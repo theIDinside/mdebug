@@ -1,11 +1,57 @@
 cmake_minimum_required(VERSION 3.22)
-project(midas)
-
-set(SOURCES
+project(midas LANGUAGES CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_STANDARD_REQUIRED 23)
+set(MIDAS_SOURCES
   ./src/main.cpp
+  ./src/tracer.cpp
+  ./src/tracer.h
+  ./src/target.cpp
+  ./src/target.h
+  ./src/common.cpp
+  ./src/common.h
+  ./src/ptrace.cpp
+  ./src/ptrace.h
+  src/posix/argslist.cpp
+  src/posix/argslist.h
 )
 
-add_subdirectory(./dependencies/fmt)
-add_executable(mdb ${SOURCES})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-target_link_libraries(mdb fmt::fmt-header-only)
+set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__")
+set(MIDAS_DEBUG_FLAGS "-g3 -O0 -Wall -Wextra")
+set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
+set(MIDAS_TEST_FLAGS "${MIDAS_DEBUG_FLAGS}")
+
+set(CMAKE_CXX_FLAGS_DEBUG "${COMMON_FLAGS} ${MIDAS_DEBUG_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
+
+set(MDB_TESTS
+  helloworld
+  threads
+)
+
+
+function(build_tests tests)
+    foreach(target_name ${tests})
+        set(target_source ${CMAKE_CURRENT_SOURCE_DIR}/test/${target_name}.cpp)
+        add_executable(${target_name} ${target_source})  # Change the file extension if necessary
+        set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
+        set_target_properties(${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    endforeach()
+endfunction()
+
+build_tests("${MDB_TESTS}")
+
+enable_testing()
+
+add_subdirectory(./dependencies/fmt)
+add_executable(mdb ${MIDAS_SOURCES})
+set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
+target_link_libraries(mdb fmt::fmt)
+target_include_directories(mdb PUBLIC ./dependencies)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(mdb PRIVATE MDB_DEBUG)
+endif()

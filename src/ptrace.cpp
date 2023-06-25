@@ -1,0 +1,181 @@
+#include "ptrace.h"
+#include "common.h"
+#include <sys/ptrace.h>
+
+static constexpr std::array<std::string_view, 6> REGISTER_NAMES{"rdi", "rsi", "rdx", "r10", "r8", "r9"};
+
+std::string_view
+request_name(__ptrace_request req)
+{
+  switch (req) {
+  case PTRACE_TRACEME:
+    return "PTRACE_TRACEME";
+  case PTRACE_PEEKTEXT:
+    return "PTRACE_PEEKTEXT";
+  case PTRACE_PEEKDATA:
+    return "PTRACE_PEEKDATA";
+  case PTRACE_PEEKUSER:
+    return "PTRACE_PEEKUSER";
+  case PTRACE_POKETEXT:
+    return "PTRACE_POKETEXT";
+  case PTRACE_POKEDATA:
+    return "PTRACE_POKEDATA";
+  case PTRACE_POKEUSER:
+    return "PTRACE_POKEUSER";
+  case PTRACE_CONT:
+    return "PTRACE_CONT";
+  case PTRACE_KILL:
+    return "PTRACE_KILL";
+  case PTRACE_SINGLESTEP:
+    return "PTRACE_SINGLESTEP";
+  case PTRACE_GETREGS:
+    return "PTRACE_GETREGS";
+  case PTRACE_SETREGS:
+    return "PTRACE_SETREGS";
+  case PTRACE_GETFPREGS:
+    return "PTRACE_GETFPREGS";
+  case PTRACE_SETFPREGS:
+    return "PTRACE_SETFPREGS";
+  case PTRACE_ATTACH:
+    return "PTRACE_ATTACH";
+  case PTRACE_DETACH:
+    return "PTRACE_DETACH";
+  case PTRACE_GETFPXREGS:
+    return "PTRACE_GETFPXREGS";
+  case PTRACE_SETFPXREGS:
+    return "PTRACE_SETFPXREGS";
+  case PTRACE_SYSCALL:
+    return "PTRACE_SYSCALL";
+  case PTRACE_GET_THREAD_AREA:
+    return "PTRACE_GET_THREAD_AREA";
+  case PTRACE_SET_THREAD_AREA:
+    return "PTRACE_SET_THREAD_AREA";
+  case PTRACE_ARCH_PRCTL:
+    return "PTRACE_ARCH_PRCTL";
+  case PTRACE_SYSEMU:
+    return "PTRACE_SYSEMU";
+  case PTRACE_SYSEMU_SINGLESTEP:
+    return "PTRACE_SYSEMU_SINGLESTEP";
+  case PTRACE_SINGLEBLOCK:
+    return "PTRACE_SINGLEBLOCK";
+  case PTRACE_SETOPTIONS:
+    return "PTRACE_SETOPTIONS";
+  case PTRACE_GETEVENTMSG:
+    return "PTRACE_GETEVENTMSG";
+  case PTRACE_GETSIGINFO:
+    return "PTRACE_GETSIGINFO";
+  case PTRACE_SETSIGINFO:
+    return "PTRACE_SETSIGINFO";
+  case PTRACE_GETREGSET:
+    return "PTRACE_GETREGSET";
+  case PTRACE_SETREGSET:
+    return "PTRACE_SETREGSET";
+  case PTRACE_SEIZE:
+    return "PTRACE_SEIZE";
+  case PTRACE_INTERRUPT:
+    return "PTRACE_INTERRUPT";
+  case PTRACE_LISTEN:
+    return "PTRACE_LISTEN";
+  case PTRACE_PEEKSIGINFO:
+    return "PTRACE_PEEKSIGINFO";
+  case PTRACE_GETSIGMASK:
+    return "PTRACE_GETSIGMASK";
+  case PTRACE_SETSIGMASK:
+    return "PTRACE_SETSIGMASK";
+  case PTRACE_SECCOMP_GET_FILTER:
+    return "PTRACE_SECCOMP_GET_FILTER";
+  case PTRACE_SECCOMP_GET_METADATA:
+    return "PTRACE_SECCOMP_GET_METADATA";
+  case PTRACE_GET_SYSCALL_INFO:
+    return "PTRACE_GET_SYSCALL_INFO";
+  case PTRACE_GET_RSEQ_CONFIGURATION:
+    return "PTRACE_GET_RSEQ_CONFIGURATION";
+  }
+}
+
+void
+new_target_set_options(pid_t pid)
+{
+  const auto options = (PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEVFORKDONE | PTRACE_O_TRACEVFORK |
+                        PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_EXITKILL);
+  if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
+    panic(fmt::format("Failed to set PTRACE options: {}", strerror(errno)));
+  }
+}
+
+// PtraceSyscallInfo::PtraceSyscallInfo(__ptrace_syscall_info info) noexcept : m_info(info) {}
+
+std::uintptr_t
+PtraceSyscallInfo::stack_ptr() const noexcept
+{
+  return m_info.stack_pointer;
+}
+std::uintptr_t
+PtraceSyscallInfo::ip() const noexcept
+{
+  return m_info.instruction_pointer;
+}
+SyscallStop
+PtraceSyscallInfo::syscall_stop() const noexcept
+{
+#ifdef MDB_DEBUG
+  if (!is_entry() && !is_exit()) {
+    panic("Sanitized value is invalid.");
+  }
+#endif
+  return (SyscallStop)m_info.op;
+}
+bool
+PtraceSyscallInfo::is_entry() const noexcept
+{
+  return m_info.op == PTRACE_SYSCALL_INFO_ENTRY;
+}
+bool
+PtraceSyscallInfo::is_exit() const noexcept
+{
+  return m_info.op == PTRACE_SYSCALL_INFO_EXIT;
+}
+bool
+PtraceSyscallInfo::is_seccomp() const noexcept
+{
+  return m_info.op == PTRACE_SYSCALL_INFO_SECCOMP;
+}
+
+void
+ptrace_panic(__ptrace_request req, pid_t pid, std::string_view additional_msg)
+{
+  if (additional_msg.length() > 0) {
+    panic(fmt::format("{} FAILED for {}. {}", request_name(req), pid, additional_msg));
+  } else {
+    panic(fmt::format("{} FAILED for [{}].", request_name(req), pid));
+  }
+}
+
+SyscallArguments::SyscallArguments(const user_regs_struct &regs)
+{
+  const u64 res[6]{regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r8};
+  std::memcpy(arguments.args, res, sizeof(u64) * REGISTER_NAMES.size());
+}
+
+#ifdef MDB_DEBUG
+void
+SyscallArguments::debug_print(bool flush, bool pretty)
+{
+  if (pretty) {
+    fmt::print("{{\n  arg1 0x{:x} ({}),\n  arg2 0x{:x} ({}),\n  arg3 0x{:x} ({}),\n  arg4 0x{:x} ({}),\n  arg5 0x{:x} ({}),\n  arg6 0x{:x} ({})\n}}",
+               arguments.arg1, arguments.arg1,
+               arguments.arg2, arguments.arg2,
+               arguments.arg3, arguments.arg3,
+               arguments.arg4, arguments.arg4,
+               arguments.arg5, arguments.arg5,
+               arguments.arg6, arguments.arg6);
+  } else {
+    fmt::print("{{ arg1 0x{:x}, arg2 0x{:x}, arg3 0x{:x}, arg4 0x{:x}, arg5 0x{:x}, arg6 0x{:x} }}",
+               arguments.arg1, arguments.arg2, arguments.arg3, arguments.arg4, arguments.arg5, arguments.arg6);
+  }
+  if (flush)
+    fmt::println("");
+}
+#else
+
+#endif
