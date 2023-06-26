@@ -8,7 +8,6 @@
 using ThreadPool = std::vector<std::thread>;
 
 int main(int, const char**) {
-  clone_args cl;
   ThreadPool thread_pool;
 
   for(auto i = 0; i < 8; i++) {
