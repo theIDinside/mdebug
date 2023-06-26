@@ -1,1 +1,2 @@
 dependencies/**
+src/defs/syscalls.def

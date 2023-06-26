@@ -44,6 +44,8 @@ endfunction()
 build_tests("${MDB_TESTS}")
 
 enable_testing()
+# Generate syscalls.def
+execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(./dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
