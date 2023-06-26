@@ -2,15 +2,44 @@
 #include "fmt/core.h"
 #include <cstdlib>
 #include <cstring>
+#include <cxxabi.h>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <regex>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+template <typename T>
 void
-panic(std::string_view err_msg)
+replace_regex(T &str)
 {
+  static const std::regex str_view_regex("std::basic_string_view<char, std::char_traits<char> >");
+  static const std::regex str_regex{
+      "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"};
+  static const std::regex allocator_regex{", std::allocator<.*> "};
+
+  const std::string replacement = "std::string_view";
+  str = std::regex_replace(str, str_view_regex, replacement);
+
+  const std::string str_replacement = "std::string";
+  str = std::regex_replace(str, str_regex, str_replacement);
+
+  const std::string allocator_replacement = "";
+  str = std::regex_replace(str, allocator_regex, allocator_replacement);
+}
+
+static void
+sanitize(std::string &name)
+{
+  replace_regex(name);
+}
+
+void
+panic(std::string_view err_msg, const std::source_location& loc, int strip_levels)
+{
+
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];
@@ -28,12 +57,26 @@ panic(std::string_view err_msg)
     exit(EXIT_FAILURE);
   }
 
-  for (int j = 0; j < nptrs; j++)
+  for (int j = strip_levels; j < nptrs; j++) {
+    auto demangle_len = 0ul;
+    int stat = 0;
+    std::string_view view{strings[j]};
+    if (const auto p = view.find_first_of("_Z"); p != std::string_view::npos) {
+      view.remove_prefix(p);
+      view.remove_suffix(view.size() - view.find_first_of("+"));
+      std::string copy{view};
+      if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
+        std::string copy{res};
+        sanitize(copy);
+        fmt::println("{}", copy);
+        continue;
+      }
+    }
     fmt::println("{}", strings[j]);
+  }
 
   free(strings);
-
-  fmt::print("[PANIC]: {}\n", err_msg);
+  fmt::println("{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---", loc.file_name(),loc.line(), loc.function_name(), err_msg));
   exit(EXIT_FAILURE);
 }
 
@@ -49,8 +92,7 @@ ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path))
     file_size_ = 0;
   }
   fmt::println("File size: {}", file_size_);
-  if (fd == -1)
-    panic(fmt::format("Failed to open {} [{}]", p.c_str(), strerror(errno)));
+  ASSERT(fd != -1, "Failed to open {} [{}]", p.c_str(), strerror(errno));
 }
 
 ScopedFd::~ScopedFd() noexcept { close(); }
@@ -75,7 +117,7 @@ ScopedFd::close() noexcept
   if (fd >= 0) {
     const auto err = ::close(fd);
     if (err != 0 && err != -EINTR && err != EIO) {
-      panic("Failed to open file");
+      PANIC("Failed to open file");
     }
   }
   fd = -1;
@@ -94,13 +136,10 @@ ScopedFd::file_size() const noexcept
   }
 
   const auto curr = lseek(fd, 0, SEEK_CUR);
-  if ((off_t)-1 == curr)
-    panic("Failed to lseek");
+  ASSERT(-1 != curr, "Failed to fseek");
   auto size = lseek(fd, 0, SEEK_END);
-  if ((off_t)-1 == size)
-    panic("Failed to lseek");
-  if ((off_t)-1 == lseek(fd, curr, SEEK_SET))
-    panic("Failed to lseek");
+  ASSERT((off_t)-1 != size, "Failed to get size");
+  lseek(fd, curr, SEEK_SET);
   return size;
 }
 
@@ -108,10 +147,7 @@ ScopedFd::file_size() const noexcept
 ScopedFd
 ScopedFd::open(const Path &p, int flags, mode_t mode) noexcept
 {
-  if (!fs::exists(p)) {
-    panic(fmt::format("File did not exist {}", p.c_str()));
-  }
-
+  ASSERT(fs::exists(p), "File did not exist {}", p.c_str());
   return ScopedFd{::open(p.c_str(), flags, mode), p};
 }
 
