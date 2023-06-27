@@ -12,8 +12,14 @@ set(MIDAS_SOURCES
   ./src/common.h
   ./src/ptrace.cpp
   ./src/ptrace.h
+  src/task.cpp
+  src/task.h
   src/posix/argslist.cpp
   src/posix/argslist.h
+  src/symbolication/elf.cpp
+  src/symbolication/elf.h
+  src/symbolication/objfile.cpp
+  src/symbolication/objfile.h
 )
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
