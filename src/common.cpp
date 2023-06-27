@@ -7,9 +7,19 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <regex>
+#include <source_location>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+std::string_view syscall_name(u64 syscall_number) {
+  #define SYSCALL(num, name) case num: return #name;
+  switch(syscall_number) {
+    #include "defs/syscalls.def"
+  }
+  #undef SYSCALL
+  panic(fmt::format("UNKNOWN SYSCALL NUMBER {}", syscall_number), std::source_location::current(), 1);
+}
 
 template <typename T>
 void

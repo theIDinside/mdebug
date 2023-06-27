@@ -23,22 +23,15 @@ using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
 
-void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
+[[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
+
+std::string_view syscall_name(u64 syscall_number);
 
 #define PANIC(err_msg)                                                                                            \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
     panic(err_msg, loc, 1);                                                                                       \
   }
-
-template <typename FormatString, typename... Args>
-void
-assert(bool is_true, FormatString fmt, Args... args)
-{
-  if (!is_true) {
-    panic(fmt::format(fmt, args...));
-  }
-}
 
 #ifdef MDB_DEBUG
 #define ASSERT(cond, msg, ...)                                                                                    \
@@ -52,17 +45,11 @@ assert(bool is_true, FormatString fmt, Args... args)
 #define ASSERT(cond, msg, ...)
 #endif
 
-template <typename T>
-constexpr bool
-is_nullptr_t(T)
-{
-  return std::is_same_v<T, std::nullptr_t>;
-}
-
 template <typename T> class TraceePointer
 {
 public:
-  TraceePointer() : remote_addr{0} {}
+  TraceePointer() noexcept : remote_addr{0} {}
+  TraceePointer(std::nullptr_t) noexcept : remote_addr{0} {}
   TraceePointer(uintptr_t address) noexcept : remote_addr(address) {}
   uintptr_t
   get() const noexcept
@@ -75,7 +62,7 @@ public:
    */
   template <typename U>
   TraceePointer<U>
-  as() const
+  as() const noexcept
   {
     return TraceePointer<U>{get()};
   }
