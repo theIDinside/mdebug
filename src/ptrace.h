@@ -1,29 +1,44 @@
 #pragma once
 #include "common.h"
+#include <source_location>
 #include <string_view>
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
 
+struct TaskWaitResult;
+struct TaskInfo;
+
 std::string_view request_name(__ptrace_request req);
 
 void new_target_set_options(pid_t pid);
 
-void ptrace_panic(__ptrace_request req, pid_t pid, std::string_view additional_msg = "");
+void ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location& loc);
 
 template <typename Addr = std::nullptr_t, typename Data = std::nullptr_t>
 constexpr void
-ptrace_or_panic(auto req, pid_t pid, Addr addr = {}, Data data = {})
+ptrace_or_panic(auto req, pid_t pid, Addr addr, Data data, std::source_location &loc)
 {
-  if (-1 == ptrace(req, pid, addr, data)) {
-    ptrace_panic(req, pid);
+  if (-1 == ptrace((__ptrace_request)req, pid, addr, data)) {
+    ptrace_panic((__ptrace_request)req, pid, loc);
   }
 }
+
+#define COMBINE1(X, Y) X##Y // helper macro
+#define COMBINE(X, Y) COMBINE1(X, Y)
+
+#define LOC_NAME COMBINE(loc, __LINE__)
+
+#define PTRACE_OR_PANIC(req, pid, addr, data)                                                                     \
+  {                                                                                                               \
+    auto loc = std::source_location::current();                                                                   \
+    ptrace_or_panic(req, pid, addr, data, loc);                                                                   \
+  }
 
 enum class SyscallStop : u8
 {
   Entry = PTRACE_SYSCALL_INFO_ENTRY,
-  Exit = PTRACE_SYSCALL_INFO_EXIT
+  Exit = PTRACE_SYSCALL_INFO_EXIT,
 };
 
 // The equivalent of "extension-functions". It's terrible. but it is what C++/C offers us. You just have to learn
@@ -37,9 +52,25 @@ public:
   bool is_entry() const noexcept;
   bool is_exit() const noexcept;
   bool is_seccomp() const noexcept;
+  bool is_none() const noexcept;
 
-private:
   __ptrace_syscall_info m_info;
+};
+
+template <class... T> constexpr bool always_false = false;
+
+template <size_t... T> constexpr bool always_false_i = false;
+
+enum SysRegister : size_t
+{
+  RDI = 1,
+  RSI = 2,
+  RDX = 3,
+  R10 = 4,
+  R8 = 5,
+  R9 = 6,
+  Return = 7,
+  ReturnValue2 = 8,
 };
 
 struct SyscallArguments
@@ -48,32 +79,108 @@ struct SyscallArguments
   SyscallArguments(const user_regs_struct &regs);
 
 #ifdef MDB_DEBUG
-  void
-  debug_print(bool flush, bool pretty);
+  void debug_print(bool flush, bool pretty);
 #else
 
 #endif
 
-  union
+  template <SysRegister Arg>
+  constexpr u64
+  arg() const noexcept
   {
-    u64 args[6];
-    struct
-    {
-      u64 arg1;
-      u64 arg2;
-      u64 arg3;
-      u64 arg4;
-      u64 arg5;
-      u64 arg6;
-    };
-    struct
-    {
-      u64 rdi;
-      u64 rsi;
-      u64 rdx;
-      u64 r10;
-      u64 r8;
-      u64 r9;
-    };
-  } arguments;
+    return arg_helper<(size_t)Arg>();
+  }
+
+  template <size_t Arg>
+  constexpr u64
+  arg_n() const noexcept
+  {
+    return arg_helper<Arg>();
+  }
+
+  template <SysRegister Arg>
+  constexpr u64
+  retval() const noexcept
+  {
+    if constexpr (Arg == 7) {
+      return regs->rax;
+    } else if constexpr (Arg == 8) {
+      return regs->rdx;
+    } else {
+      static_assert(always_false_i<Arg>, "Invalid return value register");
+    }
+  }
+
+  template <size_t Arg>
+  constexpr u64
+  arg_helper() const noexcept
+  {
+    if constexpr (Arg == 1) {
+      return regs->rdi;
+    } else if constexpr (Arg == 2) {
+      return regs->rsi;
+    } else if constexpr (Arg == 3) {
+      return regs->rdx;
+    } else if constexpr (Arg == 4) {
+      return regs->r10;
+    } else if constexpr (Arg == 5) {
+      return regs->r8;
+    } else if constexpr (Arg == 6) {
+      return regs->r9;
+    } else {
+      static_assert(always_false_i<Arg>, "Invalid syscall argument");
+    }
+  }
+
+  const user_regs_struct *regs;
 };
+
+template <size_t Arg>
+constexpr u64
+arg_helper(const user_regs_struct &regs) noexcept
+{
+  if constexpr (Arg == 1) {
+    return regs.rdi;
+  } else if constexpr (Arg == 2) {
+    return regs.rsi;
+  } else if constexpr (Arg == 3) {
+    return regs.rdx;
+  } else if constexpr (Arg == 4) {
+    return regs.r10;
+  } else if constexpr (Arg == 5) {
+    return regs.r8;
+  } else if constexpr (Arg == 6) {
+    return regs.r9;
+  } else {
+    static_assert(always_false_i<Arg>, "Invalid syscall argument");
+  }
+}
+
+template <SysRegister Arg>
+constexpr u64
+sys_arg(const user_regs_struct &regs) noexcept
+{
+  return arg_helper<(size_t)Arg>(regs);
+}
+
+template <size_t Arg>
+constexpr u64
+sys_arg_n(const user_regs_struct &regs) noexcept
+{
+  return arg_helper<Arg>(regs);
+}
+
+template <SysRegister Arg>
+constexpr u64
+sys_retval(const user_regs_struct &regs) noexcept
+{
+  if constexpr (Arg == 7) {
+    return regs.rax;
+  } else if constexpr (Arg == 8) {
+    return regs.rdx;
+  } else {
+    static_assert(always_false_i<Arg>, "Invalid return value register");
+  }
+}
+
+void task_wait_emplace(int status, TaskWaitResult *wait);
