@@ -127,7 +127,7 @@ ScopedFd::close() noexcept
   if (fd >= 0) {
     const auto err = ::close(fd);
     if (err != 0 && err != -EINTR && err != EIO) {
-      PANIC("Failed to open file");
+      PANIC("Failed to close file");
     }
   }
   fd = -1;

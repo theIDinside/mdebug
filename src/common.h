@@ -8,6 +8,7 @@
 #include <fmt/core.h>
 #include <source_location>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -50,7 +51,8 @@ template <typename T> class TraceePointer
 public:
   TraceePointer() noexcept : remote_addr{0} {}
   TraceePointer(std::nullptr_t) noexcept : remote_addr{0} {}
-  TraceePointer(uintptr_t address) noexcept : remote_addr(address) {}
+
+  TraceePointer<void>(uintptr_t address) noexcept : remote_addr(address) {}
   uintptr_t
   get() const noexcept
   {
@@ -58,7 +60,9 @@ public:
   }
 
   /**
-   * Cast this TraceePointer<T> to TraceePointer<U>
+   * Cast this TraceePointer<T> to TraceePointer<U>. Most often used
+   * for turning TraceePointer<void> into TraceePointer<U> where U is
+   * some concrete type.
    */
   template <typename U>
   TraceePointer<U>
@@ -70,6 +74,11 @@ public:
 private:
   std::uintptr_t remote_addr;
 };
+
+using AddrPtr = TraceePointer<void>;
+
+template <typename T>
+using TPtr = TraceePointer<T>;
 
 class ScopedFd
 {
@@ -83,6 +92,7 @@ public:
   {
     if (this == &other)
       return *this;
+    close();
     fd = other.fd;
     p = std::move(other.p);
     file_size_ = other.file_size_;
