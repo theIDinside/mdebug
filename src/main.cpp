@@ -1,8 +1,8 @@
 /** COPYRIGHT TEMPLATE */
 #include "common.h"
 #include "posix/argslist.h"
-#include "ptrace.h"
 #include "target.h"
+#include "task.h"
 #include "tracer.h"
 #include <cstdlib>
 #include <filesystem>
@@ -24,7 +24,13 @@
 #include <linux/sched.h>
 #include <sched.h>
 
+#include <csignal>
+
+#include "ptrace.h"
+
 static int barrier[2];
+
+// Signal handler function
 
 int
 main(int argc, const char **argv)
@@ -42,7 +48,7 @@ main(int argc, const char **argv)
 
   PosixArgsList args_list{std::vector<std::string>{argv + 1, argv + argc}};
   if (-1 == pipe(barrier)) {
-    panic("Failed to set up barrier pipes\n");
+    PANIC("Failed to set up barrier pipes\n");
   }
 
   auto pid = fork();
@@ -54,57 +60,69 @@ main(int argc, const char **argv)
     execv(cmd, args);
   } break;
   default: {
-    ptrace_or_panic(PTRACE_ATTACH, pid);
+    PTRACE_OR_PANIC(PTRACE_ATTACH, pid, nullptr, nullptr);
     Tracer tracer{};
     write(barrier[1], "1", 1);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    tracer.add_target(pid, p);
+    Tracer::Instance->add_target(pid, p);
+    auto target = tracer.get_current();
+    auto current_task = target->get_task(pid);
+
+    // todo(simon): for now, support only 1 process space (target), though the design looks as though we support
+    // multiple.
+
     auto tracee_exited = false;
-    ptrace_or_panic(PTRACE_SYSCALL, pid);
     while (!tracee_exited) {
-
-      auto waited_pid = waitpid(0, &status, 0);
-      if (!WIFEXITED(status)) {
-        user_regs_struct regs;
-        ptrace(PTRACE_GETREGS, waited_pid, NULL, &regs);
-        __ptrace_syscall_info ptr;
-        constexpr auto size = sizeof(__ptrace_syscall_info);
-        ptrace_or_panic(PTRACE_GET_SYSCALL_INFO, waited_pid, size, &ptr);
-        if (ptr.op == PTRACE_SYSCALL_INFO_NONE) {
-
-        } else {
-          const auto &info = (PtraceSyscallInfo &)ptr;
-          if (info.is_exit()) {
-            if ((regs.orig_rax == SYS_execve || regs.orig_rax == SYS_execveat)) {
-              auto &target = tracer.get_target(waited_pid);
-              target.reopen_memfd();
-            } else if ((regs.orig_rax == SYS_clone || regs.orig_rax == SYS_clone3)) {
-              SyscallArguments args{regs};
-              TraceePointer<clone_args> cl_args_address = args.arguments.rdi;
-              auto &target = tracer.get_target(waited_pid);
-              // Example of how to use TraceePointer and Targt::read_type
-              if (auto res = target.read_type(cl_args_address, waited_pid); res.has_value()) {
-                auto cl_args = res.value();
-                TraceePointer<pid_t> new_pid = (uintptr_t)cl_args.parent_tid;
-                auto np = target.read_type(new_pid, waited_pid);
-                if (np.has_value())
-                  fmt::println("[PROCFS] COULD FIND: {} pid?", np.value());
-              }
-              tracer.new_thread(waited_pid, ptr.exit.rval);
-            }
-          }
-        }
-
-        ptrace_or_panic(PTRACE_SYSCALL, waited_pid);
-      } else if (WIFEXITED(status)) {
-        fmt::println("{} exited with {}", waited_pid, WEXITSTATUS(status));
-        tracer.thread_exited(waited_pid, status);
-        if (waited_pid == pid) {
-          fmt::println("Process exited...");
+      auto wait = target->wait_pid(current_task);
+      target->set_wait_status(wait);
+      switch (wait.ws) {
+      case WaitStatus::Stopped:
+        break;
+      case WaitStatus::Execed: {
+        tracer.get_current()->reopen_memfd();
+        break;
+      }
+      case WaitStatus::Exited: {
+        if (wait.waited_pid == tracer.get_current()->task_leader) {
           tracee_exited = true;
         }
+        break;
       }
+      case WaitStatus::Cloned: {
+        const TraceePointer<clone_args> cl_args_ptr = sys_arg<SysRegister::RDI>(wait.registers);
+        if (auto res = target->read_type(cl_args_ptr); res.has_value()) {
+          TraceePointer<pid_t> new_pid_ptr{res->parent_tid};
+          auto np = target->read_type(new_pid_ptr);
+          if(np.has_value()) {
+
+            #ifdef MDB_DEBUG
+            long new_pid = 0;
+            PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
+            ASSERT(np.value() == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np.value(), new_pid);
+            #endif
+
+            target->new_task(np.value());
+            target->set_task_vm_info(np.value(), TaskVMInfo{.stack_low = res->stack, .stack_size = res->stack_size, .tls = res->tls});
+            target->get_task(np.value())->request_registers();
+          } else {
+            fmt::println("FAILED TO SET NEW TASK");
+          }
+        }
+        break;
+      }
+      case WaitStatus::Forked:
+        break;
+      case WaitStatus::VForked:
+        break;
+      case WaitStatus::VForkDone:
+        break;
+      case WaitStatus::Signalled:
+        break;
+      case WaitStatus::SyscallEntry:
+        break;
+      case WaitStatus::SyscallExit:
+        break;
+      }
+      target->set_running(RunType::Continue);
     }
     break;
   }

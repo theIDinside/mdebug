@@ -1,6 +1,7 @@
 #pragma once
 #include "common.h"
-#include "ptrace.h"
+#include "task.h"
+#include <cstdint>
 #include <cstdio>
 #include <optional>
 #include <sys/mman.h>
@@ -12,33 +13,8 @@
 using Tid = pid_t;
 using Pid = pid_t;
 
-struct ThreadInfo
-{
-  pid_t tid;
-};
-
-struct ObjectFile
-{
-  ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
-  ~ObjectFile() noexcept;
-  Path path;
-  u64 size;
-  const u8 *loaded_binary;
-};
-
-struct UnloadObjectFile
-{
-  void
-  operator()(ObjectFile *obj)
-  {
-    munmap((void *)obj->loaded_binary, obj->size);
-    obj->loaded_binary = nullptr;
-    obj->size = 0;
-    obj->path = "";
-  }
-};
-
-void object_file_unloader(ObjectFile *obj);
+using Address = std::uintptr_t;
+struct ObjectFile;
 
 template <typename T>
 static ssize_t
@@ -69,20 +45,31 @@ read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
 
 struct Target
 {
-  Target(u16 global_id, pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd = true) noexcept;
-  Target(Target &&other) noexcept;
-
-  u16 global_target_id;
+  // Members
   pid_t task_leader;
   Path path;
   ObjectFile *obj_file;
   ScopedFd procfs_memfd;
+  std::unordered_map<pid_t, TaskInfo> threads;
+  std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
 
-  std::unordered_map<pid_t, ThreadInfo> threads;
+  // Constructors
+  Target() = default;
+  Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd = true) noexcept;
+  Target(Target &&other) noexcept;
+
+  // Methods
   bool initialized() const noexcept;
-
+  /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
   bool reopen_memfd() noexcept;
+  /** Return the open mem fd */
   ScopedFd &mem_fd() noexcept;
+  TaskInfo *get_task(pid_t pid) noexcept;
+  TaskWaitResult wait_pid(TaskInfo *task) noexcept;
+  void new_task(Tid tid) noexcept;
+  void set_running(RunType type) noexcept;
+  void set_wait_status(TaskWaitResult wait) noexcept;
+  void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
 
   template <typename T>
   std::optional<T>
@@ -101,7 +88,7 @@ struct Target
 
   template <typename T>
   std::optional<T>
-  read_type(TraceePointer<T> address, pid_t pid)
+  read_type(TraceePointer<T> address)
   {
     typename std::remove_cv<T>::type result;
     auto total_read = 0ull;
@@ -109,7 +96,7 @@ struct Target
     while (total_read < sz) {
       auto read_bytes = pread64(mem_fd().get(), &result + total_read, sizeof(T) - total_read, address.get());
       if (-1 == read_bytes || 0 == read_bytes) {
-        panic("Failed to proc_fs read");
+        PANIC(fmt::format("Failed to proc_fs read from {:p}", (void*)address.get()));
       }
       total_read += read_bytes;
     }

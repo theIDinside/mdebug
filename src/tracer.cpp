@@ -6,27 +6,45 @@
 #include <filesystem>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include "symbolication/objfile.h"
+#include "symbolication/elf.h"
 
-Tracer::Tracer() noexcept {}
+Tracer* Tracer::Instance = nullptr;
+
+Tracer::Tracer() noexcept {
+  ASSERT(Tracer::Instance == nullptr, "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}", (uintptr_t)this, (uintptr_t
+  )Instance);
+  Instance = this;
+}
 
 void
 Tracer::add_target(pid_t task_leader, const Path &path) noexcept
 {
-  new_target_set_options(task_leader);
   ObjectFile *obj_file = nullptr;
   switch (add_object_file(path)) {
   case AddObjectResult::OK:
     obj_file = object_files.back();
     break;
   case AddObjectResult::MMAP_FAILED:
-    panic(fmt::format("Failed to load binary '{}' into memory - debugging will be impossible.", path.c_str()));
+    PANIC(fmt::format("Failed to load binary '{}' into memory - debugging will be impossible.", path.c_str()));
     break;
   case AddObjectResult::FILE_NOT_EXIST:
-    panic(fmt::format("File {} does not exist", path.c_str()));
+    PANIC(fmt::format("File {} does not exist", path.c_str()));
     break;
   }
   fmt::println("adding target {}", task_leader);
-  targets.push_back(Target{static_cast<u16>(task_leader), task_leader, path, obj_file});
+  if(obj_file != nullptr) {
+
+    auto elf = Elf::parse_objfile(obj_file);
+    fmt::println("__Sections in objecfile__");
+    auto i = 0;
+    for(auto sec : elf.sections()) {
+      fmt::println("#{}: {}", i++, sec.get_name());
+    }
+  }
+  targets.emplace(task_leader, Target{task_leader, path, obj_file});
+  current_target = &targets[task_leader];
+  new_target_set_options(task_leader);
 }
 
 AddObjectResult
@@ -50,17 +68,12 @@ Tracer::add_object_file(const Path &path) noexcept
 }
 
 void
-Tracer::new_thread(Pid pid, Tid tid) noexcept {
-  for(auto& tgt : targets) {
-    if(tgt.task_leader == pid) {
-      fmt::println("Adding thread {} to process space {}", tid, pid);
-      tgt.threads[tid] = {.tid = tid};
-    }
-  }
+Tracer::new_task(Pid pid, Tid tid) noexcept {
+  targets[pid].threads[tid] = TaskInfo{tid, nullptr};
 }
 
 void Tracer::thread_exited(Tid tid, int) noexcept {
-  for(auto& tgt : targets) {
+  for(auto& [pid, tgt] : targets) {
     if(tgt.threads.contains(tid)) {
       tgt.threads.erase(tid);
     }
@@ -68,12 +81,14 @@ void Tracer::thread_exited(Tid tid, int) noexcept {
 }
 
 Target& Tracer::get_target(pid_t pid) noexcept {
-  for(auto& t : targets) {
-    if(t.task_leader == pid) {
-      return t;
-    }
-    if(t.threads.contains(pid)) return t;
+#ifdef MDB_DEBUG
+  if(!targets.contains(pid)) {
+    PANIC(fmt::format("Target {} does not exist", pid));
   }
-  panic(fmt::format("No target with id {}", pid));
-  return *(Target*)nullptr;
+#endif
+  return targets[pid];
+}
+
+Target* Tracer::get_current() noexcept {
+  return current_target;
 }

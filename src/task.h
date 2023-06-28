@@ -1,0 +1,79 @@
+#pragma once
+
+#include "common.h"
+#include <linux/sched.h>
+#include <sys/ptrace.h>
+#include <sys/types.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+
+enum class WaitStatus
+{
+#define ITEM(IT, Value) IT = Value,
+#include "./defs/waitstatus.def"
+#undef ITEM
+};
+
+constexpr std::string_view
+to_str(WaitStatus ws)
+{
+  switch (ws) {
+#define ITEM(IT, Value)                                                                                           \
+  case WaitStatus::IT:                                                                                            \
+    return #IT;
+#include "./defs/waitstatus.def"
+#undef ITEM
+  }
+}
+
+struct TaskWaitResult
+{
+  pid_t waited_pid;
+  user_regs_struct registers;
+  WaitStatus ws;
+
+  union
+  {
+    int exit_signal;
+    int signal;
+  } data;
+};
+
+void TaskWaitResultCleanUp(TaskWaitResult *_this);
+
+enum class RunType : u8
+{
+  Step = PTRACE_SINGLESTEP,
+  Continue = PTRACE_CONT,
+  SyscallContinue = PTRACE_SYSCALL,
+  UNKNOWN,
+};
+
+struct TaskInfo
+{
+  bool stopped : 1;
+  bool signal_in_flight : 1;
+  bool stepping : 1;
+  pid_t tid;
+  TraceePointer<void> stopped_address;
+  TaskWaitResult wait_status;
+  RunType run_type;
+
+  TaskInfo(pid_t tid, TraceePointer<void> stopped_at) noexcept;
+  TaskInfo() = default;
+  ~TaskInfo() = default;
+  TaskInfo(const TaskInfo &o) = default;
+  TaskInfo(TaskInfo &&o) = default;
+  TaskInfo &operator=(const TaskInfo &o) = default;
+
+  void set_taskwait(TaskWaitResult wait) noexcept;
+  void set_running(RunType) noexcept;
+  void request_registers() noexcept;
+};
+
+struct TaskVMInfo
+{
+  TraceePointer<void> stack_low;
+  u64 stack_size;
+  TraceePointer<void> tls;
+};

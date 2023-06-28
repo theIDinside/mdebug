@@ -12,7 +12,7 @@ PosixArgsList::get_command() const noexcept
   const auto result = Command{.command = cmd, .args = (char* const*)args.data()};
   #ifdef MDB_DEBUG
   if(*(const char**)args.back() != nullptr) {
-    panic("Malformed posix arguments list - must be terminated by nullptr");
+    PANIC("Malformed posix arguments list - must be terminated by nullptr");
   }
   #endif
   return result;
