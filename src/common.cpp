@@ -12,12 +12,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-std::string_view syscall_name(u64 syscall_number) {
-  #define SYSCALL(num, name) case num: return #name;
-  switch(syscall_number) {
-    #include "defs/syscalls.def"
+std::string_view
+syscall_name(u64 syscall_number)
+{
+#define SYSCALL(num, name)                                                                                        \
+  case num:                                                                                                       \
+    return #name;
+  switch (syscall_number) {
+#include "defs/syscalls.def"
   }
-  #undef SYSCALL
+#undef SYSCALL
   panic(fmt::format("UNKNOWN SYSCALL NUMBER {}", syscall_number), std::source_location::current(), 1);
 }
 
@@ -47,7 +51,7 @@ sanitize(std::string &name)
 }
 
 void
-panic(std::string_view err_msg, const std::source_location& loc, int strip_levels)
+panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
 {
 
   constexpr auto BT_BUF_SIZE = 100;
@@ -86,7 +90,8 @@ panic(std::string_view err_msg, const std::source_location& loc, int strip_level
   }
 
   free(strings);
-  fmt::println("{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---", loc.file_name(),loc.line(), loc.function_name(), err_msg));
+  fmt::println("{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---",
+                                 loc.file_name(), loc.line(), loc.function_name(), err_msg));
   exit(EXIT_FAILURE);
 }
 
