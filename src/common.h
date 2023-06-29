@@ -49,14 +49,24 @@ std::string_view syscall_name(u64 syscall_number);
 template <typename T> class TraceePointer
 {
 public:
-  TraceePointer() noexcept : remote_addr{0} {}
-  TraceePointer(std::nullptr_t) noexcept : remote_addr{0} {}
+  using Type = typename std::remove_cv_t<T>;
+  constexpr TraceePointer() noexcept : remote_addr{0} {}
+  constexpr TraceePointer(std::nullptr_t) noexcept : remote_addr{0} {}
+  constexpr TraceePointer& operator=(const TraceePointer&) = default;
+  constexpr TraceePointer(const TraceePointer&) = default;
+  constexpr TraceePointer(TraceePointer&&) = default;
+  operator std::uintptr_t() const { return get(); }
 
-  TraceePointer<void>(uintptr_t address) noexcept : remote_addr(address) {}
+  constexpr TraceePointer<void>(uintptr_t address) noexcept : remote_addr(address) {}
   uintptr_t
   get() const noexcept
   {
     return remote_addr;
+  }
+
+  static constexpr u64 type_size() noexcept {
+    if constexpr(std::is_void_v<T>) return 8;
+    else return sizeof(T);
   }
 
   /**
@@ -69,6 +79,11 @@ public:
   as() const noexcept
   {
     return TraceePointer<U>{get()};
+  }
+
+  template<typename U>
+  friend bool operator<=>(const TraceePointer<T>& l, const TraceePointer<U>& r) noexcept {
+    return l.get() <=> r.get();
   }
 
 private:
