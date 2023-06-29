@@ -81,3 +81,28 @@ struct TaskVMInfo
   u64 stack_size;
   TraceePointer<void> tls;
 };
+
+namespace fmt {
+template <> struct fmt::formatter<TaskVMInfo>
+{
+  template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
+
+  template <typename FormatContext> auto format(TaskVMInfo const &vm_info, FormatContext &ctx);
+};
+
+template <typename ParseContext>
+constexpr auto
+fmt::formatter<TaskVMInfo>::parse(ParseContext &ctx)
+{
+  return ctx.begin();
+}
+
+template <typename FormatContext>
+auto
+fmt::formatter<TaskVMInfo>::format(TaskVMInfo const &vm_info, FormatContext &ctx)
+{
+  return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low.to_string(),
+                        vm_info.stack_size, vm_info.tls.to_string());
+}
+
+}; // namespace fmt
