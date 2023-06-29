@@ -27,6 +27,7 @@
 #include <csignal>
 
 #include "ptrace.h"
+#include <sys/personality.h>
 
 static int barrier[2];
 
@@ -55,14 +56,17 @@ main(int argc, const char **argv)
   switch (pid) {
   case 0: {
     const auto [cmd, args] = args_list.get_command();
-    char c;
-    read(barrier[0], &c, 1);
+    if (personality(ADDR_NO_RANDOMIZE) == -1) {
+      PANIC("Failed to set ADDR_NO_RANDOMIZE!");
+    }
+    ptrace(PTRACE_TRACEME, 0, 0, 0);
+    raise(SIGSTOP);
     execv(cmd, args);
   } break;
   default: {
-    PTRACE_OR_PANIC(PTRACE_ATTACH, pid, nullptr, nullptr);
+
     Tracer tracer{};
-    write(barrier[1], "1", 1);
+    tracer.init_io_thread();
     Tracer::Instance->add_target(pid, p);
     auto target = tracer.get_current();
     auto current_task = target->get_task(pid);
@@ -88,25 +92,15 @@ main(int argc, const char **argv)
         break;
       }
       case WaitStatus::Cloned: {
-        const TraceePointer<clone_args> cl_args_ptr = sys_arg<SysRegister::RDI>(wait.registers);
-        if (auto res = target->read_type(cl_args_ptr); res.has_value()) {
-          TraceePointer<pid_t> new_pid_ptr{res->parent_tid};
-          auto np = target->read_type(new_pid_ptr);
-          if(np.has_value()) {
-
-            #ifdef MDB_DEBUG
-            long new_pid = 0;
-            PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
-            ASSERT(np.value() == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np.value(), new_pid);
-            #endif
-
-            target->new_task(np.value());
-            target->set_task_vm_info(np.value(), TaskVMInfo{.stack_low = res->stack, .stack_size = res->stack_size, .tls = res->tls});
-            target->get_task(np.value())->request_registers();
-          } else {
-            fmt::println("FAILED TO SET NEW TASK");
-          }
-        }
+        const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(wait.registers);
+        const auto res = target->read_type(ptr);
+        auto np = target->read_type(TPtr<pid_t>{res.parent_tid});
+        long new_pid = 0;
+        PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
+        ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
+        target->new_task(np);
+        target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
+        target->get_task(np)->request_registers();
         break;
       }
       case WaitStatus::Forked:
@@ -122,6 +116,7 @@ main(int argc, const char **argv)
       case WaitStatus::SyscallExit:
         break;
       }
+      sleep(1);
       target->set_running(RunType::Continue);
     }
     break;

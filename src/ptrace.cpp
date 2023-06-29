@@ -5,7 +5,6 @@
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
-#include <sys/wait.h>
 
 std::string_view
 request_name(__ptrace_request req)
@@ -156,7 +155,7 @@ PtraceSyscallInfo::is_none() const noexcept
 void
 ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location &loc)
 {
-  panic(fmt::format("{} FAILED for {}", request_name(req), pid), loc, 3);
+  panic(fmt::format("{} FAILED for {} ({})", request_name(req), pid, strerror(errno)), loc, 3);
 }
 
 SyscallArguments::SyscallArguments(const user_regs_struct &regs) : regs(&regs) {}
@@ -182,102 +181,15 @@ SyscallArguments::debug_print(bool flush, bool pretty)
 
 #endif
 
-
-constexpr auto
-IS_SYSCALL_SIGTRAP(auto stopsig)
-{
-  return stopsig == (SIGTRAP | 0x80);
-}
-
-constexpr auto
-IS_TRACE_CLONE(auto stopsig) {
-  return stopsig>>8 == (SIGTRAP | (PTRACE_EVENT_CLONE << 8));
-}
-
-constexpr auto
-IS_TRACE_EXEC(auto stopsig) {
-  return stopsig>>8 == (SIGTRAP | (PTRACE_EVENT_EXEC << 8));
-}
-
-constexpr auto
-IS_TRACE_EVENT(auto stopsig, auto ptrace_event) {
-  return stopsig>>8 == (SIGTRAP | (ptrace_event << 8));
-}
-
 WaitStatus
-from_register(u64 syscall_number) {
+from_register(u64 syscall_number)
+{
   using enum WaitStatus;
-  if(syscall_number == SYS_clone || syscall_number == SYS_clone3) {
+  if (syscall_number == SYS_clone || syscall_number == SYS_clone3) {
     return Cloned;
   }
-  if(syscall_number == SYS_execve || syscall_number == SYS_execveat) {
+  if (syscall_number == SYS_execve || syscall_number == SYS_execveat) {
     return Execed;
   }
   return WaitStatus::Stopped;
-}
-
-constexpr void
-task_wait_emplace_stopped(int status, TaskWaitResult *wait)
-{
-  using enum WaitStatus;
-  if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
-      PtraceSyscallInfo info;
-      constexpr auto size = sizeof(PtraceSyscallInfo);
-      PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, wait->waited_pid, size, &info);
-    if(info.is_entry()) {
-      wait->ws = SyscallEntry;
-    } else {
-      wait->ws = SyscallExit;
-    }
-    return;
-  } else if(IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
-    wait->ws = Cloned;
-  } else if(IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
-    wait->ws = Execed;
-  } else if(IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
-    wait->ws = Exited;
-  } else if(IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
-    wait->ws = Forked;
-  } else if(IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
-    wait->ws = VForked;
-  } else if(IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
-    wait->ws = VForkDone;
-  }
-}
-
-void
-task_wait_emplace_signalled(int status, TaskWaitResult *wait)
-{
-  wait->ws = WaitStatus::Signalled;
-  wait->data.signal = WTERMSIG(status);
-}
-
-void
-task_wait_emplace_exited(int status, TaskWaitResult *wait)
-{
-  wait->ws = WaitStatus::Exited;
-  wait->data.exit_signal = WEXITSTATUS(status);
-}
-
-void
-task_wait_emplace(int status, TaskWaitResult *wait)
-{
-  ASSERT(wait != nullptr, "wait param must not be null");
-
-  ptrace(PTRACE_GETREGS, wait->waited_pid, nullptr, &wait->registers);
-
-  if (WIFSTOPPED(status)) {
-    task_wait_emplace_stopped(status, wait);
-    return;
-  }
-
-  if (WIFEXITED(status)) {
-    task_wait_emplace_exited(status, wait);
-    return;
-  }
-
-  if (WIFSIGNALED(status)) {
-    task_wait_emplace_signalled(status, wait);
-    return;
-  }
 }

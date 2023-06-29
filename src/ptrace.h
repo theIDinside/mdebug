@@ -5,6 +5,7 @@
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
+#include <sys/wait.h>
 
 struct TaskWaitResult;
 struct TaskInfo;
@@ -13,7 +14,7 @@ std::string_view request_name(__ptrace_request req);
 
 void new_target_set_options(pid_t pid);
 
-void ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location& loc);
+void ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location &loc);
 
 template <typename Addr = std::nullptr_t, typename Data = std::nullptr_t>
 constexpr void
@@ -183,4 +184,26 @@ sys_retval(const user_regs_struct &regs) noexcept
   }
 }
 
-void task_wait_emplace(int status, TaskWaitResult *wait);
+constexpr auto
+IS_SYSCALL_SIGTRAP(auto stopsig) noexcept -> bool
+{
+  return stopsig == (SIGTRAP | 0x80);
+}
+
+constexpr auto
+IS_TRACE_CLONE(auto stopsig) noexcept -> bool
+{
+  return stopsig >> 8 == (SIGTRAP | (PTRACE_EVENT_CLONE << 8));
+}
+
+constexpr auto
+IS_TRACE_EXEC(auto stopsig) noexcept -> bool
+{
+  return stopsig >> 8 == (SIGTRAP | (PTRACE_EVENT_EXEC << 8));
+}
+
+constexpr auto
+IS_TRACE_EVENT(auto stopsig, auto ptrace_event) noexcept -> bool
+{
+  return stopsig >> 8 == (SIGTRAP | (ptrace_event << 8));
+}

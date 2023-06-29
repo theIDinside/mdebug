@@ -19,7 +19,6 @@ struct Command
 class PosixArgsList
 {
 public:
-
   explicit PosixArgsList(std::vector<std::string> &&args) noexcept;
   Command get_command() const noexcept;
   const char *get_arg(std::size_t index) const noexcept;

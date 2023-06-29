@@ -1,5 +1,8 @@
 #pragma once
+#include "breakpoint.h"
 #include "common.h"
+#include "symbolication/elf.h"
+#include "symbolication/elf_symbols.h"
 #include "task.h"
 #include <cstdint>
 #include <cstdio>
@@ -9,6 +12,8 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <unordered_map>
+
+#include <chrono>
 
 using Tid = pid_t;
 using Pid = pid_t;
@@ -43,15 +48,30 @@ read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
   return nread;
 }
 
+struct BreakpointMap
+{
+  u32 bp_id_counter;
+  std::unordered_map<std::uintptr_t, Breakpoint> breakpoints;
+
+  bool contains(TraceePointer<void> addr) const noexcept;
+  bool insert(TraceePointer<void> addr, u8 overwritten_byte) noexcept;
+  Breakpoint *get(u32 id) noexcept;
+  Breakpoint *get(TraceePointer<void> addr) noexcept;
+};
+
 struct Target
 {
+  friend class Tracer;
   // Members
   pid_t task_leader;
   Path path;
   ObjectFile *obj_file;
+  Elf *elf;
   ScopedFd procfs_memfd;
   std::unordered_map<pid_t, TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
+  std::unordered_map<u64, MinSymbol> minimal_symbols;
+  BreakpointMap bkpt_map;
 
   // Constructors
   Target() = default;
@@ -70,6 +90,14 @@ struct Target
   void set_running(RunType type) noexcept;
   void set_wait_status(TaskWaitResult wait) noexcept;
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
+  void set_breakpoint(TraceePointer<u64> address) noexcept;
+
+  void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
+  void task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept;
+  void task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept;
+  void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
+
+  void emit_breakpoint_event(TPtr<void> bp_addr);
 
   template <typename T>
   std::optional<T>
@@ -87,20 +115,53 @@ struct Target
   }
 
   template <typename T>
-  std::optional<T>
-  read_type(TraceePointer<T> address)
+  T
+  read_type(TraceePointer<T> address) noexcept
   {
-    typename std::remove_cv<T>::type result;
+    typename TPtr<T>::Type result;
     auto total_read = 0ull;
-    constexpr u64 sz = sizeof(T);
+    constexpr auto sz = TPtr<T>::type_size();
     while (total_read < sz) {
-      auto read_bytes = pread64(mem_fd().get(), &result + total_read, sizeof(T) - total_read, address.get());
+      auto read_bytes = pread64(mem_fd().get(), &result + total_read, sz - total_read, address.get());
       if (-1 == read_bytes || 0 == read_bytes) {
-        PANIC(fmt::format("Failed to proc_fs read from {:p}", (void*)address.get()));
+        PANIC(fmt::format("Failed to proc_fs read from {:p}", (void *)address.get()));
       }
       total_read += read_bytes;
     }
     return result;
+  }
+
+  template <typename T>
+  T
+  cache_and_overwrite(TraceePointer<T> address, T &value)
+  {
+    auto old_value = read_type(address);
+    auto total_written = 0ull;
+    constexpr auto sz = sizeof(typename TPtr<T>::Type);
+    fmt::println("writing 0x{:x} of size {} bytes to {:p}", value, sz, (void *)address.get());
+    while (total_written < sz) {
+      auto written = pwrite64(mem_fd().get(), &value, sz, address.get());
+      if (-1 == written || 0 == written) {
+        PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
+      }
+      total_written += written;
+    }
+    return old_value.value();
+  }
+
+  template <typename T>
+  void
+  write(TraceePointer<T> address, T &value)
+  {
+    auto total_written = 0ull;
+    constexpr auto sz = address.type_size();
+    while (total_written < sz) {
+      auto written = pwrite64(mem_fd().get(), &value, sz, address.get());
+      if (-1 == written || 0 == written) {
+        PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
+      }
+      total_written += written;
+    }
   }
 
   template <typename T>

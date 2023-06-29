@@ -32,6 +32,8 @@ struct TaskWaitResult
   user_regs_struct registers;
   WaitStatus ws;
 
+  TraceePointer<void> last_byte_executed() const;
+
   union
   {
     int exit_signal;
@@ -73,6 +75,8 @@ struct TaskInfo
 
 struct TaskVMInfo
 {
+  static TaskVMInfo from_clone_args(const clone_args &cl_args) noexcept;
+
   TraceePointer<void> stack_low;
   u64 stack_size;
   TraceePointer<void> tls;

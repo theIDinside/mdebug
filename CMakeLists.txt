@@ -3,17 +3,19 @@ project(midas LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD_REQUIRED 23)
 set(MIDAS_SOURCES
-  ./src/main.cpp
-  ./src/tracer.cpp
-  ./src/tracer.h
-  ./src/target.cpp
-  ./src/target.h
-  ./src/common.cpp
-  ./src/common.h
-  ./src/ptrace.cpp
-  ./src/ptrace.h
+  src/main.cpp
+  src/tracer.cpp
+  src/tracer.h
+  src/target.cpp
+  src/target.h
+  src/common.cpp
+  src/common.h
+  src/ptrace.cpp
+  src/ptrace.h
   src/task.cpp
   src/task.h
+  src/breakpoint.cpp
+  src/breakpoint.h
   src/posix/argslist.cpp
   src/posix/argslist.h
   src/symbolication/elf.cpp

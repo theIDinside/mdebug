@@ -7,7 +7,12 @@
 
 using ThreadPool = std::vector<std::thread>;
 
-int main(int, const char**) {
+int main(int argc, const char**) {
+
+  int a = 10 + argc;
+  int b = a * 9;
+  printf("b: %d\n", b);
+
   ThreadPool thread_pool;
 
   for(auto i = 0; i < 8; i++) {

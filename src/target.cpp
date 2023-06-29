@@ -1,29 +1,35 @@
 #include "target.h"
+#include "breakpoint.h"
 #include "common.h"
 #include "ptrace.h"
 #include "task.h"
+#include <algorithm>
 #include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
+#include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 Target::Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd) noexcept
-    : task_leader(process_space_id), path(path), obj_file(obj), threads{}
+    : task_leader(process_space_id), path(path), obj_file(obj), threads{},
+      bkpt_map({.bp_id_counter = 1, .breakpoints = {}})
 {
   threads[process_space_id] = TaskInfo{process_space_id, nullptr};
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-    procfs_memfd = ScopedFd::open(procfs_path, O_RDONLY);
+    procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
   }
 }
 
 Target::Target(Target &&other) noexcept
     : task_leader(other.task_leader), path(std::move(other.path)), obj_file(other.obj_file),
-      procfs_memfd(std::move(other.procfs_memfd)), threads{std::move(other.threads)}
+      procfs_memfd(std::move(other.procfs_memfd)), threads{std::move(other.threads)},
+      bkpt_map(std::move(other.bkpt_map))
 {
 }
 
@@ -37,7 +43,7 @@ bool
 Target::reopen_memfd() noexcept
 {
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", task_leader, task_leader);
-  procfs_memfd = ScopedFd::open(procfs_path, O_RDONLY);
+  procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
   return procfs_memfd.is_open();
 }
 
@@ -71,7 +77,7 @@ Target::new_task(Tid tid) noexcept
     fmt::println("New task {} (thread parent: {})", tid, task_leader);
   }
 
-  threads[tid] = TaskInfo{ tid, nullptr };
+  threads[tid] = TaskInfo{tid, nullptr};
 }
 
 void
@@ -92,4 +98,134 @@ Target::set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept
 {
   ASSERT(threads.contains(tid), "Unknown task {}", tid);
   task_vm_infos[tid] = vm_info;
+}
+
+void
+Target::set_breakpoint(TraceePointer<u64> address) noexcept
+{
+  if (bkpt_map.contains(address.get()))
+    return;
+
+  constexpr u64 bkpt = 0xcc;
+  auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, address.get(), nullptr);
+  u8 ins_byte = static_cast<u8>(read_value & 0xff);
+  u64 installed_bp = ((read_value & ~0xff) | bkpt);
+  ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
+
+  bkpt_map.insert(address.as<void>(), ins_byte);
+}
+
+void
+Target::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
+{
+  ASSERT(wait != nullptr, "wait param must not be null");
+  user_regs_struct regs;
+  ptrace(PTRACE_GETREGS, wait->waited_pid, nullptr, &regs);
+  wait->registers = regs;
+  if (WIFSTOPPED(status)) {
+    task_wait_emplace_stopped(status, wait);
+    return;
+  }
+
+  if (WIFEXITED(status)) {
+    task_wait_emplace_exited(status, wait);
+    return;
+  }
+
+  if (WIFSIGNALED(status)) {
+    task_wait_emplace_signalled(status, wait);
+    return;
+  }
+}
+
+void
+Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
+{
+  using enum WaitStatus;
+  if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
+    PtraceSyscallInfo info;
+    constexpr auto size = sizeof(PtraceSyscallInfo);
+    PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, wait->waited_pid, size, &info);
+    if (info.is_entry()) {
+      wait->ws = SyscallEntry;
+    } else {
+      wait->ws = SyscallExit;
+    }
+    return;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
+    wait->ws = Cloned;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
+    wait->ws = Execed;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
+    wait->ws = Exited;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
+    wait->ws = Forked;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
+    wait->ws = VForked;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
+    wait->ws = VForkDone;
+  } else if (WSTOPSIG(status) == SIGTRAP) {
+    if (bkpt_map.contains(wait->last_byte_executed())) {
+      emit_breakpoint_event(wait->last_byte_executed());
+      wait->registers.rip--;
+      ptrace(PTRACE_SETREGS, wait->waited_pid, nullptr, &wait->registers);
+    }
+  } else {
+    fmt::println("SOME OTHER STOP");
+  }
+}
+
+void
+Target::task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept
+{
+  wait->ws = WaitStatus::Signalled;
+  wait->data.signal = WTERMSIG(status);
+}
+
+void
+Target::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
+{
+  wait->ws = WaitStatus::Exited;
+  wait->data.exit_signal = WEXITSTATUS(status);
+}
+
+bool
+BreakpointMap::contains(TraceePointer<void> addr) const noexcept
+{
+  return breakpoints.contains(addr.get());
+}
+bool
+BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte) noexcept
+{
+  if (contains(addr))
+    return false;
+  breakpoints[addr.get()] = Breakpoint{ins_byte, bp_id_counter++};
+  return true;
+}
+
+Breakpoint *
+BreakpointMap::get(u32 id) noexcept
+{
+  auto it = std::find_if(breakpoints.begin(), breakpoints.end(),
+                         [&](const auto &kvp) { return kvp.second.bp_id == id; });
+  if (it == std::end(breakpoints))
+    return nullptr;
+
+  return &(it->second);
+}
+Breakpoint *
+BreakpointMap::get(TraceePointer<void> addr) noexcept
+{
+  if (!contains(addr))
+    return nullptr;
+  else
+    return &breakpoints[addr.get()];
+}
+
+void
+Target::emit_breakpoint_event(TPtr<void> bp_addr)
+{
+  auto bp = bkpt_map.get(bp_addr);
+  bp->times_hit++;
+  fmt::println("Breakpoint hit {}", bp->times_hit);
 }
