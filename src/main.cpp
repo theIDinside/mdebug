@@ -94,10 +94,13 @@ main(int argc, const char **argv)
       case WaitStatus::Cloned: {
         const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(wait.registers);
         const auto res = target->read_type(ptr);
+        // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
         auto np = target->read_type(TPtr<pid_t>{res.parent_tid});
+#ifdef MDB_DEBUG
         long new_pid = 0;
         PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
         ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
+#endif
         target->new_task(np);
         target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
         target->get_task(np)->request_registers();
