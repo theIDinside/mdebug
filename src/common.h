@@ -92,6 +92,13 @@ public:
     return l.get() <=> r.get();
   }
 
+  constexpr auto to_string() const noexcept -> std::string {
+    std::string buffer{};
+    buffer.reserve(20);
+    fmt::format_to(std::back_inserter(buffer), "0x{:x}", get());
+    return buffer;
+  }
+
 private:
   std::uintptr_t remote_addr;
 };
