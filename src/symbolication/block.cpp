@@ -7,3 +7,7 @@ AddrRanges::blocks() const noexcept
 {
   return std::span{m_blocks, m_block_count};
 }
+
+bool Block::contains(Block &block) const noexcept {
+  return block.low.get() >= low.get() && block.high.get() <= high.get();
+}
