@@ -39,7 +39,7 @@ std::string_view syscall_name(u64 syscall_number);
   {                                                                                                               \
     std::source_location loc = std::source_location::current();                                                   \
     if (!(cond)) {                                                                                                \
-      panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc);                \
+      panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);             \
     }                                                                                                             \
   }
 #else
@@ -56,8 +56,8 @@ public:
   constexpr TraceePointer(const TraceePointer &) = default;
   constexpr TraceePointer(TraceePointer &&) = default;
   operator std::uintptr_t() const { return get(); }
-
   constexpr TraceePointer<void>(uintptr_t address) noexcept : remote_addr(address) {}
+
   uintptr_t
   get() const noexcept
   {
@@ -92,7 +92,9 @@ public:
     return l.get() <=> r.get();
   }
 
-  constexpr auto to_string() const noexcept -> std::string {
+  constexpr auto
+  to_string() const noexcept -> std::string
+  {
     std::string buffer{};
     buffer.reserve(20);
     fmt::format_to(std::back_inserter(buffer), "0x{:x}", get());
@@ -144,3 +146,14 @@ private:
   Path p;
   u64 file_size_;
 };
+
+static constexpr u8 LEB128_MASK = 0b0111'1111;
+
+template <typename T> struct LEB128
+{
+  T result;
+  u8 *advanced;
+};
+
+u8 *decode_uleb128(u8 *data, u64 &value) noexcept;
+u8 *decode_leb128(u8 *data, i64 &value) noexcept;
