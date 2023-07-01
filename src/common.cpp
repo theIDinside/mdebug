@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+
 std::string_view
 syscall_name(u64 syscall_number)
 {
@@ -173,45 +174,4 @@ ScopedFd::open_read_only(const Path &p) noexcept
   return ScopedFd{::open(p.c_str(), O_RDONLY), p};
 }
 
-u8 *
-decode_uleb128(u8 *data, u64 &value) noexcept
-{
-  u64 res = 0;
-  u64 shift = 0;
-  u8 index = 0;
-  for (;;) {
-    u8 byte = data[index];
-    res |= ((byte & LEB128_MASK) << shift);
-    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x1), "Decoding of ULEB128 failed at index {}", index);
-    ++index;
-    if ((byte & ~LEB128_MASK) == 0) {
-      value = res;
-      return data + index;
-    }
-    shift += 7;
-  }
-}
 
-u8 *
-decode_leb128(u8 *data, i64 &value) noexcept
-{
-  i64 res = 0;
-  u64 shift = 0;
-  u8 index = 0;
-  u64 size = 64;
-  u8 byte;
-  for (;;) {
-    byte = data[index];
-    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x7f), "Decoding of LEB128 failed at index {}", index);
-    res |= ((byte & LEB128_MASK) << shift);
-    shift += 7;
-    ++index;
-    if ((byte & ~LEB128_MASK) == 0)
-      break;
-  }
-  if (shift < size && (byte & ~LEB128_MASK) != 0) {
-    res |= -(1 << shift);
-  }
-  value = res;
-  return data + index;
-}

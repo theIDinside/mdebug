@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <execinfo.h>
@@ -155,5 +156,52 @@ template <typename T> struct LEB128
   u8 *advanced;
 };
 
-u8 *decode_uleb128(u8 *data, u64 &value) noexcept;
-u8 *decode_leb128(u8 *data, i64 &value) noexcept;
+template <typename T>
+concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
+
+u8 *
+decode_uleb128(u8 *data, IsBitsType auto &value) noexcept
+{
+  u64 res = 0;
+  u64 shift = 0;
+  u8 index = 0;
+  for (;;) {
+    u8 byte = data[index];
+    res |= ((byte & LEB128_MASK) << shift);
+    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x1), "Decoding of ULEB128 failed at index {}", index);
+    ++index;
+    if ((byte & ~LEB128_MASK) == 0) {
+      // We don't want C++ to set a "good" enum value
+      // if `value` is of type enum. We literally want a bit blast here (and we rely on that being the case)
+      std::memcpy(&value, &res, sizeof(decltype(value)));
+      return data + index;
+    }
+    shift += 7;
+  }
+}
+
+u8 *
+decode_leb128(u8 *data, IsBitsType auto &value) noexcept
+{
+  i64 res = 0;
+  u64 shift = 0;
+  u8 index = 0;
+  u64 size = 64;
+  u8 byte;
+  for (;;) {
+    byte = data[index];
+    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x7f), "Decoding of LEB128 failed at index {}", index);
+    res |= ((byte & LEB128_MASK) << shift);
+    shift += 7;
+    ++index;
+    if ((byte & ~LEB128_MASK) == 0)
+      break;
+  }
+  if (shift < size && (byte & ~LEB128_MASK) != 0) {
+    res |= -(1 << shift);
+  }
+  // We don't want C++ to set a "good" enum value
+  // if `value` is of type enum. We literally want a bit blast here (and we rely on that being the case)
+  std::memcpy(&value, &res, sizeof(decltype(value)));
+  return data + index;
+}
