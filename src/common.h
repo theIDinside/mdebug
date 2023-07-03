@@ -25,8 +25,21 @@ using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
 
+template <class... T> constexpr bool always_false = false;
+template <size_t... T> constexpr bool always_false_i = false;
+
+#define NO_COPY(CLASS)                                                                                             \
+  CLASS(const CLASS &) = delete;                                                                                    \
+  CLASS(CLASS &) = delete;                                                                                          \
+  CLASS &operator=(CLASS &) = delete;                                                                               \
+  CLASS &operator=(const CLASS &) = delete;
+
+
 [[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
 
+/**
+ * . syscall_number - the fucking param
+ */
 std::string_view syscall_name(u64 syscall_number);
 
 #define PANIC(err_msg)                                                                                            \
@@ -102,12 +115,22 @@ public:
     return buffer;
   }
 
+  static constexpr u64 ptr_width() noexcept { return sizeof(std::uintptr_t); }
+
 private:
   std::uintptr_t remote_addr;
 };
 
-using AddrPtr = TraceePointer<void>;
+struct UnrelocatedTraceePointer : public TraceePointer<void>
+{
+  TraceePointer
+  relocate(std::uintptr_t to) noexcept
+  {
+    return TraceePointer{this->get() + to};
+  }
+};
 
+using AddrPtr = TraceePointer<void>;
 template <typename T> using TPtr = TraceePointer<T>;
 
 class ScopedFd
