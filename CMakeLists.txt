@@ -22,10 +22,18 @@ set(MIDAS_SOURCES
   src/symbolication/elf.h
   src/symbolication/objfile.cpp
   src/symbolication/objfile.h
+  src/symbolication/cu.cpp
+  src/symbolication/cu.h
+  src/symbolication/dwarf.cpp
+  src/symbolication/dwarf.h
+  src/symbolication/elf_symbols.cpp
+  src/symbolication/elf_symbols.h
+  src/symbolication/block.cpp
+  src/symbolication/block.h
+  src/symbolication/dwarf_utility.h
 )
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
 set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__")
 set(MIDAS_DEBUG_FLAGS "-g3 -O0 -Wall -Wextra")
 set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
@@ -42,7 +50,7 @@ set(MDB_TESTS
 
 function(build_tests tests)
     foreach(target_name ${tests})
-        set(target_source ${CMAKE_CURRENT_SOURCE_DIR}/test/${target_name}.cpp)
+        set(target_source ${CMAKE_CURRENT_SOURCE_DIR}/test/${target_name}.cpp ${CMAKE_CURRENT_SOURCE_DIR}/test/spinlock.cpp)
         add_executable(${target_name} ${target_source})  # Change the file extension if necessary
         set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
         set_target_properties(${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})

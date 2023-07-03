@@ -58,10 +58,6 @@ public:
   __ptrace_syscall_info m_info;
 };
 
-template <class... T> constexpr bool always_false = false;
-
-template <size_t... T> constexpr bool always_false_i = false;
-
 enum SysRegister : size_t
 {
   RDI = 1,

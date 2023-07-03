@@ -18,6 +18,14 @@ struct ElfSection
   u64 m_section_size;
   u64 file_offset;
   std::string_view get_name() const noexcept;
+  u8 *begin() const noexcept;
+  u8 *end() const noexcept;
+
+  /**
+   * Determines offset of `inside_ptr` from `m_section_ptr`.
+   * Requires pointer to be >= m_section_ptr. This contract is only tested in debug builds.
+   */
+  u64 offset(u8 *inside_ptr) const noexcept;
 };
 
 struct ElfSectionData
@@ -29,15 +37,29 @@ struct ElfSectionData
 class Elf
 {
 public:
-  Elf(Elf64Header *header, ElfSectionData sections) noexcept;
+  Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept;
   static Elf *parse_objfile(ObjectFile *object_file) noexcept;
   std::span<ElfSection> sections() const noexcept;
-
+  ElfSection *get_section(std::string_view name) const noexcept;
+  ElfSection *get_section_or_panic(std::string_view name) const noexcept;
   std::unordered_map<u64, MinSymbol> parse_min_symbols() const noexcept;
 
   Elf64Header *header;
   ElfSectionData m_sections;
-  ElfSection *str_table = nullptr;
+  ObjectFile *obj_file;
+
+  ElfSection *str_table;
+  // Dwarf Sections, might as well keep direct pointers to them
+  ElfSection *debug_info;
+  ElfSection *debug_abbrev;
+  ElfSection *debug_str;
+  ElfSection *debug_line_str;
+  ElfSection *debug_ranges;
+  ElfSection *debug_line;
+  ElfSection *debug_addr;
+  ElfSection *debug_str_offsets;
+  ElfSection *debug_rnglists;
+  ElfSection *debug_loclist;
 };
 
 enum class DwarfSectionIdent : u8

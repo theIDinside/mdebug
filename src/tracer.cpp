@@ -1,6 +1,8 @@
 #include "tracer.h"
 #include "common.h"
 #include "ptrace.h"
+#include "symbolication/cu.h"
+#include "symbolication/dwarf.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "target.h"
@@ -38,10 +40,15 @@ Tracer::add_target(pid_t task_leader, const Path &path) noexcept
   if (obj_file != nullptr) {
 
     auto elf = Elf::parse_objfile(obj_file);
-    fmt::println("__Sections in objecfile__");
-    auto i = 0;
-    for (auto sec : elf->sections()) {
-      fmt::println("#{}: {}", i++, sec.get_name());
+    CompilationUnitBuilder cu_builder{obj_file};
+    std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
+    auto total = cu_builder.build_cu_headers();
+    for (const auto &cu_hdr : total) {
+      cu_processors.emplace_back(prepare_cu_processing(obj_file, cu_hdr));
+    }
+    auto index = 0;
+    for (auto &proc : cu_processors) {
+      auto res = proc->read_in_dies();
     }
     targets.emplace(task_leader, Target{task_leader, path, obj_file});
     auto &target = get_target(task_leader);
