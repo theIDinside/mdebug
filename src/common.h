@@ -28,12 +28,11 @@ using i8 = std::int8_t;
 template <class... T> constexpr bool always_false = false;
 template <size_t... T> constexpr bool always_false_i = false;
 
-#define NO_COPY(CLASS)                                                                                             \
-  CLASS(const CLASS &) = delete;                                                                                    \
-  CLASS(CLASS &) = delete;                                                                                          \
-  CLASS &operator=(CLASS &) = delete;                                                                               \
+#define NO_COPY(CLASS)                                                                                            \
+  CLASS(const CLASS &) = delete;                                                                                  \
+  CLASS(CLASS &) = delete;                                                                                        \
+  CLASS &operator=(CLASS &) = delete;                                                                             \
   CLASS &operator=(const CLASS &) = delete;
-
 
 [[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
 
@@ -115,7 +114,11 @@ public:
     return buffer;
   }
 
-  static constexpr u64 ptr_width() noexcept { return sizeof(std::uintptr_t); }
+  static constexpr u64
+  ptr_width() noexcept
+  {
+    return sizeof(std::uintptr_t);
+  }
 
 private:
   std::uintptr_t remote_addr;

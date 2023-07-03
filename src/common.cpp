@@ -12,7 +12,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-
 std::string_view
 syscall_name(u64 syscall_number)
 {
@@ -173,5 +172,3 @@ ScopedFd::open_read_only(const Path &p) noexcept
 {
   return ScopedFd{::open(p.c_str(), O_RDONLY), p};
 }
-
-

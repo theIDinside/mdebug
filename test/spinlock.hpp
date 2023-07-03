@@ -2,22 +2,25 @@
 #include <atomic>
 #include <ctime>
 
-class SpinLock {
+class SpinLock
+{
 public:
   SpinLock();
   void lock() noexcept;
   void unlock() noexcept;
+
 private:
   std::atomic<unsigned int> m_flag;
 };
 
-template <typename T>
-struct IntrusiveList {
-  T* next;
-  T* prev;
+template <typename T> struct IntrusiveList
+{
+  T *next;
+  T *prev;
 };
 
-struct Foo : IntrusiveList<Foo> {
+struct Foo : IntrusiveList<Foo>
+{
   int a;
   long long b;
   float c;

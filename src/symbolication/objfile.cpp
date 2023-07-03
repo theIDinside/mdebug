@@ -18,6 +18,8 @@ ObjectFile::get_offset(u8 *ptr) const noexcept
   return ptr - loaded_binary;
 }
 
-TPtr<void> ObjectFile::text_section_offset() const noexcept {
+TPtr<void>
+ObjectFile::text_section_offset() const noexcept
+{
   return nullptr;
 }

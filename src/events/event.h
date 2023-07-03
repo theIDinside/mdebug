@@ -2,17 +2,19 @@
 
 #include <sys/types.h>
 
-
-enum class StopEventType {
+enum class StopEventType
+{
   Syscall
 };
 
-struct Event {
+struct Event
+{
   pid_t event_for;
   StopEventType evt_type;
 };
 
-class BaseEvent {
+class BaseEvent
+{
 public:
   BaseEvent() = default;
   virtual ~BaseEvent() = default;

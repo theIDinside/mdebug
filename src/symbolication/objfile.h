@@ -17,8 +17,7 @@ struct ObjectFile
   const u8 *loaded_binary;
   TPtr<void> entry_point;
   TPtr<void> vm_text_section;
-  Elf* parsed_elf = nullptr;
-
+  Elf *parsed_elf = nullptr;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
@@ -32,10 +31,13 @@ struct ObjectFile
 
   template <typename T>
   T *
-  get_at(u8* ptr)
+  get_at(u8 *ptr)
   {
-    ASSERT(ptr > loaded_binary, "Pointer is outside (below) memory mapped object file by {} bytes at {:p}", (u64)(loaded_binary - ptr), (void*)ptr);
-    ASSERT(ptr < (loaded_binary+size), "Pointer is outside (above) memory mapped object file by {} bytes at {:p}", (u64)(ptr - loaded_binary), (void*)ptr);
+    ASSERT(ptr > loaded_binary, "Pointer is outside (below) memory mapped object file by {} bytes at {:p}",
+           (u64)(loaded_binary - ptr), (void *)ptr);
+    ASSERT(ptr < (loaded_binary + size),
+           "Pointer is outside (above) memory mapped object file by {} bytes at {:p}", (u64)(ptr - loaded_binary),
+           (void *)ptr);
     return (T *)(ptr);
   }
 

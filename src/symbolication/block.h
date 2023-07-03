@@ -9,7 +9,7 @@ struct Block
   TPtr<void> high;
   TPtr<void> low;
 
-  bool contains(Block& block) const noexcept;
+  bool contains(Block &block) const noexcept;
 };
 
 class AddrRanges
