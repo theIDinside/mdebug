@@ -425,6 +425,12 @@
   ITEM(DW_TAG_skeleton_unit, 0x4a)
   ITEM(DW_TAG_immutable_type, 0x4b)
   ITEM(DW_TAG_lo_user, 0x4080)
+  ITEM(DW_TAG_format_label, 0x4101)
+  ITEM(DW_TAG_function_template, 0x4102)
+  ITEM(DW_TAG_class_template, 0x4103)
+  ITEM(DW_TAG_GNU_BINCL, 0x4104)
+  ITEM(DW_TAG_GNU_EINCL, 0x4105)
+  ITEM(DW_TAG_GNU_template_parameter_pack, 0x4107)
   ITEM(DW_TAG_hi_user, 0xffff)
 #endif
 
