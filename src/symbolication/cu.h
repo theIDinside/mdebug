@@ -70,7 +70,7 @@ public:
 
 private:
   CompileUnitHeader *header;
-  u8 *current_ptr;
+  const u8 *current_ptr;
   std::optional<u64> addr_table_base;
   std::optional<u64> str_offsets_base;
   std::optional<u64> rng_list_base;
@@ -208,31 +208,18 @@ template <UnsignedWord T> struct D5 : InitialLength<T>
   T abbr_offset;
 };
 #pragma pack(pop)
-
+// clang-format off
 template <typename Header>
 concept CUHeader = requires(Header header) {
-                     {
-                       header.ver
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.addr_size
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.abbr_offset
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.len
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.addr_size
-                       } -> std::convertible_to<u64>;
-                     {
-                       Header::version()
-                     };
-                     {
-                       Header::len_offset()
-                       } -> std::convertible_to<u64>;
-                   };
+  { header.ver } -> std::convertible_to<u64>;
+  { header.addr_size } -> std::convertible_to<u64>;
+  { header.abbr_offset } -> std::convertible_to<u64>;
+  { header.len } -> std::convertible_to<u64>;
+  { header.addr_size } -> std::convertible_to<u64>;
+  { Header::version() };
+  { Header::len_offset() } -> std::convertible_to<u64>;
+};
+// clang-format on
 
 // Assume a few things; once the version and address size
 // has been read, we never read it again. Share that data amongst

@@ -2,6 +2,7 @@
 
 #include "../common.h"
 #include "dwarf_defs.h"
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -14,8 +15,7 @@ struct Target;
 std::unique_ptr<CUProcessor> prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header,
                                                    Target *target);
 
-template <typename T>
-concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
+template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
 
 #pragma pack(push, 1)
 template <bool Dummy> struct dummy
@@ -65,12 +65,6 @@ struct AbbreviationInfo
   u32 sibling_offset;
   std::vector<Abbreviation> attributes;
   std::vector<i64> implicit_consts;
-};
-
-struct DataBlock
-{
-  const u8 *const ptr;
-  u64 size;
 };
 
 struct StrSlice
@@ -228,31 +222,42 @@ struct AddressRangeTable64
 // include_directories                  (array of sequence of bytes (as string))
 // file_names                           (array of sequence of bytes (as string))
 
-#pragma pack(push, 1)
-template <UnsignedWord T> struct LineHeader4 : InitialLength<T>
+struct DirEntry
 {
-  T header_length;
+  std::string_view path;
+  std::optional<DataBlock> md5;
 };
 
-template <UnsignedWord T> struct LineHeader5 : InitialLength<T>
+struct FileEntry
 {
-  u8 address_size;
-  u8 segment_selector_size;
-  T header_length;
-  u8 min_ins_len;
-  u8 max_ops_per_ins;
-  u8 statment_as_default;
-  i8 line_base;
-  u8 line_range;
-  u8 opcode_base;
+  std::string_view file_name;
+  u64 dir_index;
+  std::optional<u64> file_size;
+  std::optional<DataBlock> md5;
 };
-#pragma pack(pop)
 
 /**
  * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
  */
-class LineHeader
+struct LineHeader
 {
-  DwarfVersion version;
+  using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
+  using FileNameEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
   u64 length;
+  const u8 *data;
+  DwarfVersion version;
+  u8 addr_size;
+  u8 segment_selector_size;
+  u8 min_ins_length4;
+  u8 max_ops_per_ins;
+  bool default_is_stmt;
+  i8 line_base;
+  u8 line_range;
+  u8 opcode_base;
+  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> std_opcode_lengths;
+  std::vector<DirEntry> directories;
+  std::vector<FileEntry> file_names;
 };
+
+std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes) noexcept;
+std::unique_ptr<LineHeader> read_lineheader_v4(const u8 *ptr) noexcept;
