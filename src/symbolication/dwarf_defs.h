@@ -140,11 +140,31 @@ enum class RangeListEntry : std::uint8_t
 #undef DW_RANGE_LIST_ENTRY
 };
 
+enum class LineNumberProgramOpCode : std::uint8_t
+{
+#define DW_LNP_STANDARD_OPCODES
+#include "../defs/dwarf.defs"
+#undef DW_LNP_STANDARD_OPCODES
+};
+
+// END OF ENUM DEFINITIONS
 #undef ITEM
 
+// STRING REPRESENTATION OF DEFINITION
 #define ITEM(Name, Value)                                                                                         \
   case Name:                                                                                                      \
     return #Name;
+
+constexpr std::string_view
+to_str(LineNumberProgramOpCode opcode)
+{
+#define DW_LNP_STANDARD_OPCODES
+  using enum LineNumberProgramOpCode;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_LNP_STANDARD_OPCODES
+}
 
 constexpr std::string_view
 to_str(Attribute attr) noexcept
