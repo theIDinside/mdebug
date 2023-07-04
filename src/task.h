@@ -83,7 +83,7 @@ struct TaskVMInfo
 };
 
 namespace fmt {
-template <> struct fmt::formatter<TaskVMInfo>
+template <> struct formatter<TaskVMInfo>
 {
   template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
 
@@ -92,14 +92,14 @@ template <> struct fmt::formatter<TaskVMInfo>
 
 template <typename ParseContext>
 constexpr auto
-fmt::formatter<TaskVMInfo>::parse(ParseContext &ctx)
+formatter<TaskVMInfo>::parse(ParseContext &ctx)
 {
   return ctx.begin();
 }
 
 template <typename FormatContext>
 auto
-fmt::formatter<TaskVMInfo>::format(TaskVMInfo const &vm_info, FormatContext &ctx)
+formatter<TaskVMInfo>::format(TaskVMInfo const &vm_info, FormatContext &ctx)
 {
   return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low.to_string(),
                         vm_info.stack_size, vm_info.tls.to_string());
