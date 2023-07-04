@@ -262,6 +262,52 @@ read_lineheader_v5(const u8 *ptr) noexcept
 }
 
 std::unique_ptr<LineHeader>
-read_lineheader_v4(const u8 *ptr) noexcept
+read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept
 {
+  DwarfBinaryReader reader{ptr, 4096};
+  const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
+  const auto version = reader.read_value<u16>();
+  const u64 header_length = reader.dwarf_spec_read_value();
+  const u8 *data_ptr = reader.current_ptr() + header_length;
+  const u8 min_ins_len = reader.read_value<u8>();
+  const u8 max_ops_per_ins = reader.read_value<u8>();
+  const bool default_is_stmt = reader.read_value<u8>();
+  const i8 line_base = reader.read_value<i8>();
+  const u8 line_range = reader.read_value<u8>();
+  const u8 opcode_base = reader.read_value<u8>();
+  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opcode_lengths{};
+  reader.read_into_array(opcode_lengths);
+
+  // read include directories
+  std::vector<DirEntry> dirs;
+  auto dir = reader.read_string();
+  while (dir.size() > 0) {
+    dirs.push_back(DirEntry{.path = dir, .md5 = {}});
+    dir = reader.read_string();
+  }
+
+  std::vector<FileEntry> files;
+  while (reader.peek_value<u8>() != 0) {
+    FileEntry entry;
+    entry.file_name = reader.read_string();
+    entry.dir_index = reader.read_uleb128<u64>();
+    [[gnu::unused]] const auto _timestamp = reader.read_uleb128<u64>();
+    entry.file_size = reader.read_uleb128<u64>();
+    files.push_back(entry);
+  }
+
+  return std::unique_ptr<LineHeader>(new LineHeader{.length = init_len,
+                                                    .data = data_ptr,
+                                                    .version = (DwarfVersion)version,
+                                                    .addr_size = addr_size,
+                                                    .segment_selector_size = 0,
+                                                    .min_ins_length4 = min_ins_len,
+                                                    .max_ops_per_ins = max_ops_per_ins,
+                                                    .default_is_stmt = default_is_stmt,
+                                                    .line_base = line_base,
+                                                    .line_range = line_range,
+                                                    .opcode_base = opcode_base,
+                                                    .std_opcode_lengths = opcode_lengths,
+                                                    .directories = std::move(dirs),
+                                                    .file_names = std::move(files)});
 }
