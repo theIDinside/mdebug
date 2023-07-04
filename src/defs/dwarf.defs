@@ -459,3 +459,13 @@ ITEM(DW_LNS_set_prologue_end, 0x0a)
 ITEM(DW_LNS_set_epilogue_begin, 0x0b)
 ITEM(DW_LNS_set_isa, 0x0c)
 #endif
+
+#ifdef DW_LNP_CONTENT
+ITEM(DW_LNCT_path, 0x1)
+ITEM(DW_LNCT_directory_index, 0x2)
+ITEM(DW_LNCT_timestamp, 0x3)
+ITEM(DW_LNCT_size, 0x4)
+ITEM(DW_LNCT_MD5, 0x5)
+ITEM(DW_LNCT_lo_user, 0x2000)
+ITEM(DW_LNCT_hi_user, 0x3fff)
+#endif

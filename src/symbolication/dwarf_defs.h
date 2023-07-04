@@ -147,6 +147,13 @@ enum class LineNumberProgramOpCode : std::uint8_t
 #undef DW_LNP_STANDARD_OPCODES
 };
 
+enum class LineNumberProgramContent : std::uint16_t
+{
+#define DW_LNP_CONTENT
+#include "../defs/dwarf.defs"
+#undef DW_LNP_CONTENT
+};
+
 // END OF ENUM DEFINITIONS
 #undef ITEM
 
@@ -164,6 +171,17 @@ to_str(LineNumberProgramOpCode opcode)
 #include "../defs/dwarf.defs"
   }
 #undef DW_LNP_STANDARD_OPCODES
+}
+
+constexpr std::string_view
+to_str(LineNumberProgramContent content)
+{
+#define DW_LNP_CONTENT
+  using enum LineNumberProgramContent;
+  switch (content) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_LNP_CONTENT
 }
 
 constexpr std::string_view
