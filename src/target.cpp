@@ -103,7 +103,7 @@ Target::set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept
 void
 Target::set_breakpoint(TraceePointer<u64> address) noexcept
 {
-  if (bkpt_map.contains(address.get()))
+  if (bkpt_map.contains(address))
     return;
 
   constexpr u64 bkpt = 0xcc;
@@ -190,11 +190,6 @@ Target::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
 }
 
 bool
-BreakpointMap::contains(TraceePointer<void> addr) const noexcept
-{
-  return breakpoints.contains(addr.get());
-}
-bool
 BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte) noexcept
 {
   if (contains(addr))
@@ -228,4 +223,16 @@ Target::emit_breakpoint_event(TPtr<void> bp_addr)
   auto bp = bkpt_map.get(bp_addr);
   bp->times_hit++;
   fmt::println("Breakpoint hit {}", bp->times_hit);
+}
+
+void
+Target::add_file(File file) noexcept
+{
+  // use spinlock instead (probably)
+  fmt::println("Adding file: {}", file);
+}
+
+void
+Target::add_type(Type type) noexcept
+{
 }

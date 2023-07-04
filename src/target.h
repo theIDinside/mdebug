@@ -3,6 +3,7 @@
 #include "common.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
+#include "symbolication/type.h"
 #include "task.h"
 #include <cstdint>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include <unordered_map>
 
 #include <chrono>
+#include <mutex>
 
 using Tid = pid_t;
 using Pid = pid_t;
@@ -53,7 +55,12 @@ struct BreakpointMap
   u32 bp_id_counter;
   std::unordered_map<std::uintptr_t, Breakpoint> breakpoints;
 
-  bool contains(TraceePointer<void> addr) const noexcept;
+  template <typename T>
+  bool
+  contains(TraceePointer<T> addr) const noexcept
+  {
+    return breakpoints.contains(addr.get());
+  }
   bool insert(TraceePointer<void> addr, u8 overwritten_byte) noexcept;
   Breakpoint *get(u32 id) noexcept;
   Breakpoint *get(TraceePointer<void> addr) noexcept;
@@ -61,6 +68,7 @@ struct BreakpointMap
 
 struct Target
 {
+  std::mutex m;
   friend class Tracer;
   // Members
   pid_t task_leader;
@@ -188,4 +196,11 @@ struct Target
       return result;
     }
   }
+
+  void add_file(File file) noexcept;
+  void add_type(Type type) noexcept;
+
+private:
+  std::vector<File> m_files;
+  std::vector<Type> m_types;
 };
