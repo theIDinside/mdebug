@@ -10,29 +10,14 @@
 #include <type_traits>
 #include <utility>
 
+struct File;
+
 enum class DwarfVersion : u8
 {
   D2 = 2,
   D3 = 3,
   D4 = 4,
   D5 = 5,
-};
-
-struct CompilationUnit
-{
-  bool parsed : 1;
-  bool partial : 1;
-  bool dies_known : 1;
-  bool dies_finished : 1;
-  // Data read in the header
-  u32 size;
-  u8 *data_begin;
-
-  std::string_view file_name;
-  std::string_view comp_dir;
-  TPtr<void> low_pc;
-  TPtr<void> high_pc;
-  AddrRanges addresses;
 };
 
 /**
@@ -107,14 +92,16 @@ private:
 class CUProcessor
 {
 public:
-  CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
-              u32 index) noexcept;
+  CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table, u32 index,
+              Target *target) noexcept;
   CUProcessor(CUProcessor &&) noexcept = default;
   CUProcessor(const CUProcessor &) = delete;
 
   /** Reads in all dies of this compilation unit and returns the Ancestor (the CU-die), the equivalent of
    * &cu_dies[0] */
-  DebugInfoEntry *read_in_dies() noexcept;
+  DebugInfoEntry *read_in_dies(bool only_compile_unit = false) noexcept;
+  std::unique_ptr<DebugInfoEntry> read_root_die() noexcept;
+  const CompileUnitHeader &get_header() const noexcept;
 
 private:
   bool finished : 1;
@@ -125,10 +112,13 @@ private:
   CompileUnitHeader header;
   AbbreviationInfo::Table abbrev_table;
   std::vector<DebugInfoEntry> cu_dies;
+
+  // The Target that is requesting parsing of debug info
+  Target *requesting_target;
 };
 
 namespace fmt {
-template <> struct fmt::formatter<CompileUnitHeader>
+template <> struct formatter<CompileUnitHeader>
 {
   template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
 
@@ -137,14 +127,14 @@ template <> struct fmt::formatter<CompileUnitHeader>
 
 template <typename ParseContext>
 constexpr auto
-fmt::formatter<CompileUnitHeader>::parse(ParseContext &ctx)
+formatter<CompileUnitHeader>::parse(ParseContext &ctx)
 {
   return ctx.begin();
 }
 
 template <typename FormatContext>
 auto
-fmt::formatter<CompileUnitHeader>::format(CompileUnitHeader const &item, FormatContext &ctx)
+formatter<CompileUnitHeader>::format(CompileUnitHeader const &item, FormatContext &ctx)
 {
   return fmt::format_to(ctx.out(),
                         "Compile Unit: length = {:#010x}, format = {}, version = {:#06x}, abbr_offset = "
@@ -313,3 +303,5 @@ private:
 private:
   ObjectFile *obj_file;
 };
+
+File process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *file, DebugInfoEntry *die) noexcept;

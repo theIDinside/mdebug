@@ -8,9 +8,11 @@
 struct ObjectFile;
 struct CompileUnitHeader;
 class CUProcessor;
+struct Target;
 
 // Decodes values in abbreviation table for CU described by `header` (but does not translate them)
-std::unique_ptr<CUProcessor> prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header);
+std::unique_ptr<CUProcessor> prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header,
+                                                   Target *target);
 
 struct Abbreviation
 {
@@ -102,10 +104,11 @@ struct DebugInfoEntry
 {
   u32 abbreviation_code;
   /** Offset into .debug_info or .debug_types */
-  u64 cu_offset;
+  u64 next_die_in_cu;
   DebugInfoEntry *first_child;
   DebugInfoEntry *next_sibling;
   DebugInfoEntry *parent;
+  DwarfTag tag;
   std::vector<AttributeValue> attributes;
 };
 

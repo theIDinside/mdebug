@@ -36,26 +36,37 @@ Tracer::add_target(pid_t task_leader, const Path &path) noexcept
     PANIC(fmt::format("File {} does not exist", path.c_str()));
     break;
   }
-  fmt::println("adding target {}", task_leader);
-  if (obj_file != nullptr) {
+  ASSERT(obj_file != nullptr, "Object file can't be nullptr");
 
-    auto elf = Elf::parse_objfile(obj_file);
-    CompilationUnitBuilder cu_builder{obj_file};
-    std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
-    auto total = cu_builder.build_cu_headers();
-    for (const auto &cu_hdr : total) {
-      cu_processors.emplace_back(prepare_cu_processing(obj_file, cu_hdr));
+  auto elf = Elf::parse_objfile(obj_file);
+  CompilationUnitBuilder cu_builder{obj_file};
+  std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
+  auto total = cu_builder.build_cu_headers();
+  for (const auto &cu_hdr : total) {
+    cu_processors.emplace_back(prepare_cu_processing(obj_file, cu_hdr, get_current()));
+  }
+
+  std::vector<File> files;
+  std::vector<std::unique_ptr<DebugInfoEntry>> compile_unit_dies{};
+  for (auto &proc : cu_processors) {
+    auto compile_unit_die = proc->read_root_die();
+    if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
+      const auto file = process_compile_unit_die(proc->get_header(), obj_file, compile_unit_die.get());
+      files.push_back(file);
+    } else {
+      PANIC("Unexpected non-compile unit DIE parsed");
     }
-    auto index = 0;
-    for (auto &proc : cu_processors) {
-      auto res = proc->read_in_dies();
-    }
-    targets.emplace(task_leader, Target{task_leader, path, obj_file});
-    auto &target = get_target(task_leader);
-    target.elf = elf;
-    target.minimal_symbols = target.elf->parse_min_symbols();
-    current_target = &targets[task_leader];
-    new_target_set_options(task_leader);
+    compile_unit_dies.push_back(std::move(compile_unit_die));
+  }
+
+  targets.emplace(task_leader, Target{task_leader, path, obj_file});
+  auto &target = get_target(task_leader);
+  target.elf = elf;
+  target.minimal_symbols = target.elf->parse_min_symbols();
+  current_target = &targets[task_leader];
+  new_target_set_options(task_leader);
+  for (const auto &f : files) {
+    get_current()->add_file(f);
   }
 }
 

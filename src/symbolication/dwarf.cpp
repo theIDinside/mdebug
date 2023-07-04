@@ -11,7 +11,7 @@ DEBUG_SANITIZE_DWARF_NAME(u16 _value)
 }
 
 std::unique_ptr<CUProcessor>
-prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header)
+prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header, Target *target)
 {
   const auto abbrev_sec = obj_file->parsed_elf->debug_abbrev;
 
@@ -53,7 +53,7 @@ prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header)
     }
     result.push_back(info);
   }
-  return std::make_unique<CUProcessor>(obj_file, header, std::move(result), header.cu_index);
+  return std::make_unique<CUProcessor>(obj_file, header, std::move(result), header.cu_index, target);
 }
 
 std::uintptr_t

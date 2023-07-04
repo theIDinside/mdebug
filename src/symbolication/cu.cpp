@@ -1,10 +1,16 @@
 #include "cu.h"
+#include "block.h"
 #include "dwarf.h"
-#include "dwarf_utility.h"
+#include "dwarf_defs.h"
 #include "elf.h"
 #include "objfile.h"
+#include "type.h"
+#include <bit>
+#include <bits/align.h>
 #include <cstdint>
 #include <utility>
+
+#include <emmintrin.h>
 
 CompilationUnitBuilder::CompilationUnitBuilder(ObjectFile *obj_file) noexcept : obj_file(obj_file) {}
 
@@ -29,9 +35,9 @@ CompilationUnitBuilder::build_cu_headers() noexcept
 }
 
 CUProcessor::CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
-                         u32 index) noexcept
+                         u32 index, Target *target) noexcept
     : finished(false), file_name{}, obj_file(obj_file), index(index), header(header),
-      abbrev_table(std::move(table)), cu_dies()
+      abbrev_table(std::move(table)), cu_dies(), requesting_target(target)
 {
 }
 
@@ -98,8 +104,9 @@ read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<
     ASSERT(elf->debug_line != nullptr, ".debug_line expected to be not null");
     if (!IS_DWZ) {
       const auto offset = reader.read_offset();
-      std::string_view indirect_str{(const char *)elf->debug_line_str->begin() + offset};
-      AttributeValue{indirect_str, abbr.form, abbr.name};
+      const auto ptr = elf->debug_line_str->begin() + offset;
+      const std::string_view indirect_str{(const char *)ptr};
+      return AttributeValue{indirect_str, abbr.form, abbr.name};
     }
   }
   case AttributeForm::DW_FORM_udata:
@@ -126,7 +133,7 @@ read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<
   }
   case AttributeForm::DW_FORM_indirect: {
     const auto new_form = (AttributeForm)reader.uleb128();
-    Abbreviation new_abbr{.name = abbr.name, .form = new_form};
+    Abbreviation new_abbr{.name = abbr.name, .form = new_form, .IMPLICIT_CONST_INDEX = UINT8_MAX};
     if (new_form == AttributeForm::DW_FORM_implicit_const) {
       const auto value = reader.leb128();
       new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
@@ -206,10 +213,11 @@ read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<
     PANIC("Unsupported attribute form DW_FORM_ref_sup8");
     break;
   }
+  PANIC("Unknown Attribute Form");
 }
 
 DebugInfoEntry *
-CUProcessor::read_in_dies() noexcept
+CUProcessor::read_in_dies(bool only_compile_unit) noexcept
 {
   DebugInfoEntry *ancestor = nullptr;
   CompileUnitReader reader{&header, obj_file};
@@ -220,7 +228,6 @@ CUProcessor::read_in_dies() noexcept
     auto abbreviation = abbrev_table[abbrev_code - 1];
     std::vector<AttributeValue> attribute_values;
 
-    fmt::println("{} - Has children: {}", abbreviation.tag, abbreviation.has_children);
     for (const auto &attr : abbreviation.attributes) {
       attribute_values.emplace_back(read_attribute_values(reader, attr, abbreviation.implicit_consts));
     }
@@ -235,6 +242,29 @@ CUProcessor::read_in_dies() noexcept
 
   ancestor = &cu_dies.front();
   return ancestor;
+}
+
+std::unique_ptr<DebugInfoEntry>
+CUProcessor::read_root_die() noexcept
+{
+  CompileUnitReader reader{&header, obj_file};
+  std::unique_ptr<DebugInfoEntry> root = std::make_unique<DebugInfoEntry>();
+  const auto abbrev_code = reader.uleb128();
+  ASSERT(abbrev_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
+  auto abbreviation = abbrev_table[abbrev_code - 1];
+  root->abbreviation_code = abbrev_code;
+  root->tag = abbreviation.tag;
+  for (const auto &attr : abbreviation.attributes) {
+    root->attributes.emplace_back(read_attribute_values(reader, attr, abbreviation.implicit_consts));
+  }
+  root->next_die_in_cu = reader.bytes_read();
+  return root;
+}
+
+const CompileUnitHeader &
+CUProcessor::get_header() const noexcept
+{
+  return header;
 }
 
 CompileUnitReader::CompileUnitReader(CompileUnitHeader *header, const ObjectFile *obj_file) noexcept
@@ -277,6 +307,12 @@ CompileUnitReader::read_block(u64 size) noexcept
   const auto tmp = current_ptr;
   current_ptr += size;
   return {.ptr = tmp, .size = size};
+}
+
+u64
+CompileUnitReader::bytes_read() const noexcept
+{
+  return static_cast<u64>(current_ptr - header->data);
 }
 
 u64
@@ -397,4 +433,45 @@ CompileUnitReader::read_loclist_index(u64 range_index) const noexcept
     const auto value = *(u64 *)ptr;
     return value;
   }
+}
+
+File
+process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *obj_file, DebugInfoEntry *die) noexcept
+{
+  File file{};
+  const auto elf = obj_file->parsed_elf;
+  if (header.addr_size == 4) {
+    PANIC("32-bit arch not yet supported.");
+  } else {
+    for (const auto &att : die->attributes) {
+      if (att.name == Attribute::DW_AT_name) {
+        file.name = att.string();
+      }
+      if (att.name == Attribute::DW_AT_ranges) {
+        const auto value = att.address();
+        const auto ptr = elf->debug_ranges->begin() + value;
+        if ((std::uintptr_t)ptr % 16 == 0) {
+          u64 *start = std::assume_aligned<16>((u64 *)ptr);
+          file.blocks.push_back(Block{});
+          _mm_store_si128((__m128i *)&file.blocks.back(), _mm_load_si128((__m128i *)start));
+          for (; file.blocks.back().is_valid(); start += 2) {
+            file.blocks.push_back(Block{});
+            _mm_store_si128((__m128i *)&file.blocks.back(), _mm_load_si128((__m128i *)start));
+          }
+          // remove end-of-list entry
+          file.blocks.pop_back();
+        } else {
+          u64 *start = (u64 *)ptr;
+          file.blocks.push_back(Block{});
+          _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
+          for (; file.blocks.back().is_valid(); start += 2) {
+            file.blocks.push_back(Block{});
+            _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
+          }
+          file.blocks.pop_back();
+        }
+      }
+    }
+  }
+  return file;
 }
