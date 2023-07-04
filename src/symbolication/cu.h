@@ -1,6 +1,5 @@
 #pragma once
 
-#include "block.h"
 #include "dwarf.h"
 #include "objfile.h"
 #include <concepts>
@@ -11,14 +10,6 @@
 #include <utility>
 
 struct File;
-
-enum class DwarfVersion : u8
-{
-  D2 = 2,
-  D3 = 3,
-  D4 = 4,
-  D5 = 5,
-};
 
 /**
  * The processed Compilation Unit Header. For the raw byte-to-byte representation see D4/D5
@@ -115,6 +106,7 @@ private:
 
   // The Target that is requesting parsing of debug info
   Target *requesting_target;
+  std::unique_ptr<LineHeader> line_header;
 };
 
 namespace fmt {
@@ -182,27 +174,8 @@ struct DetermineDwarf
   }
 };
 
-template <typename T>
-concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
-
 #pragma pack(push, 1)
-template <bool Dummy> struct dummy
-{
-};
-
-template <> struct dummy<true>
-{
-  u32 _dummy;
-};
-
-template <UnsignedWord T> struct DFmt
-{
-  [[no_unique_address]] dummy<std::is_same_v<T, u64>> dummy;
-  T len;
-  u16 ver;
-};
-
-template <UnsignedWord T> struct D4 : DFmt<T>
+template <UnsignedWord T> struct D4 : InitialLength<T>
 {
   static constexpr auto
   version() noexcept
@@ -212,13 +185,13 @@ template <UnsignedWord T> struct D4 : DFmt<T>
   static constexpr auto
   len_offset() noexcept
   {
-    return offsetof(DFmt<T>, len);
+    return offsetof(InitialLength<T>, len);
   }
   T abbr_offset;
   u8 addr_size;
 };
 
-template <UnsignedWord T> struct D5 : DFmt<T>
+template <UnsignedWord T> struct D5 : InitialLength<T>
 {
   static constexpr auto
   version() noexcept
@@ -228,7 +201,7 @@ template <UnsignedWord T> struct D5 : DFmt<T>
   static constexpr auto
   len_offset() noexcept
   {
-    return offsetof(DFmt<T>, len);
+    return offsetof(InitialLength<T>, len);
   }
   u8 unit_type;
   u8 addr_size;
