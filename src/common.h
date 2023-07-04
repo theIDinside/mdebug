@@ -68,8 +68,8 @@ public:
   constexpr TraceePointer &operator=(const TraceePointer &) = default;
   constexpr TraceePointer(const TraceePointer &) = default;
   constexpr TraceePointer(TraceePointer &&) = default;
-  operator std::uintptr_t() const { return get(); }
-  constexpr TraceePointer<void>(uintptr_t address) noexcept : remote_addr(address) {}
+  constexpr operator std::uintptr_t() const { return get(); }
+  constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
 
   uintptr_t
   get() const noexcept
@@ -124,12 +124,32 @@ private:
   std::uintptr_t remote_addr;
 };
 
+namespace fmt {
+template <typename T> struct formatter<TraceePointer<T>>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(TraceePointer<T> const &tptr, FormatContext &ctx)
+  {
+    return fmt::format_to(ctx.out(), "0x{:x}", tptr.get());
+  }
+};
+
+} // namespace fmt
+
 struct UnrelocatedTraceePointer : public TraceePointer<void>
 {
   TraceePointer
-  relocate(std::uintptr_t to) noexcept
+  relocate(std::uintptr_t offset) noexcept
   {
-    return TraceePointer{this->get() + to};
+    return TraceePointer<void>{this->get() + offset};
   }
 };
 
