@@ -4,21 +4,21 @@
 #include <fmt/core.h>
 
 namespace fmt {
-template <> struct fmt::formatter<Attribute>
+template <> struct formatter<Attribute>
 {
   template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
 
   template <typename FormatContext> auto format(Attribute const &attribute, FormatContext &ctx);
 };
 
-template <> struct fmt::formatter<AttributeForm>
+template <> struct formatter<AttributeForm>
 {
   template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
 
   template <typename FormatContext> auto format(AttributeForm const &form, FormatContext &ctx);
 };
 
-template <> struct fmt::formatter<DwarfTag>
+template <> struct formatter<DwarfTag>
 {
   template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
 
@@ -27,42 +27,42 @@ template <> struct fmt::formatter<DwarfTag>
 
 template <typename ParseContext>
 constexpr auto
-fmt::formatter<Attribute>::parse(ParseContext &ctx)
+formatter<Attribute>::parse(ParseContext &ctx)
 {
   return ctx.begin();
 }
 
 template <typename FormatContext>
 auto
-fmt::formatter<Attribute>::format(Attribute const &attribute, FormatContext &ctx)
+formatter<Attribute>::format(Attribute const &attribute, FormatContext &ctx)
 {
   return fmt::format_to(ctx.out(), "{}", to_str(attribute));
 }
 
 template <typename ParseContext>
 constexpr auto
-fmt::formatter<AttributeForm>::parse(ParseContext &ctx)
+formatter<AttributeForm>::parse(ParseContext &ctx)
 {
   return ctx.begin();
 }
 
 template <typename FormatContext>
 auto
-fmt::formatter<AttributeForm>::format(AttributeForm const &form, FormatContext &ctx)
+formatter<AttributeForm>::format(AttributeForm const &form, FormatContext &ctx)
 {
   return fmt::format_to(ctx.out(), "{}", to_str(form));
 }
 
 template <typename ParseContext>
 constexpr auto
-fmt::formatter<DwarfTag>::parse(ParseContext &ctx)
+formatter<DwarfTag>::parse(ParseContext &ctx)
 {
   return ctx.begin();
 }
 
 template <typename FormatContext>
 auto
-fmt::formatter<DwarfTag>::format(DwarfTag const &tag, FormatContext &ctx)
+formatter<DwarfTag>::format(DwarfTag const &tag, FormatContext &ctx)
 {
   return fmt::format_to(ctx.out(), "{}", to_str(tag));
 }
