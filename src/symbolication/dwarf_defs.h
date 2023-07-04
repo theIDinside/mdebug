@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <fmt/core.h>
 #include <string_view>
 
 // Macro that defines enumerator values N.B - the undef must be at the end of this file or all sorts of hell can
@@ -179,3 +180,57 @@ to_str(DwarfTag attr) noexcept
 }
 
 #undef ITEM
+
+namespace fmt {
+template <> struct formatter<Attribute>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(Attribute const &attribute, FormatContext &ctx)
+  {
+    return fmt::format_to(ctx.out(), "{}", to_str(attribute));
+  }
+};
+
+template <> struct formatter<AttributeForm>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(AttributeForm const &form, FormatContext &ctx)
+  {
+    return fmt::format_to(ctx.out(), "{}", to_str(form));
+  }
+};
+
+template <> struct formatter<DwarfTag>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(DwarfTag const &tag, FormatContext &ctx)
+  {
+    return fmt::format_to(ctx.out(), "{}", to_str(tag));
+  }
+};
+
+} // namespace fmt
