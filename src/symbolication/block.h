@@ -6,10 +6,11 @@
  */
 struct Block
 {
-  TPtr<void> high;
   TPtr<void> low;
-
+  TPtr<void> high;
   bool contains(Block &block) const noexcept;
+  bool contains(TPtr<void> ptr) const noexcept;
+  bool is_valid() const noexcept;
 };
 
 class AddrRanges
