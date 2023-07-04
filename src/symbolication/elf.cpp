@@ -33,6 +33,18 @@ ElfSection::offset(u8 *inside_ptr) const noexcept
   return (inside_ptr - m_section_ptr);
 }
 
+u64
+ElfSection::size() const noexcept
+{
+  return m_section_size;
+}
+
+const u8 *
+ElfSection::data() const noexcept
+{
+  return m_section_ptr;
+}
+
 DwarfSectionIdent
 from_str(std::string_view str)
 {
