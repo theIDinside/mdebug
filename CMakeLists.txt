@@ -30,7 +30,6 @@ set(MIDAS_SOURCES
   src/symbolication/elf_symbols.h
   src/symbolication/block.cpp
   src/symbolication/block.h
-  src/symbolication/dwarf_utility.h
   src/symbolication/type.cpp
   src/symbolication/type.h
 )
