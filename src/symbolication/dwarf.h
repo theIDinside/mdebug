@@ -14,6 +14,35 @@ struct Target;
 std::unique_ptr<CUProcessor> prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header,
                                                    Target *target);
 
+template <typename T>
+concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
+
+#pragma pack(push, 1)
+template <bool Dummy> struct dummy
+{
+};
+
+template <> struct dummy<true>
+{
+  u32 _dummy;
+};
+
+template <UnsignedWord T> struct InitialLength
+{
+  [[no_unique_address]] dummy<std::is_same_v<T, u64>> dummy;
+  T len;
+  u16 ver;
+};
+#pragma pack(pop)
+
+enum class DwarfVersion : u8
+{
+  D2 = 2,
+  D3 = 3,
+  D4 = 4,
+  D5 = 5,
+};
+
 struct Abbreviation
 {
   Attribute name;
@@ -184,4 +213,46 @@ struct AddressRangeTable64
   u64 debug_info_offset;
   u8 address_size;
   u8 segment_selector_size;
+};
+
+/**
+ * LNP V4
+ */
+// unit_length                          4/12 bytes
+// version                              2 bytes
+// header_length                        4/8 bytes     - number of bytes, starting from `min_ins_len` to where data
+// begins min_ins_len                          1 byte maximum_operations_per_instruction   1 byte default_is_stmt
+// 1 byte line_base                            1 signed byte line_range                           1 byte
+// opcode_base                          1 byte
+// standard_opcode_lengths              (array of byte)
+// include_directories                  (array of sequence of bytes (as string))
+// file_names                           (array of sequence of bytes (as string))
+
+#pragma pack(push, 1)
+template <UnsignedWord T> struct LineHeader4 : InitialLength<T>
+{
+  T header_length;
+};
+
+template <UnsignedWord T> struct LineHeader5 : InitialLength<T>
+{
+  u8 address_size;
+  u8 segment_selector_size;
+  T header_length;
+  u8 min_ins_len;
+  u8 max_ops_per_ins;
+  u8 statment_as_default;
+  i8 line_base;
+  u8 line_range;
+  u8 opcode_base;
+};
+#pragma pack(pop)
+
+/**
+ * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
+ */
+class LineHeader
+{
+  DwarfVersion version;
+  u64 length;
 };
