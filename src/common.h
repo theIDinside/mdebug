@@ -373,6 +373,5 @@ private:
   const u8 *buffer;
   const u8 *head;
   u64 size;
-  bool is_dwarf_reader = false;
   u8 offset_size = 4;
 };

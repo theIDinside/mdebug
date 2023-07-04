@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dwarf.h"
+#include "lnp.h"
 #include "objfile.h"
 #include <concepts>
 #include <cstddef>
@@ -8,7 +9,6 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
-
 struct File;
 
 /**

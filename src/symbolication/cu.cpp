@@ -8,9 +8,8 @@
 #include <bit>
 #include <bits/align.h>
 #include <cstdint>
-#include <utility>
-
 #include <emmintrin.h>
+#include <utility>
 
 CompilationUnitBuilder::CompilationUnitBuilder(ObjectFile *obj_file) noexcept : obj_file(obj_file) {}
 
@@ -37,7 +36,7 @@ CompilationUnitBuilder::build_cu_headers() noexcept
 CUProcessor::CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
                          u32 index, Target *target) noexcept
     : finished(false), file_name{}, obj_file(obj_file), index(index), header(header),
-      abbrev_table(std::move(table)), cu_dies(), requesting_target(target)
+      abbrev_table(std::move(table)), cu_dies(), requesting_target(target), line_header(nullptr)
 {
 }
 
@@ -446,29 +445,26 @@ process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *obj_file, 
     for (const auto &att : die->attributes) {
       if (att.name == Attribute::DW_AT_name) {
         file.name = att.string();
-      }
-      if (att.name == Attribute::DW_AT_ranges) {
+      } else if (att.name == Attribute::DW_AT_ranges) {
+        // todo(simon): re-add/re-design for opportunity of aligned loads/stores
         const auto value = att.address();
         const auto ptr = elf->debug_ranges->begin() + value;
-        if ((std::uintptr_t)ptr % 16 == 0) {
-          u64 *start = std::assume_aligned<16>((u64 *)ptr);
-          file.blocks.push_back(Block{});
-          _mm_store_si128((__m128i *)&file.blocks.back(), _mm_load_si128((__m128i *)start));
-          for (; file.blocks.back().is_valid(); start += 2) {
-            file.blocks.push_back(Block{});
-            _mm_store_si128((__m128i *)&file.blocks.back(), _mm_load_si128((__m128i *)start));
-          }
-          // remove end-of-list entry
-          file.blocks.pop_back();
-        } else {
-          u64 *start = (u64 *)ptr;
+        u64 *start = (u64 *)ptr;
+        file.blocks.push_back(Block{});
+        _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
+        for (; file.blocks.back().is_valid(); start += 2) {
           file.blocks.push_back(Block{});
           _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
-          for (; file.blocks.back().is_valid(); start += 2) {
-            file.blocks.push_back(Block{});
-            _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
-          }
-          file.blocks.pop_back();
+        }
+        file.blocks.pop_back();
+      } else if (att.name == Attribute::DW_AT_stmt_list) {
+        const auto offset = att.address();
+        if (header.version == DwarfVersion::D4) {
+          auto lnp_header =
+              read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
+
+        } else {
+          PANIC("V5 line number program not supported yet");
         }
       }
     }

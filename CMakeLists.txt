@@ -26,6 +26,8 @@ set(MIDAS_SOURCES
   src/symbolication/cu.h
   src/symbolication/dwarf.cpp
   src/symbolication/dwarf.h
+  src/symbolication/lnp.cpp
+  src/symbolication/lnp.h
   src/symbolication/elf_symbols.cpp
   src/symbolication/elf_symbols.h
   src/symbolication/block.cpp

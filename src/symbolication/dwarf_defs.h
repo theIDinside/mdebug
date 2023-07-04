@@ -3,6 +3,14 @@
 #include <fmt/core.h>
 #include <string_view>
 
+enum class DwarfVersion : std::uint8_t
+{
+  D2 = 2,
+  D3 = 3,
+  D4 = 4,
+  D5 = 5,
+};
+
 // Macro that defines enumerator values N.B - the undef must be at the end of this file or all sorts of hell can
 // break loose
 #define ITEM(Name, Value) Name = Value,
