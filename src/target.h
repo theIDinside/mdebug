@@ -1,10 +1,12 @@
 #pragma once
 #include "breakpoint.h"
 #include "common.h"
+#include "lib/spinlock.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
 #include "task.h"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -14,11 +16,16 @@
 #include <unistd.h>
 #include <unordered_map>
 
-#include <chrono>
-#include <mutex>
-
 using Tid = pid_t;
 using Pid = pid_t;
+
+struct LWP
+{
+  Pid pid;
+  Tid tid;
+
+  constexpr bool operator<=>(const LWP &other) const = default;
+};
 
 using Address = std::uintptr_t;
 struct ObjectFile;
@@ -68,7 +75,6 @@ struct BreakpointMap
 
 struct Target
 {
-  std::mutex m;
   friend class Tracer;
   // Members
   pid_t task_leader;
@@ -81,10 +87,13 @@ struct Target
   std::unordered_map<u64, MinSymbol> minimal_symbols;
   BreakpointMap bkpt_map;
 
+  // Aggressive spinlock
+  SpinLock spin_lock;
+
   // Constructors
-  Target() = default;
   Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd = true) noexcept;
-  Target(Target &&other) noexcept;
+  Target(const Target &) = delete;
+  Target &operator=(const Target &) = delete;
 
   // Methods
   bool initialized() const noexcept;
@@ -197,10 +206,10 @@ struct Target
     }
   }
 
-  void add_file(File file) noexcept;
+  void add_file(CompilationUnitFile &&file) noexcept;
   void add_type(Type type) noexcept;
 
 private:
-  std::vector<File> m_files;
-  std::vector<Type> m_types;
+  std::vector<CompilationUnitFile> m_files;
+  std::unordered_map<std::string_view, Type> m_types;
 };

@@ -6,8 +6,11 @@
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "target.h"
+#include <algorithm>
+#include <bits/ranges_util.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <ranges>
 #include <sys/mman.h>
 #include <sys/stat.h>
 
@@ -39,6 +42,10 @@ Tracer::add_target(pid_t task_leader, const Path &path) noexcept
   ASSERT(obj_file != nullptr, "Object file can't be nullptr");
 
   auto elf = Elf::parse_objfile(obj_file);
+  targets.push_back(std::make_unique<Target>(task_leader, path, obj_file));
+  auto &target = get_target(task_leader);
+  current_target = targets.back().get();
+
   CompilationUnitBuilder cu_builder{obj_file};
   std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
@@ -46,28 +53,20 @@ Tracer::add_target(pid_t task_leader, const Path &path) noexcept
     cu_processors.emplace_back(prepare_cu_processing(obj_file, cu_hdr, get_current()));
   }
 
-  std::vector<File> files;
   std::vector<std::unique_ptr<DebugInfoEntry>> compile_unit_dies{};
   for (auto &proc : cu_processors) {
     auto compile_unit_die = proc->read_root_die();
     if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-      const auto file = process_compile_unit_die(proc->get_header(), obj_file, compile_unit_die.get());
-      files.push_back(file);
+      proc->process_compile_unit_die(compile_unit_die.get());
     } else {
       PANIC("Unexpected non-compile unit DIE parsed");
     }
     compile_unit_dies.push_back(std::move(compile_unit_die));
   }
-
-  targets.emplace(task_leader, Target{task_leader, path, obj_file});
-  auto &target = get_target(task_leader);
   target.elf = elf;
   target.minimal_symbols = target.elf->parse_min_symbols();
-  current_target = &targets[task_leader];
+
   new_target_set_options(task_leader);
-  for (const auto &f : files) {
-    get_current()->add_file(f);
-  }
 }
 
 AddObjectResult
@@ -92,28 +91,25 @@ Tracer::add_object_file(const Path &path) noexcept
 void
 Tracer::new_task(Pid pid, Tid tid) noexcept
 {
-  targets[pid].threads[tid] = TaskInfo{tid, nullptr};
+  auto it = std::find_if(targets.cbegin(), targets.cend(), [&pid](auto &t) { return t->task_leader = pid; });
+  ASSERT(it != std::end(targets), "Did not find target with task leader {} pid", pid);
+  it->get()->threads[tid] = TaskInfo{tid, nullptr};
 }
 
 void
-Tracer::thread_exited(Tid tid, int) noexcept
+Tracer::thread_exited(LWP lwp, int) noexcept
 {
-  for (auto &[pid, tgt] : targets) {
-    if (tgt.threads.contains(tid)) {
-      tgt.threads.erase(tid);
-    }
-  }
+  auto &t = get_target(lwp.pid);
+  t.threads.erase(lwp.tid);
 }
 
 Target &
 Tracer::get_target(pid_t pid) noexcept
 {
-#ifdef MDB_DEBUG
-  if (!targets.contains(pid)) {
-    PANIC(fmt::format("Target {} does not exist", pid));
-  }
-#endif
-  return targets[pid];
+  auto it = std::ranges::find_if(targets, [&pid](auto &t) { return t->task_leader == pid; });
+  ASSERT(it != std::end(targets), "Could not find target {} pid", pid);
+
+  return **it;
 }
 
 Target *

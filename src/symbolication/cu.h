@@ -1,15 +1,16 @@
 #pragma once
 
 #include "dwarf.h"
+#include "lnp.h"
 #include "objfile.h"
+#include "type.h"
 #include <concepts>
 #include <cstddef>
 #include <cstring>
 #include <optional>
 #include <type_traits>
 #include <utility>
-
-struct File;
+struct CompilationUnitFile;
 
 /**
  * The processed Compilation Unit Header. For the raw byte-to-byte representation see D4/D5
@@ -70,7 +71,7 @@ public:
 
 private:
   CompileUnitHeader *header;
-  u8 *current_ptr;
+  const u8 *current_ptr;
   std::optional<u64> addr_table_base;
   std::optional<u64> str_offsets_base;
   std::optional<u64> rng_list_base;
@@ -79,9 +80,19 @@ private:
 
 /**
  * Processes a single CU after having decoded the abbreviation table for it.
+ * This type can be considered a "thread unit of work". It's safe to send off to a thread somewhere
+ * because all the jobs it do, it does on it's own. At least that's the idea.
+ * Any DWARF references between compilation units, will be resolved _after_ each CUProcessor has finished
+ * at which point, we could, create a new type that shares some of the behaviors of CUProcessors, being an
+ * "independent job/task/thread". The idea is to try to find where/when/if what parts of DWARF is trivially
+ * parallelizable and design our debugger *specifically* with that in mind. We're not there yet though, by a long
+ * shot, as to find these trivially parallell solutions, we must first have a naive one.
  */
 class CUProcessor
 {
+  // todo(simon): Layout of type
+  // todo(simon): Redundancy?
+  // todo(simon): Data ownership?
 public:
   CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table, u32 index,
               Target *target) noexcept;
@@ -93,20 +104,22 @@ public:
   DebugInfoEntry *read_in_dies(bool only_compile_unit = false) noexcept;
   std::unique_ptr<DebugInfoEntry> read_root_die() noexcept;
   const CompileUnitHeader &get_header() const noexcept;
+  LineHeader *get_lnp_header() const noexcept;
+  void process_compile_unit_die(DebugInfoEntry *cu_die) noexcept;
 
 private:
-  bool finished : 1;
+  bool finished;
   std::string_view file_name;
-
   const ObjectFile *obj_file;
-  u32 index;
+  u32 cu_index;
   CompileUnitHeader header;
   AbbreviationInfo::Table abbrev_table;
   std::vector<DebugInfoEntry> cu_dies;
-
+  std::unique_ptr<CompilationUnitFile> cu_file;
   // The Target that is requesting parsing of debug info
   Target *requesting_target;
   std::unique_ptr<LineHeader> line_header;
+  OwnedLineTable line_table;
 };
 
 namespace fmt {
@@ -208,31 +221,18 @@ template <UnsignedWord T> struct D5 : InitialLength<T>
   T abbr_offset;
 };
 #pragma pack(pop)
-
+// clang-format off
 template <typename Header>
 concept CUHeader = requires(Header header) {
-                     {
-                       header.ver
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.addr_size
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.abbr_offset
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.len
-                       } -> std::convertible_to<u64>;
-                     {
-                       header.addr_size
-                       } -> std::convertible_to<u64>;
-                     {
-                       Header::version()
-                     };
-                     {
-                       Header::len_offset()
-                       } -> std::convertible_to<u64>;
-                   };
+  { header.ver } -> std::convertible_to<u64>;
+  { header.addr_size } -> std::convertible_to<u64>;
+  { header.abbr_offset } -> std::convertible_to<u64>;
+  { header.len } -> std::convertible_to<u64>;
+  { header.addr_size } -> std::convertible_to<u64>;
+  { Header::version() };
+  { Header::len_offset() } -> std::convertible_to<u64>;
+};
+// clang-format on
 
 // Assume a few things; once the version and address size
 // has been read, we never read it again. Share that data amongst
@@ -242,7 +242,6 @@ class CompilationUnitBuilder
 public:
   explicit CompilationUnitBuilder(ObjectFile *obj_file) noexcept;
   std::vector<CompileUnitHeader> build_cu_headers() noexcept;
-  void process_cu(CompileUnitHeader &cu_header) noexcept;
 
 private:
   template <CUHeader DwarfSpec>
@@ -277,4 +276,6 @@ private:
   ObjectFile *obj_file;
 };
 
-File process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *file, DebugInfoEntry *die) noexcept;
+CompilationUnitFile process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *file,
+                                             DebugInfoEntry *die) noexcept;
+LineTable parse_linetable(CUProcessor *proc) noexcept;

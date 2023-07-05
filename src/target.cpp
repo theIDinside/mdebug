@@ -1,6 +1,8 @@
 #include "target.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "lib/lockguard.h"
+#include "lib/spinlock.h"
 #include "ptrace.h"
 #include "task.h"
 #include <algorithm>
@@ -17,20 +19,13 @@
 
 Target::Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd) noexcept
     : task_leader(process_space_id), path(path), obj_file(obj), threads{},
-      bkpt_map({.bp_id_counter = 1, .breakpoints = {}})
+      bkpt_map({.bp_id_counter = 1, .breakpoints = {}}), spin_lock{}, m_files{}, m_types{}
 {
   threads[process_space_id] = TaskInfo{process_space_id, nullptr};
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
     procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
   }
-}
-
-Target::Target(Target &&other) noexcept
-    : task_leader(other.task_leader), path(std::move(other.path)), obj_file(other.obj_file),
-      procfs_memfd(std::move(other.procfs_memfd)), threads{std::move(other.threads)},
-      bkpt_map(std::move(other.bkpt_map))
-{
 }
 
 bool
@@ -54,9 +49,9 @@ Target::mem_fd() noexcept
 }
 
 TaskInfo *
-Target::get_task(pid_t pid) noexcept
+Target::get_task(pid_t tid) noexcept
 {
-  return &threads[pid];
+  return &threads[tid];
 }
 
 TaskWaitResult
@@ -226,13 +221,16 @@ Target::emit_breakpoint_event(TPtr<void> bp_addr)
 }
 
 void
-Target::add_file(File file) noexcept
+Target::add_file(CompilationUnitFile &&file) noexcept
 {
-  // use spinlock instead (probably)
+  LockGuard guard{spin_lock};
   fmt::println("Adding file: {}", file);
+  m_files.push_back(file);
 }
 
 void
 Target::add_type(Type type) noexcept
 {
+  LockGuard guard{spin_lock};
+  m_types[type.name] = type;
 }

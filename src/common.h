@@ -25,6 +25,12 @@ using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
 
+struct DataBlock
+{
+  const u8 *const ptr;
+  u64 size;
+};
+
 template <class... T> constexpr bool always_false = false;
 template <size_t... T> constexpr bool always_false_i = false;
 
@@ -202,11 +208,10 @@ template <typename T> struct LEB128
   u8 *advanced;
 };
 
-template <typename T>
-concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
+template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
 
-u8 *
-decode_uleb128(u8 *data, IsBitsType auto &value) noexcept
+const u8 *
+decode_uleb128(const u8 *data, IsBitsType auto &value) noexcept
 {
   u64 res = 0;
   u64 shift = 0;
@@ -226,8 +231,8 @@ decode_uleb128(u8 *data, IsBitsType auto &value) noexcept
   }
 }
 
-u8 *
-decode_leb128(u8 *data, IsBitsType auto &value) noexcept
+const u8 *
+decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
 {
   i64 res = 0;
   u64 shift = 0;
@@ -243,11 +248,131 @@ decode_leb128(u8 *data, IsBitsType auto &value) noexcept
     if ((byte & ~LEB128_MASK) == 0)
       break;
   }
-  if (shift < size && (byte & ~LEB128_MASK) != 0) {
-    res |= -(1 << shift);
+  if (shift < size && (byte & 0x40)) {
+    res |= ((-1) << shift);
   }
   // We don't want C++ to set a "good" enum value
   // if `value` is of type enum. We literally want a bit blast here (and we rely on that being the case)
   std::memcpy(&value, &res, sizeof(decltype(value)));
   return data + index;
 }
+// clang-format off
+template <typename BufferType>
+concept ByteContainer = requires(BufferType t) {
+  { t.size() } -> std::convertible_to<u64>;
+  { t.data() } -> std::convertible_to<u8 *>;
+  { t.offset(10) } -> std::convertible_to<u8 *>;
+};
+// clang-format on
+
+class DwarfBinaryReader
+{
+public:
+  enum class InitLengthRead
+  {
+    UpdateBufferSize,
+    Ignore
+  };
+
+  using enum InitLengthRead;
+
+  DwarfBinaryReader(const u8 *buffer, u64 size) noexcept;
+  DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept;
+
+  template <ByteContainer BC> DwarfBinaryReader(const BC &bc) : buffer(bc.data()), head(bc.data()), size(bc.size())
+  {
+  }
+
+  template <ByteContainer BC>
+  DwarfBinaryReader(const BC &bc, u64 offset)
+      : buffer(bc.offset(offset)), head(bc.offset(offset)), size(bc.size() - offset)
+  {
+  }
+
+  template <typename T>
+    requires(!std::is_pointer_v<T>)
+  constexpr T read_value() noexcept
+  {
+    ASSERT(remaining_size() >= sizeof(T),
+           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
+           remaining_size());
+    using Type = typename std::remove_cv_t<T>;
+    constexpr auto sz = sizeof(Type);
+    Type value = *(Type *)head;
+    head += sz;
+    return value;
+  }
+
+  template <typename T, size_t N>
+  constexpr void
+  read_into_array(std::array<T, N> &out)
+  {
+    for (auto &elem : out) {
+      elem = read_value<T>();
+    }
+  }
+
+  template <typename T>
+  T
+  peek_value() noexcept
+  {
+    return *(T *)head;
+  }
+
+  template <InitLengthRead InitReadAction>
+  u64
+  read_initial_length() noexcept
+  {
+    u32 peeked = peek_value<u32>();
+    if (peeked != 0xff'ff'ff'ff) {
+      if constexpr (InitReadAction == UpdateBufferSize)
+        set_wrapped_buffer_size(peeked + 4);
+      offset_size = 4;
+      return read_value<u32>();
+    } else {
+      head += 4;
+      const auto sz = read_value<u64>();
+      if constexpr (InitReadAction == UpdateBufferSize)
+        set_wrapped_buffer_size(sz + 12);
+      offset_size = 8;
+      return sz;
+    }
+  }
+
+  /** Reads value from buffer according to dwarf spec, which can determine size of addresess, offsets etc. We
+   * always make the results u64, but DWARF might represent the data as 32-bit values etc.*/
+  u64 dwarf_spec_read_value() noexcept;
+  template <IsBitsType T>
+  constexpr auto
+  read_uleb128() noexcept
+  {
+    T value;
+    head = decode_uleb128(head, value);
+    return value;
+  }
+
+  template <IsBitsType T>
+  T
+  read_leb128() noexcept
+  {
+    T value;
+    head = decode_leb128(head, value);
+    return value;
+  }
+
+  std::string_view read_string() noexcept;
+  DataBlock read_block(u64 size) noexcept;
+  const u8 *current_ptr() const noexcept;
+  bool has_more() noexcept;
+  u64 remaining_size() const noexcept;
+
+  friend DwarfBinaryReader sub_reader(const DwarfBinaryReader &reader) noexcept;
+
+private:
+  void set_wrapped_buffer_size(u64 size) noexcept;
+  const u8 *buffer;
+  const u8 *head;
+  const u8 *end;
+  u64 size;
+  u8 offset_size = 4;
+};

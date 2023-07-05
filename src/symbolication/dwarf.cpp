@@ -1,8 +1,10 @@
 #include "dwarf.h"
 #include "cu.h"
 #include "dwarf_defs.h"
+#include <algorithm>
 #include <cstdint>
 #include <utility>
+#include <variant>
 
 constexpr bool
 DEBUG_SANITIZE_DWARF_NAME(u16 _value)
@@ -17,7 +19,7 @@ prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header, Tar
 
   AbbreviationInfo::Table result{};
 
-  auto abbr_ptr = abbrev_sec->m_section_ptr + header.abbrev_offset;
+  const u8 *abbr_ptr = abbrev_sec->m_section_ptr + header.abbrev_offset;
 
   while (true) {
     AbbreviationInfo info;

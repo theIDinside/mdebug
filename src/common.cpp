@@ -172,3 +172,73 @@ ScopedFd::open_read_only(const Path &p) noexcept
 {
   return ScopedFd{::open(p.c_str(), O_RDONLY), p};
 }
+
+u64
+DwarfBinaryReader::dwarf_spec_read_value() noexcept
+{
+  switch (offset_size) {
+  case 4:
+    return read_value<u32>();
+  case 8:
+    return read_value<u64>();
+  default:
+    PANIC(fmt::format("Unsupported offset size {}", offset_size));
+  }
+}
+
+std::string_view
+DwarfBinaryReader::read_string() noexcept
+{
+  std::string_view str{(const char *)(head)};
+  head += str.size() + 1;
+  return str;
+}
+
+DataBlock
+DwarfBinaryReader::read_block(u64 size) noexcept
+{
+  const auto ptr = head;
+  head += size;
+  return {.ptr = ptr, .size = size};
+}
+
+const u8 *
+DwarfBinaryReader::current_ptr() const noexcept
+{
+  return head;
+}
+
+DwarfBinaryReader::DwarfBinaryReader(const u8 *buffer, u64 size) noexcept
+    : buffer(buffer), head(buffer), end(buffer + size), size(size)
+{
+}
+
+DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
+    : buffer(reader.buffer), head(reader.head), size(reader.size)
+{
+}
+
+bool
+DwarfBinaryReader::has_more() noexcept
+{
+  return head < end;
+}
+
+u64
+DwarfBinaryReader::remaining_size() const noexcept
+{
+  return ((buffer + size) - head);
+}
+
+DwarfBinaryReader
+sub_reader(const DwarfBinaryReader &reader) noexcept
+{
+  return DwarfBinaryReader{reader.head, reader.size - (reader.head - reader.buffer)};
+}
+
+void
+DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
+{
+  end = buffer + new_size;
+  size = new_size;
+}

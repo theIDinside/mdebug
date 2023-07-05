@@ -70,7 +70,7 @@ BraceWrapping:
   SplitEmptyRecord: true
   SplitEmptyNamespace: true
 BreakBeforeBinaryOperators: None
-BreakBeforeConceptDeclarations: Always
+BreakBeforeConceptDeclarations: Allowed
 
 BreakBeforeInheritanceComma: false
 BreakInheritanceList: BeforeColon

@@ -3,6 +3,14 @@
 #include <fmt/core.h>
 #include <string_view>
 
+enum class DwarfVersion : std::uint8_t
+{
+  D2 = 2,
+  D3 = 3,
+  D4 = 4,
+  D5 = 5,
+};
+
 // Macro that defines enumerator values N.B - the undef must be at the end of this file or all sorts of hell can
 // break loose
 #define ITEM(Name, Value) Name = Value,
@@ -140,11 +148,67 @@ enum class RangeListEntry : std::uint8_t
 #undef DW_RANGE_LIST_ENTRY
 };
 
+enum class LineNumberProgramOpCode : std::uint8_t
+{
+#define DW_LNP_STANDARD_OPCODES
+#include "../defs/dwarf.defs"
+#undef DW_LNP_STANDARD_OPCODES
+};
+
+enum class LineNumberProgramContent : std::uint16_t
+{
+#define DW_LNP_CONTENT
+#include "../defs/dwarf.defs"
+#undef DW_LNP_CONTENT
+};
+
+enum class LineNumberProgramExtendedOpCode : std::uint8_t
+{
+#define DW_LNP_EXTENDED_OPCODES
+#include "../defs/dwarf.defs"
+#undef DW_LNP_EXTENDED_OPCODES
+};
+
+// END OF ENUM DEFINITIONS
 #undef ITEM
 
+// STRING REPRESENTATION OF DEFINITION
 #define ITEM(Name, Value)                                                                                         \
   case Name:                                                                                                      \
     return #Name;
+
+constexpr std::string_view
+to_str(LineNumberProgramExtendedOpCode opcode)
+{
+#define DW_LNP_EXTENDED_OPCODES
+  using enum LineNumberProgramExtendedOpCode;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_LNP_EXTENDED_OPCODES
+}
+
+constexpr std::string_view
+to_str(LineNumberProgramOpCode opcode)
+{
+#define DW_LNP_STANDARD_OPCODES
+  using enum LineNumberProgramOpCode;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_LNP_STANDARD_OPCODES
+}
+
+constexpr std::string_view
+to_str(LineNumberProgramContent content)
+{
+#define DW_LNP_CONTENT
+  using enum LineNumberProgramContent;
+  switch (content) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_LNP_CONTENT
+}
 
 constexpr std::string_view
 to_str(Attribute attr) noexcept
