@@ -1,6 +1,7 @@
 #include "target.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "lib/lockguard.h"
 #include "ptrace.h"
 #include "task.h"
 #include <algorithm>
@@ -226,13 +227,16 @@ Target::emit_breakpoint_event(TPtr<void> bp_addr)
 }
 
 void
-Target::add_file(File file) noexcept
+Target::add_file(File &&file) noexcept
 {
-  // use spinlock instead (probably)
+  LockGuard guard{spin_lock};
   fmt::println("Adding file: {}", file);
+  m_files.emplace_back(std::move(file));
 }
 
 void
 Target::add_type(Type type) noexcept
 {
+  LockGuard guard{spin_lock};
+  m_types[type.name] = type;
 }

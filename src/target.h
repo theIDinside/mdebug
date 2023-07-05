@@ -1,10 +1,12 @@
 #pragma once
 #include "breakpoint.h"
 #include "common.h"
+#include "lib/spinlock.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
 #include "task.h"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -13,9 +15,6 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <unordered_map>
-
-#include <chrono>
-#include <mutex>
 
 using Tid = pid_t;
 using Pid = pid_t;
@@ -80,6 +79,9 @@ struct Target
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   std::unordered_map<u64, MinSymbol> minimal_symbols;
   BreakpointMap bkpt_map;
+
+  // Aggressive spinlock
+  SpinLock spin_lock;
 
   // Constructors
   Target() = default;
@@ -197,10 +199,10 @@ struct Target
     }
   }
 
-  void add_file(File file) noexcept;
+  void add_file(File &&file) noexcept;
   void add_type(Type type) noexcept;
 
 private:
   std::vector<File> m_files;
-  std::vector<Type> m_types;
+  std::unordered_map<std::string_view, Type> m_types;
 };
