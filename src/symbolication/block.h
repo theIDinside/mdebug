@@ -4,11 +4,11 @@
 /**
  * Description of a range of executable code, inside of a compilation unit.
  */
-struct Block
+struct AddressRange
 {
   TPtr<void> low;
   TPtr<void> high;
-  bool contains(Block &block) const noexcept;
+  bool contains(AddressRange &range) const noexcept;
   bool contains(TPtr<void> ptr) const noexcept;
   bool is_valid() const noexcept;
 };
@@ -16,9 +16,9 @@ struct Block
 class AddrRanges
 {
   u64 m_block_count;
-  Block *m_blocks;
+  AddressRange *m_blocks;
 
 public:
-  AddrRanges(Block *blocks, u64 block_count) noexcept;
-  std::span<Block> blocks() const noexcept;
+  AddrRanges(AddressRange *blocks, u64 block_count) noexcept;
+  std::span<AddressRange> blocks() const noexcept;
 };
