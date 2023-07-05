@@ -218,7 +218,7 @@ DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
 {
 }
 
-constexpr bool
+bool
 DwarfBinaryReader::has_more() noexcept
 {
   return head < (buffer + size);

@@ -363,7 +363,7 @@ public:
   std::string_view read_string() noexcept;
   DataBlock read_block(u64 size) noexcept;
   const u8 *current_ptr() const noexcept;
-  constexpr bool has_more() noexcept;
+  bool has_more() noexcept;
   u64 remaining_size() const noexcept;
 
   friend DwarfBinaryReader sub_reader(const DwarfBinaryReader &reader) noexcept;
