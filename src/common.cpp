@@ -209,7 +209,7 @@ DwarfBinaryReader::current_ptr() const noexcept
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const u8 *buffer, u64 size) noexcept
-    : buffer(buffer), head(buffer), size(size)
+    : buffer(buffer), head(buffer), end(buffer + size), size(size)
 {
 }
 
@@ -221,13 +221,13 @@ DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
 bool
 DwarfBinaryReader::has_more() noexcept
 {
-  return head < (buffer + size);
+  return head < end;
 }
 
 u64
 DwarfBinaryReader::remaining_size() const noexcept
 {
-  return (buffer + size) - head;
+  return ((buffer + size) - head);
 }
 
 DwarfBinaryReader
@@ -239,5 +239,6 @@ sub_reader(const DwarfBinaryReader &reader) noexcept
 void
 DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
 {
+  end = buffer + new_size;
   size = new_size;
 }

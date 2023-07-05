@@ -372,6 +372,7 @@ private:
   void set_wrapped_buffer_size(u64 size) noexcept;
   const u8 *buffer;
   const u8 *head;
+  const u8 *end;
   u64 size;
   u8 offset_size = 4;
 };
