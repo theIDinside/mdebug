@@ -34,7 +34,11 @@ set(MIDAS_SOURCES
   src/symbolication/block.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/lib/lockguard.h
 )
+
+set(MIDAS_SPINLOCK src/lib/spinlock.cpp src/lib/spinlock.h)
+add_library(mdb_spinlock STATIC ${MIDAS_SPINLOCK})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__ -march=native -mavx -mavx2")
@@ -70,7 +74,7 @@ add_subdirectory(./dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
-target_link_libraries(mdb fmt::fmt)
+target_link_libraries(mdb fmt::fmt mdb_spinlock)
 target_include_directories(mdb PUBLIC ./dependencies)
 
 # To be able to print backtrace with symbols
