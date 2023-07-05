@@ -39,6 +39,9 @@ Tracer::add_target(pid_t task_leader, const Path &path) noexcept
   ASSERT(obj_file != nullptr, "Object file can't be nullptr");
 
   auto elf = Elf::parse_objfile(obj_file);
+  targets.emplace(task_leader, Target{task_leader, path, obj_file});
+  auto &target = get_target(task_leader);
+
   CompilationUnitBuilder cu_builder{obj_file};
   std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
@@ -51,16 +54,12 @@ Tracer::add_target(pid_t task_leader, const Path &path) noexcept
   for (auto &proc : cu_processors) {
     auto compile_unit_die = proc->read_root_die();
     if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-      const auto file = process_compile_unit_die(proc->get_header(), obj_file, compile_unit_die.get());
-      files.push_back(file);
+      proc->process_compile_unit_die(compile_unit_die.get());
     } else {
       PANIC("Unexpected non-compile unit DIE parsed");
     }
     compile_unit_dies.push_back(std::move(compile_unit_die));
   }
-
-  targets.emplace(task_leader, Target{task_leader, path, obj_file});
-  auto &target = get_target(task_leader);
   target.elf = elf;
   target.minimal_symbols = target.elf->parse_min_symbols();
   current_target = &targets[task_leader];
