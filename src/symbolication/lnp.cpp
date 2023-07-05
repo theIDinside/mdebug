@@ -162,13 +162,14 @@ read_lineheader_v5(const u8 *ptr) noexcept
     files.push_back(entry);
   }
 
-  return std::unique_ptr<LineHeader>(new LineHeader{.length = init_len,
+  return std::unique_ptr<LineHeader>(new LineHeader{.initial_length = init_len,
                                                     .data = data_ptr,
+                                                    .data_length = reader.remaining_size(),
                                                     .version = (DwarfVersion)version,
                                                     .addr_size = addr_size,
                                                     .segment_selector_size = segment_selector_size,
-                                                    .min_ins_length4 = min_ins_len,
-                                                    .max_ops_per_ins = max_ops_per_ins,
+                                                    .min_len = min_ins_len,
+                                                    .max_ops = max_ops_per_ins,
                                                     .default_is_stmt = default_is_stmt,
                                                     .line_base = line_base,
                                                     .line_range = line_range,
@@ -182,10 +183,13 @@ std::unique_ptr<LineHeader>
 read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept
 {
   DwarfBinaryReader reader{ptr, 4096};
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=126
   const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
+  const auto lnp_for_cu_end = reader.current_ptr() + init_len;
   const auto version = reader.read_value<u16>();
   const u64 header_length = reader.dwarf_spec_read_value();
   const u8 *data_ptr = reader.current_ptr() + header_length;
+  const auto data_len = static_cast<u64>(lnp_for_cu_end - data_ptr);
   const u8 min_ins_len = reader.read_value<u8>();
   const u8 max_ops_per_ins = reader.read_value<u8>();
   const bool default_is_stmt = reader.read_value<u8>();
@@ -213,13 +217,14 @@ read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept
     files.push_back(entry);
   }
 
-  return std::unique_ptr<LineHeader>(new LineHeader{.length = init_len,
+  return std::unique_ptr<LineHeader>(new LineHeader{.initial_length = init_len,
                                                     .data = data_ptr,
+                                                    .data_length = data_len,
                                                     .version = (DwarfVersion)version,
                                                     .addr_size = addr_size,
                                                     .segment_selector_size = 0,
-                                                    .min_ins_length4 = min_ins_len,
-                                                    .max_ops_per_ins = max_ops_per_ins,
+                                                    .min_len = min_ins_len,
+                                                    .max_ops = max_ops_per_ins,
                                                     .default_is_stmt = default_is_stmt,
                                                     .line_base = line_base,
                                                     .line_range = line_range,

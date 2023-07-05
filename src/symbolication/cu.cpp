@@ -1,8 +1,10 @@
 #include "cu.h"
+#include "../target.h"
 #include "block.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"
 #include "elf.h"
+#include "lnp.h"
 #include "objfile.h"
 #include "type.h"
 #include <bit>
@@ -35,8 +37,9 @@ CompilationUnitBuilder::build_cu_headers() noexcept
 
 CUProcessor::CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
                          u32 index, Target *target) noexcept
-    : finished(false), file_name{}, obj_file(obj_file), index(index), header(header),
-      abbrev_table(std::move(table)), cu_dies(), requesting_target(target), line_header(nullptr)
+    : finished{false}, file_name{}, obj_file{obj_file}, cu_index{index}, header{header},
+      abbrev_table{std::move(table)}, cu_dies{}, cu_file{nullptr}, requesting_target{target}, line_header{nullptr},
+      line_table{nullptr}
 {
 }
 
@@ -266,6 +269,51 @@ CUProcessor::get_header() const noexcept
   return header;
 }
 
+LineHeader *
+CUProcessor::get_lnp_header() const noexcept
+{
+  ASSERT(line_header.get() != nullptr, "Line Number Program Header has not been read in!");
+  return line_header.get();
+}
+
+void
+CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
+{
+  CompilationUnitFile f{};
+  const auto elf = obj_file->parsed_elf;
+  if (header.addr_size == 4) {
+    PANIC("32-bit arch not yet supported.");
+  } else {
+    for (const auto &att : cu_die->attributes) {
+      if (att.name == Attribute::DW_AT_name) {
+        f.name = att.string();
+      } else if (att.name == Attribute::DW_AT_ranges) {
+        // todo(simon): re-add/re-design for opportunity of aligned loads/stores
+        const auto value = att.address();
+        const auto ptr = elf->debug_ranges->begin() + value;
+        u64 *start = (u64 *)ptr;
+        f.address_ranges.push_back(AddressRange{});
+        _mm_storeu_si128((__m128i *)&f.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
+        for (; f.address_ranges.back().is_valid(); start += 2) {
+          f.address_ranges.push_back(AddressRange{});
+          _mm_storeu_si128((__m128i *)&f.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
+        }
+        f.address_ranges.pop_back();
+      } else if (att.name == Attribute::DW_AT_stmt_list) {
+        const auto offset = att.address();
+        if (header.version == DwarfVersion::D4) {
+          this->line_header =
+              read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
+          f.ltes = parse_linetable(this);
+        } else {
+          PANIC("V5 line number program not supported yet");
+        }
+      }
+    }
+  }
+  requesting_target->add_file(std::move(f));
+}
+
 CompileUnitReader::CompileUnitReader(CompileUnitHeader *header, const ObjectFile *obj_file) noexcept
     : obj_file(obj_file), header(header), current_ptr(header->data), addr_table_base()
 {
@@ -434,10 +482,10 @@ CompileUnitReader::read_loclist_index(u64 range_index) const noexcept
   }
 }
 
-File
+CompilationUnitFile
 process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *obj_file, DebugInfoEntry *die) noexcept
 {
-  File file{};
+  CompilationUnitFile file{};
   const auto elf = obj_file->parsed_elf;
   if (header.addr_size == 4) {
     PANIC("32-bit arch not yet supported.");
@@ -450,19 +498,18 @@ process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *obj_file, 
         const auto value = att.address();
         const auto ptr = elf->debug_ranges->begin() + value;
         u64 *start = (u64 *)ptr;
-        file.blocks.push_back(Block{});
-        _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
-        for (; file.blocks.back().is_valid(); start += 2) {
-          file.blocks.push_back(Block{});
-          _mm_storeu_si128((__m128i *)&file.blocks.back(), _mm_loadu_si128((__m128i *)start));
+        file.address_ranges.push_back(AddressRange{});
+        _mm_storeu_si128((__m128i *)&file.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
+        for (; file.address_ranges.back().is_valid(); start += 2) {
+          file.address_ranges.push_back(AddressRange{});
+          _mm_storeu_si128((__m128i *)&file.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
         }
-        file.blocks.pop_back();
+        file.address_ranges.pop_back();
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
         if (header.version == DwarfVersion::D4) {
           auto lnp_header =
               read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
-
         } else {
           PANIC("V5 line number program not supported yet");
         }
@@ -470,4 +517,292 @@ process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *obj_file, 
     }
   }
   return file;
+}
+
+class LNPStateMachine
+{
+public:
+  LNPStateMachine(LineHeader *header, LineTable *table)
+      : header{header}, table{table}, address(0), line(1), column(0), op_index(0), file(1),
+        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
+        epilogue_begin(false), isa(0), discriminator(0)
+  {
+  }
+
+  constexpr bool
+  sequence_ended() const noexcept
+  {
+    return end_sequence;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  stamp_entry() noexcept
+  {
+    table->push_back(LineTableEntry{.pc = address,
+                                    .line = line,
+                                    .column = column,
+                                    .file = static_cast<u16>(file),
+                                    .is_stmt = is_stmt,
+                                    .prologue_end = prologue_end,
+                                    .basic_block = basic_block});
+    discriminator = 0;
+    basic_block = false;
+    prologue_end = false;
+    epilogue_begin = false;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  advance_pc(u64 adjust_value) noexcept
+  {
+    const auto address_adjust = ((op_index + adjust_value) / header->max_ops) * header->min_len;
+    address += address_adjust;
+    op_index = ((op_index + adjust_value) % header->max_ops);
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  advance_line(i64 value) noexcept
+  {
+    line += value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_file(u64 value) noexcept
+  {
+    file = value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_column(u64 value) noexcept
+  {
+    column = value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  negate_stmt() noexcept
+  {
+    is_stmt = !is_stmt;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_basic_block() noexcept
+  {
+    basic_block = true;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  const_add_pc() noexcept
+  {
+    special_opindex_advance(255);
+  }
+
+  // DWARF V4 Spec page 120:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  advance_fixed_pc(u64 advance) noexcept
+  {
+    address += advance;
+    op_index = 0;
+  }
+
+  // DWARF V4 Spec page 120:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  set_prologue_end() noexcept
+  {
+    prologue_end = true;
+  }
+
+  // DWARF V4 Spec page 121:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=135
+  constexpr void
+  set_epilogue_begin() noexcept
+  {
+    epilogue_begin = true;
+  }
+
+  constexpr void
+  set_isa(u64 isa) noexcept
+  {
+    this->isa = isa;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=130
+  constexpr void
+  execute_special_opcode(u8 opcode) noexcept
+  {
+    special_opindex_advance(opcode);
+    const auto line_inc = header->line_base + ((opcode - header->opcode_base) % header->line_range);
+    line += line_inc;
+    stamp_entry();
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_sequence_ended() noexcept
+  {
+    end_sequence = true;
+    stamp_entry();
+  }
+
+  constexpr void
+  set_address(u64 addr) noexcept
+  {
+    address = addr;
+    op_index = 0;
+  }
+
+  constexpr void
+  define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
+  {
+    header->file_names.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
+  }
+
+  constexpr void
+  set_discriminator(u64 value) noexcept
+  {
+    discriminator = value;
+  }
+
+private:
+  constexpr void
+  special_opindex_advance(u8 opcode)
+  {
+    const auto advance = op_advance(opcode);
+    const auto new_address = address + header->min_len * ((op_index + advance) / header->max_ops);
+    const auto new_op_index = (op_index + advance) % header->max_ops;
+    address = new_address;
+    op_index = new_op_index;
+  }
+
+  constexpr u64
+  op_advance(u8 opcode) const noexcept
+  {
+    const auto adjusted_op = opcode - header->opcode_base;
+    const auto advance = adjusted_op / header->line_range;
+    return advance;
+  }
+  LineHeader *header;
+  LineTable *table;
+  // State machine register
+  u64 address;
+  u32 line;
+  u32 column;
+  u16 op_index;
+  u32 file;
+  bool is_stmt;
+  bool basic_block;
+  bool end_sequence;
+  bool prologue_end;
+  bool epilogue_begin;
+  u8 isa;
+  u32 discriminator;
+};
+
+LineTable
+parse_linetable(CUProcessor *proc) noexcept
+{
+  using OpCode = LineNumberProgramOpCode;
+
+  auto hdr = proc->get_lnp_header();
+  DwarfBinaryReader reader{hdr->data, hdr->data_length};
+  LineTable line_table{};
+  while (reader.has_more()) {
+    LNPStateMachine state{hdr, &line_table};
+    while (reader.has_more() && !state.sequence_ended()) {
+      const auto opcode = reader.read_value<OpCode>();
+      if (const auto spec_op = std::to_underlying(opcode); spec_op >= hdr->opcode_base) {
+        state.execute_special_opcode(spec_op);
+        continue;
+      }
+      if (std::to_underlying(opcode) == 0) {
+        // Extended Op Codes
+        const auto len = reader.read_uleb128<u64>();
+        const auto end = reader.current_ptr() + len;
+        auto ext_op = reader.read_value<LineNumberProgramExtendedOpCode>();
+        switch (ext_op) {
+        case LineNumberProgramExtendedOpCode::DW_LNE_end_sequence:
+          state.set_sequence_ended();
+          break;
+        case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
+          if (proc->get_header().addr_size == 4) {
+            const auto addr = reader.read_value<u32>();
+            state.set_address(addr);
+          } else {
+            const auto addr = reader.read_value<u64>();
+            state.set_address(addr);
+          }
+          break;
+        case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
+          if (proc->get_header().version == DwarfVersion::D4) {
+            // https://dwarfstd.org/doc/DWARF4.pdf#page=136
+            const auto filename = reader.read_string();
+            const auto dir_index = reader.read_uleb128<u64>();
+            const auto last_modified = reader.read_uleb128<u64>();
+            const auto file_size = reader.read_uleb128<u64>();
+            state.define_file(filename, dir_index, last_modified, file_size);
+          } else {
+            PANIC(fmt::format("DWARF V5 line tables not yet implemented"));
+          }
+          break;
+        }
+        case LineNumberProgramExtendedOpCode::DW_LNE_set_discriminator: {
+          state.set_discriminator(reader.read_uleb128<u64>());
+          break;
+        }
+        default:
+          // Vendor extensions
+          while (reader.current_ptr() < end)
+            reader.read_value<u8>();
+          break;
+        }
+      }
+      switch (opcode) {
+      case OpCode::DW_LNS_copy:
+        state.stamp_entry();
+        break;
+      case OpCode::DW_LNS_advance_pc:
+        state.advance_pc(reader.read_uleb128<u64>());
+        break;
+      case OpCode::DW_LNS_advance_line:
+        state.advance_line(reader.read_leb128<i64>());
+        break;
+      case OpCode::DW_LNS_set_file:
+        state.set_file(reader.read_uleb128<u64>());
+        break;
+      case OpCode::DW_LNS_set_column:
+        state.set_column(reader.read_uleb128<u64>());
+        break;
+      case OpCode::DW_LNS_negate_stmt:
+        state.negate_stmt();
+        break;
+      case OpCode::DW_LNS_set_basic_block:
+        state.set_basic_block();
+        break;
+      case OpCode::DW_LNS_const_add_pc:
+        state.const_add_pc();
+        break;
+      case OpCode::DW_LNS_fixed_advance_pc:
+        state.advance_fixed_pc(reader.read_value<u16>());
+        break;
+      case OpCode::DW_LNS_set_prologue_end:
+        state.set_prologue_end();
+        break;
+      case OpCode::DW_LNS_set_epilogue_begin:
+        state.set_epilogue_begin();
+        break;
+      case OpCode::DW_LNS_set_isa:
+        state.set_isa(reader.read_value<u64>());
+        break;
+      }
+    }
+  }
+  return line_table;
 }

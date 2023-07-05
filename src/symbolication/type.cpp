@@ -2,8 +2,15 @@
 #include <filesystem>
 
 Path
-File::dir() const noexcept
+CompilationUnitFile::dir() const noexcept
 {
   Path p{name};
   return p.root_directory();
+}
+
+Path
+CompilationUnitFile::source_filename() const noexcept
+{
+  Path p{name};
+  return p.filename();
 }

@@ -11,6 +11,8 @@ struct Target;
 using Pid = pid_t;
 using Tid = pid_t;
 
+struct LWP;
+
 enum class AddObjectResult : u8
 {
   OK = 0,
@@ -26,7 +28,7 @@ public:
   void add_target(pid_t task_leader, const Path &path) noexcept;
   AddObjectResult add_object_file(const Path &path) noexcept;
   void new_task(Pid pid, Tid tid) noexcept;
-  void thread_exited(Tid tid, int status) noexcept;
+  void thread_exited(LWP lwp, int status) noexcept;
   Target &get_target(pid_t pid) noexcept;
   Target *get_current() noexcept;
 
@@ -35,7 +37,7 @@ public:
   void init_io_thread() noexcept;
 
 private:
-  std::unordered_map<pid_t, Target> targets;
+  std::vector<std::unique_ptr<Target>> targets;
   Target *current_target = nullptr;
   std::vector<ObjectFile *> object_files;
 };
