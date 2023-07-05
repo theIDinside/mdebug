@@ -98,10 +98,19 @@ public:
    * some concrete type.
    */
   template <typename U>
-  TraceePointer<U>
+  constexpr TraceePointer<U>
   as() const noexcept
   {
     return TraceePointer<U>{get()};
+  }
+
+  // Utility that could get called a lot when we want to do arbitrary
+  // things with a TraceePointer<T> that doesn't involve the type T it's pointing to, like for instance comparing
+  // if a ptr lands inside an address range. Use `as_void` for this (or the templated member function)
+  constexpr TraceePointer<void>
+  as_void() const noexcept
+  {
+    return as<void>();
   }
 
   template <typename U>
