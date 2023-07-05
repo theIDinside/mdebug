@@ -78,9 +78,7 @@ struct Target
   friend class Tracer;
   // Members
   pid_t task_leader;
-  Path path;
-  ObjectFile *obj_file;
-  Elf *elf;
+  std::vector<ObjectFile *> object_files;
   ScopedFd procfs_memfd;
   std::unordered_map<pid_t, TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
@@ -91,7 +89,7 @@ struct Target
   SpinLock spin_lock;
 
   // Constructors
-  Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd = true) noexcept;
+  Target(pid_t process_space_id, bool open_mem_fd = true) noexcept;
   Target(const Target &) = delete;
   Target &operator=(const Target &) = delete;
 
@@ -115,6 +113,9 @@ struct Target
   void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
   void emit_breakpoint_event(TPtr<void> bp_addr);
+
+  // Debug Symbols Related Logic
+  void register_object_file(ObjectFile *obj) noexcept;
 
   template <typename T>
   std::optional<T>

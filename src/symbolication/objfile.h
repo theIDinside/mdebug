@@ -10,6 +10,11 @@ struct ElfSection;
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
  * to outlive them all, so it's safe to take raw pointers into `loaded_binary`.
  */
+
+// TODO(simon): Make `ObjectFile` the owner of Minimal Symbols and parsed debug information, for instance the
+// std::map in target that contains minimal symbols etc, so that we can effectively track life time and if for
+// instance a shared library gets unloaded, we can kill the symbols along with it.
+
 struct ObjectFile
 {
   Path path;

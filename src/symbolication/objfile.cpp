@@ -6,7 +6,11 @@ ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
 
-ObjectFile::~ObjectFile() noexcept { munmap((void *)loaded_binary, size); }
+ObjectFile::~ObjectFile() noexcept
+{
+  delete parsed_elf;
+  munmap((void *)loaded_binary, size);
+}
 
 u64
 ObjectFile::get_offset(u8 *ptr) const noexcept

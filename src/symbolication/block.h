@@ -12,13 +12,3 @@ struct AddressRange
   bool contains(TPtr<void> ptr) const noexcept;
   bool is_valid() const noexcept;
 };
-
-class AddrRanges
-{
-  u64 m_block_count;
-  AddressRange *m_blocks;
-
-public:
-  AddrRanges(AddressRange *blocks, u64 block_count) noexcept;
-  std::span<AddressRange> blocks() const noexcept;
-};

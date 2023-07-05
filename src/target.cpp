@@ -4,6 +4,7 @@
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
+#include "symbolication/objfile.h"
 #include "task.h"
 #include <algorithm>
 #include <cstdint>
@@ -16,9 +17,8 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-Target::Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem_fd) noexcept
-    : task_leader(process_space_id), path(path), obj_file(obj), threads{},
+Target::Target(pid_t process_space_id, bool open_mem_fd) noexcept
+    : task_leader(process_space_id), object_files{}, threads{},
       bkpt_map({.bp_id_counter = 1, .breakpoints = {}}), spin_lock{}, m_files{}, m_types{}
 {
   threads[process_space_id] = TaskInfo{process_space_id, nullptr};
@@ -31,7 +31,7 @@ Target::Target(pid_t process_space_id, Path path, ObjectFile *obj, bool open_mem
 bool
 Target::initialized() const noexcept
 {
-  return !(obj_file == nullptr);
+  return !(object_files.empty());
 }
 
 bool
@@ -210,6 +210,25 @@ BreakpointMap::get(TraceePointer<void> addr) noexcept
     return nullptr;
   else
     return &breakpoints[addr.get()];
+}
+
+// Debug Symbols Related Logic
+void
+Target::register_object_file(ObjectFile *obj) noexcept
+{
+  object_files.push_back(obj);
+  if (minimal_symbols.empty()) {
+    minimal_symbols = object_files.back()->parsed_elf->parse_min_symbols();
+  } else {
+    auto minsyms = object_files.back()->parsed_elf->parse_min_symbols();
+    for (const auto &[hash, sym] : minsyms) {
+      ASSERT(!minimal_symbols.contains(hash),
+             "Hash collision with previously parsed Minimal Symbols from object file. \nCollision: [Hash: {}] "
+             "[Address: {}], [Name: {}]",
+             hash, sym.address, sym.name);
+      minimal_symbols[hash] = sym;
+    }
+  }
 }
 
 void

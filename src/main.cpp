@@ -67,7 +67,7 @@ main(int argc, const char **argv)
 
     Tracer tracer{};
     tracer.init_io_thread();
-    Tracer::Instance->add_target(pid, p);
+    Tracer::Instance->add_target_set_current(pid, p);
     auto target = tracer.get_current();
     auto current_task = target->get_task(pid);
 

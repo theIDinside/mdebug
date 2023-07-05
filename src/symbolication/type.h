@@ -4,6 +4,7 @@
 #include "lnp.h"
 #include <optional>
 
+using AddrRanges = std::vector<AddressRange>;
 struct Field
 {
   const char *name;
@@ -40,14 +41,34 @@ struct IncludedFile
  * debugger". As such, we want simplicity for the every day case and intuitive behaviors. First design therefore
  * will revolve around compilation units as being a sort of "master identifier"
  */
-struct CompilationUnitFile
+class CompilationUnitFile
 {
+public:
+  explicit CompilationUnitFile(std::string_view name, AddrRanges &&addr_ranges, LineTable &&lt_ents) noexcept;
+
   Path dir() const noexcept;
   Path source_filename() const noexcept;
 
-  std::string_view name;
-  std::vector<AddressRange> address_ranges;
-  LineTable ltes;
+  std::string_view name() const noexcept;
+  TPtr<void> low_pc() const noexcept;
+  TPtr<void> high_pc() const noexcept;
+  const LineTable &line_table() const noexcept;
+  const AddrRanges &address_ranges() const noexcept;
+
+  template <typename T>
+  bool
+  may_contain(TPtr<T> ptr) const noexcept
+  {
+    return pc_boundaries.contains(ptr.as_void());
+  }
+
+private:
+  // the lowest / highest PC in `address_ranges`
+  std::string_view m_name;
+  std::vector<AddressRange> m_addr_ranges;
+  LineTable m_ltes;
+  // The lowest (inclusive) and highest (exclusive) pc in this CU's range (`m_addr_ranges`)
+  AddressRange pc_boundaries;
 };
 
 namespace fmt {
@@ -64,8 +85,8 @@ template <> struct formatter<CompilationUnitFile>
   auto
   format(CompilationUnitFile const &f, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(), "{{ path: {}, low: {}, high: {}, blocks: {} }}", f.name,
-                          f.address_ranges.front().low, f.address_ranges.back().high, f.address_ranges.size());
+    return fmt::format_to(ctx.out(), "{{ path: {}, low: {}, high: {}, blocks: {} }}", f.name(), f.low_pc(),
+                          f.high_pc(), f.address_ranges().size());
   }
 };
 

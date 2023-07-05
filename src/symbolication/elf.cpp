@@ -96,7 +96,7 @@ Elf::get_section_or_panic(std::string_view name) const noexcept
   return sec;
 }
 
-Elf *
+void
 Elf::parse_objfile(ObjectFile *object_file) noexcept
 {
   const auto header = object_file->get_at_offset<Elf64Header>(0);
@@ -116,7 +116,8 @@ Elf::parse_objfile(ObjectFile *object_file) noexcept
         object_file->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
     data.sections[i].file_offset = sec_hdr->sh_offset;
   }
-  return new Elf{header, data, object_file};
+  // ObjectFile is the owner of `Elf`
+  new Elf{header, data, object_file};
 }
 
 std::unordered_map<u64, MinSymbol>

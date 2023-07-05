@@ -17,7 +17,7 @@ enum class AddObjectResult : u8
 {
   OK = 0,
   MMAP_FAILED,
-  FILE_NOT_EXIST,
+  FILE_NOT_EXIST
 };
 
 class Tracer
@@ -25,8 +25,9 @@ class Tracer
 public:
   static Tracer *Instance;
   Tracer() noexcept;
-  void add_target(pid_t task_leader, const Path &path) noexcept;
-  AddObjectResult add_object_file(const Path &path) noexcept;
+  void add_target_set_current(pid_t task_leader, const Path &path) noexcept;
+  void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
+  AddObjectResult mmap_objectfile(const Path &path) noexcept;
   void new_task(Pid pid, Tid tid) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
   Target &get_target(pid_t pid) noexcept;

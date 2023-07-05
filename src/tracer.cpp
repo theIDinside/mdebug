@@ -1,5 +1,6 @@
 #include "tracer.h"
 #include "common.h"
+#include "lib/lockguard.h"
 #include "ptrace.h"
 #include "symbolication/cu.h"
 #include "symbolication/dwarf.h"
@@ -13,6 +14,7 @@
 #include <ranges>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <thread>
 
 Tracer *Tracer::Instance = nullptr;
 
@@ -25,55 +27,56 @@ Tracer::Tracer() noexcept
 }
 
 void
-Tracer::add_target(pid_t task_leader, const Path &path) noexcept
+Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
-  ObjectFile *obj_file = nullptr;
-  switch (add_object_file(path)) {
-  case AddObjectResult::OK:
-    obj_file = object_files.back();
-    break;
-  case AddObjectResult::MMAP_FAILED:
-    PANIC(fmt::format("Failed to load binary '{}' into memory - debugging will be impossible.", path.c_str()));
-    break;
-  case AddObjectResult::FILE_NOT_EXIST:
-    PANIC(fmt::format("File {} does not exist", path.c_str()));
-    break;
-  }
-  ASSERT(obj_file != nullptr, "Object file can't be nullptr");
-
-  auto elf = Elf::parse_objfile(obj_file);
-  targets.push_back(std::make_unique<Target>(task_leader, path, obj_file));
-  auto &target = get_target(task_leader);
-  current_target = targets.back().get();
-
+  ASSERT(mmap_objectfile(objfile_path) == AddObjectResult::OK, "Failed to load object file");
+  const auto obj_file = object_files.back();
+  Elf::parse_objfile(obj_file);
+  auto &target = get_target(target_pid);
+  target.register_object_file(obj_file);
   CompilationUnitBuilder cu_builder{obj_file};
   std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
-  for (const auto &cu_hdr : total) {
-    cu_processors.emplace_back(prepare_cu_processing(obj_file, cu_hdr, get_current()));
+  std::vector<std::thread> jobs{};
+  SpinLock stdio_lock{};
+
+  for (auto &cu_hdr : total) {
+    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = get_current(), &stdio_lock]() {
+      auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
+      auto compile_unit_die = proc->read_root_die();
+      if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
+        proc->process_compile_unit_die(compile_unit_die.get());
+      } else {
+        PANIC("Unexpected non-compile unit DIE parsed");
+      }
+      LockGuard guard{stdio_lock};
+      fmt::println("Thread finished processing CU {}", cu_hdr.cu_index);
+    }});
   }
 
-  std::vector<std::unique_ptr<DebugInfoEntry>> compile_unit_dies{};
-  for (auto &proc : cu_processors) {
-    auto compile_unit_die = proc->read_root_die();
-    if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-      proc->process_compile_unit_die(compile_unit_die.get());
-    } else {
-      PANIC("Unexpected non-compile unit DIE parsed");
-    }
-    compile_unit_dies.push_back(std::move(compile_unit_die));
+  for (auto &&j : jobs) {
+    j.join();
   }
-  target.elf = elf;
-  target.minimal_symbols = target.elf->parse_min_symbols();
+}
 
+void
+Tracer::add_target_set_current(pid_t task_leader, const Path &path) noexcept
+{
+  targets.push_back(std::make_unique<Target>(task_leader, true));
+  current_target = targets.back().get();
+  load_and_process_objfile(task_leader, path);
   new_target_set_options(task_leader);
 }
 
 AddObjectResult
-Tracer::add_object_file(const Path &path) noexcept
+Tracer::mmap_objectfile(const Path &path) noexcept
 {
   if (!fs::exists(path))
     return AddObjectResult::FILE_NOT_EXIST;
+
+  ASSERT(std::ranges::find_if(object_files, [&](ObjectFile *obj) { return obj->path == path; }) ==
+             std::end(object_files),
+         "Object file from {} has already been loaded", path.c_str());
 
   auto fd = ScopedFd::open_read_only(path);
   const auto addr = (u8 *)mmap(nullptr, fd.file_size(), PROT_READ, MAP_PRIVATE, fd.get(), 0);

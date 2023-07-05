@@ -10,7 +10,7 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
-struct CompilationUnitFile;
+class CompilationUnitFile;
 
 /**
  * The processed Compilation Unit Header. For the raw byte-to-byte representation see D4/D5

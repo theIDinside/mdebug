@@ -279,38 +279,42 @@ CUProcessor::get_lnp_header() const noexcept
 void
 CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 {
-  CompilationUnitFile f{};
+
+  LineTable ltes;
+  std::vector<AddressRange> address_ranges;
+  std::string_view name;
   const auto elf = obj_file->parsed_elf;
   if (header.addr_size == 4) {
     PANIC("32-bit arch not yet supported.");
   } else {
     for (const auto &att : cu_die->attributes) {
       if (att.name == Attribute::DW_AT_name) {
-        f.name = att.string();
+        name = att.string();
       } else if (att.name == Attribute::DW_AT_ranges) {
         // todo(simon): re-add/re-design for opportunity of aligned loads/stores
         const auto value = att.address();
         const auto ptr = elf->debug_ranges->begin() + value;
         u64 *start = (u64 *)ptr;
-        f.address_ranges.push_back(AddressRange{});
-        _mm_storeu_si128((__m128i *)&f.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
-        for (; f.address_ranges.back().is_valid(); start += 2) {
-          f.address_ranges.push_back(AddressRange{});
-          _mm_storeu_si128((__m128i *)&f.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
+        address_ranges.push_back(AddressRange{});
+        _mm_storeu_si128((__m128i *)&address_ranges.back(), _mm_loadu_si128((__m128i *)start));
+        for (; address_ranges.back().is_valid(); start += 2) {
+          address_ranges.push_back(AddressRange{});
+          _mm_storeu_si128((__m128i *)&address_ranges.back(), _mm_loadu_si128((__m128i *)start));
         }
-        f.address_ranges.pop_back();
+        address_ranges.pop_back();
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
         if (header.version == DwarfVersion::D4) {
           this->line_header =
               read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
-          f.ltes = parse_linetable(this);
+          ltes = parse_linetable(this);
         } else {
           PANIC("V5 line number program not supported yet");
         }
       }
     }
   }
+  CompilationUnitFile f{name, std::move(address_ranges), std::move(ltes)};
   requesting_target->add_file(std::move(f));
 }
 
@@ -480,43 +484,6 @@ CompileUnitReader::read_loclist_index(u64 range_index) const noexcept
     const auto value = *(u64 *)ptr;
     return value;
   }
-}
-
-CompilationUnitFile
-process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *obj_file, DebugInfoEntry *die) noexcept
-{
-  CompilationUnitFile file{};
-  const auto elf = obj_file->parsed_elf;
-  if (header.addr_size == 4) {
-    PANIC("32-bit arch not yet supported.");
-  } else {
-    for (const auto &att : die->attributes) {
-      if (att.name == Attribute::DW_AT_name) {
-        file.name = att.string();
-      } else if (att.name == Attribute::DW_AT_ranges) {
-        // todo(simon): re-add/re-design for opportunity of aligned loads/stores
-        const auto value = att.address();
-        const auto ptr = elf->debug_ranges->begin() + value;
-        u64 *start = (u64 *)ptr;
-        file.address_ranges.push_back(AddressRange{});
-        _mm_storeu_si128((__m128i *)&file.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
-        for (; file.address_ranges.back().is_valid(); start += 2) {
-          file.address_ranges.push_back(AddressRange{});
-          _mm_storeu_si128((__m128i *)&file.address_ranges.back(), _mm_loadu_si128((__m128i *)start));
-        }
-        file.address_ranges.pop_back();
-      } else if (att.name == Attribute::DW_AT_stmt_list) {
-        const auto offset = att.address();
-        if (header.version == DwarfVersion::D4) {
-          auto lnp_header =
-              read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
-        } else {
-          PANIC("V5 line number program not supported yet");
-        }
-      }
-    }
-  }
-  return file;
 }
 
 class LNPStateMachine
