@@ -248,8 +248,8 @@ decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
     if ((byte & ~LEB128_MASK) == 0)
       break;
   }
-  if (shift < size && (byte & ~LEB128_MASK) != 0) {
-    res |= -(1 << shift);
+  if (shift < size && (byte & 0x40)) {
+    res |= ((-1) << shift);
   }
   // We don't want C++ to set a "good" enum value
   // if `value` is of type enum. We literally want a bit blast here (and we rely on that being the case)
