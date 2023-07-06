@@ -11,9 +11,11 @@
 using ThreadPool = std::vector<std::thread>;
 
 int
-main(int argc, const char **)
+main(int argc, const char **argv)
 {
-
+  for (auto i = 1; i < argc; i++) {
+    printf("%s\n", argv[i]);
+  }
   Foo foo{};
   foo.a = 1;
   foo.b = 2;

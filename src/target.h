@@ -116,6 +116,11 @@ struct Target
   // Debug Symbols Related Logic
   void register_object_file(ObjectFile *obj) noexcept;
 
+  // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
+  // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
+  // might (very likely) not be.
+  void read_auxv(TaskWaitResult &wait);
+
   template <typename T>
   std::optional<T>
   read_type_ptrace(TraceePointer<T> address, pid_t pid)
@@ -212,4 +217,6 @@ struct Target
 private:
   std::vector<CompilationUnitFile> m_files;
   std::unordered_map<std::string_view, Type> m_types;
+  std::optional<TPtr<void>> interpreter_base;
+  std::optional<TPtr<void>> entry;
 };

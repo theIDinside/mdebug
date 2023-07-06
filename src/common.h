@@ -77,12 +77,59 @@ public:
   constexpr operator std::uintptr_t() const { return get(); }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
 
+  // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
+  constexpr TraceePointer
+  operator+(std::intptr_t offset) const noexcept
+  {
+    const auto res = remote_addr + (offset * type_size());
+    return TraceePointer{res};
+  }
+
+  // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
+  constexpr TraceePointer
+  operator-(std::intptr_t offset) const noexcept
+  {
+    const auto res = remote_addr - (offset * type_size());
+    return TraceePointer{res};
+  }
+
+  constexpr TraceePointer &
+  operator+=(std::intptr_t offset) noexcept
+  {
+    remote_addr += (offset * type_size());
+    return *this;
+  }
+
+  constexpr TraceePointer &
+  operator-=(std::intptr_t offset) noexcept
+  {
+    remote_addr -= (offset * type_size());
+    return *this;
+  }
+
+  constexpr TraceePointer &
+  operator++() noexcept
+  {
+    remote_addr += type_size();
+    return *this;
+  }
+
+  constexpr TraceePointer
+  operator++(int) noexcept
+  {
+    const auto current = remote_addr;
+    remote_addr += type_size();
+    return TraceePointer{current};
+  }
+
   uintptr_t
   get() const noexcept
   {
     return remote_addr;
   }
 
+  // Returns the size of the pointed-to type so we can do pointer arithmetics on it.
+  // We handle the edge case of void pointers, by assuming an Architecture's "word size" (32-bit/64-bit)
   static constexpr u64
   type_size() noexcept
   {
@@ -127,12 +174,6 @@ public:
     buffer.reserve(20);
     fmt::format_to(std::back_inserter(buffer), "0x{:x}", get());
     return buffer;
-  }
-
-  static constexpr u64
-  ptr_width() noexcept
-  {
-    return sizeof(std::uintptr_t);
   }
 
 private:
