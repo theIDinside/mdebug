@@ -82,7 +82,6 @@ struct Target
   ScopedFd procfs_memfd;
   std::unordered_map<pid_t, TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
-  std::unordered_map<u64, MinSymbol> minimal_symbols;
   BreakpointMap bkpt_map;
 
   // Aggressive spinlock

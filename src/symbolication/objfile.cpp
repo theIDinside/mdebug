@@ -1,7 +1,9 @@
 #include "objfile.h"
+#include "elf_symbols.h"
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), entry_point(), vm_text_section()
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary),
+      entry_point(), vm_text_section{}, minimal_symbols{}
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -25,5 +27,5 @@ ObjectFile::get_offset(u8 *ptr) const noexcept
 TPtr<void>
 ObjectFile::text_section_offset() const noexcept
 {
-  return nullptr;
+  return parsed_elf->get_section(".text")->address;
 }

@@ -217,17 +217,8 @@ void
 Target::register_object_file(ObjectFile *obj) noexcept
 {
   object_files.push_back(obj);
-  if (minimal_symbols.empty()) {
-    minimal_symbols = object_files.back()->parsed_elf->parse_min_symbols();
-  } else {
-    auto minsyms = object_files.back()->parsed_elf->parse_min_symbols();
-    for (const auto &[hash, sym] : minsyms) {
-      ASSERT(!minimal_symbols.contains(hash),
-             "Hash collision with previously parsed Minimal Symbols from object file. \nCollision: [Hash: {}] "
-             "[Address: {}], [Name: {}]",
-             hash, sym.address, sym.name);
-      minimal_symbols[hash] = sym;
-    }
+  if (obj->minimal_symbols.empty()) {
+    obj->parsed_elf->parse_min_symbols();
   }
 }
 

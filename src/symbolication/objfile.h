@@ -23,6 +23,7 @@ struct ObjectFile
   TPtr<void> entry_point;
   TPtr<void> vm_text_section;
   Elf *parsed_elf = nullptr;
+  std::unordered_map<u64, MinSymbol> minimal_symbols;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;

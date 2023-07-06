@@ -17,6 +17,7 @@ struct ElfSection
   const char *m_name;
   u64 m_section_size;
   u64 file_offset;
+  TPtr<void> address;
   std::string_view get_name() const noexcept;
   u8 *begin() const noexcept;
   u8 *end() const noexcept;
@@ -44,7 +45,9 @@ public:
   std::span<ElfSection> sections() const noexcept;
   ElfSection *get_section(std::string_view name) const noexcept;
   ElfSection *get_section_or_panic(std::string_view name) const noexcept;
-  std::unordered_map<u64, MinSymbol> parse_min_symbols() const noexcept;
+
+  /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
+  void parse_min_symbols() const noexcept;
 
   Elf64Header *header;
   ElfSectionData m_sections;

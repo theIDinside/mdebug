@@ -115,15 +115,15 @@ Elf::parse_objfile(ObjectFile *object_file) noexcept
     data.sections[i].m_name =
         object_file->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
     data.sections[i].file_offset = sec_hdr->sh_offset;
+    data.sections[i].address = sec_hdr->sh_addr;
   }
   // ObjectFile is the owner of `Elf`
   new Elf{header, data, object_file};
 }
 
-std::unordered_map<u64, MinSymbol>
+void
 Elf::parse_min_symbols() const noexcept
 {
-  std::unordered_map<u64, MinSymbol> result;
 
   std::span<ElfSection> sects = sections();
   auto strtable = std::ranges::find_if(sects, [](ElfSection &sect) { return sect.get_name() == ".strtab"; });
@@ -140,9 +140,9 @@ Elf::parse_min_symbols() const noexcept
       for (auto &symbol : symbols) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
         u64 hashkey = hasher(name);
-        result[hashkey] = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+        obj_file->minimal_symbols[hashkey] =
+            MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }
     }
   }
-  return result;
 }
