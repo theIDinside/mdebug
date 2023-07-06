@@ -1,3 +1,4 @@
+#include "dynamic_lib.h"
 #include "spinlock.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -25,6 +26,11 @@ main(int argc, const char **)
   int a = 10 + argc;
   int b = a * 9;
   printf("b: %d\n", b);
+
+  float degC = 25;
+  float degF;
+  degF = convert_celsius_to_fahrenheit(degC);
+  printf("%.0f degrees Celsius equals %.0f degrees Fahrenheit\n", degC, degF);
 
   ThreadPool thread_pool;
 
@@ -54,6 +60,9 @@ main(int argc, const char **)
       for (auto idx = 0; idx < 8; idx++) {
         if (ids[idx] == -1) {
           ids[idx] = i;
+          float degF;
+          degF = convert_celsius_to_fahrenheit(foo.c);
+          printf("%.0f degrees Celsius equals %.0f degrees Fahrenheit\n", foo.c, degF);
           break;
         }
       }
