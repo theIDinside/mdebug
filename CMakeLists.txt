@@ -80,7 +80,7 @@ set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 target_link_libraries(mdb fmt::fmt mdb_spinlock)
 target_include_directories(mdb PUBLIC ./dependencies)
 
-# To be able to print backtrace with symbols
+# To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(mdb PRIVATE MDB_DEBUG)
