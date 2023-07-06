@@ -83,6 +83,7 @@ main(int argc, const char **argv)
         break;
       case WaitStatus::Execed: {
         tracer.get_current()->reopen_memfd();
+        target->read_auxv(wait);
         break;
       }
       case WaitStatus::Exited: {

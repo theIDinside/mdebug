@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
+#include <linux/auxvec.h>
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
@@ -18,8 +19,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 Target::Target(pid_t process_space_id, bool open_mem_fd) noexcept
-    : task_leader(process_space_id), object_files{}, threads{},
-      bkpt_map({.bp_id_counter = 1, .breakpoints = {}}), spin_lock{}, m_files{}, m_types{}
+    : task_leader{process_space_id}, object_files{}, threads{},
+      bkpt_map({.bp_id_counter = 1, .breakpoints = {}}), spin_lock{}, m_files{}, m_types{},
+      interpreter_base{}, entry{}
 {
   threads[process_space_id] = TaskInfo{process_space_id, nullptr};
   if (open_mem_fd) {
@@ -220,6 +222,56 @@ Target::register_object_file(ObjectFile *obj) noexcept
   if (obj->minimal_symbols.empty()) {
     obj->parsed_elf->parse_min_symbols();
   }
+}
+
+struct AuxvPair
+{
+  u64 key, value;
+};
+
+void
+Target::read_auxv(TaskWaitResult &wait)
+{
+  ASSERT(wait.ws == WaitStatus::Execed,
+         "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
+  TPtr<i64> stack_ptr = wait.registers.rsp;
+  i64 argc = read_type(stack_ptr);
+
+  stack_ptr += argc + 1;
+  ASSERT(read_type(stack_ptr) == 0, "Expected null terminator after argv at {}", stack_ptr);
+  stack_ptr++;
+  auto envp = stack_ptr.as<const char *>();
+  // we're at the envp now, that pointer list is also terminated by a nullptr
+  while (read_type(envp) != nullptr) {
+    envp++;
+  }
+  // We should now be at Auxilliary Vector Table (see `man getauxval` for info, we're interested in the interpreter
+  // base address)
+
+  envp++;
+  // cast it to our own type
+  auto aux_ptr = envp.as<AuxvPair>();
+  std::vector<AuxvPair> auxv{};
+  for (;;) {
+    auto kvp = read_type(aux_ptr);
+    auxv.push_back(kvp);
+    // terminated by a "null entry"
+    if (kvp.key == 0) {
+      break;
+    }
+    aux_ptr++;
+  }
+
+  for (const auto &kvp : auxv) {
+    if (kvp.key == AT_BASE) {
+      interpreter_base = kvp.value;
+    }
+    if (kvp.key == AT_ENTRY) {
+      entry = kvp.value;
+    }
+  }
+
+  ASSERT(entry.has_value() && interpreter_base.has_value(), "Expected ENTRY and INTERPRETER_BASE to be found");
 }
 
 void
