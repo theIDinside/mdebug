@@ -73,11 +73,17 @@ enable_testing()
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_subdirectory(./dependencies/fmt)
+# Add the fantastic libfmt library
+add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
-target_link_libraries(mdb fmt::fmt mdb_spinlock)
+
+# Add the json library
+set(JSON_Install OFF CACHE INTERNAL "")
+add_subdirectory(dependencies/nlohmann_json)
+
+target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json)
 target_include_directories(mdb PUBLIC ./dependencies)
 
 # To be able to print backtrace with symbols (see `man backtrace`)
