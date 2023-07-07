@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(midas LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_STANDARD_REQUIRED 23)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
   src/main.cpp
   src/tracer.cpp
@@ -69,9 +71,30 @@ endfunction()
 
 build_tests("${MDB_TESTS}")
 
-enable_testing()
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+enable_testing()
+# Unit Testing (using googletest)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+add_subdirectory(dependencies/googletest)
+
+add_executable(
+  parse_dap_requests
+  test/unittest/parse_dap_requests.cpp
+  src/interface/interface.cpp
+  src/interface/interface.h
+)
+
+target_link_libraries(
+  parse_dap_requests
+  GTest::gtest_main
+  fmt::fmt
+  nlohmann_json::nlohmann_json
+)
+
+include(GoogleTest)
+gtest_discover_tests(parse_dap_requests)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
