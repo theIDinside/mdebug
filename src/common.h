@@ -10,6 +10,7 @@
 #include <source_location>
 #include <span>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -24,6 +25,9 @@ using i64 = std::int64_t;
 using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
+
+// "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
+template <typename T> using ActualType = std::remove_cvref_t<T>;
 
 struct DataBlock
 {
@@ -426,3 +430,39 @@ private:
   u64 size;
   u8 offset_size = 4;
 };
+
+template <typename T, typename... Args>
+constexpr const T *
+unwrap(const std::variant<Args...> &variant) noexcept
+{
+  const T *r = nullptr;
+  std::visit(
+      [&r](auto &&item) {
+        using var_t = ActualType<decltype(item)>;
+        if constexpr (std::is_same_v<var_t, T>) {
+          r = &item;
+        } else {
+          PANIC("Unexpected type in variant");
+        }
+      },
+      variant);
+  return r;
+}
+
+template <typename T, typename... Args>
+constexpr const T *
+maybe_unwrap(const std::variant<Args...> &variant) noexcept
+{
+  const T *r = nullptr;
+  std::visit(
+      [&r](auto &&item) {
+        using var_t = ActualType<decltype(item)>;
+        if constexpr (std::is_same_v<var_t, T>) {
+          r = &item;
+        } else {
+          r = nullptr;
+        }
+      },
+      variant);
+  return r;
+}

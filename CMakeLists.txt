@@ -37,7 +37,12 @@ set(MIDAS_SOURCES
   src/symbolication/type.cpp
   src/symbolication/type.h
   src/lib/lockguard.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  src/interface/dap/dap_defs.h
 )
+
+set(COMMON_SRC src/common.cpp src/common.h)
 
 set(MIDAS_SPINLOCK src/lib/spinlock.cpp src/lib/spinlock.h)
 add_library(mdb_spinlock STATIC ${MIDAS_SPINLOCK})
@@ -82,8 +87,9 @@ add_subdirectory(dependencies/googletest)
 add_executable(
   parse_dap_requests
   test/unittest/parse_dap_requests.cpp
-  src/interface/interface.cpp
-  src/interface/interface.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  ${COMMON_SRC}
 )
 
 target_link_libraries(
