@@ -29,6 +29,8 @@
 #include "ptrace.h"
 #include <sys/personality.h>
 
+#include "interface/dap/interface.h"
+
 static int barrier[2];
 
 // Signal handler function
@@ -36,6 +38,7 @@ static int barrier[2];
 int
 main(int argc, const char **argv)
 {
+
   if (argc < 2) {
     fmt::print("Usage: mdb <binary>\n");
     exit(EXIT_FAILURE);
@@ -66,6 +69,7 @@ main(int argc, const char **argv)
   default: {
 
     Tracer tracer{};
+    ui::dap::DAP ui_interface{&tracer, 1, 0};
     tracer.init_io_thread();
     Tracer::Instance->add_target_set_current(pid, p);
     auto target = tracer.get_current();

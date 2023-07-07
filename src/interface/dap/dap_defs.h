@@ -7,72 +7,53 @@ namespace ui::dap {
 
 enum class Command : std::uint8_t
 {
-  Attach = 0,
-  BreakpointLocations,
-  Completions,
-  ConfigurationDone,
-  Continue,
-  CustomRequest,
-  DataBreakpointInfo,
-  Disassemble,
-  Disconnect,
-  Evaluate,
-  ExceptionInfo,
-  Goto,
-  GotoTargets,
-  Initialize,
-  Launch,
-  LoadedSources,
-  Modules,
-  Next,
-  Pause,
-  ReadMemory,
-  Restart,
-  RestartFrame,
-  ReverseContinue,
-  Scopes,
-  SetBreakpoints,
-  SetDataBreakpoints,
-  SetExceptionBreakpoints,
-  SetExpression,
-  SetFunctionBreakpoints,
-  SetInstructionBreakpoints,
-  SetVariable,
-  Source,
-  StackTrace,
-  StepBack,
-  StepIn,
-  StepInTargets,
-  StepOut,
-  Terminate,
-  TerminateThreads,
-  Threads,
-  Variables,
-  WriteMemory,
+#define DAP_COMMANDS
+#define ITEM(name, value) name = value,
+#include "dap.defs"
+#undef ITEM
+#undef DAP_COMMANDS
   UNKNOWN
 };
+
+constexpr std::string_view
+to_str(Command command) noexcept
+{
+#define DAP_COMMANDS
+#define ITEM(name, value)                                                                                         \
+  case Command::name:                                                                                             \
+    return #name;
+  switch (command) {
+#include "dap.defs"
+  case Command::UNKNOWN:
+    return "Unknown command type";
+  }
+#undef ITEM
+#undef DAP_COMMANDS
+}
 
 // We sent events, we never receive them, so an "UNKNOWN" value is unnecessary.
 // or better put; Events are an "output" type only.
 enum class Events : std::uint8_t
 {
-  Breakpoint = 0,
-  Capabilities,
-  Continued,
-  Exited,
-  Initialized,
-  Invalidated,
-  LoadedSource,
-  Memory,
-  Module,
-  Output,
-  Process,
-  ProgressEnd,
-  ProgressStart,
-  ProgressUpdate,
-  Stopped,
-  Terminated,
-  Thread,
+#define DAP_EVENTS
+#define ITEM(name, value) name = value,
+#include "dap.defs"
+#undef ITEM
+#undef DAP_EVENTS
 };
+
+constexpr std::string_view
+to_str(Events command) noexcept
+{
+#define DAP_EVENTS
+#define ITEM(name, value)                                                                                         \
+  case Events::name:                                                                                              \
+    return #name;
+  switch (command) {
+#include "dap.defs"
+  }
+#undef ITEM
+#undef DAP_EVENTS
+}
 
 } // namespace ui::dap

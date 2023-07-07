@@ -79,11 +79,7 @@ Tracer::mmap_objectfile(const Path &path) noexcept
          "Object file from {} has already been loaded", path.c_str());
 
   auto fd = ScopedFd::open_read_only(path);
-  const auto addr = (u8 *)mmap(nullptr, fd.file_size(), PROT_READ, MAP_PRIVATE, fd.get(), 0);
-  if (addr == MAP_FAILED) {
-    fmt::println("Failed to open file {} ({}) with size {}", path.c_str(), fd.get(), fd.file_size());
-    return AddObjectResult::MMAP_FAILED;
-  }
+  const auto addr = mmap_file<u8>(fd, fd.file_size(), true);
 
   auto obj = new ObjectFile{path, fd.file_size(), addr};
   object_files.push_back(obj);

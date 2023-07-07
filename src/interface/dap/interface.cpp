@@ -15,6 +15,12 @@
 namespace ui::dap {
 using namespace std::string_literals;
 
+std::string_view
+ContentDescriptor::payload() const noexcept
+{
+  return std::string_view{payload_begin, payload_begin + payload_length};
+}
+
 // Ordered by size, not alphabetically
 // as benchmarks seem to suggest that this gives better performance
 // https://quick-bench.com/q/EsrIbPt2A2455D-RON5_2TXxD9I
@@ -66,12 +72,11 @@ static constexpr std::string_view strings[]{
 using json = nlohmann::json;
 
 DAP::DAP(Tracer *tracer, int input_fd, int output_fd) noexcept
-    : tracer{tracer}, input_fd(input_fd), output_fd(output_fd), epoll_fd(epoll_create1(0)), event{},
-      keep_running(true)
+    : tracer{tracer}, input_fd(input_fd), output_fd(output_fd), event{}, keep_running(true)
 {
-  buffer = (char *)mmap(nullptr, 4096 * 3, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
-  ASSERT(buffer != MAP_FAILED, "Failed to mmap in read buffer; {}", strerror(errno));
+  epoll_fd = epoll_create1(0);
   ASSERT(epoll_fd != 1, "Failed to create epoll fd instance {}", strerror(errno));
+  buffer = mmap_buffer<char>(4096 * 3);
   event.events = EPOLLIN;
   event.data.fd = input_fd;
 
@@ -82,13 +87,14 @@ DAP::DAP(Tracer *tracer, int input_fd, int output_fd) noexcept
 static const std::regex content_length = std::regex{R"(Content-Length: (\d+)\s{4})"};
 
 std::vector<ContentParse>
-parse_buffer(const std::string_view buffer_view) noexcept
+parse_buffer(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
 {
   std::vector<ContentParse> result;
 
   std::smatch m;
   std::string_view internal_view{buffer_view};
   ViewMatchResult base_match;
+  bool partial_found = false;
   while (std::regex_search(internal_view.begin(), internal_view.end(), base_match, content_length)) {
     if (base_match.size() == 2) {
       std::sub_match<std::string_view::const_iterator> base_sub_match = base_match[1];
@@ -110,17 +116,21 @@ parse_buffer(const std::string_view buffer_view) noexcept
             .payload_missing = (base_match.position() + base_match.length() + len) - internal_view.size(),
             .payload_begin = internal_view.data() + base_match.position() + base_match.length()});
         internal_view.remove_prefix(internal_view.size());
+        partial_found = true;
       }
     }
   }
   if (!internal_view.empty()) {
     result.push_back(RemainderData{.length = internal_view.size(), .begin = internal_view.data()});
+    partial_found = true;
   }
+  if (all_msgs_ok != nullptr)
+    *all_msgs_ok = !partial_found;
   return result;
 }
 
 void
-DAP::infinite_poll() noexcept
+DAP::input_wait_loop() noexcept
 {
   epoll_event events[5];
 
@@ -133,151 +143,32 @@ DAP::infinite_poll() noexcept
       if (bytes_read <= 4096 * 3) {
         free_ptr = buffer + bytes_read;
       }
-      const auto request_headers = parse_buffer({buffer, free_ptr});
+      bool no_partials = false;
+      const auto request_headers = parse_buffer({buffer, free_ptr}, &no_partials);
+      if (no_partials) {
+        for (auto &&hdr : request_headers) {
+          auto cd = maybe_unwrap<ContentDescriptor>(hdr);
+          const auto packet = cd->payload();
+          auto obj = json::parse(packet);
+          std::string_view cmd;
+          obj["command"].get_to(cmd);
+          auto command = parse_input(cmd);
+        }
+
+/* This is technically much safer - so why not during release builds?
+ * My justification is this; by having 2 distinct logic paths, if an error occurs
+ * it's easy to see if it works in debug or not; constraining the domain size of where the issues may be.
+ * We don't want to do unnecessary writes when we don't have to.  */
+#ifdef MDB_DEBUG
+        std::memset(buffer, 0, std::distance(buffer, free_ptr));
+#endif
+        // since there's no partials left in the buffer, we reset it
+        free_ptr = buffer;
+        curr_ptr = buffer;
+      } else {
+      }
     }
   }
-}
-
-Command
-DAP::parse_command_type(std::string_view str) noexcept
-{
-  return parse_input(str);
-}
-
-/* I've actually benchmarked this, and this is faster than a naive constexpr-map *and* a std::unordered_map
- * lookup by a *LARGE* margin. As such I see no good reason at all to change this as the DA-protocol is well
- * defined when it comes to it's commands. Any change to the spec will trivially be changed here. */
-constexpr Command
-parse_input(const std::string_view view) noexcept
-{
-  using namespace std::literals::string_view_literals;
-  switch (view.size()) {
-  case 4: {
-    if (view == "Goto"sv)
-      return Command::Goto;
-    if (view == "Next"sv)
-      return Command::Next;
-  } break;
-  case 5: {
-    if (view == "Pause"sv)
-      return Command::Pause;
-  } break;
-  case 6: {
-    if (view == "Attach"sv)
-      return Command::Attach;
-    if (view == "Launch"sv)
-      return Command::Launch;
-    if (view == "Scopes"sv)
-      return Command::Scopes;
-    if (view == "Source"sv)
-      return Command::Source;
-    if (view == "StepIn"sv)
-      return Command::StepIn;
-  } break;
-  case 7: {
-    if (view == "Modules"sv)
-      return Command::Modules;
-    if (view == "Restart"sv)
-      return Command::Restart;
-    if (view == "StepOut"sv)
-      return Command::StepOut;
-    if (view == "Threads"sv)
-      return Command::Threads;
-  } break;
-  case 8: {
-    if (view == "Continue"sv)
-      return Command::Continue;
-    if (view == "Evaluate"sv)
-      return Command::Evaluate;
-    if (view == "StepBack"sv)
-      return Command::StepBack;
-  } break;
-  case 9: {
-    if (view == "Terminate"sv)
-      return Command::Terminate;
-    if (view == "Variables"sv)
-      return Command::Variables;
-  } break;
-  case 10: {
-    if (view == "Disconnect"sv)
-      return Command::Disconnect;
-    if (view == "Initialize"sv)
-      return Command::Initialize;
-    if (view == "ReadMemory"sv)
-      return Command::ReadMemory;
-    if (view == "StackTrace"sv)
-      return Command::StackTrace;
-  } break;
-  case 11: {
-    if (view == "Completions"sv)
-      return Command::Completions;
-    if (view == "Disassemble"sv)
-      return Command::Disassemble;
-    if (view == "GotoTargets"sv)
-      return Command::GotoTargets;
-    if (view == "SetVariable"sv)
-      return Command::SetVariable;
-    if (view == "WriteMemory"sv)
-      return Command::WriteMemory;
-  } break;
-  case 12: {
-    if (view == "RestartFrame"sv)
-      return Command::RestartFrame;
-  } break;
-  case 13: {
-    if (view == "CustomRequest"sv)
-      return Command::CustomRequest;
-    if (view == "ExceptionInfo"sv)
-      return Command::ExceptionInfo;
-    if (view == "LoadedSources"sv)
-      return Command::LoadedSources;
-    if (view == "SetExpression"sv)
-      return Command::SetExpression;
-    if (view == "StepInTargets"sv)
-      return Command::StepInTargets;
-  } break;
-  case 14: {
-    if (view == "SetBreakpoints"sv)
-      return Command::SetBreakpoints;
-  } break;
-  case 15: {
-    if (view == "ReverseContinue"sv)
-      return Command::ReverseContinue;
-  } break;
-  case 16: {
-    if (view == "TerminateThreads"sv)
-      return Command::TerminateThreads;
-  } break;
-  case 17: {
-    if (view == "ConfigurationDone"sv)
-      return Command::ConfigurationDone;
-  } break;
-  case 18: {
-    if (view == "DataBreakpointInfo"sv)
-      return Command::DataBreakpointInfo;
-    if (view == "SetDataBreakpoints"sv)
-      return Command::SetDataBreakpoints;
-  } break;
-  case 19: {
-    if (view == "BreakpointLocations"sv)
-      return Command::BreakpointLocations;
-  } break;
-  case 22: {
-    if (view == "SetFunctionBreakpoints"sv)
-      return Command::SetFunctionBreakpoints;
-  } break;
-  case 23: {
-    if (view == "SetExceptionBreakpoints"sv)
-      return Command::SetExceptionBreakpoints;
-  } break;
-  case 25: {
-    if (view == "SetInstructionBreakpoints"sv)
-      return Command::SetInstructionBreakpoints;
-  } break;
-  default:
-    break;
-  }
-  return Command::UNKNOWN;
 }
 
 } // namespace ui::dap
