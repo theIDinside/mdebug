@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <string>
 #include <type_traits>
 
 #include "../../src/interface/dap/interface.h"
+#include "nlohmann/json_fwd.hpp"
 
 // clang-format off
 const auto WellFormedPayloads_3 = 
@@ -100,4 +103,36 @@ TEST(DapRequestParsing, OneWellFormedOneRemainderData)
   const RD *rd = maybe_unwrap<RD>(result[1]);
   EXPECT_TRUE(rd != nullptr) << "Expected type to be Remainder Data";
   EXPECT_EQ(rd->length, 16);
+}
+
+TEST(DapRequestParsing, ParseRequestTypes3WellFormed)
+{
+  const auto result = ui::dap::parse_buffer(WellFormedPayloads_3);
+  const auto unwrapper = [](const auto &v) -> const CD * { return maybe_unwrap<CD>(v); };
+  auto i = 0;
+  for (auto &&payload : result) {
+    auto ptr = unwrapper(payload);
+    EXPECT_TRUE(ptr != nullptr) << "Expected payload to be OK parsed";
+    std::string_view data{ptr->payload_begin, ptr->payload_begin + ptr->payload_length};
+    fmt::println("payload contents: '{}'", data);
+    auto json = nlohmann::json::parse(data);
+    EXPECT_TRUE(json["command"].is_string());
+    std::string_view cmd_str;
+    json.at("command").get_to(cmd_str);
+    const auto command = ui::dap::parse_input(cmd_str);
+    switch (i++) {
+    case 0:
+      EXPECT_EQ(ui::dap::Command::Launch, command)
+          << "Expected Launch but got " << to_str(command) << " from str " << cmd_str;
+      break;
+    case 1:
+      EXPECT_EQ(ui::dap::Command::Continue, command)
+          << "Expected Continue but got " << to_str(command) << " from str " << cmd_str;
+      break;
+    case 2:
+      EXPECT_EQ(ui::dap::Command::SetDataBreakpoints, command)
+          << "Expected SetDataBreakpoints but got " << to_str(command) << " from str " << cmd_str;
+      break;
+    }
+  }
 }
