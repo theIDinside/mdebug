@@ -9,6 +9,7 @@
 #include <fmt/core.h>
 #include <source_location>
 #include <span>
+#include <sys/mman.h>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -233,7 +234,6 @@ public:
     p = std::move(other.p);
     file_size_ = other.file_size_;
     other.fd = -1;
-    other.p = "";
     return *this;
   }
 
@@ -244,6 +244,7 @@ public:
   void close() noexcept;
   operator int() const noexcept;
   u64 file_size() const noexcept;
+  const Path &path() const noexcept;
 
   static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
   static ScopedFd open_read_only(const Path &p) noexcept;
@@ -465,4 +466,23 @@ maybe_unwrap(const std::variant<Args...> &variant) noexcept
       },
       variant);
   return r;
+}
+
+template <typename T>
+T *
+mmap_buffer(u64 size) noexcept
+{
+  auto ptr = (T *)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {}", size);
+  return ptr;
+}
+
+template <typename T>
+T *
+mmap_file(ScopedFd &fd, u64 size, bool read_only) noexcept
+{
+  ASSERT(fd.is_open(), "Backing file not open: {}", fd.path().c_str());
+  auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, fd.get(), 0);
+  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, fd.path().c_str());
+  return ptr;
 }

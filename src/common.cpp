@@ -158,6 +158,12 @@ ScopedFd::file_size() const noexcept
   return size;
 }
 
+const Path &
+ScopedFd::path() const noexcept
+{
+  return p;
+}
+
 /* static */
 ScopedFd
 ScopedFd::open(const Path &p, int flags, mode_t mode) noexcept
