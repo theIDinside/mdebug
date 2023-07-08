@@ -29,10 +29,7 @@ to_str(WaitStatus ws)
 struct TaskWaitResult
 {
   pid_t waited_pid;
-  user_regs_struct registers;
   WaitStatus ws;
-
-  TraceePointer<void> last_byte_executed() const;
 
   union
   {
@@ -40,8 +37,6 @@ struct TaskWaitResult
     int signal;
   } data;
 };
-
-void TaskWaitResultCleanUp(TaskWaitResult *_this);
 
 enum class RunType : u8
 {
@@ -59,6 +54,7 @@ struct TaskInfo
   pid_t tid;
   TraceePointer<void> stopped_address;
   TaskWaitResult wait_status;
+  user_regs_struct registers;
   RunType run_type;
 
   TaskInfo(pid_t tid, TraceePointer<void> stopped_at) noexcept;

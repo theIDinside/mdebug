@@ -28,13 +28,7 @@ TaskInfo::set_running(RunType type) noexcept
 void
 TaskInfo::request_registers() noexcept
 {
-  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &wait_status.registers);
-}
-
-TraceePointer<void>
-TaskWaitResult::last_byte_executed() const
-{
-  return registers.rip - 1;
+  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
 }
 
 TaskVMInfo
