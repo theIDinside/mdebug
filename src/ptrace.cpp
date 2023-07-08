@@ -5,6 +5,7 @@
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
+#include <utility>
 
 std::string_view
 request_name(__ptrace_request req)
@@ -93,13 +94,14 @@ request_name(__ptrace_request req)
   case PTRACE_GET_RSEQ_CONFIGURATION:
     return "PTRACE_GET_RSEQ_CONFIGURATION";
   }
+  PANIC(fmt::format("Unknown PTRACE request {}", std::to_underlying(req)));
 }
 
 void
 new_target_set_options(pid_t pid)
 {
   const auto options = (PTRACE_O_TRACESYSGOOD /*| PTRACE_O_TRACEVFORKDONE */ | PTRACE_O_TRACEVFORK |
-                        PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_EXITKILL);
+                        PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE /*| PTRACE_O_EXITKILL*/);
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     sleep(1);
     if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
@@ -153,7 +155,7 @@ PtraceSyscallInfo::is_none() const noexcept
 void
 ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location &loc)
 {
-  panic(fmt::format("{} FAILED for {} ({})", request_name(req), pid, strerror(errno)), loc, 3);
+  panic(fmt::format("{} FAILED for {} ({}) errno: {}", request_name(req), pid, strerror(errno), errno), loc, 3);
 }
 
 SyscallArguments::SyscallArguments(const user_regs_struct &regs) : regs(&regs) {}
