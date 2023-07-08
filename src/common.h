@@ -58,14 +58,17 @@ std::string_view syscall_name(u64 syscall_number);
     panic(err_msg, loc, 1);                                                                                       \
   }
 
-#ifdef MDB_DEBUG
-#define ASSERT(cond, msg, ...)                                                                                    \
+// Identical to ASSERT, but doesn't care about build type
+#define VERIFY(cond, msg, ...)                                                                                    \
   {                                                                                                               \
     std::source_location loc = std::source_location::current();                                                   \
     if (!(cond)) {                                                                                                \
       panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);             \
     }                                                                                                             \
   }
+
+#if defined(MDB_DEBUG)
+#define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 #else
 #define ASSERT(cond, msg, ...)
 #endif
