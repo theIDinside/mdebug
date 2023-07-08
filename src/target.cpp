@@ -73,7 +73,6 @@ Target::new_task(Tid tid) noexcept
   if constexpr (MDB_DEBUG) {
     fmt::println("New task {} (thread parent: {})", tid, task_leader);
   }
-
   threads[tid] = TaskInfo{tid, nullptr};
 }
 

@@ -37,8 +37,20 @@ public:
   /// and the client
   void init_io_thread() noexcept;
 
+  void interrupt(LWP lwp) noexcept;
+  void run(LWP lwp) noexcept;
+
+  // This will be removed in future work
+  // but it's just to get something up-and-running
+  bool waiting_for_ui() const noexcept;
+  void wait_and_process_ui_events() noexcept;
+  void wait_for_tracee_events() noexcept;
+
 private:
   std::vector<std::unique_ptr<Target>> targets;
   Target *current_target = nullptr;
   std::vector<ObjectFile *> object_files;
+  // N.B. to be removed in future work when an event-processing scheme
+  // has been developed
+  bool ui_wait;
 };

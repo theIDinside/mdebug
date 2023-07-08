@@ -67,65 +67,28 @@ main(int argc, const char **argv)
     execv(cmd, args);
   } break;
   default: {
-
     Tracer tracer{};
     ui::dap::DAP ui_interface{&tracer, 1, 0};
-    tracer.init_io_thread();
     Tracer::Instance->add_target_set_current(pid, p);
-    auto target = tracer.get_current();
-    auto current_task = target->get_task(pid);
 
-    // todo(simon): for now, support only 1 process space (target), though the design looks as though we support
-    // multiple.
-
-    auto tracee_exited = false;
-    while (!tracee_exited) {
-      auto wait = target->wait_pid(current_task);
-      target->set_wait_status(wait);
-      switch (wait.ws) {
-      case WaitStatus::Stopped:
-        break;
-      case WaitStatus::Execed: {
-        tracer.get_current()->reopen_memfd();
-        target->read_auxv(wait);
-        break;
+    // the event loop
+    // For now, before we've implemented a pseudo terminal, that can act as our "tracee terminal"
+    // we'll just do the following;
+    // if we're running, wait for tracee events
+    // if not, wait for UI events (like user input)
+    // This means that UI actions can never be asynchronous and only ever happen
+    // at tracee stops - but, it is *by design* it's done that way for now, because it's orders of magnitude
+    // easier to get to a working state, in order to build the other interesting stuff that
+    // we want to build. But in the final design, we won't be doing if-else, but instead have some
+    // sort of event pump that gives us events to track and handle accordingly, where the events
+    // can come from multiple sources
+    // But doing the above, means we can start developing our DAP interface and start testing it
+    for (;;) {
+      if (tracer.waiting_for_ui()) {
+        tracer.wait_and_process_ui_events();
+      } else {
+        tracer.wait_for_tracee_events();
       }
-      case WaitStatus::Exited: {
-        if (wait.waited_pid == tracer.get_current()->task_leader) {
-          tracee_exited = true;
-        }
-        break;
-      }
-      case WaitStatus::Cloned: {
-        const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(wait.registers);
-        const auto res = target->read_type(ptr);
-        // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
-        auto np = target->read_type(TPtr<pid_t>{res.parent_tid});
-#ifdef MDB_DEBUG
-        long new_pid = 0;
-        PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
-        ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
-#endif
-        target->new_task(np);
-        target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-        target->get_task(np)->request_registers();
-        break;
-      }
-      case WaitStatus::Forked:
-        break;
-      case WaitStatus::VForked:
-        break;
-      case WaitStatus::VForkDone:
-        break;
-      case WaitStatus::Signalled:
-        break;
-      case WaitStatus::SyscallEntry:
-        break;
-      case WaitStatus::SyscallExit:
-        break;
-      }
-      sleep(1);
-      target->set_running(RunType::Continue);
     }
     break;
   }

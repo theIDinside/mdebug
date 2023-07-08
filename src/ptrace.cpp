@@ -99,7 +99,7 @@ void
 new_target_set_options(pid_t pid)
 {
   const auto options = (PTRACE_O_TRACESYSGOOD /*| PTRACE_O_TRACEVFORKDONE */ | PTRACE_O_TRACEVFORK |
-                        PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE);
+                        PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_EXITKILL);
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     sleep(1);
     if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
@@ -107,8 +107,6 @@ new_target_set_options(pid_t pid)
     }
   }
 }
-
-// PtraceSyscallInfo::PtraceSyscallInfo(__ptrace_syscall_info info) noexcept : m_info(info) {}
 
 std::uintptr_t
 PtraceSyscallInfo::stack_ptr() const noexcept
