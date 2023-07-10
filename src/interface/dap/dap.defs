@@ -62,3 +62,21 @@ ITEM(Stopped, 14)
 ITEM(Terminated, 15)
 ITEM(Thread, 16)
 #endif
+
+#ifdef DAP_PROTOCOL_MESSAGE
+ITEM(Request, 0)
+ITEM(Response, 1)
+ITEM(Event, 2)
+#endif
+
+#ifdef DAP_STOPPED_REASON
+ITEM(Step, 0)
+ITEM(Breakpoint, 1)
+ITEM(Exception, 2)
+ITEM(Pause, 3)
+ITEM(Entry, 4)
+ITEM(Goto, 5)
+ITEM(FunctionBreakpoint, 6)
+ITEM(DataBreakpoint, 7)
+ITEM(InstructionBreakpoint, 8)
+#endif
