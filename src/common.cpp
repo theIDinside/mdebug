@@ -3,14 +3,41 @@
 #include <cstdlib>
 #include <cstring>
 #include <cxxabi.h>
+#include <exception>
 #include <execinfo.h>
+#include <expected>
 #include <fcntl.h>
 #include <filesystem>
+#include <optional>
 #include <regex>
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+Option<WaitPid>
+waitpid_peek(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG | WNOWAIT);
+  if (waited_pid == 0)
+    return {};
+  if (waited_pid == -1)
+    return {};
+
+  return WaitPid{.tid = waited_pid, .status = status};
+}
+
+Option<WaitPid>
+waitpid_nonblock(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG);
+  if (waited_pid == 0 || waited_pid == -1)
+    return Option<WaitPid>{};
+  return WaitPid{waited_pid, status};
+}
 
 std::string_view
 syscall_name(u64 syscall_number)

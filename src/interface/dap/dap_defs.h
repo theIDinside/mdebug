@@ -56,7 +56,7 @@ to_str(Events command) noexcept
 #undef DAP_EVENTS
 }
 
-enum class ProtocolMessage : std::uint8_t
+enum class ProtocolMessageType : std::uint8_t
 {
 #define DAP_PROTOCOL_MESSAGE
 #define ITEM(name, value) name = value,
@@ -66,11 +66,11 @@ enum class ProtocolMessage : std::uint8_t
 };
 
 constexpr std::string_view
-to_str(ProtocolMessage msg) noexcept
+to_str(ProtocolMessageType msg) noexcept
 {
 #define DAP_PROTOCOL_MESSAGE
 #define ITEM(name, value)                                                                                         \
-  case ProtocolMessage::name:                                                                                     \
+  case ProtocolMessageType::name:                                                                                 \
     return #name;
   switch (msg) {
 #include "dap.defs"

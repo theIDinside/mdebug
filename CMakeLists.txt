@@ -37,8 +37,6 @@ set(MIDAS_SOURCES
   src/symbolication/type.cpp
   src/symbolication/type.h
   src/lib/lockguard.h
-  src/interface/dap/protocol.cpp
-  src/interface/dap/protocol.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
   src/interface/dap/commands.cpp
@@ -46,6 +44,8 @@ set(MIDAS_SOURCES
   src/interface/dap/dap_defs.h
   src/interface/dap/parse_buffer.cpp
   src/interface/dap/parse_buffer.h
+  src/interface/dap/events.cpp
+  src/interface/dap/events.h
   src/interface/pty.cpp
   src/interface/pty.h
   src/user_commands/commands.cpp

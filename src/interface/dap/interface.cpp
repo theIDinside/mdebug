@@ -1,9 +1,12 @@
 #include "interface.h"
 #include "../../tracer.h"
 #include "commands.h"
+#include "events.h"
+#include "fmt/core.h"
 #include "parse_buffer.h"
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -81,7 +84,7 @@ using json = nlohmann::json;
 
 DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_pty_fd) noexcept
     : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), master_pty_fd(master_pty_fd),
-      keep_running(true), output_message_lock{}, msg{}, seq(0)
+      keep_running(true), output_message_lock{}, events_queue{}, seq(0)
 {
   post_event_fd = Pipe::non_blocking_read();
   buffer = mmap_buffer<char>(4096 * 3);
@@ -91,14 +94,23 @@ DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_p
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
-std::unique_ptr<std::string>
-DAP::pop_message() noexcept
+Event *
+DAP::pop_event() noexcept
 {
-  VERIFY(!messages.empty(), "Message queue must be non-empty");
+  VERIFY(!events_queue.empty(), "Can't pop events from an empty list!");
   LockGuard<SpinLock> lock{output_message_lock};
-  auto msg = std::move(messages.front());
-  messages.pop_front();
-  return msg;
+  Event *evt = events_queue.front();
+  std::uintptr_t test = (std::uintptr_t)evt;
+  events_queue.pop_front();
+  ASSERT((std::uintptr_t)evt == test, "pointer changed value under our feet");
+  return evt;
+}
+
+void
+DAP::write_protocol_message(const SerializedProtocolMessage &msg) noexcept
+{
+  VERIFY(write(tracer_out_fd, msg.header.data(), msg.header.size()) != -1, "Failed to write '{}'", msg.header);
+  VERIFY(write(tracer_out_fd, msg.payload.data(), msg.payload.size()) != -1, "Failed to write '{}'", msg.payload);
 }
 
 void
@@ -146,75 +158,41 @@ DAP::run_ui_loop() noexcept
           // process new messages (strings) posted on the output queue
           char buf[GO.size()];
           read(post_event_fd.read_end(), buf, GO.size());
-          while (!messages.empty()) {
-            const auto msg = pop_message();
-            json j;
-            j["seq"] = seq++;
-            j["type"] = "event";
-            j["event"] = "output";
-            j["body"] = {};
-            j["body"]["category"] = "console";
-            j["body"]["output"] = fmt::format("{}", *msg);
-            const auto dap_payload = j.dump();
-            const auto hdr_with_paylod =
-                fmt::format("Content-Length: {}\r\n\r\n{}", dap_payload.size(), dap_payload);
-            VERIFY(write(tracer_out_fd, hdr_with_paylod.data(), hdr_with_paylod.size()) != -1,
-                   "Failed to write '{}'", hdr_with_paylod);
-          }
-          while (!msg.empty()) {
-            handle_first_json([&seq = this->seq, fd = tracer_out_fd](json &j) {
-              j["seq"] = seq++;
-              const auto dap_payload = j.dump();
-              const auto hdr_with_paylod =
-                  fmt::format("Content-Length: {}\r\n\r\n{}", dap_payload.size(), dap_payload);
-              VERIFY(write(fd, hdr_with_paylod.data(), hdr_with_paylod.size()) != -1, "Failed to write '{}'",
-                     hdr_with_paylod);
-            });
+          while (!events_queue.empty()) {
+            auto evt = pop_event();
+            const auto protocol_msg = evt->serialize(seq++);
+            write_protocol_message(protocol_msg);
+            delete evt;
           }
         } else if (pfds[i].fd == master_pty_fd && (pfds[i].revents & POLLIN)) {
           auto bytes_read = read(master_pty_fd, tracee_stdout_buffer, 4096 * 3);
           if (bytes_read == -1)
             continue;
-
           std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-          json j;
-          j["seq"] = seq++;
-          j["type"] = "event";
-          j["event"] = "output";
-          j["body"] = {};
-          j["body"]["category"] = "stdout";
-          j["body"]["output"] = fmt::format("{}", data);
-          const auto dap_payload = j.dump();
-
-          const auto hdr_with_paylod =
-              fmt::format("Content-Length: {}\r\n\r\n{}\n", dap_payload.size(), dap_payload);
-          VERIFY(write(tracer_out_fd, hdr_with_paylod.data(), hdr_with_paylod.size()) != -1,
-                 "Failed to write '{}'", hdr_with_paylod);
+          // we do this _simply_ to escape the string (and utf-8 it?)
+          json str = data;
+          const auto escaped_body_contents = str.dump();
+          const auto payload = fmt::format(
+              R"({{"seq": {},"type":"event","event":"output","body":{{ "category": "stdout", "output": {}}}}})",
+              seq++, escaped_body_contents);
+          const auto header = fmt::format("Content-Length: {}\r\n\r\n\n", payload.size());
+          VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
+          VERIFY(write(tracer_out_fd, payload.data(), payload.size()) != -1, "Failed to write '{}'", payload);
         }
       }
     }
     if (!keep_running)
       cleanup_times--;
   }
-}
-
-// Post `output_message` to the DAP output message queue
-void
-DAP::post_output_event(std::unique_ptr<std::string> output_message) noexcept
-{
-  {
-    LockGuard<SpinLock> guard{output_message_lock};
-    messages.push_back(std::move(output_message));
-  }
-  notify_new_message();
+  cleaned_up = true;
 }
 
 void
-DAP::post_json_event(json &&dictionary) noexcept
+DAP::post_event(Event *serializable_event) noexcept
 {
   {
     LockGuard<SpinLock> guard{output_message_lock};
-    msg.push_back(std::move(dictionary));
+    events_queue.push_back(serializable_event);
   }
   notify_new_message();
 }
@@ -233,8 +211,9 @@ DAP::notify_new_message() noexcept
 }
 
 void
-DAP::kill_ui() noexcept
+DAP::clean_up() noexcept
 {
+  using namespace std::chrono_literals;
   keep_running = false;
 }
 

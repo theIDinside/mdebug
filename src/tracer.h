@@ -2,6 +2,8 @@
 
 #include "common.h"
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
+#include <queue>
 #include <unordered_map>
 #include <vector>
 
@@ -10,9 +12,16 @@ struct Target;
 
 using Pid = pid_t;
 using Tid = pid_t;
+namespace ui::dap {
+class DAP;
+struct Event;
+} // namespace ui::dap
+
+namespace cmd {
+class Command;
+};
 
 struct LWP;
-
 enum class AddObjectResult : u8
 {
   OK = 0,
@@ -20,6 +29,7 @@ enum class AddObjectResult : u8
   FILE_NOT_EXIST
 };
 
+/** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
 public:
@@ -36,15 +46,20 @@ public:
   /// Create & Initialize IO thread that deals with input/output between the tracee/tracer
   /// and the client
   void init_io_thread() noexcept;
-
   void interrupt(LWP lwp) noexcept;
-  void run(LWP lwp) noexcept;
 
   // This will be removed in future work
   // but it's just to get something up-and-running
   bool waiting_for_ui() const noexcept;
-  void wait_and_process_ui_events() noexcept;
-  void wait_for_tracee_events() noexcept;
+  void continue_current_target() noexcept;
+  bool wait_for_tracee_events() noexcept;
+  void set_ui(ui::dap::DAP *dap) noexcept;
+  void kill_ui() noexcept;
+  void post_event(ui::dap::Event *obj) noexcept;
+
+  /** Receives a command and places it on the command queue to be executed. Thread-safe, but if re-entrant will
+   * hang. */
+  void accept_command(cmd::Command *cmd) noexcept;
 
 private:
   std::vector<std::unique_ptr<Target>> targets;
@@ -53,4 +68,7 @@ private:
   // N.B. to be removed in future work when an event-processing scheme
   // has been developed
   bool ui_wait;
+  ui::dap::DAP *dap;
+  SpinLock command_queue_lock;
+  std::queue<cmd::Command *> command_queue;
 };

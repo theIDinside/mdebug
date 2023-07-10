@@ -7,6 +7,7 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
+using namespace std::string_view_literals;
 enum class WaitStatus
 {
 #define ITEM(IT, Value) IT = Value,
@@ -51,22 +52,30 @@ struct TaskInfo
   bool stopped : 1;
   bool signal_in_flight : 1;
   bool stepping : 1;
+  bool stopped_by_tracer : 1;
+  bool initialized : 1;
   pid_t tid;
-  TraceePointer<void> stopped_address;
-  TaskWaitResult wait_status;
-  user_regs_struct registers;
+  std::optional<TaskWaitResult> wait_status;
   RunType run_type;
 
-  TaskInfo(pid_t tid, TraceePointer<void> stopped_at) noexcept;
-  TaskInfo() = default;
-  ~TaskInfo() = default;
-  TaskInfo(const TaskInfo &o) = default;
-  TaskInfo(TaskInfo &&o) = default;
+  TaskInfo() = delete;
+  TaskInfo(pid_t tid) noexcept;
+  TaskInfo(const TaskInfo &o) noexcept = default;
+  TaskInfo(TaskInfo &&o) noexcept = default;
+  TaskInfo &operator=(TaskInfo &t) noexcept = default;
   TaskInfo &operator=(const TaskInfo &o) = default;
 
   void set_taskwait(TaskWaitResult wait) noexcept;
   void set_running(RunType) noexcept;
-  void request_registers() noexcept;
+  void set_stop() noexcept;
+  void initialize() noexcept;
+  bool can_continue() noexcept;
+
+  /*
+   * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
+   * being delivered, etc.
+   */
+  bool is_stopped() noexcept;
 };
 
 struct TaskVMInfo
@@ -81,25 +90,46 @@ struct TaskVMInfo
 namespace fmt {
 template <> struct formatter<TaskVMInfo>
 {
-  template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
 
-  template <typename FormatContext> auto format(TaskVMInfo const &vm_info, FormatContext &ctx);
+  template <typename FormatContext>
+  auto
+  format(TaskVMInfo const &vm_info, FormatContext &ctx)
+  {
+    return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low.to_string(),
+                          vm_info.stack_size, vm_info.tls.to_string());
+  }
 };
 
-template <typename ParseContext>
-constexpr auto
-formatter<TaskVMInfo>::parse(ParseContext &ctx)
+template <> struct formatter<TaskInfo>
 {
-  return ctx.begin();
-}
 
-template <typename FormatContext>
-auto
-formatter<TaskVMInfo>::format(TaskVMInfo const &vm_info, FormatContext &ctx)
-{
-  return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low.to_string(),
-                        vm_info.stack_size, vm_info.tls.to_string());
-}
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(TaskInfo const &task, FormatContext &ctx)
+  {
+
+    std::string_view wait_status = "None";
+    if (task.wait_status) {
+      wait_status = to_str(task.wait_status->ws);
+    }
+
+    return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.tid,
+                          task.stopped, task.stopped_by_tracer, wait_status);
+  }
+};
 
 template <> struct formatter<user_regs_struct>
 {

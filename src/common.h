@@ -17,6 +17,7 @@
 #include <variant>
 #include <vector>
 // For `pipe` syscall
+#include <optional>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -34,6 +35,21 @@ using i8 = std::int8_t;
 
 using Tid = pid_t;
 using Pid = pid_t;
+
+template <typename T> using Option = std::optional<T>;
+
+/** C++-ified result from waitpid syscall. */
+struct WaitPid
+{
+  Tid tid;
+  int status;
+};
+
+/** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
+ * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
+Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
+/** `wait`'s for `tid` in a non-blocking way. If waiting on `tid` yielded no wait status, returns `none` */
+Option<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
 
 // "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
 template <typename T> using ActualType = std::remove_cvref_t<T>;
