@@ -1,5 +1,7 @@
 #pragma once
 
+#include "lib/lockguard.h"
+#include "lib/spinlock.h"
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -10,9 +12,12 @@
 #include <source_location>
 #include <span>
 #include <sys/mman.h>
+#include <sys/poll.h>
 #include <type_traits>
 #include <variant>
 #include <vector>
+// For `pipe` syscall
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 using Path = fs::path;
@@ -26,6 +31,9 @@ using i64 = std::int64_t;
 using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
+
+using Tid = pid_t;
+using Pid = pid_t;
 
 // "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
 template <typename T> using ActualType = std::remove_cvref_t<T>;
@@ -86,30 +94,34 @@ public:
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
+  template <std::integral OffsetT>
   constexpr TraceePointer
-  operator+(std::intptr_t offset) const noexcept
+  operator+(OffsetT offset) const noexcept
   {
     const auto res = remote_addr + (offset * type_size());
     return TraceePointer{res};
   }
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
+  template <std::integral OffsetT>
   constexpr TraceePointer
-  operator-(std::intptr_t offset) const noexcept
+  operator-(OffsetT offset) const noexcept
   {
     const auto res = remote_addr - (offset * type_size());
     return TraceePointer{res};
   }
 
+  template <std::integral OffsetT>
   constexpr TraceePointer &
-  operator+=(std::intptr_t offset) noexcept
+  operator+=(OffsetT offset) noexcept
   {
     remote_addr += (offset * type_size());
     return *this;
   }
 
+  template <std::integral OffsetT>
   constexpr TraceePointer &
-  operator-=(std::intptr_t offset) noexcept
+  operator-=(OffsetT offset) noexcept
   {
     remote_addr -= (offset * type_size());
     return *this;
@@ -130,6 +142,21 @@ public:
     return TraceePointer{current};
   }
 
+  constexpr TraceePointer &
+  operator--() noexcept
+  {
+    remote_addr -= type_size();
+    return *this;
+  }
+
+  constexpr TraceePointer
+  operator--(int) noexcept
+  {
+    const auto current = remote_addr;
+    remote_addr -= type_size();
+    return TraceePointer{current};
+  }
+
   uintptr_t
   get() const noexcept
   {
@@ -142,7 +169,7 @@ public:
   type_size() noexcept
   {
     if constexpr (std::is_void_v<T>)
-      return 8;
+      return 1;
     else
       return sizeof(T);
   }
@@ -224,6 +251,7 @@ class ScopedFd
 {
 public:
   ScopedFd() noexcept : fd(-1), p{} {}
+  ScopedFd(int fd) noexcept;
   ScopedFd(int fd, Path p) noexcept;
   ~ScopedFd() noexcept;
 
@@ -251,12 +279,31 @@ public:
 
   static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
   static ScopedFd open_read_only(const Path &p) noexcept;
+  static ScopedFd take_ownership(int fd) noexcept;
 
 private:
   int fd;
   Path p;
   u64 file_size_;
 };
+
+constexpr pollfd
+cfg_read_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLIN | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
+
+constexpr pollfd
+cfg_write_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLOUT | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
 
 static constexpr u8 LEB128_MASK = 0b0111'1111;
 
@@ -489,3 +536,34 @@ mmap_file(ScopedFd &fd, u64 size, bool read_only) noexcept
   ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, fd.path().c_str());
   return ptr;
 }
+
+struct Pipe
+{
+private:
+  union
+  {
+    struct
+    {
+      int read;
+      int write;
+    };
+    int _pipe[2];
+  };
+
+public:
+  static Pipe non_blocking_read() noexcept;
+
+  constexpr int
+  read_end() const noexcept
+  {
+    return read;
+  }
+
+  constexpr int
+  write_end() const noexcept
+  {
+    return write;
+  }
+};
+
+using SpinGuard = LockGuard<SpinLock>;

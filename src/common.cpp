@@ -106,8 +106,12 @@ ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path))
   } else {
     file_size_ = 0;
   }
-  fmt::println("File size: {}", file_size_);
   ASSERT(fd != -1, "Failed to open {} [{}]", p.c_str(), strerror(errno));
+}
+
+ScopedFd::ScopedFd(int fd) noexcept : fd(fd)
+{
+  VERIFY(fd != -1, "Taking ownership of a closed file or error file: {}", strerror(errno));
 }
 
 ScopedFd::~ScopedFd() noexcept { close(); }
@@ -179,6 +183,13 @@ ScopedFd::open_read_only(const Path &p) noexcept
   return ScopedFd{::open(p.c_str(), O_RDONLY), p};
 }
 
+/*static*/
+ScopedFd
+ScopedFd::take_ownership(int fd) noexcept
+{
+  return ScopedFd{fd};
+}
+
 u64
 DwarfBinaryReader::dwarf_spec_read_value() noexcept
 {
@@ -247,4 +258,16 @@ DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
 {
   end = buffer + new_size;
   size = new_size;
+}
+
+/*static*/
+Pipe
+Pipe::non_blocking_read() noexcept
+{
+  Pipe p;
+  pipe(p._pipe);
+  auto flags = fcntl(p.read_end(), F_GETFL);
+  VERIFY(flags != -1, "Failed to get flags for read-end of pipe");
+  VERIFY(-1 != fcntl(p.read_end(), F_SETFL, flags | O_NONBLOCK), "Failed to set non-blocking for pipe");
+  return p;
 }
