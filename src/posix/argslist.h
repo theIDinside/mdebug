@@ -15,6 +15,7 @@ struct Command
 
 /**
  * Utility class to be able to be passed to POSIX syscalls and utilities.
+ * Does minor sanity checks for our convenience.
  */
 class PosixArgsList
 {
