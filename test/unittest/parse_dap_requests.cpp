@@ -3,8 +3,7 @@
 #include <string>
 #include <type_traits>
 
-#include "../../src/interface/dap/interface.h"
-#include "nlohmann/json_fwd.hpp"
+#include "../../src/interface/dap/parse_buffer.h"
 
 // clang-format off
 const auto WellFormedPayloads_3 = 
@@ -119,7 +118,7 @@ TEST(DapRequestParsing, ParseRequestTypes3WellFormed)
     EXPECT_TRUE(json["command"].is_string());
     std::string_view cmd_str;
     json.at("command").get_to(cmd_str);
-    const auto command = ui::dap::parse_input(cmd_str);
+    const auto command = ui::dap::parse_command_type(cmd_str);
     switch (i++) {
     case 0:
       EXPECT_EQ(ui::dap::Command::Launch, command)
