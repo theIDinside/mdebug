@@ -37,9 +37,13 @@ set(MIDAS_SOURCES
   src/symbolication/type.cpp
   src/symbolication/type.h
   src/lib/lockguard.h
+  src/interface/dap/protocol.cpp
+  src/interface/dap/protocol.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
   src/interface/dap/dap_defs.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
   src/interface/pty.cpp
   src/interface/pty.h
   src/user_commands/commands.cpp
@@ -91,8 +95,8 @@ add_subdirectory(dependencies/googletest)
 add_executable(
   parse_dap_requests
   test/unittest/parse_dap_requests.cpp
-  src/interface/dap/interface.cpp
-  src/interface/dap/interface.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
   ${COMMON_SRC}
 )
 
@@ -100,6 +104,7 @@ target_link_libraries(
   parse_dap_requests
   GTest::gtest_main
   fmt::fmt
+  mdb_spinlock
   nlohmann_json::nlohmann_json
 )
 
