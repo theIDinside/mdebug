@@ -42,6 +42,8 @@ set(MIDAS_SOURCES
   src/interface/dap/dap_defs.h
   src/interface/pty.cpp
   src/interface/pty.h
+  src/user_commands/commands.cpp
+  src/user_commands/commands.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
