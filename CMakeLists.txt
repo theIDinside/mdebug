@@ -41,6 +41,8 @@ set(MIDAS_SOURCES
   src/interface/dap/protocol.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
+  src/interface/dap/commands.cpp
+  src/interface/dap/commands.h
   src/interface/dap/dap_defs.h
   src/interface/dap/parse_buffer.cpp
   src/interface/dap/parse_buffer.h
