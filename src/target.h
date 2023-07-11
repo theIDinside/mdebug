@@ -15,6 +15,10 @@
 #include <unistd.h>
 #include <unordered_map>
 
+namespace ui {
+struct UICommand;
+};
+
 struct LWP
 {
   Pid pid;
@@ -59,6 +63,8 @@ read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
   return nread;
 }
 
+struct Target;
+
 struct BreakpointMap
 {
   u32 bp_id_counter;
@@ -71,6 +77,7 @@ struct BreakpointMap
     return breakpoints.contains(addr.get());
   }
   bool insert(TraceePointer<void> addr, u8 overwritten_byte) noexcept;
+  void clear(Target *target) noexcept;
   Breakpoint *get(u32 id) noexcept;
   Breakpoint *get(TraceePointer<void> addr) noexcept;
 };
@@ -78,6 +85,7 @@ struct BreakpointMap
 struct Target
 {
   friend class Tracer;
+  friend struct ui::UICommand;
   // Members
   pid_t task_leader;
   std::vector<ObjectFile *> object_files;
@@ -129,6 +137,11 @@ struct Target
   /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
    * multiple breakpoints at the same location.*/
   void set_breakpoint(TraceePointer<u64> address) noexcept;
+  void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
+  // Services the `setInstructionBreakpoint` requests
+  // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
+  //  what's in `addresses`.
+  void reset_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
@@ -138,8 +151,6 @@ struct Target
 
   /* Check if we have any tasks left in the process space. */
   bool running() const noexcept;
-
-  void emit_breakpoint_event(TPtr<void> bp_addr);
 
   // Debug Symbols Related Logic
   void register_object_file(ObjectFile *obj) noexcept;

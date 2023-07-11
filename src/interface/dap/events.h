@@ -1,62 +1,70 @@
 #pragma once
 
 #include "../../common.h"
+#include "../ui_result.h"
 #include "dap_defs.h"
+#include "types.h"
 #include <nlohmann/json_fwd.hpp>
 
 namespace ui::dap {
 
-struct SerializedProtocolMessage
+struct ContinuedEvent final : public ui::UIResult
 {
-  std::string header;
-  std::string payload;
+  // threadId
+  int thread_id;
+  // allThreadsContinued
+  bool all_threads_continued;
+  ContinuedEvent(Tid tid, bool all_threads) noexcept;
+  std::string serialize(int seq) const noexcept override final;
 };
 
-struct ProtocolMessage
+struct ExitedEvent final : public ui::UIResult
 {
-  std::string header(const std::string &payload) noexcept;
+  // exitCode
+  int exit_code;
+  ExitedEvent(int exit_code) noexcept;
+  std::string serialize(int seq) const noexcept override final;
 };
 
-struct Event : public ProtocolMessage
-{
-  virtual ~Event() noexcept = default;
-
-  virtual SerializedProtocolMessage serialize(int seq) noexcept = 0;
-};
-
-struct ThreadEvent : public Event
+struct ThreadEvent final : public ui::UIResult
 {
   ThreadEvent(ThreadReason reason, Tid tid) noexcept;
   virtual ~ThreadEvent() noexcept = default;
-  SerializedProtocolMessage serialize(int seq) noexcept override final;
+  std::string serialize(int seq) const noexcept override final;
   ThreadReason reason;
   Tid tid;
 };
 
-struct StoppedEvent final : public Event
+struct StoppedEvent final : public ui::UIResult
 {
   virtual ~StoppedEvent() noexcept = default;
-  StoppedEvent(StoppedReason reason, std::string_view description, std::vector<int> bps) noexcept;
+  StoppedEvent(StoppedReason reason, std::string_view description, Tid tid, std::vector<int> bps,
+               std::string_view text, bool all_stopped) noexcept;
   StoppedReason reason;
+  // static description
   std::string_view description;
+  Tid tid;
   std::vector<int> bp_ids;
-  SerializedProtocolMessage serialize(int seq) noexcept override final;
+  // static additional information, name of exception for instance
+  std::string_view text;
+  bool all_threads_stopped;
+  std::string serialize(int seq) const noexcept override final;
 };
 
-struct BreakpointEvent final : public Event
+struct BreakpointEvent final : public ui::UIResult
 {
-  std::vector<int> bp_ids;
-  SerializedProtocolMessage serialize(int seq) noexcept override final;
+  ui::dap::Breakpoint breakpoint;
+  std::string serialize(int seq) const noexcept override final;
 };
 
-struct OutputEvent final : public Event
+struct OutputEvent final : public ui::UIResult
 {
   virtual ~OutputEvent() noexcept = default;
   OutputEvent(std::string_view category, std::string &&output) noexcept;
 
   std::string_view category; // static category strings exist, we always pass literals to this
   std::string output;
-  SerializedProtocolMessage serialize(int seq) noexcept override final;
+  std::string serialize(int seq) const noexcept override final;
 };
 
 }; // namespace ui::dap

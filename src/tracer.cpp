@@ -1,19 +1,17 @@
 #include "tracer.h"
 #include "./interface/dap/interface.h"
 #include "common.h"
-#include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
-#include "interface/dap/protocol.h"
+#include "interface/ui_command.h"
+#include "interface/ui_result.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
 #include "symbolication/cu.h"
-#include "symbolication/dwarf.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "target.h"
 #include "task.h"
-#include "user_commands/commands.h"
 #include <algorithm>
 #include <bits/ranges_util.h>
 #include <cstdlib>
@@ -312,13 +310,13 @@ Tracer::kill_ui() noexcept
 }
 
 void
-Tracer::post_event(ui::dap::Event *obj) noexcept
+Tracer::post_event(ui::UIResultPtr obj) noexcept
 {
   dap->post_event(obj);
 }
 
 void
-Tracer::accept_command(cmd::Command *cmd) noexcept
+Tracer::accept_command(ui::UICommand *cmd) noexcept
 {
   {
     SpinGuard lock{command_queue_lock};

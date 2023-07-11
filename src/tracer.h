@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common.h"
+#include "interface/ui_command.h"
+#include "interface/ui_result.h"
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
 #include <queue>
@@ -21,6 +23,10 @@ namespace cmd {
 class Command;
 };
 
+namespace ui {
+struct UICommand;
+}
+
 struct LWP;
 enum class AddObjectResult : u8
 {
@@ -34,6 +40,7 @@ class Tracer
 {
 public:
   static Tracer *Instance;
+  friend struct ui::UICommand;
   Tracer() noexcept;
   void add_target_set_current(pid_t task_leader, const Path &path) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
@@ -55,11 +62,11 @@ public:
   bool wait_for_tracee_events() noexcept;
   void set_ui(ui::dap::DAP *dap) noexcept;
   void kill_ui() noexcept;
-  void post_event(ui::dap::Event *obj) noexcept;
+  void post_event(ui::UIResultPtr obj) noexcept;
 
   /** Receives a command and places it on the command queue to be executed. Thread-safe, but if re-entrant will
    * hang. */
-  void accept_command(cmd::Command *cmd) noexcept;
+  void accept_command(ui::UICommand *cmd) noexcept;
 
 private:
   std::vector<std::unique_ptr<Target>> targets;
@@ -70,5 +77,5 @@ private:
   bool ui_wait;
   ui::dap::DAP *dap;
   SpinLock command_queue_lock;
-  std::queue<cmd::Command *> command_queue;
+  std::queue<ui::UICommand *> command_queue;
 };

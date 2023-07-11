@@ -94,12 +94,12 @@ DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_p
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
-Event *
+UIResultPtr
 DAP::pop_event() noexcept
 {
   VERIFY(!events_queue.empty(), "Can't pop events from an empty list!");
   LockGuard<SpinLock> lock{output_message_lock};
-  Event *evt = events_queue.front();
+  UIResultPtr evt = events_queue.front();
   std::uintptr_t test = (std::uintptr_t)evt;
   events_queue.pop_front();
   ASSERT((std::uintptr_t)evt == test, "pointer changed value under our feet");
@@ -107,10 +107,17 @@ DAP::pop_event() noexcept
 }
 
 void
-DAP::write_protocol_message(const SerializedProtocolMessage &msg) noexcept
+DAP::write_protocol_message(std::string_view msg) noexcept
 {
-  VERIFY(write(tracer_out_fd, msg.header.data(), msg.header.size()) != -1, "Failed to write '{}'", msg.header);
-  VERIFY(write(tracer_out_fd, msg.payload.data(), msg.payload.size()) != -1, "Failed to write '{}'", msg.payload);
+  const auto header = fmt::format("Content-Length: {}\r\n\r\n\n", msg.size());
+  VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
+  VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
+}
+
+u64
+DAP::new_result_id() noexcept
+{
+  return seq++;
 }
 
 void
@@ -147,7 +154,8 @@ DAP::run_ui_loop() noexcept
               auto obj = json::parse(packet);
               std::string_view cmd_name;
               obj["command"].get_to(cmd_name);
-              auto cmd = parse_command(parse_command_type(cmd_name), obj["arguments"]);
+              ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
+              auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
               tracer->accept_command(cmd);
             }
             // since there's no partials left in the buffer, we reset it
@@ -188,7 +196,7 @@ DAP::run_ui_loop() noexcept
 }
 
 void
-DAP::post_event(Event *serializable_event) noexcept
+DAP::post_event(UIResultPtr serializable_event) noexcept
 {
   {
     LockGuard<SpinLock> guard{output_message_lock};
@@ -215,6 +223,13 @@ DAP::clean_up() noexcept
 {
   using namespace std::chrono_literals;
   keep_running = false;
+}
+
+// Fulfill the `UI` concept in ui_result.h
+void
+DAP::display_result(std::string_view str) const noexcept
+{
+  VERIFY(write(tracer_out_fd, str.data(), str.size()) != -1, "Failed to write '{}'", str);
 }
 
 } // namespace ui::dap

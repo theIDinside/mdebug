@@ -1,10 +1,9 @@
 #pragma once
 
 #include "../../common.h"
-#include "../../lib/lockguard.h"
 #include "../../lib/spinlock.h"
+#include "../ui_command.h"
 #include "dap_defs.h"
-#include "events.h"
 #include <algorithm>
 #include <array>
 #include <nlohmann/json.hpp>
@@ -41,14 +40,17 @@ public:
   // exceptions.
   void run_ui_loop() noexcept;
 
-  void post_event(Event *serializable_event) noexcept;
+  void post_event(UIResultPtr serializable_event) noexcept;
   int get_post_event_fd() noexcept;
   void notify_new_message() noexcept;
   void clean_up() noexcept;
+  // Fulfill the `UI` concept in ui_result.h
+  void display_result(std::string_view str) const noexcept;
 
 private:
-  Event *pop_event() noexcept;
-  void write_protocol_message(const SerializedProtocolMessage &msg) noexcept;
+  UIResultPtr pop_event() noexcept;
+  void write_protocol_message(std::string_view msg) noexcept;
+  u64 new_result_id() noexcept;
 
   Pipe post_event_fd;
   Tracer *tracer;
@@ -61,8 +63,8 @@ private:
   char *fmt_out_buffer;
   char *tracee_stdout_buffer;
   SpinLock output_message_lock;
-  std::deque<Event *> events_queue;
-  int seq;
+  std::deque<UIResultPtr> events_queue;
+  u64 seq;
   bool cleaned_up = false;
 };
 }; // namespace ui::dap

@@ -4,7 +4,6 @@
 #include "fmt/core.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
-#include "interface/dap/protocol.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
@@ -132,7 +131,7 @@ Target::handle_stopped_for(TaskInfo *task) noexcept
   auto &task_register = register_cache[task->tid];
   const auto current_pc = TPtr<void>{task_register.rip};
   if (this->bkpt_map.contains(current_pc - 1)) {
-    emit_breakpoint_event((current_pc - 1));
+    emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
     return ActionOnEvent::StopTracee;
   } else {
     // No action needs taking, restart `task`
@@ -186,6 +185,26 @@ Target::set_breakpoint(TraceePointer<u64> address) noexcept
   ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
 
   bkpt_map.insert(address.as<void>(), ins_byte);
+}
+
+void
+Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
+{
+  auto bp = bkpt_map.get(bp_addr);
+  bp->times_hit++;
+  auto evt =
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
+  evt->bp_ids.push_back(bp->bp_id);
+  Tracer::Instance->post_event(evt);
+}
+
+void
+Target::reset_breakpoints(std::vector<TPtr<void>> addresses) noexcept
+{
+  bkpt_map.clear(this);
+  for (auto addr : addresses) {
+    set_breakpoint(addr.as<u64>());
+  }
 }
 
 void
@@ -268,8 +287,17 @@ BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte) noexcept
 {
   if (contains(addr))
     return false;
-  breakpoints[addr.get()] = Breakpoint{ins_byte, bp_id_counter++};
+  breakpoints[addr.get()] = Breakpoint{addr, ins_byte, bp_id_counter++};
   return true;
+}
+
+void
+BreakpointMap::clear(Target *target) noexcept
+{
+  for (const auto &[addr, bkpt] : breakpoints) {
+    ptrace(PTRACE_POKEDATA, target->task_leader, bkpt.address.get(), bkpt.ins_byte);
+  }
+  breakpoints.clear();
 }
 
 Breakpoint *
@@ -351,16 +379,6 @@ Target::read_auxv(TaskWaitResult &wait)
   }
 
   ASSERT(entry.has_value() && interpreter_base.has_value(), "Expected ENTRY and INTERPRETER_BASE to be found");
-}
-
-void
-Target::emit_breakpoint_event(TPtr<void> bp_addr)
-{
-  auto bp = bkpt_map.get(bp_addr);
-  bp->times_hit++;
-  auto evt = new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", {}};
-  evt->bp_ids.push_back(bp->bp_id);
-  Tracer::Instance->post_event(evt);
 }
 
 void
