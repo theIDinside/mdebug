@@ -2,6 +2,7 @@
 
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
+#include <charconv>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -292,6 +293,7 @@ public:
   operator int() const noexcept;
   u64 file_size() const noexcept;
   const Path &path() const noexcept;
+  void forget() noexcept;
 
   static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
   static ScopedFd open_read_only(const Path &p) noexcept;
@@ -581,5 +583,27 @@ public:
     return write;
   }
 };
+
+template <std::integral Value>
+constexpr Option<Value>
+to_integral(std::string_view s)
+{
+  if (Value value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+    return value;
+  else
+    return std::nullopt;
+}
+
+constexpr Option<TPtr<void>>
+to_addr(std::string_view s)
+{
+  if (s.starts_with("0x"))
+    s.remove_prefix(2);
+
+  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+    return TPtr<void>{value};
+  else
+    return std::nullopt;
+}
 
 using SpinGuard = LockGuard<SpinLock>;

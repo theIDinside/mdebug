@@ -195,6 +195,13 @@ ScopedFd::path() const noexcept
   return p;
 }
 
+void
+ScopedFd::forget() noexcept
+{
+  p = "";
+  fd = -1;
+}
+
 /* static */
 ScopedFd
 ScopedFd::open(const Path &p, int flags, mode_t mode) noexcept
