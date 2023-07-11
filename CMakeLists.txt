@@ -46,10 +46,10 @@ set(MIDAS_SOURCES
   src/interface/dap/parse_buffer.h
   src/interface/dap/events.cpp
   src/interface/dap/events.h
+  src/interface/dap/types.cpp
+  src/interface/dap/types.h
   src/interface/pty.cpp
   src/interface/pty.h
-  src/user_commands/commands.cpp
-  src/user_commands/commands.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
