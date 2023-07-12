@@ -26,3 +26,9 @@ Justification for these three libraries are as follows;
 - libfmt is the best thing that ever happened to C++. Finally C++ can join the 21st century. An added bonus is also that it's a fast library and easy to use. With the right tweaks, it compiles down to what looks like C printf's. Fantastic.
 - nlohmann_json because we don't want to parse json ourselves. It's not fun. The particular choice for parsing JSON may change, as nlohmann_json might not fulfill MDB's requirements, because it *seems* as though it only operates on JSON Lines. We parse JSON that come with a header (defining the length of the json object) - if there's a library that can take this into account, we will use that instead.
 - gtest - for unit testing. Which is absolutely needed when we, for instance, want to parse JSON objects from a raw stream of bytes.
+
+# Current blog posts that describes MDB 
+These blog posts are not done, but I write some in them during the dev cycles to build a cohesive explanation of what's going on and where.
+
+- [Command System](./blog/commands_system.md)
+- [Concurrency](./blog/concurrency.md)
