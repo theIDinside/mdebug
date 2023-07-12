@@ -32,13 +32,13 @@ R"(Content-Length: )";
 
 TEST(DapRequestParsing, WellFormedPayloadsTest)
 {
-  const auto result = ui::dap::parse_buffer(WellFormedPayloads_3);
+  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3);
   EXPECT_EQ(result.size(), 3);
 }
 
 TEST(DapRequestParsing, CorrectHeaderTypes)
 {
-  const auto result = ui::dap::parse_buffer(WellFormedPayloads_3);
+  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3);
   for (auto &&data : result) {
     EXPECT_EQ(data.index(), 0);
   }
@@ -53,7 +53,7 @@ using RD = ui::dap::RemainderData;
 
 TEST(DapRequestParsing, CorrectMixOfHeaderTypes)
 {
-  const auto result = ui::dap::parse_buffer(OneWellFormedOnePartial);
+  const auto result = ui::dap::parse_headers_from(OneWellFormedOnePartial);
   EXPECT_EQ(result.size(), 2);
   EXPECT_EQ(result[0].index(), 0);
   EXPECT_EQ(result[1].index(), 1);
@@ -91,7 +91,7 @@ TEST(DapRequestParsing, CorrectMixOfHeaderTypes)
 
 TEST(DapRequestParsing, OneWellFormedOneRemainderData)
 {
-  const auto result = ui::dap::parse_buffer(OneWellFormedOneRemainderData);
+  const auto result = ui::dap::parse_headers_from(OneWellFormedOneRemainderData);
   EXPECT_EQ(result.size(), 2);
   EXPECT_EQ(result[0].index(), 0);
   EXPECT_EQ(result[1].index(), 2);
@@ -106,7 +106,7 @@ TEST(DapRequestParsing, OneWellFormedOneRemainderData)
 
 TEST(DapRequestParsing, ParseRequestTypes3WellFormed)
 {
-  const auto result = ui::dap::parse_buffer(WellFormedPayloads_3);
+  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3);
   const auto unwrapper = [](const auto &v) -> const CD * { return maybe_unwrap<CD>(v); };
   auto i = 0;
   for (auto &&payload : result) {
@@ -134,4 +134,27 @@ TEST(DapRequestParsing, ParseRequestTypes3WellFormed)
       break;
     }
   }
+}
+
+const auto SetInsBkptReq =
+    R"(Content-Length: 205)"
+    "\r\n\r\n"
+    R"({"seq":4,"type":"request","command":"setInstructionBreakpoints","arguments":{"breakpoints":[{"instructionReference":"0x402030"},{"instructionReference":"0x7ffffff"},{"instructionReference":"0xabcdbeef"}]}})";
+
+TEST(DapRequestParsing, setInstructionBreakpointsParsing)
+{
+  const auto result = ui::dap::parse_headers_from(SetInsBkptReq);
+  const auto unwrapper = [](const auto &v) -> const CD * { return maybe_unwrap<CD>(v); };
+  auto ptr = unwrapper(result[0]);
+  EXPECT_TRUE(ptr != nullptr) << "Expected payload to be OK parsed";
+  std::string_view data{ptr->payload_begin, ptr->payload_begin + ptr->payload_length};
+  auto json = nlohmann::json::parse(data);
+  EXPECT_TRUE(json["command"].is_string());
+  std::string_view cmd_str;
+  json.at("command").get_to(cmd_str);
+  const auto command = ui::dap::parse_command_type(cmd_str);
+  EXPECT_EQ(command, ui::dap::Command::SetInstructionBreakpoints);
+  std::string_view cmd_name;
+  json["command"].get_to(cmd_name);
+  ASSERT(json.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
 }

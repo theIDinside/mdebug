@@ -37,6 +37,8 @@ using i8 = std::int8_t;
 using Tid = pid_t;
 using Pid = pid_t;
 
+#define PAGE_SIZE 4096
+
 template <typename T> using Option = std::optional<T>;
 
 /** C++-ified result from waitpid syscall. */
@@ -45,6 +47,8 @@ struct WaitPid
   Tid tid;
   int status;
 };
+
+#define FOR_EVER for (;;)
 
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
  * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
@@ -554,35 +558,6 @@ mmap_file(ScopedFd &fd, u64 size, bool read_only) noexcept
   ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, fd.path().c_str());
   return ptr;
 }
-
-struct Pipe
-{
-private:
-  union
-  {
-    struct
-    {
-      int read;
-      int write;
-    };
-    int _pipe[2];
-  };
-
-public:
-  static Pipe non_blocking_read() noexcept;
-
-  constexpr int
-  read_end() const noexcept
-  {
-    return read;
-  }
-
-  constexpr int
-  write_end() const noexcept
-  {
-    return write;
-  }
-};
 
 template <std::integral Value>
 constexpr Option<Value>

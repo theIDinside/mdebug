@@ -1,7 +1,6 @@
 #include "interface.h"
 #include "../../tracer.h"
 #include "commands.h"
-#include "events.h"
 #include "fmt/core.h"
 #include "parse_buffer.h"
 #include <algorithm>
@@ -10,10 +9,13 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fcntl.h>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <nlohmann/json.hpp>
+#include <ostream>
 #include <poll.h>
 #include <ranges>
 #include <string>
@@ -24,7 +26,6 @@
 namespace ui::dap {
 using namespace std::string_literals;
 
-static constexpr auto GO = "+"sv;
 std::string_view
 ContentDescriptor::payload() const noexcept
 {
@@ -82,16 +83,25 @@ static constexpr std::string_view strings[]{
 
 using json = nlohmann::json;
 
-DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_pty_fd) noexcept
+DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_pty_fd,
+         utils::Notifier::WriteEnd command_notifier) noexcept
     : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), master_pty_fd(master_pty_fd),
-      keep_running(true), output_message_lock{}, events_queue{}, seq(0)
+      keep_running(true), output_message_lock{}, events_queue{}, seq(0), command_notifier(command_notifier)
 {
-  post_event_fd = Pipe::non_blocking_read();
-  buffer = mmap_buffer<char>(4096 * 3);
+  auto [r, w] = utils::Notifier::notify_pipe();
+  posted_event_notifier = w;
+  posted_evt_listener = r;
+  buffer = mmap_buffer<char>(4096);
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
   auto flags = fcntl(master_pty_fd, F_GETFL);
   VERIFY(flags != -1, "Failed to get pty flags");
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
+  log_file = std::fstream{"/home/cx/dev/foss/cx/dbm/build-debug/bin/dap.log",
+                          std::ios_base::in | std::ios_base::out | std::ios_base::trunc};
+  if (!log_file.is_open())
+    log_file.open("/home/cx/dev/foss/cx/dbm/build-debug/bin/dap.log",
+                  std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
+  setup_logging(log_file);
 }
 
 UIResultPtr
@@ -121,51 +131,71 @@ DAP::new_result_id() noexcept
 }
 
 void
-DAP::run_ui_loop() noexcept
+DAP::run_ui_loop()
 {
   auto cleanup_times = 5;
+  ParseBuffer parse_swapbuffer{PAGE_SIZE};
+
   while (keep_running || cleanup_times > 0) {
     epoll_event events[5];
     struct pollfd pfds[3]{
         cfg_read_poll(tracer_in_fd, 0),
-        cfg_read_poll(post_event_fd.read_end(), 0),
+        cfg_read_poll(posted_evt_listener, 0),
         cfg_read_poll(master_pty_fd, 0),
     };
 
     auto ready = poll(pfds, 3, 100);
     VERIFY(ready != -1, "Failed to poll");
-    char *free_ptr = buffer;
-    char *curr_ptr = buffer;
 
     for (auto i = 0; i < 3 && ready > 0; i++) {
       if ((pfds[i].revents & POLLIN) || ((pfds[i].revents & POLLOUT))) {
+        // DAP Requests (or parts of) have came in via stdout
         if (pfds[i].fd == tracer_in_fd) {
-          // process commands
-          const auto bytes_read = read(events[i].data.fd, curr_ptr, 4096 * 3);
-          if (bytes_read <= 4096 * 3) {
-            free_ptr = buffer + bytes_read;
-          }
+          parse_swapbuffer.read_from_fd(events[i].data.fd);
           bool no_partials = false;
-          const auto request_headers = parse_buffer({buffer, free_ptr}, &no_partials);
-          if (no_partials) {
+          std::string_view buffer_view = parse_swapbuffer.take_view();
+          const auto request_headers = parse_headers_from(buffer_view, &no_partials);
+          if (no_partials && request_headers.size() > 0) {
             for (auto &&hdr : request_headers) {
               auto cd = maybe_unwrap<ContentDescriptor>(hdr);
-              const auto packet = cd->payload();
-              auto obj = json::parse(packet);
+              const auto packet = std::string{cd->payload()};
+              auto obj = json::parse(packet, nullptr, false);
               std::string_view cmd_name;
               obj["command"].get_to(cmd_name);
               ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
               auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
               tracer->accept_command(cmd);
             }
+            command_notifier.notify();
             // since there's no partials left in the buffer, we reset it
-            free_ptr = buffer;
-            curr_ptr = buffer;
+            parse_swapbuffer.clear();
+          } else {
+            if (request_headers.size() > 1) {
+              bool parsed_commands = false;
+              for (auto i = 0ull; i < request_headers.size() - 1; i++) {
+                auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
+                const auto packet = std::string{cd->payload()};
+                auto obj = json::parse(packet, nullptr, false);
+                std::string_view cmd_name;
+                obj["command"].get_to(cmd_name);
+                ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
+                auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
+                tracer->accept_command(cmd);
+                parsed_commands = true;
+              }
+              if (parsed_commands) {
+                command_notifier.notify();
+              }
+              auto rd = maybe_unwrap<RemainderData>(request_headers.back());
+              parse_swapbuffer.swap(rd->offset);
+              ASSERT(parse_swapbuffer.current_size() == rd->length,
+                     "Parse Swap Buffer operation failed; expected length {} but got {}", rd->length,
+                     parse_swapbuffer.current_size());
+            }
           }
-        } else if (pfds[i].fd == post_event_fd.read_end()) {
+        } else if (pfds[i].fd == posted_evt_listener.fd) {
           // process new messages (strings) posted on the output queue
-          char buf[GO.size()];
-          read(post_event_fd.read_end(), buf, GO.size());
+          posted_evt_listener.consume_expected();
           while (!events_queue.empty()) {
             auto evt = pop_event();
             const auto protocol_msg = evt->serialize(seq++);
@@ -205,17 +235,11 @@ DAP::post_event(UIResultPtr serializable_event) noexcept
   notify_new_message();
 }
 
-int
-DAP::get_post_event_fd() noexcept
-{
-  return post_event_fd.write_end();
-}
-
 void
 DAP::notify_new_message() noexcept
 {
-  ASSERT(write(post_event_fd.write_end(), GO.data(), GO.size()) != -1,
-         "failed to notify DAP interface of new message");
+  const auto succeeded = posted_event_notifier.notify();
+  ASSERT(succeeded, "failed to notify DAP interface of new message due to {}", strerror(errno));
 }
 
 void

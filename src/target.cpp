@@ -76,11 +76,9 @@ void
 Target::new_task(Tid tid) noexcept
 {
   VERIFY(tid != 0, "Invalid tid {}", tid);
-  if constexpr (MDB_DEBUG) {
-    auto evt = new ui::dap::OutputEvent{
-        "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
-    Tracer::Instance->post_event(evt);
-  }
+  auto evt = new ui::dap::OutputEvent{
+      "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
+  Tracer::Instance->post_event(evt);
   threads.push_back(TaskInfo{tid});
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
@@ -122,7 +120,8 @@ Target::stop_all() noexcept
 bool
 Target::should_stop_on_clone() noexcept
 {
-  return stop_on_clone;
+  return true;
+  // return stop_on_clone;
 }
 
 ActionOnEvent

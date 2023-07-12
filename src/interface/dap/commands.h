@@ -25,6 +25,7 @@ struct Continue final : public ui::UICommand
   Continue(int tid, bool all) noexcept : thread_id(tid), continue_all(all) {}
   ~Continue() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(Continue)
 };
 
 struct SetInstructionBreakpointsResponse final : ui::UIResult
@@ -40,6 +41,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   ~SetInstructionBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(SetInstructionBreakpoints)
 };
 
 ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;

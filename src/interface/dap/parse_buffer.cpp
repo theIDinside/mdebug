@@ -1,12 +1,35 @@
 #include "parse_buffer.h"
 #include <charconv>
-
+#include <fstream>
 namespace ui::dap {
 
-static const std::regex content_length = std::regex{R"(Content-Length: (\d+)\s{4})"};
+static const std::regex CONTENT_LENGTH_HEADER = std::regex{R"(Content-Length: (\d+)\s{2})"};
+
+static std::fstream *logger_file = nullptr;
+
+void
+setup_logging(std::fstream &logger)
+{
+  logger_file = &logger;
+}
+
+inline void
+log_if(std::string_view msg) noexcept
+{
+  if (logger_file) {
+    auto &stream = *logger_file;
+    stream << msg << "\n" << std::flush;
+  }
+}
+
+#define LOG_IF(fmt_expression)                                                                                    \
+  if (logger_file) {                                                                                              \
+    auto &stream = *logger_file;                                                                                  \
+    stream << (fmt_expression) << "\n" << std::flush;                                                             \
+  }
 
 std::vector<ContentParse>
-parse_buffer(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
+parse_headers_from(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
 {
   std::vector<ContentParse> result;
 
@@ -14,20 +37,23 @@ parse_buffer(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
   std::string_view internal_view{buffer_view};
   ViewMatchResult base_match;
   bool partial_found = false;
-  while (std::regex_search(internal_view.begin(), internal_view.end(), base_match, content_length)) {
+  while (std::regex_search(internal_view.begin(), internal_view.end(), base_match, CONTENT_LENGTH_HEADER)) {
     if (base_match.size() == 2) {
       std::sub_match<std::string_view::const_iterator> base_sub_match = base_match[1];
       std::string_view len_str{base_sub_match.first, base_sub_match.second};
-      u64 len;
-      const auto res = std::from_chars(len_str.data(), len_str.data() + len_str.size(), len);
-      if (res.ec != std::errc()) {
-        PANIC(fmt::format("Hard failure if <regex> thinks it's found a number when it didn't"));
-      }
-      ASSERT(res.ec != std::errc(), "Failed to parse Content Length {}", len_str);
+      const auto res = to_integral<u64>(len_str);
+      ASSERT(res.has_value(), "Failed to parse length from Content-Length header");
+      const auto len = res.value();
       if (base_match.position() + base_match.length() + len <= internal_view.size()) {
+        const auto header_begin_ptr = internal_view.data() + base_match.position();
+        const auto payload_begin_ptr = header_begin_ptr + base_match.length();
+        const auto packet_offset =
+            static_cast<u64>(std::distance((const char *)buffer_view.data(), (const char *)header_begin_ptr));
+        LOG_IF(fmt::format("payload length: '{}'\nHeader begins at '{}'", len_str, base_match.position()));
         result.push_back(ContentDescriptor{.payload_length = len,
-                                           .header_begin = internal_view.data() + base_match.position(),
-                                           .payload_begin = internal_view.data() + base_match.length()});
+                                           .packet_offset = packet_offset,
+                                           .header_begin = header_begin_ptr,
+                                           .payload_begin = payload_begin_ptr});
         internal_view.remove_prefix(base_match.position() + base_match.length() + len);
       } else {
         result.push_back(PartialContentDescriptor{
@@ -40,7 +66,11 @@ parse_buffer(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
     }
   }
   if (!internal_view.empty()) {
-    result.push_back(RemainderData{.length = internal_view.size(), .begin = internal_view.data()});
+    const char *ptr = internal_view.data();
+    const char *begin = buffer_view.data();
+    const u64 offset = std::distance(begin, ptr);
+    LOG_IF(fmt::format("Remainder data length {} at offset {}", internal_view.size(), offset));
+    result.push_back(RemainderData{.length = internal_view.size(), .offset = offset});
     partial_found = true;
   }
   if (all_msgs_ok != nullptr)

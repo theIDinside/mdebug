@@ -3,6 +3,7 @@
 #include "common.h"
 #include "interface/ui_command.h"
 #include "interface/ui_result.h"
+#include "notify_pipe.h"
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
 #include <queue>
@@ -41,7 +42,7 @@ class Tracer
 public:
   static Tracer *Instance;
   friend struct ui::UICommand;
-  Tracer() noexcept;
+  Tracer(utils::Notifier::ReadEnd wait_pipe, utils::Notifier::ReadEnd io_thread_pipe) noexcept;
   void add_target_set_current(pid_t task_leader, const Path &path) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   AddObjectResult mmap_objectfile(const Path &path) noexcept;
@@ -67,6 +68,7 @@ public:
   /** Receives a command and places it on the command queue to be executed. Thread-safe, but if re-entrant will
    * hang. */
   void accept_command(ui::UICommand *cmd) noexcept;
+  void execute_pending_commands() noexcept;
 
 private:
   std::vector<std::unique_ptr<Target>> targets;
@@ -78,4 +80,6 @@ private:
   ui::dap::DAP *dap;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;
+  utils::Notifier::ReadEnd wait_pipe;
+  utils::Notifier::ReadEnd io_thread_pipe;
 };

@@ -116,6 +116,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::SetExceptionBreakpoints:
   case Command::SetExpression:
   case Command::SetFunctionBreakpoints:
+    break;
   case Command::SetInstructionBreakpoints: {
     return new ui::dap::SetInstructionBreakpoints{std::move(args)};
   }
@@ -134,6 +135,8 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::UNKNOWN:
     break;
   }
+  PANIC("Could not parse command");
+  return nullptr;
 }
 
 } // namespace ui::dap

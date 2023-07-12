@@ -28,7 +28,8 @@
 
 Tracer *Tracer::Instance = nullptr;
 
-Tracer::Tracer() noexcept
+Tracer::Tracer(utils::Notifier::ReadEnd wait_pipe, utils::Notifier::ReadEnd io_thread_pipe) noexcept
+    : wait_pipe(wait_pipe), io_thread_pipe(io_thread_pipe)
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -223,6 +224,7 @@ Tracer::wait_for_tracee_events() noexcept
     get_current()->reopen_memfd();
     target->cache_registers(task->tid);
     target->read_auxv(wait);
+    target->set_all_running(RunType::Continue);
     break;
   }
   case WaitStatus::Exited: {
@@ -322,4 +324,30 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
     SpinGuard lock{command_queue_lock};
     command_queue.push(cmd);
   }
+}
+
+void
+Tracer::execute_pending_commands() noexcept
+{
+  ui::UICommandPtr pending_command = nullptr;
+  int executed_commands = 0;
+  while (!command_queue.empty()) {
+    // keep the lock as minimum of a time span as possible
+    {
+      SpinGuard lock{command_queue_lock};
+      pending_command = command_queue.front();
+      command_queue.pop();
+    }
+    ASSERT(pending_command != nullptr, "Expected a command but got null");
+#ifdef MDB_DEBUG
+    fmt::println("Executing {}", pending_command->name());
+#endif
+    auto result = pending_command->execute(this);
+
+    dap->post_event(result);
+    delete pending_command;
+    pending_command = nullptr;
+    executed_commands++;
+  }
+  fmt::println("Executed {} commands", executed_commands);
 }

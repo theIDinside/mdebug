@@ -213,8 +213,13 @@ static constexpr std::array<std::pair<std::string_view, Command>, std::to_underl
 // - `payload_begin` points to the first byte of the body in the buffer
 struct ContentDescriptor
 {
+  // The parsed payload length from the header
   u64 payload_length;
+  // offset to start of the header into the owning buffer
+  u64 packet_offset;
+  // first byte of header
   const char *header_begin;
+  // first byte of payload
   const char *payload_begin;
 
   std::string_view payload() const noexcept;
@@ -240,11 +245,14 @@ struct PartialContentDescriptor
 struct RemainderData
 {
   u64 length;
-  const char *begin;
+  u64 offset;
 };
 
 using ViewMatchResult = std::match_results<std::string_view::const_iterator>;
 using ContentParse = std::variant<ContentDescriptor, PartialContentDescriptor, RemainderData>;
 
-std::vector<ContentParse> parse_buffer(const std::string_view buffer_view, bool *no_partials = nullptr) noexcept;
+std::vector<ContentParse> parse_headers_from(const std::string_view buffer_view,
+                                             bool *no_partials = nullptr) noexcept;
+
+void setup_logging(std::fstream &logger);
 } // namespace ui::dap

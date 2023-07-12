@@ -293,15 +293,3 @@ DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
   end = buffer + new_size;
   size = new_size;
 }
-
-/*static*/
-Pipe
-Pipe::non_blocking_read() noexcept
-{
-  Pipe p;
-  pipe(p._pipe);
-  auto flags = fcntl(p.read_end(), F_GETFL);
-  VERIFY(flags != -1, "Failed to get flags for read-end of pipe");
-  VERIFY(-1 != fcntl(p.read_end(), F_SETFL, flags | O_NONBLOCK), "Failed to set non-blocking for pipe");
-  return p;
-}
