@@ -1,13 +1,19 @@
 #include "target.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "fmt/core.h"
+#include "interface/dap/dap_defs.h"
+#include "interface/dap/events.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
 #include "symbolication/objfile.h"
 #include "task.h"
+#include "tracer.h"
 #include <algorithm>
+#include <bits/ranges_algo.h>
 #include <cstdint>
+#include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
 #include <linux/auxvec.h>
@@ -19,21 +25,15 @@
 #include <sys/wait.h>
 #include <unistd.h>
 Target::Target(pid_t process_space_id, bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{},
-      bkpt_map({.bp_id_counter = 1, .breakpoints = {}}), spin_lock{}, m_files{}, m_types{},
-      interpreter_base{}, entry{}
+    : task_leader{process_space_id}, object_files{}, threads{}, bkpt_map({.bp_id_counter = 1, .breakpoints = {}}),
+      stop_on_clone(false), spin_lock{}, m_files{}, m_types{}, interpreter_base{}, entry{}, register_cache()
 {
-  threads[process_space_id] = TaskInfo{process_space_id, nullptr};
+  threads.push_back(TaskInfo{process_space_id});
+  threads.back().initialize();
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
     procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
   }
-}
-
-bool
-Target::initialized() const noexcept
-{
-  return !(object_files.empty());
 }
 
 bool
@@ -53,48 +53,122 @@ Target::mem_fd() noexcept
 TaskInfo *
 Target::get_task(pid_t tid) noexcept
 {
-  return &threads[tid];
+  for (auto &t : threads) {
+    if (t.tid == tid)
+      return &t;
+  }
+  return nullptr;
 }
 
-TaskWaitResult
-Target::wait_pid(TaskInfo *task) noexcept
+std::optional<TaskWaitResult>
+Target::wait_pid(TaskInfo *requested_task) noexcept
 {
-  int status = 0;
-  TaskWaitResult wait{};
-  auto wait_tid = task == nullptr ? 0 : task->tid;
-  wait.waited_pid = waitpid(wait_tid, &status, 0);
-  task_wait_emplace(status, &wait);
-  return wait;
+  const auto tid = requested_task == nullptr ? -1 : requested_task->tid;
+  return waitpid_nonblock(tid).transform([this](auto &&wpid) {
+    TaskWaitResult wait{};
+    wait.waited_pid = wpid.tid;
+    task_wait_emplace(wpid.status, &wait);
+    return wait;
+  });
 }
 
 void
 Target::new_task(Tid tid) noexcept
 {
-  if constexpr (MDB_DEBUG) {
-    fmt::println("New task {} (thread parent: {})", tid, task_leader);
+  VERIFY(tid != 0, "Invalid tid {}", tid);
+  auto evt = new ui::dap::OutputEvent{
+      "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
+  Tracer::Instance->post_event(evt);
+  threads.push_back(TaskInfo{tid});
+
+  ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
+         "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
+}
+
+bool
+Target::has_task(Tid tid) noexcept
+{
+  for (const auto &task : threads) {
+    if (task.tid == tid)
+      return true;
   }
-
-  threads[tid] = TaskInfo{tid, nullptr};
+  return false;
 }
 
 void
-Target::set_running(RunType type) noexcept
+Target::set_all_running(RunType type) noexcept
 {
-  threads[task_leader].set_running(type);
+  for (auto &t : threads) {
+    if (t.can_continue()) {
+      t.set_running(type);
+    }
+  }
 }
 
 void
-Target::set_wait_status(TaskWaitResult wait) noexcept
+Target::stop_all() noexcept
 {
-  ASSERT(threads.contains(wait.waited_pid), "Target did not contain task {}", wait.waited_pid);
-  threads[wait.waited_pid].set_taskwait(wait);
+  kill(task_leader, SIGSTOP);
+  for (auto &t : threads) {
+    if (!t.stopped) {
+      t.set_stop();
+      t.stopped_by_tracer = true;
+    }
+  }
+}
+
+bool
+Target::should_stop_on_clone() noexcept
+{
+  return true;
+  // return stop_on_clone;
+}
+
+ActionOnEvent
+Target::handle_stopped_for(TaskInfo *task) noexcept
+{
+  auto &task_register = register_cache[task->tid];
+  const auto current_pc = TPtr<void>{task_register.rip};
+  if (this->bkpt_map.contains(current_pc - 1)) {
+    emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
+    return ActionOnEvent::StopTracee;
+  } else {
+    // No action needs taking, restart `task`
+    return ActionOnEvent::ShouldContinue;
+  }
+}
+
+void
+Target::reap_task(TaskInfo *task) noexcept
+{
+  auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
+  VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
+  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status->data.exit_signal);
+  threads.erase(it);
+}
+
+void
+Target::register_task_waited(TaskWaitResult wait) noexcept
+{
+  ASSERT(has_task(wait.waited_pid), "Target did not contain task {}", wait.waited_pid);
+  auto task = get_task(wait.waited_pid);
+  ASSERT(task != nullptr, "No task found with tid {}", wait.waited_pid);
+  task->set_taskwait(wait);
 }
 
 void
 Target::set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept
 {
-  ASSERT(threads.contains(tid), "Unknown task {}", tid);
+  ASSERT(has_task(tid), "Unknown task {}", tid);
   task_vm_infos[tid] = vm_info;
+}
+
+const user_regs_struct &
+Target::cache_registers(Tid tid) noexcept
+{
+  auto &registers = register_cache[tid];
+  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
+  return registers;
 }
 
 void
@@ -113,12 +187,29 @@ Target::set_breakpoint(TraceePointer<u64> address) noexcept
 }
 
 void
+Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
+{
+  auto bp = bkpt_map.get(bp_addr);
+  bp->times_hit++;
+  auto evt =
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
+  evt->bp_ids.push_back(bp->bp_id);
+  Tracer::Instance->post_event(evt);
+}
+
+void
+Target::reset_breakpoints(std::vector<TPtr<void>> addresses) noexcept
+{
+  bkpt_map.clear(this);
+  for (auto addr : addresses) {
+    set_breakpoint(addr.as<u64>());
+  }
+}
+
+void
 Target::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
 {
   ASSERT(wait != nullptr, "wait param must not be null");
-  user_regs_struct regs;
-  ptrace(PTRACE_GETREGS, wait->waited_pid, nullptr, &regs);
-  wait->registers = regs;
   if (WIFSTOPPED(status)) {
     task_wait_emplace_stopped(status, wait);
     return;
@@ -162,13 +253,11 @@ Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
     wait->ws = VForkDone;
   } else if (WSTOPSIG(status) == SIGTRAP) {
-    if (bkpt_map.contains(wait->last_byte_executed())) {
-      emit_breakpoint_event(wait->last_byte_executed());
-      wait->registers.rip--;
-      ptrace(PTRACE_SETREGS, wait->waited_pid, nullptr, &wait->registers);
-    }
+    wait->ws = Stopped;
+  } else if (WSTOPSIG(status) == SIGSTOP) {
+    wait->ws = Stopped;
   } else {
-    fmt::println("SOME OTHER STOP");
+    fmt::println("SOME OTHER STOP FOR {}", wait->waited_pid);
   }
 }
 
@@ -187,12 +276,27 @@ Target::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
 }
 
 bool
+Target::running() const noexcept
+{
+  return !threads.empty();
+}
+
+bool
 BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte) noexcept
 {
   if (contains(addr))
     return false;
-  breakpoints[addr.get()] = Breakpoint{ins_byte, bp_id_counter++};
+  breakpoints[addr.get()] = Breakpoint{addr, ins_byte, bp_id_counter++};
   return true;
+}
+
+void
+BreakpointMap::clear(Target *target) noexcept
+{
+  for (const auto &[addr, bkpt] : breakpoints) {
+    ptrace(PTRACE_POKEDATA, target->task_leader, bkpt.address.get(), bkpt.ins_byte);
+  }
+  breakpoints.clear();
 }
 
 Breakpoint *
@@ -234,7 +338,9 @@ Target::read_auxv(TaskWaitResult &wait)
 {
   ASSERT(wait.ws == WaitStatus::Execed,
          "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
-  TPtr<i64> stack_ptr = wait.registers.rsp;
+  auto task = get_task(wait.waited_pid);
+  auto &registers = register_cache[task->tid];
+  TPtr<i64> stack_ptr = registers.rsp;
   i64 argc = read_type(stack_ptr);
 
   stack_ptr += argc + 1;
@@ -275,19 +381,14 @@ Target::read_auxv(TaskWaitResult &wait)
 }
 
 void
-Target::emit_breakpoint_event(TPtr<void> bp_addr)
-{
-  auto bp = bkpt_map.get(bp_addr);
-  bp->times_hit++;
-  fmt::println("Breakpoint hit {}", bp->times_hit);
-}
-
-void
 Target::add_file(CompilationUnitFile &&file) noexcept
 {
-  LockGuard guard{spin_lock};
-  fmt::println("Adding file: {}", file);
-  m_files.push_back(file);
+  {
+    LockGuard guard{spin_lock};
+    m_files.push_back(file);
+  }
+  auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
+  Tracer::Instance->post_event(evt);
 }
 
 void

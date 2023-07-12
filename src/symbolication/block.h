@@ -1,5 +1,5 @@
 #pragma once
-#include "../src/common.h"
+#include "../common.h"
 
 /**
  * Description of a range of executable code, inside of a compilation unit.

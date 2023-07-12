@@ -2,39 +2,61 @@
 #include "ptrace.h"
 #include <sys/ptrace.h>
 
-TaskInfo::TaskInfo(pid_t tid, TraceePointer<void> stopped_at) noexcept
-    : stopped(true), signal_in_flight(false), stepping(false), tid(tid), stopped_address(stopped_at),
-      run_type(RunType::UNKNOWN)
+TaskInfo::TaskInfo(pid_t tid) noexcept
+    : stopped(true), signal_in_flight(false), stepping(false), stopped_by_tracer(false), initialized(false),
+      tid(tid), wait_status(), run_type(RunType::UNKNOWN)
 {
 }
 
 void
 TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 {
-  this->stopped = true;
   wait_status = wait;
 }
 
 void
 TaskInfo::set_running(RunType type) noexcept
 {
-  stopped = false;
-  signal_in_flight = false;
-  stepping = false;
-  run_type = type;
-  PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
+  if (stopped) {
+    stopped = false;
+    signal_in_flight = false;
+    stepping = false;
+    run_type = type;
+    PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
+  } else if (stopped_by_tracer) {
+    stopped = false;
+    stopped_by_tracer = false;
+    signal_in_flight = false;
+    stepping = false;
+    run_type = type;
+    PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
+  }
 }
 
 void
-TaskInfo::request_registers() noexcept
+TaskInfo::set_stop() noexcept
 {
-  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &wait_status.registers);
+  stopped = true;
+  signal_in_flight = false;
+  stepping = false;
 }
 
-TraceePointer<void>
-TaskWaitResult::last_byte_executed() const
+void
+TaskInfo::initialize() noexcept
 {
-  return registers.rip - 1;
+  initialized = true;
+}
+
+bool
+TaskInfo::can_continue() noexcept
+{
+  return initialized && (stopped || stopped_by_tracer);
+}
+
+bool
+TaskInfo::is_stopped() noexcept
+{
+  return stopped_by_tracer || stopped;
 }
 
 TaskVMInfo

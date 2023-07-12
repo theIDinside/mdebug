@@ -62,9 +62,8 @@ main(int argc, const char **argv)
       for (auto idx = 0; idx < 8; idx++) {
         if (ids[idx] == -1) {
           ids[idx] = i;
-          float degF;
-          degF = convert_celsius_to_fahrenheit(foo.c);
-          printf("%.0f degrees Celsius equals %.0f degrees Fahrenheit\n", foo.c, degF);
+          const auto tid = gettid();
+          printf("TASK number %d ___ TID: %d ___ EXITED\n", i, tid);
           break;
         }
       }

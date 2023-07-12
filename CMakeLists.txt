@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(midas LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_STANDARD_REQUIRED 23)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
   src/main.cpp
   src/tracer.cpp
@@ -35,7 +37,22 @@ set(MIDAS_SOURCES
   src/symbolication/type.cpp
   src/symbolication/type.h
   src/lib/lockguard.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  src/interface/dap/commands.cpp
+  src/interface/dap/commands.h
+  src/interface/dap/dap_defs.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
+  src/interface/dap/events.cpp
+  src/interface/dap/events.h
+  src/interface/dap/types.cpp
+  src/interface/dap/types.h
+  src/interface/pty.cpp
+  src/interface/pty.h
 )
+
+set(COMMON_SRC src/common.cpp src/common.h)
 
 set(MIDAS_SPINLOCK src/lib/spinlock.cpp src/lib/spinlock.h)
 add_library(mdb_spinlock STATIC ${MIDAS_SPINLOCK})
@@ -69,15 +86,44 @@ endfunction()
 
 build_tests("${MDB_TESTS}")
 
-enable_testing()
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_subdirectory(./dependencies/fmt)
+enable_testing()
+# Unit Testing (using googletest)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+add_subdirectory(dependencies/googletest)
+
+add_executable(
+  parse_dap_requests
+  test/unittest/parse_dap_requests.cpp
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
+  ${COMMON_SRC}
+)
+
+target_link_libraries(
+  parse_dap_requests
+  GTest::gtest_main
+  fmt::fmt
+  mdb_spinlock
+  nlohmann_json::nlohmann_json
+)
+
+include(GoogleTest)
+gtest_discover_tests(parse_dap_requests)
+
+# Add the fantastic libfmt library
+add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
-target_link_libraries(mdb fmt::fmt mdb_spinlock)
+
+# Add the json library
+set(JSON_Install OFF CACHE INTERNAL "")
+add_subdirectory(dependencies/nlohmann_json)
+
+target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json)
 target_include_directories(mdb PUBLIC ./dependencies)
 
 # To be able to print backtrace with symbols (see `man backtrace`)

@@ -1,41 +1,62 @@
 /** COPYRIGHT TEMPLATE */
 #include "common.h"
+#include "interface/dap/interface.h"
+#include "interface/pty.h"
+#include "notify_pipe.h"
 #include "posix/argslist.h"
 #include "target.h"
-#include "task.h"
 #include "tracer.h"
+#include <array>
+#include <asm-generic/errno-base.h>
+#include <condition_variable>
+#include <csignal>
 #include <cstdlib>
+#include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
-#include <sys/ptrace.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include <array>
-
+#include <linux/sched.h>
+#include <mutex>
+#include <poll.h>
+#include <sched.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/personality.h>
+#include <sys/ptrace.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
+#include <utility>
 
-#include <linux/sched.h>
-#include <sched.h>
+std::mutex m;
+std::condition_variable cv;
+std::string data;
+bool ready = false;
+bool exit_debug_session = false;
 
-#include <csignal>
+enum AwaitablePipes : u64
+{
+  AwaiterThread = 0,
+  IOThread = 1
+};
 
-#include "ptrace.h"
-#include <sys/personality.h>
-
-static int barrier[2];
-
-// Signal handler function
+template <AwaitablePipes AP>
+constexpr size_t
+idx()
+{
+  return std::to_underlying(AP);
+}
 
 int
 main(int argc, const char **argv)
 {
+
   if (argc < 2) {
     fmt::print("Usage: mdb <binary>\n");
     exit(EXIT_FAILURE);
@@ -47,83 +68,105 @@ main(int argc, const char **argv)
     exit(EXIT_FAILURE);
   }
 
+  ScopedFd log_file = ScopedFd::open("/home/cx/dev/foss/cx/dbm/build-debug/bin/mdb.log", O_CREAT | O_RDWR);
   PosixArgsList args_list{std::vector<std::string>{argv + 1, argv + argc}};
-  if (-1 == pipe(barrier)) {
-    PANIC("Failed to set up barrier pipes\n");
-  }
 
-  auto pid = fork();
-  switch (pid) {
+  termios original_tty;
+  winsize ws;
+  VERIFY(tcgetattr(STDIN_FILENO, &original_tty) != -1, "Failed to get attributes for stdin");
+  VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
+
+  auto fork_result = pty_fork(&original_tty, &ws);
+
+  switch (fork_result.index()) {
   case 0: {
     const auto [cmd, args] = args_list.get_command();
     if (personality(ADDR_NO_RANDOMIZE) == -1) {
       PANIC("Failed to set ADDR_NO_RANDOMIZE!");
     }
-    ptrace(PTRACE_TRACEME, 0, 0, 0);
+    // ptrace(PTRACE_TRACEME, 0, 0, 0);
     raise(SIGSTOP);
     execv(cmd, args);
-  } break;
+    break;
+  }
   default: {
+    const auto result = std::get<PtyParentResult>(fork_result);
 
-    Tracer tracer{};
-    tracer.init_io_thread();
-    Tracer::Instance->add_target_set_current(pid, p);
-    auto target = tracer.get_current();
-    auto current_task = target->get_task(pid);
+    auto [wait_read, wait_write] = utils::Notifier::notify_pipe();
+    auto [io_read, io_write] = utils::Notifier::notify_pipe();
 
-    // todo(simon): for now, support only 1 process space (target), though the design looks as though we support
-    // multiple.
+    utils::NotifyManager<2> notifiers{std::array<utils::Notifier::ReadEnd, 2>{wait_read, io_read},
+                                      std::array<std::string_view, 2>{"Awaiter Thread", "IO Thread"}};
 
-    auto tracee_exited = false;
-    while (!tracee_exited) {
-      auto wait = target->wait_pid(current_task);
-      target->set_wait_status(wait);
-      switch (wait.ws) {
-      case WaitStatus::Stopped:
-        break;
-      case WaitStatus::Execed: {
-        tracer.get_current()->reopen_memfd();
-        target->read_auxv(wait);
-        break;
-      }
-      case WaitStatus::Exited: {
-        if (wait.waited_pid == tracer.get_current()->task_leader) {
-          tracee_exited = true;
+    Tracer::Instance = new Tracer{wait_read, io_read};
+    auto &tracer = *Tracer::Instance;
+    // spawn the UI thread that runs our UI loop
+    bool ui_thread_setup = false;
+
+    std::thread ui_thread{[fd = result.fd, &io_write = io_write, &ui_thread_setup]() {
+      ui::dap::DAP ui_interface{Tracer::Instance, STDIN_FILENO, STDOUT_FILENO, fd, io_write};
+      Tracer::Instance->set_ui(&ui_interface);
+      ui_thread_setup = true;
+      ui_interface.run_ui_loop();
+    }};
+    bool waiter_thread_setup = false;
+    std::thread awaiter_thread([&wait_write = wait_write, tl = result.pid, &waiter_thread_setup]() {
+      int error_tries = 0;
+      waiter_thread_setup = true;
+      while (!exit_debug_session) {
+
+        siginfo_t info_ptr;
+        auto res = waitid(P_ALL, tl, &info_ptr, WEXITED | WSTOPPED | WNOWAIT);
+        if (res == -1) {
+          error_tries++;
+          ASSERT(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
+          continue;
         }
-        break;
+        error_tries = 0;
+        // notify Tracer thread that it can pull out wait status info
+        wait_write.notify();
+
+        // Now wait for Tracer thread to notify us that it has handled all wait statuses it can
+        // This is also very important for another reason; When the tracer thread does it's magic
+        // it might for instance do start-stop-restart-stop LWP's for a number of reasons - while doing that,
+        // we can't have the awaiter thread yelling at us that there are a bunch of new await results available
+        // - so we tell this puppy to go to sleep here and let the Tracer thread wake it up afterwards
+        {
+          std::unique_lock lk(m);
+          ready = false;
+          while (!ready)
+            cv.wait(lk);
+        }
+        ready = false;
       }
-      case WaitStatus::Cloned: {
-        const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(wait.registers);
-        const auto res = target->read_type(ptr);
-        // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
-        auto np = target->read_type(TPtr<pid_t>{res.parent_tid});
-#ifdef MDB_DEBUG
-        long new_pid = 0;
-        PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
-        ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
-#endif
-        target->new_task(np);
-        target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-        target->get_task(np)->request_registers();
-        break;
-      }
-      case WaitStatus::Forked:
-        break;
-      case WaitStatus::VForked:
-        break;
-      case WaitStatus::VForkDone:
-        break;
-      case WaitStatus::Signalled:
-        break;
-      case WaitStatus::SyscallEntry:
-        break;
-      case WaitStatus::SyscallExit:
-        break;
-      }
-      sleep(1);
-      target->set_running(RunType::Continue);
+    });
+
+    while (!waiter_thread_setup || !ui_thread_setup) {
     }
+    Tracer::Instance->add_target_set_current(result.pid, p);
+    bool stopped = true;
+    using enum AwaitablePipes;
+    for (; tracer.get_current()->running();) {
+      if (notifiers.poll(1000)) {
+        if (notifiers.has_notification<AwaiterThread>()) {
+          stopped = tracer.wait_for_tracee_events();
+          ready = true;
+          cv.notify_one();
+        }
+        if (notifiers.has_notification<IOThread>()) {
+          tracer.execute_pending_commands();
+        }
+      }
+      if (stopped) {
+        fmt::println("Tracer reported we're stopped?");
+      }
+    }
+    exit_debug_session = true;
+    Tracer::Instance->kill_ui();
+    ui_thread.join();
+    awaiter_thread.join();
     break;
   }
   }
+  fmt::println("Exited...");
 }

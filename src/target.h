@@ -2,8 +2,6 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "lib/spinlock.h"
-#include "symbolication/elf.h"
-#include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
 #include "task.h"
 #include <chrono>
@@ -13,11 +11,13 @@
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/uio.h>
+#include <sys/user.h>
 #include <unistd.h>
 #include <unordered_map>
 
-using Tid = pid_t;
-using Pid = pid_t;
+namespace ui {
+struct UICommand;
+};
 
 struct LWP
 {
@@ -25,6 +25,12 @@ struct LWP
   Tid tid;
 
   constexpr bool operator<=>(const LWP &other) const = default;
+};
+
+enum ActionOnEvent
+{
+  ShouldContinue,
+  StopTracee
 };
 
 using Address = std::uintptr_t;
@@ -57,6 +63,8 @@ read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
   return nread;
 }
 
+struct Target;
+
 struct BreakpointMap
 {
   u32 bp_id_counter;
@@ -69,6 +77,7 @@ struct BreakpointMap
     return breakpoints.contains(addr.get());
   }
   bool insert(TraceePointer<void> addr, u8 overwritten_byte) noexcept;
+  void clear(Target *target) noexcept;
   Breakpoint *get(u32 id) noexcept;
   Breakpoint *get(TraceePointer<void> addr) noexcept;
 };
@@ -76,13 +85,15 @@ struct BreakpointMap
 struct Target
 {
   friend class Tracer;
+  friend struct ui::UICommand;
   // Members
   pid_t task_leader;
   std::vector<ObjectFile *> object_files;
   ScopedFd procfs_memfd;
-  std::unordered_map<pid_t, TaskInfo> threads;
+  std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   BreakpointMap bkpt_map;
+  bool stop_on_clone;
 
   // Aggressive spinlock
   SpinLock spin_lock;
@@ -92,26 +103,54 @@ struct Target
   Target(const Target &) = delete;
   Target &operator=(const Target &) = delete;
 
-  // Methods
-  bool initialized() const noexcept;
   /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
   bool reopen_memfd() noexcept;
   /** Return the open mem fd */
   ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
-  TaskWaitResult wait_pid(TaskInfo *task) noexcept;
+  /* wait on `task` or the entire target if `task` is nullptr */
+  std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
+  /* Create new task meta data for `tid` */
   void new_task(Tid tid) noexcept;
-  void set_running(RunType type) noexcept;
-  void set_wait_status(TaskWaitResult wait) noexcept;
-  void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
-  void set_breakpoint(TraceePointer<u64> address) noexcept;
+  bool has_task(Tid tid) noexcept;
+  /* Set all tasks in this target to continue, if they're stopped. */
+  void set_all_running(RunType type) noexcept;
+  /* Interrupts/stops all threads in this process space */
+  void stop_all() noexcept;
+  /* Query if we should interrupt the entire process and all it's tasks when we encounter a clone syscall */
+  bool should_stop_on_clone() noexcept;
+  /* Perform arbitrary logic during a Stopped event */
+  ActionOnEvent handle_stopped_for(TaskInfo *task) noexcept;
+  /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
+   * interface of the event */
+  void reap_task(TaskInfo *task) noexcept;
+  /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
+   * reads that task's registers and caches them.*/
+  void register_task_waited(TaskWaitResult wait) noexcept;
 
+  /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
+   * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
+   * task, later on.*/
+  void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
+  /* Cache the register contents of `tid`. */
+  [[maybe_unused]] const user_regs_struct &cache_registers(Tid tid) noexcept;
+  /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
+   * multiple breakpoints at the same location.*/
+  void set_breakpoint(TraceePointer<u64> address) noexcept;
+  void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
+  // Services the `setInstructionBreakpoint` requests
+  // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
+  //  what's in `addresses`.
+  void reset_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
+
+  // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
   void task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept;
   void task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept;
   void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
-  void emit_breakpoint_event(TPtr<void> bp_addr);
+  /* Check if we have any tasks left in the process space. */
+  bool running() const noexcept;
 
   // Debug Symbols Related Logic
   void register_object_file(ObjectFile *obj) noexcept;
@@ -160,7 +199,6 @@ struct Target
     auto old_value = read_type(address);
     auto total_written = 0ull;
     constexpr auto sz = sizeof(typename TPtr<T>::Type);
-    fmt::println("writing 0x{:x} of size {} bytes to {:p}", value, sz, (void *)address.get());
     while (total_written < sz) {
       auto written = pwrite64(mem_fd().get(), &value, sz, address.get());
       if (-1 == written || 0 == written) {
@@ -190,7 +228,6 @@ struct Target
   std::optional<T>
   read_type_readv(TraceePointer<T> address, pid_t pid)
   {
-    fmt::println("[read_type_readv] Reading from address 0x{:x}", address.get());
     typename std::remove_cv<T>::type result;
     constexpr u64 sz = sizeof(T);
     struct iovec io;
@@ -211,7 +248,9 @@ struct Target
     }
   }
 
+  /* Add parsed DWARF debug info for `file` */
   void add_file(CompilationUnitFile &&file) noexcept;
+  /* Add parsed DWARF debug info for `type` */
   void add_type(Type type) noexcept;
 
 private:
@@ -219,4 +258,5 @@ private:
   std::unordered_map<std::string_view, Type> m_types;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
+  std::unordered_map<Tid, user_regs_struct> register_cache;
 };

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "lib/lockguard.h"
+#include "lib/spinlock.h"
+#include <charconv>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -9,8 +12,14 @@
 #include <fmt/core.h>
 #include <source_location>
 #include <span>
+#include <sys/mman.h>
+#include <sys/poll.h>
 #include <type_traits>
+#include <variant>
 #include <vector>
+// For `pipe` syscall
+#include <optional>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 using Path = fs::path;
@@ -24,6 +33,31 @@ using i64 = std::int64_t;
 using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
+
+using Tid = pid_t;
+using Pid = pid_t;
+
+#define PAGE_SIZE 4096
+
+template <typename T> using Option = std::optional<T>;
+
+/** C++-ified result from waitpid syscall. */
+struct WaitPid
+{
+  Tid tid;
+  int status;
+};
+
+#define FOR_EVER for (;;)
+
+/** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
+ * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
+Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
+/** `wait`'s for `tid` in a non-blocking way. If waiting on `tid` yielded no wait status, returns `none` */
+Option<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
+
+// "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
+template <typename T> using ActualType = std::remove_cvref_t<T>;
 
 struct DataBlock
 {
@@ -53,14 +87,17 @@ std::string_view syscall_name(u64 syscall_number);
     panic(err_msg, loc, 1);                                                                                       \
   }
 
-#ifdef MDB_DEBUG
-#define ASSERT(cond, msg, ...)                                                                                    \
+// Identical to ASSERT, but doesn't care about build type
+#define VERIFY(cond, msg, ...)                                                                                    \
   {                                                                                                               \
     std::source_location loc = std::source_location::current();                                                   \
     if (!(cond)) {                                                                                                \
       panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);             \
     }                                                                                                             \
   }
+
+#if defined(MDB_DEBUG)
+#define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 #else
 #define ASSERT(cond, msg, ...)
 #endif
@@ -78,30 +115,34 @@ public:
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
+  template <std::integral OffsetT>
   constexpr TraceePointer
-  operator+(std::intptr_t offset) const noexcept
+  operator+(OffsetT offset) const noexcept
   {
     const auto res = remote_addr + (offset * type_size());
     return TraceePointer{res};
   }
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
+  template <std::integral OffsetT>
   constexpr TraceePointer
-  operator-(std::intptr_t offset) const noexcept
+  operator-(OffsetT offset) const noexcept
   {
     const auto res = remote_addr - (offset * type_size());
     return TraceePointer{res};
   }
 
+  template <std::integral OffsetT>
   constexpr TraceePointer &
-  operator+=(std::intptr_t offset) noexcept
+  operator+=(OffsetT offset) noexcept
   {
     remote_addr += (offset * type_size());
     return *this;
   }
 
+  template <std::integral OffsetT>
   constexpr TraceePointer &
-  operator-=(std::intptr_t offset) noexcept
+  operator-=(OffsetT offset) noexcept
   {
     remote_addr -= (offset * type_size());
     return *this;
@@ -122,6 +163,21 @@ public:
     return TraceePointer{current};
   }
 
+  constexpr TraceePointer &
+  operator--() noexcept
+  {
+    remote_addr -= type_size();
+    return *this;
+  }
+
+  constexpr TraceePointer
+  operator--(int) noexcept
+  {
+    const auto current = remote_addr;
+    remote_addr -= type_size();
+    return TraceePointer{current};
+  }
+
   uintptr_t
   get() const noexcept
   {
@@ -134,7 +190,7 @@ public:
   type_size() noexcept
   {
     if constexpr (std::is_void_v<T>)
-      return 8;
+      return 1;
     else
       return sizeof(T);
   }
@@ -216,6 +272,7 @@ class ScopedFd
 {
 public:
   ScopedFd() noexcept : fd(-1), p{} {}
+  ScopedFd(int fd) noexcept;
   ScopedFd(int fd, Path p) noexcept;
   ~ScopedFd() noexcept;
 
@@ -229,7 +286,6 @@ public:
     p = std::move(other.p);
     file_size_ = other.file_size_;
     other.fd = -1;
-    other.p = "";
     return *this;
   }
 
@@ -240,15 +296,36 @@ public:
   void close() noexcept;
   operator int() const noexcept;
   u64 file_size() const noexcept;
+  const Path &path() const noexcept;
+  void forget() noexcept;
 
   static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
   static ScopedFd open_read_only(const Path &p) noexcept;
+  static ScopedFd take_ownership(int fd) noexcept;
 
 private:
   int fd;
   Path p;
   u64 file_size_;
 };
+
+constexpr pollfd
+cfg_read_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLIN | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
+
+constexpr pollfd
+cfg_write_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLOUT | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
 
 static constexpr u8 LEB128_MASK = 0b0111'1111;
 
@@ -426,3 +503,82 @@ private:
   u64 size;
   u8 offset_size = 4;
 };
+
+template <typename T, typename... Args>
+constexpr const T *
+unwrap(const std::variant<Args...> &variant) noexcept
+{
+  const T *r = nullptr;
+  std::visit(
+      [&r](auto &&item) {
+        using var_t = ActualType<decltype(item)>;
+        if constexpr (std::is_same_v<var_t, T>) {
+          r = &item;
+        } else {
+          PANIC("Unexpected type in variant");
+        }
+      },
+      variant);
+  return r;
+}
+
+template <typename T, typename... Args>
+constexpr const T *
+maybe_unwrap(const std::variant<Args...> &variant) noexcept
+{
+  const T *r = nullptr;
+  std::visit(
+      [&r](auto &&item) {
+        using var_t = ActualType<decltype(item)>;
+        if constexpr (std::is_same_v<var_t, T>) {
+          r = &item;
+        } else {
+          r = nullptr;
+        }
+      },
+      variant);
+  return r;
+}
+
+template <typename T>
+T *
+mmap_buffer(u64 size) noexcept
+{
+  auto ptr = (T *)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {}", size);
+  return ptr;
+}
+
+template <typename T>
+T *
+mmap_file(ScopedFd &fd, u64 size, bool read_only) noexcept
+{
+  ASSERT(fd.is_open(), "Backing file not open: {}", fd.path().c_str());
+  auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, fd.get(), 0);
+  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, fd.path().c_str());
+  return ptr;
+}
+
+template <std::integral Value>
+constexpr Option<Value>
+to_integral(std::string_view s)
+{
+  if (Value value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+    return value;
+  else
+    return std::nullopt;
+}
+
+constexpr Option<TPtr<void>>
+to_addr(std::string_view s)
+{
+  if (s.starts_with("0x"))
+    s.remove_prefix(2);
+
+  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+    return TPtr<void>{value};
+  else
+    return std::nullopt;
+}
+
+using SpinGuard = LockGuard<SpinLock>;

@@ -3,14 +3,41 @@
 #include <cstdlib>
 #include <cstring>
 #include <cxxabi.h>
+#include <exception>
 #include <execinfo.h>
+#include <expected>
 #include <fcntl.h>
 #include <filesystem>
+#include <optional>
 #include <regex>
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+Option<WaitPid>
+waitpid_peek(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG | WNOWAIT);
+  if (waited_pid == 0)
+    return {};
+  if (waited_pid == -1)
+    return {};
+
+  return WaitPid{.tid = waited_pid, .status = status};
+}
+
+Option<WaitPid>
+waitpid_nonblock(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG);
+  if (waited_pid == 0 || waited_pid == -1)
+    return Option<WaitPid>{};
+  return WaitPid{waited_pid, status};
+}
 
 std::string_view
 syscall_name(u64 syscall_number)
@@ -106,8 +133,12 @@ ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path))
   } else {
     file_size_ = 0;
   }
-  fmt::println("File size: {}", file_size_);
   ASSERT(fd != -1, "Failed to open {} [{}]", p.c_str(), strerror(errno));
+}
+
+ScopedFd::ScopedFd(int fd) noexcept : fd(fd)
+{
+  VERIFY(fd != -1, "Taking ownership of a closed file or error file: {}", strerror(errno));
 }
 
 ScopedFd::~ScopedFd() noexcept { close(); }
@@ -158,6 +189,19 @@ ScopedFd::file_size() const noexcept
   return size;
 }
 
+const Path &
+ScopedFd::path() const noexcept
+{
+  return p;
+}
+
+void
+ScopedFd::forget() noexcept
+{
+  p = "";
+  fd = -1;
+}
+
 /* static */
 ScopedFd
 ScopedFd::open(const Path &p, int flags, mode_t mode) noexcept
@@ -171,6 +215,13 @@ ScopedFd
 ScopedFd::open_read_only(const Path &p) noexcept
 {
   return ScopedFd{::open(p.c_str(), O_RDONLY), p};
+}
+
+/*static*/
+ScopedFd
+ScopedFd::take_ownership(int fd) noexcept
+{
+  return ScopedFd{fd};
 }
 
 u64
