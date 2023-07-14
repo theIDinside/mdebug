@@ -3,6 +3,7 @@
 #include "../../tracer.h"
 #include "../../utils/base64.h"
 #include "fmt/format.h"
+#include "nlohmann/json_fwd.hpp"
 #include "types.h"
 #include <algorithm>
 #include <memory>
@@ -15,11 +16,11 @@ ContinueResponse::serialize(int seq) const noexcept
 {
   if (success)
     return fmt::format(
-        R"({{ "seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
+        R"({{ "response_seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
         seq, continue_all);
   else
     return fmt::format(
-        R"({{ "seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
+        R"({{ "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
         seq);
 }
 
@@ -51,7 +52,7 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
       serialized_bkpts.push_back(bp.serialize());
     }
     return fmt::format(
-        R"({{ "seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+        R"({{ "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
         seq, fmt::join(serialized_bkpts, ","));
   } else {
     TODO("Unsuccessful set instruction breakpoints event response handling");
@@ -144,7 +145,7 @@ ReadMemoryResponse::serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
-        R"({{ "seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": {}, "unreadableBytes": {}, "data": {} }} }})",
+        R"({{ "response_seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": {}, "unreadableBytes": {}, "data": {} }} }})",
         seq, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
@@ -166,6 +167,73 @@ ReadMemory::execute(Tracer *tracer) noexcept
   res->success = true;
   res->unreadable_bytes = 0;
   return res;
+}
+
+std::string
+ConfigurationDoneResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "response_seq": {}, "type": "response", "success": true, "command": "configurationDone" }})", seq);
+}
+
+Initialize::Initialize(nlohmann::json &&arguments) noexcept : args(std::move(arguments)) {}
+
+UIResultPtr
+Initialize::execute(Tracer *tracer) noexcept
+{
+  return new InitializeResponse{};
+}
+
+std::string
+InitializeResponse::serialize(int seq) const noexcept
+{
+  // "this _must_ be 1, the first response"
+
+  nlohmann::json cfg;
+  auto &cfg_body = cfg["body"];
+  cfg_body["supportsConfigurationDoneRequest"] = true;
+  cfg_body["supportsFunctionBreakpoints"] = true;
+  cfg_body["supportsConditionalBreakpoints"] = false;
+  cfg_body["supportsHitConditionalBreakpoints"] = true;
+  cfg_body["supportsEvaluateForHovers"] = false;
+  // cfg_body["exceptionBreakpointFilters"] = []
+  cfg_body["supportsStepBack"] = false;
+  cfg_body["supportsSetVariable"] = false;
+  cfg_body["supportsRestartFrame"] = false;
+  cfg_body["supportsGotoTargetsRequest"] = false;
+  cfg_body["supportsStepInTargetsRequest"] = false;
+  cfg_body["supportsCompletionsRequest"] = true;
+  cfg_body["completionTriggerCharacters"] = {".", "["};
+  cfg_body["supportsModulesRequest"] = false;
+  cfg_body["additionalModuleColumns"] = false;
+  cfg_body["supportedChecksumAlgorithms"] = false;
+  cfg_body["supportsRestartRequest"] = false;
+  cfg_body["supportsExceptionOptions"] = false;
+  cfg_body["supportsValueFormattingOptions"] = true;
+  cfg_body["supportsExceptionInfoRequest"] = true;
+  cfg_body["supportTerminateDebuggee"] = true;
+  cfg_body["supportSuspendDebuggee"] = false;
+  cfg_body["supportsDelayedStackTraceLoading"] = false;
+  cfg_body["supportsLoadedSourcesRequest"] = false;
+  cfg_body["supportsLogPoints"] = false;
+  cfg_body["supportsTerminateThreadsRequest"] = true;
+  cfg_body["supportsSetExpression"] = false;
+  cfg_body["supportsTerminateRequest"] = true;
+  cfg_body["supportsDataBreakpoints"] = false;
+  cfg_body["supportsReadMemoryRequest"] = true;
+  cfg_body["supportsWriteMemoryRequest"] = false;
+  cfg_body["supportsDisassembleRequest"] = false;
+  cfg_body["supportsCancelRequest"] = false;
+  cfg_body["supportsBreakpointLocationsRequest"] = false;
+  cfg_body["supportsClipboardContext"] = false;
+  cfg_body["supportsSteppingGranularity"] = false;
+  cfg_body["supportsInstructionBreakpoints"] = false;
+  cfg_body["supportsExceptionFilterOptions"] = false;
+  cfg_body["supportsSingleThreadExecutionRequests"] = false;
+
+  return fmt::format(
+      R"({{ "response_seq": 1, "type": "response", "success": true, "command": "initialize", "body": {} }})", seq,
+      cfg_body.dump());
 }
 
 ui::UICommand *

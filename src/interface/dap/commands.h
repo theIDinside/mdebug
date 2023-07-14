@@ -80,5 +80,35 @@ struct ReadMemory final : public ui::UICommand
   DEFINE_NAME(ReadMemory)
 };
 
+struct ConfigurationDoneResponse final : public ui::UIResult
+{
+  ~ConfigurationDoneResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct ConfigurationDone final : public ui::UICommand
+{
+  ConfigurationDone() noexcept = default;
+  ~ConfigurationDone() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+
+  DEFINE_NAME(ConfigurationDone)
+};
+
+struct InitializeResponse final : public ui::UIResult
+{
+  ~InitializeResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct Initialize final : public ui::UICommand
+{
+  Initialize(nlohmann::json &&arguments) noexcept;
+  ~Initialize() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  nlohmann::json args;
+  DEFINE_NAME(Initialize)
+};
+
 ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;
 }; // namespace ui::dap
