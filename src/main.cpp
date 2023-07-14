@@ -146,7 +146,7 @@ main(int argc, const char **argv)
     Tracer::Instance->add_target_set_current(result.pid, p);
     bool stopped = true;
     using enum AwaitablePipes;
-    for (; tracer.get_current()->running();) {
+    for (; tracer.get_current()->execution_not_ended();) {
       if (notifiers.poll(1000)) {
         if (notifiers.has_notification<AwaiterThread>()) {
           stopped = tracer.wait_for_tracee_events();

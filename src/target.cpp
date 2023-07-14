@@ -276,7 +276,7 @@ Target::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
 }
 
 bool
-Target::running() const noexcept
+Target::execution_not_ended() const noexcept
 {
   return !threads.empty();
 }
