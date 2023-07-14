@@ -118,7 +118,7 @@ struct Target
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
   /* Create new task meta data for `tid` */
-  void new_task(Tid tid) noexcept;
+  void new_task(Tid tid, bool ui_update) noexcept;
   bool has_task(Tid tid) noexcept;
   /* Set all tasks in this target to continue, if they're stopped. */
   void set_all_running(RunType type) noexcept;
@@ -161,7 +161,8 @@ struct Target
   void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
   /* Check if we have any tasks left in the process space. */
-  bool running() const noexcept;
+  bool execution_not_ended() const noexcept;
+  bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
   void register_object_file(ObjectFile *obj) noexcept;

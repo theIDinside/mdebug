@@ -54,7 +54,7 @@ TaskInfo::can_continue() noexcept
 }
 
 bool
-TaskInfo::is_stopped() noexcept
+TaskInfo::is_stopped() const noexcept
 {
   return stopped_by_tracer || stopped;
 }

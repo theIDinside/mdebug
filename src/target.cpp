@@ -76,7 +76,7 @@ Target::wait_pid(TaskInfo *requested_task) noexcept
 }
 
 void
-Target::new_task(Tid tid) noexcept
+Target::new_task(Tid tid, bool ui_update) noexcept
 {
   VERIFY(tid != 0, "Invalid tid {}", tid);
   auto evt = new ui::dap::OutputEvent{
@@ -86,6 +86,10 @@ Target::new_task(Tid tid) noexcept
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
          "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
+  if (ui_update) {
+    const auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Started, tid};
+    Tracer::Instance->post_event(evt);
+  }
 }
 
 bool

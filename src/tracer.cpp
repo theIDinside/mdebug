@@ -107,14 +107,6 @@ Tracer::mmap_objectfile(const Path &path) noexcept
 }
 
 void
-Tracer::new_task(Pid pid, Tid tid) noexcept
-{
-  auto it = std::find_if(targets.cbegin(), targets.cend(), [&pid](auto &t) { return t->task_leader = pid; });
-  ASSERT(it != std::end(targets), "Did not find target with task leader {} pid", pid);
-  it->get()->new_task(tid);
-}
-
-void
 Tracer::thread_exited(LWP lwp, int) noexcept
 {
   auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, lwp.tid};
@@ -166,7 +158,7 @@ Tracer::wait_for_tracee_events() noexcept
   bool do_not_interrupt_leader = false;
   bool stopped = false;
   if (!target->has_task(wait.waited_pid)) {
-    target->new_task(wait.waited_pid);
+    target->new_task(wait.waited_pid, true);
     do_not_interrupt_leader = true;
   }
   target->register_task_waited(wait);
@@ -209,7 +201,6 @@ Tracer::wait_for_tracee_events() noexcept
     get_current()->reopen_memfd();
     target->cache_registers(task->tid);
     target->read_auxv(wait);
-    target->set_all_running(RunType::Continue);
     break;
   }
   case WaitStatus::Exited: {
@@ -230,7 +221,7 @@ Tracer::wait_for_tracee_events() noexcept
     ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
 #endif
     if (!target->has_task(np)) {
-      target->new_task(np);
+      target->new_task(np, true);
     }
     // by this point, the task has cloned _and_ it's continuable because the parent has been told
     // that "hey, we're ok". Why on earth a pre-finished clone can be waited on, I will never know.
@@ -262,6 +253,7 @@ Tracer::wait_for_tracee_events() noexcept
     } else {
       task->set_running(RunType::Continue);
     }
+
     break;
   }
   case WaitStatus::Forked:

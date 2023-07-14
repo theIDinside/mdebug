@@ -46,7 +46,6 @@ public:
   void add_target_set_current(pid_t task_leader, const Path &path) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   AddObjectResult mmap_objectfile(const Path &path) noexcept;
-  void new_task(Pid pid, Tid tid) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
   Target &get_target(pid_t pid) noexcept;
   Target *get_current() noexcept;

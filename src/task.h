@@ -75,7 +75,7 @@ struct TaskInfo
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
    */
-  bool is_stopped() noexcept;
+  bool is_stopped() const noexcept;
 };
 
 struct TaskVMInfo
