@@ -1,5 +1,6 @@
 #include "objfile.h"
 #include "elf_symbols.h"
+#include <optional>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary),
@@ -28,4 +29,14 @@ TPtr<void>
 ObjectFile::text_section_offset() const noexcept
 {
   return parsed_elf->get_section(".text")->address;
+}
+
+std::optional<MinSymbol>
+ObjectFile::get_minsymbol(std::string_view name) noexcept
+{
+  if (minimal_symbols.contains(name)) {
+    return minimal_symbols[name];
+  } else {
+    return std::nullopt;
+  }
 }

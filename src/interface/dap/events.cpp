@@ -1,4 +1,5 @@
 #include "events.h"
+#include "fmt/format.h"
 #include "nlohmann/json.hpp"
 
 namespace ui::dap {
@@ -42,13 +43,25 @@ StoppedEvent::StoppedEvent(StoppedReason reason, std::string_view description, T
 std::string
 StoppedEvent::serialize(int seq) const noexcept
 {
-  PANIC("unimplemented");
+  nlohmann::json ensure_desc_utf8 = description;
+  const auto description_utf8 = ensure_desc_utf8.dump();
+  if (text.empty()) {
+    return fmt::format(
+        R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": "", "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
+        seq, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
+  } else {
+    const nlohmann::json ensure_utf8 = text;
+    const auto utf8text = ensure_utf8.dump();
+    return fmt::format(
+        R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": {}, "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
+        seq, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
+  }
 }
 
 std::string
 BreakpointEvent::serialize(int seq) const noexcept
 {
-  PANIC("unimplemented");
+  TODO("unimplemented");
 }
 
 OutputEvent::OutputEvent(std::string_view category, std::string &&output) noexcept

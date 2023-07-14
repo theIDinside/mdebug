@@ -136,11 +136,9 @@ Elf::parse_min_symbols() const noexcept
       auto end = start + sec.m_section_size;
       auto entries = (end - start) / sizeof(Elf64_Sym);
       std::span<Elf64_Sym> symbols{(Elf64_Sym *)sec.m_section_ptr, entries};
-      auto hasher = std::hash<std::string_view>{};
       for (auto &symbol : symbols) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
-        u64 hashkey = hasher(name);
-        obj_file->minimal_symbols[hashkey] =
+        obj_file->minimal_symbols[name] =
             MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }
     }

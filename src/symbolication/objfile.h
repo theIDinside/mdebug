@@ -1,6 +1,8 @@
 #pragma once
 #include "../common.h"
 #include "elf.h"
+#include "elf_symbols.h"
+#include <string_view>
 #include <sys/mman.h>
 
 class Elf;
@@ -23,7 +25,7 @@ struct ObjectFile
   TPtr<void> entry_point;
   TPtr<void> vm_text_section;
   Elf *parsed_elf = nullptr;
-  std::unordered_map<u64, MinSymbol> minimal_symbols;
+  std::unordered_map<std::string_view, MinSymbol> minimal_symbols;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
@@ -50,6 +52,7 @@ struct ObjectFile
   u64 get_offset(u8 *ptr) const noexcept;
   u8 *get_section(Elf *elf, u32 index) const noexcept;
   TPtr<void> text_section_offset() const noexcept;
+  std::optional<MinSymbol> get_minsymbol(std::string_view name) noexcept;
 };
 
 struct UnloadObjectFile

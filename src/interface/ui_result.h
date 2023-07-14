@@ -23,6 +23,7 @@ struct UIResult
   {
     output->display_result(serialize(output->new_result_id()));
   }
+  bool success;
 };
 
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here

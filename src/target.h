@@ -4,6 +4,7 @@
 #include "lib/spinlock.h"
 #include "symbolication/type.h"
 #include "task.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/user.h>
+#include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -68,16 +70,21 @@ struct Target;
 struct BreakpointMap
 {
   u32 bp_id_counter;
-  std::unordered_map<std::uintptr_t, Breakpoint> breakpoints;
+  std::vector<Breakpoint> breakpoints;
+  std::unordered_map<u32, std::string> fn_breakpoint_names;
+  std::unordered_map<u32, std::string> source_breakpoints;
 
   template <typename T>
   bool
   contains(TraceePointer<T> addr) const noexcept
   {
-    return breakpoints.contains(addr.get());
+    return any_of(breakpoints, [&addr](const Breakpoint &bp) { return bp.address == addr; });
   }
-  bool insert(TraceePointer<void> addr, u8 overwritten_byte) noexcept;
-  void clear(Target *target) noexcept;
+  bool insert(TraceePointer<void> addr, u8 overwritten_byte, BreakpointType type) noexcept;
+  void clear(Target *target, BreakpointType type) noexcept;
+
+  template <typename Predicate> friend void clear_breakpoints(BreakpointMap &bp, Target *, Predicate &&p) noexcept;
+
   Breakpoint *get(u32 id) noexcept;
   Breakpoint *get(TraceePointer<void> addr) noexcept;
 };
@@ -92,7 +99,7 @@ struct Target
   ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
-  BreakpointMap bkpt_map;
+  BreakpointMap user_breakpoints_map;
   bool stop_on_clone;
 
   // Aggressive spinlock
@@ -136,12 +143,16 @@ struct Target
   [[maybe_unused]] const user_regs_struct &cache_registers(Tid tid) noexcept;
   /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
    * multiple breakpoints at the same location.*/
-  void set_breakpoint(TraceePointer<u64> address) noexcept;
+  void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
+  void set_fn_breakpoint(std::string_view function_name) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
-  // Services the `setInstructionBreakpoint` requests
+
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
-  //  what's in `addresses`.
-  void reset_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
+  //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
+  // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
+  // thing
+  void reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
+  void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
@@ -260,3 +271,15 @@ private:
   std::optional<TPtr<void>> entry;
   std::unordered_map<Tid, user_regs_struct> register_cache;
 };
+
+template <typename Predicate>
+void
+clear_breakpoints(BreakpointMap &bp, Target *target, Predicate &&predicate) noexcept
+{
+  std::erase_if(bp.breakpoints, [target, &p = predicate](auto &bp) {
+    if (p(bp)) {
+      ptrace(PTRACE_POKEDATA, target->task_leader, bp.second.address.get(), bp.second.ins_byte);
+      return true;
+    }
+  });
+}

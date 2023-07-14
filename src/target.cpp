@@ -7,6 +7,7 @@
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
+#include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
 #include "task.h"
 #include "tracer.h"
@@ -24,8 +25,10 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
 Target::Target(pid_t process_space_id, bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{}, bkpt_map({.bp_id_counter = 1, .breakpoints = {}}),
+    : task_leader{process_space_id}, object_files{}, threads{},
+      user_breakpoints_map({.bp_id_counter = 1, .breakpoints = {}}),
       stop_on_clone(false), spin_lock{}, m_files{}, m_types{}, interpreter_base{}, entry{}, register_cache()
 {
   threads.push_back(TaskInfo{process_space_id});
@@ -129,7 +132,7 @@ Target::handle_stopped_for(TaskInfo *task) noexcept
 {
   auto &task_register = register_cache[task->tid];
   const auto current_pc = TPtr<void>{task_register.rip};
-  if (this->bkpt_map.contains(current_pc - 1)) {
+  if (this->user_breakpoints_map.contains(current_pc - 1)) {
     emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
     return ActionOnEvent::StopTracee;
   } else {
@@ -172,9 +175,9 @@ Target::cache_registers(Tid tid) noexcept
 }
 
 void
-Target::set_breakpoint(TraceePointer<u64> address) noexcept
+Target::set_addr_breakpoint(TraceePointer<u64> address) noexcept
 {
-  if (bkpt_map.contains(address))
+  if (user_breakpoints_map.contains(address))
     return;
 
   constexpr u64 bkpt = 0xcc;
@@ -183,13 +186,40 @@ Target::set_breakpoint(TraceePointer<u64> address) noexcept
   u64 installed_bp = ((read_value & ~0xff) | bkpt);
   ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
 
-  bkpt_map.insert(address.as<void>(), ins_byte);
+  user_breakpoints_map.insert(address.as<void>(), ins_byte, BreakpointType::AddressBreakpoint);
+}
+
+void
+Target::set_fn_breakpoint(std::string_view function_name) noexcept
+{
+  for (const auto &[id, name] : user_breakpoints_map.fn_breakpoint_names) {
+    if (name == function_name)
+      return;
+  }
+
+  std::vector<MinSymbol> matching_symbols;
+  for (ObjectFile *obj : object_files) {
+    if (auto s = obj->get_minsymbol(function_name); s.has_value()) {
+      matching_symbols.push_back(*s);
+    }
+  }
+
+  for (const auto &sym : matching_symbols) {
+    constexpr u64 bkpt = 0xcc;
+    auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
+    u8 ins_byte = static_cast<u8>(read_value & 0xff);
+    u64 installed_bp = ((read_value & ~0xff) | bkpt);
+    ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
+    user_breakpoints_map.insert(sym.address, ins_byte, BreakpointType::FunctionBreakpoint);
+    auto &bp = user_breakpoints_map.breakpoints.back();
+    user_breakpoints_map.fn_breakpoint_names[bp.bp_id] = function_name;
+  }
 }
 
 void
 Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
 {
-  auto bp = bkpt_map.get(bp_addr);
+  auto bp = user_breakpoints_map.get(bp_addr);
   bp->times_hit++;
   auto evt =
       new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
@@ -198,11 +228,21 @@ Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
 }
 
 void
-Target::reset_breakpoints(std::vector<TPtr<void>> addresses) noexcept
+Target::reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept
 {
-  bkpt_map.clear(this);
+  user_breakpoints_map.clear(this, BreakpointType::AddressBreakpoint);
   for (auto addr : addresses) {
-    set_breakpoint(addr.as<u64>());
+    set_addr_breakpoint(addr.as<u64>());
+  }
+}
+
+void
+Target::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
+{
+  user_breakpoints_map.clear(this, BreakpointType::FunctionBreakpoint);
+  user_breakpoints_map.fn_breakpoint_names.clear();
+  for (auto fn_name : fn_names) {
+    set_fn_breakpoint(fn_name);
   }
 }
 
@@ -282,40 +322,50 @@ Target::execution_not_ended() const noexcept
 }
 
 bool
-BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte) noexcept
+Target::is_running() const noexcept
+{
+  return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) { return !t.is_stopped(); });
+}
+
+bool
+BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, BreakpointType type) noexcept
 {
   if (contains(addr))
     return false;
-  breakpoints[addr.get()] = Breakpoint{addr, ins_byte, bp_id_counter++};
+  breakpoints.push_back(Breakpoint{addr, ins_byte, bp_id_counter++, type});
   return true;
 }
 
 void
-BreakpointMap::clear(Target *target) noexcept
+BreakpointMap::clear(Target *target, BreakpointType type) noexcept
 {
-  for (const auto &[addr, bkpt] : breakpoints) {
-    ptrace(PTRACE_POKEDATA, target->task_leader, bkpt.address.get(), bkpt.ins_byte);
-  }
-  breakpoints.clear();
+  std::erase_if(breakpoints, [target, type](auto &bp) {
+    if (bp.type == type) {
+      ptrace(PTRACE_POKEDATA, target->task_leader, bp.address.get(), bp.ins_byte);
+      return true;
+    } else {
+      return false;
+    }
+  });
 }
 
 Breakpoint *
 BreakpointMap::get(u32 id) noexcept
 {
-  auto it = std::find_if(breakpoints.begin(), breakpoints.end(),
-                         [&](const auto &kvp) { return kvp.second.bp_id == id; });
+  auto it = std::find_if(breakpoints.begin(), breakpoints.end(), [&](const auto &bp) { return bp.bp_id == id; });
   if (it == std::end(breakpoints))
     return nullptr;
 
-  return &(it->second);
+  return &(*it);
 }
 Breakpoint *
 BreakpointMap::get(TraceePointer<void> addr) noexcept
 {
-  if (!contains(addr))
-    return nullptr;
+  auto iter = find(breakpoints, [addr](auto &bp) { return bp.address == addr; });
+  if (iter != std::cend(breakpoints))
+    return &(*iter);
   else
-    return &breakpoints[addr.get()];
+    return nullptr;
 }
 
 // Debug Symbols Related Logic

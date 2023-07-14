@@ -1,6 +1,7 @@
 #pragma once
 #include "../ui_command.h"
 // NOLINTNEXTLINE
+#include "../../breakpoint.h"
 #include "dap_defs.h"
 #include "nlohmann/json.hpp"
 #include "types.h"
@@ -28,10 +29,14 @@ struct Continue final : public ui::UICommand
   DEFINE_NAME(Continue)
 };
 
-struct SetInstructionBreakpointsResponse final : ui::UIResult
+// This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
+// in the DAP spec
+struct SetBreakpointsResponse final : ui::UIResult
 {
+  SetBreakpointsResponse(BreakpointType type) noexcept;
+  BreakpointType type;
   std::vector<ui::dap::Breakpoint> breakpoints;
-  ~SetInstructionBreakpointsResponse() noexcept = default;
+  ~SetBreakpointsResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
 
@@ -39,6 +44,15 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 {
   SetInstructionBreakpoints(nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() = default;
+  nlohmann::json args;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(SetInstructionBreakpoints)
+};
+
+struct SetFunctionBreakpoints final : public ui::UICommand
+{
+  SetFunctionBreakpoints(nlohmann::json &&arguments) noexcept;
+  ~SetFunctionBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   DEFINE_NAME(SetInstructionBreakpoints)

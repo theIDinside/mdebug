@@ -3,6 +3,26 @@
 #include <string_view>
 namespace ui::dap {
 
+struct SourceBreakpoint
+{
+  int line;
+  std::optional<int> column;
+  std::optional<std::string> condition;
+  std::optional<std::string> hit_condition;
+  std::optional<std::string> logMessage;
+};
+
+struct FunctionBreakpoint
+{
+  std::string name;
+  std::optional<std::string> condition;
+  std::optional<std::string> hit_condition;
+};
+
+struct InstructionBreakpoint
+{
+};
+
 struct Source
 {
   std::string_view name;
