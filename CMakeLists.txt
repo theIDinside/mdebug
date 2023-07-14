@@ -50,6 +50,8 @@ set(MIDAS_SOURCES
   src/interface/dap/types.h
   src/interface/pty.cpp
   src/interface/pty.h
+  src/utils/base64.cpp
+  src/utils/base64.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
@@ -110,8 +112,22 @@ target_link_libraries(
   nlohmann_json::nlohmann_json
 )
 
+add_executable(
+  base64_encoding
+  test/unittest/base64.cpp
+  src/utils/base64.cpp
+  ${COMMON_SRC}
+)
+
+target_link_libraries(
+  base64_encoding
+  GTest::gtest_main
+  fmt::fmt
+)
+
 include(GoogleTest)
 gtest_discover_tests(parse_dap_requests)
+gtest_discover_tests(base64_encoding)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)

@@ -4,6 +4,7 @@
 #include "lib/spinlock.h"
 #include "symbolication/type.h"
 #include "task.h"
+#include "utils/static_vector.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -171,6 +172,8 @@ struct Target
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
   void read_auxv(TaskWaitResult &wait);
+
+  utils::StaticVector<u8>::own_ptr read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept;
 
   template <typename T>
   std::optional<T>

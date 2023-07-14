@@ -434,6 +434,23 @@ Target::read_auxv(TaskWaitResult &wait)
   ASSERT(entry.has_value() && interpreter_base.has_value(), "Expected ENTRY and INTERPRETER_BASE to be found");
 }
 
+utils::StaticVector<u8>::own_ptr
+Target::read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept
+{
+  auto data = std::make_unique<utils::StaticVector<u8>>(bytes);
+
+  auto total_read = 0ull;
+  while (total_read < bytes) {
+    auto read_bytes = pread64(mem_fd().get(), data->data_ptr() + total_read, bytes - total_read, addr);
+    if (-1 == read_bytes || 0 == read_bytes) {
+      PANIC(fmt::format("Failed to proc_fs read from {}", addr));
+    }
+    total_read += read_bytes;
+  }
+  data->set_size(total_read);
+  return data;
+}
+
 void
 Target::add_file(CompilationUnitFile &&file) noexcept
 {

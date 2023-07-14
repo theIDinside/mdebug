@@ -58,5 +58,27 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   DEFINE_NAME(SetInstructionBreakpoints)
 };
 
+struct ReadMemoryResponse final : public ui::UIResult
+{
+  ~ReadMemoryResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  TPtr<void> first_readable_address;
+  u64 unreadable_bytes;
+  std::string data_base64;
+};
+
+struct ReadMemory final : public ui::UICommand
+{
+  ReadMemory(TPtr<void> address, int offset, u64 bytes) noexcept;
+  ~ReadMemory() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+
+  TPtr<void> address;
+  int offset;
+  u64 bytes;
+
+  DEFINE_NAME(ReadMemory)
+};
+
 ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;
 }; // namespace ui::dap

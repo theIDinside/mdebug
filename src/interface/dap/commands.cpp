@@ -1,6 +1,7 @@
 #include "commands.h"
 #include "../../target.h"
 #include "../../tracer.h"
+#include "../../utils/base64.h"
 #include "fmt/format.h"
 #include "types.h"
 #include <algorithm>
@@ -50,7 +51,7 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
       serialized_bkpts.push_back(bp.serialize());
     }
     return fmt::format(
-        R"({{ "seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "breakpoints": [{}] }} }})",
+        R"({{ "seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
         seq, fmt::join(serialized_bkpts, ","));
   } else {
     TODO("Unsuccessful set instruction breakpoints event response handling");
@@ -135,6 +136,35 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
     }
   }
   res->success = true;
+  return res;
+}
+
+std::string
+ReadMemoryResponse::serialize(int seq) const noexcept
+{
+  if (success) {
+    return fmt::format(
+        R"({{ "seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": {}, "unreadableBytes": {}, "data": {} }} }})",
+        seq, first_readable_address, unreadable_bytes, data_base64);
+  } else {
+    TODO("non-success for ReadMemory");
+  }
+}
+
+ReadMemory::ReadMemory(TPtr<void> address, int offset, u64 bytes) noexcept
+    : address(address), offset(offset), bytes(bytes)
+{
+}
+
+UIResultPtr
+ReadMemory::execute(Tracer *tracer) noexcept
+{
+  auto sv = tracer->get_current()->read_to_vector(address, bytes);
+  auto res = new ReadMemoryResponse{};
+  res->data_base64 = utils::encode_base64(sv->span());
+  res->first_readable_address = address;
+  res->success = true;
+  res->unreadable_bytes = 0;
   return res;
 }
 
