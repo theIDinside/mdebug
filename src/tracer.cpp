@@ -6,6 +6,7 @@
 #include "interface/ui_result.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
+#include "notify_pipe.h"
 #include "ptrace.h"
 #include "symbolication/cu.h"
 #include "symbolication/elf.h"
@@ -35,7 +36,6 @@ Tracer::Tracer(utils::Notifier::ReadEnd wait_pipe, utils::Notifier::ReadEnd io_t
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
          (uintptr_t)this, (uintptr_t)Instance);
   Instance = this;
-  ui_wait = true;
   this->command_queue = {};
 }
 
@@ -152,21 +152,6 @@ Tracer::interrupt(LWP lwp) noexcept
       task.stopped_by_tracer = true;
     }
   }
-}
-
-bool
-Tracer::waiting_for_ui() const noexcept
-{
-  return ui_wait;
-}
-void
-Tracer::continue_current_target() noexcept
-{
-  char ch;
-  // Emulating user input to say "continue" by just typing a character
-  ASSERT(read(STDIN_FILENO, &ch, 1) != -1, "Failed to read from STDIN: {}", strerror(errno));
-  ui_wait = false;
-  get_current()->set_all_running(RunType::Continue);
 }
 
 bool
@@ -295,7 +280,6 @@ Tracer::wait_for_tracee_events() noexcept
   default:
     PANIC("WAIT, WHAT?");
   }
-  ui_wait = true;
   return stopped;
 }
 

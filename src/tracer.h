@@ -56,10 +56,6 @@ public:
   void init_io_thread() noexcept;
   void interrupt(LWP lwp) noexcept;
 
-  // This will be removed in future work
-  // but it's just to get something up-and-running
-  bool waiting_for_ui() const noexcept;
-  void continue_current_target() noexcept;
   bool wait_for_tracee_events() noexcept;
   void set_ui(ui::dap::DAP *dap) noexcept;
   void kill_ui() noexcept;
@@ -74,9 +70,6 @@ private:
   std::vector<std::unique_ptr<Target>> targets;
   Target *current_target = nullptr;
   std::vector<ObjectFile *> object_files;
-  // N.B. to be removed in future work when an event-processing scheme
-  // has been developed
-  bool ui_wait;
   ui::dap::DAP *dap;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;
