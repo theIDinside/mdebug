@@ -2,6 +2,7 @@
 
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
+#include <algorithm>
 #include <charconv>
 #include <concepts>
 #include <cstddef>
@@ -10,16 +11,15 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
+#include <optional>
 #include <source_location>
 #include <span>
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <type_traits>
+#include <unistd.h>
 #include <variant>
 #include <vector>
-// For `pipe` syscall
-#include <optional>
-#include <unistd.h>
 
 namespace fs = std::filesystem;
 using Path = fs::path;
@@ -85,6 +85,13 @@ std::string_view syscall_name(u64 syscall_number);
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
     panic(err_msg, loc, 1);                                                                                       \
+  }
+
+#define TODO(abort_msg)                                                                                           \
+  {                                                                                                               \
+    auto loc = std::source_location::current();                                                                   \
+    fmt::println("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);         \
+    std::terminate();                                                                                             \
   }
 
 // Identical to ASSERT, but doesn't care about build type
@@ -575,10 +582,31 @@ to_addr(std::string_view s)
   if (s.starts_with("0x"))
     s.remove_prefix(2);
 
-  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value, 16).ec == std::errc{})
     return TPtr<void>{value};
   else
     return std::nullopt;
 }
 
 using SpinGuard = LockGuard<SpinLock>;
+
+template <typename T, typename Predicate>
+constexpr bool
+any_of(const std::vector<T> &vec, Predicate &&p) noexcept
+{
+  return std::any_of(vec.cbegin(), vec.cend(), p);
+}
+
+template <typename T, typename Predicate>
+constexpr auto
+find(const std::vector<T> &vec, Predicate &&p) noexcept
+{
+  return std::find_if(vec.cbegin(), vec.cend(), p);
+}
+
+template <typename T, typename Predicate>
+constexpr auto
+find(std::vector<T> &vec, Predicate &&p) noexcept
+{
+  return std::find_if(vec.begin(), vec.end(), p);
+}
