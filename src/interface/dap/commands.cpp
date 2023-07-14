@@ -247,7 +247,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::Completions:
     TODO("Command::Completions");
   case Command::ConfigurationDone:
-    TODO("Command::ConfigurationDone");
+    return new ConfigurationDone{};
     break;
   case Command::Continue: {
     const auto all_threads = !args.contains("singleThread") ? true : false;
@@ -270,7 +270,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::GotoTargets:
     TODO("Command::GotoTargets");
   case Command::Initialize:
-    TODO("Command::Initialize");
+    return new Initialize{std::move(args)};
   case Command::Launch:
     TODO("Command::Launch");
   case Command::LoadedSources:
@@ -281,8 +281,19 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     TODO("Command::Next");
   case Command::Pause:
     TODO("Command::Pause");
-  case Command::ReadMemory:
-    TODO("Command::ReadMemory");
+  case Command::ReadMemory: {
+    ASSERT(args.contains("memoryReference") && args.contains("count"),
+           "args didn't contain memoryReference or count");
+    std::string_view addr_str;
+    args.at("instructionReference").get_to(addr_str);
+    auto addr = to_addr(addr_str);
+    auto offset = 0;
+    if (args.contains("offset")) {
+      offset = args.at("offset");
+    }
+    u64 count = args.at("count");
+    return new ui::dap::ReadMemory{*addr, offset, count};
+  }
   case Command::Restart:
     TODO("Command::Restart");
   case Command::RestartFrame:
@@ -300,9 +311,9 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::SetExpression:
     TODO("Command::SetExpression");
   case Command::SetFunctionBreakpoints:
-    return new ui::dap::SetFunctionBreakpoints{std::move(args)};
+    return new SetFunctionBreakpoints{std::move(args)};
   case Command::SetInstructionBreakpoints:
-    return new ui::dap::SetInstructionBreakpoints{std::move(args)};
+    return new SetInstructionBreakpoints{std::move(args)};
   case Command::SetVariable:
     TODO("Command::SetVariable");
   case Command::Source:
