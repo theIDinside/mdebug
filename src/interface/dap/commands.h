@@ -1,5 +1,6 @@
 #pragma once
 #include "../ui_command.h"
+#include "../ui_result.h"
 // NOLINTNEXTLINE
 #include "../../breakpoint.h"
 #include "dap_defs.h"
@@ -10,10 +11,16 @@
 
 namespace ui::dap {
 
+#define CTOR(Type)                                                                                                \
+  Type(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd)                                          \
+  {                                                                                                               \
+  }
+
 struct Breakpoint;
 
 struct ContinueResponse final : ui::UIResult
 {
+  CTOR(ContinueResponse)
   ~ContinueResponse() noexcept = default;
   bool continue_all;
   std::string serialize(int seq) const noexcept final override;
@@ -33,7 +40,7 @@ struct Continue final : public ui::UICommand
 // in the DAP spec
 struct SetBreakpointsResponse final : ui::UIResult
 {
-  SetBreakpointsResponse(BreakpointType type) noexcept;
+  SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept;
   BreakpointType type;
   std::vector<ui::dap::Breakpoint> breakpoints;
   ~SetBreakpointsResponse() noexcept = default;
@@ -60,6 +67,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
 
 struct ReadMemoryResponse final : public ui::UIResult
 {
+  CTOR(ReadMemoryResponse)
   ~ReadMemoryResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
   TPtr<void> first_readable_address;
@@ -82,6 +90,7 @@ struct ReadMemory final : public ui::UICommand
 
 struct ConfigurationDoneResponse final : public ui::UIResult
 {
+  CTOR(ConfigurationDoneResponse)
   ~ConfigurationDoneResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -97,6 +106,7 @@ struct ConfigurationDone final : public ui::UICommand
 
 struct InitializeResponse final : public ui::UIResult
 {
+  CTOR(InitializeResponse)
   ~InitializeResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -108,6 +118,53 @@ struct Initialize final : public ui::UICommand
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   nlohmann::json args;
   DEFINE_NAME(Initialize)
+};
+
+struct DisconnectResponse final : public UIResult
+{
+  CTOR(DisconnectResponse)
+  ~DisconnectResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct Disconnect final : public UICommand
+{
+  Disconnect(bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
+  ~Disconnect() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  bool restart, terminate_tracee, suspend_tracee;
+  DEFINE_NAME(Disconnect)
+};
+
+struct LaunchResponse final : public UIResult
+{
+  CTOR(LaunchResponse)
+  ~LaunchResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct Launch final : public UICommand
+{
+  Launch(Path &&program, std::vector<std::string> &&program_args) noexcept;
+  ~Launch() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  Path program;
+  std::vector<std::string> program_args;
+  DEFINE_NAME(Launch)
+};
+
+struct TerminateResponse final : public UIResult
+{
+  CTOR(TerminateResponse)
+  ~TerminateResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct Terminate final : public UICommand
+{
+  ~Terminate() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(Terminate)
 };
 
 ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;

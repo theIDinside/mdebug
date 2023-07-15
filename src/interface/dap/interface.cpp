@@ -179,7 +179,9 @@ DAP::run_ui_loop()
                 std::string_view cmd_name;
                 obj["command"].get_to(cmd_name);
                 ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
+                ASSERT(obj.contains("seq"), "Request did not contain seq field");
                 auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
+                cmd->seq = obj["seq"];
                 tracer->accept_command(cmd);
                 parsed_commands = true;
               }

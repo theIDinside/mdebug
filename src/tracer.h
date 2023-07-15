@@ -65,6 +65,8 @@ public:
   void accept_command(ui::UICommand *cmd) noexcept;
   void execute_pending_commands() noexcept;
 
+  void launch(Path &&program, std::vector<std::string> &&prog_args) noexcept;
+
 private:
   std::vector<std::unique_ptr<Target>> targets;
   Target *current_target = nullptr;
@@ -74,4 +76,5 @@ private:
   std::queue<ui::UICommand *> command_queue;
   utils::Notifier::ReadEnd wait_pipe;
   utils::Notifier::ReadEnd io_thread_pipe;
+  bool already_launched;
 };

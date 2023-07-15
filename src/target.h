@@ -14,6 +14,7 @@
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/user.h>
+#include <thread>
 #include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
@@ -154,6 +155,9 @@ struct Target
   // thing
   void reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
   void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
+
+  bool kill() noexcept;
+  bool terminate_gracefully() noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;

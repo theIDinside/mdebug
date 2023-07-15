@@ -1,6 +1,8 @@
 #include "tracer.h"
 #include "./interface/dap/interface.h"
 #include "common.h"
+#include "fmt/format.h"
+#include "forker.h"
 #include "interface/dap/events.h"
 #include "interface/ui_command.h"
 #include "interface/ui_result.h"
@@ -326,4 +328,11 @@ Tracer::execute_pending_commands() noexcept
     executed_commands++;
   }
   fmt::println("Executed {} commands", executed_commands);
+}
+
+void
+Tracer::launch(Path &&program, std::vector<std::string> &&prog_args) noexcept
+{
+  TODO(fmt::format("Service the Launch Request for program: {}, args: {{ {} }}", program.c_str(),
+                   fmt::join(prog_args, ",")));
 }

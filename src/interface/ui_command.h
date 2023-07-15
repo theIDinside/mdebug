@@ -1,9 +1,13 @@
 #pragma once
-#include "ui_result.h"
+#include <cstdint>
+#include <string_view>
 
 class Tracer;
 
 namespace ui {
+struct UIResult;
+using UIResultPtr = UIResult *;
+
 #if defined(MDB_DEBUG)
 #define DEFINE_NAME(Type)                                                                                         \
   constexpr std::string_view name() noexcept override final                                                       \
@@ -20,6 +24,7 @@ public:
   virtual ~UICommand() = default;
   virtual UIResultPtr execute(Tracer *tracer) noexcept = 0;
 
+  std::uint64_t seq;
 #if defined(MDB_DEBUG)
   constexpr virtual std::string_view name() noexcept = 0;
 #endif

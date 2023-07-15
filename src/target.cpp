@@ -115,7 +115,7 @@ Target::set_all_running(RunType type) noexcept
 void
 Target::stop_all() noexcept
 {
-  kill(task_leader, SIGSTOP);
+  ::kill(task_leader, SIGSTOP);
   for (auto &t : threads) {
     if (!t.stopped) {
       t.set_stop();
@@ -248,6 +248,26 @@ Target::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
   }
+}
+
+bool
+Target::kill() noexcept
+{
+  bool done = ptrace(PTRACE_KILL, task_leader, nullptr, nullptr) != -1;
+  bool threads_done = false;
+  for (const auto &t : threads) {
+    threads_done = threads_done && (ptrace(PTRACE_KILL, t.tid, nullptr, nullptr) != -1);
+  }
+  return done || threads_done;
+}
+
+bool
+Target::terminate_gracefully() noexcept
+{
+  if (is_running()) {
+    stop_all();
+  }
+  return ::kill(task_leader, SIGKILL) == 0;
 }
 
 void
