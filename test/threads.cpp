@@ -10,6 +10,8 @@
 
 using ThreadPool = std::vector<std::thread>;
 
+static Foo *global_foo = new Foo{.a = 10000, .b = 20000, .c = 30000, .d = 40000};
+
 int
 main(int argc, const char **argv)
 {

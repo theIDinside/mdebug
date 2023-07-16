@@ -149,7 +149,7 @@ ReadMemoryResponse::serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": {}, "unreadableBytes": {}, "data": {} }} }})",
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": "{}", "unreadableBytes": {}, "data": "{}" }} }})",
         seq, response_seq, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
@@ -374,7 +374,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     ASSERT(args.contains("memoryReference") && args.contains("count"),
            "args didn't contain memoryReference or count");
     std::string_view addr_str;
-    args.at("instructionReference").get_to(addr_str);
+    args.at("memoryReference").get_to(addr_str);
     auto addr = to_addr(addr_str);
     auto offset = 0;
     if (args.contains("offset")) {
