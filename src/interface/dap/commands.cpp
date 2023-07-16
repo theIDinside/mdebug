@@ -286,7 +286,6 @@ Launch::Launch(Path &&program, std::vector<std::string> &&program_args) noexcept
 UIResultPtr
 Launch::execute(Tracer *tracer) noexcept
 {
-  fmt::println("[Launch] {} with args {{ {} }}", program.c_str(), fmt::join(program_args, ","));
   tracer->launch(std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
 }
