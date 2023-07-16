@@ -39,6 +39,16 @@ waitpid_nonblock(pid_t tid) noexcept
   return WaitPid{waited_pid, status};
 }
 
+Option<WaitPid>
+waitpid_block(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, 0);
+  if (waited_pid == 0 || waited_pid == -1)
+    return Option<WaitPid>{};
+  return WaitPid{waited_pid, status};
+}
+
 std::string_view
 syscall_name(u64 syscall_number)
 {

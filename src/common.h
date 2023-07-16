@@ -48,13 +48,19 @@ struct WaitPid
   int status;
 };
 
-#define FOR_EVER for (;;)
+enum class TargetSession
+{
+  Launched,
+  Attached
+};
 
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
  * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
 Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
 /** `wait`'s for `tid` in a non-blocking way. If waiting on `tid` yielded no wait status, returns `none` */
 Option<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
+
+Option<WaitPid> waitpid_block(pid_t tid) noexcept;
 
 // "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
 template <typename T> using ActualType = std::remove_cvref_t<T>;

@@ -16,6 +16,10 @@ set(MIDAS_SOURCES
   src/ptrace.h
   src/task.cpp
   src/task.h
+  src/notify_pipe.cpp
+  src/notify_pipe.h
+  src/awaiter.cpp
+  src/awaiter.h
   src/breakpoint.cpp
   src/breakpoint.h
   src/posix/argslist.cpp

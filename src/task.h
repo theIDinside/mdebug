@@ -52,7 +52,7 @@ struct TaskInfo
   bool stopped : 1;
   bool signal_in_flight : 1;
   bool stepping : 1;
-  bool stopped_by_tracer : 1;
+  bool ptrace_stop : 1;
   bool initialized : 1;
   pid_t tid;
   std::optional<TaskWaitResult> wait_status;
@@ -70,6 +70,7 @@ struct TaskInfo
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
+  void set_pc(TPtr<void> pc) noexcept;
 
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
@@ -127,7 +128,7 @@ template <> struct formatter<TaskInfo>
     }
 
     return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.tid,
-                          task.stopped, task.stopped_by_tracer, wait_status);
+                          task.stopped, task.ptrace_stop, wait_status);
   }
 };
 

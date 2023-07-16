@@ -83,9 +83,9 @@ static constexpr std::string_view strings[]{
 
 using json = nlohmann::json;
 
-DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_pty_fd,
+DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
          utils::Notifier::WriteEnd command_notifier) noexcept
-    : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), master_pty_fd(master_pty_fd),
+    : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd),
       keep_running(true), output_message_lock{}, events_queue{}, seq(0), command_notifier(command_notifier)
 {
   auto [r, w] = utils::Notifier::notify_pipe();
@@ -93,9 +93,7 @@ DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int master_p
   posted_evt_listener = r;
   buffer = mmap_buffer<char>(4096);
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
-  auto flags = fcntl(master_pty_fd, F_GETFL);
-  VERIFY(flags != -1, "Failed to get pty flags");
-  VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
+
   log_file = std::fstream{"/home/cx/dev/foss/cx/dbm/build-debug/bin/dap.log",
                           std::ios_base::in | std::ios_base::out | std::ios_base::trunc};
   if (!log_file.is_open())
@@ -138,10 +136,13 @@ DAP::run_ui_loop()
 
   while (keep_running || cleanup_times > 0) {
     epoll_event events[5];
+
+    const auto master_pty = current_tty();
+
     struct pollfd pfds[3]{
         cfg_read_poll(tracer_in_fd, 0),
         cfg_read_poll(posted_evt_listener, 0),
-        cfg_read_poll(master_pty_fd, 0),
+        cfg_read_poll(master_pty, 0),
     };
 
     auto ready = poll(pfds, 3, 100);
@@ -179,7 +180,9 @@ DAP::run_ui_loop()
                 std::string_view cmd_name;
                 obj["command"].get_to(cmd_name);
                 ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
+                ASSERT(obj.contains("seq"), "Request did not contain seq field");
                 auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
+                cmd->seq = obj["seq"];
                 tracer->accept_command(cmd);
                 parsed_commands = true;
               }
@@ -202,8 +205,8 @@ DAP::run_ui_loop()
             write_protocol_message(protocol_msg);
             delete evt;
           }
-        } else if (pfds[i].fd == master_pty_fd && (pfds[i].revents & POLLIN)) {
-          auto bytes_read = read(master_pty_fd, tracee_stdout_buffer, 4096 * 3);
+        } else if (pfds[i].fd == master_pty && (pfds[i].revents & POLLIN)) {
+          auto bytes_read = read(master_pty, tracee_stdout_buffer, 4096 * 3);
           if (bytes_read == -1)
             continue;
           std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
@@ -254,6 +257,28 @@ void
 DAP::display_result(std::string_view str) const noexcept
 {
   VERIFY(write(tracer_out_fd, str.data(), str.size()) != -1, "Failed to write '{}'", str);
+}
+
+void
+DAP::add_tty(int master_pty_fd) noexcept
+{
+  // todo(simon): when we add a new pty, what we need to do
+  // is somehow find a way to re-route (temporarily) the other pty's to /dev/null, because we don't care for them
+  // however, we must also be able to _restore_ those pty's from that re-routing. I'm not sure that works, or if
+  // it's possible but it would be nice.
+  auto flags = fcntl(master_pty_fd, F_GETFL);
+  VERIFY(flags != -1, "Failed to get pty flags");
+  VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
+  current_tty_idx = tty_fds.size();
+  tty_fds.push_back(master_pty_fd);
+}
+
+int
+DAP::current_tty() noexcept
+{
+  if (tty_fds.empty())
+    return -1;
+  return tty_fds[current_tty_idx];
 }
 
 } // namespace ui::dap

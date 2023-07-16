@@ -18,6 +18,9 @@ public:
   Breakpoint &operator=(const Breakpoint &) noexcept = default;
   Breakpoint &operator=(Breakpoint &&) noexcept = default;
 
+  void enable(Tid tid) noexcept;
+  void disable(Tid tid) noexcept;
+
   u8 ins_byte;
   bool enabled : 1;
   BreakpointType type : 7;

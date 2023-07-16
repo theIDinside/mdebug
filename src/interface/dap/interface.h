@@ -106,7 +106,7 @@ private:
 class DAP
 {
 public:
-  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd, int output_fd,
+  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
                utils::Notifier::WriteEnd io_write) noexcept;
   ~DAP() = default;
 
@@ -123,17 +123,25 @@ public:
   // Fulfill the `UI` concept in ui_result.h
   void display_result(std::string_view str) const noexcept;
 
+  void add_tty(int master_pty_fd) noexcept;
+  int current_tty() noexcept;
+
 private:
   UIResultPtr pop_event() noexcept;
   void write_protocol_message(std::string_view msg) noexcept;
   u64 new_result_id() noexcept;
+
+  // all the tty's we have connected.
+  // Note that, we only ever listen/have one active at one time. Interleaving std output from different processes
+  // would be insane.
+  std::vector<int> tty_fds;
+  u64 current_tty_idx;
 
   utils::Notifier::WriteEnd posted_event_notifier;
   utils::Notifier::ReadEnd posted_evt_listener;
   Tracer *tracer;
   int tracer_in_fd;
   int tracer_out_fd;
-  int master_pty_fd;
   bool keep_running;
   char *buffer;
   // A buffer of

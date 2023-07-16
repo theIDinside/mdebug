@@ -14,20 +14,21 @@ namespace ui::dap {
 std::string
 ContinueResponse::serialize(int seq) const noexcept
 {
+
   if (success)
     return fmt::format(
-        R"({{ "response_seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
-        seq, continue_all);
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
+        seq, response_seq, continue_all);
   else
     return fmt::format(
-        R"({{ "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
-        seq);
+        R"({{ "seq": {} "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
+        seq, response_seq);
 }
 
 UIResultPtr
 Continue::execute(Tracer *tracer) noexcept
 {
-  auto res = new ContinueResponse{};
+  auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
   auto target = tracer->get_current();
   if (target->is_running()) {
@@ -40,7 +41,10 @@ Continue::execute(Tracer *tracer) noexcept
   return res;
 }
 
-SetBreakpointsResponse::SetBreakpointsResponse(BreakpointType type) noexcept : type(type), breakpoints() {}
+SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept
+    : ui::UIResult(success, cmd), type(type), breakpoints()
+{
+}
 
 std::string
 SetBreakpointsResponse::serialize(int seq) const noexcept
@@ -52,8 +56,8 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
       serialized_bkpts.push_back(bp.serialize());
     }
     return fmt::format(
-        R"({{ "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
-        seq, fmt::join(serialized_bkpts, ","));
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+        seq, response_seq, fmt::join(serialized_bkpts, ","));
   } else {
     TODO("Unsuccessful set instruction breakpoints event response handling");
   }
@@ -84,7 +88,7 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
   auto target = tracer->get_current();
   target->reset_addr_breakpoints(addresses);
 
-  auto res = new SetBreakpointsResponse{BreakpointType::AddressBreakpoint};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::AddressBreakpoint};
   res->breakpoints.reserve(target->user_breakpoints_map.breakpoints.size());
 
   for (const auto &bp : target->user_breakpoints_map.breakpoints) {
@@ -115,7 +119,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
   std::vector<std::string_view> bkpts{};
   std::vector<std::string_view> new_ones{};
 
-  auto res = new SetBreakpointsResponse{BreakpointType::FunctionBreakpoint};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::FunctionBreakpoint};
   for (const auto &fnbkpt : args.at("breakpoints")) {
     ASSERT(fnbkpt.contains("name") && fnbkpt["name"].is_string(),
            "instructionReference field not in args or wasn't of type string");
@@ -145,8 +149,8 @@ ReadMemoryResponse::serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
-        R"({{ "response_seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": {}, "unreadableBytes": {}, "data": {} }} }})",
-        seq, first_readable_address, unreadable_bytes, data_base64);
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": "{}", "unreadableBytes": {}, "data": "{}" }} }})",
+        seq, response_seq, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
   }
@@ -161,7 +165,7 @@ UIResultPtr
 ReadMemory::execute(Tracer *tracer) noexcept
 {
   auto sv = tracer->get_current()->read_to_vector(address, bytes);
-  auto res = new ReadMemoryResponse{};
+  auto res = new ReadMemoryResponse{true, this};
   res->data_base64 = utils::encode_base64(sv->span());
   res->first_readable_address = address;
   res->success = true;
@@ -173,7 +177,17 @@ std::string
 ConfigurationDoneResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-      R"({{ "response_seq": {}, "type": "response", "success": true, "command": "configurationDone" }})", seq);
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "configurationDone" }})",
+      seq, response_seq);
+}
+
+UIResultPtr
+ConfigurationDone::execute(Tracer *tracer) noexcept
+{
+  fmt::println("Configuration steps done.");
+  tracer->get_current()->set_all_running(RunType::Continue);
+  tracer->get_current()->start_awaiter_thread();
+  return new ConfigurationDoneResponse{true, this};
 }
 
 Initialize::Initialize(nlohmann::json &&arguments) noexcept : args(std::move(arguments)) {}
@@ -181,7 +195,27 @@ Initialize::Initialize(nlohmann::json &&arguments) noexcept : args(std::move(arg
 UIResultPtr
 Initialize::execute(Tracer *tracer) noexcept
 {
-  return new InitializeResponse{};
+  fmt::println("initializing...");
+  return new InitializeResponse{true, this};
+}
+
+std::string
+DisconnectResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "disconnect" }})", seq,
+      response_seq);
+}
+
+Disconnect::Disconnect(bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
+    : restart(restart), terminate_tracee(terminate_debuggee), suspend_tracee(suspend_debuggee)
+{
+}
+UIResultPtr
+Disconnect::execute(Tracer *tracer) noexcept
+{
+  tracer->kill_all_targets();
+  return new DisconnectResponse{true, this};
 }
 
 std::string
@@ -236,6 +270,41 @@ InitializeResponse::serialize(int seq) const noexcept
       cfg_body.dump());
 }
 
+std::string
+LaunchResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "launch" }})", seq,
+      response_seq);
+}
+
+Launch::Launch(Path &&program, std::vector<std::string> &&program_args) noexcept
+    : program(std::move(program)), program_args(std::move(program_args))
+{
+}
+
+UIResultPtr
+Launch::execute(Tracer *tracer) noexcept
+{
+  tracer->launch(std::move(program), std::move(program_args));
+  return new LaunchResponse{true, this};
+}
+
+std::string
+TerminateResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "terminate" }})", seq,
+      response_seq);
+}
+
+UIResultPtr
+Terminate::execute(Tracer *tracer) noexcept
+{
+  bool success = tracer->get_current()->terminate_gracefully();
+  return new TerminateResponse{success, this};
+}
+
 ui::UICommand *
 parse_command(Command cmd, nlohmann::json &&args) noexcept
 {
@@ -259,8 +328,21 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     TODO("Command::DataBreakpointInfo");
   case Command::Disassemble:
     TODO("Command::Disassemble");
-  case Command::Disconnect:
-    TODO("Command::Disconnect")
+  case Command::Disconnect: {
+    bool restart = false;
+    bool terminate_debuggee = false;
+    bool suspend_debuggee = false;
+    if (args.contains("restart")) {
+      restart = args.at("restart");
+    }
+    if (args.contains("terminateDebuggee")) {
+      terminate_debuggee = args.at("terminateDebuggee");
+    }
+    if (args.contains("suspendDebuggee")) {
+      suspend_debuggee = args.at("suspendDebuggee");
+    }
+    return new Disconnect{restart, terminate_debuggee, suspend_debuggee};
+  }
   case Command::Evaluate:
     TODO("Command::Evaluate");
   case Command::ExceptionInfo:
@@ -271,8 +353,15 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     TODO("Command::GotoTargets");
   case Command::Initialize:
     return new Initialize{std::move(args)};
-  case Command::Launch:
-    TODO("Command::Launch");
+  case Command::Launch: {
+    ASSERT(args.contains("program"), "Launch must contain 'program' field in args");
+    Path path = args.at("program");
+    std::vector<std::string> prog_args;
+    if (args.contains("args")) {
+      prog_args = args.at("args");
+    }
+    return new Launch{std::move(path), std::move(prog_args)};
+  }
   case Command::LoadedSources:
     TODO("Command::LoadedSources");
   case Command::Modules:
@@ -285,7 +374,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     ASSERT(args.contains("memoryReference") && args.contains("count"),
            "args didn't contain memoryReference or count");
     std::string_view addr_str;
-    args.at("instructionReference").get_to(addr_str);
+    args.at("memoryReference").get_to(addr_str);
     auto addr = to_addr(addr_str);
     auto offset = 0;
     if (args.contains("offset")) {
@@ -329,7 +418,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::StepOut:
     TODO("Command::StepOut");
   case Command::Terminate:
-    TODO("Command::Terminate");
+    return new Terminate{};
   case Command::TerminateThreads:
     TODO("Command::TerminateThreads");
   case Command::Threads:

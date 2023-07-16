@@ -38,10 +38,11 @@ public:
     *(data + size) = t;
   }
 
-  T *
+  template <typename U = T>
+  U *
   data_ptr() noexcept
   {
-    return data;
+    return (U *)data;
   }
 
   std::span<T>
