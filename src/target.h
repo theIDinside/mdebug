@@ -1,4 +1,5 @@
 #pragma once
+#include "awaiter.h"
 #include "breakpoint.h"
 #include "common.h"
 #include "lib/spinlock.h"
@@ -93,6 +94,7 @@ struct BreakpointMap
 
 struct Target
 {
+  using handle = std::unique_ptr<Target>;
   friend class Tracer;
   friend struct ui::UICommand;
   // Members
@@ -108,7 +110,8 @@ struct Target
   SpinLock spin_lock;
 
   // Constructors
-  Target(pid_t process_space_id, bool open_mem_fd = true) noexcept;
+  Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
+         bool open_mem_fd = true) noexcept;
   Target(const Target &) = delete;
   Target &operator=(const Target &) = delete;
 
@@ -147,6 +150,8 @@ struct Target
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
+  void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
+
   void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
 
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
@@ -158,6 +163,7 @@ struct Target
 
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
+  bool detach() noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
@@ -176,6 +182,7 @@ struct Target
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
   void read_auxv(TaskWaitResult &wait);
+  TargetSession session_type() const noexcept;
 
   utils::StaticVector<u8>::own_ptr read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept;
 
@@ -201,11 +208,17 @@ struct Target
     typename TPtr<T>::Type result;
     auto total_read = 0ull;
     constexpr auto sz = TPtr<T>::type_size();
+    auto EOF_REACHED = 0;
     while (total_read < sz) {
       auto read_bytes = pread64(mem_fd().get(), &result + total_read, sz - total_read, address.get());
-      if (-1 == read_bytes || 0 == read_bytes) {
-        PANIC(fmt::format("Failed to proc_fs read from {:p}", (void *)address.get()));
+      if (-1 == read_bytes) {
+        PANIC(fmt::format("Failed to proc_fs read from {:p} because {}", (void *)address.get(), strerror(errno)));
       }
+      if (0 == read_bytes)
+        EOF_REACHED++;
+
+      if (EOF_REACHED > 3)
+        PANIC("Erred out because we attempted read beyond EOF multiple times.");
       total_read += read_bytes;
     }
     return result;
@@ -272,12 +285,17 @@ struct Target
   /* Add parsed DWARF debug info for `type` */
   void add_type(Type type) noexcept;
 
+  void reaped_events() noexcept;
+  void start_awaiter_thread() noexcept;
+
 private:
   std::vector<CompilationUnitFile> m_files;
   std::unordered_map<std::string_view, Type> m_types;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   std::unordered_map<Tid, user_regs_struct> register_cache;
+  AwaiterThread::handle awaiter_thread;
+  TargetSession session;
 };
 
 template <typename Predicate>

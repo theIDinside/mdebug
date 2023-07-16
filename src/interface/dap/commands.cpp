@@ -184,6 +184,9 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
+  fmt::println("Configuration steps done.");
+  tracer->get_current()->set_all_running(RunType::Continue);
+  tracer->get_current()->start_awaiter_thread();
   return new ConfigurationDoneResponse{true, this};
 }
 
@@ -192,6 +195,7 @@ Initialize::Initialize(nlohmann::json &&arguments) noexcept : args(std::move(arg
 UIResultPtr
 Initialize::execute(Tracer *tracer) noexcept
 {
+  fmt::println("initializing...");
   return new InitializeResponse{true, this};
 }
 
@@ -210,6 +214,7 @@ Disconnect::Disconnect(bool restart, bool terminate_debuggee, bool suspend_debug
 UIResultPtr
 Disconnect::execute(Tracer *tracer) noexcept
 {
+  tracer->kill_all_targets();
   return new DisconnectResponse{true, this};
 }
 
@@ -281,7 +286,9 @@ Launch::Launch(Path &&program, std::vector<std::string> &&program_args) noexcept
 UIResultPtr
 Launch::execute(Tracer *tracer) noexcept
 {
-  TODO("Launch::execute (see main.cpp for what it needs to do ish)");
+  fmt::println("[Launch] {} with args {{ {} }}", program.c_str(), fmt::join(program_args, ","));
+  tracer->launch(std::move(program), std::move(program_args));
+  return new LaunchResponse{true, this};
 }
 
 std::string

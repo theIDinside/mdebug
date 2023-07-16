@@ -3,12 +3,15 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <string>
 #include <sys/epoll.h>
 #include <sys/poll.h>
 #include <tuple>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 struct pollfd;
 
@@ -46,57 +49,33 @@ struct Notifier
       return ::write(fd, "+", 1) > 0;
     }
   };
-
-  static Notifier
-  notify_pipe() noexcept
-  {
-    int notify_pipe[2];
-    ASSERT(pipe(notify_pipe) != -1, "Failed to set up notifier pipe {}", strerror(errno));
-    auto flags = fcntl(notify_pipe[0], F_GETFL);
-    VERIFY(flags != -1, "Failed to get flags for read-end of pipe");
-    VERIFY(-1 != fcntl(notify_pipe[0], F_SETFL, flags | O_NONBLOCK), "Failed to set non-blocking for pipe");
-    return Notifier{.read = ReadEnd{notify_pipe[0]}, .write = WriteEnd{notify_pipe[1]}};
-  }
-
+  static Notifier notify_pipe() noexcept;
   ReadEnd read;
   WriteEnd write;
 };
 
-template <size_t Size> struct NotifyManager
+struct AwaiterNotifier
 {
-  std::array<Notifier::ReadEnd, Size> notifiers;
-  std::array<std::string_view, Size> notifier_names;
-  pollfd pollfds[Size];
-  constexpr NotifyManager(std::array<Notifier::ReadEnd, Size> read_end_notifiers,
-                          std::array<std::string_view, Size> names) noexcept
-      : notifiers(read_end_notifiers), notifier_names(names)
-  {
-    for (auto i = Size - Size; i < Size; i++) {
-      pollfds[i] = {.fd = notifiers[i].fd, .events = EPOLLIN, .revents = 0};
-    }
-  }
+  Notifier::ReadEnd notifier;
+};
 
-  bool
-  poll(int timeout) noexcept
-  {
-    auto ready = ::poll(pollfds, Size, timeout);
-    return ready > 0;
-  }
+struct NotifyResult
+{
+  Tid pid;
+};
 
-  template <size_t Idx>
-  constexpr bool
-  has_notification() noexcept
-  {
-    const auto ok = (pollfds[Idx].revents & POLLIN) == POLLIN;
-    if (ok) {
-      char c;
-      auto res = ::read(pollfds[Idx].fd, &c, 1);
-      ASSERT(res != -1 && errno != EAGAIN, "Attempting to read from pipe when it would block");
-    }
-    pollfds[Idx].revents = 0;
-    pollfds[Idx].events = POLLIN;
-    pollfds[Idx].fd = notifiers[Idx].fd;
-    return ok;
-  }
+struct NotifyManager
+{
+  // notifiers[0] & pollfds[0] __MUST__ be exclusive for IO Thread notifications.
+  std::vector<Notifier::ReadEnd> notifiers;
+  std::vector<std::string> notifier_names;
+  std::vector<pollfd> pollfds;
+  std::unordered_map<int, Tid> fd_to_target;
+  NotifyManager(Notifier::ReadEnd io_read) noexcept;
+
+  void add_notifier(Notifier::ReadEnd notifier, std::string name, Tid task_leader) noexcept;
+  bool poll(int timeout) noexcept;
+  bool has_io_ready() noexcept;
+  void has_wait_ready(std::vector<NotifyResult> &result);
 };
 }; // namespace utils

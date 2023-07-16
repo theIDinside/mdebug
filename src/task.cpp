@@ -3,8 +3,8 @@
 #include <sys/ptrace.h>
 
 TaskInfo::TaskInfo(pid_t tid) noexcept
-    : stopped(true), signal_in_flight(false), stepping(false), stopped_by_tracer(false), initialized(false),
-      tid(tid), wait_status(), run_type(RunType::UNKNOWN)
+    : stopped(true), signal_in_flight(false), stepping(false), ptrace_stop(false), initialized(false), tid(tid),
+      wait_status(), run_type(RunType::UNKNOWN)
 {
 }
 
@@ -23,9 +23,9 @@ TaskInfo::set_running(RunType type) noexcept
     stepping = false;
     run_type = type;
     PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
-  } else if (stopped_by_tracer) {
+  } else if (ptrace_stop) {
     stopped = false;
-    stopped_by_tracer = false;
+    ptrace_stop = false;
     signal_in_flight = false;
     stepping = false;
     run_type = type;
@@ -50,13 +50,20 @@ TaskInfo::initialize() noexcept
 bool
 TaskInfo::can_continue() noexcept
 {
-  return initialized && (stopped || stopped_by_tracer);
+  return initialized && (stopped || ptrace_stop);
+}
+
+void
+TaskInfo::set_pc(TPtr<void> pc) noexcept
+{
+  const auto rip_offset = offsetof(user_regs_struct, rip);
+  VERIFY(ptrace(PTRACE_POKEUSER, tid, rip_offset, pc.get()) != -1, "Failed to set RIP register");
 }
 
 bool
 TaskInfo::is_stopped() const noexcept
 {
-  return stopped_by_tracer || stopped;
+  return ptrace_stop || stopped;
 }
 
 TaskVMInfo

@@ -6,6 +6,7 @@
 #include "interface/dap/events.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
+#include "notify_pipe.h"
 #include "ptrace.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
@@ -13,6 +14,7 @@
 #include "tracer.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <fcntl.h>
@@ -22,15 +24,19 @@
 #include <string_view>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#include <sys/ucontext.h>
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-Target::Target(pid_t process_space_id, bool open_mem_fd) noexcept
+Target::Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
+               bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, threads{},
       user_breakpoints_map({.bp_id_counter = 1, .breakpoints = {}}),
-      stop_on_clone(false), spin_lock{}, m_files{}, m_types{}, interpreter_base{}, entry{}, register_cache()
+      stop_on_clone(false), spin_lock{}, m_files{}, m_types{}, interpreter_base{}, entry{}, register_cache(),
+      session(session)
 {
+  awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
   threads.back().initialize();
   if (open_mem_fd) {
@@ -119,7 +125,7 @@ Target::stop_all() noexcept
   for (auto &t : threads) {
     if (!t.stopped) {
       t.set_stop();
-      t.stopped_by_tracer = true;
+      t.ptrace_stop = true;
     }
   }
 }
@@ -127,7 +133,7 @@ Target::stop_all() noexcept
 bool
 Target::should_stop_on_clone() noexcept
 {
-  return true;
+  return false;
   // return stop_on_clone;
 }
 
@@ -137,6 +143,7 @@ Target::handle_stopped_for(TaskInfo *task) noexcept
   auto &task_register = register_cache[task->tid];
   const auto current_pc = TPtr<void>{task_register.rip};
   if (this->user_breakpoints_map.contains(current_pc - 1)) {
+    task->set_pc(current_pc - 1);
     emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
     return ActionOnEvent::StopTracee;
   } else {
@@ -151,6 +158,9 @@ Target::reap_task(TaskInfo *task) noexcept
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
   Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status->data.exit_signal);
+  if (task->tid == task_leader) {
+    awaiter_thread->set_process_exited();
+  }
   threads.erase(it);
 }
 
@@ -227,6 +237,7 @@ Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
   bp->times_hit++;
   auto evt =
       new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
+  bp->disable(lwp.tid);
   evt->bp_ids.push_back(bp->bp_id);
   Tracer::Instance->post_event(evt);
 }
@@ -268,6 +279,23 @@ Target::terminate_gracefully() noexcept
     stop_all();
   }
   return ::kill(task_leader, SIGKILL) == 0;
+}
+
+bool
+Target::detach() noexcept
+{
+  if (is_running()) {
+    stop_all();
+  }
+  std::vector<std::pair<Tid, int>> errs;
+  for (auto t : threads) {
+    const auto res = ptrace(PTRACE_DETACH, t.tid, 0, 0);
+    if (res == -1)
+      errs.push_back(std::make_pair(t.tid, errno));
+  }
+
+  // todo(simon): construct a way to let this information bubble up to caller
+  return errs.empty();
 }
 
 void
@@ -321,7 +349,9 @@ Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
   } else if (WSTOPSIG(status) == SIGSTOP) {
     wait->ws = Stopped;
   } else {
-    fmt::println("SOME OTHER STOP FOR {}", wait->waited_pid);
+    wait->ws = Stopped;
+    fmt::println("SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait->waited_pid, WSTOPSIG(status));
+    sleep(1);
   }
 }
 
@@ -365,7 +395,8 @@ BreakpointMap::clear(Target *target, BreakpointType type) noexcept
 {
   std::erase_if(breakpoints, [target, type](auto &bp) {
     if (bp.type == type) {
-      ptrace(PTRACE_POKEDATA, target->task_leader, bp.address.get(), bp.ins_byte);
+      if (bp.enabled)
+        bp.disable(target->task_leader);
       return true;
     } else {
       return false;
@@ -454,6 +485,12 @@ Target::read_auxv(TaskWaitResult &wait)
   ASSERT(entry.has_value() && interpreter_base.has_value(), "Expected ENTRY and INTERPRETER_BASE to be found");
 }
 
+TargetSession
+Target::session_type() const noexcept
+{
+  return session;
+}
+
 utils::StaticVector<u8>::own_ptr
 Target::read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept
 {
@@ -487,4 +524,18 @@ Target::add_type(Type type) noexcept
 {
   LockGuard guard{spin_lock};
   m_types[type.name] = type;
+}
+
+void
+Target::reaped_events() noexcept
+{
+  awaiter_thread->reaped_events();
+}
+
+/** Called after an exec has been processed and we've set up the necessary data structures
+  to manage it.*/
+void
+Target::start_awaiter_thread() noexcept
+{
+  awaiter_thread->start_awaiter_thread();
 }
