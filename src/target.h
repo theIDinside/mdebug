@@ -152,6 +152,9 @@ struct Target
    * reads that task's registers and caches them.*/
   void register_task_waited(TaskWaitResult wait) noexcept;
 
+  void set_pc(TaskInfo *t, TPtr<void> addr) noexcept;
+  TPtr<void> determine_retaddr(TaskInfo *t) noexcept;
+
   /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/

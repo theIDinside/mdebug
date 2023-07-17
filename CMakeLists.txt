@@ -75,6 +75,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
 set(MDB_TESTS
   helloworld
   threads
+  stackframes
 )
 
 add_library(metricsconv SHARED test/dynamic_lib.cpp test/dynamic_lib.h)

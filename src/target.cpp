@@ -157,8 +157,9 @@ Target::handle_stopped_for(TaskInfo *task) noexcept
 {
   auto &task_register = register_cache[task->tid];
   const auto current_pc = TPtr<void>{task_register.rip};
-  if (this->user_brkpts.contains(current_pc - 1)) {
-    task->set_pc(current_pc - 1);
+  const auto prev_pc_byte = current_pc - 1;
+  if (this->user_brkpts.contains(prev_pc_byte)) {
+    set_pc(task, prev_pc_byte);
     emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
     return ActionOnEvent::StopTracee;
   } else {
@@ -186,6 +187,22 @@ Target::register_task_waited(TaskWaitResult wait) noexcept
   auto task = get_task(wait.waited_pid);
   ASSERT(task != nullptr, "No task found with tid {}", wait.waited_pid);
   task->set_taskwait(wait);
+}
+
+void
+Target::set_pc(TaskInfo *t, TPtr<void> addr) noexcept
+{
+  const auto rip_offset = offsetof(user_regs_struct, rip);
+  VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
+  register_cache[t->tid].rip = addr;
+}
+
+TPtr<void>
+Target::determine_retaddr(TaskInfo *t) noexcept
+{
+  const auto pushed_retaddr = register_cache[t->tid].rbp + 8;
+  const auto ret_addr = read_type<TPtr<void>>(pushed_retaddr);
+  return ret_addr;
 }
 
 void
