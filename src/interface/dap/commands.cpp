@@ -90,9 +90,9 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
   target->reset_addr_breakpoints(addresses);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointType::AddressBreakpoint};
-  res->breakpoints.reserve(target->user_bkpts.breakpoints.size());
+  res->breakpoints.reserve(target->user_brkpts.breakpoints.size());
 
-  for (const auto &bp : target->user_bkpts.breakpoints) {
+  for (const auto &bp : target->user_brkpts.breakpoints) {
     if (bp.type == BreakpointType::AddressBreakpoint) {
       res->breakpoints.push_back(BP{
           .id = bp.bp_id,
@@ -132,7 +132,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
   auto target = tracer->get_current();
   target->reset_fn_breakpoints(bkpts);
 
-  for (const auto &bp : target->user_bkpts.breakpoints) {
+  for (const auto &bp : target->user_brkpts.breakpoints) {
     if (bp.type == BreakpointType::FunctionBreakpoint) {
       res->breakpoints.push_back(BP{
           .id = bp.bp_id,
@@ -331,6 +331,26 @@ Threads::execute(Tracer *tracer) noexcept
   return response;
 }
 
+StackTrace::StackTrace(int threadId, std::optional<int> startFrame, std::optional<int> levels,
+                       std::optional<StackTraceFormat> format) noexcept
+    : threadId(threadId), startFrame(startFrame), levels(levels), format(format)
+{
+}
+
+std::string
+StackTraceResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "stackTrace", "body": {{ "stackFrames": [{}] }} }})",
+      seq, response_seq, fmt::join(stack_frames, ","));
+}
+
+UIResultPtr
+StackTrace::execute(Tracer *tracer) noexcept
+{
+  TODO("StackTrace request");
+}
+
 ui::UICommand *
 parse_command(Command cmd, nlohmann::json &&args) noexcept
 {
@@ -401,12 +421,9 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
            "args didn't contain memoryReference or count");
     std::string_view addr_str;
     args.at("memoryReference").get_to(addr_str);
-    auto addr = to_addr(addr_str);
-    auto offset = 0;
-    if (args.contains("offset")) {
-      offset = args.at("offset");
-    }
-    u64 count = args.at("count");
+    const auto addr = to_addr(addr_str);
+    const auto offset = args.value("offset", 0);
+    const u64 count = args.at("count");
     return new ui::dap::ReadMemory{*addr, offset, count};
   }
   case Command::Restart:
@@ -433,8 +450,30 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     TODO("Command::SetVariable");
   case Command::Source:
     TODO("Command::Source");
-  case Command::StackTrace:
-    TODO("Command::StackTrace");
+  case Command::StackTrace: {
+    std::optional<int> startFrame;
+    std::optional<int> levels;
+    std::optional<StackTraceFormat> format_;
+    if (args.contains("startFrame")) {
+      startFrame = args.at("startFrame");
+    }
+    if (args.contains("levels")) {
+      levels = args.at("levels");
+    }
+    if (args.contains("format")) {
+      auto &fmt = args["format"];
+      StackTraceFormat format;
+      format.parameters = fmt.value("parameters", true);
+      format.parameterTypes = fmt.value("parameterTypes", true);
+      format.parameterNames = fmt.value("parameterNames", true);
+      format.parameterValues = fmt.value("parameterValues", true);
+      format.line = fmt.value("line", true);
+      format.module = fmt.value("module", false);
+      format.includeAll = fmt.value("includeAll", true);
+      format_ = format;
+    }
+    return new ui::dap::StackTrace{args.at("threadId"), startFrame, levels, format_};
+  }
   case Command::StepBack:
     TODO("Command::StepBack");
   case Command::StepIn:

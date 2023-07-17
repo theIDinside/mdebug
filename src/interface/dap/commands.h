@@ -182,5 +182,26 @@ struct Threads final : public UICommand
   DEFINE_NAME(Threads)
 };
 
+struct StackTraceResponse final : public UIResult
+{
+  CTOR(StackTraceResponse)
+  ~StackTraceResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  std::vector<StackFrame> stack_frames;
+};
+
+struct StackTrace final : public UICommand
+{
+  StackTrace(int threadId, std::optional<int> startFrame, std::optional<int> levels,
+             std::optional<StackTraceFormat> format) noexcept;
+  ~StackTrace() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  int threadId;
+  std::optional<int> startFrame;
+  std::optional<int> levels;
+  std::optional<StackTraceFormat> format;
+  DEFINE_NAME(StackTrace)
+};
+
 ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;
 }; // namespace ui::dap

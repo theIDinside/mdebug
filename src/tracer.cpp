@@ -58,7 +58,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   SpinLock stdio_lock{};
 
   for (auto &cu_hdr : total) {
-    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = get_current(), &stdio_lock]() {
+    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target, &stdio_lock]() {
       auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
       auto compile_unit_die = proc->read_root_die();
       if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
@@ -241,7 +241,7 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     // task backing storage may have re-allocated and invalidated this pointer.
     task = target->get_task(wait.waited_pid);
     target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-    for (const auto bp : target->user_bkpts.breakpoints) {
+    for (const auto bp : target->user_brkpts.breakpoints) {
       auto read_value = ptrace(PTRACE_PEEKDATA, np, bp.address.get(), nullptr);
       u8 ins_byte = static_cast<u8>(read_value & 0xff);
       fmt::println("Byte at breakpoint addr in {} is {}", np, ins_byte);
