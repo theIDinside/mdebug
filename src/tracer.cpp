@@ -159,11 +159,11 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     return false;
   auto wait = *wait_res;
   // For now, we only support "all-stop" mode
-  bool do_not_interrupt_leader = false;
+  bool saw_task_before_parent_clone_return = false;
   bool stopped = false;
   if (!target->has_task(wait.waited_pid)) {
     target->new_task(wait.waited_pid, true);
-    do_not_interrupt_leader = true;
+    saw_task_before_parent_clone_return = true;
   }
   target->register_task_waited(wait);
   auto task = target->get_task(wait.waited_pid);
@@ -174,25 +174,32 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     // some pretty involved functionality needs to be called here, I think.
     switch (target->handle_stopped_for(task)) {
     case ActionOnEvent::ShouldContinue: {
-      task->set_running(RunType::Continue);
-      stopped = false;
+      // task->set_running(RunType::Continue);
+      // stopped = false;
       break;
     }
     case ActionOnEvent::StopTracee: {
+      target->is_in_user_ptrace_stop = true;
       stopped = true;
       for (auto &task : target->threads) {
-        if (task.tid != wait.waited_pid && (do_not_interrupt_leader ? task.tid != target->task_leader : true)) {
-          int stat;
+        if (task.tid != wait.waited_pid &&
+            (saw_task_before_parent_clone_return ? task.tid != target->task_leader : true)) {
           // peek wait statuses
-          const auto peek_waited_tid = waitpid(task.tid, &stat, WNOHANG | WNOWAIT);
+          siginfo_t info_ptr;
+          auto peek_waited_tid = waitid(P_PID, task.tid, &info_ptr, WEXITED | WSTOPPED | WNOWAIT | WNOHANG);
           // if task has no wait status waiting, it's most likely running
           // therefore we need to interrupt it.
           if (peek_waited_tid == 0) {
-            PTRACE_OR_PANIC(PTRACE_INTERRUPT, task.tid, nullptr, nullptr);
+            VERIFY(-1 != tgkill(target->task_leader, task.tid, SIGSTOP), "Failed to send SIGSTOP to {}", task.tid);
+            fmt::println("INTERRUPTING {}", task.tid);
             // we can block, because we know we sent this signal.
-            waitpid(task.tid, &stat, 0);
+            siginfo_t info_ptr;
+            const auto peek_waited_tid = waitid(P_PID, task.tid, &info_ptr, WEXITED | WSTOPPED | WNOHANG);
+            fmt::println("SIGNO: {}", info_ptr.si_signo);
             task.ptrace_stop = true;
+            target->is_in_user_ptrace_stop = true;
           } else {
+            fmt::println("DID NOT INTERRUPT {}", task.tid);
             // task *was* stopped when we peeked - set stopped, but not by us
             task.stopped = true;
           }
@@ -234,8 +241,14 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     // task backing storage may have re-allocated and invalidated this pointer.
     task = target->get_task(wait.waited_pid);
     target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-    if (target->should_stop_on_clone()) {
+    for (const auto bp : target->user_bkpts.breakpoints) {
+      auto read_value = ptrace(PTRACE_PEEKDATA, np, bp.address.get(), nullptr);
+      u8 ins_byte = static_cast<u8>(read_value & 0xff);
+      fmt::println("Byte at breakpoint addr in {} is {}", np, ins_byte);
+    }
+    if (target->should_stop_on_clone() || target->is_in_user_ptrace_stop) {
       stopped = true;
+      target->is_in_user_ptrace_stop = true;
       target->cache_registers(np);
       for (auto &task : target->threads) {
         if (task.tid != wait.waited_pid && task.tid != np) {
@@ -247,7 +260,7 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
           if (!peek) {
             PTRACE_OR_PANIC(PTRACE_INTERRUPT, task.tid, nullptr, nullptr);
             // we can block, because we know we sent this signal.
-            waitpid(task.tid, &stat, 0);
+            fmt::println("TRACER WAITPID");
             task.ptrace_stop = true;
           } else {
             // task *was* stopped when we peeked - set stopped, but not by us
@@ -256,7 +269,10 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
         }
       }
     } else {
-      task->set_running(RunType::Continue);
+      if (!target->is_in_user_ptrace_stop) {
+        fmt::println("CONTINUING AFTER CLONE MOTHERFUCKER");
+        task->set_running(RunType::Continue);
+      }
     }
 
     break;
@@ -279,135 +295,6 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
   }
 
   target->reaped_events();
-  return stopped;
-}
-
-bool
-Tracer::wait_for_tracee_events() noexcept
-{
-  auto target = get_current();
-  auto wait_res = target->wait_pid(nullptr);
-  if (!wait_res.has_value())
-    return false;
-  auto wait = *wait_res;
-  // For now, we only support "all-stop" mode
-  bool do_not_interrupt_leader = false;
-  bool stopped = false;
-  if (!target->has_task(wait.waited_pid)) {
-    target->new_task(wait.waited_pid, true);
-    do_not_interrupt_leader = true;
-  }
-  target->register_task_waited(wait);
-  auto task = target->get_task(wait.waited_pid);
-  task->stopped = true;
-  switch (wait.ws) {
-  case WaitStatus::Stopped: {
-    target->cache_registers(task->tid);
-    // some pretty involved functionality needs to be called here, I think.
-    switch (target->handle_stopped_for(task)) {
-    case ActionOnEvent::ShouldContinue: {
-      task->set_running(RunType::Continue);
-      break;
-    }
-    case ActionOnEvent::StopTracee: {
-      stopped = true;
-      for (auto &task : target->threads) {
-        if (task.tid != wait.waited_pid && (do_not_interrupt_leader ? task.tid != target->task_leader : true)) {
-          int stat;
-          // peek wait statuses
-          const auto peek_waited_tid = waitpid(task.tid, &stat, WNOHANG | WNOWAIT);
-          // if task has no wait status waiting, it's most likely running
-          // therefore we need to interrupt it.
-          if (peek_waited_tid == 0) {
-            PTRACE_OR_PANIC(PTRACE_INTERRUPT, task.tid, nullptr, nullptr);
-            // we can block, because we know we sent this signal.
-            waitpid(task.tid, &stat, 0);
-            task.ptrace_stop = true;
-          } else {
-            // task *was* stopped when we peeked - set stopped, but not by us
-            task.stopped = true;
-          }
-        }
-      }
-      break;
-    }
-    }
-  } break;
-  case WaitStatus::Execed: {
-    get_current()->reopen_memfd();
-    target->cache_registers(task->tid);
-    target->read_auxv(wait);
-    break;
-  }
-  case WaitStatus::Exited: {
-    target->reap_task(task);
-    break;
-  }
-  case WaitStatus::Cloned: {
-    // we always have to cache these registers, because we need them to pull out some information
-    // about the new clone
-    auto &registers = target->cache_registers(task->tid);
-    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(registers);
-    const auto res = target->read_type(ptr);
-    // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
-    auto np = target->read_type(TPtr<pid_t>{res.parent_tid});
-#ifdef MDB_DEBUG
-    long new_pid = 0;
-    PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, wait.waited_pid, 0, &new_pid);
-    ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
-#endif
-    if (!target->has_task(np)) {
-      target->new_task(np, true);
-    }
-    // by this point, the task has cloned _and_ it's continuable because the parent has been told
-    // that "hey, we're ok". Why on earth a pre-finished clone can be waited on, I will never know.
-    target->get_task(np)->initialize();
-    // task backing storage may have re-allocated and invalidated this pointer.
-    task = target->get_task(wait.waited_pid);
-    target->set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-    if (target->should_stop_on_clone()) {
-      stopped = true;
-      target->cache_registers(np);
-      for (auto &task : target->threads) {
-        if (task.tid != wait.waited_pid && task.tid != np) {
-          int stat;
-          // peek wait statuses
-          const auto peek = waitpid_peek(task.tid);
-          // if task has no wait status waiting, it's most likely running
-          // therefore we need to interrupt it.
-          if (!peek) {
-            PTRACE_OR_PANIC(PTRACE_INTERRUPT, task.tid, nullptr, nullptr);
-            // we can block, because we know we sent this signal.
-            waitpid(task.tid, &stat, 0);
-            task.ptrace_stop = true;
-          } else {
-            // task *was* stopped when we peeked - set stopped, but not by us
-            task.stopped = true;
-          }
-        }
-      }
-    } else {
-      task->set_running(RunType::Continue);
-    }
-
-    break;
-  }
-  case WaitStatus::Forked:
-    break;
-  case WaitStatus::VForked:
-    break;
-  case WaitStatus::VForkDone:
-    break;
-  case WaitStatus::Signalled:
-    task->stopped = true;
-    break;
-  case WaitStatus::SyscallEntry:
-    break;
-  case WaitStatus::SyscallExit:
-    break;
-  default:
-    PANIC("WAIT, WHAT?");
-  }
   return stopped;
 }
 

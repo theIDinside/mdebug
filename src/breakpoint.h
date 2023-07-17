@@ -12,7 +12,7 @@ enum class BreakpointType : std::uint8_t
 class Breakpoint
 {
 public:
-  explicit Breakpoint(AddrPtr, u8 replaced_byte, u32 id, BreakpointType type) noexcept;
+  explicit Breakpoint(AddrPtr, u8 original_byte, u32 id, BreakpointType type) noexcept;
   Breakpoint() noexcept = default;
   Breakpoint(const Breakpoint &) noexcept = default;
   Breakpoint &operator=(const Breakpoint &) noexcept = default;
@@ -21,7 +21,7 @@ public:
   void enable(Tid tid) noexcept;
   void disable(Tid tid) noexcept;
 
-  u8 ins_byte;
+  u8 original_byte;
   bool enabled : 1;
   BreakpointType type : 7;
   u16 bp_id;

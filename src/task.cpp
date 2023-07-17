@@ -19,6 +19,7 @@ TaskInfo::set_running(RunType type) noexcept
 {
   if (stopped) {
     stopped = false;
+    ptrace_stop = false;
     signal_in_flight = false;
     stepping = false;
     run_type = type;

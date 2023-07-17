@@ -90,9 +90,9 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
   target->reset_addr_breakpoints(addresses);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointType::AddressBreakpoint};
-  res->breakpoints.reserve(target->user_breakpoints_map.breakpoints.size());
+  res->breakpoints.reserve(target->user_bkpts.breakpoints.size());
 
-  for (const auto &bp : target->user_breakpoints_map.breakpoints) {
+  for (const auto &bp : target->user_bkpts.breakpoints) {
     if (bp.type == BreakpointType::AddressBreakpoint) {
       res->breakpoints.push_back(BP{
           .id = bp.bp_id,
@@ -132,7 +132,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
   auto target = tracer->get_current();
   target->reset_fn_breakpoints(bkpts);
 
-  for (const auto &bp : target->user_breakpoints_map.breakpoints) {
+  for (const auto &bp : target->user_bkpts.breakpoints) {
     if (bp.type == BreakpointType::FunctionBreakpoint) {
       res->breakpoints.push_back(BP{
           .id = bp.bp_id,

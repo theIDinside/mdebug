@@ -59,7 +59,6 @@ public:
   void init_io_thread() noexcept;
   void interrupt(LWP lwp) noexcept;
 
-  bool wait_for_tracee_events() noexcept;
   bool wait_for_tracee_events(Tid target) noexcept;
   void set_ui(ui::dap::DAP *dap) noexcept;
   void kill_ui() noexcept;

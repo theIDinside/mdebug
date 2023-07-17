@@ -72,10 +72,19 @@ struct Target;
 
 struct BreakpointMap
 {
+  struct TaskBreakpointStatus
+  {
+    TaskInfo task;
+    u16 bp_id;
+  };
+
   u32 bp_id_counter;
   std::vector<Breakpoint> breakpoints;
+  Tid address_space_tid;
   std::unordered_map<u32, std::string> fn_breakpoint_names;
   std::unordered_map<u32, std::string> source_breakpoints;
+  // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
+  std::vector<TaskBreakpointStatus> task_bp_stats;
 
   template <typename T>
   bool
@@ -85,10 +94,13 @@ struct BreakpointMap
   }
   bool insert(TraceePointer<void> addr, u8 overwritten_byte, BreakpointType type) noexcept;
   void clear(Target *target, BreakpointType type) noexcept;
+  void clear_breakpoint_stats() noexcept;
+  void disable_breakpoint(u16 id) noexcept;
+  void enable_breakpoint(u16 id) noexcept;
 
   template <typename Predicate> friend void clear_breakpoints(BreakpointMap &bp, Target *, Predicate &&p) noexcept;
 
-  Breakpoint *get(u32 id) noexcept;
+  Breakpoint *get_by_id(u32 id) noexcept;
   Breakpoint *get(TraceePointer<void> addr) noexcept;
 };
 
@@ -103,7 +115,7 @@ struct Target
   ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
-  BreakpointMap user_breakpoints_map;
+  BreakpointMap user_brkpts;
   bool stop_on_clone;
 
   // Aggressive spinlock
@@ -125,8 +137,8 @@ struct Target
   /* Create new task meta data for `tid` */
   void new_task(Tid tid, bool ui_update) noexcept;
   bool has_task(Tid tid) noexcept;
-  /* Set all tasks in this target to continue, if they're stopped. */
-  void set_all_running(RunType type) noexcept;
+  /* Resumes all tasks in this target. */
+  void resume_target(RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all() noexcept;
   /* Query if we should interrupt the entire process and all it's tasks when we encounter a clone syscall */
@@ -151,9 +163,7 @@ struct Target
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
-
   void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
-
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
@@ -183,6 +193,7 @@ struct Target
   // might (very likely) not be.
   void read_auxv(TaskWaitResult &wait);
   TargetSession session_type() const noexcept;
+  std::string get_thread_name(Tid tid) const noexcept;
 
   utils::StaticVector<u8>::own_ptr read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept;
 
@@ -296,6 +307,7 @@ private:
   std::unordered_map<Tid, user_regs_struct> register_cache;
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
+  bool is_in_user_ptrace_stop;
 };
 
 template <typename Predicate>

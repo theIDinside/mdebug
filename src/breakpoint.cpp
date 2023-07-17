@@ -1,8 +1,8 @@
 #include "breakpoint.h"
 #include <sys/ptrace.h>
 
-Breakpoint::Breakpoint(AddrPtr addr, u8 replaced_byte, u32 id, BreakpointType type) noexcept
-    : ins_byte(replaced_byte), enabled(true), type(type), bp_id(id), times_hit(0), address(addr)
+Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BreakpointType type) noexcept
+    : original_byte(original_byte), enabled(true), type(type), bp_id(id), times_hit(0), address(addr)
 {
 }
 
@@ -20,7 +20,7 @@ void
 Breakpoint::disable(Tid tid) noexcept
 {
   const auto read_value = ptrace(PTRACE_PEEKDATA, tid, address.get(), nullptr);
-  const u64 restore = ((read_value & ~0xff) | ins_byte);
+  const u64 restore = ((read_value & ~0xff) | original_byte);
   ptrace(PTRACE_POKEDATA, tid, address.get(), restore);
   enabled = false;
 }
