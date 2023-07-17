@@ -167,5 +167,20 @@ struct Terminate final : public UICommand
   DEFINE_NAME(Terminate)
 };
 
+struct ThreadsResponse final : public UIResult
+{
+  CTOR(ThreadsResponse)
+  ~ThreadsResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  std::vector<Thread> threads;
+};
+
+struct Threads final : public UICommand
+{
+  ~Threads() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(Threads)
+};
+
 ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;
 }; // namespace ui::dap

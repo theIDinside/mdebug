@@ -1,5 +1,6 @@
 #pragma once
 #include "../../common.h"
+#include <fmt/format.h>
 #include <string_view>
 namespace ui::dap {
 
@@ -50,4 +51,31 @@ struct DataBreakpoint
   std::string hit_condition;
 };
 
+struct Thread
+{
+  int id;
+  std::string name;
+};
+
 }; // namespace ui::dap
+
+namespace fmt {
+template <> struct formatter<ui::dap::Thread>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(ui::dap::Thread const &task, FormatContext &ctx) const
+  {
+    return fmt::format_to(ctx.out(), "{{ \"id\": {}, \"name\": \"{}\" }}", task.id, task.name);
+  }
+};
+
+} // namespace fmt

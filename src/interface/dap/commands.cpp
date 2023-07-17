@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <memory>
 #include <ranges>
+#include <unistd.h>
 #include <unordered_set>
 namespace ui::dap {
 
@@ -35,7 +36,7 @@ Continue::execute(Tracer *tracer) noexcept
     res->success = false;
   } else {
     res->success = true;
-    target->set_all_running(RunType::Continue);
+    target->resume_target(RunType::Continue);
   }
 
   return res;
@@ -185,7 +186,7 @@ UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
   fmt::println("Configuration steps done.");
-  tracer->get_current()->set_all_running(RunType::Continue);
+  tracer->get_current()->resume_target(RunType::Continue);
   tracer->get_current()->start_awaiter_thread();
   return new ConfigurationDoneResponse{true, this};
 }
@@ -305,6 +306,31 @@ Terminate::execute(Tracer *tracer) noexcept
   return new TerminateResponse{success, this};
 }
 
+std::string
+ThreadsResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "threads", "body": {{ "threads": [{}] }} }})",
+      seq, response_seq, fmt::join(threads, ","));
+}
+
+UIResultPtr
+Threads::execute(Tracer *tracer) noexcept
+{
+  // todo(simon): right now, we only support 1 process, but theoretically the current design
+  // allows for more; it would require some work to get the DAP protocol to play nicely though.
+  // therefore we just hand back the threads of the currently active target
+  auto response = new ThreadsResponse{true, this};
+
+  const auto target = tracer->get_current();
+  const auto &threads = target->threads;
+  response->threads.reserve(threads.size());
+  for (auto thread : threads) {
+    response->threads.push_back(Thread{.id = thread.tid, .name = target->get_thread_name(thread.tid)});
+  }
+  return response;
+}
+
 ui::UICommand *
 parse_command(Command cmd, nlohmann::json &&args) noexcept
 {
@@ -422,7 +448,7 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
   case Command::TerminateThreads:
     TODO("Command::TerminateThreads");
   case Command::Threads:
-    TODO("Command::Threads");
+    return new Threads{};
   case Command::Variables:
     TODO("Command::Variables");
   case Command::WriteMemory:
