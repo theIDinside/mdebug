@@ -1,4 +1,5 @@
 /** COPYRIGHT TEMPLATE */
+#include "./utils/logger.h"
 #include "common.h"
 #include "interface/dap/interface.h"
 #include "interface/pty.h"
@@ -59,9 +60,8 @@ winsize Tracer::ws = {};
 int
 main(int argc, const char **argv)
 {
-  ScopedFd log_file = ScopedFd::open("/home/cx/dev/foss/cx/dbm/build-debug/bin/mdb.log", O_CREAT | O_RDWR);
-  VERIFY(tcgetattr(STDIN_FILENO, &Tracer::original_tty) != -1, "Failed to get attributes for stdin");
-  VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &Tracer::ws) >= 0, "Failed to get winsize of stdin");
+  logging::Logger::get_logger()->setup_channel("mdb");
+  logging::Logger::get_logger()->setup_channel("dap");
 
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 

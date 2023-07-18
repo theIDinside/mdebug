@@ -26,7 +26,7 @@ struct Event;
 
 struct Request
 {
-  Command command;
+  CommandType command;
   std::vector<std::string> arguments;
 };
 
@@ -152,6 +152,5 @@ private:
   u64 seq;
   bool cleaned_up = false;
   utils::Notifier::WriteEnd command_notifier;
-  std::fstream log_file;
 };
 }; // namespace ui::dap

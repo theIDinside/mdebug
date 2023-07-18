@@ -30,7 +30,7 @@ struct Continue final : public ui::UICommand
 {
   int thread_id;
   bool continue_all;
-  Continue(int tid, bool all) noexcept : thread_id(tid), continue_all(all) {}
+  Continue(std::uint64_t seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~Continue() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   DEFINE_NAME(Continue)
@@ -49,7 +49,7 @@ struct SetBreakpointsResponse final : ui::UIResult
 
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
-  SetInstructionBreakpoints(nlohmann::json &&arguments) noexcept;
+  SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
@@ -58,7 +58,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 
 struct SetFunctionBreakpoints final : public ui::UICommand
 {
-  SetFunctionBreakpoints(nlohmann::json &&arguments) noexcept;
+  SetFunctionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
   ~SetFunctionBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
@@ -77,7 +77,7 @@ struct ReadMemoryResponse final : public ui::UIResult
 
 struct ReadMemory final : public ui::UICommand
 {
-  ReadMemory(TPtr<void> address, int offset, u64 bytes) noexcept;
+  ReadMemory(std::uint64_t seq, TPtr<void> address, int offset, u64 bytes) noexcept;
   ~ReadMemory() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
 
@@ -97,7 +97,7 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 
 struct ConfigurationDone final : public ui::UICommand
 {
-  ConfigurationDone() noexcept = default;
+  ConfigurationDone(std::uint64_t seq) noexcept : UICommand(seq) {}
   ~ConfigurationDone() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
 
@@ -113,7 +113,7 @@ struct InitializeResponse final : public ui::UIResult
 
 struct Initialize final : public ui::UICommand
 {
-  Initialize(nlohmann::json &&arguments) noexcept;
+  Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
   ~Initialize() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   nlohmann::json args;
@@ -129,7 +129,7 @@ struct DisconnectResponse final : public UIResult
 
 struct Disconnect final : public UICommand
 {
-  Disconnect(bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
+  Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
   ~Disconnect() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   bool restart, terminate_tracee, suspend_tracee;
@@ -145,7 +145,7 @@ struct LaunchResponse final : public UIResult
 
 struct Launch final : public UICommand
 {
-  Launch(Path &&program, std::vector<std::string> &&program_args) noexcept;
+  Launch(std::uint64_t seq, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   Path program;
@@ -162,6 +162,7 @@ struct TerminateResponse final : public UIResult
 
 struct Terminate final : public UICommand
 {
+  Terminate(u64 seq) noexcept : UICommand(seq) {}
   ~Terminate() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   DEFINE_NAME(Terminate)
@@ -177,6 +178,7 @@ struct ThreadsResponse final : public UIResult
 
 struct Threads final : public UICommand
 {
+  Threads(u64 seq) noexcept : UICommand(seq) {}
   ~Threads() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   DEFINE_NAME(Threads)
@@ -192,7 +194,7 @@ struct StackTraceResponse final : public UIResult
 
 struct StackTrace final : public UICommand
 {
-  StackTrace(int threadId, std::optional<int> startFrame, std::optional<int> levels,
+  StackTrace(std::uint64_t seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
@@ -203,5 +205,5 @@ struct StackTrace final : public UICommand
   DEFINE_NAME(StackTrace)
 };
 
-ui::UICommand *parse_command(Command cmd, nlohmann::json &&args) noexcept;
+ui::UICommand *parse_command(std::string &&packet) noexcept;
 }; // namespace ui::dap

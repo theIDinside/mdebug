@@ -32,8 +32,7 @@
 
 Target::Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
                bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{},
-      user_brkpts({.bp_id_counter = 1, .breakpoints = {}, .address_space_tid = process_space_id}),
+    : task_leader{process_space_id}, object_files{}, threads{}, user_brkpts(process_space_id),
       stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, register_cache(),
       session(session), is_in_user_ptrace_stop(false)
 {

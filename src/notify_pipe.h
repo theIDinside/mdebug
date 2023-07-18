@@ -30,24 +30,13 @@ struct Notifier
     int fd;
     operator int() noexcept { return fd; }
 
-    [[maybe_unused]] constexpr bool
-    consume_expected() noexcept
-    {
-      char ch;
-      [[maybe_unused]] const auto res = ::read(fd, &ch, 1);
-      ASSERT(res != -1, "Failed to consume posted event token due to error {}", strerror(errno));
-      return true;
-    }
+    [[maybe_unused]] bool consume_expected() noexcept;
   };
 
   struct WriteEnd
   {
     int fd;
-    constexpr bool
-    notify() const noexcept
-    {
-      return ::write(fd, "+", 1) > 0;
-    }
+    bool notify() const noexcept;
   };
   static Notifier notify_pipe() noexcept;
   ReadEnd read;

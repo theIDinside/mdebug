@@ -1,6 +1,7 @@
 #include "type.h"
 #include "block.h"
 #include "dwarf.h"
+#include <emmintrin.h>
 #include <filesystem>
 
 CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
@@ -43,6 +44,19 @@ void
 CompilationUnitFile::set_name(std::string_view name) noexcept
 {
   m_name = name;
+}
+
+void
+CompilationUnitFile::add_addr_rng(const u64 *start) noexcept
+{
+  m_addr_ranges.push_back(AddressRange{});
+  _mm_storeu_si128((__m128i *)&m_addr_ranges.back(), _mm_loadu_si128((__m128i *)start));
+}
+
+bool
+CompilationUnitFile::last_added_addr_valid() const noexcept
+{
+  return m_addr_ranges.back().is_valid();
 }
 
 void

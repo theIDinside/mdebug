@@ -12,7 +12,7 @@
 
 using ThreadPool = std::vector<std::thread>;
 
-static Foo *global_foo = new Foo{.a = 10000, .b = 20000, .c = 30000, .d = 40000};
+static Foo *global_foo = new Foo{{.next = nullptr, .prev = nullptr}, 10000, 20000, 30000, 40000};
 
 constexpr static std::string_view thread_names[8] = {"Foo", "Bar", "Baz", "Quux", "420", "1337", "MDB", "DAP"};
 

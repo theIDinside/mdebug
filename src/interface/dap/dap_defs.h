@@ -1,11 +1,12 @@
 #pragma once
 
+#include "../../utils/macros.h"
 #include <cstdint>
 #include <string_view>
 
 namespace ui::dap {
 
-enum class Command : std::uint8_t
+enum class CommandType : std::uint8_t
 {
 #define DAP_COMMANDS
 #define ITEM(name, value) name = value,
@@ -16,19 +17,20 @@ enum class Command : std::uint8_t
 };
 
 constexpr std::string_view
-to_str(Command command) noexcept
+to_str(CommandType command) noexcept
 {
 #define DAP_COMMANDS
 #define ITEM(name, value)                                                                                         \
-  case Command::name:                                                                                             \
+  case CommandType::name:                                                                                         \
     return #name;
   switch (command) {
 #include "dap.defs"
-  case Command::UNKNOWN:
+  case CommandType::UNKNOWN:
     return "Unknown command type";
   }
 #undef ITEM
 #undef DAP_COMMANDS
+  return "Unknown command type";
 }
 
 // We sent events, we never receive them, so an "UNKNOWN" value is unnecessary.
@@ -111,6 +113,7 @@ to_str(StoppedReason reason) noexcept
   case StoppedReason::InstructionBreakpoint:
     return "instruction breakpoint";
   }
+  DEAL_WITH_SHITTY_GCC
 }
 
 // unfortunately, the DAP people were so "brilliant" as to not make the names
@@ -132,6 +135,7 @@ to_str(ThreadReason reason) noexcept
     return "exited";
     break;
   }
+  DEAL_WITH_SHITTY_GCC
 }
 
 } // namespace ui::dap

@@ -318,7 +318,6 @@ void
 CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 {
   LineTable ltes;
-  std::string_view name;
   const auto elf = obj_file->parsed_elf;
   TPtr<void> low = nullptr;
   TPtr<void> high = nullptr;
@@ -553,7 +552,8 @@ public:
                                     .file = static_cast<u16>(file),
                                     .is_stmt = is_stmt,
                                     .prologue_end = prologue_end,
-                                    .basic_block = basic_block});
+                                    .basic_block = basic_block,
+                                    .epilogue_begin = epilogue_begin});
     discriminator = 0;
     basic_block = false;
     prologue_end = false;

@@ -1,5 +1,6 @@
 #include "common.h"
 #include "fmt/core.h"
+#include "utils/logger.h"
 #include <cstdlib>
 #include <cstring>
 #include <cxxabi.h>
@@ -97,6 +98,7 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
   char **strings;
 
   nptrs = backtrace(buffer, BT_BUF_SIZE);
+  logging::get_logging()->log("mdb", fmt::format("backtrace() returned {} addresses\n", nptrs));
   fmt::println("backtrace() returned {} addresses\n", nptrs);
 
   /* The call backtrace_symbols_fd(buffer, nptrs, STDOUT_FILENO)
@@ -105,7 +107,7 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
   strings = backtrace_symbols(buffer, nptrs);
   if (strings == NULL) {
     perror("backtrace_symbols");
-    exit(EXIT_FAILURE);
+    goto ifbacktrace_failed;
   }
 
   for (int j = strip_levels; j < nptrs; j++) {
@@ -119,16 +121,24 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
       if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
         std::string copy{res};
         sanitize(copy);
+        logging::get_logging()->log("mdb", copy);
         fmt::println("{}", copy);
         continue;
       }
     }
+    logging::get_logging()->log("mdb", strings[j]);
     fmt::println("{}", strings[j]);
   }
 
   free(strings);
+ifbacktrace_failed:
+  logging::get_logging()->log(
+      "mdb", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---",
+                         loc.file_name(), loc.line(), loc.function_name(), err_msg));
+
   fmt::println("{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---",
                                  loc.file_name(), loc.line(), loc.function_name(), err_msg));
+  delete logging::get_logging();
   exit(EXIT_FAILURE);
 }
 
@@ -302,4 +312,16 @@ DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
 {
   end = buffer + new_size;
   size = new_size;
+}
+
+Option<TPtr<void>>
+to_addr(std::string_view s) noexcept
+{
+  if (s.starts_with("0x"))
+    s.remove_prefix(2);
+
+  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value, 16).ec == std::errc{})
+    return TPtr<void>{value};
+  else
+    return std::nullopt;
 }

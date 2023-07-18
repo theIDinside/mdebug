@@ -3,7 +3,6 @@
 #include "block.h"
 #include "dwarf.h"
 #include "lnp.h"
-#include <emmintrin.h>
 #include <optional>
 #include <unordered_map>
 
@@ -44,18 +43,9 @@ public:
   TPtr<void> high_pc() const noexcept;
   void set_name(std::string_view name) noexcept;
 
-  constexpr void
-  add_addr_rng(const u64 *start) noexcept
-  {
-    m_addr_ranges.push_back(AddressRange{});
-    _mm_storeu_si128((__m128i *)&m_addr_ranges.back(), _mm_loadu_si128((__m128i *)start));
-  }
+  void add_addr_rng(const u64 *start) noexcept;
 
-  constexpr bool
-  last_added_addr_valid() const noexcept
-  {
-    return m_addr_ranges.back().is_valid();
-  }
+  bool last_added_addr_valid() const noexcept;
 
   void
   pop_addr() noexcept

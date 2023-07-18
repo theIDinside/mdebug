@@ -21,6 +21,8 @@
 #include <variant>
 #include <vector>
 
+#include "utils/macros.h"
+
 namespace fs = std::filesystem;
 using Path = fs::path;
 
@@ -98,6 +100,8 @@ std::string_view syscall_name(u64 syscall_number);
     auto loc = std::source_location::current();                                                                   \
     fmt::println("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);         \
     std::terminate();                                                                                             \
+    /** Silence moronic GCC warnings. */                                                                          \
+    DEAL_WITH_SHITTY_GCC                                                                                          \
   }
 
 // Identical to ASSERT, but doesn't care about build type
@@ -620,17 +624,7 @@ to_integral(std::string_view s)
     return std::nullopt;
 }
 
-constexpr Option<TPtr<void>>
-to_addr(std::string_view s)
-{
-  if (s.starts_with("0x"))
-    s.remove_prefix(2);
-
-  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value, 16).ec == std::errc{})
-    return TPtr<void>{value};
-  else
-    return std::nullopt;
-}
+Option<TPtr<void>> to_addr(std::string_view s) noexcept;
 
 using SpinGuard = LockGuard<SpinLock>;
 

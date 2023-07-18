@@ -5,6 +5,7 @@
 #include "interface/ui_result.h"
 #include "notify_pipe.h"
 #include <cstdint>
+#include <fstream>
 #include <nlohmann/json_fwd.hpp>
 #include <queue>
 #include <sys/ioctl.h>

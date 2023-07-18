@@ -21,6 +21,7 @@ using UIResultPtr = UIResult *;
 struct UICommand
 {
 public:
+  explicit UICommand(std::uint64_t seq) noexcept : seq(seq) {}
   virtual ~UICommand() = default;
   virtual UIResultPtr execute(Tracer *tracer) noexcept = 0;
 

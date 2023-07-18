@@ -69,4 +69,20 @@ NotifyManager::has_wait_ready(std::vector<NotifyResult> &result)
     pollfds[i].events = POLLIN;
   }
 }
+
+[[maybe_unused]] bool
+Notifier::ReadEnd::consume_expected() noexcept
+{
+  char ch;
+  [[maybe_unused]] const auto res = ::read(fd, &ch, 1);
+  ASSERT(res != -1, "Failed to consume posted event token due to error {}", strerror(errno));
+  return true;
+}
+
+bool
+Notifier::WriteEnd::notify() const noexcept
+{
+  return ::write(fd, "+", 1) > 0;
+}
+
 } // namespace utils

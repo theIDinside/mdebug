@@ -121,15 +121,15 @@ TEST(DapRequestParsing, ParseRequestTypes3WellFormed)
     const auto command = ui::dap::parse_command_type(cmd_str);
     switch (i++) {
     case 0:
-      EXPECT_EQ(ui::dap::Command::Launch, command)
+      EXPECT_EQ(ui::dap::CommandType::Launch, command)
           << "Expected Launch but got " << to_str(command) << " from str " << cmd_str;
       break;
     case 1:
-      EXPECT_EQ(ui::dap::Command::Continue, command)
+      EXPECT_EQ(ui::dap::CommandType::Continue, command)
           << "Expected Continue but got " << to_str(command) << " from str " << cmd_str;
       break;
     case 2:
-      EXPECT_EQ(ui::dap::Command::SetDataBreakpoints, command)
+      EXPECT_EQ(ui::dap::CommandType::SetDataBreakpoints, command)
           << "Expected SetDataBreakpoints but got " << to_str(command) << " from str " << cmd_str;
       break;
     }
@@ -153,7 +153,7 @@ TEST(DapRequestParsing, setInstructionBreakpointsParsing)
   std::string_view cmd_str;
   json.at("command").get_to(cmd_str);
   const auto command = ui::dap::parse_command_type(cmd_str);
-  EXPECT_EQ(command, ui::dap::Command::SetInstructionBreakpoints);
+  EXPECT_EQ(command, ui::dap::CommandType::SetInstructionBreakpoints);
   std::string_view cmd_name;
   json["command"].get_to(cmd_name);
   ASSERT(json.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);

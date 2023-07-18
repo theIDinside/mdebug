@@ -85,6 +85,12 @@ struct BreakpointMap
     u16 bp_id;
   };
 
+  explicit BreakpointMap(Tid address_space) noexcept
+      : bp_id_counter(1), breakpoints(), address_space_tid(address_space), fn_breakpoint_names(),
+        source_breakpoints(), task_bp_stats()
+  {
+  }
+
   u32 bp_id_counter;
   std::vector<Breakpoint> breakpoints;
   Tid address_space_tid;

@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
   src/main.cpp
+  src/utils/logger.cpp
+  src/utils/logger.h
   src/tracer.cpp
   src/tracer.h
   src/target.cpp
@@ -40,6 +42,8 @@ set(MIDAS_SOURCES
   src/symbolication/block.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/symbolication/callstack.cpp
+  src/symbolication/callstack.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
@@ -106,6 +110,7 @@ add_executable(
   test/unittest/parse_dap_requests.cpp
   src/interface/dap/parse_buffer.cpp
   src/interface/dap/parse_buffer.h
+  src/utils/logger.cpp
   ${COMMON_SRC}
 )
 
@@ -121,6 +126,7 @@ add_executable(
   base64_encoding
   test/unittest/base64.cpp
   src/utils/base64.cpp
+  src/utils/logger.cpp
   ${COMMON_SRC}
 )
 
@@ -128,6 +134,7 @@ target_link_libraries(
   base64_encoding
   GTest::gtest_main
   fmt::fmt
+  mdb_spinlock
 )
 
 include(GoogleTest)
