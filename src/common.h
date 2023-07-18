@@ -127,6 +127,9 @@ public:
   constexpr operator std::uintptr_t() const { return get(); }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
 
+  // Utility function. When one needs to be sure we are offseting by *bytes* and not by sizeof(T) * n.
+  TraceePointer<T> constexpr offset(u64 bytes) const noexcept { return this->remote_addr + bytes; }
+
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
   template <std::integral OffsetT>
   constexpr TraceePointer
@@ -229,11 +232,46 @@ public:
     return as<void>();
   }
 
-  template <typename U>
-  friend bool
-  operator<=>(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  template <typename U = T>
+  constexpr friend bool
+  operator<(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() <=> r.get();
+    return l.get() < r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator<=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() <= r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator>(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() > r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator>=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() > r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator==(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() == r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator!=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() != r.get();
   }
 
   constexpr auto
