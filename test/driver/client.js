@@ -96,7 +96,6 @@ class DAClient {
 
     this.mdb.stdout.on("data", (data) => {
       const str_data = data.toString();
-      console.log()
       this.append_buffer(str_data);
       let msgs = this.parse_contents(this.buf.receive_buffer);
       let last_ends = 0;
@@ -108,7 +107,6 @@ class DAClient {
           if (!this.events.emit(json.type, json)) {
             this.events.emit("err", json);
           }
-          console.log(`emitted ${JSON.stringify(json)}`);
           last_ends = content_start + length;
         } catch (ex) {
           console.log(`Buffer contents: '''${this.buf.receive_buffer}'''`);
@@ -143,7 +141,6 @@ class DAClient {
   send_req_get_response(req, args) {
     return new Promise((res) => {
       const serialized = this.serialize_request(req, args);
-      console.log(`writing ${serialized}`);
       this.mdb.stdin.write(serialized)
       this.send_wait_res.once(req, (response) => {
         res(response);
@@ -189,18 +186,18 @@ class DAClient {
 
 }
 
-function check_response(response, command, expected_success = true) {
+function check_response(file, response, command, expected_success = true) {
   if (response.type != "response") {
-    console.error(`Type of message was expected to be 'response' but was '${response.type}'`);
+    console.error(`[${file}] Type of message was expected to be 'response' but was '${response.type}'`);
     process.exit(-1);
   }
   if (response.success != expected_success) {
-    console.error(`Expected response to succeed ${expected_success} but got ${response.success}`);
+    console.error(`[${file}] Expected response to succeed ${expected_success} but got ${response.success}`);
     process.exit(-1);
   }
 
   if (response.command != command) {
-    console.error(`Expected command to be ${command} but got ${response.command}`);
+    console.error(`[${file}] Expected command to be ${command} but got ${response.command}`);
     process.exit(-1);
   }
 }
