@@ -120,11 +120,17 @@ struct DebugInfoEntry
   u32 abbreviation_code;
   /** Offset into .debug_info or .debug_types */
   u64 next_die_in_cu;
-  DebugInfoEntry *first_child;
-  DebugInfoEntry *next_sibling;
+  // todo(simon): Make this better.
+  // This is terrible for performance. But it's easy. The reason being
+  // is that the layout is terrible, we have:
+  // root, 1st child, (1st child (1st child ... siblings) .. siblings), which mean we can't iterate over contigous
+  // memory, if we only want to iterate over the direct children of the root.
+  std::vector<std::unique_ptr<DebugInfoEntry>> children;
   DebugInfoEntry *parent;
   DwarfTag tag;
   std::vector<AttributeValue> attributes;
+  bool subprogram_with_addresses : 1;
+  void debug_dump(int indent = 0) const noexcept;
 };
 
 /// DWARF version >= 5

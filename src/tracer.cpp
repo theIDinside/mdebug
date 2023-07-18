@@ -55,19 +55,16 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
   std::vector<std::thread> jobs{};
-  SpinLock stdio_lock{};
 
   for (auto &cu_hdr : total) {
-    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target, &stdio_lock]() {
+    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target]() {
       auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
-      auto compile_unit_die = proc->read_root_die();
+      auto compile_unit_die = proc->read_dies();
       if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-        proc->process_compile_unit_die(compile_unit_die.get());
+        proc->process_compile_unit_die(compile_unit_die.release());
       } else {
         PANIC("Unexpected non-compile unit DIE parsed");
       }
-      LockGuard guard{stdio_lock};
-      fmt::println("Thread finished processing CU {}", cu_hdr.cu_index);
     }});
   }
 
@@ -191,7 +188,6 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
           // therefore we need to interrupt it.
           if (peek_waited_tid == 0) {
             VERIFY(-1 != tgkill(target->task_leader, task.tid, SIGSTOP), "Failed to send SIGSTOP to {}", task.tid);
-            fmt::println("INTERRUPTING {}", task.tid);
             // we can block, because we know we sent this signal.
             siginfo_t info_ptr;
             const auto peek_waited_tid = waitid(P_PID, task.tid, &info_ptr, WEXITED | WSTOPPED | WNOHANG);

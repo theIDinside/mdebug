@@ -8,6 +8,7 @@
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
 #include "ptrace.h"
+#include "symbolication/callstack.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
 #include "task.h"
@@ -33,12 +34,13 @@ Target::Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, threads{},
       user_brkpts({.bp_id_counter = 1, .breakpoints = {}, .address_space_tid = process_space_id}),
-      stop_on_clone(false), spin_lock{}, m_files{}, m_types{}, interpreter_base{}, entry{}, register_cache(),
+      stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, register_cache(),
       session(session), is_in_user_ptrace_stop(false)
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
   threads.back().initialize();
+  frame_cache.push_back(sym::CallStack{.tid = threads.back().tid, .frames = {}});
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
     procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
@@ -66,7 +68,7 @@ Target::get_task(pid_t tid) noexcept
     if (t.tid == tid)
       return &t;
   }
-  return nullptr;
+  return &(*threads.begin());
 }
 
 std::optional<TaskWaitResult>
@@ -89,6 +91,7 @@ Target::new_task(Tid tid, bool ui_update) noexcept
       "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
   Tracer::Instance->post_event(evt);
   threads.push_back(TaskInfo{tid});
+  frame_cache.push_back(sym::CallStack{.tid = tid, .frames = {}});
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
          "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
@@ -120,8 +123,8 @@ Target::resume_target(RunType type) noexcept
       VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.task.tid, 1, 0),
              "Single step over user breakpoint boundary failed: {}", strerror(errno));
       waitpid(bp_stat.task.tid, &stat, 0);
-      ASSERT(cache_registers(bp_stat.task.tid).rip != bp->address, "Failed to single step over breakpoint at {}",
-             bp->address);
+      ASSERT(TPtr<void>{cache_registers(bp_stat.task.tid).rip} != bp->address,
+             "Failed to single step over breakpoint at {}", bp->address);
       user_brkpts.enable_breakpoint(bp_stat.bp_id);
     }
   }
@@ -195,14 +198,6 @@ Target::set_pc(TaskInfo *t, TPtr<void> addr) noexcept
   const auto rip_offset = offsetof(user_regs_struct, rip);
   VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
   register_cache[t->tid].rip = addr;
-}
-
-TPtr<void>
-Target::determine_retaddr(TaskInfo *t) noexcept
-{
-  const auto pushed_retaddr = register_cache[t->tid].rbp + 8;
-  const auto ret_addr = read_type<TPtr<void>>(pushed_retaddr);
-  return ret_addr;
 }
 
 void
@@ -585,13 +580,6 @@ Target::add_file(CompilationUnitFile &&file) noexcept
 }
 
 void
-Target::add_type(Type type) noexcept
-{
-  LockGuard guard{spin_lock};
-  m_types[type.name] = type;
-}
-
-void
 Target::reaped_events() noexcept
 {
   awaiter_thread->reaped_events();
@@ -603,4 +591,73 @@ void
 Target::start_awaiter_thread() noexcept
 {
   awaiter_thread->start_awaiter_thread();
+}
+
+sym::CallStack &
+Target::build_callframe_stack(const TaskInfo *task) noexcept
+{
+  std::vector<TPtr<std::uintptr_t>> bps;
+  auto bp = register_cache[task->tid].rbp;
+  bps.push_back(bp);
+  while (true) {
+    TPtr<std::uintptr_t> bp_addr = bps.back();
+    const auto prev_bp = read_type_safe(bp_addr);
+    if (prev_bp) {
+      if (*prev_bp == 0x1) {
+        break;
+      }
+      bps.push_back(*prev_bp);
+    } else
+      break;
+  }
+
+  std::vector<TPtr<std::uintptr_t>> rsps;
+  rsps.reserve(bps.size());
+  rsps.push_back(register_cache[task->tid].rip);
+  for (auto bp_it = bps.begin(); bp_it != bps.end(); ++bp_it) {
+    const auto ret_addr = read_type<TPtr<std::uintptr_t>>({bp_it->offset(8)});
+    rsps.push_back(ret_addr);
+  }
+
+  for (auto &cs : frame_cache) {
+    if (cs.tid == task->tid) {
+      // N.B! N.B! N.B! todo(simon): this probably has room for LOTS of optimization
+      //  instead of throwing it all away _every step, every stop_.
+      cs.frames.clear();
+      for (auto i = rsps.begin(); i != rsps.end(); i++) {
+        auto symbol = find_fn_by_pc(i->as_void());
+        if (symbol)
+          cs.frames.push_back(sym::Frame{.start = symbol->fn_sym->start,
+                                         .end = symbol->fn_sym->end,
+                                         .rip = i->as_void(),
+                                         .fn_name = symbol->fn_sym->name,
+                                         .cu_file = symbol->cu_file,
+                                         .type = sym::FrameType::Full});
+        else {
+          cs.frames.push_back(sym::Frame{.start = nullptr,
+                                         .end = nullptr,
+                                         .rip = i->as_void(),
+                                         .fn_name = "unknown",
+                                         .cu_file = nullptr,
+                                         .type = sym::FrameType::Unknown});
+        }
+      }
+      return cs;
+    }
+  }
+  PANIC(fmt::format("Failed to find call stack for {}", task->tid));
+}
+
+std::optional<SearchFnSymResult>
+Target::find_fn_by_pc(TPtr<void> addr) noexcept
+{
+  for (auto &f : m_files) {
+    if (f.may_contain(addr)) {
+      auto fn = f.find_subprogram(addr);
+      if (fn != nullptr) {
+        return SearchFnSymResult{.fn_sym = fn, .cu_file = &f};
+      }
+    }
+  }
+  return {};
 }

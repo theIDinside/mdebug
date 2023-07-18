@@ -11,6 +11,7 @@
 #include <bits/align.h>
 #include <cstdint>
 #include <emmintrin.h>
+#include <stack>
 #include <utility>
 
 CompilationUnitBuilder::CompilationUnitBuilder(ObjectFile *obj_file) noexcept : obj_file(obj_file) {}
@@ -47,7 +48,8 @@ CUProcessor::CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, A
 static constexpr auto IS_DWZ = false;
 
 static AttributeValue
-read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<i64> &implicit_consts) noexcept
+read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation abbr,
+                      std::vector<i64> &implicit_consts) noexcept
 {
   if (abbr.IMPLICIT_CONST_INDEX != UINT8_MAX) {
     return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], AttributeForm::DW_FORM_implicit_const,
@@ -60,8 +62,10 @@ read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<
   case AttributeForm::DW_FORM_ref_addr:
     PANIC("AttributeForm::DW_FORM_ref_addr not yet supported");
     break;
-  case AttributeForm::DW_FORM_addr:
+  case AttributeForm::DW_FORM_addr: {
+    e->subprogram_with_addresses = true;
     return AttributeValue{reader.read_address(), abbr.form, abbr.name};
+  }
   case AttributeForm::Reserved:
     PANIC("Can't handle RESERVED");
   case AttributeForm::DW_FORM_block2:
@@ -141,7 +145,7 @@ read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<
       new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
       implicit_consts.push_back(value);
     }
-    return read_attribute_values(reader, new_abbr, implicit_consts);
+    return read_attribute_values(e, reader, new_abbr, implicit_consts);
   }
   case AttributeForm::DW_FORM_sec_offset: {
     const auto offset = reader.read_offset();
@@ -218,48 +222,46 @@ read_attribute_values(CompileUnitReader &reader, Abbreviation abbr, std::vector<
   PANIC("Unknown Attribute Form");
 }
 
-DebugInfoEntry *
-CUProcessor::read_in_dies(bool only_compile_unit) noexcept
-{
-  DebugInfoEntry *ancestor = nullptr;
-  CompileUnitReader reader{&header, obj_file};
-  while (reader.has_more()) {
-    const auto abbrev_code = reader.uleb128();
-    if (abbrev_code == 0)
-      return ancestor;
-    auto abbreviation = abbrev_table[abbrev_code - 1];
-    std::vector<AttributeValue> attribute_values;
-
-    for (const auto &attr : abbreviation.attributes) {
-      attribute_values.emplace_back(read_attribute_values(reader, attr, abbreviation.implicit_consts));
-    }
-    for (const auto &attr : attribute_values) {
-      if (attr.form == AttributeForm::DW_FORM_strp) {
-        fmt::println("\t{} {} => {}", attr.name, attr.form, attr.string());
-      } else {
-        fmt::println("\t{} {}", attr.name, attr.form);
-      }
-    }
-  }
-
-  ancestor = &cu_dies.front();
-  return ancestor;
-}
-
 std::unique_ptr<DebugInfoEntry>
-CUProcessor::read_root_die() noexcept
+CUProcessor::read_dies() noexcept
 {
   CompileUnitReader reader{&header, obj_file};
   std::unique_ptr<DebugInfoEntry> root = std::make_unique<DebugInfoEntry>();
-  const auto abbrev_code = reader.uleb128();
-  ASSERT(abbrev_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
-  auto abbreviation = abbrev_table[abbrev_code - 1];
-  root->abbreviation_code = abbrev_code;
+  const auto abbr_code = reader.uleb128();
+  ASSERT(abbr_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
+  auto abbreviation = abbrev_table[abbr_code - 1];
+  root->abbreviation_code = abbr_code;
   root->tag = abbreviation.tag;
+
   for (const auto &attr : abbreviation.attributes) {
-    root->attributes.emplace_back(read_attribute_values(reader, attr, abbreviation.implicit_consts));
+    root->attributes.emplace_back(read_attribute_values(root.get(), reader, attr, abbreviation.implicit_consts));
   }
   root->next_die_in_cu = reader.bytes_read();
+  std::stack<DebugInfoEntry *> parent_stack; // for "horizontal" travelling
+  DebugInfoEntry *e = root.get();
+  bool has_children = abbreviation.has_children;
+  while (true) {
+    u64 abbr_code = reader.uleb128();
+    if (abbr_code == 0) {
+      parent_stack.pop();
+      if (parent_stack.empty())
+        break;
+      has_children = false;
+      continue;
+    }
+    if (has_children) {
+      parent_stack.push(e);
+    }
+    parent_stack.top()->children.emplace_back(std::make_unique<DebugInfoEntry>());
+    e = parent_stack.top()->children.back().get();
+    auto abbreviation = abbrev_table[abbr_code - 1];
+    e->abbreviation_code = abbr_code;
+    e->tag = abbreviation.tag;
+    for (const auto &attr : abbreviation.attributes) {
+      e->attributes.emplace_back(read_attribute_values(e, reader, attr, abbreviation.implicit_consts));
+    }
+    has_children = abbreviation.has_children;
+  }
   return root;
 }
 
@@ -276,45 +278,84 @@ CUProcessor::get_lnp_header() const noexcept
   return line_header.get();
 }
 
+static void
+add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die) noexcept
+{
+  for (const auto &child : root_die->children) {
+    if (child->subprogram_with_addresses) {
+      FunctionSymbol fn{.start = nullptr, .end = nullptr, .name = {}};
+      for (const auto attr : child->attributes) {
+        using enum Attribute;
+        switch (attr.name) {
+        case DW_AT_low_pc:
+          fn.start = attr.address();
+          break;
+        case DW_AT_high_pc:
+          fn.end = attr.address();
+          break;
+        case DW_AT_name:
+          fn.name = attr.string();
+          break;
+        case DW_AT_linkage_name:
+          break;
+        default:
+          break; // ignore attributes
+        }
+      }
+      if (fn.start != nullptr && fn.end != nullptr && !fn.name.empty()) {
+        // means the AT_high_pc was an offset, not an address
+        if (fn.end < fn.start) {
+          fn.end = (fn.start + fn.end);
+        }
+        file.add_function(fn.name, fn);
+      }
+    }
+    add_subprograms(file, child.get());
+  }
+}
+
 void
 CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 {
-
   LineTable ltes;
-  std::vector<AddressRange> address_ranges;
   std::string_view name;
   const auto elf = obj_file->parsed_elf;
+  TPtr<void> low = nullptr;
+  TPtr<void> high = nullptr;
+  CompilationUnitFile f{cu_die};
   if (header.addr_size == 4) {
     PANIC("32-bit arch not yet supported.");
   } else {
     for (const auto &att : cu_die->attributes) {
       if (att.name == Attribute::DW_AT_name) {
-        name = att.string();
+        f.set_name(att.string());
       } else if (att.name == Attribute::DW_AT_ranges) {
         // todo(simon): re-add/re-design for opportunity of aligned loads/stores
         const auto value = att.address();
         const auto ptr = elf->debug_ranges->begin() + value;
         u64 *start = (u64 *)ptr;
-        address_ranges.push_back(AddressRange{});
-        _mm_storeu_si128((__m128i *)&address_ranges.back(), _mm_loadu_si128((__m128i *)start));
-        for (; address_ranges.back().is_valid(); start += 2) {
-          address_ranges.push_back(AddressRange{});
-          _mm_storeu_si128((__m128i *)&address_ranges.back(), _mm_loadu_si128((__m128i *)start));
+        f.add_addr_rng(start);
+        for (start += 2; f.m_addr_ranges.back().is_valid(); start += 2) {
+          f.add_addr_rng(start);
         }
-        address_ranges.pop_back();
+        f.m_addr_ranges.pop_back();
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
         if (header.version == DwarfVersion::D4) {
-          this->line_header =
-              read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
-          ltes = parse_linetable(this);
+          line_header = read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
+          f.set_linetable(parse_linetable(this));
         } else {
           PANIC("V5 line number program not supported yet");
         }
+      } else if (att.name == Attribute::DW_AT_low_pc) {
+        low = att.address();
+      } else if (att.name == Attribute::DW_AT_high_pc) {
+        high = att.address();
       }
     }
   }
-  CompilationUnitFile f{name, std::move(address_ranges), std::move(ltes)};
+  f.set_boundaries();
+  add_subprograms(f, cu_die);
   requesting_target->add_file(std::move(f));
 }
 

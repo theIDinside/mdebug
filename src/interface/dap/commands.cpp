@@ -7,6 +7,7 @@
 #include "types.h"
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <unistd.h>
 #include <unordered_set>
@@ -321,8 +322,8 @@ Threads::execute(Tracer *tracer) noexcept
   // allows for more; it would require some work to get the DAP protocol to play nicely though.
   // therefore we just hand back the threads of the currently active target
   auto response = new ThreadsResponse{true, this};
-
   const auto target = tracer->get_current();
+
   const auto &threads = target->threads;
   response->threads.reserve(threads.size());
   for (auto thread : threads) {
@@ -348,7 +349,41 @@ StackTraceResponse::serialize(int seq) const noexcept
 UIResultPtr
 StackTrace::execute(Tracer *tracer) noexcept
 {
-  TODO("StackTrace request");
+  // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
+  auto target = tracer->get_current();
+  auto task = target->get_task(threadId);
+  auto &cfs = target->build_callframe_stack(task);
+  auto response = new StackTraceResponse{true, this};
+  response->stack_frames.reserve(cfs.frames.size());
+  auto id = 1;
+  for (const auto &frame : cfs.frames) {
+    if (frame.type == sym::FrameType::Full) {
+      auto &lt = frame.cu_file->line_table();
+      auto line = 0;
+      auto col = 0;
+      for (auto ita = lt.cbegin(), itb = ita + 1; ita != lt.cend() && itb != lt.cend(); ita++, itb++) {
+        if (ita->pc <= frame.rip && itb->pc >= frame.rip) {
+          line = ita->line;
+          col = ita->column;
+        }
+      }
+      response->stack_frames.push_back(
+          StackFrame{.id = id++,
+                     .name = frame.fn_name.value_or("unknown"),
+                     .source = Source{.name = frame.cu_file->name(), .path = frame.cu_file->name()},
+                     .line = line,
+                     .column = col,
+                     .rip = fmt::format("{}", frame.rip)});
+    } else {
+      response->stack_frames.push_back(StackFrame{.id = id++,
+                                                  .name = frame.fn_name.value_or("unknown"),
+                                                  .source = std::nullopt,
+                                                  .line = 0,
+                                                  .column = 0,
+                                                  .rip = fmt::format("{}", frame.rip)});
+    }
+  }
+  return response;
 }
 
 ui::UICommand *

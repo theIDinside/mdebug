@@ -3,6 +3,7 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "lib/spinlock.h"
+#include "symbolication/callstack.h"
 #include "symbolication/type.h"
 #include "task.h"
 #include "utils/static_vector.h"
@@ -36,6 +37,12 @@ enum ActionOnEvent
 {
   ShouldContinue,
   StopTracee
+};
+
+struct SearchFnSymResult
+{
+  FunctionSymbol *fn_sym;
+  CompilationUnitFile *cu_file;
 };
 
 using Address = std::uintptr_t;
@@ -153,7 +160,6 @@ struct Target
   void register_task_waited(TaskWaitResult wait) noexcept;
 
   void set_pc(TaskInfo *t, TPtr<void> addr) noexcept;
-  TPtr<void> determine_retaddr(TaskInfo *t) noexcept;
 
   /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
@@ -239,6 +245,29 @@ struct Target
   }
 
   template <typename T>
+  std::optional<T>
+  read_type_safe(TPtr<T> addr)
+  {
+    typename TPtr<T>::Type result;
+    auto total_read = 0ull;
+    constexpr auto sz = TPtr<T>::type_size();
+    auto EOF_REACHED = 0;
+    while (total_read < sz) {
+      auto read_bytes = pread64(mem_fd().get(), &result + total_read, sz - total_read, addr.get());
+      if (-1 == read_bytes) {
+        return std::nullopt;
+      }
+      if (0 == read_bytes)
+        EOF_REACHED++;
+
+      if (EOF_REACHED > 3)
+        return std::nullopt;
+      total_read += read_bytes;
+    }
+    return result;
+  }
+
+  template <typename T>
   T
   cache_and_overwrite(TraceePointer<T> address, T &value)
   {
@@ -296,18 +325,18 @@ struct Target
 
   /* Add parsed DWARF debug info for `file` */
   void add_file(CompilationUnitFile &&file) noexcept;
-  /* Add parsed DWARF debug info for `type` */
-  void add_type(Type type) noexcept;
 
   void reaped_events() noexcept;
   void start_awaiter_thread() noexcept;
+  sym::CallStack &build_callframe_stack(const TaskInfo *task) noexcept;
+  std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) noexcept;
 
 private:
   std::vector<CompilationUnitFile> m_files;
-  std::unordered_map<std::string_view, Type> m_types;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   std::unordered_map<Tid, user_regs_struct> register_cache;
+  std::vector<sym::CallStack> frame_cache;
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
   bool is_in_user_ptrace_stop;

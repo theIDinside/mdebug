@@ -1,29 +1,19 @@
 #pragma once
 #include "../common.h"
 #include "block.h"
+#include "dwarf.h"
 #include "lnp.h"
+#include <emmintrin.h>
 #include <optional>
+#include <unordered_map>
 
 using AddrRanges = std::vector<AddressRange>;
-struct Field
-{
-  const char *name;
-  u32 offset;
-  u32 size;
-};
 
-struct Type
+struct FunctionSymbol
 {
+  TPtr<void> start;
+  TPtr<void> end;
   std::string_view name;
-  std::vector<Field> members;
-  u64 size_of() const noexcept;
-};
-
-struct Symbol
-{
-  const char *name;
-  Type type;
-  TPtr<void> address;
 };
 
 /* Included files are files that are not representable as a compilation unit, at least not directly.
@@ -44,7 +34,7 @@ struct IncludedFile
 class CompilationUnitFile
 {
 public:
-  explicit CompilationUnitFile(std::string_view name, AddrRanges &&addr_ranges, LineTable &&lt_ents) noexcept;
+  explicit CompilationUnitFile(DebugInfoEntry *cu_die) noexcept;
 
   Path dir() const noexcept;
   Path source_filename() const noexcept;
@@ -52,23 +42,51 @@ public:
   std::string_view name() const noexcept;
   TPtr<void> low_pc() const noexcept;
   TPtr<void> high_pc() const noexcept;
+  void set_name(std::string_view name) noexcept;
+
+  constexpr void
+  add_addr_rng(const u64 *start) noexcept
+  {
+    m_addr_ranges.push_back(AddressRange{});
+    _mm_storeu_si128((__m128i *)&m_addr_ranges.back(), _mm_loadu_si128((__m128i *)start));
+  }
+
+  constexpr bool
+  last_added_addr_valid() const noexcept
+  {
+    return m_addr_ranges.back().is_valid();
+  }
+
+  void
+  pop_addr() noexcept
+  {
+    m_addr_ranges.pop_back();
+  }
+
+  void set_linetable(LineTable &&lte) noexcept;
+  void set_boundaries() noexcept;
   const LineTable &line_table() const noexcept;
   const AddrRanges &address_ranges() const noexcept;
 
   template <typename T>
-  bool
+  constexpr bool
   may_contain(TPtr<T> ptr) const noexcept
   {
     return pc_boundaries.contains(ptr.as_void());
   }
 
+  void add_function(std::string_view fn_name, FunctionSymbol sym) noexcept;
+  FunctionSymbol *find_subprogram(TPtr<void> addr) noexcept;
+  std::vector<AddressRange> m_addr_ranges;
+
 private:
   // the lowest / highest PC in `address_ranges`
   std::string_view m_name;
-  std::vector<AddressRange> m_addr_ranges;
+  AddressRange pc_boundaries;
   LineTable m_ltes;
   // The lowest (inclusive) and highest (exclusive) pc in this CU's range (`m_addr_ranges`)
-  AddressRange pc_boundaries;
+  std::unordered_map<std::string_view, FunctionSymbol> functions;
+  DebugInfoEntry *cu_die;
 };
 
 namespace fmt {

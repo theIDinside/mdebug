@@ -99,10 +99,7 @@ public:
   CUProcessor(CUProcessor &&) noexcept = default;
   CUProcessor(const CUProcessor &) = delete;
 
-  /** Reads in all dies of this compilation unit and returns the Ancestor (the CU-die), the equivalent of
-   * &cu_dies[0] */
-  DebugInfoEntry *read_in_dies(bool only_compile_unit = false) noexcept;
-  std::unique_ptr<DebugInfoEntry> read_root_die() noexcept;
+  std::unique_ptr<DebugInfoEntry> read_dies() noexcept;
   const CompileUnitHeader &get_header() const noexcept;
   LineHeader *get_lnp_header() const noexcept;
   void process_compile_unit_die(DebugInfoEntry *cu_die) noexcept;
@@ -276,6 +273,4 @@ private:
   ObjectFile *obj_file;
 };
 
-CompilationUnitFile process_compile_unit_die(const CompileUnitHeader &header, ObjectFile *file,
-                                             DebugInfoEntry *die) noexcept;
 LineTable parse_linetable(CUProcessor *proc) noexcept;
