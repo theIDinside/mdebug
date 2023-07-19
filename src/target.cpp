@@ -11,8 +11,10 @@
 #include "symbolication/callstack.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
+#include "symbolication/type.h"
 #include "task.h"
 #include "tracer.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
 #include <cstddef>
@@ -21,6 +23,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <linux/auxvec.h>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
@@ -257,6 +260,38 @@ Target::set_fn_breakpoint(std::string_view function_name) noexcept
 }
 
 void
+Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept
+{
+  logging::get_logging()->log("mdb",
+                              fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
+  auto f = find(m_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+  if (f != std::end(m_files)) {
+    for (auto &&desc : descs) {
+      logging::get_logging()->log(
+          "mdb", fmt::format("Setting at {}:{}", desc.line,
+                             desc.column.transform([](auto v) { return std::to_string(v); }).value_or("None")));
+      for (const auto &lte : f->line_table()) {
+        if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
+          if (!user_brkpts.contains(lte.pc)) {
+            constexpr u64 bkpt = 0xcc;
+            auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, lte.pc, nullptr);
+            u8 original_byte = static_cast<u8>(read_value & 0xff);
+            u64 installed_bp = ((read_value & ~0xff) | bkpt);
+            ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
+            user_brkpts.insert(lte.pc, original_byte, BreakpointType::SourceBreakpoint);
+            const auto &bp = user_brkpts.breakpoints.back();
+            user_brkpts.source_breakpoints[bp.bp_id] = std::move(desc);
+            break;
+          }
+        }
+      }
+    }
+  } else {
+    logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
+  }
+}
+
+void
 Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
 {
   auto bp = user_brkpts.get(bp_addr);
@@ -285,6 +320,24 @@ Target::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
   }
+}
+
+void
+Target::reset_source_breakpoints(std::string_view source_filepath,
+                                 std::vector<SourceBreakpointDescriptor> &&bps) noexcept
+{
+  std::erase_if(user_brkpts.breakpoints, [&bpm = user_brkpts, path = source_filepath](Breakpoint &bp) {
+    if (bp.type == BreakpointType::SourceBreakpoint) {
+      if (bpm.source_breakpoints[bp.bp_id].source_file.compare(path) == 0) {
+        bpm.source_breakpoints.erase(bp.bp_id);
+        if (bp.enabled)
+          bp.disable(bpm.address_space_tid);
+        return true;
+      }
+    }
+    return false;
+  });
+  set_source_breakpoints(source_filepath, std::move(bps));
 }
 
 bool
@@ -419,10 +472,20 @@ BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, BreakpointType type
 void
 BreakpointMap::clear(Target *target, BreakpointType type) noexcept
 {
-  std::erase_if(breakpoints, [target, type](auto &bp) {
+  std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
     if (bp.type == type) {
       if (bp.enabled)
         bp.disable(target->task_leader);
+      switch (bp.type) {
+      case BreakpointType::SourceBreakpoint:
+        t->source_breakpoints.erase(bp.bp_id);
+        break;
+      case BreakpointType::FunctionBreakpoint:
+        t->fn_breakpoint_names.erase(bp.bp_id);
+        break;
+      case BreakpointType::AddressBreakpoint:
+        break;
+      }
       return true;
     } else {
       return false;
@@ -659,4 +722,15 @@ Target::find_fn_by_pc(TPtr<void> addr) noexcept
     }
   }
   return {};
+}
+
+std::optional<std::string_view>
+Target::get_source(std::string_view name) noexcept
+{
+  for (const auto &f : m_files) {
+    if (f.name() == name) {
+      return f.name();
+    }
+  }
+  return std::nullopt;
 }

@@ -23,6 +23,12 @@ CompilationUnitFile::source_filename() const noexcept
   return p.filename();
 }
 
+Path
+CompilationUnitFile::fullpath() const noexcept
+{
+  return m_name;
+}
+
 std::string_view
 CompilationUnitFile::name() const noexcept
 {

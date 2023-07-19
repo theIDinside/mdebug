@@ -91,7 +91,6 @@ sanitize(std::string &name)
 void
 panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
 {
-
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];

@@ -2,6 +2,7 @@
 
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <charconv>
 #include <concepts>
@@ -56,6 +57,12 @@ enum class TargetSession
   Attached
 };
 
+struct Index
+{
+  operator u64() noexcept { return i; }
+  u64 i;
+};
+
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
  * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
 Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
@@ -98,9 +105,12 @@ std::string_view syscall_name(u64 syscall_number);
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
-    fmt::println("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);         \
-    std::terminate();                                                                                             \
-    /** Silence moronic GCC warnings. */                                                                          \
+    const auto todo_msg =                                                                                         \
+        fmt::format("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);      \
+    fmt::println("{}", todo_msg);                                                                                 \
+    logging::get_logging()->log("mdb", todo_msg);                                                                 \
+    logging::get_logging()->on_abort();                                                                           \
+    std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     DEAL_WITH_SHITTY_GCC                                                                                          \
   }
 

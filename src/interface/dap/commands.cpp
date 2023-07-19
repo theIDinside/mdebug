@@ -58,12 +58,96 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
     for (auto &bp : breakpoints) {
       serialized_bkpts.push_back(bp.serialize());
     }
-    return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
-        seq, response_seq, fmt::join(serialized_bkpts, ","));
+    switch (this->type) {
+    case BreakpointType::SourceBreakpoint:
+      return fmt::format(
+          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+          seq, response_seq, fmt::join(serialized_bkpts, ","));
+    case BreakpointType::FunctionBreakpoint:
+      return fmt::format(
+          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setFunctionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+          seq, response_seq, fmt::join(serialized_bkpts, ","));
+    case BreakpointType::AddressBreakpoint:
+      return fmt::format(
+          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setInstructionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+          seq, response_seq, fmt::join(serialized_bkpts, ","));
+      break;
+    }
   } else {
     TODO("Unsuccessful set instruction breakpoints event response handling");
   }
+}
+
+SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
+    : ui::UICommand(seq), args(std::move(arguments))
+{
+  ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
+         "Arguments did not contain 'breakpoints' field or wasn't an array");
+}
+
+UIResultPtr
+SetBreakpoints::execute(Tracer *tracer) noexcept
+{
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::SourceBreakpoint};
+  auto target = tracer->get_current();
+  ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
+  ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
+  std::string file = args["source"]["path"];
+  auto source_file = target->get_source(file);
+  std::vector<SourceBreakpointDescriptor> src_bps;
+  if (source_file.has_value()) {
+    logging::get_logging()->log("dap", fmt::format("Found source file to set breakpoints in: {}", *source_file));
+    for (const auto &src_bp : args.at("breakpoints")) {
+      ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
+      u32 line = src_bp["line"];
+      std::optional<u32> col = std::nullopt;
+      std::optional<std::string> condition = std::nullopt;
+      std::optional<int> hit_condition = std::nullopt;
+      std::optional<std::string> log_message = std::nullopt;
+
+      if (src_bp.contains("column")) {
+        col = src_bp["column"];
+      }
+      if (src_bp.contains("condition")) {
+        condition = src_bp["condition"];
+      }
+      if (src_bp.contains("hitCondition")) {
+        hit_condition = src_bp["hitCondition"];
+      }
+      if (src_bp.contains("logMessage")) {
+        log_message = std::make_optional(src_bp["logMessage"]);
+      }
+      src_bps.push_back(
+          SourceBreakpointDescriptor{*source_file, line, col, condition, hit_condition, log_message});
+    }
+    target->reset_source_breakpoints(*source_file, std::move(src_bps));
+    using BP = ui::dap::Breakpoint;
+    for (const auto &bp : target->user_brkpts.breakpoints) {
+      if (bp.type == BreakpointType::SourceBreakpoint &&
+          target->user_brkpts.source_breakpoints[bp.bp_id].source_file == *source_file) {
+        const auto &description = target->user_brkpts.source_breakpoints[bp.bp_id];
+        res->breakpoints.push_back(BP{.id = bp.bp_id,
+                                      .verified = true,
+                                      .addr = bp.address,
+                                      .line = description.line,
+                                      .col = description.column,
+                                      .source_path = description.source_file});
+      }
+    }
+  } else {
+    using BP = ui::dap::Breakpoint;
+    const auto count = args.at("breakpoints").size();
+    for (auto i = 1000u; i < count; i++) {
+      res->breakpoints.push_back(BP{.id = i,
+                                    .verified = false,
+                                    .addr = nullptr,
+                                    .line = std::nullopt,
+                                    .col = std::nullopt,
+                                    .source_path = std::nullopt,
+                                    .error_message = "Could not find source file"});
+    }
+  }
+  return res;
 }
 
 SetInstructionBreakpoints::SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
@@ -100,6 +184,9 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
           .id = bp.bp_id,
           .verified = true,
           .addr = bp.address,
+          .line = std::nullopt,
+          .col = std::nullopt,
+          .source_path = std::nullopt,
       });
     }
   }
@@ -141,6 +228,9 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
           .id = bp.bp_id,
           .verified = true,
           .addr = bp.address,
+          .line = std::nullopt,
+          .col = std::nullopt,
+          .source_path = std::nullopt,
       });
     }
   }
@@ -480,7 +570,7 @@ parse_command(std::string &&packet) noexcept
   case CommandType::Scopes:
     TODO("Command::Scopes");
   case CommandType::SetBreakpoints:
-    TODO("Command::SetBreakpoints");
+    return new SetBreakpoints{seq, std::move(args)};
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
   case CommandType::SetExceptionBreakpoints:

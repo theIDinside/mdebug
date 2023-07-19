@@ -47,6 +47,15 @@ Logger::get_logger() noexcept
 }
 
 void
+Logger::on_abort() noexcept
+{
+  for (const auto &[name, channel] : log_files) {
+    channel->log("\n - flushed");
+    channel->fstream.flush();
+  }
+}
+
+void
 Logger::LogChannel::log(std::string_view msg) noexcept
 {
   LockGuard<SpinLock> guard{spin_lock};

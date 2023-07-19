@@ -1,49 +1,41 @@
 /** COPYRIGHT TEMPLATE */
 
+/**
+ * The DA Client driver. This file contains no tests but is included by the test to be able to spawn
+ * a new mdb session. It emulates that of an Inline DA in VSCode (look at the extension `Midas` for examples)
+ */
+
 const path = require("path");
 const fs = require("fs");
 const { spawn, spawnSync } = require("child_process");
 const EventEmitter = require("events");
 
+
+// Environment setup
 const DRIVER_DIR = path.dirname(__filename);
 const TEST_DIR = path.dirname(DRIVER_DIR);
 const REPO_DIR = path.dirname(TEST_DIR);
-const BUILD_BIN_DIR = path.join(REPO_DIR, "build-debug", "bin");
+
+const TestArgs = process.argv.slice(2);
+
+if (TestArgs.length == 0) {
+  console.error(`Tests require to pass the build directory as the developer might choose different locations for their build dir.`);
+  process.exit(-1);
+}
+
+const UserBuildDir = TestArgs[0];
+const BUILD_BIN_DIR = path.join(UserBuildDir, "bin");
+if (!fs.existsSync(BUILD_BIN_DIR)) {
+  console.error(`Could not find the build directory '${BUILD_BIN_DIR}'`);
+  process.exit(-1);
+}
 const MDB_PATH = path.join(BUILD_BIN_DIR, "mdb");
-
-/**
- * Reads the driver test subjects file and parses it.
- * @returns { Set<String> } - A set of all the test subjects that can be used.
- */
-function readTestSubjects() {
-  const set = new Set();
-  const test_subjects = fs.readFileSync(path.join(TEST_DIR, "driver-test-subjects"), "utf-8");
-  const lines = test_subjects.split("\n");
-  for (const subject of lines) {
-    set.add(subject);
-  }
-  return set;
-}
-
-const test_subjects = readTestSubjects();
-
 console.log(`MDB Path: ${MDB_PATH}`);
-const test_subject = process.argv.slice(2);
-console.log(`Command line args:`);
-
-if (test_subject.length == 0) {
-  console.error(`Test subject to test against required as a parameter. Possible test subjects: ${[...readTestSubjects().values()]}`);
-  process.exit(-1);
-}
-
-if (test_subject.length > 1) {
-  console.error(`Only 1 test subject should be passed as parameter per test-run. This is to differentiate between failing and succeeding tests. The script exits with an exit code 0 if successful, -1 if fail.`);
-  process.exit(-1);
-}
-
 
 // currently, mdb takes no args
 const mdb_args = [];
+// End of environment setup
+
 
 const regex = /Content-Length: (\d+)\s{4}/gm;
 class DAClient {
@@ -62,6 +54,9 @@ class DAClient {
   constructor(mdb, mdb_args) {
     // this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "inherit" });
     this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+    process.on("exit", () => {
+      this.mdb.kill("SIGKILL");
+    });
     this.seq = 1;
     this.send_wait_res = new EventEmitter();
     this.events = new EventEmitter();
@@ -128,7 +123,7 @@ class DAClient {
     this.seq += 1;
     const data = JSON.stringify(json);
     const length = data.length;
-    const res = `Content-Length: ${length}\n\n${data}`;
+    const res = `Content-Length: ${length}\r\n\r\n${data}`;
     return res;
   }
 
@@ -186,20 +181,38 @@ class DAClient {
 
 }
 
+// Since we're running in a test suite, we want individual tests to 
+// dump the contents of the current logs, so that they are picked up by ctest if the tests
+// fail - otherwise the tests get overwritten by each other.
+function dump_log() {
+  const mdblog = fs.readFileSync(path.join(BUILD_BIN_DIR, "mdb.log"));
+  const daplog = fs.readFileSync(path.join(BUILD_BIN_DIR, "dap.log"));
+  console.log(mdblog);
+  console.log(daplog);
+}
+
 function check_response(file, response, command, expected_success = true) {
   if (response.type != "response") {
     console.error(`[${file}] Type of message was expected to be 'response' but was '${response.type}'`);
+    dump_log();
     process.exit(-1);
   }
   if (response.success != expected_success) {
     console.error(`[${file}] Expected response to succeed ${expected_success} but got ${response.success}`);
+    dump_log();
     process.exit(-1);
   }
 
   if (response.command != command) {
     console.error(`[${file}] Expected command to be ${command} but got ${response.command}`);
+    dump_log();
     process.exit(-1);
   }
+}
+
+function testException(err) {
+  console.error(`Test failed: ${err}`);
+  process.exit(-1);
 }
 
 module.exports = {
@@ -208,7 +221,7 @@ module.exports = {
   REPO_DIR,
   BUILD_BIN_DIR,
   MDB_PATH,
-  readTestSubjects,
   check_response,
+  testException,
   DAClient
 }

@@ -47,6 +47,15 @@ struct SetBreakpointsResponse final : ui::UIResult
   std::string serialize(int seq) const noexcept final override;
 };
 
+struct SetBreakpoints final : public ui::UICommand
+{
+  SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
+  ~SetBreakpoints() = default;
+  nlohmann::json args;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(SetBreakpoints)
+};
+
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
   SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;

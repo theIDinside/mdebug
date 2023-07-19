@@ -40,6 +40,11 @@ struct Breakpoint
   // instructionReference
   TPtr<void> addr;
 
+  std::optional<u32> line;
+  std::optional<u32> col;
+  std::optional<std::string_view> source_path;
+  std::optional<std::string_view> error_message;
+
   std::string serialize() const noexcept;
 };
 

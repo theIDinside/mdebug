@@ -37,6 +37,7 @@ public:
 
   Path dir() const noexcept;
   Path source_filename() const noexcept;
+  Path fullpath() const noexcept;
 
   std::string_view name() const noexcept;
   TPtr<void> low_pc() const noexcept;

@@ -13,7 +13,7 @@ struct SourceBreakpointDescriptor
 {
   std::string_view source_file;
   u32 line;
-  u32 column;
+  std::optional<u32> column;
   std::optional<std::string> condition;
   std::optional<int> hit_condition;
   std::optional<std::string> log_message;

@@ -20,10 +20,17 @@
 #include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace ui {
 struct UICommand;
 };
+
+// clang-format off
+template <typename BpPred> concept BpPredicate = requires(BpPred fn) { 
+   { fn(std::declval<Breakpoint>()) } -> std::convertible_to<bool>;
+};
+// clang-format on
 
 struct LWP
 {
@@ -92,13 +99,16 @@ struct BreakpointMap
   }
 
   u32 bp_id_counter;
+  // All breakpoints are stored in `breakpoints` - and they map to either `fn_breakpoint_names` or
+  // `source_breakpoints` depending on their type (or to neither - if they're address breakpoints). So we don't
+  // allow for multiple breakpoints on the same loc, because I argue it's a bad decision that makes breakpoint
+  // design much more complex for almost 0 gain.
   std::vector<Breakpoint> breakpoints;
   Tid address_space_tid;
   std::unordered_map<u32, std::string> fn_breakpoint_names;
-  std::unordered_map<u32, std::string> source_breakpoints;
+  std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
   // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
   std::vector<TaskBreakpointStatus> task_bp_stats;
-
   template <typename T>
   bool
   contains(TraceePointer<T> addr) const noexcept
@@ -177,14 +187,17 @@ struct Target
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
+  void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
-  // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
+  // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
   // thing
   void reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
   void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
+  void reset_source_breakpoints(std::string_view source_filepath,
+                                std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
 
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
@@ -336,6 +349,7 @@ struct Target
   void start_awaiter_thread() noexcept;
   sym::CallStack &build_callframe_stack(const TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) noexcept;
+  std::optional<std::string_view> get_source(std::string_view name) noexcept;
 
 private:
   std::vector<CompilationUnitFile> m_files;
@@ -352,10 +366,5 @@ template <typename Predicate>
 void
 clear_breakpoints(BreakpointMap &bp, Target *target, Predicate &&predicate) noexcept
 {
-  std::erase_if(bp.breakpoints, [target, &p = predicate](auto &bp) {
-    if (p(bp)) {
-      ptrace(PTRACE_POKEDATA, target->task_leader, bp.second.address.get(), bp.second.ins_byte);
-      return true;
-    }
-  });
+  std::erase_if(bp.breakpoints, [&p = predicate](Breakpoint &bp) { return p(bp); });
 }
