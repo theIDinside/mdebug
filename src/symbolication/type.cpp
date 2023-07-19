@@ -102,7 +102,7 @@ FunctionSymbol *
 CompilationUnitFile::find_subprogram(TPtr<void> addr) noexcept
 {
   for (const auto &[name, fn] : functions) {
-    if (addr >= fn.start && addr <= fn.end)
+    if (addr >= fn.start && addr < fn.end)
       return &functions[name];
   }
   return nullptr;

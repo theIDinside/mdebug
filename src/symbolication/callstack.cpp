@@ -5,7 +5,7 @@ namespace sym {
 bool
 Frame::inside(TPtr<void> addr) const noexcept
 {
-  return addr >= start && addr <= end;
+  return addr >= start && addr < end;
 }
 
 bool
