@@ -1,5 +1,6 @@
 #include "interface.h"
 #include "../../tracer.h"
+#include "../../utils/logger.h"
 #include "commands.h"
 #include "fmt/core.h"
 #include "parse_buffer.h"
@@ -93,13 +94,6 @@ DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
   posted_evt_listener = r;
   buffer = mmap_buffer<char>(4096);
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
-
-  log_file = std::fstream{"/home/cx/dev/foss/cx/dbm/build-debug/bin/dap.log",
-                          std::ios_base::in | std::ios_base::out | std::ios_base::trunc};
-  if (!log_file.is_open())
-    log_file.open("/home/cx/dev/foss/cx/dbm/build-debug/bin/dap.log",
-                  std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
-  setup_logging(log_file);
 }
 
 UIResultPtr
@@ -117,7 +111,10 @@ DAP::pop_event() noexcept
 void
 DAP::write_protocol_message(std::string_view msg) noexcept
 {
-  const auto header = fmt::format("Content-Length: {}\r\n\r\n\n", msg.size());
+  const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
+#ifdef MDB_DEBUG
+  logging::Logger::get_logger()->log("dap", fmt::format("WRITING -->{}{}<---", header, msg));
+#endif
   VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
   VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
 }
@@ -158,13 +155,8 @@ DAP::run_ui_loop()
           const auto request_headers = parse_headers_from(buffer_view, &no_partials);
           if (no_partials && request_headers.size() > 0) {
             for (auto &&hdr : request_headers) {
-              auto cd = maybe_unwrap<ContentDescriptor>(hdr);
-              const auto packet = std::string{cd->payload()};
-              auto obj = json::parse(packet, nullptr, false);
-              std::string_view cmd_name;
-              obj["command"].get_to(cmd_name);
-              ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
-              auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
+              const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
+              const auto cmd = parse_command(std::string{cd->payload()});
               tracer->accept_command(cmd);
             }
             command_notifier.notify();
@@ -174,15 +166,8 @@ DAP::run_ui_loop()
             if (request_headers.size() > 1) {
               bool parsed_commands = false;
               for (auto i = 0ull; i < request_headers.size() - 1; i++) {
-                auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
-                const auto packet = std::string{cd->payload()};
-                auto obj = json::parse(packet, nullptr, false);
-                std::string_view cmd_name;
-                obj["command"].get_to(cmd_name);
-                ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
-                ASSERT(obj.contains("seq"), "Request did not contain seq field");
-                auto cmd = parse_command(parse_command_type(cmd_name), std::move(obj["arguments"]));
-                cmd->seq = obj["seq"];
+                const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
+                const auto cmd = parse_command(std::string{cd->payload()});
                 tracer->accept_command(cmd);
                 parsed_commands = true;
               }
@@ -232,6 +217,10 @@ void
 DAP::post_event(UIResultPtr serializable_event) noexcept
 {
   {
+#ifdef MDB_DEBUG
+    logging::get_logging()->log("dap",
+                                fmt::format("posted event for msg with seq {}", serializable_event->response_seq));
+#endif
     LockGuard<SpinLock> guard{output_message_lock};
     events_queue.push_back(serializable_event);
   }

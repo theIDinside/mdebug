@@ -16,6 +16,7 @@
 #include "symbolication/objfile.h"
 #include "target.h"
 #include "task.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <bits/ranges_util.h>
 #include <cstdlib>
@@ -55,19 +56,16 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
   std::vector<std::thread> jobs{};
-  SpinLock stdio_lock{};
 
   for (auto &cu_hdr : total) {
-    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target, &stdio_lock]() {
+    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target]() {
       auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
-      auto compile_unit_die = proc->read_root_die();
+      auto compile_unit_die = proc->read_dies();
       if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-        proc->process_compile_unit_die(compile_unit_die.get());
+        proc->process_compile_unit_die(compile_unit_die.release());
       } else {
         PANIC("Unexpected non-compile unit DIE parsed");
       }
-      LockGuard guard{stdio_lock};
-      fmt::println("Thread finished processing CU {}", cu_hdr.cu_index);
     }});
   }
 
@@ -191,11 +189,10 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
           // therefore we need to interrupt it.
           if (peek_waited_tid == 0) {
             VERIFY(-1 != tgkill(target->task_leader, task.tid, SIGSTOP), "Failed to send SIGSTOP to {}", task.tid);
-            fmt::println("INTERRUPTING {}", task.tid);
             // we can block, because we know we sent this signal.
             siginfo_t info_ptr;
             const auto peek_waited_tid = waitid(P_PID, task.tid, &info_ptr, WEXITED | WSTOPPED | WNOHANG);
-            fmt::println("SIGNO: {}", info_ptr.si_signo);
+            fmt::println("SIGNO: {} on peeked tid {}", info_ptr.si_signo, peek_waited_tid);
             task.ptrace_stop = true;
             target->is_in_user_ptrace_stop = true;
           } else {
@@ -252,7 +249,6 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
       target->cache_registers(np);
       for (auto &task : target->threads) {
         if (task.tid != wait.waited_pid && task.tid != np) {
-          int stat;
           // peek wait statuses
           const auto peek = waitpid_peek(task.tid);
           // if task has no wait status waiting, it's most likely running
@@ -320,6 +316,9 @@ void
 Tracer::accept_command(ui::UICommand *cmd) noexcept
 {
   {
+#ifdef MDB_DEBUG
+    logging::get_logging()->log("dap", fmt::format("accepted command {}", cmd->name()));
+#endif
     SpinGuard lock{command_queue_lock};
     command_queue.push(cmd);
   }
@@ -356,10 +355,13 @@ Tracer::launch(Path &&program, std::vector<std::string> &&prog_args) noexcept
   PosixArgsList args_list{std::move(posix_cmd_args)};
   termios original_tty;
   winsize ws;
-  VERIFY(tcgetattr(STDIN_FILENO, &original_tty) != -1, "Failed to get attributes for stdin");
-  VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
 
-  auto fork_result = pty_fork(&original_tty, &ws);
+  bool could_set_term_settings = (tcgetattr(STDIN_FILENO, &original_tty) != -1);
+  if (could_set_term_settings)
+    VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
+
+  const auto fork_result =
+      pty_fork(could_set_term_settings ? &original_tty : nullptr, could_set_term_settings ? &ws : nullptr);
   // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process
   //  I'd much rather like a "stub" process to exec from, that gets handed to us by some "Fork server" thing,
   //  but the logic for that is way more complex and I'm not really interested in solving that problem right now.
@@ -374,6 +376,7 @@ Tracer::launch(Path &&program, std::vector<std::string> &&prog_args) noexcept
     if (execv(cmd, args) == -1) {
       PANIC(fmt::format("EXECV Failed for {}", cmd));
     }
+    break;
   }
   default: {
     const auto res = get<PtyParentResult>(fork_result);

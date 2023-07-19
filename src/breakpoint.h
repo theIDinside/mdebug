@@ -4,9 +4,19 @@
 
 enum class BreakpointType : std::uint8_t
 {
-  SourceBreakpoint = 0,
-  FunctionBreakpoint = 1,
-  AddressBreakpoint = 2,
+  SourceBreakpoint = 1 << 0,
+  FunctionBreakpoint = 1 << 1,
+  AddressBreakpoint = 1 << 2,
+};
+
+struct SourceBreakpointDescriptor
+{
+  std::string_view source_file;
+  u32 line;
+  std::optional<u32> column;
+  std::optional<std::string> condition;
+  std::optional<int> hit_condition;
+  std::optional<std::string> log_message;
 };
 
 class Breakpoint

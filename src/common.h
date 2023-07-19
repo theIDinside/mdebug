@@ -2,6 +2,7 @@
 
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <charconv>
 #include <concepts>
@@ -20,6 +21,8 @@
 #include <unistd.h>
 #include <variant>
 #include <vector>
+
+#include "utils/macros.h"
 
 namespace fs = std::filesystem;
 using Path = fs::path;
@@ -52,6 +55,12 @@ enum class TargetSession
 {
   Launched,
   Attached
+};
+
+struct Index
+{
+  operator u64() noexcept { return i; }
+  u64 i;
 };
 
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
@@ -96,8 +105,13 @@ std::string_view syscall_name(u64 syscall_number);
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
-    fmt::println("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);         \
-    std::terminate();                                                                                             \
+    const auto todo_msg =                                                                                         \
+        fmt::format("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);      \
+    fmt::println("{}", todo_msg);                                                                                 \
+    logging::get_logging()->log("mdb", todo_msg);                                                                 \
+    logging::get_logging()->on_abort();                                                                           \
+    std::terminate(); /** Silence moronic GCC warnings. */                                                        \
+    DEAL_WITH_SHITTY_GCC                                                                                          \
   }
 
 // Identical to ASSERT, but doesn't care about build type
@@ -126,6 +140,9 @@ public:
   constexpr TraceePointer(TraceePointer &&) = default;
   constexpr operator std::uintptr_t() const { return get(); }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
+
+  // Utility function. When one needs to be sure we are offseting by *bytes* and not by sizeof(T) * n.
+  TraceePointer<T> constexpr offset(u64 bytes) const noexcept { return this->remote_addr + bytes; }
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
   template <std::integral OffsetT>
@@ -229,11 +246,46 @@ public:
     return as<void>();
   }
 
-  template <typename U>
-  friend bool
-  operator<=>(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  template <typename U = T>
+  constexpr friend bool
+  operator<(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() <=> r.get();
+    return l.get() < r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator<=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() <= r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator>(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() > r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator>=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() > r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator==(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() == r.get();
+  }
+
+  template <typename U = T>
+  constexpr friend bool
+  operator!=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
+  {
+    return l.get() != r.get();
   }
 
   constexpr auto
@@ -582,17 +634,7 @@ to_integral(std::string_view s)
     return std::nullopt;
 }
 
-constexpr Option<TPtr<void>>
-to_addr(std::string_view s)
-{
-  if (s.starts_with("0x"))
-    s.remove_prefix(2);
-
-  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value, 16).ec == std::errc{})
-    return TPtr<void>{value};
-  else
-    return std::nullopt;
-}
+Option<TPtr<void>> to_addr(std::string_view s) noexcept;
 
 using SpinGuard = LockGuard<SpinLock>;
 

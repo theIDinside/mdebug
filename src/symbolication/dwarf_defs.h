@@ -1,4 +1,5 @@
 #pragma once
+#include "../utils/macros.h"
 #include <cstdint>
 #include <fmt/core.h>
 #include <string_view>
@@ -186,6 +187,7 @@ to_str(LineNumberProgramExtendedOpCode opcode)
 #include "../defs/dwarf.defs"
   }
 #undef DW_LNP_EXTENDED_OPCODES
+  DEAL_WITH_SHITTY_GCC
 }
 
 constexpr std::string_view
@@ -197,6 +199,7 @@ to_str(LineNumberProgramOpCode opcode)
 #include "../defs/dwarf.defs"
   }
 #undef DW_LNP_STANDARD_OPCODES
+  DEAL_WITH_SHITTY_GCC
 }
 
 constexpr std::string_view
@@ -208,6 +211,7 @@ to_str(LineNumberProgramContent content)
 #include "../defs/dwarf.defs"
   }
 #undef DW_LNP_CONTENT
+  DEAL_WITH_SHITTY_GCC
 }
 
 constexpr std::string_view
@@ -230,6 +234,7 @@ to_str(AttributeForm attr) noexcept
 #include "../defs/dwarf.defs"
   }
 #undef DW_ATTRIBUTE_FORM
+  DEAL_WITH_SHITTY_GCC
 }
 
 constexpr std::string_view
@@ -241,6 +246,7 @@ to_str(DwarfTag attr) noexcept
 #include "../defs/dwarf.defs"
   }
 #undef DW_DWARF_TAG
+  DEAL_WITH_SHITTY_GCC
 }
 
 #undef ITEM

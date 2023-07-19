@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
   src/main.cpp
+  src/utils/logger.cpp
+  src/utils/logger.h
   src/tracer.cpp
   src/tracer.h
   src/target.cpp
@@ -40,6 +42,8 @@ set(MIDAS_SOURCES
   src/symbolication/block.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/symbolication/callstack.cpp
+  src/symbolication/callstack.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
@@ -75,6 +79,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
 set(MDB_TESTS
   helloworld
   threads
+  stackframes
 )
 
 add_library(metricsconv SHARED test/dynamic_lib.cpp test/dynamic_lib.h)
@@ -105,6 +110,7 @@ add_executable(
   test/unittest/parse_dap_requests.cpp
   src/interface/dap/parse_buffer.cpp
   src/interface/dap/parse_buffer.h
+  src/utils/logger.cpp
   ${COMMON_SRC}
 )
 
@@ -120,6 +126,7 @@ add_executable(
   base64_encoding
   test/unittest/base64.cpp
   src/utils/base64.cpp
+  src/utils/logger.cpp
   ${COMMON_SRC}
 )
 
@@ -127,6 +134,7 @@ target_link_libraries(
   base64_encoding
   GTest::gtest_main
   fmt::fmt
+  mdb_spinlock
 )
 
 include(GoogleTest)
@@ -145,6 +153,15 @@ add_subdirectory(dependencies/nlohmann_json)
 
 target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json)
 target_include_directories(mdb PUBLIC ./dependencies)
+
+find_program(NODEJS "node")
+
+if(NODEJS)
+  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints)
+  foreach(driver_test ${DRIVER_TESTS})
+    add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})
+  endforeach()
+endif()
 
 # To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)

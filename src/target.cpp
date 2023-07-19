@@ -8,10 +8,13 @@
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
 #include "ptrace.h"
+#include "symbolication/callstack.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
+#include "symbolication/type.h"
 #include "task.h"
 #include "tracer.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
 #include <cstddef>
@@ -20,6 +23,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <linux/auxvec.h>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
@@ -31,14 +35,14 @@
 
 Target::Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
                bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{},
-      user_brkpts({.bp_id_counter = 1, .breakpoints = {}, .address_space_tid = process_space_id}),
-      stop_on_clone(false), spin_lock{}, m_files{}, m_types{}, interpreter_base{}, entry{}, register_cache(),
+    : task_leader{process_space_id}, object_files{}, threads{}, user_brkpts(process_space_id),
+      stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, register_cache(),
       session(session), is_in_user_ptrace_stop(false)
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
   threads.back().initialize();
+  frame_cache.push_back(sym::CallStack{.tid = threads.back().tid, .frames = {}});
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
     procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
@@ -66,7 +70,7 @@ Target::get_task(pid_t tid) noexcept
     if (t.tid == tid)
       return &t;
   }
-  return nullptr;
+  return &(*threads.begin());
 }
 
 std::optional<TaskWaitResult>
@@ -89,6 +93,7 @@ Target::new_task(Tid tid, bool ui_update) noexcept
       "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
   Tracer::Instance->post_event(evt);
   threads.push_back(TaskInfo{tid});
+  frame_cache.push_back(sym::CallStack{.tid = tid, .frames = {}});
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
          "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
@@ -120,8 +125,8 @@ Target::resume_target(RunType type) noexcept
       VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.task.tid, 1, 0),
              "Single step over user breakpoint boundary failed: {}", strerror(errno));
       waitpid(bp_stat.task.tid, &stat, 0);
-      ASSERT(cache_registers(bp_stat.task.tid).rip != bp->address, "Failed to single step over breakpoint at {}",
-             bp->address);
+      ASSERT(TPtr<void>{cache_registers(bp_stat.task.tid).rip} != bp->address,
+             "Failed to single step over breakpoint at {}", bp->address);
       user_brkpts.enable_breakpoint(bp_stat.bp_id);
     }
   }
@@ -157,8 +162,9 @@ Target::handle_stopped_for(TaskInfo *task) noexcept
 {
   auto &task_register = register_cache[task->tid];
   const auto current_pc = TPtr<void>{task_register.rip};
-  if (this->user_brkpts.contains(current_pc - 1)) {
-    task->set_pc(current_pc - 1);
+  const auto prev_pc_byte = current_pc - 1;
+  if (this->user_brkpts.contains(prev_pc_byte)) {
+    set_pc(task, prev_pc_byte);
     emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
     return ActionOnEvent::StopTracee;
   } else {
@@ -186,6 +192,14 @@ Target::register_task_waited(TaskWaitResult wait) noexcept
   auto task = get_task(wait.waited_pid);
   ASSERT(task != nullptr, "No task found with tid {}", wait.waited_pid);
   task->set_taskwait(wait);
+}
+
+void
+Target::set_pc(TaskInfo *t, TPtr<void> addr) noexcept
+{
+  const auto rip_offset = offsetof(user_regs_struct, rip);
+  VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
+  register_cache[t->tid].rip = addr;
 }
 
 void
@@ -246,6 +260,38 @@ Target::set_fn_breakpoint(std::string_view function_name) noexcept
 }
 
 void
+Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept
+{
+  logging::get_logging()->log("mdb",
+                              fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
+  auto f = find(m_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+  if (f != std::end(m_files)) {
+    for (auto &&desc : descs) {
+      logging::get_logging()->log(
+          "mdb", fmt::format("Setting at {}:{}", desc.line,
+                             desc.column.transform([](auto v) { return std::to_string(v); }).value_or("None")));
+      for (const auto &lte : f->line_table()) {
+        if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
+          if (!user_brkpts.contains(lte.pc)) {
+            constexpr u64 bkpt = 0xcc;
+            auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, lte.pc, nullptr);
+            u8 original_byte = static_cast<u8>(read_value & 0xff);
+            u64 installed_bp = ((read_value & ~0xff) | bkpt);
+            ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
+            user_brkpts.insert(lte.pc, original_byte, BreakpointType::SourceBreakpoint);
+            const auto &bp = user_brkpts.breakpoints.back();
+            user_brkpts.source_breakpoints[bp.bp_id] = std::move(desc);
+            break;
+          }
+        }
+      }
+    }
+  } else {
+    logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
+  }
+}
+
+void
 Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
 {
   auto bp = user_brkpts.get(bp_addr);
@@ -274,6 +320,24 @@ Target::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
   }
+}
+
+void
+Target::reset_source_breakpoints(std::string_view source_filepath,
+                                 std::vector<SourceBreakpointDescriptor> &&bps) noexcept
+{
+  std::erase_if(user_brkpts.breakpoints, [&bpm = user_brkpts, path = source_filepath](Breakpoint &bp) {
+    if (bp.type == BreakpointType::SourceBreakpoint) {
+      if (bpm.source_breakpoints[bp.bp_id].source_file.compare(path) == 0) {
+        bpm.source_breakpoints.erase(bp.bp_id);
+        if (bp.enabled)
+          bp.disable(bpm.address_space_tid);
+        return true;
+      }
+    }
+    return false;
+  });
+  set_source_breakpoints(source_filepath, std::move(bps));
 }
 
 bool
@@ -408,10 +472,20 @@ BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, BreakpointType type
 void
 BreakpointMap::clear(Target *target, BreakpointType type) noexcept
 {
-  std::erase_if(breakpoints, [target, type](auto &bp) {
+  std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
     if (bp.type == type) {
       if (bp.enabled)
         bp.disable(target->task_leader);
+      switch (bp.type) {
+      case BreakpointType::SourceBreakpoint:
+        t->source_breakpoints.erase(bp.bp_id);
+        break;
+      case BreakpointType::FunctionBreakpoint:
+        t->fn_breakpoint_names.erase(bp.bp_id);
+        break;
+      case BreakpointType::AddressBreakpoint:
+        break;
+      }
       return true;
     } else {
       return false;
@@ -568,13 +642,6 @@ Target::add_file(CompilationUnitFile &&file) noexcept
 }
 
 void
-Target::add_type(Type type) noexcept
-{
-  LockGuard guard{spin_lock};
-  m_types[type.name] = type;
-}
-
-void
 Target::reaped_events() noexcept
 {
   awaiter_thread->reaped_events();
@@ -586,4 +653,84 @@ void
 Target::start_awaiter_thread() noexcept
 {
   awaiter_thread->start_awaiter_thread();
+}
+
+sym::CallStack &
+Target::build_callframe_stack(const TaskInfo *task) noexcept
+{
+  std::vector<TPtr<std::uintptr_t>> bps;
+  auto bp = register_cache[task->tid].rbp;
+  bps.push_back(bp);
+  while (true) {
+    TPtr<std::uintptr_t> bp_addr = bps.back();
+    const auto prev_bp = read_type_safe(bp_addr);
+    if (prev_bp) {
+      if (*prev_bp == 0x1) {
+        break;
+      }
+      bps.push_back(*prev_bp);
+    } else
+      break;
+  }
+
+  std::vector<TPtr<std::uintptr_t>> rsps;
+  rsps.reserve(bps.size());
+  rsps.push_back(register_cache[task->tid].rip);
+  for (auto bp_it = bps.begin(); bp_it != bps.end(); ++bp_it) {
+    const auto ret_addr = read_type<TPtr<std::uintptr_t>>({bp_it->offset(8)});
+    rsps.push_back(ret_addr);
+  }
+
+  for (auto &cs : frame_cache) {
+    if (cs.tid == task->tid) {
+      // N.B! N.B! N.B! todo(simon): this probably has room for LOTS of optimization
+      //  instead of throwing it all away _every step, every stop_.
+      cs.frames.clear();
+      for (auto i = rsps.begin(); i != rsps.end(); i++) {
+        auto symbol = find_fn_by_pc(i->as_void());
+        if (symbol)
+          cs.frames.push_back(sym::Frame{.start = symbol->fn_sym->start,
+                                         .end = symbol->fn_sym->end,
+                                         .rip = i->as_void(),
+                                         .fn_name = symbol->fn_sym->name,
+                                         .cu_file = symbol->cu_file,
+                                         .type = sym::FrameType::Full});
+        else {
+          cs.frames.push_back(sym::Frame{.start = nullptr,
+                                         .end = nullptr,
+                                         .rip = i->as_void(),
+                                         .fn_name = "unknown",
+                                         .cu_file = nullptr,
+                                         .type = sym::FrameType::Unknown});
+        }
+      }
+      return cs;
+    }
+  }
+  PANIC(fmt::format("Failed to find call stack for {}", task->tid));
+}
+
+std::optional<SearchFnSymResult>
+Target::find_fn_by_pc(TPtr<void> addr) noexcept
+{
+  for (auto &f : m_files) {
+    if (f.may_contain(addr)) {
+      auto fn = f.find_subprogram(addr);
+      if (fn != nullptr) {
+        return SearchFnSymResult{.fn_sym = fn, .cu_file = &f};
+      }
+    }
+  }
+  return {};
+}
+
+std::optional<std::string_view>
+Target::get_source(std::string_view name) noexcept
+{
+  for (const auto &f : m_files) {
+    if (f.name() == name) {
+      return f.name();
+    }
+  }
+  return std::nullopt;
 }

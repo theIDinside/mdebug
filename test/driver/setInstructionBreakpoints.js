@@ -1,0 +1,25 @@
+const { DAClient, MDB_PATH, check_response, testException } = require("./client")
+
+const da_client = new DAClient(MDB_PATH, []);
+
+// we don't care for initialize, that's tested elsewhere
+da_client.send_req_get_response("initialize", {}).then(res => {
+  check_response(__filename, res, "initialize", true);
+}).catch(testException)
+
+da_client.send_req_get_response("launch", { program: "/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes", stopAtEntry: true }).then(res => {
+  check_response(__filename, res, "launch", true);
+  console.log(`launch was ok`);
+}).catch(testException);
+
+da_client.send_req_get_response("setInstructionBreakpoints", { breakpoints: [{ "instructionReference": "0x40127e" }] }).then(res => {
+  console.log(`setIns bkpt request...`);
+  check_response(__filename, res, "setInstructionBreakpoints", true);
+  if (res.body.breakpoints.length != 1) {
+    throw new Error(`Expected bkpts 1 but got ${res.body.breakpoints.length}`)
+  }
+  const { id, verified, instructionReference } = res.body.breakpoints[0];
+  if (!verified) throw new Error("Expected breakpoint to be verified and exist!");
+  if (instructionReference != "0x40127e") throw new Error(`Attempted to set ins breakpoint at 0x40127e but it was set at ${instructionReference}`);
+  process.exit(0);
+}).catch(testException)

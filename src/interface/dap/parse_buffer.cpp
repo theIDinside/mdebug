@@ -3,30 +3,7 @@
 #include <fstream>
 namespace ui::dap {
 
-static const std::regex CONTENT_LENGTH_HEADER = std::regex{R"(Content-Length: (\d+)\s{2})"};
-
-static std::fstream *logger_file = nullptr;
-
-void
-setup_logging(std::fstream &logger)
-{
-  logger_file = &logger;
-}
-
-inline void
-log_if(std::string_view msg) noexcept
-{
-  if (logger_file) {
-    auto &stream = *logger_file;
-    stream << msg << "\n" << std::flush;
-  }
-}
-
-#define LOG_IF(fmt_expression)                                                                                    \
-  if (logger_file) {                                                                                              \
-    auto &stream = *logger_file;                                                                                  \
-    stream << (fmt_expression) << "\n" << std::flush;                                                             \
-  }
+static const std::regex CONTENT_LENGTH_HEADER = std::regex{R"(Content-Length: (\d+)\r\n\r\n)"};
 
 std::vector<ContentParse>
 parse_headers_from(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
@@ -49,7 +26,6 @@ parse_headers_from(const std::string_view buffer_view, bool *all_msgs_ok) noexce
         const auto payload_begin_ptr = header_begin_ptr + base_match.length();
         const auto packet_offset =
             static_cast<u64>(std::distance((const char *)buffer_view.data(), (const char *)header_begin_ptr));
-        LOG_IF(fmt::format("payload length: '{}'\nHeader begins at '{}'", len_str, base_match.position()));
         result.push_back(ContentDescriptor{.payload_length = len,
                                            .packet_offset = packet_offset,
                                            .header_begin = header_begin_ptr,
@@ -69,7 +45,6 @@ parse_headers_from(const std::string_view buffer_view, bool *all_msgs_ok) noexce
     const char *ptr = internal_view.data();
     const char *begin = buffer_view.data();
     const u64 offset = std::distance(begin, ptr);
-    LOG_IF(fmt::format("Remainder data length {} at offset {}", internal_view.size(), offset));
     result.push_back(RemainderData{.length = internal_view.size(), .offset = offset});
     partial_found = true;
   }

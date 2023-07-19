@@ -25,6 +25,7 @@ prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header, Tar
     AbbreviationInfo info;
     abbr_ptr = decode_uleb128(abbr_ptr, info.code);
 
+    // we've reached the end of this abbrev sub-section.
     if (info.code == 0) {
       break;
     }
@@ -82,4 +83,18 @@ i64
 AttributeValue::signed_value() const noexcept
 {
   return value.i;
+}
+
+void
+DebugInfoEntry::debug_dump(int indent) const noexcept
+{
+  std::string fill(indent, ' ');
+  fmt::print("{} [{}] {}\n", fill, abbreviation_code, to_str(this->tag));
+  for (const auto &att : attributes) {
+    fmt::println("{} | {} {}", fill, to_str(att.name), to_str(att.form));
+  }
+  fmt::println("---");
+  for (const auto &ch : children) {
+    ch->debug_dump(indent + 1);
+  }
 }

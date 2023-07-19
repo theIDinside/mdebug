@@ -8,6 +8,9 @@ TWo "simple" stated goals, at least at this point in time.
 - Only support the DWARF debug information (and of that subset, only support version >= 4)
 - Only use >= C++20 features.
 
+## Testing & Tests
+Midas Debugger uses multiple kinds of tests. Google test for unit testing individual parts of the system and CMake's built in `ctest` functionality, for the "driver tests". These tests mimicks the real behavior of a DA-extension in VSCode. They are found in the [test/driver](./test/driver/) folder; and they are set in the CMake file as `DRIVER_TESTS`. What's neat about ctest is that it takes an executable and if it exits with a 0 code it's passed, otherwise it failed. This is extremely flexible and makes it possible for Midas to use whatever is suitable, Python, NodeJs (in this case, but we could just use Python) or anything else for that matter. We could use Tcl+expect too, but I am not a sadist.
+
 # Contribute & Develop Midas
 Set up dev environment using configure-dev.sh. It sets up the required tools and pulls in the dependencies required to build this project, sets up commit pre-hooks and verifies that the required tools can be found on $PATH.
 

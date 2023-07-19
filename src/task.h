@@ -41,22 +41,21 @@ struct TaskWaitResult
 
 enum class RunType : u8
 {
-  Step = PTRACE_SINGLESTEP,
-  Continue = PTRACE_CONT,
-  SyscallContinue = PTRACE_SYSCALL,
-  UNKNOWN,
+  Step = 0b0001,
+  Continue = 0b0010,
+  SyscallContinue = 0b0011,
+  UNKNOWN = 0b0000,
 };
 
 struct TaskInfo
 {
-  bool stopped : 1;
-  bool signal_in_flight : 1;
-  bool stepping : 1;
-  bool ptrace_stop : 1;
-  bool initialized : 1;
   pid_t tid;
   std::optional<TaskWaitResult> wait_status;
   RunType run_type;
+  bool stopped : 1;
+  bool stepping : 1;
+  bool ptrace_stop : 1;
+  bool initialized : 1;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;
@@ -70,8 +69,6 @@ struct TaskInfo
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
-  void set_pc(TPtr<void> pc) noexcept;
-
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.

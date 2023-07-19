@@ -4,9 +4,11 @@
 #include "../../utils/base64.h"
 #include "fmt/format.h"
 #include "nlohmann/json_fwd.hpp"
+#include "parse_buffer.h"
 #include "types.h"
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <unistd.h>
 #include <unordered_set>
@@ -56,16 +58,100 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
     for (auto &bp : breakpoints) {
       serialized_bkpts.push_back(bp.serialize());
     }
-    return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
-        seq, response_seq, fmt::join(serialized_bkpts, ","));
+    switch (this->type) {
+    case BreakpointType::SourceBreakpoint:
+      return fmt::format(
+          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+          seq, response_seq, fmt::join(serialized_bkpts, ","));
+    case BreakpointType::FunctionBreakpoint:
+      return fmt::format(
+          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setFunctionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+          seq, response_seq, fmt::join(serialized_bkpts, ","));
+    case BreakpointType::AddressBreakpoint:
+      return fmt::format(
+          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setInstructionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
+          seq, response_seq, fmt::join(serialized_bkpts, ","));
+      break;
+    }
   } else {
     TODO("Unsuccessful set instruction breakpoints event response handling");
   }
 }
 
-SetInstructionBreakpoints::SetInstructionBreakpoints(nlohmann::json &&arguments) noexcept
-    : args(std::move(arguments))
+SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
+    : ui::UICommand(seq), args(std::move(arguments))
+{
+  ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
+         "Arguments did not contain 'breakpoints' field or wasn't an array");
+}
+
+UIResultPtr
+SetBreakpoints::execute(Tracer *tracer) noexcept
+{
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::SourceBreakpoint};
+  auto target = tracer->get_current();
+  ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
+  ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
+  std::string file = args["source"]["path"];
+  auto source_file = target->get_source(file);
+  std::vector<SourceBreakpointDescriptor> src_bps;
+  if (source_file.has_value()) {
+    logging::get_logging()->log("dap", fmt::format("Found source file to set breakpoints in: {}", *source_file));
+    for (const auto &src_bp : args.at("breakpoints")) {
+      ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
+      u32 line = src_bp["line"];
+      std::optional<u32> col = std::nullopt;
+      std::optional<std::string> condition = std::nullopt;
+      std::optional<int> hit_condition = std::nullopt;
+      std::optional<std::string> log_message = std::nullopt;
+
+      if (src_bp.contains("column")) {
+        col = src_bp["column"];
+      }
+      if (src_bp.contains("condition")) {
+        condition = src_bp["condition"];
+      }
+      if (src_bp.contains("hitCondition")) {
+        hit_condition = src_bp["hitCondition"];
+      }
+      if (src_bp.contains("logMessage")) {
+        log_message = std::make_optional(src_bp["logMessage"]);
+      }
+      src_bps.push_back(
+          SourceBreakpointDescriptor{*source_file, line, col, condition, hit_condition, log_message});
+    }
+    target->reset_source_breakpoints(*source_file, std::move(src_bps));
+    using BP = ui::dap::Breakpoint;
+    for (const auto &bp : target->user_brkpts.breakpoints) {
+      if (bp.type == BreakpointType::SourceBreakpoint &&
+          target->user_brkpts.source_breakpoints[bp.bp_id].source_file == *source_file) {
+        const auto &description = target->user_brkpts.source_breakpoints[bp.bp_id];
+        res->breakpoints.push_back(BP{.id = bp.bp_id,
+                                      .verified = true,
+                                      .addr = bp.address,
+                                      .line = description.line,
+                                      .col = description.column,
+                                      .source_path = description.source_file});
+      }
+    }
+  } else {
+    using BP = ui::dap::Breakpoint;
+    const auto count = args.at("breakpoints").size();
+    for (auto i = 1000u; i < count; i++) {
+      res->breakpoints.push_back(BP{.id = i,
+                                    .verified = false,
+                                    .addr = nullptr,
+                                    .line = std::nullopt,
+                                    .col = std::nullopt,
+                                    .source_path = std::nullopt,
+                                    .error_message = "Could not find source file"});
+    }
+  }
+  return res;
+}
+
+SetInstructionBreakpoints::SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
+    : UICommand(seq), args(std::move(arguments))
 {
   ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
          "Arguments did not contain 'breakpoints' field or wasn't an array");
@@ -98,6 +184,9 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
           .id = bp.bp_id,
           .verified = true,
           .addr = bp.address,
+          .line = std::nullopt,
+          .col = std::nullopt,
+          .source_path = std::nullopt,
       });
     }
   }
@@ -107,7 +196,8 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
   return res;
 }
 
-SetFunctionBreakpoints::SetFunctionBreakpoints(nlohmann::json &&arguments) noexcept : args(std::move(arguments))
+SetFunctionBreakpoints::SetFunctionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
+    : UICommand(seq), args(std::move(arguments))
 {
   ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
          "Arguments did not contain 'breakpoints' field or wasn't an array");
@@ -138,6 +228,9 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
           .id = bp.bp_id,
           .verified = true,
           .addr = bp.address,
+          .line = std::nullopt,
+          .col = std::nullopt,
+          .source_path = std::nullopt,
       });
     }
   }
@@ -157,8 +250,8 @@ ReadMemoryResponse::serialize(int seq) const noexcept
   }
 }
 
-ReadMemory::ReadMemory(TPtr<void> address, int offset, u64 bytes) noexcept
-    : address(address), offset(offset), bytes(bytes)
+ReadMemory::ReadMemory(std::uint64_t seq, TPtr<void> address, int offset, u64 bytes) noexcept
+    : UICommand(seq), address(address), offset(offset), bytes(bytes)
 {
 }
 
@@ -185,18 +278,19 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
-  fmt::println("Configuration steps done.");
   tracer->get_current()->resume_target(RunType::Continue);
   tracer->get_current()->start_awaiter_thread();
   return new ConfigurationDoneResponse{true, this};
 }
 
-Initialize::Initialize(nlohmann::json &&arguments) noexcept : args(std::move(arguments)) {}
+Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
+    : UICommand(seq), args(std::move(arguments))
+{
+}
 
 UIResultPtr
 Initialize::execute(Tracer *tracer) noexcept
 {
-  fmt::println("initializing...");
   return new InitializeResponse{true, this};
 }
 
@@ -208,8 +302,8 @@ DisconnectResponse::serialize(int seq) const noexcept
       response_seq);
 }
 
-Disconnect::Disconnect(bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
-    : restart(restart), terminate_tracee(terminate_debuggee), suspend_tracee(suspend_debuggee)
+Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
+    : UICommand(seq), restart(restart), terminate_tracee(terminate_debuggee), suspend_tracee(suspend_debuggee)
 {
 }
 UIResultPtr
@@ -267,7 +361,7 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsSingleThreadExecutionRequests"] = false;
 
   return fmt::format(
-      R"({{ "response_seq": 1, "type": "response", "success": true, "command": "initialize", "body": {} }})", seq,
+      R"({{ "response_seq": {}, "type": "response", "success": true, "command": "initialize", "body": {} }})", seq,
       cfg_body.dump());
 }
 
@@ -279,8 +373,8 @@ LaunchResponse::serialize(int seq) const noexcept
       response_seq);
 }
 
-Launch::Launch(Path &&program, std::vector<std::string> &&program_args) noexcept
-    : program(std::move(program)), program_args(std::move(program_args))
+Launch::Launch(std::uint64_t seq, Path &&program, std::vector<std::string> &&program_args) noexcept
+    : UICommand(seq), program(std::move(program)), program_args(std::move(program_args))
 {
 }
 
@@ -321,8 +415,8 @@ Threads::execute(Tracer *tracer) noexcept
   // allows for more; it would require some work to get the DAP protocol to play nicely though.
   // therefore we just hand back the threads of the currently active target
   auto response = new ThreadsResponse{true, this};
-
   const auto target = tracer->get_current();
+
   const auto &threads = target->threads;
   response->threads.reserve(threads.size());
   for (auto thread : threads) {
@@ -331,9 +425,9 @@ Threads::execute(Tracer *tracer) noexcept
   return response;
 }
 
-StackTrace::StackTrace(int threadId, std::optional<int> startFrame, std::optional<int> levels,
+StackTrace::StackTrace(std::uint64_t seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
                        std::optional<StackTraceFormat> format) noexcept
-    : threadId(threadId), startFrame(startFrame), levels(levels), format(format)
+    : UICommand(seq), threadId(threadId), startFrame(startFrame), levels(levels), format(format)
 {
 }
 
@@ -348,33 +442,74 @@ StackTraceResponse::serialize(int seq) const noexcept
 UIResultPtr
 StackTrace::execute(Tracer *tracer) noexcept
 {
-  TODO("StackTrace request");
+  // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
+  auto target = tracer->get_current();
+  auto task = target->get_task(threadId);
+  auto &cfs = target->build_callframe_stack(task);
+  auto response = new StackTraceResponse{true, this};
+  response->stack_frames.reserve(cfs.frames.size());
+  auto id = 1;
+  for (const auto &frame : cfs.frames) {
+    if (frame.type == sym::FrameType::Full) {
+      auto &lt = frame.cu_file->line_table();
+      auto line = 0;
+      auto col = 0;
+      for (auto ita = lt.cbegin(), itb = ita + 1; ita != lt.cend() && itb != lt.cend(); ita++, itb++) {
+        if (ita->pc <= frame.rip && itb->pc >= frame.rip) {
+          line = ita->line;
+          col = ita->column;
+        }
+      }
+      response->stack_frames.push_back(
+          StackFrame{.id = id++,
+                     .name = frame.fn_name.value_or("unknown"),
+                     .source = Source{.name = frame.cu_file->name(), .path = frame.cu_file->name()},
+                     .line = line,
+                     .column = col,
+                     .rip = fmt::format("{}", frame.rip)});
+    } else {
+      response->stack_frames.push_back(StackFrame{.id = id++,
+                                                  .name = frame.fn_name.value_or("unknown"),
+                                                  .source = std::nullopt,
+                                                  .line = 0,
+                                                  .column = 0,
+                                                  .rip = fmt::format("{}", frame.rip)});
+    }
+  }
+  return response;
 }
 
 ui::UICommand *
-parse_command(Command cmd, nlohmann::json &&args) noexcept
+parse_command(std::string &&packet) noexcept
 {
+  auto obj = nlohmann::json::parse(packet, nullptr, false);
+  std::string_view cmd_name;
+  obj["command"].get_to(cmd_name);
+  ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
+  const u64 seq = obj["seq"];
+  const auto cmd = parse_command_type(cmd_name);
+  auto &&args = std::move(obj["arguments"]);
   switch (cmd) {
-  case Command::Attach:
+  case CommandType::Attach:
     TODO("Command::Attach");
-  case Command::BreakpointLocations:
+  case CommandType::BreakpointLocations:
     TODO("Command::BreakpointLocations");
-  case Command::Completions:
+  case CommandType::Completions:
     TODO("Command::Completions");
-  case Command::ConfigurationDone:
-    return new ConfigurationDone{};
+  case CommandType::ConfigurationDone:
+    return new ConfigurationDone{seq};
     break;
-  case Command::Continue: {
+  case CommandType::Continue: {
     const auto all_threads = !args.contains("singleThread") ? true : false;
-    return new ui::dap::Continue{args.at("threadId"), all_threads};
+    return new ui::dap::Continue{seq, args.at("threadId"), all_threads};
   }
-  case Command::CustomRequest:
+  case CommandType::CustomRequest:
     TODO("Command::CustomRequest");
-  case Command::DataBreakpointInfo:
+  case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
-  case Command::Disassemble:
+  case CommandType::Disassemble:
     TODO("Command::Disassemble");
-  case Command::Disconnect: {
+  case CommandType::Disconnect: {
     bool restart = false;
     bool terminate_debuggee = false;
     bool suspend_debuggee = false;
@@ -387,36 +522,36 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     if (args.contains("suspendDebuggee")) {
       suspend_debuggee = args.at("suspendDebuggee");
     }
-    return new Disconnect{restart, terminate_debuggee, suspend_debuggee};
+    return new Disconnect{seq, restart, terminate_debuggee, suspend_debuggee};
   }
-  case Command::Evaluate:
+  case CommandType::Evaluate:
     TODO("Command::Evaluate");
-  case Command::ExceptionInfo:
+  case CommandType::ExceptionInfo:
     TODO("Command::ExceptionInfo");
-  case Command::Goto:
+  case CommandType::Goto:
     TODO("Command::Goto");
-  case Command::GotoTargets:
+  case CommandType::GotoTargets:
     TODO("Command::GotoTargets");
-  case Command::Initialize:
-    return new Initialize{std::move(args)};
-  case Command::Launch: {
+  case CommandType::Initialize:
+    return new Initialize{seq, std::move(args)};
+  case CommandType::Launch: {
     ASSERT(args.contains("program"), "Launch must contain 'program' field in args");
     Path path = args.at("program");
     std::vector<std::string> prog_args;
     if (args.contains("args")) {
       prog_args = args.at("args");
     }
-    return new Launch{std::move(path), std::move(prog_args)};
+    return new Launch{seq, std::move(path), std::move(prog_args)};
   }
-  case Command::LoadedSources:
+  case CommandType::LoadedSources:
     TODO("Command::LoadedSources");
-  case Command::Modules:
+  case CommandType::Modules:
     TODO("Command::Modules");
-  case Command::Next:
+  case CommandType::Next:
     TODO("Command::Next");
-  case Command::Pause:
+  case CommandType::Pause:
     TODO("Command::Pause");
-  case Command::ReadMemory: {
+  case CommandType::ReadMemory: {
     ASSERT(args.contains("memoryReference") && args.contains("count"),
            "args didn't contain memoryReference or count");
     std::string_view addr_str;
@@ -424,33 +559,33 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
     const auto addr = to_addr(addr_str);
     const auto offset = args.value("offset", 0);
     const u64 count = args.at("count");
-    return new ui::dap::ReadMemory{*addr, offset, count};
+    return new ui::dap::ReadMemory{seq, *addr, offset, count};
   }
-  case Command::Restart:
+  case CommandType::Restart:
     TODO("Command::Restart");
-  case Command::RestartFrame:
+  case CommandType::RestartFrame:
     TODO("Command::RestartFrame");
-  case Command::ReverseContinue:
+  case CommandType::ReverseContinue:
     TODO("Command::ReverseContinue");
-  case Command::Scopes:
+  case CommandType::Scopes:
     TODO("Command::Scopes");
-  case Command::SetBreakpoints:
-    TODO("Command::SetBreakpoints");
-  case Command::SetDataBreakpoints:
+  case CommandType::SetBreakpoints:
+    return new SetBreakpoints{seq, std::move(args)};
+  case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
-  case Command::SetExceptionBreakpoints:
+  case CommandType::SetExceptionBreakpoints:
     TODO("Command::SetExceptionBreakpoints");
-  case Command::SetExpression:
+  case CommandType::SetExpression:
     TODO("Command::SetExpression");
-  case Command::SetFunctionBreakpoints:
-    return new SetFunctionBreakpoints{std::move(args)};
-  case Command::SetInstructionBreakpoints:
-    return new SetInstructionBreakpoints{std::move(args)};
-  case Command::SetVariable:
+  case CommandType::SetFunctionBreakpoints:
+    return new SetFunctionBreakpoints{seq, std::move(args)};
+  case CommandType::SetInstructionBreakpoints:
+    return new SetInstructionBreakpoints{seq, std::move(args)};
+  case CommandType::SetVariable:
     TODO("Command::SetVariable");
-  case Command::Source:
+  case CommandType::Source:
     TODO("Command::Source");
-  case Command::StackTrace: {
+  case CommandType::StackTrace: {
     std::optional<int> startFrame;
     std::optional<int> levels;
     std::optional<StackTraceFormat> format_;
@@ -472,27 +607,27 @@ parse_command(Command cmd, nlohmann::json &&args) noexcept
       format.includeAll = fmt.value("includeAll", true);
       format_ = format;
     }
-    return new ui::dap::StackTrace{args.at("threadId"), startFrame, levels, format_};
+    return new ui::dap::StackTrace{seq, args.at("threadId"), startFrame, levels, format_};
   }
-  case Command::StepBack:
+  case CommandType::StepBack:
     TODO("Command::StepBack");
-  case Command::StepIn:
+  case CommandType::StepIn:
     TODO("Command::StepIn");
-  case Command::StepInTargets:
+  case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
-  case Command::StepOut:
+  case CommandType::StepOut:
     TODO("Command::StepOut");
-  case Command::Terminate:
-    return new Terminate{};
-  case Command::TerminateThreads:
+  case CommandType::Terminate:
+    return new Terminate{seq};
+  case CommandType::TerminateThreads:
     TODO("Command::TerminateThreads");
-  case Command::Threads:
-    return new Threads{};
-  case Command::Variables:
+  case CommandType::Threads:
+    return new Threads{seq};
+  case CommandType::Variables:
     TODO("Command::Variables");
-  case Command::WriteMemory:
+  case CommandType::WriteMemory:
     TODO("Command::WriteMemory");
-  case Command::UNKNOWN:
+  case CommandType::UNKNOWN:
     break;
   }
   PANIC("Could not parse command");

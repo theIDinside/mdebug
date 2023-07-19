@@ -3,6 +3,7 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "lib/spinlock.h"
+#include "symbolication/callstack.h"
 #include "symbolication/type.h"
 #include "task.h"
 #include "utils/static_vector.h"
@@ -19,10 +20,17 @@
 #include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace ui {
 struct UICommand;
 };
+
+// clang-format off
+template <typename BpPred> concept BpPredicate = requires(BpPred fn) { 
+   { fn(std::declval<Breakpoint>()) } -> std::convertible_to<bool>;
+};
+// clang-format on
 
 struct LWP
 {
@@ -36,6 +44,12 @@ enum ActionOnEvent
 {
   ShouldContinue,
   StopTracee
+};
+
+struct SearchFnSymResult
+{
+  FunctionSymbol *fn_sym;
+  CompilationUnitFile *cu_file;
 };
 
 using Address = std::uintptr_t;
@@ -78,14 +92,23 @@ struct BreakpointMap
     u16 bp_id;
   };
 
+  explicit BreakpointMap(Tid address_space) noexcept
+      : bp_id_counter(1), breakpoints(), address_space_tid(address_space), fn_breakpoint_names(),
+        source_breakpoints(), task_bp_stats()
+  {
+  }
+
   u32 bp_id_counter;
+  // All breakpoints are stored in `breakpoints` - and they map to either `fn_breakpoint_names` or
+  // `source_breakpoints` depending on their type (or to neither - if they're address breakpoints). So we don't
+  // allow for multiple breakpoints on the same loc, because I argue it's a bad decision that makes breakpoint
+  // design much more complex for almost 0 gain.
   std::vector<Breakpoint> breakpoints;
   Tid address_space_tid;
   std::unordered_map<u32, std::string> fn_breakpoint_names;
-  std::unordered_map<u32, std::string> source_breakpoints;
+  std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
   // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
   std::vector<TaskBreakpointStatus> task_bp_stats;
-
   template <typename T>
   bool
   contains(TraceePointer<T> addr) const noexcept
@@ -152,6 +175,8 @@ struct Target
    * reads that task's registers and caches them.*/
   void register_task_waited(TaskWaitResult wait) noexcept;
 
+  void set_pc(TaskInfo *t, TPtr<void> addr) noexcept;
+
   /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/
@@ -162,14 +187,17 @@ struct Target
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
+  void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
-  // TODO(simon): major optimization can be done. We naively remove all breakpoints and the set
+  // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
   // thing
   void reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
   void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
+  void reset_source_breakpoints(std::string_view source_filepath,
+                                std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
 
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
@@ -236,6 +264,29 @@ struct Target
   }
 
   template <typename T>
+  std::optional<T>
+  read_type_safe(TPtr<T> addr)
+  {
+    typename TPtr<T>::Type result;
+    auto total_read = 0ull;
+    constexpr auto sz = TPtr<T>::type_size();
+    auto EOF_REACHED = 0;
+    while (total_read < sz) {
+      auto read_bytes = pread64(mem_fd().get(), &result + total_read, sz - total_read, addr.get());
+      if (-1 == read_bytes) {
+        return std::nullopt;
+      }
+      if (0 == read_bytes)
+        EOF_REACHED++;
+
+      if (EOF_REACHED > 3)
+        return std::nullopt;
+      total_read += read_bytes;
+    }
+    return result;
+  }
+
+  template <typename T>
   T
   cache_and_overwrite(TraceePointer<T> address, T &value)
   {
@@ -293,18 +344,19 @@ struct Target
 
   /* Add parsed DWARF debug info for `file` */
   void add_file(CompilationUnitFile &&file) noexcept;
-  /* Add parsed DWARF debug info for `type` */
-  void add_type(Type type) noexcept;
 
   void reaped_events() noexcept;
   void start_awaiter_thread() noexcept;
+  sym::CallStack &build_callframe_stack(const TaskInfo *task) noexcept;
+  std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) noexcept;
+  std::optional<std::string_view> get_source(std::string_view name) noexcept;
 
 private:
   std::vector<CompilationUnitFile> m_files;
-  std::unordered_map<std::string_view, Type> m_types;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   std::unordered_map<Tid, user_regs_struct> register_cache;
+  std::vector<sym::CallStack> frame_cache;
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
   bool is_in_user_ptrace_stop;
@@ -314,10 +366,5 @@ template <typename Predicate>
 void
 clear_breakpoints(BreakpointMap &bp, Target *target, Predicate &&predicate) noexcept
 {
-  std::erase_if(bp.breakpoints, [target, &p = predicate](auto &bp) {
-    if (p(bp)) {
-      ptrace(PTRACE_POKEDATA, target->task_leader, bp.second.address.get(), bp.second.ins_byte);
-      return true;
-    }
-  });
+  std::erase_if(bp.breakpoints, [&p = predicate](Breakpoint &bp) { return p(bp); });
 }

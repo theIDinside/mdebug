@@ -40,6 +40,11 @@ struct Breakpoint
   // instructionReference
   TPtr<void> addr;
 
+  std::optional<u32> line;
+  std::optional<u32> col;
+  std::optional<std::string_view> source_path;
+  std::optional<std::string_view> error_message;
+
   std::string serialize() const noexcept;
 };
 
@@ -61,11 +66,10 @@ struct StackFrame
 {
   int id;
   std::string_view name;
-  Source source;
+  std::optional<Source> source;
   int line;
   int column;
   std::string rip;
-  std::string_view display_hint;
 };
 
 struct StackTraceFormat
@@ -117,6 +121,29 @@ template <> struct formatter<ui::dap::Source>
     return fmt::format_to(ctx.out(), R"({{ "name": "{}", "path": "{}" }})", source.name, source.path);
   }
 };
+using SourceField = std::optional<ui::dap::Source>;
+template <> struct formatter<SourceField>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const SourceField &source, FormatContext &ctx) const
+  {
+    if (source.has_value()) {
+      const auto &src = *source;
+      return fmt::format_to(ctx.out(), R"({{ "name": "{}", "path": "{}" }})", src.name, src.path);
+    } else {
+      return fmt::format_to(ctx.out(), R"(null)");
+    }
+  }
+};
 
 template <> struct formatter<ui::dap::StackFrame>
 {
@@ -134,8 +161,8 @@ template <> struct formatter<ui::dap::StackFrame>
   {
     return fmt::format_to(
         ctx.out(),
-        R"({{ "id": {}, "name": "{}", "source": {}, "line": {}, "column": {}, "instructionPointerReference": "{}", "presentationHint": "{}" }})",
-        frame.id, frame.name, frame.source, frame.line, frame.column, frame.rip, frame.display_hint);
+        R"({{ "id": {}, "name": "{}", "source": {}, "line": {}, "column": {}, "instructionPointerReference": "{}" }})",
+        frame.id, frame.name, frame.source, frame.line, frame.column, frame.rip);
   }
 };
 
