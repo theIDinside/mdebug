@@ -1,18 +1,18 @@
-const { DAClient, MDB_PATH, check_response, testException } = require("./client")
+const { DAClient, MDB_PATH, checkResponse: check_response, testException } = require("./client")
 
 const da_client = new DAClient(MDB_PATH, []);
 
 // we don't care for initialize, that's tested elsewhere
-da_client.send_req_get_response("initialize", {}).then(res => {
+da_client.sendReqGetResponse("initialize", {}).then(res => {
   check_response(__filename, res, "initialize", true);
 }).catch(testException)
 
-da_client.send_req_get_response("launch", { program: "/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes", stopAtEntry: true }).then(res => {
+da_client.sendReqGetResponse("launch", { program: "/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes", stopAtEntry: true }).then(res => {
   check_response(__filename, res, "launch", true);
   console.log(`launch was ok`);
 }).catch(testException);
 
-da_client.send_req_get_response("setInstructionBreakpoints", { breakpoints: [{ "instructionReference": "0x40127e" }] }).then(res => {
+da_client.sendReqGetResponse("setInstructionBreakpoints", { breakpoints: [{ "instructionReference": "0x40127e" }] }).then(res => {
   console.log(`setIns bkpt request...`);
   check_response(__filename, res, "setInstructionBreakpoints", true);
   if (res.body.breakpoints.length != 1) {

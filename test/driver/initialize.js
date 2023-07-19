@@ -1,8 +1,8 @@
-const { DAClient, MDB_PATH, check_response } = require("./client")
+const { DAClient, MDB_PATH, checkResponse: check_response } = require("./client")
 
 const da_client = new DAClient(MDB_PATH, []);
 
-da_client.send_req_get_response("initialize", {}).then(response => {
+da_client.sendReqGetResponse("initialize", {}).then(response => {
   check_response(__filename, response, "initialize", true);
   console.log(`Test ${__filename} succeeded`);
   process.exit(0);

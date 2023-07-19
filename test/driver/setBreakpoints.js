@@ -1,7 +1,7 @@
 const {
   DAClient,
   MDB_PATH,
-  check_response,
+  checkResponse: check_response,
   testException,
 } = require("./client");
 
@@ -11,14 +11,14 @@ const verify_breakpoints = [{ line: 7 }, { line: 13 }, { line: 45 }]
 
 // we don't care for initialize, that's tested elsewhere
 da_client
-  .send_req_get_response("initialize", {})
+  .sendReqGetResponse("initialize", {})
   .then((res) => {
     check_response(__filename, res, "initialize", true);
   })
   .catch(testException)
   .then(() => {
     return da_client
-      .send_req_get_response("launch", {
+      .sendReqGetResponse("launch", {
         program: "/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes",
         stopAtEntry: true,
       })
@@ -30,7 +30,7 @@ da_client
   }).then(() => {
     const bpRequest = "setBreakpoints"
     da_client
-      .send_req_get_response(bpRequest, {
+      .sendReqGetResponse(bpRequest, {
         source: {
           name: "/home/cx/dev/foss/cx/dbm/test/stackframes.cpp",
           path: "/home/cx/dev/foss/cx/dbm/test/stackframes.cpp",

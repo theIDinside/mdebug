@@ -10,7 +10,6 @@ const fs = require("fs");
 const { spawn, spawnSync } = require("child_process");
 const EventEmitter = require("events");
 
-
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename);
 const TEST_DIR = path.dirname(DRIVER_DIR);
@@ -19,8 +18,28 @@ const REPO_DIR = path.dirname(TEST_DIR);
 const TestArgs = process.argv.slice(2);
 
 if (TestArgs.length == 0) {
-  console.error(`Tests require to pass the build directory as the developer might choose different locations for their build dir.`);
+  console.error(
+    `Tests require to pass the build directory as the developer might choose different locations for their build dir.`
+  );
   process.exit(-1);
+}
+
+/**
+ * Splits `fileData` into lines and looks for what line `string_identifier` can be found on - returns the first line where it can be found.
+ * @param {string} fileData
+ * @param {string} string_identifier
+ */
+function getLineOf(fileData, string_identifier) {
+  let lineIdx = 1;
+  for (const line of fileData.split("\n")) {
+    if (line.includes(string_identifier)) return lineIdx;
+    lineIdx++;
+  }
+  return null;
+}
+
+function readFile(path) {
+  return fs.readFileSync(path).toString();
 }
 
 const UserBuildDir = TestArgs[0];
@@ -35,7 +54,6 @@ console.log(`MDB Path: ${MDB_PATH}`);
 // currently, mdb takes no args
 const mdb_args = [];
 // End of environment setup
-
 
 const regex = /Content-Length: (\d+)\s{4}/gm;
 class DAClient {
@@ -70,16 +88,20 @@ class DAClient {
       const { event, body } = evt;
       switch (event) {
         case "exited":
-          this.mdb.stdin.write(this.serialize_request("disconnect"));
+          this.mdb.stdin.write(this.serializeRequest("disconnect"));
           break;
         case "output":
           break;
         case "initialized":
           break;
+        // we're interested in mostly a few events really, stopped being one of them, in testing
+        // asynchronous messages or debug console messages are uninteresting.
+        // When we get dynamic shared object debug symbol parsing, we will however want to
+        // pay attention to breakpoint events (which happen during breakpoint modification)
         case "stopped":
+          this.events.emit("stopped", body);
           break;
         default:
-          console.log(`event: ${JSON.stringify(evt)}`);
           break;
       }
     });
@@ -91,10 +113,12 @@ class DAClient {
 
     this.mdb.stdout.on("data", (data) => {
       const str_data = data.toString();
-      this.append_buffer(str_data);
-      let msgs = this.parse_contents(this.buf.receive_buffer);
+      this.appendBuffer(str_data);
+      let msgs = this.parseContents(this.buf.receive_buffer);
       let last_ends = 0;
-      for (const { content_start, length } of msgs.filter(i => i.all_received)) {
+      for (const { content_start, length } of msgs.filter(
+        (i) => i.all_received
+      )) {
         const end = content_start + length;
         const data = this.buf.receive_buffer.slice(content_start, end);
         try {
@@ -113,7 +137,7 @@ class DAClient {
     });
   }
 
-  serialize_request(req, args = {}) {
+  serializeRequest(req, args = {}) {
     const json = {
       seq: this.seq,
       type: "request",
@@ -128,30 +152,57 @@ class DAClient {
   }
 
   /**
-   * 
-   * @param { string } req - the request "command"
-   * @param { object } args - request's arguments, as per the DAP spec: https://microsoft.github.io/debug-adapter-protocol/specification
-   * @returns { Promise<{response_seq: number, type: string, success: boolean, command: string, body: object}> } - Returns a promise that resolves to the response to the `req` command.
+   * @returns {Promise<{id: number, name: string}[]>}
    */
-  send_req_get_response(req, args) {
-    return new Promise((res) => {
-      const serialized = this.serialize_request(req, args);
-      this.mdb.stdin.write(serialized)
-      this.send_wait_res.once(req, (response) => {
-        res(response);
+  async threads() {
+    return this.sendReqGetResponse("threads", {})
+      .then((res) => {
+        return res.body.threads;
       })
+      .catch(testException);
+  }
+
+  /* Called _before_ an action that is expected to create an event.
+   * Calling this after, may or may not work, as the event handler might not be set up in time,
+   * before the actual event comes across the wire.*/
+  prepareWaitForEvent(evt) {
+    return new Promise((res, rej) => {
+      this.events.once(evt, (body) => {
+        res(body);
+      });
     });
   }
 
-  flush_connection() {
+  /**
+   * @typedef {{response_seq: number, type: string, success: boolean, command: string, body: object}} Response
+   * 
+   * @param { string } req - the request "command"
+   * @param { object } args - request's arguments, as per the DAP spec: https://microsoft.github.io/debug-adapter-protocol/specification
+   * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
+   */
+  sendReqGetResponse(req, args) {
+    return new Promise((res) => {
+      const serialized = this.serializeRequest(req, args);
+      this.send_wait_res.once(req, (response) => {
+        res(response);
+      });
+      this.mdb.stdin.write(serialized);
+    });
+  }
+
+  async stackTrace(threadId) {
+    return this.sendReqGetResponse("stackTrace", { threadId: threadId });
+  }
+
+  flushConnection() {
     this.mdb.stdin.write("----\n");
   }
 
   /**
-  * @param {string} contents
-  * @returns {{ content_start: number, length: number, all_received: boolean }[]}
-  */
-  parse_contents(contents) {
+   * @param {string} contents
+   * @returns {{ content_start: number, length: number, all_received: boolean }[]}
+   */
+  parseContents(contents) {
     let m;
     const result = [];
     while ((m = regex.exec(contents)) !== null) {
@@ -166,22 +217,51 @@ class DAClient {
           contents_start = m.index + match.length;
         }
         if (groupIndex == 1) {
-          const len = Number.parseInt(match)
-          const all_received = (contents_start + len) <= contents.length;
-          result.push({ content_start: contents_start, length: len, all_received })
+          const len = Number.parseInt(match);
+          const all_received = contents_start + len <= contents.length;
+          result.push({
+            content_start: contents_start,
+            length: len,
+            all_received,
+          });
         }
       });
     }
     return result;
   }
 
-  append_buffer(data) {
+  appendBuffer(data) {
     this.buf.receive_buffer = this.buf.receive_buffer.concat(data);
   }
 
+  // utility function to initialize, launch `program` and run to `main`
+  async launchToMain(program) {
+    let stopped_promise = this.prepareWaitForEvent("stopped");
+    await this.sendReqGetResponse("initialize", {})
+      .then((response) => {
+        checkResponse(__filename, response, "initialize", true);
+      })
+      .catch(testException);
+    await this.sendReqGetResponse("launch", {
+      program: program,
+      stopAtEntry: true,
+    })
+      .then((response) => {
+        checkResponse(__filename, response, "launch", true);
+      })
+      .catch(testException);
+    await this.sendReqGetResponse("configurationDone").catch(testException);
+    await stopped_promise;
+  }
+
+  async contNextStop(threadId) {
+    let stopped_promise = this.prepareWaitForEvent("stopped");
+    await this.sendReqGetResponse("continue", { threadId: threadId });
+    await stopped_promise;
+  }
 }
 
-// Since we're running in a test suite, we want individual tests to 
+// Since we're running in a test suite, we want individual tests to
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
 function dump_log() {
@@ -191,20 +271,26 @@ function dump_log() {
   console.log(daplog);
 }
 
-function check_response(file, response, command, expected_success = true) {
+function checkResponse(file, response, command, expected_success = true) {
   if (response.type != "response") {
-    console.error(`[${file}] Type of message was expected to be 'response' but was '${response.type}'`);
+    console.error(
+      `[${file}] Type of message was expected to be 'response' but was '${response.type}'`
+    );
     dump_log();
     process.exit(-1);
   }
   if (response.success != expected_success) {
-    console.error(`[${file}] Expected response to succeed ${expected_success} but got ${response.success}`);
+    console.error(
+      `[${file}] Expected response to succeed ${expected_success} but got ${response.success}`
+    );
     dump_log();
     process.exit(-1);
   }
 
   if (response.command != command) {
-    console.error(`[${file}] Expected command to be ${command} but got ${response.command}`);
+    console.error(
+      `[${file}] Expected command to be ${command} but got ${response.command}`
+    );
     dump_log();
     process.exit(-1);
   }
@@ -221,7 +307,9 @@ module.exports = {
   REPO_DIR,
   BUILD_BIN_DIR,
   MDB_PATH,
-  check_response,
+  checkResponse,
   testException,
-  DAClient
-}
+  getLineOf,
+  readFile,
+  DAClient,
+};

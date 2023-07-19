@@ -4,14 +4,14 @@
 static int
 quux(int acc, int a)
 {
-  return acc * a;
+  return acc * a; // BP4
 }
 
 static int
 baz(int a, int b, int times)
 {
   int res_a = 1;
-  int res_b = 1;
+  int res_b = 1; // BP3
   while (times > 0) {
     res_a = quux(res_a, a);
     res_b = quux(res_b, b);
@@ -30,13 +30,13 @@ raise_after_baz(int a, int b)
 static void
 bar(int a, int b)
 {
-  baz(a, b, 4);
+  baz(a, b, 4); // BP2
 }
 
 static void
 foo()
 {
-  bar(1, 2);
+  bar(1, 2); // BP1
 }
 
 int
