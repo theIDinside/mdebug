@@ -345,7 +345,7 @@ Tracer::execute_pending_commands() noexcept
 }
 
 void
-Tracer::launch(Path &&program, std::vector<std::string> &&prog_args) noexcept
+Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept
 {
   std::vector<std::string> posix_cmd_args{};
   posix_cmd_args.push_back(program);
@@ -397,6 +397,9 @@ Tracer::launch(Path &&program, std::vector<std::string> &&prog_args) noexcept
         }
       }
       VERIFY(ptrace(PTRACE_CONT, res.pid, 0, 0) != -1, "Failed to continue passed our exec boundary");
+    }
+    if (stopAtEntry) {
+      get_current()->set_fn_breakpoint("main");
     }
     break;
   }

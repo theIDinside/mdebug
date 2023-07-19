@@ -24,7 +24,7 @@ ContinueResponse::serialize(int seq) const noexcept
         seq, response_seq, continue_all);
   else
     return fmt::format(
-        R"({{ "seq": {} "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
         seq, response_seq);
 }
 
@@ -373,15 +373,16 @@ LaunchResponse::serialize(int seq) const noexcept
       response_seq);
 }
 
-Launch::Launch(std::uint64_t seq, Path &&program, std::vector<std::string> &&program_args) noexcept
-    : UICommand(seq), program(std::move(program)), program_args(std::move(program_args))
+Launch::Launch(std::uint64_t seq, bool stopAtEntry, Path &&program,
+               std::vector<std::string> &&program_args) noexcept
+    : UICommand(seq), stopAtEntry(stopAtEntry), program(std::move(program)), program_args(std::move(program_args))
 {
 }
 
 UIResultPtr
 Launch::execute(Tracer *tracer) noexcept
 {
-  tracer->launch(std::move(program), std::move(program_args));
+  tracer->launch(stopAtEntry, std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
 }
 
@@ -445,17 +446,20 @@ StackTrace::execute(Tracer *tracer) noexcept
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto target = tracer->get_current();
   auto task = target->get_task(threadId);
+  if (task == nullptr) {
+    TODO(fmt::format("Handle not-found thread by threadId {}", threadId));
+  }
   auto &cfs = target->build_callframe_stack(task);
   auto response = new StackTraceResponse{true, this};
   response->stack_frames.reserve(cfs.frames.size());
   auto id = 1;
   for (const auto &frame : cfs.frames) {
     if (frame.type == sym::FrameType::Full) {
-      auto &lt = frame.cu_file->line_table();
+      const auto &lt = frame.cu_file->line_table();
       auto line = 0;
       auto col = 0;
       for (auto ita = lt.cbegin(), itb = ita + 1; ita != lt.cend() && itb != lt.cend(); ita++, itb++) {
-        if (ita->pc <= frame.rip && itb->pc >= frame.rip) {
+        if (ita->pc <= frame.rip && itb->pc > frame.rip) {
           line = ita->line;
           col = ita->column;
         }
@@ -541,7 +545,8 @@ parse_command(std::string &&packet) noexcept
     if (args.contains("args")) {
       prog_args = args.at("args");
     }
-    return new Launch{seq, std::move(path), std::move(prog_args)};
+    const bool stopAtEntry = args.contains("stopAtEntry");
+    return new Launch{seq, stopAtEntry, std::move(path), std::move(prog_args)};
   }
   case CommandType::LoadedSources:
     TODO("Command::LoadedSources");

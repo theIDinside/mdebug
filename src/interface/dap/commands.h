@@ -154,9 +154,10 @@ struct LaunchResponse final : public UIResult
 
 struct Launch final : public UICommand
 {
-  Launch(std::uint64_t seq, Path &&program, std::vector<std::string> &&program_args) noexcept;
+  Launch(std::uint64_t seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
+  bool stopAtEntry;
   Path program;
   std::vector<std::string> program_args;
   DEFINE_NAME(Launch)

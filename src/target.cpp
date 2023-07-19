@@ -70,7 +70,7 @@ Target::get_task(pid_t tid) noexcept
     if (t.tid == tid)
       return &t;
   }
-  return &(*threads.begin());
+  return nullptr;
 }
 
 std::optional<TaskWaitResult>
@@ -267,12 +267,10 @@ Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpoin
   auto f = find(m_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
   if (f != std::end(m_files)) {
     for (auto &&desc : descs) {
-      logging::get_logging()->log(
-          "mdb", fmt::format("Setting at {}:{}", desc.line,
-                             desc.column.transform([](auto v) { return std::to_string(v); }).value_or("None")));
       for (const auto &lte : f->line_table()) {
         if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
           if (!user_brkpts.contains(lte.pc)) {
+            logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
             constexpr u64 bkpt = 0xcc;
             auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, lte.pc, nullptr);
             u8 original_byte = static_cast<u8>(read_value & 0xff);
@@ -289,6 +287,7 @@ Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpoin
   } else {
     logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
   }
+  logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", user_brkpts.breakpoints.size()));
 }
 
 void
@@ -658,27 +657,31 @@ Target::start_awaiter_thread() noexcept
 sym::CallStack &
 Target::build_callframe_stack(const TaskInfo *task) noexcept
 {
-  std::vector<TPtr<std::uintptr_t>> bps;
+  std::vector<TPtr<std::uintptr_t>> base_ptrs;
   auto bp = register_cache[task->tid].rbp;
-  bps.push_back(bp);
+  base_ptrs.push_back(bp);
   while (true) {
-    TPtr<std::uintptr_t> bp_addr = bps.back();
+    TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
     const auto prev_bp = read_type_safe(bp_addr);
     if (prev_bp) {
       if (*prev_bp == 0x1) {
         break;
       }
-      bps.push_back(*prev_bp);
+      base_ptrs.push_back(*prev_bp);
     } else
       break;
   }
+  for (const auto &bp : base_ptrs) {
+    logging::get_logging()->log("mdb", fmt::format("Base pointer {}", bp.as<void>()));
+  }
 
   std::vector<TPtr<std::uintptr_t>> rsps;
-  rsps.reserve(bps.size());
+  rsps.reserve(base_ptrs.size());
   rsps.push_back(register_cache[task->tid].rip);
-  for (auto bp_it = bps.begin(); bp_it != bps.end(); ++bp_it) {
-    const auto ret_addr = read_type<TPtr<std::uintptr_t>>({bp_it->offset(8)});
-    rsps.push_back(ret_addr);
+  for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
+    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({bp_it->offset(8)});
+    if (ret_addr)
+      rsps.push_back(*ret_addr);
   }
 
   for (auto &cs : frame_cache) {
@@ -715,13 +718,13 @@ Target::find_fn_by_pc(TPtr<void> addr) noexcept
 {
   for (auto &f : m_files) {
     if (f.may_contain(addr)) {
-      auto fn = f.find_subprogram(addr);
+      const auto fn = f.find_subprogram(addr);
       if (fn != nullptr) {
         return SearchFnSymResult{.fn_sym = fn, .cu_file = &f};
       }
     }
   }
-  return {};
+  return std::nullopt;
 }
 
 std::optional<std::string_view>
