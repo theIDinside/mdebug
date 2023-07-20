@@ -1,6 +1,7 @@
 #pragma once
 #include "../../common.h"
 #include "dap_defs.h"
+#include <memory_resource>
 #include <regex>
 #include <utility>
 
@@ -250,8 +251,9 @@ struct RemainderData
 using ViewMatchResult = std::match_results<std::string_view::const_iterator>;
 using ContentParse = std::variant<ContentDescriptor, PartialContentDescriptor, RemainderData>;
 
-std::vector<ContentParse> parse_headers_from(const std::string_view buffer_view,
-                                             bool *no_partials = nullptr) noexcept;
+std::pmr::vector<ContentParse> parse_headers_from(const std::string_view buffer_view,
+                                                  std::pmr::monotonic_buffer_resource &resource,
+                                                  bool *no_partials = nullptr) noexcept;
 
 void setup_logging(std::fstream &logger);
 } // namespace ui::dap

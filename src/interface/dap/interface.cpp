@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <memory_resource>
 #include <nlohmann/json.hpp>
 #include <ostream>
 #include <poll.h>
@@ -119,38 +120,45 @@ DAP::write_protocol_message(std::string_view msg) noexcept
   VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
 }
 
-u64
-DAP::new_result_id() noexcept
-{
-  return seq++;
-}
-
 void
 DAP::run_ui_loop()
 {
   auto cleanup_times = 5;
   ParseBuffer parse_swapbuffer{PAGE_SIZE};
+  static constexpr auto DESCRIPTOR_STORAGE_SIZE = PAGE_SIZE;
+
+  // These are stack data. So when we process events, we don't want to be
+  // returning `new`ed memory over and over. Just fill it in our local buffer
+  // and we are done with it at each iteration, reusing the same buffer over and over.
+  std::byte descriptor_buffer[sizeof(ContentDescriptor) * 15];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&descriptor_buffer, DESCRIPTOR_STORAGE_SIZE};
+
+  std::byte pmr_buffer[sizeof(pollfd) * 10];
+  std::pmr::monotonic_buffer_resource resource{&pmr_buffer, sizeof(pmr_buffer)};
+  std::pmr::vector<pollfd> pfds{&resource};
 
   while (keep_running || cleanup_times > 0) {
     const auto master_pty = current_tty();
+    pfds.clear();
+    if (master_pty) {
+      pfds.push_back(cfg_read_poll(tracer_in_fd, 0));
+      pfds.push_back(cfg_read_poll(posted_evt_listener, 0));
+      pfds.push_back(cfg_read_poll(*master_pty, 0));
+    } else {
+      pfds.push_back(cfg_read_poll(tracer_in_fd, 0));
+      pfds.push_back(cfg_read_poll(posted_evt_listener, 0));
+    }
 
-    struct pollfd pfds[3]{
-        cfg_read_poll(tracer_in_fd, 0),
-        cfg_read_poll(posted_evt_listener, 0),
-        cfg_read_poll(master_pty, 0),
-    };
-
-    auto ready = poll(pfds, 3, 100);
+    auto ready = poll(pfds.data(), pfds.size(), 1000);
     VERIFY(ready != -1, "Failed to poll");
-
-    for (auto i = 0; i < 3 && ready > 0; i++) {
+    for (auto i = 0u; i < pfds.size() && ready > 0; i++) {
       if ((pfds[i].revents & POLLIN) || ((pfds[i].revents & POLLOUT))) {
         // DAP Requests (or parts of) have came in via stdout
         if (pfds[i].fd == tracer_in_fd) {
           parse_swapbuffer.expect_read_from_fd(pfds[i].fd);
           bool no_partials = false;
-          std::string_view buffer_view = parse_swapbuffer.take_view();
-          const auto request_headers = parse_headers_from(buffer_view, &no_partials);
+          const auto request_headers =
+              parse_headers_from(parse_swapbuffer.take_view(), descriptor_resource, &no_partials);
           if (no_partials && request_headers.size() > 0) {
             for (auto &&hdr : request_headers) {
               const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
@@ -189,7 +197,7 @@ DAP::run_ui_loop()
             delete evt;
           }
         } else if (pfds[i].fd == master_pty && (pfds[i].revents & POLLIN)) {
-          auto bytes_read = read(master_pty, tracee_stdout_buffer, 4096 * 3);
+          const auto bytes_read = read(*master_pty, tracee_stdout_buffer, 4096 * 3);
           if (bytes_read == -1)
             continue;
           std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
@@ -239,13 +247,6 @@ DAP::clean_up() noexcept
   keep_running = false;
 }
 
-// Fulfill the `UI` concept in ui_result.h
-void
-DAP::display_result(std::string_view str) const noexcept
-{
-  VERIFY(write(tracer_out_fd, str.data(), str.size()) != -1, "Failed to write '{}'", str);
-}
-
 void
 DAP::add_tty(int master_pty_fd) noexcept
 {
@@ -260,11 +261,11 @@ DAP::add_tty(int master_pty_fd) noexcept
   tty_fds.push_back(master_pty_fd);
 }
 
-int
+std::optional<int>
 DAP::current_tty() noexcept
 {
   if (tty_fds.empty())
-    return -1;
+    return std::nullopt;
   return tty_fds[current_tty_idx];
 }
 

@@ -32,13 +32,17 @@ R"(Content-Length: )";
 
 TEST(DapRequestParsing, WellFormedPayloadsTest)
 {
-  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3);
+  std::byte pmr_buffer[1028];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&pmr_buffer, sizeof(pmr_buffer)};
+  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3, descriptor_resource);
   EXPECT_EQ(result.size(), 3);
 }
 
 TEST(DapRequestParsing, CorrectHeaderTypes)
 {
-  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3);
+  std::byte pmr_buffer[1028];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&pmr_buffer, sizeof(pmr_buffer)};
+  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3, descriptor_resource);
   for (auto &&data : result) {
     EXPECT_EQ(data.index(), 0);
   }
@@ -53,7 +57,9 @@ using RD = ui::dap::RemainderData;
 
 TEST(DapRequestParsing, CorrectMixOfHeaderTypes)
 {
-  const auto result = ui::dap::parse_headers_from(OneWellFormedOnePartial);
+  std::byte pmr_buffer[1028];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&pmr_buffer, sizeof(pmr_buffer)};
+  const auto result = ui::dap::parse_headers_from(OneWellFormedOnePartial, descriptor_resource);
   EXPECT_EQ(result.size(), 2);
   EXPECT_EQ(result[0].index(), 0);
   EXPECT_EQ(result[1].index(), 1);
@@ -91,7 +97,9 @@ TEST(DapRequestParsing, CorrectMixOfHeaderTypes)
 
 TEST(DapRequestParsing, OneWellFormedOneRemainderData)
 {
-  const auto result = ui::dap::parse_headers_from(OneWellFormedOneRemainderData);
+  std::byte pmr_buffer[1028];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&pmr_buffer, sizeof(pmr_buffer)};
+  const auto result = ui::dap::parse_headers_from(OneWellFormedOneRemainderData, descriptor_resource);
   EXPECT_EQ(result.size(), 2);
   EXPECT_EQ(result[0].index(), 0);
   EXPECT_EQ(result[1].index(), 2);
@@ -106,7 +114,9 @@ TEST(DapRequestParsing, OneWellFormedOneRemainderData)
 
 TEST(DapRequestParsing, ParseRequestTypes3WellFormed)
 {
-  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3);
+  std::byte pmr_buffer[1028];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&pmr_buffer, sizeof(pmr_buffer)};
+  const auto result = ui::dap::parse_headers_from(WellFormedPayloads_3, descriptor_resource);
   const auto unwrapper = [](const auto &v) -> const CD * { return maybe_unwrap<CD>(v); };
   auto i = 0;
   for (auto &&payload : result) {
@@ -143,7 +153,9 @@ const auto SetInsBkptReq =
 
 TEST(DapRequestParsing, setInstructionBreakpointsParsing)
 {
-  const auto result = ui::dap::parse_headers_from(SetInsBkptReq);
+  std::byte pmr_buffer[1028];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&pmr_buffer, sizeof(pmr_buffer)};
+  const auto result = ui::dap::parse_headers_from(SetInsBkptReq, descriptor_resource);
   const auto unwrapper = [](const auto &v) -> const CD * { return maybe_unwrap<CD>(v); };
   auto ptr = unwrapper(result[0]);
   EXPECT_TRUE(ptr != nullptr) << "Expected payload to be OK parsed";
