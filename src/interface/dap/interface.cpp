@@ -132,8 +132,6 @@ DAP::run_ui_loop()
   ParseBuffer parse_swapbuffer{PAGE_SIZE};
 
   while (keep_running || cleanup_times > 0) {
-    epoll_event events[5];
-
     const auto master_pty = current_tty();
 
     struct pollfd pfds[3]{
@@ -149,7 +147,7 @@ DAP::run_ui_loop()
       if ((pfds[i].revents & POLLIN) || ((pfds[i].revents & POLLOUT))) {
         // DAP Requests (or parts of) have came in via stdout
         if (pfds[i].fd == tracer_in_fd) {
-          parse_swapbuffer.read_from_fd(events[i].data.fd);
+          parse_swapbuffer.expect_read_from_fd(pfds[i].fd);
           bool no_partials = false;
           std::string_view buffer_view = parse_swapbuffer.take_view();
           const auto request_headers = parse_headers_from(buffer_view, &no_partials);

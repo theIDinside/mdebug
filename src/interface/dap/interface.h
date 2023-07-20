@@ -40,10 +40,13 @@ public:
     swap_buffers[1] = mmap_buffer<const char>(size);
   }
 
+  // Expects to be able to read from `fd` - if we don't, we've got a bug and we should *not* silently ignore it or
+  // handle it. Fail fast.
   void
-  read_from_fd(int fd) noexcept
+  expect_read_from_fd(int fd) noexcept
   {
     auto read_bytes = read(fd, buffer_current(), 4096 - current_size());
+    VERIFY(read_bytes != -1, "Failed to read from parse buffer. Error: {}", strerror(errno));
     if (read_bytes >= 0) {
       size[current_buffer_index] += read_bytes;
     }
