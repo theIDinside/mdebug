@@ -1,8 +1,10 @@
 const {
   DAClient,
   MDB_PATH,
-  checkResponse: check_response,
+  checkResponse,
+  buildDirFile,
   testException,
+  repoDirFile,
 } = require("./client");
 
 const da_client = new DAClient(MDB_PATH, []);
@@ -13,17 +15,17 @@ const verify_breakpoints = [{ line: 7 }, { line: 13 }, { line: 45 }]
 da_client
   .sendReqGetResponse("initialize", {})
   .then((res) => {
-    check_response(__filename, res, "initialize", true);
+    checkResponse(__filename, res, "initialize", true);
   })
   .catch(testException)
   .then(() => {
     return da_client
       .sendReqGetResponse("launch", {
-        program: "/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes",
+        program: buildDirFile("stackframes"),
         stopAtEntry: true,
       })
       .then((res) => {
-        check_response(__filename, res, "launch", true);
+        checkResponse(__filename, res, "launch", true);
         console.log(`launch was ok`);
       })
       .catch(testException);
@@ -32,13 +34,13 @@ da_client
     da_client
       .sendReqGetResponse(bpRequest, {
         source: {
-          name: "/home/cx/dev/foss/cx/dbm/test/stackframes.cpp",
-          path: "/home/cx/dev/foss/cx/dbm/test/stackframes.cpp",
+          name: repoDirFile("test/stackframes.cpp"),
+          path: repoDirFile("test/stackframes.cpp"),
         },
         breakpoints: verify_breakpoints,
       })
       .then((res) => {
-        check_response(__filename, res, bpRequest, true);
+        checkResponse(__filename, res, bpRequest, true);
         if (res.body.breakpoints.length != 3) {
           throw new Error(
             `Expected bkpts 3 but got ${res.body.breakpoints.length}`

@@ -271,6 +271,14 @@ function dump_log() {
   console.log(daplog);
 }
 
+function buildDirFile(fileName) {
+  return path.join(BUILD_BIN_DIR, fileName);
+}
+
+function repoDirFile(filePath) {
+  return path.join(REPO_DIR, filePath);
+}
+
 function checkResponse(file, response, command, expected_success = true) {
   if (response.type != "response") {
     console.error(
@@ -309,6 +317,8 @@ module.exports = {
   MDB_PATH,
   checkResponse,
   testException,
+  buildDirFile,
+  repoDirFile,
   getLineOf,
   readFile,
   DAClient,

@@ -1,6 +1,7 @@
 #include "logger.h"
 #include "../common.h"
 #include "../lib/lockguard.h"
+#include <filesystem>
 
 namespace logging {
 
@@ -24,7 +25,7 @@ void
 Logger::setup_channel(std::string_view name) noexcept
 {
   ASSERT(!log_files.contains(name), "Creating log channel {} twice is not allowed.", name);
-  Path p = Path{"/home/cx/dev/foss/cx/dbm/build-debug/bin"} / fmt::format("{}.log", name);
+  Path p = std::filesystem::current_path() / fmt::format("{}.log", name);
   auto channel =
       new LogChannel{.spin_lock = SpinLock{},
                      .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};

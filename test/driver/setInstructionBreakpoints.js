@@ -1,4 +1,4 @@
-const { DAClient, MDB_PATH, checkResponse: check_response, testException } = require("./client")
+const { DAClient, MDB_PATH, checkResponse: check_response, testException, buildDirFile } = require("./client")
 
 const da_client = new DAClient(MDB_PATH, []);
 
@@ -7,7 +7,7 @@ da_client.sendReqGetResponse("initialize", {}).then(res => {
   check_response(__filename, res, "initialize", true);
 }).catch(testException)
 
-da_client.sendReqGetResponse("launch", { program: "/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes", stopAtEntry: true }).then(res => {
+da_client.sendReqGetResponse("launch", { program: buildDirFile("stackframes"), stopAtEntry: true }).then(res => {
   check_response(__filename, res, "launch", true);
   console.log(`launch was ok`);
 }).catch(testException);

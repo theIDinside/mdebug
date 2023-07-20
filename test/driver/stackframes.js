@@ -1,4 +1,4 @@
-const { DAClient, MDB_PATH, checkResponse, testException, getLineOf, readFile } = require("./client")
+const { DAClient, MDB_PATH, checkResponse, testException, getLineOf, readFile, buildDirFile, repoDirFile } = require("./client")
 
 const da_client = new DAClient(MDB_PATH, []);
 
@@ -10,14 +10,15 @@ const expectedStackTraces = [
 ]
 
 async function test() {
-  await da_client.launchToMain("/home/cx/dev/foss/cx/dbm/build-debug/bin/stackframes");
-  const file = readFile("/home/cx/dev/foss/cx/dbm/test/stackframes.cpp");
+
+  await da_client.launchToMain(buildDirFile("stackframes"));
+  const file = readFile(repoDirFile("test/stackframes.cpp"));
   const bp_lines = ["BP1", "BP2", "BP3", "BP4"].map(ident => getLineOf(file, ident)).filter(item => item != null).map(l => ({ line: l }));
   if (bp_lines.length != 4) throw new Error(`Expected to find 4 breakpoint locations but found ${bp_lines.length}`);
   await da_client.sendReqGetResponse("setBreakpoints", {
     source: {
-      name: "/home/cx/dev/foss/cx/dbm/test/stackframes.cpp",
-      path: "/home/cx/dev/foss/cx/dbm/test/stackframes.cpp",
+      name: repoDirFile("test/stackframes.cpp"),
+      path: repoDirFile("test/stackframes.cpp"),
     },
     breakpoints: bp_lines
   }).catch(testException);
