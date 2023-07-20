@@ -72,6 +72,14 @@ class DAClient {
   constructor(mdb, mdb_args) {
     // this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "inherit" });
     this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+    this.mdb.on("error", (err) => {
+      console.error(`[TEST FAILED] MDB error: ${err}`);
+      process.exit(-1);
+    });
+    this.mdb.on("exit", exitCode => {
+      console.error(`[TEST FAILED] MDB panicked or terminated with exit code ${exit}`);
+      process.exit(-1);
+    });
     process.on("exit", () => {
       this.mdb.kill("SIGKILL");
     });
