@@ -12,7 +12,9 @@ In debuggers on Linux there are 2 system calls that are crucial concepts:
 This means we need the following;
 A way to `wait` on events from the `tracee`, a way to process input and output, both from the `tracer user` but also the `tracee`. Both of these need to run in "infinite" loops, which means we also need a way to actually perform "commands" like, interrupt the tracee, read registers.
 
-We need 3 threads. One thread that waits, using the `wait` system calls, one IO thread and one "main" thread.
+We need 3 threads. One thread that waits, using the `wait` system calls, one IO thread and one "main" thread. If we just resorted to a main thread and an IO thread, we would end up with this problem:
+
+![Wait is a blocking system call](./threads.png)
 
 ## Concurrency
 

@@ -46,7 +46,7 @@ Justification for these three libraries are as follows;
 These blog posts are not done, but I write some in them during the dev cycles to build a cohesive explanation of what's going on and where.
 
 - [Why a debugger?](./blog/why_debugger.md)
-- [Command System](./blog/commands_system.md)
 - ["Architecture" of the debugger](./blog/architecture.md)
+- [Command System](./blog/commands_system.md)
 - [Driver tests](./blog/driver_tests.md)
 - [Elves and dwarves](./blog/elves_and_dwarves.md)
