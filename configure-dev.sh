@@ -55,7 +55,7 @@ if [ ! -e "$relative_repo_root_dir/dependencies/googletest" ]; then
   echo "Downloading googletest ..."
   wget -q -P $relative_repo_root_dir/dependencies "https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip" --output-document=$relative_repo_root_dir/dependencies/gtest.zip
   echo "Done!"
-  unzip $relative_repo_root_dir/dependencies/gtest.zip
+  unzip $relative_repo_root_dir/dependencies/gtest.zip -d $relative_repo_root_dir/dependencies/
   mv "$relative_repo_root_dir/dependencies/googletest-$gtest_version" $relative_repo_root_dir/dependencies/googletest
   rm $relative_repo_root_dir/dependencies/gtest.zip
   echo "gtest dependency configured"
