@@ -2,22 +2,22 @@
 
 namespace sym {
 
-bool
+InsideRange
 Frame::inside(TPtr<void> addr) const noexcept
 {
-  return addr >= start && addr < end;
+  if (symbol) {
+    return (addr >= symbol->start && addr < symbol->end) ? InsideRange::Yes : InsideRange::No;
+  } else
+    return InsideRange::Unknown;
 }
 
-bool
-CallStack::trim_stack(TPtr<void> addr) noexcept
+std::optional<std::string_view>
+Frame::name() const noexcept
 {
-  if (frames.back().inside(addr))
-    return false;
-  const auto sz = frames.size();
-  auto it = find(frames, [addr](const auto &frame) { return frame.inside(addr); });
-  it = (std::end(frames) == it) ? it : it + 1;
-  frames.erase(it, std::end(frames));
-  return sz != frames.size();
+  if (!symbol)
+    return std::nullopt;
+  else
+    return symbol->name;
 }
 
 } // namespace sym

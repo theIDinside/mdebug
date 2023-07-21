@@ -466,14 +466,14 @@ StackTrace::execute(Tracer *tracer) noexcept
       }
       response->stack_frames.push_back(
           StackFrame{.id = id++,
-                     .name = frame.fn_name.value_or("unknown"),
+                     .name = frame.name().value_or("unknown"),
                      .source = Source{.name = frame.cu_file->name(), .path = frame.cu_file->name()},
                      .line = line,
                      .column = col,
                      .rip = fmt::format("{}", frame.rip)});
     } else {
       response->stack_frames.push_back(StackFrame{.id = id++,
-                                                  .name = frame.fn_name.value_or("unknown"),
+                                                  .name = frame.name().value_or("unknown"),
                                                   .source = std::nullopt,
                                                   .line = 0,
                                                   .column = 0,

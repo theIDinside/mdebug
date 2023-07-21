@@ -48,8 +48,8 @@ enum ActionOnEvent
 
 struct SearchFnSymResult
 {
-  FunctionSymbol *fn_sym;
-  CompilationUnitFile *cu_file;
+  const FunctionSymbol *fn_sym;
+  const CompilationUnitFile *cu_file;
 };
 
 using Address = std::uintptr_t;
@@ -120,8 +120,6 @@ struct BreakpointMap
   void clear_breakpoint_stats() noexcept;
   void disable_breakpoint(u16 id) noexcept;
   void enable_breakpoint(u16 id) noexcept;
-
-  template <typename Predicate> friend void clear_breakpoints(BreakpointMap &bp, Target *, Predicate &&p) noexcept;
 
   Breakpoint *get_by_id(u32 id) noexcept;
   Breakpoint *get(TraceePointer<void> addr) noexcept;
@@ -348,7 +346,7 @@ struct Target
   void reaped_events() noexcept;
   void start_awaiter_thread() noexcept;
   sym::CallStack &build_callframe_stack(const TaskInfo *task) noexcept;
-  std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) noexcept;
+  std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
 
 private:
@@ -361,10 +359,3 @@ private:
   TargetSession session;
   bool is_in_user_ptrace_stop;
 };
-
-template <typename Predicate>
-void
-clear_breakpoints(BreakpointMap &bp, Target *target, Predicate &&predicate) noexcept
-{
-  std::erase_if(bp.breakpoints, [&p = predicate](Breakpoint &bp) { return p(bp); });
-}

@@ -66,8 +66,8 @@ public:
     return pc_boundaries.contains(ptr.as_void());
   }
 
-  void add_function(std::string_view fn_name, FunctionSymbol sym) noexcept;
-  FunctionSymbol *find_subprogram(TPtr<void> addr) noexcept;
+  void add_function(FunctionSymbol sym) noexcept;
+  const FunctionSymbol *find_subprogram(TPtr<void> addr) const noexcept;
   std::vector<AddressRange> m_addr_ranges;
 
 private:
@@ -75,8 +75,7 @@ private:
   std::string_view m_name;
   AddressRange pc_boundaries;
   LineTable m_ltes;
-  // The lowest (inclusive) and highest (exclusive) pc in this CU's range (`m_addr_ranges`)
-  std::unordered_map<std::string_view, FunctionSymbol> functions;
+  std::vector<FunctionSymbol> fns;
   DebugInfoEntry *cu_die;
 };
 

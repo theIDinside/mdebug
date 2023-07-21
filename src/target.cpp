@@ -671,9 +671,6 @@ Target::build_callframe_stack(const TaskInfo *task) noexcept
     } else
       break;
   }
-  for (const auto &bp : base_ptrs) {
-    logging::get_logging()->log("mdb", fmt::format("Base pointer {}", bp.as<void>()));
-  }
 
   std::vector<TPtr<std::uintptr_t>> rsps;
   rsps.reserve(base_ptrs.size());
@@ -692,19 +689,13 @@ Target::build_callframe_stack(const TaskInfo *task) noexcept
       for (auto i = rsps.begin(); i != rsps.end(); i++) {
         auto symbol = find_fn_by_pc(i->as_void());
         if (symbol)
-          cs.frames.push_back(sym::Frame{.start = symbol->fn_sym->start,
-                                         .end = symbol->fn_sym->end,
-                                         .rip = i->as_void(),
-                                         .fn_name = symbol->fn_sym->name,
+          cs.frames.push_back(sym::Frame{.rip = i->as_void(),
+                                         .symbol = symbol->fn_sym,
                                          .cu_file = symbol->cu_file,
                                          .type = sym::FrameType::Full});
         else {
-          cs.frames.push_back(sym::Frame{.start = nullptr,
-                                         .end = nullptr,
-                                         .rip = i->as_void(),
-                                         .fn_name = "unknown",
-                                         .cu_file = nullptr,
-                                         .type = sym::FrameType::Unknown});
+          cs.frames.push_back(sym::Frame{
+              .rip = i->as_void(), .symbol = nullptr, .cu_file = nullptr, .type = sym::FrameType::Unknown});
         }
       }
       return cs;
@@ -714,7 +705,7 @@ Target::build_callframe_stack(const TaskInfo *task) noexcept
 }
 
 std::optional<SearchFnSymResult>
-Target::find_fn_by_pc(TPtr<void> addr) noexcept
+Target::find_fn_by_pc(TPtr<void> addr) const noexcept
 {
   for (auto &f : m_files) {
     if (f.may_contain(addr)) {

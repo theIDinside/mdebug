@@ -1,6 +1,7 @@
 /** COPYRIGHT TEMPLATE */
 #include "./utils/logger.h"
 #include "common.h"
+#include "fmt/format.h"
 #include "interface/dap/interface.h"
 #include "interface/pty.h"
 #include "notify_pipe.h"
@@ -62,6 +63,12 @@ main(int argc, const char **argv)
 {
   logging::Logger::get_logger()->setup_channel("mdb");
   logging::Logger::get_logger()->setup_channel("dap");
+
+  std::span<const char *> args(argv, argc);
+  logging::get_logging()->log("mdb", "MDB CLI Arguments");
+  for (const auto arg : args) {
+    logging::get_logging()->log("mdb", fmt::format("{}", arg));
+  }
 
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 

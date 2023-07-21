@@ -307,7 +307,7 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die) noexcept
         if (fn.end < fn.start) {
           fn.end = (fn.start + fn.end);
         }
-        file.add_function(fn.name, fn);
+        file.add_function(fn);
       }
     }
     add_subprograms(file, child.get());
