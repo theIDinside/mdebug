@@ -77,7 +77,7 @@ class DAClient {
       process.exit(-1);
     });
     this.mdb.on("exit", exitCode => {
-      console.error(`[TEST FAILED] MDB panicked or terminated with exit code ${exit}`);
+      console.error(`[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`);
       process.exit(-1);
     });
     process.on("exit", () => {
