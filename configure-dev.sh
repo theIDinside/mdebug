@@ -14,7 +14,7 @@ if [ ! -e "$relative_repo_root_dir/dependencies/distorm" ]; then
   echo "Downloading distorm ..."
   wget -q -P $relative_repo_root_dir/dependencies https://github.com/gdabah/distorm/archive/refs/tags/3.5.2b.tar.gz
   echo "Done!"
-  tar xvf $relative_repo_root_dir/dependencies/3.5.2b.tar.gz -C $relative_repo_root_dir/dependencies/
+  tar xf $relative_repo_root_dir/dependencies/3.5.2b.tar.gz -C $relative_repo_root_dir/dependencies/
   mv $relative_repo_root_dir/dependencies/distorm-3.5.2b $relative_repo_root_dir/dependencies/distorm
   rm $relative_repo_root_dir/dependencies/3.5.2b.tar.gz
   echo "Setting up CMake for distorm dependency..."
@@ -29,7 +29,7 @@ if [ ! -e "$relative_repo_root_dir/dependencies/fmt" ]; then
   echo "Downloading libfmt ..."
   wget -q -P $relative_repo_root_dir/dependencies https://github.com/fmtlib/fmt/releases/download/$fmt_version/fmt-$fmt_version.zip
   echo "Done!"
-  unzip $relative_repo_root_dir/dependencies/fmt-$fmt_version.zip -d $relative_repo_root_dir/dependencies/
+  unzip -qq $relative_repo_root_dir/dependencies/fmt-$fmt_version.zip -d $relative_repo_root_dir/dependencies/
   mv $relative_repo_root_dir/dependencies/fmt-$fmt_version $relative_repo_root_dir/dependencies/fmt
   rm $relative_repo_root_dir/dependencies/fmt-$fmt_version.zip
   echo "libfmt dependency configured"
@@ -42,7 +42,7 @@ if [ ! -e "$relative_repo_root_dir/dependencies/nlohmann_json" ]; then
   echo "Downloading nlohmann_json ..."
   wget -q -P $relative_repo_root_dir/dependencies "https://github.com/nlohmann/json/releases/download/$json_version/json.tar.xz"
   echo "Done!"
-  tar xvf $relative_repo_root_dir/dependencies/json.tar.xz -C $relative_repo_root_dir/dependencies/
+  tar xf $relative_repo_root_dir/dependencies/json.tar.xz -C $relative_repo_root_dir/dependencies/
   mv $relative_repo_root_dir/dependencies/json $relative_repo_root_dir/dependencies/nlohmann_json
   rm $relative_repo_root_dir/dependencies/json.tar.xz
   echo "json dependency configured"
@@ -55,7 +55,7 @@ if [ ! -e "$relative_repo_root_dir/dependencies/googletest" ]; then
   echo "Downloading googletest ..."
   wget -q -P $relative_repo_root_dir/dependencies "https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip" --output-document=$relative_repo_root_dir/dependencies/gtest.zip
   echo "Done!"
-  unzip $relative_repo_root_dir/dependencies/gtest.zip -d $relative_repo_root_dir/dependencies/
+  unzip -qq $relative_repo_root_dir/dependencies/gtest.zip -d $relative_repo_root_dir/dependencies/
   mv "$relative_repo_root_dir/dependencies/googletest-$gtest_version" $relative_repo_root_dir/dependencies/googletest
   rm $relative_repo_root_dir/dependencies/gtest.zip
   echo "gtest dependency configured"
