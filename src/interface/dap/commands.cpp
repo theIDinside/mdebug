@@ -7,11 +7,15 @@
 #include "parse_buffer.h"
 #include "types.h"
 #include <algorithm>
+#include <distorm/include/distorm.h>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <unistd.h>
 #include <unordered_set>
+
 namespace ui::dap {
 
 std::string
@@ -351,12 +355,12 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsDataBreakpoints"] = false;
   cfg_body["supportsReadMemoryRequest"] = true;
   cfg_body["supportsWriteMemoryRequest"] = false;
-  cfg_body["supportsDisassembleRequest"] = false;
+  cfg_body["supportsDisassembleRequest"] = true;
   cfg_body["supportsCancelRequest"] = false;
   cfg_body["supportsBreakpointLocationsRequest"] = false;
   cfg_body["supportsClipboardContext"] = false;
   cfg_body["supportsSteppingGranularity"] = false;
-  cfg_body["supportsInstructionBreakpoints"] = false;
+  cfg_body["supportsInstructionBreakpoints"] = true;
   cfg_body["supportsExceptionFilterOptions"] = false;
   cfg_body["supportsSingleThreadExecutionRequests"] = false;
 
@@ -483,6 +487,50 @@ StackTrace::execute(Tracer *tracer) noexcept
   return response;
 }
 
+Disassemble::Disassemble(std::uint64_t seq, TPtr<void> address, int byte_offset, int ins_offset, int ins_count,
+                         bool resolve_symbols) noexcept
+    : UICommand(seq), address(address), byte_offset(byte_offset), ins_offset(ins_offset), ins_count(ins_count),
+      resolve_symbols(resolve_symbols)
+{
+}
+
+UIResultPtr
+Disassemble::execute(Tracer *tracer) noexcept
+{
+  _DecodedInst ins[ins_count];
+  u32 total = 0;
+  _DecodeType dt = Decode64Bits;
+  _OffsetType offset = 0;
+  const auto target = tracer->get_current();
+  auto sect_ptr = target->get_in_text_section(address);
+  const auto res_code = distorm_decode(offset, sect_ptr, 50, dt, ins, ins_count, &total);
+  ASSERT(res_code != DECRES_INPUTERR, "Failed to disassemble {} instructions starting from {}", ins_count,
+         address);
+  auto res = new DisassembleResponse{true, this};
+  res->disassembled_instructions.reserve(total);
+  for (auto i = 0u; i < total; ++i) {
+    std::string opcode;
+    opcode.reserve(ins[i].instructionHex.length);
+    std::string mnemonic;
+    mnemonic.reserve(ins[i].mnemonic.length);
+    std::copy(ins[i].instructionHex.p, ins[i].instructionHex.p + ins[i].instructionHex.length,
+              std::back_inserter(opcode));
+    std::copy(ins[i].mnemonic.p, ins[i].mnemonic.p + ins[i].mnemonic.length, std::back_inserter(mnemonic));
+    res->disassembled_instructions.push_back(
+        sym::Disassembly{address.offset(ins[i].offset), opcode, mnemonic, "stackframes.cpp", 1, 1});
+  }
+
+  return res;
+}
+
+std::string
+DisassembleResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "disassemble", "body": {{ "instructions": [{}] }} }})",
+      seq, response_seq, fmt::join(disassembled_instructions, ","));
+}
+
 ui::UICommand *
 parse_command(std::string &&packet) noexcept
 {
@@ -511,8 +559,19 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::CustomRequest");
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
-  case CommandType::Disassemble:
-    TODO("Command::Disassemble");
+  case CommandType::Disassemble: {
+    ASSERT(args.contains("memoryReference"), "Args did not contain 'memoryReference'");
+    ASSERT(args.contains("offset"), "Args did not contain 'offset'");
+    ASSERT(args.contains("instructionCount"), "Args did not contain 'instructionCount'");
+    ASSERT(args.contains("instructionOffset"), "Args did not contain 'instructionOffset'");
+    std::string_view addr_str;
+    args["memoryReference"].get_to(addr_str);
+    const auto addr = to_addr(addr_str);
+    int offset = args.at("offset");
+    int instructionOffset = args.at("instructionOffset");
+    int instructionCount = args.at("instructionCount");
+    return new ui::dap::Disassemble{seq, *addr, offset, instructionOffset, instructionCount, false};
+  }
   case CommandType::Disconnect: {
     bool restart = false;
     bool terminate_debuggee = false;

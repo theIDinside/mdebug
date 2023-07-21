@@ -348,6 +348,7 @@ struct Target
   sym::CallStack &build_callframe_stack(const TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
+  u8 *get_in_text_section(TPtr<void> address) const noexcept;
 
 private:
   std::vector<CompilationUnitFile> m_files;

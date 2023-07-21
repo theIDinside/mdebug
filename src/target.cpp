@@ -728,3 +728,17 @@ Target::get_source(std::string_view name) noexcept
   }
   return std::nullopt;
 }
+
+u8 *
+Target::get_in_text_section(TPtr<void> vma) const noexcept
+{
+  for (const auto obj : object_files) {
+    const auto sec = obj->parsed_elf->get_section(".text");
+    TPtr<void> relo_addr{sec->address};
+    auto offset = vma - relo_addr;
+    if (offset < sec->size()) {
+      return sec->m_section_ptr + offset;
+    }
+  }
+  return nullptr;
+}

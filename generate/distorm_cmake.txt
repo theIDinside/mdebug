@@ -1,0 +1,38 @@
+cmake_minimum_required(VERSION 3.22)
+project(distorm VERSION 3.5.2 LANGUAGES C)
+
+include_directories(include)
+include_directories(src)
+
+#Set platform specific options
+if(${CMAKE_HOST_SYSTEM_NAME} MATCHES Linux)
+    set(LINUX TRUE)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -O2 -Wall -std=c99")
+endif()
+
+#Check if machine is 64-bit
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ENV{SUPPORT_64BIT_OFFSET} 1)
+endif()
+
+#List all source files to tell Makefile what to compile
+set(DS_SOURCE_FILES 
+    src/decoder.c
+    src/decoder.h
+    src/distorm.c
+    include/distorm.h
+    src/instructions.c
+    src/instructions.h
+    src/insts.c
+    src/insts.h
+    src/mnemonics.c
+    include/mnemonics.h
+    src/operands.c
+    src/operands.h
+    src/prefix.c
+    src/prefix.h
+    src/textdefs.c
+    src/textdefs.h
+)
+
+add_library(distorm3 STATIC ${DS_SOURCE_FILES})

@@ -1,12 +1,8 @@
 /** COPYRIGHT TEMPLATE */
 #include "./utils/logger.h"
 #include "common.h"
-#include "fmt/format.h"
 #include "interface/dap/interface.h"
-#include "interface/pty.h"
 #include "notify_pipe.h"
-#include "posix/argslist.h"
-#include "target.h"
 #include "tracer.h"
 #include <array>
 #include <asm-generic/errno-base.h>

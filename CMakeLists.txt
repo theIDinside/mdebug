@@ -151,7 +151,9 @@ set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 set(JSON_Install OFF CACHE INTERNAL "")
 add_subdirectory(dependencies/nlohmann_json)
 
-target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json)
+add_subdirectory(dependencies/distorm)
+
+target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json distorm3)
 target_include_directories(mdb PUBLIC ./dependencies)
 
 find_program(NODEJS "node")

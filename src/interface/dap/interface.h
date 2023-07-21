@@ -33,9 +33,8 @@ struct Request
 struct ParseBuffer
 {
 public:
-  ParseBuffer(size_t size) noexcept : size{0, 0}
+  ParseBuffer(size_t size) noexcept : size{0, 0}, current_buffer_index(0), buffer_size(size)
   {
-    current_buffer_index = 0;
     swap_buffers[0] = mmap_buffer<const char>(size);
     swap_buffers[1] = mmap_buffer<const char>(size);
   }
@@ -45,8 +44,10 @@ public:
   void
   expect_read_from_fd(int fd) noexcept
   {
-    auto read_bytes = read(fd, buffer_current(), 4096 - current_size());
-    VERIFY(read_bytes != -1, "Failed to read from parse buffer. Error: {}", strerror(errno));
+    auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
+    VERIFY(read_bytes > 0,
+           "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: {}",
+           buffer_size - current_size(), buffer_size, strerror(errno), take_view());
     if (read_bytes >= 0) {
       size[current_buffer_index] += read_bytes;
     }
@@ -64,15 +65,21 @@ public:
   {
     const auto next_buffer_used = size[current_buffer_index] - start;
     const auto src = buffer_ptr() + start;
+    size[current_buffer_index] = 0;
     current_buffer_index = next_buffer_index();
     const auto dst = buffer_ptr();
-    std::memcpy(dst, src, next_buffer_used);
+    ASSERT(next_buffer_used < buffer_size, "Offset into buffer outside of {} bytes: {}", buffer_size,
+           next_buffer_used);
+    if (next_buffer_used > 0) {
+      std::memcpy(dst, src, next_buffer_used);
+    }
     size[current_buffer_index] = next_buffer_used;
   }
 
   void
   clear() noexcept
   {
+    current_buffer_index = 0;
     size[0] = 0;
     size[1] = 0;
   }
@@ -93,7 +100,8 @@ private:
   char *
   buffer_ptr() noexcept
   {
-    return const_cast<char *>(swap_buffers[current_buffer_index]);
+    const auto ptr = swap_buffers[current_buffer_index];
+    return const_cast<char *>(ptr);
   }
 
   char *
@@ -104,6 +112,7 @@ private:
   size_t size[2];
   const char *swap_buffers[2];
   size_t current_buffer_index;
+  const size_t buffer_size;
 };
 
 class DAP

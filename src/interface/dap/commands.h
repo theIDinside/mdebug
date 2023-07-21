@@ -3,6 +3,7 @@
 #include "../ui_result.h"
 // NOLINTNEXTLINE
 #include "../../breakpoint.h"
+#include "../../symbolication/disassemble.h"
 #include "dap_defs.h"
 #include "nlohmann/json.hpp"
 #include "types.h"
@@ -213,6 +214,29 @@ struct StackTrace final : public UICommand
   std::optional<int> levels;
   std::optional<StackTraceFormat> format;
   DEFINE_NAME(StackTrace)
+};
+
+struct DisassembleResponse final : public UIResult
+{
+  CTOR(DisassembleResponse)
+  ~DisassembleResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  std::vector<sym::Disassembly> disassembled_instructions;
+};
+
+struct Disassemble final : public UICommand
+{
+  Disassemble(std::uint64_t seq, TPtr<void> address, int byte_offset, int ins_offset, int ins_count,
+              bool resolve_symbols) noexcept;
+  ~Disassemble() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+
+  TPtr<void> address;
+  int byte_offset;
+  int ins_offset;
+  int ins_count;
+  bool resolve_symbols;
+  DEFINE_NAME(Disassemble);
 };
 
 ui::UICommand *parse_command(std::string &&packet) noexcept;

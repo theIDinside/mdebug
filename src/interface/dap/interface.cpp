@@ -124,22 +124,20 @@ void
 DAP::run_ui_loop()
 {
   auto cleanup_times = 5;
-  ParseBuffer parse_swapbuffer{PAGE_SIZE};
+  ParseBuffer parse_swapbuffer{PAGE_SIZE * 4};
   static constexpr auto DESCRIPTOR_STORAGE_SIZE = PAGE_SIZE;
 
   // These are stack data. So when we process events, we don't want to be
   // returning `new`ed memory over and over. Just fill it in our local buffer
   // and we are done with it at each iteration, reusing the same buffer over and over.
   std::byte descriptor_buffer[sizeof(ContentDescriptor) * 15];
-  std::pmr::monotonic_buffer_resource descriptor_resource{&descriptor_buffer, DESCRIPTOR_STORAGE_SIZE};
-
   std::byte pmr_buffer[sizeof(pollfd) * 10];
-  std::pmr::monotonic_buffer_resource resource{&pmr_buffer, sizeof(pmr_buffer)};
-  std::pmr::vector<pollfd> pfds{&resource};
 
   while (keep_running || cleanup_times > 0) {
     const auto master_pty = current_tty();
-    pfds.clear();
+    std::pmr::monotonic_buffer_resource descriptor_resource{&descriptor_buffer, DESCRIPTOR_STORAGE_SIZE};
+    std::pmr::monotonic_buffer_resource resource{&pmr_buffer, sizeof(pmr_buffer)};
+    std::pmr::vector<pollfd> pfds{&resource};
     if (master_pty) {
       pfds.push_back(cfg_read_poll(tracer_in_fd, 0));
       pfds.push_back(cfg_read_poll(posted_evt_listener, 0));
@@ -152,6 +150,7 @@ DAP::run_ui_loop()
     auto ready = poll(pfds.data(), pfds.size(), 1000);
     VERIFY(ready != -1, "Failed to poll");
     for (auto i = 0u; i < pfds.size() && ready > 0; i++) {
+
       if ((pfds[i].revents & POLLIN) || ((pfds[i].revents & POLLOUT))) {
         // DAP Requests (or parts of) have came in via stdout
         if (pfds[i].fd == tracer_in_fd) {
