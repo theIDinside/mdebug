@@ -658,3 +658,14 @@ find(std::vector<T> &vec, Predicate &&p) noexcept
 {
   return std::find_if(vec.begin(), vec.end(), p);
 }
+
+template <typename Container>
+void
+keep_range(Container &c, u64 start_idx, u64 end_idx) noexcept
+{
+  const auto start = c.begin() + start_idx;
+  const auto end = c.begin() + end_idx;
+  // erase from end to c.end() first to keep iterators valid
+  c.erase(end, c.end());
+  c.erase(c.begin(), start);
+}

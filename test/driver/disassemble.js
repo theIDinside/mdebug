@@ -46,15 +46,15 @@ function processObjdumpLines(insts) {
 
 function compareDisassembly(objdump, mdbResult) {
   if (mdbResult.length != objdump.length) {
-    throw new Error(`Expected ${objdump.length} disassembled instructions but instead got ${mdbResult.length}. Serial data: ${JSON.stringify(mdbResult, null, 2)}`);
+    throw new Error(`Expected ${objdump.length} disassembled instructions but instead got ${mdbResult.length}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
   }
   for (let i = 0; i < objdump.length; ++i) {
     if (mdbResult[i].address != objdump[i].addr) {
-      throw new Error(`Expected disassembled instruction #${i} at address ${objdump[i].addr} but got ${mdbResult[i].address}. Serial data: ${JSON.stringify(mdbResult, null, 2)}`);
+      throw new Error(`Expected disassembled instruction #${i} at address ${objdump[i].addr} but got ${mdbResult[i].address}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
     }
     if (mdbResult[i].instructionBytes != objdump.opcode
       && mdbResult[i].instructionBytes.split(" ").join("") != objdump[i].opcode.split(" ").join("")) {
-      throw new Error(`Expected disassembled instruction to have opcode ${objdump[i].opcode} but got ${mdbResult[i].instructionBytes}. Serial data: ${JSON.stringify(mdbResult, null, 2)}`)
+      throw new Error(`Expected disassembled instruction to have opcode ${objdump[i].opcode} but got ${mdbResult[i].instructionBytes}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`)
     }
   }
 }
@@ -69,14 +69,24 @@ async function test() {
   const pc = frames.body.stackFrames[0].instructionPointerReference;
 
   const insIndex = insts.findIndex(({ addr, opcode, rep }) => addr == pc);
-  const objdumpSpan = insts.slice(insIndex - 5, insIndex + 5);
-  console.log(`${JSON.stringify(objdumpSpan, null, 2)}`);
-  const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: -5, instructionCount: 10, resolveSymbols: false });
-  if (disassembly.body.instructions.length != 10) {
-    throw new Error(`Expected 10 disassembled instructions but instead got ${disassembly.body.instructions.length}. Serial data: ${JSON.stringify(disassembly.body.instructions, null, 2)}`);
+
+  {
+    const objdumpSpan = insts.slice(insIndex - 5, insIndex + 5);
+    const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: -5, instructionCount: 10, resolveSymbols: false });
+    compareDisassembly(objdumpSpan, disassembly.body.instructions);
   }
-  const mdbResult = disassembly.body.instructions;
-  compareDisassembly(objdumpSpan, mdbResult);
+
+  {
+    const objdumpSpan = insts.slice(insIndex, insIndex + 10)
+    const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: 0, instructionCount: 10, resolveSymbols: false });
+    compareDisassembly(objdumpSpan, disassembly.body.instructions);
+  }
+
+  {
+    const objdumpSpan = insts.slice(insIndex - 20, insIndex - 10)
+    const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: -20, instructionCount: 10, resolveSymbols: false });
+    compareDisassembly(objdumpSpan, disassembly.body.instructions);
+  }
 }
 
 test().then(() => {

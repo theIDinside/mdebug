@@ -15,6 +15,7 @@
 #include <string>
 #include <unistd.h>
 #include <unordered_set>
+#include <valarray>
 
 namespace ui::dap {
 
@@ -507,8 +508,26 @@ Disassemble::execute(Tracer *tracer) noexcept
   auto instruction_count = ins_count;
   if (ins_offset < 0) {
     sym::disassemble_backwards(target, address, ins_offset, instruction_count, res->disassembled_instructions);
-    instruction_count -= res->disassembled_instructions.size();
+    if (std::abs(ins_offset) > instruction_count) {
+      ASSERT(static_cast<u32>(std::abs(ins_offset)) <= res->disassembled_instructions.size(),
+             "We don't have enough instructions");
+      const auto start_idx = res->disassembled_instructions.size() + ins_offset;
+      const auto end_idx = start_idx + instruction_count;
+      keep_range(res->disassembled_instructions, start_idx, end_idx);
+      return res;
+    } else {
+      auto resize = instruction_count + ins_offset;
+      if (res->disassembled_instructions.size() > resize) {
+        auto diff = res->disassembled_instructions.size() - resize;
+        res->disassembled_instructions.erase(res->disassembled_instructions.begin(),
+                                             res->disassembled_instructions.begin() + diff);
+      }
+      instruction_count -= res->disassembled_instructions.size();
+    }
   }
+
+  if (instruction_count <= 0)
+    return res;
 
   const auto res_code = distorm_decode(address, sect_ptr, 2000, dt, ins, instruction_count, &total);
   ASSERT(res_code != DECRES_INPUTERR, "Failed to disassemble {} instructions starting from {}", instruction_count,

@@ -13,7 +13,7 @@ disassemble_backwards(Target *target, AddrPtr addr, int ins_offset, u32 total,
   result.reserve(total);
   ElfSection *text = target->get_text_section(addr);
   ASSERT(text != nullptr, "Could not find .text section containing {}", addr);
-  auto total_disassembled = 0u;
+  auto total_disassembled = 0;
   auto file_index_res = target->cu_file_from_pc(addr);
   ASSERT(file_index_res.has_value(), "Could not find CU with address {}", addr);
   auto file_index = *file_index_res;
@@ -30,8 +30,8 @@ disassemble_backwards(Target *target, AddrPtr addr, int ins_offset, u32 total,
   // find line table entry, reverse iterate from there, disassemble between lte->pc .. addr, rinse repeat
   auto it = std::make_reverse_iterator(lt_entry_iter);
   auto end = std::crend(lt);
-  auto end_addr = addr;
-  while (total_disassembled < total) {
+  auto end_addr = current_addr;
+  while (total_disassembled < static_cast<int>(total) || total_disassembled < cmp) {
     --it;
     if (it == end) {
       if (file_index > 0) {
@@ -51,8 +51,8 @@ disassemble_backwards(Target *target, AddrPtr addr, int ins_offset, u32 total,
     info.dt = Decode64Bits;
     info.codeOffset = it->pc;
     info.code = text->into(it->pc);
-    info.codeLen = static_cast<int>(addr - it->pc);
-    addr = it->pc;
+    info.codeLen = static_cast<int>(current_addr - it->pc);
+    current_addr = it->pc;
     u32 result_count = 0;
     const auto res =
         distorm_decompose(&info, (decomposed + total_disassembled), 400 - total_disassembled, &result_count);
@@ -73,9 +73,8 @@ disassemble_backwards(Target *target, AddrPtr addr, int ins_offset, u32 total,
                                                      f->path_of_file(it->file), it->line, it->column});
     }
   }
-  if (result.size() > total) {
-    auto diff = result.size() - total;
-    result.erase(result.begin(), result.begin() + diff);
+  for (const auto &r : result) {
+    logging::get_logging()->log("mdb", fmt::format("{}", r.address));
   }
 }
 } // namespace sym
