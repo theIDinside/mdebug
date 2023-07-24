@@ -38,8 +38,8 @@ struct ObjectFile
   }
 
   template <typename T>
-  T *
-  get_at(u8 *ptr)
+  const T *
+  get_at(const u8 *ptr)
   {
     ASSERT(ptr > loaded_binary, "Pointer is outside (below) memory mapped object file by {} bytes at {:p}",
            (u64)(loaded_binary - ptr), (void *)ptr);

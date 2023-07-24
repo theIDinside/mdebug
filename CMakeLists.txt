@@ -44,6 +44,8 @@ set(MIDAS_SOURCES
   src/symbolication/type.h
   src/symbolication/callstack.cpp
   src/symbolication/callstack.h
+  src/symbolication/disassemble.cpp
+  src/symbolication/disassemble.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h

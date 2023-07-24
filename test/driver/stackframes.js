@@ -12,8 +12,8 @@ const expectedStackTraces = [
 async function test() {
 
   await da_client.launchToMain(buildDirFile("stackframes"));
-  const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: "0x401210", offset: 0, instructionOffset: 0, instructionCount: 4, resolveSymbols: false });
-  if (disassembly.body.instructions.length != 4) {
+  const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: "0x401210", offset: 0, instructionOffset: 0, instructionCount: 9, resolveSymbols: false });
+  if (disassembly.body.instructions.length != 9) {
     throw new Error(`Expected 4 disassembled instructions but instead got ${disassembly.body.instructions.length}. Serial data: ${JSON.stringify(disassembly.body.instructions)}`);
   }
   const file = readFile(repoDirFile("test/stackframes.cpp"));

@@ -1,6 +1,8 @@
 #pragma once
 #include "../common.h"
 
+struct Target;
+
 namespace sym {
 struct Disassembly
 {
@@ -12,6 +14,8 @@ struct Disassembly
   u32 column;
 };
 
+void disassemble_backwards(Target *target, AddrPtr addr, u32 ins_offset, u32 total,
+                           std::vector<sym::Disassembly> &output);
 } // namespace sym
 
 namespace fmt {

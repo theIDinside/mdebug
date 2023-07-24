@@ -342,7 +342,11 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
         const auto offset = att.address();
         if (header.version == DwarfVersion::D4) {
           line_header = read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
+          for (const auto &f : line_header->file_names) {
+            logging::get_logging()->log("mdb", fmt::format("CU file: {}", f.file_name));
+          }
           f.set_linetable(parse_linetable(this));
+          f.set_linetable_header(std::move(this->line_header));
         } else {
           PANIC("V5 line number program not supported yet");
         }

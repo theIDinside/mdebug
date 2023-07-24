@@ -18,14 +18,16 @@ struct ElfSection
   u64 file_offset;
   TPtr<void> address;
   std::string_view get_name() const noexcept;
-  u8 *begin() const noexcept;
-  u8 *end() const noexcept;
+  const u8 *begin() const noexcept;
+  const u8 *end() const noexcept;
+  const u8 *into(AddrPtr addr) const noexcept;
+  bool contains_relo_addr(AddrPtr addr) const noexcept;
 
   /**
    * Determines offset of `inside_ptr` from `m_section_ptr`.
    * Requires pointer to be >= m_section_ptr. This contract is only tested in debug builds.
    */
-  u64 offset(u8 *inside_ptr) const noexcept;
+  u64 offset(const u8 *inside_ptr) const noexcept;
   u64 size() const noexcept;
   const u8 *data() const noexcept;
 };

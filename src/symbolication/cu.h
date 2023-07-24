@@ -19,8 +19,8 @@ struct CompileUnitHeader
 {
   u64 length;
   u64 abbrev_offset;
-  u8 *data;
-  u8 *end;
+  const u8 *data;
+  const u8 *end;
   u32 cu_index;
   u8 addr_size;
   u64 debug_info_sec_offset;
