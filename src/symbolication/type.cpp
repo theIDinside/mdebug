@@ -160,6 +160,13 @@ CompilationUnitFile::file(u32 index) const noexcept
   return line_header->file_names[index].file_name;
 }
 
+std::string_view
+CompilationUnitFile::path_of_file(u32 index) const noexcept
+{
+  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
+  return line_header->directories[line_header->file_names[index].dir_index].path;
+}
+
 Path
 CompilationUnitFile::file_path(u32 index) const noexcept
 {

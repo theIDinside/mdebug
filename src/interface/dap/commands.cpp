@@ -500,14 +500,20 @@ Disassemble::execute(Tracer *tracer) noexcept
   _DecodedInst ins[ins_count];
   u32 total = 0;
   _DecodeType dt = Decode64Bits;
-  _OffsetType offset = 0;
   const auto target = tracer->get_current();
   auto sect_ptr = target->get_in_text_section(address);
-  const auto res_code = distorm_decode(offset, sect_ptr, 50, dt, ins, ins_count, &total);
-  ASSERT(res_code != DECRES_INPUTERR, "Failed to disassemble {} instructions starting from {}", ins_count,
-         address);
   auto res = new DisassembleResponse{true, this};
-  res->disassembled_instructions.reserve(total);
+  res->disassembled_instructions.reserve(ins_count);
+  auto instruction_count = ins_count;
+  if (ins_offset < 0) {
+    sym::disassemble_backwards(target, address, ins_offset, instruction_count, res->disassembled_instructions);
+    instruction_count -= res->disassembled_instructions.size();
+  }
+
+  const auto res_code = distorm_decode(address, sect_ptr, 2000, dt, ins, instruction_count, &total);
+  ASSERT(res_code != DECRES_INPUTERR, "Failed to disassemble {} instructions starting from {}", instruction_count,
+         address);
+
   for (auto i = 0u; i < total; ++i) {
     std::string opcode;
     opcode.reserve(ins[i].instructionHex.length);
@@ -516,8 +522,20 @@ Disassemble::execute(Tracer *tracer) noexcept
     std::copy(ins[i].instructionHex.p, ins[i].instructionHex.p + ins[i].instructionHex.length,
               std::back_inserter(opcode));
     std::copy(ins[i].mnemonic.p, ins[i].mnemonic.p + ins[i].mnemonic.length, std::back_inserter(mnemonic));
-    res->disassembled_instructions.push_back(
-        sym::Disassembly{address.offset(ins[i].offset), opcode, mnemonic, "stackframes.cpp", 1, 1});
+    auto fidx = target->cu_file_from_pc(address);
+    if (fidx) {
+      const auto &f = target->cu_files()[*fidx];
+      const auto &lt = f.line_table();
+      auto lte = std::lower_bound(lt.cbegin(), lt.cend(), address,
+                                  [](const LineTableEntry &entry, AddrPtr addr) { return entry.pc >= addr; });
+      if (lte != std::cend(lt)) {
+        --lte;
+      }
+      res->disassembled_instructions.push_back(sym::Disassembly{
+          ins[i].offset, opcode, mnemonic, f.file(lte->file), f.path_of_file(lte->file), lte->line, lte->column});
+    } else {
+      res->disassembled_instructions.push_back(sym::Disassembly{ins[i].offset, opcode, mnemonic, "", "", 0, 0});
+    }
   }
 
   return res;

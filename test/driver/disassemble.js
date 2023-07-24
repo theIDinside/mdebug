@@ -71,7 +71,7 @@ async function test() {
   const insIndex = insts.findIndex(({ addr, opcode, rep }) => addr == pc);
   const objdumpSpan = insts.slice(insIndex - 5, insIndex + 5);
   console.log(`${JSON.stringify(objdumpSpan, null, 2)}`);
-  const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: 5, instructionCount: 10, resolveSymbols: false });
+  const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: -5, instructionCount: 10, resolveSymbols: false });
   if (disassembly.body.instructions.length != 10) {
     throw new Error(`Expected 10 disassembled instructions but instead got ${disassembly.body.instructions.length}. Serial data: ${JSON.stringify(disassembly.body.instructions, null, 2)}`);
   }

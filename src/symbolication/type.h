@@ -74,6 +74,7 @@ public:
   void add_function(FunctionSymbol sym) noexcept;
   const FunctionSymbol *find_subprogram(TPtr<void> addr) const noexcept;
   std::string_view file(u32 index) const noexcept;
+  std::string_view path_of_file(u32 index) const noexcept;
   Path file_path(u32 index) const noexcept;
   std::vector<AddressRange> m_addr_ranges;
 

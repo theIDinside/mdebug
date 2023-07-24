@@ -38,7 +38,7 @@ ElfSection::contains_relo_addr(AddrPtr vm_address) const noexcept
 {
   if (vm_address < this->address)
     return false;
-  return (address - vm_address) < size();
+  return (vm_address - address) < size();
 }
 
 u64

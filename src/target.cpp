@@ -267,7 +267,9 @@ Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpoin
   auto f = find(m_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
   if (f != std::end(m_files)) {
     for (auto &&desc : descs) {
-      for (const auto &lte : f->line_table()) {
+      // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
+      const auto &lt = f->line_table();
+      for (const auto &lte : lt) {
         if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
           if (!user_brkpts.contains(lte.pc)) {
             logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
