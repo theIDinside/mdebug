@@ -9,7 +9,7 @@ Below is a list of implemented requests. Though they might not be implemented _f
 - [x] Continue
 - [ ] CustomRequest
 - [ ] DataBreakpointInfo
-- [ ] Disassemble
+- [x] Disassemble
 - [x] Disconnect
 - [ ] Evaluate
 - [ ] ExceptionInfo

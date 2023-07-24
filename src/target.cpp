@@ -267,7 +267,9 @@ Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpoin
   auto f = find(m_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
   if (f != std::end(m_files)) {
     for (auto &&desc : descs) {
-      for (const auto &lte : f->line_table()) {
+      // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
+      const auto &lt = f->line_table();
+      for (const auto &lte : lt) {
         if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
           if (!user_brkpts.contains(lte.pc)) {
             logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
@@ -634,7 +636,12 @@ Target::add_file(CompilationUnitFile &&file) noexcept
 {
   {
     LockGuard guard{spin_lock};
-    m_files.push_back(file);
+    constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
+      const auto faddr_rng = f.low_high_pc();
+      return range.high < faddr_rng.low;
+    };
+    auto it_pos = std::lower_bound(m_files.begin(), m_files.end(), file.low_high_pc(), file_sorter_by_addresses);
+    m_files.insert(it_pos, std::move(file));
   }
   auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
   Tracer::Instance->post_event(evt);
@@ -741,4 +748,33 @@ Target::get_in_text_section(TPtr<void> vma) const noexcept
     }
   }
   return nullptr;
+}
+
+ElfSection *
+Target::get_text_section(AddrPtr addr) const noexcept
+{
+  for (const auto of : object_files) {
+    auto text = of->parsed_elf->get_section(".text");
+    if (text->contains_relo_addr(addr))
+      return text;
+  }
+  return nullptr;
+}
+
+std::optional<u64>
+Target::cu_file_from_pc(TPtr<void> address) const noexcept
+{
+  const auto first =
+      std::find_if(m_files.begin(), m_files.end(), [address](const auto &f) { return f.may_contain(address); });
+  if (first != std::cend(m_files)) {
+    return std::distance(std::cbegin(m_files), first);
+  } else {
+    return std::nullopt;
+  }
+}
+
+const std::vector<CompilationUnitFile> &
+Target::cu_files() const noexcept
+{
+  return m_files;
 }

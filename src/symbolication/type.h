@@ -34,6 +34,9 @@ class CompilationUnitFile
 {
 public:
   explicit CompilationUnitFile(DebugInfoEntry *cu_die) noexcept;
+  CompilationUnitFile(CompilationUnitFile &&o) noexcept;
+  CompilationUnitFile &operator=(CompilationUnitFile &&) noexcept;
+  NO_COPY(CompilationUnitFile);
 
   Path dir() const noexcept;
   Path source_filename() const noexcept;
@@ -54,10 +57,12 @@ public:
     m_addr_ranges.pop_back();
   }
 
+  void set_linetable_header(std::unique_ptr<LineHeader> &&header) noexcept;
   void set_linetable(LineTable &&lte) noexcept;
   void set_boundaries() noexcept;
   const LineTable &line_table() const noexcept;
   const AddrRanges &address_ranges() const noexcept;
+  AddressRange low_high_pc() const noexcept;
 
   template <typename T>
   constexpr bool
@@ -68,12 +73,16 @@ public:
 
   void add_function(FunctionSymbol sym) noexcept;
   const FunctionSymbol *find_subprogram(TPtr<void> addr) const noexcept;
+  std::string_view file(u32 index) const noexcept;
+  std::string_view path_of_file(u32 index) const noexcept;
+  Path file_path(u32 index) const noexcept;
   std::vector<AddressRange> m_addr_ranges;
 
 private:
   // the lowest / highest PC in `address_ranges`
   std::string_view m_name;
   AddressRange pc_boundaries;
+  std::unique_ptr<LineHeader> line_header;
   LineTable m_ltes;
   std::vector<FunctionSymbol> fns;
   DebugInfoEntry *cu_die;

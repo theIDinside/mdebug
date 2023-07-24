@@ -1,6 +1,7 @@
 #include "type.h"
 #include "block.h"
 #include "dwarf.h"
+#include "lnp.h"
 #include <algorithm>
 #include <emmintrin.h>
 #include <filesystem>
@@ -8,6 +9,27 @@
 CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
     : m_addr_ranges(), m_name(), m_ltes(), fns(), cu_die(cu)
 {
+}
+
+CompilationUnitFile::CompilationUnitFile(CompilationUnitFile &&o) noexcept
+    : m_addr_ranges(std::move(o.m_addr_ranges)), m_name(o.m_name), pc_boundaries(o.pc_boundaries),
+      line_header(std::move(o.line_header)), m_ltes(std::move(o.m_ltes)), fns(std::move(o.fns)), cu_die(o.cu_die)
+{
+}
+
+CompilationUnitFile &
+CompilationUnitFile::operator=(CompilationUnitFile &&o) noexcept
+{
+  if (this == &o)
+    return *this;
+  m_addr_ranges = std::move(o.m_addr_ranges);
+  m_name = o.m_name;
+  pc_boundaries = o.pc_boundaries;
+  line_header = std::move(o.line_header);
+  m_ltes = std::move(o.m_ltes);
+  fns = std::move(o.fns);
+  cu_die = o.cu_die;
+  return *this;
 }
 
 Path
@@ -67,6 +89,12 @@ CompilationUnitFile::last_added_addr_valid() const noexcept
 }
 
 void
+CompilationUnitFile::set_linetable_header(std::unique_ptr<LineHeader> &&header) noexcept
+{
+  line_header = std::move(header);
+}
+
+void
 CompilationUnitFile::set_linetable(LineTable &&lte) noexcept
 {
   m_ltes = std::move(lte);
@@ -93,6 +121,12 @@ CompilationUnitFile::address_ranges() const noexcept
   return m_addr_ranges;
 }
 
+AddressRange
+CompilationUnitFile::low_high_pc() const noexcept
+{
+  return pc_boundaries;
+}
+
 void
 CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
 {
@@ -117,4 +151,27 @@ CompilationUnitFile::find_subprogram(TPtr<void> addr) const noexcept
   } else {
     return nullptr;
   }
+}
+
+std::string_view
+CompilationUnitFile::file(u32 index) const noexcept
+{
+  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
+  return line_header->file_names[index].file_name;
+}
+
+std::string_view
+CompilationUnitFile::path_of_file(u32 index) const noexcept
+{
+  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
+  return line_header->directories[line_header->file_names[index].dir_index].path;
+}
+
+Path
+CompilationUnitFile::file_path(u32 index) const noexcept
+{
+  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
+  auto &fentry = line_header->file_names[index];
+  Path p = line_header->directories[fentry.dir_index].path;
+  return p / fentry.file_name;
 }

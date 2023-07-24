@@ -13,20 +13,36 @@ ElfSection::get_name() const noexcept
   return m_name;
 }
 
-u8 *
+const u8 *
 ElfSection::begin() const noexcept
 {
   return m_section_ptr;
 }
 
-u8 *
+const u8 *
 ElfSection::end() const noexcept
 {
   return m_section_ptr + m_section_size;
 }
 
+const u8 *
+ElfSection::into(AddrPtr vm_addr) const noexcept
+{
+  ASSERT(vm_addr > address && (vm_addr - address) < size(), "Section does not contain vm address {}", vm_addr);
+  const AddrPtr offset = (vm_addr - address);
+  return begin() + offset;
+}
+
+bool
+ElfSection::contains_relo_addr(AddrPtr vm_address) const noexcept
+{
+  if (vm_address < this->address)
+    return false;
+  return (vm_address - address) < size();
+}
+
 u64
-ElfSection::offset(u8 *inside_ptr) const noexcept
+ElfSection::offset(const u8 *inside_ptr) const noexcept
 {
   ASSERT(inside_ptr >= m_section_ptr, "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
          (void *)inside_ptr, (void *)m_section_ptr);

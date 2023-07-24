@@ -44,6 +44,8 @@ set(MIDAS_SOURCES
   src/symbolication/type.h
   src/symbolication/callstack.cpp
   src/symbolication/callstack.h
+  src/symbolication/disassemble.cpp
+  src/symbolication/disassemble.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
@@ -159,7 +161,7 @@ target_include_directories(mdb PUBLIC ./dependencies)
 find_program(NODEJS "node")
 
 if(NODEJS)
-  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints stackframes)
+  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints stackframes disassemble)
   foreach(driver_test ${DRIVER_TESTS})
     add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})
   endforeach()

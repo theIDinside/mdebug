@@ -4,6 +4,7 @@
 #include "common.h"
 #include "lib/spinlock.h"
 #include "symbolication/callstack.h"
+#include "symbolication/elf.h"
 #include "symbolication/type.h"
 #include "task.h"
 #include "utils/static_vector.h"
@@ -349,6 +350,10 @@ struct Target
   std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   u8 *get_in_text_section(TPtr<void> address) const noexcept;
+  ElfSection *get_text_section(AddrPtr addr) const noexcept;
+  // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
+  std::optional<u64> cu_file_from_pc(TPtr<void> address) const noexcept;
+  const std::vector<CompilationUnitFile> &cu_files() const noexcept;
 
 private:
   std::vector<CompilationUnitFile> m_files;
