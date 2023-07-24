@@ -159,3 +159,12 @@ CompilationUnitFile::file(u32 index) const noexcept
   ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
   return line_header->file_names[index].file_name;
 }
+
+Path
+CompilationUnitFile::file_path(u32 index) const noexcept
+{
+  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
+  auto &fentry = line_header->file_names[index];
+  Path p = line_header->directories[fentry.dir_index].path;
+  return p / fentry.file_name;
+}

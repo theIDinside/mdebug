@@ -198,6 +198,11 @@ class DAClient {
     });
   }
 
+  /**
+   * @typedef {{ id: number, name: string, source: {name: string, path: string}, line: number, column: number, instructionPointerReference: string}} StackFrame
+   * @param { number } threadId 
+   * @returns {Promise<{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}>}
+   */
   async stackTrace(threadId) {
     return this.sendReqGetResponse("stackTrace", { threadId: threadId });
   }

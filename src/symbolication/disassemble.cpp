@@ -18,15 +18,14 @@ disassemble_backwards(Target *target, AddrPtr addr, u32 ins_offset, u32 total,
   auto f = &target->cu_files()[file_index];
   auto current_addr = addr;
   auto lt = f->line_table();
-  auto entry_it = std::lower_bound(lt.cbegin(), lt.cend(), current_addr,
-                                   [](const auto &lte, auto addr) { return lte.pc >= addr; });
+  auto lt_entry_iter = std::lower_bound(lt.cbegin(), lt.cend(), current_addr,
+                                        [](const auto &lte, auto addr) { return lte.pc >= addr; });
   _DInst decomposed[std::min(ins_offset, total)];
-  // simple path, we *for sure* got more instructions than requested, because 1 "logical breakpoint location"
-  // generally involves quite a few instructions, sometimes, quite a lot.
-  auto it = std::make_reverse_iterator(entry_it);
+
+  // find line table entry, reverse iterate from there, disassemble between lte->pc .. addr, rinse repeat
+  auto it = std::make_reverse_iterator(lt_entry_iter);
   auto end = std::crend(lt);
   auto end_addr = addr;
-
   while (total_disassembled < ins_offset && total_disassembled < total) {
     --it;
     if (it == end) {
