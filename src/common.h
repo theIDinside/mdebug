@@ -271,7 +271,7 @@ public:
   constexpr friend bool
   operator>=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() > r.get();
+    return l.get() >= r.get();
   }
 
   template <typename U = T>
