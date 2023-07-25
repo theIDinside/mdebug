@@ -181,15 +181,15 @@ SyscallArguments::debug_print(bool flush, bool pretty)
 
 #endif
 
-WaitStatus
+WaitStatusKind
 from_register(u64 syscall_number)
 {
-  using enum WaitStatus;
+  using enum WaitStatusKind;
   if (syscall_number == SYS_clone || syscall_number == SYS_clone3) {
     return Cloned;
   }
   if (syscall_number == SYS_execve || syscall_number == SYS_execveat) {
     return Execed;
   }
-  return WaitStatus::Stopped;
+  return WaitStatusKind::Stopped;
 }

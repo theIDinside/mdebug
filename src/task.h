@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 
 using namespace std::string_view_literals;
-enum class WaitStatus : u16
+enum class WaitStatusKind : u16
 {
 #define ITEM(IT, Value) IT = Value,
 #include "./defs/waitstatus.def"
@@ -16,27 +16,31 @@ enum class WaitStatus : u16
 };
 
 constexpr std::string_view
-to_str(WaitStatus ws)
+to_str(WaitStatusKind ws)
 {
   switch (ws) {
 #define ITEM(IT, Value)                                                                                           \
-  case WaitStatus::IT:                                                                                            \
+  case WaitStatusKind::IT:                                                                                        \
     return #IT;
 #include "./defs/waitstatus.def"
 #undef ITEM
   }
 }
 
-struct TaskWaitResult
+struct WaitStatus
 {
-  pid_t waited_pid;
-  WaitStatus ws;
-
+  WaitStatusKind ws;
   union
   {
     int exit_signal;
     int signal;
   } data;
+};
+
+struct TaskWaitResult
+{
+  Tid waited_pid;
+  WaitStatus ws;
 };
 
 enum class RunType : u8
@@ -50,7 +54,7 @@ enum class RunType : u8
 struct TaskInfo
 {
   pid_t tid;
-  std::optional<TaskWaitResult> wait_status;
+  WaitStatus wait_status;
   RunType run_type : 4;
   bool stopped : 1;
   bool stepping : 1;
@@ -131,8 +135,8 @@ template <> struct formatter<TaskInfo>
   {
 
     std::string_view wait_status = "None";
-    if (task.wait_status) {
-      wait_status = to_str(task.wait_status->ws);
+    if (task.wait_status.ws != WaitStatusKind::NotKnown) {
+      wait_status = to_str(task.wait_status.ws);
     }
 
     return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.tid,

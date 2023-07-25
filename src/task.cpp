@@ -11,7 +11,7 @@ TaskInfo::TaskInfo(pid_t tid) noexcept
 void
 TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 {
-  wait_status = wait;
+  wait_status = wait.ws;
 }
 
 void

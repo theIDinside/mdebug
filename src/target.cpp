@@ -250,7 +250,7 @@ Target::reap_task(TaskInfo *task) noexcept
 {
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
-  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status->data.exit_signal);
+  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.data.exit_signal);
   if (task->tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
@@ -495,35 +495,35 @@ Target::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
 void
 Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
 {
-  using enum WaitStatus;
+  using enum WaitStatusKind;
   if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
     PtraceSyscallInfo info;
     constexpr auto size = sizeof(PtraceSyscallInfo);
     PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, wait->waited_pid, size, &info);
     if (info.is_entry()) {
-      wait->ws = SyscallEntry;
+      wait->ws.ws = SyscallEntry;
     } else {
-      wait->ws = SyscallExit;
+      wait->ws.ws = SyscallExit;
     }
     return;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
-    wait->ws = Cloned;
+    wait->ws.ws = Cloned;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
-    wait->ws = Execed;
+    wait->ws.ws = Execed;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
-    wait->ws = Exited;
+    wait->ws.ws = Exited;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
-    wait->ws = Forked;
+    wait->ws.ws = Forked;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
-    wait->ws = VForked;
+    wait->ws.ws = VForked;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
-    wait->ws = VForkDone;
+    wait->ws.ws = VForkDone;
   } else if (WSTOPSIG(status) == SIGTRAP) {
-    wait->ws = Stopped;
+    wait->ws.ws = Stopped;
   } else if (WSTOPSIG(status) == SIGSTOP) {
-    wait->ws = Stopped;
+    wait->ws.ws = Stopped;
   } else {
-    wait->ws = Stopped;
+    wait->ws.ws = Stopped;
     fmt::println("SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait->waited_pid, WSTOPSIG(status));
     sleep(1);
   }
@@ -532,15 +532,15 @@ Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
 void
 Target::task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept
 {
-  wait->ws = WaitStatus::Signalled;
-  wait->data.signal = WTERMSIG(status);
+  wait->ws.ws = WaitStatusKind::Signalled;
+  wait->ws.data.signal = WTERMSIG(status);
 }
 
 void
 Target::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
 {
-  wait->ws = WaitStatus::Exited;
-  wait->data.exit_signal = WEXITSTATUS(status);
+  wait->ws.ws = WaitStatusKind::Exited;
+  wait->ws.data.exit_signal = WEXITSTATUS(status);
 }
 
 bool
@@ -643,7 +643,7 @@ struct AuxvPair
 void
 Target::read_auxv(TaskWaitResult &wait)
 {
-  ASSERT(wait.ws == WaitStatus::Execed,
+  ASSERT(wait.ws.ws == WaitStatusKind::Execed,
          "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
   auto task = get_task(wait.waited_pid);
   auto &registers = register_cache[task->tid];

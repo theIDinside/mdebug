@@ -166,8 +166,8 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
   target->register_task_waited(wait);
   auto task = target->get_task(wait.waited_pid);
   task->stopped = true;
-  switch (wait.ws) {
-  case WaitStatus::Stopped: {
+  switch (wait.ws.ws) {
+  case WaitStatusKind::Stopped: {
     target->cache_registers(task->tid);
     // some pretty involved functionality needs to be called here, I think.
     switch (target->handle_stopped_for(task)) {
@@ -206,17 +206,17 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     }
     }
   } break;
-  case WaitStatus::Execed: {
+  case WaitStatusKind::Execed: {
     get_current()->reopen_memfd();
     target->cache_registers(task->tid);
     target->read_auxv(wait);
     break;
   }
-  case WaitStatus::Exited: {
+  case WaitStatusKind::Exited: {
     target->reap_task(task);
     break;
   }
-  case WaitStatus::Cloned: {
+  case WaitStatusKind::Cloned: {
     // we always have to cache these registers, because we need them to pull out some information
     // about the new clone
     auto &registers = target->cache_registers(task->tid);
@@ -273,18 +273,18 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
 
     break;
   }
-  case WaitStatus::Forked:
+  case WaitStatusKind::Forked:
     break;
-  case WaitStatus::VForked:
+  case WaitStatusKind::VForked:
     break;
-  case WaitStatus::VForkDone:
+  case WaitStatusKind::VForkDone:
     break;
-  case WaitStatus::Signalled:
+  case WaitStatusKind::Signalled:
     task->stopped = true;
     break;
-  case WaitStatus::SyscallEntry:
+  case WaitStatusKind::SyscallEntry:
     break;
-  case WaitStatus::SyscallExit:
+  case WaitStatusKind::SyscallExit:
     break;
   default:
     stopped = false;
@@ -387,7 +387,7 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
         const auto stat = ws->status;
         if ((stat >> 8) == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
           TaskWaitResult twr;
-          twr.ws = WaitStatus::Execed;
+          twr.ws.ws = WaitStatusKind::Execed;
           twr.waited_pid = res.pid;
           get_current()->reopen_memfd();
           get_current()->cache_registers(twr.waited_pid);
