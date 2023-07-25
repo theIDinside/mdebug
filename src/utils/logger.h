@@ -1,5 +1,7 @@
 #pragma once
 #include "../lib/spinlock.h"
+#include "fmt/core.h"
+#include "fmt/format.h"
 #include <fstream>
 #include <memory>
 #include <string>
@@ -30,4 +32,10 @@ private:
 };
 
 Logger *get_logging() noexcept;
+
+#ifdef MDB_DEBUG
+#define LOG(channel, ...) logging::get_logging()->log(channel, fmt::format(__VA_ARGS__));
+#else
+#define LOG(channel, ...)
+#endif
 } // namespace logging

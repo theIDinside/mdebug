@@ -51,13 +51,38 @@ Continue::execute(Tracer *tracer) noexcept
 std::string
 NextResponse::serialize(int seq) const noexcept
 {
-  TODO("NextResponse::serialize(int seq)");
+  if (success)
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "next" }})", seq,
+        response_seq);
+  else
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "next", "message": "notStopped" }})",
+        seq, response_seq);
 }
 
 UIResultPtr
 Next::execute(Tracer *tracer) noexcept
 {
-  TODO("Next::execute(Tracer *tracer)");
+  auto target = tracer->get_current();
+  if (target->is_running()) {
+    return new NextResponse{false, this};
+  }
+
+  switch (granularity) {
+  case SteppingGranularity::Instruction:
+    LOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
+        target->cache_registers(thread_id).rip);
+    target->step_target(thread_id, 1);
+    break;
+  case SteppingGranularity::Line:
+    TODO("Next::execute granularity=SteppingGranularity::Line")
+    break;
+  case SteppingGranularity::LogicalBreakpointLocation:
+    TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
+    break;
+  }
+  return new NextResponse{true, this};
 }
 
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept

@@ -20,6 +20,9 @@ Below is a list of implemented requests. Though they might not be implemented _f
 - [ ] LoadedSources
 - [ ] Modules
 - [ ] Next
+  - [x] Instruction
+  - [ ] Line
+  - [ ] "Statement"
 - [ ] Pause
 - [x] ReadMemory
 - [ ] Restart

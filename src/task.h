@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 
 using namespace std::string_view_literals;
-enum class WaitStatus
+enum class WaitStatus : u16
 {
 #define ITEM(IT, Value) IT = Value,
 #include "./defs/waitstatus.def"
@@ -51,11 +51,12 @@ struct TaskInfo
 {
   pid_t tid;
   std::optional<TaskWaitResult> wait_status;
-  RunType run_type;
+  RunType run_type : 4;
   bool stopped : 1;
   bool stepping : 1;
   bool ptrace_stop : 1;
   bool initialized : 1;
+  bool cache_dirty : 1;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;
@@ -69,11 +70,21 @@ struct TaskInfo
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
+  void set_dirty() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
    */
   bool is_stopped() const noexcept;
+};
+
+struct TaskStepInfo
+{
+  Tid tid;
+  int steps;
+  bool ignore_bps;
+  TPtr<void> rip;
+  void step_taken_to(TPtr<void> rip) noexcept;
 };
 
 struct TaskVMInfo

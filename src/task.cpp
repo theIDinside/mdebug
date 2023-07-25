@@ -4,7 +4,7 @@
 
 TaskInfo::TaskInfo(pid_t tid) noexcept
     : tid(tid), wait_status(), run_type(RunType::UNKNOWN), stopped(true), stepping(false), ptrace_stop(false),
-      initialized(false)
+      initialized(false), cache_dirty(true)
 {
 }
 
@@ -49,6 +49,19 @@ bool
 TaskInfo::can_continue() noexcept
 {
   return initialized && (stopped || ptrace_stop);
+}
+
+void
+TaskInfo::set_dirty() noexcept
+{
+  cache_dirty = true;
+}
+
+void
+TaskStepInfo::step_taken_to(TPtr<void> rip) noexcept
+{
+  this->rip = rip;
+  --steps;
 }
 
 bool
