@@ -1,80 +1,151 @@
 #include "disassemble.h"
 #include "../target.h"
-#include "distorm/include/distorm.h"
 #include "elf.h"
+#include "fmt/core.h"
+#include "lnp.h"
+#include "type.h"
+#include "zydis/Zydis.h"
+#include <algorithm>
+#include <charconv>
+#include <set>
 
 namespace sym {
-void
-disassemble_backwards(Target *target, AddrPtr addr, int ins_offset, u32 total,
-                      std::vector<sym::Disassembly> &result)
+
+static sym::Disassembly
+create_disasm_entry(Target *target, AddrPtr vm_address, const ZydisDisassembledInstruction &ins,
+                    const u8 *exec_data_ptr) noexcept
 {
-  logging::get_logging()->log(
-      "mdb", fmt::format("Disassemble backwards from {} at ins offset {} of total {}", addr, ins_offset, total));
-  result.reserve(total);
-  ElfSection *text = target->get_text_section(addr);
-  ASSERT(text != nullptr, "Could not find .text section containing {}", addr);
-  auto total_disassembled = 0;
-  auto file_index_res = target->cu_file_from_pc(addr);
-  ASSERT(file_index_res.has_value(), "Could not find CU with address {}", addr);
-  auto file_index = *file_index_res;
-  auto f = &target->cu_files()[file_index];
-  auto current_addr = addr;
-  const auto &lt = f->line_table();
-  auto lt_entry_iter = std::lower_bound(lt.cbegin(), lt.cend(), current_addr,
-                                        [](const auto &lte, auto addr) { return lte.pc >= addr; });
-  const auto cmp = std::abs(ins_offset);
-  total = std::min(cmp, static_cast<int>(total));
-
-  _DInst decomposed[400];
-
-  // find line table entry, reverse iterate from there, disassemble between lte->pc .. addr, rinse repeat
-  auto it = std::make_reverse_iterator(lt_entry_iter);
-  auto end = std::crend(lt);
-  auto end_addr = current_addr;
-  while (total_disassembled < static_cast<int>(total) || total_disassembled < cmp) {
-    --it;
-    if (it == end) {
-      if (file_index > 0) {
-        f = &target->cu_files()[--file_index];
-        it = std::crbegin(f->line_table());
-        end = std::crend(f->line_table());
-      } else {
-        const auto remaining_invalid = total - total_disassembled;
-        total_disassembled += (total - total_disassembled);
-        for (auto i = 0u; i < remaining_invalid; ++i) {
-          result.insert(result.begin(), sym::Disassembly{nullptr, "", "", "<unknown>", "<unknown>", 0, 0});
-        }
-        return;
-      }
+  std::string machine_code{};
+  machine_code.resize(ins.info.length * 2 + ins.info.length - 1, ' ');
+  auto mc_b = machine_code.begin();
+  for (auto i = 0; i < ins.info.length; i++) {
+    fmt::format_to(mc_b, "{:02x}", *(exec_data_ptr + i));
+    mc_b += 3;
+  }
+  auto f = target->cu_file_from_pc(vm_address);
+  if (f) {
+    const CompilationUnitFile &file = target->cu_files()[*f];
+    const auto [begin, end] = file.get_range(vm_address);
+    if (begin && end) {
+      ASSERT(begin != nullptr && end != nullptr, "Expected to be able to find LT Entries; but didn't");
+      ASSERT(vm_address >= begin->pc && vm_address <= end->pc,
+             "Address {} does not land inside LTE range {} .. {}", vm_address, begin->pc, end->pc);
+      return sym::Disassembly{.address = vm_address,
+                              .opcode = std::move(machine_code),
+                              .instruction = ins.text,
+                              .source_name = file.file(begin->file),
+                              .source_path = file.path_of_file(begin->file),
+                              .line = begin->line,
+                              .column = begin->column};
+    } else {
+      return sym::Disassembly{.address = vm_address,
+                              .opcode = std::move(machine_code),
+                              .instruction = ins.text,
+                              .source_name = "",
+                              .source_path = "",
+                              .line = 0,
+                              .column = 0};
     }
-    _CodeInfo info{};
-    info.dt = Decode64Bits;
-    info.codeOffset = it->pc;
-    info.code = text->into(it->pc);
-    info.codeLen = static_cast<int>(current_addr - it->pc);
-    current_addr = it->pc;
-    u32 result_count = 0;
-    const auto res =
-        distorm_decompose(&info, (decomposed + total_disassembled), 400 - total_disassembled, &result_count);
-    int idx = result_count;
-    ASSERT(res == DECRES_SUCCESS, "Failed to decompose instructions between {} .. {}", it->pc, end_addr);
-    total_disassembled += result_count;
-    for (auto i = idx - 1; i >= 0; --i) {
-      _DecodedInst decode;
-      distorm_format(&info, &decomposed[i], &decode);
-      std::string opcode;
-      opcode.reserve(decode.instructionHex.length);
-      std::string mnemonic;
-      mnemonic.reserve(decode.mnemonic.length);
-      std::copy(decode.instructionHex.p, decode.instructionHex.p + decode.instructionHex.length,
-                std::back_inserter(opcode));
-      std::copy(decode.mnemonic.p, decode.mnemonic.p + decode.mnemonic.length, std::back_inserter(mnemonic));
-      result.insert(result.begin(), sym::Disassembly{decode.offset, opcode, mnemonic, f->file(it->file),
-                                                     f->path_of_file(it->file), it->line, it->column});
+  } else {
+    return sym::Disassembly{.address = vm_address,
+                            .opcode = std::move(machine_code),
+                            .instruction = ins.text,
+                            .source_name = "",
+                            .source_path = "",
+                            .line = 0,
+                            .column = 0};
+  }
+}
+
+void
+zydis_disasm_backwards(Target *target, AddrPtr addr, i32 ins_offset, i32 total,
+                       std::vector<sym::Disassembly> &output) noexcept
+{
+  ASSERT(ins_offset > 0 && total > 0, "ins_offset must be an absolute number");
+  ElfSection *text = target->get_text_section(addr);
+  ZydisDisassembledInstruction instruction;
+
+  // This hurts my soul and is so hacky.
+  std::set<AddrPtr> disassembled_addresses{};
+  if (auto idx = target->cu_file_from_pc(addr); idx.has_value()) {
+    int index = *idx;
+    while (index >= 0 && static_cast<int>(output.size()) <= ins_offset) {
+      auto add = target->cu_files()[index].low_pc();
+      auto exec_data_ptr = text->into(add);
+      std::vector<sym::Disassembly> result;
+      while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
+                                              text->remaining_bytes(exec_data_ptr), &instruction)) &&
+             add <= addr) {
+        if (!disassembled_addresses.contains(add))
+          result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
+        disassembled_addresses.insert(add);
+        add = offset(add, instruction.info.length);
+        exec_data_ptr += instruction.info.length;
+      }
+      addr = target->cu_files()[index].low_pc();
+      for (auto i = result.rbegin(); i != result.rend(); i++) {
+        output.insert(output.begin(), *i);
+      }
+      index--;
     }
   }
-  for (const auto &r : result) {
-    logging::get_logging()->log("mdb", fmt::format("{}", r.address));
+
+  // Disassemble instructions that aren't referenced by DWARF debug info
+  if (static_cast<int>(output.size()) <= ins_offset) {
+    auto add = text->address;
+    auto exec_data_ptr = text->into(text->address);
+    std::vector<sym::Disassembly> result;
+    logging::get_logging()->log("mdb", fmt::format("Disassembling non-DWARF referenced instructions"));
+    while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
+                                            text->remaining_bytes(exec_data_ptr), &instruction)) &&
+           add <= addr) {
+      if (!disassembled_addresses.contains(add))
+        result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
+      disassembled_addresses.insert(add);
+      add = offset(add, instruction.info.length);
+      exec_data_ptr += instruction.info.length;
+    }
+    for (auto i = result.rbegin(); i != result.rend(); i++) {
+      if (output.begin()->address != i->address) {
+        output.insert(output.begin(), *i);
+      }
+    }
+  }
+  // Fill remaining with "invalid values"
+  if (static_cast<int>(output.size()) <= ins_offset) {
+    while (static_cast<int>(output.size()) < ins_offset) {
+      output.insert(output.begin(), sym::Disassembly{nullptr, "", "", "", "", 0, 0});
+    }
+  }
+}
+
+void
+zydis_disasm(Target *target, AddrPtr addr, u32 ins_offset, u32 total,
+             std::vector<sym::Disassembly> &output) noexcept
+{
+  ElfSection *text = target->get_text_section(addr);
+  const auto start_exec_data = text->into(addr);
+  auto exec_data_ptr = start_exec_data;
+  ZydisDisassembledInstruction instruction;
+  auto vm_address = addr;
+
+  if (ins_offset > 0) {
+    while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, vm_address, exec_data_ptr,
+                                            text->remaining_bytes(exec_data_ptr), &instruction)) &&
+           ins_offset != 0) {
+      vm_address = offset(vm_address, instruction.info.length);
+      exec_data_ptr += instruction.info.length;
+      --ins_offset;
+    }
+  }
+
+  while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, vm_address, exec_data_ptr,
+                                          text->remaining_bytes(exec_data_ptr), &instruction)) &&
+         total != 0) {
+    output.push_back(create_disasm_entry(target, vm_address, instruction, exec_data_ptr));
+    vm_address = offset(vm_address, instruction.info.length);
+    exec_data_ptr += instruction.info.length;
+    --total;
   }
 }
 } // namespace sym

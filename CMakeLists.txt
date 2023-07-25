@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(midas LANGUAGES CXX)
+project(midas LANGUAGES CXX C ASM)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -68,6 +68,8 @@ set(COMMON_SRC src/common.cpp src/common.h)
 
 set(MIDAS_SPINLOCK src/lib/spinlock.cpp src/lib/spinlock.h)
 add_library(mdb_spinlock STATIC ${MIDAS_SPINLOCK})
+add_library(zydis STATIC dependencies/zydis/Zydis.c dependencies/zydis/Zydis.h)
+target_include_directories(zydis PRIVATE ./dependencies/zydis)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__ -march=native -mavx -mavx2")
@@ -153,9 +155,7 @@ set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 set(JSON_Install OFF CACHE INTERNAL "")
 add_subdirectory(dependencies/nlohmann_json)
 
-add_subdirectory(dependencies/distorm)
-
-target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json distorm3)
+target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zydis)
 target_include_directories(mdb PUBLIC ./dependencies)
 
 find_program(NODEJS "node")

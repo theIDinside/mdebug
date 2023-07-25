@@ -638,7 +638,7 @@ Target::add_file(CompilationUnitFile &&file) noexcept
     LockGuard guard{spin_lock};
     constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
       const auto faddr_rng = f.low_high_pc();
-      return range.high < faddr_rng.low;
+      return range.high > faddr_rng.low;
     };
     auto it_pos = std::lower_bound(m_files.begin(), m_files.end(), file.low_high_pc(), file_sorter_by_addresses);
     m_files.insert(it_pos, std::move(file));
@@ -683,7 +683,7 @@ Target::build_callframe_stack(const TaskInfo *task) noexcept
   rsps.reserve(base_ptrs.size());
   rsps.push_back(register_cache[task->tid].rip);
   for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
-    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({bp_it->offset(8)});
+    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
     if (ret_addr)
       rsps.push_back(*ret_addr);
   }

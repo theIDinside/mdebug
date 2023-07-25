@@ -2,6 +2,9 @@
 #include "../common.h"
 
 struct Target;
+struct ElfSection;
+class CompilationUnitFile;
+struct LineTableEntry;
 
 namespace sym {
 struct Disassembly
@@ -15,8 +18,11 @@ struct Disassembly
   u32 column;
 };
 
-void disassemble_backwards(Target *target, AddrPtr addr, int ins_offset, u32 total,
-                           std::vector<sym::Disassembly> &output);
+void zydis_disasm_backwards(Target *target, AddrPtr addr, i32 ins_offset, i32 total,
+                            std::vector<sym::Disassembly> &output) noexcept;
+
+void zydis_disasm(Target *target, AddrPtr addr, u32 ins_offset, u32 total,
+                  std::vector<sym::Disassembly> &output) noexcept;
 } // namespace sym
 
 namespace fmt {

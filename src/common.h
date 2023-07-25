@@ -142,7 +142,10 @@ public:
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
 
   // Utility function. When one needs to be sure we are offseting by *bytes* and not by sizeof(T) * n.
-  TraceePointer<T> constexpr offset(u64 bytes) const noexcept { return this->remote_addr + bytes; }
+  friend TraceePointer<T> constexpr offset(TraceePointer<T> ptr, u64 bytes) noexcept
+  {
+    return ptr.remote_addr + bytes;
+  }
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
   template <std::integral OffsetT>
@@ -271,7 +274,7 @@ public:
   constexpr friend bool
   operator>=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() > r.get();
+    return l.get() >= r.get();
   }
 
   template <typename U = T>
@@ -663,8 +666,9 @@ template <typename Container>
 void
 keep_range(Container &c, u64 start_idx, u64 end_idx) noexcept
 {
+  ASSERT(start_idx <= end_idx, "Invalid parameters start {} end {}", start_idx, end_idx);
   const auto start = c.begin() + start_idx;
-  const auto end = c.begin() + end_idx;
+  const auto end = c.begin() + std::min(end_idx, c.size());
   // erase from end to c.end() first to keep iterators valid
   c.erase(end, c.end());
   c.erase(c.begin(), start);

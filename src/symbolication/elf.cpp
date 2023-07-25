@@ -28,9 +28,10 @@ ElfSection::end() const noexcept
 const u8 *
 ElfSection::into(AddrPtr vm_addr) const noexcept
 {
-  ASSERT(vm_addr > address && (vm_addr - address) < size(), "Section does not contain vm address {}", vm_addr);
+  ASSERT(vm_addr >= address, "Virtual Memory address {} is < {}", vm_addr, address);
+  ASSERT((vm_addr - address) < size(), "Virtual memory address {} is > {}", vm_addr, address + size());
   const AddrPtr offset = (vm_addr - address);
-  return begin() + offset;
+  return begin() + offset.get();
 }
 
 bool
@@ -47,6 +48,15 @@ ElfSection::offset(const u8 *inside_ptr) const noexcept
   ASSERT(inside_ptr >= m_section_ptr, "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
          (void *)inside_ptr, (void *)m_section_ptr);
   return (inside_ptr - m_section_ptr);
+}
+
+u64
+ElfSection::remaining_bytes(const u8 *ptr) const noexcept
+{
+  ASSERT(ptr >= m_section_ptr, "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})", (void *)ptr,
+         (void *)m_section_ptr);
+  const auto offset_bytes = offset(ptr);
+  return size() - offset_bytes;
 }
 
 u64
