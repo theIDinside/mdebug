@@ -638,7 +638,7 @@ Target::add_file(CompilationUnitFile &&file) noexcept
     LockGuard guard{spin_lock};
     constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
       const auto faddr_rng = f.low_high_pc();
-      return range.high < faddr_rng.low;
+      return range.high > faddr_rng.low;
     };
     auto it_pos = std::lower_bound(m_files.begin(), m_files.end(), file.low_high_pc(), file_sorter_by_addresses);
     m_files.insert(it_pos, std::move(file));
