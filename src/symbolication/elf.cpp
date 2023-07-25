@@ -28,9 +28,10 @@ ElfSection::end() const noexcept
 const u8 *
 ElfSection::into(AddrPtr vm_addr) const noexcept
 {
-  ASSERT(vm_addr > address && (vm_addr - address) < size(), "Section does not contain vm address {}", vm_addr);
+  ASSERT(vm_addr >= address, "Virtual Memory address {} is < {}", vm_addr, address);
+  ASSERT((vm_addr - address) < size(), "Virtual memory address {} is > {}", vm_addr, address + size());
   const AddrPtr offset = (vm_addr - address);
-  return begin() + offset;
+  return begin() + offset.get();
 }
 
 bool

@@ -45,9 +45,11 @@ function processObjdumpLines(insts) {
 }
 
 function compareDisassembly(objdump, mdbResult) {
+
   if (mdbResult.length != objdump.length) {
     throw new Error(`Expected ${objdump.length} disassembled instructions but instead got ${mdbResult.length}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
   }
+  console.log(`Disassembled instructions ${mdbResult.length}`);
   for (let i = 0; i < objdump.length; ++i) {
     if (mdbResult[i].address != objdump[i].addr) {
       throw new Error(`Expected disassembled instruction #${i} at address ${objdump[i].addr} but got ${mdbResult[i].address}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
@@ -59,34 +61,28 @@ function compareDisassembly(objdump, mdbResult) {
   }
 }
 
+async function disasm_verify(objdump, client, pc, insOffset, insCount) {
+  const insIndex = objdump.findIndex(({ addr, opcode, rep }) => addr == pc);
+  const objdumpSpan = objdump.slice(insIndex + insOffset, insIndex + insOffset + insCount);
+  const disassembly = await client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: insOffset, instructionCount: insCount, resolveSymbols: false });
+  compareDisassembly(objdumpSpan, disassembly.body.instructions);
+  console.log(`Disassemble ${insOffset} ${insCount}; starting at ${pc} succeeded`);
+}
+
 async function test() {
   const objdumped = spawnSync("objdump", ["-d", buildDirFile("stackframes")]).stdout.toString();
   const insts_of_interest = getTextSection(objdumped);
-  const insts = processObjdumpLines(insts_of_interest);
+  const objdump = processObjdumpLines(insts_of_interest);
   await da_client.launchToMain(buildDirFile("stackframes"));
   const threads = await da_client.threads();
   const frames = await da_client.stackTrace(threads[0].id);
   const pc = frames.body.stackFrames[0].instructionPointerReference;
-
-  const insIndex = insts.findIndex(({ addr, opcode, rep }) => addr == pc);
-
-  {
-    const objdumpSpan = insts.slice(insIndex - 5, insIndex + 5);
-    const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: -5, instructionCount: 10, resolveSymbols: false });
-    compareDisassembly(objdumpSpan, disassembly.body.instructions);
-  }
-
-  {
-    const objdumpSpan = insts.slice(insIndex, insIndex + 10)
-    const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: 0, instructionCount: 10, resolveSymbols: false });
-    compareDisassembly(objdumpSpan, disassembly.body.instructions);
-  }
-
-  {
-    const objdumpSpan = insts.slice(insIndex - 20, insIndex - 10)
-    const disassembly = await da_client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: -20, instructionCount: 10, resolveSymbols: false });
-    compareDisassembly(objdumpSpan, disassembly.body.instructions);
-  }
+  await disasm_verify(objdump, da_client, pc, -5, 10)
+  await disasm_verify(objdump, da_client, pc, 0, 10);
+  await disasm_verify(objdump, da_client, pc, -30, 10);
+  await disasm_verify(objdump, da_client, pc, -50, 20);
+  await disasm_verify(objdump, da_client, pc, -100, 200);
+  await disasm_verify(objdump, da_client, pc, 10, 2000);
 }
 
 test().then(() => {

@@ -4,6 +4,8 @@ fmt_version="10.0.0"
 json_version="v3.11.2"
 gtest_version="03597a01ee50ed33e9dfd640b249b4be3799d395"
 distorm_version="3.5.2b"
+zydis_version="v4.0.0"
+
 # https://github.com/gdabah/distorm/archive/refs/tags/3.5.2b.tar.gz
 # The relative path to repo root dir from where this script is executed,
 # makes it safe to run from where ever.
@@ -23,6 +25,21 @@ if [ ! -e "$relative_repo_root_dir/dependencies/distorm" ]; then
 else
   echo "distorm dependency already met"
 fi
+
+if [ ! -e "$relative_repo_root_dir/dependencies/zydis" ]; then
+  echo "Downloading Zydis"
+  wget -q -P $relative_repo_root_dir/dependencies https://github.com/zyantific/zydis/releases/download/$zydis_version/zydis-amalgamated.tar.gz
+  echo "Done!"
+  tar xf $relative_repo_root_dir/dependencies/zydis-amalgamated.tar.gz -C $relative_repo_root_dir/dependencies/
+  mv $relative_repo_root_dir/dependencies/amalgamated-dist $relative_repo_root_dir/dependencies/zydis
+  rm $relative_repo_root_dir/dependencies/zydis-amalgamated.tar.gz
+  # echo "Setting up CMake for Zydis dependency..."
+  # cp $relative_repo_root_dir/generate/distorm_cmake.txt $relative_repo_root_dir/dependencies/distorm/CMakeLists.txt
+  echo "zydis dependency configured"
+else
+  echo "zydis dependency already met"
+fi
+
 
 # Begin by setting up libfmt dependencies
 if [ ! -e "$relative_repo_root_dir/dependencies/fmt" ]; then

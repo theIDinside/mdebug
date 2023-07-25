@@ -2,6 +2,9 @@
 #include "../common.h"
 
 struct Target;
+struct ElfSection;
+class CompilationUnitFile;
+struct LineTableEntry;
 
 namespace sym {
 struct Disassembly
