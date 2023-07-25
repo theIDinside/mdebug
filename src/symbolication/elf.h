@@ -28,6 +28,7 @@ struct ElfSection
    * Requires pointer to be >= m_section_ptr. This contract is only tested in debug builds.
    */
   u64 offset(const u8 *inside_ptr) const noexcept;
+  u64 remaining_bytes(const u8 *ptr) const noexcept;
   u64 size() const noexcept;
   const u8 *data() const noexcept;
 };

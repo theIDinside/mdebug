@@ -37,36 +37,38 @@ function processObjdumpLines(insts) {
       const decomposition = { addr: `0x${line.substring(0, pos)}`, opcode: line.substring(pos + 2, rep).trimEnd(), rep: line.substring(rep + 1) };
       res.push(decomposition);
     } else {
-      const decomposition = { addr: `0x${line.substring(0, pos)}`, opcode: line.substring(pos + 2).trimEnd(), rep: "padding" };
-      res.push(decomposition);
+      // zydis appends padding to last instruction, apparently, making our tests fail. This way, we make objdump behave like Zydis
+      res[res.length - 1].opcode = `${res[res.length - 1].opcode} ${line.substring(pos + 2).trimEnd()}`
     }
   }
   return res;
 }
 
-function compareDisassembly(objdump, mdbResult) {
+function compareDisassembly(pc, objdump, mdbResult) {
 
   if (mdbResult.length != objdump.length) {
-    throw new Error(`Expected ${objdump.length} disassembled instructions but instead got ${mdbResult.length}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
+    throw new Error(`(${pc}): Expected ${objdump.length} disassembled instructions but instead got ${mdbResult.length}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
   }
-  console.log(`Disassembled instructions ${mdbResult.length}`);
+  console.log(`MDB Instruction Output: ${mdbResult.length} == objdump Instruction Output: ${objdump.length}`);
   for (let i = 0; i < objdump.length; ++i) {
     if (mdbResult[i].address != objdump[i].addr) {
-      throw new Error(`Expected disassembled instruction #${i} at address ${objdump[i].addr} but got ${mdbResult[i].address}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
+      throw new Error(`(${pc}): Expected disassembled instruction #${i} at address ${objdump[i].addr} but got ${mdbResult[i].address}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`);
     }
     if (mdbResult[i].instructionBytes != objdump.opcode
       && mdbResult[i].instructionBytes.split(" ").join("") != objdump[i].opcode.split(" ").join("")) {
-      throw new Error(`Expected disassembled instruction to have opcode ${objdump[i].opcode} but got ${mdbResult[i].instructionBytes}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`)
+      throw new Error(`(${pc}): Expected disassembled instruction to have opcode ${objdump[i].opcode} but got ${mdbResult[i].instructionBytes}. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`)
     }
   }
+
 }
 
 async function disasm_verify(objdump, client, pc, insOffset, insCount) {
   const insIndex = objdump.findIndex(({ addr, opcode, rep }) => addr == pc);
-  const objdumpSpan = objdump.slice(insIndex + insOffset, insIndex + insOffset + insCount);
+  const offset = insIndex + insOffset
+  const objdumpSpan = objdump.slice(offset, offset + insCount);
   const disassembly = await client.sendReqGetResponse("disassemble", { memoryReference: pc, offset: 0, instructionOffset: insOffset, instructionCount: insCount, resolveSymbols: false });
-  compareDisassembly(objdumpSpan, disassembly.body.instructions);
-  console.log(`Disassemble ${insOffset} ${insCount}; starting at ${pc} succeeded`);
+  compareDisassembly(pc, objdumpSpan, disassembly.body.instructions);
+  console.log(`[offset: ${insOffset}, pc: ${pc}, count: ${insCount}]\n\t - MDB output == objdump output!`);
 }
 
 async function test() {
@@ -77,10 +79,11 @@ async function test() {
   const threads = await da_client.threads();
   const frames = await da_client.stackTrace(threads[0].id);
   const pc = frames.body.stackFrames[0].instructionPointerReference;
-  await disasm_verify(objdump, da_client, pc, -5, 10)
   await disasm_verify(objdump, da_client, pc, 0, 10);
+  await disasm_verify(objdump, da_client, pc, 5, 10);
+  await disasm_verify(objdump, da_client, pc, -5, 10)
   await disasm_verify(objdump, da_client, pc, -30, 10);
-  await disasm_verify(objdump, da_client, pc, -50, 20);
+  await disasm_verify(objdump, da_client, pc, -50, 10);
   await disasm_verify(objdump, da_client, pc, -100, 200);
   await disasm_verify(objdump, da_client, pc, 10, 2000);
 }

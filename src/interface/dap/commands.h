@@ -221,7 +221,7 @@ struct DisassembleResponse final : public UIResult
   CTOR(DisassembleResponse)
   ~DisassembleResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
-  std::vector<sym::Disassembly> disassembled_instructions;
+  std::vector<sym::Disassembly> instructions;
 };
 
 struct Disassemble final : public UICommand

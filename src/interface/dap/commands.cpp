@@ -7,7 +7,6 @@
 #include "parse_buffer.h"
 #include "types.h"
 #include <algorithm>
-#include <distorm/include/distorm.h>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -498,65 +497,37 @@ Disassemble::Disassemble(std::uint64_t seq, TPtr<void> address, int byte_offset,
 UIResultPtr
 Disassemble::execute(Tracer *tracer) noexcept
 {
-  _DecodedInst ins[ins_count];
-  u32 total = 0;
-  _DecodeType dt = Decode64Bits;
-  const auto target = tracer->get_current();
-  auto sect_ptr = target->get_in_text_section(address);
   auto res = new DisassembleResponse{true, this};
-  res->disassembled_instructions.reserve(ins_count);
-  auto instruction_count = ins_count;
+  res->instructions.reserve(ins_count);
+  int remaining = ins_count;
   if (ins_offset < 0) {
-    sym::disassemble_backwards(target, address, ins_offset, instruction_count, res->disassembled_instructions);
-    if (std::abs(ins_offset) > instruction_count) {
-      ASSERT(static_cast<u32>(std::abs(ins_offset)) <= res->disassembled_instructions.size(),
-             "We don't have enough instructions");
-      const auto start_idx = res->disassembled_instructions.size() + ins_offset;
-      const auto end_idx = start_idx + instruction_count;
-      keep_range(res->disassembled_instructions, start_idx, end_idx);
+    const int negative_offset = std::abs(ins_offset);
+    sym::zydis_disasm_backwards(tracer->get_current(), address, static_cast<u32>(negative_offset), ins_count,
+                                res->instructions);
+    if (negative_offset < ins_count) {
+      for (auto i = 0u; i < res->instructions.size(); i++) {
+        if (res->instructions[i].address == address) {
+          keep_range(res->instructions, i - negative_offset, i);
+          break;
+        }
+      }
+    } else {
+      for (auto i = 0u; i < res->instructions.size(); i++) {
+        if (res->instructions[i].address == address) {
+          keep_range(res->instructions, i - negative_offset, i - negative_offset + ins_count);
+          break;
+        }
+      }
       return res;
-    } else {
-      auto resize = instruction_count + ins_offset;
-      if (res->disassembled_instructions.size() > resize) {
-        auto diff = res->disassembled_instructions.size() - resize;
-        res->disassembled_instructions.erase(res->disassembled_instructions.begin(),
-                                             res->disassembled_instructions.begin() + diff);
-      }
-      instruction_count -= res->disassembled_instructions.size();
     }
+    remaining -= res->instructions.size();
+    ins_offset = 0;
   }
 
-  if (instruction_count <= 0)
-    return res;
-
-  const auto res_code = distorm_decode(address, sect_ptr, 2000, dt, ins, instruction_count, &total);
-  ASSERT(res_code != DECRES_INPUTERR, "Failed to disassemble {} instructions starting from {}", instruction_count,
-         address);
-
-  for (auto i = 0u; i < total; ++i) {
-    std::string opcode;
-    opcode.reserve(ins[i].instructionHex.length);
-    std::string mnemonic;
-    mnemonic.reserve(ins[i].mnemonic.length);
-    std::copy(ins[i].instructionHex.p, ins[i].instructionHex.p + ins[i].instructionHex.length,
-              std::back_inserter(opcode));
-    std::copy(ins[i].mnemonic.p, ins[i].mnemonic.p + ins[i].mnemonic.length, std::back_inserter(mnemonic));
-    auto fidx = target->cu_file_from_pc(address);
-    if (fidx) {
-      const auto &f = target->cu_files()[*fidx];
-      const auto &lt = f.line_table();
-      auto lte = std::lower_bound(lt.cbegin(), lt.cend(), address,
-                                  [](const LineTableEntry &entry, AddrPtr addr) { return entry.pc >= addr; });
-      if (lte != std::cend(lt)) {
-        --lte;
-      }
-      res->disassembled_instructions.push_back(sym::Disassembly{
-          ins[i].offset, opcode, mnemonic, f.file(lte->file), f.path_of_file(lte->file), lte->line, lte->column});
-    } else {
-      res->disassembled_instructions.push_back(sym::Disassembly{ins[i].offset, opcode, mnemonic, "", "", 0, 0});
-    }
+  if (remaining > 0) {
+    sym::zydis_disasm(tracer->get_current(), address, static_cast<u32>(std::abs(ins_offset)), remaining,
+                      res->instructions);
   }
-
   return res;
 }
 
@@ -565,7 +536,7 @@ DisassembleResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
       R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "disassemble", "body": {{ "instructions": [{}] }} }})",
-      seq, response_seq, fmt::join(disassembled_instructions, ","));
+      seq, response_seq, fmt::join(instructions, ","));
 }
 
 ui::UICommand *

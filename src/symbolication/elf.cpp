@@ -51,6 +51,15 @@ ElfSection::offset(const u8 *inside_ptr) const noexcept
 }
 
 u64
+ElfSection::remaining_bytes(const u8 *ptr) const noexcept
+{
+  ASSERT(ptr >= m_section_ptr, "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})", (void *)ptr,
+         (void *)m_section_ptr);
+  const auto offset_bytes = offset(ptr);
+  return size() - offset_bytes;
+}
+
+u64
 ElfSection::size() const noexcept
 {
   return m_section_size;

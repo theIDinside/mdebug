@@ -141,7 +141,7 @@ const FunctionSymbol *
 CompilationUnitFile::find_subprogram(TPtr<void> addr) const noexcept
 {
   using FnSym = FunctionSymbol;
-  const auto sym = std::lower_bound(fns.cbegin(), fns.cend(), addr.offset(1),
+  const auto sym = std::lower_bound(fns.cbegin(), fns.cend(), offset(addr, 1),
                                     [](const FnSym &l, TPtr<void> addr) { return l.end < addr; });
   if (sym != std::end(fns)) {
     ASSERT(sym->start.get() <= addr.get() && addr.get() < sym->end.get(),
@@ -151,6 +151,22 @@ CompilationUnitFile::find_subprogram(TPtr<void> addr) const noexcept
   } else {
     return nullptr;
   }
+}
+
+LineTableEntryRange
+CompilationUnitFile::get_range(TPtr<void> addr) const noexcept
+{
+  const auto lte_it = std::lower_bound(m_ltes.cbegin(), m_ltes.cend(), addr,
+                                       [](const LineTableEntry &l, TPtr<void> addr) { return l.pc <= addr; });
+  if (lte_it == std::cend(m_ltes))
+    return {nullptr, nullptr};
+  return {(lte_it - 1).base(), lte_it.base()};
+}
+
+LineTableEntryRange
+CompilationUnitFile::get_range(TPtr<void> start, TPtr<void> end) const noexcept
+{
+  TODO(fmt::format("CompilationUnitFile::get_range(TPtr<void> start = {}, TPtr<void> end = {})", start, end));
 }
 
 std::string_view

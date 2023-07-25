@@ -30,13 +30,13 @@ Current dependencies
 
 - libfmt version 10.0.0
 - nlohmann_json version 3.11.2
-- distorm
+- zydis
 
 Justification for these three libraries are as follows;
 
 - `libfmt` is the best thing that ever happened to C++. Finally C++ can join the 21st century. An added bonus is also that it's a fast library and easy to use. With the right tweaks, it compiles down to what looks like C printf's (according to their documentation). That's pretty awesome.
 - `nlohmann_json` because we don't want to parse json ourselves. It's not fun. The particular choice for parsing JSON may change, as nlohmann*json might not fulfill MDB's requirements, because it \_seems* as though it only operates on JSON Lines. We parse JSON that come with a header (defining the length of the json object) - if there's a library that can take this into account, we will use that instead.
-- `distorm` - because I don't know how to disassemble yet and being able to perform this task is crucial for a debugger. We'll cross that bridge when we have solved everything else, though. It's the only "debug related" dependency we will be using though, so we can pat ourselves on our back for that.
+- `zydis` - because I don't know how to disassemble yet and being able to perform this task is crucial for a debugger. We'll cross that bridge when we have solved everything else, though. It's the only "debug related" dependency we will be using though, so we can pat ourselves on our back for that.
 
 #### Dev-dependencies
 

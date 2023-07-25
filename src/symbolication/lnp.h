@@ -81,6 +81,12 @@ struct LineTableEntry
   bool epilogue_begin : 1;
 };
 
+struct LineTableEntryRange
+{
+  const LineTableEntry *begin;
+  const LineTableEntry *end;
+};
+
 namespace fmt {
 template <> struct formatter<LineTableEntry>
 {

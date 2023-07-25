@@ -683,7 +683,7 @@ Target::build_callframe_stack(const TaskInfo *task) noexcept
   rsps.reserve(base_ptrs.size());
   rsps.push_back(register_cache[task->tid].rip);
   for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
-    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({bp_it->offset(8)});
+    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
     if (ret_addr)
       rsps.push_back(*ret_addr);
   }
