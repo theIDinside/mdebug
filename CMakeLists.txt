@@ -161,7 +161,7 @@ target_include_directories(mdb PUBLIC ./dependencies)
 find_program(NODEJS "node")
 
 if(NODEJS)
-  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints stackframes disassemble)
+  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints stackframes disassemble next)
   foreach(driver_test ${DRIVER_TESTS})
     add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})
   endforeach()

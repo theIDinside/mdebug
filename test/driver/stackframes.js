@@ -1,4 +1,4 @@
-const { DAClient, MDB_PATH, checkResponse, testException, getLineOf, readFile, buildDirFile, repoDirFile } = require("./client")
+const { DAClient, MDB_PATH, checkResponse, testException, getLineOf, readFile, buildDirFile, repoDirFile, seconds } = require("./client")
 
 const da_client = new DAClient(MDB_PATH, []);
 
@@ -33,7 +33,7 @@ async function test() {
   });
 
   for (let i = 3; i < 7; i++) {
-    await da_client.contNextStop(threads[0].id);
+    await da_client.sendReqWaitEvent("continue", { threadId: threads[0].id }, "stopped", seconds(1));
     await da_client.stackTrace(threads[0].id).then(res => {
       checkResponse(__filename, res, "stackTrace", true);
       const { stackFrames } = res.body;
