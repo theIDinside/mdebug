@@ -10,6 +10,8 @@ const fs = require("fs");
 const { spawn, spawnSync } = require("child_process");
 const EventEmitter = require("events");
 
+let IMPORTING_FILE = "";
+
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename);
 const TEST_DIR = path.dirname(DRIVER_DIR);
@@ -76,12 +78,18 @@ class DAClient {
       console.error(`[TEST FAILED] MDB error: ${err}`);
       process.exit(-1);
     });
-    this.mdb.on("exit", exitCode => {
-      console.error(`[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`);
+    this.mdb.on("exit", (exitCode) => {
+      console.error(
+        `[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`
+      );
       process.exit(-1);
     });
-    process.on("exit", () => {
+    process.on("exit", (code) => {
       this.mdb.kill("SIGKILL");
+      if (code != 0) {
+        console.log(`DUMPING LOG`);
+        dump_log();
+      }
     });
     this.seq = 1;
     this.send_wait_res = new EventEmitter();
@@ -98,18 +106,8 @@ class DAClient {
         case "exited":
           this.mdb.stdin.write(this.serializeRequest("disconnect"));
           break;
-        case "output":
-          break;
-        case "initialized":
-          break;
-        // we're interested in mostly a few events really, stopped being one of them, in testing
-        // asynchronous messages or debug console messages are uninteresting.
-        // When we get dynamic shared object debug symbol parsing, we will however want to
-        // pay attention to breakpoint events (which happen during breakpoint modification)
-        case "stopped":
-          this.events.emit("stopped", body);
-          break;
         default:
+          this.events.emit(event, body);
           break;
       }
     });
@@ -181,14 +179,7 @@ class DAClient {
     });
   }
 
-  /**
-   * @typedef {{response_seq: number, type: string, success: boolean, command: string, body: object}} Response
-   * 
-   * @param { string } req - the request "command"
-   * @param { object } args - request's arguments, as per the DAP spec: https://microsoft.github.io/debug-adapter-protocol/specification
-   * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
-   */
-  sendReqGetResponse(req, args) {
+  _sendReqGetResponseImpl(req, args) {
     return new Promise((res) => {
       const serialized = this.serializeRequest(req, args);
       this.send_wait_res.once(req, (response) => {
@@ -199,8 +190,37 @@ class DAClient {
   }
 
   /**
+   * @typedef {{response_seq: number, type: string, success: boolean, command: string, body: object}} Response
+   *
+   * @param { string } req - the request "command"
+   * @param { object } args - request's arguments, as per the DAP spec: https://microsoft.github.io/debug-adapter-protocol/specification
+   * @param { number } failureTimeout - The maximum time (in milliseconds) that we should wait for response. If the request takes longer, the test will fail.
+   * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
+   */
+  async sendReqGetResponse(req, args, failureTimeout = seconds(1)) {
+    const ctrl = new AbortController();
+    const signal = ctrl.signal;
+    const req_promise = this._sendReqGetResponseImpl(req, args);
+    const timeOut = setTimeout(() => {
+      ctrl.abort();
+    }, failureTimeout);
+
+    return Promise.race([
+      req_promise.then((res) => {
+        clearTimeout(timeOut);
+        return res;
+      }),
+      new Promise((_, rej) => {
+        signal.addEventListener("abort", () => {
+          rej(new Error(`Timed out waiting for response from request ${req}`));
+        });
+      }),
+    ]);
+  }
+
+  /**
    * @typedef {{ id: number, name: string, source: {name: string, path: string}, line: number, column: number, instructionPointerReference: string}} StackFrame
-   * @param { number } threadId 
+   * @param { number } threadId
    * @returns {Promise<{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}>}
    */
   async stackTrace(threadId) {
@@ -252,7 +272,7 @@ class DAClient {
     let stopped_promise = this.prepareWaitForEvent("stopped");
     await this.sendReqGetResponse("initialize", {})
       .then((response) => {
-        checkResponse(__filename, response, "initialize", true);
+        checkResponse(response, "initialize", true);
       })
       .catch(testException);
     await this.sendReqGetResponse("launch", {
@@ -260,7 +280,7 @@ class DAClient {
       stopAtEntry: true,
     })
       .then((response) => {
-        checkResponse(__filename, response, "launch", true);
+        checkResponse(response, "launch", true);
       })
       .catch(testException);
     await this.sendReqGetResponse("configurationDone").catch(testException);
@@ -283,15 +303,20 @@ class DAClient {
     }, failureTimeout);
 
     return Promise.race([
-      event_promise.then(res => {
+      event_promise.then((res) => {
         clearTimeout(timeOut);
         return res;
       }),
       new Promise((_, rej) => {
         signal.addEventListener("abort", () => {
-          rej(new Error(`Timed out waiting for event ${event} after request ${req}`));
+          rej(
+            new Error(
+              `Timed out waiting for event ${event} after request ${req}`
+            )
+          );
         });
-      })]);
+      }),
+    ]);
   }
 }
 
@@ -313,61 +338,74 @@ function repoDirFile(filePath) {
   return path.join(REPO_DIR, filePath);
 }
 
-function checkResponse(file, response, command, expected_success = true) {
+function checkResponse(response, command, expected_success = true) {
   if (response.type != "response") {
-    console.error(
-      `[${file}] Type of message was expected to be 'response' but was '${response.type}'`
-    );
     dump_log();
-    process.exit(-1);
+    throw new Error(
+      `Type of message was expected to be 'response' but was '${response.type}'`
+    );
   }
   if (response.success != expected_success) {
-    console.error(
-      `[${file}] Expected response to succeed ${expected_success} but got ${response.success}`
-    );
     dump_log();
-    process.exit(-1);
+    throw new Error(
+      `Expected response to succeed ${expected_success} but got ${response.success}`
+    );
   }
 
   if (response.command != command) {
-    console.error(
-      `[${file}] Expected command to be ${command} but got ${response.command}`
-    );
     dump_log();
-    process.exit(-1);
+    throw new Error(
+      `Expected command to be ${command} but got ${response.command}`
+    );
   }
 }
 
 /**
  * Returns PC (as string) of stack frame `level`
- * @param {{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}} stackTraceRes 
- * @param {number} level 
- * @returns {string} 
+ * @param {{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}} stackTraceRes
+ * @param {number} level
+ * @returns {string}
  */
 function getStackFramePc(stackTraceRes, level) {
   return stackTraceRes.body.stackFrames[level].instructionPointerReference;
 }
 
+function testSuccess() {
+  console.log(`Test ${IMPORTING_FILE} succeeded`);
+  process.exit(0);
+}
+
 function testException(err) {
-  console.error(`Test failed: ${err}`);
+  console.error(`Test ${IMPORTING_FILE} failed: ${err}`);
   process.exit(-1);
 }
 
-function seconds(sec) { return sec * 1000; }
+function runTest(test) {
+  test().then(testSuccess).catch(testException);
+}
 
-module.exports = {
-  DRIVER_DIR,
-  TEST_DIR,
-  REPO_DIR,
-  BUILD_BIN_DIR,
-  MDB_PATH,
-  checkResponse,
-  testException,
-  buildDirFile,
-  repoDirFile,
-  getLineOf,
-  readFile,
-  DAClient,
-  getStackFramePc,
-  seconds
+function seconds(sec) {
+  return sec * 1000;
+}
+
+module.exports = function (file) {
+  IMPORTING_FILE = file;
+  return {
+    DRIVER_DIR,
+    TEST_DIR,
+    REPO_DIR,
+    BUILD_BIN_DIR,
+    MDB_PATH,
+    buildDirFile,
+    checkResponse,
+    DAClient,
+    getLineOf,
+    getStackFramePc,
+    readFile,
+    repoDirFile,
+    seconds,
+    testException,
+    testSuccess,
+    runTest,
+  };
 };

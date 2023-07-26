@@ -6,6 +6,12 @@ These tests are built to behave much like what a real DA (debugger adapter) woul
 2. `json` is 1st class
 3. Writing JS is easy - even if it's poorly written JS, getting the job done is what's most important.
 
+## Test File design
+
+Each file begins with `require(client)(__filename)` passing in the current test file name to the client code so that we remove a bunch of duplicated code that involves printing current file.
+
+The test file should contain 1 async function that performs the test logic, which it then passes to `runTest(testFunction)` that executes it. Just look at `launch.js` test in [test files](../test/driver/launch.js) for an example of how to make a test. Then this test is added to the `CmakeLists.txt` file. This is done by adding it as a name to the cmake variable `DRIVER_TESTS` - but without it's file extension.
+
 ### Async
 
 Due to async being 1st class, writing utilities for our "test harness" becomes as simple as:

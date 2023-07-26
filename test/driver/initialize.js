@@ -1,11 +1,12 @@
-const { DAClient, MDB_PATH, checkResponse: check_response } = require("./client")
+const { DAClient, MDB_PATH, checkResponse, runTest } =
+  require("./client")(__filename);
 
 const da_client = new DAClient(MDB_PATH, []);
 
-da_client.sendReqGetResponse("initialize", {}).then(response => {
-  check_response(__filename, response, "initialize", true);
-  console.log(`Test ${__filename} succeeded`);
-  process.exit(0);
-}).catch(err => {
-  console.error(`Test failed: ${err}`);
-});
+async function test() {
+  await da_client
+    .sendReqGetResponse("initialize", {}, 1000)
+    .then((res) => checkResponse(res, "initialize", true));
+}
+
+runTest(test);
