@@ -207,6 +207,7 @@ DAP::run_ui_loop()
               R"({{"seq": {},"type":"event","event":"output","body":{{ "category": "stdout", "output": {}}}}})",
               seq++, escaped_body_contents);
           const auto header = fmt::format("Content-Length: {}\r\n\r\n\n", payload.size());
+          LOG("dap", "Received event: {}", payload);
           VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
           VERIFY(write(tracer_out_fd, payload.data(), payload.size()) != -1, "Failed to write '{}'", payload);
         }
@@ -222,11 +223,11 @@ void
 DAP::post_event(UIResultPtr serializable_event) noexcept
 {
   {
+    LockGuard<SpinLock> guard{output_message_lock};
 #ifdef MDB_DEBUG
     logging::get_logging()->log("dap",
                                 fmt::format("posted event for msg with seq {}", serializable_event->response_seq));
 #endif
-    LockGuard<SpinLock> guard{output_message_lock};
     events_queue.push_back(serializable_event);
   }
   notify_new_message();

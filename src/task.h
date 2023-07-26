@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 
 using namespace std::string_view_literals;
-enum class WaitStatus
+enum class WaitStatusKind : u16
 {
 #define ITEM(IT, Value) IT = Value,
 #include "./defs/waitstatus.def"
@@ -16,27 +16,31 @@ enum class WaitStatus
 };
 
 constexpr std::string_view
-to_str(WaitStatus ws)
+to_str(WaitStatusKind ws)
 {
   switch (ws) {
 #define ITEM(IT, Value)                                                                                           \
-  case WaitStatus::IT:                                                                                            \
+  case WaitStatusKind::IT:                                                                                        \
     return #IT;
 #include "./defs/waitstatus.def"
 #undef ITEM
   }
 }
 
-struct TaskWaitResult
+struct WaitStatus
 {
-  pid_t waited_pid;
-  WaitStatus ws;
-
+  WaitStatusKind ws;
   union
   {
     int exit_signal;
     int signal;
   } data;
+};
+
+struct TaskWaitResult
+{
+  Tid waited_pid;
+  WaitStatus ws;
 };
 
 enum class RunType : u8
@@ -50,12 +54,13 @@ enum class RunType : u8
 struct TaskInfo
 {
   pid_t tid;
-  std::optional<TaskWaitResult> wait_status;
-  RunType run_type;
+  WaitStatus wait_status;
+  RunType run_type : 4;
   bool stopped : 1;
   bool stepping : 1;
   bool ptrace_stop : 1;
   bool initialized : 1;
+  bool cache_dirty : 1;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;
@@ -69,11 +74,21 @@ struct TaskInfo
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
+  void set_dirty() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
    */
   bool is_stopped() const noexcept;
+};
+
+struct TaskStepInfo
+{
+  Tid tid;
+  int steps;
+  bool ignore_bps;
+  TPtr<void> rip;
+  void step_taken_to(TPtr<void> rip) noexcept;
 };
 
 struct TaskVMInfo
@@ -120,8 +135,8 @@ template <> struct formatter<TaskInfo>
   {
 
     std::string_view wait_status = "None";
-    if (task.wait_status) {
-      wait_status = to_str(task.wait_status->ws);
+    if (task.wait_status.ws != WaitStatusKind::NotKnown) {
+      wait_status = to_str(task.wait_status.ws);
     }
 
     return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.tid,

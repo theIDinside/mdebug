@@ -32,6 +32,9 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <unordered_set>
+
+template <typename T> using Set = std::unordered_set<T>;
 
 Target::Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
                bool open_mem_fd) noexcept
@@ -139,6 +142,75 @@ Target::resume_target(RunType type) noexcept
 }
 
 void
+Target::step_target(Tid tid, int steps) noexcept
+{
+  ASSERT(is_in_user_ptrace_stop,
+         "Stepping while not in a ptrace-stop doesn't make sense. Target must be interrupted first.");
+
+  // start by stepping the requested thread first, then go in-order
+  auto thr_steps = prepare_foreach_thread<TaskStepInfo>();
+  for (const auto &t : threads) {
+    if (t.tid == tid) {
+      thr_steps.insert(thr_steps.begin(),
+                       {.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = register_cache[t.tid].rip});
+    } else {
+      thr_steps.push_back({.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = register_cache[t.tid].rip});
+    }
+  }
+
+  // Single-step over breakpoints that were hit, then re-enable them.
+  if (!user_brkpts.task_bp_stats.empty()) {
+    for (auto bp_stat : user_brkpts.task_bp_stats) {
+      auto bp = user_brkpts.get_by_id(bp_stat.bp_id);
+      bp->disable(bp_stat.task.tid);
+      int stat;
+      VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.task.tid, 1, 0),
+             "Single step over user breakpoint boundary failed: {}", strerror(errno));
+      waitpid(bp_stat.task.tid, &stat, 0);
+      u64 rip;
+      auto ptr = ptrace(PTRACE_PEEKUSER, bp_stat.task.tid, offsetof(user_regs_struct, rip), &rip);
+      ASSERT(ptr != -1 && AddrPtr{rip} != bp->address, "Failed to single step over breakpoint at {}", bp->address);
+      user_brkpts.enable_breakpoint(bp_stat.bp_id);
+      get_task(bp_stat.task.tid)->set_dirty();
+      auto ts_info = find(thr_steps, [tid = bp_stat.task.tid](auto &t) { return t.tid == tid; });
+      ts_info->step_taken_to(rip);
+    }
+  }
+
+  user_brkpts.clear_breakpoint_stats();
+  Set<Tid> threads_stepped{};
+  for (auto &tsi : thr_steps) {
+    if (tsi.steps > 0) {
+      if (-1 == ptrace(PTRACE_SINGLESTEP, tsi.tid, nullptr, nullptr)) {
+        LOG("mdb", "Failed to step {}: {}", tsi.tid, strerror(errno));
+      } else {
+        u64 rip;
+        auto ptr = ptrace(PTRACE_PEEKUSER, tsi.tid, offsetof(user_regs_struct, rip), &rip);
+        tsi.step_taken_to(ptr);
+        get_task(tsi.tid)->set_dirty();
+        threads_stepped.insert(tsi.tid);
+        if (user_brkpts.contains(tsi.rip - 1)) {
+          set_pc(get_task(tsi.tid), tsi.rip - 1);
+          for (auto t : threads_stepped) {
+            int stat;
+            waitpid(t, &stat, 0);
+          }
+          emit_stopped_at_breakpoint({.pid = task_leader, .tid = tsi.tid}, (tsi.rip - 1));
+          return;
+        }
+      }
+    }
+  }
+
+  for (auto t : threads_stepped) {
+    int stat;
+    waitpid(t, &stat, 0);
+  }
+
+  emit_stepped_stop(LWP{.pid = task_leader, .tid = tid});
+}
+
+void
 Target::stop_all() noexcept
 {
   ::kill(task_leader, SIGSTOP);
@@ -163,7 +235,7 @@ Target::handle_stopped_for(TaskInfo *task) noexcept
   auto &task_register = register_cache[task->tid];
   const auto current_pc = TPtr<void>{task_register.rip};
   const auto prev_pc_byte = current_pc - 1;
-  if (this->user_brkpts.contains(prev_pc_byte)) {
+  if (user_brkpts.contains(prev_pc_byte)) {
     set_pc(task, prev_pc_byte);
     emit_stopped_at_breakpoint({.pid = task_leader, .tid = task->tid}, (current_pc - 1));
     return ActionOnEvent::StopTracee;
@@ -178,7 +250,7 @@ Target::reap_task(TaskInfo *task) noexcept
 {
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
-  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status->data.exit_signal);
+  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.data.exit_signal);
   if (task->tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
@@ -214,7 +286,16 @@ Target::cache_registers(Tid tid) noexcept
 {
   auto &registers = register_cache[tid];
   PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
+  get_task(tid)->cache_dirty = false;
   return registers;
+}
+
+void
+Target::synchronize_registers(Tid tid) noexcept
+{
+  auto &registers = register_cache[tid];
+  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
+  get_task(tid)->cache_dirty = false;
 }
 
 void
@@ -293,7 +374,7 @@ Target::set_source_breakpoints(std::string_view src, std::vector<SourceBreakpoin
 }
 
 void
-Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
+Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr) noexcept
 {
   auto bp = user_brkpts.get(bp_addr);
   user_brkpts.task_bp_stats.push_back({.task = *get_task(lwp.tid), .bp_id = bp->bp_id});
@@ -302,6 +383,13 @@ Target::emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr)
       new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
   evt->bp_ids.push_back(bp->bp_id);
   Tracer::Instance->post_event(evt);
+}
+
+void
+Target::emit_stepped_stop(LWP lwp) noexcept
+{
+  Tracer::Instance->post_event(
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", true});
 }
 
 void
@@ -378,6 +466,12 @@ Target::detach() noexcept
   return errs.empty();
 }
 
+AddrPtr
+Target::task_rip(Tid tid) noexcept
+{
+  return register_cache[tid].rip;
+}
+
 void
 Target::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
 {
@@ -401,35 +495,35 @@ Target::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
 void
 Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
 {
-  using enum WaitStatus;
+  using enum WaitStatusKind;
   if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
     PtraceSyscallInfo info;
     constexpr auto size = sizeof(PtraceSyscallInfo);
     PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, wait->waited_pid, size, &info);
     if (info.is_entry()) {
-      wait->ws = SyscallEntry;
+      wait->ws.ws = SyscallEntry;
     } else {
-      wait->ws = SyscallExit;
+      wait->ws.ws = SyscallExit;
     }
     return;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
-    wait->ws = Cloned;
+    wait->ws.ws = Cloned;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
-    wait->ws = Execed;
+    wait->ws.ws = Execed;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
-    wait->ws = Exited;
+    wait->ws.ws = Exited;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
-    wait->ws = Forked;
+    wait->ws.ws = Forked;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
-    wait->ws = VForked;
+    wait->ws.ws = VForked;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
-    wait->ws = VForkDone;
+    wait->ws.ws = VForkDone;
   } else if (WSTOPSIG(status) == SIGTRAP) {
-    wait->ws = Stopped;
+    wait->ws.ws = Stopped;
   } else if (WSTOPSIG(status) == SIGSTOP) {
-    wait->ws = Stopped;
+    wait->ws.ws = Stopped;
   } else {
-    wait->ws = Stopped;
+    wait->ws.ws = Stopped;
     fmt::println("SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait->waited_pid, WSTOPSIG(status));
     sleep(1);
   }
@@ -438,15 +532,15 @@ Target::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
 void
 Target::task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept
 {
-  wait->ws = WaitStatus::Signalled;
-  wait->data.signal = WTERMSIG(status);
+  wait->ws.ws = WaitStatusKind::Signalled;
+  wait->ws.data.signal = WTERMSIG(status);
 }
 
 void
 Target::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
 {
-  wait->ws = WaitStatus::Exited;
-  wait->data.exit_signal = WEXITSTATUS(status);
+  wait->ws.ws = WaitStatusKind::Exited;
+  wait->ws.data.exit_signal = WEXITSTATUS(status);
 }
 
 bool
@@ -549,7 +643,7 @@ struct AuxvPair
 void
 Target::read_auxv(TaskWaitResult &wait)
 {
-  ASSERT(wait.ws == WaitStatus::Execed,
+  ASSERT(wait.ws.ws == WaitStatusKind::Execed,
          "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
   auto task = get_task(wait.waited_pid);
   auto &registers = register_cache[task->tid];
@@ -662,8 +756,13 @@ Target::start_awaiter_thread() noexcept
 }
 
 sym::CallStack &
-Target::build_callframe_stack(const TaskInfo *task) noexcept
+Target::build_callframe_stack(TaskInfo *task) noexcept
 {
+  if (task->cache_dirty) {
+    cache_registers(task->tid);
+    task->cache_dirty = false;
+  }
+  LOG("mdb", "Task {} %rip={:x}", task->tid, register_cache[task->tid].rip);
   std::vector<TPtr<std::uintptr_t>> base_ptrs;
   auto bp = register_cache[task->tid].rbp;
   base_ptrs.push_back(bp);

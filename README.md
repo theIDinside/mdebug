@@ -24,6 +24,14 @@ The script can be executed from wherever, but it's recommended to be executed fr
 $ ./configure-dev.sh
 ```
 
+It does the following
+
+- libfmt (c++ formatting library, which std::format et all is being modelled after)
+- nlohmann_json (json library)
+- zydis (disassembler library)
+- installs commit pre-hook, to verify that all code is formatted before pushing
+- verifies that `clang-format` is installed on `$PATH` (but does not install it, you have to do that)
+
 ### Dependencies
 
 Current dependencies

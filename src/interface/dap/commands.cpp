@@ -48,6 +48,43 @@ Continue::execute(Tracer *tracer) noexcept
   return res;
 }
 
+std::string
+NextResponse::serialize(int seq) const noexcept
+{
+  if (success)
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "next" }})", seq,
+        response_seq);
+  else
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "next", "message": "notStopped" }})",
+        seq, response_seq);
+}
+
+UIResultPtr
+Next::execute(Tracer *tracer) noexcept
+{
+  auto target = tracer->get_current();
+  if (target->is_running()) {
+    return new NextResponse{false, this};
+  }
+
+  switch (granularity) {
+  case SteppingGranularity::Instruction:
+    LOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
+        target->cache_registers(thread_id).rip);
+    target->step_target(thread_id, 1);
+    break;
+  case SteppingGranularity::Line:
+    TODO("Next::execute granularity=SteppingGranularity::Line")
+    break;
+  case SteppingGranularity::LogicalBreakpointLocation:
+    TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
+    break;
+  }
+  return new NextResponse{true, this};
+}
+
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept
     : ui::UIResult(success, cmd), type(type), breakpoints()
 {
@@ -619,8 +656,22 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::LoadedSources");
   case CommandType::Modules:
     TODO("Command::Modules");
-  case CommandType::Next:
-    TODO("Command::Next");
+  case CommandType::Next: {
+    ASSERT(args.contains("threadId"),
+           "Next requests must contain a threadId whether or not all-stop is the execution mode");
+    int thread_id = args["threadId"];
+    bool single_thread = false;
+    SteppingGranularity step_type = SteppingGranularity::Line;
+    if (args.contains("granularity")) {
+      std::string_view str_arg;
+      args["granularity"].get_to(str_arg);
+      step_type = from_str(str_arg);
+    }
+    if (args.contains("singleThread")) {
+      single_thread = args["singleThread"];
+    }
+    return new Next{seq, thread_id, !single_thread, step_type};
+  }
   case CommandType::Pause:
     TODO("Command::Pause");
   case CommandType::ReadMemory: {

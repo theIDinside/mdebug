@@ -1,14 +1,8 @@
-const { DAClient, MDB_PATH, checkResponse, testException, getLineOf, readFile, buildDirFile, repoDirFile } = require("./client")
+const { DAClient, MDB_PATH, checkResponse, testException, getLineOf, readFile, buildDirFile, repoDirFile, getStackFramePc } = require("./client")
 const { spawnSync } = require("child_process");
 
 const da_client = new DAClient(MDB_PATH, []);
 
-const expectedStackTraces = [
-  [{ line: 39, name: "foo" }, { line: 46, name: "main" }, { line: 0, name: "unknown" }],
-  [{ line: 33, name: "bar" }, { line: 40, name: "foo" }, { line: 46, name: "main" }, { line: 0, name: "unknown" }],
-  [{ line: 14, name: "baz" }, { line: 34, name: "bar" }, { line: 40, name: "foo" }, { line: 46, name: "main" }, { line: 0, name: "unknown" }],
-  [{ line: 7, name: "quux" }, { line: 16, name: "baz" }, { line: 34, name: "bar" }, { line: 40, name: "foo" }, { line: 46, name: "main" }, { line: 0, name: "unknown" }]
-]
 const regex = /[0-9a-f]+:/
 function getTextSection(objdumpOutput) {
   const lines = objdumpOutput.split("\n");
@@ -78,7 +72,7 @@ async function test() {
   await da_client.launchToMain(buildDirFile("stackframes"));
   const threads = await da_client.threads();
   const frames = await da_client.stackTrace(threads[0].id);
-  const pc = frames.body.stackFrames[0].instructionPointerReference;
+  const pc = getStackFramePc(frames, 0);
   await disasm_verify(objdump, da_client, pc, 0, 10);
   await disasm_verify(objdump, da_client, pc, 5, 10);
   await disasm_verify(objdump, da_client, pc, -5, 10)

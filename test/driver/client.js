@@ -270,7 +270,28 @@ class DAClient {
   async contNextStop(threadId) {
     let stopped_promise = this.prepareWaitForEvent("stopped");
     await this.sendReqGetResponse("continue", { threadId: threadId });
-    await stopped_promise;
+    return await stopped_promise;
+  }
+
+  async sendReqWaitEvent(req, args, event, failureTimeout) {
+    const ctrl = new AbortController();
+    const signal = ctrl.signal;
+    const event_promise = this.prepareWaitForEvent(event);
+    const resp_res = await this.sendReqGetResponse(req, args);
+    const timeOut = setTimeout(() => {
+      ctrl.abort();
+    }, failureTimeout);
+
+    return Promise.race([
+      event_promise.then(res => {
+        clearTimeout(timeOut);
+        return res;
+      }),
+      new Promise((_, rej) => {
+        signal.addEventListener("abort", () => {
+          rej(new Error(`Timed out waiting for event ${event} after request ${req}`));
+        });
+      })]);
   }
 }
 
@@ -317,10 +338,22 @@ function checkResponse(file, response, command, expected_success = true) {
   }
 }
 
+/**
+ * Returns PC (as string) of stack frame `level`
+ * @param {{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}} stackTraceRes 
+ * @param {number} level 
+ * @returns {string} 
+ */
+function getStackFramePc(stackTraceRes, level) {
+  return stackTraceRes.body.stackFrames[level].instructionPointerReference;
+}
+
 function testException(err) {
   console.error(`Test failed: ${err}`);
   process.exit(-1);
 }
+
+function seconds(sec) { return sec * 1000; }
 
 module.exports = {
   DRIVER_DIR,
@@ -335,4 +368,6 @@ module.exports = {
   getLineOf,
   readFile,
   DAClient,
+  getStackFramePc,
+  seconds
 };

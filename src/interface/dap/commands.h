@@ -37,6 +37,49 @@ struct Continue final : public ui::UICommand
   DEFINE_NAME(Continue)
 };
 
+enum class SteppingGranularity
+{
+  Instruction,
+  Line,
+  LogicalBreakpointLocation
+};
+
+static constexpr SteppingGranularity
+from_str(std::string_view granularity) noexcept
+{
+  if (granularity == "statement") {
+    return SteppingGranularity::LogicalBreakpointLocation; // default
+  } else if (granularity == "line") {
+    return SteppingGranularity::Line; // default
+  } else if (granularity == "instruction") {
+    return SteppingGranularity::Instruction; // default
+  } else {
+    return SteppingGranularity::Line; // default
+  }
+}
+
+struct NextResponse final : ui::UIResult
+{
+  CTOR(NextResponse)
+  ~NextResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct Next final : public ui::UICommand
+{
+  int thread_id;
+  bool continue_all;
+  SteppingGranularity granularity;
+
+  Next(std::uint64_t seq, int tid, bool all, SteppingGranularity granularity) noexcept
+      : UICommand(seq), thread_id(tid), continue_all(all), granularity(granularity)
+  {
+  }
+  ~Next() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(Next)
+};
+
 // This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
 // in the DAP spec
 struct SetBreakpointsResponse final : ui::UIResult

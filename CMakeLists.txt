@@ -82,18 +82,22 @@ set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
 
 set(MDB_TESTS
   helloworld
-  threads
+  threads_shared # all tests that uses shared libraries, must have shared in their name
   stackframes
+  lib_shared # all tests that uses shared libraries, must have shared in their name
 )
 
 add_library(metricsconv SHARED test/dynamic_lib.cpp test/dynamic_lib.h)
 set_target_properties(metricsconv PROPERTIES PUBLIC_HEADER test/dynamic_lib.h)
+set_target_properties(metricsconv PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 function(build_tests tests)
     foreach(target_name ${tests})
         set(target_source ${CMAKE_CURRENT_SOURCE_DIR}/test/${target_name}.cpp ${CMAKE_CURRENT_SOURCE_DIR}/test/spinlock.cpp)
         add_executable(${target_name} ${target_source})  # Change the file extension if necessary
-        target_link_libraries(${target_name} metricsconv)
+        if(${target_name} MATCHES "shared")
+          target_link_libraries(${target_name} metricsconv)
+        endif()
         set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
         set_target_properties(${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
     endforeach()
@@ -161,7 +165,7 @@ target_include_directories(mdb PUBLIC ./dependencies)
 find_program(NODEJS "node")
 
 if(NODEJS)
-  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints stackframes disassemble)
+  set(DRIVER_TESTS initialize launch setInstructionBreakpoints setBreakpoints stackframes disassemble next)
   foreach(driver_test ${DRIVER_TESTS})
     add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})
   endforeach()

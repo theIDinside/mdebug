@@ -44,7 +44,8 @@ struct LWP
 enum ActionOnEvent
 {
   ShouldContinue,
-  StopTracee
+  CanContinue,
+  StopTracee,
 };
 
 struct SearchFnSymResult
@@ -161,6 +162,8 @@ struct Target
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(RunType type) noexcept;
+  /* Steps all tasks in this target by `steps`. After stepping is done, report that `tid` has stopped. */
+  void step_target(Tid tid, int steps) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all() noexcept;
   /* Query if we should interrupt the entire process and all it's tasks when we encounter a clone syscall */
@@ -182,13 +185,15 @@ struct Target
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
   /* Cache the register contents of `tid`. */
   [[maybe_unused]] const user_regs_struct &cache_registers(Tid tid) noexcept;
+  void synchronize_registers(Tid tid) noexcept;
   /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
   void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
-  void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr);
+  void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr) noexcept;
+  void emit_stepped_stop(LWP lwp) noexcept;
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
@@ -201,6 +206,8 @@ struct Target
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
   bool detach() noexcept;
+
+  AddrPtr task_rip(Tid tid) noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
@@ -223,6 +230,16 @@ struct Target
   std::string get_thread_name(Tid tid) const noexcept;
 
   utils::StaticVector<u8>::own_ptr read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept;
+
+  /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
+  template <typename T>
+  constexpr std::vector<T>
+  prepare_foreach_thread()
+  {
+    std::vector<T> vec;
+    vec.reserve(threads.size());
+    return vec;
+  }
 
   template <typename T>
   std::optional<T>
@@ -346,7 +363,7 @@ struct Target
 
   void reaped_events() noexcept;
   void start_awaiter_thread() noexcept;
-  sym::CallStack &build_callframe_stack(const TaskInfo *task) noexcept;
+  sym::CallStack &build_callframe_stack(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   u8 *get_in_text_section(TPtr<void> address) const noexcept;
