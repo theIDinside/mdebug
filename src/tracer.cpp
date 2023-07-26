@@ -171,9 +171,10 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     target->cache_registers(task->tid);
     // some pretty involved functionality needs to be called here, I think.
     switch (target->handle_stopped_for(task)) {
+    case ActionOnEvent::CanContinue:
     case ActionOnEvent::ShouldContinue: {
-      // task->set_running(RunType::Continue);
-      // stopped = false;
+      task->set_running(RunType::Continue);
+      stopped = false;
       break;
     }
     case ActionOnEvent::StopTracee: {

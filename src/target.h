@@ -44,7 +44,8 @@ struct LWP
 enum ActionOnEvent
 {
   ShouldContinue,
-  StopTracee
+  CanContinue,
+  StopTracee,
 };
 
 struct SearchFnSymResult
