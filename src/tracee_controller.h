@@ -23,15 +23,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace ptracestop {
+class StopHandler;
+class Action;
+} // namespace ptracestop
+
 namespace ui {
 struct UICommand;
 };
-
-// clang-format off
-template <typename BpPred> concept BpPredicate = requires(BpPred fn) { 
-   { fn(std::declval<Breakpoint>()) } -> std::convertible_to<bool>;
-};
-// clang-format on
 
 struct LWP
 {
@@ -41,11 +40,26 @@ struct LWP
   constexpr bool operator<=>(const LWP &other) const = default;
 };
 
-enum ActionOnEvent
+enum class TracerWaitEvent : u8
 {
-  ShouldContinue,
-  CanContinue,
-  StopTracee,
+  BreakpointHit,
+  WatchpointHit,
+  None,
+};
+
+struct WE
+{
+  TracerWaitEvent event;
+  union
+  {
+    AddrPtr pc;
+    Breakpoint *bp;
+    struct
+    {
+      AddrPtr var_addr;
+      u64 new_value;
+    } watchpoint;
+  };
 };
 
 struct SearchFnSymResult
@@ -84,14 +98,15 @@ read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
   return nread;
 }
 
-struct Target;
+struct TraceeController;
 
 struct BreakpointMap
 {
   struct TaskBreakpointStatus
   {
-    TaskInfo task;
+    Tid tid;
     u16 bp_id;
+    bool stepped_over;
   };
 
   explicit BreakpointMap(Tid address_space) noexcept
@@ -111,14 +126,17 @@ struct BreakpointMap
   std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
   // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
   std::vector<TaskBreakpointStatus> task_bp_stats;
+
   template <typename T>
   bool
   contains(TraceePointer<T> addr) const noexcept
   {
     return any_of(breakpoints, [&addr](const Breakpoint &bp) { return bp.address == addr; });
   }
+
+  void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
   bool insert(TraceePointer<void> addr, u8 overwritten_byte, BreakpointType type) noexcept;
-  void clear(Target *target, BreakpointType type) noexcept;
+  void clear(TraceeController *target, BreakpointType type) noexcept;
   void clear_breakpoint_stats() noexcept;
   void disable_breakpoint(u16 id) noexcept;
   void enable_breakpoint(u16 id) noexcept;
@@ -127,9 +145,11 @@ struct BreakpointMap
   Breakpoint *get(TraceePointer<void> addr) noexcept;
 };
 
-struct Target
+class Default;
+
+struct TraceeController
 {
-  using handle = std::unique_ptr<Target>;
+  using handle = std::unique_ptr<TraceeController>;
   friend class Tracer;
   friend struct ui::UICommand;
   // Members
@@ -145,10 +165,10 @@ struct Target
   SpinLock spin_lock;
 
   // Constructors
-  Target(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
-         bool open_mem_fd = true) noexcept;
-  Target(const Target &) = delete;
-  Target &operator=(const Target &) = delete;
+  TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
+                   bool open_mem_fd = true) noexcept;
+  TraceeController(const TraceeController &) = delete;
+  TraceeController &operator=(const TraceeController &) = delete;
 
   /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
   bool reopen_memfd() noexcept;
@@ -168,15 +188,14 @@ struct Target
   void stop_all() noexcept;
   /* Query if we should interrupt the entire process and all it's tasks when we encounter a clone syscall */
   bool should_stop_on_clone() noexcept;
-  /* Perform arbitrary logic during a Stopped event */
-  ActionOnEvent handle_stopped_for(TaskInfo *task) noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
    * interface of the event */
   void reap_task(TaskInfo *task) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
-  void register_task_waited(TaskWaitResult wait) noexcept;
+  TaskInfo *register_task_waited(TaskWaitResult wait) noexcept;
 
+  AddrPtr get_caching_pc(TaskInfo *t) noexcept;
   void set_pc(TaskInfo *t, TPtr<void> addr) noexcept;
 
   /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
@@ -192,8 +211,9 @@ struct Target
   void set_fn_breakpoint(std::string_view function_name) noexcept;
   void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
-  void emit_stopped_at_breakpoint(LWP lwp, TPtr<void> bp_addr) noexcept;
+  void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
+  void emit_signal_event(LWP lwp, int signal) noexcept;
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
@@ -206,14 +226,19 @@ struct Target
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
   bool detach() noexcept;
-
   AddrPtr task_rip(Tid tid) noexcept;
+  void install_ptracestop_action(ptracestop::Action *action) noexcept;
+  void restore_default_handler() noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
   void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
   void task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept;
   void task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept;
   void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
+
+  void process_exec(TaskInfo *t) noexcept;
+  void process_clone(TaskInfo *t) noexcept;
+  WE process_stopped(TaskInfo *t) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;
@@ -225,10 +250,9 @@ struct Target
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
-  void read_auxv(TaskWaitResult &wait);
+  void read_auxv(TaskInfo &task);
   TargetSession session_type() const noexcept;
   std::string get_thread_name(Tid tid) const noexcept;
-
   utils::StaticVector<u8>::own_ptr read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept;
 
   /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
@@ -371,6 +395,8 @@ struct Target
   // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
   std::optional<u64> cu_file_from_pc(TPtr<void> address) const noexcept;
   const std::vector<CompilationUnitFile> &cu_files() const noexcept;
+  bool step_machine_active() const noexcept;
+  void handle_execution_event(TaskInfo *task);
 
 private:
   std::vector<CompilationUnitFile> m_files;
@@ -381,4 +407,5 @@ private:
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
   bool is_in_user_ptrace_stop;
+  ptracestop::StopHandler *ptracestop_handler;
 };

@@ -57,10 +57,10 @@ struct TaskInfo
   WaitStatus wait_status;
   RunType run_type : 4;
   bool stopped : 1;
-  bool stepping : 1;
   bool ptrace_stop : 1;
   bool initialized : 1;
   bool cache_dirty : 1;
+  bool rip_dirty : 1;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;

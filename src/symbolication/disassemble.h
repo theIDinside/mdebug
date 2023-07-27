@@ -1,7 +1,7 @@
 #pragma once
 #include "../common.h"
 
-struct Target;
+struct TraceeController;
 struct ElfSection;
 class CompilationUnitFile;
 struct LineTableEntry;
@@ -18,10 +18,10 @@ struct Disassembly
   u32 column;
 };
 
-void zydis_disasm_backwards(Target *target, AddrPtr addr, i32 ins_offset, i32 total,
+void zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset, i32 total,
                             std::vector<sym::Disassembly> &output) noexcept;
 
-void zydis_disasm(Target *target, AddrPtr addr, u32 ins_offset, u32 total,
+void zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
                   std::vector<sym::Disassembly> &output) noexcept;
 } // namespace sym
 

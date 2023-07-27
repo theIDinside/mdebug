@@ -95,7 +95,7 @@ class CUProcessor
   // todo(simon): Data ownership?
 public:
   CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table, u32 index,
-              Target *target) noexcept;
+              TraceeController *target) noexcept;
   CUProcessor(CUProcessor &&) noexcept = default;
   CUProcessor(const CUProcessor &) = delete;
 
@@ -114,7 +114,7 @@ private:
   std::vector<DebugInfoEntry> cu_dies;
   std::unique_ptr<CompilationUnitFile> cu_file;
   // The Target that is requesting parsing of debug info
-  Target *requesting_target;
+  TraceeController *requesting_target;
   std::unique_ptr<LineHeader> line_header;
   OwnedLineTable line_table;
 };

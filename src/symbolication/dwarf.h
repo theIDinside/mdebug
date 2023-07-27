@@ -9,11 +9,11 @@
 struct ObjectFile;
 struct CompileUnitHeader;
 class CUProcessor;
-struct Target;
+struct TraceeController;
 
 // Decodes values in abbreviation table for CU described by `header` (but does not translate them)
 std::unique_ptr<CUProcessor> prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header,
-                                                   Target *target);
+                                                   TraceeController *target);
 
 template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
 

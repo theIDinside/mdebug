@@ -25,6 +25,13 @@ struct Frame
   const FunctionSymbol *symbol;
   const CompilationUnitFile *cu_file;
   FrameType type;
+  int level;
+
+  friend constexpr bool
+  operator==(const Frame &l, const Frame &r) noexcept
+  {
+    return l.level == r.level && l.cu_file == r.cu_file && l.symbol == r.symbol;
+  }
 };
 
 struct CallStack

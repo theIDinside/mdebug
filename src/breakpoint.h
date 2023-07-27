@@ -1,12 +1,12 @@
 #pragma once
 #include "common.h"
-#include "symbolication/type.h"
 
 enum class BreakpointType : std::uint8_t
 {
   SourceBreakpoint = 1 << 0,
   FunctionBreakpoint = 1 << 1,
   AddressBreakpoint = 1 << 2,
+  FinishBreakpoint = 1 << 3,
 };
 
 struct SourceBreakpointDescriptor

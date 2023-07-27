@@ -1,5 +1,6 @@
 #include "commands.h"
-#include "../../target.h"
+#include "../../ptracestop_handlers.h"
+#include "../../tracee_controller.h"
 #include "../../tracer.h"
 #include "../../utils/base64.h"
 #include "fmt/format.h"
@@ -73,7 +74,7 @@ Next::execute(Tracer *tracer) noexcept
   case SteppingGranularity::Instruction:
     LOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
         target->cache_registers(thread_id).rip);
-    target->step_target(thread_id, 1);
+    target->install_ptracestop_action(new ptracestop::InstructionStep{target, thread_id, 1, !continue_all});
     break;
   case SteppingGranularity::Line:
     TODO("Next::execute granularity=SteppingGranularity::Line")

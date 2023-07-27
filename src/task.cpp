@@ -3,8 +3,8 @@
 #include <sys/ptrace.h>
 
 TaskInfo::TaskInfo(pid_t tid) noexcept
-    : tid(tid), wait_status(), run_type(RunType::UNKNOWN), stopped(true), stepping(false), ptrace_stop(false),
-      initialized(false), cache_dirty(true)
+    : tid(tid), wait_status(), run_type(RunType::UNKNOWN), stopped(true), ptrace_stop(false), initialized(false),
+      cache_dirty(true), rip_dirty(true)
 {
 }
 
@@ -20,13 +20,11 @@ TaskInfo::set_running(RunType type) noexcept
   if (stopped) {
     stopped = false;
     ptrace_stop = false;
-    stepping = false;
     run_type = type;
     PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
   } else if (ptrace_stop) {
     stopped = false;
     ptrace_stop = false;
-    stepping = false;
     run_type = type;
     PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
   }
@@ -36,7 +34,6 @@ void
 TaskInfo::set_stop() noexcept
 {
   stopped = true;
-  stepping = false;
 }
 
 void
@@ -55,6 +52,7 @@ void
 TaskInfo::set_dirty() noexcept
 {
   cache_dirty = true;
+  rip_dirty = true;
 }
 
 void

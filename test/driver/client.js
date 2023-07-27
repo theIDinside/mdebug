@@ -79,10 +79,12 @@ class DAClient {
       process.exit(-1);
     });
     this.mdb.on("exit", (exitCode) => {
-      console.error(
-        `[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`
-      );
-      process.exit(-1);
+      if (exitCode != 0) {
+        console.error(
+          `[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`
+        );
+        process.exit(-1);
+      }
     });
     process.on("exit", (code) => {
       this.mdb.kill("SIGKILL");
@@ -324,10 +326,8 @@ class DAClient {
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
 function dump_log() {
-  const mdblog = fs.readFileSync(path.join(BUILD_BIN_DIR, "mdb.log"));
-  const daplog = fs.readFileSync(path.join(BUILD_BIN_DIR, "dap.log"));
-  console.log(mdblog);
-  console.log(daplog);
+  const mdblog = fs.readFileSync(path.join(process.cwd(), "mdb.log"));
+  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(IMPORTING_FILE)}.log`), mdblog);
 }
 
 function buildDirFile(fileName) {

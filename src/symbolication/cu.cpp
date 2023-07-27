@@ -1,5 +1,5 @@
 #include "cu.h"
-#include "../target.h"
+#include "../tracee_controller.h"
 #include "block.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"
@@ -37,7 +37,7 @@ CompilationUnitBuilder::build_cu_headers() noexcept
 }
 
 CUProcessor::CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
-                         u32 index, Target *target) noexcept
+                         u32 index, TraceeController *target) noexcept
     : finished{false}, file_name{}, obj_file{obj_file}, cu_index{index}, header{header},
       abbrev_table{std::move(table)}, cu_dies{}, cu_file{nullptr}, requesting_target{target}, line_header{nullptr},
       line_table{nullptr}

@@ -14,7 +14,7 @@
 #include <vector>
 
 struct ObjectFile;
-struct Target;
+struct TraceeController;
 
 using Pid = pid_t;
 using Tid = pid_t;
@@ -39,6 +39,17 @@ enum class AddObjectResult : u8
   FILE_NOT_EXIST
 };
 
+enum class TracerAction
+{
+  None,
+  InstructionStepping,
+  LineStepping,
+  StatementStepping,
+  FinishStepping
+};
+
+struct TaskInfo;
+
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
@@ -52,15 +63,10 @@ public:
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   AddObjectResult mmap_objectfile(const Path &path) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
-  Target *get_target(pid_t pid) noexcept;
-  Target *get_current() noexcept;
+  TraceeController *get_controller(pid_t pid) noexcept;
+  TraceeController *get_current() noexcept;
 
-  /// Create & Initialize IO thread that deals with input/output between the tracee/tracer
-  /// and the client
-  void init_io_thread() noexcept;
-  void interrupt(LWP lwp) noexcept;
-
-  bool wait_for_tracee_events(Tid target) noexcept;
+  void wait_for_tracee_events(Tid target) noexcept;
   void set_ui(ui::dap::DAP *dap) noexcept;
   void kill_ui() noexcept;
   void post_event(ui::UIResultPtr obj) noexcept;
@@ -71,11 +77,11 @@ public:
   void execute_pending_commands() noexcept;
   void launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept;
   void kill_all_targets() noexcept;
-  void detach(std::unique_ptr<Target> &&target) noexcept;
+  void detach(std::unique_ptr<TraceeController> &&target) noexcept;
 
 private:
-  std::vector<std::unique_ptr<Target>> targets;
-  Target *current_target = nullptr;
+  std::vector<std::unique_ptr<TraceeController>> targets;
+  TraceeController *current_target = nullptr;
   std::vector<ObjectFile *> object_files;
   ui::dap::DAP *dap;
   SpinLock command_queue_lock;
