@@ -317,7 +317,7 @@ TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
   u64 installed_bp = ((read_value & ~0xff) | bkpt);
   ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
 
-  user_brkpts.insert(address.as<void>(), original_byte, BreakpointType::AddressBreakpoint);
+  user_brkpts.insert(address.as<void>(), original_byte, UserBreakpointType::AddressBreakpoint);
 }
 
 void
@@ -342,7 +342,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     u8 ins_byte = static_cast<u8>(read_value & 0xff);
     u64 installed_bp = ((read_value & ~0xff) | bkpt);
     ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
-    user_brkpts.insert(sym.address, ins_byte, BreakpointType::FunctionBreakpoint);
+    user_brkpts.insert(sym.address, ins_byte, UserBreakpointType::FunctionBreakpoint);
     auto &bp = user_brkpts.breakpoints.back();
     user_brkpts.fn_breakpoint_names[bp.bp_id] = function_name;
   }
@@ -368,7 +368,7 @@ TraceeController::set_source_breakpoints(std::string_view src,
             u8 original_byte = static_cast<u8>(read_value & 0xff);
             u64 installed_bp = ((read_value & ~0xff) | bkpt);
             ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
-            user_brkpts.insert(lte.pc, original_byte, BreakpointType::SourceBreakpoint);
+            user_brkpts.insert(lte.pc, original_byte, UserBreakpointType::SourceBreakpoint);
             const auto &bp = user_brkpts.breakpoints.back();
             user_brkpts.source_breakpoints[bp.bp_id] = std::move(desc);
             break;
@@ -408,7 +408,7 @@ TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 void
 TraceeController::reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept
 {
-  user_brkpts.clear(this, BreakpointType::AddressBreakpoint);
+  user_brkpts.clear(this, UserBreakpointType::AddressBreakpoint);
   for (auto addr : addresses) {
     set_addr_breakpoint(addr.as<u64>());
   }
@@ -417,7 +417,7 @@ TraceeController::reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noex
 void
 TraceeController::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
 {
-  user_brkpts.clear(this, BreakpointType::FunctionBreakpoint);
+  user_brkpts.clear(this, UserBreakpointType::FunctionBreakpoint);
   user_brkpts.fn_breakpoint_names.clear();
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
@@ -429,7 +429,7 @@ TraceeController::reset_source_breakpoints(std::string_view source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&bps) noexcept
 {
   std::erase_if(user_brkpts.breakpoints, [&bpm = user_brkpts, path = source_filepath](Breakpoint &bp) {
-    if (bp.type == BreakpointType::SourceBreakpoint) {
+    if (bp.type == UserBreakpointType::SourceBreakpoint) {
       if (bpm.source_breakpoints[bp.bp_id].source_file.compare(path) == 0) {
         bpm.source_breakpoints.erase(bp.bp_id);
         if (bp.enabled)
@@ -647,7 +647,7 @@ BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
 }
 
 bool
-BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, BreakpointType type) noexcept
+BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, UserBreakpointType type) noexcept
 {
   if (contains(addr))
     return false;
@@ -656,21 +656,20 @@ BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, BreakpointType type
 }
 
 void
-BreakpointMap::clear(TraceeController *target, BreakpointType type) noexcept
+BreakpointMap::clear(TraceeController *target, UserBreakpointType type) noexcept
 {
   std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
     if (bp.type == type) {
       if (bp.enabled)
         bp.disable(target->task_leader);
       switch (bp.type) {
-      case BreakpointType::SourceBreakpoint:
+      case UserBreakpointType::SourceBreakpoint:
         t->source_breakpoints.erase(bp.bp_id);
         break;
-      case BreakpointType::FunctionBreakpoint:
+      case UserBreakpointType::FunctionBreakpoint:
         t->fn_breakpoint_names.erase(bp.bp_id);
         break;
-      case BreakpointType::AddressBreakpoint:
-      case BreakpointType::FinishBreakpoint:
+      case UserBreakpointType::AddressBreakpoint:
         break;
       }
       return true;
@@ -855,6 +854,15 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
     task->cache_dirty = false;
     task->rip_dirty = false;
   }
+
+  // todo(simon): optimize. Either give thread ids a "live" monotonic id, so they can index directly into
+  // frame_cache[N]
+  //  or perhaps use associative container here, so we don't have to do std::find on it. A "live monontonic" id,
+  //  would be updated as threads are created _and_ dies, so it's not an id that would be displayed to the user as
+  //  this would confuse her.
+  if (!task->callstack_dirty) {
+    return *find(frame_cache, [tid = task->tid](auto &cs) { return cs.tid == tid; });
+  }
   std::vector<TPtr<std::uintptr_t>> base_ptrs;
   auto bp = register_cache[task->tid].rbp;
   base_ptrs.push_back(bp);
@@ -903,6 +911,7 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
         }
         ++level;
       }
+      task->callstack_dirty = false;
       return cs;
     }
   }
@@ -975,65 +984,4 @@ const std::vector<CompilationUnitFile> &
 TraceeController::cu_files() const noexcept
 {
   return m_files;
-}
-
-void
-TraceeController::handle_execution_event(TaskInfo *stopped)
-{
-  stopped->set_dirty();
-  switch (stopped->wait_status.ws) {
-  case WaitStatusKind::Stopped: {
-    const auto tevt = process_stopped(stopped);
-    switch (tevt.event) {
-    case TracerWaitEvent::BreakpointHit: {
-      ptracestop_handler->handle_breakpoint_event(stopped, tevt.bp);
-      break;
-    }
-    case TracerWaitEvent::None:
-      if (ptracestop_handler)
-        ptracestop_handler->handle_generic_stop(stopped);
-      else
-        stopped->set_running(RunType::Continue);
-      break;
-    case TracerWaitEvent::WatchpointHit:
-      TODO("TracerWaitEvent::WatchpointHit");
-      break;
-    }
-  } break;
-  case WaitStatusKind::Execed: {
-    process_exec(stopped);
-    break;
-  }
-  case WaitStatusKind::Exited: {
-    reap_task(stopped);
-    break;
-  }
-  case WaitStatusKind::Cloned: {
-    process_clone(stopped);
-    break;
-  }
-  case WaitStatusKind::Forked:
-    break;
-  case WaitStatusKind::VForked:
-    break;
-  case WaitStatusKind::VForkDone:
-    break;
-  case WaitStatusKind::Signalled:
-    ptracestop_handler->handle_signalled(stopped);
-    break;
-  case WaitStatusKind::SyscallEntry:
-    break;
-  case WaitStatusKind::SyscallExit:
-    break;
-  default:
-    break;
-  }
-  reaped_events();
-  ptracestop_handler->do_next_action(stopped);
-}
-
-bool
-TraceeController::step_machine_active() const noexcept
-{
-  return ptracestop_handler != nullptr;
 }

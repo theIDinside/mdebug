@@ -1,12 +1,11 @@
 #pragma once
 #include "common.h"
 
-enum class BreakpointType : std::uint8_t
+enum class UserBreakpointType : std::uint8_t
 {
   SourceBreakpoint = 1 << 0,
   FunctionBreakpoint = 1 << 1,
-  AddressBreakpoint = 1 << 2,
-  FinishBreakpoint = 1 << 3,
+  AddressBreakpoint = 1 << 2
 };
 
 struct SourceBreakpointDescriptor
@@ -22,7 +21,7 @@ struct SourceBreakpointDescriptor
 class Breakpoint
 {
 public:
-  explicit Breakpoint(AddrPtr, u8 original_byte, u32 id, BreakpointType type) noexcept;
+  explicit Breakpoint(AddrPtr, u8 original_byte, u32 id, UserBreakpointType type) noexcept;
   Breakpoint() noexcept = default;
   Breakpoint(const Breakpoint &) noexcept = default;
   Breakpoint &operator=(const Breakpoint &) noexcept = default;
@@ -33,7 +32,7 @@ public:
 
   u8 original_byte;
   bool enabled : 1;
-  BreakpointType type : 7;
+  UserBreakpointType type : 7;
   u16 bp_id;
   u32 times_hit;
   TPtr<void> address;

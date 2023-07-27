@@ -135,8 +135,8 @@ struct BreakpointMap
   }
 
   void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
-  bool insert(TraceePointer<void> addr, u8 overwritten_byte, BreakpointType type) noexcept;
-  void clear(TraceeController *target, BreakpointType type) noexcept;
+  bool insert(TraceePointer<void> addr, u8 overwritten_byte, UserBreakpointType type) noexcept;
+  void clear(TraceeController *target, UserBreakpointType type) noexcept;
   void clear_breakpoint_stats() noexcept;
   void disable_breakpoint(u16 id) noexcept;
   void enable_breakpoint(u16 id) noexcept;
@@ -395,8 +395,6 @@ struct TraceeController
   // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
   std::optional<u64> cu_file_from_pc(TPtr<void> address) const noexcept;
   const std::vector<CompilationUnitFile> &cu_files() const noexcept;
-  bool step_machine_active() const noexcept;
-  void handle_execution_event(TaskInfo *task);
 
 private:
   std::vector<CompilationUnitFile> m_files;
