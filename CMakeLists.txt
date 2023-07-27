@@ -172,7 +172,8 @@ if(NODEJS)
       exited
       initialize 
       launch 
-      next 
+      nextInstruction
+      nextLine 
       setBreakpoints 
       setInstructionBreakpoints 
       stackframes

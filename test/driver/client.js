@@ -71,9 +71,15 @@ class DAClient {
   /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
   buf;
 
-  constructor(mdb, mdb_args) {
-    // this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "inherit" });
-    this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+  constructor(mdb, mdb_args, record = false) {
+    // for future work when we get recording in tests suites working.
+    this.recording = record;
+    if (record) {
+      this.mdb = spawn("rr", ["record", mdb, ...mdb_args])
+    } else {
+      this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+    }
+
     this.mdb.on("error", (err) => {
       console.error(`[TEST FAILED] MDB error: ${err}`);
       process.exit(-1);
@@ -299,7 +305,7 @@ class DAClient {
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     const event_promise = this.prepareWaitForEvent(event);
-    const resp_res = await this.sendReqGetResponse(req, args);
+    const resp_res = await this.sendReqGetResponse(req, args, failureTimeout);
     const timeOut = setTimeout(() => {
       ctrl.abort();
     }, failureTimeout);
@@ -313,7 +319,7 @@ class DAClient {
         signal.addEventListener("abort", () => {
           rej(
             new Error(
-              `Timed out waiting for event ${event} after request ${req}`
+              `Timed out waiting for event ${event} after request ${req} for ${failureTimeout}`
             )
           );
         });
