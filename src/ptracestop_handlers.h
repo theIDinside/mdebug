@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common.h"
+#include "symbolication/callstack.h"
+#include "symbolication/lnp.h"
 #include "task.h"
 #include <vector>
 
@@ -13,6 +15,9 @@ class Action
 public:
   Action(TraceeController *tc) noexcept : tc(tc), should_stop(false) {}
   virtual ~Action() = default;
+
+  // `should_stop` is passed in by the StopHandler, if we've encountered
+  // an event, signal or whatever, that should abort this installed stepper
   virtual bool
   do_next_action(TaskInfo *t, bool should_stop) noexcept
   {
@@ -36,6 +41,12 @@ public:
     return false;
   }
 
+  // Updates the step schedule - this is *not* performed during a ptrace-stop. So no ptrace requests can be made.
+  virtual void
+  update_step_schedule() noexcept
+  {
+  }
+
 protected:
   TraceeController *tc;
   bool should_stop;
@@ -46,14 +57,17 @@ class InstructionStep : public Action
 public:
   InstructionStep(TraceeController *tracee, Tid thread_id, int steps, bool single_thread = false) noexcept;
   ~InstructionStep() override = default;
+  // `should_stop` is passed in by the StopHandler, if we've encountered
+  // an event, signal or whatever, that should abort this installed stepper
   virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept override;
   void start_action() noexcept override;
   bool check_if_done() noexcept override;
 
-private:
-  void step_one() noexcept;
+  // Updates the step schedule - this is *not* performed during a ptrace-stop. So no ptrace requests can be made.
+  void update_step_schedule() noexcept override;
 
 protected:
+  bool step_one() noexcept;
   Tid thread_id;
   int steps;
   bool done;
@@ -68,6 +82,12 @@ public:
   ~LineStep() override final = default;
   void start_action() noexcept override final;
   bool check_if_done() noexcept override final;
+  void update_step_schedule() noexcept override final;
+
+private:
+  sym::Frame start_frame;
+  LineTableEntry entry;
+  const CompilationUnitFile *cu;
 };
 
 class StopHandler
@@ -90,7 +110,6 @@ public:
   constexpr void stop_on_thread_exit() noexcept;
   constexpr void ignore_bps() noexcept;
 
-  virtual void do_next_action(TaskInfo *t) noexcept;
   void set_action(Action *action) noexcept;
   void restore_default() noexcept;
   void start_action() noexcept;

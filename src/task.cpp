@@ -53,6 +53,7 @@ TaskInfo::set_dirty() noexcept
 {
   cache_dirty = true;
   rip_dirty = true;
+  callstack_dirty = true;
 }
 
 void

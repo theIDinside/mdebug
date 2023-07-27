@@ -20,4 +20,16 @@ Frame::name() const noexcept
     return symbol->name;
 }
 
+std::optional<int>
+CallStack::has_frame(const Frame &f) const noexcept
+{
+  auto i = 0;
+  for (const auto &frame : frames) {
+    if (frame == f)
+      return i;
+    ++i;
+  }
+  return std::nullopt;
+}
+
 } // namespace sym

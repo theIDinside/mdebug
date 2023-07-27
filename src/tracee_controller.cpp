@@ -146,75 +146,6 @@ TraceeController::resume_target(RunType type) noexcept
 }
 
 void
-TraceeController::step_target(Tid tid, int steps) noexcept
-{
-  ASSERT(is_in_user_ptrace_stop,
-         "Stepping while not in a ptrace-stop doesn't make sense. Target must be interrupted first.");
-
-  // start by stepping the requested thread first, then go in-order
-  auto thr_steps = prepare_foreach_thread<TaskStepInfo>();
-  for (const auto &t : threads) {
-    if (t.tid == tid) {
-      thr_steps.insert(thr_steps.begin(),
-                       {.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = register_cache[t.tid].rip});
-    } else {
-      thr_steps.push_back({.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = register_cache[t.tid].rip});
-    }
-  }
-
-  // Single-step over breakpoints that were hit, then re-enable them.
-  if (!user_brkpts.task_bp_stats.empty()) {
-    for (auto bp_stat : user_brkpts.task_bp_stats) {
-      auto bp = user_brkpts.get_by_id(bp_stat.bp_id);
-      bp->disable(bp_stat.tid);
-      int stat;
-      VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
-             "Single step over user breakpoint boundary failed: {}", strerror(errno));
-      waitpid(bp_stat.tid, &stat, 0);
-      u64 rip;
-      auto ptr = ptrace(PTRACE_PEEKUSER, bp_stat.tid, offsetof(user_regs_struct, rip), &rip);
-      ASSERT(ptr != -1 && AddrPtr{rip} != bp->address, "Failed to single step over breakpoint at {}", bp->address);
-      user_brkpts.enable_breakpoint(bp_stat.bp_id);
-      get_task(bp_stat.tid)->set_dirty();
-      auto ts_info = find(thr_steps, [tid = bp_stat.tid](auto &t) { return t.tid == tid; });
-      ts_info->step_taken_to(rip);
-    }
-  }
-
-  user_brkpts.clear_breakpoint_stats();
-  Set<Tid> threads_stepped{};
-  for (auto &tsi : thr_steps) {
-    if (tsi.steps > 0) {
-      if (-1 == ptrace(PTRACE_SINGLESTEP, tsi.tid, nullptr, nullptr)) {
-        LOG("mdb", "Failed to step {}: {}", tsi.tid, strerror(errno));
-      } else {
-        u64 rip;
-        auto ptr = ptrace(PTRACE_PEEKUSER, tsi.tid, offsetof(user_regs_struct, rip), &rip);
-        tsi.step_taken_to(ptr);
-        get_task(tsi.tid)->set_dirty();
-        threads_stepped.insert(tsi.tid);
-        if (user_brkpts.contains(tsi.rip - 1)) {
-          set_pc(get_task(tsi.tid), tsi.rip - 1);
-          for (auto t : threads_stepped) {
-            int stat;
-            waitpid(t, &stat, 0);
-          }
-          emit_stopped_at_breakpoint({.pid = task_leader, .tid = tsi.tid}, (tsi.rip - 1));
-          return;
-        }
-      }
-    }
-  }
-
-  for (auto t : threads_stepped) {
-    int stat;
-    waitpid(t, &stat, 0);
-  }
-
-  emit_stepped_stop(LWP{.pid = task_leader, .tid = tid});
-}
-
-void
 TraceeController::stop_all() noexcept
 {
   for (auto &t : threads) {
@@ -263,10 +194,8 @@ TraceeController::get_caching_pc(TaskInfo *t) noexcept
     VERIFY(static_cast<i64>(rip) != -1, "Failed to set RIP register");
     t->rip_dirty = false;
     register_cache[t->tid].rip = rip;
-    LOG("mdb", "Task PC dirty read in {:x}", rip);
     return rip;
   } else {
-    LOG("mdb", "Task PC clean: {:x}", register_cache[t->tid].rip);
     return register_cache[t->tid].rip;
   }
 }
@@ -293,7 +222,9 @@ TraceeController::cache_registers(Tid tid) noexcept
 {
   auto &registers = register_cache[tid];
   PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
-  get_task(tid)->cache_dirty = false;
+  auto task = get_task(tid);
+  task->cache_dirty = false;
+  task->rip_dirty = false;
   return registers;
 }
 
@@ -897,17 +828,22 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
       for (auto i = rsps.begin(); i != rsps.end(); i++) {
         auto symbol = find_fn_by_pc(i->as_void());
         if (symbol)
-          cs.frames.push_back(sym::Frame{.rip = i->as_void(),
-                                         .symbol = symbol->fn_sym,
-                                         .cu_file = symbol->cu_file,
-                                         .type = sym::FrameType::Full,
-                                         .level = static_cast<int>(levels - level)});
+          cs.frames.push_back(sym::Frame{
+              .rip = i->as_void(),
+              .symbol = symbol->fn_sym,
+              .cu_file = symbol->cu_file,
+              .level = static_cast<int>(levels - level),
+              .type = sym::FrameType::Full,
+
+          });
         else {
-          cs.frames.push_back(sym::Frame{.rip = i->as_void(),
-                                         .symbol = nullptr,
-                                         .cu_file = nullptr,
-                                         .type = sym::FrameType::Unknown,
-                                         .level = static_cast<int>(levels - level)});
+          cs.frames.push_back(sym::Frame{
+              .rip = i->as_void(),
+              .symbol = nullptr,
+              .cu_file = nullptr,
+              .level = static_cast<int>(levels - level),
+              .type = sym::FrameType::Unknown,
+          });
         }
         ++level;
       }

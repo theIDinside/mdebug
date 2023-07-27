@@ -61,6 +61,7 @@ struct TaskInfo
   bool initialized : 1;
   bool cache_dirty : 1;
   bool rip_dirty : 1;
+  bool callstack_dirty : 1;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;

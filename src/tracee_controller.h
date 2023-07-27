@@ -182,8 +182,6 @@ struct TraceeController
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(RunType type) noexcept;
-  /* Steps all tasks in this target by `steps`. After stepping is done, report that `tid` has stopped. */
-  void step_target(Tid tid, int steps) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all() noexcept;
   /* Query if we should interrupt the entire process and all it's tasks when we encounter a clone syscall */

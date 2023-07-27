@@ -77,7 +77,7 @@ Next::execute(Tracer *tracer) noexcept
     target->install_ptracestop_action(new ptracestop::InstructionStep{target, thread_id, 1, !continue_all});
     break;
   case SteppingGranularity::Line:
-    TODO("Next::execute granularity=SteppingGranularity::Line")
+    target->install_ptracestop_action(new ptracestop::LineStep{target, thread_id, 1, !continue_all});
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")

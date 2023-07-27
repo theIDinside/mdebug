@@ -4,7 +4,7 @@
 #include <vector>
 
 namespace sym {
-enum class FrameType
+enum class FrameType : u8
 {
   Full,
   Unknown
@@ -24,8 +24,8 @@ struct Frame
   TPtr<void> rip;
   const FunctionSymbol *symbol;
   const CompilationUnitFile *cu_file;
-  FrameType type;
   int level;
+  FrameType type;
 
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept
@@ -38,5 +38,6 @@ struct CallStack
 {
   Tid tid;                   // the task associated with this call stack
   std::vector<Frame> frames; // the call stack
+  std::optional<int> has_frame(const Frame &f) const noexcept;
 };
 } // namespace sym

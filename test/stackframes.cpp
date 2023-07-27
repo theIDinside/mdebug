@@ -10,7 +10,7 @@ quux(int acc, int a)
 static int
 baz(int a, int b, int times)
 {
-  int res_a = 1;
+  int res_a = 1; // BPLine1
   int res_b = 1; // BP3
   while (times > 0) {
     res_a = quux(res_a, a);
