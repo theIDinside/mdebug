@@ -219,7 +219,15 @@ struct TraceeController
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
   bool detach() noexcept;
-  void install_ptracestop_action(ptracestop::Action *action) noexcept;
+
+  template <typename StopAction, typename... Args>
+  void
+  install_ptracestop_handler(Args... args) noexcept
+  {
+    ptracestop_handler->set_action(new StopAction{ptracestop_handler, args...});
+    ptracestop_handler->start_action();
+  }
+
   void restore_default_handler() noexcept;
 
   // todo(simon): These need re-factoring. They're only confusing as hell and misleading.

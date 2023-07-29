@@ -402,13 +402,6 @@ TraceeController::detach() noexcept
 }
 
 void
-TraceeController::install_ptracestop_action(ptracestop::Action *action) noexcept
-{
-  ptracestop_handler->set_action(action);
-  ptracestop_handler->start_action();
-}
-
-void
 TraceeController::restore_default_handler() noexcept
 {
   ptracestop_handler->restore_default();

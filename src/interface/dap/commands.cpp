@@ -74,12 +74,10 @@ Next::execute(Tracer *tracer) noexcept
   case SteppingGranularity::Instruction:
     DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
          target->get_task(thread_id)->registers->rip);
-    target->install_ptracestop_action(
-        new ptracestop::InstructionStep{target->stop_handler(), thread_id, 1, !continue_all});
+    target->install_ptracestop_handler<ptracestop::InstructionStep>(thread_id, 1, !continue_all);
     break;
   case SteppingGranularity::Line:
-    target->install_ptracestop_action(
-        new ptracestop::LineStep{target->stop_handler(), thread_id, 1, !continue_all});
+    target->install_ptracestop_handler<ptracestop::LineStep>(thread_id, 1, !continue_all);
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
