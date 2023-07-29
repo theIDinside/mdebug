@@ -60,6 +60,7 @@ main(int argc, const char **argv)
   logging::Logger::get_logger()->setup_channel("mdb");
   logging::Logger::get_logger()->setup_channel("dap");
   logging::Logger::get_logger()->setup_channel("dwarf");
+  logging::Logger::get_logger()->setup_channel("awaiter");
 
   std::span<const char *> args(argv, argc);
   logging::get_logging()->log("mdb", "MDB CLI Arguments");
@@ -87,7 +88,7 @@ main(int argc, const char **argv)
 
   std::vector<utils::NotifyResult> notify_events{};
   for (;;) {
-    if (notifiers.poll(1000)) {
+    if (notifiers.poll(0)) {
       notifiers.has_wait_ready(notify_events);
       for (const auto target : notify_events) {
         // handle await events on `target`
