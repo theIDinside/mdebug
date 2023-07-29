@@ -231,8 +231,8 @@ class DAClient {
    * @param { number } threadId
    * @returns {Promise<{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}>}
    */
-  async stackTrace(threadId) {
-    return this.sendReqGetResponse("stackTrace", { threadId: threadId });
+  async stackTrace(threadId, timeout = 1000) {
+    return this.sendReqGetResponse("stackTrace", { threadId: threadId }, timeout);
   }
 
   flushConnection() {
@@ -276,9 +276,9 @@ class DAClient {
   }
 
   // utility function to initialize, launch `program` and run to `main`
-  async launchToMain(program) {
+  async launchToMain(program, timeout = 1000) {
     let stopped_promise = this.prepareWaitForEvent("stopped");
-    await this.sendReqGetResponse("initialize", {})
+    await this.sendReqGetResponse("initialize", {}, timeout)
       .then((response) => {
         checkResponse(response, "initialize", true);
       })
@@ -286,12 +286,12 @@ class DAClient {
     await this.sendReqGetResponse("launch", {
       program: program,
       stopAtEntry: true,
-    })
+    }, timeout)
       .then((response) => {
         checkResponse(response, "launch", true);
       })
       .catch(testException);
-    await this.sendReqGetResponse("configurationDone").catch(testException);
+    await this.sendReqGetResponse("configurationDone", {}, timeout).catch(testException);
     await stopped_promise;
   }
 
