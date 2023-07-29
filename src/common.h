@@ -125,8 +125,10 @@ std::string_view syscall_name(u64 syscall_number);
 
 #if defined(MDB_DEBUG)
 #define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
+#define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
 #else
 #define ASSERT(cond, msg, ...)
+#define PERFORM_ASSERT(op, msg, ...) op
 #endif
 
 template <typename T> class TraceePointer
@@ -637,7 +639,7 @@ to_integral(std::string_view s)
     return std::nullopt;
 }
 
-Option<TPtr<void>> to_addr(std::string_view s) noexcept;
+Option<AddrPtr> to_addr(std::string_view s) noexcept;
 
 using SpinGuard = LockGuard<SpinLock>;
 

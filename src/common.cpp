@@ -313,14 +313,14 @@ DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
   size = new_size;
 }
 
-Option<TPtr<void>>
+Option<AddrPtr>
 to_addr(std::string_view s) noexcept
 {
   if (s.starts_with("0x"))
     s.remove_prefix(2);
 
   if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value, 16).ec == std::errc{})
-    return TPtr<void>{value};
+    return AddrPtr{value};
   else
     return std::nullopt;
 }
