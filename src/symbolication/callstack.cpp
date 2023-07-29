@@ -32,4 +32,16 @@ CallStack::has_frame(const Frame &f) const noexcept
   return std::nullopt;
 }
 
+std::optional<std::string_view>
+Frame::function_name() const noexcept
+{
+  if (symbol) {
+    return symbol->name;
+  } else {
+    return std::nullopt;
+  }
+}
+
+CallStack::CallStack(Tid tid) noexcept : tid(tid), frames(), pcs() {}
+
 } // namespace sym

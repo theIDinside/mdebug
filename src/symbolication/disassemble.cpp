@@ -58,10 +58,9 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
 }
 
 void
-zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset, i32 total,
+zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
-  ASSERT(ins_offset > 0 && total > 0, "ins_offset must be an absolute number");
   ElfSection *text = target->get_text_section(addr);
   ZydisDisassembledInstruction instruction;
 

@@ -59,7 +59,7 @@ StoppedEvent::serialize(int seq) const noexcept
 }
 
 std::string
-BreakpointEvent::serialize(int seq) const noexcept
+BreakpointEvent::serialize(int) const noexcept
 {
   TODO("unimplemented");
 }

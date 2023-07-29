@@ -72,12 +72,14 @@ Next::execute(Tracer *tracer) noexcept
 
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    LOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
-        target->cache_registers(thread_id).rip);
-    target->install_ptracestop_action(new ptracestop::InstructionStep{target, thread_id, 1, !continue_all});
+    DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
+         target->get_task(thread_id)->registers->rip);
+    target->install_ptracestop_action(
+        new ptracestop::InstructionStep{target->stop_handler(), thread_id, 1, !continue_all});
     break;
   case SteppingGranularity::Line:
-    target->install_ptracestop_action(new ptracestop::LineStep{target, thread_id, 1, !continue_all});
+    target->install_ptracestop_action(
+        new ptracestop::LineStep{target->stop_handler(), thread_id, 1, !continue_all});
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -293,7 +295,7 @@ ReadMemoryResponse::serialize(int seq) const noexcept
   }
 }
 
-ReadMemory::ReadMemory(std::uint64_t seq, TPtr<void> address, int offset, u64 bytes) noexcept
+ReadMemory::ReadMemory(std::uint64_t seq, AddrPtr address, int offset, u64 bytes) noexcept
     : UICommand(seq), address(address), offset(offset), bytes(bytes)
 {
 }
@@ -332,7 +334,7 @@ Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
 }
 
 UIResultPtr
-Initialize::execute(Tracer *tracer) noexcept
+Initialize::execute(Tracer *) noexcept
 {
   return new InitializeResponse{true, this};
 }
@@ -526,7 +528,7 @@ StackTrace::execute(Tracer *tracer) noexcept
   return response;
 }
 
-Disassemble::Disassemble(std::uint64_t seq, TPtr<void> address, int byte_offset, int ins_offset, int ins_count,
+Disassemble::Disassemble(std::uint64_t seq, AddrPtr address, int byte_offset, int ins_offset, int ins_count,
                          bool resolve_symbols) noexcept
     : UICommand(seq), address(address), byte_offset(byte_offset), ins_offset(ins_offset), ins_count(ins_count),
       resolve_symbols(resolve_symbols)
@@ -541,7 +543,7 @@ Disassemble::execute(Tracer *tracer) noexcept
   int remaining = ins_count;
   if (ins_offset < 0) {
     const int negative_offset = std::abs(ins_offset);
-    sym::zydis_disasm_backwards(tracer->get_current(), address, static_cast<u32>(negative_offset), ins_count,
+    sym::zydis_disasm_backwards(tracer->get_current(), address, static_cast<u32>(negative_offset),
                                 res->instructions);
     if (negative_offset < ins_count) {
       for (auto i = 0u; i < res->instructions.size(); i++) {

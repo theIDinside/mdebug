@@ -9,7 +9,7 @@ struct LineTableEntry;
 namespace sym {
 struct Disassembly
 {
-  TPtr<void> address;
+  AddrPtr address;
   std::string opcode;
   std::string instruction;
   std::string_view source_name;
@@ -18,7 +18,7 @@ struct Disassembly
   u32 column;
 };
 
-void zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset, i32 total,
+void zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                             std::vector<sym::Disassembly> &output) noexcept;
 
 void zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,

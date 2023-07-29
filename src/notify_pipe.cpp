@@ -8,7 +8,7 @@ namespace utils {
 Notifier::notify_pipe() noexcept
 {
   int notify_pipe[2];
-  ASSERT(pipe(notify_pipe) != -1, "Failed to set up notifier pipe {}", strerror(errno));
+  VERIFY(pipe(notify_pipe) != -1, "Failed to set up notifier pipe {}", strerror(errno));
   auto flags = fcntl(notify_pipe[0], F_GETFL);
   VERIFY(flags != -1, "Failed to get flags for read-end of pipe");
   VERIFY(-1 != fcntl(notify_pipe[0], F_SETFL, flags | O_NONBLOCK), "Failed to set non-blocking for pipe");
@@ -44,8 +44,8 @@ NotifyManager::has_io_ready() noexcept
   const auto ok = (pollfds[0].revents & POLLIN) == POLLIN;
   if (ok) {
     char c;
-    auto res = ::read(pollfds[0].fd, &c, 1);
-    ASSERT(res != -1 && errno != EAGAIN, "Attempting to read from pipe when it would block");
+    PERFORM_ASSERT(::read(pollfds[0].fd, &c, 1) != -1 && errno != EAGAIN,
+                   "Attempting to read from pipe when it would block");
   }
   pollfds[0].revents = 0;
   pollfds[0].events = POLLIN;
@@ -62,8 +62,7 @@ NotifyManager::has_wait_ready(std::vector<NotifyResult> &result)
     if (ok) {
       result.push_back(NotifyResult{.pid = fd_to_target[pollfds[i].fd]});
       char c;
-      auto res = ::read(pollfds[i].fd, &c, 1);
-      ASSERT(res != -1 && errno != EAGAIN, "Attempting to read from pipe when it would block");
+      ::read(pollfds[i].fd, &c, 1);
     }
     pollfds[i].revents = 0;
     pollfds[i].events = POLLIN;

@@ -3,6 +3,7 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "lib/spinlock.h"
+#include "ptracestop_handlers.h"
 #include "symbolication/callstack.h"
 #include "symbolication/elf.h"
 #include "symbolication/type.h"
@@ -22,11 +23,6 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
-
-namespace ptracestop {
-class StopHandler;
-class Action;
-} // namespace ptracestop
 
 namespace ui {
 struct UICommand;
@@ -135,14 +131,14 @@ struct BreakpointMap
   }
 
   void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
-  bool insert(TraceePointer<void> addr, u8 overwritten_byte, UserBreakpointType type) noexcept;
+  bool insert(AddrPtr addr, u8 overwritten_byte, UserBreakpointType type) noexcept;
   void clear(TraceeController *target, UserBreakpointType type) noexcept;
   void clear_breakpoint_stats() noexcept;
   void disable_breakpoint(u16 id) noexcept;
   void enable_breakpoint(u16 id) noexcept;
 
   Breakpoint *get_by_id(u32 id) noexcept;
-  Breakpoint *get(TraceePointer<void> addr) noexcept;
+  Breakpoint *get(AddrPtr addr) noexcept;
 };
 
 class Default;
@@ -194,15 +190,14 @@ struct TraceeController
   TaskInfo *register_task_waited(TaskWaitResult wait) noexcept;
 
   AddrPtr get_caching_pc(TaskInfo *t) noexcept;
-  void set_pc(TaskInfo *t, TPtr<void> addr) noexcept;
+  void set_pc(TaskInfo *t, AddrPtr addr) noexcept;
 
   /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
   /* Cache the register contents of `tid`. */
-  [[maybe_unused]] const user_regs_struct &cache_registers(Tid tid) noexcept;
-  void synchronize_registers(Tid tid) noexcept;
+  [[maybe_unused]] void cache_registers(TaskInfo *task) noexcept;
   /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
@@ -216,7 +211,7 @@ struct TraceeController
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
   // thing
-  void reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept;
+  void reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept;
   void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
   void reset_source_breakpoints(std::string_view source_filepath,
                                 std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
@@ -224,7 +219,6 @@ struct TraceeController
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
   bool detach() noexcept;
-  AddrPtr task_rip(Tid tid) noexcept;
   void install_ptracestop_action(ptracestop::Action *action) noexcept;
   void restore_default_handler() noexcept;
 
@@ -248,10 +242,10 @@ struct TraceeController
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
-  void read_auxv(TaskInfo &task);
+  void read_auxv(TaskInfo *task);
   TargetSession session_type() const noexcept;
   std::string get_thread_name(Tid tid) const noexcept;
-  utils::StaticVector<u8>::own_ptr read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept;
+  utils::StaticVector<u8>::own_ptr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
 
   /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
   template <typename T>
@@ -383,23 +377,33 @@ struct TraceeController
   /* Add parsed DWARF debug info for `file` */
   void add_file(CompilationUnitFile &&file) noexcept;
 
+  // Inform awaiter threads that event has been consumed & handled. "Wakes up" the awaiter thread.
   void reaped_events() noexcept;
+
+  /* N.B.(simon):
+   * Notify "self" of events; while awaiter thread is blocked/yielded. This is particularly useful
+   * during stepping, as we *know* there will be awaitable events. This reduces that extra `wait` system call,
+   * which can be quite the overhead when stepping through thousands of instructions. Naive measurements show a
+   * >50% time reducation in waiting on each event in each step (from 7us -> 2us).
+   */
+  void notify_self() noexcept;
   void start_awaiter_thread() noexcept;
   sym::CallStack &build_callframe_stack(TaskInfo *task) noexcept;
-  std::optional<SearchFnSymResult> find_fn_by_pc(TPtr<void> addr) const noexcept;
+  sym::Frame current_frame(TaskInfo *task) noexcept;
+  std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
-  u8 *get_in_text_section(TPtr<void> address) const noexcept;
+  u8 *get_in_text_section(AddrPtr address) const noexcept;
   ElfSection *get_text_section(AddrPtr addr) const noexcept;
   // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
-  std::optional<u64> cu_file_from_pc(TPtr<void> address) const noexcept;
+  std::optional<u64> cu_file_from_pc(AddrPtr address) const noexcept;
+  const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
   const std::vector<CompilationUnitFile> &cu_files() const noexcept;
+  ptracestop::StopHandler *stop_handler() const noexcept;
 
 private:
   std::vector<CompilationUnitFile> m_files;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
-  std::unordered_map<Tid, user_regs_struct> register_cache;
-  std::vector<sym::CallStack> frame_cache;
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
   bool is_in_user_ptrace_stop;

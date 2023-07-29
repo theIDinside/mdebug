@@ -1,10 +1,12 @@
 #include "task.h"
 #include "ptrace.h"
+#include "symbolication/callstack.h"
 #include <sys/ptrace.h>
+#include <sys/user.h>
 
 TaskInfo::TaskInfo(pid_t tid) noexcept
     : tid(tid), wait_status(), run_type(RunType::UNKNOWN), stopped(true), ptrace_stop(false), initialized(false),
-      cache_dirty(true), rip_dirty(true)
+      cache_dirty(true), rip_dirty(true), registers(new user_regs_struct{}), call_stack(new sym::CallStack{tid})
 {
 }
 
@@ -17,6 +19,7 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 void
 TaskInfo::set_running(RunType type) noexcept
 {
+  DLOG("mdb", "restarting {}", tid);
   if (stopped) {
     stopped = false;
     ptrace_stop = false;
@@ -28,6 +31,7 @@ TaskInfo::set_running(RunType type) noexcept
     run_type = type;
     PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
   }
+  set_dirty();
 }
 
 void
@@ -57,7 +61,7 @@ TaskInfo::set_dirty() noexcept
 }
 
 void
-TaskStepInfo::step_taken_to(TPtr<void> rip) noexcept
+TaskStepInfo::step_taken_to(AddrPtr rip) noexcept
 {
   this->rip = rip;
   --steps;

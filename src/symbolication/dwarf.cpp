@@ -7,7 +7,7 @@
 #include <variant>
 
 constexpr bool
-DEBUG_SANITIZE_DWARF_NAME(u16 _value)
+DEBUG_SANITIZE_DWARF_NAME(u16)
 {
   return true;
 }

@@ -11,6 +11,6 @@
 struct MinSymbol
 {
   std::string_view name;
-  TPtr<void> address;
+  AddrPtr address;
   u64 maybe_size;
 };

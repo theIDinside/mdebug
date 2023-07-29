@@ -16,7 +16,7 @@ struct ElfSection
   const char *m_name;
   u64 m_section_size;
   u64 file_offset;
-  TPtr<void> address;
+  AddrPtr address;
   std::string_view get_name() const noexcept;
   const u8 *begin() const noexcept;
   const u8 *end() const noexcept;

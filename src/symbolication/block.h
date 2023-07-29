@@ -6,9 +6,9 @@
  */
 struct AddressRange
 {
-  TPtr<void> low;
-  TPtr<void> high;
+  AddrPtr low;
+  AddrPtr high;
   bool contains(AddressRange &range) const noexcept;
-  bool contains(TPtr<void> ptr) const noexcept;
+  bool contains(AddrPtr ptr) const noexcept;
   bool is_valid() const noexcept;
 };

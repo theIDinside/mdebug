@@ -71,7 +71,7 @@ std::unique_ptr<LineHeader> read_lineheader_v4(const u8 *ptr, u8 addr_size) noex
  */
 struct LineTableEntry
 {
-  TPtr<void> pc;
+  AddrPtr pc;
   u32 line;
   u32 column : 17;
   u16 file : 10;

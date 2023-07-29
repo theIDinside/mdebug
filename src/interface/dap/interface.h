@@ -44,9 +44,10 @@ public:
   void
   expect_read_from_fd(int fd) noexcept
   {
+    VERIFY(current_size() < buffer_size, "Next read would read < 0 bytes!");
     auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
-    VERIFY(read_bytes > 0,
-           "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: {}",
+    VERIFY(read_bytes >= 0,
+           "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: '{}'",
            buffer_size - current_size(), buffer_size, strerror(errno), take_view());
     if (read_bytes >= 0) {
       size[current_buffer_index] += read_bytes;

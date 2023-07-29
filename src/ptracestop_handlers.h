@@ -4,29 +4,25 @@
 #include "symbolication/callstack.h"
 #include "symbolication/lnp.h"
 #include "task.h"
+#include <chrono>
 #include <vector>
 
 struct TraceeController;
 class Breakpoint;
 
 namespace ptracestop {
+
+class StopHandler;
+
 class Action
 {
 public:
-  Action(TraceeController *tc) noexcept : tc(tc), should_stop(false) {}
-  virtual ~Action() = default;
+  Action(StopHandler *handler) noexcept;
+  virtual ~Action() noexcept;
 
   // `should_stop` is passed in by the StopHandler, if we've encountered
   // an event, signal or whatever, that should abort this installed stepper
-  virtual bool
-  do_next_action(TaskInfo *t, bool should_stop) noexcept
-  {
-    constexpr bool is_done = false;
-    if (!should_stop) {
-      t->set_running(RunType::Continue);
-    }
-    return is_done;
-  }
+  virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept;
 
   // default handler does nothing at "start"
   virtual void
@@ -48,6 +44,7 @@ public:
   }
 
 protected:
+  StopHandler *handler;
   TraceeController *tc;
   bool should_stop;
 };
@@ -55,10 +52,11 @@ protected:
 class InstructionStep : public Action
 {
 public:
-  InstructionStep(TraceeController *tracee, Tid thread_id, int steps, bool single_thread = false) noexcept;
+  InstructionStep(StopHandler *handler, Tid thread_id, int steps, bool single_thread = false) noexcept;
   ~InstructionStep() override = default;
   // `should_stop` is passed in by the StopHandler, if we've encountered
   // an event, signal or whatever, that should abort this installed stepper
+  // returns `true` when we _should not continue_
   virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept override;
   void start_action() noexcept override;
   bool check_if_done() noexcept override;
@@ -70,15 +68,17 @@ protected:
   bool step_one() noexcept;
   Tid thread_id;
   int steps;
+  int debug_steps_taken;
   bool done;
   std::vector<TaskStepInfo> tsi;
   std::vector<TaskStepInfo>::iterator next;
+  std::chrono::system_clock::time_point start_time;
 };
 
 class LineStep final : public InstructionStep
 {
 public:
-  LineStep(TraceeController *tc, Tid thread_id, int lines, bool single_thread = false) noexcept;
+  LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread = false) noexcept;
   ~LineStep() override final = default;
   void start_action() noexcept override final;
   bool check_if_done() noexcept override final;
@@ -88,6 +88,7 @@ private:
   sym::Frame start_frame;
   LineTableEntry entry;
   const CompilationUnitFile *cu;
+  int debug_steps_taken = 0;
 };
 
 class StopHandler
@@ -114,22 +115,24 @@ public:
   void restore_default() noexcept;
   void start_action() noexcept;
 
-protected:
   TraceeController *tc;
   Action *action;
   Action *default_action;
   bool should_stop;
   bool stop_all;
+  std::chrono::high_resolution_clock::time_point prev_time;
   union
   {
     u8 bitset;
     struct
     {
+      bool padding : 4;
       bool clone_stop : 1;
       bool exec_stop : 1;
       bool thread_exit_stop : 1;
       bool ignore_bps : 1;
     };
   } event_settings;
+  bool is_stepping;
 };
 } // namespace ptracestop

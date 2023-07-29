@@ -1,12 +1,30 @@
 #include "ptracestop_handlers.h"
 #include "symbolication/lnp.h"
 #include "tracee_controller.h"
+#include "tracer.h"
+#include "utils/logger.h"
 #include <algorithm>
+#include <chrono>
 
 namespace ptracestop {
 
-InstructionStep::InstructionStep(TraceeController *tc, Tid thread_id, int steps, bool single_thread) noexcept
-    : Action(tc), thread_id(thread_id), steps(steps), done(false), tsi(tc->prepare_foreach_thread<TaskStepInfo>())
+Action::Action(StopHandler *handler) noexcept : handler(handler), tc(handler->tc), should_stop(false) {}
+
+Action::~Action() noexcept { handler->is_stepping = false; }
+
+bool
+Action::do_next_action(TaskInfo *t, bool should_stop) noexcept
+{
+  constexpr bool is_done = false;
+  if (!should_stop) {
+    t->set_running(RunType::Continue);
+  }
+  return is_done;
+}
+
+InstructionStep::InstructionStep(StopHandler *handler, Tid thread_id, int steps, bool single_thread) noexcept
+    : Action(handler), thread_id(thread_id), steps(steps), debug_steps_taken(0), done(false),
+      tsi(handler->tc->prepare_foreach_thread<TaskStepInfo>())
 {
   ASSERT(steps > 0, "Instruction stepping with 0 as param not valid");
   for (auto &t : tc->threads) {
@@ -20,7 +38,7 @@ InstructionStep::InstructionStep(TraceeController *tc, Tid thread_id, int steps,
 }
 
 bool
-InstructionStep::do_next_action(TaskInfo *t, bool should_stop) noexcept
+InstructionStep::do_next_action(TaskInfo *, bool should_stop) noexcept
 {
   if (!should_stop) {
     return step_one();
@@ -32,6 +50,8 @@ InstructionStep::do_next_action(TaskInfo *t, bool should_stop) noexcept
 void
 InstructionStep::start_action() noexcept
 {
+  this->handler->is_stepping = true;
+  start_time = std::chrono::high_resolution_clock::now();
   step_one();
 }
 
@@ -55,48 +75,57 @@ bool
 InstructionStep::step_one() noexcept
 {
   if (check_if_done()) {
+    const auto end = std::chrono::high_resolution_clock::now();
+    const auto time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_time);
+    logging::get_logging()->log(
+        "mdb",
+        fmt::format("Stepping ({} steps) took {}us. Average time per step: {}", debug_steps_taken, time.count(),
+                    static_cast<float>(time.count()) / static_cast<float>(debug_steps_taken)));
     tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = thread_id});
     return true;
   }
-  LOG("mdb", "Stepping {} one step", next->tid);
-  auto bpstat = find(tc->user_brkpts.task_bp_stats, [t = next->tid](auto &bpstat) { return bpstat.tid == t; });
-  bool stepped_over_bp = false;
-  if (bpstat != std::end(tc->user_brkpts.task_bp_stats)) {
-    auto bp = tc->user_brkpts.get_by_id(bpstat->bp_id);
-    LOG("mdb", "[step_one]: Disabling breakpoint {} for tid {}", bpstat->bp_id, next->tid);
-    bp->disable(next->tid);
-    stepped_over_bp = true;
+  if (!tc->user_brkpts.task_bp_stats.empty()) {
+    auto bpstat = find(tc->user_brkpts.task_bp_stats, [t = next->tid](auto &bpstat) { return bpstat.tid == t; });
+    bool stepped_over_bp = false;
+    if (bpstat != std::end(tc->user_brkpts.task_bp_stats)) {
+      auto bp = tc->user_brkpts.get_by_id(bpstat->bp_id);
+      bp->disable(next->tid);
+      stepped_over_bp = true;
+    }
+    VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, next->tid, 0, 0),
+           "Single step over user breakpoint boundary failed: {}", strerror(errno));
+    if (stepped_over_bp) {
+      bpstat->stepped_over = true;
+      tc->user_brkpts.enable_breakpoint(bpstat->bp_id);
+    }
+  } else {
+    VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, next->tid, 0, 0),
+           "Single step over user breakpoint boundary failed: {}", strerror(errno));
   }
-
-  VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bpstat->tid, 0, 0),
-         "Single step over user breakpoint boundary failed: {}", strerror(errno));
-  if (stepped_over_bp) {
-    bpstat->stepped_over = true;
-    tc->user_brkpts.enable_breakpoint(bpstat->bp_id);
-  }
-
   update_step_schedule();
+  debug_steps_taken++;
   return false;
 }
 
-LineStep::LineStep(TraceeController *tc, Tid thread_id, int lines, bool single_thread) noexcept
-    : InstructionStep(tc, thread_id, lines, single_thread)
+LineStep::LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread) noexcept
+    : InstructionStep(handler, thread_id, lines, single_thread)
 {
 }
 
 void
 LineStep::start_action() noexcept
 {
+  this->handler->is_stepping = true;
+  start_time = std::chrono::high_resolution_clock::now();
   auto &callstack = tc->build_callframe_stack(tc->get_task(next->tid));
   start_frame = callstack.frames[0];
-  if (auto cu_idx = tc->cu_file_from_pc(start_frame.rip); cu_idx) {
-    const auto [a, b] = tc->cu_files()[*cu_idx].get_range(start_frame.rip);
+  if (auto cu = tc->get_cu_from_pc(start_frame.rip); cu) {
+    const auto [a, b] = cu->get_range(start_frame.rip);
     ASSERT(a != nullptr, "Expected a line table entry");
     entry = *a;
-    cu = &tc->cu_files()[*cu_idx];
+    this->cu = cu;
     step_one();
   } else {
-    // we could not find any source debug information; abort installed stepper.
     done = true;
   }
 }
@@ -112,28 +141,25 @@ LineStep::update_step_schedule() noexcept
 bool
 LineStep::check_if_done() noexcept
 {
-  auto stepped_tid = next->tid;
+  debug_steps_taken++;
   // we don't care what all the other threads are doing, we just step them.
-  if (stepped_tid != thread_id)
+  if (next->tid != thread_id)
     return false;
-
-  auto &callstack = tc->build_callframe_stack(tc->get_task(stepped_tid));
-  if (auto frameidx = callstack.has_frame(start_frame); frameidx) {
-    auto &f = callstack.frames[*frameidx];
-    const auto [a, b] = cu->get_range(f.rip);
-    ASSERT(a != nullptr && b != nullptr, "Expected to be able to find lte range.")
+  auto task = tc->get_task(next->tid);
+  const auto frame = tc->current_frame(task);
+  if (same_symbol(frame, start_frame)) {
+    const auto [a, b] = cu->get_range(frame.rip);
     if (a->line != entry.line) {
+      DLOG("mdb", "New LTE pc {}, line {} != start LTE pc {}, line {}.", a->pc, a->line, entry.pc, entry.line);
       done = true;
     }
-  } else {
-    done = true;
   }
   return done;
 }
 
 StopHandler::StopHandler(TraceeController *tc) noexcept
-    : tc(tc), action(new Action{tc}), default_action(action), should_stop(false),
-      stop_all(true), event_settings{.bitset = 0x00} // all OFF by default
+    : tc(tc), action(new Action{this}), default_action(action), should_stop(false),
+      stop_all(true), event_settings{.bitset = 0x00}, is_stepping(false) // all OFF by default
 {
 }
 
@@ -192,14 +218,16 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
   default:
     break;
   }
-
   // If we have a stepper installed, perform it's action
   if (action->do_next_action(stopped, should_stop)) {
     delete action;
     action = default_action;
     should_stop = false;
   }
-  tc->reaped_events();
+  if (is_stepping)
+    tc->notify_self();
+  else
+    tc->reaped_events();
 }
 
 void
@@ -211,7 +239,7 @@ StopHandler::handle_breakpoint_event(TaskInfo *task, Breakpoint *bp) noexcept
 }
 
 void
-StopHandler::handle_generic_stop(TaskInfo *stopped) noexcept
+StopHandler::handle_generic_stop(TaskInfo *) noexcept
 {
   should_stop = false;
 }
@@ -225,7 +253,7 @@ StopHandler::handle_signalled(TaskInfo *t) noexcept
 }
 
 void
-StopHandler::handle_execed(TaskInfo *t) noexcept
+StopHandler::handle_execed(TaskInfo *) noexcept
 {
   should_stop = event_settings.exec_stop;
 }
@@ -236,7 +264,7 @@ StopHandler::handle_exited(TaskInfo *t) noexcept
   should_stop = event_settings.thread_exit_stop;
 }
 void
-StopHandler::handle_cloned(TaskInfo *t) noexcept
+StopHandler::handle_cloned(TaskInfo *) noexcept
 {
   should_stop = event_settings.clone_stop;
 }
@@ -291,7 +319,7 @@ StopHandler::restore_default() noexcept
 void
 StopHandler::start_action() noexcept
 {
-  LOG("mdb", "Starting action...");
+  DLOG("mdb", "Starting action...");
   action->start_action();
 }
 

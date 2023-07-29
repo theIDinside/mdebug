@@ -18,12 +18,14 @@
 #include "utils/logger.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
 #include <linux/auxvec.h>
+#include <memory_resource>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -40,13 +42,12 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, threads{}, user_brkpts(process_space_id),
-      stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, register_cache(),
-      session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this})
+      stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
+      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
   threads.back().initialize();
-  frame_cache.push_back(sym::CallStack{.tid = threads.back().tid, .frames = {}});
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
     procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
@@ -97,7 +98,6 @@ TraceeController::new_task(Tid tid, bool ui_update) noexcept
       "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
   Tracer::Instance->post_event(evt);
   threads.push_back(TaskInfo{tid});
-  frame_cache.push_back(sym::CallStack{.tid = tid, .frames = {}});
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
          "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
@@ -120,19 +120,22 @@ TraceeController::has_task(Tid tid) noexcept
 void
 TraceeController::resume_target(RunType type) noexcept
 {
-  LOG("mdb", "TraceeController::resume_target");
+  DLOG("mdb", "TraceeController::resume_target");
   // Single-step over breakpoints that were hit, then re-enable them.
   if (!user_brkpts.task_bp_stats.empty()) {
     for (auto bp_stat : user_brkpts.task_bp_stats) {
-      LOG("mdb", "bpstat for bp {} for task {}", bp_stat.bp_id, bp_stat.tid);
+      DLOG("mdb", "bpstat for bp {} for task {}", bp_stat.bp_id, bp_stat.tid);
       auto bp = user_brkpts.get_by_id(bp_stat.bp_id);
       bp->disable(bp_stat.tid);
       int stat;
       VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
              "Single step over user breakpoint boundary failed: {}", strerror(errno));
       waitpid(bp_stat.tid, &stat, 0);
-      ASSERT(TPtr<void>{cache_registers(bp_stat.tid).rip} != bp->address,
-             "Failed to single step over breakpoint at {}", bp->address);
+      auto task = get_task(bp_stat.tid);
+      task->set_dirty();
+      cache_registers(task);
+      ASSERT(AddrPtr{task->registers->rip} != bp->address, "Failed to single step over breakpoint at {}",
+             bp->address);
       user_brkpts.enable_breakpoint(bp_stat.bp_id);
     }
   }
@@ -190,23 +193,20 @@ AddrPtr
 TraceeController::get_caching_pc(TaskInfo *t) noexcept
 {
   if (t->rip_dirty) {
-    const u64 rip = ptrace(PTRACE_PEEKUSER, t->tid, offsetof(user_regs_struct, rip), nullptr);
-    VERIFY(static_cast<i64>(rip) != -1, "Failed to set RIP register");
-    t->rip_dirty = false;
-    register_cache[t->tid].rip = rip;
-    return rip;
+    cache_registers(t);
+    return t->registers->rip;
   } else {
-    return register_cache[t->tid].rip;
+    return t->registers->rip;
   }
 }
 
 void
-TraceeController::set_pc(TaskInfo *t, TPtr<void> addr) noexcept
+TraceeController::set_pc(TaskInfo *t, AddrPtr addr) noexcept
 {
-  LOG("mdb", "Setting pc to {}", addr);
+  DLOG("mdb", "Setting pc to {}", addr);
   constexpr auto rip_offset = offsetof(user_regs_struct, rip);
   VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
-  register_cache[t->tid].rip = addr;
+  t->registers->rip = addr;
   t->rip_dirty = false;
 }
 
@@ -217,23 +217,14 @@ TraceeController::set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept
   task_vm_infos[tid] = vm_info;
 }
 
-const user_regs_struct &
-TraceeController::cache_registers(Tid tid) noexcept
-{
-  auto &registers = register_cache[tid];
-  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
-  auto task = get_task(tid);
-  task->cache_dirty = false;
-  task->rip_dirty = false;
-  return registers;
-}
-
 void
-TraceeController::synchronize_registers(Tid tid) noexcept
+TraceeController::cache_registers(TaskInfo *task) noexcept
 {
-  auto &registers = register_cache[tid];
-  PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, &registers);
-  get_task(tid)->cache_dirty = false;
+  if (task->cache_dirty) {
+    PTRACE_OR_PANIC(PTRACE_GETREGS, task->tid, nullptr, task->registers);
+    task->cache_dirty = false;
+    task->rip_dirty = false;
+  }
 }
 
 void
@@ -248,7 +239,7 @@ TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
   u64 installed_bp = ((read_value & ~0xff) | bkpt);
   ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
 
-  user_brkpts.insert(address.as<void>(), original_byte, UserBreakpointType::AddressBreakpoint);
+  user_brkpts.insert(address.as_void(), original_byte, UserBreakpointType::AddressBreakpoint);
 }
 
 void
@@ -265,9 +256,9 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
       matching_symbols.push_back(*s);
     }
   }
-  LOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
+  DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
   for (const auto &sym : matching_symbols) {
-    LOG("mdb", "Setting breakpoint @ {}", sym.address);
+    DLOG("mdb", "Setting breakpoint @ {}", sym.address);
     constexpr u64 bkpt = 0xcc;
     auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
     u8 ins_byte = static_cast<u8>(read_value & 0xff);
@@ -337,7 +328,7 @@ TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 }
 
 void
-TraceeController::reset_addr_breakpoints(std::vector<TPtr<void>> addresses) noexcept
+TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept
 {
   user_brkpts.clear(this, UserBreakpointType::AddressBreakpoint);
   for (auto addr : addresses) {
@@ -408,12 +399,6 @@ TraceeController::detach() noexcept
 
   // todo(simon): construct a way to let this information bubble up to caller
   return errs.empty();
-}
-
-AddrPtr
-TraceeController::task_rip(Tid tid) noexcept
-{
-  return register_cache[tid].rip;
 }
 
 void
@@ -503,20 +488,20 @@ TraceeController::task_wait_emplace_exited(int status, TaskWaitResult *wait) noe
 void
 TraceeController::process_exec(TaskInfo *t) noexcept
 {
-  LOG("mdb", "Processing EXEC for {}", t->tid);
+  DLOG("mdb", "Processing EXEC for {}", t->tid);
   reopen_memfd();
-  cache_registers(t->tid);
-  read_auxv(*t);
+  cache_registers(t);
+  read_auxv(t);
 }
 void
 TraceeController::process_clone(TaskInfo *t) noexcept
 {
-  LOG("mdb", "Processing CLONE for {}", t->tid);
+  DLOG("mdb", "Processing CLONE for {}", t->tid);
   const auto stopped_tid = t->tid;
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
-  auto &registers = cache_registers(t->tid);
-  const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(registers);
+  cache_registers(t);
+  const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
   const auto res = read_type(ptr);
   // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
   auto np = read_type(TPtr<pid_t>{res.parent_tid});
@@ -543,8 +528,9 @@ WE
 TraceeController::process_stopped(TaskInfo *t) noexcept
 {
   const auto pc = get_caching_pc(t);
-  const auto prev_pc_byte = pc - 1;
+  const auto prev_pc_byte = offset(pc, -1);
   if (auto bp = user_brkpts.get(prev_pc_byte); bp != nullptr) {
+    DLOG("mdb", "Hit breakpoint at {}", prev_pc_byte);
     auto bpstat = find(user_brkpts.task_bp_stats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
     if (bpstat != std::end(user_brkpts.task_bp_stats) && bpstat->stepped_over) {
       user_brkpts.task_bp_stats.erase(bpstat);
@@ -572,13 +558,13 @@ TraceeController::is_running() const noexcept
 void
 BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
 {
-  LOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->bp_id);
+  DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->bp_id);
   task_bp_stats.push_back({.tid = t->tid, .bp_id = bp->bp_id, .stepped_over = false});
   bp->times_hit++;
 }
 
 bool
-BreakpointMap::insert(TraceePointer<void> addr, u8 ins_byte, UserBreakpointType type) noexcept
+BreakpointMap::insert(AddrPtr addr, u8 ins_byte, UserBreakpointType type) noexcept
 {
   if (contains(addr))
     return false;
@@ -638,7 +624,7 @@ BreakpointMap::get_by_id(u32 id) noexcept
   return &(*it);
 }
 Breakpoint *
-BreakpointMap::get(TraceePointer<void> addr) noexcept
+BreakpointMap::get(AddrPtr addr) noexcept
 {
   auto iter = find(breakpoints, [addr](auto &bp) { return bp.address == addr; });
   if (iter != std::cend(breakpoints))
@@ -663,13 +649,11 @@ struct AuxvPair
 };
 
 void
-TraceeController::read_auxv(TaskInfo &task)
+TraceeController::read_auxv(TaskInfo *task)
 {
-  ASSERT(task.wait_status.ws == WaitStatusKind::Execed,
+  ASSERT(task->wait_status.ws == WaitStatusKind::Execed,
          "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
-  auto &registers = register_cache[task.tid];
-  task.cache_dirty = false;
-  TPtr<i64> stack_ptr = registers.rsp;
+  TPtr<i64> stack_ptr = task->registers->rsp;
   i64 argc = read_type(stack_ptr);
 
   stack_ptr += argc + 1;
@@ -731,7 +715,7 @@ TraceeController::get_thread_name(Tid tid) const noexcept
 }
 
 utils::StaticVector<u8>::own_ptr
-TraceeController::read_to_vector(TraceePointer<void> addr, u64 bytes) noexcept
+TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
 {
   auto data = std::make_unique<utils::StaticVector<u8>>(bytes);
 
@@ -766,7 +750,14 @@ TraceeController::add_file(CompilationUnitFile &&file) noexcept
 void
 TraceeController::reaped_events() noexcept
 {
+  DLOG("mdb", "Reaped events");
   awaiter_thread->reaped_events();
+}
+
+void
+TraceeController::notify_self() noexcept
+{
+  awaiter_thread->get_notifier().notify();
 }
 
 /** Called after an exec has been processed and we've set up the necessary data structures
@@ -777,85 +768,118 @@ TraceeController::start_awaiter_thread() noexcept
   awaiter_thread->start_awaiter_thread();
 }
 
+sym::Frame
+TraceeController::current_frame(TaskInfo *task) noexcept
+{
+  cache_registers(task);
+  auto symbol = find_fn_by_pc(task->registers->rip);
+  if (symbol)
+    return sym::Frame{
+        .rip = task->registers->rip,
+        .symbol = symbol->fn_sym,
+        .cu_file = symbol->cu_file,
+        .level = 0,
+        .type = sym::FrameType::Full,
+    };
+  else
+    return sym::Frame{
+        .rip = task->registers->rip,
+        .symbol = nullptr,
+        .cu_file = nullptr,
+        .level = 0,
+        .type = sym::FrameType::Full,
+    };
+}
+
 sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo *task) noexcept
 {
-  if (task->cache_dirty) {
-    cache_registers(task->tid);
-    task->cache_dirty = false;
-    task->rip_dirty = false;
-  }
-
-  // todo(simon): optimize. Either give thread ids a "live" monotonic id, so they can index directly into
-  // frame_cache[N]
-  //  or perhaps use associative container here, so we don't have to do std::find on it. A "live monontonic" id,
-  //  would be updated as threads are created _and_ dies, so it's not an id that would be displayed to the user as
-  //  this would confuse her.
-  if (!task->callstack_dirty) {
-    return *find(frame_cache, [tid = task->tid](auto &cs) { return cs.tid == tid; });
-  }
-  std::vector<TPtr<std::uintptr_t>> base_ptrs;
-  auto bp = register_cache[task->tid].rbp;
+  cache_registers(task);
+  // task->call_stack->pcs.clear();
+  u8 stack_storage[100 * sizeof(std::uintptr_t)];
+  std::pmr::monotonic_buffer_resource rsrc{&stack_storage, 100 * sizeof(std::uintptr_t)};
+  std::pmr::vector<AddrPtr> frame_pcs{&rsrc};
+  frame_pcs.reserve(50);
+  std::pmr::vector<TPtr<std::uintptr_t>> base_ptrs{&rsrc};
+  base_ptrs.reserve(50);
+  auto bp = task->registers->rbp;
   base_ptrs.push_back(bp);
   while (true) {
     TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
-    const auto prev_bp = read_type_safe(bp_addr);
-    if (prev_bp) {
-      if (*prev_bp == 0x1) {
-        break;
-      }
-      base_ptrs.push_back(*prev_bp);
-    } else
+    const auto prev_bp = read_type_safe(bp_addr).transform([](auto v) { return TPtr<std::uintptr_t>{v}; });
+    if (auto prev = prev_bp.value_or(0x0); prev == bp_addr || !(prev > TPtr<std::uintptr_t>{1}))
       break;
+    base_ptrs.push_back(*prev_bp);
   }
 
-  std::vector<TPtr<std::uintptr_t>> rsps;
-  rsps.reserve(base_ptrs.size());
-  rsps.push_back(register_cache[task->tid].rip);
+  frame_pcs.push_back(task->registers->rip);
+  bool inside_prologue = false;
+  auto cu = get_cu_from_pc(task->registers->rip);
+  if (cu) {
+    const auto [a, b] = cu->get_range(frame_pcs.front().as_void());
+    if (b && b->prologue_end)
+      inside_prologue = true;
+  }
+
   for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
     const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
-    if (ret_addr)
-      rsps.push_back(*ret_addr);
-  }
-
-  for (auto &cs : frame_cache) {
-    if (cs.tid == task->tid) {
-      // N.B! N.B! N.B! todo(simon): this has room for LOTS of optimization
-      //  instead of throwing it all away _every step, every stop_.
-      cs.frames.clear();
-      auto level = 1;
-      const auto levels = rsps.size();
-      for (auto i = rsps.begin(); i != rsps.end(); i++) {
-        auto symbol = find_fn_by_pc(i->as_void());
-        if (symbol)
-          cs.frames.push_back(sym::Frame{
-              .rip = i->as_void(),
-              .symbol = symbol->fn_sym,
-              .cu_file = symbol->cu_file,
-              .level = static_cast<int>(levels - level),
-              .type = sym::FrameType::Full,
-
-          });
-        else {
-          cs.frames.push_back(sym::Frame{
-              .rip = i->as_void(),
-              .symbol = nullptr,
-              .cu_file = nullptr,
-              .level = static_cast<int>(levels - level),
-              .type = sym::FrameType::Unknown,
-          });
-        }
-        ++level;
-      }
-      task->callstack_dirty = false;
-      return cs;
+    if (ret_addr) {
+      frame_pcs.push_back(ret_addr->as_void());
     }
   }
-  PANIC(fmt::format("Failed to find call stack for {}", task->tid));
+
+  // NB(simon): tracee hasn't finalized it's activation record; we need to perform some heuristics
+  // to actually determine return address. For now, this is it.
+  if (inside_prologue) {
+    TPtr<std::uintptr_t> ret_addr = task->registers->rsp;
+    auto ret_val_a = read_type_safe(ret_addr).value_or(0);
+    auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
+    bool resolved = false;
+    if (ret_val_a != 0) {
+      if (cu->may_contain(AddrPtr{ret_val_a})) {
+        frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
+        resolved = true;
+      }
+    }
+    if (!resolved && ret_val_b != 0) {
+      if (cu->may_contain(AddrPtr{ret_val_b})) {
+        frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
+        resolved = true;
+      }
+    }
+  }
+  auto &cs = *task->call_stack;
+  cs.frames.clear();
+  auto level = 1;
+  const auto levels = frame_pcs.size();
+  for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
+    auto symbol = find_fn_by_pc(i->as_void());
+    if (symbol)
+      cs.frames.push_back(sym::Frame{
+          .rip = i->as_void(),
+          .symbol = symbol->fn_sym,
+          .cu_file = symbol->cu_file,
+          .level = static_cast<int>(levels - level),
+          .type = sym::FrameType::Full,
+
+      });
+    else {
+      cs.frames.push_back(sym::Frame{
+          .rip = i->as_void(),
+          .symbol = nullptr,
+          .cu_file = nullptr,
+          .level = static_cast<int>(levels - level),
+          .type = sym::FrameType::Unknown,
+      });
+    }
+    ++level;
+  }
+  task->callstack_dirty = false;
+  return *task->call_stack;
 }
 
 std::optional<SearchFnSymResult>
-TraceeController::find_fn_by_pc(TPtr<void> addr) const noexcept
+TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 {
   for (auto &f : m_files) {
     if (f.may_contain(addr)) {
@@ -880,7 +904,7 @@ TraceeController::get_source(std::string_view name) noexcept
 }
 
 u8 *
-TraceeController::get_in_text_section(TPtr<void> vma) const noexcept
+TraceeController::get_in_text_section(AddrPtr vma) const noexcept
 {
   for (const auto obj : object_files) {
     const auto sec = obj->parsed_elf->get_section(".text");
@@ -905,7 +929,7 @@ TraceeController::get_text_section(AddrPtr addr) const noexcept
 }
 
 std::optional<u64>
-TraceeController::cu_file_from_pc(TPtr<void> address) const noexcept
+TraceeController::cu_file_from_pc(AddrPtr address) const noexcept
 {
   const auto first =
       std::find_if(m_files.begin(), m_files.end(), [address](const auto &f) { return f.may_contain(address); });
@@ -916,8 +940,24 @@ TraceeController::cu_file_from_pc(TPtr<void> address) const noexcept
   }
 }
 
+const CompilationUnitFile *
+TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
+{
+  if (auto it = find(m_files, [addr = address](const auto &f) { return f.may_contain(addr); });
+      it != std::cend(m_files)) {
+    return &*it;
+  }
+  return nullptr;
+}
+
 const std::vector<CompilationUnitFile> &
 TraceeController::cu_files() const noexcept
 {
   return m_files;
+}
+
+ptracestop::StopHandler *
+TraceeController::stop_handler() const noexcept
+{
+  return ptracestop_handler;
 }

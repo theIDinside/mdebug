@@ -19,7 +19,9 @@
 #include "tracee_controller.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <bits/chrono.h>
 #include <bits/ranges_util.h>
+#include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
@@ -35,8 +37,23 @@
 
 Tracer *Tracer::Instance = nullptr;
 
+std::string_view
+add_object_err(AddObjectResult r)
+{
+  switch (r) {
+  case AddObjectResult::OK:
+    return "OK";
+  case AddObjectResult::MMAP_FAILED:
+    return "Mmap Failed";
+  case AddObjectResult::FILE_NOT_EXIST:
+    return "File didn't exist";
+  }
+}
+
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
-    : io_thread_pipe(io_thread_pipe), events_notifier(events_notifier)
+    : targets{}, object_files(), command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe),
+      already_launched(false), events_notifier(events_notifier),
+      prev_time(std::chrono::high_resolution_clock::now())
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -48,7 +65,11 @@ Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *ev
 void
 Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
-  ASSERT(mmap_objectfile(objfile_path) == AddObjectResult::OK, "Failed to load object file");
+  const auto res = mmap_objectfile(objfile_path);
+  if (res != AddObjectResult::OK) {
+    logging::get_logging()->log(
+        "mdb", fmt::format("Failed to load object file {}; Error {}", objfile_path.c_str(), add_object_err(res)));
+  }
   const auto obj_file = object_files.back();
   Elf::parse_objfile(obj_file);
   auto target = get_controller(target_pid);
@@ -169,18 +190,19 @@ void
 Tracer::accept_command(ui::UICommand *cmd) noexcept
 {
   {
-#ifdef MDB_DEBUG
-    logging::get_logging()->log("dap", fmt::format("accepted command {}", cmd->name()));
-#endif
     SpinGuard lock{command_queue_lock};
     command_queue.push(cmd);
   }
+#ifdef MDB_DEBUG
+  logging::get_logging()->log("dap", fmt::format("accepted command {}", cmd->name()));
+#endif
 }
 
 void
 Tracer::execute_pending_commands() noexcept
 {
   ui::UICommandPtr pending_command = nullptr;
+  DLOG("mdb", "command queue items: {}", command_queue.size());
   while (!command_queue.empty()) {
     // keep the lock as minimum of a time span as possible
     {
@@ -234,7 +256,7 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
   default: {
     const auto res = get<PtyParentResult>(fork_result);
     add_target_set_current(res.pid, program, TargetSession::Launched);
-
+    TaskInfo *t = get_current()->get_task(res.pid);
     for (;;) {
       if (const auto ws = waitpid_block(res.pid); ws) {
         const auto stat = ws->status;
@@ -242,15 +264,20 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
           TaskWaitResult twr;
           twr.ws.ws = WaitStatusKind::Execed;
           twr.waited_pid = res.pid;
+          DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.waited_pid, res.pid);
+          t = get_current()->get_task(twr.waited_pid);
+          ASSERT(t != nullptr, "Unknown task!!");
           get_current()->register_task_waited(twr);
           get_current()->reopen_memfd();
-          get_current()->cache_registers(twr.waited_pid);
-          get_current()->read_auxv(*get_current()->get_task(twr.waited_pid));
+          get_current()->cache_registers(t);
+          get_current()->read_auxv(t);
           dap->add_tty(res.fd);
           break;
         }
       }
       VERIFY(ptrace(PTRACE_CONT, res.pid, 0, 0) != -1, "Failed to continue passed our exec boundary");
+      t->set_dirty();
+      get_current()->reaped_events();
     }
     if (stopAtEntry) {
       get_current()->set_fn_breakpoint("main");

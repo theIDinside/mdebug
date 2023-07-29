@@ -125,6 +125,7 @@ std::string_view syscall_name(u64 syscall_number);
 
 #if defined(MDB_DEBUG)
 #define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
+/* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
 #define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
 #else
 #define ASSERT(cond, msg, ...)

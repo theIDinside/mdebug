@@ -10,8 +10,8 @@ using AddrRanges = std::vector<AddressRange>;
 
 struct FunctionSymbol
 {
-  TPtr<void> start;
-  TPtr<void> end;
+  AddrPtr start;
+  AddrPtr end;
   std::string_view name;
 };
 
@@ -43,8 +43,8 @@ public:
   Path fullpath() const noexcept;
 
   std::string_view name() const noexcept;
-  TPtr<void> low_pc() const noexcept;
-  TPtr<void> high_pc() const noexcept;
+  AddrPtr low_pc() const noexcept;
+  AddrPtr high_pc() const noexcept;
   void set_name(std::string_view name) noexcept;
 
   void add_addr_rng(const u64 *start) noexcept;
@@ -68,13 +68,13 @@ public:
   constexpr bool
   may_contain(TPtr<T> ptr) const noexcept
   {
-    return pc_boundaries.contains(ptr.as_void());
+    return pc_boundaries.contains(ptr);
   }
 
   void add_function(FunctionSymbol sym) noexcept;
-  const FunctionSymbol *find_subprogram(TPtr<void> addr) const noexcept;
-  LineTableEntryRange get_range(TPtr<void> addr) const noexcept;
-  LineTableEntryRange get_range(TPtr<void> start, TPtr<void> end) const noexcept;
+  const FunctionSymbol *find_subprogram(AddrPtr addr) const noexcept;
+  LineTableEntryRange get_range(AddrPtr addr) const noexcept;
+  LineTableEntryRange get_range(AddrPtr start, AddrPtr end) const noexcept;
   std::string_view file(u32 index) const noexcept;
   std::string_view path_of_file(u32 index) const noexcept;
   Path file_path(u32 index) const noexcept;

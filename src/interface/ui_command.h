@@ -15,7 +15,7 @@ using UIResultPtr = UIResult *;
     return #Type;                                                                                                 \
   }
 #else
-#define DEFINE_NAME
+#define DEFINE_NAME(Type)
 #endif
 
 struct UICommand

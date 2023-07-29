@@ -4,6 +4,7 @@
 #include "interface/ui_command.h"
 #include "interface/ui_result.h"
 #include "notify_pipe.h"
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <nlohmann/json_fwd.hpp>
@@ -38,6 +39,8 @@ enum class AddObjectResult : u8
   MMAP_FAILED,
   FILE_NOT_EXIST
 };
+
+std::string_view add_object_err(AddObjectResult r);
 
 enum class TracerAction
 {
@@ -78,9 +81,9 @@ public:
   void launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept;
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
+  std::vector<std::unique_ptr<TraceeController>> targets;
 
 private:
-  std::vector<std::unique_ptr<TraceeController>> targets;
   TraceeController *current_target = nullptr;
   std::vector<ObjectFile *> object_files;
   ui::dap::DAP *dap;
@@ -89,4 +92,5 @@ private:
   utils::Notifier::ReadEnd io_thread_pipe;
   bool already_launched;
   utils::NotifyManager *events_notifier;
+  std::chrono::high_resolution_clock::time_point prev_time;
 };
