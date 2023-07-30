@@ -4,7 +4,6 @@
 // NOLINTNEXTLINE
 #include "../../breakpoint.h"
 #include "../../symbolication/disassemble.h"
-#include "dap_defs.h"
 #include "nlohmann/json.hpp"
 #include "types.h"
 #include <tuple>
