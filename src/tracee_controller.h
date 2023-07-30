@@ -36,30 +36,6 @@ struct LWP
   constexpr bool operator<=>(const LWP &other) const = default;
 };
 
-enum class BpEventType : u8
-{
-  UserBreakpointHit,
-  UserWatchpointHit,
-  TracerBreakpointHit,
-  TracerWatchpointHit,
-  None,
-};
-
-struct BpEvent
-{
-  BpEventType event;
-  union
-  {
-    AddrPtr pc;
-    Breakpoint *bp;
-    struct
-    {
-      AddrPtr var_addr;
-      u64 new_value;
-    } watchpoint;
-  };
-};
-
 struct SearchFnSymResult
 {
   const FunctionSymbol *fn_sym;
@@ -98,51 +74,6 @@ read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
 
 struct TraceeController;
 
-struct BreakpointMap
-{
-  struct TaskBreakpointStatus
-  {
-    Tid tid;
-    u16 bp_id;
-    bool stepped_over;
-  };
-
-  explicit BreakpointMap(Tid address_space) noexcept
-      : bp_id_counter(1), breakpoints(), address_space_tid(address_space), fn_breakpoint_names(),
-        source_breakpoints(), task_bp_stats()
-  {
-  }
-
-  u32 bp_id_counter;
-  // All breakpoints are stored in `breakpoints` - and they map to either `fn_breakpoint_names` or
-  // `source_breakpoints` depending on their type (or to neither - if they're address breakpoints). So we don't
-  // allow for multiple breakpoints on the same loc, because I argue it's a bad decision that makes breakpoint
-  // design much more complex for almost 0 gain.
-  std::vector<Breakpoint> breakpoints;
-  Tid address_space_tid;
-  std::unordered_map<u32, std::string> fn_breakpoint_names;
-  std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
-  // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
-  std::vector<TaskBreakpointStatus> task_bp_stats;
-
-  template <typename T>
-  bool
-  contains(TraceePointer<T> addr) const noexcept
-  {
-    return any_of(breakpoints, [&addr](const Breakpoint &bp) { return bp.address == addr; });
-  }
-
-  void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
-  bool insert(AddrPtr addr, u8 overwritten_byte, BreakpointType type) noexcept;
-  void clear(TraceeController *target, BreakpointType type) noexcept;
-  void clear_breakpoint_stats() noexcept;
-  void disable_breakpoint(u16 id) noexcept;
-  void enable_breakpoint(u16 id) noexcept;
-
-  Breakpoint *get_by_id(u32 id) noexcept;
-  Breakpoint *get(AddrPtr addr) noexcept;
-};
-
 class Default;
 
 struct TraceeController
@@ -156,7 +87,7 @@ struct TraceeController
   ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
-  BreakpointMap user_brkpts;
+  BreakpointMap bps;
   bool stop_on_clone;
 
   // Aggressive spinlock
@@ -205,6 +136,7 @@ struct TraceeController
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
   void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
+  bool set_tracer_bp(TPtr<u64> addr, BpType type) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
@@ -218,6 +150,8 @@ struct TraceeController
   void reset_source_breakpoints(std::string_view source_filepath,
                                 std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
 
+  void remove_breakpoint(AddrPtr addr, BpType type) noexcept;
+
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
   bool detach() noexcept;
@@ -226,6 +160,7 @@ struct TraceeController
   void
   install_ptracestop_handler(Args... args) noexcept
   {
+    DLOG("mdb", "Installing action {}", ptracestop::action_name<StopAction>());
     ptracestop_handler->set_action(new StopAction{ptracestop_handler, args...});
     ptracestop_handler->start_action();
   }

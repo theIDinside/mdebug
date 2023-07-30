@@ -1,5 +1,6 @@
 #pragma once
 
+#include "breakpoint.h"
 #include "common.h"
 #include "symbolication/callstack.h"
 #include "symbolication/lnp.h"
@@ -65,7 +66,8 @@ public:
   void update_step_schedule() noexcept override;
 
 protected:
-  bool step_one() noexcept;
+  bool resume() noexcept;
+  virtual void resume_impl() noexcept;
   Tid thread_id;
   int steps;
   int debug_steps_taken;
@@ -79,17 +81,36 @@ class LineStep final : public InstructionStep
 {
 public:
   LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread = false) noexcept;
-  ~LineStep() override final = default;
+  ~LineStep() noexcept override final;
   void start_action() noexcept override final;
   bool check_if_done() noexcept override final;
   void update_step_schedule() noexcept override final;
+
+  void resume_impl() noexcept override final;
 
 private:
   sym::Frame start_frame;
   LineTableEntry entry;
   const CompilationUnitFile *cu;
   int debug_steps_taken = 0;
+  bool resume_address_set;
+  AddrPtr resume_addr;
 };
+
+template <typename A>
+constexpr std::string_view
+action_name()
+{
+  if constexpr (std::is_same_v<A, Action>) {
+    return "Default";
+  } else if constexpr (std::is_same_v<A, InstructionStep>) {
+    return "Instruction Step";
+  } else if constexpr (std::is_same_v<A, LineStep>) {
+    return "Line Step";
+  } else {
+    static_assert(always_false<A>, "Unknown action type");
+  }
+}
 
 class StopHandler
 {
@@ -98,7 +119,7 @@ public:
   virtual ~StopHandler() = default;
 
   void handle_execution_event(TaskInfo *t) noexcept;
-  void handle_breakpoint_event(TaskInfo *task, Breakpoint *bp) noexcept;
+  void handle_bp_event(TaskInfo *t, BpEvent evt) noexcept;
   void handle_generic_stop(TaskInfo *t) noexcept;
   void handle_signalled(TaskInfo *t) noexcept;
   void handle_execed(TaskInfo *t) noexcept;

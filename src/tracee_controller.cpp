@@ -41,7 +41,7 @@ template <typename T> using Set = std::unordered_set<T>;
 
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{}, user_brkpts(process_space_id),
+    : task_leader{process_space_id}, object_files{}, threads{}, bps(process_space_id),
       stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
       is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this})
 {
@@ -122,10 +122,10 @@ TraceeController::resume_target(RunType type) noexcept
 {
   DLOG("mdb", "TraceeController::resume_target");
   // Single-step over breakpoints that were hit, then re-enable them.
-  if (!user_brkpts.task_bp_stats.empty()) {
-    for (auto bp_stat : user_brkpts.task_bp_stats) {
+  if (!bps.bpstats.empty()) {
+    for (auto bp_stat : bps.bpstats) {
       DLOG("mdb", "bpstat for bp {} for task {}", bp_stat.bp_id, bp_stat.tid);
-      auto bp = user_brkpts.get_by_id(bp_stat.bp_id);
+      auto bp = bps.get_by_id(bp_stat.bp_id);
       bp->disable(bp_stat.tid);
       int stat;
       VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
@@ -136,10 +136,11 @@ TraceeController::resume_target(RunType type) noexcept
       cache_registers(task);
       ASSERT(AddrPtr{task->registers->rip} != bp->address, "Failed to single step over breakpoint at {}",
              bp->address);
-      user_brkpts.enable_breakpoint(bp_stat.bp_id);
+      bps.enable_breakpoint(bp_stat.bp_id);
     }
   }
-  user_brkpts.clear_breakpoint_stats();
+
+  bps.clear_breakpoint_stats();
   for (auto &t : threads) {
     if (t.can_continue()) {
       t.set_running(type);
@@ -230,8 +231,11 @@ TraceeController::cache_registers(TaskInfo *task) noexcept
 void
 TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
 {
-  if (user_brkpts.contains(address))
+  if (bps.contains(address)) {
+    auto bp = bps.get(address.as<void>());
+    bp->bp_type.address = true;
     return;
+  }
 
   constexpr u64 bkpt = 0xcc;
   auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, address.get(), nullptr);
@@ -239,13 +243,33 @@ TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
   u64 installed_bp = ((read_value & ~0xff) | bkpt);
   ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
 
-  user_brkpts.insert(address.as_void(), original_byte, BreakpointType::AddressBreakpoint);
+  bps.insert(address.as_void(), original_byte, BpType{.address = true});
+}
+
+bool
+TraceeController::set_tracer_bp(TPtr<u64> addr, BpType type) noexcept
+{
+  if (bps.contains(addr)) {
+    auto bp = bps.get(addr.as<void>());
+    DLOG("mdb", "Configuring bp {} at {} to be tracer bp as well", bp->id, addr);
+    bp->bp_type.type |= type.type;
+    return true;
+  }
+  DLOG("mdb", "Installing tracer breakpoint at {}", addr);
+  constexpr u64 bkpt = 0xcc;
+  auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr.get(), nullptr);
+  u8 original_byte = static_cast<u8>(read_value & 0xff);
+  u64 installed_bp = ((read_value & ~0xff) | bkpt);
+  ptrace(PTRACE_POKEDATA, task_leader, addr.get(), installed_bp);
+
+  bps.insert(addr.as_void(), original_byte, type);
+  return true;
 }
 
 void
 TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
 {
-  for (const auto &[id, name] : user_brkpts.fn_breakpoint_names) {
+  for (const auto &[id, name] : bps.fn_breakpoint_names) {
     if (name == function_name)
       return;
   }
@@ -260,13 +284,19 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
   for (const auto &sym : matching_symbols) {
     DLOG("mdb", "Setting breakpoint @ {}", sym.address);
     constexpr u64 bkpt = 0xcc;
-    auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
-    u8 ins_byte = static_cast<u8>(read_value & 0xff);
-    u64 installed_bp = ((read_value & ~0xff) | bkpt);
-    ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
-    user_brkpts.insert(sym.address, ins_byte, BreakpointType::FunctionBreakpoint);
-    auto &bp = user_brkpts.breakpoints.back();
-    user_brkpts.fn_breakpoint_names[bp.id] = function_name;
+    if (bps.contains(sym.address)) {
+      auto bp = bps.get(sym.address);
+      bp->bp_type.add_setting({.function = true});
+      bps.fn_breakpoint_names[bp->id] = function_name;
+    } else {
+      auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
+      u8 ins_byte = static_cast<u8>(read_value & 0xff);
+      u64 installed_bp = ((read_value & ~0xff) | bkpt);
+      ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
+      bps.insert(sym.address, ins_byte, BpType{.function = true});
+      auto &bp = bps.breakpoints.back();
+      bps.fn_breakpoint_names[bp.id] = function_name;
+    }
   }
 }
 
@@ -283,17 +313,20 @@ TraceeController::set_source_breakpoints(std::string_view src,
       const auto &lt = f->line_table();
       for (const auto &lte : lt) {
         if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
-          if (!user_brkpts.contains(lte.pc)) {
+          if (!bps.contains(lte.pc)) {
             logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
             constexpr u64 bkpt = 0xcc;
             auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, lte.pc, nullptr);
             u8 original_byte = static_cast<u8>(read_value & 0xff);
             u64 installed_bp = ((read_value & ~0xff) | bkpt);
             ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
-            user_brkpts.insert(lte.pc, original_byte, BreakpointType::SourceBreakpoint);
-            const auto &bp = user_brkpts.breakpoints.back();
-            user_brkpts.source_breakpoints[bp.id] = std::move(desc);
+            bps.insert(lte.pc, original_byte, BpType{.source = true});
+            const auto &bp = bps.breakpoints.back();
+            bps.source_breakpoints[bp.id] = std::move(desc);
             break;
+          } else {
+            auto bp = bps.get(lte.pc);
+            bp->bp_type.source = true;
           }
         }
       }
@@ -301,7 +334,7 @@ TraceeController::set_source_breakpoints(std::string_view src,
   } else {
     logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
   }
-  logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", user_brkpts.breakpoints.size()));
+  logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", bps.breakpoints.size()));
 }
 
 void
@@ -330,7 +363,7 @@ TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 void
 TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept
 {
-  user_brkpts.clear(this, BreakpointType::AddressBreakpoint);
+  bps.clear(this, BpType{.address = true});
   for (auto addr : addresses) {
     set_addr_breakpoint(addr.as<u64>());
   }
@@ -339,8 +372,8 @@ TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcep
 void
 TraceeController::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
 {
-  user_brkpts.clear(this, BreakpointType::FunctionBreakpoint);
-  user_brkpts.fn_breakpoint_names.clear();
+  bps.clear(this, BpType{.function = true});
+  bps.fn_breakpoint_names.clear();
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
   }
@@ -350,18 +383,14 @@ void
 TraceeController::reset_source_breakpoints(std::string_view source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&bps) noexcept
 {
-  std::erase_if(user_brkpts.breakpoints, [&bpm = user_brkpts, path = source_filepath](Breakpoint &bp) {
-    if (bp.type() == BreakpointType::SourceBreakpoint) {
-      if (bpm.source_breakpoints[bp.id].source_file.compare(path) == 0) {
-        bpm.source_breakpoints.erase(bp.id);
-        if (bp.enabled)
-          bp.disable(bpm.address_space_tid);
-        return true;
-      }
-    }
-    return false;
-  });
+  this->bps.clear(this, BpType{.source = true});
   set_source_breakpoints(source_filepath, std::move(bps));
+}
+
+void
+TraceeController::remove_breakpoint(AddrPtr addr, BpType type) noexcept
+{
+  bps.remove_breakpoint(addr, type);
 }
 
 bool
@@ -522,17 +551,18 @@ TraceeController::process_stopped(TaskInfo *t) noexcept
 {
   const auto pc = get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
-  if (auto bp = user_brkpts.get(prev_pc_byte); bp != nullptr) {
+  if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
     DLOG("mdb", "Hit breakpoint at {}", prev_pc_byte);
-    auto bpstat = find(user_brkpts.task_bp_stats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-    if (bpstat != std::end(user_brkpts.task_bp_stats) && bpstat->stepped_over) {
-      user_brkpts.task_bp_stats.erase(bpstat);
+    auto bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
+    if (bpstat != std::end(bps.bpstats) && bpstat->stepped_over) {
+      bps.bpstats.erase(bpstat);
       return BpEvent{BpEventType::None, {nullptr}};
     }
     set_pc(t, prev_pc_byte);
-    user_brkpts.add_bpstat_for(t, bp);
-    return BpEvent{BpEventType::UserBreakpointHit, {.bp = bp}};
+    bps.add_bpstat_for(t, bp);
+    return BpEvent{bp->event_type(), {.bp = bp}};
   }
+  std::erase_if(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid && bpstat.stepped_over; });
   return BpEvent{BpEventType::None, {nullptr}};
 }
 
@@ -546,84 +576,6 @@ bool
 TraceeController::is_running() const noexcept
 {
   return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) { return !t.is_stopped(); });
-}
-
-void
-BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
-{
-  DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->id);
-  task_bp_stats.push_back({.tid = t->tid, .bp_id = bp->id, .stepped_over = false});
-  bp->times_hit++;
-}
-
-bool
-BreakpointMap::insert(AddrPtr addr, u8 ins_byte, BreakpointType type) noexcept
-{
-  if (contains(addr))
-    return false;
-  breakpoints.push_back(Breakpoint{addr, ins_byte, bp_id_counter++, type});
-  return true;
-}
-
-void
-BreakpointMap::clear(TraceeController *target, BreakpointType type) noexcept
-{
-  std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
-    if (bp.type() == type) {
-      if (bp.enabled)
-        bp.disable(target->task_leader);
-      switch (bp.type()) {
-      case BreakpointType::SourceBreakpoint:
-        t->source_breakpoints.erase(bp.id);
-        break;
-      case BreakpointType::FunctionBreakpoint:
-        t->fn_breakpoint_names.erase(bp.id);
-        break;
-      case BreakpointType::AddressBreakpoint:
-        break;
-      }
-      return true;
-    } else {
-      return false;
-    }
-  });
-}
-
-void
-BreakpointMap::clear_breakpoint_stats() noexcept
-{
-  task_bp_stats.clear();
-}
-
-void
-BreakpointMap::disable_breakpoint(u16 id) noexcept
-{
-  auto bp = get_by_id(id);
-  bp->disable(address_space_tid);
-}
-
-void
-BreakpointMap::enable_breakpoint(u16 id) noexcept
-{
-  auto bp = get_by_id(id);
-  bp->enable(address_space_tid);
-}
-
-Breakpoint *
-BreakpointMap::get_by_id(u32 id) noexcept
-{
-  auto it = std::find_if(breakpoints.begin(), breakpoints.end(), [&](const auto &bp) { return bp.id == id; });
-  ASSERT(it != end(breakpoints), "Expected to find a breakpoint with id {}", id);
-  return &(*it);
-}
-Breakpoint *
-BreakpointMap::get(AddrPtr addr) noexcept
-{
-  auto iter = find(breakpoints, [addr](auto &bp) { return bp.address == addr; });
-  if (iter != std::cend(breakpoints))
-    return &(*iter);
-  else
-    return nullptr;
 }
 
 // Debug Symbols Related Logic
@@ -657,8 +609,8 @@ TraceeController::read_auxv(TaskInfo *task)
   while (read_type(envp) != nullptr) {
     envp++;
   }
-  // We should now be at Auxilliary Vector Table (see `man getauxval` for info, we're interested in the interpreter
-  // base address)
+  // We should now be at Auxilliary Vector Table (see `man getauxval` for info, we're interested in the
+  // interpreter base address)
 
   envp++;
   // cast it to our own type

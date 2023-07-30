@@ -43,7 +43,7 @@ bool
 InstructionStep::do_next_action(TaskInfo *, bool should_stop) noexcept
 {
   if (!should_stop) {
-    return step_one();
+    return resume();
   } else {
     return true;
   }
@@ -54,7 +54,7 @@ InstructionStep::start_action() noexcept
 {
   this->handler->is_stepping = true;
   start_time = std::chrono::high_resolution_clock::now();
-  step_one();
+  resume();
 }
 
 bool
@@ -74,7 +74,7 @@ InstructionStep::update_step_schedule() noexcept
 }
 
 bool
-InstructionStep::step_one() noexcept
+InstructionStep::resume() noexcept
 {
   if (check_if_done()) {
     const auto end = std::chrono::high_resolution_clock::now();
@@ -86,11 +86,11 @@ InstructionStep::step_one() noexcept
     tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = thread_id});
     return true;
   }
-  if (!tc->user_brkpts.task_bp_stats.empty()) {
-    auto bpstat = find(tc->user_brkpts.task_bp_stats, [t = next->tid](auto &bpstat) { return bpstat.tid == t; });
+  if (!tc->bps.bpstats.empty()) {
+    auto bpstat = find(tc->bps.bpstats, [t = next->tid](auto &bpstat) { return bpstat.tid == t; });
     bool stepped_over_bp = false;
-    if (bpstat != std::end(tc->user_brkpts.task_bp_stats)) {
-      auto bp = tc->user_brkpts.get_by_id(bpstat->bp_id);
+    if (bpstat != std::end(tc->bps.bpstats)) {
+      auto bp = tc->bps.get_by_id(bpstat->bp_id);
       bp->disable(next->tid);
       stepped_over_bp = true;
     }
@@ -98,21 +98,29 @@ InstructionStep::step_one() noexcept
            "Single step over user breakpoint boundary failed: {}", strerror(errno));
     if (stepped_over_bp) {
       bpstat->stepped_over = true;
-      tc->user_brkpts.enable_breakpoint(bpstat->bp_id);
+      tc->bps.enable_breakpoint(bpstat->bp_id);
     }
   } else {
-    VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, next->tid, 0, 0),
-           "Single step over user breakpoint boundary failed: {}", strerror(errno));
+    resume_impl();
   }
   update_step_schedule();
   debug_steps_taken++;
   return false;
 }
 
+void
+InstructionStep::resume_impl() noexcept
+{
+  DLOG("mdb", "[InstructionStep] stepping 1 instruction");
+  VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, next->tid, 0, 0), "Failed to single step: {}", strerror(errno));
+}
+
 LineStep::LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread) noexcept
-    : InstructionStep(handler, thread_id, lines, single_thread)
+    : InstructionStep(handler, thread_id, lines, single_thread), resume_address_set(false), resume_addr(nullptr)
 {
 }
+
+LineStep::~LineStep() noexcept { tc->remove_breakpoint(resume_addr, BpType{.resume_address = true}); }
 
 void
 LineStep::start_action() noexcept
@@ -126,7 +134,7 @@ LineStep::start_action() noexcept
     ASSERT(a != nullptr, "Expected a line table entry");
     entry = *a;
     this->cu = cu;
-    step_one();
+    resume();
   } else {
     done = true;
   }
@@ -138,6 +146,18 @@ LineStep::update_step_schedule() noexcept
   ++next;
   if (next == std::end(tsi))
     next = tsi.begin();
+}
+
+void
+LineStep::resume_impl() noexcept
+{
+  if (resume_address_set) {
+    DLOG("mdb", "LineStep continuing sub frame");
+    VERIFY(-1 != ptrace(PTRACE_CONT, next->tid, 0, 0), "Failed to single step: {}", strerror(errno));
+    resume_address_set = false;
+  } else {
+    InstructionStep::resume_impl();
+  }
 }
 
 bool
@@ -152,6 +172,7 @@ LineStep::check_if_done() noexcept
   // if we're in the same frame, we single step
   if (same_symbol(frame, start_frame)) {
     const auto [a, b] = cu->get_range(frame.rip);
+    handler->is_stepping = true;
     if (a->line != entry.line) {
       DLOG("mdb", "New LTE pc {}, line {} != start LTE pc {}, line {}.", a->pc, a->line, entry.pc, entry.line);
       done = true;
@@ -164,7 +185,10 @@ LineStep::check_if_done() noexcept
     const auto resume_address = map<AddrPtr>(
         callstack.frames, [sf = start_frame](const auto &f) { return same_symbol(f, sf); }, sym::resume_address);
     if (resume_address) {
-      // tc->set_tracer_breakpoint(*resume_address, TracerBreakpointType::NextLine);
+      tc->set_tracer_bp(resume_address->as<u64>(), BpType{.resume_address = true});
+      resume_address_set = true;
+      resume_addr = *resume_address;
+      handler->is_stepping = false;
     }
   }
   return done;
@@ -183,23 +207,7 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
   switch (stopped->wait_status.ws) {
   case WaitStatusKind::Stopped: {
     const auto tevt = tc->process_stopped(stopped);
-    switch (tevt.event) {
-    case BpEventType::UserBreakpointHit: {
-      handle_breakpoint_event(stopped, tevt.bp);
-      break;
-    }
-    case BpEventType::None:
-      handle_generic_stop(stopped);
-      break;
-    case BpEventType::UserWatchpointHit:
-      TODO("TracerWaitEvent::WatchpointHit");
-      break;
-    case BpEventType::TracerBreakpointHit:
-      handle_breakpoint_event(stopped, tevt.bp);
-      break;
-    case BpEventType::TracerWatchpointHit:
-      break;
-    }
+    handle_bp_event(stopped, tevt);
   } break;
   case WaitStatusKind::Execed: {
     tc->process_exec(stopped);
@@ -249,11 +257,24 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
 }
 
 void
-StopHandler::handle_breakpoint_event(TaskInfo *task, Breakpoint *bp) noexcept
+StopHandler::handle_bp_event(TaskInfo *t, BpEvent evt) noexcept
 {
-  tc->stop_all();
-  tc->emit_stopped_at_breakpoint({.pid = tc->task_leader, .tid = task->tid}, bp->id);
-  should_stop = true;
+  switch (evt.event) {
+  // even if underlying bp is both user and tracer bp; it always handles it prioritized as user.
+  case BpEventType::Both:
+  case BpEventType::UserBreakpointHit: {
+    tc->stop_all();
+    tc->emit_stopped_at_breakpoint({.pid = tc->task_leader, .tid = t->tid}, evt.bp->id);
+    should_stop = true;
+    break;
+  }
+  case BpEventType::None:
+    should_stop = false;
+    break;
+  case BpEventType::TracerBreakpointHit:
+    evt.bp->disable(t->tid);
+    break;
+  }
 }
 
 void
