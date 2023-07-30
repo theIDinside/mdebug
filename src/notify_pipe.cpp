@@ -19,7 +19,7 @@ NotifyManager::NotifyManager(Notifier::ReadEnd io_read) noexcept : notifiers(), 
 {
   notifier_names.push_back("IO Thread");
   notifiers.push_back(io_read);
-  pollfds.push_back({.fd = io_read.fd, .events = EPOLLIN, .revents = 0});
+  pollfds.push_back({.fd = io_read.fd, .events = POLLIN, .revents = 0});
 }
 
 void
@@ -27,7 +27,7 @@ NotifyManager::add_notifier(Notifier::ReadEnd notifier, std::string name, Tid ta
 {
   notifiers.push_back(notifier);
   notifier_names.push_back(name);
-  pollfds.push_back({.fd = notifier.fd, .events = EPOLLIN, .revents = 0});
+  pollfds.push_back({.fd = notifier.fd, .events = POLLIN, .revents = 0});
   fd_to_target[notifier.fd] = task_leader;
 }
 
@@ -54,15 +54,17 @@ NotifyManager::has_io_ready() noexcept
 }
 
 void
-NotifyManager::has_wait_ready(std::vector<NotifyResult> &result)
+NotifyManager::has_wait_ready(std::vector<NotifyResult> &result, bool flush)
 {
   result.clear();
   for (auto i = 1ul; i < pollfds.size(); i++) {
     const auto ok = (pollfds[i].revents & POLLIN) == POLLIN;
     if (ok) {
       result.push_back(NotifyResult{.pid = fd_to_target[pollfds[i].fd]});
-      char c;
-      ::read(pollfds[i].fd, &c, 1);
+      if (flush) {
+        char c;
+        ::read(pollfds[i].fd, &c, 1);
+      }
     }
     pollfds[i].revents = 0;
     pollfds[i].events = POLLIN;

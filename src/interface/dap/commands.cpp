@@ -166,10 +166,10 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
     target->reset_source_breakpoints(*source_file, std::move(src_bps));
     using BP = ui::dap::Breakpoint;
     for (const auto &bp : target->user_brkpts.breakpoints) {
-      if (bp.type == UserBreakpointType::SourceBreakpoint &&
-          target->user_brkpts.source_breakpoints[bp.bp_id].source_file == *source_file) {
-        const auto &description = target->user_brkpts.source_breakpoints[bp.bp_id];
-        res->breakpoints.push_back(BP{.id = bp.bp_id,
+      if (bp.type() == UserBreakpointType::SourceBreakpoint &&
+          target->user_brkpts.source_breakpoints[bp.id].source_file == *source_file) {
+        const auto &description = target->user_brkpts.source_breakpoints[bp.id];
+        res->breakpoints.push_back(BP{.id = bp.id,
                                       .verified = true,
                                       .addr = bp.address,
                                       .line = description.line,
@@ -222,9 +222,9 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
   res->breakpoints.reserve(target->user_brkpts.breakpoints.size());
 
   for (const auto &bp : target->user_brkpts.breakpoints) {
-    if (bp.type == UserBreakpointType::AddressBreakpoint) {
+    if (bp.type() == UserBreakpointType::AddressBreakpoint) {
       res->breakpoints.push_back(BP{
-          .id = bp.bp_id,
+          .id = bp.id,
           .verified = true,
           .addr = bp.address,
           .line = std::nullopt,
@@ -266,9 +266,9 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
   target->reset_fn_breakpoints(bkpts);
 
   for (const auto &bp : target->user_brkpts.breakpoints) {
-    if (bp.type == UserBreakpointType::FunctionBreakpoint) {
+    if (bp.type() == UserBreakpointType::FunctionBreakpoint) {
       res->breakpoints.push_back(BP{
-          .id = bp.bp_id,
+          .id = bp.id,
           .verified = true,
           .addr = bp.address,
           .line = std::nullopt,

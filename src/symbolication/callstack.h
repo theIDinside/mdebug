@@ -39,8 +39,16 @@ struct Frame
     return l.symbol == r.symbol && l.cu_file == r.cu_file;
   }
 
+  friend constexpr AddrPtr resume_address(const Frame &f) noexcept;
+
   std::optional<std::string_view> function_name() const noexcept;
 };
+
+constexpr AddrPtr
+resume_address(const Frame &f) noexcept
+{
+  return f.rip;
+}
 
 struct CallStack
 {

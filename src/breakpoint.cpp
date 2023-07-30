@@ -2,7 +2,7 @@
 #include <sys/ptrace.h>
 
 Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, UserBreakpointType type) noexcept
-    : original_byte(original_byte), enabled(true), type(type), bp_id(id), times_hit(0), address(addr)
+    : original_byte(original_byte), enabled(true), bp_type(type), id(id), times_hit(0), address(addr)
 {
 }
 
@@ -23,4 +23,10 @@ Breakpoint::disable(Tid tid) noexcept
   const u64 restore = ((read_value & ~0xff) | original_byte);
   ptrace(PTRACE_POKEDATA, tid, address.get(), restore);
   enabled = false;
+}
+
+UserBreakpointType
+Breakpoint::type() const noexcept
+{
+  return bp_type;
 }

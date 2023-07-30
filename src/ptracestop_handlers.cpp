@@ -1,4 +1,6 @@
 #include "ptracestop_handlers.h"
+#include "breakpoint.h"
+#include "common.h"
 #include "symbolication/lnp.h"
 #include "tracee_controller.h"
 #include "tracer.h"
@@ -147,11 +149,22 @@ LineStep::check_if_done() noexcept
     return false;
   auto task = tc->get_task(next->tid);
   const auto frame = tc->current_frame(task);
+  // if we're in the same frame, we single step
   if (same_symbol(frame, start_frame)) {
     const auto [a, b] = cu->get_range(frame.rip);
     if (a->line != entry.line) {
       DLOG("mdb", "New LTE pc {}, line {} != start LTE pc {}, line {}.", a->pc, a->line, entry.pc, entry.line);
       done = true;
+    }
+  } else {
+    // we've left the origin frame; let's try figure out a place we can set a breakpoint
+    // so that we can skip single stepping and instead do `PTRACE_CONT` which will be many orders of magnitude
+    // faster.
+    auto &callstack = tc->build_callframe_stack(task);
+    const auto resume_address = map<AddrPtr>(
+        callstack.frames, [sf = start_frame](const auto &f) { return same_symbol(f, sf); }, sym::resume_address);
+    if (resume_address) {
+      // tc->set_tracer_breakpoint(*resume_address, TracerBreakpointType::NextLine);
     }
   }
   return done;
@@ -171,15 +184,20 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
   case WaitStatusKind::Stopped: {
     const auto tevt = tc->process_stopped(stopped);
     switch (tevt.event) {
-    case TracerWaitEvent::BreakpointHit: {
+    case BpEventType::UserBreakpointHit: {
       handle_breakpoint_event(stopped, tevt.bp);
       break;
     }
-    case TracerWaitEvent::None:
+    case BpEventType::None:
       handle_generic_stop(stopped);
       break;
-    case TracerWaitEvent::WatchpointHit:
+    case BpEventType::UserWatchpointHit:
       TODO("TracerWaitEvent::WatchpointHit");
+      break;
+    case BpEventType::TracerBreakpointHit:
+      handle_breakpoint_event(stopped, tevt.bp);
+      break;
+    case BpEventType::TracerWatchpointHit:
       break;
     }
   } break;
@@ -234,7 +252,7 @@ void
 StopHandler::handle_breakpoint_event(TaskInfo *task, Breakpoint *bp) noexcept
 {
   tc->stop_all();
-  tc->emit_stopped_at_breakpoint({.pid = tc->task_leader, .tid = task->tid}, bp->bp_id);
+  tc->emit_stopped_at_breakpoint({.pid = tc->task_leader, .tid = task->tid}, bp->id);
   should_stop = true;
 }
 

@@ -36,16 +36,18 @@ struct LWP
   constexpr bool operator<=>(const LWP &other) const = default;
 };
 
-enum class TracerWaitEvent : u8
+enum class BpEventType : u8
 {
-  BreakpointHit,
-  WatchpointHit,
+  UserBreakpointHit,
+  UserWatchpointHit,
+  TracerBreakpointHit,
+  TracerWatchpointHit,
   None,
 };
 
-struct WE
+struct BpEvent
 {
-  TracerWaitEvent event;
+  BpEventType event;
   union
   {
     AddrPtr pc;
@@ -238,7 +240,7 @@ struct TraceeController
 
   void process_exec(TaskInfo *t) noexcept;
   void process_clone(TaskInfo *t) noexcept;
-  WE process_stopped(TaskInfo *t) noexcept;
+  BpEvent process_stopped(TaskInfo *t) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;

@@ -29,11 +29,12 @@ public:
 
   void enable(Tid tid) noexcept;
   void disable(Tid tid) noexcept;
+  UserBreakpointType type() const noexcept;
 
   u8 original_byte;
   bool enabled : 1;
-  UserBreakpointType type : 7;
-  u16 bp_id;
+  UserBreakpointType bp_type : 7;
+  u16 id;
   u32 times_hit;
   TPtr<void> address;
 };

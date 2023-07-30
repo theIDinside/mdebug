@@ -266,7 +266,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
     user_brkpts.insert(sym.address, ins_byte, UserBreakpointType::FunctionBreakpoint);
     auto &bp = user_brkpts.breakpoints.back();
-    user_brkpts.fn_breakpoint_names[bp.bp_id] = function_name;
+    user_brkpts.fn_breakpoint_names[bp.id] = function_name;
   }
 }
 
@@ -292,7 +292,7 @@ TraceeController::set_source_breakpoints(std::string_view src,
             ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
             user_brkpts.insert(lte.pc, original_byte, UserBreakpointType::SourceBreakpoint);
             const auto &bp = user_brkpts.breakpoints.back();
-            user_brkpts.source_breakpoints[bp.bp_id] = std::move(desc);
+            user_brkpts.source_breakpoints[bp.id] = std::move(desc);
             break;
           }
         }
@@ -351,9 +351,9 @@ TraceeController::reset_source_breakpoints(std::string_view source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&bps) noexcept
 {
   std::erase_if(user_brkpts.breakpoints, [&bpm = user_brkpts, path = source_filepath](Breakpoint &bp) {
-    if (bp.type == UserBreakpointType::SourceBreakpoint) {
-      if (bpm.source_breakpoints[bp.bp_id].source_file.compare(path) == 0) {
-        bpm.source_breakpoints.erase(bp.bp_id);
+    if (bp.type() == UserBreakpointType::SourceBreakpoint) {
+      if (bpm.source_breakpoints[bp.id].source_file.compare(path) == 0) {
+        bpm.source_breakpoints.erase(bp.id);
         if (bp.enabled)
           bp.disable(bpm.address_space_tid);
         return true;
@@ -517,7 +517,7 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   }
 }
 
-WE
+BpEvent
 TraceeController::process_stopped(TaskInfo *t) noexcept
 {
   const auto pc = get_caching_pc(t);
@@ -527,13 +527,13 @@ TraceeController::process_stopped(TaskInfo *t) noexcept
     auto bpstat = find(user_brkpts.task_bp_stats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
     if (bpstat != std::end(user_brkpts.task_bp_stats) && bpstat->stepped_over) {
       user_brkpts.task_bp_stats.erase(bpstat);
-      return WE{TracerWaitEvent::None, {nullptr}};
+      return BpEvent{BpEventType::None, {nullptr}};
     }
     set_pc(t, prev_pc_byte);
     user_brkpts.add_bpstat_for(t, bp);
-    return WE{TracerWaitEvent::BreakpointHit, {.bp = bp}};
+    return BpEvent{BpEventType::UserBreakpointHit, {.bp = bp}};
   }
-  return WE{TracerWaitEvent::None, {nullptr}};
+  return BpEvent{BpEventType::None, {nullptr}};
 }
 
 bool
@@ -551,8 +551,8 @@ TraceeController::is_running() const noexcept
 void
 BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
 {
-  DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->bp_id);
-  task_bp_stats.push_back({.tid = t->tid, .bp_id = bp->bp_id, .stepped_over = false});
+  DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->id);
+  task_bp_stats.push_back({.tid = t->tid, .bp_id = bp->id, .stepped_over = false});
   bp->times_hit++;
 }
 
@@ -569,15 +569,15 @@ void
 BreakpointMap::clear(TraceeController *target, UserBreakpointType type) noexcept
 {
   std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
-    if (bp.type == type) {
+    if (bp.type() == type) {
       if (bp.enabled)
         bp.disable(target->task_leader);
-      switch (bp.type) {
+      switch (bp.type()) {
       case UserBreakpointType::SourceBreakpoint:
-        t->source_breakpoints.erase(bp.bp_id);
+        t->source_breakpoints.erase(bp.id);
         break;
       case UserBreakpointType::FunctionBreakpoint:
-        t->fn_breakpoint_names.erase(bp.bp_id);
+        t->fn_breakpoint_names.erase(bp.id);
         break;
       case UserBreakpointType::AddressBreakpoint:
         break;
@@ -612,7 +612,7 @@ BreakpointMap::enable_breakpoint(u16 id) noexcept
 Breakpoint *
 BreakpointMap::get_by_id(u32 id) noexcept
 {
-  auto it = std::find_if(breakpoints.begin(), breakpoints.end(), [&](const auto &bp) { return bp.bp_id == id; });
+  auto it = std::find_if(breakpoints.begin(), breakpoints.end(), [&](const auto &bp) { return bp.id == id; });
   ASSERT(it != end(breakpoints), "Expected to find a breakpoint with id {}", id);
   return &(*it);
 }
@@ -826,7 +826,7 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
   if (inside_prologue) {
     TPtr<std::uintptr_t> ret_addr = task->registers->rsp;
     auto ret_val_a = read_type_safe(ret_addr).value_or(0);
-    auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
+
     bool resolved = false;
     if (ret_val_a != 0) {
       if (cu->may_contain(AddrPtr{ret_val_a})) {
@@ -834,13 +834,17 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
         resolved = true;
       }
     }
-    if (!resolved && ret_val_b != 0) {
-      if (cu->may_contain(AddrPtr{ret_val_b})) {
-        frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
-        resolved = true;
+
+    if (!resolved) {
+      auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
+      if (!resolved && ret_val_b != 0) {
+        if (cu->may_contain(AddrPtr{ret_val_b})) {
+          frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
+        }
       }
     }
   }
+
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;

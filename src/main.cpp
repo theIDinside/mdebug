@@ -88,8 +88,12 @@ main(int argc, const char **argv)
 
   std::vector<utils::NotifyResult> notify_events{};
   for (;;) {
+    const auto now = perfclock::now();
     if (notifiers.poll(0)) {
-      notifiers.has_wait_ready(notify_events);
+      notifiers.has_wait_ready(notify_events, true);
+      const auto noticed = perfclock::now();
+      const auto duration = nanos(now, noticed);
+      DLOG("mdb", "{}ns to poll & notice event", duration);
       for (const auto target : notify_events) {
         // handle await events on `target`
         tracer.wait_for_tracee_events(target.pid);
