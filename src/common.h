@@ -5,6 +5,7 @@
 #include "utils/logger.h"
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,8 @@
 
 #include "utils/macros.h"
 
+using perfclock = std::chrono::high_resolution_clock;
+
 namespace fs = std::filesystem;
 using Path = fs::path;
 
@@ -39,6 +42,20 @@ using i8 = std::int8_t;
 
 using Tid = pid_t;
 using Pid = pid_t;
+
+template <typename TimeStamp>
+constexpr u64
+nanos(TimeStamp a, TimeStamp b)
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count();
+}
+
+template <typename TimeStamp>
+constexpr u64
+micros(TimeStamp a, TimeStamp b)
+{
+  return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count();
+}
 
 #define PAGE_SIZE 4096
 
@@ -663,6 +680,28 @@ constexpr auto
 find(std::vector<T> &vec, Predicate &&p) noexcept
 {
   return std::find_if(vec.begin(), vec.end(), p);
+}
+
+template <typename T, typename Predicate>
+constexpr auto
+find(std::vector<T> &vec, const T &item, Predicate &&p) noexcept
+{
+  for (auto it = std::cbegin(vec); it != std::end(vec); ++it) {
+    if (p(*it, item))
+      return it;
+  }
+  return std::cend(vec);
+}
+
+template <typename U, typename T, typename Predicate, typename Transform>
+constexpr auto
+map(std::vector<T> &vec, Predicate &&p, Transform &&transform) noexcept -> std::optional<U>
+{
+  for (auto it = std::cbegin(vec); it != std::end(vec); ++it) {
+    if (p(*it))
+      return transform(*it);
+  }
+  return std::nullopt;
 }
 
 template <typename Container>
