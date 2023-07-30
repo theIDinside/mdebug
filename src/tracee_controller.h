@@ -133,8 +133,8 @@ struct BreakpointMap
   }
 
   void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
-  bool insert(AddrPtr addr, u8 overwritten_byte, UserBreakpointType type) noexcept;
-  void clear(TraceeController *target, UserBreakpointType type) noexcept;
+  bool insert(AddrPtr addr, u8 overwritten_byte, BreakpointType type) noexcept;
+  void clear(TraceeController *target, BreakpointType type) noexcept;
   void clear_breakpoint_stats() noexcept;
   void disable_breakpoint(u16 id) noexcept;
   void enable_breakpoint(u16 id) noexcept;

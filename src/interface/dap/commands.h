@@ -84,8 +84,8 @@ struct Next final : public ui::UICommand
 // in the DAP spec
 struct SetBreakpointsResponse final : ui::UIResult
 {
-  SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, UserBreakpointType type) noexcept;
-  UserBreakpointType type;
+  SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept;
+  BreakpointType type;
   std::vector<ui::dap::Breakpoint> breakpoints;
   ~SetBreakpointsResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;

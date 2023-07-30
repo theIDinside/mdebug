@@ -239,7 +239,7 @@ TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
   u64 installed_bp = ((read_value & ~0xff) | bkpt);
   ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
 
-  user_brkpts.insert(address.as_void(), original_byte, UserBreakpointType::AddressBreakpoint);
+  user_brkpts.insert(address.as_void(), original_byte, BreakpointType::AddressBreakpoint);
 }
 
 void
@@ -264,7 +264,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     u8 ins_byte = static_cast<u8>(read_value & 0xff);
     u64 installed_bp = ((read_value & ~0xff) | bkpt);
     ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
-    user_brkpts.insert(sym.address, ins_byte, UserBreakpointType::FunctionBreakpoint);
+    user_brkpts.insert(sym.address, ins_byte, BreakpointType::FunctionBreakpoint);
     auto &bp = user_brkpts.breakpoints.back();
     user_brkpts.fn_breakpoint_names[bp.id] = function_name;
   }
@@ -290,7 +290,7 @@ TraceeController::set_source_breakpoints(std::string_view src,
             u8 original_byte = static_cast<u8>(read_value & 0xff);
             u64 installed_bp = ((read_value & ~0xff) | bkpt);
             ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
-            user_brkpts.insert(lte.pc, original_byte, UserBreakpointType::SourceBreakpoint);
+            user_brkpts.insert(lte.pc, original_byte, BreakpointType::SourceBreakpoint);
             const auto &bp = user_brkpts.breakpoints.back();
             user_brkpts.source_breakpoints[bp.id] = std::move(desc);
             break;
@@ -330,7 +330,7 @@ TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 void
 TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept
 {
-  user_brkpts.clear(this, UserBreakpointType::AddressBreakpoint);
+  user_brkpts.clear(this, BreakpointType::AddressBreakpoint);
   for (auto addr : addresses) {
     set_addr_breakpoint(addr.as<u64>());
   }
@@ -339,7 +339,7 @@ TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcep
 void
 TraceeController::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
 {
-  user_brkpts.clear(this, UserBreakpointType::FunctionBreakpoint);
+  user_brkpts.clear(this, BreakpointType::FunctionBreakpoint);
   user_brkpts.fn_breakpoint_names.clear();
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
@@ -351,7 +351,7 @@ TraceeController::reset_source_breakpoints(std::string_view source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&bps) noexcept
 {
   std::erase_if(user_brkpts.breakpoints, [&bpm = user_brkpts, path = source_filepath](Breakpoint &bp) {
-    if (bp.type() == UserBreakpointType::SourceBreakpoint) {
+    if (bp.type() == BreakpointType::SourceBreakpoint) {
       if (bpm.source_breakpoints[bp.id].source_file.compare(path) == 0) {
         bpm.source_breakpoints.erase(bp.id);
         if (bp.enabled)
@@ -557,7 +557,7 @@ BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
 }
 
 bool
-BreakpointMap::insert(AddrPtr addr, u8 ins_byte, UserBreakpointType type) noexcept
+BreakpointMap::insert(AddrPtr addr, u8 ins_byte, BreakpointType type) noexcept
 {
   if (contains(addr))
     return false;
@@ -566,20 +566,20 @@ BreakpointMap::insert(AddrPtr addr, u8 ins_byte, UserBreakpointType type) noexce
 }
 
 void
-BreakpointMap::clear(TraceeController *target, UserBreakpointType type) noexcept
+BreakpointMap::clear(TraceeController *target, BreakpointType type) noexcept
 {
   std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
     if (bp.type() == type) {
       if (bp.enabled)
         bp.disable(target->task_leader);
       switch (bp.type()) {
-      case UserBreakpointType::SourceBreakpoint:
+      case BreakpointType::SourceBreakpoint:
         t->source_breakpoints.erase(bp.id);
         break;
-      case UserBreakpointType::FunctionBreakpoint:
+      case BreakpointType::FunctionBreakpoint:
         t->fn_breakpoint_names.erase(bp.id);
         break;
-      case UserBreakpointType::AddressBreakpoint:
+      case BreakpointType::AddressBreakpoint:
         break;
       }
       return true;

@@ -1,7 +1,7 @@
 #include "breakpoint.h"
 #include <sys/ptrace.h>
 
-Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, UserBreakpointType type) noexcept
+Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BreakpointType type) noexcept
     : original_byte(original_byte), enabled(true), bp_type(type), id(id), times_hit(0), address(addr)
 {
 }
@@ -25,7 +25,7 @@ Breakpoint::disable(Tid tid) noexcept
   enabled = false;
 }
 
-UserBreakpointType
+BreakpointType
 Breakpoint::type() const noexcept
 {
   return bp_type;

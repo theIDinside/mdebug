@@ -86,8 +86,7 @@ Next::execute(Tracer *tracer) noexcept
   return new NextResponse{true, this};
 }
 
-SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd,
-                                               UserBreakpointType type) noexcept
+SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept
     : ui::UIResult(success, cmd), type(type), breakpoints()
 {
 }
@@ -102,15 +101,15 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
       serialized_bkpts.push_back(bp.serialize());
     }
     switch (this->type) {
-    case UserBreakpointType::SourceBreakpoint:
+    case BreakpointType::SourceBreakpoint:
       return fmt::format(
           R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
           seq, response_seq, fmt::join(serialized_bkpts, ","));
-    case UserBreakpointType::FunctionBreakpoint:
+    case BreakpointType::FunctionBreakpoint:
       return fmt::format(
           R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setFunctionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
           seq, response_seq, fmt::join(serialized_bkpts, ","));
-    case UserBreakpointType::AddressBreakpoint:
+    case BreakpointType::AddressBreakpoint:
       return fmt::format(
           R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setInstructionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
           seq, response_seq, fmt::join(serialized_bkpts, ","));
@@ -131,7 +130,7 @@ SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) no
 UIResultPtr
 SetBreakpoints::execute(Tracer *tracer) noexcept
 {
-  auto res = new SetBreakpointsResponse{true, this, UserBreakpointType::SourceBreakpoint};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::SourceBreakpoint};
   auto target = tracer->get_current();
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
@@ -166,7 +165,7 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
     target->reset_source_breakpoints(*source_file, std::move(src_bps));
     using BP = ui::dap::Breakpoint;
     for (const auto &bp : target->user_brkpts.breakpoints) {
-      if (bp.type() == UserBreakpointType::SourceBreakpoint &&
+      if (bp.type() == BreakpointType::SourceBreakpoint &&
           target->user_brkpts.source_breakpoints[bp.id].source_file == *source_file) {
         const auto &description = target->user_brkpts.source_breakpoints[bp.id];
         res->breakpoints.push_back(BP{.id = bp.id,
@@ -218,11 +217,11 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
   auto target = tracer->get_current();
   target->reset_addr_breakpoints(addresses);
 
-  auto res = new SetBreakpointsResponse{true, this, UserBreakpointType::AddressBreakpoint};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::AddressBreakpoint};
   res->breakpoints.reserve(target->user_brkpts.breakpoints.size());
 
   for (const auto &bp : target->user_brkpts.breakpoints) {
-    if (bp.type() == UserBreakpointType::AddressBreakpoint) {
+    if (bp.type() == BreakpointType::AddressBreakpoint) {
       res->breakpoints.push_back(BP{
           .id = bp.id,
           .verified = true,
@@ -253,7 +252,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
   std::vector<std::string_view> bkpts{};
   std::vector<std::string_view> new_ones{};
 
-  auto res = new SetBreakpointsResponse{true, this, UserBreakpointType::FunctionBreakpoint};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointType::FunctionBreakpoint};
   for (const auto &fnbkpt : args.at("breakpoints")) {
     ASSERT(fnbkpt.contains("name") && fnbkpt["name"].is_string(),
            "instructionReference field not in args or wasn't of type string");
@@ -266,7 +265,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
   target->reset_fn_breakpoints(bkpts);
 
   for (const auto &bp : target->user_brkpts.breakpoints) {
-    if (bp.type() == UserBreakpointType::FunctionBreakpoint) {
+    if (bp.type() == BreakpointType::FunctionBreakpoint) {
       res->breakpoints.push_back(BP{
           .id = bp.id,
           .verified = true,
