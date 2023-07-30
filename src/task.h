@@ -8,6 +8,11 @@
 #include <sys/wait.h>
 
 using namespace std::string_view_literals;
+
+namespace sym {
+struct CallStack;
+}
+
 enum class WaitStatusKind : u16
 {
 #define ITEM(IT, Value) IT = Value,
@@ -55,12 +60,22 @@ struct TaskInfo
 {
   pid_t tid;
   WaitStatus wait_status;
-  RunType run_type : 4;
-  bool stopped : 1;
-  bool stepping : 1;
-  bool ptrace_stop : 1;
-  bool initialized : 1;
-  bool cache_dirty : 1;
+  union
+  {
+    u16 bit_set;
+    struct
+    {
+      RunType run_type : 4;
+      bool stopped : 1;
+      bool ptrace_stop : 1;
+      bool initialized : 1;
+      bool cache_dirty : 1;
+      bool rip_dirty : 1;
+      bool callstack_dirty : 1;
+    };
+  };
+  user_regs_struct *registers;
+  sym::CallStack *call_stack;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;
@@ -87,8 +102,8 @@ struct TaskStepInfo
   Tid tid;
   int steps;
   bool ignore_bps;
-  TPtr<void> rip;
-  void step_taken_to(TPtr<void> rip) noexcept;
+  AddrPtr rip;
+  void step_taken_to(AddrPtr rip) noexcept;
 };
 
 struct TaskVMInfo

@@ -1,5 +1,5 @@
 #include "disassemble.h"
-#include "../target.h"
+#include "../tracee_controller.h"
 #include "elf.h"
 #include "fmt/core.h"
 #include "lnp.h"
@@ -12,7 +12,7 @@
 namespace sym {
 
 static sym::Disassembly
-create_disasm_entry(Target *target, AddrPtr vm_address, const ZydisDisassembledInstruction &ins,
+create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDisassembledInstruction &ins,
                     const u8 *exec_data_ptr) noexcept
 {
   std::string machine_code{};
@@ -58,10 +58,9 @@ create_disasm_entry(Target *target, AddrPtr vm_address, const ZydisDisassembledI
 }
 
 void
-zydis_disasm_backwards(Target *target, AddrPtr addr, i32 ins_offset, i32 total,
+zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
-  ASSERT(ins_offset > 0 && total > 0, "ins_offset must be an absolute number");
   ElfSection *text = target->get_text_section(addr);
   ZydisDisassembledInstruction instruction;
 
@@ -120,7 +119,7 @@ zydis_disasm_backwards(Target *target, AddrPtr addr, i32 ins_offset, i32 total,
 }
 
 void
-zydis_disasm(Target *target, AddrPtr addr, u32 ins_offset, u32 total,
+zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
              std::vector<sym::Disassembly> &output) noexcept
 {
   ElfSection *text = target->get_text_section(addr);

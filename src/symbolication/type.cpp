@@ -58,12 +58,13 @@ CompilationUnitFile::name() const noexcept
   return m_name;
 }
 
-TPtr<void>
+AddrPtr
 CompilationUnitFile::low_pc() const noexcept
 {
   return pc_boundaries.low;
 }
-TPtr<void>
+
+AddrPtr
 CompilationUnitFile::high_pc() const noexcept
 {
   return pc_boundaries.high;
@@ -133,16 +134,16 @@ CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
   using FnSym = FunctionSymbol;
   // N.B. if I got this right, this might cause problems with inlined functions. Though I'm not sure.
   auto it_pos = std::lower_bound(fns.begin(), fns.end(), sym.start,
-                                 [](FnSym &fn, TPtr<void> start) { return fn.start < start; });
+                                 [](FnSym &fn, AddrPtr start) { return fn.start < start; });
   fns.insert(it_pos, sym);
 }
 
 const FunctionSymbol *
-CompilationUnitFile::find_subprogram(TPtr<void> addr) const noexcept
+CompilationUnitFile::find_subprogram(AddrPtr addr) const noexcept
 {
   using FnSym = FunctionSymbol;
   const auto sym = std::lower_bound(fns.cbegin(), fns.cend(), offset(addr, 1),
-                                    [](const FnSym &l, TPtr<void> addr) { return l.end < addr; });
+                                    [](const FnSym &l, AddrPtr addr) { return l.end < addr; });
   if (sym != std::end(fns)) {
     ASSERT(sym->start.get() <= addr.get() && addr.get() < sym->end.get(),
            "Found unexpectedly the wrong FunctionSymbol when searching for {}. Sym '{}' [{}..{}]", addr, sym->name,
@@ -154,17 +155,17 @@ CompilationUnitFile::find_subprogram(TPtr<void> addr) const noexcept
 }
 
 LineTableEntryRange
-CompilationUnitFile::get_range(TPtr<void> addr) const noexcept
+CompilationUnitFile::get_range(AddrPtr addr) const noexcept
 {
   const auto lte_it = std::lower_bound(m_ltes.cbegin(), m_ltes.cend(), addr,
-                                       [](const LineTableEntry &l, TPtr<void> addr) { return l.pc <= addr; });
+                                       [](const LineTableEntry &l, AddrPtr addr) { return l.pc <= addr; });
   if (lte_it == std::cend(m_ltes))
     return {nullptr, nullptr};
   return {(lte_it - 1).base(), lte_it.base()};
 }
 
 LineTableEntryRange
-CompilationUnitFile::get_range(TPtr<void> start, TPtr<void> end) const noexcept
+CompilationUnitFile::get_range(AddrPtr start, AddrPtr end) const noexcept
 {
   TODO(fmt::format("CompilationUnitFile::get_range(TPtr<void> start = {}, TPtr<void> end = {})", start, end));
 }

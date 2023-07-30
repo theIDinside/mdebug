@@ -34,6 +34,7 @@ public:
   /** Inform AwaiterThread that the process it is waiting on, no longer is executing, i.e. let AwaiterThread
    * finish. */
   void set_process_exited() noexcept;
+  Notify get_notifier() noexcept;
 
 private:
   Notify notifier;

@@ -21,7 +21,7 @@ struct Breakpoint;
 
 struct ContinueResponse final : ui::UIResult
 {
-  CTOR(ContinueResponse)
+  CTOR(ContinueResponse);
   ~ContinueResponse() noexcept = default;
   bool continue_all;
   std::string serialize(int seq) const noexcept final override;
@@ -34,7 +34,7 @@ struct Continue final : public ui::UICommand
   Continue(std::uint64_t seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~Continue() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(Continue)
+  DEFINE_NAME(Continue);
 };
 
 enum class SteppingGranularity
@@ -60,7 +60,7 @@ from_str(std::string_view granularity) noexcept
 
 struct NextResponse final : ui::UIResult
 {
-  CTOR(NextResponse)
+  CTOR(NextResponse);
   ~NextResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -77,7 +77,7 @@ struct Next final : public ui::UICommand
   }
   ~Next() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(Next)
+  DEFINE_NAME(Next);
 };
 
 // This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
@@ -97,7 +97,7 @@ struct SetBreakpoints final : public ui::UICommand
   ~SetBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(SetBreakpoints)
+  DEFINE_NAME(SetBreakpoints);
 };
 
 struct SetInstructionBreakpoints final : public ui::UICommand
@@ -106,7 +106,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   ~SetInstructionBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(SetInstructionBreakpoints)
+  DEFINE_NAME(SetInstructionBreakpoints);
 };
 
 struct SetFunctionBreakpoints final : public ui::UICommand
@@ -115,35 +115,35 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   ~SetFunctionBreakpoints() = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(SetInstructionBreakpoints)
+  DEFINE_NAME(SetInstructionBreakpoints);
 };
 
 struct ReadMemoryResponse final : public ui::UIResult
 {
-  CTOR(ReadMemoryResponse)
+  CTOR(ReadMemoryResponse);
   ~ReadMemoryResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
-  TPtr<void> first_readable_address;
+  AddrPtr first_readable_address;
   u64 unreadable_bytes;
   std::string data_base64;
 };
 
 struct ReadMemory final : public ui::UICommand
 {
-  ReadMemory(std::uint64_t seq, TPtr<void> address, int offset, u64 bytes) noexcept;
+  ReadMemory(std::uint64_t seq, AddrPtr address, int offset, u64 bytes) noexcept;
   ~ReadMemory() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
 
-  TPtr<void> address;
+  AddrPtr address;
   int offset;
   u64 bytes;
 
-  DEFINE_NAME(ReadMemory)
+  DEFINE_NAME(ReadMemory);
 };
 
 struct ConfigurationDoneResponse final : public ui::UIResult
 {
-  CTOR(ConfigurationDoneResponse)
+  CTOR(ConfigurationDoneResponse);
   ~ConfigurationDoneResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -154,12 +154,12 @@ struct ConfigurationDone final : public ui::UICommand
   ~ConfigurationDone() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
 
-  DEFINE_NAME(ConfigurationDone)
+  DEFINE_NAME(ConfigurationDone);
 };
 
 struct InitializeResponse final : public ui::UIResult
 {
-  CTOR(InitializeResponse)
+  CTOR(InitializeResponse);
   ~InitializeResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -170,12 +170,12 @@ struct Initialize final : public ui::UICommand
   ~Initialize() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   nlohmann::json args;
-  DEFINE_NAME(Initialize)
+  DEFINE_NAME(Initialize);
 };
 
 struct DisconnectResponse final : public UIResult
 {
-  CTOR(DisconnectResponse)
+  CTOR(DisconnectResponse);
   ~DisconnectResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -186,12 +186,12 @@ struct Disconnect final : public UICommand
   ~Disconnect() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
   bool restart, terminate_tracee, suspend_tracee;
-  DEFINE_NAME(Disconnect)
+  DEFINE_NAME(Disconnect);
 };
 
 struct LaunchResponse final : public UIResult
 {
-  CTOR(LaunchResponse)
+  CTOR(LaunchResponse);
   ~LaunchResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -204,12 +204,12 @@ struct Launch final : public UICommand
   bool stopAtEntry;
   Path program;
   std::vector<std::string> program_args;
-  DEFINE_NAME(Launch)
+  DEFINE_NAME(Launch);
 };
 
 struct TerminateResponse final : public UIResult
 {
-  CTOR(TerminateResponse)
+  CTOR(TerminateResponse);
   ~TerminateResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
 };
@@ -219,12 +219,12 @@ struct Terminate final : public UICommand
   Terminate(u64 seq) noexcept : UICommand(seq) {}
   ~Terminate() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(Terminate)
+  DEFINE_NAME(Terminate);
 };
 
 struct ThreadsResponse final : public UIResult
 {
-  CTOR(ThreadsResponse)
+  CTOR(ThreadsResponse);
   ~ThreadsResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
   std::vector<Thread> threads;
@@ -235,12 +235,12 @@ struct Threads final : public UICommand
   Threads(u64 seq) noexcept : UICommand(seq) {}
   ~Threads() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
-  DEFINE_NAME(Threads)
+  DEFINE_NAME(Threads);
 };
 
 struct StackTraceResponse final : public UIResult
 {
-  CTOR(StackTraceResponse)
+  CTOR(StackTraceResponse);
   ~StackTraceResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
   std::vector<StackFrame> stack_frames;
@@ -256,12 +256,12 @@ struct StackTrace final : public UICommand
   std::optional<int> startFrame;
   std::optional<int> levels;
   std::optional<StackTraceFormat> format;
-  DEFINE_NAME(StackTrace)
+  DEFINE_NAME(StackTrace);
 };
 
 struct DisassembleResponse final : public UIResult
 {
-  CTOR(DisassembleResponse)
+  CTOR(DisassembleResponse);
   ~DisassembleResponse() noexcept = default;
   std::string serialize(int seq) const noexcept final override;
   std::vector<sym::Disassembly> instructions;
@@ -269,12 +269,12 @@ struct DisassembleResponse final : public UIResult
 
 struct Disassemble final : public UICommand
 {
-  Disassemble(std::uint64_t seq, TPtr<void> address, int byte_offset, int ins_offset, int ins_count,
+  Disassemble(std::uint64_t seq, AddrPtr address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
   ~Disassemble() = default;
   UIResultPtr execute(Tracer *tracer) noexcept final override;
 
-  TPtr<void> address;
+  AddrPtr address;
   int byte_offset;
   int ins_offset;
   int ins_count;

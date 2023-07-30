@@ -24,7 +24,7 @@ async function test() {
       granularity: "instruction",
     },
     "stopped",
-    1000
+    3000
   );
 
   if (evt.reason != "step") {

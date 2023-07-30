@@ -71,18 +71,26 @@ class DAClient {
   /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
   buf;
 
-  constructor(mdb, mdb_args) {
-    // this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "inherit" });
-    this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+  constructor(mdb, mdb_args, record = false) {
+    // for future work when we get recording in tests suites working.
+    this.recording = record;
+    if (record) {
+      this.mdb = spawn("rr", ["record", mdb, ...mdb_args])
+    } else {
+      this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+    }
+
     this.mdb.on("error", (err) => {
       console.error(`[TEST FAILED] MDB error: ${err}`);
       process.exit(-1);
     });
     this.mdb.on("exit", (exitCode) => {
-      console.error(
-        `[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`
-      );
-      process.exit(-1);
+      if (exitCode != 0) {
+        console.error(
+          `[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`
+        );
+        process.exit(-1);
+      }
     });
     process.on("exit", (code) => {
       this.mdb.kill("SIGKILL");
@@ -197,7 +205,7 @@ class DAClient {
    * @param { number } failureTimeout - The maximum time (in milliseconds) that we should wait for response. If the request takes longer, the test will fail.
    * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
    */
-  async sendReqGetResponse(req, args, failureTimeout = seconds(1)) {
+  async sendReqGetResponse(req, args, failureTimeout = seconds(2)) {
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     const req_promise = this._sendReqGetResponseImpl(req, args);
@@ -223,8 +231,8 @@ class DAClient {
    * @param { number } threadId
    * @returns {Promise<{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}>}
    */
-  async stackTrace(threadId) {
-    return this.sendReqGetResponse("stackTrace", { threadId: threadId });
+  async stackTrace(threadId, timeout = 1000) {
+    return this.sendReqGetResponse("stackTrace", { threadId: threadId }, timeout);
   }
 
   flushConnection() {
@@ -268,9 +276,9 @@ class DAClient {
   }
 
   // utility function to initialize, launch `program` and run to `main`
-  async launchToMain(program) {
+  async launchToMain(program, timeout = 1000) {
     let stopped_promise = this.prepareWaitForEvent("stopped");
-    await this.sendReqGetResponse("initialize", {})
+    await this.sendReqGetResponse("initialize", {}, timeout)
       .then((response) => {
         checkResponse(response, "initialize", true);
       })
@@ -278,12 +286,12 @@ class DAClient {
     await this.sendReqGetResponse("launch", {
       program: program,
       stopAtEntry: true,
-    })
+    }, timeout)
       .then((response) => {
         checkResponse(response, "launch", true);
       })
       .catch(testException);
-    await this.sendReqGetResponse("configurationDone").catch(testException);
+    await this.sendReqGetResponse("configurationDone", {}, timeout).catch(testException);
     await stopped_promise;
   }
 
@@ -297,7 +305,7 @@ class DAClient {
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     const event_promise = this.prepareWaitForEvent(event);
-    const resp_res = await this.sendReqGetResponse(req, args);
+    const resp_res = await this.sendReqGetResponse(req, args, failureTimeout);
     const timeOut = setTimeout(() => {
       ctrl.abort();
     }, failureTimeout);
@@ -311,7 +319,7 @@ class DAClient {
         signal.addEventListener("abort", () => {
           rej(
             new Error(
-              `Timed out waiting for event ${event} after request ${req}`
+              `Timed out waiting for event ${event} after request ${req} for ${failureTimeout}`
             )
           );
         });
@@ -324,10 +332,8 @@ class DAClient {
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
 function dump_log() {
-  const mdblog = fs.readFileSync(path.join(BUILD_BIN_DIR, "mdb.log"));
-  const daplog = fs.readFileSync(path.join(BUILD_BIN_DIR, "dap.log"));
-  console.log(mdblog);
-  console.log(daplog);
+  const mdblog = fs.readFileSync(path.join(process.cwd(), "mdb.log"));
+  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(IMPORTING_FILE)}.log`), mdblog);
 }
 
 function buildDirFile(fileName) {

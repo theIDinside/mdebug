@@ -51,7 +51,7 @@ struct ObjectFile
 
   u64 get_offset(u8 *ptr) const noexcept;
   u8 *get_section(Elf *elf, u32 index) const noexcept;
-  TPtr<void> text_section_offset() const noexcept;
+  AddrPtr text_section_offset() const noexcept;
   std::optional<MinSymbol> get_minsymbol(std::string_view name) noexcept;
 };
 

@@ -103,9 +103,7 @@ DAP::pop_event() noexcept
   VERIFY(!events_queue.empty(), "Can't pop events from an empty list!");
   LockGuard<SpinLock> lock{output_message_lock};
   UIResultPtr evt = events_queue.front();
-  std::uintptr_t test = (std::uintptr_t)evt;
   events_queue.pop_front();
-  ASSERT((std::uintptr_t)evt == test, "pointer changed value under our feet");
   return evt;
 }
 
@@ -202,12 +200,11 @@ DAP::run_ui_loop()
           std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
           // we do this _simply_ to escape the string (and utf-8 it?)
           json str = data;
-          const auto escaped_body_contents = str.dump();
           const auto payload = fmt::format(
               R"({{"seq": {},"type":"event","event":"output","body":{{ "category": "stdout", "output": {}}}}})",
-              seq++, escaped_body_contents);
-          const auto header = fmt::format("Content-Length: {}\r\n\r\n\n", payload.size());
-          LOG("dap", "Received event: {}", payload);
+              seq++, str.dump());
+          const auto header = fmt::format("Content-Length: {}\r\n\r\n", payload.size());
+          DLOG("dap", "Received event: {}", payload);
           VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
           VERIFY(write(tracer_out_fd, payload.data(), payload.size()) != -1, "Failed to write '{}'", payload);
         }
@@ -224,20 +221,17 @@ DAP::post_event(UIResultPtr serializable_event) noexcept
 {
   {
     LockGuard<SpinLock> guard{output_message_lock};
-#ifdef MDB_DEBUG
-    logging::get_logging()->log("dap",
-                                fmt::format("posted event for msg with seq {}", serializable_event->response_seq));
-#endif
     events_queue.push_back(serializable_event);
   }
+  DLOG("dap", "posted event for msg with seq {}", serializable_event->response_seq);
   notify_new_message();
 }
 
 void
 DAP::notify_new_message() noexcept
 {
-  const auto succeeded = posted_event_notifier.notify();
-  ASSERT(succeeded, "failed to notify DAP interface of new message due to {}", strerror(errno));
+  PERFORM_ASSERT(posted_event_notifier.notify(), "failed to notify DAP interface of new message due to {}",
+                 strerror(errno));
 }
 
 void

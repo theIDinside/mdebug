@@ -1,30 +1,9 @@
 #include "awaiter.h"
+#include "common.h"
+#include "tracer.h"
+#include <bits/chrono.h>
+#include <chrono>
 #include <sys/wait.h>
-
-void
-awaiter_thread_job(Notify &notifier, Tid task_leader, std::condition_variable &cv, std::mutex &m, bool &ready)
-{
-  int error_tries = 0;
-  while (true) {
-    siginfo_t info_ptr;
-    auto res = waitid(P_ALL, task_leader, &info_ptr, WEXITED | WSTOPPED | WNOWAIT);
-    if (res == -1) {
-      error_tries++;
-      ASSERT(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
-      continue;
-    }
-    error_tries = 0;
-    // notify Tracer thread that it can pull out wait status info
-    notifier.notify();
-    {
-      std::unique_lock lk(m);
-      ready = false;
-      while (!ready)
-        cv.wait(lk);
-    }
-    ready = false;
-  }
-};
 
 AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
     : notifier(notifier), events_reaped(true), m{}, cv{}, initialized(false), should_cont(true)
@@ -45,7 +24,7 @@ AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
       auto res = waitid(P_ALL, t, &info_ptr, WEXITED | WSTOPPED | WNOWAIT);
       if (res == -1) {
         error_tries++;
-        ASSERT(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
+        VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
         continue;
       }
       error_tries = 0;
@@ -82,4 +61,10 @@ void
 AwaiterThread::set_process_exited() noexcept
 {
   should_cont = false;
+}
+
+Notify
+AwaiterThread::get_notifier() noexcept
+{
+  return notifier;
 }

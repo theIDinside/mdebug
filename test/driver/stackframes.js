@@ -82,8 +82,8 @@ async function test() {
           `We're exactly at the start of the first instruction of main - expecting only 1 frame but got ${stackFrames.length}`
         );
     });
-
-  for (let i = 3; i < 7; i++) {
+  const total = 3;
+  for (let i = total; i < 7; i++) {
     await da_client.sendReqWaitEvent(
       "continue",
       { threadId: threads[0].id },
@@ -95,21 +95,21 @@ async function test() {
       const { stackFrames } = res.body;
       if (stackFrames.length != i) {
         throw new Error(
-          `Expected ${i} stackframes but got ${stackFrames.length}`
+          `Expected ${i} stackframes but got ${stackFrames.length}: ${JSON.stringify(stackFrames, null, 2)}`
         );
       }
 
       for (const idx in stackFrames) {
-        if (stackFrames[idx].line != expectedStackTraces[i - 3][idx].line) {
+        if (stackFrames[idx].line != expectedStackTraces[i - total][idx].line) {
           throw new Error(
-            `Expected line to be at ${expectedStackTraces[i - 3][idx].line
-            } but was ${stackFrames[idx].line}`
+            `Expected line to be at ${expectedStackTraces[i - total][idx].line
+            } but was ${stackFrames[idx].line}: ${JSON.stringify(stackFrames, null, 2)}`
           );
         }
-        if (stackFrames[idx].name != expectedStackTraces[i - 3][idx].name) {
+        if (stackFrames[idx].name != expectedStackTraces[i - total][idx].name) {
           throw new Error(
-            `Expected name to be ${expectedStackTraces[i - 3][idx].name
-            } but was ${stackFrames[idx].name}`
+            `Expected name to be ${expectedStackTraces[i - total][idx].name
+            } but was ${stackFrames[idx].name}: ${JSON.stringify(stackFrames, null, 2)}`
           );
         }
       }

@@ -7,7 +7,7 @@ AddressRange::contains(AddressRange &block) const noexcept
 }
 
 bool
-AddressRange::contains(TPtr<void> ptr) const noexcept
+AddressRange::contains(AddrPtr ptr) const noexcept
 {
   return ptr >= low && ptr < high;
 }

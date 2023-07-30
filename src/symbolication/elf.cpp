@@ -153,8 +153,7 @@ Elf::parse_min_symbols() const noexcept
 
   std::span<ElfSection> sects = sections();
   auto strtable = std::ranges::find_if(sects, [](ElfSection &sect) { return sect.get_name() == ".strtab"; });
-
-  ASSERT(strtable != std::end(sects), "Could not find section .strtab");
+  VERIFY(strtable != std::end(sects), "Could not find section .strtab");
 
   for (auto &sec : sections()) {
     if (sec.get_name() == ".symtab") {

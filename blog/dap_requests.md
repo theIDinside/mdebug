@@ -21,7 +21,7 @@ Below is a list of implemented requests. Though they might not be implemented _f
 - [ ] Modules
 - [ ] Next
   - [x] Instruction
-  - [ ] Line
+  - [x] Line
   - [ ] "Statement"
 - [ ] Pause
 - [x] ReadMemory

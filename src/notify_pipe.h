@@ -65,6 +65,6 @@ struct NotifyManager
   void add_notifier(Notifier::ReadEnd notifier, std::string name, Tid task_leader) noexcept;
   bool poll(int timeout) noexcept;
   bool has_io_ready() noexcept;
-  void has_wait_ready(std::vector<NotifyResult> &result);
+  void has_wait_ready(std::vector<NotifyResult> &result, bool flush);
 };
 }; // namespace utils
