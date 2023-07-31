@@ -24,7 +24,7 @@ async function test() {
   const start_line = frames.body.stackFrames[0].line;
   if (start_line != bp_lines[0].line) throw new Error(`Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}`);
   const allThreadsStop = true;
-  const evt = await da_client.sendReqWaitEvent(
+  const { event_body, response } = await da_client.sendReqWaitEvent(
     "next",
     {
       threadId: threads[0].id,
@@ -35,14 +35,14 @@ async function test() {
     1000
   );
 
-  if (evt.reason != "step") {
+  if (event_body.reason != "step") {
     throw new Error(
       `Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(
-        evt
+        event_body
       )}`
     );
   }
-  if (evt.allThreadsStopped != allThreadsStop) {
+  if (event_body.allThreadsStopped != allThreadsStop) {
     throw new Error(`Expected all threads to have stopped after step.`);
   }
   {

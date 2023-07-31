@@ -187,6 +187,39 @@ class DAClient {
     });
   }
 
+  /* Called _before_ an action that is expected to create an event.
+ * Calling this after, may or may not work, as the event handler might not be set up in time,
+ * before the actual event comes across the wire.*/
+  prepareWaitForEventN(evt, n, timeout) {
+    const ctrl = new AbortController();
+    const signal = ctrl.signal;
+    const timeOut = setTimeout(() => {
+      ctrl.abort();
+    }, timeout);
+
+    let p = new Promise((res, rej) => {
+      let events = [];
+      this.events.on(evt, (body) => {
+        events.push(body);
+        if (events.length == n) {
+          res(events);
+        }
+      });
+    });
+
+    return Promise.race([
+      p.then((res) => {
+        clearTimeout(timeOut);
+        return res;
+      }),
+      new Promise((_, rej) => {
+        signal.addEventListener("abort", () => {
+          rej(new Error(`Timed out waiting for ${n} events of type ${evt} to have happened`));
+        });
+      }),
+    ]);
+  }
+
   _sendReqGetResponseImpl(req, args) {
     return new Promise((res) => {
       const serialized = this.serializeRequest(req, args);
@@ -301,19 +334,27 @@ class DAClient {
     return await stopped_promise;
   }
 
+  /**
+   * 
+   * @param {string} req 
+   * @param {object} args 
+   * @param {string} event 
+   * @param {number} failureTimeout 
+   * @returns {Promise<{ event_body: object, response: object }>}
+   */
   async sendReqWaitEvent(req, args, event, failureTimeout) {
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     const event_promise = this.prepareWaitForEvent(event);
-    const resp_res = await this.sendReqGetResponse(req, args, failureTimeout);
+    const response = await this.sendReqGetResponse(req, args, failureTimeout);
     const timeOut = setTimeout(() => {
       ctrl.abort();
     }, failureTimeout);
 
     return Promise.race([
-      event_promise.then((res) => {
+      event_promise.then((event_body) => {
         clearTimeout(timeOut);
-        return res;
+        return { event_body, response };
       }),
       new Promise((_, rej) => {
         signal.addEventListener("abort", () => {
