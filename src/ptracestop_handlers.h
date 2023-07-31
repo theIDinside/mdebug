@@ -23,7 +23,7 @@ public:
 
   // `should_stop` is passed in by the StopHandler, if we've encountered
   // an event, signal or whatever, that should abort this installed stepper
-  virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept;
+  virtual bool completed(TaskInfo *t, bool should_stop) noexcept;
 
   // default handler does nothing at "start"
   virtual void
@@ -58,7 +58,7 @@ public:
   // `should_stop` is passed in by the StopHandler, if we've encountered
   // an event, signal or whatever, that should abort this installed stepper
   // returns `true` when we _should not continue_
-  virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept override;
+  virtual bool completed(TaskInfo *t, bool should_stop) noexcept override;
   void start_action() noexcept override;
   bool check_if_done() noexcept override;
 

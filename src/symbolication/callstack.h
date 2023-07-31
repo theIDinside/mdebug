@@ -59,6 +59,7 @@ struct CallStack
   Tid tid;                   // the task associated with this call stack
   std::vector<Frame> frames; // the call stack
   std::vector<AddrPtr> pcs;
+  bool dirty;
   std::optional<int> has_frame(const Frame &f) const noexcept;
 };
 } // namespace sym

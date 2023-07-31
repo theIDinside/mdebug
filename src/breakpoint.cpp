@@ -52,6 +52,17 @@ Breakpoint::event_type() const noexcept
   }
 }
 
+std::vector<BreakpointMap::BpStat>::iterator
+BreakpointMap::find_bpstat(Tid tid) noexcept
+{
+  return ::find(bpstats, [tid = tid](auto &bpstat) { return bpstat.tid == tid; });
+}
+bool
+BreakpointMap::has_value(std::vector<BpStat>::iterator it) noexcept
+{
+  return it != std::end(bpstats);
+}
+
 void
 BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
 {

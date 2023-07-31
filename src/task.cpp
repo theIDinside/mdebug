@@ -11,25 +11,35 @@ TaskInfo::TaskInfo(pid_t tid) noexcept
 }
 
 void
+TaskInfo::cache_registers() noexcept
+{
+  if (cache_dirty) {
+    PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, registers);
+    cache_dirty = false;
+    rip_dirty = false;
+  }
+}
+
+void
 TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 {
   wait_status = wait.ws;
 }
 
 void
-TaskInfo::set_running(RunType type) noexcept
+TaskInfo::resume(RunType type) noexcept
 {
   DLOG("mdb", "restarting {}", tid);
   if (stopped) {
     stopped = false;
     ptrace_stop = false;
     run_type = type;
-    PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
+    PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   } else if (ptrace_stop) {
     stopped = false;
     ptrace_stop = false;
     run_type = type;
-    PTRACE_OR_PANIC(PTRACE_CONT, tid, nullptr, nullptr);
+    PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   }
   set_dirty();
 }
@@ -57,7 +67,7 @@ TaskInfo::set_dirty() noexcept
 {
   cache_dirty = true;
   rip_dirty = true;
-  callstack_dirty = true;
+  call_stack->dirty = true;
 }
 
 void

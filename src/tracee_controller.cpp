@@ -143,7 +143,7 @@ TraceeController::resume_target(RunType type) noexcept
   bps.clear_breakpoint_stats();
   for (auto &t : threads) {
     if (t.can_continue()) {
-      t.set_running(type);
+      t.resume(type);
     }
   }
   ptracestop_handler->can_resume();
@@ -736,70 +736,83 @@ TraceeController::current_frame(TaskInfo *task) noexcept
     };
 }
 
+std::vector<AddrPtr> &
+TraceeController::unwind_callstack(TaskInfo *task) noexcept
+{
+  task->cache_registers();
+  if (!task->call_stack->dirty) {
+    return task->call_stack->pcs;
+  } else {
+    task->call_stack->dirty = false;
+    task->call_stack->pcs.clear();
+    auto &frame_pcs = task->call_stack->pcs;
+    u8 stack_storage[100 * sizeof(std::uintptr_t)];
+    std::pmr::monotonic_buffer_resource rsrc{&stack_storage, 100 * sizeof(std::uintptr_t)};
+
+    std::pmr::vector<TPtr<std::uintptr_t>> base_ptrs{&rsrc};
+    base_ptrs.reserve(50);
+    auto bp = task->registers->rbp;
+    base_ptrs.push_back(bp);
+    while (true) {
+      TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
+      const auto prev_bp = read_type_safe(bp_addr).transform([](auto v) { return TPtr<std::uintptr_t>{v}; });
+      if (auto prev = prev_bp.value_or(0x0); prev == bp_addr || !(prev > TPtr<std::uintptr_t>{1}))
+        break;
+      base_ptrs.push_back(*prev_bp);
+    }
+
+    frame_pcs.push_back(task->registers->rip);
+    bool inside_prologue = false;
+    auto cu = get_cu_from_pc(task->registers->rip);
+    if (cu) {
+      const auto [a, b] = cu->get_range(frame_pcs.front().as_void());
+      if (b && b->prologue_end)
+        inside_prologue = true;
+    }
+
+    for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
+      const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
+      if (ret_addr) {
+        frame_pcs.push_back(ret_addr->as_void());
+      }
+    }
+
+    // NB(simon): tracee hasn't finalized it's activation record; we need to perform some heuristics
+    // to actually determine return address. For now, this is it.
+    if (inside_prologue) {
+      TPtr<std::uintptr_t> ret_addr = task->registers->rsp;
+      auto ret_val_a = read_type_safe(ret_addr).value_or(0);
+
+      bool resolved = false;
+      if (ret_val_a != 0) {
+        if (cu->may_contain(AddrPtr{ret_val_a})) {
+          frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
+          resolved = true;
+        }
+      }
+
+      if (!resolved) {
+        auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
+        if (!resolved && ret_val_b != 0) {
+          if (cu->may_contain(AddrPtr{ret_val_b})) {
+            frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
+          }
+        }
+      }
+    }
+    return task->call_stack->pcs;
+  }
+}
+
 sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo *task) noexcept
 {
   cache_registers(task);
   // task->call_stack->pcs.clear();
-  u8 stack_storage[100 * sizeof(std::uintptr_t)];
-  std::pmr::monotonic_buffer_resource rsrc{&stack_storage, 100 * sizeof(std::uintptr_t)};
-  std::pmr::vector<AddrPtr> frame_pcs{&rsrc};
-  frame_pcs.reserve(50);
-  std::pmr::vector<TPtr<std::uintptr_t>> base_ptrs{&rsrc};
-  base_ptrs.reserve(50);
-  auto bp = task->registers->rbp;
-  base_ptrs.push_back(bp);
-  while (true) {
-    TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
-    const auto prev_bp = read_type_safe(bp_addr).transform([](auto v) { return TPtr<std::uintptr_t>{v}; });
-    if (auto prev = prev_bp.value_or(0x0); prev == bp_addr || !(prev > TPtr<std::uintptr_t>{1}))
-      break;
-    base_ptrs.push_back(*prev_bp);
-  }
-
-  frame_pcs.push_back(task->registers->rip);
-  bool inside_prologue = false;
-  auto cu = get_cu_from_pc(task->registers->rip);
-  if (cu) {
-    const auto [a, b] = cu->get_range(frame_pcs.front().as_void());
-    if (b && b->prologue_end)
-      inside_prologue = true;
-  }
-
-  for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
-    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
-    if (ret_addr) {
-      frame_pcs.push_back(ret_addr->as_void());
-    }
-  }
-
-  // NB(simon): tracee hasn't finalized it's activation record; we need to perform some heuristics
-  // to actually determine return address. For now, this is it.
-  if (inside_prologue) {
-    TPtr<std::uintptr_t> ret_addr = task->registers->rsp;
-    auto ret_val_a = read_type_safe(ret_addr).value_or(0);
-
-    bool resolved = false;
-    if (ret_val_a != 0) {
-      if (cu->may_contain(AddrPtr{ret_val_a})) {
-        frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
-        resolved = true;
-      }
-    }
-
-    if (!resolved) {
-      auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
-      if (!resolved && ret_val_b != 0) {
-        if (cu->may_contain(AddrPtr{ret_val_b})) {
-          frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
-        }
-      }
-    }
-  }
-
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;
+  auto &frame_pcs = unwind_callstack(task);
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
     auto symbol = find_fn_by_pc(i->as_void());
@@ -823,7 +836,7 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
     }
     ++level;
   }
-  task->callstack_dirty = false;
+  task->call_stack->dirty = false;
   return *task->call_stack;
 }
 

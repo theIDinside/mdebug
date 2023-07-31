@@ -2,6 +2,7 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "symbolication/lnp.h"
+#include "task.h"
 #include "tracee_controller.h"
 #include "tracer.h"
 #include "utils/logger.h"
@@ -15,11 +16,11 @@ Action::Action(StopHandler *handler) noexcept : handler(handler), tc(handler->tc
 Action::~Action() noexcept { handler->is_stepping = false; }
 
 bool
-Action::do_next_action(TaskInfo *t, bool should_stop) noexcept
+Action::completed(TaskInfo *t, bool should_stop) noexcept
 {
   constexpr bool is_done = false;
   if (!should_stop) {
-    t->set_running(RunType::Continue);
+    t->resume(RunType::Continue);
   }
   return is_done;
 }
@@ -40,7 +41,7 @@ InstructionStep::InstructionStep(StopHandler *handler, Tid thread_id, int steps,
 }
 
 bool
-InstructionStep::do_next_action(TaskInfo *, bool should_stop) noexcept
+InstructionStep::completed(TaskInfo *, bool should_stop) noexcept
 {
   if (!should_stop) {
     return resume();
@@ -94,8 +95,8 @@ InstructionStep::resume() noexcept
       bp->disable(next->tid);
       stepped_over_bp = true;
     }
-    VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, next->tid, 0, 0),
-           "Single step over user breakpoint boundary failed: {}", strerror(errno));
+    auto task = tc->get_task(next->tid);
+    task->resume(RunType::Step);
     if (stepped_over_bp) {
       bpstat->stepped_over = true;
       tc->bps.enable_breakpoint(bpstat->bp_id);
@@ -111,8 +112,9 @@ InstructionStep::resume() noexcept
 void
 InstructionStep::resume_impl() noexcept
 {
+  auto task = tc->get_task(next->tid);
   DLOG("mdb", "[InstructionStep] stepping 1 instruction");
-  VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, next->tid, 0, 0), "Failed to single step: {}", strerror(errno));
+  task->resume(RunType::Step);
 }
 
 LineStep::LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread) noexcept
@@ -153,8 +155,7 @@ LineStep::resume_impl() noexcept
 {
   if (resume_address_set) {
     DLOG("mdb", "LineStep continuing sub frame");
-    VERIFY(-1 != ptrace(PTRACE_CONT, next->tid, 0, 0), "Failed to single step: {}", strerror(errno));
-    resume_address_set = false;
+    tc->get_task(next->tid)->resume(RunType::Continue);
   } else {
     InstructionStep::resume_impl();
   }
@@ -245,11 +246,13 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
     break;
   }
   // If we have a stepper installed, perform it's action
-  if (action->do_next_action(stopped, should_stop)) {
+  if (action->completed(stopped, should_stop)) {
     delete action;
     action = default_action;
     should_stop = false;
   }
+  // NB: *ONLY* notify self when _100%_ sure there is a waitable event waiting to be read, otherwise will block
+  // main thread.
   if (is_stepping)
     tc->notify_self();
   else

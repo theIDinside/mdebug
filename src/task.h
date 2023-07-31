@@ -71,7 +71,6 @@ struct TaskInfo
       bool initialized : 1;
       bool cache_dirty : 1;
       bool rip_dirty : 1;
-      bool callstack_dirty : 1;
     };
   };
   user_regs_struct *registers;
@@ -84,8 +83,9 @@ struct TaskInfo
   TaskInfo &operator=(TaskInfo &t) noexcept = default;
   TaskInfo &operator=(const TaskInfo &o) = default;
 
+  void cache_registers() noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
-  void set_running(RunType) noexcept;
+  void resume(RunType) noexcept;
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;

@@ -23,6 +23,9 @@ struct UICommand
 public:
   explicit UICommand(std::uint64_t seq) noexcept : seq(seq) {}
   virtual ~UICommand() = default;
+
+  /* Executes the command. This is always performed in the Tracer thread (where all tracee controller actions are
+   * performed. )*/
   virtual UIResultPtr execute(Tracer *tracer) noexcept = 0;
 
   std::uint64_t seq;
