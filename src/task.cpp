@@ -5,8 +5,8 @@
 #include <sys/user.h>
 
 TaskInfo::TaskInfo(pid_t tid) noexcept
-    : tid(tid), wait_status(), run_type(RunType::UNKNOWN), stopped(true), ptrace_stop(false), initialized(false),
-      cache_dirty(true), rip_dirty(true), registers(new user_regs_struct{}), call_stack(new sym::CallStack{tid})
+    : tid(tid), wait_status(), user_stopped(true), tracer_stopped(true), initialized(false), cache_dirty(true),
+      rip_dirty(true), exited(false), registers(new user_regs_struct{}), call_stack(new sym::CallStack{tid})
 {
 }
 
@@ -29,16 +29,16 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 void
 TaskInfo::resume(RunType type) noexcept
 {
-  DLOG("mdb", "restarting {}", tid);
-  if (stopped) {
-    stopped = false;
-    ptrace_stop = false;
-    run_type = type;
+
+  if (user_stopped) {
+    DLOG("mdb", "restarting {} from user-stop", tid);
+    user_stopped = false;
+    tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
-  } else if (ptrace_stop) {
-    stopped = false;
-    ptrace_stop = false;
-    run_type = type;
+  } else if (tracer_stopped) {
+    DLOG("mdb", "restarting {} from tracer-stop", tid);
+    user_stopped = false;
+    tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   }
   set_dirty();
@@ -47,7 +47,7 @@ TaskInfo::resume(RunType type) noexcept
 void
 TaskInfo::set_stop() noexcept
 {
-  stopped = true;
+  user_stopped = true;
 }
 
 void
@@ -59,7 +59,7 @@ TaskInfo::initialize() noexcept
 bool
 TaskInfo::can_continue() noexcept
 {
-  return initialized && (stopped || ptrace_stop);
+  return initialized && (user_stopped || tracer_stopped) && !exited;
 }
 
 void
@@ -80,7 +80,7 @@ TaskStepInfo::step_taken_to(AddrPtr rip) noexcept
 bool
 TaskInfo::is_stopped() const noexcept
 {
-  return ptrace_stop || stopped;
+  return user_stopped;
 }
 
 TaskVMInfo

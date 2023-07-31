@@ -78,7 +78,6 @@ main(int argc, const char **argv)
       }
       spin_lock.unlock();
     }});
-    std::this_thread::sleep_for(std::chrono::milliseconds{i * 50});
   }
 
   auto done_list_index = 0;

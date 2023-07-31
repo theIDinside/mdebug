@@ -69,6 +69,7 @@ BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
   DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->id);
   bpstats.push_back({.tid = t->tid, .bp_id = bp->id, .type = bp->type(), .stepped_over = false});
   bp->times_hit++;
+  t->user_stopped = true;
 }
 
 bool

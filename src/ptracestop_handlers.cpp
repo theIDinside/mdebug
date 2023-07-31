@@ -19,6 +19,7 @@ bool
 Action::completed(TaskInfo *t, bool should_stop) noexcept
 {
   constexpr bool is_done = false;
+  DLOG("mdb", "Resume {}? {} (should_stop = {})", t->tid, t->can_continue(), should_stop);
   if (!should_stop && t->can_continue()) {
     t->resume(RunType::Continue);
   }
@@ -220,8 +221,10 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
     break;
   }
   case WaitStatusKind::Cloned: {
+    const auto stopped_tid = stopped->tid;
     tc->process_clone(stopped);
     handle_cloned(stopped);
+    stopped = tc->get_task(stopped_tid);
     break;
   }
   case WaitStatusKind::Forked:
@@ -303,7 +306,7 @@ void
 StopHandler::handle_exited(TaskInfo *t) noexcept
 {
   tc->reap_task(t);
-  t->exited = true;
+
   should_stop = event_settings.thread_exit_stop;
 }
 void

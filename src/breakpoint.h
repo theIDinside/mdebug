@@ -181,6 +181,8 @@ struct BreakpointMap
   std::vector<BpStat>::iterator find_bpstat(Tid tid) noexcept;
   bool has_value(std::vector<BpStat>::iterator it) noexcept;
 
+  // Registers that `t` stopped at `bp` creating a "breakpoint status" object, containing the keys `tid` and `id`
+  // of bp.
   void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
   bool insert(AddrPtr addr, u8 overwritten_byte, BpType type) noexcept;
   void clear(TraceeController *target, BpType type) noexcept;

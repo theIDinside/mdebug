@@ -124,8 +124,8 @@ TraceeController::resume_target(RunType type) noexcept
   // Single-step over breakpoints that were hit, then re-enable them.
   if (!bps.bpstats.empty()) {
     for (auto bp_stat : bps.bpstats) {
-      DLOG("mdb", "bpstat for bp {} for task {}", bp_stat.bp_id, bp_stat.tid);
       auto bp = bps.get_by_id(bp_stat.bp_id);
+      DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, bp_stat.tid);
       bp->disable(bp_stat.tid);
       int stat;
       VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
@@ -153,8 +153,12 @@ void
 TraceeController::stop_all() noexcept
 {
   for (auto &t : threads) {
-    if (!t.stopped) {
+    if (!t.user_stopped) {
       tgkill(task_leader, t.tid, SIGSTOP);
+      t.set_stop();
+    } else if (t.tracer_stopped) {
+      // we're in a tracer-stop, not in a user-stop, so we need no stopping, we only need to inform ourselves that
+      // we upgraded our tracer-stop to a user-stop
       t.set_stop();
     }
   }
@@ -172,11 +176,11 @@ TraceeController::reap_task(TaskInfo *task) noexcept
 {
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
+  task->exited = true;
   Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.data.exit_signal);
   if (task->tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
-  threads.erase(it);
 }
 
 TaskInfo *
@@ -185,8 +189,7 @@ TraceeController::register_task_waited(TaskWaitResult wait) noexcept
   ASSERT(has_task(wait.waited_pid), "Target did not contain task {}", wait.waited_pid);
   auto task = get_task(wait.waited_pid);
   task->set_taskwait(wait);
-  task->ptrace_stop = true;
-  task->stopped = true;
+  task->tracer_stopped = true;
   return task;
 }
 
@@ -541,23 +544,21 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   // task backing storage may have re-allocated and invalidated this pointer.
   t = get_task(stopped_tid);
   set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-  if (should_stop_on_clone()) {
-    stop_all();
-  }
 }
 
 BpEvent
 TraceeController::process_stopped(TaskInfo *t) noexcept
 {
+  DLOG("mdb", "Processing stopped for {}", t->tid);
   const auto pc = get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
   if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
-    DLOG("mdb", "Hit breakpoint at {}", prev_pc_byte);
     auto bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
     if (bpstat != std::end(bps.bpstats) && bpstat->stepped_over) {
       bps.bpstats.erase(bpstat);
       return BpEvent{BpEventType::None, {nullptr}};
     }
+    DLOG("mdb", "Hit breakpoint at {}", prev_pc_byte);
     set_pc(t, prev_pc_byte);
     bps.add_bpstat_for(t, bp);
     return BpEvent{bp->event_type(), {.bp = bp}};
@@ -575,7 +576,10 @@ TraceeController::execution_not_ended() const noexcept
 bool
 TraceeController::is_running() const noexcept
 {
-  return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) { return !t.is_stopped(); });
+  return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) {
+    DLOG("mdb", "Thread {} stopped={}", t.tid, t.is_stopped());
+    return !t.is_stopped();
+  });
 }
 
 // Debug Symbols Related Logic
