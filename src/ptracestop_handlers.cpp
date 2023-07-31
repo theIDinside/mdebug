@@ -19,7 +19,7 @@ bool
 Action::completed(TaskInfo *t, bool should_stop) noexcept
 {
   constexpr bool is_done = false;
-  if (!should_stop) {
+  if (!should_stop && t->can_continue()) {
     t->resume(RunType::Continue);
   }
   return is_done;
@@ -303,6 +303,7 @@ void
 StopHandler::handle_exited(TaskInfo *t) noexcept
 {
   tc->reap_task(t);
+  t->exited = true;
   should_stop = event_settings.thread_exit_stop;
 }
 void
