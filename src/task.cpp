@@ -10,6 +10,12 @@ TaskInfo::TaskInfo(pid_t tid) noexcept
 {
 }
 
+u64
+TaskInfo::get_register(u64 reg_num) noexcept
+{
+  return ::get_register(registers, reg_num);
+}
+
 void
 TaskInfo::cache_registers() noexcept
 {

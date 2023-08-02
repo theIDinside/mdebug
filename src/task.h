@@ -83,6 +83,7 @@ struct TaskInfo
   TaskInfo &operator=(TaskInfo &t) noexcept = default;
   TaskInfo &operator=(const TaskInfo &o) = default;
 
+  u64 get_register(u64 reg_num) noexcept;
   void cache_registers() noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
   void resume(RunType) noexcept;
