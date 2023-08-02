@@ -3,6 +3,7 @@
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "utils/logger.h"
+#include "utils/macros.h"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -18,12 +19,12 @@
 #include <span>
 #include <sys/mman.h>
 #include <sys/poll.h>
+#include <sys/user.h>
 #include <type_traits>
 #include <unistd.h>
+#include <utility>
 #include <variant>
 #include <vector>
-
-#include "utils/macros.h"
 
 using perfclock = std::chrono::high_resolution_clock;
 
@@ -43,6 +44,18 @@ using i8 = std::int8_t;
 using Tid = pid_t;
 using Pid = pid_t;
 
+enum class DwFormat : std::uint8_t
+{
+  DW32,
+  DW64
+};
+
+struct InitLength
+{
+  DwFormat format;
+  u64 length;
+};
+
 template <typename TimeStamp>
 constexpr u64
 nanos(TimeStamp a, TimeStamp b)
@@ -57,7 +70,7 @@ micros(TimeStamp a, TimeStamp b)
   return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count();
 }
 
-#define PAGE_SIZE 4096
+#define MDB_PAGE_SIZE 4096
 
 template <typename T> using Option = std::optional<T>;
 
@@ -480,6 +493,12 @@ concept ByteContainer = requires(BufferType t) {
 };
 // clang-format on
 
+// clang-format off
+template <typename ByteType>
+concept ByteCode = requires(ByteType bt) {
+  { std::to_underlying(bt) } -> std::convertible_to<u8>;
+} && std::is_enum<ByteType>::value;
+// clang-format on
 class DwarfBinaryReader
 {
 public:
@@ -494,7 +513,8 @@ public:
   DwarfBinaryReader(const u8 *buffer, u64 size) noexcept;
   DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept;
 
-  template <ByteContainer BC> DwarfBinaryReader(const BC &bc) : buffer(bc.data()), head(bc.data()), size(bc.size())
+  template <ByteContainer BC>
+  DwarfBinaryReader(const BC &bc) : buffer(bc.data()), head(bc.data()), size(bc.size()), bookmarks()
   {
   }
 
@@ -516,6 +536,15 @@ public:
     Type value = *(Type *)head;
     head += sz;
     return value;
+  }
+
+  template <ByteCode T>
+  constexpr T
+  read_byte() noexcept
+  {
+    const auto res = head;
+    ++head;
+    return (T)*res;
   }
 
   template <typename T, size_t N>
@@ -554,6 +583,27 @@ public:
     }
   }
 
+  template <InitLengthRead InitReadAction>
+  InitLength
+  read_initial_length_additional() noexcept
+  {
+    u32 peeked = peek_value<u32>();
+    if (peeked != 0xff'ff'ff'ff) {
+      if constexpr (InitReadAction == UpdateBufferSize)
+        set_wrapped_buffer_size(peeked + 4);
+      offset_size = 4;
+      const auto len = read_value<u32>();
+      return InitLength{.format = DwFormat::DW32, .length = len};
+    } else {
+      head += 4;
+      const auto sz = read_value<u64>();
+      if constexpr (InitReadAction == UpdateBufferSize)
+        set_wrapped_buffer_size(sz + 12);
+      offset_size = 8;
+      return InitLength{.format = DwFormat::DW32, .length = sz};
+    }
+  }
+
   /** Reads value from buffer according to dwarf spec, which can determine size of addresess, offsets etc. We
    * always make the results u64, but DWARF might represent the data as 32-bit values etc.*/
   u64 dwarf_spec_read_value() noexcept;
@@ -575,11 +625,22 @@ public:
     return value;
   }
 
+  std::span<const u8> get_span(u64 size) noexcept;
   std::string_view read_string() noexcept;
   DataBlock read_block(u64 size) noexcept;
   const u8 *current_ptr() const noexcept;
   bool has_more() noexcept;
   u64 remaining_size() const noexcept;
+  u64 bytes_read() const noexcept;
+  void skip(i64 bytes) noexcept;
+
+  // sets a mark at the "currently read to bytes", to be able to compare at some time later how many bytes have
+  // been read since that mark, by popping that mark and comparing
+  void bookmark() noexcept;
+
+  // pops the latest bookmark and subtracts current head position - that position, which calculates how many bytes
+  // has been read since then
+  u64 pop_bookmark() noexcept;
 
   friend DwarfBinaryReader sub_reader(const DwarfBinaryReader &reader) noexcept;
 
@@ -590,6 +651,7 @@ private:
   const u8 *end;
   u64 size;
   u8 offset_size = 4;
+  std::vector<u64> bookmarks;
 };
 
 template <typename T, typename... Args>
@@ -715,3 +777,14 @@ keep_range(Container &c, u64 start_idx, u64 end_idx) noexcept
   c.erase(end, c.end());
   c.erase(c.begin(), start);
 }
+
+static constexpr u16 offsets[16] = {
+    offsetof(user_regs_struct, rax), offsetof(user_regs_struct, rdx), offsetof(user_regs_struct, rcx),
+    offsetof(user_regs_struct, rbx), offsetof(user_regs_struct, rsi), offsetof(user_regs_struct, rdi),
+    offsetof(user_regs_struct, rbp), offsetof(user_regs_struct, rsp), offsetof(user_regs_struct, r8),
+    offsetof(user_regs_struct, r9),  offsetof(user_regs_struct, r10), offsetof(user_regs_struct, r11),
+    offsetof(user_regs_struct, r12), offsetof(user_regs_struct, r13), offsetof(user_regs_struct, r14),
+    offsetof(user_regs_struct, r15),
+};
+
+u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
