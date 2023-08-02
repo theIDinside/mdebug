@@ -5,7 +5,7 @@
 
 namespace utils {
 
-// Minimum allocation of PAGE_SIZE
+// Minimum allocation of MDB_PAGE_SIZE
 // Meant to hold "trivial" types.
 template <typename T> class StaticVector
 {
@@ -14,12 +14,13 @@ public:
   StaticVector(u64 capacity) noexcept : size(0), cap(capacity), cap_bytes(capacity * sizeof(T))
   {
     const auto bytes_required = sizeof(T) * capacity;
-    if (bytes_required < PAGE_SIZE) {
-      data = mmap_buffer<T>(PAGE_SIZE);
-      cap_bytes = PAGE_SIZE;
+    if (bytes_required < MDB_PAGE_SIZE) {
+      data = mmap_buffer<T>(MDB_PAGE_SIZE);
+      cap_bytes = MDB_PAGE_SIZE;
     } else {
-      const auto pages_required = std::ceil(static_cast<double>(bytes_required) / static_cast<double>(PAGE_SIZE));
-      cap_bytes = PAGE_SIZE * static_cast<u64>(pages_required);
+      const auto pages_required =
+          std::ceil(static_cast<double>(bytes_required) / static_cast<double>(MDB_PAGE_SIZE));
+      cap_bytes = MDB_PAGE_SIZE * static_cast<u64>(pages_required);
       data = mmap_buffer<T>(cap_bytes);
     }
   }
