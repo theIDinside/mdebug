@@ -174,7 +174,7 @@ struct TraceeController
   void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
   void process_exec(TaskInfo *t) noexcept;
-  void process_clone(TaskInfo *t) noexcept;
+  Tid process_clone(TaskInfo *t) noexcept;
   BpEvent process_stopped(TaskInfo *t) noexcept;
 
   /* Check if we have any tasks left in the process space. */

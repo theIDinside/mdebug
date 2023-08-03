@@ -152,8 +152,10 @@ TraceeController::resume_target(RunType type) noexcept
 void
 TraceeController::stop_all() noexcept
 {
+  DLOG("mdb", "Stopping all threads")
   for (auto &t : threads) {
     if (!t.user_stopped) {
+      DLOG("mdb", "Stopping {}", t.tid);
       tgkill(task_leader, t.tid, SIGSTOP);
       t.set_stop();
     } else if (t.tracer_stopped) {
@@ -518,7 +520,8 @@ TraceeController::process_exec(TaskInfo *t) noexcept
   cache_registers(t);
   read_auxv(t);
 }
-void
+
+Tid
 TraceeController::process_clone(TaskInfo *t) noexcept
 {
   DLOG("mdb", "Processing CLONE for {}", t->tid);
@@ -544,6 +547,7 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   // task backing storage may have re-allocated and invalidated this pointer.
   t = get_task(stopped_tid);
   set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
+  return np;
 }
 
 BpEvent
@@ -558,7 +562,7 @@ TraceeController::process_stopped(TaskInfo *t) noexcept
       bps.bpstats.erase(bpstat);
       return BpEvent{BpEventType::None, {nullptr}};
     }
-    DLOG("mdb", "Hit breakpoint at {}", prev_pc_byte);
+    DLOG("mdb", "{} Hit breakpoint {} at {}", t->tid, bp->id, prev_pc_byte);
     set_pc(t, prev_pc_byte);
     bps.add_bpstat_for(t, bp);
     return BpEvent{bp->event_type(), {.bp = bp}};
@@ -706,6 +710,7 @@ TraceeController::reaped_events() noexcept
 void
 TraceeController::notify_self() noexcept
 {
+  DLOG("mdb", "Notifying self...");
   awaiter_thread->get_notifier().notify();
 }
 
@@ -811,8 +816,8 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo *task) noexcept
 {
+  DLOG("mdb", "stacktrace for {}", task->tid);
   cache_registers(task);
-  // task->call_stack->pcs.clear();
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;

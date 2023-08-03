@@ -70,6 +70,7 @@ BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
   bpstats.push_back({.tid = t->tid, .bp_id = bp->id, .type = bp->type(), .stepped_over = false});
   bp->times_hit++;
   t->user_stopped = true;
+  t->tracer_stopped = true;
 }
 
 bool

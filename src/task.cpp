@@ -35,14 +35,15 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 void
 TaskInfo::resume(RunType type) noexcept
 {
-
   if (user_stopped) {
-    DLOG("mdb", "restarting {} from user-stop", tid);
+    DLOG("mdb", "restarting {} ({}) from user-stop", tid,
+         type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
     user_stopped = false;
     tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   } else if (tracer_stopped) {
-    DLOG("mdb", "restarting {} from tracer-stop", tid);
+    DLOG("mdb", "restarting {} ({}) from tracer-stop", tid,
+         type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
     user_stopped = false;
     tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);

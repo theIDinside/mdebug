@@ -44,6 +44,11 @@ public:
   {
   }
 
+  virtual void
+  new_task_created(TaskInfo *) noexcept
+  {
+  }
+
 protected:
   StopHandler *handler;
   TraceeController *tc;
@@ -64,6 +69,7 @@ public:
 
   // Updates the step schedule - this is *not* performed during a ptrace-stop. So no ptrace requests can be made.
   void update_step_schedule() noexcept override;
+  void new_task_created(TaskInfo *t) noexcept final override;
 
 protected:
   bool resume() noexcept;
@@ -72,6 +78,7 @@ protected:
   int steps;
   int debug_steps_taken;
   bool done;
+  bool single_threaded_stepping;
   std::vector<TaskStepInfo> tsi;
   std::vector<TaskStepInfo>::iterator next;
   std::chrono::system_clock::time_point start_time;
@@ -132,6 +139,7 @@ public:
   constexpr void stop_on_thread_exit() noexcept;
   constexpr void ignore_bps() noexcept;
 
+  bool set_should_stop(bool stop) noexcept;
   void set_action(Action *action) noexcept;
   void restore_default() noexcept;
   void start_action() noexcept;
