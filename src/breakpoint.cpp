@@ -52,12 +52,25 @@ Breakpoint::event_type() const noexcept
   }
 }
 
+std::vector<BreakpointMap::BpStat>::iterator
+BreakpointMap::find_bpstat(Tid tid) noexcept
+{
+  return ::find(bpstats, [tid = tid](auto &bpstat) { return bpstat.tid == tid; });
+}
+bool
+BreakpointMap::has_value(std::vector<BpStat>::iterator it) noexcept
+{
+  return it != std::end(bpstats);
+}
+
 void
 BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
 {
   DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->id);
   bpstats.push_back({.tid = t->tid, .bp_id = bp->id, .type = bp->type(), .stepped_over = false});
   bp->times_hit++;
+  t->user_stopped = true;
+  t->tracer_stopped = true;
 }
 
 bool

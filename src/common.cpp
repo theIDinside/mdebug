@@ -256,6 +256,16 @@ DwarfBinaryReader::dwarf_spec_read_value() noexcept
   }
 }
 
+std::span<const u8>
+DwarfBinaryReader::get_span(u64 size) noexcept
+{
+  ASSERT(remaining_size() <= size, "Not enough bytes left in reader. Requested {}, remaining {}", size,
+         remaining_size());
+  const auto span = std::span{head, size};
+  head += size;
+  return span;
+}
+
 std::string_view
 DwarfBinaryReader::read_string() noexcept
 {
@@ -279,12 +289,12 @@ DwarfBinaryReader::current_ptr() const noexcept
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const u8 *buffer, u64 size) noexcept
-    : buffer(buffer), head(buffer), end(buffer + size), size(size)
+    : buffer(buffer), head(buffer), end(buffer + size), size(size), bookmarks()
 {
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
-    : buffer(reader.buffer), head(reader.head), size(reader.size)
+    : buffer(reader.buffer), head(reader.head), size(reader.size), bookmarks()
 {
 }
 
@@ -297,7 +307,35 @@ DwarfBinaryReader::has_more() noexcept
 u64
 DwarfBinaryReader::remaining_size() const noexcept
 {
-  return ((buffer + size) - head);
+  return (end - head);
+}
+
+u64
+DwarfBinaryReader::bytes_read() const noexcept
+{
+  return head - buffer;
+}
+
+void
+DwarfBinaryReader::skip(i64 bytes) noexcept
+{
+  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head - static_cast<u64>(std::abs(bytes)) > buffer,
+         "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, remaining_size());
+  head += bytes;
+}
+
+void
+DwarfBinaryReader::bookmark() noexcept
+{
+  bookmarks.push_back(bytes_read());
+}
+
+u64
+DwarfBinaryReader::pop_bookmark() noexcept
+{
+  const auto bookmark = bookmarks.back();
+  bookmarks.pop_back();
+  return bytes_read() - bookmark;
 }
 
 DwarfBinaryReader
@@ -323,4 +361,11 @@ to_addr(std::string_view s) noexcept
     return AddrPtr{value};
   else
     return std::nullopt;
+}
+
+u64
+get_register(user_regs_struct *regs, int reg_number) noexcept
+{
+  ASSERT(reg_number < 16, "Register number {} not supported", reg_number);
+  return *(u64 *)(((std::uintptr_t)regs) + offsets[reg_number]);
 }

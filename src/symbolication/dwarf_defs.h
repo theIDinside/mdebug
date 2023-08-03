@@ -170,6 +170,34 @@ enum class LineNumberProgramExtendedOpCode : std::uint8_t
 #undef DW_LNP_EXTENDED_OPCODES
 };
 
+enum class DwarfCallFrame : std::uint8_t
+{
+#define DW_CALLFRAME
+#include "../defs/dwarf.defs"
+#undef DW_CALLFRAME
+};
+
+enum class DwarfExceptionHeaderEncoding : std::uint8_t
+{
+#define DW_EXCEPTION_HEADER_ENCODING
+#include "../defs/dwarf.defs"
+#undef DW_EXCEPTION_HEADER_ENCODING
+};
+
+enum class DwarfExceptionHeaderApplication : std::uint8_t
+{
+#define DW_EXCEPTION_HEADER_APPLICATION
+#include "../defs/dwarf.defs"
+#undef DW_EXCEPTION_HEADER_APPLICATION
+};
+
+enum class DwarfOp : std::uint8_t
+{
+#define DW_EXPR
+#include "../defs/dwarf.defs"
+#undef DW_EXPR
+};
+
 // END OF ENUM DEFINITIONS
 #undef ITEM
 
@@ -177,6 +205,56 @@ enum class LineNumberProgramExtendedOpCode : std::uint8_t
 #define ITEM(Name, Value)                                                                                         \
   case Name:                                                                                                      \
     return #Name;
+
+constexpr std::string_view
+to_str(DwarfCallFrame opcode)
+{
+#define DW_CALLFRAME
+  using enum DwarfCallFrame;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_CALLFRAME
+  DEAL_WITH_SHITTY_GCC
+}
+
+constexpr std::string_view
+to_str(DwarfExceptionHeaderEncoding opcode)
+{
+#define DW_EXCEPTION_HEADER_ENCODING
+  using enum DwarfExceptionHeaderEncoding;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_EXCEPTION_HEADER_ENCODING
+  DEAL_WITH_SHITTY_GCC
+}
+
+constexpr std::string_view
+to_str(DwarfExceptionHeaderApplication opcode)
+{
+#define DW_EXCEPTION_HEADER_APPLICATION
+
+  using enum DwarfExceptionHeaderApplication;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_EXCEPTION_HEADER_APPLICATION
+  DEAL_WITH_SHITTY_GCC
+}
+
+constexpr std::string_view
+to_str(DwarfOp opcode)
+{
+#define DW_EXPR
+
+  using enum DwarfOp;
+  switch (opcode) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_EXPR
+  DEAL_WITH_SHITTY_GCC
+}
 
 constexpr std::string_view
 to_str(LineNumberProgramExtendedOpCode opcode)

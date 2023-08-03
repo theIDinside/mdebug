@@ -174,7 +174,7 @@ struct TraceeController
   void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
   void process_exec(TaskInfo *t) noexcept;
-  void process_clone(TaskInfo *t) noexcept;
+  Tid process_clone(TaskInfo *t) noexcept;
   BpEvent process_stopped(TaskInfo *t) noexcept;
 
   /* Check if we have any tasks left in the process space. */
@@ -334,6 +334,7 @@ struct TraceeController
   void notify_self() noexcept;
   void start_awaiter_thread() noexcept;
   sym::CallStack &build_callframe_stack(TaskInfo *task) noexcept;
+  std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
   sym::Frame current_frame(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;

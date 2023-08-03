@@ -124,8 +124,8 @@ TraceeController::resume_target(RunType type) noexcept
   // Single-step over breakpoints that were hit, then re-enable them.
   if (!bps.bpstats.empty()) {
     for (auto bp_stat : bps.bpstats) {
-      DLOG("mdb", "bpstat for bp {} for task {}", bp_stat.bp_id, bp_stat.tid);
       auto bp = bps.get_by_id(bp_stat.bp_id);
+      DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, bp_stat.tid);
       bp->disable(bp_stat.tid);
       int stat;
       VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
@@ -143,7 +143,7 @@ TraceeController::resume_target(RunType type) noexcept
   bps.clear_breakpoint_stats();
   for (auto &t : threads) {
     if (t.can_continue()) {
-      t.set_running(type);
+      t.resume(type);
     }
   }
   ptracestop_handler->can_resume();
@@ -152,9 +152,15 @@ TraceeController::resume_target(RunType type) noexcept
 void
 TraceeController::stop_all() noexcept
 {
+  DLOG("mdb", "Stopping all threads")
   for (auto &t : threads) {
-    if (!t.stopped) {
+    if (!t.user_stopped) {
+      DLOG("mdb", "Stopping {}", t.tid);
       tgkill(task_leader, t.tid, SIGSTOP);
+      t.set_stop();
+    } else if (t.tracer_stopped) {
+      // we're in a tracer-stop, not in a user-stop, so we need no stopping, we only need to inform ourselves that
+      // we upgraded our tracer-stop to a user-stop
       t.set_stop();
     }
   }
@@ -172,11 +178,11 @@ TraceeController::reap_task(TaskInfo *task) noexcept
 {
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
+  task->exited = true;
   Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.data.exit_signal);
   if (task->tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
-  threads.erase(it);
 }
 
 TaskInfo *
@@ -185,8 +191,7 @@ TraceeController::register_task_waited(TaskWaitResult wait) noexcept
   ASSERT(has_task(wait.waited_pid), "Target did not contain task {}", wait.waited_pid);
   auto task = get_task(wait.waited_pid);
   task->set_taskwait(wait);
-  task->ptrace_stop = true;
-  task->stopped = true;
+  task->tracer_stopped = true;
   return task;
 }
 
@@ -515,7 +520,8 @@ TraceeController::process_exec(TaskInfo *t) noexcept
   cache_registers(t);
   read_auxv(t);
 }
-void
+
+Tid
 TraceeController::process_clone(TaskInfo *t) noexcept
 {
   DLOG("mdb", "Processing CLONE for {}", t->tid);
@@ -541,23 +547,22 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   // task backing storage may have re-allocated and invalidated this pointer.
   t = get_task(stopped_tid);
   set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-  if (should_stop_on_clone()) {
-    stop_all();
-  }
+  return np;
 }
 
 BpEvent
 TraceeController::process_stopped(TaskInfo *t) noexcept
 {
+  DLOG("mdb", "Processing stopped for {}", t->tid);
   const auto pc = get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
   if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
-    DLOG("mdb", "Hit breakpoint at {}", prev_pc_byte);
     auto bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
     if (bpstat != std::end(bps.bpstats) && bpstat->stepped_over) {
       bps.bpstats.erase(bpstat);
       return BpEvent{BpEventType::None, {nullptr}};
     }
+    DLOG("mdb", "{} Hit breakpoint {} at {}", t->tid, bp->id, prev_pc_byte);
     set_pc(t, prev_pc_byte);
     bps.add_bpstat_for(t, bp);
     return BpEvent{bp->event_type(), {.bp = bp}};
@@ -575,7 +580,10 @@ TraceeController::execution_not_ended() const noexcept
 bool
 TraceeController::is_running() const noexcept
 {
-  return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) { return !t.is_stopped(); });
+  return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) {
+    DLOG("mdb", "Thread {} stopped={}", t.tid, t.is_stopped());
+    return !t.is_stopped();
+  });
 }
 
 // Debug Symbols Related Logic
@@ -702,6 +710,7 @@ TraceeController::reaped_events() noexcept
 void
 TraceeController::notify_self() noexcept
 {
+  DLOG("mdb", "Notifying self...");
   awaiter_thread->get_notifier().notify();
 }
 
@@ -736,70 +745,83 @@ TraceeController::current_frame(TaskInfo *task) noexcept
     };
 }
 
-sym::CallStack &
-TraceeController::build_callframe_stack(TaskInfo *task) noexcept
+std::vector<AddrPtr> &
+TraceeController::unwind_callstack(TaskInfo *task) noexcept
 {
-  cache_registers(task);
-  // task->call_stack->pcs.clear();
-  u8 stack_storage[100 * sizeof(std::uintptr_t)];
-  std::pmr::monotonic_buffer_resource rsrc{&stack_storage, 100 * sizeof(std::uintptr_t)};
-  std::pmr::vector<AddrPtr> frame_pcs{&rsrc};
-  frame_pcs.reserve(50);
-  std::pmr::vector<TPtr<std::uintptr_t>> base_ptrs{&rsrc};
-  base_ptrs.reserve(50);
-  auto bp = task->registers->rbp;
-  base_ptrs.push_back(bp);
-  while (true) {
-    TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
-    const auto prev_bp = read_type_safe(bp_addr).transform([](auto v) { return TPtr<std::uintptr_t>{v}; });
-    if (auto prev = prev_bp.value_or(0x0); prev == bp_addr || !(prev > TPtr<std::uintptr_t>{1}))
-      break;
-    base_ptrs.push_back(*prev_bp);
-  }
+  task->cache_registers();
+  if (!task->call_stack->dirty) {
+    return task->call_stack->pcs;
+  } else {
+    task->call_stack->dirty = false;
+    task->call_stack->pcs.clear();
+    auto &frame_pcs = task->call_stack->pcs;
+    u8 stack_storage[100 * sizeof(std::uintptr_t)];
+    std::pmr::monotonic_buffer_resource rsrc{&stack_storage, 100 * sizeof(std::uintptr_t)};
 
-  frame_pcs.push_back(task->registers->rip);
-  bool inside_prologue = false;
-  auto cu = get_cu_from_pc(task->registers->rip);
-  if (cu) {
-    const auto [a, b] = cu->get_range(frame_pcs.front().as_void());
-    if (b && b->prologue_end)
-      inside_prologue = true;
-  }
-
-  for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
-    const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
-    if (ret_addr) {
-      frame_pcs.push_back(ret_addr->as_void());
+    std::pmr::vector<TPtr<std::uintptr_t>> base_ptrs{&rsrc};
+    base_ptrs.reserve(50);
+    auto bp = task->registers->rbp;
+    base_ptrs.push_back(bp);
+    while (true) {
+      TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
+      const auto prev_bp = read_type_safe(bp_addr).transform([](auto v) { return TPtr<std::uintptr_t>{v}; });
+      if (auto prev = prev_bp.value_or(0x0); prev == bp_addr || !(prev > TPtr<std::uintptr_t>{1}))
+        break;
+      base_ptrs.push_back(*prev_bp);
     }
-  }
 
-  // NB(simon): tracee hasn't finalized it's activation record; we need to perform some heuristics
-  // to actually determine return address. For now, this is it.
-  if (inside_prologue) {
-    TPtr<std::uintptr_t> ret_addr = task->registers->rsp;
-    auto ret_val_a = read_type_safe(ret_addr).value_or(0);
+    frame_pcs.push_back(task->registers->rip);
+    bool inside_prologue = false;
+    auto cu = get_cu_from_pc(task->registers->rip);
+    if (cu) {
+      const auto [a, b] = cu->get_range(frame_pcs.front().as_void());
+      if (b && b->prologue_end)
+        inside_prologue = true;
+    }
 
-    bool resolved = false;
-    if (ret_val_a != 0) {
-      if (cu->may_contain(AddrPtr{ret_val_a})) {
-        frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
-        resolved = true;
+    for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
+      const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
+      if (ret_addr) {
+        frame_pcs.push_back(ret_addr->as_void());
       }
     }
 
-    if (!resolved) {
-      auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
-      if (!resolved && ret_val_b != 0) {
-        if (cu->may_contain(AddrPtr{ret_val_b})) {
-          frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
+    // NB(simon): tracee hasn't finalized it's activation record; we need to perform some heuristics
+    // to actually determine return address. For now, this is it.
+    if (inside_prologue) {
+      TPtr<std::uintptr_t> ret_addr = task->registers->rsp;
+      auto ret_val_a = read_type_safe(ret_addr).value_or(0);
+
+      bool resolved = false;
+      if (ret_val_a != 0) {
+        if (cu->may_contain(AddrPtr{ret_val_a})) {
+          frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
+          resolved = true;
+        }
+      }
+
+      if (!resolved) {
+        auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
+        if (!resolved && ret_val_b != 0) {
+          if (cu->may_contain(AddrPtr{ret_val_b})) {
+            frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
+          }
         }
       }
     }
+    return task->call_stack->pcs;
   }
+}
 
+sym::CallStack &
+TraceeController::build_callframe_stack(TaskInfo *task) noexcept
+{
+  DLOG("mdb", "stacktrace for {}", task->tid);
+  cache_registers(task);
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;
+  auto &frame_pcs = unwind_callstack(task);
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
     auto symbol = find_fn_by_pc(i->as_void());
@@ -823,7 +845,7 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
     }
     ++level;
   }
-  task->callstack_dirty = false;
+  task->call_stack->dirty = false;
   return *task->call_stack;
 }
 

@@ -202,7 +202,6 @@ void
 Tracer::execute_pending_commands() noexcept
 {
   ui::UICommandPtr pending_command = nullptr;
-  DLOG("mdb", "command queue items: {}", command_queue.size());
   while (!command_queue.empty()) {
     // keep the lock as minimum of a time span as possible
     {
@@ -211,8 +210,8 @@ Tracer::execute_pending_commands() noexcept
       command_queue.pop();
     }
     ASSERT(pending_command != nullptr, "Expected a command but got null");
+    DLOG("mdb", "Executing {}", pending_command->name());
     auto result = pending_command->execute(this);
-
     dap->post_event(result);
     delete pending_command;
     pending_command = nullptr;

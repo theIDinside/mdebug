@@ -16,7 +16,7 @@ async function test() {
     resolveSymbols: false,
   });
   const allThreadsStop = true;
-  const evt = await da_client.sendReqWaitEvent(
+  const { event_body, response } = await da_client.sendReqWaitEvent(
     "next",
     {
       threadId: threads[0].id,
@@ -27,14 +27,16 @@ async function test() {
     3000
   );
 
-  if (evt.reason != "step") {
+  if (!response.success) throw new Error(`Request was unsuccessful: ${JSON.stringify(response)}`);
+
+  if (event_body.reason != "step") {
     throw new Error(
       `Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(
-        evt
+        event_body
       )}`
     );
   }
-  if (evt.allThreadsStopped != allThreadsStop) {
+  if (event_body.allThreadsStopped != allThreadsStop) {
     throw new Error(`Expected all threads to have stopped after step.`);
   }
   frames = await da_client.stackTrace(threads[0].id);

@@ -72,13 +72,13 @@ main(int argc, const char **argv)
           const auto tid = gettid();
           char name[16];
           pthread_getname_np(pthread_self(), name, 16);
-          printf("TASK NAME %s with TASK number %d ___ TID: %d ___ EXITED\n", name, i, tid);
+          printf("TASK NAME %s with TASK number %d ___ TID: %d ___ EXITED\n", name, i, tid); // BP1
+          printf(" --- --- \n");                                                             // BP2
           break;
         }
       }
       spin_lock.unlock();
     }});
-    std::this_thread::sleep_for(std::chrono::milliseconds{i * 50});
   }
 
   auto done_list_index = 0;

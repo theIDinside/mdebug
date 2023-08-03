@@ -22,6 +22,7 @@ struct ObjectFile
   Path path;
   u64 size;
   const u8 *loaded_binary;
+  AddrPtr relocated_address;
   TPtr<void> entry_point;
   TPtr<void> vm_text_section;
   Elf *parsed_elf = nullptr;

@@ -122,8 +122,8 @@ void
 DAP::run_ui_loop()
 {
   auto cleanup_times = 5;
-  ParseBuffer parse_swapbuffer{PAGE_SIZE * 4};
-  static constexpr auto DESCRIPTOR_STORAGE_SIZE = PAGE_SIZE;
+  ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 4};
+  static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
 
   // These are stack data. So when we process events, we don't want to be
   // returning `new`ed memory over and over. Just fill it in our local buffer

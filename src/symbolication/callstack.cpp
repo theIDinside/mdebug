@@ -42,6 +42,6 @@ Frame::function_name() const noexcept
   }
 }
 
-CallStack::CallStack(Tid tid) noexcept : tid(tid), frames(), pcs() {}
+CallStack::CallStack(Tid tid) noexcept : tid(tid), frames(), pcs(), dirty(true) {}
 
 } // namespace sym

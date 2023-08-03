@@ -86,6 +86,25 @@ Next::execute(Tracer *tracer) noexcept
   return new NextResponse{true, this};
 }
 
+std::string
+StepOutResponse::serialize(int seq) const noexcept
+{
+  if (success)
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "stepOut" }})", seq,
+        response_seq);
+  else
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "stepOut", "message": "notStopped" }})",
+        seq, response_seq);
+}
+
+UIResultPtr
+StepOut::execute(Tracer *tracer) noexcept
+{
+  TODO("StepOut::execute");
+}
+
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept
     : ui::UIResult(success, cmd), type(type), breakpoints()
 {

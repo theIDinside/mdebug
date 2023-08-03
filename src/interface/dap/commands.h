@@ -79,6 +79,28 @@ struct Next final : public ui::UICommand
   DEFINE_NAME(Next);
 };
 
+struct StepOutResponse final : ui::UIResult
+{
+  CTOR(StepOutResponse);
+  ~StepOutResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+};
+
+struct StepOut final : public ui::UICommand
+{
+  int thread_id;
+  bool continue_all;
+  SteppingGranularity granularity;
+
+  StepOut(std::uint64_t seq, int tid, bool all, SteppingGranularity granularity) noexcept
+      : UICommand(seq), thread_id(tid), continue_all(all), granularity(granularity)
+  {
+  }
+  ~StepOut() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  DEFINE_NAME(StepOut);
+};
+
 // This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
 // in the DAP spec
 struct SetBreakpointsResponse final : ui::UIResult

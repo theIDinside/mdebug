@@ -23,7 +23,7 @@ public:
 
   // `should_stop` is passed in by the StopHandler, if we've encountered
   // an event, signal or whatever, that should abort this installed stepper
-  virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept;
+  virtual bool completed(TaskInfo *t, bool should_stop) noexcept;
 
   // default handler does nothing at "start"
   virtual void
@@ -44,6 +44,11 @@ public:
   {
   }
 
+  virtual void
+  new_task_created(TaskInfo *) noexcept
+  {
+  }
+
 protected:
   StopHandler *handler;
   TraceeController *tc;
@@ -58,12 +63,13 @@ public:
   // `should_stop` is passed in by the StopHandler, if we've encountered
   // an event, signal or whatever, that should abort this installed stepper
   // returns `true` when we _should not continue_
-  virtual bool do_next_action(TaskInfo *t, bool should_stop) noexcept override;
+  virtual bool completed(TaskInfo *t, bool should_stop) noexcept override;
   void start_action() noexcept override;
   bool check_if_done() noexcept override;
 
   // Updates the step schedule - this is *not* performed during a ptrace-stop. So no ptrace requests can be made.
   void update_step_schedule() noexcept override;
+  void new_task_created(TaskInfo *t) noexcept final override;
 
 protected:
   bool resume() noexcept;
@@ -72,6 +78,7 @@ protected:
   int steps;
   int debug_steps_taken;
   bool done;
+  bool single_threaded_stepping;
   std::vector<TaskStepInfo> tsi;
   std::vector<TaskStepInfo>::iterator next;
   std::chrono::system_clock::time_point start_time;
@@ -132,6 +139,7 @@ public:
   constexpr void stop_on_thread_exit() noexcept;
   constexpr void ignore_bps() noexcept;
 
+  bool set_should_stop(bool stop) noexcept;
   void set_action(Action *action) noexcept;
   void restore_default() noexcept;
   void start_action() noexcept;

@@ -65,13 +65,12 @@ struct TaskInfo
     u16 bit_set;
     struct
     {
-      RunType run_type : 4;
-      bool stopped : 1;
-      bool ptrace_stop : 1;
-      bool initialized : 1;
-      bool cache_dirty : 1;
-      bool rip_dirty : 1;
-      bool callstack_dirty : 1;
+      bool user_stopped : 1;   // stops visible (possibly) to the user
+      bool tracer_stopped : 1; // stops invisible to the user - may be upgraded to user stops
+      bool initialized : 1;    // fully initialized task. after a clone syscall some setup is required
+      bool cache_dirty : 1;    // register is dirty and requires refetching
+      bool rip_dirty : 1;      // rip requires fetching
+      bool exited : 1;         // task has exited
     };
   };
   user_regs_struct *registers;
@@ -84,8 +83,10 @@ struct TaskInfo
   TaskInfo &operator=(TaskInfo &t) noexcept = default;
   TaskInfo &operator=(const TaskInfo &o) = default;
 
+  u64 get_register(u64 reg_num) noexcept;
+  void cache_registers() noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
-  void set_running(RunType) noexcept;
+  void resume(RunType) noexcept;
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
@@ -155,7 +156,7 @@ template <> struct formatter<TaskInfo>
     }
 
     return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.tid,
-                          task.stopped, task.ptrace_stop, wait_status);
+                          task.user_stopped, task.tracer_stopped, wait_status);
   }
 };
 
