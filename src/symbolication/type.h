@@ -2,6 +2,7 @@
 #include "../common.h"
 #include "block.h"
 #include "dwarf.h"
+#include "dwarf_frameunwinder.h"
 #include "lnp.h"
 #include <optional>
 #include <unordered_map>
@@ -13,6 +14,7 @@ struct FunctionSymbol
   AddrPtr start;
   AddrPtr end;
   std::string_view name;
+  sym::UnwindInfo unwind;
 };
 
 /* Included files are files that are not representable as a compilation unit, at least not directly.
@@ -75,6 +77,7 @@ public:
   const FunctionSymbol *find_subprogram(AddrPtr addr) const noexcept;
   LineTableEntryRange get_range(AddrPtr addr) const noexcept;
   LineTableEntryRange get_range(AddrPtr start, AddrPtr end) const noexcept;
+  LineTableEntryRange get_range_of_pc(AddrPtr addr) const noexcept;
   std::string_view file(u32 index) const noexcept;
   std::string_view path_of_file(u32 index) const noexcept;
   Path file_path(u32 index) const noexcept;

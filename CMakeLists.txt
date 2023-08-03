@@ -48,6 +48,10 @@ set(MIDAS_SOURCES
   src/symbolication/callstack.h
   src/symbolication/disassemble.cpp
   src/symbolication/disassemble.h
+  src/symbolication/dwarf_frameunwinder.cpp
+  src/symbolication/dwarf_frameunwinder.h
+  src/symbolication/dwarf_expressions.cpp
+  src/symbolication/dwarf_expressions.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
@@ -109,6 +113,23 @@ target_link_libraries(
 )
 
 add_executable(
+  parse_cf
+  test/unittest/parse_cf.cpp
+  src/symbolication/dwarf_frameunwinder.cpp
+  src/symbolication/elf.cpp
+  src/common.cpp
+  src/utils/logger.cpp
+  ${COMMON_SRC}
+)
+
+target_link_libraries(
+  parse_cf
+  GTest::gtest_main
+  fmt::fmt
+  mdb_spinlock
+)
+
+add_executable(
   base64_encoding
   test/unittest/base64.cpp
   src/utils/base64.cpp
@@ -126,6 +147,7 @@ target_link_libraries(
 include(GoogleTest)
 gtest_discover_tests(parse_dap_requests)
 gtest_discover_tests(base64_encoding)
+gtest_discover_tests(parse_cf)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)

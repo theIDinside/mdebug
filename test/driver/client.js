@@ -336,9 +336,9 @@ class DAClient {
 
   /**
    * 
-   * @param {string} req 
-   * @param {object} args 
-   * @param {string} event 
+   * @param {string} req
+   * @param {object} args
+   * @param {string} event
    * @param {number} failureTimeout 
    * @returns {Promise<{ event_body: object, response: object }>}
    */

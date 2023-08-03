@@ -134,7 +134,8 @@ CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
   using FnSym = FunctionSymbol;
   // N.B. if I got this right, this might cause problems with inlined functions. Though I'm not sure.
   auto it_pos = std::lower_bound(fns.begin(), fns.end(), sym.start,
-                                 [](FnSym &fn, AddrPtr start) { return fn.start < start; });
+                                 [](FnSym &fn, AddrPtr start) { return fn.start > start; });
+  DLOG("dwarf", "Adding symbol #{} {} [{} .. {}] to CU {}", fns.size(), sym.name, sym.start, sym.end, m_name);
   fns.insert(it_pos, sym);
 }
 
@@ -142,12 +143,14 @@ const FunctionSymbol *
 CompilationUnitFile::find_subprogram(AddrPtr addr) const noexcept
 {
   using FnSym = FunctionSymbol;
-  const auto sym = std::lower_bound(fns.cbegin(), fns.cend(), offset(addr, 1),
-                                    [](const FnSym &l, AddrPtr addr) { return l.end < addr; });
+  const auto sym =
+      std::find_if(fns.cbegin(), fns.cend(), [addr](auto &sym) { return sym.start <= addr && sym.end >= addr; });
+
   if (sym != std::end(fns)) {
     ASSERT(sym->start.get() <= addr.get() && addr.get() < sym->end.get(),
            "Found unexpectedly the wrong FunctionSymbol when searching for {}. Sym '{}' [{}..{}]", addr, sym->name,
            sym->start, sym->end);
+    DLOG("mdb", "found {} from {}", sym->name, addr);
     return sym.base();
   } else {
     return nullptr;
@@ -161,7 +164,22 @@ CompilationUnitFile::get_range(AddrPtr addr) const noexcept
                                        [](const LineTableEntry &l, AddrPtr addr) { return l.pc <= addr; });
   if (lte_it == std::cend(m_ltes))
     return {nullptr, nullptr};
+  if (lte_it + 1 == std::end(m_ltes))
+    return {nullptr, nullptr};
+  if ((lte_it + 1)->pc < addr)
+    return {nullptr, nullptr};
   return {(lte_it - 1).base(), lte_it.base()};
+}
+
+LineTableEntryRange
+CompilationUnitFile::get_range_of_pc(AddrPtr addr) const noexcept
+{
+  auto it = find(m_ltes, [addr](auto &lte) { return lte.pc > addr; });
+  if (it == std::end(m_ltes) || it == std::begin(m_ltes))
+    return {nullptr, nullptr};
+  if ((it - 1)->pc > addr)
+    return {nullptr, nullptr};
+  return {(it - 1).base(), it.base()};
 }
 
 LineTableEntryRange

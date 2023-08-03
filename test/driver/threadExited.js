@@ -3,9 +3,6 @@ const {
   MDB_PATH,
   buildDirFile,
   runTest,
-  seconds,
-  readFile,
-  repoDirFile,
 } = require("./client")(__filename);
 
 const da_client = new DAClient(MDB_PATH, []);
