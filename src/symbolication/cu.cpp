@@ -297,6 +297,8 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die) noexcept
           fn.name = attr.string();
           break;
         case DW_AT_linkage_name:
+          if (fn.name.empty())
+            fn.name = attr.string();
           break;
         default:
           break; // ignore attributes
