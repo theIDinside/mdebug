@@ -1,6 +1,7 @@
 #include "dwarf_frameunwinder.h"
 #include "dwarf_defs.h"
 #include "elf.h"
+#include "objfile.h"
 
 namespace sym {
 
@@ -419,10 +420,10 @@ dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
 }
 
 Unwinder *
-parse_eh(const ElfSection *eh_frame, int fde_count) noexcept
+parse_eh(ObjFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept
 {
   DwarfBinaryReader reader{eh_frame->m_section_ptr, eh_frame->size()};
-  auto unwinder_db = new Unwinder{};
+  auto unwinder_db = new Unwinder{objfile};
 
   using CieId = u64;
   using CieIdx = u64;
@@ -653,5 +654,7 @@ Unwinder::total_fdes() const noexcept
 {
   return dwarf_unwind_infos.size() + elf_eh_unwind_infos.size();
 }
+
+Unwinder::Unwinder(ObjFile *objfile) noexcept : objfile(objfile) {}
 
 } // namespace sym
