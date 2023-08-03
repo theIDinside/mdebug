@@ -118,7 +118,7 @@ TEST(CallFrameParsing, calculateCieFdeCount_libxul)
 
 TEST(CallFrameParsing, parseLibxulUnwindInfo)
 {
-  auto unwinder = sym::parse_eh(&libxul_eh_frame, -1);
+  auto unwinder = sym::parse_eh(nullptr, &libxul_eh_frame, -1);
   sym::parse_dwarf_eh(unwinder, &libxul_debug_frame, -1);
   EXPECT_EQ(LIBXUL_TOTAL_FDE, unwinder->total_fdes());
   EXPECT_EQ(LIBXUL_TOTAL_CIE, unwinder->total_cies());
@@ -133,7 +133,7 @@ TEST(CallFrameParsing, getRegisterValueByDwarfRegisterNumber)
 
 TEST(CallFrameParsing, verifyParsedEhFrameInOrder)
 {
-  auto unwinder = sym::parse_eh(&mock_eh_frame, -1);
+  auto unwinder = sym::parse_eh(nullptr, &mock_eh_frame, -1);
   auto &entries = unwinder->elf_eh_unwind_infos;
   std::sort(entries.begin(), entries.end(), [](auto &a, auto &b) { return a.start < b.start; });
   auto start = entries.front().start;
@@ -168,7 +168,7 @@ TEST(CallFrameParsing, parseThreadsShared)
   EXPECT_EQ(908, header.frame_ptr.u);
   EXPECT_EQ(112, header.fde_count.u);
 
-  auto unwinder = sym::parse_eh(&mock_eh_frame, -1);
+  auto unwinder = sym::parse_eh(nullptr, &mock_eh_frame, -1);
 
   auto &entries = unwinder->elf_eh_unwind_infos;
 
