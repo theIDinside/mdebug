@@ -52,7 +52,7 @@ Breakpoint::event_type() const noexcept
   }
 }
 
-std::vector<BreakpointMap::BpStat>::iterator
+std::vector<BpStat>::iterator
 BreakpointMap::find_bpstat(Tid tid) noexcept
 {
   return ::find(bpstats, [tid = tid](auto &bpstat) { return bpstat.tid == tid; });
@@ -156,6 +156,7 @@ BreakpointMap::remove_breakpoint(AddrPtr addr, BpType type) noexcept
       bp.bp_type.unset(type);
       if (bp.bp_type.type == 0) {
         bp.disable(pid);
+        DLOG("mdb", "Deleted breakpoint at {}", bp.address);
         return true;
       }
     }

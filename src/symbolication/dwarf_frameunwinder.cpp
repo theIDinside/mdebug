@@ -3,6 +3,9 @@
 #include "elf.h"
 #include "objfile.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 namespace sym {
 
 ByteCodeInterpreter::ByteCodeInterpreter(std::span<const u8> stream) noexcept : byte_stream(stream) {}
@@ -420,7 +423,7 @@ dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
 }
 
 Unwinder *
-parse_eh(ObjFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept
+parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept
 {
   DwarfBinaryReader reader{eh_frame->m_section_ptr, eh_frame->size()};
   auto unwinder_db = new Unwinder{objfile};
@@ -454,9 +457,10 @@ parse_eh(ObjFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept
       ASSERT(initial_loc < 0, "Expected initial loc to be negative offset");
       AddrPtr begin = (eh_frame->address + reader.bytes_read() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.read_value<u32>();
-      auto aug_data_length = 0;
+      u8 aug_data_length = 0u;
       if (cie.augmentation_string->contains("z")) {
-        aug_data_length = reader.read_uleb128<u64>();
+        // it's *going* to be less than 255 bytes. So we cast it here
+        aug_data_length = static_cast<u8>(reader.read_uleb128<u64>());
       }
       const auto bytes_remaining = entry_length - reader.pop_bookmark();
       auto ins = reader.get_span(bytes_remaining);
@@ -469,6 +473,7 @@ parse_eh(ObjFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept
           .end = end,
           .code_align = static_cast<u8>(cie.code_alignment_factor),
           .data_align = static_cast<i8>(cie.data_alignment_factor),
+          .aug_data_len = aug_data_length,
           .cie = &cie,
           .fde_insts = ins,
       });
@@ -565,7 +570,7 @@ read_cie(DwarfBinaryReader &reader)
 
   cie.code_alignment_factor = entry_reader.read_uleb128<u64>();
   cie.data_alignment_factor = entry_reader.read_leb128<i64>();
-  cie.retaddr_register = cie.retaddr_register = entry_reader.read_uleb128<u64>();
+  cie.retaddr_register = entry_reader.read_uleb128<u64>();
   auto auglen = 0;
   for (auto c : cie.augmentation_string.value_or("")) {
     if (c == 'z') {
@@ -616,7 +621,7 @@ read_cie(u64 length, DwarfBinaryReader &entry_reader) noexcept
 
   cie.code_alignment_factor = entry_reader.read_uleb128<u64>();
   cie.data_alignment_factor = entry_reader.read_leb128<i64>();
-  cie.retaddr_register = cie.retaddr_register = entry_reader.read_uleb128<u64>();
+  cie.retaddr_register = entry_reader.read_uleb128<u64>();
   auto auglen = 0;
   for (auto c : cie.augmentation_string.value_or("")) {
     if (c == 'z') {
@@ -655,6 +660,8 @@ Unwinder::total_fdes() const noexcept
   return dwarf_unwind_infos.size() + elf_eh_unwind_infos.size();
 }
 
-Unwinder::Unwinder(ObjFile *objfile) noexcept : objfile(objfile) {}
+Unwinder::Unwinder(ObjectFile *objfile) noexcept : objfile(objfile) {}
 
 } // namespace sym
+
+#pragma GCC diagnostic pop

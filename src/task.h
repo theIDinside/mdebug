@@ -8,7 +8,8 @@
 #include <sys/wait.h>
 
 using namespace std::string_view_literals;
-
+struct BpStat;
+struct TraceeController;
 namespace sym {
 struct CallStack;
 }
@@ -86,7 +87,9 @@ struct TaskInfo
   u64 get_register(u64 reg_num) noexcept;
   void cache_registers() noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
+  void consume_wait() noexcept;
   void resume(RunType) noexcept;
+  void step_over_breakpoint(TraceeController *tc, BpStat *bpstat) noexcept;
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;

@@ -49,24 +49,6 @@ create_ehframe(const char *path)
   return mock_eh_frame;
 }
 
-static ElfSection
-create_libxul_ehframe()
-{
-  ScopedFd ehframe = ScopedFd::open("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame", O_RDONLY);
-
-  auto ehframe_data = new std::vector<u8>{};
-  ehframe_data->resize(ehframe.file_size());
-
-  EXPECT_NE(::read(ehframe, ehframe_data->data(), ehframe.file_size()), -1);
-  auto mock_eh_frame = ElfSection{.m_section_ptr = ehframe_data->data(),
-                                  .m_name = ".eh_frame",
-                                  .m_section_size = ehframe.file_size(),
-                                  .file_offset = 0x325fce8,
-                                  .address = 0x325fce8};
-
-  return mock_eh_frame;
-}
-
 std::vector<u8>
 create_mock_eh_frame_hdr_data()
 {
@@ -126,7 +108,9 @@ TEST(CallFrameParsing, parseLibxulUnwindInfo)
 
 TEST(CallFrameParsing, getRegisterValueByDwarfRegisterNumber)
 {
-  user_regs_struct regs{.rbp = 0xdeadbeef, .rsp = 0xba5};
+  user_regs_struct regs{0};
+  regs.rbp = 0xdeadbeef;
+  regs.rsp = 0xba5;
   EXPECT_EQ(get_register(&regs, 6), 0xdeadbeef);
   EXPECT_EQ(get_register(&regs, 7), 0xba5);
 }

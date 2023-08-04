@@ -3,7 +3,7 @@
 #include "dwarf_defs.h"
 
 struct ElfSection;
-struct ObjFile;
+struct ObjectFile;
 
 namespace sym {
 
@@ -87,6 +87,7 @@ struct UnwindInfo
   AddrPtr end;
   u8 code_align;
   i8 data_align;
+  u8 aug_data_len;
   CIE *cie;
   std::span<const u8> fde_insts{};
 };
@@ -94,12 +95,12 @@ struct UnwindInfo
 class Unwinder
 {
 public:
-  Unwinder(ObjFile *objfile) noexcept;
+  Unwinder(ObjectFile *objfile) noexcept;
   u64 total_cies() const noexcept;
   u64 total_fdes() const noexcept;
 
   // Objfile
-  ObjFile *objfile;
+  ObjectFile *objfile;
   // .debug_frame
   std::vector<CIE> dwarf_debug_cies;
   std::vector<UnwindInfo> dwarf_unwind_infos;
@@ -112,7 +113,7 @@ public:
 std::pair<u64, u64> elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 std::pair<u64, u64> dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 CommonInformationEntry read_cie(u64 length, DwarfBinaryReader &reader) noexcept;
-Unwinder *parse_eh(ObjFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept;
+Unwinder *parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, int fde_count) noexcept;
 void parse_dwarf_eh(Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_count) noexcept;
 
 FrameDescriptionEntry read_fde(DwarfBinaryReader &reader);

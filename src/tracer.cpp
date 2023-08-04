@@ -270,6 +270,7 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
           get_current()->reopen_memfd();
           get_current()->cache_registers(t);
           get_current()->read_auxv(t);
+          get_current()->install_loader_breakpoints();
           dap->add_tty(res.fd);
           break;
         }

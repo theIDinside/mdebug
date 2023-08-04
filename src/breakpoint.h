@@ -13,7 +13,7 @@ enum class BreakpointType : std::uint8_t
   Address = 1 << 2,
   // Tracer breakpoints & User breakpoints
   ResumeAddress = 1 << 3,
-  SharedObjectLoaded = 1 << 4,
+  SharedObjectEvent = 1 << 4,
   Exception = 1 << 5,
   LongJump = 1 << 6
 };
@@ -142,17 +142,17 @@ struct BpEvent
   };
 };
 
+// Task Breakpoint Status
+struct BpStat
+{
+  Tid tid;
+  u16 bp_id;
+  BpType type;
+  bool stepped_over;
+};
+
 struct BreakpointMap
 {
-  // Task Breakpoint Status
-  struct BpStat
-  {
-    Tid tid;
-    u16 bp_id;
-    BpType type;
-    bool stepped_over;
-  };
-
   explicit BreakpointMap(Tid address_space) noexcept
       : bp_id_counter(1), breakpoints(), address_space_tid(address_space), fn_breakpoint_names(),
         source_breakpoints(), bpstats()
@@ -170,6 +170,8 @@ struct BreakpointMap
   std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
   // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
   std::vector<BpStat> bpstats;
+
+  std::vector<Breakpoint> ld_breakpoints;
 
   template <typename T>
   bool

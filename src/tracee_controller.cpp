@@ -9,7 +9,9 @@
 #include "notify_pipe.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
+#include "so_loading.h"
 #include "symbolication/callstack.h"
+#include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
 #include "symbolication/type.h"
@@ -22,11 +24,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <elf.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <link.h>
 #include <linux/auxvec.h>
 #include <memory_resource>
 #include <optional>
+#include <set>
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
@@ -37,13 +42,17 @@
 #include <unistd.h>
 #include <unordered_set>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+
 template <typename T> using Set = std::unordered_set<T>;
 
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{}, bps(process_space_id),
-      stop_on_clone(false), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
-      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this})
+    : task_leader{process_space_id}, object_files{}, threads{}, bps(process_space_id), stop_on_clone(false),
+      tracee_r_debug(nullptr), spin_lock{}, shared_objects(), m_files{}, interpreter_base{}, entry{},
+      session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -60,6 +69,134 @@ TraceeController::reopen_memfd() noexcept
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", task_leader, task_leader);
   procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
   return procfs_memfd.is_open();
+}
+
+struct ProbeInfo
+{
+  AddrPtr address;
+  std::string name;
+};
+
+static std::vector<ProbeInfo>
+parse_stapsdt_note(ElfSection *section) noexcept
+{
+  std::vector<ProbeInfo> probes;
+  DwarfBinaryReader reader{section->data(), section->size()};
+  std::set<std::string_view> required_probes{{"map_complete", "reloc_complete", "unmap_complete"}};
+  // stapsdt, location 8 bytes, base 8 bytes, semaphore 8 bytes, desc=string of N bytes, then more bytes we don't
+  // care for
+
+  while (reader.has_more() && required_probes.size() > 0) {
+    reader.read_value<u32>();
+    reader.read_value<u32>();
+    reader.read_value<u32>();
+    const auto stapsdt = reader.read_string();
+    ASSERT(stapsdt == "stapsdt", "Failed to see 'stapsdt' deliminator; saw {}", stapsdt);
+    const auto ptr = reader.read_value<u64>();
+    const auto base = reader.read_value<u64>();
+    const auto semaphore = reader.read_value<u64>();
+    const auto provider = reader.read_string();
+    ASSERT(provider == "rtld", "Supported provider is rtld, got {}", provider);
+    const auto probe_name = reader.read_string();
+    const auto description = reader.read_string();
+    if (reader.bytes_read() % 4 != 0)
+      reader.skip(4 - reader.bytes_read() % 4);
+    if (required_probes.contains(probe_name)) {
+      DLOG("mdb", "adding {} probe at {}", probe_name, ptr);
+      probes.push_back(ProbeInfo{.address = ptr, .name = std::string{probe_name}});
+      required_probes.erase(std::find(required_probes.begin(), required_probes.end(), probe_name));
+    }
+  }
+  return probes;
+}
+
+void
+TraceeController::install_loader_breakpoints() noexcept
+{
+  ASSERT(interpreter_base.has_value(),
+         "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
+  auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
+  auto tmp_objfile = mmap_objectfile(int_path);
+  ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
+  Elf::parse_objfile(tmp_objfile);
+  tmp_objfile->parsed_elf->parse_min_symbols();
+  const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
+  ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
+  const auto probes = parse_stapsdt_note(system_tap_sec);
+  auto rdebug_state = tmp_objfile->get_minsymbol(LOADER_STATE);
+  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
+  tracee_r_debug = interpreter_base.value() + rdebug_state->address;
+  DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
+  for (const auto &p : probes) {
+    DLOG("mdb", "probe {}, found={}", p.name, p.address);
+  }
+
+  std::vector<AddrPtr> addresses{};
+  for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
+    if (tmp_objfile->minimal_symbols.contains(symbol_name)) {
+      const auto sym = tmp_objfile->minimal_symbols[symbol_name];
+      const auto s_offset = sym.address; // - text_sec->address;
+      DLOG("mdb", "dl_debug state: {}", sym.address);
+      const auto addr = interpreter_base.transform([s_offset](auto addr) { return addr + s_offset; });
+      ASSERT(addr.has_value(), "Could not determine interpreter base to add symbol offset to.");
+      addresses.push_back(*addr);
+    }
+  }
+
+  ASSERT(addresses.size() != 0, "Failed to find required symbols");
+  DLOG("mdb", "Found {} ld breakpoint addresses", addresses.size());
+  for (const auto addr : addresses) {
+    DLOG("mdb", "Setting ld breakpoint at {}", addr);
+    set_tracer_bp(addr.as<u64>(), BpType{.shared_object_load = true});
+  }
+  set_tracer_bp(0xc16e + *interpreter_base, BpType{.shared_object_load = true});
+  set_tracer_bp(0xbff8 + *interpreter_base, BpType{.shared_object_load = true});
+  // map_complete no-op instruction "probe"
+}
+
+void
+TraceeController::on_so_event() noexcept
+{
+  DLOG("mdb", "so event triggered");
+  // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
+  r_debug_extended rdebug_ext = read_type(tracee_r_debug);
+  auto count = 1;
+  while (true) {
+    // means we've hit some "entry" point in the linker-debugger interface; we need to wait for RT_CONSISTENT to
+    // safely read "link map" containing the shared objects
+    if (rdebug_ext.base.r_state != rdebug_ext.base.RT_CONSISTENT) {
+      return;
+    }
+    auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
+    while (linkmap != nullptr) {
+      link_map map = read_type(linkmap);
+      auto name_ptr = TPtr<char>{map.l_name};
+      const auto path = read_string(name_ptr);
+      if (path) {
+        shared_objects.add_if_new(linkmap, map.l_addr, std::move(*path));
+      }
+      linkmap = TPtr<link_map>{map.l_next};
+    }
+    const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
+    if (next != nullptr) {
+      r_debug_extended rdebug_ext = read_type(next);
+      ++count;
+    } else {
+      break;
+    }
+  }
+  DLOG("mdb", "r_debug_extended found: {}", count);
+
+  auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
+  while (linkmap != nullptr) {
+    link_map map = read_type(linkmap);
+    auto name_ptr = TPtr<char>{map.l_name};
+    const auto path = read_string(name_ptr);
+    if (path) {
+      shared_objects.add_if_new(linkmap, map.l_addr, std::move(*path));
+    }
+    linkmap = TPtr<link_map>{map.l_next};
+  }
 }
 
 ScopedFd &
@@ -388,7 +525,9 @@ void
 TraceeController::reset_source_breakpoints(std::string_view source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&bps) noexcept
 {
-  this->bps.clear(this, BpType{.source = true});
+  auto type = BpType{0};
+  type.source = true;
+  this->bps.clear(this, type);
   set_source_breakpoints(source_filepath, std::move(bps));
 }
 
@@ -553,16 +692,22 @@ TraceeController::process_clone(TaskInfo *t) noexcept
 BpEvent
 TraceeController::process_stopped(TaskInfo *t) noexcept
 {
-  DLOG("mdb", "Processing stopped for {}", t->tid);
   const auto pc = get_caching_pc(t);
+  DLOG("mdb", "Processing stopped for {} at {}", t->tid, AddrPtr{t->registers->rip});
   const auto prev_pc_byte = offset(pc, -1);
   if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
     auto bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
     if (bpstat != std::end(bps.bpstats) && bpstat->stepped_over) {
       bps.bpstats.erase(bpstat);
+      bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
+      if (bpstat != std::end(bps.bpstats)) {
+        DLOG("mdb", "Had multiple bpstats for {}", t->tid);
+        goto breakout;
+      }
       return BpEvent{BpEventType::None, {nullptr}};
     }
-    DLOG("mdb", "{} Hit breakpoint {} at {}", t->tid, bp->id, prev_pc_byte);
+  breakout:
+    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
     set_pc(t, prev_pc_byte);
     bps.add_bpstat_for(t, bp);
     return BpEvent{bp->event_type(), {.bp = bp}};
@@ -682,6 +827,23 @@ TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
   }
   data->set_size(total_read);
   return data;
+}
+
+std::optional<std::string>
+TraceeController::read_string(TraceePointer<char> address) noexcept
+{
+  std::string result;
+  if (address == nullptr)
+    return std::nullopt;
+  auto ch = read_type<char>(address);
+  while (ch != 0) {
+    result.push_back(ch);
+    address += 1;
+    ch = read_type<char>(address);
+  }
+  if (result.empty())
+    return std::nullopt;
+  return result;
 }
 
 void
@@ -932,3 +1094,5 @@ TraceeController::stop_handler() const noexcept
 {
   return ptracestop_handler;
 }
+
+#pragma GCC diagnostic pop

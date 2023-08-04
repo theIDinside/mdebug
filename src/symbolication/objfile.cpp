@@ -1,4 +1,5 @@
 #include "objfile.h"
+#include "../so_loading.h"
 #include "elf_symbols.h"
 #include <optional>
 
@@ -39,4 +40,24 @@ ObjectFile::get_minsymbol(std::string_view name) noexcept
   } else {
     return std::nullopt;
   }
+}
+
+Path
+ObjectFile::interpreter() const noexcept
+{
+  const auto path = interpreter_path(parsed_elf->get_section(".interp"));
+  return path;
+}
+
+ObjectFile *
+mmap_objectfile(const Path &path) noexcept
+{
+  if (!fs::exists(path))
+    return nullptr;
+
+  auto fd = ScopedFd::open_read_only(path);
+  const auto addr = mmap_file<u8>(fd, fd.file_size(), true);
+  auto objfile = new ObjectFile{path, fd.file_size(), addr};
+  Elf::parse_objfile(objfile);
+  return objfile;
 }

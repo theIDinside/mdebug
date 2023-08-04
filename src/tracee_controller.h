@@ -4,6 +4,7 @@
 #include "common.h"
 #include "lib/spinlock.h"
 #include "ptracestop_handlers.h"
+#include "so_loading.h"
 #include "symbolication/callstack.h"
 #include "symbolication/elf.h"
 #include "symbolication/type.h"
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <link.h>
 #include <optional>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
@@ -89,10 +91,21 @@ struct TraceeController
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   BreakpointMap bps;
   bool stop_on_clone;
-
+  TPtr<r_debug_extended> tracee_r_debug;
   // Aggressive spinlock
   SpinLock spin_lock;
+  SharedObjectMap shared_objects;
 
+private:
+  std::vector<CompilationUnitFile> m_files;
+  std::optional<TPtr<void>> interpreter_base;
+  std::optional<TPtr<void>> entry;
+  AwaiterThread::handle awaiter_thread;
+  TargetSession session;
+  bool is_in_user_ptrace_stop;
+  ptracestop::StopHandler *ptracestop_handler;
+
+public:
   // Constructors
   TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
                    bool open_mem_fd = true) noexcept;
@@ -101,6 +114,9 @@ struct TraceeController
 
   /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
   bool reopen_memfd() noexcept;
+  /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
+  void install_loader_breakpoints() noexcept;
+  void on_so_event() noexcept;
   /** Return the open mem fd */
   ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
@@ -319,6 +335,8 @@ struct TraceeController
     }
   }
 
+  std::optional<std::string> read_string(TraceePointer<char> address) noexcept;
+
   /* Add parsed DWARF debug info for `file` */
   void add_file(CompilationUnitFile &&file) noexcept;
 
@@ -345,13 +363,4 @@ struct TraceeController
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
   const std::vector<CompilationUnitFile> &cu_files() const noexcept;
   ptracestop::StopHandler *stop_handler() const noexcept;
-
-private:
-  std::vector<CompilationUnitFile> m_files;
-  std::optional<TPtr<void>> interpreter_base;
-  std::optional<TPtr<void>> entry;
-  AwaiterThread::handle awaiter_thread;
-  TargetSession session;
-  bool is_in_user_ptrace_stop;
-  ptracestop::StopHandler *ptracestop_handler;
 };
