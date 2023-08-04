@@ -50,6 +50,28 @@ Justification for these three libraries are as follows;
 
 - gtest - for unit testing.
 
+#### Coding guidelines
+
+Few of these for now.
+
+1. clang-format it all. Write it however you want it and let clang-format do the rest.
+
+2. Keep implementations of interface methods linearly placed in source files. If A is an abstract class with 3 virtual methods, and B and C implement those, group the method _definitions_ together in the `.cpp` file. This might seem strange to some, but I prefer it. My general sense is, an interface often have only slightly different behaviors - and even if they do, their overriden methods are used in the same contexts. Some times they might even resembled one another. Therefore having them close, a sort of spatial locality in the source code is benefitial - it's quick and easy to compare multiple different implementations. Below is an example:
+
+```cpp
+struct A { virtual void foo() = 0; virtual void bar() = 0; };
+struct B : A ...
+struct C : A ...
+// in cpp file
+
+// group all `foo`s together
+void B::foo() { }
+void C::foo() {}
+// group all `bar`s together
+void B::bar() {}
+void C::bar() {}
+```
+
 # Current blog posts that describes MDB
 
 These blog posts are not done, but I write some in them during the dev cycles to build a cohesive explanation of what's going on and where.
