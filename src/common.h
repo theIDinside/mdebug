@@ -173,6 +173,7 @@ public:
   constexpr TraceePointer(TraceePointer &&) = default;
   constexpr operator std::uintptr_t() const { return get(); }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
+  constexpr TraceePointer(T *t) noexcept : remote_addr(reinterpret_cast<std::uintptr_t>(t)) {}
 
   // Utility function. When one needs to be sure we are offseting by *bytes* and not by sizeof(T) * n.
   friend TraceePointer<T> constexpr offset(TraceePointer<T> ptr, u64 bytes) noexcept
