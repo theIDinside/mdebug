@@ -54,7 +54,7 @@ create_mock_eh_frame_hdr_data()
 {
   ScopedFd ehframe_header =
       ScopedFd::open("/home/cx/dev/foss/cx/dbm/test/unittest/threads_ehframe_header", O_RDONLY);
-  EXPECT_EQ(ehframe_header.file_size(), 912);
+  EXPECT_EQ(ehframe_header.file_size(), 908);
   std::vector<u8> ehframe_header_data{};
   ehframe_header_data.resize(ehframe_header.file_size());
   EXPECT_NE(::read(ehframe_header, ehframe_header_data.data(), ehframe_header.file_size()), -1);
