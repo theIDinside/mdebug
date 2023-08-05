@@ -54,6 +54,7 @@ create_mock_eh_frame_hdr_data()
 {
   ScopedFd ehframe_header =
       ScopedFd::open("/home/cx/dev/foss/cx/dbm/test/unittest/threads_ehframe_header", O_RDONLY);
+  EXPECT_TRUE(ehframe_header.is_open());
   EXPECT_EQ(ehframe_header.file_size(), 908);
   std::vector<u8> ehframe_header_data{};
   ehframe_header_data.resize(ehframe_header.file_size());
@@ -61,28 +62,33 @@ create_mock_eh_frame_hdr_data()
   return ehframe_header_data;
 }
 
-static const auto mock_eh_frame = create_mock_eh_frame_section();
-
 constexpr static auto LIBXUL_EH_FRAME_FDE_COUNT = 417556;
 constexpr static auto LIBXUL_DEBUG_FRAME_FDE_COUNT = 14788;
 constexpr static auto LIBXUL_EH_FRAME_CIE_COUNT = 2;
 constexpr static auto LIBXUL_DEBUG_FRAME_CIE_COUNT = 1835;
 constexpr static auto LIBXUL_TOTAL_FDE = LIBXUL_EH_FRAME_FDE_COUNT + LIBXUL_DEBUG_FRAME_FDE_COUNT;
 constexpr static auto LIBXUL_TOTAL_CIE = LIBXUL_EH_FRAME_CIE_COUNT + LIBXUL_DEBUG_FRAME_CIE_COUNT;
-static const auto libxul_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame");
-static const auto libxul_debug_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_debug_frame");
-static const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
 
 TEST(CallFrameParsing, calculateCieFdeCount)
 {
+  static const auto mock_eh_frame = create_mock_eh_frame_section();
+  static const auto sf_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/sf_ehframe");
   const auto [cie_count, fde_count] =
       sym::elf_eh_calculate_entries_count(DwarfBinaryReader{mock_eh_frame.data(), mock_eh_frame.size()});
   EXPECT_EQ(cie_count, 2);
   EXPECT_EQ(fde_count, 112);
+
+  const auto [cie_count2, fde_count2] =
+      sym::elf_eh_calculate_entries_count(DwarfBinaryReader{sf_eh_frame.data(), sf_eh_frame.size()});
+  EXPECT_EQ(cie_count2, 2);
+  EXPECT_EQ(fde_count2, 16);
 }
 
 TEST(CallFrameParsing, calculateCieFdeCount_libxul)
 {
+  static const auto libxul_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame");
+  static const auto libxul_debug_frame =
+      create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_debug_frame");
   const auto [cie_count, fde_count] =
       sym::elf_eh_calculate_entries_count(DwarfBinaryReader{libxul_eh_frame.data(), libxul_eh_frame.size()});
   const auto [cie_count2, fde_count2] = sym::dwarf_eh_calculate_entries_count(
@@ -100,6 +106,9 @@ TEST(CallFrameParsing, calculateCieFdeCount_libxul)
 
 TEST(CallFrameParsing, parseLibxulUnwindInfo)
 {
+  static const auto libxul_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame");
+  static const auto libxul_debug_frame =
+      create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_debug_frame");
   auto unwinder = sym::parse_eh(nullptr, &libxul_eh_frame, -1);
   sym::parse_dwarf_eh(unwinder, &libxul_debug_frame, -1);
   EXPECT_EQ(LIBXUL_TOTAL_FDE, unwinder->total_fdes());
@@ -117,6 +126,7 @@ TEST(CallFrameParsing, getRegisterValueByDwarfRegisterNumber)
 
 TEST(CallFrameParsing, verifyParsedEhFrameInOrder)
 {
+  static const auto mock_eh_frame = create_mock_eh_frame_section();
   auto unwinder = sym::parse_eh(nullptr, &mock_eh_frame, -1);
   auto &entries = unwinder->elf_eh_unwind_infos;
   std::sort(entries.begin(), entries.end(), [](auto &a, auto &b) { return a.start < b.start; });
@@ -128,9 +138,10 @@ TEST(CallFrameParsing, verifyParsedEhFrameInOrder)
 
 TEST(CallFrameParsing, parseThreadsShared)
 {
+  static const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
   // const auto mock_eh_frame = create_mock_eh_frame_section();
   // const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
-
+  static const auto mock_eh_frame = create_mock_eh_frame_section();
   DwarfBinaryReader reader{mock_eh_frame.data(), mock_eh_frame.size()};
   sym::CIE cie = sym::read_cie(reader);
   EXPECT_EQ(cie.length, 0x14);

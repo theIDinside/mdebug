@@ -178,6 +178,7 @@ if(NODEJS)
       setInstructionBreakpoints 
       stackframes
       threadExited
+      moduleEvent
   )
   foreach(driver_test ${DRIVER_TESTS})
     add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})
