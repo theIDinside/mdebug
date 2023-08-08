@@ -260,7 +260,7 @@ DwarfBinaryReader::dwarf_spec_read_value() noexcept
 std::span<const u8>
 DwarfBinaryReader::get_span(u64 size) noexcept
 {
-  ASSERT(remaining_size() <= size, "Not enough bytes left in reader. Requested {}, remaining {}", size,
+  ASSERT(size <= remaining_size(), "Not enough bytes left in reader. Requested {}, remaining {}", size,
          remaining_size());
   const auto span = std::span{head, size};
   head += size;
@@ -295,7 +295,7 @@ DwarfBinaryReader::DwarfBinaryReader(const u8 *buffer, u64 size) noexcept
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
-    : buffer(reader.buffer), head(reader.head), size(reader.size), bookmarks()
+    : buffer(reader.buffer), head(reader.head), end(reader.end), size(reader.size), bookmarks()
 {
 }
 
@@ -367,6 +367,6 @@ to_addr(std::string_view s) noexcept
 u64
 get_register(user_regs_struct *regs, int reg_number) noexcept
 {
-  ASSERT(reg_number < 16, "Register number {} not supported", reg_number);
+  ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
   return *(u64 *)(((std::uintptr_t)regs) + offsets[reg_number]);
 }

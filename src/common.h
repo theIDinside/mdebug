@@ -334,6 +334,18 @@ public:
     return buffer;
   }
 
+  static constexpr auto
+  Max() noexcept
+  {
+    return TraceePointer{UINTMAX_MAX};
+  }
+
+  static constexpr auto
+  Min() noexcept
+  {
+    return TraceePointer{nullptr};
+  }
+
 private:
   std::uintptr_t remote_addr;
 };
@@ -515,13 +527,15 @@ public:
   DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept;
 
   template <ByteContainer BC>
-  DwarfBinaryReader(const BC &bc) : buffer(bc.data()), head(bc.data()), size(bc.size()), bookmarks()
+  DwarfBinaryReader(const BC &bc)
+      : buffer(bc.data()), head(bc.data()), end(bc.data() + bc.size()), size(bc.size()), bookmarks()
   {
   }
 
   template <ByteContainer BC>
   DwarfBinaryReader(const BC &bc, u64 offset)
-      : buffer(bc.offset(offset)), head(bc.offset(offset)), size(bc.size() - offset)
+      : buffer(bc.offset(offset)), head(bc.offset(offset)), end(bc.data() + bc.size()), size(bc.size() - offset),
+        bookmarks()
   {
   }
 
@@ -779,13 +793,38 @@ keep_range(Container &c, u64 start_idx, u64 end_idx) noexcept
   c.erase(c.begin(), start);
 }
 
-static constexpr u16 offsets[16] = {
+enum class RegDescriptor : u8
+{
+#define REGISTER(Name, Value) Name = Value,
+#define REG_DESC
+#include "./defs/registers.defs"
+#undef REG_DESC
+#undef REGISTER
+};
+
+#define REGISTER(Name, Value)                                                                                     \
+  case Name:                                                                                                      \
+    return #Name;
+static constexpr std::string_view
+reg_name(RegDescriptor reg) noexcept
+{
+  using enum RegDescriptor;
+  switch (reg) {
+#define REG_DESC
+#include "./defs/registers.defs"
+#undef REG_DESC
+  }
+}
+#undef REGISTER
+static constexpr u16 offsets[17] = {
     offsetof(user_regs_struct, rax), offsetof(user_regs_struct, rdx), offsetof(user_regs_struct, rcx),
     offsetof(user_regs_struct, rbx), offsetof(user_regs_struct, rsi), offsetof(user_regs_struct, rdi),
     offsetof(user_regs_struct, rbp), offsetof(user_regs_struct, rsp), offsetof(user_regs_struct, r8),
     offsetof(user_regs_struct, r9),  offsetof(user_regs_struct, r10), offsetof(user_regs_struct, r11),
     offsetof(user_regs_struct, r12), offsetof(user_regs_struct, r13), offsetof(user_regs_struct, r14),
-    offsetof(user_regs_struct, r15),
-};
+    offsetof(user_regs_struct, r15), offsetof(user_regs_struct, rip)};
+
+static constexpr std::string_view reg_names[17] = {"rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp", "r8",
+                                                   "r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip"};
 
 u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
