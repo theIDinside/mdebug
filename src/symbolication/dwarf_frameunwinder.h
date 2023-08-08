@@ -37,6 +37,7 @@ struct Reg
     std::span<const u8> expr;
   };
   void set_expression(std::span<const u8> expr) noexcept;
+  void set_val_expression(std::span<const u8> expr) noexcept;
   void set_offset(i64 offset) noexcept;
   void set_value_offset(i64 val_offset) noexcept;
   void set_register(u64 reg) noexcept;
@@ -123,24 +124,6 @@ struct Enc
   DwarfExceptionHeaderEncoding value_fmt;
 };
 
-union QuadWord
-{
-  i64 i;
-  u64 u;
-};
-
-struct EhFrameHeader
-{
-  u8 version;
-  Enc frame_ptr_encoding;
-  Enc fde_count_encoding;
-  Enc table_encoding;
-  QuadWord frame_ptr;
-  QuadWord fde_count;
-};
-
-EhFrameHeader read_frame_header(DwarfBinaryReader &reader);
-
 struct CommonInformationEntry
 {
   u64 length;
@@ -173,12 +156,6 @@ struct FrameDescriptionEntry
 };
 using FDE = FrameDescriptionEntry;
 
-struct EhFrameEntry
-{
-  AddrPtr initial_location;
-  FDE *fde;
-};
-
 /** Structure describing where to find unwind info */
 struct UnwindInfo
 {
@@ -191,9 +168,6 @@ struct UnwindInfo
   CIE *cie;
   u64 fde_eh_offset;
   std::span<const u8> fde_insts{};
-
-  u64 compute_code(u64 value) const noexcept;
-  i64 compute_data();
 };
 
 class Unwinder

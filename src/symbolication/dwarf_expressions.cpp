@@ -432,7 +432,7 @@ op_fbreg(ExprByteCodeInterpreter &i) noexcept
   // const auto frame_base_addr = i.request_frame_base();
   // const auto result = frame_base_addr + offset;
   // i.stack.push<u64>(result.get());
-  TODO("op_fbreg")
+  TODO_FMT("op_fbreg with offset {}", offset);
 }
 void
 op_bregx(ExprByteCodeInterpreter &i) noexcept

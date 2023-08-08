@@ -130,7 +130,7 @@ Elf::get_section_or_panic(std::string_view name) const noexcept
 }
 
 void
-Elf::parse_objfile(ObjectFile *object_file) noexcept
+Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept
 {
   DLOG("mdb", "Parsing objfile {}", object_file->path.c_str());
   const auto header = object_file->get_at_offset<Elf64Header>(0);
@@ -157,7 +157,7 @@ Elf::parse_objfile(ObjectFile *object_file) noexcept
         object_file->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
     data.sections[i].file_offset = sec_hdr->sh_offset;
     data.sections[i].address = sec_hdr->sh_addr;
-    data.sections[i].reloc_base = nullptr;
+    data.sections[i].reloc_base = reloc_base;
   }
   // ObjectFile is the owner of `Elf`
   new Elf{header, data, object_file};
@@ -172,7 +172,7 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     obj_file->min_syms = false;
     return;
   }
-  DLOG("mdb", "parsing min symbols for {}", obj_file->path.c_str());
+  DLOG("mdb", "{} min symbols, base_vma={}", obj_file->path.c_str(), base_vma);
 
   for (auto &sec : sections()) {
     if (sec.get_name() == ".symtab") {

@@ -134,7 +134,6 @@ public:
 
   void handle_execution_event(TaskInfo *t) noexcept;
   void handle_bp_event(TaskInfo *t, BpEvent evt) noexcept;
-  void handle_generic_stop(TaskInfo *t) noexcept;
   void handle_signalled(TaskInfo *t) noexcept;
   void handle_execed(TaskInfo *t) noexcept;
   void handle_exited(TaskInfo *t) noexcept;

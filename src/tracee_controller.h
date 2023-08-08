@@ -53,37 +53,6 @@ struct SearchFnSymResult
 using Address = std::uintptr_t;
 struct ObjectFile;
 
-template <typename T>
-static ssize_t
-read_bytes_ptrace(TraceePointer<T> addr, ssize_t buf_size, void *buf, pid_t tid)
-{
-  ssize_t nread = 0;
-  // ptrace operates on the word size of the host, so we really do want
-  // to use sizes of host types here.
-  uintptr_t word_size = sizeof(long);
-  errno = 0;
-  // Only read aligned words. This ensures we can always read the last
-  // byte before an unmapped region.
-  while (nread < buf_size) {
-    uintptr_t start = addr.get() + nread;
-    uintptr_t start_word = start & ~(word_size - 1);
-    uintptr_t end_word = start_word + word_size;
-    uintptr_t length = std::min(end_word - start, uintptr_t(buf_size - nread));
-    long v = ptrace(PTRACE_PEEKDATA, tid, start_word, nullptr);
-    if (errno) {
-      break;
-    }
-    memcpy(static_cast<uint8_t *>(buf) + nread, reinterpret_cast<uint8_t *>(&v) + (start - start_word), length);
-    nread += length;
-  }
-
-  return nread;
-}
-
-struct TraceeController;
-
-class Default;
-
 struct TraceeController
 {
   using handle = std::unique_ptr<TraceeController>;
@@ -100,10 +69,11 @@ struct TraceeController
   bool stop_on_clone;
   TPtr<r_debug_extended> tracee_r_debug;
   // Aggressive spinlock
-  SpinLock spin_lock;
+
   SharedObjectMap shared_objects;
 
 private:
+  SpinLock spin_lock;
   std::vector<CompilationUnitFile> m_files;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
@@ -218,7 +188,7 @@ public:
   void read_auxv(TaskInfo *task);
   TargetSession session_type() const noexcept;
   std::string get_thread_name(Tid tid) const noexcept;
-  utils::StaticVector<u8>::own_ptr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
+  utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
 
   /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
   template <typename T>
@@ -228,21 +198,6 @@ public:
     std::vector<T> vec;
     vec.reserve(threads.size());
     return vec;
-  }
-
-  template <typename T>
-  std::optional<T>
-  read_type_ptrace(TraceePointer<T> address, pid_t pid)
-  {
-    typename std::remove_cv<T>::type result;
-    constexpr u64 sz = sizeof(T);
-    auto ptrace_read = read_bytes_ptrace(address, sz, &result, pid);
-    if (ptrace_read != sz) {
-      fmt::println("Failed to read {} bytes (read {})", ptrace_read, sz);
-      return {};
-    } else {
-      return result;
-    }
   }
 
   template <typename T>
@@ -292,23 +247,6 @@ public:
   }
 
   template <typename T>
-  T
-  cache_and_overwrite(TraceePointer<T> address, T &value)
-  {
-    auto old_value = read_type(address);
-    auto total_written = 0ull;
-    constexpr auto sz = sizeof(typename TPtr<T>::Type);
-    while (total_written < sz) {
-      auto written = pwrite64(mem_fd().get(), &value, sz, address.get());
-      if (-1 == written || 0 == written) {
-        PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
-      }
-      total_written += written;
-    }
-    return old_value.value();
-  }
-
-  template <typename T>
   void
   write(TraceePointer<T> address, T &value)
   {
@@ -320,30 +258,6 @@ public:
         PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
       }
       total_written += written;
-    }
-  }
-
-  template <typename T>
-  std::optional<T>
-  read_type_readv(TraceePointer<T> address, pid_t pid)
-  {
-    typename std::remove_cv<T>::type result;
-    constexpr u64 sz = sizeof(T);
-    struct iovec io;
-    struct iovec remote;
-    remote.iov_base = (void *)address.get();
-    remote.iov_len = sz;
-
-    // Read data from child process memory
-    io.iov_base = &result;
-    io.iov_len = sz;
-    ssize_t bytes_read = process_vm_readv(pid, &io, 1, &remote, 1, 0);
-    if (bytes_read != sz) {
-      fmt::println("Failed to read {} bytes, read {}", sz, bytes_read);
-      return {};
-    } else {
-      fmt::println("Successfully process_vm_readv");
-      return result;
     }
   }
 
@@ -370,11 +284,10 @@ public:
   sym::Frame current_frame(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
-  u8 *get_in_text_section(AddrPtr address) const noexcept;
+  // u8 *get_in_text_section(AddrPtr address) const noexcept;
   ElfSection *get_text_section(AddrPtr addr) const noexcept;
   // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
   std::optional<u64> cu_file_from_pc(AddrPtr address) const noexcept;
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
   const std::vector<CompilationUnitFile> &cu_files() const noexcept;
-  ptracestop::StopHandler *stop_handler() const noexcept;
 };

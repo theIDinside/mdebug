@@ -53,9 +53,9 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      stop_on_clone(false), tracee_r_debug(nullptr), spin_lock{},
-      shared_objects(), m_files{}, interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
-      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders()
+      stop_on_clone(false), tracee_r_debug(nullptr),
+      shared_objects(), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
+      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}), unwinders()
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -113,6 +113,14 @@ parse_stapsdt_note(ElfSection *section) noexcept
   return probes;
 }
 
+static TPtr<r_debug_extended>
+get_rdebug_state(ObjectFile *obj_file)
+{
+  const auto rdebug_state = obj_file->get_min_obj_sym(LOADER_STATE);
+  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
+  return rdebug_state->address.as<r_debug_extended>();
+}
+
 void
 TraceeController::install_loader_breakpoints() noexcept
 {
@@ -121,36 +129,20 @@ TraceeController::install_loader_breakpoints() noexcept
   auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
   auto tmp_objfile = mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
-  Elf::parse_objfile(tmp_objfile);
-  tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{});
+  Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
+  tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
   ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
-  auto rdebug_state = tmp_objfile->get_min_obj_sym(LOADER_STATE);
-  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
-  tracee_r_debug = interpreter_base.value() + rdebug_state->address;
-
-  std::vector<AddrPtr> addresses{};
+  tracee_r_debug = get_rdebug_state(tmp_objfile);
+  DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
   for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
     if (tmp_objfile->minimal_fn_symbols.contains(symbol_name)) {
-      const auto sym = tmp_objfile->minimal_fn_symbols[symbol_name];
-      const auto s_offset = sym.address; // - text_sec->address;
-      DLOG("mdb", "dl_debug state: {}", sym.address);
-      const auto addr = interpreter_base.transform([s_offset](auto addr) { return addr + s_offset; });
-      ASSERT(addr.has_value(), "Could not determine interpreter base to add symbol offset to.");
-      addresses.push_back(*addr);
+      const auto addr = tmp_objfile->minimal_fn_symbols[symbol_name].address;
+      DLOG("mdb", "Setting ld breakpoint at {}", addr);
+      set_tracer_bp(addr.as<u64>(), BpType{.shared_object_load = true});
     }
   }
-
-  ASSERT(addresses.size() != 0, "Failed to find required symbols");
-  DLOG("mdb", "Found {} ld breakpoint addresses", addresses.size());
-  for (const auto addr : addresses) {
-    DLOG("mdb", "Setting ld breakpoint at {}", addr);
-    set_tracer_bp(addr.as<u64>(), BpType{.shared_object_load = true});
-  }
-  set_tracer_bp(0xc16e + *interpreter_base, BpType{.shared_object_load = true});
-  set_tracer_bp(0xbff8 + *interpreter_base, BpType{.shared_object_load = true});
-  // map_complete no-op instruction "probe"
   delete tmp_objfile;
 }
 
@@ -190,7 +182,7 @@ TraceeController::on_so_event() noexcept
       break;
     }
   }
-  DLOG("mdb", "r_debug_extended found: {}; new shared objects: {}", count, new_sos);
+  DLOG("mdb", "[so event] new={}", new_sos);
 
   // do simple parsing first, then collect to do extensive processing in parallell
   std::vector<SharedObject::SoId> sos;
@@ -755,7 +747,7 @@ TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
                                        std::optional<AddrPtr> base_vma) noexcept
 {
   ASSERT(obj != nullptr, "Object file is null");
-  Elf::parse_objfile(obj);
+  Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
   object_files.push_back(obj);
   if (obj->minimal_fn_symbols.empty()) {
     obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
@@ -848,7 +840,7 @@ TraceeController::get_thread_name(Tid tid) const noexcept
   return name;
 }
 
-utils::StaticVector<u8>::own_ptr
+utils::StaticVector<u8>::OwnPtr
 TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
 {
   auto data = std::make_unique<utils::StaticVector<u8>>(bytes);
@@ -1097,20 +1089,6 @@ TraceeController::get_source(std::string_view name) noexcept
   return std::nullopt;
 }
 
-u8 *
-TraceeController::get_in_text_section(AddrPtr vma) const noexcept
-{
-  for (const auto obj : object_files) {
-    const auto sec = obj->parsed_elf->get_section(".text");
-    TPtr<void> relo_addr{sec->address};
-    auto offset = vma - relo_addr;
-    if (offset < sec->size()) {
-      return sec->m_section_ptr + offset;
-    }
-  }
-  return nullptr;
-}
-
 ElfSection *
 TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
@@ -1148,12 +1126,6 @@ const std::vector<CompilationUnitFile> &
 TraceeController::cu_files() const noexcept
 {
   return m_files;
-}
-
-ptracestop::StopHandler *
-TraceeController::stop_handler() const noexcept
-{
-  return ptracestop_handler;
 }
 
 static constexpr auto X86_64_RET_ADDR_REGISTER = 16;

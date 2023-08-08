@@ -46,7 +46,7 @@ class Elf
 {
 public:
   Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept;
-  static void parse_objfile(ObjectFile *object_file) noexcept;
+  static void parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept;
   std::span<ElfSection> sections() const noexcept;
   ElfSection *get_section(std::string_view name) const noexcept;
   ElfSection *get_section_or_panic(std::string_view name) const noexcept;

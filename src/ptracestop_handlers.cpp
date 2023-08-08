@@ -338,12 +338,6 @@ StopHandler::handle_bp_event(TaskInfo *t, BpEvent evt) noexcept
 }
 
 void
-StopHandler::handle_generic_stop(TaskInfo *) noexcept
-{
-  should_stop = false;
-}
-
-void
 StopHandler::handle_signalled(TaskInfo *t) noexcept
 {
   set_should_stop(true);
