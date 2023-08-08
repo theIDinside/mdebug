@@ -5,6 +5,10 @@
 #include <string_view>
 #include <sys/mman.h>
 
+namespace sym {
+class Unwinder;
+}
+
 class Elf;
 struct ElfSection;
 
@@ -26,7 +30,14 @@ struct ObjectFile
   TPtr<void> entry_point;
   TPtr<void> vm_text_section;
   Elf *parsed_elf = nullptr;
-  std::unordered_map<std::string_view, MinSymbol> minimal_symbols;
+  bool min_syms = false;
+  std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
+  std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
+  sym::Unwinder *unwinder;
+  // lowest address of the LOAD segments defined in program headers
+  AddrPtr low;
+  // highest address of the LOAD segments, defined in program headers
+  AddrPtr high;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
@@ -53,8 +64,11 @@ struct ObjectFile
   u64 get_offset(u8 *ptr) const noexcept;
   u8 *get_section(Elf *elf, u32 index) const noexcept;
   AddrPtr text_section_offset() const noexcept;
-  std::optional<MinSymbol> get_minsymbol(std::string_view name) noexcept;
+  std::optional<MinSymbol> get_min_fn_sym(std::string_view name) noexcept;
+  std::optional<MinSymbol> get_min_obj_sym(std::string_view name) noexcept;
+
   Path interpreter() const noexcept;
+  bool found_min_syms() const noexcept;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

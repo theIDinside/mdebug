@@ -1,8 +1,40 @@
 #include "events.h"
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
+#include <iterator>
 
 namespace ui::dap {
+
+ModuleEvent::ModuleEvent(std::string_view reason, SharedObject *so) noexcept
+    : id(so->so_id), reason(reason), name(so->name()), path(so->path), addr_range(so->relocated_addr_range()),
+      sym_info(so->symbol_info), symbol_file_path(so->symbol_file_path()), version(so->version())
+{
+  ASSERT(so != nullptr, "Shared object was null");
+}
+
+std::string
+ModuleEvent::serialize(int seq) const noexcept
+{
+  auto out = fmt::memory_buffer();
+  constexpr auto bi = [](auto &out) { return std::back_inserter(out); };
+  fmt::format_to(
+      bi(out),
+      R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":{},"name":"{}","path":"{}")",
+      seq, reason, id, name, path.c_str());
+
+  if (version) {
+    fmt::format_to(bi(out), R"(,"version":"{}")", *version);
+  }
+  fmt::format_to(bi(out), R"(,"symbolStatus":"{}")", so_sym_info_description(sym_info));
+
+  if (symbol_file_path) {
+    fmt::format_to(bi(out), R"(,"symbolFilePath":"{}")", *symbol_file_path);
+  }
+
+  fmt::format_to(bi(out), R"(,"addressRange":"{}:{}"}}}}}})", addr_range.low, addr_range.high);
+
+  return fmt::to_string(out);
+}
 
 ContinuedEvent::ContinuedEvent(Tid tid, bool all_threads) noexcept
     : thread_id(tid), all_threads_continued(all_threads)

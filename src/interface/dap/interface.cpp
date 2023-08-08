@@ -223,7 +223,7 @@ DAP::post_event(UIResultPtr serializable_event) noexcept
     LockGuard<SpinLock> guard{output_message_lock};
     events_queue.push_back(serializable_event);
   }
-  DLOG("dap", "posted event for msg with seq {}", serializable_event->response_seq);
+  DLOG("dap", "posted event");
   notify_new_message();
 }
 

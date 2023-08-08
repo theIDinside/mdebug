@@ -11,6 +11,8 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
+#include "symbolication/dwarf_expressions.h"
+#include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
@@ -50,9 +52,10 @@ template <typename T> using Set = std::unordered_set<T>;
 
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, object_files{}, threads{}, bps(process_space_id), stop_on_clone(false),
-      tracee_r_debug(nullptr), spin_lock{}, shared_objects(), m_files{}, interpreter_base{}, entry{},
-      session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this})
+    : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
+      stop_on_clone(false), tracee_r_debug(nullptr), spin_lock{},
+      shared_objects(), m_files{}, interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
+      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders()
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -119,22 +122,18 @@ TraceeController::install_loader_breakpoints() noexcept
   auto tmp_objfile = mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
   Elf::parse_objfile(tmp_objfile);
-  tmp_objfile->parsed_elf->parse_min_symbols();
+  tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
   ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
-  auto rdebug_state = tmp_objfile->get_minsymbol(LOADER_STATE);
+  auto rdebug_state = tmp_objfile->get_min_obj_sym(LOADER_STATE);
   ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
   tracee_r_debug = interpreter_base.value() + rdebug_state->address;
-  DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
-  for (const auto &p : probes) {
-    DLOG("mdb", "probe {}, found={}", p.name, p.address);
-  }
 
   std::vector<AddrPtr> addresses{};
   for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
-    if (tmp_objfile->minimal_symbols.contains(symbol_name)) {
-      const auto sym = tmp_objfile->minimal_symbols[symbol_name];
+    if (tmp_objfile->minimal_fn_symbols.contains(symbol_name)) {
+      const auto sym = tmp_objfile->minimal_fn_symbols[symbol_name];
       const auto s_offset = sym.address; // - text_sec->address;
       DLOG("mdb", "dl_debug state: {}", sym.address);
       const auto addr = interpreter_base.transform([s_offset](auto addr) { return addr + s_offset; });
@@ -152,6 +151,7 @@ TraceeController::install_loader_breakpoints() noexcept
   set_tracer_bp(0xc16e + *interpreter_base, BpType{.shared_object_load = true});
   set_tracer_bp(0xbff8 + *interpreter_base, BpType{.shared_object_load = true});
   // map_complete no-op instruction "probe"
+  delete tmp_objfile;
 }
 
 void
@@ -161,6 +161,9 @@ TraceeController::on_so_event() noexcept
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
   r_debug_extended rdebug_ext = read_type(tracee_r_debug);
   auto count = 1;
+  int new_so_ids[50];
+  int new_sos = 0;
+
   while (true) {
     // means we've hit some "entry" point in the linker-debugger interface; we need to wait for RT_CONSISTENT to
     // safely read "link map" containing the shared objects
@@ -173,7 +176,9 @@ TraceeController::on_so_event() noexcept
       auto name_ptr = TPtr<char>{map.l_name};
       const auto path = read_string(name_ptr);
       if (path) {
-        shared_objects.add_if_new(linkmap, map.l_addr, std::move(*path));
+        const auto so = shared_objects.add_if_new(linkmap, map.l_addr, std::move(*path));
+        if (so)
+          new_so_ids[new_sos++] = so.value();
       }
       linkmap = TPtr<link_map>{map.l_next};
     }
@@ -185,17 +190,30 @@ TraceeController::on_so_event() noexcept
       break;
     }
   }
-  DLOG("mdb", "r_debug_extended found: {}", count);
+  DLOG("mdb", "r_debug_extended found: {}; new shared objects: {}", count, new_sos);
 
-  auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
-  while (linkmap != nullptr) {
-    link_map map = read_type(linkmap);
-    auto name_ptr = TPtr<char>{map.l_name};
-    const auto path = read_string(name_ptr);
-    if (path) {
-      shared_objects.add_if_new(linkmap, map.l_addr, std::move(*path));
+  // do simple parsing first, then collect to do extensive processing in parallell
+  std::vector<SharedObject::SoId> sos;
+  for (auto i = 0; i < new_sos; ++i) {
+    auto so = shared_objects.get_so(new_so_ids[i]);
+    const auto so_of = mmap_objectfile(so->path);
+    if (so_of) {
+      register_object_file(so_of, false, so->elf_vma_addr_diff);
+      sos.push_back(new_so_ids[i]);
     }
-    linkmap = TPtr<link_map>{map.l_next};
+  }
+  process_dwarf(sos);
+}
+
+void
+TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
+{
+  // TODO(simon): for now, we do no dwarf processing, implement that in future commits; just emit DAP module
+  // events. We emit them here, because the DWARF parsing may or may not be multi threaded, so they might be done
+  // out of order.
+  for (auto so_id : sos) {
+    const auto so = shared_objects.get_so(so_id);
+    Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
   }
 }
 
@@ -418,7 +436,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
 
   std::vector<MinSymbol> matching_symbols;
   for (ObjectFile *obj : object_files) {
-    if (auto s = obj->get_minsymbol(function_name); s.has_value()) {
+    if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {
       matching_symbols.push_back(*s);
     }
   }
@@ -733,12 +751,30 @@ TraceeController::is_running() const noexcept
 
 // Debug Symbols Related Logic
 void
-TraceeController::register_object_file(ObjectFile *obj) noexcept
+TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
+                                       std::optional<AddrPtr> base_vma) noexcept
 {
+  ASSERT(obj != nullptr, "Object file is null");
+  Elf::parse_objfile(obj);
   object_files.push_back(obj);
-  if (obj->minimal_symbols.empty()) {
-    obj->parsed_elf->parse_min_symbols();
+  if (obj->minimal_fn_symbols.empty()) {
+    obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
   }
+  if (is_main_executable)
+    main_executable = obj;
+
+  auto unwinder = sym::parse_eh(obj, obj->parsed_elf->get_section(".eh_frame"), base_vma.value_or(0));
+  const auto section = obj->parsed_elf->get_section(".debug_frame");
+  if (section) {
+    DLOG("mdb", ".debug_frame section found; parsing DWARF CFI section");
+    sym::parse_dwarf_eh(unwinder, section, -1);
+  }
+
+  unwinders.push_back(unwinder);
+  // todo(simon): optimization possible; insert in a sorted fashion instead.
+  std::sort(unwinders.begin(), unwinders.end(), [](auto a, auto b) {
+    return a->addr_range.low < b->addr_range.low && a->addr_range.high < b->addr_range.high;
+  });
 }
 
 struct AuxvPair
@@ -907,6 +943,24 @@ TraceeController::current_frame(TaskInfo *task) noexcept
     };
 }
 
+sym::Unwinder *
+TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
+{
+  for (auto unwinder : unwinders) {
+    if (unwinder->addr_range.contains(pc)) {
+      return unwinder;
+    }
+  }
+  return nullptr;
+}
+
+std::vector<AddrPtr>
+TraceeController::dwarf_unwind_callstack(TaskInfo *task) noexcept
+{
+  task->cache_registers();
+  return return_addresses(this, task);
+}
+
 std::vector<AddrPtr> &
 TraceeController::unwind_callstack(TaskInfo *task) noexcept
 {
@@ -983,7 +1037,14 @@ TraceeController::build_callframe_stack(TaskInfo *task) noexcept
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;
+  auto dwarf_frame_pcs = dwarf_unwind_callstack(task);
   auto &frame_pcs = unwind_callstack(task);
+  for (auto pc : dwarf_frame_pcs) {
+    DLOG("eh", "Dwarf PC {}", pc);
+  }
+  for (auto pc : frame_pcs) {
+    DLOG("eh", "Base pointer PC {}", pc);
+  }
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
     auto symbol = find_fn_by_pc(i->as_void());
@@ -1095,4 +1156,54 @@ TraceeController::stop_handler() const noexcept
   return ptracestop_handler;
 }
 
+static constexpr auto X86_64_RET_ADDR_REGISTER = 16;
+
+std::vector<AddrPtr>
+return_addresses(TraceeController *tc, TaskInfo *t) noexcept
+{
+  std::vector<AddrPtr> pcs;
+  std::vector<sym::CFAStateMachine> frames_computers;
+  std::vector<sym::RegisterValues> frame_registers;
+
+  pcs.push_back(t->registers->rip);
+  sym::Unwinder *unwinder = tc->get_unwinder_from_pc(t->registers->rip);
+  ASSERT(unwinder != nullptr, "Could not find unwinder for pc {}", AddrPtr{t->registers->rip});
+  const sym::UnwindInfo *inf = unwinder->get_unwind_info(t->registers->rip);
+  frames_computers.push_back(sym::CFAStateMachine::Init(tc, t, inf, pcs.back()));
+
+  // initialize bottom frame's registers with actual live register contents
+  sym::RegisterValues regs{};
+  for (auto i = 0; i <= 16; ++i) {
+    regs[i] = t->get_register(i);
+  }
+
+  while (inf != nullptr) {
+    const auto pc = pcs.back();
+    DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc={}", inf->cie->offset, inf->fde_eh_offset, pc);
+    DwarfBinaryReader reader{inf->cie->instructions.data(), inf->cie->instructions.size()};
+    sym::decode(reader, frames_computers.back(), inf);
+    DwarfBinaryReader fde{inf->fde_insts.data(), inf->fde_insts.size()};
+    sym::decode(fde, frames_computers.back(), inf);
+    frame_registers.push_back(frames_computers.back().produce_preserved_reg_contents(regs));
+    regs = frame_registers.back();
+    pcs.push_back(frame_registers.back()[X86_64_RET_ADDR_REGISTER]);
+    inf = unwinder->get_unwind_info(pcs.back());
+    if (inf != nullptr && pc != pcs.back())
+      frames_computers.push_back(sym::CFAStateMachine{tc, t, frame_registers.back(), inf, pcs.back()});
+    else {
+      unwinder = tc->get_unwinder_from_pc(pcs.back());
+      if (unwinder) {
+        inf = unwinder->get_unwind_info(pcs.back());
+        frames_computers.push_back(sym::CFAStateMachine{tc, t, frame_registers.back(), inf, pcs.back()});
+      } else {
+        pcs.pop_back();
+        break;
+      }
+    }
+  }
+  return pcs;
+}
+
 #pragma GCC diagnostic pop
+
+// 0x405e6b

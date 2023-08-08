@@ -26,6 +26,12 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace sym {
+class Unwinder;
+};
+
+std::vector<AddrPtr> return_addresses(TraceeController *tc, TaskInfo *t) noexcept;
+
 namespace ui {
 struct UICommand;
 };
@@ -86,6 +92,7 @@ struct TraceeController
   // Members
   pid_t task_leader;
   std::vector<ObjectFile *> object_files;
+  ObjectFile *main_executable;
   ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
@@ -104,6 +111,7 @@ private:
   TargetSession session;
   bool is_in_user_ptrace_stop;
   ptracestop::StopHandler *ptracestop_handler;
+  std::vector<sym::Unwinder *> unwinders;
 
 public:
   // Constructors
@@ -117,6 +125,10 @@ public:
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
   void install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
+
+  // N.B(simon): process shared object's in parallell, determined by some heuristic (like for instance file size
+  // could determine how much thread resources are subscribed to parsing a shared object.)
+  void process_dwarf(std::vector<SharedObject::SoId> sos) noexcept;
   /** Return the open mem fd */
   ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
@@ -198,7 +210,7 @@ public:
   bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
-  void register_object_file(ObjectFile *obj) noexcept;
+  void register_object_file(ObjectFile *obj, bool is_main_executable, std::optional<AddrPtr> base_vma) noexcept;
 
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
@@ -351,8 +363,10 @@ public:
    */
   void notify_self() noexcept;
   void start_awaiter_thread() noexcept;
+  sym::Unwinder *get_unwinder_from_pc(AddrPtr pc) noexcept;
   sym::CallStack &build_callframe_stack(TaskInfo *task) noexcept;
   std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
+  std::vector<AddrPtr> dwarf_unwind_callstack(TaskInfo *task) noexcept;
   sym::Frame current_frame(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;

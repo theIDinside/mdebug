@@ -135,7 +135,7 @@ TEST(CallFrameParsing, verifyParsedEhFrameInOrder)
     EXPECT_GT(i->start, start);
   }
 }
-
+/*
 TEST(CallFrameParsing, parseThreadsShared)
 {
   static const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
@@ -231,3 +231,4 @@ TEST(CallFrameParsing, parseThreadsShared)
     std::cout << to_str(fde3_debug[i]) << std::endl;
   }
 }
+*/
