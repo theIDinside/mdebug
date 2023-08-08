@@ -135,8 +135,9 @@ ifbacktrace_failed:
       "mdb", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---",
                          loc.file_name(), loc.line(), loc.function_name(), err_msg));
 
-  fmt::println("{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---",
-                                 loc.file_name(), loc.line(), loc.function_name(), err_msg));
+  fmt::println(
+      "{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}--- [PANIC] ---",
+                        loc.file_name(), loc.line(), loc.function_name(), err_msg, errno));
   delete logging::get_logging();
   exit(EXIT_FAILURE);
 }
@@ -259,7 +260,7 @@ DwarfBinaryReader::dwarf_spec_read_value() noexcept
 std::span<const u8>
 DwarfBinaryReader::get_span(u64 size) noexcept
 {
-  ASSERT(remaining_size() <= size, "Not enough bytes left in reader. Requested {}, remaining {}", size,
+  ASSERT(size <= remaining_size(), "Not enough bytes left in reader. Requested {}, remaining {}", size,
          remaining_size());
   const auto span = std::span{head, size};
   head += size;
@@ -294,7 +295,7 @@ DwarfBinaryReader::DwarfBinaryReader(const u8 *buffer, u64 size) noexcept
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
-    : buffer(reader.buffer), head(reader.head), size(reader.size), bookmarks()
+    : buffer(reader.buffer), head(reader.head), end(reader.end), size(reader.size), bookmarks()
 {
 }
 
@@ -319,7 +320,7 @@ DwarfBinaryReader::bytes_read() const noexcept
 void
 DwarfBinaryReader::skip(i64 bytes) noexcept
 {
-  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head - static_cast<u64>(std::abs(bytes)) > buffer,
+  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head + bytes > buffer,
          "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, remaining_size());
   head += bytes;
 }
@@ -366,6 +367,6 @@ to_addr(std::string_view s) noexcept
 u64
 get_register(user_regs_struct *regs, int reg_number) noexcept
 {
-  ASSERT(reg_number < 16, "Register number {} not supported", reg_number);
+  ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
   return *(u64 *)(((std::uintptr_t)regs) + offsets[reg_number]);
 }

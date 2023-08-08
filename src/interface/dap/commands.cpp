@@ -517,12 +517,17 @@ StackTrace::execute(Tracer *tracer) noexcept
   for (const auto &frame : cfs.frames) {
     if (frame.type == sym::FrameType::Full) {
       const auto &lt = frame.cu_file->line_table();
+      DLOG("dwarf", "walking line table of CU: {} for frame {} at pc {}", frame.cu_file->name(),
+           frame.function_name().value_or("could not find fn name"), frame.rip);
       auto line = 0;
       auto col = 0;
+      // todo(simon): linear search is horrid. But binary search is so fragile instead. So for now, we do the
+      // absolute worst, so long it works.
       for (auto ita = lt.cbegin(), itb = ita + 1; ita != lt.cend() && itb != lt.cend(); ita++, itb++) {
         if (ita->pc <= frame.rip && itb->pc > frame.rip) {
           line = ita->line;
           col = ita->column;
+          break;
         }
       }
       response->stack_frames.push_back(

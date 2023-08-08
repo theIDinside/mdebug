@@ -1,6 +1,7 @@
 #pragma once
 #include "../common.h"
 #include <string_view>
+
 /**
  * Parsing & Decoding minimalistic symbols found in the elf symtable (.symtab)
  * These are generally not particularly useful, unless of course you're doing some hacking stuff,

@@ -17,11 +17,14 @@ struct ElfSection
   u64 m_section_size;
   u64 file_offset;
   AddrPtr address;
+  AddrPtr reloc_base;
+  // TODO(simon): add relocated_address field
   std::string_view get_name() const noexcept;
   const u8 *begin() const noexcept;
   const u8 *end() const noexcept;
   const u8 *into(AddrPtr addr) const noexcept;
   bool contains_relo_addr(AddrPtr addr) const noexcept;
+  AddrPtr vma() const noexcept;
 
   /**
    * Determines offset of `inside_ptr` from `m_section_ptr`.
@@ -49,7 +52,7 @@ public:
   ElfSection *get_section_or_panic(std::string_view name) const noexcept;
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
-  void parse_min_symbols() const noexcept;
+  void parse_min_symbols(AddrPtr base_vma) const noexcept;
 
   Elf64Header *header;
   ElfSectionData m_sections;

@@ -26,6 +26,8 @@ set(MIDAS_SOURCES
   src/awaiter.h
   src/breakpoint.cpp
   src/breakpoint.h
+  src/so_loading.cpp
+  src/so_loading.h
   src/posix/argslist.cpp
   src/posix/argslist.h
   src/symbolication/elf.cpp
@@ -112,22 +114,22 @@ target_link_libraries(
   nlohmann_json::nlohmann_json
 )
 
-add_executable(
-  parse_cf
-  test/unittest/parse_cf.cpp
-  src/symbolication/dwarf_frameunwinder.cpp
-  src/symbolication/elf.cpp
-  src/common.cpp
-  src/utils/logger.cpp
-  ${COMMON_SRC}
-)
+# add_executable(
+#   parse_cf
+#   test/unittest/parse_cf.cpp
+#   src/symbolication/dwarf_frameunwinder.cpp
+#   src/symbolication/elf.cpp
+#   src/common.cpp
+#   src/utils/logger.cpp
+#   ${COMMON_SRC}
+# )
 
-target_link_libraries(
-  parse_cf
-  GTest::gtest_main
-  fmt::fmt
-  mdb_spinlock
-)
+# target_link_libraries(
+#   parse_cf
+#   GTest::gtest_main
+#   fmt::fmt
+#   mdb_spinlock
+# )
 
 add_executable(
   base64_encoding
@@ -147,7 +149,7 @@ target_link_libraries(
 include(GoogleTest)
 gtest_discover_tests(parse_dap_requests)
 gtest_discover_tests(base64_encoding)
-gtest_discover_tests(parse_cf)
+# gtest_discover_tests(parse_cf)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
@@ -176,6 +178,8 @@ if(NODEJS)
       setInstructionBreakpoints 
       stackframes
       threadExited
+      moduleEvent
+      unwinder
   )
   foreach(driver_test ${DRIVER_TESTS})
     add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})

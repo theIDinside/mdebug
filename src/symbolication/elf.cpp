@@ -37,9 +37,16 @@ ElfSection::into(AddrPtr vm_addr) const noexcept
 bool
 ElfSection::contains_relo_addr(AddrPtr vm_address) const noexcept
 {
-  if (vm_address < this->address)
+  const auto addr = vma();
+  if (vm_address < addr)
     return false;
-  return (vm_address - address) < size();
+  return (vm_address - addr) < size();
+}
+
+AddrPtr
+ElfSection::vma() const noexcept
+{
+  return reloc_base + address;
 }
 
 u64
@@ -88,9 +95,9 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noe
       debug_str_offsets{nullptr}, debug_rnglists{nullptr}, debug_loclist{nullptr}
 {
   obj_file->parsed_elf = this;
-  str_table = get_section_or_panic(".strtab");
-  debug_info = get_section_or_panic(".debug_info");
-  debug_abbrev = get_section_or_panic(".debug_abbrev");
+  str_table = get_section(".strtab");
+  debug_info = get_section(".debug_info");
+  debug_abbrev = get_section(".debug_abbrev");
   debug_str = get_section(".debug_str");
   debug_line = get_section(".debug_line");
   debug_ranges = get_section(".debug_ranges");
@@ -118,13 +125,14 @@ ElfSection *
 Elf::get_section_or_panic(std::string_view name) const noexcept
 {
   auto sec = get_section(name);
-  ASSERT(sec != nullptr, "Expected {} not to be null", name);
+  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, this->obj_file->path.c_str());
   return sec;
 }
 
 void
 Elf::parse_objfile(ObjectFile *object_file) noexcept
 {
+  DLOG("mdb", "Parsing objfile {}", object_file->path.c_str());
   const auto header = object_file->get_at_offset<Elf64Header>(0);
   ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
@@ -132,7 +140,14 @@ Elf::parse_objfile(ObjectFile *object_file) noexcept
   const auto sec_names_offset_hdr =
       object_file->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
 
+  for (auto i = 0; i < header->e_phnum; ++i) {
+    auto phdr = object_file->get_at_offset<Elf64_Phdr>(header->e_phoff);
+    if (phdr->p_type == PT_LOAD) {
+    }
+  }
+
   auto sec_hdrs_offset = header->e_shoff;
+  // parse sections
   for (auto i = 0; i < data.count; i++) {
     const auto sec_hdr = object_file->get_at_offset<Elf64_Shdr>(sec_hdrs_offset);
     sec_hdrs_offset += header->e_shentsize;
@@ -142,18 +157,22 @@ Elf::parse_objfile(ObjectFile *object_file) noexcept
         object_file->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
     data.sections[i].file_offset = sec_hdr->sh_offset;
     data.sections[i].address = sec_hdr->sh_addr;
+    data.sections[i].reloc_base = nullptr;
   }
   // ObjectFile is the owner of `Elf`
   new Elf{header, data, object_file};
 }
 
 void
-Elf::parse_min_symbols() const noexcept
+Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
 {
-
   std::span<ElfSection> sects = sections();
   auto strtable = std::ranges::find_if(sects, [](ElfSection &sect) { return sect.get_name() == ".strtab"; });
-  VERIFY(strtable != std::end(sects), "Could not find section .strtab");
+  if (strtable == sects.end()) {
+    obj_file->min_syms = false;
+    return;
+  }
+  DLOG("mdb", "parsing min symbols for {}", obj_file->path.c_str());
 
   for (auto &sec : sections()) {
     if (sec.get_name() == ".symtab") {
@@ -162,10 +181,17 @@ Elf::parse_min_symbols() const noexcept
       auto entries = (end - start) / sizeof(Elf64_Sym);
       std::span<Elf64_Sym> symbols{(Elf64_Sym *)sec.m_section_ptr, entries};
       for (auto &symbol : symbols) {
-        std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
-        obj_file->minimal_symbols[name] =
-            MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+        if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
+          std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
+          obj_file->minimal_fn_symbols[name] =
+              MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
+        } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
+          std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
+          obj_file->minimal_obj_symbols[name] =
+              MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
+        }
       }
     }
   }
+  obj_file->min_syms = true;
 }

@@ -48,23 +48,20 @@ struct DwarfStack
 // already "there".
 struct ExprByteCodeInterpreter
 {
-  explicit ExprByteCodeInterpreter(std::span<const u8> bytecode) noexcept;
+  explicit ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t, const UnwindInfo *unwind_info,
+                                   std::vector<u8> &&byte_stream) noexcept;
   AddrPtr request_frame_base() noexcept;
   void run() noexcept;
 
   DwarfStack stack;
-  DwarfBinaryReader reader;
   DwarfOp latest_decoded;
   TraceeController *tc;
   TaskInfo *task;
-  UnwindInfo *unwind_info;
-
-private:
-  std::span<const u8> bytecode;
+  const UnwindInfo *unwind_info;
+  std::vector<u8> byte_stream;
+  DwarfBinaryReader reader;
 };
 
 using Op = void (*)(ExprByteCodeInterpreter &);
-
-using ExprOperation = void (*)(ExprByteCodeInterpreter &, DwarfBinaryReader &);
 
 } // namespace sym

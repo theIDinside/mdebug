@@ -1,10 +1,11 @@
 #include "objfile.h"
+#include "../so_loading.h"
 #include "elf_symbols.h"
 #include <optional>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary),
-      entry_point(), vm_text_section{}, minimal_symbols{}
+      entry_point(), vm_text_section{}, minimal_fn_symbols{}, minimal_obj_symbols{}
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -32,11 +33,47 @@ ObjectFile::text_section_offset() const noexcept
 }
 
 std::optional<MinSymbol>
-ObjectFile::get_minsymbol(std::string_view name) noexcept
+ObjectFile::get_min_fn_sym(std::string_view name) noexcept
 {
-  if (minimal_symbols.contains(name)) {
-    return minimal_symbols[name];
+  if (minimal_fn_symbols.contains(name)) {
+    return minimal_fn_symbols[name];
   } else {
     return std::nullopt;
   }
+}
+
+std::optional<MinSymbol>
+ObjectFile::get_min_obj_sym(std::string_view name) noexcept
+{
+  if (minimal_obj_symbols.contains(name)) {
+    return minimal_obj_symbols[name];
+  } else {
+    return std::nullopt;
+  }
+}
+
+Path
+ObjectFile::interpreter() const noexcept
+{
+  const auto path = interpreter_path(parsed_elf->get_section(".interp"));
+  return path;
+}
+
+bool
+ObjectFile::found_min_syms() const noexcept
+{
+  return min_syms;
+}
+
+ObjectFile *
+mmap_objectfile(const Path &path) noexcept
+{
+  if (!fs::exists(path)) {
+    return nullptr;
+  }
+
+  auto fd = ScopedFd::open_read_only(path);
+  const auto addr = mmap_file<u8>(fd, fd.file_size(), true);
+  auto objfile = new ObjectFile{path, fd.file_size(), addr};
+  return objfile;
 }

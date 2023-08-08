@@ -1,6 +1,7 @@
 #include "task.h"
 #include "ptrace.h"
 #include "symbolication/callstack.h"
+#include "tracee_controller.h"
 #include <sys/ptrace.h>
 #include <sys/user.h>
 
@@ -33,6 +34,15 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 }
 
 void
+TaskInfo::consume_wait() noexcept
+{
+  int stat;
+  waitpid(tid, &stat, 0);
+  this->tracer_stopped = true;
+  this->user_stopped = true;
+}
+
+void
 TaskInfo::resume(RunType type) noexcept
 {
   if (user_stopped) {
@@ -49,6 +59,23 @@ TaskInfo::resume(RunType type) noexcept
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   }
   set_dirty();
+}
+
+void
+TaskInfo::step_over_breakpoint(TraceeController *tc, BpStat *bpstat) noexcept
+{
+  ASSERT(bpstat != nullptr, "Requires a valid bpstat");
+  auto bp = tc->bps.get_by_id(bpstat->bp_id);
+  auto it = find(tc->bps.bpstats, [t = tid](auto &bp_stat) { return bp_stat.tid == t; });
+  DLOG("mdb", "Stepping over bp {} at {}", bpstat->bp_id, bp->address);
+  bp->disable(tc->task_leader);
+  resume(RunType::Step);
+  consume_wait();
+  bpstat->stepped_over = true;
+  bp->enable(tc->task_leader);
+  tc->bps.bpstats.erase(it);
+  cache_registers();
+  DLOG("mdb", "After step: {}", AddrPtr{registers->rip});
 }
 
 void

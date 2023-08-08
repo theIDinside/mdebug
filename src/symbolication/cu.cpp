@@ -19,6 +19,9 @@ CompilationUnitBuilder::CompilationUnitBuilder(ObjectFile *obj_file) noexcept : 
 std::vector<CompileUnitHeader>
 CompilationUnitBuilder::build_cu_headers() noexcept
 {
+  VERIFY(
+      obj_file->parsed_elf->debug_info != nullptr,
+      "Main executable must have dwarf debug information provided. This is an absolute constraint made by MDB.");
   auto it = obj_file->parsed_elf->debug_info->begin();
   auto determine_dwarf = obj_file->get_at<DetermineDwarf>(it);
   if (determine_dwarf->is_32()) {

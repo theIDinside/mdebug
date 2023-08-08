@@ -11,7 +11,10 @@
 
 namespace ptracestop {
 
-Action::Action(StopHandler *handler) noexcept : handler(handler), tc(handler->tc), should_stop(false) {}
+Action::Action(StopHandler *handler) noexcept
+    : handler(handler), tc(handler->tc), should_stop(false), step_over_breakpoint(nullptr)
+{
+}
 
 Action::~Action() noexcept { handler->is_stepping = false; }
 
@@ -22,6 +25,10 @@ Action::completed(TaskInfo *t, bool should_stop) noexcept
   DLOG("mdb", "Resume {}, can_continue={}, should_stop = {}: will resume => {}", t->tid, t->can_continue(),
        should_stop, !should_stop && t->can_continue());
   if (!should_stop && t->can_continue()) {
+    if (step_over_breakpoint) {
+      t->step_over_breakpoint(tc, step_over_breakpoint);
+      step_over_breakpoint = nullptr;
+    }
     t->resume(RunType::Continue);
   }
   return is_done;
@@ -315,15 +322,18 @@ StopHandler::handle_bp_event(TaskInfo *t, BpEvent evt) noexcept
   case BpEventType::UserBreakpointHit: {
     tc->stop_all();
     tc->emit_stopped_at_breakpoint({.pid = tc->task_leader, .tid = t->tid}, evt.bp->id);
-    DLOG("mdb", "Hit breakpoint - we MUST stop, so why aren't we?");
     set_should_stop(true);
     break;
   }
   case BpEventType::None:
     break;
-  case BpEventType::TracerBreakpointHit:
-    evt.bp->disable(t->tid);
-    break;
+  case BpEventType::TracerBreakpointHit: {
+    auto bpstat = find(tc->bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
+    action->set_step_over(bpstat.base());
+    if (evt.bp->bp_type.shared_object_load) {
+      tc->on_so_event();
+    }
+  } break;
   }
 }
 

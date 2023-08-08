@@ -61,6 +61,7 @@ main(int argc, const char **argv)
   logging::Logger::get_logger()->setup_channel("dap");
   logging::Logger::get_logger()->setup_channel("dwarf");
   logging::Logger::get_logger()->setup_channel("awaiter");
+  logging::Logger::get_logger()->setup_channel("eh");
 
   std::span<const char *> args(argv, argc);
   logging::get_logging()->log("mdb", "MDB CLI Arguments");

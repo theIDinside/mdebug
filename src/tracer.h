@@ -64,7 +64,6 @@ public:
   Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept;
   void add_target_set_current(pid_t task_leader, const Path &path, TargetSession session) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
-  AddObjectResult mmap_objectfile(const Path &path) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
   TraceeController *get_current() noexcept;

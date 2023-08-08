@@ -1,12 +1,46 @@
 #pragma once
 
 #include "../../common.h"
+#include "../../so_loading.h"
+#include "../../symbolication/block.h"
 #include "../ui_result.h"
 #include "dap_defs.h"
 #include "types.h"
 #include <nlohmann/json_fwd.hpp>
 
 namespace ui::dap {
+
+enum ChangeEvent : u8
+{
+  New = 0,
+  Changed = 1,
+  Removed = 2,
+};
+
+static constexpr std::string_view reasons[3]{"new", "changed", "removed"};
+// Module event: https://microsoft.github.io/debug-adapter-protocol/specification#Events_Module
+struct ModuleEvent final : public ui::UIResult
+{
+  ModuleEvent(int id, std::string_view reason, std::string &&name, Path &&path,
+              std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
+              AddressRange range, SharedObjectSymbols so_sym_info) noexcept
+      : id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
+        sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)), version(std::move(version))
+  {
+  }
+
+  ModuleEvent(std::string_view reason, SharedObject *shared_object) noexcept;
+  int id;
+  std::string_view reason;
+  std::string name;
+  Path path;
+  AddressRange addr_range;
+  SharedObjectSymbols sym_info;
+  std::optional<std::string> symbol_file_path;
+  std::optional<std::string> version;
+
+  std::string serialize(int seq) const noexcept override final;
+};
 
 struct ContinuedEvent final : public ui::UIResult
 {

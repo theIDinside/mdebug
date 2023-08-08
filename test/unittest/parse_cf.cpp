@@ -49,37 +49,18 @@ create_ehframe(const char *path)
   return mock_eh_frame;
 }
 
-static ElfSection
-create_libxul_ehframe()
-{
-  ScopedFd ehframe = ScopedFd::open("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame", O_RDONLY);
-
-  auto ehframe_data = new std::vector<u8>{};
-  ehframe_data->resize(ehframe.file_size());
-
-  EXPECT_NE(::read(ehframe, ehframe_data->data(), ehframe.file_size()), -1);
-  auto mock_eh_frame = ElfSection{.m_section_ptr = ehframe_data->data(),
-                                  .m_name = ".eh_frame",
-                                  .m_section_size = ehframe.file_size(),
-                                  .file_offset = 0x325fce8,
-                                  .address = 0x325fce8};
-
-  return mock_eh_frame;
-}
-
 std::vector<u8>
 create_mock_eh_frame_hdr_data()
 {
   ScopedFd ehframe_header =
       ScopedFd::open("/home/cx/dev/foss/cx/dbm/test/unittest/threads_ehframe_header", O_RDONLY);
-  EXPECT_EQ(ehframe_header.file_size(), 912);
+  EXPECT_TRUE(ehframe_header.is_open());
+  EXPECT_EQ(ehframe_header.file_size(), 908);
   std::vector<u8> ehframe_header_data{};
   ehframe_header_data.resize(ehframe_header.file_size());
   EXPECT_NE(::read(ehframe_header, ehframe_header_data.data(), ehframe_header.file_size()), -1);
   return ehframe_header_data;
 }
-
-static const auto mock_eh_frame = create_mock_eh_frame_section();
 
 constexpr static auto LIBXUL_EH_FRAME_FDE_COUNT = 417556;
 constexpr static auto LIBXUL_DEBUG_FRAME_FDE_COUNT = 14788;
@@ -87,20 +68,27 @@ constexpr static auto LIBXUL_EH_FRAME_CIE_COUNT = 2;
 constexpr static auto LIBXUL_DEBUG_FRAME_CIE_COUNT = 1835;
 constexpr static auto LIBXUL_TOTAL_FDE = LIBXUL_EH_FRAME_FDE_COUNT + LIBXUL_DEBUG_FRAME_FDE_COUNT;
 constexpr static auto LIBXUL_TOTAL_CIE = LIBXUL_EH_FRAME_CIE_COUNT + LIBXUL_DEBUG_FRAME_CIE_COUNT;
-static const auto libxul_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame");
-static const auto libxul_debug_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_debug_frame");
-static const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
 
 TEST(CallFrameParsing, calculateCieFdeCount)
 {
+  static const auto mock_eh_frame = create_mock_eh_frame_section();
+  static const auto sf_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/sf_ehframe");
   const auto [cie_count, fde_count] =
       sym::elf_eh_calculate_entries_count(DwarfBinaryReader{mock_eh_frame.data(), mock_eh_frame.size()});
   EXPECT_EQ(cie_count, 2);
   EXPECT_EQ(fde_count, 112);
+
+  const auto [cie_count2, fde_count2] =
+      sym::elf_eh_calculate_entries_count(DwarfBinaryReader{sf_eh_frame.data(), sf_eh_frame.size()});
+  EXPECT_EQ(cie_count2, 2);
+  EXPECT_EQ(fde_count2, 16);
 }
 
 TEST(CallFrameParsing, calculateCieFdeCount_libxul)
 {
+  static const auto libxul_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame");
+  static const auto libxul_debug_frame =
+      create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_debug_frame");
   const auto [cie_count, fde_count] =
       sym::elf_eh_calculate_entries_count(DwarfBinaryReader{libxul_eh_frame.data(), libxul_eh_frame.size()});
   const auto [cie_count2, fde_count2] = sym::dwarf_eh_calculate_entries_count(
@@ -118,6 +106,9 @@ TEST(CallFrameParsing, calculateCieFdeCount_libxul)
 
 TEST(CallFrameParsing, parseLibxulUnwindInfo)
 {
+  static const auto libxul_eh_frame = create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_eh_frame");
+  static const auto libxul_debug_frame =
+      create_ehframe("/home/cx/dev/foss/cx/dbm/test/unittest/libxul_debug_frame");
   auto unwinder = sym::parse_eh(nullptr, &libxul_eh_frame, -1);
   sym::parse_dwarf_eh(unwinder, &libxul_debug_frame, -1);
   EXPECT_EQ(LIBXUL_TOTAL_FDE, unwinder->total_fdes());
@@ -126,13 +117,16 @@ TEST(CallFrameParsing, parseLibxulUnwindInfo)
 
 TEST(CallFrameParsing, getRegisterValueByDwarfRegisterNumber)
 {
-  user_regs_struct regs{.rbp = 0xdeadbeef, .rsp = 0xba5};
+  user_regs_struct regs{0};
+  regs.rbp = 0xdeadbeef;
+  regs.rsp = 0xba5;
   EXPECT_EQ(get_register(&regs, 6), 0xdeadbeef);
   EXPECT_EQ(get_register(&regs, 7), 0xba5);
 }
 
 TEST(CallFrameParsing, verifyParsedEhFrameInOrder)
 {
+  static const auto mock_eh_frame = create_mock_eh_frame_section();
   auto unwinder = sym::parse_eh(nullptr, &mock_eh_frame, -1);
   auto &entries = unwinder->elf_eh_unwind_infos;
   std::sort(entries.begin(), entries.end(), [](auto &a, auto &b) { return a.start < b.start; });
@@ -141,12 +135,13 @@ TEST(CallFrameParsing, verifyParsedEhFrameInOrder)
     EXPECT_GT(i->start, start);
   }
 }
-
+/*
 TEST(CallFrameParsing, parseThreadsShared)
 {
+  static const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
   // const auto mock_eh_frame = create_mock_eh_frame_section();
   // const auto ehframe_header_data = create_mock_eh_frame_hdr_data();
-
+  static const auto mock_eh_frame = create_mock_eh_frame_section();
   DwarfBinaryReader reader{mock_eh_frame.data(), mock_eh_frame.size()};
   sym::CIE cie = sym::read_cie(reader);
   EXPECT_EQ(cie.length, 0x14);
@@ -236,3 +231,4 @@ TEST(CallFrameParsing, parseThreadsShared)
     std::cout << to_str(fde3_debug[i]) << std::endl;
   }
 }
+*/

@@ -13,6 +13,7 @@
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "symbolication/cu.h"
+#include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "task.h"
@@ -65,15 +66,9 @@ Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *ev
 void
 Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
-  const auto res = mmap_objectfile(objfile_path);
-  if (res != AddObjectResult::OK) {
-    logging::get_logging()->log(
-        "mdb", fmt::format("Failed to load object file {}; Error {}", objfile_path.c_str(), add_object_err(res)));
-  }
-  const auto obj_file = object_files.back();
-  Elf::parse_objfile(obj_file);
+  const auto obj_file = mmap_objectfile(objfile_path);
   auto target = get_controller(target_pid);
-  target->register_object_file(obj_file);
+  target->register_object_file(obj_file, true, std::nullopt);
   CompilationUnitBuilder cu_builder{obj_file};
   std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
@@ -109,25 +104,6 @@ Tracer::add_target_set_current(pid_t task_leader, const Path &path, TargetSessio
   load_and_process_objfile(task_leader, path);
   PTRACE_OR_PANIC(PTRACE_SEIZE, task_leader, 0, 0);
   new_target_set_options(task_leader);
-}
-
-AddObjectResult
-Tracer::mmap_objectfile(const Path &path) noexcept
-{
-  if (!fs::exists(path))
-    return AddObjectResult::FILE_NOT_EXIST;
-
-  ASSERT(std::ranges::find_if(object_files, [&](ObjectFile *obj) { return obj->path == path; }) ==
-             std::end(object_files),
-         "Object file from {} has already been loaded", path.c_str());
-
-  auto fd = ScopedFd::open_read_only(path);
-  const auto addr = mmap_file<u8>(fd, fd.file_size(), true);
-
-  auto obj = new ObjectFile{path, fd.file_size(), addr};
-  object_files.push_back(obj);
-
-  return AddObjectResult::OK;
 }
 
 void
@@ -270,6 +246,7 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
           get_current()->reopen_memfd();
           get_current()->cache_registers(t);
           get_current()->read_auxv(t);
+          get_current()->install_loader_breakpoints();
           dap->add_tty(res.fd);
           break;
         }

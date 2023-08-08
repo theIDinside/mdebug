@@ -43,8 +43,10 @@ DwarfStack::swap() noexcept
   stack[size - 2] = tmp;
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(std::span<const u8> bytecode) noexcept
-    : stack(), reader{bytecode.data(), bytecode.size()}, bytecode(bytecode)
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t, const UnwindInfo *unwind_info,
+                                                 std::vector<u8> &&byte_stream) noexcept
+    : stack(), tc(tc), task(t), unwind_info(unwind_info), byte_stream(std::move(byte_stream)),
+      reader(byte_stream.data(), byte_stream.size())
 {
 }
 
@@ -427,9 +429,9 @@ void
 op_fbreg(ExprByteCodeInterpreter &i) noexcept
 {
   const auto offset = i.reader.read_leb128<i64>();
-  const auto frame_base_addr = i.request_frame_base();
-  const auto result = frame_base_addr + offset;
-  i.stack.push<u64>(result.get());
+  // const auto frame_base_addr = i.request_frame_base();
+  // const auto result = frame_base_addr + offset;
+  // i.stack.push<u64>(result.get());
   TODO("op_fbreg")
 }
 void
@@ -446,7 +448,6 @@ void
 op_piece(ExprByteCodeInterpreter &i) noexcept
 {
   TODO(fmt::format("op_piece {}", i.stack.size));
-  TODO("op_piece")
 }
 
 void
@@ -670,14 +671,10 @@ static Op ops[0xff] = {
     // clang-format-on
 };
 
-AddrPtr ExprByteCodeInterpreter::request_frame_base() noexcept {
-  TODO("ExprByteCodeInterpreter::request_frame_base");
-}
-
 void
 ExprByteCodeInterpreter::run() noexcept
 {
-  DwarfBinaryReader r{bytecode.data(), bytecode.size()};
+  DwarfBinaryReader r{byte_stream.data(), byte_stream.size()};
   while (r.has_more()) {
     const auto op = r.read_byte<DwarfOp>();
     this->latest_decoded = op;

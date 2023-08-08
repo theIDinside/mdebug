@@ -9,7 +9,7 @@
 #include <vector>
 
 struct TraceeController;
-class Breakpoint;
+struct BpStat;
 
 namespace ptracestop {
 
@@ -49,10 +49,17 @@ public:
   {
   }
 
+  void
+  set_step_over(BpStat *bpstat) noexcept
+  {
+    step_over_breakpoint = bpstat;
+  }
+
 protected:
   StopHandler *handler;
   TraceeController *tc;
   bool should_stop;
+  BpStat *step_over_breakpoint;
 };
 
 class InstructionStep : public Action
