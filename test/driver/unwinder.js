@@ -17,7 +17,7 @@ async function unwindFromSharedObject() {
   const frame_lines = [17, 25, 31, 52, 20, 27]
 
   const sharedObjectsCount = 6;
-
+  const so_addr = "0x7ffff7fbc189";
   async function set_bp(source, bps) {
     const file = readFile(repoDirFile(source));
     const bp_lines = bps
@@ -50,11 +50,16 @@ async function unwindFromSharedObject() {
     "stopped",
     seconds(1)
   );
-  await da_client.stackTrace(threads[0].id, 10000000).then((res) => {
+
+  await da_client.setInsBreakpoint(so_addr);
+  await da_client.contNextStop();
+  const frames = await da_client.stackTrace(threads[0].id, 10000000).then((res) => {
     checkResponse(res, "stackTrace", true);
     const { stackFrames } = res.body;
     console.log(`${JSON.stringify(stackFrames, null, 2)}`);
+    return stackFrames;
   });
+  verifyFrameIs(frames[0], "convert_kilometers_to_miles");
 }
 
 const INSIDE_BAR_PROLOGUE = "0x0000000000401270";
