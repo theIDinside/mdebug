@@ -1,4 +1,4 @@
-const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTest } =
+const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite } =
   require("./client")(__filename);
 
 const da_client = new DAClient(MDB_PATH, []);
@@ -48,4 +48,8 @@ async function test() {
   }
 }
 
-runTest(test);
+const tests = {
+  "oneInstruction": test
+}
+
+runTestSuite(tests);

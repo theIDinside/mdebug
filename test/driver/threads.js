@@ -2,16 +2,14 @@ const {
   DAClient,
   MDB_PATH,
   buildDirFile,
-  runTest,
-  seconds,
+  runTestSuite,
   getLineOf,
   readFile,
   repoDirFile,
 } = require("./client")(__filename);
 
-const da_client = new DAClient(MDB_PATH, []);
-
-async function test() {
+async function threads() {
+  const da_client = new DAClient(MDB_PATH, []);
   await da_client.launchToMain(buildDirFile("threads_shared"));
   let threads = await da_client.threads();
   const file = readFile(repoDirFile("test/threads_shared.cpp"));
@@ -50,5 +48,8 @@ async function test() {
     throw new Error(`Expected to be at line ${bp_lines[0].line + 1} but we're at line ${end_line}: ${JSON.stringify(frames.body.stackFrames, null, 2)}`);
   }
 }
+const tests = {
+  "threads": threads,
+}
 
-runTest(test);
+runTestSuite(tests);

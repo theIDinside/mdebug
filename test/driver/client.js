@@ -265,7 +265,13 @@ class DAClient {
    * @returns {Promise<{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}>}
    */
   async stackTrace(threadId, timeout = 1000) {
+    threadId = threadId != null ? threadId : await this.getAnyThreadId();
     return this.sendReqGetResponse("stackTrace", { threadId: threadId }, timeout);
+  }
+
+  async getAnyThreadId() {
+    const thrs = await this.threads();
+    return thrs[0].id;
   }
 
   flushConnection() {
@@ -328,7 +334,17 @@ class DAClient {
     await stopped_promise;
   }
 
+  async setInsBreakpoint(addr) {
+    return this.sendReqGetResponse("setInstructionBreakpoints", {
+      breakpoints: [{ instructionReference: addr }],
+    })
+  }
+
   async contNextStop(threadId) {
+    if (threadId == null) {
+      const thrs = await this.threads();
+      threadId = thrs[0].id;
+    }
     let stopped_promise = this.prepareWaitForEvent("stopped");
     await this.sendReqGetResponse("continue", { threadId: threadId });
     return await stopped_promise;
@@ -431,8 +447,23 @@ function runTest(test) {
   test().then(testSuccess).catch(testException);
 }
 
+function runTestSuite(tests) {
+  const requested = getRequestedTest();
+  if (tests.hasOwnProperty(requested)) {
+    console.log(`Running ${requested} test`);
+    runTest(tests[requested]);
+  } else {
+    throw new Error(`No test called ${requested} in this suite`);
+  }
+}
+
 function seconds(sec) {
   return sec * 1000;
+}
+
+// each test is executed like: node ./path/to/test <working dir> <desired test name>. This function returns the passed in name.
+function getRequestedTest() {
+  return process.argv[3];
 }
 
 module.exports = function (file) {
@@ -454,5 +485,7 @@ module.exports = function (file) {
     testException,
     testSuccess,
     runTest,
+    runTestSuite,
+    getRequestedTest
   };
 };

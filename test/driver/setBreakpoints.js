@@ -6,12 +6,11 @@ const {
   getLineOf,
   readFile,
   repoDirFile,
-  runTest,
+  runTestSuite,
 } = require("./client")(__filename);
 
-const da_client = new DAClient(MDB_PATH, []);
-
-async function test() {
+async function set4Breakpoints() {
+  const da_client = new DAClient(MDB_PATH, []);
   // we don't care for initialize, that's tested elsewhere
   da_client
     .sendReqGetResponse("initialize", {})
@@ -69,4 +68,8 @@ async function test() {
     });
 }
 
-runTest(test);
+const tests = {
+  "set4Breakpoints": set4Breakpoints,
+}
+
+runTestSuite(tests);

@@ -2,13 +2,12 @@ const {
   DAClient,
   MDB_PATH,
   buildDirFile,
-  runTest,
+  runTestSuite,
   seconds,
 } = require("./client")(__filename);
 
-const da_client = new DAClient(MDB_PATH, []);
-
-async function test() {
+async function programExit() {
+  const da_client = new DAClient(MDB_PATH, []);
   await da_client.launchToMain(buildDirFile("stackframes"));
   const threads = await da_client.threads();
   const { event_body, response } = await da_client.sendReqWaitEvent(
@@ -25,4 +24,8 @@ async function test() {
     );
 }
 
-runTest(test);
+const tests = {
+  "programExit": programExit
+}
+
+runTestSuite(tests);
