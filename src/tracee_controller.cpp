@@ -55,7 +55,8 @@ TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::Writ
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
       stop_on_clone(false), tracee_r_debug(nullptr),
       shared_objects(), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
-      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}), unwinders()
+      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(),
+      null_unwinder(new sym::Unwinder{nullptr})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -152,7 +153,6 @@ TraceeController::on_so_event() noexcept
   DLOG("mdb", "so event triggered");
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
   r_debug_extended rdebug_ext = read_type(tracee_r_debug);
-  auto count = 1;
   int new_so_ids[50];
   int new_sos = 0;
 
@@ -177,7 +177,6 @@ TraceeController::on_so_event() noexcept
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
       r_debug_extended rdebug_ext = read_type(next);
-      ++count;
     } else {
       break;
     }
@@ -195,6 +194,12 @@ TraceeController::on_so_event() noexcept
     }
   }
   process_dwarf(sos);
+}
+
+bool
+TraceeController::is_null_unwinder(sym::Unwinder *unwinder) const noexcept
+{
+  return unwinder == null_unwinder;
 }
 
 void
@@ -943,14 +948,13 @@ TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
       return unwinder;
     }
   }
-  return nullptr;
+  return null_unwinder;
 }
 
-std::vector<AddrPtr>
-TraceeController::dwarf_unwind_callstack(TaskInfo *task) noexcept
+const std::vector<AddrPtr> &
+TraceeController::dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept
 {
-  task->cache_registers();
-  return return_addresses(this, task);
+  return task->return_addresses(this, req);
 }
 
 std::vector<AddrPtr> &
@@ -1022,21 +1026,14 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 }
 
 sym::CallStack &
-TraceeController::build_callframe_stack(TaskInfo *task) noexcept
+TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept
 {
   DLOG("mdb", "stacktrace for {}", task->tid);
   cache_registers(task);
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;
-  auto dwarf_frame_pcs = dwarf_unwind_callstack(task);
-  auto &frame_pcs = unwind_callstack(task);
-  for (auto pc : dwarf_frame_pcs) {
-    DLOG("eh", "Dwarf PC {}", pc);
-  }
-  for (auto pc : frame_pcs) {
-    DLOG("eh", "Base pointer PC {}", pc);
-  }
+  auto frame_pcs = task->return_addresses(this, req);
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
     auto symbol = find_fn_by_pc(i->as_void());
@@ -1126,54 +1123,6 @@ const std::vector<CompilationUnitFile> &
 TraceeController::cu_files() const noexcept
 {
   return m_files;
-}
-
-static constexpr auto X86_64_RET_ADDR_REGISTER = 16;
-
-std::vector<AddrPtr>
-return_addresses(TraceeController *tc, TaskInfo *t) noexcept
-{
-  std::vector<AddrPtr> pcs;
-  std::vector<sym::CFAStateMachine> frames_computers;
-  std::vector<sym::RegisterValues> frame_registers;
-
-  pcs.push_back(t->registers->rip);
-  sym::Unwinder *unwinder = tc->get_unwinder_from_pc(t->registers->rip);
-  ASSERT(unwinder != nullptr, "Could not find unwinder for pc {}", AddrPtr{t->registers->rip});
-  const sym::UnwindInfo *inf = unwinder->get_unwind_info(t->registers->rip);
-  frames_computers.push_back(sym::CFAStateMachine::Init(tc, t, inf, pcs.back()));
-
-  // initialize bottom frame's registers with actual live register contents
-  sym::RegisterValues regs{};
-  for (auto i = 0; i <= 16; ++i) {
-    regs[i] = t->get_register(i);
-  }
-
-  while (inf != nullptr) {
-    const auto pc = pcs.back();
-    DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc={}", inf->cie->offset, inf->fde_eh_offset, pc);
-    DwarfBinaryReader reader{inf->cie->instructions.data(), inf->cie->instructions.size()};
-    sym::decode(reader, frames_computers.back(), inf);
-    DwarfBinaryReader fde{inf->fde_insts.data(), inf->fde_insts.size()};
-    sym::decode(fde, frames_computers.back(), inf);
-    frame_registers.push_back(frames_computers.back().produce_preserved_reg_contents(regs));
-    regs = frame_registers.back();
-    pcs.push_back(frame_registers.back()[X86_64_RET_ADDR_REGISTER]);
-    inf = unwinder->get_unwind_info(pcs.back());
-    if (inf != nullptr && pc != pcs.back())
-      frames_computers.push_back(sym::CFAStateMachine{tc, t, frame_registers.back(), inf, pcs.back()});
-    else {
-      unwinder = tc->get_unwinder_from_pc(pcs.back());
-      if (unwinder) {
-        inf = unwinder->get_unwind_info(pcs.back());
-        frames_computers.push_back(sym::CFAStateMachine{tc, t, frame_registers.back(), inf, pcs.back()});
-      } else {
-        pcs.pop_back();
-        break;
-      }
-    }
-  }
-  return pcs;
 }
 
 #pragma GCC diagnostic pop

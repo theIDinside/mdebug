@@ -155,7 +155,7 @@ LineStep::start_action() noexcept
 {
   this->handler->is_stepping = true;
   start_time = std::chrono::high_resolution_clock::now();
-  auto &callstack = tc->build_callframe_stack(tc->get_task(next->tid));
+  auto &callstack = tc->build_callframe_stack(tc->get_task(next->tid), CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
   DLOG("mdb", "frame rip: {} cu: {:p} sym: {:p}. frame info {}", start_frame.rip, (void *)start_frame.cu_file,
        (void *)start_frame.symbol, start_frame);
@@ -221,7 +221,7 @@ LineStep::check_if_done() noexcept
     // we've left the origin frame; let's try figure out a place we can set a breakpoint
     // so that we can skip single stepping and instead do `PTRACE_CONT` which will be many orders of magnitude
     // faster.
-    auto &callstack = tc->build_callframe_stack(task);
+    auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(2));
     const auto resume_address = map<AddrPtr>(
         callstack.frames,
         [sf = start_frame](const auto &f) {

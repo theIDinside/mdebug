@@ -30,8 +30,6 @@ namespace sym {
 class Unwinder;
 };
 
-std::vector<AddrPtr> return_addresses(TraceeController *tc, TaskInfo *t) noexcept;
-
 namespace ui {
 struct UICommand;
 };
@@ -82,6 +80,8 @@ private:
   bool is_in_user_ptrace_stop;
   ptracestop::StopHandler *ptracestop_handler;
   std::vector<sym::Unwinder *> unwinders;
+  // an unwinder that always returns sym::UnwindInfo* = nullptr
+  sym::Unwinder *null_unwinder;
 
 public:
   // Constructors
@@ -95,6 +95,8 @@ public:
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
   void install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
+
+  bool is_null_unwinder(sym::Unwinder *unwinder) const noexcept;
 
   // N.B(simon): process shared object's in parallell, determined by some heuristic (like for instance file size
   // could determine how much thread resources are subscribed to parsing a shared object.)
@@ -277,10 +279,13 @@ public:
    */
   void notify_self() noexcept;
   void start_awaiter_thread() noexcept;
+  // Get the unwinder for `pc` - if no such unwinder exists, the "NullUnwinder" is returned, an unwinder that
+  // always returns UnwindInfo* = `nullptr` results. This is to not have to do nullchecks against the Unwinder
+  // itself.
   sym::Unwinder *get_unwinder_from_pc(AddrPtr pc) noexcept;
-  sym::CallStack &build_callframe_stack(TaskInfo *task) noexcept;
+  sym::CallStack &build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept;
   std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
-  std::vector<AddrPtr> dwarf_unwind_callstack(TaskInfo *task) noexcept;
+  const std::vector<AddrPtr> &dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept;
   sym::Frame current_frame(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;

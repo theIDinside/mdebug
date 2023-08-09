@@ -843,3 +843,5 @@ static constexpr std::string_view reg_names[17] = {"rax", "rdx", "rcx", "rbx", "
                                                    "r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip"};
 
 u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
+
+static constexpr auto X86_64_RIP_REGISTER = 16;

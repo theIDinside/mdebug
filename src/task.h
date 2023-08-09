@@ -33,6 +33,19 @@ to_str(WaitStatusKind ws)
   }
 }
 
+struct CallStackRequest
+{
+  enum class Type : u8
+  {
+    Full,
+    Partial
+  } req;
+  u8 count;
+
+  static CallStackRequest partial(u8 count) noexcept;
+  static CallStackRequest full() noexcept;
+};
+
 struct WaitStatus
 {
   WaitStatusKind ws;
@@ -86,6 +99,7 @@ struct TaskInfo
 
   u64 get_register(u64 reg_num) noexcept;
   void cache_registers() noexcept;
+  const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
   void consume_wait() noexcept;
   void resume(RunType) noexcept;

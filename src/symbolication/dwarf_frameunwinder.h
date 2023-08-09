@@ -2,6 +2,7 @@
 #include "../common.h"
 #include "block.h"
 #include "dwarf_defs.h"
+#include <cstdint>
 
 struct ElfSection;
 struct ObjectFile;
@@ -73,12 +74,11 @@ template <size_t RegCount> struct FrameRegisters
 };
 
 using Registers = std::array<Reg, 17>;
-
 using RegisterValues = std::array<u64, 17>;
 
 class CFAStateMachine
 {
-  friend bool decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
+  friend int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
 public:
   CFAStateMachine(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
@@ -92,19 +92,19 @@ public:
   // Reads the register rule of `reg_number` and resolves it's saved (or live, if it hasn't been modified / stored
   // somewhere in memory) contents
   u64 resolve_reg_contents(u64 reg_number, const RegisterValues &reg) noexcept;
-  RegisterValues produce_preserved_reg_contents(const RegisterValues &reg) noexcept;
+  RegisterValues resolve_frame_regs(const RegisterValues &reg) noexcept;
   const CFA &get_cfa() const noexcept;
   const Registers &get_regs() const noexcept;
   const Reg &ret_reg() const noexcept;
-  void update_frame_local_rsp();
+  void reset(const UnwindInfo *inf, const RegisterValues &frame_below, AddrPtr pc) noexcept;
 
 private:
   TraceeController *tc;
   TaskInfo *task;
-  AddrPtr address;
-  AddrPtr pc;
+  AddrPtr fde_pc;
+  AddrPtr end_pc;
   CFA cfa;
-  Registers registers;
+  Registers rule_table;
   u64 cfa_value;
 };
 
@@ -195,6 +195,18 @@ public:
   std::vector<UnwindInfo> elf_eh_unwind_infos;
 };
 
+class UnwindIterator
+{
+public:
+  UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept;
+  const UnwindInfo *get_info(AddrPtr pc) noexcept;
+  bool is_null() const noexcept;
+
+private:
+  TraceeController *tc;
+  Unwinder *current;
+};
+
 std::pair<u64, u64> elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 std::pair<u64, u64> dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 CommonInformationEntry read_cie(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
@@ -203,6 +215,6 @@ void parse_dwarf_eh(Unwinder *unwinder_db, const ElfSection *debug_frame, int fd
 
 FrameDescriptionEntry read_fde(DwarfBinaryReader &reader);
 
-bool decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
+int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
 } // namespace sym

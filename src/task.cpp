@@ -1,6 +1,8 @@
 #include "task.h"
+#include "common.h"
 #include "ptrace.h"
 #include "symbolication/callstack.h"
+#include "symbolication/dwarf_frameunwinder.h"
 #include "tracee_controller.h"
 #include <sys/ptrace.h>
 #include <sys/user.h>
@@ -25,6 +27,79 @@ TaskInfo::cache_registers() noexcept
     cache_dirty = false;
     rip_dirty = false;
   }
+}
+
+static void
+decode_eh_insts(const sym::UnwindInfo *inf, sym::CFAStateMachine &state) noexcept
+{
+  DwarfBinaryReader reader{inf->cie->instructions.data(), inf->cie->instructions.size()};
+
+  const auto cie_cnt = sym::decode(reader, state, inf);
+  DLOG("eh", "CIE ins decoded={}", cie_cnt);
+  DwarfBinaryReader fde{inf->fde_insts.data(), inf->fde_insts.size()};
+  const auto fde_cnt = sym::decode(fde, state, inf);
+  DLOG("eh", "FDE ins decoded={}", fde_cnt);
+}
+
+const std::vector<AddrPtr> &
+TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
+{
+  if (!call_stack->dirty)
+    return call_stack->pcs;
+  else {
+    call_stack->pcs.clear();
+    // TODO(SIMON), todo(SIMON), todo(simon) uncomment this, when DWARF stack unwinding is good.
+  }
+
+  if (cache_dirty)
+    cache_registers();
+
+  // initialize bottom frame's registers with actual live register contents
+  auto &buf = call_stack->reg_unwind_buffer;
+  buf.clear();
+  buf.reserve(call_stack->pcs.size());
+  buf.push_back({});
+  call_stack->resolved = req.count;
+  {
+    auto &init = buf.back();
+    for (auto i = 0; i <= 16; ++i) {
+      init[i] = get_register(i);
+    }
+  }
+
+  sym::UnwindIterator it{tc, registers->rip};
+  ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{registers->rip});
+  const sym::UnwindInfo *un_info = it.get_info(registers->rip);
+  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(tc, this, un_info, registers->rip);
+
+  const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
+
+  switch (req.req) {
+  case CallStackRequest::Type::Full: {
+    for (auto uinf = un_info; uinf != nullptr; uinf = it.get_info(get_current_pc())) {
+      const auto pc = get_current_pc();
+      cfa_state.reset(uinf, buf.back(), pc);
+      call_stack->pcs.push_back(pc);
+      DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc=0x{:x}", uinf->cie->offset, uinf->fde_eh_offset, pc);
+      decode_eh_insts(uinf, cfa_state);
+      buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
+    }
+    call_stack->dirty = false;
+  }
+  case CallStackRequest::Type::Partial: {
+    for (auto uinf = un_info; uinf != nullptr && req.count != 0; uinf = it.get_info(get_current_pc())) {
+      const auto pc = get_current_pc();
+      cfa_state.reset(uinf, buf.back(), pc);
+      call_stack->pcs.push_back(pc);
+      DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc=0x{:x}", uinf->cie->offset, uinf->fde_eh_offset, pc);
+      decode_eh_insts(uinf, cfa_state);
+      buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
+      --req.count;
+    }
+    call_stack->resolved = call_stack->resolved - req.count;
+  }
+  }
+  return call_stack->pcs;
 }
 
 void
@@ -121,4 +196,16 @@ TaskVMInfo
 TaskVMInfo::from_clone_args(const clone_args &cl_args) noexcept
 {
   return {.stack_low = cl_args.stack, .stack_size = cl_args.stack_size, .tls = cl_args.tls};
+}
+
+/*static*/ CallStackRequest
+CallStackRequest::partial(u8 count) noexcept
+{
+  return CallStackRequest{.req = Type::Partial, .count = count};
+}
+
+/*static*/ CallStackRequest
+CallStackRequest::full() noexcept
+{
+  return CallStackRequest{.req = Type::Full, .count = 0};
 }

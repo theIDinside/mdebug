@@ -510,7 +510,7 @@ StackTrace::execute(Tracer *tracer) noexcept
   if (task == nullptr) {
     TODO(fmt::format("Handle not-found thread by threadId {}", threadId));
   }
-  auto &cfs = target->build_callframe_stack(task);
+  auto &cfs = target->build_callframe_stack(task, CallStackRequest::full());
   auto response = new StackTraceResponse{true, this};
   response->stack_frames.reserve(cfs.frames.size());
   auto id = 1;
