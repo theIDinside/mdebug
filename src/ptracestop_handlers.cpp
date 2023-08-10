@@ -8,6 +8,7 @@
 #include "utils/logger.h"
 #include <algorithm>
 #include <chrono>
+#include <sys/wait.h>
 
 namespace ptracestop {
 
@@ -22,11 +23,10 @@ bool
 Action::completed(TaskInfo *t, bool should_stop) noexcept
 {
   constexpr bool is_done = false;
-  DLOG("mdb", "Resume {}, can_continue={}, should_stop = {}: will resume => {}", t->tid, t->can_continue(),
-       should_stop, !should_stop && t->can_continue());
+  DLOG("mdb", "[action]: {} will resume => {}", t->tid, !should_stop && t->can_continue());
   if (!should_stop && t->can_continue()) {
     if (step_over_breakpoint) {
-      t->step_over_breakpoint(tc, step_over_breakpoint);
+      t->step_over_breakpoint(tc);
       step_over_breakpoint = nullptr;
     }
     t->resume(RunType::Continue);
@@ -108,21 +108,17 @@ InstructionStep::resume() noexcept
     tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = thread_id});
     return true;
   }
-  if (!tc->bps.bpstats.empty()) {
-    auto bpstat = find(tc->bps.bpstats, [t = next->tid](auto &bpstat) { return bpstat.tid == t; });
-    bool stepped_over_bp = false;
-    if (bpstat != std::end(tc->bps.bpstats)) {
-      auto bp = tc->bps.get_by_id(bpstat->bp_id);
-      bp->disable(next->tid);
-      stepped_over_bp = true;
-    }
-    auto task = tc->get_task(next->tid);
+
+  auto task = tc->get_task(next->tid);
+  if (task->bstat) {
+    DLOG("mdb", "[ptrace stop:istep]: breakpoint step-over");
+    auto bp = tc->bps.get_by_id(task->bstat->bp_id);
+    bp->disable(tc->task_leader);
     task->resume(RunType::Step);
-    if (stepped_over_bp) {
-      bpstat->stepped_over = true;
-      tc->bps.enable_breakpoint(bpstat->bp_id);
-    }
+    bp->enable(next->tid);
+    task->bstat->stepped_over = true;
   } else {
+    DLOG("mdb", "[ptrace stop:istep]: resume");
     resume_impl();
   }
   update_step_schedule();
@@ -328,8 +324,7 @@ StopHandler::handle_bp_event(TaskInfo *t, BpEvent evt) noexcept
   case BpEventType::None:
     break;
   case BpEventType::TracerBreakpointHit: {
-    auto bpstat = find(tc->bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-    action->set_step_over(bpstat.base());
+    action->set_step_over(&t->bstat.value());
     if (evt.bp->bp_type.shared_object_load) {
       tc->on_so_event();
     }
@@ -422,7 +417,7 @@ StopHandler::restore_default() noexcept
 void
 StopHandler::start_action() noexcept
 {
-  DLOG("mdb", "Starting action...");
+  DLOG("mdb", "[ptrace stop]: start action...");
   action->start_action();
 }
 

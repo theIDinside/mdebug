@@ -334,6 +334,27 @@ class DAClient {
     await stopped_promise;
   }
 
+    // utility function to initialize, launch `program` and run to `main`
+  async launchToAddress(program, addr, timeout = 1000) {
+    let stopped_promise = this.prepareWaitForEvent("stopped");
+    await this.sendReqGetResponse("initialize", {}, timeout)
+      .then((response) => {
+        checkResponse(response, "initialize", true);
+      })
+      .catch(testException);
+    await this.sendReqGetResponse("launch", {
+      program: program,
+      stopAtEntry: false,
+    }, timeout)
+      .then((response) => {
+        checkResponse(response, "launch", true);
+      })
+      .catch(testException);
+    await this.setInsBreakpoint(addr);
+    await this.sendReqGetResponse("configurationDone", {}, timeout).catch(testException);
+    await stopped_promise;
+  }
+
   async setInsBreakpoint(addr) {
     return this.sendReqGetResponse("setInstructionBreakpoints", {
       breakpoints: [{ instructionReference: addr }],

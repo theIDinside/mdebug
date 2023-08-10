@@ -145,7 +145,6 @@ struct BpEvent
 // Task Breakpoint Status
 struct BpStat
 {
-  Tid tid;
   u16 bp_id;
   BpType type;
   bool stepped_over;
@@ -155,7 +154,7 @@ struct BreakpointMap
 {
   explicit BreakpointMap(Tid address_space) noexcept
       : bp_id_counter(1), breakpoints(), address_space_tid(address_space), fn_breakpoint_names(),
-        source_breakpoints(), bpstats()
+        source_breakpoints()
   {
   }
 
@@ -168,8 +167,6 @@ struct BreakpointMap
   Tid address_space_tid;
   std::unordered_map<u32, std::string> fn_breakpoint_names;
   std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
-  // Task's breakpoint statuses. Information about regarding the relationship between a hit breakpoint and a task
-  std::vector<BpStat> bpstats;
 
   std::vector<Breakpoint> ld_breakpoints;
 
@@ -180,15 +177,8 @@ struct BreakpointMap
     return any_of(breakpoints, [&addr](const Breakpoint &bp) { return bp.address == addr; });
   }
 
-  std::vector<BpStat>::iterator find_bpstat(Tid tid) noexcept;
-  bool has_value(std::vector<BpStat>::iterator it) noexcept;
-
-  // Registers that `t` stopped at `bp` creating a "breakpoint status" object, containing the keys `tid` and `id`
-  // of bp.
-  void add_bpstat_for(TaskInfo *t, Breakpoint *bp);
   bool insert(AddrPtr addr, u8 overwritten_byte, BpType type) noexcept;
   void clear(TraceeController *target, BpType type) noexcept;
-  void clear_breakpoint_stats() noexcept;
   void disable_breakpoint(u16 id) noexcept;
   void enable_breakpoint(u16 id) noexcept;
 

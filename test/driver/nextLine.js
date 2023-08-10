@@ -31,7 +31,7 @@ async function nextLineOverFunction() {
       granularity: "line",
     },
     "stopped",
-    10000000
+    1000
   );
 
   if (event_body.reason != "step") {

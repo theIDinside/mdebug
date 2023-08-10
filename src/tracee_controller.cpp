@@ -272,29 +272,22 @@ TraceeController::has_task(Tid tid) noexcept
 void
 TraceeController::resume_target(RunType type) noexcept
 {
-  DLOG("mdb", "TraceeController::resume_target");
-  // Single-step over breakpoints that were hit, then re-enable them.
-  if (!bps.bpstats.empty()) {
-    for (auto bp_stat : bps.bpstats) {
-      auto bp = bps.get_by_id(bp_stat.bp_id);
-      DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, bp_stat.tid);
-      bp->disable(bp_stat.tid);
-      int stat;
-      VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
-             "Single step over user breakpoint boundary failed: {}", strerror(errno));
-      waitpid(bp_stat.tid, &stat, 0);
-      auto task = get_task(bp_stat.tid);
-      task->set_dirty();
-      cache_registers(task);
-      ASSERT(AddrPtr{task->registers->rip} != bp->address, "Failed to single step over breakpoint at {}",
-             bp->address);
-      bps.enable_breakpoint(bp_stat.bp_id);
-    }
-  }
-
-  bps.clear_breakpoint_stats();
+  DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
   for (auto &t : threads) {
     if (t.can_continue()) {
+      if (t.bstat) {
+        auto bp = bps.get_by_id(t.bstat->bp_id);
+        DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, t.tid);
+        bp->disable(t.tid);
+        int stat;
+        VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, t.tid, 1, 0),
+               "Single step over user breakpoint boundary failed: {}", strerror(errno));
+        waitpid(t.tid, &stat, 0);
+        t.set_dirty();
+        bp->enable(t.tid);
+        if (type == RunType::Step)
+          continue;
+      }
       t.resume(type);
     }
   }
@@ -306,7 +299,7 @@ TraceeController::stop_all() noexcept
 {
   DLOG("mdb", "Stopping all threads")
   for (auto &t : threads) {
-    if (!t.user_stopped) {
+    if (!t.user_stopped && !t.tracer_stopped) {
       DLOG("mdb", "Stopping {}", t.tid);
       tgkill(task_leader, t.tid, SIGSTOP);
       t.set_stop();
@@ -449,6 +442,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
       auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
       u8 ins_byte = static_cast<u8>(read_value & 0xff);
       u64 installed_bp = ((read_value & ~0xff) | bkpt);
+      DLOG("mdb", "read 0x{:x} from bp location - setting 0x{:x}", read_value, installed_bp);
       ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
       bps.insert(sym.address, ins_byte, BpType{.function = true});
       auto &bp = bps.breakpoints.back();
@@ -711,23 +705,16 @@ TraceeController::process_stopped(TaskInfo *t) noexcept
   DLOG("mdb", "Processing stopped for {} at {}", t->tid, AddrPtr{t->registers->rip});
   const auto prev_pc_byte = offset(pc, -1);
   if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
-    auto bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-    if (bpstat != std::end(bps.bpstats) && bpstat->stepped_over) {
-      bps.bpstats.erase(bpstat);
-      bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-      if (bpstat != std::end(bps.bpstats)) {
-        DLOG("mdb", "Had multiple bpstats for {}", t->tid);
-        goto breakout;
-      }
+    if (t->bstat && t->bstat->stepped_over) {
+      t->bstat = std::nullopt;
       return BpEvent{BpEventType::None, {nullptr}};
     }
-  breakout:
     DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
     set_pc(t, prev_pc_byte);
-    bps.add_bpstat_for(t, bp);
+    t->add_bpstat(bp);
     return BpEvent{bp->event_type(), {.bp = bp}};
   }
-  std::erase_if(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid && bpstat.stepped_over; });
+  t->bstat = std::nullopt;
   return BpEvent{BpEventType::None, {nullptr}};
 }
 

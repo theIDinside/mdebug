@@ -1,4 +1,5 @@
 #include "task.h"
+#include "breakpoint.h"
 #include "common.h"
 #include "ptrace.h"
 #include "symbolication/callstack.h"
@@ -137,18 +138,19 @@ TaskInfo::resume(RunType type) noexcept
 }
 
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc, BpStat *bpstat) noexcept
+TaskInfo::step_over_breakpoint(TraceeController *tc) noexcept
 {
-  ASSERT(bpstat != nullptr, "Requires a valid bpstat");
-  auto bp = tc->bps.get_by_id(bpstat->bp_id);
-  auto it = find(tc->bps.bpstats, [t = tid](auto &bp_stat) { return bp_stat.tid == t; });
-  DLOG("mdb", "Stepping over bp {} at {}", bpstat->bp_id, bp->address);
+  ASSERT(bstat.has_value(), "Requires a valid bpstat");
+  auto bp = tc->bps.get_by_id(bstat->bp_id);
+  if (bstat) {
+    DLOG("mdb", "Stepping over bp {} at {}", bstat->bp_id, bp->address);
+  }
+
   bp->disable(tc->task_leader);
   resume(RunType::Step);
   consume_wait();
-  bpstat->stepped_over = true;
   bp->enable(tc->task_leader);
-  tc->bps.bpstats.erase(it);
+  bstat = std::nullopt;
   cache_registers();
   DLOG("mdb", "After step: {}", AddrPtr{registers->rip});
 }
@@ -177,6 +179,12 @@ TaskInfo::set_dirty() noexcept
   cache_dirty = true;
   rip_dirty = true;
   call_stack->dirty = true;
+}
+
+void
+TaskInfo::add_bpstat(Breakpoint *bp) noexcept
+{
+  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false};
 }
 
 void

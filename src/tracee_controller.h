@@ -160,7 +160,7 @@ public:
   void
   install_ptracestop_handler(Args... args) noexcept
   {
-    DLOG("mdb", "Installing action {}", ptracestop::action_name<StopAction>());
+    DLOG("mdb", "[ptrace stop]: install action {}", ptracestop::action_name<StopAction>());
     ptracestop_handler->set_action(new StopAction{ptracestop_handler, args...});
     ptracestop_handler->start_action();
   }

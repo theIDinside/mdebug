@@ -1,5 +1,6 @@
 #pragma once
 
+#include "breakpoint.h"
 #include "common.h"
 #include <linux/sched.h>
 #include <sys/ptrace.h>
@@ -8,7 +9,6 @@
 #include <sys/wait.h>
 
 using namespace std::string_view_literals;
-struct BpStat;
 struct TraceeController;
 namespace sym {
 struct CallStack;
@@ -70,6 +70,22 @@ enum class RunType : u8
   UNKNOWN = 0b0000,
 };
 
+static constexpr std::string_view
+to_str(RunType type) noexcept
+{
+  switch (type) {
+  case RunType::Step:
+    return "RunType::Step";
+  case RunType::Continue:
+    return "RunType::Continue";
+  case RunType::SyscallContinue:
+    return "RunType::SyscallContinue";
+  case RunType::UNKNOWN:
+    return "RunType::UNKNOWN";
+    break;
+  }
+}
+
 struct TaskInfo
 {
   pid_t tid;
@@ -89,6 +105,7 @@ struct TaskInfo
   };
   user_regs_struct *registers;
   sym::CallStack *call_stack;
+  std::optional<BpStat> bstat;
 
   TaskInfo() = delete;
   TaskInfo(pid_t tid) noexcept;
@@ -103,11 +120,12 @@ struct TaskInfo
   void set_taskwait(TaskWaitResult wait) noexcept;
   void consume_wait() noexcept;
   void resume(RunType) noexcept;
-  void step_over_breakpoint(TraceeController *tc, BpStat *bpstat) noexcept;
+  void step_over_breakpoint(TraceeController *tc) noexcept;
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
   void set_dirty() noexcept;
+  void add_bpstat(Breakpoint *bp) noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.

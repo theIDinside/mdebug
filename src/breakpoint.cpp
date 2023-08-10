@@ -12,6 +12,7 @@ void
 Breakpoint::enable(Tid tid) noexcept
 {
   if (!enabled) {
+    DLOG("mdb", "[bkpt]: enabling {} (tid: {})", id, tid);
     constexpr u64 bkpt = 0xcc;
     const auto read_value = ptrace(PTRACE_PEEKDATA, tid, address.get(), nullptr);
     const u64 installed_bp = ((read_value & ~0xff) | bkpt);
@@ -24,6 +25,7 @@ void
 Breakpoint::disable(Tid tid) noexcept
 {
   if (enabled) {
+    DLOG("mdb", "[bkpt]: disabling {} (tid: {})", id, tid);
     const auto read_value = ptrace(PTRACE_PEEKDATA, tid, address.get(), nullptr);
     const u64 restore = ((read_value & ~0xff) | original_byte);
     ptrace(PTRACE_POKEDATA, tid, address.get(), restore);
@@ -50,27 +52,6 @@ Breakpoint::event_type() const noexcept
   } else {
     return BpEventType::TracerBreakpointHit;
   }
-}
-
-std::vector<BpStat>::iterator
-BreakpointMap::find_bpstat(Tid tid) noexcept
-{
-  return ::find(bpstats, [tid = tid](auto &bpstat) { return bpstat.tid == tid; });
-}
-bool
-BreakpointMap::has_value(std::vector<BpStat>::iterator it) noexcept
-{
-  return it != std::end(bpstats);
-}
-
-void
-BreakpointMap::add_bpstat_for(TaskInfo *t, Breakpoint *bp)
-{
-  DLOG("mdb", "Adding bpstat for {} on breakpoint {}", t->tid, bp->id);
-  bpstats.push_back({.tid = t->tid, .bp_id = bp->id, .type = bp->type(), .stepped_over = false});
-  bp->times_hit++;
-  t->user_stopped = true;
-  t->tracer_stopped = true;
 }
 
 bool
@@ -107,12 +88,6 @@ BreakpointMap::clear(TraceeController *target, BpType type) noexcept
     }
     return false;
   });
-}
-
-void
-BreakpointMap::clear_breakpoint_stats() noexcept
-{
-  bpstats.clear();
 }
 
 void
