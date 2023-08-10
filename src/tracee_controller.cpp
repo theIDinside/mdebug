@@ -53,9 +53,10 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      stop_on_clone(false), tracee_r_debug(nullptr), spin_lock{},
-      shared_objects(), m_files{}, interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
-      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders()
+      stop_on_clone(false), tracee_r_debug(nullptr),
+      shared_objects(), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
+      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(),
+      null_unwinder(new sym::Unwinder{nullptr})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -113,6 +114,14 @@ parse_stapsdt_note(ElfSection *section) noexcept
   return probes;
 }
 
+static TPtr<r_debug_extended>
+get_rdebug_state(ObjectFile *obj_file)
+{
+  const auto rdebug_state = obj_file->get_min_obj_sym(LOADER_STATE);
+  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
+  return rdebug_state->address.as<r_debug_extended>();
+}
+
 void
 TraceeController::install_loader_breakpoints() noexcept
 {
@@ -121,36 +130,20 @@ TraceeController::install_loader_breakpoints() noexcept
   auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
   auto tmp_objfile = mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
-  Elf::parse_objfile(tmp_objfile);
-  tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{});
+  Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
+  tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
   ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
-  auto rdebug_state = tmp_objfile->get_min_obj_sym(LOADER_STATE);
-  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
-  tracee_r_debug = interpreter_base.value() + rdebug_state->address;
-
-  std::vector<AddrPtr> addresses{};
+  tracee_r_debug = get_rdebug_state(tmp_objfile);
+  DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
   for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
     if (tmp_objfile->minimal_fn_symbols.contains(symbol_name)) {
-      const auto sym = tmp_objfile->minimal_fn_symbols[symbol_name];
-      const auto s_offset = sym.address; // - text_sec->address;
-      DLOG("mdb", "dl_debug state: {}", sym.address);
-      const auto addr = interpreter_base.transform([s_offset](auto addr) { return addr + s_offset; });
-      ASSERT(addr.has_value(), "Could not determine interpreter base to add symbol offset to.");
-      addresses.push_back(*addr);
+      const auto addr = tmp_objfile->minimal_fn_symbols[symbol_name].address;
+      DLOG("mdb", "Setting ld breakpoint at {}", addr);
+      set_tracer_bp(addr.as<u64>(), BpType{.shared_object_load = true});
     }
   }
-
-  ASSERT(addresses.size() != 0, "Failed to find required symbols");
-  DLOG("mdb", "Found {} ld breakpoint addresses", addresses.size());
-  for (const auto addr : addresses) {
-    DLOG("mdb", "Setting ld breakpoint at {}", addr);
-    set_tracer_bp(addr.as<u64>(), BpType{.shared_object_load = true});
-  }
-  set_tracer_bp(0xc16e + *interpreter_base, BpType{.shared_object_load = true});
-  set_tracer_bp(0xbff8 + *interpreter_base, BpType{.shared_object_load = true});
-  // map_complete no-op instruction "probe"
   delete tmp_objfile;
 }
 
@@ -160,7 +153,6 @@ TraceeController::on_so_event() noexcept
   DLOG("mdb", "so event triggered");
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
   r_debug_extended rdebug_ext = read_type(tracee_r_debug);
-  auto count = 1;
   int new_so_ids[50];
   int new_sos = 0;
 
@@ -185,12 +177,11 @@ TraceeController::on_so_event() noexcept
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
       r_debug_extended rdebug_ext = read_type(next);
-      ++count;
     } else {
       break;
     }
   }
-  DLOG("mdb", "r_debug_extended found: {}; new shared objects: {}", count, new_sos);
+  DLOG("mdb", "[so event] new={}", new_sos);
 
   // do simple parsing first, then collect to do extensive processing in parallell
   std::vector<SharedObject::SoId> sos;
@@ -203,6 +194,12 @@ TraceeController::on_so_event() noexcept
     }
   }
   process_dwarf(sos);
+}
+
+bool
+TraceeController::is_null_unwinder(sym::Unwinder *unwinder) const noexcept
+{
+  return unwinder == null_unwinder;
 }
 
 void
@@ -275,29 +272,22 @@ TraceeController::has_task(Tid tid) noexcept
 void
 TraceeController::resume_target(RunType type) noexcept
 {
-  DLOG("mdb", "TraceeController::resume_target");
-  // Single-step over breakpoints that were hit, then re-enable them.
-  if (!bps.bpstats.empty()) {
-    for (auto bp_stat : bps.bpstats) {
-      auto bp = bps.get_by_id(bp_stat.bp_id);
-      DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, bp_stat.tid);
-      bp->disable(bp_stat.tid);
-      int stat;
-      VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, bp_stat.tid, 1, 0),
-             "Single step over user breakpoint boundary failed: {}", strerror(errno));
-      waitpid(bp_stat.tid, &stat, 0);
-      auto task = get_task(bp_stat.tid);
-      task->set_dirty();
-      cache_registers(task);
-      ASSERT(AddrPtr{task->registers->rip} != bp->address, "Failed to single step over breakpoint at {}",
-             bp->address);
-      bps.enable_breakpoint(bp_stat.bp_id);
-    }
-  }
-
-  bps.clear_breakpoint_stats();
+  DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
   for (auto &t : threads) {
     if (t.can_continue()) {
+      if (t.bstat) {
+        auto bp = bps.get_by_id(t.bstat->bp_id);
+        DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, t.tid);
+        bp->disable(t.tid);
+        int stat;
+        VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, t.tid, 1, 0),
+               "Single step over user breakpoint boundary failed: {}", strerror(errno));
+        waitpid(t.tid, &stat, 0);
+        t.set_dirty();
+        bp->enable(t.tid);
+        if (type == RunType::Step)
+          continue;
+      }
       t.resume(type);
     }
   }
@@ -309,7 +299,7 @@ TraceeController::stop_all() noexcept
 {
   DLOG("mdb", "Stopping all threads")
   for (auto &t : threads) {
-    if (!t.user_stopped) {
+    if (!t.user_stopped && !t.tracer_stopped) {
       DLOG("mdb", "Stopping {}", t.tid);
       tgkill(task_leader, t.tid, SIGSTOP);
       t.set_stop();
@@ -452,6 +442,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
       auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
       u8 ins_byte = static_cast<u8>(read_value & 0xff);
       u64 installed_bp = ((read_value & ~0xff) | bkpt);
+      DLOG("mdb", "read 0x{:x} from bp location - setting 0x{:x}", read_value, installed_bp);
       ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
       bps.insert(sym.address, ins_byte, BpType{.function = true});
       auto &bp = bps.breakpoints.back();
@@ -714,23 +705,16 @@ TraceeController::process_stopped(TaskInfo *t) noexcept
   DLOG("mdb", "Processing stopped for {} at {}", t->tid, AddrPtr{t->registers->rip});
   const auto prev_pc_byte = offset(pc, -1);
   if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
-    auto bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-    if (bpstat != std::end(bps.bpstats) && bpstat->stepped_over) {
-      bps.bpstats.erase(bpstat);
-      bpstat = find(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-      if (bpstat != std::end(bps.bpstats)) {
-        DLOG("mdb", "Had multiple bpstats for {}", t->tid);
-        goto breakout;
-      }
+    if (t->bstat && t->bstat->stepped_over) {
+      t->bstat = std::nullopt;
       return BpEvent{BpEventType::None, {nullptr}};
     }
-  breakout:
     DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
     set_pc(t, prev_pc_byte);
-    bps.add_bpstat_for(t, bp);
+    t->add_bpstat(bp);
     return BpEvent{bp->event_type(), {.bp = bp}};
   }
-  std::erase_if(bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid && bpstat.stepped_over; });
+  t->bstat = std::nullopt;
   return BpEvent{BpEventType::None, {nullptr}};
 }
 
@@ -755,7 +739,7 @@ TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
                                        std::optional<AddrPtr> base_vma) noexcept
 {
   ASSERT(obj != nullptr, "Object file is null");
-  Elf::parse_objfile(obj);
+  Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
   object_files.push_back(obj);
   if (obj->minimal_fn_symbols.empty()) {
     obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
@@ -848,7 +832,7 @@ TraceeController::get_thread_name(Tid tid) const noexcept
   return name;
 }
 
-utils::StaticVector<u8>::own_ptr
+utils::StaticVector<u8>::OwnPtr
 TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
 {
   auto data = std::make_unique<utils::StaticVector<u8>>(bytes);
@@ -951,14 +935,13 @@ TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
       return unwinder;
     }
   }
-  return nullptr;
+  return null_unwinder;
 }
 
-std::vector<AddrPtr>
-TraceeController::dwarf_unwind_callstack(TaskInfo *task) noexcept
+const std::vector<AddrPtr> &
+TraceeController::dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept
 {
-  task->cache_registers();
-  return return_addresses(this, task);
+  return task->return_addresses(this, req);
 }
 
 std::vector<AddrPtr> &
@@ -1030,21 +1013,14 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 }
 
 sym::CallStack &
-TraceeController::build_callframe_stack(TaskInfo *task) noexcept
+TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept
 {
   DLOG("mdb", "stacktrace for {}", task->tid);
   cache_registers(task);
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;
-  auto dwarf_frame_pcs = dwarf_unwind_callstack(task);
-  auto &frame_pcs = unwind_callstack(task);
-  for (auto pc : dwarf_frame_pcs) {
-    DLOG("eh", "Dwarf PC {}", pc);
-  }
-  for (auto pc : frame_pcs) {
-    DLOG("eh", "Base pointer PC {}", pc);
-  }
+  auto frame_pcs = task->return_addresses(this, req);
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
     auto symbol = find_fn_by_pc(i->as_void());
@@ -1097,20 +1073,6 @@ TraceeController::get_source(std::string_view name) noexcept
   return std::nullopt;
 }
 
-u8 *
-TraceeController::get_in_text_section(AddrPtr vma) const noexcept
-{
-  for (const auto obj : object_files) {
-    const auto sec = obj->parsed_elf->get_section(".text");
-    TPtr<void> relo_addr{sec->address};
-    auto offset = vma - relo_addr;
-    if (offset < sec->size()) {
-      return sec->m_section_ptr + offset;
-    }
-  }
-  return nullptr;
-}
-
 ElfSection *
 TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
@@ -1148,60 +1110,6 @@ const std::vector<CompilationUnitFile> &
 TraceeController::cu_files() const noexcept
 {
   return m_files;
-}
-
-ptracestop::StopHandler *
-TraceeController::stop_handler() const noexcept
-{
-  return ptracestop_handler;
-}
-
-static constexpr auto X86_64_RET_ADDR_REGISTER = 16;
-
-std::vector<AddrPtr>
-return_addresses(TraceeController *tc, TaskInfo *t) noexcept
-{
-  std::vector<AddrPtr> pcs;
-  std::vector<sym::CFAStateMachine> frames_computers;
-  std::vector<sym::RegisterValues> frame_registers;
-
-  pcs.push_back(t->registers->rip);
-  sym::Unwinder *unwinder = tc->get_unwinder_from_pc(t->registers->rip);
-  ASSERT(unwinder != nullptr, "Could not find unwinder for pc {}", AddrPtr{t->registers->rip});
-  const sym::UnwindInfo *inf = unwinder->get_unwind_info(t->registers->rip);
-  frames_computers.push_back(sym::CFAStateMachine::Init(tc, t, inf, pcs.back()));
-
-  // initialize bottom frame's registers with actual live register contents
-  sym::RegisterValues regs{};
-  for (auto i = 0; i <= 16; ++i) {
-    regs[i] = t->get_register(i);
-  }
-
-  while (inf != nullptr) {
-    const auto pc = pcs.back();
-    DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc={}", inf->cie->offset, inf->fde_eh_offset, pc);
-    DwarfBinaryReader reader{inf->cie->instructions.data(), inf->cie->instructions.size()};
-    sym::decode(reader, frames_computers.back(), inf);
-    DwarfBinaryReader fde{inf->fde_insts.data(), inf->fde_insts.size()};
-    sym::decode(fde, frames_computers.back(), inf);
-    frame_registers.push_back(frames_computers.back().produce_preserved_reg_contents(regs));
-    regs = frame_registers.back();
-    pcs.push_back(frame_registers.back()[X86_64_RET_ADDR_REGISTER]);
-    inf = unwinder->get_unwind_info(pcs.back());
-    if (inf != nullptr && pc != pcs.back())
-      frames_computers.push_back(sym::CFAStateMachine{tc, t, frame_registers.back(), inf, pcs.back()});
-    else {
-      unwinder = tc->get_unwinder_from_pc(pcs.back());
-      if (unwinder) {
-        inf = unwinder->get_unwind_info(pcs.back());
-        frames_computers.push_back(sym::CFAStateMachine{tc, t, frame_registers.back(), inf, pcs.back()});
-      } else {
-        pcs.pop_back();
-        break;
-      }
-    }
-  }
-  return pcs;
 }
 
 #pragma GCC diagnostic pop

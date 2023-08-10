@@ -2,7 +2,7 @@ const {
   DAClient,
   MDB_PATH,
   buildDirFile,
-  runTest,
+  runTestSuite,
 } = require("./client")(__filename);
 
 const da_client = new DAClient(MDB_PATH, []);
@@ -34,4 +34,8 @@ async function test() {
 
 }
 
-runTest(test);
+const tests = {
+  "see9ThreadExits": test
+}
+
+runTestSuite(tests);

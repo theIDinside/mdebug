@@ -114,23 +114,6 @@ target_link_libraries(
   nlohmann_json::nlohmann_json
 )
 
-# add_executable(
-#   parse_cf
-#   test/unittest/parse_cf.cpp
-#   src/symbolication/dwarf_frameunwinder.cpp
-#   src/symbolication/elf.cpp
-#   src/common.cpp
-#   src/utils/logger.cpp
-#   ${COMMON_SRC}
-# )
-
-# target_link_libraries(
-#   parse_cf
-#   GTest::gtest_main
-#   fmt::fmt
-#   mdb_spinlock
-# )
-
 add_executable(
   base64_encoding
   test/unittest/base64.cpp
@@ -149,7 +132,6 @@ target_link_libraries(
 include(GoogleTest)
 gtest_discover_tests(parse_dap_requests)
 gtest_discover_tests(base64_encoding)
-# gtest_discover_tests(parse_cf)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
@@ -166,8 +148,10 @@ target_include_directories(mdb PUBLIC ./dependencies)
 
 find_program(NODEJS "node")
 
+# The Driver Test Suite
 if(NODEJS)
-  set(DRIVER_TESTS 
+  # Sub-test suites.
+  set(DRIVER_TEST_SUITES
       disassemble 
       exited
       initialize 
@@ -176,13 +160,37 @@ if(NODEJS)
       nextLine 
       setBreakpoints 
       setInstructionBreakpoints 
-      stackframes
+      unwinder
       threadExited
       moduleEvent
-      unwinder
+      threads
   )
-  foreach(driver_test ${DRIVER_TESTS})
-    add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR})
+
+  # These define 
+  set(disassemble "backAndForward")
+  set(exited "programExit")
+  set(initialize)
+  set(launch "launch")
+  set(nextInstruction "oneInstruction")
+  set(nextLine "nextLineOverFunction")
+  set(setBreakpoints "set4Breakpoints")
+  set(setInstructionBreakpoints "set1Bp") 
+  set(unwinder "insidePrologue" "normal" "insideEpilogue" "unwindFromSharedObject")
+  set(threadExited "see9ThreadExits")
+  set(moduleEvent "6modules")
+  set(threads "threads")
+
+  foreach(driver_test ${DRIVER_TEST_SUITES})
+    list(LENGTH ${driver_test} LIST_LENGTH)
+    if(${LIST_LENGTH} EQUAL 0)
+      add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR} ${test})
+    else()
+    message("Suite ${driver_test}:")
+      foreach(test ${${driver_test}})
+        message("  - ${test}")
+        add_test(NAME DriverTest.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR} ${test})
+      endforeach()
+    endif()
   endforeach()
 endif()
 

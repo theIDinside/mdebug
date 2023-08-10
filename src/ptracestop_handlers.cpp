@@ -8,6 +8,7 @@
 #include "utils/logger.h"
 #include <algorithm>
 #include <chrono>
+#include <sys/wait.h>
 
 namespace ptracestop {
 
@@ -22,11 +23,10 @@ bool
 Action::completed(TaskInfo *t, bool should_stop) noexcept
 {
   constexpr bool is_done = false;
-  DLOG("mdb", "Resume {}, can_continue={}, should_stop = {}: will resume => {}", t->tid, t->can_continue(),
-       should_stop, !should_stop && t->can_continue());
+  DLOG("mdb", "[action]: {} will resume => {}", t->tid, !should_stop && t->can_continue());
   if (!should_stop && t->can_continue()) {
     if (step_over_breakpoint) {
-      t->step_over_breakpoint(tc, step_over_breakpoint);
+      t->step_over_breakpoint(tc);
       step_over_breakpoint = nullptr;
     }
     t->resume(RunType::Continue);
@@ -108,21 +108,17 @@ InstructionStep::resume() noexcept
     tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = thread_id});
     return true;
   }
-  if (!tc->bps.bpstats.empty()) {
-    auto bpstat = find(tc->bps.bpstats, [t = next->tid](auto &bpstat) { return bpstat.tid == t; });
-    bool stepped_over_bp = false;
-    if (bpstat != std::end(tc->bps.bpstats)) {
-      auto bp = tc->bps.get_by_id(bpstat->bp_id);
-      bp->disable(next->tid);
-      stepped_over_bp = true;
-    }
-    auto task = tc->get_task(next->tid);
+
+  auto task = tc->get_task(next->tid);
+  if (task->bstat) {
+    DLOG("mdb", "[ptrace stop:istep]: breakpoint step-over");
+    auto bp = tc->bps.get_by_id(task->bstat->bp_id);
+    bp->disable(tc->task_leader);
     task->resume(RunType::Step);
-    if (stepped_over_bp) {
-      bpstat->stepped_over = true;
-      tc->bps.enable_breakpoint(bpstat->bp_id);
-    }
+    bp->enable(next->tid);
+    task->bstat->stepped_over = true;
   } else {
+    DLOG("mdb", "[ptrace stop:istep]: resume");
     resume_impl();
   }
   update_step_schedule();
@@ -155,7 +151,7 @@ LineStep::start_action() noexcept
 {
   this->handler->is_stepping = true;
   start_time = std::chrono::high_resolution_clock::now();
-  auto &callstack = tc->build_callframe_stack(tc->get_task(next->tid));
+  auto &callstack = tc->build_callframe_stack(tc->get_task(next->tid), CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
   DLOG("mdb", "frame rip: {} cu: {:p} sym: {:p}. frame info {}", start_frame.rip, (void *)start_frame.cu_file,
        (void *)start_frame.symbol, start_frame);
@@ -221,7 +217,7 @@ LineStep::check_if_done() noexcept
     // we've left the origin frame; let's try figure out a place we can set a breakpoint
     // so that we can skip single stepping and instead do `PTRACE_CONT` which will be many orders of magnitude
     // faster.
-    auto &callstack = tc->build_callframe_stack(task);
+    auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(2));
     const auto resume_address = map<AddrPtr>(
         callstack.frames,
         [sf = start_frame](const auto &f) {
@@ -328,19 +324,12 @@ StopHandler::handle_bp_event(TaskInfo *t, BpEvent evt) noexcept
   case BpEventType::None:
     break;
   case BpEventType::TracerBreakpointHit: {
-    auto bpstat = find(tc->bps.bpstats, [t](auto &bpstat) { return bpstat.tid == t->tid; });
-    action->set_step_over(bpstat.base());
+    action->set_step_over(&t->bstat.value());
     if (evt.bp->bp_type.shared_object_load) {
       tc->on_so_event();
     }
   } break;
   }
-}
-
-void
-StopHandler::handle_generic_stop(TaskInfo *) noexcept
-{
-  should_stop = false;
 }
 
 void
@@ -428,7 +417,7 @@ StopHandler::restore_default() noexcept
 void
 StopHandler::start_action() noexcept
 {
-  DLOG("mdb", "Starting action...");
+  DLOG("mdb", "[ptrace stop]: start action...");
   action->start_action();
 }
 

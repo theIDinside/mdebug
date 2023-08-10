@@ -144,6 +144,21 @@ std::string_view syscall_name(u64 syscall_number);
     DEAL_WITH_SHITTY_GCC                                                                                          \
   }
 
+#define TODO_FMT(fmt_str, ...)                                                                                    \
+  {                                                                                                               \
+    auto loc = std::source_location::current();                                                                   \
+    const auto todo_msg_hdr =                                                                                     \
+        fmt::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                      \
+    const auto todo_msg = fmt::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
+    fmt::println("{}", todo_msg_hdr);                                                                             \
+    fmt::println("{}", todo_msg);                                                                                 \
+    logging::get_logging()->log("mdb", todo_msg_hdr);                                                             \
+    logging::get_logging()->log("mdb", todo_msg);                                                                 \
+    logging::get_logging()->on_abort();                                                                           \
+    std::terminate(); /** Silence moronic GCC warnings. */                                                        \
+    DEAL_WITH_SHITTY_GCC                                                                                          \
+  }
+
 // Identical to ASSERT, but doesn't care about build type
 #define VERIFY(cond, msg, ...)                                                                                    \
   {                                                                                                               \
@@ -828,3 +843,5 @@ static constexpr std::string_view reg_names[17] = {"rax", "rdx", "rcx", "rbx", "
                                                    "r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip"};
 
 u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
+
+static constexpr auto X86_64_RIP_REGISTER = 16;

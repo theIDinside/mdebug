@@ -2,3 +2,4 @@ dependencies/**
 src/defs/syscalls.def
 src/symbolication_reference
 build-gcc/
+*.log

@@ -10,7 +10,7 @@ namespace utils {
 template <typename T> class StaticVector
 {
 public:
-  using own_ptr = std::unique_ptr<StaticVector<T>>;
+  using OwnPtr = std::unique_ptr<StaticVector<T>>;
   StaticVector(u64 capacity) noexcept : size(0), cap(capacity), cap_bytes(capacity * sizeof(T))
   {
     const auto bytes_required = sizeof(T) * capacity;

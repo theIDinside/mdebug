@@ -56,10 +56,12 @@ struct CallStack
   explicit CallStack(Tid tid) noexcept;
   ~CallStack() = default;
 
-  Tid tid;                   // the task associated with this call stack
+  Tid tid; // the task associated with this call stack
+  bool dirty;
+  u8 resolved;
   std::vector<Frame> frames; // the call stack
   std::vector<AddrPtr> pcs;
-  bool dirty;
+  std::vector<std::array<u64, 17>> reg_unwind_buffer;
   std::optional<int> has_frame(const Frame &f) const noexcept;
 };
 } // namespace sym

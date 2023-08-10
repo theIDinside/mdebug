@@ -32,7 +32,7 @@ foo()
 int
 main(int argc, const char **argv)
 {
-  // print("Hello world", 100 * argc);
+  print("Hello world: %d", 100 * argc);
   int res = foo();              // BP1 - next line should end on 36, not somewhere inside foo, bar, baz or print.
   print("Goodbye world!", res); // BP2
   print(argv[0], argc);

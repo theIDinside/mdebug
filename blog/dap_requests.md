@@ -18,7 +18,7 @@ Below is a list of implemented requests. Though they might not be implemented _f
 - [x] Initialize
 - [x] Launch
 - [ ] LoadedSources
-- [ ] Modules
+- [x] Modules
 - [ ] Next
   - [x] Instruction
   - [x] Line

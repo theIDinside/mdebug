@@ -3,12 +3,12 @@ const {
   MDB_PATH,
   buildDirFile,
   checkResponse,
-  runTest,
+  runTestSuite,
 } = require("./client")(__filename);
 
 const da_client = new DAClient(MDB_PATH, []);
 
-async function test() {
+async function launch() {
   // we don't care for initialize, that's tested elsewhere
   await da_client
     .sendReqGetResponse("initialize", {}, 1000)
@@ -21,4 +21,8 @@ async function test() {
     .then((res) => checkResponse(res, "launch", true));
 }
 
-runTest(test);
+const tests = {
+  "launch": launch
+}
+
+runTestSuite(tests);

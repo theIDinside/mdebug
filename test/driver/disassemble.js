@@ -1,8 +1,8 @@
-const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTest } =
+const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite } =
   require("./client")(__filename);
 const { spawnSync } = require("child_process");
 
-const da_client = new DAClient(MDB_PATH, []);
+
 
 const regex = /[0-9a-f]+:/;
 function getTextSection(objdumpOutput) {
@@ -107,7 +107,8 @@ async function disasm_verify(objdump, client, pc, insOffset, insCount) {
   );
 }
 
-async function test() {
+async function backAndForward() {
+  const da_client = new DAClient(MDB_PATH, []);
   const objdumped = spawnSync("objdump", [
     "-d",
     buildDirFile("stackframes"),
@@ -127,4 +128,8 @@ async function test() {
   await disasm_verify(objdump, da_client, pc, 10, 2000);
 }
 
-runTest(test);
+const tests = {
+  "backAndForward": backAndForward
+}
+
+runTestSuite(tests);

@@ -12,9 +12,6 @@
 #include <memory_resource>
 #include <span>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 namespace sym {
 
 void
@@ -22,6 +19,13 @@ Reg::set_expression(std::span<const u8> expression) noexcept
 {
   expr = expression;
   rule = RegisterRule::Expression;
+}
+
+void
+Reg::set_val_expression(std::span<const u8> expression) noexcept
+{
+  expr = expression;
+  rule = RegisterRule::ValueExpression;
 }
 
 void
@@ -48,28 +52,46 @@ Reg::set_register(u64 reg) noexcept
 Reg::Reg() noexcept : value(0), rule(RegisterRule::Undefined) {}
 
 CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept
-    : tc(tc), task(task), address(cfi->start), pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), registers()
+    : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), rule_table()
 {
+  std::memset(rule_table.data(), 0, sizeof(Reg) * rule_table.size());
 }
 
 CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const RegisterValues &frame_below,
                                  const UnwindInfo *cfi, AddrPtr pc) noexcept
-    : tc(tc), task(task), address(cfi->start), pc(pc), cfa({.is_expr = false, .reg = {0, 0}})
+    : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}})
 {
-  for (auto i = 0u; i < registers.size(); ++i) {
-    registers[i].rule = RegisterRule::Undefined;
-    registers[i].value = frame_below[i];
+  for (auto i = 0u; i < rule_table.size(); ++i) {
+    rule_table[i].rule = RegisterRule::Undefined;
+    rule_table[i].value = frame_below[i];
   }
 }
 
+void
+CFAStateMachine::reset(const UnwindInfo *inf, const RegisterValues &frame_below, AddrPtr pc) noexcept
+{
+  fde_pc = inf->start;
+  end_pc = pc;
+  cfa = {.is_expr = false, .reg = {0, 0}};
+  auto i = 0;
+  for (auto &r : rule_table) {
+    r.rule = RegisterRule::Undefined;
+    r.value = frame_below[i];
+    i++;
+  }
+}
+
+// todo(simon): this factory fn might seem dumb, but at some point we will want to optimize
+// and only produce Rule-cells for registers actually in use - determining/initializing that will be done here
+// then.
 /* static */
 CFAStateMachine
 CFAStateMachine::Init(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept
 {
   auto cfa_sm = CFAStateMachine{tc, task, cfi, pc};
   for (auto i = 0; i <= 16; i++) {
-    cfa_sm.registers[i].rule = RegisterRule::Undefined;
-    cfa_sm.registers[i].value = task->get_register(i);
+    cfa_sm.rule_table[i].rule = RegisterRule::Undefined;
+    cfa_sm.rule_table[i].value = task->get_register(i);
   }
   return cfa_sm;
 }
@@ -83,20 +105,21 @@ CFAStateMachine::compute_expression(std::span<const u8> bytes) const noexcept
 }
 
 RegisterValues
-CFAStateMachine::produce_preserved_reg_contents(const RegisterValues &reg) noexcept
+CFAStateMachine::resolve_frame_regs(const RegisterValues &frame_live_registers) noexcept
 {
   RegisterValues nxt_frame_regs{};
 
   if (cfa.is_expr) {
     TODO("CFA expr not impl");
   } else {
-    const auto res = static_cast<i64>(reg[cfa.reg.number]) + cfa.reg.offset;
+    const auto res = static_cast<i64>(frame_live_registers[cfa.reg.number]) + cfa.reg.offset;
     cfa_value = static_cast<u64>(res);
-    DLOG("eh", "CFA=0x{:x}", cfa_value);
+    DLOG("eh", "CFA=0x{:x} set from reg {} with value 0x{:x}", cfa_value, cfa.reg.number,
+         frame_live_registers[cfa.reg.number]);
   }
 
   for (auto i = 0u; i < nxt_frame_regs.size(); ++i) {
-    nxt_frame_regs[i] = resolve_reg_contents(i, reg);
+    nxt_frame_regs[i] = resolve_reg_contents(i, frame_live_registers);
   }
 
   nxt_frame_regs[7] = cfa_value;
@@ -106,10 +129,9 @@ CFAStateMachine::produce_preserved_reg_contents(const RegisterValues &reg) noexc
 u64
 CFAStateMachine::resolve_reg_contents(u64 reg_number, const RegisterValues &regs) noexcept
 {
-  auto &reg = registers[reg_number];
+  auto &reg = rule_table[reg_number];
   switch (reg.rule) {
   case sym::RegisterRule::Undefined:
-    [[fallthrough]];
   case sym::RegisterRule::SameValue:
     return reg.value;
   case sym::RegisterRule::Offset: {
@@ -149,13 +171,13 @@ CFAStateMachine::get_cfa() const noexcept
 const Registers &
 CFAStateMachine::get_regs() const noexcept
 {
-  return registers;
+  return rule_table;
 }
 
 const Reg &
 CFAStateMachine::ret_reg() const noexcept
 {
-  return registers[16];
+  return rule_table[16];
 }
 
 void
@@ -185,25 +207,23 @@ CFA::set_expression(std::span<const u8> expression) noexcept
   expr = expression;
 }
 
-bool
+int
 decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
 {
-  while (reader.has_more() && state.address <= state.pc) {
+  auto count = 0;
+  while (reader.has_more() && state.fde_pc <= state.end_pc) {
     auto op = reader.read_value<u8>();
+    ++count;
     switch (op & 0b1100'0000) {
     case 0b0100'0000: { // DW_CFA_advance_loc
-      DLOG("eh", "DW_CFA_advance_loc: pc: {} += {}", state.address,
-           (BOTTOM6_BITS & op) * cfi->cie->code_alignment_factor);
-      state.address += (BOTTOM6_BITS & op) * cfi->cie->code_alignment_factor;
+      state.fde_pc += (BOTTOM6_BITS & op) * cfi->cie->code_alignment_factor;
       break;
     }
     case 0b1000'0000: { // I::DW_CFA_offset
       const auto reg_num = (op & BOTTOM6_BITS);
       const auto offset = reader.read_uleb128<u64>();
       const auto n = static_cast<i64>(offset) * cfi->cie->data_alignment_factor;
-      state.registers[reg_num].set_offset(static_cast<i64>(n));
-      DLOG("eh", "DW_CFA_offset reg={}, offset= {}", reg_num, n);
-      // state.cfa = {.reg = reg_num, .offset = static_cast<i64>(offset)};
+      state.rule_table[reg_num].set_offset(static_cast<i64>(n));
       break;
     }
     case 0b1100'0000:
@@ -214,42 +234,42 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       case 0: // I::DW_CFA_nop
         break;
       case 0x01: { // I::DW_CFA_set_loc
-        state.address = reader.read_value<u64>();
+        state.fde_pc = reader.read_value<u64>();
       } break;
       case 0x02: { // I::DW_CFA_advance_loc1
         const auto delta = reader.read_value<u8>();
-        state.address += delta * cfi->cie->code_alignment_factor;
+        state.fde_pc += delta * cfi->cie->code_alignment_factor;
       } break;
       case 0x03: { // I::DW_CFA_advance_loc2
         const auto delta = reader.read_value<u16>();
-        state.address += delta * cfi->cie->code_alignment_factor;
+        state.fde_pc += delta * cfi->cie->code_alignment_factor;
       } break;
       case 0x04: { // I::DW_CFA_advance_loc4
         const auto delta = reader.read_value<u16>();
-        state.address += delta * cfi->cie->code_alignment_factor;
+        state.fde_pc += delta * cfi->cie->code_alignment_factor;
       } break;
       case 0x05: { // I::DW_CFA_offset_extended
         const auto reg = reader.read_uleb128<u64>();
         const auto offset = reader.read_uleb128<u64>();
         const auto n = offset * cfi->cie->data_alignment_factor;
-        state.registers[reg].set_offset(n);
+        state.rule_table[reg].set_offset(n);
       } break;
       case 0x06: { // I::DW_CFA_restore_extended
         const auto reg = reader.read_uleb128<u64>();
-        TODO("I::DW_CFA_restore_extended not implemented");
+        TODO_FMT("I::DW_CFA_restore_extended not implemented, reg={}", reg);
       } break;
       case 0x07: { // I::DW_CFA_undefined
         const auto reg = reader.read_uleb128<u64>();
-        state.registers[reg].rule = RegisterRule::Undefined;
+        state.rule_table[reg].rule = RegisterRule::Undefined;
       } break;
       case 0x08: { // I::DW_CFA_same_value
         const auto reg = reader.read_uleb128<u64>();
-        state.registers[reg].rule = RegisterRule::SameValue;
+        state.rule_table[reg].rule = RegisterRule::SameValue;
       } break;
       case 0x09: { // I::DW_CFA_register
         const auto reg1 = reader.read_uleb128<u64>();
         const auto reg2 = reader.read_uleb128<u64>();
-        state.registers[reg1].set_register(reg2);
+        state.rule_table[reg1].set_register(reg2);
       } break;
       case 0x0a: { // I::DW_CFA_remember_state
         TODO("I::DW_CFA_remember_state")
@@ -261,34 +281,32 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         const auto reg = reader.read_uleb128<u64>();
         const auto offset = reader.read_uleb128<u64>();
         state.cfa.set_register(reg, offset);
-        DLOG("eh", "DW_CFA_def_cfa: reg={}, offset={}", reg, offset);
       } break;
       case 0x0d: { // I::DW_CFA_def_cfa_register
         const auto reg = reader.read_uleb128<u64>();
         state.cfa.set_register(reg);
-        DLOG("eh", "DW_CFA_def_cfa_register: cfa_reg={}", state.cfa.reg.number);
       } break;
       case 0x0e: { // I::DW_CFA_def_cfa_offset
         const auto offset = reader.read_uleb128<u64>();
         state.cfa.set_offset(static_cast<i64>(offset));
-        DLOG("eh", "DW_CFA_def_cfa_offset: offset={}", offset);
       } break;
       case 0x0f: { // I::DW_CFA_def_cfa_expression
         const auto length = reader.read_uleb128<u64>();
         const auto block = reader.read_block(length);
+        state.cfa.set_expression(std::span{block.ptr, block.size});
       } break;
       case 0x10: { // I::DW_CFA_expression
         TODO("I::DW_CFA_expression");
         const auto reg = reader.read_uleb128<u64>();
         const auto length = reader.read_uleb128<u64>();
         const auto block = reader.read_block(length);
-        state.registers[reg].set_expression(std::span<const u8>{block.ptr, block.size});
+        state.rule_table[reg].set_expression(std::span<const u8>{block.ptr, block.size});
       } break;
       case 0x11: { // I::DW_CFA_offset_extended_sf
         const auto reg = reader.read_uleb128<u64>();
         const auto offset = reader.read_leb128<i64>();
         const auto n = offset * cfi->cie->data_alignment_factor;
-        state.registers[reg].set_offset(n);
+        state.rule_table[reg].set_offset(n);
       } break;
       case 0x12: { // I::DW_CFA_def_cfa_sf
         const auto reg = reader.read_uleb128<u64>();
@@ -305,18 +323,19 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         const auto reg = reader.read_uleb128<u64>();
         const auto offset = reader.read_uleb128<u64>();
         const auto n = offset * cfi->cie->data_alignment_factor;
-        state.registers[reg].set_value_offset(n);
+        state.rule_table[reg].set_value_offset(n);
       } break;
       case 0x15: { // I::DW_CFA_val_offset_sf
         const auto reg = reader.read_uleb128<u64>();
         const auto offset = reader.read_leb128<i64>();
         const auto n = offset * cfi->cie->data_alignment_factor;
-        state.registers[reg].set_value_offset(n);
+        state.rule_table[reg].set_value_offset(n);
       } break;
       case 0x16: { // I::DW_CFA_val_expression
-        const auto val = reader.read_uleb128<u64>();
+        const auto reg = reader.read_uleb128<u64>();
         const auto length = reader.read_uleb128<u64>();
         const auto block = reader.read_block(length);
+        state.rule_table[reg].set_val_expression({block.ptr, block.size});
       } break;
       case 0x1c:
         TODO("DW_CFA_lo_user not supported");
@@ -330,9 +349,7 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       }
     }
   }
-  if (reader.has_more())
-    return true;
-  return false;
+  return count;
 }
 
 ByteCodeInterpreter::ByteCodeInterpreter(std::span<const u8> stream) noexcept : byte_stream(stream) {}
@@ -344,226 +361,7 @@ parse_encoding(u8 value)
              .value_fmt = (DwarfExceptionHeaderEncoding)(0b0000'1111 & value)};
 }
 
-static AddrPtr
-iloc_uleb_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_uleb128<u64>();
-}
-
-static AddrPtr
-iloc_u16_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_value<u16>();
-}
-
-static AddrPtr
-iloc_u32_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_value<u32>();
-}
-
-static AddrPtr
-iloc_u64_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_value<u64>();
-}
-
-static AddrPtr
-iloc_i16_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_value<i16>();
-}
-
-static AddrPtr
-iloc_i32_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_value<i32>();
-}
-
-static AddrPtr
-iloc_i64_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_value<i64>();
-}
-
-static AddrPtr
-iloc_ileb_reader(ElfSection *hdr, DwarfBinaryReader &reader)
-{
-  return hdr->address + reader.read_leb128<i64>();
-}
-
-static AddrPtr
-iloc_uleb_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_uleb128<u64>();
-}
-
-static AddrPtr
-iloc_u16_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_value<u16>();
-}
-
-static AddrPtr
-iloc_u32_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-
-  return reader.read_value<u32>();
-}
-
-static AddrPtr
-iloc_u64_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_value<u64>();
-}
-
-static AddrPtr
-iloc_i16_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_value<i16>();
-}
-
-static AddrPtr
-iloc_i32_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_value<i32>();
-}
-
-static AddrPtr
-iloc_i64_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_value<i64>();
-}
-
-static AddrPtr
-iloc_ileb_reader_abs(ElfSection *, DwarfBinaryReader &reader)
-{
-  return reader.read_leb128<i64>();
-}
-
 using ExprOperation = AddrPtr (*)(ElfSection *, DwarfBinaryReader &);
-
-constexpr QuadWord
-read_value(DwarfExceptionHeaderEncoding encoding, DwarfBinaryReader &reader)
-{
-  switch (encoding) {
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_omit:
-    return QuadWord{0};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_uleb128:
-    return QuadWord{.u = reader.read_uleb128<u64>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_udata2:
-    return QuadWord{.u = reader.read_value<u16>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_udata4:
-    return QuadWord{.u = reader.read_value<u32>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_udata8:
-    return QuadWord{.u = reader.read_value<u64>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sleb128:
-    return QuadWord{.i = reader.read_leb128<i64>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sdata2:
-    return QuadWord{.i = reader.read_value<i16>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sdata4:
-    return QuadWord{.i = reader.read_value<i32>()};
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sdata8:
-    return QuadWord{.i = reader.read_value<i64>()};
-  }
-}
-
-EhFrameHeader
-read_frame_header(DwarfBinaryReader &reader)
-{
-  EhFrameHeader header;
-  header.version = reader.read_value<u8>();
-  header.frame_ptr_encoding = parse_encoding(reader.read_value<u8>());
-  header.fde_count_encoding = parse_encoding(reader.read_value<u8>());
-  header.table_encoding = parse_encoding(reader.read_value<u8>());
-  header.frame_ptr = read_value(header.frame_ptr_encoding.value_fmt, reader);
-  header.fde_count = read_value(header.fde_count_encoding.value_fmt, reader);
-  return header;
-}
-
-ExprOperation
-get_reader(EhFrameHeader &header)
-{
-  ExprOperation reader;
-  switch (header.table_encoding.value_fmt) {
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_omit:
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_uleb128:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_uleb_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_uleb_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_udata2:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_u16_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_u16_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_udata4:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_u32_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_u32_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_udata8:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_u64_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_u64_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sleb128:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_ileb_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_ileb_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sdata2:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_i16_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_i16_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sdata4:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_i32_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_i32_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-    break;
-  case DwarfExceptionHeaderEncoding::DW_EH_PE_sdata8:
-    if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_absptr) {
-      reader = &iloc_i64_reader_abs;
-    } else if (header.table_encoding.loc_fmt == DwarfExceptionHeaderApplication::DW_EH_PE_datarel) {
-      reader = &iloc_i64_reader;
-    } else {
-      PANIC("Unsupported initial location format");
-    }
-    break;
-  }
-  return reader;
-}
 
 std::pair<u64, u64>
 elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
@@ -833,12 +631,10 @@ read_cie(u64 cie_len, u64 cie_offset, DwarfBinaryReader &entry_reader) noexcept
   cie.code_alignment_factor = entry_reader.read_uleb128<u64>();
   cie.data_alignment_factor = entry_reader.read_leb128<i64>();
   cie.retaddr_register = entry_reader.read_uleb128<u64>();
-  auto auglen = 0;
   for (auto c : cie.augmentation_string.value_or("")) {
     if (c == 'z') {
-      const auto bytes_read_a = entry_reader.bytes_read();
-      auglen = entry_reader.read_uleb128<u64>();
-      const auto diff = entry_reader.bytes_read() - bytes_read_a;
+      // we don't care about auglength.
+      entry_reader.read_uleb128<u64>();
     }
     if (c == 'R') {
       auto fde_encoding = parse_encoding(entry_reader.read_value<u8>());
@@ -915,6 +711,28 @@ Unwinder::get_unwind_info(AddrPtr pc) const noexcept
 
 Unwinder::Unwinder(ObjectFile *objfile) noexcept : objfile(objfile), addr_range(AddressRange::MaxMin()) {}
 
+UnwindIterator::UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept
+    : tc(tc), current(tc->get_unwinder_from_pc(first_pc))
+{
+}
+const UnwindInfo *
+UnwindIterator::get_info(AddrPtr pc) noexcept
+{
+  auto inf = current->get_unwind_info(pc);
+  if (inf)
+    return inf;
+  else {
+    current = tc->get_unwinder_from_pc(pc);
+    return current->get_unwind_info(pc);
+  }
+}
+
+bool
+UnwindIterator::is_null() const noexcept
+{
+  return tc->is_null_unwinder(current);
+}
+
 } // namespace sym
 
-#pragma GCC diagnostic pop
+// #pragma GCC diagnostic pop

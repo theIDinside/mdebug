@@ -142,7 +142,6 @@ CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
 const FunctionSymbol *
 CompilationUnitFile::find_subprogram(AddrPtr addr) const noexcept
 {
-  using FnSym = FunctionSymbol;
   const auto sym =
       std::find_if(fns.cbegin(), fns.cend(), [addr](auto &sym) { return sym.start <= addr && sym.end >= addr; });
 
