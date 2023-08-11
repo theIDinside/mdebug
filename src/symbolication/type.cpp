@@ -7,7 +7,7 @@
 #include <filesystem>
 
 CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
-    : m_addr_ranges(), m_name(), m_ltes(), fns(), cu_die(cu)
+    : m_addr_ranges(), m_name(), pc_boundaries(), m_ltes(), fns(), cu_die(cu)
 {
 }
 
