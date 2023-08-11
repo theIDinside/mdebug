@@ -67,10 +67,11 @@ void
 Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
   const auto obj_file = mmap_objectfile(objfile_path);
+  DLOG("mdb", "loading {}", objfile_path.c_str());
+  ASSERT(obj_file != nullptr, "Failed to mmap object file from {}", objfile_path.c_str());
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
   CompilationUnitBuilder cu_builder{obj_file};
-  std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
   auto total = cu_builder.build_cu_headers();
   std::vector<std::thread> jobs{};
 
@@ -79,7 +80,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
       auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
       auto compile_unit_die = proc->read_dies();
       if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-        proc->process_compile_unit_die(compile_unit_die.release());
+        proc->process_compile_unit_die(compile_unit_die.release(), obj_file->parsed_elf);
       } else {
         PANIC("Unexpected non-compile unit DIE parsed");
       }

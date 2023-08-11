@@ -365,6 +365,15 @@ private:
   std::uintptr_t remote_addr;
 };
 
+struct UnrelocatedTraceePointer : public TraceePointer<void>
+{
+  TraceePointer
+  relocate(std::uintptr_t offset) noexcept
+  {
+    return TraceePointer<void>{this->get() + offset};
+  }
+};
+
 namespace fmt {
 template <typename T> struct formatter<TraceePointer<T>>
 {
@@ -383,16 +392,24 @@ template <typename T> struct formatter<TraceePointer<T>>
   }
 };
 
-} // namespace fmt
-
-struct UnrelocatedTraceePointer : public TraceePointer<void>
+template <> struct formatter<UnrelocatedTraceePointer>
 {
-  TraceePointer
-  relocate(std::uintptr_t offset) noexcept
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
   {
-    return TraceePointer<void>{this->get() + offset};
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(UnrelocatedTraceePointer const &tptr, FormatContext &ctx)
+  {
+    return fmt::format_to(ctx.out(), "0x{:x}", tptr.get());
   }
 };
+
+} // namespace fmt
 
 using AddrPtr = TraceePointer<void>;
 template <typename T> using TPtr = TraceePointer<T>;
@@ -516,8 +533,8 @@ decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
 template <typename BufferType>
 concept ByteContainer = requires(BufferType t) {
   { t.size() } -> std::convertible_to<u64>;
-  { t.data() } -> std::convertible_to<u8 *>;
-  { t.offset(10) } -> std::convertible_to<u8 *>;
+  { t.data() } -> std::convertible_to<const u8 *>;
+  { t.offset(10) } -> std::convertible_to<const u8 *>;
 };
 // clang-format on
 
@@ -658,6 +675,14 @@ public:
   std::span<const u8> get_span(u64 size) noexcept;
   std::string_view read_string() noexcept;
   DataBlock read_block(u64 size) noexcept;
+
+  /**
+   * @brief Reads an 'offset value' from the binary data stream. The offset size is determined when reading the
+   * initial length (unit length) of a unit header in one of the many DWARF sections.
+   *
+   * @return u64 - the offset value found at the current position in the data stream.
+   */
+  u64 read_offset() noexcept;
   const u8 *current_ptr() const noexcept;
   bool has_more() noexcept;
   u64 remaining_size() const noexcept;
@@ -806,6 +831,30 @@ keep_range(Container &c, u64 start_idx, u64 end_idx) noexcept
   // erase from end to c.end() first to keep iterators valid
   c.erase(end, c.end());
   c.erase(c.begin(), start);
+}
+
+template <typename T>
+std::vector<std::vector<T>>
+split_into_batches(std::vector<T> &&data, int batches, int work_per_batch) noexcept
+{
+  std::vector<std::vector<T>> res{};
+  res.reserve(batches);
+  ASSERT(data.size() == batches * work_per_batch,
+         "data contains {} elements but was requested to be split into {} * {} = {}", data.size(), batches,
+         work_per_batch, batches * work_per_batch);
+
+  auto idx = 0;
+  auto copied = 0;
+  for (auto i = 0; i < batches * work_per_batch; i += work_per_batch) {
+    res.push_back({});
+    for (auto j = 0; j < work_per_batch; ++j) {
+      res[idx].push_back(data[i + j]);
+      ++copied;
+    }
+    ++idx;
+  }
+  ASSERT(copied == data.size(), "Failed to create subvectors holding all elements");
+  return res;
 }
 
 enum class RegDescriptor : u8

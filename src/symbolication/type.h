@@ -14,7 +14,6 @@ struct FunctionSymbol
   AddrPtr start;
   AddrPtr end;
   std::string_view name;
-  sym::UnwindInfo unwind;
 };
 
 /* Included files are files that are not representable as a compilation unit, at least not directly.
@@ -49,6 +48,7 @@ public:
   AddrPtr high_pc() const noexcept;
   void set_name(std::string_view name) noexcept;
 
+  void add_addr_rng(AddrPtr start, AddrPtr end) noexcept;
   void add_addr_rng(const u64 *start) noexcept;
 
   bool last_added_addr_valid() const noexcept;

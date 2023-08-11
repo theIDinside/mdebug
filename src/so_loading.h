@@ -75,4 +75,4 @@ private:
   int next_so_id;
 };
 
-Path interpreter_path(ElfSection *interp) noexcept;
+Path interpreter_path(const ElfSection *interp) noexcept;

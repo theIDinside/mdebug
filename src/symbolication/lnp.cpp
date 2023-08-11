@@ -1,4 +1,5 @@
 #include "lnp.h"
+#include "elf.h"
 #include <variant>
 
 u64
@@ -18,14 +19,22 @@ read_content_index(DwarfBinaryReader &reader, AttributeForm form)
 }
 
 std::string_view
-read_content_str(DwarfBinaryReader &reader, AttributeForm form)
+read_content_str(DwarfBinaryReader &reader, AttributeForm form, Elf *elf)
 {
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_string:
     return reader.read_string();
-  case DW_FORM_line_strp:
-  case DW_FORM_strp:
+  case DW_FORM_line_strp: {
+    ASSERT(elf->debug_line != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
+    const auto offset = reader.read_offset();
+    return std::string_view{(const char *)elf->debug_line->offset(offset)};
+  }
+  case DW_FORM_strp: {
+    ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
+    const auto offset = reader.read_offset();
+    return std::string_view{(const char *)elf->debug_str->offset(offset)};
+  }
   case DW_FORM_strp_sup:
   case DW_FORM_strx:
   case DW_FORM_strx1:
@@ -87,7 +96,7 @@ read_content(DwarfBinaryReader &reader, AttributeForm form)
 }
 
 std::unique_ptr<LineHeader>
-read_lineheader_v5(const u8 *ptr) noexcept
+read_lineheader_v5(const u8 *ptr, Elf *elf) noexcept
 {
   DwarfBinaryReader reader{ptr, 4096};
   const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
@@ -124,7 +133,7 @@ read_lineheader_v5(const u8 *ptr) noexcept
 
     for (const auto &[content, form] : dir_entry_fmt) {
       if (content == LineNumberProgramContent::DW_LNCT_path) {
-        ent.path = read_content_str(reader, form);
+        ent.path = read_content_str(reader, form, elf);
       } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
         ent.md5.emplace(read_content_datablock(reader, form));
       } else {
@@ -154,7 +163,7 @@ read_lineheader_v5(const u8 *ptr) noexcept
       } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
         entry.md5.emplace(read_content_datablock(reader, form));
       } else if (content == LineNumberProgramContent::DW_LNCT_path) {
-        entry.file_name = read_content_str(reader, form);
+        entry.file_name = read_content_str(reader, form, elf);
       } else {
         read_content(reader, form);
       }

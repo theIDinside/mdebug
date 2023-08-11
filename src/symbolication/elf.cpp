@@ -57,6 +57,13 @@ ElfSection::offset(const u8 *inside_ptr) const noexcept
   return (inside_ptr - m_section_ptr);
 }
 
+const u8 *
+ElfSection::offset(u64 offset) const noexcept
+{
+  ASSERT(offset < size(), "Offset is outside the bounds of this elf section {}", m_name);
+  return m_section_ptr + offset;
+}
+
 u64
 ElfSection::remaining_bytes(const u8 *ptr) const noexcept
 {
@@ -102,6 +109,9 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noe
   debug_line = get_section(".debug_line");
   debug_ranges = get_section(".debug_ranges");
   debug_line_str = get_section(".debug_line_str");
+  debug_str_offsets = get_section(".debug_str_offsets");
+  debug_rnglists = get_section(".debug_rnglists");
+  debug_loclist = get_section(".debug_loclists");
 }
 
 std::span<ElfSection>
@@ -110,7 +120,7 @@ Elf::sections() const noexcept
   return std::span<ElfSection>{m_sections.sections, m_sections.sections + m_sections.count};
 }
 
-ElfSection *
+const ElfSection *
 Elf::get_section(std::string_view name) const noexcept
 {
   for (auto &sec : sections()) {
@@ -121,7 +131,7 @@ Elf::get_section(std::string_view name) const noexcept
   return nullptr;
 }
 
-ElfSection *
+const ElfSection *
 Elf::get_section_or_panic(std::string_view name) const noexcept
 {
   auto sec = get_section(name);
@@ -132,7 +142,7 @@ Elf::get_section_or_panic(std::string_view name) const noexcept
 void
 Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept
 {
-  DLOG("mdb", "Parsing objfile {}", object_file->path.c_str());
+  DLOG("mdb", "[elf]: parsing {}", object_file->path.c_str());
   const auto header = object_file->get_at_offset<Elf64Header>(0);
   ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
@@ -194,4 +204,10 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     }
   }
   obj_file->min_syms = true;
+}
+
+void
+Elf::set_relocation(AddrPtr vma) noexcept
+{
+  reloc = vma;
 }

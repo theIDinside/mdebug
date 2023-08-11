@@ -26,6 +26,7 @@ struct CompileUnitHeader
   u64 debug_info_sec_offset;
   DwarfVersion version;
   u8 format;
+  u8 unit_type;
 };
 
 class CompileUnitReader
@@ -102,7 +103,8 @@ public:
   std::unique_ptr<DebugInfoEntry> read_dies() noexcept;
   const CompileUnitHeader &get_header() const noexcept;
   LineHeader *get_lnp_header() const noexcept;
-  void process_compile_unit_die(DebugInfoEntry *cu_die) noexcept;
+  void process_compile_unit_die(DebugInfoEntry *cu_die, Elf *elf_hndl) noexcept;
+  AddrPtr reloc_base_addr() const noexcept;
 
 private:
   bool finished;
@@ -197,6 +199,11 @@ template <UnsignedWord T> struct D4 : InitialLength<T>
   {
     return offsetof(InitialLength<T>, len);
   }
+  constexpr u8
+  unit_type() noexcept
+  {
+    return 0;
+  }
   T abbr_offset;
   u8 addr_size;
 };
@@ -213,7 +220,14 @@ template <UnsignedWord T> struct D5 : InitialLength<T>
   {
     return offsetof(InitialLength<T>, len);
   }
-  u8 unit_type;
+
+  constexpr u8
+  unit_type() noexcept
+  {
+    return unit_type_;
+  }
+
+  u8 unit_type_;
   u8 addr_size;
   T abbr_offset;
 };
@@ -228,6 +242,7 @@ concept CUHeader = requires(Header header) {
   { header.addr_size } -> std::convertible_to<u64>;
   { Header::version() };
   { Header::len_offset() } -> std::convertible_to<u64>;
+  { header.unit_type() } -> std::convertible_to<u64>;
 };
 // clang-format on
 
@@ -261,7 +276,8 @@ private:
                                .addr_size = cu_hdr->addr_size,
                                .debug_info_sec_offset = dbg_info->offset(it),
                                .version = DwarfSpec::version(),
-                               .format = DwarfSpec::len_offset() + 4};
+                               .format = DwarfSpec::len_offset() + 4,
+                               .unit_type = cu_hdr->unit_type()};
       result.push_back(header);
       it = result.back().end;
       cu_index++;

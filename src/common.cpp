@@ -283,6 +283,19 @@ DwarfBinaryReader::read_block(u64 size) noexcept
   return {.ptr = ptr, .size = size};
 }
 
+u64
+DwarfBinaryReader::read_offset() noexcept
+{
+  switch (offset_size) {
+  case 8:
+    return read_value<u64>();
+  case 4:
+    return read_value<u32>();
+  default:
+    TODO_FMT("Reading offsets/addresses of size {} not yet supported", offset_size);
+  }
+}
+
 const u8 *
 DwarfBinaryReader::current_ptr() const noexcept
 {

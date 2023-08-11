@@ -11,6 +11,7 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
+#include "symbolication/cu.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
@@ -82,7 +83,7 @@ struct ProbeInfo
 };
 
 static std::vector<ProbeInfo>
-parse_stapsdt_note(ElfSection *section) noexcept
+parse_stapsdt_note(const ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
   DwarfBinaryReader reader{section->data(), section->size()};
@@ -188,6 +189,7 @@ TraceeController::on_so_event() noexcept
   for (auto i = 0; i < new_sos; ++i) {
     auto so = shared_objects.get_so(new_so_ids[i]);
     const auto so_of = mmap_objectfile(so->path);
+    so->objfile = so_of;
     if (so_of) {
       register_object_file(so_of, false, so->elf_vma_addr_diff);
       sos.push_back(new_so_ids[i]);
@@ -210,6 +212,27 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   // out of order.
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
+    if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
+      DLOG("mdb", "[dwarf]: parsing {}", so->objfile->path.c_str());
+      CompilationUnitBuilder cu_builder{so->objfile};
+      auto total = cu_builder.build_cu_headers();
+      // todo(simon): make this multi threaded, like the parsing of dwarf for the main executable.
+      //  it's fairly simple to get a parallell version going - however, we should do that once the parsing is done
+      //  because when/if parsing fails and aborts, with multi threading we might not have the proper time to log
+      //  it.
+      auto current = 1;
+      const auto total_sz = total.size();
+      for (const auto &hdr : total) {
+        DLOG("dwarf", "[cu]: processing #{}/{}", current, total_sz);
+        auto proc = prepare_cu_processing(so->objfile, hdr, this);
+        auto compile_unit_die = proc->read_dies();
+        ASSERT(compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit ||
+                   compile_unit_die->tag == DwarfTag::DW_TAG_partial_unit,
+               "Unexpected non-compile unit DIE parsed: {}", to_str(compile_unit_die->tag));
+        proc->process_compile_unit_die(compile_unit_die.release(), so->objfile->parsed_elf);
+        current++;
+      }
+    }
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
   }
 }
@@ -740,6 +763,7 @@ TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
 {
   ASSERT(obj != nullptr, "Object file is null");
   Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
+  obj->parsed_elf->set_relocation(base_vma.value_or(nullptr));
   object_files.push_back(obj);
   if (obj->minimal_fn_symbols.empty()) {
     obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
@@ -1073,7 +1097,7 @@ TraceeController::get_source(std::string_view name) noexcept
   return std::nullopt;
 }
 
-ElfSection *
+const ElfSection *
 TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
   for (const auto of : object_files) {

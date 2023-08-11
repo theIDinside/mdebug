@@ -3,11 +3,12 @@
 #include "dwarf.h"
 #include "lnp.h"
 #include <algorithm>
+#include <chrono>
 #include <emmintrin.h>
 #include <filesystem>
 
 CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
-    : m_addr_ranges(), m_name(), m_ltes(), fns(), cu_die(cu)
+    : m_addr_ranges(), m_name(), pc_boundaries(), m_ltes(), fns(), cu_die(cu)
 {
 }
 
@@ -77,6 +78,12 @@ CompilationUnitFile::set_name(std::string_view name) noexcept
 }
 
 void
+CompilationUnitFile::add_addr_rng(AddrPtr start, AddrPtr end) noexcept
+{
+  m_addr_ranges.push_back(AddressRange{start, end});
+}
+
+void
 CompilationUnitFile::add_addr_rng(const u64 *start) noexcept
 {
   m_addr_ranges.push_back(AddressRange{});
@@ -106,8 +113,13 @@ CompilationUnitFile::set_boundaries() noexcept
 {
   if (!m_addr_ranges.empty())
     pc_boundaries = AddressRange{.low = m_addr_ranges.front().low, .high = m_addr_ranges.back().high};
-  else
+  else if (!m_ltes.empty())
     pc_boundaries = AddressRange{.low = m_ltes.front().pc, .high = m_ltes.back().pc + 1};
+  else // in the case of imported units, partial units with no address (directly) associated with it. It can
+       // potentially have an address range, but in that case it's the actual CU it's pointing to that has it.
+    pc_boundaries = AddressRange{nullptr, nullptr};
+
+  DLOG("dwarf", "[cu]: {}, addr_range={} .. {}", this->m_name, pc_boundaries.low, pc_boundaries.high);
 }
 
 const LineTable &
