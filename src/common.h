@@ -658,6 +658,14 @@ public:
   std::span<const u8> get_span(u64 size) noexcept;
   std::string_view read_string() noexcept;
   DataBlock read_block(u64 size) noexcept;
+
+  /**
+   * @brief Reads an 'offset value' from the binary data stream. The offset size is determined when reading the
+   * initial length (unit length) of a unit header in one of the many DWARF sections.
+   *
+   * @return u64 - the offset value found at the current position in the data stream.
+   */
+  u64 read_offset() noexcept;
   const u8 *current_ptr() const noexcept;
   bool has_more() noexcept;
   u64 remaining_size() const noexcept;
