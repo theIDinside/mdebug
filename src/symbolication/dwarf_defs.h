@@ -207,6 +207,18 @@ enum class DwarfOp : std::uint8_t
     return #Name;
 
 constexpr std::string_view
+to_str(RangeListEntry entry)
+{
+#define DW_RANGE_LIST_ENTRY
+  using enum RangeListEntry;
+  switch (entry) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_RANGE_LIST_ENTRY
+  DEAL_WITH_SHITTY_GCC
+}
+
+constexpr std::string_view
 to_str(DwarfCallFrame opcode)
 {
 #define DW_CALLFRAME
