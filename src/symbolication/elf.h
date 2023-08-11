@@ -53,7 +53,9 @@ public:
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
   void parse_min_symbols(AddrPtr base_vma) const noexcept;
+  void set_relocation(AddrPtr vma) noexcept;
 
+  AddrPtr reloc;
   Elf64Header *header;
   ElfSectionData m_sections;
   ObjectFile *obj_file;

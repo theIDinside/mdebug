@@ -90,9 +90,9 @@ from_str(std::string_view str)
 }
 
 Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept
-    : header(header), m_sections(sections), obj_file(obj_file), str_table{nullptr}, debug_info{nullptr},
-      debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr}, debug_line{nullptr}, debug_addr{nullptr},
-      debug_str_offsets{nullptr}, debug_rnglists{nullptr}, debug_loclist{nullptr}
+    : reloc(nullptr), header(header), m_sections(sections), obj_file(obj_file), str_table{nullptr},
+      debug_info{nullptr}, debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr}, debug_line{nullptr},
+      debug_addr{nullptr}, debug_str_offsets{nullptr}, debug_rnglists{nullptr}, debug_loclist{nullptr}
 {
   obj_file->parsed_elf = this;
   str_table = get_section(".strtab");
@@ -102,6 +102,9 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noe
   debug_line = get_section(".debug_line");
   debug_ranges = get_section(".debug_ranges");
   debug_line_str = get_section(".debug_line_str");
+  debug_str_offsets = get_section(".debug_str_offsets");
+  debug_rnglists = get_section(".debug_rnglists");
+  debug_loclist = get_section(".debug_loclists");
 }
 
 std::span<ElfSection>
@@ -160,7 +163,8 @@ Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcep
     data.sections[i].reloc_base = reloc_base;
   }
   // ObjectFile is the owner of `Elf`
-  new Elf{header, data, object_file};
+  auto elf = new Elf{header, data, object_file};
+  elf->set_relocation(reloc_base);
 }
 
 void
@@ -194,4 +198,10 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     }
   }
   obj_file->min_syms = true;
+}
+
+void
+Elf::set_relocation(AddrPtr vma) noexcept
+{
+  reloc = vma;
 }

@@ -67,6 +67,7 @@ void
 Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
   const auto obj_file = mmap_objectfile(objfile_path);
+  ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
   CompilationUnitBuilder cu_builder{obj_file};
