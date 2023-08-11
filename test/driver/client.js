@@ -334,7 +334,7 @@ class DAClient {
     await stopped_promise;
   }
 
-    // utility function to initialize, launch `program` and run to `main`
+  // utility function to initialize, launch `program` and run to `main`
   async launchToAddress(program, addr, timeout = 1000) {
     let stopped_promise = this.prepareWaitForEvent("stopped");
     await this.sendReqGetResponse("initialize", {}, timeout)
@@ -464,8 +464,11 @@ function testException(err) {
   process.exit(-1);
 }
 
-function runTest(test) {
-  test().then(testSuccess).catch(testException);
+function runTest(test, should_exit = true) {
+  if (should_exit)
+    test().then(testSuccess).catch(testException);
+  else
+    test().catch(testException)
 }
 
 function runTestSuite(tests) {
@@ -473,6 +476,10 @@ function runTestSuite(tests) {
   if (tests.hasOwnProperty(requested)) {
     console.log(`Running ${requested} test`);
     runTest(tests[requested]);
+  } else if (requested == undefined) {
+    for (const prop in tests) {
+      runTest(tests[prop], false);
+    }
   } else {
     throw new Error(`No test called ${requested} in this suite`);
   }
