@@ -516,8 +516,9 @@ decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
 template <typename BufferType>
 concept ByteContainer = requires(BufferType t) {
   { t.size() } -> std::convertible_to<u64>;
-  { t.data() } -> std::convertible_to<u8 *>;
-  { t.offset(10) } -> std::convertible_to<u8 *>;
+  { t.begin() } -> std::convertible_to<const u8 *>;
+  { t.end() } -> std::convertible_to<const u8 *>;
+  { t.offset(10) } -> std::convertible_to<const u8 *>;
 };
 // clang-format on
 
@@ -543,13 +544,25 @@ public:
 
   template <ByteContainer BC>
   DwarfBinaryReader(const BC &bc)
-      : buffer(bc.data()), head(bc.data()), end(bc.data() + bc.size()), size(bc.size()), bookmarks()
+      : buffer(bc.begin()), head(bc.begin()), end(bc.end()), size(bc.size()), bookmarks()
+  {
+  }
+
+  template <ByteContainer BC>
+  DwarfBinaryReader(const BC *bc)
+      : buffer(bc->begin()), head(bc->begin()), end(bc->end()), size(bc->size()), bookmarks()
   {
   }
 
   template <ByteContainer BC>
   DwarfBinaryReader(const BC &bc, u64 offset)
-      : buffer(bc.offset(offset)), head(bc.offset(offset)), end(bc.data() + bc.size()), size(bc.size() - offset),
+      : buffer(bc.offset(offset)), head(bc.offset(offset)), end(bc.end()), size(bc.size() - offset), bookmarks()
+  {
+  }
+
+  template <ByteContainer BC>
+  DwarfBinaryReader(const BC *bc, u64 offset)
+      : buffer(bc->offset(offset)), head(bc->offset(offset)), end(bc->end()), size(bc->size() - offset),
         bookmarks()
   {
   }

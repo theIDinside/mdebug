@@ -63,7 +63,7 @@ read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation
 
   switch (abbr.form) {
   case AttributeForm::DW_FORM_ref_addr:
-    PANIC("AttributeForm::DW_FORM_ref_addr not yet supported");
+    return AttributeValue{reader.read_offset(), abbr.form, abbr.name};
     break;
   case AttributeForm::DW_FORM_addr: {
     e->subprogram_with_addresses = true;
@@ -102,7 +102,7 @@ read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation
   case AttributeForm::DW_FORM_sdata:
     return AttributeValue{reader.leb128(), abbr.form, abbr.name};
   case AttributeForm::DW_FORM_strp: {
-    ASSERT(elf->debug_str != nullptr, ".debug_line expected to be not null");
+    ASSERT(elf->debug_str != nullptr, ".debug_str expected to be not null");
     if (!IS_DWZ) {
       const auto offset = reader.read_offset();
       std::string_view indirect_str{(const char *)elf->debug_str->begin() + offset};
@@ -110,7 +110,7 @@ read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation
     }
   }
   case AttributeForm::DW_FORM_line_strp: {
-    ASSERT(elf->debug_line != nullptr, ".debug_line expected to be not null");
+    ASSERT(elf->debug_line_str != nullptr, ".debug_line expected to be not null");
     if (!IS_DWZ) {
       const auto offset = reader.read_offset();
       const auto ptr = elf->debug_line_str->begin() + offset;
@@ -243,6 +243,8 @@ CUProcessor::read_dies() noexcept
   std::stack<DebugInfoEntry *> parent_stack; // for "horizontal" travelling
   DebugInfoEntry *e = root.get();
   bool has_children = abbreviation.has_children;
+  if (!has_children)
+    return root;
   while (true) {
     u64 abbr_code = reader.uleb128();
     if (abbr_code == 0) {
@@ -282,7 +284,7 @@ CUProcessor::get_lnp_header() const noexcept
 }
 
 static void
-add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die) noexcept
+add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) noexcept
 {
   for (const auto &child : root_die->children) {
     if (child->subprogram_with_addresses) {
@@ -291,10 +293,10 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die) noexcept
         using enum Attribute;
         switch (attr.name) {
         case DW_AT_low_pc:
-          fn.start = attr.address();
+          fn.start = elf->relocate_addr(attr.address());
           break;
         case DW_AT_high_pc:
-          fn.end = attr.address();
+          fn.end = elf->relocate_addr(attr.address());
           break;
         case DW_AT_name:
           fn.name = attr.string();
@@ -310,12 +312,12 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die) noexcept
       if (fn.start != nullptr && fn.end != nullptr && !fn.name.empty()) {
         // means the AT_high_pc was an offset, not an address
         if (fn.end < fn.start) {
-          fn.end = (fn.start + fn.end);
+          fn.end = elf->relocate_addr(fn.start + fn.end);
         }
         file.add_function(fn);
       }
     }
-    add_subprograms(file, child.get());
+    add_subprograms(file, child.get(), elf);
   }
 }
 
@@ -326,7 +328,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
   const auto elf = obj_file->parsed_elf;
   TPtr<void> low = nullptr;
   TPtr<void> high = nullptr;
-  CompilationUnitFile f{cu_die};
+  CompilationUnitFile f{cu_die, elf};
   if (header.addr_size == 4) {
     PANIC("32-bit arch not yet supported.");
   } else {
@@ -335,22 +337,48 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
         f.set_name(att.string());
       } else if (att.name == Attribute::DW_AT_ranges) {
         // todo(simon): re-add/re-design for opportunity of aligned loads/stores
-        const auto value = att.address();
-        const auto ptr = elf->debug_ranges->begin() + value;
-        u64 *start = (u64 *)ptr;
-        f.add_addr_rng(start);
-        for (start += 2; f.m_addr_ranges.back().is_valid(); start += 2) {
-          f.add_addr_rng(start);
+        const u64 value = att.address();
+        if (header.version == DwarfVersion::D4) {
+          DwarfBinaryReader reader{elf->debug_ranges, value};
+          while (true) {
+            auto start = reader.read_value<u64>();
+            auto end = reader.read_value<u64>();
+            if (start == 0 && end == 0)
+              break;
+            f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(end));
+          }
+        } else {
+          DwarfBinaryReader reader{elf->debug_ranges, value};
+          auto range_entry_type = reader.read_value<RangeListEntry>();
+          while (range_entry_type != RangeListEntry::DW_RLE_end_of_list) {
+            switch (range_entry_type) {
+            case RangeListEntry::DW_RLE_start_length: {
+              u64 start = reader.read_value<u64>();
+              u64 length = reader.read_uleb128<u64>();
+              f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(start + length));
+            } break;
+            case RangeListEntry::DW_RLE_offset_pair: {
+              u64 start = reader.read_uleb128<u64>();
+              u64 end = reader.read_uleb128<u64>();
+              f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(end));
+            } break;
+            default:
+              TODO_FMT("RangeListEntry of type {} not yet implemented", to_str(range_entry_type));
+              break;
+            }
+            range_entry_type = reader.read_value<RangeListEntry>();
+          }
         }
-        f.m_addr_ranges.pop_back();
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
         if (header.version == DwarfVersion::D4) {
-          line_header = read_lineheader_v4(obj_file->parsed_elf->debug_line->data() + offset, header.addr_size);
+          line_header = read_lineheader_v4(obj_file->parsed_elf->debug_line->offset(offset), header.addr_size);
           f.set_linetable(parse_linetable(this));
           f.set_linetable_header(std::move(this->line_header));
         } else {
-          PANIC("V5 line number program not supported yet");
+          line_header = read_lineheader_v5(obj_file->parsed_elf->debug_line->offset(offset), elf);
+          f.set_linetable(parse_linetable(this));
+          f.set_linetable_header(std::move(this->line_header));
         }
       } else if (att.name == Attribute::DW_AT_low_pc) {
         low = att.address();
@@ -360,8 +388,14 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
     }
   }
   f.set_boundaries();
-  add_subprograms(f, cu_die);
+  add_subprograms(f, cu_die, elf);
   requesting_target->add_file(std::move(f));
+}
+
+AddrPtr
+CUProcessor::reloc_base() const noexcept
+{
+  return obj_file->parsed_elf->relocate_addr(nullptr);
 }
 
 CompileUnitReader::CompileUnitReader(CompileUnitHeader *header, const ObjectFile *obj_file) noexcept
@@ -535,9 +569,9 @@ CompileUnitReader::read_loclist_index(u64 range_index) const noexcept
 class LNPStateMachine
 {
 public:
-  LNPStateMachine(LineHeader *header, LineTable *table)
-      : header{header}, table{table}, address(0), line(1), column(0), op_index(0), file(1),
-        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
+  LNPStateMachine(LineHeader *header, LineTable *table, AddrPtr relocate_base)
+      : header{header}, table{table}, relocate_base(relocate_base), address(0), line(1), column(0), op_index(0),
+        file(1), is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
         epilogue_begin(false), isa(0), discriminator(0)
   {
   }
@@ -552,7 +586,7 @@ public:
   constexpr void
   stamp_entry() noexcept
   {
-    table->push_back(LineTableEntry{.pc = address,
+    table->push_back(LineTableEntry{.pc = address + relocate_base,
                                     .line = line,
                                     .column = column,
                                     .file = static_cast<u16>(file),
@@ -705,6 +739,7 @@ private:
   }
   LineHeader *header;
   LineTable *table;
+  AddrPtr relocate_base;
   // State machine register
   u64 address;
   u32 line;
@@ -729,7 +764,7 @@ parse_linetable(CUProcessor *proc) noexcept
   DwarfBinaryReader reader{hdr->data, hdr->data_length};
   LineTable line_table{};
   while (reader.has_more()) {
-    LNPStateMachine state{hdr, &line_table};
+    LNPStateMachine state{hdr, &line_table, proc->reloc_base()};
     while (reader.has_more() && !state.sequence_ended()) {
       const auto opcode = reader.read_value<OpCode>();
       if (const auto spec_op = std::to_underlying(opcode); spec_op >= hdr->opcode_base) {

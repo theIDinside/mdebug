@@ -30,10 +30,11 @@ struct ElfSection
    * Determines offset of `inside_ptr` from `m_section_ptr`.
    * Requires pointer to be >= m_section_ptr. This contract is only tested in debug builds.
    */
-  u64 offset(const u8 *inside_ptr) const noexcept;
+  u64 get_ptr_offset(const u8 *inside_ptr) const noexcept;
+
+  const u8 *offset(u64 offset) const noexcept;
   u64 remaining_bytes(const u8 *ptr) const noexcept;
   u64 size() const noexcept;
-  const u8 *data() const noexcept;
 };
 
 struct ElfSectionData
@@ -54,8 +55,13 @@ public:
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
   void parse_min_symbols(AddrPtr base_vma) const noexcept;
   void set_relocation(AddrPtr vma) noexcept;
+  AddrPtr relocate_addr(AddrPtr addr) noexcept;
+  AddrPtr obj_addr(AddrPtr addr) noexcept;
 
+private:
   AddrPtr reloc;
+
+public:
   Elf64Header *header;
   ElfSectionData m_sections;
   ObjectFile *obj_file;

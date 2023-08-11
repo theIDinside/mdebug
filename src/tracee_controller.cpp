@@ -84,7 +84,7 @@ static std::vector<ProbeInfo>
 parse_stapsdt_note(const ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
-  DwarfBinaryReader reader{section->data(), section->size()};
+  DwarfBinaryReader reader{section};
   std::set<std::string_view> required_probes{{"map_complete", "reloc_complete", "unmap_complete"}};
   // stapsdt, location 8 bytes, base 8 bytes, semaphore 8 bytes, desc=string of N bytes, then more bytes we don't
   // care for

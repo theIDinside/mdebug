@@ -4,6 +4,8 @@
 #include <optional>
 #include <utility>
 
+class Elf;
+
 struct DirEntry
 {
   std::string_view path;
@@ -53,7 +55,7 @@ struct LineHeader
  * @param bytes - pointer into the `.debug_line` section where we start parsing this header.
  * @return std::unique_ptr<LineHeader>
  */
-std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes) noexcept;
+std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes, Elf *elf) noexcept;
 
 /**
  * See description for `read_lineheader_v5`; only the implementation details differ.

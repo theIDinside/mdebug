@@ -103,6 +103,7 @@ public:
   const CompileUnitHeader &get_header() const noexcept;
   LineHeader *get_lnp_header() const noexcept;
   void process_compile_unit_die(DebugInfoEntry *cu_die) noexcept;
+  AddrPtr reloc_base() const noexcept;
 
 private:
   bool finished;
@@ -259,7 +260,7 @@ private:
                                .end = it + cu_hdr->len + (sizeof(cu_hdr->len) + DwarfSpec::len_offset()),
                                .cu_index = cu_index,
                                .addr_size = cu_hdr->addr_size,
-                               .debug_info_sec_offset = dbg_info->offset(it),
+                               .debug_info_sec_offset = dbg_info->get_ptr_offset(it),
                                .version = DwarfSpec::version(),
                                .format = DwarfSpec::len_offset() + 4};
       result.push_back(header);

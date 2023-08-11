@@ -58,7 +58,7 @@ Path
 interpreter_path(const ElfSection *interp) noexcept
 {
   ASSERT(interp->get_name() == ".interp", "Section is not .interp: {}", interp->get_name());
-  DwarfBinaryReader reader{interp->data(), interp->size()};
+  DwarfBinaryReader reader{interp};
   const auto path = reader.read_string();
   DLOG("mdb", "Path to system interpreter: {}", path);
   return path;

@@ -9,6 +9,8 @@
 
 using AddrRanges = std::vector<AddressRange>;
 
+class Elf;
+
 struct FunctionSymbol
 {
   AddrPtr start;
@@ -39,7 +41,7 @@ struct IncludedFile
 class CompilationUnitFile
 {
 public:
-  explicit CompilationUnitFile(DebugInfoEntry *cu_die) noexcept;
+  explicit CompilationUnitFile(DebugInfoEntry *cu_die, const Elf *elf) noexcept;
   CompilationUnitFile(CompilationUnitFile &&o) noexcept;
   CompilationUnitFile &operator=(CompilationUnitFile &&) noexcept;
   NO_COPY(CompilationUnitFile);
@@ -96,6 +98,7 @@ private:
   LineTable m_ltes;
   std::vector<FunctionSymbol> fns;
   DebugInfoEntry *cu_die;
+  const Elf *elf;
 };
 
 class NonExecutableCompilationUnitFile

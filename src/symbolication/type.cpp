@@ -1,13 +1,14 @@
 #include "type.h"
 #include "block.h"
 #include "dwarf.h"
+#include "elf.h"
 #include "lnp.h"
 #include <algorithm>
 #include <emmintrin.h>
 #include <filesystem>
 
-CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
-    : m_addr_ranges(), m_name(), pc_boundaries(), m_ltes(), fns(), cu_die(cu)
+CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu, const Elf *elf) noexcept
+    : m_addr_ranges(), m_name(), pc_boundaries(), m_ltes(), fns(), cu_die(cu), elf(elf)
 {
 }
 

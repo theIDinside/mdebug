@@ -50,11 +50,17 @@ ElfSection::vma() const noexcept
 }
 
 u64
-ElfSection::offset(const u8 *inside_ptr) const noexcept
+ElfSection::get_ptr_offset(const u8 *inside_ptr) const noexcept
 {
   ASSERT(inside_ptr >= m_section_ptr, "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
          (void *)inside_ptr, (void *)m_section_ptr);
   return (inside_ptr - m_section_ptr);
+}
+
+const u8 *
+ElfSection::offset(u64 offset) const noexcept
+{
+  return m_section_ptr + offset;
 }
 
 u64
@@ -62,7 +68,7 @@ ElfSection::remaining_bytes(const u8 *ptr) const noexcept
 {
   ASSERT(ptr >= m_section_ptr, "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})", (void *)ptr,
          (void *)m_section_ptr);
-  const auto offset_bytes = offset(ptr);
+  const auto offset_bytes = get_ptr_offset(ptr);
   return size() - offset_bytes;
 }
 
@@ -70,12 +76,6 @@ u64
 ElfSection::size() const noexcept
 {
   return m_section_size;
-}
-
-const u8 *
-ElfSection::data() const noexcept
-{
-  return m_section_ptr;
 }
 
 DwarfSectionIdent
@@ -204,4 +204,17 @@ void
 Elf::set_relocation(AddrPtr vma) noexcept
 {
   reloc = vma;
+}
+
+AddrPtr
+Elf::relocate_addr(AddrPtr addr) noexcept
+{
+  return addr + reloc;
+}
+
+AddrPtr
+Elf::obj_addr(AddrPtr addr) noexcept
+{
+  ASSERT(addr > reloc, "Address {} is below reloc base {}", addr, reloc);
+  return addr - reloc;
 }
