@@ -53,10 +53,9 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      stop_on_clone(false), tracee_r_debug(nullptr),
-      shared_objects(), spin_lock{}, m_files{}, interpreter_base{}, entry{}, session(session),
-      is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(),
-      null_unwinder(new sym::Unwinder{nullptr})
+      stop_on_clone(false), tracee_r_debug(nullptr), shared_objects(), spin_lock{}, m_executable_files{},
+      m_other_cu_files(), interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
+      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -457,8 +456,8 @@ TraceeController::set_source_breakpoints(std::string_view src,
 {
   logging::get_logging()->log("mdb",
                               fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
-  auto f = find(m_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
-  if (f != std::end(m_files)) {
+  auto f = find(m_executable_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+  if (f != std::end(m_executable_files)) {
     for (auto &&desc : descs) {
       // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
       const auto &lt = f->line_table();
@@ -875,8 +874,9 @@ TraceeController::add_file(CompilationUnitFile &&file) noexcept
       const auto faddr_rng = f.low_high_pc();
       return range.high > faddr_rng.low;
     };
-    auto it_pos = std::lower_bound(m_files.begin(), m_files.end(), file.low_high_pc(), file_sorter_by_addresses);
-    m_files.insert(it_pos, std::move(file));
+    auto it_pos = std::lower_bound(m_executable_files.begin(), m_executable_files.end(), file.low_high_pc(),
+                                   file_sorter_by_addresses);
+    m_executable_files.insert(it_pos, std::move(file));
   }
   auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
   Tracer::Instance->post_event(evt);
@@ -1051,7 +1051,7 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
 std::optional<SearchFnSymResult>
 TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 {
-  for (auto &f : m_files) {
+  for (auto &f : m_executable_files) {
     if (f.may_contain(addr)) {
       const auto fn = f.find_subprogram(addr);
       if (fn != nullptr) {
@@ -1065,7 +1065,7 @@ TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 std::optional<std::string_view>
 TraceeController::get_source(std::string_view name) noexcept
 {
-  for (const auto &f : m_files) {
+  for (const auto &f : m_executable_files) {
     if (f.name() == name) {
       return f.name();
     }
@@ -1087,10 +1087,10 @@ TraceeController::get_text_section(AddrPtr addr) const noexcept
 std::optional<u64>
 TraceeController::cu_file_from_pc(AddrPtr address) const noexcept
 {
-  const auto first =
-      std::find_if(m_files.begin(), m_files.end(), [address](const auto &f) { return f.may_contain(address); });
-  if (first != std::cend(m_files)) {
-    return std::distance(std::cbegin(m_files), first);
+  const auto first = std::find_if(m_executable_files.begin(), m_executable_files.end(),
+                                  [address](const auto &f) { return f.may_contain(address); });
+  if (first != std::cend(m_executable_files)) {
+    return std::distance(std::cbegin(m_executable_files), first);
   } else {
     return std::nullopt;
   }
@@ -1099,17 +1099,17 @@ TraceeController::cu_file_from_pc(AddrPtr address) const noexcept
 const CompilationUnitFile *
 TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
 {
-  if (auto it = find(m_files, [addr = address](const auto &f) { return f.may_contain(addr); });
-      it != std::cend(m_files)) {
+  if (auto it = find(m_executable_files, [addr = address](const auto &f) { return f.may_contain(addr); });
+      it != std::cend(m_executable_files)) {
     return &*it;
   }
   return nullptr;
 }
 
 const std::vector<CompilationUnitFile> &
-TraceeController::cu_files() const noexcept
+TraceeController::get_executable_cus() const noexcept
 {
-  return m_files;
+  return m_executable_files;
 }
 
 #pragma GCC diagnostic pop

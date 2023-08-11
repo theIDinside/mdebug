@@ -31,6 +31,10 @@ struct IncludedFile
  * Symbol container for a specific file. The idea is that we operate on files when we're a "normal programmer
  * debugger". As such, we want simplicity for the every day case and intuitive behaviors. First design therefore
  * will revolve around compilation units as being a sort of "master identifier"
+ * These CU's represent compilation units that contain executable code. CU's that don't, or that contain references
+ * to other CU's that may or may not, is instead called NonExecutableCompilationUnitFile. This way they won't
+ * clutter up the containers so searching for code addresses can be kept as fast as possible, even without
+ * optimizations.
  */
 class CompilationUnitFile
 {
@@ -50,6 +54,7 @@ public:
   void set_name(std::string_view name) noexcept;
 
   void add_addr_rng(const u64 *start) noexcept;
+  void add_addr_rng(AddrPtr start, AddrPtr end) noexcept;
 
   bool last_added_addr_valid() const noexcept;
 
@@ -91,6 +96,10 @@ private:
   LineTable m_ltes;
   std::vector<FunctionSymbol> fns;
   DebugInfoEntry *cu_die;
+};
+
+class NonExecutableCompilationUnitFile
+{
 };
 
 namespace fmt {

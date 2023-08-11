@@ -72,7 +72,8 @@ struct TraceeController
 
 private:
   SpinLock spin_lock;
-  std::vector<CompilationUnitFile> m_files;
+  std::vector<CompilationUnitFile> m_executable_files;
+  std::vector<NonExecutableCompilationUnitFile> m_other_cu_files;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   AwaiterThread::handle awaiter_thread;
@@ -294,5 +295,6 @@ public:
   // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
   std::optional<u64> cu_file_from_pc(AddrPtr address) const noexcept;
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
-  const std::vector<CompilationUnitFile> &cu_files() const noexcept;
+  // Returns CU:s containing executable code.
+  const std::vector<CompilationUnitFile> &get_executable_cus() const noexcept;
 };

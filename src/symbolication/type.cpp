@@ -83,6 +83,12 @@ CompilationUnitFile::add_addr_rng(const u64 *start) noexcept
   _mm_storeu_si128((__m128i *)&m_addr_ranges.back(), _mm_loadu_si128((__m128i *)start));
 }
 
+void
+CompilationUnitFile::add_addr_rng(AddrPtr start, AddrPtr end) noexcept
+{
+  m_addr_ranges.push_back(AddressRange{start, end});
+}
+
 bool
 CompilationUnitFile::last_added_addr_valid() const noexcept
 {
