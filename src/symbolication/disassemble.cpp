@@ -61,7 +61,7 @@ void
 zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
-  ElfSection *text = target->get_text_section(addr);
+  const auto text = target->get_text_section(addr);
   ZydisDisassembledInstruction instruction;
 
   // This hurts my soul and is so hacky.
@@ -122,7 +122,7 @@ void
 zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
              std::vector<sym::Disassembly> &output) noexcept
 {
-  ElfSection *text = target->get_text_section(addr);
+  const ElfSection *text = target->get_text_section(addr);
   const auto start_exec_data = text->into(addr);
   auto exec_data_ptr = start_exec_data;
   ZydisDisassembledInstruction instruction;

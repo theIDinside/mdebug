@@ -290,7 +290,7 @@ public:
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
-  ElfSection *get_text_section(AddrPtr addr) const noexcept;
+  const ElfSection *get_text_section(AddrPtr addr) const noexcept;
   // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
   std::optional<u64> cu_file_from_pc(AddrPtr address) const noexcept;
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;

@@ -82,7 +82,7 @@ struct ProbeInfo
 };
 
 static std::vector<ProbeInfo>
-parse_stapsdt_note(ElfSection *section) noexcept
+parse_stapsdt_note(const ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
   DwarfBinaryReader reader{section->data(), section->size()};
@@ -1073,11 +1073,11 @@ TraceeController::get_source(std::string_view name) noexcept
   return std::nullopt;
 }
 
-ElfSection *
+const ElfSection *
 TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
   for (const auto of : object_files) {
-    auto text = of->parsed_elf->get_section(".text");
+    const auto text = of->parsed_elf->get_section(".text");
     if (text->contains_relo_addr(addr))
       return text;
   }

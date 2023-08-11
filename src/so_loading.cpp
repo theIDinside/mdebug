@@ -55,7 +55,7 @@ SharedObject::load_objectfile() noexcept
 }
 
 Path
-interpreter_path(ElfSection *interp) noexcept
+interpreter_path(const ElfSection *interp) noexcept
 {
   ASSERT(interp->get_name() == ".interp", "Section is not .interp: {}", interp->get_name());
   DwarfBinaryReader reader{interp->data(), interp->size()};

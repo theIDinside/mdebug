@@ -110,7 +110,7 @@ Elf::sections() const noexcept
   return std::span<ElfSection>{m_sections.sections, m_sections.sections + m_sections.count};
 }
 
-ElfSection *
+const ElfSection *
 Elf::get_section(std::string_view name) const noexcept
 {
   for (auto &sec : sections()) {
@@ -121,7 +121,7 @@ Elf::get_section(std::string_view name) const noexcept
   return nullptr;
 }
 
-ElfSection *
+const ElfSection *
 Elf::get_section_or_panic(std::string_view name) const noexcept
 {
   auto sec = get_section(name);

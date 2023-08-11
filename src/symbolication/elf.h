@@ -48,8 +48,8 @@ public:
   Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept;
   static void parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept;
   std::span<ElfSection> sections() const noexcept;
-  ElfSection *get_section(std::string_view name) const noexcept;
-  ElfSection *get_section_or_panic(std::string_view name) const noexcept;
+  const ElfSection *get_section(std::string_view name) const noexcept;
+  const ElfSection *get_section_or_panic(std::string_view name) const noexcept;
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
   void parse_min_symbols(AddrPtr base_vma) const noexcept;
@@ -58,18 +58,18 @@ public:
   ElfSectionData m_sections;
   ObjectFile *obj_file;
 
-  ElfSection *str_table;
+  const ElfSection *str_table;
   // Dwarf Sections, might as well keep direct pointers to them
-  ElfSection *debug_info;
-  ElfSection *debug_abbrev;
-  ElfSection *debug_str;
-  ElfSection *debug_line_str;
-  ElfSection *debug_ranges;
-  ElfSection *debug_line;
-  ElfSection *debug_addr;
-  ElfSection *debug_str_offsets;
-  ElfSection *debug_rnglists;
-  ElfSection *debug_loclist;
+  const ElfSection *debug_info;
+  const ElfSection *debug_abbrev;
+  const ElfSection *debug_str;
+  const ElfSection *debug_line_str;
+  const ElfSection *debug_ranges;
+  const ElfSection *debug_line;
+  const ElfSection *debug_addr;
+  const ElfSection *debug_str_offsets;
+  const ElfSection *debug_rnglists;
+  const ElfSection *debug_loclist;
 };
 
 enum class DwarfSectionIdent : u8
