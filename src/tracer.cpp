@@ -71,7 +71,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
   CompilationUnitBuilder cu_builder{obj_file};
-  std::vector<std::unique_ptr<CUProcessor>> cu_processors{};
+
   auto total = cu_builder.build_cu_headers();
   std::vector<std::thread> jobs{};
 
