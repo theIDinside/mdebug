@@ -52,7 +52,7 @@ static constexpr auto IS_DWZ = false;
 
 static AttributeValue
 read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation abbr,
-                      const std::vector<i64> &implicit_consts) noexcept
+                      std::vector<i64> &implicit_consts) noexcept
 {
   if (abbr.IMPLICIT_CONST_INDEX != UINT8_MAX) {
     return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], AttributeForm::DW_FORM_implicit_const,
@@ -232,7 +232,7 @@ CUProcessor::read_dies() noexcept
   std::unique_ptr<DebugInfoEntry> root = std::make_unique<DebugInfoEntry>();
   const auto abbr_code = reader.uleb128();
   ASSERT(abbr_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
-  const auto &abbreviation = abbrev_table[abbr_code - 1];
+  auto &abbreviation = abbrev_table[abbr_code - 1];
   root->set_abbreviation(abbreviation);
 
   for (const auto &attr : abbreviation.attributes) {
@@ -257,7 +257,7 @@ CUProcessor::read_dies() noexcept
     }
     parent_stack.top()->children.emplace_back(std::make_unique<DebugInfoEntry>());
     e = parent_stack.top()->children.back().get();
-    const auto &abbreviation = abbrev_table[abbr_code - 1];
+    auto &abbreviation = abbrev_table[abbr_code - 1];
     e->set_abbreviation(abbreviation);
     for (const auto &attr : abbreviation.attributes) {
       e->attributes.emplace_back(read_attribute_values(e, reader, attr, abbreviation.implicit_consts));
