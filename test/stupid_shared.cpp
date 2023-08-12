@@ -24,5 +24,14 @@ do_test_stuff(int count)
 int
 main(int, const char **)
 {
-  do_test_stuff(names.size());
+  {
+    printf("first child lexical block\n");
+    int a = names.size();
+    do_test_stuff(a);
+  }
+  printf("main lexical block\n");
+  {
+    printf("second child lexical block\n");
+    do_test_stuff(4);
+  }
 }

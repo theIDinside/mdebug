@@ -234,12 +234,11 @@ CUProcessor::read_dies() noexcept
   ASSERT(abbr_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
   auto abbreviation = abbrev_table[abbr_code - 1];
   root->abbreviation_code = abbr_code;
-  root->tag = abbreviation.tag;
+  root->set_tag(abbreviation.tag);
 
   for (const auto &attr : abbreviation.attributes) {
     root->attributes.emplace_back(read_attribute_values(root.get(), reader, attr, abbreviation.implicit_consts));
   }
-  root->next_die_in_cu = reader.bytes_read();
   std::stack<DebugInfoEntry *> parent_stack; // for "horizontal" travelling
   DebugInfoEntry *e = root.get();
   bool has_children = abbreviation.has_children;
@@ -261,7 +260,7 @@ CUProcessor::read_dies() noexcept
     e = parent_stack.top()->children.back().get();
     auto abbreviation = abbrev_table[abbr_code - 1];
     e->abbreviation_code = abbr_code;
-    e->tag = abbreviation.tag;
+    e->set_tag(abbreviation.tag);
     for (const auto &attr : abbreviation.attributes) {
       e->attributes.emplace_back(read_attribute_values(e, reader, attr, abbreviation.implicit_consts));
     }
@@ -348,7 +347,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
             f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(end));
           }
         } else {
-          DwarfBinaryReader reader{elf->debug_ranges, value};
+          DwarfBinaryReader reader{elf->debug_rnglists, value};
           auto range_entry_type = reader.read_value<RangeListEntry>();
           while (range_entry_type != RangeListEntry::DW_RLE_end_of_list) {
             switch (range_entry_type) {

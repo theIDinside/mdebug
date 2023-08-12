@@ -113,8 +113,10 @@ CompilationUnitFile::set_boundaries() noexcept
 {
   if (!m_addr_ranges.empty())
     pc_boundaries = AddressRange{.low = m_addr_ranges.front().low, .high = m_addr_ranges.back().high};
-  else
+  else if (!m_ltes.empty())
     pc_boundaries = AddressRange{.low = m_ltes.front().pc, .high = m_ltes.back().pc + 1};
+  else
+    pc_boundaries = AddressRange{nullptr, nullptr};
 }
 
 const LineTable &

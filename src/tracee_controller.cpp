@@ -11,6 +11,7 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
+#include "symbolication/cu.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
@@ -53,8 +54,8 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      stop_on_clone(false), tracee_r_debug(nullptr), shared_objects(), spin_lock{}, m_executable_files{},
-      m_other_cu_files(), interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
+      stop_on_clone(false), tracee_r_debug(nullptr), shared_objects(), spin_lock{}, m_full_cu{},
+      m_partial_units(), interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
       ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
@@ -187,6 +188,7 @@ TraceeController::on_so_event() noexcept
   for (auto i = 0; i < new_sos; ++i) {
     auto so = shared_objects.get_so(new_so_ids[i]);
     const auto so_of = mmap_objectfile(so->path);
+    so->objfile = so_of;
     if (so_of) {
       register_object_file(so_of, false, so->elf_vma_addr_diff);
       sos.push_back(new_so_ids[i]);
@@ -204,11 +206,26 @@ TraceeController::is_null_unwinder(sym::Unwinder *unwinder) const noexcept
 void
 TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
 {
-  // TODO(simon): for now, we do no dwarf processing, implement that in future commits; just emit DAP module
-  // events. We emit them here, because the DWARF parsing may or may not be multi threaded, so they might be done
-  // out of order.
+  // todo(simon): make this multi threaded, like the parsing of dwarf for the main executable.
+  //  it's fairly simple to get a parallell version going - however, we should do that once the parsing is done
+  //  because when/if parsing fails and aborts, with multi threading we might not have the proper time to log
+  //  it.
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
+    if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
+      CompilationUnitBuilder cu_builder{so->objfile};
+      auto total = cu_builder.build_cu_headers();
+      const auto total_sz = total.size();
+      for (const auto &hdr : total) {
+        ASSERT(so->objfile != nullptr, "Objfile is null!");
+        auto proc = prepare_cu_processing(so->objfile, hdr, this);
+        auto compile_unit_die = proc->read_dies();
+        ASSERT(compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit ||
+                   compile_unit_die->tag == DwarfTag::DW_TAG_partial_unit,
+               "Unexpected non-compile unit DIE parsed: {}", to_str(compile_unit_die->tag));
+        proc->process_compile_unit_die(compile_unit_die.release());
+      }
+    }
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
   }
 }
@@ -456,8 +473,8 @@ TraceeController::set_source_breakpoints(std::string_view src,
 {
   logging::get_logging()->log("mdb",
                               fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
-  auto f = find(m_executable_files, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
-  if (f != std::end(m_executable_files)) {
+  auto f = find(m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+  if (f != std::end(m_full_cu)) {
     for (auto &&desc : descs) {
       // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
       const auto &lt = f->line_table();
@@ -870,13 +887,17 @@ TraceeController::add_file(CompilationUnitFile &&file) noexcept
 {
   {
     LockGuard guard{spin_lock};
-    constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
-      const auto faddr_rng = f.low_high_pc();
-      return range.high > faddr_rng.low;
-    };
-    auto it_pos = std::lower_bound(m_executable_files.begin(), m_executable_files.end(), file.low_high_pc(),
-                                   file_sorter_by_addresses);
-    m_executable_files.insert(it_pos, std::move(file));
+    if (file.low_high_pc().is_valid()) {
+      constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
+        const auto faddr_rng = f.low_high_pc();
+        return range.high > faddr_rng.low;
+      };
+      auto it_pos =
+          std::lower_bound(m_full_cu.begin(), m_full_cu.end(), file.low_high_pc(), file_sorter_by_addresses);
+      m_full_cu.insert(it_pos, std::move(file));
+    } else {
+      m_partial_units.push_back({});
+    }
   }
   auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
   Tracer::Instance->post_event(evt);
@@ -1051,7 +1072,7 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
 std::optional<SearchFnSymResult>
 TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 {
-  for (auto &f : m_executable_files) {
+  for (auto &f : m_full_cu) {
     if (f.may_contain(addr)) {
       const auto fn = f.find_subprogram(addr);
       if (fn != nullptr) {
@@ -1065,7 +1086,7 @@ TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 std::optional<std::string_view>
 TraceeController::get_source(std::string_view name) noexcept
 {
-  for (const auto &f : m_executable_files) {
+  for (const auto &f : m_full_cu) {
     if (f.name() == name) {
       return f.name();
     }
@@ -1087,10 +1108,10 @@ TraceeController::get_text_section(AddrPtr addr) const noexcept
 std::optional<u64>
 TraceeController::cu_file_from_pc(AddrPtr address) const noexcept
 {
-  const auto first = std::find_if(m_executable_files.begin(), m_executable_files.end(),
+  const auto first = std::find_if(m_full_cu.begin(), m_full_cu.end(),
                                   [address](const auto &f) { return f.may_contain(address); });
-  if (first != std::cend(m_executable_files)) {
-    return std::distance(std::cbegin(m_executable_files), first);
+  if (first != std::cend(m_full_cu)) {
+    return std::distance(std::cbegin(m_full_cu), first);
   } else {
     return std::nullopt;
   }
@@ -1099,8 +1120,8 @@ TraceeController::cu_file_from_pc(AddrPtr address) const noexcept
 const CompilationUnitFile *
 TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
 {
-  if (auto it = find(m_executable_files, [addr = address](const auto &f) { return f.may_contain(addr); });
-      it != std::cend(m_executable_files)) {
+  if (auto it = find(m_full_cu, [addr = address](const auto &f) { return f.may_contain(addr); });
+      it != std::cend(m_full_cu)) {
     return &*it;
   }
   return nullptr;
@@ -1109,7 +1130,7 @@ TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
 const std::vector<CompilationUnitFile> &
 TraceeController::get_executable_cus() const noexcept
 {
-  return m_executable_files;
+  return m_full_cu;
 }
 
 #pragma GCC diagnostic pop

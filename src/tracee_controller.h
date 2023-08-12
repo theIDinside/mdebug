@@ -72,8 +72,8 @@ struct TraceeController
 
 private:
   SpinLock spin_lock;
-  std::vector<CompilationUnitFile> m_executable_files;
-  std::vector<NonExecutableCompilationUnitFile> m_other_cu_files;
+  std::vector<CompilationUnitFile> m_full_cu;
+  std::vector<NonExecutableCompilationUnitFile> m_partial_units;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   AwaiterThread::handle awaiter_thread;
