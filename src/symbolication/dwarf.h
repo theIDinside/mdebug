@@ -129,6 +129,14 @@ struct DebugInfoEntry
   bool subprogram_with_addresses : 1;
   void debug_dump(int indent = 0) const noexcept;
 
+  void
+  set_abbreviation(const AbbreviationInfo &a) noexcept
+  {
+    abbreviation_code = a.code;
+    set_tag(a.tag);
+  }
+
+private:
   constexpr void
   set_tag(DwarfTag tag) noexcept
   {
