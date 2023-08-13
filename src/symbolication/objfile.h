@@ -2,6 +2,7 @@
 #include "../common.h"
 #include "elf.h"
 #include "elf_symbols.h"
+#include "lnp.h"
 #include <string_view>
 #include <sys/mman.h>
 
@@ -33,6 +34,8 @@ struct ObjectFile
   bool min_syms = false;
   std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
   std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
+  std::vector<LineTable> line_tables;
+  std::vector<LineHeader> line_table_headers;
   sym::Unwinder *unwinder;
   // lowest address of the LOAD segments defined in program headers
   AddrPtr low;
@@ -69,6 +72,7 @@ struct ObjectFile
 
   Path interpreter() const noexcept;
   bool found_min_syms() const noexcept;
+  const LineHeader *line_table_header(u64 offset) const noexcept;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

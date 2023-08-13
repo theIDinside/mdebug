@@ -8,13 +8,13 @@
 #include <filesystem>
 
 CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu, const Elf *elf) noexcept
-    : m_addr_ranges(), m_name(), pc_boundaries(), m_ltes(), fns(), cu_die(cu), elf(elf)
+    : m_addr_ranges(), m_name(), pc_boundaries(), line_header(nullptr), fns(), cu_die(cu), elf(elf)
 {
 }
 
 CompilationUnitFile::CompilationUnitFile(CompilationUnitFile &&o) noexcept
     : m_addr_ranges(std::move(o.m_addr_ranges)), m_name(o.m_name), pc_boundaries(o.pc_boundaries),
-      line_header(std::move(o.line_header)), m_ltes(std::move(o.m_ltes)), fns(std::move(o.fns)), cu_die(o.cu_die)
+      line_header(o.line_header), fns(std::move(o.fns)), cu_die(o.cu_die)
 {
 }
 
@@ -26,8 +26,7 @@ CompilationUnitFile::operator=(CompilationUnitFile &&o) noexcept
   m_addr_ranges = std::move(o.m_addr_ranges);
   m_name = o.m_name;
   pc_boundaries = o.pc_boundaries;
-  line_header = std::move(o.line_header);
-  m_ltes = std::move(o.m_ltes);
+  line_header = o.line_header;
   fns = std::move(o.fns);
   cu_die = o.cu_die;
   return *this;
@@ -97,32 +96,43 @@ CompilationUnitFile::last_added_addr_valid() const noexcept
 }
 
 void
-CompilationUnitFile::set_linetable_header(std::unique_ptr<LineHeader> &&header) noexcept
+CompilationUnitFile::set_linetable(const LineHeader *header) noexcept
 {
-  line_header = std::move(header);
+  DLOG("dwarf", "[lnp]: table=0x{:x}", header->sec_offset);
+  line_header = header;
 }
 
-void
-CompilationUnitFile::set_linetable(LineTable &&lte) noexcept
+bool
+CompilationUnitFile::known_addresses() const noexcept
 {
-  m_ltes = std::move(lte);
+  return !m_addr_ranges.empty() || (line_header && line_header->has_entries());
 }
 
 void
 CompilationUnitFile::set_boundaries() noexcept
 {
-  if (!m_addr_ranges.empty())
+  if (!m_addr_ranges.empty()) {
     pc_boundaries = AddressRange{.low = m_addr_ranges.front().low, .high = m_addr_ranges.back().high};
-  else if (!m_ltes.empty())
-    pc_boundaries = AddressRange{.low = m_ltes.front().pc, .high = m_ltes.back().pc + 1};
-  else
+  } else if (line_header && line_header->line_table) {
+    pc_boundaries =
+        AddressRange{.low = line_header->line_table->front().pc, .high = line_header->line_table->back().pc + 1};
+  } else
     pc_boundaries = AddressRange{nullptr, nullptr};
+
+  if (pc_boundaries.low > pc_boundaries.high) {
+    DLOG("mdb", "faulty pc boundaries");
+    for (const auto &lte : *(line_header->line_table)) {
+      DLOG("mdb", "[LINE TABLE DUMP]: {}", lte);
+    }
+  }
+  ASSERT(pc_boundaries.low <= pc_boundaries.high, "low must be <= high: {} <= {} ({})", pc_boundaries.low,
+         pc_boundaries.high, this->m_name);
 }
 
 const LineTable &
 CompilationUnitFile::line_table() const noexcept
 {
-  return m_ltes;
+  return *line_header->line_table;
 }
 
 const AddrRanges &
@@ -144,7 +154,6 @@ CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
   // N.B. if I got this right, this might cause problems with inlined functions. Though I'm not sure.
   auto it_pos = std::lower_bound(fns.begin(), fns.end(), sym.start,
                                  [](FnSym &fn, AddrPtr start) { return fn.start > start; });
-  DLOG("dwarf", "Adding symbol #{} {} [{} .. {}] to CU {}", fns.size(), sym.name, sym.start, sym.end, m_name);
   fns.insert(it_pos, sym);
 }
 
@@ -168,6 +177,7 @@ CompilationUnitFile::find_subprogram(AddrPtr addr) const noexcept
 LineTableEntryRange
 CompilationUnitFile::get_range(AddrPtr addr) const noexcept
 {
+  const auto &m_ltes = line_table();
   const auto lte_it = std::lower_bound(m_ltes.cbegin(), m_ltes.cend(), addr,
                                        [](const LineTableEntry &l, AddrPtr addr) { return l.pc <= addr; });
   if (lte_it == std::cend(m_ltes))
@@ -182,6 +192,7 @@ CompilationUnitFile::get_range(AddrPtr addr) const noexcept
 LineTableEntryRange
 CompilationUnitFile::get_range_of_pc(AddrPtr addr) const noexcept
 {
+  const auto &m_ltes = line_table();
   auto it = find(m_ltes, [addr](auto &lte) { return lte.pc > addr; });
   if (it == std::end(m_ltes) || it == std::begin(m_ltes))
     return {nullptr, nullptr};

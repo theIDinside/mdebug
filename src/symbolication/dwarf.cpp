@@ -98,3 +98,16 @@ DebugInfoEntry::debug_dump(int indent) const noexcept
     ch->debug_dump(indent + 1);
   }
 }
+
+void
+DebugInfoEntry::set_abbreviation(const AbbreviationInfo &a) noexcept
+{
+  abbreviation_code = a.code;
+  set_tag(a.tag);
+}
+
+void
+DebugInfoEntry::set_offset(u64 offset) noexcept
+{
+  sec_offset = offset;
+}

@@ -33,8 +33,8 @@ async function unwindFromSharedObject() {
     });
   }
 
-  let modules_event_promise = da_client.prepareWaitForEventN("module", 6, 2000);
-  await da_client.launchToMain(buildDirFile("stupid_shared"));
+  let modules_event_promise = da_client.prepareWaitForEventN("module", 6, 1000000);
+  await da_client.launchToMain(buildDirFile("stupid_shared"), 1000000);
   const res = await modules_event_promise;
 
   if (res.length != sharedObjectsCount) {

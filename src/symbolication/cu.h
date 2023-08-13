@@ -22,10 +22,11 @@ struct CompileUnitHeader
   const u8 *data;
   const u8 *end;
   u32 cu_index;
-  u8 addr_size;
   u64 debug_info_sec_offset;
-  DwarfVersion version;
+  u8 addr_size;
   u8 format;
+  DwarfVersion version;
+  u8 header_length;
 };
 
 class CompileUnitReader
@@ -68,6 +69,7 @@ public:
   std::string_view read_by_idx_from_str_table(u64 str_index) const noexcept;
   u64 read_by_idx_from_rnglist(u64 range_index) const noexcept;
   u64 read_loclist_index(u64 range_index) const noexcept;
+  u64 sec_offset() const noexcept;
 
 private:
   CompileUnitHeader *header;
@@ -259,10 +261,11 @@ private:
                                .data = it + sizeof(DwarfSpec),
                                .end = it + cu_hdr->len + (sizeof(cu_hdr->len) + DwarfSpec::len_offset()),
                                .cu_index = cu_index,
-                               .addr_size = cu_hdr->addr_size,
                                .debug_info_sec_offset = dbg_info->get_ptr_offset(it),
+                               .addr_size = cu_hdr->addr_size,
+                               .format = DwarfSpec::len_offset() + 4,
                                .version = DwarfSpec::version(),
-                               .format = DwarfSpec::len_offset() + 4};
+                               .header_length = sizeof(DwarfSpec)};
       result.push_back(header);
       it = result.back().end;
       cu_index++;
@@ -273,5 +276,3 @@ private:
 private:
   ObjectFile *obj_file;
 };
-
-LineTable parse_linetable(CUProcessor *proc) noexcept;

@@ -65,6 +65,16 @@ ObjectFile::found_min_syms() const noexcept
   return min_syms;
 }
 
+const LineHeader *
+ObjectFile::line_table_header(u64 offset) const noexcept
+{
+  for (const auto &lth : line_table_headers) {
+    if (lth.sec_offset == offset)
+      return &lth;
+  }
+  TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
+}
+
 ObjectFile *
 mmap_objectfile(const Path &path) noexcept
 {

@@ -16,6 +16,7 @@
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
+#include "symbolication/lnp.h"
 #include "symbolication/objfile.h"
 #include "symbolication/type.h"
 #include "task.h"
@@ -213,17 +214,21 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
     if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
+      so->objfile->line_table_headers = parse_lnp_headers(so->objfile->parsed_elf);
+      so->objfile->line_tables.reserve(so->objfile->line_table_headers.size());
+      for (auto &lth : so->objfile->line_table_headers) {
+        so->objfile->line_tables.push_back({});
+        lth.set_linetable_storage(&so->objfile->line_tables.back());
+        lth.parse_linetable(so->objfile->parsed_elf->relocate_addr(nullptr));
+      }
       CompilationUnitBuilder cu_builder{so->objfile};
       auto total = cu_builder.build_cu_headers();
       const auto total_sz = total.size();
       for (const auto &hdr : total) {
         ASSERT(so->objfile != nullptr, "Objfile is null!");
         auto proc = prepare_cu_processing(so->objfile, hdr, this);
-        auto compile_unit_die = proc->read_dies();
-        ASSERT(compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit ||
-                   compile_unit_die->tag == DwarfTag::DW_TAG_partial_unit,
-               "Unexpected non-compile unit DIE parsed: {}", to_str(compile_unit_die->tag));
-        proc->process_compile_unit_die(compile_unit_die.release());
+        auto die = proc->read_dies();
+        proc->process_compile_unit_die(die.release());
       }
     }
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
@@ -1080,6 +1085,7 @@ TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
       }
     }
   }
+  DLOG("mdb", "couldn't find fn for pc {}", addr);
   return std::nullopt;
 }
 

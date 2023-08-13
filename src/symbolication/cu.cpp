@@ -230,10 +230,13 @@ CUProcessor::read_dies() noexcept
 {
   CompileUnitReader reader{&header, obj_file};
   std::unique_ptr<DebugInfoEntry> root = std::make_unique<DebugInfoEntry>();
+  const auto die_sec_offset = reader.sec_offset();
   const auto abbr_code = reader.uleb128();
+
   ASSERT(abbr_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
   auto &abbreviation = abbrev_table[abbr_code - 1];
   root->set_abbreviation(abbreviation);
+  root->set_offset(die_sec_offset);
 
   for (const auto &attr : abbreviation.attributes) {
     root->attributes.emplace_back(read_attribute_values(root.get(), reader, attr, abbreviation.implicit_consts));
@@ -244,6 +247,7 @@ CUProcessor::read_dies() noexcept
   if (!has_children)
     return root;
   while (true) {
+    const auto die_sec_offset = reader.sec_offset();
     u64 abbr_code = reader.uleb128();
     if (abbr_code == 0) {
       parent_stack.pop();
@@ -259,6 +263,7 @@ CUProcessor::read_dies() noexcept
     e = parent_stack.top()->children.back().get();
     auto &abbreviation = abbrev_table[abbr_code - 1];
     e->set_abbreviation(abbreviation);
+    e->set_offset(die_sec_offset);
     for (const auto &attr : abbreviation.attributes) {
       e->attributes.emplace_back(read_attribute_values(e, reader, attr, abbreviation.implicit_consts));
     }
@@ -368,24 +373,20 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
         }
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
-        if (header.version == DwarfVersion::D4) {
-          line_header = read_lineheader_v4(obj_file->parsed_elf->debug_line->offset(offset), header.addr_size);
-          f.set_linetable(parse_linetable(this));
-          f.set_linetable_header(std::move(this->line_header));
-        } else {
-          line_header = read_lineheader_v5(obj_file->parsed_elf->debug_line->offset(offset), elf);
-          f.set_linetable(parse_linetable(this));
-          f.set_linetable_header(std::move(this->line_header));
-        }
+        f.set_linetable(obj_file->line_table_header(offset));
       } else if (att.name == Attribute::DW_AT_low_pc) {
         low = att.address();
       } else if (att.name == Attribute::DW_AT_high_pc) {
         high = att.address();
+        if (high < low)
+          high = high + low;
       }
     }
   }
-  f.set_boundaries();
-  add_subprograms(f, cu_die, elf);
+  if (f.known_addresses()) {
+    f.set_boundaries();
+    add_subprograms(f, cu_die, elf);
+  }
   requesting_target->add_file(std::move(f));
 }
 
@@ -563,292 +564,8 @@ CompileUnitReader::read_loclist_index(u64 range_index) const noexcept
   }
 }
 
-class LNPStateMachine
+u64
+CompileUnitReader::sec_offset() const noexcept
 {
-public:
-  LNPStateMachine(LineHeader *header, LineTable *table, AddrPtr relocate_base)
-      : header{header}, table{table}, relocate_base(relocate_base), address(0), line(1), column(0), op_index(0),
-        file(1), is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
-        epilogue_begin(false), isa(0), discriminator(0)
-  {
-  }
-
-  constexpr bool
-  sequence_ended() const noexcept
-  {
-    return end_sequence;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  stamp_entry() noexcept
-  {
-    table->push_back(LineTableEntry{.pc = address + relocate_base,
-                                    .line = line,
-                                    .column = column,
-                                    .file = static_cast<u16>(file),
-                                    .is_stmt = is_stmt,
-                                    .prologue_end = prologue_end,
-                                    .basic_block = basic_block,
-                                    .epilogue_begin = epilogue_begin});
-    discriminator = 0;
-    basic_block = false;
-    prologue_end = false;
-    epilogue_begin = false;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  advance_pc(u64 adjust_value) noexcept
-  {
-    const auto address_adjust = ((op_index + adjust_value) / header->max_ops) * header->min_len;
-    address += address_adjust;
-    op_index = ((op_index + adjust_value) % header->max_ops);
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  advance_line(i64 value) noexcept
-  {
-    line += value;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  set_file(u64 value) noexcept
-  {
-    file = value;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  set_column(u64 value) noexcept
-  {
-    column = value;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  negate_stmt() noexcept
-  {
-    is_stmt = !is_stmt;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  set_basic_block() noexcept
-  {
-    basic_block = true;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
-  constexpr void
-  const_add_pc() noexcept
-  {
-    special_opindex_advance(255);
-  }
-
-  // DWARF V4 Spec page 120:
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
-  constexpr void
-  advance_fixed_pc(u64 advance) noexcept
-  {
-    address += advance;
-    op_index = 0;
-  }
-
-  // DWARF V4 Spec page 120:
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
-  constexpr void
-  set_prologue_end() noexcept
-  {
-    prologue_end = true;
-  }
-
-  // DWARF V4 Spec page 121:
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=135
-  constexpr void
-  set_epilogue_begin() noexcept
-  {
-    epilogue_begin = true;
-  }
-
-  constexpr void
-  set_isa(u64 isa) noexcept
-  {
-    this->isa = isa;
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=130
-  constexpr void
-  execute_special_opcode(u8 opcode) noexcept
-  {
-    special_opindex_advance(opcode);
-    const auto line_inc = header->line_base + ((opcode - header->opcode_base) % header->line_range);
-    line += line_inc;
-    stamp_entry();
-  }
-
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
-  constexpr void
-  set_sequence_ended() noexcept
-  {
-    end_sequence = true;
-    stamp_entry();
-  }
-
-  constexpr void
-  set_address(u64 addr) noexcept
-  {
-    address = addr;
-    op_index = 0;
-  }
-
-  constexpr void
-  define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
-  {
-    header->file_names.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
-  }
-
-  constexpr void
-  set_discriminator(u64 value) noexcept
-  {
-    discriminator = value;
-  }
-
-private:
-  constexpr void
-  special_opindex_advance(u8 opcode)
-  {
-    const auto advance = op_advance(opcode);
-    const auto new_address = address + header->min_len * ((op_index + advance) / header->max_ops);
-    const auto new_op_index = (op_index + advance) % header->max_ops;
-    address = new_address;
-    op_index = new_op_index;
-  }
-
-  constexpr u64
-  op_advance(u8 opcode) const noexcept
-  {
-    const auto adjusted_op = opcode - header->opcode_base;
-    const auto advance = adjusted_op / header->line_range;
-    return advance;
-  }
-  LineHeader *header;
-  LineTable *table;
-  AddrPtr relocate_base;
-  // State machine register
-  u64 address;
-  u32 line;
-  u32 column;
-  u16 op_index;
-  u32 file;
-  bool is_stmt;
-  bool basic_block;
-  bool end_sequence;
-  bool prologue_end;
-  bool epilogue_begin;
-  u8 isa;
-  u32 discriminator;
-};
-
-LineTable
-parse_linetable(CUProcessor *proc) noexcept
-{
-  using OpCode = LineNumberProgramOpCode;
-
-  auto hdr = proc->get_lnp_header();
-  DwarfBinaryReader reader{hdr->data, hdr->data_length};
-  LineTable line_table{};
-  while (reader.has_more()) {
-    LNPStateMachine state{hdr, &line_table, proc->reloc_base()};
-    while (reader.has_more() && !state.sequence_ended()) {
-      const auto opcode = reader.read_value<OpCode>();
-      if (const auto spec_op = std::to_underlying(opcode); spec_op >= hdr->opcode_base) {
-        state.execute_special_opcode(spec_op);
-        continue;
-      }
-      if (std::to_underlying(opcode) == 0) {
-        // Extended Op Codes
-        const auto len = reader.read_uleb128<u64>();
-        const auto end = reader.current_ptr() + len;
-        auto ext_op = reader.read_value<LineNumberProgramExtendedOpCode>();
-        switch (ext_op) {
-        case LineNumberProgramExtendedOpCode::DW_LNE_end_sequence:
-          state.set_sequence_ended();
-          break;
-        case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
-          if (proc->get_header().addr_size == 4) {
-            const auto addr = reader.read_value<u32>();
-            state.set_address(addr);
-          } else {
-            const auto addr = reader.read_value<u64>();
-            state.set_address(addr);
-          }
-          break;
-        case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
-          if (proc->get_header().version == DwarfVersion::D4) {
-            // https://dwarfstd.org/doc/DWARF4.pdf#page=136
-            const auto filename = reader.read_string();
-            const auto dir_index = reader.read_uleb128<u64>();
-            const auto last_modified = reader.read_uleb128<u64>();
-            const auto file_size = reader.read_uleb128<u64>();
-            state.define_file(filename, dir_index, last_modified, file_size);
-          } else {
-            PANIC(fmt::format("DWARF V5 line tables not yet implemented"));
-          }
-          break;
-        }
-        case LineNumberProgramExtendedOpCode::DW_LNE_set_discriminator: {
-          state.set_discriminator(reader.read_uleb128<u64>());
-          break;
-        }
-        default:
-          // Vendor extensions
-          while (reader.current_ptr() < end)
-            reader.read_value<u8>();
-          break;
-        }
-      }
-      switch (opcode) {
-      case OpCode::DW_LNS_copy:
-        state.stamp_entry();
-        break;
-      case OpCode::DW_LNS_advance_pc:
-        state.advance_pc(reader.read_uleb128<u64>());
-        break;
-      case OpCode::DW_LNS_advance_line:
-        state.advance_line(reader.read_leb128<i64>());
-        break;
-      case OpCode::DW_LNS_set_file:
-        state.set_file(reader.read_uleb128<u64>());
-        break;
-      case OpCode::DW_LNS_set_column:
-        state.set_column(reader.read_uleb128<u64>());
-        break;
-      case OpCode::DW_LNS_negate_stmt:
-        state.negate_stmt();
-        break;
-      case OpCode::DW_LNS_set_basic_block:
-        state.set_basic_block();
-        break;
-      case OpCode::DW_LNS_const_add_pc:
-        state.const_add_pc();
-        break;
-      case OpCode::DW_LNS_fixed_advance_pc:
-        state.advance_fixed_pc(reader.read_value<u16>());
-        break;
-      case OpCode::DW_LNS_set_prologue_end:
-        state.set_prologue_end();
-        break;
-      case OpCode::DW_LNS_set_epilogue_begin:
-        state.set_epilogue_begin();
-        break;
-      case OpCode::DW_LNS_set_isa:
-        state.set_isa(reader.read_value<u64>());
-        break;
-      }
-    }
-  }
-  return line_table;
+  return header->debug_info_sec_offset + header->header_length + bytes_read();
 }

@@ -118,23 +118,22 @@ private:
 struct DebugInfoEntry
 {
   u32 abbreviation_code;
+  DwarfTag tag;
+  bool subprogram_with_addresses;
+  u32 sec_offset;
+
   // todo(simon): Make this better.
   // This is terrible for performance. But it's easy. The reason being
   // is that the layout is terrible, we have:
   // root, 1st child, (1st child (1st child ... siblings) .. siblings), which mean we can't iterate over contigous
   // memory, if we only want to iterate over the direct children of the root.
   std::vector<std::unique_ptr<DebugInfoEntry>> children;
-  DwarfTag tag;
-  std::vector<AttributeValue> attributes;
-  bool subprogram_with_addresses : 1;
-  void debug_dump(int indent = 0) const noexcept;
 
-  void
-  set_abbreviation(const AbbreviationInfo &a) noexcept
-  {
-    abbreviation_code = a.code;
-    set_tag(a.tag);
-  }
+  std::vector<AttributeValue> attributes;
+
+  void debug_dump(int indent = 0) const noexcept;
+  void set_abbreviation(const AbbreviationInfo &a) noexcept;
+  void set_offset(u64 sec_offset) noexcept;
 
 private:
   constexpr void

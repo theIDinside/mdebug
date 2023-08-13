@@ -5,6 +5,7 @@
 #include <utility>
 
 class Elf;
+struct ElfSection;
 
 struct DirEntry
 {
@@ -20,47 +21,6 @@ struct FileEntry
   std::optional<DataBlock> md5;
   std::optional<u64> last_modified;
 };
-
-/**
- * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
- */
-struct LineHeader
-{
-  using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
-  using FileNameEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
-  u64 initial_length;
-  const u8 *data;
-  u64 data_length;
-  DwarfVersion version;
-  u8 addr_size;
-  u8 segment_selector_size;
-  u8 min_len;
-  u8 max_ops;
-  bool default_is_stmt;
-  i8 line_base;
-  u8 line_range;
-  u8 opcode_base;
-  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> std_opcode_lengths;
-  std::vector<DirEntry> directories;
-  std::vector<FileEntry> file_names;
-};
-
-/**
- * @brief Reads the Line Number Program Header for a compilation unit. `bytes` is gathered from the Compilation
- * Unit's DIE coupled with DW_AT_stmt_list; it contains an offset into the ELF section `.debug_line` where this LNP
- * Header begins.
- *
- * DWARF Version 5
- *
- * @param bytes - pointer into the `.debug_line` section where we start parsing this header.
- * @return std::unique_ptr<LineHeader>
- */
-std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes, Elf *elf) noexcept;
-
-/**
- * See description for `read_lineheader_v5`; only the implementation details differ.
- */
-std::unique_ptr<LineHeader> read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept;
 
 /**
  * @brief Line Table Entry relates information between source code
@@ -88,6 +48,57 @@ struct LineTableEntryRange
   const LineTableEntry *begin;
   const LineTableEntry *end;
 };
+using LineTable = std::vector<LineTableEntry>;
+using OwnedLineTable = std::unique_ptr<LineTable>;
+
+/**
+ * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
+ */
+struct LineHeader
+{
+  using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
+  using FileNameEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
+  u64 sec_offset;
+  u64 initial_length;
+  const u8 *data;
+  const u8 *data_end;
+  DwarfVersion version;
+  u8 addr_size;
+  u8 min_len;
+  u8 max_ops;
+  bool default_is_stmt;
+  i8 line_base;
+  u8 line_range;
+  u8 opcode_base;
+  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> std_opcode_lengths;
+  std::vector<DirEntry> directories;
+  std::vector<FileEntry> file_names;
+  LineTable *line_table;
+
+  void parse_linetable(AddrPtr reloc_base) noexcept;
+  void set_linetable_storage(LineTable *storage) noexcept;
+  DwarfBinaryReader get_reader() const noexcept;
+  bool has_entries() const noexcept;
+};
+
+std::vector<LineHeader> parse_lnp_headers(const Elf *) noexcept;
+
+/**
+ * @brief Reads the Line Number Program Header for a compilation unit. `bytes` is gathered from the Compilation
+ * Unit's DIE coupled with DW_AT_stmt_list; it contains an offset into the ELF section `.debug_line` where this LNP
+ * Header begins.
+ *
+ * DWARF Version 5
+ *
+ * @param bytes - pointer into the `.debug_line` section where we start parsing this header.
+ * @return std::unique_ptr<LineHeader>
+ */
+std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes, Elf *elf) noexcept;
+
+/**
+ * See description for `read_lineheader_v5`; only the implementation details differ.
+ */
+std::unique_ptr<LineHeader> read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept;
 
 namespace fmt {
 template <> struct formatter<LineTableEntry>
@@ -112,6 +123,3 @@ template <> struct formatter<LineTableEntry>
   }
 };
 } // namespace fmt
-
-using LineTable = std::vector<LineTableEntry>;
-using OwnedLineTable = std::unique_ptr<LineTable>;
