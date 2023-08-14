@@ -159,7 +159,6 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
   auto source_file = target->get_source(file);
   std::vector<SourceBreakpointDescriptor> src_bps;
   if (source_file.has_value()) {
-    logging::get_logging()->log("dap", fmt::format("Found source file to set breakpoints in: {}", *source_file));
     for (const auto &src_bp : args.at("breakpoints")) {
       ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
       u32 line = src_bp["line"];
