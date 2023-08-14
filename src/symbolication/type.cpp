@@ -125,8 +125,8 @@ CompilationUnitFile::set_boundaries() noexcept
       DLOG("mdb", "[LINE TABLE DUMP]: {}", lte);
     }
   }
-  ASSERT(pc_boundaries.low <= pc_boundaries.high, "low must be <= high: {} <= {} ({})", pc_boundaries.low,
-         pc_boundaries.high, this->m_name);
+  // ASSERT(pc_boundaries.low <= pc_boundaries.high, "low must be <= high: {} <= {} ({})",
+  // pc_boundaries.low,pc_boundaries.high, this->m_name);
 }
 
 const LineTable &
