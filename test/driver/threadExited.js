@@ -5,9 +5,8 @@ const {
   runTestSuite,
 } = require("./client")(__filename);
 
-const da_client = new DAClient(MDB_PATH, []);
-
 async function test() {
+  const da_client = new DAClient(MDB_PATH, []);
   await da_client.launchToMain(buildDirFile("threads_shared"));
   const threads = await da_client.threads();
   let p = da_client.prepareWaitForEventN("thread", 16, 2000);
@@ -38,4 +37,4 @@ const tests = {
   "see9ThreadExits": test
 }
 
-runTestSuite(tests);
+runTestSuite(tests).then(() => console.log("Done."));

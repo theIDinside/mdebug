@@ -6,9 +6,8 @@ const {
   runTestSuite,
 } = require("./client")(__filename);
 
-const da_client = new DAClient(MDB_PATH, []);
-
 async function launch() {
+  const da_client = new DAClient(MDB_PATH, []);
   // we don't care for initialize, that's tested elsewhere
   await da_client
     .sendReqGetResponse("initialize", {}, 1000)

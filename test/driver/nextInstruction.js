@@ -1,4 +1,4 @@
-const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite } =
+const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite, seconds } =
   require("./client")(__filename);
 
 
@@ -55,4 +55,10 @@ const tests = {
   "oneInstruction": test
 }
 
-runTestSuite(tests);
+try {
+  runTestSuite(tests).then(() => {
+    console.log(`done with test`);
+  });
+} catch (ex) {
+  throw ex;
+}

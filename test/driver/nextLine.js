@@ -2,7 +2,7 @@ const { DAClient, MDB_PATH, buildDirFile, readFile, runTestSuite, repoDirFile, g
   require("./client")(__filename);
 
 async function nextLineOverFunction() {
-  const da_client = new DAClient(MDB_PATH, [], false);
+  const da_client = new DAClient(MDB_PATH, []);
   await da_client.launchToMain(buildDirFile("next"));
   const file = readFile(repoDirFile("test/next.cpp"));
   const bp_lines = ["BP1", "BP2"]

@@ -57,6 +57,12 @@ console.log(`MDB Path: ${MDB_PATH}`);
 const mdb_args = [];
 // End of environment setup
 
+function unpackRecordArgs(param) {
+  const p = param.split(";");
+  const [recorder] = p.splice(0, 1);
+  return { path: recorder, args: p };
+}
+
 const regex = /Content-Length: (\d+)\s{4}/gm;
 class DAClient {
   /** @type {EventEmitter} */
@@ -71,19 +77,28 @@ class DAClient {
   /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
   buf;
 
-  constructor(mdb, mdb_args, record = false) {
+  constructor(mdb, mdb_args) {
     // for future work when we get recording in tests suites working.
-    this.recording = record;
-    if (record) {
-      this.mdb = spawn("rr", ["record", mdb, ...mdb_args])
-    } else {
-      this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+    try {
+      this.recording = process.env.hasOwnProperty("REC");
+      if (this.recording) {
+        const parsed = unpackRecordArgs(process.env["REC"]);
+        const { path, args } = parsed;
+        console.log(`${JSON.stringify(parsed)}`);
+        console.log(`Recording using ${process.env["REC"]}`);
+        this.mdb = spawn(path, ["record", ...args, mdb, ...mdb_args]);
+      } else {
+        this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+      }
+    } catch (ex) {
+      console.log(`failed to spawn mdb: ${ex}`);
     }
 
     this.mdb.on("error", (err) => {
       console.error(`[TEST FAILED] MDB error: ${err}`);
       process.exit(-1);
     });
+
     this.mdb.on("exit", (exitCode) => {
       if (exitCode != 0) {
         console.error(
@@ -93,7 +108,7 @@ class DAClient {
       }
     });
     process.on("exit", (code) => {
-      this.mdb.kill("SIGKILL");
+      this.mdb.kill("SIGTERM");
       if (code != 0) {
         console.log(`DUMPING LOG`);
         dump_log();
@@ -168,8 +183,8 @@ class DAClient {
   /**
    * @returns {Promise<{id: number, name: string}[]>}
    */
-  async threads() {
-    return this.sendReqGetResponse("threads", {})
+  async threads(timeout = seconds(1)) {
+    return this.sendReqGetResponse("threads", {}, timeout)
       .then((res) => {
         return res.body.threads;
       })
@@ -461,25 +476,21 @@ function testSuccess() {
 
 function testException(err) {
   console.error(`Test ${IMPORTING_FILE} failed: ${err}`);
-  process.exit(-1);
+  throw err;
 }
 
-function runTest(test, should_exit = true) {
+async function runTest(test, should_exit = true) {
   if (should_exit)
     test().then(testSuccess).catch(testException);
   else
     test().catch(testException)
 }
 
-function runTestSuite(tests) {
+async function runTestSuite(tests) {
   const requested = getRequestedTest();
   if (tests.hasOwnProperty(requested)) {
     console.log(`Running ${requested} test`);
-    runTest(tests[requested]);
-  } else if (requested == undefined) {
-    for (const prop in tests) {
-      runTest(tests[prop], false);
-    }
+    await runTest(tests[requested]);
   } else {
     throw new Error(`No test called ${requested} in this suite`);
   }

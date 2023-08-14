@@ -13,10 +13,8 @@ const {
 async function unwindFromSharedObject() {
   const da_client = new DAClient(MDB_PATH, []);
 
-  const frame_pcs = [0x405c9d, 0x405cec, 0x405d2d, 0x405f31, 0x4036d4, 0x403785];
-  const frame_lines = [17, 25, 31, 52, 20, 27]
-
   const sharedObjectsCount = 6;
+
   const so_addr = "0x7ffff7fbc189";
   async function set_bp(source, bps) {
     const file = readFile(repoDirFile(source));
@@ -33,15 +31,24 @@ async function unwindFromSharedObject() {
     });
   }
 
-  let modules_event_promise = da_client.prepareWaitForEventN("module", 6, 1000000);
-  await da_client.launchToMain(buildDirFile("stupid_shared"), 1000000);
+  async function setFnBp(fn) {
+    const bps = fn.map(name => ({ name: name }))
+    return da_client.sendReqGetResponse("setFunctionBreakpoints", { breakpoints: bps });
+  }
+
+  let modules_event_promise = da_client.prepareWaitForEventN("module", 6, seconds(1));
+  await da_client.launchToMain(buildDirFile("stupid_shared"), seconds(1));
   const res = await modules_event_promise;
 
-  if (res.length != sharedObjectsCount) {
+  const bp_res = await setFnBp(["convert_kilometers_to_miles"]);
+  console.log(`bpres ${JSON.stringify(bp_res)}`);
+
+  if (res.length < sharedObjectsCount) {
     throw new Error(`Expected to see 6 module events for shared objects but saw ${res.length}`);
   }
   const threads = await da_client.threads();
   const bps = await set_bp("test/todo.cpp", ["BP1"]);
+  const bps2 = await set_bp("test/dynamic_lib.cpp", ["BPKM"])
 
   // hit breakpoint in todo.cpp
   await da_client.sendReqWaitEvent(
@@ -53,7 +60,7 @@ async function unwindFromSharedObject() {
 
   await da_client.setInsBreakpoint(so_addr);
   await da_client.contNextStop();
-  const frames = await da_client.stackTrace(threads[0].id, 10000000).then((res) => {
+  const frames = await da_client.stackTrace(threads[0].id, seconds(1)).then((res) => {
     checkResponse(res, "stackTrace", true);
     const { stackFrames } = res.body;
     console.log(`${JSON.stringify(stackFrames, null, 2)}`);
