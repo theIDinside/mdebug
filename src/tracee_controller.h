@@ -251,7 +251,7 @@ public:
 
   template <typename T>
   void
-  write(TraceePointer<T> address, T &value)
+  write(TraceePointer<T> address, const T &value)
   {
     auto total_written = 0ull;
     constexpr auto sz = address.type_size();

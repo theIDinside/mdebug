@@ -427,13 +427,11 @@ TraceeController::set_tracer_bp(TPtr<u64> addr, BpType type) noexcept
     return true;
   }
   DLOG("mdb", "Installing tracer breakpoint at {}", addr);
-  constexpr u64 bkpt = 0xcc;
-  auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr.get(), nullptr);
-  u8 original_byte = static_cast<u8>(read_value & 0xff);
-  u64 installed_bp = ((read_value & ~0xff) | bkpt);
-  ptrace(PTRACE_POKEDATA, task_leader, addr.get(), installed_bp);
-
-  bps.insert(addr.as_void(), original_byte, type);
+  u8 bkpt = 0xcc;
+  const auto original_byte = read_type_safe(addr.as<u8>());
+  ASSERT(original_byte.has_value(), "Failed to read byte at {}", addr);
+  write(addr.as<u8>(), bkpt);
+  bps.insert(addr.as_void(), *original_byte, type);
   return true;
 }
 
