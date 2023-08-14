@@ -53,6 +53,7 @@ idx()
 
 termios Tracer::original_tty = {};
 winsize Tracer::ws = {};
+bool Tracer::use_traceme = true;
 
 int
 main(int argc, const char **argv)

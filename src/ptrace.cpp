@@ -100,10 +100,8 @@ request_name(__ptrace_request req)
 void
 new_target_set_options(pid_t pid)
 {
-  const auto options = (PTRACE_O_TRACESYSGOOD /*| PTRACE_O_TRACEVFORKDONE */ | PTRACE_O_TRACEVFORK |
-                        PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_EXITKILL);
+  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
-    sleep(1);
     if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
       PANIC(fmt::format("Failed to set PTRACE options for {}: {}", pid, strerror(errno)));
     }

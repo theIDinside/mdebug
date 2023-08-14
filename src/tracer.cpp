@@ -109,7 +109,9 @@ Tracer::add_target_set_current(pid_t task_leader, const Path &path, TargetSessio
   Tracer::Instance->post_event(evt);
   current_target = targets.back().get();
   load_and_process_objfile(task_leader, path);
-  PTRACE_OR_PANIC(PTRACE_SEIZE, task_leader, 0, 0);
+  if (!Tracer::use_traceme) {
+    PTRACE_OR_PANIC(PTRACE_ATTACH, task_leader, 0, 0);
+  }
   new_target_set_options(task_leader);
 }
 
@@ -229,39 +231,58 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
     if (personality(ADDR_NO_RANDOMIZE) == -1) {
       PANIC("Failed to set ADDR_NO_RANDOMIZE!");
     }
-    raise(SIGSTOP);
+    if (Tracer::use_traceme) {
+      PTRACE_OR_PANIC(PTRACE_TRACEME, 0, 0, 0);
+    } else {
+      raise(SIGSTOP);
+    }
+
     if (execv(cmd, args) == -1) {
       PANIC(fmt::format("EXECV Failed for {}", cmd));
     }
+    _exit(0);
     break;
   }
   default: {
     const auto res = get<PtyParentResult>(fork_result);
     add_target_set_current(res.pid, program, TargetSession::Launched);
     TaskInfo *t = get_current()->get_task(res.pid);
-    for (;;) {
-      if (const auto ws = waitpid_block(res.pid); ws) {
-        const auto stat = ws->status;
-        if ((stat >> 8) == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
-          TaskWaitResult twr;
-          twr.ws.ws = WaitStatusKind::Execed;
-          twr.waited_pid = res.pid;
-          DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.waited_pid, res.pid);
-          t = get_current()->get_task(twr.waited_pid);
-          ASSERT(t != nullptr, "Unknown task!!");
-          get_current()->register_task_waited(twr);
-          get_current()->reopen_memfd();
-          get_current()->cache_registers(t);
-          get_current()->read_auxv(t);
-          get_current()->install_loader_breakpoints();
-          dap->add_tty(res.fd);
-          break;
+    if (Tracer::use_traceme) {
+      TaskWaitResult twr{.waited_pid = res.pid, .ws = {.ws = WaitStatusKind::Execed}};
+      t = get_current()->get_task(res.pid);
+      ASSERT(t != nullptr, "Unknown task!!");
+      get_current()->register_task_waited(twr);
+      get_current()->reopen_memfd();
+      get_current()->cache_registers(t);
+      get_current()->read_auxv(t);
+      get_current()->install_loader_breakpoints();
+      dap->add_tty(res.fd);
+    } else {
+      for (;;) {
+        if (const auto ws = waitpid_block(res.pid); ws) {
+          const auto stat = ws->status;
+          if ((stat >> 8) == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
+            TaskWaitResult twr;
+            twr.ws.ws = WaitStatusKind::Execed;
+            twr.waited_pid = res.pid;
+            DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.waited_pid, res.pid);
+            t = get_current()->get_task(twr.waited_pid);
+            ASSERT(t != nullptr, "Unknown task!!");
+            get_current()->register_task_waited(twr);
+            get_current()->reopen_memfd();
+            get_current()->cache_registers(t);
+            get_current()->read_auxv(t);
+            get_current()->install_loader_breakpoints();
+            dap->add_tty(res.fd);
+            break;
+          }
+          VERIFY(ptrace(PTRACE_CONT, res.pid, 0, 0) != -1, "Failed to continue passed our exec boundary: {}",
+                 strerror(errno));
         }
       }
-      VERIFY(ptrace(PTRACE_CONT, res.pid, 0, 0) != -1, "Failed to continue passed our exec boundary");
-      t->set_dirty();
-      get_current()->reaped_events();
     }
+    t->set_dirty();
+    get_current()->reaped_events();
     if (stopAtEntry) {
       get_current()->set_fn_breakpoint("main");
     }

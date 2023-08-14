@@ -60,6 +60,7 @@ public:
   static termios original_tty;
   static winsize ws;
   static Tracer *Instance;
+  static bool use_traceme;
   friend struct ui::UICommand;
   Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept;
   void add_target_set_current(pid_t task_leader, const Path &path, TargetSession session) noexcept;
