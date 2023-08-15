@@ -60,6 +60,7 @@ public:
   static termios original_tty;
   static winsize ws;
   static Tracer *Instance;
+  static bool KeepAlive;
   static bool use_traceme;
   friend struct ui::UICommand;
   Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept;
@@ -81,6 +82,7 @@ public:
   void launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept;
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
+  void disconnect() noexcept;
   std::vector<std::unique_ptr<TraceeController>> targets;
 
 private:

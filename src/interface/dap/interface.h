@@ -134,6 +134,7 @@ public:
   void post_event(UIResultPtr serializable_event) noexcept;
   void notify_new_message() noexcept;
   void clean_up() noexcept;
+  void flush_events() noexcept;
 
   void add_tty(int master_pty_fd) noexcept;
   std::optional<int> current_tty() noexcept;

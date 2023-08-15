@@ -20,8 +20,22 @@ async function launch() {
     .then((res) => checkResponse(res, "launch", true));
 }
 
+async function launchToMain() {
+  const da_client = new DAClient(MDB_PATH, []);
+  await da_client.launchToMain(buildDirFile("stackframes"));
+}
+
+async function launchThenDisconnect() {
+  const da_client = new DAClient(MDB_PATH, []);
+  await da_client.launchToMain(buildDirFile("stackframes"));
+  const response = await da_client.disconnect("terminate");
+  if (!response.success) throw new Error(`Failed to disconnect. ${JSON.stringify(response)}`);
+}
+
 const tests = {
-  "launch": launch
+  "launch": launch,
+  "launchToMain": launchToMain,
+  "launchThenDisconnect": launchThenDisconnect
 }
 
 runTestSuite(tests);

@@ -369,7 +369,7 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 UIResultPtr
 Disconnect::execute(Tracer *tracer) noexcept
 {
-  tracer->kill_all_targets();
+  tracer->disconnect();
   return new DisconnectResponse{true, this};
 }
 

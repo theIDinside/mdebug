@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 Tracer *Tracer::Instance = nullptr;
+bool Tracer::KeepAlive = true;
 
 std::string_view
 add_object_err(AddObjectResult r)
@@ -311,4 +312,11 @@ Tracer::detach(std::unique_ptr<TraceeController> &&target) noexcept
 {
   // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
   target->detach();
+}
+
+void
+Tracer::disconnect() noexcept
+{
+  kill_all_targets();
+  Tracer::KeepAlive = false;
 }

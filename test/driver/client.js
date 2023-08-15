@@ -387,6 +387,25 @@ class DAClient {
   }
 
   /**
+   * @param { "terminate"  | "suspend" } kind 
+   * @param { number } timeout 
+   * @returns 
+   */
+  async disconnect(kind = "terminateDebuggee", timeout = 1000) {
+    switch (kind) {
+      case "terminate":
+        return this.sendReqGetResponse("disconnect", {
+          terminateDebuggee: true
+        });
+      case "suspend":
+        return this.sendReqGetResponse("disconnect", {
+          suspendDebuggee: true
+        });
+    }
+
+  }
+
+  /**
    * 
    * @param {string} req
    * @param {object} args

@@ -187,12 +187,7 @@ DAP::run_ui_loop()
         } else if (pfds[i].fd == posted_evt_listener.fd) {
           // process new messages (strings) posted on the output queue
           posted_evt_listener.consume_expected();
-          while (!events_queue.empty()) {
-            auto evt = pop_event();
-            const auto protocol_msg = evt->serialize(seq++);
-            write_protocol_message(protocol_msg);
-            delete evt;
-          }
+          flush_events();
         } else if (pfds[i].fd == master_pty && (pfds[i].revents & POLLIN)) {
           const auto bytes_read = read(*master_pty, tracee_stdout_buffer, 4096 * 3);
           if (bytes_read == -1)
@@ -223,7 +218,6 @@ DAP::post_event(UIResultPtr serializable_event) noexcept
     LockGuard<SpinLock> guard{output_message_lock};
     events_queue.push_back(serializable_event);
   }
-  DLOG("dap", "posted event");
   notify_new_message();
 }
 
@@ -235,10 +229,22 @@ DAP::notify_new_message() noexcept
 }
 
 void
+DAP::flush_events() noexcept
+{
+  while (!events_queue.empty()) {
+    auto evt = pop_event();
+    const auto protocol_msg = evt->serialize(seq++);
+    write_protocol_message(protocol_msg);
+    delete evt;
+  }
+}
+
+void
 DAP::clean_up() noexcept
 {
   using namespace std::chrono_literals;
   keep_running = false;
+  flush_events();
 }
 
 void

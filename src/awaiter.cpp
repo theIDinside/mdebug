@@ -33,7 +33,7 @@ AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
       {
         std::unique_lock lk(m);
         ready = false;
-        while (!ready)
+        while (!ready && c)
           cv.wait(lk);
       }
       ready = false;
@@ -41,7 +41,12 @@ AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
   }};
 };
 
-AwaiterThread::~AwaiterThread() noexcept { worker_thread.join(); }
+AwaiterThread::~AwaiterThread() noexcept
+{
+  should_cont = false;
+  reaped_events();
+  worker_thread.join();
+}
 
 void
 AwaiterThread::reaped_events() noexcept

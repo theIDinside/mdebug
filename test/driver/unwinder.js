@@ -67,6 +67,8 @@ async function unwindFromSharedObject() {
     return stackFrames;
   });
   verifyFrameIs(frames[0], "convert_kilometers_to_miles");
+  const response = await da_client.disconnect("terminate");
+  if (!response.success) throw new Error(`Failed to disconnect. ${JSON.stringify(response)}`);
 }
 
 const INSIDE_BAR_PROLOGUE = "0x0000000000401270";

@@ -89,7 +89,7 @@ main(int argc, const char **argv)
   }
 
   std::vector<utils::NotifyResult> notify_events{};
-  for (;;) {
+  while (Tracer::Instance->KeepAlive) {
     if (notifiers.poll(0)) {
       notifiers.has_wait_ready(notify_events, true);
       for (const auto target : notify_events) {
@@ -104,6 +104,7 @@ main(int argc, const char **argv)
   }
   exit_debug_session = true;
   Tracer::Instance->kill_ui();
+  Tracer::Instance->kill_all_targets();
   ui_thread.join();
-  fmt::println("Exited...");
+  DLOG("mdb", "Exited...");
 }
