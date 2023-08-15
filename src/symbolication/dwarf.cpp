@@ -111,3 +111,13 @@ DebugInfoEntry::set_offset(u64 offset) noexcept
 {
   sec_offset = offset;
 }
+
+std::optional<AttributeValue>
+DebugInfoEntry::get_attribute(Attribute attr) const noexcept
+{
+  for (const auto &att : attributes) {
+    if (att.name == attr)
+      return att;
+  }
+  return std::nullopt;
+}

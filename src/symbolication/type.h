@@ -41,7 +41,7 @@ struct IncludedFile
 class CompilationUnitFile
 {
 public:
-  explicit CompilationUnitFile(DebugInfoEntry *cu_die, const Elf *elf) noexcept;
+  explicit CompilationUnitFile(DebugInfoEntry *cu_die) noexcept;
   CompilationUnitFile(CompilationUnitFile &&o) noexcept;
   CompilationUnitFile &operator=(CompilationUnitFile &&) noexcept;
   NO_COPY(CompilationUnitFile);
@@ -67,8 +67,7 @@ public:
   }
 
   void set_linetable(const LineHeader *header) noexcept;
-  bool known_addresses() const noexcept;
-  void set_boundaries() noexcept;
+  void set_boundaries(AddressRange range) noexcept;
   const LineTable &line_table() const noexcept;
   const AddrRanges &address_ranges() const noexcept;
   AddressRange low_high_pc() const noexcept;
@@ -88,6 +87,8 @@ public:
   std::string_view file(u32 index) const noexcept;
   std::string_view path_of_file(u32 index) const noexcept;
   Path file_path(u32 index) const noexcept;
+  void set_default_base_addr(AddrPtr default_base) noexcept;
+
   std::vector<AddressRange> m_addr_ranges;
 
 private:
@@ -97,7 +98,7 @@ private:
   const LineHeader *line_header;
   std::vector<FunctionSymbol> fns;
   DebugInfoEntry *cu_die;
-  const Elf *elf;
+  AddrPtr default_base_addr = nullptr;
 };
 
 class NonExecutableCompilationUnitFile

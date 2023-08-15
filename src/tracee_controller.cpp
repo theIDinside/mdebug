@@ -219,7 +219,6 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
       for (auto &lth : so->objfile->line_table_headers) {
         so->objfile->line_tables.push_back({});
         lth.set_linetable_storage(&so->objfile->line_tables.back());
-        lth.parse_linetable(so->objfile->parsed_elf->relocate_addr(nullptr));
       }
       CompilationUnitBuilder cu_builder{so->objfile};
       auto total = cu_builder.build_cu_headers();
@@ -476,11 +475,11 @@ TraceeController::set_source_breakpoints(std::string_view src,
 {
   logging::get_logging()->log("mdb",
                               fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
-  auto f = find(m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
-  if (f != std::end(m_full_cu)) {
+  const auto f_it = find(m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+  if (f_it != std::end(m_full_cu)) {
     for (auto &&desc : descs) {
       // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
-      const auto &lt = f->line_table();
+      const auto &lt = f_it->line_table();
       for (const auto &lte : lt) {
         if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
           if (!bps.contains(lte.pc)) {

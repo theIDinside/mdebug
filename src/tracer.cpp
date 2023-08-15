@@ -76,7 +76,6 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   for (auto &lth : obj_file->line_table_headers) {
     obj_file->line_tables.push_back({});
     lth.set_linetable_storage(&obj_file->line_tables.back());
-    lth.parse_linetable(obj_file->parsed_elf->relocate_addr(nullptr));
   }
   auto total = cu_builder.build_cu_headers();
   std::vector<std::thread> jobs{};

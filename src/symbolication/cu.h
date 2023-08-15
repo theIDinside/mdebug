@@ -96,7 +96,7 @@ class CUProcessor
   // todo(simon): Redundancy?
   // todo(simon): Data ownership?
 public:
-  CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table, u32 index,
+  CUProcessor(ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table, u32 index,
               TraceeController *target) noexcept;
   CUProcessor(CUProcessor &&) noexcept = default;
   CUProcessor(const CUProcessor &) = delete;
@@ -105,12 +105,13 @@ public:
   const CompileUnitHeader &get_header() const noexcept;
   LineHeader *get_lnp_header() const noexcept;
   void process_compile_unit_die(DebugInfoEntry *cu_die) noexcept;
+  std::optional<AddressRange> determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept;
   AddrPtr reloc_base() const noexcept;
 
 private:
   bool finished;
   std::string_view file_name;
-  const ObjectFile *obj_file;
+  ObjectFile *obj_file;
   u32 cu_index;
   CompileUnitHeader header;
   AbbreviationInfo::Table abbrev_table;

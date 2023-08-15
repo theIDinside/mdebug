@@ -66,9 +66,8 @@ struct StrSlice
 };
 
 #define ATTR_CTOR(DataType, field)                                                                                \
-  constexpr AttributeValue(DataType data, AttributeForm form, Attribute name,                                     \
-                           bool requires_more = false) noexcept                                                   \
-      : form{form}, name{name}, requires_more_context(requires_more), value{data}                                 \
+  constexpr AttributeValue(DataType data, AttributeForm form, Attribute name) noexcept                            \
+      : form{form}, name{name}, value{data}                                                                       \
   {                                                                                                               \
   }
 
@@ -81,8 +80,8 @@ concept AttributeValueType = std::is_same_v<T, u64> || std::is_same_v<T, i64> ||
 struct AttributeValue
 {
   template <AttributeValueType T>
-  constexpr AttributeValue(T value, AttributeForm form, Attribute name, bool requires_more = false) noexcept
-      : form{form}, name{name}, requires_more_context(requires_more), value{value}
+  constexpr AttributeValue(T value, AttributeForm form, Attribute name) noexcept
+      : form{form}, name{name}, value{value}
   {
   }
 
@@ -93,9 +92,6 @@ struct AttributeValue
   i64 signed_value() const noexcept;
   AttributeForm form;
   Attribute name;
-  // For AttributeValue's where the payload (data in the union)
-  // requires additional context to be fully realized / interpreted.
-  bool requires_more_context;
 
 private:
   union _value
@@ -134,6 +130,7 @@ struct DebugInfoEntry
   void debug_dump(int indent = 0) const noexcept;
   void set_abbreviation(const AbbreviationInfo &a) noexcept;
   void set_offset(u64 sec_offset) noexcept;
+  std::optional<AttributeValue> get_attribute(Attribute attr) const noexcept;
 
 private:
   constexpr void

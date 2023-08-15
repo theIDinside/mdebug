@@ -39,7 +39,7 @@ CompilationUnitBuilder::build_cu_headers() noexcept
   }
 }
 
-CUProcessor::CUProcessor(const ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
+CUProcessor::CUProcessor(ObjectFile *obj_file, CompileUnitHeader header, AbbreviationInfo::Table &&table,
                          u32 index, TraceeController *target) noexcept
     : finished{false}, file_name{}, obj_file{obj_file}, cu_index{index}, header{header},
       abbrev_table{std::move(table)}, cu_dies{}, cu_file{nullptr}, requesting_target{target}, line_header{nullptr},
@@ -302,10 +302,14 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) n
           break;
         case DW_AT_name:
           fn.name = attr.string();
+          DLOG("dwarf", "[cu] die=0x{:x}, subprogram={}", child->sec_offset, fn.name);
           break;
         case DW_AT_linkage_name:
-          if (fn.name.empty())
+          if (fn.name.empty()) {
+            // TODO(simon): this will require demangling to make sense at all. For now just record the mangled
+            // name. Damn you overloading!
             fn.name = attr.string();
+          }
           break;
         default:
           break; // ignore attributes
@@ -323,17 +327,76 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) n
   }
 }
 
+std::optional<AddressRange>
+CUProcessor::determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept
+{
+  const auto h = die->get_attribute(Attribute::DW_AT_high_pc);
+  if (h) {
+    const auto l = die->get_attribute(Attribute::DW_AT_low_pc);
+    return zip(l, h, [](const auto &l, const auto &h) {
+      if (h.form != AttributeForm::DW_FORM_addr)
+        return AddressRange{l.address(), l.address() + h.address()};
+      else
+        return AddressRange{l.address(), h.address()};
+    });
+  }
+
+  if (const auto r = die->get_attribute(Attribute::DW_AT_ranges); r) {
+    const u64 offset = r.value().address();
+    const auto elf = obj_file->parsed_elf;
+    if (header.version == DwarfVersion::D4) {
+      DwarfBinaryReader reader{elf->debug_ranges, offset};
+      BoundsBuilder builder{};
+      while (true) {
+        if (!builder.next(reader.read_value<u64>(), reader.read_value<u64>()))
+          break;
+      }
+      ASSERT(builder.valid(),
+             "Failed to determine PC bounds from CU that contains .debug_ranges section reference.");
+      return builder.done(nullptr);
+    } else {
+      DwarfBinaryReader reader{elf->debug_rnglists, offset};
+      auto range_entry_type = reader.read_value<RangeListEntry>();
+      BoundsBuilder builder{};
+
+      while (range_entry_type != RangeListEntry::DW_RLE_end_of_list) {
+        switch (range_entry_type) {
+        case RangeListEntry::DW_RLE_start_length: {
+          builder.next(reader.read_value<u64>(), reader.read_uleb128<u64>());
+        } break;
+        case RangeListEntry::DW_RLE_offset_pair: {
+          TODO_FMT("DW_RLE_offset_pair not handled yet");
+          builder.next(reader.read_uleb128<u64>(), reader.read_uleb128<u64>());
+        } break;
+        default:
+          TODO_FMT("RangeListEntry of type {} not yet implemented", to_str(range_entry_type));
+          break;
+        }
+        range_entry_type = reader.read_value<RangeListEntry>();
+      }
+      return builder.done(nullptr);
+    }
+  }
+  DLOG("mdb", "[die] offset=0x{:x}, no bounds", die->sec_offset);
+  return std::nullopt;
+}
+
 void
 CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 {
   LineTable ltes;
   const auto elf = obj_file->parsed_elf;
-  TPtr<void> low = nullptr;
-  TPtr<void> high = nullptr;
-  CompilationUnitFile f{cu_die, elf};
+
+  CompilationUnitFile f{cu_die};
   if (header.addr_size == 4) {
     PANIC("32-bit arch not yet supported.");
   } else {
+    const auto bounds = determine_unrelocated_bounds(cu_die);
+    if (bounds) {
+      f.set_boundaries(*bounds.transform([elf](auto range) {
+        return AddressRange{.low = elf->relocate_addr(range.low), .high = elf->relocate_addr(range.high)};
+      }));
+    }
     for (const auto &att : cu_die->attributes) {
       if (att.name == Attribute::DW_AT_name) {
         f.set_name(att.string());
@@ -373,20 +436,18 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
         }
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
-        f.set_linetable(obj_file->line_table_header(offset));
+        auto header = obj_file->line_table_header(offset);
+        header->parse_linetable(elf->relocate_addr(nullptr), bounds);
+        f.set_linetable(header);
       } else if (att.name == Attribute::DW_AT_low_pc) {
-        low = att.address();
-      } else if (att.name == Attribute::DW_AT_high_pc) {
-        high = att.address();
-        if (high < low)
-          high = high + low;
+        const auto low = att.address();
+        if (!cu_die->get_attribute(Attribute::DW_AT_high_pc)) {
+          f.set_default_base_addr(low);
+        }
       }
     }
   }
-  if (f.known_addresses()) {
-    f.set_boundaries();
-    add_subprograms(f, cu_die, elf);
-  }
+  add_subprograms(f, cu_die, elf);
   requesting_target->add_file(std::move(f));
 }
 

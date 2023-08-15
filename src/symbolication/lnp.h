@@ -1,5 +1,6 @@
 #pragma once
 #include "../common.h"
+#include "block.h"
 #include "dwarf_defs.h"
 #include <optional>
 #include <utility>
@@ -75,7 +76,7 @@ struct LineHeader
   std::vector<FileEntry> file_names;
   LineTable *line_table;
 
-  void parse_linetable(AddrPtr reloc_base) noexcept;
+  void parse_linetable(AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept;
   void set_linetable_storage(LineTable *storage) noexcept;
   DwarfBinaryReader get_reader() const noexcept;
   bool has_entries() const noexcept;

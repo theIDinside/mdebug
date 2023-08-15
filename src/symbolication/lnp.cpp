@@ -1,14 +1,19 @@
 #include "lnp.h"
+#include "block.h"
 #include "elf.h"
+#include <algorithm>
+#include <optional>
+#include <unordered_map>
 #include <variant>
 
 class LNPStateMachine
 {
 public:
-  LNPStateMachine(LineHeader *header, LineTable *table, AddrPtr relocate_base)
-      : header{header}, table{table}, relocate_base(relocate_base), address(0), line(1), column(0), op_index(0),
+  LNPStateMachine(LineHeader *header, LineTable *table, AddrPtr relocate_base,
+                  std::optional<AddressRange> valid_bounds) noexcept
+      : header{header}, table(table), relocate_base(relocate_base), address(0), line(1), column(0), op_index(0),
         file(1), is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
-        epilogue_begin(false), isa(0), discriminator(0)
+        epilogue_begin(false), isa(0), discriminator(0), bounds(valid_bounds)
   {
   }
 
@@ -22,17 +27,16 @@ public:
   constexpr void
   stamp_entry() noexcept
   {
-    if (!table->empty() && AddrPtr(address + relocate_base) < table->back().pc) {
-      DLOG("mdb", "ERROR LTE");
+    if (should_record_lines) {
+      table->push_back(LineTableEntry{.pc = address + relocate_base,
+                                      .line = line,
+                                      .column = column,
+                                      .file = static_cast<u16>(file),
+                                      .is_stmt = is_stmt,
+                                      .prologue_end = prologue_end,
+                                      .basic_block = basic_block,
+                                      .epilogue_begin = epilogue_begin});
     }
-    table->push_back(LineTableEntry{.pc = address + relocate_base,
-                                    .line = line,
-                                    .column = column,
-                                    .file = static_cast<u16>(file),
-                                    .is_stmt = is_stmt,
-                                    .prologue_end = prologue_end,
-                                    .basic_block = basic_block,
-                                    .epilogue_begin = epilogue_begin});
     discriminator = 0;
     basic_block = false;
     prologue_end = false;
@@ -137,11 +141,15 @@ public:
   {
     end_sequence = true;
     stamp_entry();
+    should_record_lines = true;
   }
 
   constexpr void
   set_address(u64 addr) noexcept
   {
+    if (this->bounds && should_record_lines) {
+      should_record_lines = AddrPtr{addr} >= bounds->low;
+    }
     address = addr;
     op_index = 0;
   }
@@ -192,6 +200,8 @@ private:
   bool epilogue_begin;
   u8 isa;
   u32 discriminator;
+  std::optional<AddressRange> bounds;
+  bool should_record_lines = true;
 };
 
 u64
@@ -443,7 +453,7 @@ parse_lnp_headers(const Elf *elf) noexcept
       reader.skip(init_len);
     }
   }
-  DLOG("dwarf", "[lnp]: {} headers found", header_count);
+
   std::vector<LineHeader> headers{};
   headers.reserve(header_count);
   DwarfBinaryReader reader{debug_line};
@@ -608,12 +618,16 @@ LineHeader::set_linetable_storage(LineTable *storage) noexcept
 }
 
 void
-LineHeader::parse_linetable(AddrPtr reloc_base) noexcept
+LineHeader::parse_linetable(AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept
 {
   using OpCode = LineNumberProgramOpCode;
   auto reader = get_reader();
+  std::vector<LineTable> sequences{};
+  sequences.push_back({});
   while (reader.has_more()) {
-    LNPStateMachine state{this, line_table, reloc_base};
+    if (!sequences.empty() && !sequences.back().empty())
+      sequences.push_back({});
+    LNPStateMachine state{this, &sequences.back(), reloc_base, bounds};
     while (reader.has_more() && !state.sequence_ended()) {
       const auto opcode = reader.read_value<OpCode>();
       if (const auto spec_op = std::to_underlying(opcode); spec_op >= opcode_base) {
@@ -701,8 +715,12 @@ LineHeader::parse_linetable(AddrPtr reloc_base) noexcept
         break;
       }
     }
-    if (state.sequence_ended()) {
-      auto foo = 10;
-    }
+  }
+  // N.B: This kind of double work always irks me. But it *is* simple.
+  // optimizations possible here.
+  std::erase_if(sequences, [](auto &seq) { return seq.empty(); });
+  std::sort(sequences.begin(), sequences.end(), [](auto &a, auto &b) { return a.front().pc < b.front().pc; });
+  for (const auto &seq : sequences) {
+    std::copy(seq.cbegin(), seq.cend(), std::back_inserter(*line_table));
   }
 }

@@ -72,7 +72,7 @@ struct ObjectFile
 
   Path interpreter() const noexcept;
   bool found_min_syms() const noexcept;
-  const LineHeader *line_table_header(u64 offset) const noexcept;
+  LineHeader *line_table_header(u64 offset) noexcept;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

@@ -7,8 +7,8 @@
 #include <emmintrin.h>
 #include <filesystem>
 
-CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu, const Elf *elf) noexcept
-    : m_addr_ranges(), m_name(), pc_boundaries(), line_header(nullptr), fns(), cu_die(cu), elf(elf)
+CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
+    : m_addr_ranges(), m_name(), pc_boundaries(), line_header(nullptr), fns(), cu_die(cu)
 {
 }
 
@@ -102,31 +102,10 @@ CompilationUnitFile::set_linetable(const LineHeader *header) noexcept
   line_header = header;
 }
 
-bool
-CompilationUnitFile::known_addresses() const noexcept
-{
-  return !m_addr_ranges.empty() || (line_header && line_header->has_entries());
-}
-
 void
-CompilationUnitFile::set_boundaries() noexcept
+CompilationUnitFile::set_boundaries(AddressRange range) noexcept
 {
-  if (!m_addr_ranges.empty()) {
-    pc_boundaries = AddressRange{.low = m_addr_ranges.front().low, .high = m_addr_ranges.back().high};
-  } else if (line_header && line_header->line_table) {
-    pc_boundaries =
-        AddressRange{.low = line_header->line_table->front().pc, .high = line_header->line_table->back().pc + 1};
-  } else
-    pc_boundaries = AddressRange{nullptr, nullptr};
-
-  if (pc_boundaries.low > pc_boundaries.high) {
-    DLOG("mdb", "faulty pc boundaries");
-    for (const auto &lte : *(line_header->line_table)) {
-      DLOG("mdb", "[LINE TABLE DUMP]: {}", lte);
-    }
-  }
-  // ASSERT(pc_boundaries.low <= pc_boundaries.high, "low must be <= high: {} <= {} ({})",
-  // pc_boundaries.low,pc_boundaries.high, this->m_name);
+  pc_boundaries = range;
 }
 
 const LineTable &
@@ -228,4 +207,10 @@ CompilationUnitFile::file_path(u32 index) const noexcept
   auto &fentry = line_header->file_names[index];
   Path p = line_header->directories[fentry.dir_index].path;
   return p / fentry.file_name;
+}
+
+void
+CompilationUnitFile::set_default_base_addr(AddrPtr default_base) noexcept
+{
+  default_base_addr = default_base;
 }
