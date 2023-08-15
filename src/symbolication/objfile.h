@@ -27,9 +27,6 @@ struct ObjectFile
   Path path;
   u64 size;
   const u8 *loaded_binary;
-  AddrPtr relocated_address;
-  TPtr<void> entry_point;
-  TPtr<void> vm_text_section;
   Elf *parsed_elf = nullptr;
   bool min_syms = false;
   std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
@@ -37,10 +34,6 @@ struct ObjectFile
   std::vector<LineTable> line_tables;
   std::vector<LineHeader> line_table_headers;
   sym::Unwinder *unwinder;
-  // lowest address of the LOAD segments defined in program headers
-  AddrPtr low;
-  // highest address of the LOAD segments, defined in program headers
-  AddrPtr high;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;

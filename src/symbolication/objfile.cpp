@@ -4,8 +4,7 @@
 #include <optional>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary),
-      entry_point(), vm_text_section{}, minimal_fn_symbols{}, minimal_obj_symbols{}
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{}
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
