@@ -297,4 +297,8 @@ public:
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
   // Returns CU:s containing executable code.
   const std::vector<CompilationUnitFile> &get_executable_cus() const noexcept;
+
+private:
+  // Writes breakpoint point and returns the original value found at that address
+  u8 write_bp_byte(AddrPtr addr) noexcept;
 };

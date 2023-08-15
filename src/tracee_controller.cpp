@@ -406,13 +406,7 @@ TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
     bp->bp_type.address = true;
     return;
   }
-
-  constexpr u64 bkpt = 0xcc;
-  auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, address.get(), nullptr);
-  u8 original_byte = static_cast<u8>(read_value & 0xff);
-  u64 installed_bp = ((read_value & ~0xff) | bkpt);
-  ptrace(PTRACE_POKEDATA, task_leader, address.get(), installed_bp);
-
+  u8 original_byte = write_bp_byte(address.as_void());
   bps.insert(address.as_void(), original_byte, BpType{.address = true});
 }
 
@@ -457,11 +451,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
       bp->bp_type.add_setting({.function = true});
       bps.fn_breakpoint_names[bp->id] = function_name;
     } else {
-      auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, sym.address.get(), nullptr);
-      u8 ins_byte = static_cast<u8>(read_value & 0xff);
-      u64 installed_bp = ((read_value & ~0xff) | bkpt);
-      DLOG("mdb", "read 0x{:x} from bp location - setting 0x{:x}", read_value, installed_bp);
-      ptrace(PTRACE_POKEDATA, task_leader, sym.address.get(), installed_bp);
+      auto ins_byte = write_bp_byte(sym.address);
       bps.insert(sym.address, ins_byte, BpType{.function = true});
       auto &bp = bps.breakpoints.back();
       bps.fn_breakpoint_names[bp.id] = function_name;
@@ -484,11 +474,7 @@ TraceeController::set_source_breakpoints(std::string_view src,
         if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
           if (!bps.contains(lte.pc)) {
             logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
-            constexpr u64 bkpt = 0xcc;
-            auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, lte.pc, nullptr);
-            u8 original_byte = static_cast<u8>(read_value & 0xff);
-            u64 installed_bp = ((read_value & ~0xff) | bkpt);
-            ptrace(PTRACE_POKEDATA, task_leader, lte.pc, installed_bp);
+            u8 original_byte = write_bp_byte(lte.pc);
             bps.insert(lte.pc, original_byte, BpType{.source = true});
             const auto &bp = bps.breakpoints.back();
             bps.source_breakpoints[bp.id] = std::move(desc);
@@ -1134,6 +1120,17 @@ const std::vector<CompilationUnitFile> &
 TraceeController::get_executable_cus() const noexcept
 {
   return m_full_cu;
+}
+
+u8
+TraceeController::write_bp_byte(AddrPtr addr) noexcept
+{
+  constexpr u8 bkpt = 0xcc;
+  auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr, nullptr);
+  u8 ins_byte = static_cast<u8>(read_value & 0xff);
+  u64 installed_bp = ((read_value & ~0xff) | bkpt);
+  ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp);
+  return ins_byte;
 }
 
 #pragma GCC diagnostic pop
