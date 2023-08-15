@@ -130,8 +130,6 @@ public:
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
-  /* Cache the register contents of `tid`. */
-  [[maybe_unused]] void cache_registers(TaskInfo *task) noexcept;
   /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;

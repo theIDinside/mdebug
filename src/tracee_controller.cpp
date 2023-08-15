@@ -364,7 +364,7 @@ AddrPtr
 TraceeController::get_caching_pc(TaskInfo *t) noexcept
 {
   if (t->rip_dirty) {
-    cache_registers(t);
+    t->cache_registers();
     return t->registers->rip;
   } else {
     return t->registers->rip;
@@ -386,16 +386,6 @@ TraceeController::set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept
 {
   ASSERT(has_task(tid), "Unknown task {}", tid);
   task_vm_infos[tid] = vm_info;
-}
-
-void
-TraceeController::cache_registers(TaskInfo *task) noexcept
-{
-  if (task->cache_dirty) {
-    PTRACE_OR_PANIC(PTRACE_GETREGS, task->tid, nullptr, task->registers);
-    task->cache_dirty = false;
-    task->rip_dirty = false;
-  }
 }
 
 void
@@ -669,7 +659,7 @@ TraceeController::process_exec(TaskInfo *t) noexcept
 {
   DLOG("mdb", "Processing EXEC for {}", t->tid);
   reopen_memfd();
-  cache_registers(t);
+  t->cache_registers();
   read_auxv(t);
 }
 
@@ -680,7 +670,7 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   const auto stopped_tid = t->tid;
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
-  cache_registers(t);
+  t->cache_registers();
   const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
   const auto res = read_type(ptr);
   // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
@@ -916,7 +906,7 @@ TraceeController::start_awaiter_thread() noexcept
 sym::Frame
 TraceeController::current_frame(TaskInfo *task) noexcept
 {
-  cache_registers(task);
+  task->cache_registers();
   auto symbol = find_fn_by_pc(task->registers->rip);
   if (symbol)
     return sym::Frame{
@@ -1025,7 +1015,7 @@ sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept
 {
   DLOG("mdb", "stacktrace for {}", task->tid);
-  cache_registers(task);
+  task->cache_registers();
   auto &cs = *task->call_stack;
   cs.frames.clear();
   auto level = 1;

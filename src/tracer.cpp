@@ -253,7 +253,7 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
       ASSERT(t != nullptr, "Unknown task!!");
       get_current()->register_task_waited(twr);
       get_current()->reopen_memfd();
-      get_current()->cache_registers(t);
+      t->cache_registers();
       get_current()->read_auxv(t);
       get_current()->install_loader_breakpoints();
       dap->add_tty(res.fd);
@@ -270,7 +270,7 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
             ASSERT(t != nullptr, "Unknown task!!");
             get_current()->register_task_waited(twr);
             get_current()->reopen_memfd();
-            get_current()->cache_registers(t);
+            t->cache_registers();
             get_current()->read_auxv(t);
             get_current()->install_loader_breakpoints();
             dap->add_tty(res.fd);
