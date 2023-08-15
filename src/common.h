@@ -866,3 +866,13 @@ static constexpr std::string_view reg_names[17] = {"rax", "rdx", "rcx", "rbx", "
 u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
 
 static constexpr auto X86_64_RIP_REGISTER = 16;
+
+template <typename T, typename U, typename Fn, typename R = typename std::invoke_result_t<Fn, T, U>>
+std::optional<R>
+zip(const std::optional<T> &l, const std::optional<U> &r, Fn &&fn)
+{
+  if (l && r)
+    return std::optional<R>{fn(*l, *r)};
+  else
+    return std::nullopt;
+}
