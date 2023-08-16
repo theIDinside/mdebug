@@ -72,8 +72,6 @@ struct TraceeController
 
 private:
   SpinLock spin_lock;
-  std::vector<CompilationUnitFile> m_full_cu;
-  std::vector<NonExecutableCompilationUnitFile> m_partial_units;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   AwaiterThread::handle awaiter_thread;
@@ -264,8 +262,10 @@ public:
 
   std::optional<std::string> read_string(TraceePointer<char> address) noexcept;
 
-  /* Add parsed DWARF debug info for `file` */
-  void add_file(CompilationUnitFile &&file) noexcept;
+  /* Add parsed DWARF debug info for `file` into `obj`. One could let `ObjectFile` handle this. But for the most
+   * part I want ObjectFile to be *data* about the system, and constrain the amount of *behavior* it can do. At
+   * least for now. This function is a critical section and as such is "synchronized". */
+  void add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept;
 
   // Inform awaiter threads that event has been consumed & handled. "Wakes up" the awaiter thread.
   void reaped_events() noexcept;
@@ -287,14 +287,11 @@ public:
   const std::vector<AddrPtr> &dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept;
   sym::Frame current_frame(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
+  ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
   const ElfSection *get_text_section(AddrPtr addr) const noexcept;
-  // Finds the first CompilationUnitFile that may contain `address` and returns the index of that file.
-  std::optional<u64> cu_file_from_pc(AddrPtr address) const noexcept;
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
-  // Returns CU:s containing executable code.
-  const std::vector<CompilationUnitFile> &get_executable_cus() const noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

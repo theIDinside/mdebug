@@ -55,9 +55,9 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      stop_on_clone(false), tracee_r_debug(nullptr), shared_objects(), spin_lock{}, m_full_cu{},
-      m_partial_units(), interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
-      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
+      stop_on_clone(false), tracee_r_debug(nullptr), shared_objects(), spin_lock{}, interpreter_base{}, entry{},
+      session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}),
+      unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
@@ -455,29 +455,31 @@ TraceeController::set_source_breakpoints(std::string_view src,
 {
   logging::get_logging()->log("mdb",
                               fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
-  const auto f_it = find(m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
-  if (f_it != std::end(m_full_cu)) {
-    for (auto &&desc : descs) {
-      // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
-      const auto &lt = f_it->line_table();
-      for (const auto &lte : lt) {
-        if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
-          if (!bps.contains(lte.pc)) {
-            logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
-            u8 original_byte = write_bp_byte(lte.pc);
-            bps.insert(lte.pc, original_byte, BpType{.source = true});
-            const auto &bp = bps.breakpoints.back();
-            bps.source_breakpoints[bp.id] = std::move(desc);
-            break;
-          } else {
-            auto bp = bps.get(lte.pc);
-            bp->bp_type.source = true;
+  for (const auto obj : object_files) {
+    const auto f_it = find(obj->m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+    if (f_it != std::end(obj->m_full_cu)) {
+      for (auto &&desc : descs) {
+        // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
+        const auto &lt = f_it->line_table();
+        for (const auto &lte : lt) {
+          if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
+            if (!bps.contains(lte.pc)) {
+              logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
+              u8 original_byte = write_bp_byte(lte.pc);
+              bps.insert(lte.pc, original_byte, BpType{.source = true});
+              const auto &bp = bps.breakpoints.back();
+              bps.source_breakpoints[bp.id] = std::move(desc);
+              break;
+            } else {
+              auto bp = bps.get(lte.pc);
+              bp->bp_type.source = true;
+            }
           }
         }
       }
+    } else {
+      logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
     }
-  } else {
-    logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
   }
   logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", bps.breakpoints.size()));
 }
@@ -861,7 +863,7 @@ TraceeController::read_string(TraceePointer<char> address) noexcept
 }
 
 void
-TraceeController::add_file(CompilationUnitFile &&file) noexcept
+TraceeController::add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept
 {
   {
     LockGuard guard{spin_lock};
@@ -870,11 +872,11 @@ TraceeController::add_file(CompilationUnitFile &&file) noexcept
         const auto faddr_rng = f.low_high_pc();
         return range.high > faddr_rng.low;
       };
-      auto it_pos =
-          std::lower_bound(m_full_cu.begin(), m_full_cu.end(), file.low_high_pc(), file_sorter_by_addresses);
-      m_full_cu.insert(it_pos, std::move(file));
+      auto it_pos = std::lower_bound(obj->m_full_cu.begin(), obj->m_full_cu.end(), file.low_high_pc(),
+                                     file_sorter_by_addresses);
+      obj->m_full_cu.insert(it_pos, std::move(file));
     } else {
-      m_partial_units.push_back({});
+      obj->m_partial_units.push_back({});
     }
   }
   auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
@@ -1047,10 +1049,21 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
   return *task->call_stack;
 }
 
+ObjectFile *
+TraceeController::find_obj_by_pc(AddrPtr addr) const noexcept
+{
+  for (const auto obj : object_files) {
+    if (obj->address_bounds.contains(addr))
+      return obj;
+  }
+  return nullptr;
+}
+
 std::optional<SearchFnSymResult>
 TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 {
-  for (auto &f : m_full_cu) {
+  const auto obj = find_obj_by_pc(addr);
+  for (auto &f : obj->m_full_cu) {
     if (f.may_contain(addr)) {
       const auto fn = f.find_subprogram(addr);
       if (fn != nullptr) {
@@ -1065,9 +1078,11 @@ TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 std::optional<std::string_view>
 TraceeController::get_source(std::string_view name) noexcept
 {
-  for (const auto &f : m_full_cu) {
-    if (f.name() == name) {
-      return f.name();
+  for (auto obj : object_files) {
+    for (const auto &f : obj->m_full_cu) {
+      if (f.name() == name) {
+        return f.name();
+      }
     }
   }
   return std::nullopt;
@@ -1076,40 +1091,23 @@ TraceeController::get_source(std::string_view name) noexcept
 const ElfSection *
 TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
-  for (const auto of : object_files) {
-    const auto text = of->parsed_elf->get_section(".text");
-    if (text->contains_relo_addr(addr))
-      return text;
+  const auto obj = find_obj_by_pc(addr);
+  if (obj) {
+    const auto text = obj->parsed_elf->get_section(".text");
+    return text;
   }
   return nullptr;
-}
-
-std::optional<u64>
-TraceeController::cu_file_from_pc(AddrPtr address) const noexcept
-{
-  const auto first = std::find_if(m_full_cu.begin(), m_full_cu.end(),
-                                  [address](const auto &f) { return f.may_contain(address); });
-  if (first != std::cend(m_full_cu)) {
-    return std::distance(std::cbegin(m_full_cu), first);
-  } else {
-    return std::nullopt;
-  }
 }
 
 const CompilationUnitFile *
 TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
 {
-  if (auto it = find(m_full_cu, [addr = address](const auto &f) { return f.may_contain(addr); });
-      it != std::cend(m_full_cu)) {
-    return &*it;
+  const auto obj = find_obj_by_pc(address);
+  if (auto it = find(obj->m_full_cu, [addr = address](const auto &f) { return f.may_contain(addr); });
+      it != std::cend(obj->m_full_cu)) {
+    return it.base();
   }
   return nullptr;
-}
-
-const std::vector<CompilationUnitFile> &
-TraceeController::get_executable_cus() const noexcept
-{
-  return m_full_cu;
 }
 
 u8

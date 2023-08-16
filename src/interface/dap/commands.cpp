@@ -156,7 +156,7 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
   std::string file = args["source"]["path"];
-  auto source_file = target->get_source(file);
+  const auto source_file = target->get_source(file);
   std::vector<SourceBreakpointDescriptor> src_bps;
   if (source_file.has_value()) {
     for (const auto &src_bp : args.at("breakpoints")) {

@@ -1,10 +1,12 @@
 #include "objfile.h"
 #include "../so_loading.h"
+#include "cu.h"
 #include "elf_symbols.h"
 #include <optional>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{}
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
+      line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(), m_partial_units()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -72,6 +74,18 @@ ObjectFile::line_table_header(u64 offset) noexcept
       return &lth;
   }
   TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
+}
+
+SearchResult<CompilationUnitFile>
+ObjectFile::get_cu_iterable(AddrPtr addr) const noexcept
+{
+  if (const auto it = find(m_full_cu, [addr](const auto &f) { return f.may_contain(addr); });
+      it != std::cend(m_full_cu)) {
+    return SearchResult<CompilationUnitFile>{.ptr = it.base(),
+                                             .index = static_cast<u32>(std::distance(m_full_cu.cbegin(), it)),
+                                             .cap = static_cast<u32>(m_full_cu.size())};
+  }
+  return {nullptr, 0, 0};
 }
 
 ObjectFile *

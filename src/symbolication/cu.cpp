@@ -448,7 +448,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
     }
   }
   add_subprograms(f, cu_die, elf);
-  requesting_target->add_file(std::move(f));
+  requesting_target->add_file(obj_file, std::move(f));
 }
 
 AddrPtr
