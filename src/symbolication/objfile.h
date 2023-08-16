@@ -6,6 +6,9 @@
 #include <string_view>
 #include <sys/mman.h>
 
+class CompilationUnitFile;
+class NonExecutableCompilationUnitFile;
+
 namespace sym {
 class Unwinder;
 }
@@ -17,10 +20,6 @@ struct ElfSection;
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
  * to outlive them all, so it's safe to take raw pointers into `loaded_binary`.
  */
-
-// TODO(simon): Make `ObjectFile` the owner of Minimal Symbols and parsed debug information, for instance the
-// std::map in target that contains minimal symbols etc, so that we can effectively track life time and if for
-// instance a shared library gets unloaded, we can kill the symbols along with it.
 
 struct ObjectFile
 {
@@ -36,6 +35,8 @@ struct ObjectFile
   sym::Unwinder *unwinder;
   // Address bounds determined by reading the program segments of the elf binary
   AddressRange address_bounds;
+  std::vector<CompilationUnitFile> m_full_cu;
+  std::vector<NonExecutableCompilationUnitFile> m_partial_units;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
@@ -68,6 +69,7 @@ struct ObjectFile
   Path interpreter() const noexcept;
   bool found_min_syms() const noexcept;
   LineHeader *line_table_header(u64 offset) noexcept;
+  SearchResult<CompilationUnitFile> get_cu_iterable(AddrPtr addr) const noexcept;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

@@ -876,3 +876,19 @@ zip(const std::optional<T> &l, const std::optional<U> &r, Fn &&fn)
   else
     return std::nullopt;
 }
+
+template <typename T> struct SearchResult
+{
+  // found element in container that was searched.
+  const T *ptr;
+  // index in the container `ptr` was found in
+  u32 index;
+  // capacity of the container `ptr` was found in
+  u32 cap;
+
+  constexpr bool
+  found() const noexcept
+  {
+    return ptr != nullptr;
+  }
+};
