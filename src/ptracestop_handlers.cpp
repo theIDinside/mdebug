@@ -1,9 +1,9 @@
 #include "ptracestop_handlers.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "supervisor.h"
 #include "symbolication/lnp.h"
 #include "task.h"
-#include "tracee_controller.h"
 #include "tracer.h"
 #include "utils/logger.h"
 #include <algorithm>

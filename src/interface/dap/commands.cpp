@@ -1,6 +1,6 @@
 #include "commands.h"
 #include "../../ptracestop_handlers.h"
-#include "../../tracee_controller.h"
+#include "../../supervisor.h"
 #include "../../tracer.h"
 #include "../../utils/base64.h"
 #include "fmt/format.h"

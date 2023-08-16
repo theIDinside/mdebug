@@ -1,6 +1,6 @@
 #include "dwarf_frameunwinder.h"
+#include "../supervisor.h"
 #include "../task.h"
-#include "../tracee_controller.h"
 #include "block.h"
 #include "dwarf_defs.h"
 #include "dwarf_expressions.h"

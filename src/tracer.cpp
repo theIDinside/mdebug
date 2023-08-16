@@ -12,12 +12,12 @@
 #include "posix/argslist.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
+#include "supervisor.h"
 #include "symbolication/cu.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "task.h"
-#include "tracee_controller.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <bits/chrono.h>

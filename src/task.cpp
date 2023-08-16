@@ -2,9 +2,9 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "ptrace.h"
+#include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_frameunwinder.h"
-#include "tracee_controller.h"
 #include <sys/ptrace.h>
 #include <sys/user.h>
 

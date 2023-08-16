@@ -1,5 +1,5 @@
 #include "disassemble.h"
-#include "../tracee_controller.h"
+#include "../supervisor.h"
 #include "elf.h"
 #include "fmt/core.h"
 #include "lnp.h"

@@ -1,5 +1,5 @@
 #include "cu.h"
-#include "../tracee_controller.h"
+#include "../supervisor.h"
 #include "block.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"

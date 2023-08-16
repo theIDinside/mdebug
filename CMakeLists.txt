@@ -10,8 +10,8 @@ set(MIDAS_SOURCES
   src/utils/logger.h
   src/tracer.cpp
   src/tracer.h
-  src/tracee_controller.cpp
-  src/tracee_controller.h
+  src/supervisor.cpp
+  src/supervisor.h
   src/ptracestop_handlers.cpp
   src/ptracestop_handlers.h
   src/common.cpp
