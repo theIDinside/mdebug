@@ -143,12 +143,21 @@ Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcep
   const auto sec_names_offset_hdr =
       object_file->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
 
+  auto min = UINTMAX_MAX;
+  auto max = reloc_base.get();
+
+  // good enough heuristic to determine mapped in ranges.
   for (auto i = 0; i < header->e_phnum; ++i) {
-    auto phdr = object_file->get_at_offset<Elf64_Phdr>(header->e_phoff);
+    auto phdr = object_file->get_at_offset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
     if (phdr->p_type == PT_LOAD) {
+      min = std::min(phdr->p_vaddr + reloc_base, min);
+      const auto end = phdr->p_vaddr + reloc_base + phdr->p_memsz;
+      const auto align_adjust = phdr->p_align - (end % phdr->p_align);
+      max = std::max(end + align_adjust, max);
     }
   }
 
+  object_file->address_bounds = AddressRange{.low = min, .high = max};
   auto sec_hdrs_offset = header->e_shoff;
   // parse sections
   for (auto i = 0; i < data.count; i++) {

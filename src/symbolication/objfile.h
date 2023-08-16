@@ -34,6 +34,8 @@ struct ObjectFile
   std::vector<LineTable> line_tables;
   std::vector<LineHeader> line_table_headers;
   sym::Unwinder *unwinder;
+  // Address bounds determined by reading the program segments of the elf binary
+  AddressRange address_bounds;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
