@@ -83,9 +83,35 @@ struct StackTraceFormat
   bool includeAll : 1;
 };
 
+struct Scope
+{
+  std::string_view name;
+  std::string_view presentation_hint;
+  int variables_reference;
+};
+
 }; // namespace ui::dap
 
 namespace fmt {
+template <> struct formatter<ui::dap::Scope>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const ui::dap::Scope &scope, FormatContext &ctx) const
+  {
+    return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": "{}" }})",
+                          scope.name, scope.presentation_hint, scope.variables_reference);
+  }
+};
+
 template <> struct formatter<ui::dap::Thread>
 {
 

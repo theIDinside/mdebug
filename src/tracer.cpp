@@ -320,3 +320,12 @@ Tracer::disconnect() noexcept
   kill_all_targets();
   Tracer::KeepAlive = false;
 }
+
+std::array<ui::dap::Scope, 3>
+Tracer::get_scopes(int frame_id) const noexcept
+{
+  using ui::dap::Scope;
+  // 'arguments' | 'locals' | 'registers'
+  return std::array<Scope, 3>{Scope{"Arguments", "arguments", 1000}, Scope{"Locals", "locals", 1001},
+                              Scope{"Registers", "registers", 1002}};
+}

@@ -22,6 +22,7 @@ using Tid = pid_t;
 namespace ui::dap {
 class DAP;
 struct Event;
+struct Scope;
 } // namespace ui::dap
 
 namespace cmd {
@@ -83,6 +84,7 @@ public:
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
   void disconnect() noexcept;
+  std::array<ui::dap::Scope, 3> get_scopes(int frame_id) const noexcept;
   std::vector<std::unique_ptr<TraceeController>> targets;
 
 private:
