@@ -44,8 +44,8 @@ set(MIDAS_SOURCES
   src/symbolication/elf_symbols.h
   src/symbolication/block.cpp
   src/symbolication/block.h
-  src/symbolication/type.cpp
-  src/symbolication/type.h
+  src/symbolication/cu_file.cpp
+  src/symbolication/cu_file.h
   src/symbolication/callstack.cpp
   src/symbolication/callstack.h
   src/symbolication/disassemble.cpp

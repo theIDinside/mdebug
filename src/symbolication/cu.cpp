@@ -1,12 +1,12 @@
 #include "cu.h"
 #include "../supervisor.h"
 #include "block.h"
+#include "cu_file.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"
 #include "elf.h"
 #include "lnp.h"
 #include "objfile.h"
-#include "type.h"
 #include <bit>
 #include <bits/align.h>
 #include <cstdint>
