@@ -2,6 +2,7 @@
 #include "awaiter.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "interface/dap/types.h"
 #include "lib/spinlock.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
@@ -32,7 +33,10 @@ class Unwinder;
 
 namespace ui {
 struct UICommand;
+namespace dap {
+struct VariablesReference;
 };
+}; // namespace ui
 
 struct LWP
 {
@@ -64,13 +68,12 @@ struct TraceeController
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   BreakpointMap bps;
-  bool stop_on_clone;
   TPtr<r_debug_extended> tracee_r_debug;
-  // Aggressive spinlock
-
   SharedObjectMap shared_objects;
 
 private:
+  int next_var_ref = 0;
+  std::unordered_map<int, ui::dap::VariablesReference> var_refs;
   SpinLock spin_lock;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
@@ -81,6 +84,11 @@ private:
   std::vector<sym::Unwinder *> unwinders;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *null_unwinder;
+
+  int new_frame_id(TaskInfo *task) noexcept;
+  int new_scope_id(const sym::Frame *frame) noexcept;
+  int new_var_id(int parent_id) noexcept;
+  void reset_variable_references() noexcept;
 
 public:
   // Constructors
@@ -112,8 +120,6 @@ public:
   void resume_target(RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all() noexcept;
-  /* Query if we should interrupt the entire process and all it's tasks when we encounter a clone syscall */
-  bool should_stop_on_clone() noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
    * interface of the event */
   void reap_task(TaskInfo *task) noexcept;
@@ -292,6 +298,10 @@ public:
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
   const ElfSection *get_text_section(AddrPtr addr) const noexcept;
   const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
+  std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
+
+  std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
+  const sym::Frame *frame(int frame_id) noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

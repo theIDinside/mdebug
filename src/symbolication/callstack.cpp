@@ -20,18 +20,6 @@ Frame::name() const noexcept
     return symbol->name;
 }
 
-std::optional<int>
-CallStack::has_frame(const Frame &f) const noexcept
-{
-  auto i = 0;
-  for (const auto &frame : frames) {
-    if (frame == f)
-      return i;
-    ++i;
-  }
-  return std::nullopt;
-}
-
 std::optional<std::string_view>
 Frame::function_name() const noexcept
 {
@@ -43,5 +31,15 @@ Frame::function_name() const noexcept
 }
 
 CallStack::CallStack(Tid tid) noexcept : tid(tid), dirty(true), frames(), pcs() {}
+
+const Frame *
+CallStack::get_frame(int frame_id) const noexcept
+{
+  for (const auto &f : frames) {
+    if (f.frame_id == frame_id)
+      return &f;
+  }
+  return nullptr;
+}
 
 } // namespace sym

@@ -3,6 +3,10 @@
 #include "type.h"
 #include <vector>
 
+namespace ui::dap {
+struct Scope;
+}
+
 namespace sym {
 enum class FrameType : u8
 {
@@ -26,6 +30,7 @@ struct Frame
   const CompilationUnitFile *cu_file;
   int level;
   FrameType type;
+  int frame_id;
 
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept
@@ -56,13 +61,14 @@ struct CallStack
   explicit CallStack(Tid tid) noexcept;
   ~CallStack() = default;
 
+  const Frame *get_frame(int frame_id) const noexcept;
+
   Tid tid; // the task associated with this call stack
   bool dirty;
   u8 resolved;
   std::vector<Frame> frames; // the call stack
   std::vector<AddrPtr> pcs;
   std::vector<std::array<u64, 17>> reg_unwind_buffer;
-  std::optional<int> has_frame(const Frame &f) const noexcept;
 };
 } // namespace sym
 

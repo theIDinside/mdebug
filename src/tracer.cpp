@@ -24,6 +24,7 @@
 #include <bits/ranges_util.h>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <fcntl.h>
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -53,9 +54,8 @@ add_object_err(AddObjectResult r)
 }
 
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
-    : targets{}, object_files(), command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe),
-      already_launched(false), events_notifier(events_notifier),
-      prev_time(std::chrono::high_resolution_clock::now())
+    : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
+      events_notifier(events_notifier), prev_time(std::chrono::high_resolution_clock::now())
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -319,13 +319,4 @@ Tracer::disconnect() noexcept
 {
   kill_all_targets();
   Tracer::KeepAlive = false;
-}
-
-std::array<ui::dap::Scope, 3>
-Tracer::get_scopes(int frame_id) const noexcept
-{
-  using ui::dap::Scope;
-  // 'arguments' | 'locals' | 'registers'
-  return std::array<Scope, 3>{Scope{"Arguments", "arguments", 1000}, Scope{"Locals", "locals", 1001},
-                              Scope{"Registers", "registers", 1002}};
 }

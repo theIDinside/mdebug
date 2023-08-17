@@ -519,7 +519,6 @@ StackTrace::execute(Tracer *tracer) noexcept
 
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.frames.size());
-  auto id = 1;
   for (const auto &frame : cfs.frames) {
     if (frame.type == sym::FrameType::Full) {
       const auto &lt = frame.cu_file->line_table();
@@ -537,14 +536,14 @@ StackTrace::execute(Tracer *tracer) noexcept
         }
       }
       stack_frames.push_back(
-          StackFrame{.id = id++,
+          StackFrame{.id = frame.frame_id,
                      .name = frame.name().value_or("unknown"),
                      .source = Source{.name = frame.cu_file->name(), .path = frame.cu_file->name()},
                      .line = line,
                      .column = col,
                      .rip = fmt::format("{}", frame.rip)});
     } else {
-      stack_frames.push_back(StackFrame{.id = id++,
+      stack_frames.push_back(StackFrame{.id = frame.frame_id,
                                         .name = frame.name().value_or("unknown"),
                                         .source = std::nullopt,
                                         .line = 0,
@@ -573,7 +572,8 @@ ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> s
 UIResultPtr
 Scopes::execute(Tracer *tracer) noexcept
 {
-  return new ScopesResponse{true, this, tracer->get_scopes(frameId)};
+  auto current = tracer->get_current();
+  return new ScopesResponse{true, this, current->scopes_reference(frameId)};
 }
 
 Disassemble::Disassemble(std::uint64_t seq, AddrPtr address, int byte_offset, int ins_offset, int ins_count,
@@ -742,8 +742,10 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::RestartFrame");
   case CommandType::ReverseContinue:
     TODO("Command::ReverseContinue");
-  case CommandType::Scopes:
-    TODO("Command::Scopes");
+  case CommandType::Scopes: {
+    const int frame_id = args.at("frameId");
+    return new ui::dap::Scopes{seq, frame_id};
+  }
   case CommandType::SetBreakpoints:
     return new SetBreakpoints{seq, std::move(args)};
   case CommandType::SetDataBreakpoints:

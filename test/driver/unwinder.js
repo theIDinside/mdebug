@@ -1,6 +1,7 @@
 const {
   DAClient,
   MDB_PATH,
+  prettyJson,
   buildDirFile,
   checkResponse,
   getLineOf,
@@ -208,15 +209,23 @@ async function normalTest() {
     breakpoints: bp_lines,
   });
   const threads = await da_client.threads();
-  await da_client
-    .stackTrace(threads[0].id)
-    .then(({ response_seq, command, type, success, body: { stackFrames } }) => {
-      checkResponse({ type, success, command }, "stackTrace", true);
-      if (stackFrames.length != 4)
-        throw new Error(
-          `We're exactly at the start of the first instruction of main - expecting only 1 frame but got ${stackFrames.length}: ${JSON.stringify(stackFrames)}`
-        );
-    });
+  {
+    const frames = await da_client
+      .stackTrace(threads[0].id)
+      .then(({ response_seq, command, type, success, body: { stackFrames } }) => {
+        checkResponse({ type, success, command }, "stackTrace", true);
+        return stackFrames;
+      });
+    if (frames.length != 4)
+      throw new Error(
+        `We're exactly at the start of the first instruction of main - expecting only 1 frame but got ${stackFrames.length}: ${JSON.stringify(stackFrames)}`
+      );
+    const scopes = [];
+    for (const frame of frames) {
+      scopes.push(await da_client.sendReqGetResponse("scopes", { frameId: frame.id }));
+    }
+    if (scopes.length != frames.length) throw new Error(`Expected ${frames.length} scopes but got ${scopes.length}`);
+  }
   const total = 5;
   for (let i = total; i < 9; i++) {
     await da_client.sendReqWaitEvent(

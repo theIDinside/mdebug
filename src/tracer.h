@@ -84,12 +84,10 @@ public:
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
   void disconnect() noexcept;
-  std::array<ui::dap::Scope, 3> get_scopes(int frame_id) const noexcept;
   std::vector<std::unique_ptr<TraceeController>> targets;
 
 private:
   TraceeController *current_target = nullptr;
-  std::vector<ObjectFile *> object_files;
   ui::dap::DAP *dap;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;
