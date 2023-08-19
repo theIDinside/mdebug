@@ -9,14 +9,36 @@
 
 using AddrRanges = std::vector<AddressRange>;
 
+namespace sym {
+class Type;
+}
+
 class Elf;
 
+struct Variable
+{
+  std::string_view name;
+  sym::Type *type;
+};
+
+struct FunctionParameter
+{
+  std::string_view name;
+  sym::Type *type;
+};
+
+// Create something else that: Essentially represents the "template" of what a frame/activation looks like (over
+// the span of it's entire life time, so all variables, etc are known up front, because we parse the entire DIE for
+// that function. "Live" frames, should sort of be "instantiations" of this type. )
 struct FunctionSymbol
 {
+  DebugInfoEntry *die;
   AddrPtr start;
   AddrPtr end;
   std::string_view name;
-  sym::UnwindInfo unwind;
+  bool resolved_typeinfo;
+  std::vector<FunctionParameter> frame_args;
+  std::vector<Variable> frame_locals;
 };
 
 /* Included files are files that are not representable as a compilation unit, at least not directly.
@@ -79,7 +101,7 @@ public:
     return pc_boundaries.contains(ptr);
   }
 
-  void add_function(FunctionSymbol sym) noexcept;
+  void add_function(FunctionSymbol &&sym) noexcept;
   const FunctionSymbol *find_subprogram(AddrPtr addr) const noexcept;
   LineTableEntryRange get_range(AddrPtr addr) const noexcept;
   LineTableEntryRange get_range(AddrPtr start, AddrPtr end) const noexcept;

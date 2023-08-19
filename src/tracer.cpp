@@ -178,9 +178,7 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
     SpinGuard lock{command_queue_lock};
     command_queue.push(cmd);
   }
-#ifdef MDB_DEBUG
-  logging::get_logging()->log("dap", fmt::format("accepted command {}", cmd->name()));
-#endif
+  DLOG("mdb", "accepted command {}", cmd->name());
 }
 
 void

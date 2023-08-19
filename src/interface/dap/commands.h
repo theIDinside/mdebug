@@ -299,6 +299,23 @@ struct ScopesResponse final : public UIResult
   std::array<Scope, 3> scopes;
 };
 
+struct Variables final : public UICommand
+{
+  Variables(std::uint64_t seq, int var_ref) noexcept;
+  ~Variables() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  int var_ref;
+  DEFINE_NAME(Variables);
+};
+
+struct VariablesResponse final : public UIResult
+{
+  VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept;
+  ~VariablesResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  std::vector<Variable> variables;
+};
+
 struct DisassembleResponse final : public UIResult
 {
   CTOR(DisassembleResponse);

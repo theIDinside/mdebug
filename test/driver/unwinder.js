@@ -224,6 +224,7 @@ async function normalTest() {
     for (const frame of frames) {
       scopes.push(await da_client.sendReqGetResponse("scopes", { frameId: frame.id }));
     }
+    console.log(prettyJson(scopes));
     if (scopes.length != frames.length) throw new Error(`Expected ${frames.length} scopes but got ${scopes.length}`);
   }
   const total = 5;

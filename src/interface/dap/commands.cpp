@@ -628,6 +628,36 @@ DisassembleResponse::serialize(int seq) const noexcept
       seq, response_seq, fmt::join(instructions, ","));
 }
 
+Variables::Variables(std::uint64_t seq, int var_ref) noexcept : UICommand(seq), var_ref(var_ref) {}
+
+UIResultPtr
+Variables::execute(Tracer *tracer) noexcept
+{
+  DLOG("mdb", "[dap cmd]: variables command returns an empty list for now");
+  auto current = tracer->get_current();
+  if (const auto varref = current->var_ref(this->var_ref); varref) {
+    const auto frame_id = varref->frame_id;
+    const auto frame = current->frame(frame_id);
+    DLOG("mdb", "Get variables for frame {}", *frame);
+    return new VariablesResponse{true, this, {}};
+  } else {
+    return new VariablesResponse{false, this, {}};
+  }
+}
+
+VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept
+    : UIResult(success, cmd), variables(std::move(vars))
+{
+}
+
+std::string
+VariablesResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "variables", "body": {{ "variables": [{}] }} }})",
+      seq, response_seq, fmt::join(variables, ","));
+}
+
 ui::UICommand *
 parse_command(std::string &&packet) noexcept
 {
@@ -800,8 +830,10 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
     return new Threads{seq};
-  case CommandType::Variables:
-    TODO("Command::Variables");
+  case CommandType::Variables: {
+    int var_ref = args["variablesReference"];
+    return new Variables{seq, var_ref};
+  }
   case CommandType::WriteMemory:
     TODO("Command::WriteMemory");
   case CommandType::UNKNOWN:

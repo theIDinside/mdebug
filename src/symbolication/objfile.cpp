@@ -2,11 +2,13 @@
 #include "../so_loading.h"
 #include "cu.h"
 #include "elf_symbols.h"
+#include "type.h"
 #include <optional>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
-      line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(), m_partial_units()
+      types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
+      m_partial_units()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }

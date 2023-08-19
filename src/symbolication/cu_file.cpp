@@ -127,13 +127,13 @@ CompilationUnitFile::low_high_pc() const noexcept
 }
 
 void
-CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
+CompilationUnitFile::add_function(FunctionSymbol &&sym) noexcept
 {
   using FnSym = FunctionSymbol;
   // N.B. if I got this right, this might cause problems with inlined functions. Though I'm not sure.
   auto it_pos = std::lower_bound(fns.begin(), fns.end(), sym.start,
                                  [](FnSym &fn, AddrPtr start) { return fn.start > start; });
-  fns.insert(it_pos, sym);
+  fns.insert(it_pos, std::move(sym));
 }
 
 const FunctionSymbol *

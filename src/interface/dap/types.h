@@ -111,12 +111,41 @@ struct VariablesReference
   EntityType type;
 };
 
+// DAP Result for `variables` request.
+struct Variable
+{
+  int ref;
+  std::string_view name;
+  std::string_view type;
+  std::string value;
+  AddrPtr mem_ref;
+};
+
 }; // namespace ui::dap
 
 namespace fmt {
+
+template <> struct formatter<ui::dap::Variable>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const ui::dap::Variable &var, FormatContext &ctx) const
+  {
+    return fmt::format_to(
+        ctx.out(), R"({{ "name": "{}", "value": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
+        var.name, var.value, var.ref, var.mem_ref);
+  }
+};
+
 template <> struct formatter<ui::dap::Scope>
 {
-
   template <typename ParseContext>
   constexpr auto
   parse(ParseContext &ctx)
@@ -128,7 +157,7 @@ template <> struct formatter<ui::dap::Scope>
   auto
   format(const ui::dap::Scope &scope, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": "{}" }})",
+    return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": {} }})",
                           scope.name, scope.presentation_hint, scope.variables_reference);
   }
 };
