@@ -1,6 +1,7 @@
 #include "cu.h"
 #include "../supervisor.h"
 #include "block.h"
+#include "cu_file.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"
 #include "elf.h"
@@ -290,7 +291,15 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) n
 {
   for (const auto &child : root_die->children) {
     if (child->subprogram_with_addresses) {
-      FunctionSymbol fn{.start = nullptr, .end = nullptr, .name = {}};
+      // THIS IS GONNA BLOW UP REALLY BAD - WE ARE TAKING A RAW POINTER FROM A STD::UNIQUE_PTR - REALLY BAD, REALLY
+      // BAD, REALLY BAD
+      FunctionSymbol fn{.die = child.get(),
+                        .start = nullptr,
+                        .end = nullptr,
+                        .name = {},
+                        .resolved_typeinfo = false,
+                        .frame_args = {},
+                        .frame_locals = {}};
       for (const auto attr : child->attributes) {
         using enum Attribute;
         switch (attr.name) {
@@ -302,7 +311,6 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) n
           break;
         case DW_AT_name:
           fn.name = attr.string();
-          DLOG("dwarf", "[cu] die=0x{:x}, subprogram={}", child->sec_offset, fn.name);
           break;
         case DW_AT_linkage_name:
           if (fn.name.empty()) {
@@ -320,7 +328,9 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) n
         if (fn.end < fn.start) {
           fn.end = elf->relocate_addr(fn.start + fn.end);
         }
-        file.add_function(fn);
+        DLOG("dwarf", "[die]: offset=0x{:x}, fn name='{}', child dies={}", root_die->sec_offset, fn.name,
+             child->children.size());
+        file.add_function(std::move(fn));
       }
     }
     add_subprograms(file, child.get(), elf);

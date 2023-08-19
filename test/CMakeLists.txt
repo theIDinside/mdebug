@@ -16,6 +16,7 @@ set(MDB_TESTS
   next
   lib_shared # all tests that uses shared libraries, must have shared in their name
   stupid_shared
+  basetypes # testing of variable symbol parsing for base types and POD types
 )
 
 # For tests with additional sources (beyond the sources with the same name of the test, that is)

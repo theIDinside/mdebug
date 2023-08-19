@@ -22,6 +22,7 @@ using Tid = pid_t;
 namespace ui::dap {
 class DAP;
 struct Event;
+struct Scope;
 } // namespace ui::dap
 
 namespace cmd {
@@ -87,7 +88,6 @@ public:
 
 private:
   TraceeController *current_target = nullptr;
-  std::vector<ObjectFile *> object_files;
   ui::dap::DAP *dap;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;

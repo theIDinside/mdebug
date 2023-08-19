@@ -1,128 +1,90 @@
 #pragma once
 #include "../common.h"
-#include "block.h"
-#include "dwarf.h"
-#include "dwarf_frameunwinder.h"
-#include "lnp.h"
-#include <optional>
-#include <unordered_map>
+#include "cu_file.h"
+#include "dwarf_defs.h"
+#include <stack>
+#include <string_view>
 
-using AddrRanges = std::vector<AddressRange>;
+struct DebugInfoEntry;
 
-class Elf;
+namespace sym {
 
-struct FunctionSymbol
+class Type;
+using TypeMap = std::unordered_map<u64, sym::Type>;
+using NameTypeMap = std::unordered_map<std::string_view, u64>;
+using Bytes = std::vector<u8>;
+
+enum class TypeEncoding : u8
 {
-  AddrPtr start;
-  AddrPtr end;
+  Structure = 0,
+  ADT = 1,
+  Enum = 2,
+  BaseType = 3
+};
+
+class Type;
+
+// Fields are: member variables, member functions, etc
+struct Field
+{
   std::string_view name;
-  sym::UnwindInfo unwind;
+  u64 offset_of;
+  u64 field_index;
+  Type *type;
 };
 
-/* Included files are files that are not representable as a compilation unit, at least not directly.
-To understand why, use `llvm-dwarfdump --debug-info threads` where `threads` is one of the test applications in the
-`test/` folder. As we can see, what's generate is 2 compilation units, though we *know* the test application relies
-on plenty more (for instance, the name suggests we should be using /std/lib/path/thread.h ). As such
-the compilation unit DIE (`DebugInfoEntry`) "owns" these sub files. */
-struct IncludedFile
-{
-  std::string_view file_name;
-};
-
-/**
- * Symbol container for a specific file. The idea is that we operate on files when we're a "normal programmer
- * debugger". As such, we want simplicity for the every day case and intuitive behaviors. First design therefore
- * will revolve around compilation units as being a sort of "master identifier"
- * These CU's represent compilation units that contain executable code. CU's that don't, or that contain references
- * to other CU's that may or may not, is instead called NonExecutableCompilationUnitFile. This way they won't
- * clutter up the containers so searching for code addresses can be kept as fast as possible, even without
- * optimizations.
- */
-class CompilationUnitFile
+// This is meant to be the interface via which we interpret a range of bytes
+class Type
 {
 public:
-  explicit CompilationUnitFile(DebugInfoEntry *cu_die) noexcept;
-  CompilationUnitFile(CompilationUnitFile &&o) noexcept;
-  CompilationUnitFile &operator=(CompilationUnitFile &&) noexcept;
-  NO_COPY(CompilationUnitFile);
+  Type(std::string_view name) noexcept;
+  Type(Type &&o) noexcept;
+  void set_field_count(u32 cnt) noexcept;
+  void set_field(Field field, u32 index) noexcept;
+  void set_type_code(TypeEncoding enc) noexcept;
 
-  Path dir() const noexcept;
-  Path source_filename() const noexcept;
-  Path fullpath() const noexcept;
+  std::string_view name;
+  u32 size_of;
+  BaseTypeEncoding base_type;
+  TypeEncoding type_code;
+  std::vector<Field> fields;
+  bool resolved;
+  DebugInfoEntry *die;
+};
 
-  std::string_view name() const noexcept;
-  AddrPtr low_pc() const noexcept;
-  AddrPtr high_pc() const noexcept;
-  void set_name(std::string_view name) noexcept;
-
-  void add_addr_rng(const u64 *start) noexcept;
-  void add_addr_rng(AddrPtr start, AddrPtr end) noexcept;
-
-  bool last_added_addr_valid() const noexcept;
-
-  void
-  pop_addr() noexcept
-  {
-    m_addr_ranges.pop_back();
-  }
-
-  void set_linetable(const LineHeader *header) noexcept;
-  void set_boundaries(AddressRange range) noexcept;
-  const LineTable &line_table() const noexcept;
-  const AddrRanges &address_ranges() const noexcept;
-  AddressRange low_high_pc() const noexcept;
-
-  template <typename T>
-  constexpr bool
-  may_contain(TPtr<T> ptr) const noexcept
-  {
-    return pc_boundaries.contains(ptr);
-  }
-
-  void add_function(FunctionSymbol sym) noexcept;
-  const FunctionSymbol *find_subprogram(AddrPtr addr) const noexcept;
-  LineTableEntryRange get_range(AddrPtr addr) const noexcept;
-  LineTableEntryRange get_range(AddrPtr start, AddrPtr end) const noexcept;
-  LineTableEntryRange get_range_of_pc(AddrPtr addr) const noexcept;
-  std::string_view file(u32 index) const noexcept;
-  std::string_view path_of_file(u32 index) const noexcept;
-  Path file_path(u32 index) const noexcept;
-  void set_default_base_addr(AddrPtr default_base) noexcept;
-
-  std::vector<AddressRange> m_addr_ranges;
+class Value
+{
+public:
+  Value(Type *type, Bytes &&bytes) noexcept;
 
 private:
-  // the lowest / highest PC in `address_ranges`
-  std::string_view m_name;
-  AddressRange pc_boundaries;
-  const LineHeader *line_header;
-  std::vector<FunctionSymbol> fns;
-  DebugInfoEntry *cu_die;
-  AddrPtr default_base_addr = nullptr;
+  Type *type;
+  std::vector<u8> bytes;
 };
 
-class NonExecutableCompilationUnitFile
+class TypeReader
 {
-  DebugInfoEntry *partial_cu_die;
+public:
+  TypeReader(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *type) noexcept;
+  auto read_in() noexcept -> void;
+
+private:
+  auto read_type_from_signature() noexcept -> void;
+  auto read_structured() noexcept -> void;
+  auto read_primitive() noexcept -> void;
+  auto sec_offset(const DebugInfoEntry *ent) noexcept -> u64;
+
+  [[clang::always_inline]] inline auto current() noexcept -> const DebugInfoEntry *;
+
+  u64 dbg_inf_start_offs;
+  TypeMap &storage;
+  const DebugInfoEntry *root;
+  std::stack<const DebugInfoEntry *> curr_stack;
 };
 
-namespace fmt {
-template <> struct formatter<CompilationUnitFile>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+void read_type_from_signature(u64 dbg_inf_start_offs, TypeMap &storage, u64 type_signature,
+                              const DebugInfoEntry *die) noexcept;
+void read_structured(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *die) noexcept;
+void read_type(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *die) noexcept;
 
-  template <typename FormatContext>
-  auto
-  format(CompilationUnitFile const &f, FormatContext &ctx)
-  {
-    return fmt::format_to(ctx.out(), "{{ path: {}, low: {}, high: {}, blocks: {} }}", f.name(), f.low_pc(),
-                          f.high_pc(), f.address_ranges().size());
-  }
-};
-
-} // namespace fmt
+} // namespace sym

@@ -492,6 +492,12 @@ StackTrace::StackTrace(std::uint64_t seq, int threadId, std::optional<int> start
 {
 }
 
+StackTraceResponse::StackTraceResponse(bool success, StackTrace *cmd,
+                                       std::vector<StackFrame> &&stack_frames) noexcept
+    : UIResult(success, cmd), stack_frames(std::move(stack_frames))
+{
+}
+
 std::string
 StackTraceResponse::serialize(int seq) const noexcept
 {
@@ -510,9 +516,9 @@ StackTrace::execute(Tracer *tracer) noexcept
     TODO(fmt::format("Handle not-found thread by threadId {}", threadId));
   }
   auto &cfs = target->build_callframe_stack(task, CallStackRequest::full());
-  auto response = new StackTraceResponse{true, this};
-  response->stack_frames.reserve(cfs.frames.size());
-  auto id = 1;
+
+  std::vector<StackFrame> stack_frames{};
+  stack_frames.reserve(cfs.frames.size());
   for (const auto &frame : cfs.frames) {
     if (frame.type == sym::FrameType::Full) {
       const auto &lt = frame.cu_file->line_table();
@@ -529,23 +535,45 @@ StackTrace::execute(Tracer *tracer) noexcept
           break;
         }
       }
-      response->stack_frames.push_back(
-          StackFrame{.id = id++,
+      stack_frames.push_back(
+          StackFrame{.id = frame.frame_id,
                      .name = frame.name().value_or("unknown"),
                      .source = Source{.name = frame.cu_file->name(), .path = frame.cu_file->name()},
                      .line = line,
                      .column = col,
                      .rip = fmt::format("{}", frame.rip)});
     } else {
-      response->stack_frames.push_back(StackFrame{.id = id++,
-                                                  .name = frame.name().value_or("unknown"),
-                                                  .source = std::nullopt,
-                                                  .line = 0,
-                                                  .column = 0,
-                                                  .rip = fmt::format("{}", frame.rip)});
+      stack_frames.push_back(StackFrame{.id = frame.frame_id,
+                                        .name = frame.name().value_or("unknown"),
+                                        .source = std::nullopt,
+                                        .line = 0,
+                                        .column = 0,
+                                        .rip = fmt::format("{}", frame.rip)});
     }
   }
-  return response;
+  return new StackTraceResponse{true, this, std::move(stack_frames)};
+}
+
+Scopes::Scopes(std::uint64_t seq, int frameId) noexcept : UICommand(seq), frameId(frameId) {}
+
+std::string
+ScopesResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "scopes", "body": {{ "scopes": [{}] }} }})",
+      seq, response_seq, fmt::join(scopes, ","));
+}
+
+ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> scopes) noexcept
+    : UIResult(success, cmd), scopes(scopes)
+{
+}
+
+UIResultPtr
+Scopes::execute(Tracer *tracer) noexcept
+{
+  auto current = tracer->get_current();
+  return new ScopesResponse{true, this, current->scopes_reference(frameId)};
 }
 
 Disassemble::Disassemble(std::uint64_t seq, AddrPtr address, int byte_offset, int ins_offset, int ins_count,
@@ -598,6 +626,36 @@ DisassembleResponse::serialize(int seq) const noexcept
   return fmt::format(
       R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "disassemble", "body": {{ "instructions": [{}] }} }})",
       seq, response_seq, fmt::join(instructions, ","));
+}
+
+Variables::Variables(std::uint64_t seq, int var_ref) noexcept : UICommand(seq), var_ref(var_ref) {}
+
+UIResultPtr
+Variables::execute(Tracer *tracer) noexcept
+{
+  DLOG("mdb", "[dap cmd]: variables command returns an empty list for now");
+  auto current = tracer->get_current();
+  if (const auto varref = current->var_ref(this->var_ref); varref) {
+    const auto frame_id = varref->frame_id;
+    const auto frame = current->frame(frame_id);
+    DLOG("mdb", "Get variables for frame {}", *frame);
+    return new VariablesResponse{true, this, {}};
+  } else {
+    return new VariablesResponse{false, this, {}};
+  }
+}
+
+VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept
+    : UIResult(success, cmd), variables(std::move(vars))
+{
+}
+
+std::string
+VariablesResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "variables", "body": {{ "variables": [{}] }} }})",
+      seq, response_seq, fmt::join(variables, ","));
 }
 
 ui::UICommand *
@@ -714,8 +772,10 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::RestartFrame");
   case CommandType::ReverseContinue:
     TODO("Command::ReverseContinue");
-  case CommandType::Scopes:
-    TODO("Command::Scopes");
+  case CommandType::Scopes: {
+    const int frame_id = args.at("frameId");
+    return new ui::dap::Scopes{seq, frame_id};
+  }
   case CommandType::SetBreakpoints:
     return new SetBreakpoints{seq, std::move(args)};
   case CommandType::SetDataBreakpoints:
@@ -770,8 +830,10 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
     return new Threads{seq};
-  case CommandType::Variables:
-    TODO("Command::Variables");
+  case CommandType::Variables: {
+    int var_ref = args["variablesReference"];
+    return new Variables{seq, var_ref};
+  }
   case CommandType::WriteMemory:
     TODO("Command::WriteMemory");
   case CommandType::UNKNOWN:

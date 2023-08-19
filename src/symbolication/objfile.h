@@ -1,5 +1,6 @@
 #pragma once
 #include "../common.h"
+#include "dwarf.h"
 #include "elf.h"
 #include "elf_symbols.h"
 #include "lnp.h"
@@ -11,7 +12,8 @@ class NonExecutableCompilationUnitFile;
 
 namespace sym {
 class Unwinder;
-}
+class Type;
+} // namespace sym
 
 class Elf;
 struct ElfSection;
@@ -30,6 +32,10 @@ struct ObjectFile
   bool min_syms = false;
   std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
   std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
+
+  // Should the key be something much better than a string, here? If so, how and what?
+  std::unordered_map<u64, sym::Type> types;
+
   std::vector<LineTable> line_tables;
   std::vector<LineHeader> line_table_headers;
   sym::Unwinder *unwinder;

@@ -259,14 +259,6 @@ struct Threads final : public UICommand
   DEFINE_NAME(Threads);
 };
 
-struct StackTraceResponse final : public UIResult
-{
-  CTOR(StackTraceResponse);
-  ~StackTraceResponse() noexcept = default;
-  std::string serialize(int seq) const noexcept final override;
-  std::vector<StackFrame> stack_frames;
-};
-
 struct StackTrace final : public UICommand
 {
   StackTrace(std::uint64_t seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
@@ -278,6 +270,50 @@ struct StackTrace final : public UICommand
   std::optional<int> levels;
   std::optional<StackTraceFormat> format;
   DEFINE_NAME(StackTrace);
+};
+
+struct StackTraceResponse final : public UIResult
+{
+  CTOR(StackTraceResponse);
+  StackTraceResponse(bool success, StackTrace *cmd, std::vector<StackFrame> &&stack_frames) noexcept;
+  ~StackTraceResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  std::vector<StackFrame> stack_frames;
+};
+
+struct Scopes final : public UICommand
+{
+  Scopes(std::uint64_t seq, int frameId) noexcept;
+  ~Scopes() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  int frameId;
+  DEFINE_NAME(Scopes);
+};
+
+struct ScopesResponse final : public UIResult
+{
+  ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> scopes) noexcept;
+  ~ScopesResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  // For now, we only have 3 scopes, Args, Locals, Registers
+  std::array<Scope, 3> scopes;
+};
+
+struct Variables final : public UICommand
+{
+  Variables(std::uint64_t seq, int var_ref) noexcept;
+  ~Variables() = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final override;
+  int var_ref;
+  DEFINE_NAME(Variables);
+};
+
+struct VariablesResponse final : public UIResult
+{
+  VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept;
+  ~VariablesResponse() noexcept = default;
+  std::string serialize(int seq) const noexcept final override;
+  std::vector<Variable> variables;
 };
 
 struct DisassembleResponse final : public UIResult

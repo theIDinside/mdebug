@@ -1,5 +1,6 @@
 #pragma once
 #include "../../common.h"
+#include "../../symbolication/callstack.h"
 #include <fmt/format.h>
 #include <string_view>
 namespace ui::dap {
@@ -83,9 +84,84 @@ struct StackTraceFormat
   bool includeAll : 1;
 };
 
+struct Scope
+{
+  std::string_view name;
+  std::string_view presentation_hint;
+  int variables_reference;
+};
+
+enum class EntityType
+{
+  Scope,
+  Frame,
+  Variable
+};
+
+struct VariablesReference
+{
+  // The execution context (Task) that this variable reference exists in
+  int thread_id;
+  // The frame id this variable reference exists in
+  int frame_id;
+  // (Possible) parent reference. A scope has a frame as it's parent. A variable has a scope or another variable as
+  // it's parent. To walk up the hierarchy, one would read the variables reference map using the parent key
+  int parent;
+  // The reference type
+  EntityType type;
+};
+
+// DAP Result for `variables` request.
+struct Variable
+{
+  int ref;
+  std::string_view name;
+  std::string_view type;
+  std::string value;
+  AddrPtr mem_ref;
+};
+
 }; // namespace ui::dap
 
 namespace fmt {
+
+template <> struct formatter<ui::dap::Variable>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const ui::dap::Variable &var, FormatContext &ctx) const
+  {
+    return fmt::format_to(
+        ctx.out(), R"({{ "name": "{}", "value": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
+        var.name, var.value, var.ref, var.mem_ref);
+  }
+};
+
+template <> struct formatter<ui::dap::Scope>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const ui::dap::Scope &scope, FormatContext &ctx) const
+  {
+    return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": {} }})",
+                          scope.name, scope.presentation_hint, scope.variables_reference);
+  }
+};
+
 template <> struct formatter<ui::dap::Thread>
 {
 

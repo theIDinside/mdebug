@@ -4,6 +4,7 @@
 #include "fmt/core.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
+#include "interface/dap/types.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
@@ -12,13 +13,13 @@
 #include "so_loading.h"
 #include "symbolication/callstack.h"
 #include "symbolication/cu.h"
+#include "symbolication/cu_file.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/lnp.h"
 #include "symbolication/objfile.h"
-#include "symbolication/type.h"
 #include "task.h"
 #include "tracer.h"
 #include "utils/logger.h"
@@ -55,7 +56,7 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      stop_on_clone(false), tracee_r_debug(nullptr), shared_objects(), spin_lock{}, interpreter_base{}, entry{},
+      tracee_r_debug(nullptr), shared_objects(), var_refs(), spin_lock{}, interpreter_base{}, entry{},
       session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}),
       unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
@@ -329,13 +330,6 @@ TraceeController::stop_all() noexcept
       t.set_stop();
     }
   }
-}
-
-bool
-TraceeController::should_stop_on_clone() noexcept
-{
-  return false;
-  // return stop_on_clone;
 }
 
 void
@@ -1013,6 +1007,50 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
   }
 }
 
+int
+TraceeController::new_frame_id(TaskInfo *task) noexcept
+{
+  using VR = ui::dap::VariablesReference;
+  const auto res = next_var_ref;
+  var_refs[res] = VR{.thread_id = task->tid, .frame_id = res, .parent = 0, .type = ui::dap::EntityType::Frame};
+  ++next_var_ref;
+  return res;
+}
+
+int
+TraceeController::new_scope_id(const sym::Frame *frame) noexcept
+{
+  using VR = ui::dap::VariablesReference;
+  const auto res = next_var_ref;
+  const auto vr = var_refs[frame->frame_id];
+  var_refs[res] = VR{.thread_id = vr.thread_id,
+                     .frame_id = frame->frame_id,
+                     .parent = frame->frame_id,
+                     .type = ui::dap::EntityType::Scope};
+  ++next_var_ref;
+  return res;
+}
+
+int
+TraceeController::new_var_id(int parent_id) noexcept
+{
+  using VR = ui::dap::VariablesReference;
+  const auto res = next_var_ref;
+  const auto vr = var_refs[parent_id];
+  var_refs[res] = VR{.thread_id = vr.thread_id,
+                     .frame_id = vr.frame_id,
+                     .parent = parent_id,
+                     .type = ui::dap::EntityType::Variable};
+  ++next_var_ref;
+  return res;
+}
+
+void
+TraceeController::reset_variable_references() noexcept
+{
+  var_refs.clear();
+}
+
 sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept
 {
@@ -1025,6 +1063,7 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
     auto symbol = find_fn_by_pc(i->as_void());
+    const auto id = new_frame_id(task);
     if (symbol)
       cs.frames.push_back(sym::Frame{
           .rip = i->as_void(),
@@ -1032,7 +1071,7 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
           .cu_file = symbol->cu_file,
           .level = static_cast<int>(levels - level),
           .type = sym::FrameType::Full,
-
+          .frame_id = id,
       });
     else {
       cs.frames.push_back(sym::Frame{
@@ -1041,6 +1080,7 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
           .cu_file = nullptr,
           .level = static_cast<int>(levels - level),
           .type = sym::FrameType::Unknown,
+          .frame_id = id,
       });
     }
     ++level;
@@ -1119,6 +1159,34 @@ TraceeController::write_bp_byte(AddrPtr addr) noexcept
   u64 installed_bp = ((read_value & ~0xff) | bkpt);
   ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp);
   return ins_byte;
+}
+
+std::optional<ui::dap::VariablesReference>
+TraceeController::var_ref(int variables_reference) noexcept
+{
+  auto it = std::find_if(var_refs.begin(), var_refs.end(),
+                         [vr = variables_reference](auto &kvp) { return kvp.first == vr; });
+  if (it != std::end(var_refs))
+    return it->second;
+  else
+    return std::nullopt;
+}
+
+std::array<ui::dap::Scope, 3>
+TraceeController::scopes_reference(int frame_id) noexcept
+{
+  using S = ui::dap::Scope;
+  const auto f = frame(frame_id);
+  return std::array<S, 3>{S{"Arguments", "arguments", new_scope_id(f)}, S{"Locals", "locals", new_scope_id(f)},
+                          S{"Registers", "registers", new_scope_id(f)}};
+}
+
+const sym::Frame *
+TraceeController::frame(int frame_id) noexcept
+{
+  const auto frame_ref_info = var_refs[frame_id];
+  auto task = get_task(frame_ref_info.thread_id);
+  return task->call_stack->get_frame(frame_id);
 }
 
 #pragma GCC diagnostic pop

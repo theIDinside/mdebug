@@ -30,7 +30,7 @@ enum class AttributeForm : std::uint8_t
 #undef DW_ATTRIBUTE_FORM
 };
 
-enum class BaseTypeAttributeEncoding : std::uint32_t
+enum class BaseTypeEncoding : std::uint16_t
 {
 #define DW_BASETYPE_ENCODING
 #include "../defs/dwarf.defs"
@@ -205,6 +205,18 @@ enum class DwarfOp : std::uint8_t
 #define ITEM(Name, Value)                                                                                         \
   case Name:                                                                                                      \
     return #Name;
+
+constexpr std::string_view
+to_str(BaseTypeEncoding enc)
+{
+#define DW_BASETYPE_ENCODING
+  using enum BaseTypeEncoding;
+  switch (enc) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_BASETYPE_ENCODING
+  DEAL_WITH_SHITTY_GCC
+}
 
 constexpr std::string_view
 to_str(RangeListEntry entry)

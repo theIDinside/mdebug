@@ -24,6 +24,7 @@
 #include <bits/ranges_util.h>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <fcntl.h>
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -53,9 +54,8 @@ add_object_err(AddObjectResult r)
 }
 
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
-    : targets{}, object_files(), command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe),
-      already_launched(false), events_notifier(events_notifier),
-      prev_time(std::chrono::high_resolution_clock::now())
+    : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
+      events_notifier(events_notifier), prev_time(std::chrono::high_resolution_clock::now())
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -178,9 +178,7 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
     SpinGuard lock{command_queue_lock};
     command_queue.push(cmd);
   }
-#ifdef MDB_DEBUG
-  logging::get_logging()->log("dap", fmt::format("accepted command {}", cmd->name()));
-#endif
+  DLOG("mdb", "accepted command {}", cmd->name());
 }
 
 void

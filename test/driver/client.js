@@ -524,6 +524,10 @@ function getRequestedTest() {
   return process.argv[3];
 }
 
+function prettyJson(obj) {
+  return JSON.stringify(obj, null, 2);
+}
+
 module.exports = function (file) {
   IMPORTING_FILE = file;
   return {
@@ -544,6 +548,7 @@ module.exports = function (file) {
     testSuccess,
     runTest,
     runTestSuite,
-    getRequestedTest
+    getRequestedTest,
+    prettyJson
   };
 };

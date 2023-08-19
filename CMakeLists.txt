@@ -44,8 +44,8 @@ set(MIDAS_SOURCES
   src/symbolication/elf_symbols.h
   src/symbolication/block.cpp
   src/symbolication/block.h
-  src/symbolication/type.cpp
-  src/symbolication/type.h
+  src/symbolication/cu_file.cpp
+  src/symbolication/cu_file.h
   src/symbolication/callstack.cpp
   src/symbolication/callstack.h
   src/symbolication/disassemble.cpp
@@ -54,6 +54,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf_frameunwinder.h
   src/symbolication/dwarf_expressions.cpp
   src/symbolication/dwarf_expressions.h
+  src/symbolication/type.cpp
+  src/symbolication/type.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
@@ -164,6 +166,7 @@ if(NODEJS)
       threadExited
       moduleEvent
       threads
+      variables
   )
 
   # These define 
@@ -179,6 +182,7 @@ if(NODEJS)
   set(threadExited "see9ThreadExits")
   set(moduleEvent "6modules")
   set(threads "threads")
+  set(variables "baseTypes")
 
   foreach(driver_test ${DRIVER_TEST_SUITES})
     list(LENGTH ${driver_test} LIST_LENGTH)

@@ -1,216 +1,166 @@
 #include "type.h"
-#include "block.h"
 #include "dwarf.h"
-#include "elf.h"
-#include "lnp.h"
-#include <algorithm>
-#include <emmintrin.h>
-#include <filesystem>
+#include "dwarf_defs.h"
 
-CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
-    : m_addr_ranges(), m_name(), pc_boundaries(), line_header(nullptr), fns(), cu_die(cu)
+namespace sym {
+Type::Type(std::string_view name) noexcept
+    : name(name), size_of(0), base_type(BaseTypeEncoding::DW_ATE_hi_user), type_code(TypeEncoding::BaseType),
+      fields()
 {
 }
 
-CompilationUnitFile::CompilationUnitFile(CompilationUnitFile &&o) noexcept
-    : m_addr_ranges(std::move(o.m_addr_ranges)), m_name(o.m_name), pc_boundaries(o.pc_boundaries),
-      line_header(o.line_header), fns(std::move(o.fns)), cu_die(o.cu_die)
+Type::Type(Type &&o) noexcept
+    : name(o.name), size_of(o.size_of), base_type(o.base_type), type_code(o.type_code), fields(std::move(o.fields))
 {
 }
 
-CompilationUnitFile &
-CompilationUnitFile::operator=(CompilationUnitFile &&o) noexcept
+auto
+Type::set_field_count(u32 cnt) noexcept -> void
 {
-  if (this == &o)
-    return *this;
-  m_addr_ranges = std::move(o.m_addr_ranges);
-  m_name = o.m_name;
-  pc_boundaries = o.pc_boundaries;
-  line_header = o.line_header;
-  fns = std::move(o.fns);
-  cu_die = o.cu_die;
-  return *this;
+  fields.reserve(cnt);
 }
 
-Path
-CompilationUnitFile::dir() const noexcept
+auto
+Type::set_field(Field field, u32 index) noexcept -> void
 {
-  Path p{m_name};
-  return p.root_directory();
+  fields[index] = field;
 }
 
-Path
-CompilationUnitFile::source_filename() const noexcept
+auto
+Type::set_type_code(TypeEncoding enc) noexcept -> void
 {
-  Path p{m_name};
-  return p.filename();
+  type_code = enc;
 }
 
-Path
-CompilationUnitFile::fullpath() const noexcept
+TypeReader::TypeReader(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *type) noexcept
+    : dbg_inf_start_offs(dbg_inf_start_offs), storage(storage), root(type)
 {
-  return m_name;
+  curr_stack.push(root);
 }
 
-std::string_view
-CompilationUnitFile::name() const noexcept
+auto
+TypeReader::read_in() noexcept -> void
 {
-  return m_name;
-}
-
-AddrPtr
-CompilationUnitFile::low_pc() const noexcept
-{
-  return pc_boundaries.low;
-}
-
-AddrPtr
-CompilationUnitFile::high_pc() const noexcept
-{
-  return pc_boundaries.high;
-}
-
-void
-CompilationUnitFile::set_name(std::string_view name) noexcept
-{
-  m_name = name;
-}
-
-void
-CompilationUnitFile::add_addr_rng(const u64 *start) noexcept
-{
-  m_addr_ranges.push_back(AddressRange{});
-  _mm_storeu_si128((__m128i *)&m_addr_ranges.back(), _mm_loadu_si128((__m128i *)start));
-}
-
-void
-CompilationUnitFile::add_addr_rng(AddrPtr start, AddrPtr end) noexcept
-{
-  m_addr_ranges.push_back(AddressRange{start, end});
-}
-
-bool
-CompilationUnitFile::last_added_addr_valid() const noexcept
-{
-  return m_addr_ranges.back().is_valid();
-}
-
-void
-CompilationUnitFile::set_linetable(const LineHeader *header) noexcept
-{
-  DLOG("dwarf", "[lnp]: table=0x{:x}", header->sec_offset);
-  line_header = header;
-}
-
-void
-CompilationUnitFile::set_boundaries(AddressRange range) noexcept
-{
-  pc_boundaries = range;
-}
-
-const LineTable &
-CompilationUnitFile::line_table() const noexcept
-{
-  return *line_header->line_table;
-}
-
-const AddrRanges &
-CompilationUnitFile::address_ranges() const noexcept
-{
-  return m_addr_ranges;
-}
-
-AddressRange
-CompilationUnitFile::low_high_pc() const noexcept
-{
-  return pc_boundaries;
-}
-
-void
-CompilationUnitFile::add_function(FunctionSymbol sym) noexcept
-{
-  using FnSym = FunctionSymbol;
-  // N.B. if I got this right, this might cause problems with inlined functions. Though I'm not sure.
-  auto it_pos = std::lower_bound(fns.begin(), fns.end(), sym.start,
-                                 [](FnSym &fn, AddrPtr start) { return fn.start > start; });
-  fns.insert(it_pos, sym);
-}
-
-const FunctionSymbol *
-CompilationUnitFile::find_subprogram(AddrPtr addr) const noexcept
-{
-  const auto sym =
-      std::find_if(fns.cbegin(), fns.cend(), [addr](auto &sym) { return sym.start <= addr && sym.end >= addr; });
-
-  if (sym != std::end(fns)) {
-    ASSERT(sym->start.get() <= addr.get() && addr.get() < sym->end.get(),
-           "Found unexpectedly the wrong FunctionSymbol when searching for {}. Sym '{}' [{}..{}]", addr, sym->name,
-           sym->start, sym->end);
-    DLOG("mdb", "found {} from {}", sym->name, addr);
-    return sym.base();
-  } else {
-    return nullptr;
+  switch (current()->tag) {
+  case DwarfTag::DW_TAG_class_type:
+  case DwarfTag::DW_TAG_structure_type:
+  case DwarfTag::DW_TAG_union_type:
+  case DwarfTag::DW_TAG_interface_type:
+    DLOG("dwarf", "[read_in]: die=0x{:x}, structured", current()->sec_offset);
+    return read_structured();
+  case DwarfTag::DW_TAG_base_type:
+    DLOG("dwarf", "[read_in]: die=0x{:x}, base_type", current()->sec_offset);
+    return read_primitive();
+  case DwarfTag::DW_TAG_array_type:
+  case DwarfTag::DW_TAG_enumeration_type:
+  case DwarfTag::DW_TAG_pointer_type:
+  case DwarfTag::DW_TAG_reference_type:
+  case DwarfTag::DW_TAG_string_type:
+  case DwarfTag::DW_TAG_typedef:
+  case DwarfTag::DW_TAG_variant:
+  case DwarfTag::DW_TAG_subrange_type:
+  case DwarfTag::DW_TAG_generic_subrange:
+  case DwarfTag::DW_TAG_ptr_to_member_type:
+  case DwarfTag::DW_TAG_set_type:
+  case DwarfTag::DW_TAG_packed_type:
+  case DwarfTag::DW_TAG_volatile_type:
+  case DwarfTag::DW_TAG_restrict_type:
+  case DwarfTag::DW_TAG_unspecified_type:
+  case DwarfTag::DW_TAG_rvalue_reference_type:
+  case DwarfTag::DW_TAG_coarray_type:
+  case DwarfTag::DW_TAG_dynamic_type:
+  case DwarfTag::DW_TAG_atomic_type:
+  case DwarfTag::DW_TAG_shared_type:
+    break;
+  case DwarfTag::DW_TAG_subroutine_type:
+  case DwarfTag::DW_TAG_inlined_subroutine:
+  case DwarfTag::DW_TAG_subprogram:
+    TODO_FMT("mdb", "do we really expect a subprogram, subroutine or inlined subroutine here? ({})",
+             to_str(root->tag));
+    break;
+  case DwarfTag::DW_TAG_const_type:
+    DLOG("mdb", "{} not supported type to parse yet", to_str(root->tag));
+    break;
+  default:
+    TODO_FMT("reading type with TAG {} not supported", to_str(root->tag));
   }
 }
 
-LineTableEntryRange
-CompilationUnitFile::get_range(AddrPtr addr) const noexcept
+auto
+TypeReader::current() noexcept -> const DebugInfoEntry *
 {
-  const auto &m_ltes = line_table();
-  const auto lte_it = std::lower_bound(m_ltes.cbegin(), m_ltes.cend(), addr,
-                                       [](const LineTableEntry &l, AddrPtr addr) { return l.pc <= addr; });
-  if (lte_it == std::cend(m_ltes))
-    return {nullptr, nullptr};
-  if (lte_it + 1 == std::end(m_ltes))
-    return {nullptr, nullptr};
-  if ((lte_it + 1)->pc < addr)
-    return {nullptr, nullptr};
-  return {(lte_it - 1).base(), lte_it.base()};
+  return curr_stack.top();
 }
 
-LineTableEntryRange
-CompilationUnitFile::get_range_of_pc(AddrPtr addr) const noexcept
+auto
+TypeReader::read_type_from_signature() noexcept -> void
 {
-  const auto &m_ltes = line_table();
-  auto it = find(m_ltes, [addr](auto &lte) { return lte.pc > addr; });
-  if (it == std::end(m_ltes) || it == std::begin(m_ltes))
-    return {nullptr, nullptr};
-  if ((it - 1)->pc > addr)
-    return {nullptr, nullptr};
-  return {(it - 1).base(), it.base()};
 }
 
-LineTableEntryRange
-CompilationUnitFile::get_range(AddrPtr start, AddrPtr end) const noexcept
+auto
+TypeReader::read_structured() noexcept -> void
 {
-  TODO(fmt::format("CompilationUnitFile::get_range(TPtr<void> start = {}, TPtr<void> end = {})", start, end));
+  const auto die_key = sec_offset(current());
+  if (storage.contains(die_key))
+    return;
+
+  if (const auto sig = current()->get_attribute(Attribute::DW_AT_signature); sig) {
+    return read_type_from_signature();
+  }
+
+  auto name =
+      current()->get_attribute(Attribute::DW_AT_name).transform([](const auto &attr) { return attr.string(); });
+  ASSERT(name.has_value(), "Type must have a DW_AT_name for now");
+
+  storage.emplace(std::make_pair(die_key, Type{*name}));
+  auto &type = storage.at(die_key);
+  type.set_type_code(TypeEncoding::Structure);
+  type.resolved = false;
+  type.size_of = current()->get_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
+  for (const auto &child : current()->children) {
+    const auto name = child->get_attribute(Attribute::DW_AT_name)->string();
+    curr_stack.push(child.get());
+    read_in();
+    curr_stack.pop();
+    auto offset = child->get_attribute(Attribute::DW_AT_data_member_location)->unsigned_value();
+    switch (child->tag) {
+    case DwarfTag::DW_TAG_member:
+      type.fields.push_back(Field{.name = name,
+                                  .offset_of = offset,
+                                  .field_index = type.fields.size(),
+                                  .type = &storage.at(sec_offset(child.get()))});
+      break;
+    case DwarfTag::DW_TAG_template_type_parameter:
+      break;
+    case DwarfTag::DW_TAG_inheritance:
+      break;
+    case DwarfTag::DW_TAG_subprogram:
+      break;
+    default:
+      break;
+    }
+  }
 }
 
-std::string_view
-CompilationUnitFile::file(u32 index) const noexcept
+auto
+TypeReader::read_primitive() noexcept -> void
 {
-  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
-  return line_header->file_names[index].file_name;
+  if (storage.contains(sec_offset(current())))
+    return;
+  auto name =
+      current()->get_attribute(Attribute::DW_AT_name).transform([](const auto &attr) { return attr.string(); });
+  ASSERT(name.has_value(), "Type must have a DW_AT_name for now");
+  storage.emplace(std::make_pair(current()->sec_offset, Type{*name}));
+  auto &type = storage.at(current()->sec_offset);
+  type.set_type_code(TypeEncoding::BaseType);
+  type.resolved = true;
+  type.size_of = current()->get_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
 }
 
-std::string_view
-CompilationUnitFile::path_of_file(u32 index) const noexcept
+auto
+TypeReader::sec_offset(const DebugInfoEntry *ent) noexcept -> u64
 {
-  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
-  return line_header->directories[line_header->file_names[index].dir_index].path;
+  return ent->sec_offset - dbg_inf_start_offs;
 }
 
-Path
-CompilationUnitFile::file_path(u32 index) const noexcept
-{
-  ASSERT(index < line_header->file_names.size(), "No file in this CU with that index");
-  auto &fentry = line_header->file_names[index];
-  Path p = line_header->directories[fentry.dir_index].path;
-  return p / fentry.file_name;
-}
-
-void
-CompilationUnitFile::set_default_base_addr(AddrPtr default_base) noexcept
-{
-  default_base_addr = default_base;
-}
+} // namespace sym
