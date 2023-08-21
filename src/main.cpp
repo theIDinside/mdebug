@@ -4,21 +4,15 @@
 #include "interface/dap/interface.h"
 #include "notify_pipe.h"
 #include "tracer.h"
-#include <array>
 #include <asm-generic/errno-base.h>
 #include <condition_variable>
 #include <csignal>
-#include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
 #include <linux/sched.h>
 #include <mutex>
-#include <poll.h>
-#include <sched.h>
 #include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
 #include <sys/select.h>
@@ -30,7 +24,6 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 
 std::mutex m;
 std::condition_variable cv;

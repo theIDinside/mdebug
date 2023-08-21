@@ -1,12 +1,12 @@
 #pragma once
-#include "../common.h"
-#include "dwarf_defs.h"
-#include <concepts>
+#include "dwarf/dwarf_defs.h"
+#include <common.h>
 #include <stack>
 
 struct TraceeController;
 struct TaskInfo;
 
+// SYMBOLS namespace
 namespace sym {
 
 struct UnwindInfo;

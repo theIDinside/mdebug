@@ -5,31 +5,26 @@
 #include "interface/dap/types.h"
 #include "lib/spinlock.h"
 #include "ptracestop_handlers.h"
-#include "so_loading.h"
 #include "symbol/callstack.h"
 #include "symbol/cu_file.h"
 #include "symbol/elf.h"
+#include "symbol/so_loading.h"
 #include "task.h"
 #include "utils/static_vector.h"
-#include <algorithm>
-#include <chrono>
-#include <cstdint>
-#include <cstdio>
 #include <link.h>
-#include <optional>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/user.h>
 #include <thread>
-#include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace sym {
 class Unwinder;
-};
+struct ObjectFile;
+}; // namespace sym
 
 namespace ui {
 struct UICommand;
@@ -48,12 +43,9 @@ struct LWP
 
 struct SearchFnSymResult
 {
-  const FunctionSymbol *fn_sym;
-  const CompilationUnitFile *cu_file;
+  const sym::FunctionSymbol *fn_sym;
+  const sym::CompilationUnitFile *cu_file;
 };
-
-using Address = std::uintptr_t;
-struct ObjectFile;
 
 struct TraceeController
 {
@@ -62,14 +54,14 @@ struct TraceeController
   friend struct ui::UICommand;
   // Members
   pid_t task_leader;
-  std::vector<ObjectFile *> object_files;
-  ObjectFile *main_executable;
+  std::vector<sym::ObjectFile *> object_files;
+  sym::ObjectFile *main_executable;
   ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   BreakpointMap bps;
   TPtr<r_debug_extended> tracee_r_debug;
-  SharedObjectMap shared_objects;
+  sym::SharedObjectMap shared_objects;
 
 private:
   int next_var_ref = 0;
@@ -107,7 +99,7 @@ public:
 
   // N.B(simon): process shared object's in parallell, determined by some heuristic (like for instance file size
   // could determine how much thread resources are subscribed to parsing a shared object.)
-  void process_dwarf(std::vector<SharedObject::SoId> sos) noexcept;
+  void process_dwarf(std::vector<sym::SharedObject::SoId> sos) noexcept;
   /** Return the open mem fd */
   ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
@@ -185,7 +177,8 @@ public:
   bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
-  void register_object_file(ObjectFile *obj, bool is_main_executable, std::optional<AddrPtr> base_vma) noexcept;
+  void register_object_file(sym::ObjectFile *obj, bool is_main_executable,
+                            std::optional<AddrPtr> base_vma) noexcept;
 
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
@@ -271,7 +264,7 @@ public:
   /* Add parsed DWARF debug info for `file` into `obj`. One could let `ObjectFile` handle this. But for the most
    * part I want ObjectFile to be *data* about the system, and constrain the amount of *behavior* it can do. At
    * least for now. This function is a critical section and as such is "synchronized". */
-  void add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept;
+  void add_file(sym::ObjectFile *obj, sym::CompilationUnitFile &&file) noexcept;
 
   // Inform awaiter threads that event has been consumed & handled. "Wakes up" the awaiter thread.
   void reaped_events() noexcept;
@@ -293,11 +286,11 @@ public:
   const std::vector<AddrPtr> &dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept;
   sym::Frame current_frame(TaskInfo *task) noexcept;
   std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
-  ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
+  sym::ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
-  const ElfSection *get_text_section(AddrPtr addr) const noexcept;
-  const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
+  const sym::ElfSection *get_text_section(AddrPtr addr) const noexcept;
+  const sym::CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;

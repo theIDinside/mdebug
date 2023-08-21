@@ -1,6 +1,7 @@
 #include "type.h"
 #include "dwarf.h"
-#include "dwarf_defs.h"
+#include "dwarf/die.h"
+#include "dwarf/dwarf_defs.h"
 
 namespace sym {
 Type::Type(std::string_view name) noexcept
@@ -32,7 +33,7 @@ Type::set_type_code(TypeEncoding enc) noexcept -> void
   type_code = enc;
 }
 
-TypeReader::TypeReader(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *type) noexcept
+TypeReader::TypeReader(u64 dbg_inf_start_offs, TypeMap &storage, const dw::DebugInfoEntry *type) noexcept
     : dbg_inf_start_offs(dbg_inf_start_offs), storage(storage), root(type)
 {
   curr_stack.push(root);
@@ -87,7 +88,7 @@ TypeReader::read_in() noexcept -> void
 }
 
 auto
-TypeReader::current() noexcept -> const DebugInfoEntry *
+TypeReader::current() noexcept -> const dw::DebugInfoEntry *
 {
   return curr_stack.top();
 }
@@ -158,7 +159,7 @@ TypeReader::read_primitive() noexcept -> void
 }
 
 auto
-TypeReader::sec_offset(const DebugInfoEntry *ent) noexcept -> u64
+TypeReader::sec_offset(const dw::DebugInfoEntry *ent) noexcept -> u64
 {
   return ent->sec_offset - dbg_inf_start_offs;
 }

@@ -2,12 +2,10 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "supervisor.h"
-#include "symbol/lnp.h"
+#include "symbol/dwarf/lnp.h"
 #include "task.h"
 #include "tracer.h"
 #include "utils/logger.h"
-#include <algorithm>
-#include <chrono>
 #include <sys/wait.h>
 
 namespace ptracestop {

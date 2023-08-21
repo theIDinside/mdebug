@@ -1,19 +1,22 @@
 #pragma once
 #include "../common.h"
 #include "block.h"
-#include "dwarf.h"
-#include "dwarf_frameunwinder.h"
-#include "lnp.h"
+#include "dwarf/lnp.h"
 #include <optional>
 #include <unordered_map>
 
-using AddrRanges = std::vector<AddressRange>;
-
+// SYMBOLS namespace
 namespace sym {
+using AddrRanges = std::vector<AddressRange>;
 class Type;
-}
-
 class Elf;
+
+namespace dw {
+struct DebugInfoEntry;
+struct LineTableEntryRange;
+struct LineTableEntry;
+using LineTable = std::vector<LineTableEntry>;
+} // namespace dw
 
 struct Variable
 {
@@ -32,7 +35,7 @@ struct FunctionParameter
 // that function. "Live" frames, should sort of be "instantiations" of this type. )
 struct FunctionSymbol
 {
-  DebugInfoEntry *die;
+  dw::DebugInfoEntry *die;
   AddrPtr start;
   AddrPtr end;
   std::string_view name;
@@ -63,7 +66,7 @@ struct IncludedFile
 class CompilationUnitFile
 {
 public:
-  explicit CompilationUnitFile(DebugInfoEntry *cu_die) noexcept;
+  explicit CompilationUnitFile(dw::DebugInfoEntry *cu_die) noexcept;
   CompilationUnitFile(CompilationUnitFile &&o) noexcept;
   CompilationUnitFile &operator=(CompilationUnitFile &&) noexcept;
   NO_COPY(CompilationUnitFile);
@@ -88,9 +91,9 @@ public:
     m_addr_ranges.pop_back();
   }
 
-  void set_linetable(const LineHeader *header) noexcept;
+  void set_linetable(const dw::LineHeader *header) noexcept;
   void set_boundaries(AddressRange range) noexcept;
-  const LineTable &line_table() const noexcept;
+  const dw::LineTable &line_table() const noexcept;
   const AddrRanges &address_ranges() const noexcept;
   AddressRange low_high_pc() const noexcept;
 
@@ -103,9 +106,9 @@ public:
 
   void add_function(FunctionSymbol &&sym) noexcept;
   const FunctionSymbol *find_subprogram(AddrPtr addr) const noexcept;
-  LineTableEntryRange get_range(AddrPtr addr) const noexcept;
-  LineTableEntryRange get_range(AddrPtr start, AddrPtr end) const noexcept;
-  LineTableEntryRange get_range_of_pc(AddrPtr addr) const noexcept;
+  dw::LineTableEntryRange get_range(AddrPtr addr) const noexcept;
+  dw::LineTableEntryRange get_range(AddrPtr start, AddrPtr end) const noexcept;
+  dw::LineTableEntryRange get_range_of_pc(AddrPtr addr) const noexcept;
   std::string_view file(u32 index) const noexcept;
   std::string_view path_of_file(u32 index) const noexcept;
   Path file_path(u32 index) const noexcept;
@@ -117,19 +120,21 @@ private:
   // the lowest / highest PC in `address_ranges`
   std::string_view m_name;
   AddressRange pc_boundaries;
-  const LineHeader *line_header;
+  const dw::LineHeader *line_header;
   std::vector<FunctionSymbol> fns;
-  DebugInfoEntry *cu_die;
+  dw::DebugInfoEntry *cu_die;
   AddrPtr default_base_addr = nullptr;
 };
 
 class NonExecutableCompilationUnitFile
 {
-  DebugInfoEntry *partial_cu_die;
+  dw::DebugInfoEntry *partial_cu_die;
 };
 
+}; // namespace sym
+
 namespace fmt {
-template <> struct formatter<CompilationUnitFile>
+template <> struct formatter<sym::CompilationUnitFile>
 {
   template <typename ParseContext>
   constexpr auto
@@ -140,7 +145,7 @@ template <> struct formatter<CompilationUnitFile>
 
   template <typename FormatContext>
   auto
-  format(CompilationUnitFile const &f, FormatContext &ctx)
+  format(const sym::CompilationUnitFile &f, FormatContext &ctx)
   {
     return fmt::format_to(ctx.out(), "{{ path: {}, low: {}, high: {}, blocks: {} }}", f.name(), f.low_pc(),
                           f.high_pc(), f.address_ranges().size());

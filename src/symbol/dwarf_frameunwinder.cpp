@@ -2,16 +2,11 @@
 #include "../supervisor.h"
 #include "../task.h"
 #include "block.h"
-#include "dwarf_defs.h"
-#include "dwarf_expressions.h"
+#include "dwarf/dwarf_defs.h"
 #include "elf.h"
 #include "objfile.h"
-#include <algorithm>
-#include <array>
-#include <cstdint>
-#include <memory_resource>
-#include <span>
 
+// SYMBOLS namespace
 namespace sym {
 
 void
@@ -54,7 +49,7 @@ Reg::Reg() noexcept : value(0), rule(RegisterRule::Undefined) {}
 CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept
     : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), rule_table()
 {
-  std::memset(rule_table.data(), 0, sizeof(Reg) * rule_table.size());
+  rule_table = {};
 }
 
 CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const RegisterValues &frame_below,
@@ -591,16 +586,16 @@ parse_dwarf_eh(Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_cou
            cie.instructions.size(), ins.size());
       low = std::min(low, begin);
       high = std::max(high, end);
-      unwinder_db->dwarf_unwind_infos.push_back(UnwindInfo{
-          .start = begin,
-          .end = end,
-          .code_align = static_cast<u8>(cie.code_alignment_factor),
-          .data_align = static_cast<i8>(cie.data_alignment_factor),
-          .aug_data_len = aug_data_length,
-          .lsda = lsda,
-          .cie = &cie,
-          .fde_insts = ins,
-      });
+      unwinder_db->dwarf_unwind_infos.push_back(
+          UnwindInfo{.start = begin,
+                     .end = end,
+                     .code_align = static_cast<u8>(cie.code_alignment_factor),
+                     .data_align = static_cast<i8>(cie.data_alignment_factor),
+                     .aug_data_len = aug_data_length,
+                     .lsda = lsda,
+                     .cie = &cie,
+                     .fde_eh_offset = eh_offset,
+                     .fde_insts = ins});
     }
   }
   unwinder_db->set_high(high);

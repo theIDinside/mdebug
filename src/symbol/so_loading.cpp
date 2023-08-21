@@ -1,10 +1,13 @@
 #include "so_loading.h"
+// disambiguate from <elf.h> which *can* refer to the system elf.h
+#include "./elf.h"
+#include "block.h"
 #include "common.h"
-#include "symbol/block.h"
-#include "symbol/elf.h"
-#include "symbol/objfile.h"
+#include "objfile.h"
 #include <filesystem>
 
+// SYMBOLS namespace
+namespace sym {
 SharedObject::SharedObject(int so_id, TPtr<link_map> tloc, AddrPtr addr, Path &&path,
                            AddressRange address_range) noexcept
     : so_id(so_id), tracee_location(tloc), elf_vma_addr_diff(addr), path(std::move(path)),
@@ -85,3 +88,4 @@ SharedObjectMap::get_so(int id) noexcept
   }
   return nullptr;
 }
+} // namespace sym

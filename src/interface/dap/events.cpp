@@ -5,7 +5,7 @@
 
 namespace ui::dap {
 
-ModuleEvent::ModuleEvent(std::string_view reason, SharedObject *so) noexcept
+ModuleEvent::ModuleEvent(std::string_view reason, sym::SharedObject *so) noexcept
     : id(so->so_id), reason(reason), name(so->name()), path(so->path), addr_range(so->relocated_addr_range()),
       sym_info(so->symbol_info), symbol_file_path(so->symbol_file_path()), version(so->version())
 {

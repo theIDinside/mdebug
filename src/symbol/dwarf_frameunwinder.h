@@ -1,16 +1,17 @@
 #pragma once
 #include "../common.h"
 #include "block.h"
-#include "dwarf_defs.h"
+#include "dwarf/dwarf_defs.h"
 #include <cstdint>
 
-struct ElfSection;
-struct ObjectFile;
 struct TraceeController;
 struct TaskInfo;
 
+// SYMBOLS namespace
 namespace sym {
 
+struct ElfSection;
+struct ObjectFile;
 struct UnwindInfo;
 
 static constexpr auto TOP2_BITS = 0xC0;

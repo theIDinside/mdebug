@@ -1,12 +1,10 @@
 #include "elf.h"
+#include "./elf.h"
 #include "elf_symbols.h"
 #include "objfile.h"
-#include <algorithm>
-#include <bits/ranges_util.h>
-#include <cstdint>
-#include <elf.h>
-#include <ranges>
 
+// SYMBOLS namespace
+namespace sym {
 std::string_view
 ElfSection::get_name() const noexcept
 {
@@ -227,3 +225,4 @@ Elf::obj_addr(AddrPtr addr) noexcept
   ASSERT(addr > reloc, "Address {} is below reloc base {}", addr, reloc);
   return addr - reloc;
 }
+}; // namespace sym

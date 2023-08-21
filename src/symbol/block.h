@@ -1,6 +1,8 @@
 #pragma once
-#include "../common.h"
+#include <common.h>
 
+// SYMBOLS namespace
+namespace sym {
 /**
  * Description of a range of executable code, inside of a compilation unit.
  */
@@ -49,3 +51,4 @@ public:
     return low != UINTMAX_MAX && high != 0;
   }
 };
+} // namespace sym

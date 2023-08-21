@@ -2,6 +2,7 @@
 
 #include "breakpoint.h"
 #include "common.h"
+#include "utils/macros.h"
 #include <linux/sched.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
@@ -84,6 +85,7 @@ to_str(RunType type) noexcept
     return "RunType::UNKNOWN";
     break;
   }
+  DEAL_WITH_SHITTY_GCC
 }
 
 struct TaskInfo

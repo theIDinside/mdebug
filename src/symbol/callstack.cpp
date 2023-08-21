@@ -1,5 +1,6 @@
 #include "callstack.h"
 
+// SYMBOLS namespace
 namespace sym {
 
 InsideRange

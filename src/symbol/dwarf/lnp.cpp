@@ -1,10 +1,13 @@
 #include "lnp.h"
-#include "block.h"
-#include "elf.h"
+#include "../block.h"
+#include "../elf.h"
 #include <algorithm>
 #include <optional>
 #include <unordered_map>
 #include <variant>
+
+// SYMBOLS DWARF namespace
+namespace sym::dw {
 
 class LNPStateMachine
 {
@@ -293,152 +296,8 @@ read_content(DwarfBinaryReader &reader, AttributeForm form)
   }
 }
 
-std::unique_ptr<LineHeader>
-read_lineheader_v5(const u8 *ptr, Elf *elf) noexcept
-{
-  DwarfBinaryReader reader{ptr, 4096};
-  const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
-  const auto version = reader.read_value<u16>();
-  const auto addr_size = reader.read_value<u8>();
-  // skip segment_selector_size
-  reader.skip(1);
-  const u64 header_length = reader.dwarf_spec_read_value();
-  const u8 *data_ptr = reader.current_ptr() + header_length;
-  const u8 min_ins_len = reader.read_value<u8>();
-  const u8 max_ops_per_ins = reader.read_value<u8>();
-  const bool default_is_stmt = reader.read_value<u8>();
-  const i8 line_base = reader.read_value<i8>();
-  const u8 line_range = reader.read_value<u8>();
-  const u8 opcode_base = reader.read_value<u8>();
-  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opcode_lengths{};
-  reader.read_into_array(opcode_lengths);
-
-  const u8 directory_entry_format_count = reader.read_value<u8>();
-  LineHeader::DirEntFormats dir_entry_fmt{};
-  dir_entry_fmt.reserve(directory_entry_format_count);
-
-  for (auto i = 0; i < directory_entry_format_count; i++) {
-    const auto content = reader.read_uleb128<LineNumberProgramContent>();
-    const auto form = reader.read_uleb128<AttributeForm>();
-    dir_entry_fmt.emplace_back(content, form);
-  }
-
-  const u64 dir_count = reader.read_uleb128<u64>();
-  std::vector<DirEntry> dirs{};
-  dirs.reserve(dir_count);
-  for (auto i = 0ull; i < dir_count; i++) {
-    using enum AttributeForm;
-    DirEntry ent{};
-
-    for (const auto &[content, form] : dir_entry_fmt) {
-      if (content == LineNumberProgramContent::DW_LNCT_path) {
-        ent.path = read_content_str(reader, form, elf);
-      } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-        ent.md5.emplace(read_content_datablock(reader, form));
-      } else {
-        read_content(reader, form);
-      }
-    }
-    dirs.push_back(ent);
-  }
-
-  const u8 file_name_entry_fmt_count = reader.read_value<u8>();
-  LineHeader::FileNameEntFormats filename_ent_formats{};
-  filename_ent_formats.reserve(file_name_entry_fmt_count);
-
-  for (auto i = 0; i < file_name_entry_fmt_count; i++) {
-    const auto content = reader.read_uleb128<LineNumberProgramContent>();
-    const auto form = reader.read_uleb128<AttributeForm>();
-    filename_ent_formats.emplace_back(content, form);
-  }
-  const u64 file_count = reader.read_uleb128<u64>();
-  std::vector<FileEntry> files{};
-  files.reserve(file_count);
-  for (auto i = 0ull; i < file_count; i++) {
-    FileEntry entry;
-    for (const auto &[content, form] : filename_ent_formats) {
-      if (content == LineNumberProgramContent::DW_LNCT_directory_index) {
-        entry.dir_index = read_content_index(reader, form);
-      } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-        entry.md5.emplace(read_content_datablock(reader, form));
-      } else if (content == LineNumberProgramContent::DW_LNCT_path) {
-        entry.file_name = read_content_str(reader, form, elf);
-      } else {
-        read_content(reader, form);
-      }
-    }
-    files.push_back(entry);
-  }
-  return std::unique_ptr<LineHeader>(new LineHeader{.initial_length = init_len,
-                                                    .data = data_ptr,
-                                                    .version = (DwarfVersion)version,
-                                                    .addr_size = addr_size,
-                                                    .min_len = min_ins_len,
-                                                    .max_ops = max_ops_per_ins,
-                                                    .default_is_stmt = default_is_stmt,
-                                                    .line_base = line_base,
-                                                    .line_range = line_range,
-                                                    .opcode_base = opcode_base,
-                                                    .std_opcode_lengths = opcode_lengths,
-                                                    .directories = std::move(dirs),
-                                                    .file_names = std::move(files)});
-}
-
-std::unique_ptr<LineHeader>
-read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept
-{
-  DwarfBinaryReader reader{ptr, 4096};
-  // https://dwarfstd.org/doc/DWARF4.pdf#page=126
-  const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
-  reader.bookmark();
-  const auto version = reader.read_value<u16>();
-  const u64 header_length = reader.dwarf_spec_read_value();
-  const u8 *data_ptr = reader.current_ptr() + header_length;
-  const u8 min_ins_len = reader.read_value<u8>();
-  const u8 max_ops_per_ins = reader.read_value<u8>();
-  const bool default_is_stmt = reader.read_value<u8>();
-  const i8 line_base = reader.read_value<i8>();
-  const u8 line_range = reader.read_value<u8>();
-  const u8 opcode_base = reader.read_value<u8>();
-  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opcode_lengths{};
-  reader.read_into_array(opcode_lengths);
-
-  // read include directories
-  std::vector<DirEntry> dirs;
-  auto dir = reader.read_string();
-  while (dir.size() > 0) {
-    dirs.push_back(DirEntry{.path = dir, .md5 = {}});
-    dir = reader.read_string();
-  }
-
-  std::vector<FileEntry> files;
-  while (reader.peek_value<u8>() != 0) {
-    FileEntry entry;
-    entry.file_name = reader.read_string();
-    entry.dir_index = reader.read_uleb128<u64>();
-    [[gnu::unused]] const auto _timestamp = reader.read_uleb128<u64>();
-    entry.file_size = reader.read_uleb128<u64>();
-    files.push_back(entry);
-  }
-  const auto data_length = init_len - reader.pop_bookmark();
-  return std::unique_ptr<LineHeader>(new LineHeader{.initial_length = init_len,
-                                                    .data = data_ptr,
-                                                    .data_end = data_ptr + data_length,
-                                                    .version = (DwarfVersion)version,
-                                                    .addr_size = addr_size,
-                                                    .min_len = min_ins_len,
-                                                    .max_ops = max_ops_per_ins,
-                                                    .default_is_stmt = default_is_stmt,
-                                                    .line_base = line_base,
-                                                    .line_range = line_range,
-                                                    .opcode_base = opcode_base,
-                                                    .std_opcode_lengths = opcode_lengths,
-                                                    .directories = std::move(dirs),
-                                                    .file_names = std::move(files)});
-}
-
 std::vector<LineHeader>
-parse_lnp_headers(const Elf *elf) noexcept
+parse_lnp_headers(const sym::Elf *elf) noexcept
 {
   ASSERT(elf != nullptr, "ELF must be parsed first");
   auto debug_line = elf->debug_line;
@@ -515,7 +374,8 @@ parse_lnp_headers(const Elf *elf) noexcept
                                    .opcode_base = opcode_base,
                                    .std_opcode_lengths = opcode_lengths,
                                    .directories = std::move(dirs),
-                                   .file_names = std::move(files)});
+                                   .file_names = std::move(files),
+                                   .line_table = nullptr});
       reader.skip(init_len - reader.pop_bookmark());
     } else {
       const u8 directory_entry_format_count = reader.read_value<u8>();
@@ -588,7 +448,8 @@ parse_lnp_headers(const Elf *elf) noexcept
                                    .opcode_base = opcode_base,
                                    .std_opcode_lengths = opcode_lengths,
                                    .directories = std::move(dirs),
-                                   .file_names = std::move(files)});
+                                   .file_names = std::move(files),
+                                   .line_table = nullptr});
       reader.skip(init_len - reader.pop_bookmark());
     }
   }
@@ -618,7 +479,7 @@ LineHeader::set_linetable_storage(LineTable *storage) noexcept
 }
 
 void
-LineHeader::parse_linetable(AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept
+LineHeader::parse_linetable(AddrPtr reloc_base, std::optional<sym::AddressRange> bounds) noexcept
 {
   using OpCode = LineNumberProgramOpCode;
   auto reader = get_reader();
@@ -724,3 +585,4 @@ LineHeader::parse_linetable(AddrPtr reloc_base, std::optional<AddressRange> boun
     std::copy(seq.cbegin(), seq.cend(), std::back_inserter(*line_table));
   }
 }
+} // namespace sym::dw

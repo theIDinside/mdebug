@@ -1,13 +1,16 @@
 #include "cu_file.h"
 #include "block.h"
 #include "dwarf.h"
+#include "dwarf/lnp.h"
 #include "elf.h"
-#include "lnp.h"
 #include <algorithm>
 #include <emmintrin.h>
 #include <filesystem>
 
-CompilationUnitFile::CompilationUnitFile(DebugInfoEntry *cu) noexcept
+// SYMBOLS namespace
+namespace sym {
+
+CompilationUnitFile::CompilationUnitFile(dw::DebugInfoEntry *cu) noexcept
     : m_addr_ranges(), m_name(), pc_boundaries(), line_header(nullptr), fns(), cu_die(cu)
 {
 }
@@ -96,7 +99,7 @@ CompilationUnitFile::last_added_addr_valid() const noexcept
 }
 
 void
-CompilationUnitFile::set_linetable(const LineHeader *header) noexcept
+CompilationUnitFile::set_linetable(const dw::LineHeader *header) noexcept
 {
   DLOG("dwarf", "[lnp]: table=0x{:x}", header->sec_offset);
   line_header = header;
@@ -108,7 +111,7 @@ CompilationUnitFile::set_boundaries(AddressRange range) noexcept
   pc_boundaries = range;
 }
 
-const LineTable &
+const dw::LineTable &
 CompilationUnitFile::line_table() const noexcept
 {
   return *line_header->line_table;
@@ -153,12 +156,12 @@ CompilationUnitFile::find_subprogram(AddrPtr addr) const noexcept
   }
 }
 
-LineTableEntryRange
+dw::LineTableEntryRange
 CompilationUnitFile::get_range(AddrPtr addr) const noexcept
 {
   const auto &m_ltes = line_table();
   const auto lte_it = std::lower_bound(m_ltes.cbegin(), m_ltes.cend(), addr,
-                                       [](const LineTableEntry &l, AddrPtr addr) { return l.pc <= addr; });
+                                       [](const dw::LineTableEntry &l, AddrPtr addr) { return l.pc <= addr; });
   if (lte_it == std::cend(m_ltes))
     return {nullptr, nullptr};
   if (lte_it + 1 == std::end(m_ltes))
@@ -168,7 +171,7 @@ CompilationUnitFile::get_range(AddrPtr addr) const noexcept
   return {(lte_it - 1).base(), lte_it.base()};
 }
 
-LineTableEntryRange
+dw::LineTableEntryRange
 CompilationUnitFile::get_range_of_pc(AddrPtr addr) const noexcept
 {
   const auto &m_ltes = line_table();
@@ -180,7 +183,7 @@ CompilationUnitFile::get_range_of_pc(AddrPtr addr) const noexcept
   return {(it - 1).base(), it.base()};
 }
 
-LineTableEntryRange
+dw::LineTableEntryRange
 CompilationUnitFile::get_range(AddrPtr start, AddrPtr end) const noexcept
 {
   TODO(fmt::format("CompilationUnitFile::get_range(TPtr<void> start = {}, TPtr<void> end = {})", start, end));
@@ -214,3 +217,4 @@ CompilationUnitFile::set_default_base_addr(AddrPtr default_base) noexcept
 {
   default_base_addr = default_base;
 }
+}; // namespace sym

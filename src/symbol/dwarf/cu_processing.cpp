@@ -1,19 +1,18 @@
-#include "cu.h"
-#include "../supervisor.h"
-#include "block.h"
-#include "cu_file.h"
-#include "dwarf.h"
+#include "cu_processing.h"
+// TODO(simon): These includes highly suggest, that this should be a part of the sym namespace, not the sym::dw
+#include "../block.h"
+#include "../cu_file.h"
+#include "../elf.h"
+#include "../objfile.h"
+// ----
 #include "dwarf_defs.h"
-#include "elf.h"
 #include "lnp.h"
-#include "objfile.h"
-#include "type.h"
-#include <bit>
-#include <bits/align.h>
-#include <cstdint>
-#include <emmintrin.h>
 #include <stack>
+#include <supervisor.h>
 #include <utility>
+
+// SYMBOLS DWARF namespace
+namespace sym::dw {
 
 CompilationUnitBuilder::CompilationUnitBuilder(ObjectFile *obj_file) noexcept : obj_file(obj_file) {}
 
@@ -640,3 +639,4 @@ CompileUnitReader::sec_offset() const noexcept
 {
   return header->debug_info_sec_offset + header->header_length + bytes_read();
 }
+} // namespace sym::dw

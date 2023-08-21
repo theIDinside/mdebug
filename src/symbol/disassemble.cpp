@@ -1,15 +1,16 @@
 #include "disassemble.h"
 #include "../supervisor.h"
 #include "cu_file.h"
+#include "dwarf/lnp.h"
 #include "elf.h"
 #include "fmt/core.h"
-#include "lnp.h"
 #include "objfile.h"
 #include "zydis/Zydis.h"
 #include <algorithm>
 #include <charconv>
 #include <set>
 
+// SYMBOLS namespace
 namespace sym {
 
 static sym::Disassembly

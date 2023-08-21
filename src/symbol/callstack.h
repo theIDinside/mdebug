@@ -1,12 +1,12 @@
 #pragma once
 #include "../common.h"
 #include "cu_file.h"
-#include <vector>
 
 namespace ui::dap {
 struct Scope;
 }
 
+// SYMBOLS namespace
 namespace sym {
 enum class FrameType : u8
 {

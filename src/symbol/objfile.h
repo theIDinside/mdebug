@@ -1,20 +1,18 @@
 #pragma once
 #include "../common.h"
-#include "dwarf.h"
+// #include "dwarf.h"
+#include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
-#include "lnp.h"
 #include <string_view>
 #include <sys/mman.h>
 
-class CompilationUnitFile;
-class NonExecutableCompilationUnitFile;
-
+// SYMBOLS namespace
 namespace sym {
 class Unwinder;
 class Type;
-} // namespace sym
-
+class CompilationUnitFile;
+class NonExecutableCompilationUnitFile;
 class Elf;
 struct ElfSection;
 
@@ -36,8 +34,8 @@ struct ObjectFile
   // Should the key be something much better than a string, here? If so, how and what?
   std::unordered_map<u64, sym::Type> types;
 
-  std::vector<LineTable> line_tables;
-  std::vector<LineHeader> line_table_headers;
+  std::vector<dw::LineTable> line_tables;
+  std::vector<dw::LineHeader> line_table_headers;
   sym::Unwinder *unwinder;
   // Address bounds determined by reading the program segments of the elf binary
   AddressRange address_bounds;
@@ -74,7 +72,7 @@ struct ObjectFile
 
   Path interpreter() const noexcept;
   bool found_min_syms() const noexcept;
-  LineHeader *line_table_header(u64 offset) noexcept;
+  dw::LineHeader *line_table_header(u64 offset) noexcept;
   SearchResult<CompilationUnitFile> get_cu_iterable(AddrPtr addr) const noexcept;
 };
 
@@ -93,3 +91,4 @@ struct UnloadObjectFile
 };
 
 void object_file_unloader(ObjectFile *obj);
+} // namespace sym

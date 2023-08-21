@@ -2,8 +2,11 @@
 #include "common.h"
 #include "link.h"
 #include "symbol/block.h"
+#include "utils/macros.h"
 #include <array>
 
+// SYMBOLS namespace
+namespace sym {
 struct ObjectFile;
 struct ElfSection;
 
@@ -32,6 +35,7 @@ so_sym_info_description(SharedObjectSymbols sos)
   case SharedObjectSymbols::None:
     return "No symbols loaded";
   }
+  DEAL_WITH_SHITTY_GCC
 }
 
 struct SharedObject
@@ -76,3 +80,4 @@ private:
 };
 
 Path interpreter_path(const ElfSection *interp) noexcept;
+} // namespace sym

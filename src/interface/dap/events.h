@@ -1,12 +1,12 @@
 #pragma once
 
-#include "../../common.h"
-#include "../../so_loading.h"
-#include "../../symbol/block.h"
 #include "../ui_result.h"
 #include "dap_defs.h"
 #include "types.h"
+#include <common.h>
 #include <nlohmann/json_fwd.hpp>
+#include <symbol/block.h>
+#include <symbol/so_loading.h>
 
 namespace ui::dap {
 
@@ -23,19 +23,19 @@ struct ModuleEvent final : public ui::UIResult
 {
   ModuleEvent(int id, std::string_view reason, std::string &&name, Path &&path,
               std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
-              AddressRange range, SharedObjectSymbols so_sym_info) noexcept
+              sym::AddressRange range, sym::SharedObjectSymbols so_sym_info) noexcept
       : id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
         sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)), version(std::move(version))
   {
   }
 
-  ModuleEvent(std::string_view reason, SharedObject *shared_object) noexcept;
+  ModuleEvent(std::string_view reason, sym::SharedObject *shared_object) noexcept;
   int id;
   std::string_view reason;
   std::string name;
   Path path;
-  AddressRange addr_range;
-  SharedObjectSymbols sym_info;
+  sym::AddressRange addr_range;
+  sym::SharedObjectSymbols sym_info;
   std::optional<std::string> symbol_file_path;
   std::optional<std::string> version;
 

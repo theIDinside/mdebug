@@ -1,17 +1,6 @@
 #pragma once
 #include "common.h"
-#include <algorithm>
-#include <cerrno>
-#include <cstring>
-#include <string>
-#include <sys/epoll.h>
 #include <sys/poll.h>
-#include <tuple>
-#include <type_traits>
-#include <unistd.h>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
 struct pollfd;
 

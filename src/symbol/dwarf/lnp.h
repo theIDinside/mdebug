@@ -1,12 +1,17 @@
 #pragma once
-#include "../common.h"
-#include "block.h"
+#include "../block.h"
 #include "dwarf_defs.h"
+#include <common.h>
 #include <optional>
 #include <utility>
 
+namespace sym {
 class Elf;
 struct ElfSection;
+} // namespace sym
+
+// SYMBOLS DWARF namespace
+namespace sym::dw {
 
 struct DirEntry
 {
@@ -82,27 +87,13 @@ struct LineHeader
   bool has_entries() const noexcept;
 };
 
-std::vector<LineHeader> parse_lnp_headers(const Elf *) noexcept;
+std::vector<LineHeader> parse_lnp_headers(const sym::Elf *) noexcept;
 
-/**
- * @brief Reads the Line Number Program Header for a compilation unit. `bytes` is gathered from the Compilation
- * Unit's DIE coupled with DW_AT_stmt_list; it contains an offset into the ELF section `.debug_line` where this LNP
- * Header begins.
- *
- * DWARF Version 5
- *
- * @param bytes - pointer into the `.debug_line` section where we start parsing this header.
- * @return std::unique_ptr<LineHeader>
- */
-std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes, Elf *elf) noexcept;
-
-/**
- * See description for `read_lineheader_v5`; only the implementation details differ.
- */
-std::unique_ptr<LineHeader> read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept;
+}; // namespace sym::dw
 
 namespace fmt {
-template <> struct formatter<LineTableEntry>
+using LTE = sym::dw::LineTableEntry;
+template <> struct formatter<LTE>
 {
   template <typename ParseContext>
   constexpr auto
@@ -113,7 +104,7 @@ template <> struct formatter<LineTableEntry>
 
   template <typename FormatContext>
   auto
-  format(LineTableEntry const &entry, FormatContext &ctx)
+  format(const LTE &entry, FormatContext &ctx)
   {
     return fmt::format_to(
         ctx.out(),

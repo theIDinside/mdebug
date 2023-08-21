@@ -3,10 +3,8 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "symbol/callstack.h"
-#include "symbol/lnp.h"
+#include "symbol/dwarf/lnp.h"
 #include "task.h"
-#include <chrono>
-#include <vector>
 
 struct TraceeController;
 struct BpStat;
@@ -104,8 +102,8 @@ public:
 
 private:
   sym::Frame start_frame;
-  LineTableEntry entry;
-  const CompilationUnitFile *cu;
+  sym::dw::LineTableEntry entry;
+  const sym::CompilationUnitFile *cu;
   int debug_steps_taken = 0;
   bool resume_address_set;
   AddrPtr resume_addr;

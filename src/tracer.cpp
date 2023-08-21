@@ -1,7 +1,5 @@
 #include "tracer.h"
 #include "./interface/dap/interface.h"
-#include "common.h"
-#include "fmt/format.h"
 #include "interface/dap/events.h"
 #include "interface/pty.h"
 #include "interface/ui_command.h"
@@ -13,22 +11,13 @@
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
-#include "symbol/cu.h"
-#include "symbol/dwarf_frameunwinder.h"
+#include "symbol/dwarf/cu_processing.h"
 #include "symbol/elf.h"
 #include "symbol/objfile.h"
 #include "task.h"
 #include "utils/logger.h"
-#include <algorithm>
-#include <bits/chrono.h>
-#include <bits/ranges_util.h>
-#include <chrono>
-#include <cstdlib>
-#include <exception>
 #include <fcntl.h>
-#include <filesystem>
 #include <nlohmann/json.hpp>
-#include <ranges>
 #include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
@@ -39,19 +28,6 @@
 
 Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
-
-std::string_view
-add_object_err(AddObjectResult r)
-{
-  switch (r) {
-  case AddObjectResult::OK:
-    return "OK";
-  case AddObjectResult::MMAP_FAILED:
-    return "Mmap Failed";
-  case AddObjectResult::FILE_NOT_EXIST:
-    return "File didn't exist";
-  }
-}
 
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
     : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
@@ -67,12 +43,12 @@ Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *ev
 void
 Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
-  const auto obj_file = mmap_objectfile(objfile_path);
+  const auto obj_file = sym::mmap_objectfile(objfile_path);
   ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
-  CompilationUnitBuilder cu_builder{obj_file};
-  obj_file->line_table_headers = parse_lnp_headers(obj_file->parsed_elf);
+  sym::dw::CompilationUnitBuilder cu_builder{obj_file};
+  obj_file->line_table_headers = sym::dw::parse_lnp_headers(obj_file->parsed_elf);
   obj_file->line_tables.reserve(obj_file->line_table_headers.size());
   for (auto &lth : obj_file->line_table_headers) {
     obj_file->line_tables.push_back({});
@@ -83,7 +59,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 
   for (auto &cu_hdr : total) {
     jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target]() {
-      auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
+      auto proc = sym::prepare_cu_processing(obj_file, cu_hdr, tgt);
       auto compile_unit_die = proc->read_dies();
       if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
         proc->process_compile_unit_die(compile_unit_die.release());

@@ -1,33 +1,18 @@
 #pragma once
 
-#include "cu_file.h"
-#include "dwarf.h"
+#include "../cu_file.h"
+#include "../dwarf.h"
+#include "../objfile.h"
+#include "cu_header.h"
+#include "die.h"
 #include "lnp.h"
-#include "objfile.h"
-#include <concepts>
-#include <cstddef>
-#include <cstring>
-#include <optional>
-#include <type_traits>
-#include <utility>
-class CompilationUnitFile;
 
-/**
- * The processed Compilation Unit Header. For the raw byte-to-byte representation see D4/D5
- */
-struct CompileUnitHeader
-{
-  u64 length;
-  u64 abbrev_offset;
-  const u8 *data;
-  const u8 *end;
-  u32 cu_index;
-  u64 debug_info_sec_offset;
-  u8 addr_size;
-  u8 format;
-  DwarfVersion version;
-  u8 header_length;
-};
+struct TraceeController;
+
+// SYMBOLS DWARF namespace
+namespace sym::dw {
+
+struct CompileUnitHeader;
 
 class CompileUnitReader
 {
@@ -122,33 +107,6 @@ private:
   std::unique_ptr<LineHeader> line_header;
   OwnedLineTable line_table;
 };
-
-namespace fmt {
-template <> struct formatter<CompileUnitHeader>
-{
-  template <typename ParseContext> constexpr auto parse(ParseContext &ctx);
-
-  template <typename FormatContext> auto format(CompileUnitHeader const &item, FormatContext &ctx);
-};
-
-template <typename ParseContext>
-constexpr auto
-formatter<CompileUnitHeader>::parse(ParseContext &ctx)
-{
-  return ctx.begin();
-}
-
-template <typename FormatContext>
-auto
-formatter<CompileUnitHeader>::format(CompileUnitHeader const &item, FormatContext &ctx)
-{
-  return fmt::format_to(ctx.out(),
-                        "Compile Unit: length = {:#010x}, format = {}, version = {:#06x}, abbr_offset = "
-                        "{:#06x}, addr_size = {:#04x}",
-                        item.length, "DWARF32", std::to_underlying(item.version), item.abbrev_offset, 8);
-}
-
-}; // namespace fmt
 
 struct DetermineDwarf
 {
@@ -277,3 +235,4 @@ private:
 private:
   ObjectFile *obj_file;
 };
+} // namespace sym::dw

@@ -86,6 +86,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
     }
     call_stack->dirty = false;
+    break;
   }
   case CallStackRequest::Type::Partial: {
     for (auto uinf = un_info; uinf != nullptr && req.count != 0; uinf = it.get_info(get_current_pc())) {
@@ -98,6 +99,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       --req.count;
     }
     call_stack->resolved = call_stack->resolved - req.count;
+    break;
   }
   }
   return call_stack->pcs;

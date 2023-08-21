@@ -1,22 +1,13 @@
 #pragma once
 
-#include "../../common.h"
 #include "../../lib/spinlock.h"
 #include "../../notify_pipe.h"
 #include "../ui_result.h"
 #include "dap_defs.h"
 #include <algorithm>
-#include <array>
-#include <cstring>
-#include <fstream>
-#include <linux/limits.h>
+#include <common.h>
 #include <nlohmann/json.hpp>
 #include <queue>
-#include <string_view>
-#include <sys/epoll.h>
-#include <utility>
-#include <variant>
-#include <vector>
 class Tracer;
 /* The different DAP commands/requests */
 

@@ -1,9 +1,10 @@
 #include "objfile.h"
-#include "../so_loading.h"
-#include "cu.h"
 #include "elf_symbols.h"
+#include "so_loading.h"
 #include "type.h"
-#include <optional>
+
+// SYMBOLS namespace
+namespace sym {
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
@@ -68,7 +69,7 @@ ObjectFile::found_min_syms() const noexcept
   return min_syms;
 }
 
-LineHeader *
+dw::LineHeader *
 ObjectFile::line_table_header(u64 offset) noexcept
 {
   for (auto &lth : line_table_headers) {
@@ -102,3 +103,4 @@ mmap_objectfile(const Path &path) noexcept
   auto objfile = new ObjectFile{path, fd.file_size(), addr};
   return objfile;
 }
+}; // namespace sym

@@ -4,15 +4,10 @@
 #include "interface/ui_command.h"
 #include "interface/ui_result.h"
 #include "notify_pipe.h"
-#include <chrono>
-#include <cstdint>
-#include <fstream>
 #include <nlohmann/json_fwd.hpp>
 #include <queue>
 #include <sys/ioctl.h>
 #include <termios.h>
-#include <unordered_map>
-#include <vector>
 
 struct ObjectFile;
 struct TraceeController;
@@ -34,14 +29,6 @@ struct UICommand;
 }
 
 struct LWP;
-enum class AddObjectResult : u8
-{
-  OK = 0,
-  MMAP_FAILED,
-  FILE_NOT_EXIST
-};
-
-std::string_view add_object_err(AddObjectResult r);
 
 enum class TracerAction
 {

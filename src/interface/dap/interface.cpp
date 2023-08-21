@@ -5,24 +5,12 @@
 #include "fmt/core.h"
 #include "parse_buffer.h"
 #include <algorithm>
-#include <charconv>
 #include <chrono>
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
-#include <exception>
 #include <fcntl.h>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
 #include <memory_resource>
 #include <nlohmann/json.hpp>
-#include <ostream>
 #include <poll.h>
-#include <ranges>
 #include <string>
-#include <string_view>
-#include <sys/epoll.h>
 #include <sys/mman.h>
 #include <thread>
 namespace ui::dap {

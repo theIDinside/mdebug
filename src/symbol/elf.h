@@ -1,13 +1,13 @@
 #pragma once
 #include "../common.h"
-#include <string_view>
-
 #include <elf.h>
-#include <unordered_map>
 
 constexpr static u8 ELF_MAGIC[4]{0x7F, 0x45, 0x4C, 0x46};
 constexpr static u8 ELF_MAGIC_[4]{EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3};
 using Elf64Header = Elf64_Ehdr;
+
+// SYMBOLS namespace
+namespace sym {
 struct ObjectFile;
 
 struct ElfSection
@@ -90,3 +90,4 @@ enum class DwarfSectionIdent : u8
 };
 
 DwarfSectionIdent from_str(std::string_view str);
+}; // namespace sym

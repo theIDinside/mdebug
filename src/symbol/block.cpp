@@ -1,5 +1,7 @@
 #include "block.h"
 
+// SYMBOLS namespace
+namespace sym {
 bool
 AddressRange::contains(AddressRange &block) const noexcept
 {
@@ -17,3 +19,4 @@ AddressRange::is_valid() const noexcept
 {
   return low != TPtr<void>{nullptr} && high != TPtr<void>{nullptr};
 }
+} // namespace sym

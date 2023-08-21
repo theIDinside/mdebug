@@ -1,28 +1,25 @@
 #include "dwarf.h"
-#include "cu.h"
-#include "dwarf_defs.h"
-#include <algorithm>
-#include <cstdint>
-#include <utility>
-#include <variant>
+#include "dwarf/cu_processing.h"
 
+// SYMBOLS namespace
+namespace sym {
 constexpr bool
 DEBUG_SANITIZE_DWARF_NAME(u16)
 {
   return true;
 }
 
-std::unique_ptr<CUProcessor>
-prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header, TraceeController *target)
+std::unique_ptr<dw::CUProcessor>
+prepare_cu_processing(ObjectFile *obj_file, const dw::CompileUnitHeader &header, TraceeController *target)
 {
   const auto abbrev_sec = obj_file->parsed_elf->debug_abbrev;
 
-  AbbreviationInfo::Table result{};
+  dw::AbbreviationInfo::Table result{};
 
   const u8 *abbr_ptr = abbrev_sec->m_section_ptr + header.abbrev_offset;
 
   while (true) {
-    AbbreviationInfo info;
+    dw::AbbreviationInfo info;
     abbr_ptr = decode_uleb128(abbr_ptr, info.code);
 
     // we've reached the end of this abbrev sub-section.
@@ -36,7 +33,7 @@ prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header, Tra
 
     // read declarations
     for (;;) {
-      Abbreviation abbr;
+      dw::Abbreviation abbr;
       abbr_ptr = decode_uleb128(abbr_ptr, abbr.name);
       abbr_ptr = decode_uleb128(abbr_ptr, abbr.form);
       if (abbr.form == AttributeForm::DW_FORM_implicit_const) {
@@ -56,68 +53,6 @@ prepare_cu_processing(ObjectFile *obj_file, const CompileUnitHeader &header, Tra
     }
     result.push_back(info);
   }
-  return std::make_unique<CUProcessor>(obj_file, header, std::move(result), header.cu_index, target);
+  return std::make_unique<dw::CUProcessor>(obj_file, header, std::move(result), header.cu_index, target);
 }
-
-std::uintptr_t
-AttributeValue::address() const noexcept
-{
-  return value.addr;
-}
-std::string_view
-AttributeValue::string() const noexcept
-{
-  return value.str;
-}
-DataBlock
-AttributeValue::block() const noexcept
-{
-  return value.block;
-}
-u64
-AttributeValue::unsigned_value() const noexcept
-{
-  return value.u;
-}
-i64
-AttributeValue::signed_value() const noexcept
-{
-  return value.i;
-}
-
-void
-DebugInfoEntry::debug_dump(int indent) const noexcept
-{
-  std::string fill(indent, ' ');
-  fmt::print("{} [{}] {}\n", fill, abbreviation_code, to_str(this->tag));
-  for (const auto &att : attributes) {
-    fmt::println("{} | {} {}", fill, to_str(att.name), to_str(att.form));
-  }
-  fmt::println("---");
-  for (const auto &ch : children) {
-    ch->debug_dump(indent + 1);
-  }
-}
-
-void
-DebugInfoEntry::set_abbreviation(const AbbreviationInfo &a) noexcept
-{
-  abbreviation_code = a.code;
-  set_tag(a.tag);
-}
-
-void
-DebugInfoEntry::set_offset(u64 offset) noexcept
-{
-  sec_offset = offset;
-}
-
-std::optional<AttributeValue>
-DebugInfoEntry::get_attribute(Attribute attr) const noexcept
-{
-  for (const auto &att : attributes) {
-    if (att.name == attr)
-      return att;
-  }
-  return std::nullopt;
-}
+} // namespace sym

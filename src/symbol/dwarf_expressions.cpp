@@ -1,10 +1,11 @@
 #include "dwarf_expressions.h"
 #include "../supervisor.h"
 #include "../task.h"
-#include "dwarf_defs.h"
+#include "dwarf/dwarf_defs.h"
 #include "dwarf_frameunwinder.h"
 #include <utility>
 
+// SYMBOLS namespace
 namespace sym {
 
 u64

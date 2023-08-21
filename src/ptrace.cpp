@@ -1,11 +1,9 @@
 #include "ptrace.h"
 #include "common.h"
 #include "task.h"
-#include <cstdlib>
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
-#include <utility>
 
 std::string_view
 request_name(__ptrace_request req)

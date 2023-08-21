@@ -100,7 +100,7 @@ StepOutResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-StepOut::execute(Tracer *tracer) noexcept
+StepOut::execute(Tracer *) noexcept
 {
   TODO("StepOut::execute");
 }
@@ -192,7 +192,8 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
                                       .addr = bp.address,
                                       .line = description.line,
                                       .col = description.column,
-                                      .source_path = description.source_file});
+                                      .source_path = description.source_file,
+                                      .error_message = std::nullopt});
       }
     }
   } else {
@@ -241,14 +242,13 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
 
   for (const auto &bp : target->bps.breakpoints) {
     if (bp.type().address) {
-      res->breakpoints.push_back(BP{
-          .id = bp.id,
-          .verified = true,
-          .addr = bp.address,
-          .line = std::nullopt,
-          .col = std::nullopt,
-          .source_path = std::nullopt,
-      });
+      res->breakpoints.push_back(BP{.id = bp.id,
+                                    .verified = true,
+                                    .addr = bp.address,
+                                    .line = std::nullopt,
+                                    .col = std::nullopt,
+                                    .source_path = std::nullopt,
+                                    .error_message = std::nullopt});
     }
   }
   ASSERT(res->breakpoints.size() == addresses.size(), "Response value size does not match result size");
@@ -284,14 +284,13 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
 
   for (const auto &bp : target->bps.breakpoints) {
     if (bp.type().function) {
-      res->breakpoints.push_back(BP{
-          .id = bp.id,
-          .verified = true,
-          .addr = bp.address,
-          .line = std::nullopt,
-          .col = std::nullopt,
-          .source_path = std::nullopt,
-      });
+      res->breakpoints.push_back(BP{.id = bp.id,
+                                    .verified = true,
+                                    .addr = bp.address,
+                                    .line = std::nullopt,
+                                    .col = std::nullopt,
+                                    .source_path = std::nullopt,
+                                    .error_message = std::nullopt});
     }
   }
   res->success = true;

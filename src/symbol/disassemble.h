@@ -6,6 +6,7 @@ struct ElfSection;
 class CompilationUnitFile;
 struct LineTableEntry;
 
+// SYMBOLS namespace
 namespace sym {
 struct Disassembly
 {

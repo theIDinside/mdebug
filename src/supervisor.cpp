@@ -10,16 +10,16 @@
 #include "notify_pipe.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
-#include "so_loading.h"
 #include "symbol/callstack.h"
-#include "symbol/cu.h"
 #include "symbol/cu_file.h"
+#include "symbol/dwarf/cu_processing.h"
+#include "symbol/dwarf/lnp.h"
 #include "symbol/dwarf_expressions.h"
 #include "symbol/dwarf_frameunwinder.h"
 #include "symbol/elf.h"
 #include "symbol/elf_symbols.h"
-#include "symbol/lnp.h"
 #include "symbol/objfile.h"
+#include "symbol/so_loading.h"
 #include "task.h"
 #include "tracer.h"
 #include "utils/logger.h"
@@ -84,7 +84,7 @@ struct ProbeInfo
 };
 
 static std::vector<ProbeInfo>
-parse_stapsdt_note(const ElfSection *section) noexcept
+parse_stapsdt_note(const sym::ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
   DwarfBinaryReader reader{section};
@@ -117,9 +117,9 @@ parse_stapsdt_note(const ElfSection *section) noexcept
 }
 
 static TPtr<r_debug_extended>
-get_rdebug_state(ObjectFile *obj_file)
+get_rdebug_state(sym::ObjectFile *obj_file)
 {
-  const auto rdebug_state = obj_file->get_min_obj_sym(LOADER_STATE);
+  const auto rdebug_state = obj_file->get_min_obj_sym(sym::LOADER_STATE);
   ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
   return rdebug_state->address.as<r_debug_extended>();
 }
@@ -130,16 +130,16 @@ TraceeController::install_loader_breakpoints() noexcept
   ASSERT(interpreter_base.has_value(),
          "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
   auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
-  auto tmp_objfile = mmap_objectfile(int_path);
+  auto tmp_objfile = sym::mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
-  Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
+  sym::Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
   tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
   ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
   tracee_r_debug = get_rdebug_state(tmp_objfile);
   DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
-  for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
+  for (const auto symbol_name : sym::LOADER_SYMBOL_NAMES) {
     if (tmp_objfile->minimal_fn_symbols.contains(symbol_name)) {
       const auto addr = tmp_objfile->minimal_fn_symbols[symbol_name].address;
       DLOG("mdb", "Setting ld breakpoint at {}", addr);
@@ -178,7 +178,7 @@ TraceeController::on_so_event() noexcept
     }
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
-      r_debug_extended rdebug_ext = read_type(next);
+      rdebug_ext = read_type(next);
     } else {
       break;
     }
@@ -186,10 +186,10 @@ TraceeController::on_so_event() noexcept
   DLOG("mdb", "[so event] new={}", new_sos);
 
   // do simple parsing first, then collect to do extensive processing in parallell
-  std::vector<SharedObject::SoId> sos;
+  std::vector<sym::SharedObject::SoId> sos;
   for (auto i = 0; i < new_sos; ++i) {
     auto so = shared_objects.get_so(new_so_ids[i]);
-    const auto so_of = mmap_objectfile(so->path);
+    const auto so_of = sym::mmap_objectfile(so->path);
     so->objfile = so_of;
     if (so_of) {
       register_object_file(so_of, false, so->elf_vma_addr_diff);
@@ -206,7 +206,7 @@ TraceeController::is_null_unwinder(sym::Unwinder *unwinder) const noexcept
 }
 
 void
-TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
+TraceeController::process_dwarf(std::vector<sym::SharedObject::SoId> sos) noexcept
 {
   // todo(simon): make this multi threaded, like the parsing of dwarf for the main executable.
   //  it's fairly simple to get a parallell version going - however, we should do that once the parsing is done
@@ -215,18 +215,18 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
     if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
-      so->objfile->line_table_headers = parse_lnp_headers(so->objfile->parsed_elf);
+      so->objfile->line_table_headers = sym::dw::parse_lnp_headers(so->objfile->parsed_elf);
       so->objfile->line_tables.reserve(so->objfile->line_table_headers.size());
       for (auto &lth : so->objfile->line_table_headers) {
         so->objfile->line_tables.push_back({});
         lth.set_linetable_storage(&so->objfile->line_tables.back());
       }
-      CompilationUnitBuilder cu_builder{so->objfile};
+      sym::dw::CompilationUnitBuilder cu_builder{so->objfile};
       auto total = cu_builder.build_cu_headers();
       const auto total_sz = total.size();
       for (const auto &hdr : total) {
         ASSERT(so->objfile != nullptr, "Objfile is null!");
-        auto proc = prepare_cu_processing(so->objfile, hdr, this);
+        auto proc = sym::prepare_cu_processing(so->objfile, hdr, this);
         auto die = proc->read_dies();
         proc->process_compile_unit_die(die.release());
       }
@@ -421,7 +421,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
   }
 
   std::vector<MinSymbol> matching_symbols;
-  for (ObjectFile *obj : object_files) {
+  for (auto *obj : object_files) {
     if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {
       matching_symbols.push_back(*s);
     }
@@ -450,7 +450,8 @@ TraceeController::set_source_breakpoints(std::string_view src,
   logging::get_logging()->log("mdb",
                               fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
   for (const auto obj : object_files) {
-    const auto f_it = find(obj->m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
+    const auto f_it =
+        find(obj->m_full_cu, [src](const sym::CompilationUnitFile &cu) { return cu.fullpath() == src; });
     if (f_it != std::end(obj->m_full_cu)) {
       for (auto &&desc : descs) {
         // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
@@ -725,11 +726,11 @@ TraceeController::is_running() const noexcept
 
 // Debug Symbols Related Logic
 void
-TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
+TraceeController::register_object_file(sym::ObjectFile *obj, bool is_main_executable,
                                        std::optional<AddrPtr> base_vma) noexcept
 {
   ASSERT(obj != nullptr, "Object file is null");
-  Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
+  sym::Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
   object_files.push_back(obj);
   if (obj->minimal_fn_symbols.empty()) {
     obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
@@ -857,12 +858,13 @@ TraceeController::read_string(TraceePointer<char> address) noexcept
 }
 
 void
-TraceeController::add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept
+TraceeController::add_file(sym::ObjectFile *obj, sym::CompilationUnitFile &&file) noexcept
 {
   {
     LockGuard guard{spin_lock};
     if (file.low_high_pc().is_valid()) {
-      constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
+      constexpr auto file_sorter_by_addresses = [](sym::CompilationUnitFile &f,
+                                                   const sym::AddressRange &range) noexcept {
         const auto faddr_rng = f.low_high_pc();
         return range.high > faddr_rng.low;
       };
@@ -1089,7 +1091,7 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
   return *task->call_stack;
 }
 
-ObjectFile *
+sym::ObjectFile *
 TraceeController::find_obj_by_pc(AddrPtr addr) const noexcept
 {
   for (const auto obj : object_files) {
@@ -1128,7 +1130,7 @@ TraceeController::get_source(std::string_view name) noexcept
   return std::nullopt;
 }
 
-const ElfSection *
+const sym::ElfSection *
 TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
   const auto obj = find_obj_by_pc(addr);
@@ -1139,7 +1141,7 @@ TraceeController::get_text_section(AddrPtr addr) const noexcept
   return nullptr;
 }
 
-const CompilationUnitFile *
+const sym::CompilationUnitFile *
 TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
 {
   const auto obj = find_obj_by_pc(address);

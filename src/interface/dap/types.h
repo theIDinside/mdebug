@@ -1,6 +1,5 @@
 #pragma once
 #include "../../common.h"
-#include "../../symbol/callstack.h"
 #include <fmt/format.h>
 #include <string_view>
 namespace ui::dap {

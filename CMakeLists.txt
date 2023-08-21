@@ -5,73 +5,86 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
+  # Main non-category application source files
   src/main.cpp
-  src/utils/logger.cpp
-  src/utils/logger.h
-  src/tracer.cpp
-  src/tracer.h
-  src/supervisor.cpp
-  src/supervisor.h
-  src/ptracestop_handlers.cpp
-  src/ptracestop_handlers.h
-  src/common.cpp
-  src/common.h
-  src/ptrace.cpp
-  src/ptrace.h
-  src/task.cpp
-  src/task.h
-  src/notify_pipe.cpp
-  src/notify_pipe.h
   src/awaiter.cpp
   src/awaiter.h
   src/breakpoint.cpp
   src/breakpoint.h
-  src/so_loading.cpp
-  src/so_loading.h
+  src/common.cpp
+  src/common.h
+  src/notify_pipe.cpp
+  src/notify_pipe.h
+  src/ptrace.cpp
+  src/ptrace.h
+  src/ptracestop_handlers.cpp
+  src/ptracestop_handlers.h
+  src/supervisor.cpp
+  src/supervisor.h
+  src/task.cpp
+  src/task.h
+  src/tracer.cpp
+  src/tracer.h
+  # Posix utils
   src/posix/argslist.cpp
   src/posix/argslist.h
+  # Symbol namespace
+  src/symbol/block.cpp
+  src/symbol/block.h
+  src/symbol/callstack.cpp
+  src/symbol/callstack.h
+  src/symbol/cu_file.cpp
+  src/symbol/cu_file.h
+  src/symbol/disassemble.cpp
+  src/symbol/disassemble.h
+  src/symbol/dwarf_expressions.cpp
+  src/symbol/dwarf_expressions.h
+  src/symbol/dwarf_frameunwinder.cpp
+  src/symbol/dwarf_frameunwinder.h
+  src/symbol/dwarf.cpp
+  src/symbol/dwarf.h
+  src/symbol/elf_symbols.cpp
+  src/symbol/elf_symbols.h
   src/symbol/elf.cpp
   src/symbol/elf.h
   src/symbol/objfile.cpp
   src/symbol/objfile.h
-  src/symbol/cu.cpp
-  src/symbol/cu.h
-  src/symbol/dwarf.cpp
-  src/symbol/dwarf.h
-  src/symbol/lnp.cpp
-  src/symbol/lnp.h
-  src/symbol/elf_symbols.cpp
-  src/symbol/elf_symbols.h
-  src/symbol/block.cpp
-  src/symbol/block.h
-  src/symbol/cu_file.cpp
-  src/symbol/cu_file.h
-  src/symbol/callstack.cpp
-  src/symbol/callstack.h
-  src/symbol/disassemble.cpp
-  src/symbol/disassemble.h
-  src/symbol/dwarf_frameunwinder.cpp
-  src/symbol/dwarf_frameunwinder.h
-  src/symbol/dwarf_expressions.cpp
-  src/symbol/dwarf_expressions.h
+  src/symbol/so_loading.cpp
+  src/symbol/so_loading.h
   src/symbol/type.cpp
   src/symbol/type.h
+  # Symbol-DWARF namespace
+  src/symbol/dwarf/cu_header.cpp
+  src/symbol/dwarf/cu_header.h
+  src/symbol/dwarf/cu_processing.cpp
+  src/symbol/dwarf/cu_processing.h
+  src/symbol/dwarf/die.cpp
+  src/symbol/dwarf/die.h
+  src/symbol/dwarf/dwarf_defs.h
+  src/symbol/dwarf/lnp.cpp
+  src/symbol/dwarf/lnp.h
+  # Arbitrary "library" utils
   src/lib/lockguard.h
-  src/interface/dap/interface.cpp
-  src/interface/dap/interface.h
+  # interface namespace
+  src/interface/pty.cpp
+  src/interface/pty.h
+  # interface-DAP namespace
   src/interface/dap/commands.cpp
   src/interface/dap/commands.h
   src/interface/dap/dap_defs.h
-  src/interface/dap/parse_buffer.cpp
-  src/interface/dap/parse_buffer.h
   src/interface/dap/events.cpp
   src/interface/dap/events.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
   src/interface/dap/types.cpp
   src/interface/dap/types.h
-  src/interface/pty.cpp
-  src/interface/pty.h
+  # utilities
   src/utils/base64.cpp
   src/utils/base64.h
+  src/utils/logger.cpp
+  src/utils/logger.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
@@ -138,6 +151,7 @@ gtest_discover_tests(base64_encoding)
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
+target_include_directories(mdb PRIVATE src)
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 
