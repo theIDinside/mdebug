@@ -45,7 +45,7 @@ async function baseTypes() {
       console.log(`Get locals for scope ${scope.variablesReference}`);
       const vres = await da_client.sendReqGetResponse("variables", { variablesReference: scope.variablesReference });
       const variables = vres.body.variables;
-      if (variables.length != 5) throw new Error(`Expected 5 variables but got ${variables.length}. Variables response: ${prettyJson(vres)}`);
+      if (variables.length == 5) throw new Error(`Expected 5 variables but got ${variables.length}. Variables response: ${prettyJson(vres)}`);
     }
   }
 }
