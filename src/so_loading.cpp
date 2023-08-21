@@ -1,8 +1,8 @@
 #include "so_loading.h"
 #include "common.h"
-#include "symbolication/block.h"
-#include "symbolication/elf.h"
-#include "symbolication/objfile.h"
+#include "symbol/block.h"
+#include "symbol/elf.h"
+#include "symbol/objfile.h"
 #include <filesystem>
 
 SharedObject::SharedObject(int so_id, TPtr<link_map> tloc, AddrPtr addr, Path &&path,

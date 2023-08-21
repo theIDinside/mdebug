@@ -2,8 +2,8 @@
 
 #include "breakpoint.h"
 #include "common.h"
-#include "symbolication/callstack.h"
-#include "symbolication/lnp.h"
+#include "symbol/callstack.h"
+#include "symbol/lnp.h"
 #include "task.h"
 #include <chrono>
 #include <vector>

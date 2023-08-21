@@ -30,32 +30,32 @@ set(MIDAS_SOURCES
   src/so_loading.h
   src/posix/argslist.cpp
   src/posix/argslist.h
-  src/symbolication/elf.cpp
-  src/symbolication/elf.h
-  src/symbolication/objfile.cpp
-  src/symbolication/objfile.h
-  src/symbolication/cu.cpp
-  src/symbolication/cu.h
-  src/symbolication/dwarf.cpp
-  src/symbolication/dwarf.h
-  src/symbolication/lnp.cpp
-  src/symbolication/lnp.h
-  src/symbolication/elf_symbols.cpp
-  src/symbolication/elf_symbols.h
-  src/symbolication/block.cpp
-  src/symbolication/block.h
-  src/symbolication/cu_file.cpp
-  src/symbolication/cu_file.h
-  src/symbolication/callstack.cpp
-  src/symbolication/callstack.h
-  src/symbolication/disassemble.cpp
-  src/symbolication/disassemble.h
-  src/symbolication/dwarf_frameunwinder.cpp
-  src/symbolication/dwarf_frameunwinder.h
-  src/symbolication/dwarf_expressions.cpp
-  src/symbolication/dwarf_expressions.h
-  src/symbolication/type.cpp
-  src/symbolication/type.h
+  src/symbol/elf.cpp
+  src/symbol/elf.h
+  src/symbol/objfile.cpp
+  src/symbol/objfile.h
+  src/symbol/cu.cpp
+  src/symbol/cu.h
+  src/symbol/dwarf.cpp
+  src/symbol/dwarf.h
+  src/symbol/lnp.cpp
+  src/symbol/lnp.h
+  src/symbol/elf_symbols.cpp
+  src/symbol/elf_symbols.h
+  src/symbol/block.cpp
+  src/symbol/block.h
+  src/symbol/cu_file.cpp
+  src/symbol/cu_file.h
+  src/symbol/callstack.cpp
+  src/symbol/callstack.h
+  src/symbol/disassemble.cpp
+  src/symbol/disassemble.h
+  src/symbol/dwarf_frameunwinder.cpp
+  src/symbol/dwarf_frameunwinder.h
+  src/symbol/dwarf_expressions.cpp
+  src/symbol/dwarf_expressions.h
+  src/symbol/type.cpp
+  src/symbol/type.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h

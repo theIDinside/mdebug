@@ -1,4 +1,4 @@
-#include "../../src/symbolication/elf.h"
+#include "../../src/symbol/elf.h"
 #include <cstdlib>
 
 int

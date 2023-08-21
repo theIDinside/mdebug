@@ -2,7 +2,7 @@
 
 #include "../../common.h"
 #include "../../so_loading.h"
-#include "../../symbolication/block.h"
+#include "../../symbol/block.h"
 #include "../ui_result.h"
 #include "dap_defs.h"
 #include "types.h"

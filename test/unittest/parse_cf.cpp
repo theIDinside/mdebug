@@ -1,5 +1,5 @@
-#include "../../src/symbolication/dwarf_frameunwinder.h"
-#include "../../src/symbolication/elf.h"
+#include "../../src/symbol/dwarf_frameunwinder.h"
+#include "../../src/symbol/elf.h"
 #include <algorithm>
 #include <array>
 #include <fcntl.h>

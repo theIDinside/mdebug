@@ -1,7 +1,7 @@
 #pragma once
 #include "common.h"
 #include "link.h"
-#include "symbolication/block.h"
+#include "symbol/block.h"
 #include <array>
 
 struct ObjectFile;

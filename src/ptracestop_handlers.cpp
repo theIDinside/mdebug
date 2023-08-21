@@ -2,7 +2,7 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "supervisor.h"
-#include "symbolication/lnp.h"
+#include "symbol/lnp.h"
 #include "task.h"
 #include "tracer.h"
 #include "utils/logger.h"

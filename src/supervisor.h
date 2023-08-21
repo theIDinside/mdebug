@@ -6,9 +6,9 @@
 #include "lib/spinlock.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
-#include "symbolication/callstack.h"
-#include "symbolication/cu_file.h"
-#include "symbolication/elf.h"
+#include "symbol/callstack.h"
+#include "symbol/cu_file.h"
+#include "symbol/elf.h"
 #include "task.h"
 #include "utils/static_vector.h"
 #include <algorithm>

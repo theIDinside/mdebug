@@ -3,7 +3,7 @@
 #include "../ui_result.h"
 // NOLINTNEXTLINE
 #include "../../breakpoint.h"
-#include "../../symbolication/disassemble.h"
+#include "../../symbol/disassemble.h"
 #include "nlohmann/json.hpp"
 #include "types.h"
 #include <tuple>
