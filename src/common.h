@@ -70,6 +70,13 @@ micros(TimeStamp a, TimeStamp b)
   return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count();
 }
 
+template <typename TimeStamp>
+constexpr u64
+millis(TimeStamp a, TimeStamp b)
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
+}
+
 #define MDB_PAGE_SIZE 4096
 
 template <typename T> using Option = std::optional<T>;

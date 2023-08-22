@@ -85,6 +85,8 @@ set(MIDAS_SOURCES
   src/utils/base64.h
   src/utils/logger.cpp
   src/utils/logger.h
+  src/utils/timer.cpp
+  src/utils/timer.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
