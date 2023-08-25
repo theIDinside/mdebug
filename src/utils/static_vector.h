@@ -5,6 +5,104 @@
 
 namespace utils {
 
+// Not a complete interface yet - building only the currently needed parts as we go along.
+template <typename T, size_t Size> class StackVector
+{
+public:
+  StackVector() noexcept : m_size(0) {}
+
+  constexpr auto
+  front() const noexcept
+  {
+    ASSERT(m_size > 0, "No elements in StackVector");
+    return reference(0);
+  }
+
+  constexpr auto
+  back() const noexcept
+  {
+    return reference(m_size - 1);
+  }
+
+  template <typename... Args>
+  constexpr void
+  push_back(Args &&...args) noexcept
+  {
+    ASSERT(m_size < capacity(), "StackVector reached max capacity.");
+    new (m_storage) T{std::forward<Args...>(args...)};
+    m_size++;
+  }
+
+  constexpr void
+  push_back(const T &t) noexcept
+  {
+    ASSERT(m_size < capacity(), "StackVector reached max capacity.");
+    new (m_storage) T{t};
+    m_size++;
+  }
+
+  constexpr void
+  push_back(T &&t) noexcept
+  {
+    ASSERT(m_size < capacity(), "StackVector reached max capacity.");
+    new (m_storage) T{std::move(t)};
+    m_size++;
+  }
+
+  constexpr T &
+  pop_back() noexcept
+  {
+    const auto last = m_size - 1;
+    --m_size;
+    return reference(last);
+  }
+
+  constexpr auto
+  capacity() const noexcept
+  {
+    return Size;
+  }
+
+  constexpr auto
+  size() const noexcept
+  {
+    return m_size;
+  }
+
+  constexpr T *
+  begin() noexcept
+  {
+    if (m_size == 0)
+      return nullptr;
+    return &reference(0);
+  }
+
+  constexpr T *
+  end() noexcept
+  {
+    if (m_size == 0)
+      return nullptr;
+    return (&reference(m_size - 1)) + 1;
+  }
+
+  constexpr std::span<T>
+  span() const noexcept
+  {
+    return std::span<T>{&reference(0), m_size};
+  }
+
+private:
+  constexpr T &
+  reference(u64 index) const noexcept
+  {
+    ASSERT(index < m_size, "Index outside range of contained elements");
+    return *(T *)m_storage;
+  }
+
+  std::byte m_storage[sizeof(T) * Size];
+  size_t m_size;
+};
+
 // Minimum allocation of MDB_PAGE_SIZE
 // Meant to hold "trivial" types.
 template <typename T> class StaticVector
