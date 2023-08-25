@@ -56,8 +56,8 @@ public:
   void parse_min_symbols(AddrPtr base_vma) const noexcept;
   void set_relocation(AddrPtr vma) noexcept;
   // Relocates `addr`. Note, to get the `base relocation` address, one can pass `nullptr` to this method to get it.
-  AddrPtr relocate_addr(AddrPtr addr) noexcept;
-  AddrPtr obj_addr(AddrPtr addr) noexcept;
+  AddrPtr relocate_addr(AddrPtr addr) const noexcept;
+  AddrPtr obj_addr(AddrPtr addr) const noexcept;
 
 private:
   AddrPtr reloc;

@@ -48,7 +48,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
   sym::dw::CompilationUnitBuilder cu_builder{obj_file};
-  obj_file->line_table_headers = sym::dw::parse_lnp_headers(obj_file->parsed_elf);
+  obj_file->line_table_headers = sym::dw::parse_lnp_headers(obj_file->elf());
   obj_file->line_tables.reserve(obj_file->line_table_headers.size());
   for (auto &lth : obj_file->line_table_headers) {
     obj_file->line_tables.push_back({});

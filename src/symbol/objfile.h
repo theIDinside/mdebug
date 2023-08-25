@@ -6,6 +6,7 @@
 #include "elf_symbols.h"
 #include <string_view>
 #include <sys/mman.h>
+#include <unordered_set>
 
 // SYMBOLS namespace
 namespace sym {
@@ -16,6 +17,20 @@ class NonExecutableCompilationUnitFile;
 class Elf;
 struct ElfSection;
 
+class IndexedNames
+{
+public:
+  IndexedNames() noexcept;
+  void add_synchronized(std::string_view name, AddrPtr start_addr) noexcept;
+  // N.B. all reads are *non-synchronoized* - because we believe that writing to this index will only happen in
+  // stages where MDB is not about to read from it. this is just a very loose assumption at this point.
+  std::optional<std::vector<AddrPtr>> indexed_names(std::string_view name) const noexcept;
+
+private:
+  std::unordered_map<std::string_view, std::vector<AddrPtr>> m_fn_name_index;
+  SpinLock add_lock;
+};
+
 /**
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
  * to outlive them all, so it's safe to take raw pointers into `loaded_binary`.
@@ -23,11 +38,11 @@ struct ElfSection;
 
 struct ObjectFile
 {
+  friend class Elf;
   Path path;
   u64 size;
   const u8 *loaded_binary;
-  Elf *parsed_elf = nullptr;
-  bool min_syms = false;
+
   std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
   std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
 
@@ -41,6 +56,9 @@ struct ObjectFile
   AddressRange address_bounds;
   std::vector<CompilationUnitFile> m_full_cu;
   std::vector<NonExecutableCompilationUnitFile> m_partial_units;
+
+  // Names indexed to an address (or multiple addresses)
+  IndexedNames m_indexed_names;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
@@ -71,9 +89,14 @@ struct ObjectFile
   std::optional<MinSymbol> get_min_obj_sym(std::string_view name) noexcept;
 
   Path interpreter() const noexcept;
-  bool found_min_syms() const noexcept;
   dw::LineHeader *line_table_header(u64 offset) noexcept;
   SearchResult<CompilationUnitFile> get_cu_iterable(AddrPtr addr) const noexcept;
+  inline const Elf *elf() const noexcept;
+  // For getting the Elf data that we want to change
+  Elf *get_elf() noexcept;
+
+private:
+  Elf *parsed_elf = nullptr;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

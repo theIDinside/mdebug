@@ -208,7 +208,7 @@ private:
   build_cu_headers_impl() noexcept
   {
 
-    const auto dbg_info = obj_file->parsed_elf->debug_info;
+    const auto dbg_info = obj_file->elf()->debug_info;
     std::vector<CompileUnitHeader> result{};
     auto it = dbg_info->begin();
     auto end = dbg_info->end();

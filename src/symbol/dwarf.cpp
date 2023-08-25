@@ -12,7 +12,7 @@ DEBUG_SANITIZE_DWARF_NAME(u16)
 std::unique_ptr<dw::CUProcessor>
 prepare_cu_processing(ObjectFile *obj_file, const dw::CompileUnitHeader &header, TraceeController *target)
 {
-  const auto abbrev_sec = obj_file->parsed_elf->debug_abbrev;
+  const auto abbrev_sec = obj_file->elf()->debug_abbrev;
 
   dw::AbbreviationInfo::Table result{};
 

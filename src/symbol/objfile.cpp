@@ -6,17 +6,36 @@
 // SYMBOLS namespace
 namespace sym {
 
+IndexedNames::IndexedNames() noexcept : m_fn_name_index(), add_lock() {}
+
+void
+IndexedNames::add_synchronized(std::string_view name, AddrPtr start_addr) noexcept
+{
+  LockGuard guard{add_lock};
+  auto &addresses = m_fn_name_index[name];
+  addresses.push_back(start_addr);
+}
+// N.B. all reads are *non-synchronoized* - because we believe that writing to this index will only happen in
+// stages where MDB is not about to read from it. this is just a very loose assumption at this point.
+std::optional<std::vector<AddrPtr>>
+IndexedNames::indexed_names(std::string_view name) const noexcept
+{
+  if (m_fn_name_index.contains(name))
+    return m_fn_name_index.at(name);
+  return std::nullopt;
+}
+
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
       types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
-      m_partial_units()
+      m_partial_units(), m_indexed_names(), parsed_elf(nullptr)
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
 
 ObjectFile::~ObjectFile() noexcept
 {
-  delete parsed_elf;
+  delete elf();
   munmap((void *)loaded_binary, size);
 }
 
@@ -33,7 +52,7 @@ ObjectFile::get_offset(u8 *ptr) const noexcept
 AddrPtr
 ObjectFile::text_section_offset() const noexcept
 {
-  return parsed_elf->get_section(".text")->address;
+  return elf()->get_section(".text")->address;
 }
 
 std::optional<MinSymbol>
@@ -59,14 +78,8 @@ ObjectFile::get_min_obj_sym(std::string_view name) noexcept
 Path
 ObjectFile::interpreter() const noexcept
 {
-  const auto path = interpreter_path(parsed_elf->get_section(".interp"));
+  const auto path = interpreter_path(elf()->get_section(".interp"));
   return path;
-}
-
-bool
-ObjectFile::found_min_syms() const noexcept
-{
-  return min_syms;
 }
 
 dw::LineHeader *
@@ -102,5 +115,17 @@ mmap_objectfile(const Path &path) noexcept
   const auto addr = mmap_file<u8>(fd, fd.file_size(), true);
   auto objfile = new ObjectFile{path, fd.file_size(), addr};
   return objfile;
+}
+
+inline const Elf *
+ObjectFile::elf() const noexcept
+{
+  return parsed_elf;
+}
+
+Elf *
+ObjectFile::get_elf() noexcept
+{
+  return parsed_elf;
 }
 }; // namespace sym

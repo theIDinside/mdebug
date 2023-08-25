@@ -63,7 +63,7 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
   const auto objfile = target->find_obj_by_pc(addr);
-  const auto text = objfile->parsed_elf->get_section(".text");
+  const auto text = objfile->elf()->get_section(".text");
   ZydisDisassembledInstruction instruction;
 
   // This hurts my soul and is so hacky.

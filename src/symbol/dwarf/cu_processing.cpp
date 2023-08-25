@@ -20,9 +20,9 @@ std::vector<CompileUnitHeader>
 CompilationUnitBuilder::build_cu_headers() noexcept
 {
   VERIFY(
-      obj_file->parsed_elf->debug_info != nullptr,
+      obj_file->elf()->debug_info != nullptr,
       "Main executable must have dwarf debug information provided. This is an absolute constraint made by MDB.");
-  auto it = obj_file->parsed_elf->debug_info->begin();
+  auto it = obj_file->elf()->debug_info->begin();
   auto determine_dwarf = obj_file->get_at<DetermineDwarf>(it);
   if (determine_dwarf->is_32()) {
     if (determine_dwarf->version() == 4) {
@@ -59,7 +59,7 @@ read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation
                           abbr.name};
   }
 
-  const auto elf = reader.obj_file->parsed_elf;
+  const auto elf = reader.obj_file->elf();
 
   switch (abbr.form) {
   case AttributeForm::DW_FORM_ref_addr:
@@ -286,7 +286,7 @@ CUProcessor::get_lnp_header() const noexcept
 }
 
 static void
-add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) noexcept
+add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, const Elf *elf) noexcept
 {
   for (const auto &child : root_die->children) {
     if (child->subprogram_with_addresses) {
@@ -329,6 +329,7 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, Elf *elf) n
         }
         DLOG("dwarf", "[die]: offset=0x{:x}, fn name='{}', child dies={}", root_die->sec_offset, fn.name,
              child->children.size());
+        elf->obj_file->m_indexed_names.add_synchronized(fn.name, fn.start);
         file.add_function(std::move(fn));
       }
     }
@@ -352,7 +353,7 @@ CUProcessor::determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept
 
   if (const auto r = die->get_attribute(Attribute::DW_AT_ranges); r) {
     const u64 offset = r.value().address();
-    const auto elf = obj_file->parsed_elf;
+    const auto elf = obj_file->elf();
     if (header.version == DwarfVersion::D4) {
       DwarfBinaryReader reader{elf->debug_ranges, offset};
       BoundsBuilder builder{};
@@ -394,7 +395,7 @@ void
 CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 {
   LineTable ltes;
-  const auto elf = obj_file->parsed_elf;
+  const auto elf = obj_file->elf();
 
   CompilationUnitFile f{cu_die};
   if (header.addr_size == 4) {
@@ -463,7 +464,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 AddrPtr
 CUProcessor::reloc_base() const noexcept
 {
-  return obj_file->parsed_elf->relocate_addr(nullptr);
+  return obj_file->elf()->relocate_addr(nullptr);
 }
 
 CompileUnitReader::CompileUnitReader(CompileUnitHeader *header, const ObjectFile *obj_file) noexcept
@@ -572,9 +573,9 @@ CompileUnitReader::read_bytes(u8 bytes) noexcept
 UnrelocatedTraceePointer
 CompileUnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 {
-  ASSERT(obj_file->parsed_elf->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
+  ASSERT(obj_file->elf()->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
   const auto addr_table_offset = addr_table_base.value_or(0) + address_index * header->format;
-  const auto ptr = (obj_file->parsed_elf->debug_addr->m_section_ptr + addr_table_offset);
+  const auto ptr = (obj_file->elf()->debug_addr->m_section_ptr + addr_table_offset);
   if (header->addr_size == 4) {
     const auto value = *(u32 *)ptr;
     return UnrelocatedTraceePointer{value};
@@ -587,27 +588,27 @@ CompileUnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 std::string_view
 CompileUnitReader::read_by_idx_from_str_table(u64 address_index) const noexcept
 {
-  ASSERT(obj_file->parsed_elf->debug_str_offsets->m_section_ptr != nullptr,
+  ASSERT(obj_file->elf()->debug_str_offsets->m_section_ptr != nullptr,
          ".debug_str_offsets expected not to be nullptr");
   const auto str_table_offset = str_offsets_base.value_or(0) + address_index * header->format;
-  const auto ptr = (obj_file->parsed_elf->debug_str_offsets->m_section_ptr + str_table_offset);
+  const auto ptr = (obj_file->elf()->debug_str_offsets->m_section_ptr + str_table_offset);
   if (header->addr_size == 4) {
     const auto value = *(u32 *)ptr;
-    return std::string_view{(const char *)(obj_file->parsed_elf->debug_str->m_section_ptr + value)};
+    return std::string_view{(const char *)(obj_file->elf()->debug_str->m_section_ptr + value)};
   } else {
     const auto value = *(u64 *)ptr;
-    return std::string_view{(const char *)(obj_file->parsed_elf->debug_str->m_section_ptr + value)};
+    return std::string_view{(const char *)(obj_file->elf()->debug_str->m_section_ptr + value)};
   }
 }
 
 u64
 CompileUnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
 {
-  ASSERT(obj_file->parsed_elf->debug_rnglists->m_section_ptr != nullptr,
+  ASSERT(obj_file->elf()->debug_rnglists->m_section_ptr != nullptr,
          ".debug_str_offsets expected not to be nullptr");
 
   const auto rnglist_offset = rng_list_base.value_or(0) + range_index * header->format;
-  const auto ptr = (obj_file->parsed_elf->debug_rnglists->m_section_ptr + rnglist_offset);
+  const auto ptr = (obj_file->elf()->debug_rnglists->m_section_ptr + rnglist_offset);
   if (header->addr_size == 4) {
     const auto value = *(u32 *)ptr;
     return value;
@@ -620,11 +621,11 @@ CompileUnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
 u64
 CompileUnitReader::read_loclist_index(u64 range_index) const noexcept
 {
-  ASSERT(obj_file->parsed_elf->debug_loclist->m_section_ptr != nullptr,
+  ASSERT(obj_file->elf()->debug_loclist->m_section_ptr != nullptr,
          ".debug_str_offsets expected not to be nullptr");
 
   const auto rnglist_offset = loc_list_base.value_or(0) + range_index * header->format;
-  const auto ptr = (obj_file->parsed_elf->debug_loclist->m_section_ptr + rnglist_offset);
+  const auto ptr = (obj_file->elf()->debug_loclist->m_section_ptr + rnglist_offset);
   if (header->addr_size == 4) {
     const auto value = *(u32 *)ptr;
     return value;

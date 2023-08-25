@@ -180,7 +180,6 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
   std::span<ElfSection> sects = sections();
   auto strtable = std::ranges::find_if(sects, [](ElfSection &sect) { return sect.get_name() == ".strtab"; });
   if (strtable == sects.end()) {
-    obj_file->min_syms = false;
     return;
   }
   DLOG("mdb", "{} min symbols, base_vma={}", obj_file->path.c_str(), base_vma);
@@ -204,7 +203,6 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
       }
     }
   }
-  obj_file->min_syms = true;
 }
 
 void
@@ -214,13 +212,13 @@ Elf::set_relocation(AddrPtr vma) noexcept
 }
 
 AddrPtr
-Elf::relocate_addr(AddrPtr addr) noexcept
+Elf::relocate_addr(AddrPtr addr) const noexcept
 {
   return addr + reloc;
 }
 
 AddrPtr
-Elf::obj_addr(AddrPtr addr) noexcept
+Elf::obj_addr(AddrPtr addr) const noexcept
 {
   ASSERT(addr > reloc, "Address {} is below reloc base {}", addr, reloc);
   return addr - reloc;

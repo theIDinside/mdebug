@@ -129,12 +129,12 @@ TraceeController::install_loader_breakpoints() noexcept
 {
   ASSERT(interpreter_base.has_value(),
          "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
-  auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
+  auto int_path = interpreter_path(object_files.front()->elf()->get_section(".interp"));
   auto tmp_objfile = sym::mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
   sym::Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
-  tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
-  const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
+  tmp_objfile->elf()->parse_min_symbols(AddrPtr{interpreter_base.value()});
+  const auto system_tap_sec = tmp_objfile->elf()->get_section(".note.stapsdt");
   ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
   tracee_r_debug = get_rdebug_state(tmp_objfile);
@@ -214,8 +214,8 @@ TraceeController::process_dwarf(std::vector<sym::SharedObject::SoId> sos) noexce
   //  it.
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
-    if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
-      so->objfile->line_table_headers = sym::dw::parse_lnp_headers(so->objfile->parsed_elf);
+    if (so->objfile != nullptr && so->objfile->elf()->get_section(".debug_info") != nullptr) {
+      so->objfile->line_table_headers = sym::dw::parse_lnp_headers(so->objfile->elf());
       so->objfile->line_tables.reserve(so->objfile->line_table_headers.size());
       for (auto &lth : so->objfile->line_table_headers) {
         so->objfile->line_tables.push_back({});
@@ -419,24 +419,29 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     if (name == function_name)
       return;
   }
+  utils::StackVector<AddrPtr, 64> addrs{};
 
-  std::vector<MinSymbol> matching_symbols;
   for (auto *obj : object_files) {
+    if (auto res = obj->m_indexed_names.indexed_names(function_name); res) {
+      const auto r = res.value();
+      for (auto &&v : res.value())
+        addrs.push_back(v);
+    }
     if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {
-      matching_symbols.push_back(*s);
+      addrs.push_back(s->address);
     }
   }
-  DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
-  for (const auto &sym : matching_symbols) {
-    DLOG("mdb", "Setting breakpoint @ {}", sym.address);
+
+  DLOG("mdb", "[bkpt] set fnbp={}, found={}", function_name, addrs.size());
+  for (const auto &addr : addrs) {
     constexpr u64 bkpt = 0xcc;
-    if (bps.contains(sym.address)) {
-      auto bp = bps.get(sym.address);
+    if (bps.contains(addr)) {
+      auto bp = bps.get(addr);
       bp->bp_type.add_setting({.function = true});
       bps.fn_breakpoint_names[bp->id] = function_name;
     } else {
-      auto ins_byte = write_bp_byte(sym.address);
-      bps.insert(sym.address, ins_byte, BpType{.function = true});
+      auto ins_byte = write_bp_byte(addr);
+      bps.insert(addr, ins_byte, BpType{.function = true});
       auto &bp = bps.breakpoints.back();
       bps.fn_breakpoint_names[bp.id] = function_name;
     }
@@ -733,13 +738,13 @@ TraceeController::register_object_file(sym::ObjectFile *obj, bool is_main_execut
   sym::Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
   object_files.push_back(obj);
   if (obj->minimal_fn_symbols.empty()) {
-    obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
+    obj->elf()->parse_min_symbols(base_vma.value_or(0));
   }
   if (is_main_executable)
     main_executable = obj;
 
-  auto unwinder = sym::parse_eh(obj, obj->parsed_elf->get_section(".eh_frame"), base_vma.value_or(0));
-  const auto section = obj->parsed_elf->get_section(".debug_frame");
+  auto unwinder = sym::parse_eh(obj, obj->elf()->get_section(".eh_frame"), base_vma.value_or(0));
+  const auto section = obj->elf()->get_section(".debug_frame");
   if (section) {
     DLOG("mdb", ".debug_frame section found; parsing DWARF CFI section");
     sym::parse_dwarf_eh(unwinder, section, -1);
@@ -1135,7 +1140,7 @@ TraceeController::get_text_section(AddrPtr addr) const noexcept
 {
   const auto obj = find_obj_by_pc(addr);
   if (obj) {
-    const auto text = obj->parsed_elf->get_section(".text");
+    const auto text = obj->elf()->get_section(".text");
     return text;
   }
   return nullptr;
