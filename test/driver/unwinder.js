@@ -11,6 +11,11 @@ const {
   runTestSuite
 } = require("./client")(__filename);
 
+async function setFnBp(dbg, fn) {
+  const bps = fn.map(name => ({ name: name }))
+  return dbg.sendReqGetResponse("setFunctionBreakpoints", { breakpoints: bps });
+}
+
 async function unwindFromSharedObject() {
   const da_client = new DAClient(MDB_PATH, []);
 
@@ -32,16 +37,11 @@ async function unwindFromSharedObject() {
     });
   }
 
-  async function setFnBp(fn) {
-    const bps = fn.map(name => ({ name: name }))
-    return da_client.sendReqGetResponse("setFunctionBreakpoints", { breakpoints: bps });
-  }
-
   let modules_event_promise = da_client.prepareWaitForEventN("module", 6, seconds(1));
   await da_client.launchToMain(buildDirFile("stupid_shared"), seconds(1));
   const res = await modules_event_promise;
 
-  const bp_res = await setFnBp(["convert_kilometers_to_miles"]);
+  const bp_res = await setFnBp(da_client, ["convert_kilometers_to_miles"]);
   console.log(`bpres ${JSON.stringify(bp_res)}`);
 
   if (res.length < sharedObjectsCount) {
@@ -84,7 +84,7 @@ function verifyFrameIs(frame, name) {
 async function insidePrologueTest() {
   const da_client = new DAClient(MDB_PATH, []);
   await da_client.launchToMain(buildDirFile("stackframes"));
-  await da_client.setInsBreakpoint(INSIDE_BAR_PROLOGUE);
+  const bp_res = await setFnBp(da_client, ["bar"]);
   await da_client.contNextStop();
   const frames = await da_client
     .stackTrace()

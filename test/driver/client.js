@@ -331,7 +331,7 @@ class DAClient {
 
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = 1000) {
-    let stopped_promise = this.prepareWaitForEvent("stopped");
+    let stopped_promise = this.prepareWaitForEventN("stopped", 1, 3000);
     await this.sendReqGetResponse("initialize", {}, timeout)
       .then((response) => {
         checkResponse(response, "initialize", true);
@@ -381,7 +381,7 @@ class DAClient {
       const thrs = await this.threads();
       threadId = thrs[0].id;
     }
-    let stopped_promise = this.prepareWaitForEvent("stopped");
+    let stopped_promise = this.prepareWaitForEventN("stopped", 1, 1000);
     await this.sendReqGetResponse("continue", { threadId: threadId });
     return await stopped_promise;
   }
