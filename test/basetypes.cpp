@@ -12,6 +12,7 @@ structured_byvalue(Structure s)
   int add = 10;
   auto clone = s;
   clone.count += add; // BYVAL_BP
+  const auto stamped = clone;
 }
 
 void
