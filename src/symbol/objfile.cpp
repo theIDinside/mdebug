@@ -117,12 +117,6 @@ mmap_objectfile(const Path &path) noexcept
   return objfile;
 }
 
-inline const Elf *
-ObjectFile::elf() const noexcept
-{
-  return parsed_elf;
-}
-
 Elf *
 ObjectFile::get_elf() noexcept
 {

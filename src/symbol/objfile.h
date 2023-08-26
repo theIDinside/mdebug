@@ -91,7 +91,12 @@ struct ObjectFile
   Path interpreter() const noexcept;
   dw::LineHeader *line_table_header(u64 offset) noexcept;
   SearchResult<CompilationUnitFile> get_cu_iterable(AddrPtr addr) const noexcept;
-  inline const Elf *elf() const noexcept;
+
+  inline const Elf *
+  elf() const noexcept
+  {
+    return parsed_elf;
+  }
   // For getting the Elf data that we want to change
   Elf *get_elf() noexcept;
 
