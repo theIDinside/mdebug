@@ -452,15 +452,13 @@ void
 TraceeController::set_source_breakpoints(std::string_view src,
                                          std::vector<SourceBreakpointDescriptor> &&descs) noexcept
 {
-  logging::get_logging()->log("mdb",
-                              fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
   for (const auto obj : object_files) {
     const auto f_it =
         find(obj->m_full_cu, [src](const sym::CompilationUnitFile &cu) { return cu.fullpath() == src; });
     if (f_it != std::end(obj->m_full_cu)) {
+      const auto &lt = f_it->line_table();
       for (auto &&desc : descs) {
         // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
-        const auto &lt = f_it->line_table();
         for (const auto &lte : lt) {
           if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
             if (!bps.contains(lte.pc)) {
