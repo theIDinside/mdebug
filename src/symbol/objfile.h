@@ -17,20 +17,6 @@ class NonExecutableCompilationUnitFile;
 class Elf;
 struct ElfSection;
 
-class IndexedNames
-{
-public:
-  IndexedNames() noexcept;
-  void add_synchronized(std::string_view name, AddrPtr start_addr) noexcept;
-  // N.B. all reads are *non-synchronoized* - because we believe that writing to this index will only happen in
-  // stages where MDB is not about to read from it. this is just a very loose assumption at this point.
-  std::optional<std::vector<AddrPtr>> indexed_names(std::string_view name) const noexcept;
-
-private:
-  std::unordered_map<std::string_view, std::vector<AddrPtr>> m_fn_name_index;
-  SpinLock add_lock;
-};
-
 /**
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
  * to outlive them all, so it's safe to take raw pointers into `loaded_binary`.
@@ -56,9 +42,6 @@ struct ObjectFile
   AddressRange address_bounds;
   std::vector<CompilationUnitFile> m_full_cu;
   std::vector<NonExecutableCompilationUnitFile> m_partial_units;
-
-  // Names indexed to an address (or multiple addresses)
-  IndexedNames m_indexed_names;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;

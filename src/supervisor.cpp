@@ -422,11 +422,6 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
   utils::StackVector<AddrPtr, 64> addrs{};
 
   for (auto *obj : object_files) {
-    if (auto res = obj->m_indexed_names.indexed_names(function_name); res) {
-      const auto r = res.value();
-      for (auto &&v : res.value())
-        addrs.push_back(v);
-    }
     if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {
       addrs.push_back(s->address);
     }

@@ -6,29 +6,10 @@
 // SYMBOLS namespace
 namespace sym {
 
-IndexedNames::IndexedNames() noexcept : m_fn_name_index(), add_lock() {}
-
-void
-IndexedNames::add_synchronized(std::string_view name, AddrPtr start_addr) noexcept
-{
-  LockGuard guard{add_lock};
-  auto &addresses = m_fn_name_index[name];
-  addresses.push_back(start_addr);
-}
-// N.B. all reads are *non-synchronoized* - because we believe that writing to this index will only happen in
-// stages where MDB is not about to read from it. this is just a very loose assumption at this point.
-std::optional<std::vector<AddrPtr>>
-IndexedNames::indexed_names(std::string_view name) const noexcept
-{
-  if (m_fn_name_index.contains(name))
-    return m_fn_name_index.at(name);
-  return std::nullopt;
-}
-
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
       types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
-      m_partial_units(), m_indexed_names(), parsed_elf(nullptr)
+      m_partial_units(), parsed_elf(nullptr)
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }

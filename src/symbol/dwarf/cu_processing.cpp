@@ -329,7 +329,6 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, const Elf *
         }
         DLOG("dwarf", "[die]: offset=0x{:x}, fn name='{}', child dies={}", root_die->sec_offset, fn.name,
              child->children.size());
-        elf->obj_file->m_indexed_names.add_synchronized(fn.name, fn.start);
         file.add_function(std::move(fn));
       }
     }
