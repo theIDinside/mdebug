@@ -108,7 +108,6 @@ parse_stapsdt_note(const sym::ElfSection *section) noexcept
     if (reader.bytes_read() % 4 != 0)
       reader.skip(4 - reader.bytes_read() % 4);
     if (required_probes.contains(probe_name)) {
-      DLOG("mdb", "adding {} probe at {}", probe_name, ptr);
       probes.push_back(ProbeInfo{.address = ptr, .name = std::string{probe_name}});
       required_probes.erase(std::find(required_probes.begin(), required_probes.end(), probe_name));
     }
@@ -212,6 +211,38 @@ TraceeController::process_dwarf(std::vector<sym::SharedObject::SoId> sos) noexce
   //  it's fairly simple to get a parallell version going - however, we should do that once the parsing is done
   //  because when/if parsing fails and aborts, with multi threading we might not have the proper time to log
   //  it.
+  for (auto so_id : sos) {
+    const auto so = shared_objects.get_so(so_id);
+    if (so->objfile != nullptr && so->objfile->elf()->get_section(".debug_info") != nullptr) {
+      so->objfile->line_table_headers = sym::dw::parse_lnp_headers(so->objfile->elf());
+      so->objfile->line_tables.reserve(so->objfile->line_table_headers.size());
+      for (auto &lth : so->objfile->line_table_headers) {
+        so->objfile->line_tables.push_back({});
+        lth.set_linetable_storage(&so->objfile->line_tables.back());
+      }
+      sym::dw::CompilationUnitBuilder cu_builder{so->objfile};
+      auto total = cu_builder.build_cu_headers();
+      const auto total_sz = total.size();
+      for (const auto &hdr : total) {
+        ASSERT(so->objfile != nullptr, "Objfile is null!");
+        auto proc = sym::prepare_cu_processing(so->objfile, hdr, this);
+        auto die = proc->read_dies();
+        proc->process_compile_unit_die(die.release());
+      }
+    }
+    Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
+  }
+}
+
+void
+TraceeController::process_dwarf2(std::vector<sym::SharedObject::SoId> sos) noexcept
+{
+  // todo(simon): make this multi threaded, like the parsing of dwarf for the main executable.
+  //  it's fairly simple to get a parallell version going - however, we should do that once the parsing is done
+  //  because when/if parsing fails and aborts, with multi threading we might not have the proper time to log
+  //  it.
+
+  utils::TaskGroup batch{"so-loading"};
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
     if (so->objfile != nullptr && so->objfile->elf()->get_section(".debug_info") != nullptr) {
@@ -419,7 +450,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     if (name == function_name)
       return;
   }
-  utils::StackVector<AddrPtr, 64> addrs{};
+  utils::InlineVector<AddrPtr, 64> addrs{};
 
   for (auto *obj : object_files) {
     if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {

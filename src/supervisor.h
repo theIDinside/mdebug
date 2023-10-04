@@ -100,6 +100,7 @@ public:
   // N.B(simon): process shared object's in parallell, determined by some heuristic (like for instance file size
   // could determine how much thread resources are subscribed to parsing a shared object.)
   void process_dwarf(std::vector<sym::SharedObject::SoId> sos) noexcept;
+  void process_dwarf2(std::vector<sym::SharedObject::SoId> sos) noexcept;
   /** Return the open mem fd */
   ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;

@@ -1,7 +1,9 @@
 #include "objfile.h"
 #include "elf_symbols.h"
 #include "so_loading.h"
+#include "symbol/dwarf2/unit.h"
 #include "type.h"
+#include <algorithm>
 
 // SYMBOLS namespace
 namespace sym {
@@ -9,7 +11,7 @@ namespace sym {
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
       types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
-      m_partial_units(), parsed_elf(nullptr)
+      m_partial_units(), parsed_elf(nullptr), unit_data_lock(), m_name_index()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -102,5 +104,51 @@ Elf *
 ObjectFile::get_elf() noexcept
 {
   return parsed_elf;
+}
+
+std::vector<dw2::DwarfUnitData *> &
+ObjectFile::get_cus() noexcept
+{
+  if (!dwarf_units.empty())
+    return dwarf_units;
+
+  auto new_headers = sym::dw2::read_cu_headers(this);
+  // create TaskGroup
+  utils::TaskGroup tg("dwarf unit data");
+  auto work = sym::dw2::DwarfUnitDataTask::create_work(this, new_headers);
+  for (auto w : work) {
+    tg.add_task(w);
+  }
+  tg.schedule_tasks().wait();
+  return dwarf_units;
+}
+
+void
+ObjectFile::set_unit_data(const std::vector<dw2::DwarfUnitData *> &unit_data) noexcept
+{
+  DLOG("mdb", "Caching {} unit datas", unit_data.size());
+  std::lock_guard lock(unit_data_lock);
+  auto first_id = unit_data.front()->get_id();
+  const auto it = std::lower_bound(dwarf_units.begin(), dwarf_units.end(), first_id,
+                                   [](const dw2::DwarfUnitData *ptr, u64 id) { return ptr->get_id() < id; });
+  dwarf_units.insert(it, unit_data.begin(), unit_data.end());
+}
+
+dw2::DwarfUnitData *
+ObjectFile::get_containing_cu(dw2::DwarfId sec_offset) noexcept
+{
+  const auto it = std::lower_bound(dwarf_units.begin(), dwarf_units.end(), sec_offset.get_id(),
+                                   [](const dw2::DwarfUnitData *cu, u64 id) { return cu->get_id() < id; });
+  if (it == std::end(dwarf_units)) {
+    DLOG("mdb", "did not find CU containing 0x{:x}", sec_offset.get_id());
+    return nullptr;
+  }
+  return *it;
+}
+
+sym::dw2::NameIndex &
+ObjectFile::get_name_index() noexcept
+{
+  return m_name_index;
 }
 }; // namespace sym

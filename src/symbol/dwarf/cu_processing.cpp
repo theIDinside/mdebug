@@ -51,7 +51,7 @@ CUProcessor::CUProcessor(ObjectFile *obj_file, CompileUnitHeader header, Abbrevi
 static constexpr auto IS_DWZ = false;
 
 static AttributeValue
-read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation abbr,
+read_attribute_values(DebugInfoEntry *entry, CompileUnitReader &reader, Abbreviation abbr,
                       std::vector<i64> &implicit_consts) noexcept
 {
   if (abbr.IMPLICIT_CONST_INDEX != UINT8_MAX) {
@@ -66,7 +66,7 @@ read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation
     return AttributeValue{reader.read_offset(), abbr.form, abbr.name};
     break;
   case AttributeForm::DW_FORM_addr: {
-    e->subprogram_with_addresses = true;
+    entry->subprogram_with_addresses = true;
     return AttributeValue{reader.read_address(), abbr.form, abbr.name};
   }
   case AttributeForm::Reserved:
@@ -148,7 +148,7 @@ read_attribute_values(DebugInfoEntry *e, CompileUnitReader &reader, Abbreviation
       new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
       implicit_consts.push_back(value);
     }
-    return read_attribute_values(e, reader, new_abbr, implicit_consts);
+    return read_attribute_values(entry, reader, new_abbr, implicit_consts);
   }
   case AttributeForm::DW_FORM_sec_offset: {
     const auto offset = reader.read_offset();
@@ -231,6 +231,7 @@ CUProcessor::read_dies() noexcept
   CompileUnitReader reader{&header, obj_file};
   std::unique_ptr<DebugInfoEntry> root = std::make_unique<DebugInfoEntry>();
   const auto die_sec_offset = reader.sec_offset();
+  DLOG("dwarf", "First die in original code: 0x{:x}", std::uintptr_t(reader.ptr()));
   const auto abbr_code = reader.uleb128();
 
   ASSERT(abbr_code != 0, "Top level DIE expected to not be null (i.e. abbrev code != 0)");
@@ -327,8 +328,6 @@ add_subprograms(CompilationUnitFile &file, DebugInfoEntry *root_die, const Elf *
         if (fn.end < fn.start) {
           fn.end = elf->relocate_addr(fn.start + fn.end);
         }
-        DLOG("dwarf", "[die]: offset=0x{:x}, fn name='{}', child dies={}", root_die->sec_offset, fn.name,
-             child->children.size());
         file.add_function(std::move(fn));
       }
     }
@@ -386,7 +385,6 @@ CUProcessor::determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept
       return builder.done(nullptr);
     }
   }
-  DLOG("mdb", "[die] offset=0x{:x}, no bounds", die->sec_offset);
   return std::nullopt;
 }
 
@@ -638,5 +636,11 @@ u64
 CompileUnitReader::sec_offset() const noexcept
 {
   return header->debug_info_sec_offset + header->header_length + bytes_read();
+}
+
+const u8 *
+CompileUnitReader::ptr() const noexcept
+{
+  return current_ptr;
 }
 } // namespace sym::dw

@@ -63,6 +63,16 @@ set(MIDAS_SOURCES
   src/symbol/dwarf/dwarf_defs.h
   src/symbol/dwarf/lnp.cpp
   src/symbol/dwarf/lnp.h
+  # Symbol-DWARF, MDB version 2 namespace
+  src/symbol/dwarf2/name_index.cpp
+  src/symbol/dwarf2/name_index.h
+  src/symbol/dwarf2/die.cpp
+  src/symbol/dwarf2/die.h
+  src/symbol/dwarf2/unit.cpp
+  src/symbol/dwarf2/unit.h
+  src/symbol/dwarf2/dwarf_common.cpp
+  src/symbol/dwarf2/dwarf_common.h
+  
   # Arbitrary "library" utils
   src/lib/lockguard.h
   # interface namespace
@@ -87,6 +97,10 @@ set(MIDAS_SOURCES
   src/utils/logger.h
   src/utils/timer.cpp
   src/utils/timer.h
+  src/utils/thread_pool.cpp
+  src/utils/thread_pool.h
+  src/utils/worker_task.cpp
+  src/utils/worker_task.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)

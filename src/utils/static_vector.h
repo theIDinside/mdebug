@@ -6,10 +6,10 @@
 namespace utils {
 
 // Not a complete interface yet - building only the currently needed parts as we go along.
-template <typename T, size_t Size> class StackVector
+template <typename T, size_t Size> class InlineVector
 {
 public:
-  StackVector() noexcept : m_size(0) {}
+  InlineVector() noexcept : m_size(0) {}
 
   constexpr auto
   front() const noexcept
@@ -53,8 +53,9 @@ public:
   pop_back() noexcept
   {
     const auto last = m_size - 1;
+    auto &ref = reference(last);
     --m_size;
-    return reference(last);
+    return ref;
   }
 
   constexpr auto
@@ -91,11 +92,42 @@ public:
     return std::span<T>{&reference(0), m_size};
   }
 
+  constexpr bool
+  empty() const noexcept
+  {
+    return m_size == 0;
+  }
+
+  template <typename Comparator>
+  constexpr bool
+  contains(Comparator &&fn)
+  {
+    if (empty())
+      return false;
+    for (const auto &el : span()) {
+      if (fn(el))
+        return true;
+    }
+    return false;
+  }
+
+  constexpr bool
+  contains(const T &el)
+  {
+    if (empty())
+      return false;
+    for (const auto &item : span()) {
+      if (el == item)
+        return true;
+    }
+    return false;
+  }
+
 private:
   constexpr T &
   reference(u64 index) const noexcept
   {
-    ASSERT(index < m_size, "Index outside range of contained elements");
+    ASSERT(index < m_size, "Index={} outside range of contained elements", index);
     return *(T *)m_storage;
   }
 

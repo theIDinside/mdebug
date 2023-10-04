@@ -521,6 +521,31 @@ decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
   return data + index;
 }
 // clang-format off
+
+// Determine the size (in bytes) of `decoded_value` when it was encoded 
+auto encoded_uleb_size(uint64_t decoded_value) -> u64 {
+  auto encoded_bytes = 0;
+  do {
+    decoded_value >>= 7;
+    encoded_bytes += sizeof(i8);
+  } while (decoded_value);
+  return encoded_bytes;
+}
+
+// Determine the size (in bytes) of `decoded_value` when it was encoded 
+auto encoded_leb_size(int64_t decoded_value) -> u64 {
+  auto encoded_bytes = 0;
+  int sign = decoded_value >> (8 * sizeof(decoded_value) - 1);
+  bool has_more;
+
+  do {
+    unsigned byte = decoded_value & 0x7f;
+    decoded_value >>= 7;
+    has_more = decoded_value != sign || ((byte ^ sign) & 0x40) != 0;
+    encoded_bytes += sizeof(i8);
+  } while (has_more);
+  return encoded_bytes;
+}
 template <typename BufferType>
 concept ByteContainer = requires(BufferType t) {
   { t.size() } -> std::convertible_to<u64>;

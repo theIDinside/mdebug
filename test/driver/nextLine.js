@@ -3,7 +3,7 @@ const { DAClient, MDB_PATH, buildDirFile, readFile, runTestSuite, repoDirFile, g
 
 async function nextLineOverFunction() {
   const da_client = new DAClient(MDB_PATH, []);
-  await da_client.launchToMain(buildDirFile("next"));
+  await da_client.launchToMain(buildDirFile("next"), 10000000);
   const file = readFile(repoDirFile("test/next.cpp"));
   const bp_lines = ["BP1", "BP2"]
     .map((ident) => getLineOf(file, ident))

@@ -4,6 +4,10 @@
 #include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
+#include "symbol/dwarf2/die.h"
+#include "symbol/dwarf2/dwarf_common.h"
+#include "symbol/dwarf2/name_index.h"
+#include "symbol/dwarf2/unit.h"
 #include <string_view>
 #include <sys/mman.h>
 #include <unordered_set>
@@ -83,8 +87,16 @@ struct ObjectFile
   // For getting the Elf data that we want to change
   Elf *get_elf() noexcept;
 
+  std::vector<dw2::DwarfUnitData *> &get_cus() noexcept;
+  void set_unit_data(const std::vector<dw2::DwarfUnitData *> &) noexcept;
+  dw2::DwarfUnitData *get_containing_cu(dw2::DwarfId sec_offset) noexcept;
+  sym::dw2::NameIndex &get_name_index() noexcept;
+
 private:
   Elf *parsed_elf = nullptr;
+  std::vector<dw2::DwarfUnitData *> dwarf_units;
+  std::mutex unit_data_lock;
+  sym::dw2::NameIndex m_name_index;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

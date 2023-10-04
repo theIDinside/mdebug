@@ -12,10 +12,13 @@
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
 #include "symbol/dwarf/cu_processing.h"
+#include "symbol/dwarf2/name_index.h"
+#include "symbol/dwarf2/unit.h"
 #include "symbol/elf.h"
 #include "symbol/objfile.h"
 #include "task.h"
 #include "utils/logger.h"
+#include "utils/thread_pool.h"
 #include <fcntl.h>
 #include <nlohmann/json.hpp>
 #include <sys/mman.h>
@@ -72,6 +75,24 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   for (auto &&j : jobs) {
     j.join();
   }
+
+  auto new_headers = sym::dw2::read_cu_headers(obj_file);
+  // create TaskGroup
+  utils::TaskGroup tg("dwarf unit data");
+  auto work = sym::dw2::DwarfUnitDataTask::create_work(obj_file, new_headers);
+  for (auto w : work) {
+    tg.add_task(w);
+  }
+  tg.schedule_tasks().wait();
+
+  utils::TaskGroup tg_index_names("name indexing");
+  auto indexing_work = sym::dw2::IndexingTask::create_work(obj_file, obj_file->get_cus());
+  for (auto work : indexing_work) {
+    tg_index_names.add_task(work);
+  }
+  tg_index_names.schedule_tasks().wait();
+
+  DLOG("mdb", "Done creating dwarf unit data");
 }
 
 void
@@ -154,7 +175,6 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
     SpinGuard lock{command_queue_lock};
     command_queue.push(cmd);
   }
-  DLOG("mdb", "accepted command {}", cmd->name());
 }
 
 void

@@ -55,6 +55,7 @@ public:
   u64 read_by_idx_from_rnglist(u64 range_index) const noexcept;
   u64 read_loclist_index(u64 range_index) const noexcept;
   u64 sec_offset() const noexcept;
+  const u8 *ptr() const noexcept;
 
 private:
   CompileUnitHeader *header;
