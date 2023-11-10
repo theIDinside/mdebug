@@ -203,3 +203,5 @@ target_link_options(mdb PRIVATE -rdynamic)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(mdb PRIVATE MDB_DEBUG)
 endif()
+
+target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)

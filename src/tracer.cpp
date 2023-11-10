@@ -28,7 +28,6 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <nlohmann/json.hpp>
-#include <ranges>
 #include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>

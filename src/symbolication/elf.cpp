@@ -5,7 +5,6 @@
 #include <bits/ranges_util.h>
 #include <cstdint>
 #include <elf.h>
-#include <ranges>
 
 std::string_view
 ElfSection::get_name() const noexcept

@@ -19,7 +19,6 @@
 #include <nlohmann/json.hpp>
 #include <ostream>
 #include <poll.h>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <sys/epoll.h>
