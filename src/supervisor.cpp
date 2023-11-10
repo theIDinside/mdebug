@@ -135,7 +135,6 @@ TraceeController::install_loader_breakpoints() noexcept
   Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
   tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
-  ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
   tracee_r_debug = get_rdebug_state(tmp_objfile);
   DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
