@@ -666,25 +666,33 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
   t->cache_registers();
-  const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
-  const auto res = read_type(ptr);
-  // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
-  auto np = read_type(TPtr<pid_t>{res.parent_tid});
-#ifdef MDB_DEBUG
-  long new_pid = 0;
-  PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, t->tid, 0, &new_pid);
-  ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
-#endif
-  if (!has_task(np)) {
-    new_task(np, true);
+  pid_t np = -1;
+  if (t->registers->orig_rax == SYS_clone) {
+    const auto flags = sys_arg_n<1>(*t->registers);
+    const TPtr<void> stack_ptr = sys_arg_n<2>(*t->registers);
+    const TPtr<int> child_tid = sys_arg_n<4>(*t->registers);
+    const u64 tls = sys_arg_n<5>(*t->registers);
+    np = read_type(child_tid);
+    if (!has_task(np))
+      new_task(np, true);
+    get_task(np)->initialize();
+    set_task_vm_info(np, TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls});
+    return np;
+  } else if (t->registers->orig_rax == SYS_clone3) {
+    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
+    const auto res = read_type(ptr);
+    np = read_type(TPtr<pid_t>{res.parent_tid});
+    if (!has_task(np))
+      new_task(np, true);
+    // by this point, the task has cloned _and_ it's continuable because the parent has been told
+    // that "hey, we're ok". Why on earth a pre-finished clone can be waited on, I will never know.
+    get_task(np)->initialize();
+    // task backing storage may have re-allocated and invalidated this pointer.
+    set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
+    return np;
+  } else {
+    ASSERT(false, "Unknown clone syscall!");
   }
-  // by this point, the task has cloned _and_ it's continuable because the parent has been told
-  // that "hey, we're ok". Why on earth a pre-finished clone can be waited on, I will never know.
-  get_task(np)->initialize();
-  // task backing storage may have re-allocated and invalidated this pointer.
-  t = get_task(stopped_tid);
-  set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-  return np;
 }
 
 BpEvent
