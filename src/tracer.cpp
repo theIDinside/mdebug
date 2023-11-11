@@ -9,7 +9,6 @@
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
-#include "posix/argslist.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
@@ -200,15 +199,24 @@ Tracer::execute_pending_commands() noexcept
   }
 }
 
-void
-Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept
+static int
+exec(const Path &program, const std::vector<std::string> &prog_args)
 {
-  std::vector<std::string> posix_cmd_args{};
-  posix_cmd_args.push_back(program);
-  for (auto &&arg : prog_args) {
-    posix_cmd_args.push_back(arg);
+  const auto arg_size = prog_args.size() + 2;
+  const char *args[arg_size];
+  const char *cmd = program.c_str();
+  args[0] = cmd;
+  auto idx = 1;
+  for (const auto &arg : prog_args) {
+    args[idx] = arg.c_str();
   }
-  PosixArgsList args_list{std::move(posix_cmd_args)};
+  args[arg_size - 1] = nullptr;
+  return execv(cmd, (char *const *)args);
+}
+
+void
+Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept
+{
   termios original_tty;
   winsize ws;
 
@@ -224,7 +232,6 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
   switch (fork_result.index()) {
   case 0: // child
   {
-    const auto [cmd, args] = args_list.get_command();
     if (personality(ADDR_NO_RANDOMIZE) == -1) {
       PANIC("Failed to set ADDR_NO_RANDOMIZE!");
     }

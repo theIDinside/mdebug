@@ -28,8 +28,6 @@ set(MIDAS_SOURCES
   src/breakpoint.h
   src/so_loading.cpp
   src/so_loading.h
-  src/posix/argslist.cpp
-  src/posix/argslist.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
   src/symbolication/objfile.cpp

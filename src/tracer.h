@@ -80,7 +80,7 @@ public:
    * hang. */
   void accept_command(ui::UICommand *cmd) noexcept;
   void execute_pending_commands() noexcept;
-  void launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept;
+  void launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept;
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
   void disconnect() noexcept;
