@@ -656,6 +656,7 @@ TraceeController::process_exec(TaskInfo *t) noexcept
   reopen_memfd();
   t->cache_registers();
   read_auxv(t);
+  install_loader_breakpoints();
 }
 
 Tid

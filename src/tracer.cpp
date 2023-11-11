@@ -148,7 +148,6 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
   }
   auto task = tc->register_task_waited(wait);
   tc->ptracestop_handler->handle_execution_event(task);
-  // tc->handle_execution_event(task);
 }
 
 void
@@ -241,25 +240,19 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
       raise(SIGSTOP);
     }
 
-    if (execv(cmd, args) == -1) {
-      PANIC(fmt::format("EXECV Failed for {}", cmd));
+    if (exec(program, prog_args) == -1) {
+      PANIC(fmt::format("EXECV Failed for {}", program.c_str()));
     }
     _exit(0);
     break;
   }
   default: {
     const auto res = get<PtyParentResult>(fork_result);
+    const auto leader = res.pid;
     add_target_set_current(res.pid, program, TargetSession::Launched);
-    TaskInfo *t = get_current()->get_task(res.pid);
     if (Tracer::use_traceme) {
-      TaskWaitResult twr{.waited_pid = res.pid, .ws = {.ws = WaitStatusKind::Execed}};
-      t = get_current()->get_task(res.pid);
-      ASSERT(t != nullptr, "Unknown task!!");
-      get_current()->register_task_waited(twr);
-      get_current()->reopen_memfd();
-      t->cache_registers();
-      get_current()->read_auxv(t);
-      get_current()->install_loader_breakpoints();
+      TaskWaitResult twr{.waited_pid = leader, .ws = {.ws = WaitStatusKind::Execed}};
+      get_current()->process_exec(get_current()->register_task_waited(twr));
       dap->add_tty(res.fd);
     } else {
       for (;;) {
@@ -268,15 +261,9 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
           if ((stat >> 8) == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
             TaskWaitResult twr;
             twr.ws.ws = WaitStatusKind::Execed;
-            twr.waited_pid = res.pid;
+            twr.waited_pid = leader;
             DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.waited_pid, res.pid);
-            t = get_current()->get_task(twr.waited_pid);
-            ASSERT(t != nullptr, "Unknown task!!");
-            get_current()->register_task_waited(twr);
-            get_current()->reopen_memfd();
-            t->cache_registers();
-            get_current()->read_auxv(t);
-            get_current()->install_loader_breakpoints();
+            get_current()->process_exec(get_current()->register_task_waited(twr));
             dap->add_tty(res.fd);
             break;
           }
@@ -285,7 +272,6 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
         }
       }
     }
-    t->set_dirty();
     get_current()->reaped_events();
     if (stopAtEntry) {
       get_current()->set_fn_breakpoint("main");
