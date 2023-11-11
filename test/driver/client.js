@@ -5,25 +5,25 @@
  * a new mdb session. It emulates that of an Inline DA in VSCode (look at the extension `Midas` for examples)
  */
 
-const path = require("path");
-const fs = require("fs");
-const { spawn, spawnSync } = require("child_process");
-const EventEmitter = require("events");
+const path = require('path')
+const fs = require('fs')
+const { spawn, spawnSync } = require('child_process')
+const EventEmitter = require('events')
 
-let IMPORTING_FILE = "";
+let IMPORTING_FILE = ''
 
 // Environment setup
-const DRIVER_DIR = path.dirname(__filename);
-const TEST_DIR = path.dirname(DRIVER_DIR);
-const REPO_DIR = path.dirname(TEST_DIR);
+const DRIVER_DIR = path.dirname(__filename)
+const TEST_DIR = path.dirname(DRIVER_DIR)
+const REPO_DIR = path.dirname(TEST_DIR)
 
-const TestArgs = process.argv.slice(2);
+const TestArgs = process.argv.slice(2)
 
 if (TestArgs.length == 0) {
   console.error(
     `Tests require to pass the build directory as the developer might choose different locations for their build dir.`
-  );
-  process.exit(-1);
+  )
+  process.exit(-1)
 }
 
 /**
@@ -32,163 +32,162 @@ if (TestArgs.length == 0) {
  * @param {string} string_identifier
  */
 function getLineOf(fileData, string_identifier) {
-  let lineIdx = 1;
-  for (const line of fileData.split("\n")) {
-    if (line.includes(string_identifier)) return lineIdx;
-    lineIdx++;
+  let lineIdx = 1
+  for (const line of fileData.split('\n')) {
+    if (line.includes(string_identifier)) return lineIdx
+    lineIdx++
   }
-  return null;
+  return null
 }
 
 function readFile(path) {
-  return fs.readFileSync(path).toString();
+  return fs.readFileSync(path).toString()
 }
 
-const UserBuildDir = TestArgs[0];
-const BUILD_BIN_DIR = path.join(UserBuildDir, "bin");
+const UserBuildDir = TestArgs[0]
+const BUILD_BIN_DIR = path.join(UserBuildDir, 'bin')
 if (!fs.existsSync(BUILD_BIN_DIR)) {
-  console.error(`Could not find the build directory '${BUILD_BIN_DIR}'`);
-  process.exit(-1);
+  console.error(`Could not find the build directory '${BUILD_BIN_DIR}'`)
+  process.exit(-1)
 }
-const MDB_PATH = path.join(BUILD_BIN_DIR, "mdb");
-console.log(`MDB Path: ${MDB_PATH}`);
+const MDB_PATH = path.join(BUILD_BIN_DIR, 'mdb')
+console.log(`MDB Path: ${MDB_PATH}`)
 
 // currently, mdb takes no args
-const mdb_args = [];
+const mdb_args = []
 // End of environment setup
 
 function unpackRecordArgs(param) {
-  const p = param.split(";");
-  const [recorder] = p.splice(0, 1);
-  return { path: recorder, args: p };
+  const p = param.split(';')
+  const [recorder] = p.splice(0, 1)
+  return { path: recorder, args: p }
 }
 
-const regex = /Content-Length: (\d+)\s{4}/gm;
+const regex = /Content-Length: (\d+)\s{4}/gm
 class DAClient {
   /** @type {EventEmitter} */
-  send_wait_res;
+  send_wait_res
   /** @type {EventEmitter} */
-  events;
+  events
   /** @type {number} - Current request number */
-  seq;
+  seq
   /** The MDB process */
-  mdb;
+  mdb
 
   /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
-  buf;
+  buf
 
   constructor(mdb, mdb_args) {
     // for future work when we get recording in tests suites working.
     try {
-      this.recording = process.env.hasOwnProperty("REC");
+      this.recording = process.env.hasOwnProperty('REC')
       if (this.recording) {
-        const parsed = unpackRecordArgs(process.env["REC"]);
-        const { path, args } = parsed;
-        console.log(`${JSON.stringify(parsed)}`);
-        console.log(`Recording using ${process.env["REC"]}`);
-        this.mdb = spawn(path, ["record", ...args, mdb, ...mdb_args]);
+        const parsed = unpackRecordArgs(process.env['REC'])
+        const { path, args } = parsed
+        console.log(`${JSON.stringify(parsed)}`)
+        console.log(`Recording using ${process.env['REC']}`)
+        this.mdb = spawn(path, ['record', ...args, mdb, ...mdb_args])
       } else {
-        this.mdb = spawn(mdb, mdb_args, { shell: true, stdio: "pipe" });
+        this.mdb = spawn(mdb, mdb_args, {
+          shell: true,
+          stdio: 'pipe',
+        })
       }
     } catch (ex) {
-      console.log(`failed to spawn mdb: ${ex}`);
+      console.log(`failed to spawn mdb: ${ex}`)
     }
 
-    this.mdb.on("error", (err) => {
-      console.error(`[TEST FAILED] MDB error: ${err}`);
-      process.exit(-1);
-    });
+    this.mdb.on('error', (err) => {
+      console.error(`[TEST FAILED] MDB error: ${err}`)
+      process.exit(-1)
+    })
 
-    this.mdb.on("exit", (exitCode) => {
+    this.mdb.on('exit', (exitCode) => {
       if (exitCode != 0) {
-        console.error(
-          `[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`
-        );
-        process.exit(-1);
+        console.error(`[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`)
+        process.exit(-1)
       }
-    });
-    process.on("exit", (code) => {
-      this.mdb.kill("SIGTERM");
+    })
+    process.on('exit', (code) => {
+      this.mdb.kill('SIGTERM')
       if (code != 0) {
-        console.log(`DUMPING LOG`);
-        dump_log();
+        console.log(`DUMPING LOG`)
+        dump_log()
       }
-    });
-    this.seq = 1;
-    this.send_wait_res = new EventEmitter();
-    this.events = new EventEmitter();
+    })
+    this.seq = 1
+    this.send_wait_res = new EventEmitter()
+    this.events = new EventEmitter()
     this.buf = {
       next_packet_length: null,
-      receive_buffer: "",
-    };
+      receive_buffer: '',
+    }
 
     // Emit processed DAP Events to this event handler
-    this.events.on("event", async (evt) => {
-      const { event, body } = evt;
+    this.events.on('event', async (evt) => {
+      const { event, body } = evt
       switch (event) {
-        case "exited":
-          this.mdb.stdin.write(this.serializeRequest("disconnect"));
-          break;
+        case 'exited':
+          this.mdb.stdin.write(this.serializeRequest('disconnect'))
+          break
         default:
-          this.events.emit(event, body);
-          break;
+          this.events.emit(event, body)
+          break
       }
-    });
+    })
 
     // Emit processed DAP Responses to this event handler
-    this.events.on("response", (response) => {
-      this.send_wait_res.emit(response.command, response);
-    });
+    this.events.on('response', (response) => {
+      this.send_wait_res.emit(response.command, response)
+    })
 
-    this.mdb.stdout.on("data", (data) => {
-      const str_data = data.toString();
-      this.appendBuffer(str_data);
-      let msgs = this.parseContents(this.buf.receive_buffer);
-      let last_ends = 0;
-      for (const { content_start, length } of msgs.filter(
-        (i) => i.all_received
-      )) {
-        const end = content_start + length;
-        const data = this.buf.receive_buffer.slice(content_start, end);
+    this.mdb.stdout.on('data', (data) => {
+      const str_data = data.toString()
+      this.appendBuffer(str_data)
+      let msgs = this.parseContents(this.buf.receive_buffer)
+      let last_ends = 0
+      for (const { content_start, length } of msgs.filter((i) => i.all_received)) {
+        const end = content_start + length
+        const data = this.buf.receive_buffer.slice(content_start, end)
         try {
-          const json = JSON.parse(data);
+          const json = JSON.parse(data)
           if (!this.events.emit(json.type, json)) {
-            this.events.emit("err", json);
+            this.events.emit('err', json)
           }
-          last_ends = content_start + length;
+          last_ends = content_start + length
         } catch (ex) {
-          console.log(`Buffer contents: '''${this.buf.receive_buffer}'''`);
-          console.log(`Exception: ${ex}`);
-          process.exit(-1);
+          console.log(`Buffer contents: '''${this.buf.receive_buffer}'''`)
+          console.log(`Exception: ${ex}`)
+          process.exit(-1)
         }
       }
-      this.buf.receive_buffer = this.buf.receive_buffer.slice(last_ends);
-    });
+      this.buf.receive_buffer = this.buf.receive_buffer.slice(last_ends)
+    })
   }
 
   serializeRequest(req, args = {}) {
     const json = {
       seq: this.seq,
-      type: "request",
+      type: 'request',
       command: req,
       arguments: args,
-    };
-    this.seq += 1;
-    const data = JSON.stringify(json);
-    const length = data.length;
-    const res = `Content-Length: ${length}\r\n\r\n${data}`;
-    return res;
+    }
+    this.seq += 1
+    const data = JSON.stringify(json)
+    const length = data.length
+    const res = `Content-Length: ${length}\r\n\r\n${data}`
+    return res
   }
 
   /**
    * @returns {Promise<{id: number, name: string}[]>}
    */
   async threads(timeout = seconds(1)) {
-    return this.sendReqGetResponse("threads", {}, timeout)
+    return this.sendReqGetResponse('threads', {}, timeout)
       .then((res) => {
-        return res.body.threads;
+        return res.body.threads
       })
-      .catch(testException);
+      .catch(testException)
   }
 
   /* Called _before_ an action that is expected to create an event.
@@ -197,52 +196,52 @@ class DAClient {
   prepareWaitForEvent(evt) {
     return new Promise((res, rej) => {
       this.events.once(evt, (body) => {
-        res(body);
-      });
-    });
+        res(body)
+      })
+    })
   }
 
   /* Called _before_ an action that is expected to create an event.
- * Calling this after, may or may not work, as the event handler might not be set up in time,
- * before the actual event comes across the wire.*/
+   * Calling this after, may or may not work, as the event handler might not be set up in time,
+   * before the actual event comes across the wire.*/
   prepareWaitForEventN(evt, n, timeout) {
-    const ctrl = new AbortController();
-    const signal = ctrl.signal;
+    const ctrl = new AbortController()
+    const signal = ctrl.signal
     const timeOut = setTimeout(() => {
-      ctrl.abort();
-    }, timeout);
+      ctrl.abort()
+    }, timeout)
 
     let p = new Promise((res, rej) => {
-      let events = [];
+      let events = []
       this.events.on(evt, (body) => {
-        events.push(body);
+        events.push(body)
         if (events.length == n) {
-          res(events);
+          res(events)
         }
-      });
-    });
+      })
+    })
 
     return Promise.race([
       p.then((res) => {
-        clearTimeout(timeOut);
-        return res;
+        clearTimeout(timeOut)
+        return res
       }),
       new Promise((_, rej) => {
-        signal.addEventListener("abort", () => {
-          rej(new Error(`Timed out waiting for ${n} events of type ${evt} to have happened`));
-        });
+        signal.addEventListener('abort', () => {
+          rej(new Error(`Timed out waiting for ${n} events of type ${evt} to have happened`))
+        })
       }),
-    ]);
+    ])
   }
 
   _sendReqGetResponseImpl(req, args) {
     return new Promise((res) => {
-      const serialized = this.serializeRequest(req, args);
+      const serialized = this.serializeRequest(req, args)
       this.send_wait_res.once(req, (response) => {
-        res(response);
-      });
-      this.mdb.stdin.write(serialized);
-    });
+        res(response)
+      })
+      this.mdb.stdin.write(serialized)
+    })
   }
 
   /**
@@ -254,24 +253,24 @@ class DAClient {
    * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
    */
   async sendReqGetResponse(req, args, failureTimeout = seconds(2)) {
-    const ctrl = new AbortController();
-    const signal = ctrl.signal;
-    const req_promise = this._sendReqGetResponseImpl(req, args);
+    const ctrl = new AbortController()
+    const signal = ctrl.signal
+    const req_promise = this._sendReqGetResponseImpl(req, args)
     const timeOut = setTimeout(() => {
-      ctrl.abort();
-    }, failureTimeout);
+      ctrl.abort()
+    }, failureTimeout)
 
     return Promise.race([
       req_promise.then((res) => {
-        clearTimeout(timeOut);
-        return res;
+        clearTimeout(timeOut)
+        return res
       }),
       new Promise((_, rej) => {
-        signal.addEventListener("abort", () => {
-          rej(new Error(`Timed out waiting for response from request ${req}`));
-        });
+        signal.addEventListener('abort', () => {
+          rej(new Error(`Timed out waiting for response from request ${req}`))
+        })
       }),
-    ]);
+    ])
   }
 
   /**
@@ -280,17 +279,17 @@ class DAClient {
    * @returns {Promise<{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}>}
    */
   async stackTrace(threadId, timeout = 1000) {
-    threadId = threadId != null ? threadId : await this.getAnyThreadId();
-    return this.sendReqGetResponse("stackTrace", { threadId: threadId }, timeout);
+    threadId = threadId != null ? threadId : await this.getAnyThreadId()
+    return this.sendReqGetResponse('stackTrace', { threadId: threadId }, timeout)
   }
 
   async getAnyThreadId() {
-    const thrs = await this.threads();
-    return thrs[0].id;
+    const thrs = await this.threads()
+    return thrs[0].id
   }
 
   flushConnection() {
-    this.mdb.stdin.write("----\n");
+    this.mdb.stdin.write('----\n')
   }
 
   /**
@@ -298,145 +297,150 @@ class DAClient {
    * @returns {{ content_start: number, length: number, all_received: boolean }[]}
    */
   parseContents(contents) {
-    let m;
-    const result = [];
+    let m
+    const result = []
     while ((m = regex.exec(contents)) !== null) {
       // This is necessary to avoid infinite loops with zero-width matches
       if (m.index === regex.lastIndex) {
-        regex.lastIndex++;
+        regex.lastIndex++
       }
       // The result can be accessed through the `m`-variable.
-      let contents_start = 0;
+      let contents_start = 0
       m.forEach((match, groupIndex) => {
         if (groupIndex == 0) {
-          contents_start = m.index + match.length;
+          contents_start = m.index + match.length
         }
         if (groupIndex == 1) {
-          const len = Number.parseInt(match);
-          const all_received = contents_start + len <= contents.length;
+          const len = Number.parseInt(match)
+          const all_received = contents_start + len <= contents.length
           result.push({
             content_start: contents_start,
             length: len,
             all_received,
-          });
+          })
         }
-      });
+      })
     }
-    return result;
+    return result
   }
 
   appendBuffer(data) {
-    this.buf.receive_buffer = this.buf.receive_buffer.concat(data);
+    this.buf.receive_buffer = this.buf.receive_buffer.concat(data)
   }
 
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = 1000) {
-    let stopped_promise = this.prepareWaitForEvent("stopped");
-    await this.sendReqGetResponse("initialize", {}, timeout)
+    let stopped_promise = this.prepareWaitForEvent('stopped')
+    await this.sendReqGetResponse('initialize', {}, timeout)
       .then((response) => {
-        checkResponse(response, "initialize", true);
+        checkResponse(response, 'initialize', true)
       })
-      .catch(testException);
-    await this.sendReqGetResponse("launch", {
-      program: program,
-      stopAtEntry: true,
-    }, timeout)
+      .catch(testException)
+    await this.sendReqGetResponse(
+      'launch',
+      {
+        program: program,
+        stopAtEntry: true,
+      },
+      timeout
+    )
       .then((response) => {
-        checkResponse(response, "launch", true);
+        checkResponse(response, 'launch', true)
       })
-      .catch(testException);
-    await this.sendReqGetResponse("configurationDone", {}, timeout).catch(testException);
-    await stopped_promise;
+      .catch(testException)
+    await this.sendReqGetResponse('configurationDone', {}, timeout).catch(testException)
+    await stopped_promise
   }
 
   // utility function to initialize, launch `program` and run to `main`
   async launchToAddress(program, addr, timeout = 1000) {
-    let stopped_promise = this.prepareWaitForEvent("stopped");
-    await this.sendReqGetResponse("initialize", {}, timeout)
+    let stopped_promise = this.prepareWaitForEvent('stopped')
+    await this.sendReqGetResponse('initialize', {}, timeout)
       .then((response) => {
-        checkResponse(response, "initialize", true);
+        checkResponse(response, 'initialize', true)
       })
-      .catch(testException);
-    await this.sendReqGetResponse("launch", {
-      program: program,
-      stopAtEntry: false,
-    }, timeout)
+      .catch(testException)
+    await this.sendReqGetResponse(
+      'launch',
+      {
+        program: program,
+        stopAtEntry: false,
+      },
+      timeout
+    )
       .then((response) => {
-        checkResponse(response, "launch", true);
+        checkResponse(response, 'launch', true)
       })
-      .catch(testException);
-    await this.setInsBreakpoint(addr);
-    await this.sendReqGetResponse("configurationDone", {}, timeout).catch(testException);
-    await stopped_promise;
+      .catch(testException)
+    await this.setInsBreakpoint(addr)
+    await this.sendReqGetResponse('configurationDone', {}, timeout).catch(testException)
+    await stopped_promise
   }
 
   async setInsBreakpoint(addr) {
-    return this.sendReqGetResponse("setInstructionBreakpoints", {
+    return this.sendReqGetResponse('setInstructionBreakpoints', {
       breakpoints: [{ instructionReference: addr }],
     })
   }
 
   async contNextStop(threadId) {
     if (threadId == null) {
-      const thrs = await this.threads();
-      threadId = thrs[0].id;
+      const thrs = await this.threads()
+      threadId = thrs[0].id
     }
-    let stopped_promise = this.prepareWaitForEvent("stopped");
-    await this.sendReqGetResponse("continue", { threadId: threadId });
-    return await stopped_promise;
+    let stopped_promise = this.prepareWaitForEvent('stopped')
+    await this.sendReqGetResponse('continue', {
+      threadId: threadId,
+    })
+    return await stopped_promise
   }
 
   /**
-   * @param { "terminate"  | "suspend" } kind 
-   * @param { number } timeout 
-   * @returns 
+   * @param { "terminate"  | "suspend" } kind
+   * @param { number } timeout
+   * @returns
    */
-  async disconnect(kind = "terminateDebuggee", timeout = 1000) {
+  async disconnect(kind = 'terminateDebuggee', timeout = 1000) {
     switch (kind) {
-      case "terminate":
-        return this.sendReqGetResponse("disconnect", {
-          terminateDebuggee: true
-        });
-      case "suspend":
-        return this.sendReqGetResponse("disconnect", {
-          suspendDebuggee: true
-        });
+      case 'terminate':
+        return this.sendReqGetResponse('disconnect', {
+          terminateDebuggee: true,
+        })
+      case 'suspend':
+        return this.sendReqGetResponse('disconnect', {
+          suspendDebuggee: true,
+        })
     }
-
   }
 
   /**
-   * 
+   *
    * @param {string} req
    * @param {object} args
    * @param {string} event
-   * @param {number} failureTimeout 
+   * @param {number} failureTimeout
    * @returns {Promise<{ event_body: object, response: object }>}
    */
   async sendReqWaitEvent(req, args, event, failureTimeout) {
-    const ctrl = new AbortController();
-    const signal = ctrl.signal;
-    const event_promise = this.prepareWaitForEvent(event);
-    const response = await this.sendReqGetResponse(req, args, failureTimeout);
+    const ctrl = new AbortController()
+    const signal = ctrl.signal
+    const event_promise = this.prepareWaitForEvent(event)
+    const response = await this.sendReqGetResponse(req, args, failureTimeout)
     const timeOut = setTimeout(() => {
-      ctrl.abort();
-    }, failureTimeout);
+      ctrl.abort()
+    }, failureTimeout)
 
     return Promise.race([
       event_promise.then((event_body) => {
-        clearTimeout(timeOut);
-        return { event_body, response };
+        clearTimeout(timeOut)
+        return { event_body, response }
       }),
       new Promise((_, rej) => {
-        signal.addEventListener("abort", () => {
-          rej(
-            new Error(
-              `Timed out waiting for event ${event} after request ${req} for ${failureTimeout}`
-            )
-          );
-        });
+        signal.addEventListener('abort', () => {
+          rej(new Error(`Timed out waiting for event ${event} after request ${req} for ${failureTimeout}`))
+        })
       }),
-    ]);
+    ])
   }
 }
 
@@ -444,37 +448,31 @@ class DAClient {
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
 function dump_log() {
-  const mdblog = fs.readFileSync(path.join(process.cwd(), "mdb.log"));
-  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(IMPORTING_FILE)}.log`), mdblog);
+  const mdblog = fs.readFileSync(path.join(process.cwd(), 'mdb.log'))
+  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(IMPORTING_FILE)}.log`), mdblog)
 }
 
 function buildDirFile(fileName) {
-  return path.join(BUILD_BIN_DIR, fileName);
+  return path.join(BUILD_BIN_DIR, fileName)
 }
 
 function repoDirFile(filePath) {
-  return path.join(REPO_DIR, filePath);
+  return path.join(REPO_DIR, filePath)
 }
 
 function checkResponse(response, command, expected_success = true) {
-  if (response.type != "response") {
-    dump_log();
-    throw new Error(
-      `Type of message was expected to be 'response' but was '${response.type}'`
-    );
+  if (response.type != 'response') {
+    dump_log()
+    throw new Error(`Type of message was expected to be 'response' but was '${response.type}'`)
   }
   if (response.success != expected_success) {
-    dump_log();
-    throw new Error(
-      `Expected response to succeed ${expected_success} but got ${response.success}`
-    );
+    dump_log()
+    throw new Error(`Expected response to succeed ${expected_success} but got ${response.success}`)
   }
 
   if (response.command != command) {
-    dump_log();
-    throw new Error(
-      `Expected command to be ${command} but got ${response.command}`
-    );
+    dump_log()
+    throw new Error(`Expected command to be ${command} but got ${response.command}`)
   }
 }
 
@@ -485,51 +483,49 @@ function checkResponse(response, command, expected_success = true) {
  * @returns {string}
  */
 function getStackFramePc(stackTraceRes, level) {
-  return stackTraceRes.body.stackFrames[level].instructionPointerReference;
+  return stackTraceRes.body.stackFrames[level].instructionPointerReference
 }
 
 function testSuccess() {
-  console.log(`Test ${IMPORTING_FILE} succeeded`);
-  process.exit(0);
+  console.log(`Test ${IMPORTING_FILE} succeeded`)
+  process.exit(0)
 }
 
 function testException(err) {
-  console.error(`Test ${IMPORTING_FILE} failed: ${err}`);
-  throw err;
+  console.error(`Test ${IMPORTING_FILE} failed: ${err}`)
+  throw err
 }
 
 async function runTest(test, should_exit = true) {
-  if (should_exit)
-    test().then(testSuccess).catch(testException);
-  else
-    test().catch(testException)
+  if (should_exit) test().then(testSuccess).catch(testException)
+  else test().catch(testException)
 }
 
 async function runTestSuite(tests) {
-  const requested = getRequestedTest();
+  const requested = getRequestedTest()
   if (tests.hasOwnProperty(requested)) {
-    console.log(`Running ${requested} test`);
-    await runTest(tests[requested]);
+    console.log(`Running ${requested} test`)
+    await runTest(tests[requested])
   } else {
-    throw new Error(`No test called ${requested} in this suite`);
+    throw new Error(`No test called ${requested} in this suite`)
   }
 }
 
 function seconds(sec) {
-  return sec * 1000;
+  return sec * 1000
 }
 
 // each test is executed like: node ./path/to/test <working dir> <desired test name>. This function returns the passed in name.
 function getRequestedTest() {
-  return process.argv[3];
+  return process.argv[3]
 }
 
 function prettyJson(obj) {
-  return JSON.stringify(obj, null, 2);
+  return JSON.stringify(obj, null, 2)
 }
 
 module.exports = function (file) {
-  IMPORTING_FILE = file;
+  IMPORTING_FILE = file
   return {
     DRIVER_DIR,
     TEST_DIR,
@@ -549,6 +545,6 @@ module.exports = function (file) {
     runTest,
     runTestSuite,
     getRequestedTest,
-    prettyJson
-  };
-};
+    prettyJson,
+  }
+}
