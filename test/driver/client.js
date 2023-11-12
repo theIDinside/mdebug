@@ -63,6 +63,11 @@ function unpackRecordArgs(param) {
   return { path: recorder, args: p }
 }
 
+function onTestFailureSignal(isRecording) {
+  if (isRecording) return 'SIGTERM'
+  else return 'SIGKILL'
+}
+
 const regex = /Content-Length: (\d+)\s{4}/gm
 class DAClient {
   /** @type {EventEmitter} */
@@ -109,7 +114,7 @@ class DAClient {
       }
     })
     process.on('exit', (code) => {
-      this.mdb.kill('SIGTERM')
+      this.mdb.kill(onTestFailureSignal(this.recording))
       if (code != 0) {
         console.log(`DUMPING LOG`)
         dump_log()

@@ -4,7 +4,7 @@ async function test() {
   const da_client = new DAClient(MDB_PATH, [])
   await da_client.launchToMain(buildDirFile('threads_shared'))
   const threads = await da_client.threads()
-  let p = da_client.prepareWaitForEventN('thread', 16, 2000)
+  let p = da_client.prepareWaitForEventN('thread', 17, 2000)
   for (let i = 0; i < 3; i++) {
     const response = await da_client.sendReqGetResponse('continue', { threadId: threads[0].id })
     if (i == 0 && !response.success) {
