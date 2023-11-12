@@ -42,7 +42,12 @@ Continue::execute(Tracer *tracer) noexcept
     res->success = false;
   } else {
     res->success = true;
-    target->resume_target(RunType::Continue);
+    if (continue_all) {
+      target->resume_target(RunType::Continue);
+    } else {
+      auto t = target->get_task(thread_id);
+      t->resume(RunType::Continue);
+    }
   }
 
   return res;
