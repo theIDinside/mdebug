@@ -114,8 +114,8 @@ TaskInfo::consume_wait() noexcept
 {
   int stat;
   waitpid(tid, &stat, 0);
-  this->tracer_stopped = true;
-  this->user_stopped = true;
+  tracer_stopped = true;
+  user_stopped = true;
 }
 
 void
@@ -142,17 +142,13 @@ TaskInfo::step_over_breakpoint(TraceeController *tc) noexcept
 {
   ASSERT(bstat.has_value(), "Requires a valid bpstat");
   auto bp = tc->bps.get_by_id(bstat->bp_id);
-  if (bstat) {
-    DLOG("mdb", "Stepping over bp {} at {}", bstat->bp_id, bp->address);
-  }
+  DLOG("mdb", "[TaskInfo {}] Stepping over bp {} at {}", tid, bstat->bp_id, bp->address);
 
   bp->disable(tc->task_leader);
   resume(RunType::Step);
   consume_wait();
   bp->enable(tc->task_leader);
   bstat = std::nullopt;
-  cache_registers();
-  DLOG("mdb", "After step: {}", AddrPtr{registers->rip});
 }
 
 void

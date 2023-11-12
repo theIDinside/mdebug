@@ -295,20 +295,10 @@ TraceeController::resume_target(RunType type) noexcept
   DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
   for (auto &t : threads) {
     if (t.can_continue()) {
-      if (t.bstat) {
-        auto bp = bps.get_by_id(t.bstat->bp_id);
-        DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, t.tid);
-        bp->disable(t.tid);
-        int stat;
-        VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, t.tid, 1, 0),
-               "Single step over user breakpoint boundary failed: {}", strerror(errno));
-        waitpid(t.tid, &stat, 0);
-        t.set_dirty();
-        bp->enable(t.tid);
-        if (type == RunType::Step)
-          continue;
-      }
-      t.resume(type);
+      if (t.bstat)
+        t.step_over_breakpoint(this);
+      if (type == RunType::Continue)
+        t.resume(type);
     }
   }
   ptracestop_handler->can_resume();
@@ -549,6 +539,7 @@ TraceeController::kill() noexcept
 bool
 TraceeController::terminate_gracefully() noexcept
 {
+  DLOG("mdb", "[TraceeController]: terminate gracefully");
   if (is_running()) {
     stop_all();
   }
