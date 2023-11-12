@@ -2,6 +2,7 @@
 #include "../../tracer.h"
 #include "../../utils/logger.h"
 #include "commands.h"
+#include "events.h"
 #include "fmt/core.h"
 #include "parse_buffer.h"
 #include <algorithm>
@@ -192,15 +193,7 @@ DAP::run_ui_loop()
           if (bytes_read == -1)
             continue;
           std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-          // we do this _simply_ to escape the string (and utf-8 it?)
-          json str = data;
-          const auto payload = fmt::format(
-              R"({{"seq": {},"type":"event","event":"output","body":{{ "category": "stdout", "output": {}}}}})",
-              seq++, str.dump());
-          const auto header = fmt::format("Content-Length: {}\r\n\r\n", payload.size());
-          DLOG("dap", "Received event: {}", payload);
-          VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
-          VERIFY(write(tracer_out_fd, payload.data(), payload.size()) != -1, "Failed to write '{}'", payload);
+          post_event(new ui::dap::OutputEvent{"stdout", std::string{data}});
         }
       }
     }
