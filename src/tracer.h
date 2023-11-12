@@ -94,5 +94,4 @@ private:
   utils::Notifier::ReadEnd io_thread_pipe;
   bool already_launched;
   utils::NotifyManager *events_notifier;
-  std::chrono::high_resolution_clock::time_point prev_time;
 };

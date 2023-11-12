@@ -155,7 +155,6 @@ public:
   Action *default_action;
   bool should_stop;
   bool stop_all;
-  std::chrono::high_resolution_clock::time_point prev_time;
   union
   {
     u8 bitset;
