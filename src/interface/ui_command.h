@@ -6,14 +6,11 @@ class Tracer;
 
 namespace ui {
 struct UIResult;
-using UIResultPtr = UIResult *;
+using UIResultPtr = const UIResult *;
 
 #if defined(MDB_DEBUG)
 #define DEFINE_NAME(Type)                                                                                         \
-  constexpr std::string_view name() noexcept override final                                                       \
-  {                                                                                                               \
-    return #Type;                                                                                                 \
-  }
+  constexpr std::string_view name() noexcept override final { return #Type; }
 #else
 #define DEFINE_NAME(Type)
 #endif
