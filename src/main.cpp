@@ -90,7 +90,7 @@ main(int argc, const char **argv)
 
   std::vector<utils::NotifyResult> notify_events{};
   while (Tracer::Instance->KeepAlive) {
-    if (notifiers.poll(0)) {
+    if (notifiers.poll(10)) {
       notifiers.has_wait_ready(notify_events, true);
       for (const auto target : notify_events) {
         // handle await events on `target`
