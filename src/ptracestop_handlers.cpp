@@ -39,11 +39,17 @@ InstructionStep::InstructionStep(StopHandler *handler, Tid thread_id, int steps,
       single_threaded_stepping(single_thread), tsi(handler->tc->prepare_foreach_thread<TaskStepInfo>())
 {
   ASSERT(steps > 0, "Instruction stepping with 0 as param not valid");
-  for (auto &t : tc->threads) {
-    if (t.tid == thread_id) {
-      tsi.insert(tsi.begin(), {.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = tc->get_caching_pc(&t)});
-    } else if (!single_thread) {
-      tsi.push_back({.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = tc->get_caching_pc(&t)});
+  if (single_thread) {
+    const auto t = tc->get_task(thread_id);
+    tsi.push_back({.tid = thread_id, .steps = steps, .ignore_bps = false, .rip = tc->get_caching_pc(t)});
+  } else {
+    for (auto &t : tc->threads) {
+      if (t.tid == thread_id) {
+        tsi.insert(tsi.begin(),
+                   {.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = tc->get_caching_pc(&t)});
+      } else {
+        tsi.push_back({.tid = t.tid, .steps = steps, .ignore_bps = false, .rip = tc->get_caching_pc(&t)});
+      }
     }
   }
   next = tsi.begin();
@@ -242,8 +248,8 @@ LineStep::check_if_done() noexcept
 }
 
 StopHandler::StopHandler(TraceeController *tc) noexcept
-    : tc(tc), action(new Action{this}), default_action(action), should_stop(false),
-      stop_all(true), event_settings{.bitset = 0x00}, is_stepping(false) // all OFF by default
+    : tc(tc), action(new Action{this}), default_action(action), should_stop(false), stop_all(true),
+      event_settings{.bitset = 0x00}, is_stepping(false) // all OFF by default
 {
 }
 

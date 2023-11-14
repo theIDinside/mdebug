@@ -482,9 +482,8 @@ Threads::execute(Tracer *tracer) noexcept
   auto response = new ThreadsResponse{true, this};
   const auto target = tracer->get_current();
 
-  const auto &threads = target->threads;
-  response->threads.reserve(threads.size());
-  for (auto thread : threads) {
+  response->threads.reserve(target->threads.size());
+  for (const auto &thread : target->threads) {
     response->threads.push_back(Thread{.id = thread.tid, .name = target->get_thread_name(thread.tid)});
   }
   return response;
