@@ -20,5 +20,5 @@ struct UIResult
 };
 
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here
-using UIResultPtr = UIResult *;
+using UIResultPtr = const UIResult *;
 } // namespace ui

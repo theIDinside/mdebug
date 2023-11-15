@@ -28,8 +28,6 @@ set(MIDAS_SOURCES
   src/breakpoint.h
   src/so_loading.cpp
   src/so_loading.h
-  src/posix/argslist.cpp
-  src/posix/argslist.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
   src/symbolication/objfile.cpp
@@ -173,7 +171,7 @@ if(NODEJS)
   set(disassemble "backAndForward")
   set(exited "programExit")
   set(initialize)
-  set(launch "launch" "launchToMain" "launchThenDisconnect")
+  set(launch "launch" "main" "disconnect")
   set(nextInstruction "oneInstruction")
   set(nextLine "nextLineOverFunction")
   set(setBreakpoints "set4Breakpoints")
@@ -203,3 +201,5 @@ target_link_options(mdb PRIVATE -rdynamic)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(mdb PRIVATE MDB_DEBUG)
 endif()
+
+target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)

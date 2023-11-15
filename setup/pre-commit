@@ -6,28 +6,46 @@
 
 binutils_root=`git rev-parse --show-toplevel`
 # Verify that changed python files are properly formatted
-files=`exec git diff --cached --name-only`
+files=`exec git diff --cached --name-only --diff-filter=dr`
 
-failed_check=()
-has_failure=0
+failed_cpp_check=()
+failed_js_check=()
+cpp_has_failure=0
+js_has_failure=0
 while IFS= read -r file_path; do
 
     file_ext="${file_path##*.}"
 
-    # We only want to run black on python files
     if [[ "$file_ext" == "cpp" || "$file_ext" == "h" ]]; then
         clang-format --dry-run --Werror "$binutils_root/$file_path" >/dev/null 2>&1
         exit_code=$?
         if [[ "$exit_code" -ne 0 ]]; then
-          failed_check+=("$file_path")
-          has_failure=1
+          failed_cpp_check+=("$file_path")
+          cpp_has_failure=1
         fi
     fi
+    if [[ "$file_ext" == "js" ]]; then
+        prettier --check "$binutils_root/$file_path" >/dev/null 2>&1
+        exit_code=$?
+        if [[ "$exit_code" -ne 0 ]]; then
+          failed_js_check+=("$file_path")
+          js_has_failure=1
+        fi
+    fi
+
 done <<< "$files"
 
-if [[ "$has_failure" -eq 1 ]]; then
+if [[ "$cpp_has_failure" -eq 1 ]]; then
   echo "You need to format these files using clang-format"
-  for file in "${failed_check[@]}"; do
+  for file in "${failed_cpp_check[@]}"; do
+    echo "  $file"
+  done
+  exit 1
+fi
+
+if [[ "$js_has_failure" -eq 1 ]]; then
+  echo "You need to format these files using prettier"
+  for file in "${failed_js_check[@]}"; do
     echo "  $file"
   done
   exit 1

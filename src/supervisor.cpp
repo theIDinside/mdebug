@@ -135,7 +135,6 @@ TraceeController::install_loader_breakpoints() noexcept
   Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
   tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
-  ASSERT(system_tap_sec->file_offset == 0x35118, "Unexpected file offset for .note.stapsdt");
   const auto probes = parse_stapsdt_note(system_tap_sec);
   tracee_r_debug = get_rdebug_state(tmp_objfile);
   DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
@@ -296,20 +295,10 @@ TraceeController::resume_target(RunType type) noexcept
   DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
   for (auto &t : threads) {
     if (t.can_continue()) {
-      if (t.bstat) {
-        auto bp = bps.get_by_id(t.bstat->bp_id);
-        DLOG("mdb", "Stepping over bp {} ({}) for task {}", bp->id, bp->address, t.tid);
-        bp->disable(t.tid);
-        int stat;
-        VERIFY(-1 != ptrace(PTRACE_SINGLESTEP, t.tid, 1, 0),
-               "Single step over user breakpoint boundary failed: {}", strerror(errno));
-        waitpid(t.tid, &stat, 0);
-        t.set_dirty();
-        bp->enable(t.tid);
-        if (type == RunType::Step)
-          continue;
-      }
-      t.resume(type);
+      if (t.bstat)
+        t.step_over_breakpoint(this);
+      if (type == RunType::Continue)
+        t.resume(type);
     }
   }
   ptracestop_handler->can_resume();
@@ -550,6 +539,7 @@ TraceeController::kill() noexcept
 bool
 TraceeController::terminate_gracefully() noexcept
 {
+  DLOG("mdb", "[TraceeController]: terminate gracefully");
   if (is_running()) {
     stop_all();
   }
@@ -657,6 +647,7 @@ TraceeController::process_exec(TaskInfo *t) noexcept
   reopen_memfd();
   t->cache_registers();
   read_auxv(t);
+  install_loader_breakpoints();
 }
 
 Tid
@@ -667,25 +658,33 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
   t->cache_registers();
-  const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
-  const auto res = read_type(ptr);
-  // Nasty way to get PID, but, in doing so, we also get stack size + stack location for new thread
-  auto np = read_type(TPtr<pid_t>{res.parent_tid});
-#ifdef MDB_DEBUG
-  long new_pid = 0;
-  PTRACE_OR_PANIC(PTRACE_GETEVENTMSG, t->tid, 0, &new_pid);
-  ASSERT(np == new_pid, "Inconsistent pid values retrieved, expected {} but got {}", np, new_pid);
-#endif
-  if (!has_task(np)) {
-    new_task(np, true);
+  pid_t np = -1;
+  if (t->registers->orig_rax == SYS_clone) {
+    const auto flags = sys_arg_n<1>(*t->registers);
+    const TPtr<void> stack_ptr = sys_arg_n<2>(*t->registers);
+    const TPtr<int> child_tid = sys_arg_n<4>(*t->registers);
+    const u64 tls = sys_arg_n<5>(*t->registers);
+    np = read_type(child_tid);
+    if (!has_task(np))
+      new_task(np, true);
+    get_task(np)->initialize();
+    set_task_vm_info(np, TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls});
+    return np;
+  } else if (t->registers->orig_rax == SYS_clone3) {
+    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
+    const auto res = read_type(ptr);
+    np = read_type(TPtr<pid_t>{res.parent_tid});
+    if (!has_task(np))
+      new_task(np, true);
+    // by this point, the task has cloned _and_ it's continuable because the parent has been told
+    // that "hey, we're ok". Why on earth a pre-finished clone can be waited on, I will never know.
+    get_task(np)->initialize();
+    // task backing storage may have re-allocated and invalidated this pointer.
+    set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
+    return np;
+  } else {
+    ASSERT(false, "Unknown clone syscall!");
   }
-  // by this point, the task has cloned _and_ it's continuable because the parent has been told
-  // that "hey, we're ok". Why on earth a pre-finished clone can be waited on, I will never know.
-  get_task(np)->initialize();
-  // task backing storage may have re-allocated and invalidated this pointer.
-  t = get_task(stopped_tid);
-  set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
-  return np;
 }
 
 BpEvent

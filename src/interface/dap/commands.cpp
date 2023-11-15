@@ -11,7 +11,6 @@
 #include <iterator>
 #include <memory>
 #include <optional>
-#include <ranges>
 #include <string>
 #include <unistd.h>
 #include <unordered_set>
@@ -43,7 +42,12 @@ Continue::execute(Tracer *tracer) noexcept
     res->success = false;
   } else {
     res->success = true;
-    target->resume_target(RunType::Continue);
+    if (continue_all) {
+      target->resume_target(RunType::Continue);
+    } else {
+      auto t = target->get_task(thread_id);
+      t->resume(RunType::Continue);
+    }
   }
 
   return res;
@@ -478,9 +482,8 @@ Threads::execute(Tracer *tracer) noexcept
   auto response = new ThreadsResponse{true, this};
   const auto target = tracer->get_current();
 
-  const auto &threads = target->threads;
-  response->threads.reserve(threads.size());
-  for (auto thread : threads) {
+  response->threads.reserve(target->threads.size());
+  for (const auto &thread : target->threads) {
     response->threads.push_back(Thread{.id = thread.tid, .name = target->get_thread_name(thread.tid)});
   }
   return response;

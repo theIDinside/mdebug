@@ -387,7 +387,7 @@ CUProcessor::determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept
       return builder.done(nullptr);
     }
   }
-  DLOG("mdb", "[die] offset=0x{:x}, no bounds", die->sec_offset);
+  DLOG("dwarf", "[die] offset=0x{:x}, no bounds", die->sec_offset);
   return std::nullopt;
 }
 

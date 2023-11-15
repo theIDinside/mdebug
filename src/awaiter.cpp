@@ -9,7 +9,7 @@ AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
     : notifier(notifier), events_reaped(true), m{}, cv{}, initialized(false), should_cont(true)
 {
 
-  worker_thread = std::thread{[&n = this->notifier, &t = task_leader, &cv = cv, &m = m, &ready = events_reaped,
+  worker_thread = std::thread{[&n = this->notifier, t = task_leader, &cv = cv, &m = m, &ready = events_reaped,
                                &initialized = initialized, &c = should_cont]() {
     int error_tries = 0;
     {

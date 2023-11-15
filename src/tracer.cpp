@@ -9,7 +9,6 @@
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
-#include "posix/argslist.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
@@ -28,7 +27,6 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <nlohmann/json.hpp>
-#include <ranges>
 #include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
@@ -55,7 +53,7 @@ add_object_err(AddObjectResult r)
 
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
     : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
-      events_notifier(events_notifier), prev_time(std::chrono::high_resolution_clock::now())
+      events_notifier(events_notifier)
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -150,7 +148,6 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
   }
   auto task = tc->register_task_waited(wait);
   tc->ptracestop_handler->handle_execution_event(task);
-  // tc->handle_execution_event(task);
 }
 
 void
@@ -201,15 +198,24 @@ Tracer::execute_pending_commands() noexcept
   }
 }
 
-void
-Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog_args) noexcept
+static int
+exec(const Path &program, const std::vector<std::string> &prog_args)
 {
-  std::vector<std::string> posix_cmd_args{};
-  posix_cmd_args.push_back(program);
-  for (auto &&arg : prog_args) {
-    posix_cmd_args.push_back(arg);
+  const auto arg_size = prog_args.size() + 2;
+  const char *args[arg_size];
+  const char *cmd = program.c_str();
+  args[0] = cmd;
+  auto idx = 1;
+  for (const auto &arg : prog_args) {
+    args[idx] = arg.c_str();
   }
-  PosixArgsList args_list{std::move(posix_cmd_args)};
+  args[arg_size - 1] = nullptr;
+  return execv(cmd, (char *const *)args);
+}
+
+void
+Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept
+{
   termios original_tty;
   winsize ws;
 
@@ -225,7 +231,6 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
   switch (fork_result.index()) {
   case 0: // child
   {
-    const auto [cmd, args] = args_list.get_command();
     if (personality(ADDR_NO_RANDOMIZE) == -1) {
       PANIC("Failed to set ADDR_NO_RANDOMIZE!");
     }
@@ -235,25 +240,19 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
       raise(SIGSTOP);
     }
 
-    if (execv(cmd, args) == -1) {
-      PANIC(fmt::format("EXECV Failed for {}", cmd));
+    if (exec(program, prog_args) == -1) {
+      PANIC(fmt::format("EXECV Failed for {}", program.c_str()));
     }
     _exit(0);
     break;
   }
   default: {
     const auto res = get<PtyParentResult>(fork_result);
+    const auto leader = res.pid;
     add_target_set_current(res.pid, program, TargetSession::Launched);
-    TaskInfo *t = get_current()->get_task(res.pid);
     if (Tracer::use_traceme) {
-      TaskWaitResult twr{.waited_pid = res.pid, .ws = {.ws = WaitStatusKind::Execed}};
-      t = get_current()->get_task(res.pid);
-      ASSERT(t != nullptr, "Unknown task!!");
-      get_current()->register_task_waited(twr);
-      get_current()->reopen_memfd();
-      t->cache_registers();
-      get_current()->read_auxv(t);
-      get_current()->install_loader_breakpoints();
+      TaskWaitResult twr{.waited_pid = leader, .ws = {.ws = WaitStatusKind::Execed}};
+      get_current()->process_exec(get_current()->register_task_waited(twr));
       dap->add_tty(res.fd);
     } else {
       for (;;) {
@@ -262,15 +261,9 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
           if ((stat >> 8) == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
             TaskWaitResult twr;
             twr.ws.ws = WaitStatusKind::Execed;
-            twr.waited_pid = res.pid;
+            twr.waited_pid = leader;
             DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.waited_pid, res.pid);
-            t = get_current()->get_task(twr.waited_pid);
-            ASSERT(t != nullptr, "Unknown task!!");
-            get_current()->register_task_waited(twr);
-            get_current()->reopen_memfd();
-            t->cache_registers();
-            get_current()->read_auxv(t);
-            get_current()->install_loader_breakpoints();
+            get_current()->process_exec(get_current()->register_task_waited(twr));
             dap->add_tty(res.fd);
             break;
           }
@@ -279,7 +272,6 @@ Tracer::launch(bool stopAtEntry, Path &&program, std::vector<std::string> &&prog
         }
       }
     }
-    t->set_dirty();
     get_current()->reaped_events();
     if (stopAtEntry) {
       get_current()->set_fn_breakpoint("main");
