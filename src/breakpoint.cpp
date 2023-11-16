@@ -90,20 +90,6 @@ BreakpointMap::clear(TraceeController *target, BpType type) noexcept
   });
 }
 
-void
-BreakpointMap::disable_breakpoint(u16 id) noexcept
-{
-  auto bp = get_by_id(id);
-  bp->disable(address_space_tid);
-}
-
-void
-BreakpointMap::enable_breakpoint(u16 id) noexcept
-{
-  auto bp = get_by_id(id);
-  bp->enable(address_space_tid);
-}
-
 Breakpoint *
 BreakpointMap::get_by_id(u32 id) noexcept
 {

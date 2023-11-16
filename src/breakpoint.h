@@ -179,8 +179,6 @@ struct BreakpointMap
 
   bool insert(AddrPtr addr, u8 overwritten_byte, BpType type) noexcept;
   void clear(TraceeController *target, BpType type) noexcept;
-  void disable_breakpoint(u16 id) noexcept;
-  void enable_breakpoint(u16 id) noexcept;
 
   Breakpoint *get_by_id(u32 id) noexcept;
   Breakpoint *get(AddrPtr addr) noexcept;
