@@ -6,46 +6,14 @@
 #include <sys/wait.h>
 
 AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
-    : notifier(notifier), events_reaped(true), m{}, cv{}, initialized(false), should_cont(true)
-{
-
-  worker_thread = std::thread{[&n = this->notifier, t = task_leader, &cv = cv, &m = m, &ready = events_reaped,
-                               &initialized = initialized, &c = should_cont]() {
-    int error_tries = 0;
-    {
-      std::unique_lock lk(m);
-      while (!initialized) {
-        cv.wait(lk);
-      }
-    }
-
-    while (c) {
-      siginfo_t info_ptr;
-      auto res = waitid(P_ALL, t, &info_ptr, WEXITED | WSTOPPED | WNOWAIT);
-      if (res == -1) {
-        error_tries++;
-        VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
-        continue;
-      }
-      error_tries = 0;
-      // notify Tracer thread that it can pull out wait status info
-      n.notify();
-      {
-        std::unique_lock lk(m);
-        ready = false;
-        while (!ready && c)
-          cv.wait(lk);
-      }
-      ready = false;
-    }
-  }};
-};
+    : notifier(notifier), events_reaped(true), m{}, cv{}, initialized(false), thread(), should_cont(true),
+      process_group_id(task_leader){};
 
 AwaiterThread::~AwaiterThread() noexcept
 {
   should_cont = false;
   reaped_events();
-  worker_thread.join();
+  thread.join();
 }
 
 void
@@ -58,8 +26,29 @@ AwaiterThread::reaped_events() noexcept
 void
 AwaiterThread::start_awaiter_thread() noexcept
 {
-  this->initialized = true;
-  cv.notify_all();
+  thread = std::thread{
+      [&n = this->notifier, t = process_group_id, &cv = cv, &m = m, &ready = events_reaped, &c = should_cont]() {
+        int error_tries = 0;
+        while (c) {
+          siginfo_t info_ptr;
+          auto res = waitid(P_ALL, t, &info_ptr, WEXITED | WSTOPPED | WNOWAIT);
+          if (res == -1) {
+            error_tries++;
+            VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
+            continue;
+          }
+          error_tries = 0;
+          // notify Tracer thread that it can pull out wait status info
+          n.notify();
+          {
+            std::unique_lock lk(m);
+            ready = false;
+            while (!ready && c)
+              cv.wait(lk);
+          }
+          ready = false;
+        }
+      }};
 }
 
 void
