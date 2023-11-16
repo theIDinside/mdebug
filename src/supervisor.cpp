@@ -60,6 +60,7 @@ TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::Writ
       session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}),
       unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
+  threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
   threads.push_back(TaskInfo{process_space_id});
   threads.back().initialize();
@@ -261,9 +262,7 @@ void
 TraceeController::new_task(Tid tid, bool ui_update) noexcept
 {
   VERIFY(tid != 0, "Invalid tid {}", tid);
-  auto evt = new ui::dap::OutputEvent{
-      "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
-  Tracer::Instance->post_event(evt);
+  ASSERT(!has_task(tid), "Task {} has already been created!", tid);
   threads.push_back(TaskInfo{tid});
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
@@ -796,8 +795,6 @@ TraceeController::add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept
       obj->m_partial_units.push_back({});
     }
   }
-  auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
-  Tracer::Instance->post_event(evt);
 }
 
 void
