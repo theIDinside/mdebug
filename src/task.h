@@ -2,8 +2,8 @@
 
 #include "breakpoint.h"
 #include "common.h"
+#include "ptrace.h"
 #include <linux/sched.h>
-#include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
@@ -12,25 +12,6 @@ using namespace std::string_view_literals;
 struct TraceeController;
 namespace sym {
 struct CallStack;
-}
-
-enum class WaitStatusKind : u16
-{
-#define ITEM(IT, Value) IT = Value,
-#include "./defs/waitstatus.def"
-#undef ITEM
-};
-
-constexpr std::string_view
-to_str(WaitStatusKind ws)
-{
-  switch (ws) {
-#define ITEM(IT, Value)                                                                                           \
-  case WaitStatusKind::IT:                                                                                        \
-    return #IT;
-#include "./defs/waitstatus.def"
-#undef ITEM
-  }
 }
 
 struct CallStackRequest
@@ -44,22 +25,6 @@ struct CallStackRequest
 
   static CallStackRequest partial(u8 count) noexcept;
   static CallStackRequest full() noexcept;
-};
-
-struct WaitStatus
-{
-  WaitStatusKind ws;
-  union
-  {
-    int exit_signal;
-    int signal;
-  } data;
-};
-
-struct TaskWaitResult
-{
-  Tid waited_pid;
-  WaitStatus ws;
 };
 
 enum class RunType : u8

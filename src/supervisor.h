@@ -4,6 +4,7 @@
 #include "common.h"
 #include "interface/dap/types.h"
 #include "lib/spinlock.h"
+#include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
@@ -18,7 +19,6 @@
 #include <link.h>
 #include <optional>
 #include <sys/mman.h>
-#include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/user.h>
 #include <thread>
@@ -169,12 +169,6 @@ public:
   }
 
   void restore_default_handler() noexcept;
-
-  // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
-  void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
-  void task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept;
-  void task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept;
-  void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
   void process_exec(TaskInfo *t) noexcept;
   Tid process_clone(TaskInfo *t) noexcept;

@@ -254,12 +254,7 @@ std::optional<TaskWaitResult>
 TraceeController::wait_pid(TaskInfo *requested_task) noexcept
 {
   const auto tid = requested_task == nullptr ? -1 : requested_task->tid;
-  return waitpid_block(tid).transform([this](auto &&wpid) {
-    TaskWaitResult wait{};
-    wait.waited_pid = wpid.tid;
-    task_wait_emplace(wpid.status, &wait);
-    return wait;
-  });
+  return waitpid_block(tid).transform([](auto &&wpid) { return process_status(wpid.tid, wpid.status); });
 }
 
 void
@@ -327,7 +322,7 @@ TraceeController::reap_task(TaskInfo *task) noexcept
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
   task->exited = true;
-  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.data.exit_signal);
+  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.exit_code);
   if (task->tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
@@ -336,8 +331,8 @@ TraceeController::reap_task(TaskInfo *task) noexcept
 TaskInfo *
 TraceeController::register_task_waited(TaskWaitResult wait) noexcept
 {
-  ASSERT(has_task(wait.waited_pid), "Target did not contain task {}", wait.waited_pid);
-  auto task = get_task(wait.waited_pid);
+  ASSERT(has_task(wait.tid), "Target did not contain task {}", wait.tid);
+  auto task = get_task(wait.tid);
   task->set_taskwait(wait);
   task->tracer_stopped = true;
   return task;
@@ -567,77 +562,6 @@ void
 TraceeController::restore_default_handler() noexcept
 {
   ptracestop_handler->restore_default();
-}
-
-void
-TraceeController::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
-{
-  ASSERT(wait != nullptr, "wait param must not be null");
-  if (WIFSTOPPED(status)) {
-    task_wait_emplace_stopped(status, wait);
-    return;
-  }
-
-  if (WIFEXITED(status)) {
-    task_wait_emplace_exited(status, wait);
-    return;
-  }
-
-  if (WIFSIGNALED(status)) {
-    task_wait_emplace_signalled(status, wait);
-    return;
-  }
-}
-
-void
-TraceeController::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
-{
-  using enum WaitStatusKind;
-  if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
-    PtraceSyscallInfo info;
-    constexpr auto size = sizeof(PtraceSyscallInfo);
-    PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, wait->waited_pid, size, &info);
-    if (info.is_entry()) {
-      wait->ws.ws = SyscallEntry;
-    } else {
-      wait->ws.ws = SyscallExit;
-    }
-    return;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
-    wait->ws.ws = Cloned;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
-    wait->ws.ws = Execed;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
-    wait->ws.ws = Exited;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
-    wait->ws.ws = Forked;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
-    wait->ws.ws = VForked;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
-    wait->ws.ws = VForkDone;
-  } else if (WSTOPSIG(status) == SIGTRAP) {
-    wait->ws.ws = Stopped;
-  } else if (WSTOPSIG(status) == SIGSTOP) {
-    wait->ws.ws = Stopped;
-  } else {
-    wait->ws.ws = Stopped;
-    fmt::println("SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait->waited_pid, WSTOPSIG(status));
-    sleep(1);
-  }
-}
-
-void
-TraceeController::task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept
-{
-  wait->ws.ws = WaitStatusKind::Signalled;
-  wait->ws.data.signal = WTERMSIG(status);
-}
-
-void
-TraceeController::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
-{
-  wait->ws.ws = WaitStatusKind::Exited;
-  wait->ws.data.exit_signal = WEXITSTATUS(status);
 }
 
 void

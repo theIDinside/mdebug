@@ -191,3 +191,78 @@ from_register(u64 syscall_number)
   }
   return WaitStatusKind::Stopped;
 }
+
+static TaskWaitResult
+wait_result_stopped(Tid tid, int status)
+{
+  TaskWaitResult wait{.tid = tid};
+  using enum WaitStatusKind;
+  if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
+    PtraceSyscallInfo info;
+    constexpr auto size = sizeof(PtraceSyscallInfo);
+    PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, tid, size, &info);
+    if (info.is_entry()) {
+      wait.ws.ws = SyscallEntry;
+    } else {
+      wait.ws.ws = SyscallExit;
+    }
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
+    wait.ws.ws = Cloned;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
+    wait.ws.ws = Execed;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
+    wait.ws.ws = Exited;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
+    wait.ws.ws = Forked;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
+    wait.ws.ws = VForked;
+  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
+    wait.ws.ws = VForkDone;
+  } else if (WSTOPSIG(status) == SIGTRAP) {
+    wait.ws.ws = Stopped;
+  } else if (WSTOPSIG(status) == SIGSTOP) {
+    wait.ws.ws = Stopped;
+  } else {
+    wait.ws.ws = Stopped;
+    DLOG("mdb", "SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait.tid, WSTOPSIG(status));
+    sleep(1);
+  }
+  return wait;
+}
+
+static TaskWaitResult
+wait_result_exited(Tid tid, int status)
+{
+  TaskWaitResult wait{.tid = tid};
+  wait.ws.ws = WaitStatusKind::Exited;
+  wait.ws.exit_code = WEXITSTATUS(status);
+  return wait;
+}
+
+static TaskWaitResult
+wait_result_signalled(Tid tid, int status)
+{
+  TaskWaitResult wait{.tid = tid};
+  wait.ws.ws = WaitStatusKind::Signalled;
+  wait.ws.signal = WTERMSIG(status);
+  return wait;
+}
+
+TaskWaitResult
+process_status(Tid tid, int status) noexcept
+{
+  if (WIFSTOPPED(status)) {
+    return wait_result_stopped(tid, status);
+  }
+
+  if (WIFEXITED(status)) {
+    return wait_result_exited(tid, status);
+  }
+
+  if (WIFSIGNALED(status)) {
+    return wait_result_signalled(tid, status);
+  }
+
+  VERIFY(false, "Unknown WAIT STATUS event");
+  return {};
+}

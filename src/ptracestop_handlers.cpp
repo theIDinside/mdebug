@@ -343,7 +343,7 @@ StopHandler::handle_signalled(TaskInfo *t) noexcept
 {
   set_should_stop(true);
   tc->stop_all();
-  tc->emit_signal_event({.pid = tc->task_leader, .tid = t->tid}, t->wait_status.data.signal);
+  tc->emit_signal_event({.pid = tc->task_leader, .tid = t->tid}, t->wait_status.signal);
 }
 
 void
