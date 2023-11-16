@@ -569,7 +569,8 @@ public:
 
   template <typename T>
     requires(!std::is_pointer_v<T>)
-  constexpr T read_value() noexcept
+  constexpr T
+  read_value() noexcept
   {
     ASSERT(remaining_size() >= sizeof(T),
            "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
@@ -579,6 +580,19 @@ public:
     Type value = *(Type *)head;
     head += sz;
     return value;
+  }
+
+  template <typename T>
+    requires(!std::is_pointer_v<T>)
+  constexpr void
+  skip_value() noexcept
+  {
+    ASSERT(remaining_size() >= sizeof(T),
+           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
+           remaining_size());
+    using Type = typename std::remove_cv_t<T>;
+    constexpr auto sz = sizeof(Type);
+    head += sz;
   }
 
   template <ByteCode T>
@@ -670,6 +684,7 @@ public:
 
   std::span<const u8> get_span(u64 size) noexcept;
   std::string_view read_string() noexcept;
+  void skip_string() noexcept;
   DataBlock read_block(u64 size) noexcept;
 
   /**

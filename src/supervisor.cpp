@@ -100,12 +100,14 @@ parse_stapsdt_note(const ElfSection *section) noexcept
     const auto stapsdt = reader.read_string();
     ASSERT(stapsdt == "stapsdt", "Failed to see 'stapsdt' deliminator; saw {}", stapsdt);
     const auto ptr = reader.read_value<u64>();
-    const auto base = reader.read_value<u64>();
-    const auto semaphore = reader.read_value<u64>();
+    // base =
+    reader.skip_value<u64>();
+    // semaphore =
+    reader.skip_value<u64>();
     const auto provider = reader.read_string();
     ASSERT(provider == "rtld", "Supported provider is rtld, got {}", provider);
     const auto probe_name = reader.read_string();
-    const auto description = reader.read_string();
+    reader.skip_string();
     if (reader.bytes_read() % 4 != 0)
       reader.skip(4 - reader.bytes_read() % 4);
     if (required_probes.contains(probe_name)) {
@@ -178,7 +180,7 @@ TraceeController::on_so_event() noexcept
     }
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
-      r_debug_extended rdebug_ext = read_type(next);
+      rdebug_ext = read_type(next);
     } else {
       break;
     }
@@ -223,7 +225,6 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
       }
       CompilationUnitBuilder cu_builder{so->objfile};
       auto total = cu_builder.build_cu_headers();
-      const auto total_sz = total.size();
       for (const auto &hdr : total) {
         ASSERT(so->objfile != nullptr, "Objfile is null!");
         auto proc = prepare_cu_processing(so->objfile, hdr, this);
@@ -577,13 +578,11 @@ Tid
 TraceeController::process_clone(TaskInfo *t) noexcept
 {
   DLOG("mdb", "Processing CLONE for {}", t->tid);
-  const auto stopped_tid = t->tid;
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
   t->cache_registers();
   pid_t np = -1;
   if (t->registers->orig_rax == SYS_clone) {
-    const auto flags = sys_arg_n<1>(*t->registers);
     const TPtr<void> stack_ptr = sys_arg_n<2>(*t->registers);
     const TPtr<int> child_tid = sys_arg_n<4>(*t->registers);
     const u64 tls = sys_arg_n<5>(*t->registers);
