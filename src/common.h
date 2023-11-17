@@ -141,7 +141,7 @@ std::string_view syscall_name(u64 syscall_number);
     logging::get_logging()->log("mdb", todo_msg);                                                                 \
     logging::get_logging()->on_abort();                                                                           \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
-    DEAL_WITH_SHITTY_GCC                                                                                          \
+    MIDAS_UNREACHABLE                                                                                             \
   }
 
 #define TODO_FMT(fmt_str, ...)                                                                                    \
@@ -156,7 +156,7 @@ std::string_view syscall_name(u64 syscall_number);
     logging::get_logging()->log("mdb", todo_msg);                                                                 \
     logging::get_logging()->on_abort();                                                                           \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
-    DEAL_WITH_SHITTY_GCC                                                                                          \
+    MIDAS_UNREACHABLE                                                                                             \
   }
 
 // Identical to ASSERT, but doesn't care about build type

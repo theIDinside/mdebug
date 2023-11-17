@@ -113,7 +113,7 @@ to_str(StoppedReason reason) noexcept
   case StoppedReason::InstructionBreakpoint:
     return "instruction breakpoint";
   }
-  DEAL_WITH_SHITTY_GCC
+  MIDAS_UNREACHABLE
 }
 
 // unfortunately, the DAP people were so "brilliant" as to not make the names
@@ -135,7 +135,7 @@ to_str(ThreadReason reason) noexcept
     return "exited";
     break;
   }
-  DEAL_WITH_SHITTY_GCC
+  MIDAS_UNREACHABLE
 }
 
 } // namespace ui::dap
