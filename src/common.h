@@ -135,8 +135,7 @@ std::string_view syscall_name(u64 syscall_number);
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
-    const auto todo_msg =                                                                                         \
-        fmt::format("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);      \
+    const auto todo_msg = fmt::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
     fmt::println("{}", todo_msg);                                                                                 \
     logging::get_logging()->log("mdb", todo_msg);                                                                 \
     logging::get_logging()->on_abort();                                                                           \
