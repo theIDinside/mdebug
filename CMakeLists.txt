@@ -30,6 +30,8 @@ set(MIDAS_SOURCES
   src/breakpoint.h
   src/so_loading.cpp
   src/so_loading.h
+  src/events/event.cpp
+  src/events/event.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
   src/symbolication/objfile.cpp

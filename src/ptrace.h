@@ -10,6 +10,17 @@
 struct TaskWaitResult;
 struct TaskInfo;
 
+enum class RunType : u8
+{
+  Step = 0b0001,
+  Continue = 0b0010,
+  SyscallContinue = 0b0011,
+  UNKNOWN = 0b0000,
+  None = UNKNOWN
+};
+
+std::string_view to_str(RunType type) noexcept;
+
 enum class WaitStatusKind : u16
 {
 #define ITEM(IT, Value) IT = Value,

@@ -49,17 +49,10 @@ public:
   {
   }
 
-  void
-  set_step_over(BpStat *bpstat) noexcept
-  {
-    step_over_breakpoint = bpstat;
-  }
-
 protected:
   StopHandler *handler;
   TraceeController *tc;
   bool should_stop;
-  BpStat *step_over_breakpoint;
 };
 
 class InstructionStep : public Action
@@ -132,20 +125,12 @@ public:
   StopHandler(TraceeController *tc) noexcept;
   virtual ~StopHandler() = default;
 
-  void handle_execution_event(TaskInfo *t) noexcept;
-  void handle_bp_event(TaskInfo *t, BpEvent evt) noexcept;
-  void handle_signalled(TaskInfo *t) noexcept;
-  void handle_execed(TaskInfo *t) noexcept;
-  void handle_exited(TaskInfo *t) noexcept;
-  void handle_cloned(TaskInfo *t) noexcept;
-  void can_resume() noexcept;
+  void handle_wait_event(TaskInfo *info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;
   constexpr void stop_on_exec() noexcept;
   constexpr void stop_on_thread_exit() noexcept;
-  constexpr void ignore_bps() noexcept;
 
-  bool set_should_stop(bool stop) noexcept;
   void set_action(Action *action) noexcept;
   void restore_default() noexcept;
   void start_action() noexcept;
@@ -153,7 +138,6 @@ public:
   TraceeController *tc;
   Action *action;
   Action *default_action;
-  bool should_stop;
   bool stop_all;
   union
   {
@@ -167,6 +151,8 @@ public:
       bool ignore_bps : 1;
     };
   } event_settings;
-  bool is_stepping;
+
+private:
+  bool process_waitstatus_for(TaskInfo *t) noexcept;
 };
 } // namespace ptracestop

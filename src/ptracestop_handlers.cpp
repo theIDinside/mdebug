@@ -1,35 +1,33 @@
 #include "ptracestop_handlers.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "events/event.h"
+#include "ptrace.h"
 #include "supervisor.h"
 #include "symbolication/lnp.h"
 #include "task.h"
 #include "tracer.h"
 #include "utils/logger.h"
+#include "utils/macros.h"
 #include <algorithm>
+#include <bits/ranges_algo.h>
 #include <chrono>
 #include <sys/wait.h>
 
 namespace ptracestop {
 
-Action::Action(StopHandler *handler) noexcept
-    : handler(handler), tc(handler->tc), should_stop(false), step_over_breakpoint(nullptr)
-{
-}
+Action::Action(StopHandler *handler) noexcept : handler(handler), tc(handler->tc), should_stop(false) {}
 
-Action::~Action() noexcept { handler->is_stepping = false; }
+Action::~Action() noexcept {}
 
 bool
-Action::completed(TaskInfo *t, bool should_stop) noexcept
+Action::completed(TaskInfo *t, bool should_resume) noexcept
 {
   constexpr bool is_done = false;
-  DLOG("mdb", "[action]: {} will resume => {}", t->tid, !should_stop && t->can_continue());
-  if (!should_stop && t->can_continue()) {
-    if (step_over_breakpoint) {
-      t->step_over_breakpoint(tc);
-      step_over_breakpoint = nullptr;
-    }
-    t->resume(RunType::Continue);
+  DLOG("mdb", "[action]: {} will resume (should_resume={}) => {}", t->tid, should_resume,
+       should_resume && t->can_continue());
+  if (should_resume && t->can_continue()) {
+    tc->resume_task(t, RunType::Continue);
   }
   return is_done;
 }
@@ -56,9 +54,9 @@ InstructionStep::InstructionStep(StopHandler *handler, Tid thread_id, int steps,
 }
 
 bool
-InstructionStep::completed(TaskInfo *, bool should_stop) noexcept
+InstructionStep::completed(TaskInfo *, bool should_resume) noexcept
 {
-  if (!should_stop) {
+  if (should_resume) {
     return resume();
   } else {
     return true;
@@ -68,8 +66,6 @@ InstructionStep::completed(TaskInfo *, bool should_stop) noexcept
 void
 InstructionStep::start_action() noexcept
 {
-  handler->is_stepping = true;
-  handler->set_should_stop(false);
   start_time = std::chrono::high_resolution_clock::now();
   resume();
 }
@@ -116,17 +112,7 @@ InstructionStep::resume() noexcept
   }
 
   auto task = tc->get_task(next->tid);
-  if (task->bstat) {
-    DLOG("mdb", "[ptrace stop:istep]: breakpoint step-over");
-    auto bp = tc->bps.get_by_id(task->bstat->bp_id);
-    bp->disable(tc->task_leader);
-    task->resume(RunType::Step);
-    bp->enable(next->tid);
-    task->bstat->stepped_over = true;
-  } else {
-    DLOG("mdb", "[ptrace stop:istep]: resume");
-    resume_impl();
-  }
+  tc->resume_task(task, RunType::Step);
   update_step_schedule();
   debug_steps_taken++;
   return false;
@@ -136,8 +122,8 @@ void
 InstructionStep::resume_impl() noexcept
 {
   auto task = tc->get_task(next->tid);
-  DLOG("mdb", "[InstructionStep] stepping 1 instruction");
-  task->resume(RunType::Step);
+  DLOG("mdb", "[InstructionStep] stepping 1 instruction for {}", task->tid);
+  tc->resume_task(task, RunType::Step);
 }
 
 LineStep::LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread) noexcept
@@ -155,7 +141,6 @@ LineStep::~LineStep() noexcept
 void
 LineStep::start_action() noexcept
 {
-  this->handler->is_stepping = true;
   start_time = std::chrono::high_resolution_clock::now();
   auto &callstack = tc->build_callframe_stack(tc->get_task(next->tid), CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
@@ -167,7 +152,6 @@ LineStep::start_action() noexcept
     entry = *a;
     this->cu = cu;
     resume();
-    handler->set_should_stop(false);
     should_stop = false;
     DLOG("mdb", "Callstack at start");
     for (const auto &f : callstack.frames) {
@@ -190,8 +174,9 @@ void
 LineStep::resume_impl() noexcept
 {
   if (resume_address_set) {
-    DLOG("mdb", "LineStep continuing sub frame");
-    tc->get_task(next->tid)->resume(RunType::Continue);
+    const auto task = tc->get_task(next->tid);
+    DLOG("mdb", "LineStep continuing sub frame for {}", task->tid);
+    tc->resume_task(task, RunType::Continue);
   } else {
     InstructionStep::resume_impl();
   }
@@ -212,7 +197,7 @@ LineStep::check_if_done() noexcept
     const auto [a, b] = cu->get_range_of_pc(frame.rip);
     if (!a || !b)
       return done;
-    handler->is_stepping = true;
+
     if (a->line != entry.line) {
       DLOG("mdb", "New LTE pc {} found by using {}, line {} != start LTE pc {}, line {}. (pc {}, line {})", a->pc,
            frame.rip, a->line, entry.pc, entry.line, b->pc, b->line);
@@ -236,7 +221,6 @@ LineStep::check_if_done() noexcept
       tc->set_tracer_bp(resume_address->as<u64>(), BpType{.resume_address = true});
       resume_address_set = true;
       resume_addr = *resume_address;
-      handler->is_stepping = false;
     } else {
       DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? REALLY?: CALLSTACK:");
       for (const auto &frame : callstack.frames) {
@@ -248,37 +232,70 @@ LineStep::check_if_done() noexcept
 }
 
 StopHandler::StopHandler(TraceeController *tc) noexcept
-    : tc(tc), action(new Action{this}), default_action(action), should_stop(false), stop_all(true),
-      event_settings{.bitset = 0x00}, is_stepping(false) // all OFF by default
+    : tc(tc), action(new Action{this}), default_action(action), stop_all(true),
+      event_settings{.bitset = 0x00} // all OFF by default
 {
 }
 
 void
-StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
+StopHandler::handle_wait_event(TaskInfo *info) noexcept
 {
-  stopped->set_dirty();
-  switch (stopped->wait_status.ws) {
+  const auto should_resume = process_waitstatus_for(info);
+  if (tc->waiting_for_all_stopped) {
+    if (tc->all_stopped())
+      tc->notify_all_stopped();
+  } else {
+    action->completed(info, should_resume);
+  }
+  tc->reaped_events();
+}
+
+static bool
+process_stopped(TraceeController *tc, TaskInfo *t)
+{
+  bool should_resume = true;
+  auto stepped_over_bp_id = 0;
+  if (t->bstat) {
+    stepped_over_bp_id = t->bstat->bp_id;
+    if (t->bstat->re_enable_bp) {
+      tc->bps.get_by_id(t->bstat->bp_id)->enable(t->tid);
+    }
+    should_resume = t->bstat->should_resume;
+    t->bstat = std::nullopt;
+  }
+  const auto pc = tc->get_caching_pc(t);
+  const auto prev_pc_byte = offset(pc, -1);
+  auto bp = tc->bps.get(prev_pc_byte);
+  if (bp != nullptr && bp->id != stepped_over_bp_id) {
+    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
+    tc->set_pc(t, prev_pc_byte);
+    t->add_bpstat(bp);
+    bp->on_hit(tc, t);
+    should_resume = bp->should_resume();
+  }
+
+  DLOG("mdb", "Processed STOPPED for {}. should_resume={}, user_stopped={}", t->tid, should_resume,
+       bool{t->user_stopped});
+  const auto result = should_resume && !(t->user_stopped);
+  return result;
+}
+
+bool
+StopHandler::process_waitstatus_for(TaskInfo *t) noexcept
+{
+  t->set_dirty();
+  t->stop_collected = true;
+  const auto ws = t->pending_wait_status();
+  switch (ws.ws) {
   case WaitStatusKind::Stopped: {
-    const auto tevt = tc->process_stopped(stopped);
-    handle_bp_event(stopped, tevt);
+    return process_stopped(tc, t);
   } break;
-  case WaitStatusKind::Execed: {
-    tc->process_exec(stopped);
-    handle_execed(stopped);
-    break;
-  }
-  case WaitStatusKind::Exited: {
-    handle_exited(stopped);
-    break;
-  }
-  case WaitStatusKind::Cloned: {
-    const auto stopped_tid = stopped->tid;
-    const auto new_task_tid = tc->process_clone(stopped);
-    action->new_task_created(tc->get_task(new_task_tid));
-    handle_cloned(stopped);
-    stopped = tc->get_task(stopped_tid);
-    break;
-  }
+  case WaitStatusKind::Execed:
+    tc->process_exec(t);
+    return !event_settings.exec_stop;
+  case WaitStatusKind::Exited:
+    tc->reap_task(t);
+    return !event_settings.thread_exit_stop;
   case WaitStatusKind::Forked:
     TODO("WaitStatusKind::Forked");
     break;
@@ -288,86 +305,27 @@ StopHandler::handle_execution_event(TaskInfo *stopped) noexcept
   case WaitStatusKind::VForkDone:
     TODO("WaitStatusKind::VForkDone");
     break;
+  case WaitStatusKind::Cloned: {
+    const auto new_task_tid = tc->process_clone(t);
+    action->new_task_created(tc->get_task(new_task_tid));
+    return !event_settings.clone_stop;
+  } break;
   case WaitStatusKind::Signalled:
-    handle_signalled(stopped);
-    break;
+    tc->stop_all();
+    tc->stopped_observer.add_notification<SignalStop>(tc, t->wait_status.signal, int{t->tid});
+    return false;
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
     break;
   case WaitStatusKind::SyscallExit:
     TODO("WaitStatusKind::SyscallExit");
     break;
-  default:
+  case WaitStatusKind::NotKnown:
+    TODO("WaitStatusKind::NotKnown");
     break;
   }
-  // If we have a stepper installed, perform it's action
-  if (action->completed(stopped, should_stop)) {
-    DLOG("mdb", "Deleting action because should_stop ?= {}", should_stop);
-    delete action;
-    action = default_action;
-    set_should_stop(false);
-  }
-  // NB: *ONLY* notify self when _100%_ sure there is a waitable event waiting to be read, otherwise will block
-  // main thread.
-  if (is_stepping)
-    tc->notify_self();
-  else
-    tc->reaped_events();
-}
-
-void
-StopHandler::handle_bp_event(TaskInfo *t, BpEvent evt) noexcept
-{
-  switch (evt.event) {
-  // even if underlying bp is both user and tracer bp; it always handles it prioritized as user.
-  case BpEventType::Both:
-  case BpEventType::UserBreakpointHit: {
-    tc->stop_all();
-    tc->emit_stopped_at_breakpoint({.pid = tc->task_leader, .tid = t->tid}, evt.bp->id);
-    set_should_stop(true);
-    break;
-  }
-  case BpEventType::None:
-    break;
-  case BpEventType::TracerBreakpointHit: {
-    action->set_step_over(&t->bstat.value());
-    if (evt.bp->bp_type.shared_object_load) {
-      tc->on_so_event();
-    }
-  } break;
-  }
-}
-
-void
-StopHandler::handle_signalled(TaskInfo *t) noexcept
-{
-  set_should_stop(true);
-  tc->stop_all();
-  tc->emit_signal_event({.pid = tc->task_leader, .tid = t->tid}, t->wait_status.signal);
-}
-
-void
-StopHandler::handle_execed(TaskInfo *) noexcept
-{
-  should_stop = event_settings.exec_stop;
-}
-void
-StopHandler::handle_exited(TaskInfo *t) noexcept
-{
-  tc->reap_task(t);
-  set_should_stop(event_settings.thread_exit_stop);
-}
-void
-StopHandler::handle_cloned(TaskInfo *) noexcept
-{
-  if (!should_stop && !is_stepping)
-    set_should_stop(event_settings.clone_stop);
-}
-
-void
-StopHandler::can_resume() noexcept
-{
-  set_should_stop(false);
+  ASSERT(false, "Unknown wait status!");
+  MIDAS_UNREACHABLE
 }
 
 void
@@ -390,20 +348,6 @@ constexpr void
 StopHandler::stop_on_thread_exit() noexcept
 {
   event_settings.thread_exit_stop = true;
-}
-
-bool
-StopHandler::set_should_stop(bool stop) noexcept
-{
-  DLOG("mdb", "Setting should stop = {} to {}", should_stop, stop);
-  should_stop = stop;
-  return should_stop;
-}
-
-constexpr void
-StopHandler::ignore_bps() noexcept
-{
-  event_settings.ignore_bps = true;
 }
 
 void

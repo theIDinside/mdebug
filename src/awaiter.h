@@ -41,7 +41,6 @@ private:
   bool events_reaped;
   std::mutex m;
   std::condition_variable cv;
-  bool initialized;
   std::thread thread;
   // The keep-alive variable. If the task leader exits, should_cont = false and AwaiterThread is done.
   bool should_cont;

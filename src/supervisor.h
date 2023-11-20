@@ -2,6 +2,7 @@
 #include "awaiter.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "events/event.h"
 #include "interface/dap/types.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
@@ -55,6 +56,8 @@ struct SearchFnSymResult
 using Address = std::uintptr_t;
 struct ObjectFile;
 
+class StopObserver;
+
 struct TraceeController
 {
   using handle = std::unique_ptr<TraceeController>;
@@ -70,6 +73,8 @@ struct TraceeController
   BreakpointMap bps;
   TPtr<r_debug_extended> tracee_r_debug;
   SharedObjectMap shared_objects;
+  bool waiting_for_all_stopped;
+  StopObserver stopped_observer;
 
 private:
   int next_var_ref = 0;
@@ -118,6 +123,8 @@ public:
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(RunType type) noexcept;
+  /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
+  void resume_task(TaskInfo *task, RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all() noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
@@ -172,7 +179,6 @@ public:
 
   void process_exec(TaskInfo *t) noexcept;
   Tid process_clone(TaskInfo *t) noexcept;
-  BpEvent process_stopped(TaskInfo *t) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;
@@ -296,6 +302,8 @@ public:
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
   const sym::Frame *frame(int frame_id) noexcept;
+  void notify_all_stopped() noexcept;
+  bool all_stopped() const noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

@@ -1,10 +1,12 @@
 #include "breakpoint.h"
+#include "ptrace.h"
 #include "supervisor.h"
 #include <sys/ptrace.h>
 #include <utility>
 
 Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BpType type) noexcept
-    : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true)
+    : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true),
+      ignore(false)
 {
 }
 
@@ -37,6 +39,38 @@ BpType
 Breakpoint::type() const noexcept
 {
   return bp_type;
+}
+
+bool
+Breakpoint::should_resume() const noexcept
+{
+  return ignore || bp_type.shared_object_load;
+}
+
+void
+Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
+{
+  switch (event_type()) {
+  // even if underlying bp is both user and tracer bp; it always handles it prioritized as user.
+  case BpEventType::Both: {
+    if (bp_type.shared_object_load) {
+      tc->on_so_event();
+    }
+  }
+  case BpEventType::UserBreakpointHit: {
+    // TODO(simon): if breakpoint doesn't stop all, emit stop event directly, but only for that one thread
+    if (!ignore) {
+      tc->stop_all();
+      tc->stopped_observer.add_notification<BreakpointHit>(tc, int{id}, int{t->tid});
+    }
+    break;
+  }
+  case BpEventType::TracerBreakpointHit: {
+    if (bp_type.shared_object_load) {
+      tc->on_so_event();
+    }
+  } break;
+  }
 }
 
 #define UL(BpEvt) std::to_underlying(BpEventType::BpEvt)

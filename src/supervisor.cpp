@@ -56,13 +56,13 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      tracee_r_debug(nullptr), shared_objects(), var_refs(), spin_lock{}, interpreter_base{}, entry{},
-      session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}),
-      unwinders(), null_unwinder(new sym::Unwinder{nullptr})
+      tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), stopped_observer(), var_refs(),
+      spin_lock{}, interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
+      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
   threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
-  threads.push_back(TaskInfo{process_space_id});
+  threads.push_back(TaskInfo::create_running(process_space_id));
   threads.back().initialize();
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
@@ -264,7 +264,7 @@ TraceeController::new_task(Tid tid, bool ui_update) noexcept
 {
   VERIFY(tid != 0, "Invalid tid {}", tid);
   ASSERT(!has_task(tid), "Task {} has already been created!", tid);
-  threads.push_back(TaskInfo{tid});
+  threads.push_back(TaskInfo::create_running(tid));
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
          "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
@@ -288,21 +288,30 @@ void
 TraceeController::resume_target(RunType type) noexcept
 {
   DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
+  waiting_for_all_stopped = false;
   for (auto &t : threads) {
     if (t.can_continue()) {
-      if (t.bstat)
-        t.step_over_breakpoint(this);
-      if (type == RunType::Continue)
-        t.resume(type);
+      resume_task(&t, type);
     }
   }
-  ptracestop_handler->can_resume();
+}
+
+void
+TraceeController::resume_task(TaskInfo *task, RunType type) noexcept
+{
+  waiting_for_all_stopped = false;
+  if (task->bstat) {
+    task->step_over_breakpoint(this, type);
+  } else {
+    task->ptrace_resume(type);
+  }
 }
 
 void
 TraceeController::stop_all() noexcept
 {
   DLOG("mdb", "Stopping all threads")
+  waiting_for_all_stopped = true;
   for (auto &t : threads) {
     if (!t.user_stopped && !t.tracer_stopped) {
       DLOG("mdb", "Stopping {}", t.tid);
@@ -465,6 +474,9 @@ TraceeController::set_source_breakpoints(std::string_view src,
 void
 TraceeController::emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept
 {
+  /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
+   *  that all get stopped during this event. */
+  DLOG("mdb", "[dap event]: stopped at breakpoint {} emitted", bp_id);
   auto evt =
       new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
   evt->bp_ids.push_back(bp_id);
@@ -474,6 +486,8 @@ TraceeController::emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept
 void
 TraceeController::emit_stepped_stop(LWP lwp) noexcept
 {
+  /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
+   *  that all get stopped during this event. */
   Tracer::Instance->post_event(
       new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", true});
 }
@@ -481,6 +495,8 @@ TraceeController::emit_stepped_stop(LWP lwp) noexcept
 void
 TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 {
+  /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
+   *  that all get stopped during this event. */
   Tracer::Instance->post_event(new ui::dap::StoppedEvent{
       ui::dap::StoppedReason::Exception, fmt::format("Signalled {}", signal), lwp.tid, {}, "", true});
 }
@@ -548,7 +564,7 @@ TraceeController::detach() noexcept
     stop_all();
   }
   std::vector<std::pair<Tid, int>> errs;
-  for (auto t : threads) {
+  for (const auto &t : threads) {
     const auto res = ptrace(PTRACE_DETACH, t.tid, 0, 0);
     if (res == -1)
       errs.push_back(std::make_pair(t.tid, errno));
@@ -607,26 +623,6 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   } else {
     ASSERT(false, "Unknown clone syscall!");
   }
-}
-
-BpEvent
-TraceeController::process_stopped(TaskInfo *t) noexcept
-{
-  const auto pc = get_caching_pc(t);
-  DLOG("mdb", "Processing stopped for {} at {}", t->tid, AddrPtr{t->registers->rip});
-  const auto prev_pc_byte = offset(pc, -1);
-  if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
-    if (t->bstat && t->bstat->stepped_over) {
-      t->bstat = std::nullopt;
-      return BpEvent{BpEventType::None, {nullptr}};
-    }
-    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
-    set_pc(t, prev_pc_byte);
-    t->add_bpstat(bp);
-    return BpEvent{bp->event_type(), {.bp = bp}};
-  }
-  t->bstat = std::nullopt;
-  return BpEvent{BpEventType::None, {nullptr}};
 }
 
 bool
@@ -1106,6 +1102,19 @@ TraceeController::frame(int frame_id) noexcept
   const auto frame_ref_info = var_refs[frame_id];
   auto task = get_task(frame_ref_info.thread_id);
   return task->call_stack->get_frame(frame_id);
+}
+
+void
+TraceeController::notify_all_stopped() noexcept
+{
+  DLOG("mdb", "[all-stopped]: sending registered notifications");
+  stopped_observer.send_notifications();
+}
+
+bool
+TraceeController::all_stopped() const noexcept
+{
+  return std::ranges::all_of(threads, [](const auto &t) { return t.stop_processed(); });
 }
 
 #pragma GCC diagnostic pop

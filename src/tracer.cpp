@@ -147,7 +147,7 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     tc->new_task(wait.tid, true);
   }
   auto task = tc->register_task_waited(wait);
-  tc->ptracestop_handler->handle_execution_event(task);
+  tc->ptracestop_handler->handle_wait_event(task);
 }
 
 void

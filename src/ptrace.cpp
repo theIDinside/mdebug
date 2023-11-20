@@ -266,3 +266,20 @@ process_status(Tid tid, int status) noexcept
   VERIFY(false, "Unknown WAIT STATUS event");
   return {};
 }
+
+std::string_view
+to_str(RunType type) noexcept
+{
+  switch (type) {
+  case RunType::Step:
+    return "RunType::Step";
+  case RunType::Continue:
+    return "RunType::Continue";
+  case RunType::SyscallContinue:
+    return "RunType::SyscallContinue";
+  case RunType::UNKNOWN:
+    return "RunType::UNKNOWN";
+    break;
+  }
+  __builtin_unreachable();
+}

@@ -6,7 +6,7 @@
 #include <sys/wait.h>
 
 AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
-    : notifier(notifier), events_reaped(true), m{}, cv{}, initialized(false), thread(), should_cont(true),
+    : notifier(notifier), events_reaped(true), m{}, cv{}, thread(), should_cont(true),
       process_group_id(task_leader){};
 
 AwaiterThread::~AwaiterThread() noexcept

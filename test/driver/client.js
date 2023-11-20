@@ -211,12 +211,12 @@ class DAClient {
       ctrl.abort()
     }, timeout)
 
+    let evts = []
     let p = new Promise((res, rej) => {
-      let events = []
       this.events.on(evt, (body) => {
-        events.push(body)
-        if (events.length == n) {
-          res(events)
+        evts.push(body)
+        if (evts.length == n) {
+          res(evts)
         }
       })
     })
@@ -228,7 +228,7 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          rej(new Error(`Timed out waiting for ${n} events of type ${evt} to have happened`))
+          rej(new Error(`Timed out waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`))
         })
       }),
     ])
@@ -388,9 +388,10 @@ class DAClient {
       const thrs = await this.threads()
       threadId = thrs[0].id
     }
-    let stopped_promise = this.prepareWaitForEvent('stopped')
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, 1000)
     await this.sendReqGetResponse('continue', {
       threadId: threadId,
+      singleThread: false,
     })
     return await stopped_promise
   }

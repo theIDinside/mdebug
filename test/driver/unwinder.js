@@ -52,10 +52,11 @@ async function unwindFromSharedObject() {
   const threads = await da_client.threads()
   const bps = await set_bp('test/todo.cpp', ['BP1'])
   const bps2 = await set_bp('test/dynamic_lib.cpp', ['BPKM'])
-
+  console.log(`bps: ${JSON.stringify(bps)}`)
+  console.log(`bps2: ${JSON.stringify(bps2)}`)
   // hit breakpoint in todo.cpp
   await da_client.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-
+  console.log('foo')
   await da_client.setInsBreakpoint(so_addr)
   await da_client.contNextStop()
   const frames = await da_client.stackTrace(threads[0].id, seconds(1)).then((res) => {
@@ -100,8 +101,9 @@ async function insidePrologueTest() {
             stackFrames.length
           }: ${JSON.stringify(stackFrames)}`
         )
-      else return stackFrames
+      return stackFrames
     })
+  console.log(`${JSON.stringify(frames, null, 2)}`)
   verifyFrameIs(frames[0], 'bar')
   verifyFrameIs(frames[1], 'foo')
   verifyFrameIs(frames[2], 'main')

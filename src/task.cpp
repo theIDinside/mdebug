@@ -8,10 +8,23 @@
 #include <sys/ptrace.h>
 #include <sys/user.h>
 
-TaskInfo::TaskInfo(pid_t tid) noexcept
-    : tid(tid), wait_status(), user_stopped(true), tracer_stopped(true), initialized(false), cache_dirty(true),
-      rip_dirty(true), exited(false), registers(new user_regs_struct{}), call_stack(new sym::CallStack{tid})
+TaskInfo::TaskInfo(pid_t tid, bool user_stopped) noexcept
+    : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
+      cache_dirty(true), rip_dirty(true), exited(false), registers(new user_regs_struct{}),
+      call_stack(new sym::CallStack{tid})
 {
+}
+
+TaskInfo
+TaskInfo::create_stopped(pid_t tid)
+{
+  return TaskInfo{tid, true};
+}
+
+TaskInfo
+TaskInfo::create_running(pid_t tid)
+{
+  return TaskInfo{tid, false};
 }
 
 u64
@@ -119,42 +132,51 @@ TaskInfo::consume_wait() noexcept
 }
 
 void
-TaskInfo::resume(RunType type) noexcept
+TaskInfo::ptrace_resume(RunType type) noexcept
 {
+  ASSERT(user_stopped || tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})", bool{user_stopped},
+         bool{tracer_stopped});
   if (user_stopped) {
     DLOG("mdb", "restarting {} ({}) from user-stop", tid,
          type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    user_stopped = false;
-    tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   } else if (tracer_stopped) {
     DLOG("mdb", "restarting {} ({}) from tracer-stop", tid,
          type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    user_stopped = false;
-    tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   }
+  stop_collected = false;
+  user_stopped = false;
+  tracer_stopped = false;
   set_dirty();
 }
 
+WaitStatus
+TaskInfo::pending_wait_status() const noexcept
+{
+  ASSERT(wait_status.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", tid);
+  return wait_status;
+}
+
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc) noexcept
+TaskInfo::step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept
 {
   ASSERT(bstat.has_value(), "Requires a valid bpstat");
   auto bp = tc->bps.get_by_id(bstat->bp_id);
   DLOG("mdb", "[TaskInfo {}] Stepping over bp {} at {}", tid, bstat->bp_id, bp->address);
 
   bp->disable(tc->task_leader);
-  resume(RunType::Step);
-  consume_wait();
-  bp->enable(tc->task_leader);
-  bstat = std::nullopt;
+  bstat->stepped_over = true;
+  bstat->re_enable_bp = true;
+  bstat->should_resume = resume_action != RunType::None;
+  ptrace_resume(RunType::Step);
 }
 
 void
 TaskInfo::set_stop() noexcept
 {
   user_stopped = true;
+  tracer_stopped = true;
 }
 
 void
@@ -180,7 +202,7 @@ TaskInfo::set_dirty() noexcept
 void
 TaskInfo::add_bpstat(Breakpoint *bp) noexcept
 {
-  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false};
+  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false, .re_enable_bp = false};
 }
 
 void
@@ -194,6 +216,12 @@ bool
 TaskInfo::is_stopped() const noexcept
 {
   return user_stopped;
+}
+
+bool
+TaskInfo::stop_processed() const noexcept
+{
+  return stop_collected;
 }
 
 TaskVMInfo

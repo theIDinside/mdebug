@@ -25,14 +25,14 @@ struct BpType
     u8 type = 0;
     struct
     {
-      bool lsb_padding : 1;
+      bool lsb_padding : 1; // low bit
       bool source : 1;
       bool function : 1;
       bool address : 1;
       bool resume_address : 1;
       bool shared_object_load : 1;
       bool exception : 1;
-      bool long_jump : 1;
+      bool long_jump : 1; // high bit
     };
   };
 
@@ -87,10 +87,13 @@ template <> struct formatter<BpType>
 
 enum class BpEventType : u8
 {
+  // Breakpoints that are visible to the user
   UserBreakpointHit = 1,
+  // Breakpoints invisble to user
   TracerBreakpointHit = 2,
-  Both = 3,
-  None = 4,
+  // Breakpoints that are both; meaning they're a tracer breakpoint that shares address
+  // with a user set breakpoint.
+  Both = 3
 };
 
 struct SourceBreakpointDescriptor
@@ -116,6 +119,14 @@ public:
   void disable(Tid tid) noexcept;
   BpType type() const noexcept;
 
+  /* Should we resume after hitting this breakpoint?
+   *  Possible scenarios:
+   * - user wants this breakpoint ignored, possibly due to some condition
+   * - it's a tracer breakpoint, and as such should appear invisible to user
+   */
+  bool should_resume() const noexcept;
+  void on_hit(TraceeController *tc, TaskInfo *t) noexcept;
+
   // The type of the event this breakpoint will generate
   BpEventType event_type() const noexcept;
 
@@ -125,6 +136,7 @@ public:
   u32 times_hit;
   TPtr<void> address;
   bool enabled;
+  bool ignore;
 };
 
 struct BpEvent
@@ -147,7 +159,9 @@ struct BpStat
 {
   u16 bp_id;
   BpType type;
-  bool stepped_over;
+  bool should_resume : 1;
+  bool stepped_over : 1;
+  bool re_enable_bp : 1;
 };
 
 struct BreakpointMap
