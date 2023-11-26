@@ -111,8 +111,7 @@ InstructionStep::resume() noexcept
     return true;
   }
 
-  auto task = tc->get_task(next->tid);
-  tc->resume_task(task, RunType::Step);
+  resume_impl();
   update_step_schedule();
   debug_steps_taken++;
   return false;
@@ -178,6 +177,7 @@ LineStep::resume_impl() noexcept
     DLOG("mdb", "LineStep continuing sub frame for {}", task->tid);
     tc->resume_task(task, RunType::Continue);
   } else {
+    DLOG("mdb", "[line step]: no resume address set, keep istepping");
     InstructionStep::resume_impl();
   }
 }
@@ -222,7 +222,7 @@ LineStep::check_if_done() noexcept
       resume_address_set = true;
       resume_addr = *resume_address;
     } else {
-      DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? REALLY?: CALLSTACK:");
+      DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
       for (const auto &frame : callstack.frames) {
         DLOG("mdb", "{}", frame);
       }

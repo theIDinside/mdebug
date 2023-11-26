@@ -43,10 +43,9 @@ DwarfStack::swap() noexcept
   stack[size - 2] = tmp;
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t, const UnwindInfo *unwind_info,
-                                                 std::vector<u8> &&byte_stream) noexcept
-    : stack(), tc(tc), task(t), unwind_info(unwind_info), byte_stream(std::move(byte_stream)),
-      reader(byte_stream.data(), byte_stream.size())
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t,
+                                                 std::span<const u8> byte_stream) noexcept
+    : stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)), reader(byte_stream.data(), byte_stream.size())
 {
 }
 
@@ -476,7 +475,6 @@ op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 {
   // ??
   DLOG("dwarf", "I have no idea if this is correct");
-  i.stack.push(i.unwind_info->start.get());
 }
 
 void
@@ -671,14 +669,16 @@ static Op ops[0xff] = {
     // clang-format-on
 };
 
-void
+u64
 ExprByteCodeInterpreter::run() noexcept
 {
-  DwarfBinaryReader r{byte_stream.data(), byte_stream.size()};
-  while (r.has_more()) {
-    const auto op = r.read_byte<DwarfOp>();
+  while (reader.has_more()) {
+    const auto op = reader.read_byte<DwarfOp>();
     this->latest_decoded = op;
+    DLOG("eh", "Decoded CFA expression op: {}", to_str(op));
     ops[std::to_underlying(op)](*this);
   }
+  DLOG("mdb", "Computed result: 0x{:x}", stack.stack[0]);
+  return stack.stack[0];
 }
 } // namespace sym

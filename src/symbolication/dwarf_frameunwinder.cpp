@@ -100,8 +100,7 @@ u64
 CFAStateMachine::compute_expression(std::span<const u8> bytes) const noexcept
 {
   DLOG("eh", "compute_expression of dwarf expression of {} bytes", bytes.size());
-  TODO("CFAStateMachine::compute_expression");
-  return 0;
+  return ExprByteCodeInterpreter{tc, task, bytes}.run();
 }
 
 RegisterValues
@@ -110,7 +109,7 @@ CFAStateMachine::resolve_frame_regs(const RegisterValues &frame_live_registers) 
   RegisterValues nxt_frame_regs{};
 
   if (cfa.is_expr) {
-    TODO("CFA expr not impl");
+    cfa_value = compute_expression(cfa.expr);
   } else {
     const auto res = static_cast<i64>(frame_live_registers[cfa.reg.number]) + cfa.reg.offset;
     cfa_value = static_cast<u64>(res);
