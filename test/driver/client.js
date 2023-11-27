@@ -332,8 +332,8 @@ class DAClient {
   }
 
   // utility function to initialize, launch `program` and run to `main`
-  async launchToMain(program, timeout = 1000) {
-    let stopped_promise = this.prepareWaitForEvent('stopped')
+  async launchToMain(program, timeout = seconds(1)) {
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout)
     await this.sendReqGetResponse('initialize', {}, timeout)
       .then((response) => {
         checkResponse(response, 'initialize', true)

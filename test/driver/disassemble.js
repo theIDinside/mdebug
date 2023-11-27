@@ -7,10 +7,10 @@ function getTextSection(objdumpOutput) {
   const res = []
   let start = 0
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('Disassembly of section .text')) {
+    if (lines[i].includes('Disassembly of section .text') || lines[i].includes('Disassemblering av sektion .text')) {
       start = i + 3
       i = start
-    } else if (lines[i].includes('Disassembly') && start != 0) {
+    } else if ((lines[i].includes('Disassembly') || lines[i].includes('Disassemblering')) && start != 0) {
       return res
     }
     if (start > 0) {
