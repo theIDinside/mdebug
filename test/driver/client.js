@@ -280,7 +280,10 @@ class DAClient {
    */
   async stackTrace(threadId, timeout = 1000) {
     threadId = threadId != null ? threadId : await this.getAnyThreadId()
-    return this.sendReqGetResponse('stackTrace', { threadId: threadId }, timeout)
+    return this.sendReqGetResponse('stackTrace', { threadId: threadId }, timeout).then((response) => {
+      checkResponse(response, 'stackTrace', true)
+      return response
+    })
   }
 
   async getAnyThreadId() {

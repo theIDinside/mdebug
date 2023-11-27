@@ -678,7 +678,7 @@ ExprByteCodeInterpreter::run() noexcept
     DLOG("eh", "Decoded CFA expression op: {}", to_str(op));
     ops[std::to_underlying(op)](*this);
   }
-  DLOG("mdb", "Computed result: 0x{:x}", stack.stack[0]);
+  DLOG("eh", "Computed result: 0x{:x}", stack.stack[0]);
   return stack.stack[0];
 }
 } // namespace sym

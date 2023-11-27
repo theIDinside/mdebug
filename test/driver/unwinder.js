@@ -258,11 +258,61 @@ async function normalTest() {
   }
 }
 
+function* walk_expected_frames(frames) {
+  for (let i = 1; i < frames.length; i++) yield frames[i]
+}
+
+async function unwindWithDwarfExpression() {
+  const da_client = new DAClient(MDB_PATH, [])
+  await da_client.launchToMain(buildDirFile('next'))
+  await da_client
+    .sendReqGetResponse('setInstructionBreakpoints', {
+      breakpoints: [{ instructionReference: '0x400660' }],
+    })
+    .then((res) => {
+      checkResponse(res, 'setInstructionBreakpoints', true)
+      if (res.body.breakpoints.length != 1) {
+        throw new Error(`Expected bkpts 1 but got ${res.body.breakpoints.length}`)
+      }
+      const { id, verified, instructionReference } = res.body.breakpoints[0]
+      if (!verified) throw new Error('Expected breakpoint to be verified and exist!')
+      if (instructionReference != '0x400660')
+        throw new Error(`Attempted to set ins breakpoint at 0x40127e but it was set at ${instructionReference}`)
+    })
+  const threads = await da_client.threads()
+  await da_client.contNextStop(threads[0].id)
+
+  const verify_correct_stacktrace = (frames, expected) => {
+    let idx = 0
+    for (const f of walk_expected_frames(frames)) {
+      if (f.name != expected[idx].name)
+        throw new Error(`Expected frame to be '${expected[idx].name}' but was '${f.name}'`)
+      idx++
+      if (idx >= expected.length) return
+    }
+  }
+
+  {
+    const {
+      body: { stackFrames },
+    } = await da_client.stackTrace(threads[0].id)
+    verify_correct_stacktrace(stackFrames, [{ name: 'print' }, { name: 'main' }])
+  }
+  await da_client.contNextStop(threads[0].id)
+  {
+    const {
+      body: { stackFrames },
+    } = await da_client.stackTrace(threads[0].id)
+    verify_correct_stacktrace(stackFrames, [{ name: 'print' }, { name: 'bar' }, { name: 'foo' }, { name: 'main' }])
+  }
+}
+
 const tests = {
   insidePrologue: insidePrologueTest,
   insideEpilogue: insideEpilogueTest,
   normal: normalTest,
   unwindFromSharedObject: unwindFromSharedObject,
+  unwindWithDwarfExpression: unwindWithDwarfExpression,
 }
 
 runTestSuite(tests)
