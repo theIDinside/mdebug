@@ -6,6 +6,7 @@
 #include "symbolication/lnp.h"
 #include "task.h"
 #include <chrono>
+#include <map>
 #include <vector>
 
 struct TraceeController;
@@ -15,102 +16,63 @@ namespace ptracestop {
 
 class StopHandler;
 
-class Action
+class ThreadProceedAction
 {
 public:
-  Action(StopHandler *handler) noexcept;
-  virtual ~Action() noexcept;
+  ThreadProceedAction(StopHandler *handler, TaskInfo *task) noexcept;
+  void cancel() noexcept;
 
-  // `should_stop` is passed in by the StopHandler, if we've encountered
-  // an event, signal or whatever, that should abort this installed stepper
-  virtual bool completed(TaskInfo *t, bool should_stop) noexcept;
-
-  // default handler does nothing at "start"
-  virtual void
-  start_action() noexcept
-  {
-  }
-
-  // default handler is never done
-  virtual bool
-  check_if_done() noexcept
-  {
-    return false;
-  }
-
-  // Updates the step schedule - this is *not* performed during a ptrace-stop. So no ptrace requests can be made.
-  virtual void
-  update_step_schedule() noexcept
-  {
-  }
-
-  virtual void
-  new_task_created(TaskInfo *) noexcept
-  {
-  }
+  // Abstract Interface
+  virtual ~ThreadProceedAction() = default;
+  virtual bool has_completed() const noexcept = 0;
+  virtual void proceed() noexcept = 0;
+  virtual void update_stepped() noexcept = 0;
 
 protected:
-  StopHandler *handler;
   TraceeController *tc;
-  bool should_stop;
+  TaskInfo *task;
+  bool cancelled;
 };
 
-class InstructionStep : public Action
+class InstructionStep : public ThreadProceedAction
 {
 public:
-  InstructionStep(StopHandler *handler, Tid thread_id, int steps, bool single_thread = false) noexcept;
-  ~InstructionStep() override = default;
-  // `should_stop` is passed in by the StopHandler, if we've encountered
-  // an event, signal or whatever, that should abort this installed stepper
-  // returns `true` when we _should not continue_
-  virtual bool completed(TaskInfo *t, bool should_stop) noexcept override;
-  void start_action() noexcept override;
-  bool check_if_done() noexcept override;
-
-  // Updates the step schedule - this is *not* performed during a ptrace-stop. So no ptrace requests can be made.
-  void update_step_schedule() noexcept override;
-  void new_task_created(TaskInfo *t) noexcept final override;
-
-protected:
-  bool resume() noexcept;
-  virtual void resume_impl() noexcept;
-  Tid thread_id;
-  int steps;
-  int debug_steps_taken;
-  bool done;
-  bool single_threaded_stepping;
-  std::vector<TaskStepInfo> tsi;
-  std::vector<TaskStepInfo>::iterator next;
-  std::chrono::system_clock::time_point start_time;
-};
-
-class LineStep final : public InstructionStep
-{
-public:
-  LineStep(StopHandler *handler, Tid thread_id, int lines, bool single_thread = false) noexcept;
-  ~LineStep() noexcept override final;
-  void start_action() noexcept override final;
-  bool check_if_done() noexcept override final;
-  void update_step_schedule() noexcept override final;
-
-  void resume_impl() noexcept override final;
+  InstructionStep(StopHandler *handler, TaskInfo *task, int steps) noexcept;
+  ~InstructionStep();
+  bool has_completed() const noexcept override;
+  void proceed() noexcept override;
+  void update_stepped() noexcept override;
 
 private:
+  int steps_requested;
+  int steps_taken;
+};
+
+class LineStep : public ThreadProceedAction
+{
+public:
+  LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept;
+  ~LineStep() noexcept;
+  bool has_completed() const noexcept override;
+  void proceed() noexcept override;
+  void update_stepped() noexcept override;
+
+private:
+  int lines_requested;
+  int lines_stepped;
+  bool is_done;
+  std::optional<AddrPtr> resume_address;
+  bool resumed_to_resume_addr;
   sym::Frame start_frame;
   LineTableEntry entry;
   const CompilationUnitFile *cu;
-  int debug_steps_taken = 0;
-  bool resume_address_set;
-  AddrPtr resume_addr;
 };
 
 template <typename A>
 constexpr std::string_view
 action_name()
 {
-  if constexpr (std::is_same_v<A, Action>) {
-    return "Default";
-  } else if constexpr (std::is_same_v<A, InstructionStep>) {
+  if constexpr (std::is_same_v<A, InstructionStep>) {
     return "Instruction Step";
   } else if constexpr (std::is_same_v<A, LineStep>) {
     return "Line Step";
@@ -125,19 +87,21 @@ public:
   StopHandler(TraceeController *tc) noexcept;
   virtual ~StopHandler() = default;
 
+  bool has_action_installed(TaskInfo *t) noexcept;
+  ThreadProceedAction *get_proceed_action(TaskInfo *t) noexcept;
+  void remove_action(TaskInfo *t) noexcept;
+
+  void handle_proceed(TaskInfo *info, bool should_resume) noexcept;
   void handle_wait_event(TaskInfo *info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;
   constexpr void stop_on_exec() noexcept;
   constexpr void stop_on_thread_exit() noexcept;
 
-  void set_action(Action *action) noexcept;
-  void restore_default() noexcept;
-  void start_action() noexcept;
+  void set_action(Tid tid, ThreadProceedAction *action) noexcept;
 
   TraceeController *tc;
-  Action *action;
-  Action *default_action;
+
   bool stop_all;
   union
   {
@@ -154,5 +118,6 @@ public:
 
 private:
   bool process_waitstatus_for(TaskInfo *t) noexcept;
+  std::map<Tid, ThreadProceedAction *> proceed_actions;
 };
 } // namespace ptracestop

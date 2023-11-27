@@ -62,7 +62,6 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
     return call_stack->pcs;
   else {
     call_stack->pcs.clear();
-    // TODO(SIMON), todo(SIMON), todo(simon) uncomment this, when DWARF stack unwinding is good.
   }
 
   if (cache_dirty)
@@ -137,11 +136,11 @@ TaskInfo::ptrace_resume(RunType type) noexcept
   ASSERT(user_stopped || tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})", bool{user_stopped},
          bool{tracer_stopped});
   if (user_stopped) {
-    DLOG("mdb", "restarting {} ({}) from user-stop", tid,
+    DLOG("mdb", "[ptrace]: restarting {} ({}) from user-stop", tid,
          type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   } else if (tracer_stopped) {
-    DLOG("mdb", "restarting {} ({}) from tracer-stop", tid,
+    DLOG("mdb", "[ptrace]: restarting {} ({}) from tracer-stop", tid,
          type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   }

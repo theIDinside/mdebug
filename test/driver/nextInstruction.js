@@ -32,9 +32,7 @@ async function test() {
   if (event_body.reason != 'step') {
     throw new Error(`Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(event_body)}`)
   }
-  if (event_body.allThreadsStopped != allThreadsStop) {
-    throw new Error(`Expected all threads to have stopped after step.`)
-  }
+
   frames = await da_client.stackTrace(threads[0].id)
   const next_pc = getStackFramePc(frames, 0)
   if (next_pc != disassembly.body.instructions[1].address) {

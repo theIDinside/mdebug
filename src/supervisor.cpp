@@ -322,6 +322,11 @@ TraceeController::stop_all() noexcept
       // we upgraded our tracer-stop to a user-stop
       t.set_stop();
     }
+    auto action = ptracestop_handler->get_proceed_action(&t);
+    if (action) {
+      action->cancel();
+      ptracestop_handler->remove_action(&t);
+    }
   }
 }
 
@@ -361,7 +366,6 @@ TraceeController::get_caching_pc(TaskInfo *t) noexcept
 void
 TraceeController::set_pc(TaskInfo *t, AddrPtr addr) noexcept
 {
-  DLOG("mdb", "Setting pc to {}", addr);
   constexpr auto rip_offset = offsetof(user_regs_struct, rip);
   VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
   t->registers->rip = addr;
@@ -396,7 +400,6 @@ TraceeController::set_tracer_bp(TPtr<u64> addr, BpType type) noexcept
     bp->bp_type.type |= type.type;
     return true;
   }
-  DLOG("mdb", "Installing tracer breakpoint at {}", addr);
   u8 bkpt = 0xcc;
   const auto original_byte = read_type_safe(addr.as<u8>());
   ASSERT(original_byte.has_value(), "Failed to read byte at {}", addr);
@@ -421,7 +424,6 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
   }
   DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
   for (const auto &sym : matching_symbols) {
-    DLOG("mdb", "Setting breakpoint @ {}", sym.address);
     constexpr u64 bkpt = 0xcc;
     if (bps.contains(sym.address)) {
       auto bp = bps.get(sym.address);
@@ -440,18 +442,17 @@ void
 TraceeController::set_source_breakpoints(std::string_view src,
                                          std::vector<SourceBreakpointDescriptor> &&descs) noexcept
 {
-  logging::get_logging()->log("mdb",
-                              fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
+  DLOG("mdb", "[bkpt:source]: Requested {} source breakpoints for {}", descs.size(), src);
   for (const auto obj : object_files) {
     const auto f_it = find(obj->m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
     if (f_it != std::end(obj->m_full_cu)) {
+      DLOG("mdb", "[bkpt:source]: objfile {} has file {}", obj->path.c_str(), src);
       for (auto &&desc : descs) {
         // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
         const auto &lt = f_it->line_table();
         for (const auto &lte : lt) {
           if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
             if (!bps.contains(lte.pc)) {
-              logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
               u8 original_byte = write_bp_byte(lte.pc);
               bps.insert(lte.pc, original_byte, BpType{.source = true});
               const auto &bp = bps.breakpoints.back();
@@ -464,8 +465,6 @@ TraceeController::set_source_breakpoints(std::string_view src,
           }
         }
       }
-    } else {
-      logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
     }
   }
   logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", bps.breakpoints.size()));
@@ -488,8 +487,14 @@ TraceeController::emit_stepped_stop(LWP lwp) noexcept
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
+  emit_stepped_stop(lwp, true);
+}
+
+void
+TraceeController::emit_stepped_stop(LWP lwp, bool all_stopped) noexcept
+{
   Tracer::Instance->post_event(
-      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", true});
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", all_stopped});
 }
 
 void
@@ -572,12 +577,6 @@ TraceeController::detach() noexcept
 
   // todo(simon): construct a way to let this information bubble up to caller
   return errs.empty();
-}
-
-void
-TraceeController::restore_default_handler() noexcept
-{
-  ptracestop_handler->restore_default();
 }
 
 void
@@ -795,7 +794,6 @@ TraceeController::add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept
 void
 TraceeController::reaped_events() noexcept
 {
-  DLOG("mdb", "Reaped events");
   awaiter_thread->reaped_events();
 }
 
@@ -833,7 +831,7 @@ TraceeController::current_frame(TaskInfo *task) noexcept
         .symbol = nullptr,
         .cu_file = nullptr,
         .level = 0,
-        .type = sym::FrameType::Full,
+        .type = sym::FrameType::Unknown,
     };
 }
 

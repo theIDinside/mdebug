@@ -150,6 +150,7 @@ public:
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
+  void emit_stepped_stop(LWP lwp, bool all_stopped) noexcept;
   void emit_signal_event(LWP lwp, int signal) noexcept;
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
@@ -168,14 +169,14 @@ public:
 
   template <typename StopAction, typename... Args>
   void
-  install_ptracestop_handler(Args... args) noexcept
+  install_ptracestop_handler(Tid tid, bool resume_others, Args... args) noexcept
   {
     DLOG("mdb", "[ptrace stop]: install action {}", ptracestop::action_name<StopAction>());
-    ptracestop_handler->set_action(new StopAction{ptracestop_handler, args...});
-    ptracestop_handler->start_action();
+    if (resume_others) {
+      DLOG("mdb", "[ptrace stop]: should resume all other tasks...");
+    }
+    ptracestop_handler->set_action(tid, new StopAction{ptracestop_handler, args...});
   }
-
-  void restore_default_handler() noexcept;
 
   void process_exec(TaskInfo *t) noexcept;
   Tid process_clone(TaskInfo *t) noexcept;

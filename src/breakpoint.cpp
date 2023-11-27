@@ -8,6 +8,7 @@ Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BpType type) noex
     : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true),
       ignore(false)
 {
+  DLOG("mdb", "[bkpt]: bp {} created for {} = {}", id, addr, type);
 }
 
 void
@@ -79,7 +80,6 @@ BpEventType
 Breakpoint::event_type() const noexcept
 {
   const auto t = bp_type.type;
-  DLOG("mdb", "Breakpoint type: {:b}", bp_type.type);
   if (bp_type.type & 0b1111) {
     const auto underlying = (UL(Both) * (t > 0b1111) + (UL(UserBreakpointHit) * t <= 0b1111));
     return (BpEventType)underlying;
@@ -145,13 +145,13 @@ BreakpointMap::get(AddrPtr addr) noexcept
 void
 BreakpointMap::remove_breakpoint(AddrPtr addr, BpType type) noexcept
 {
-  DLOG("mdb", "Remove breakpoint type {} @ {}", type, addr);
+  DLOG("mdb", "[bkpt]: remove {} at {}", type, addr);
   std::erase_if(breakpoints, [pid = address_space_tid, addr, type](Breakpoint &bp) {
     if (bp.address == addr) {
       bp.bp_type.unset(type);
       if (bp.bp_type.type == 0) {
         bp.disable(pid);
-        DLOG("mdb", "Deleted breakpoint at {}", bp.address);
+        DLOG("mdb", "[bkpt] deleted bp {} at {}", bp.id, bp.address);
         return true;
       }
     }

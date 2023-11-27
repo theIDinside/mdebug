@@ -70,17 +70,46 @@ template <> struct formatter<BpType>
   auto
   format(const BpType &b, FormatContext &ctx)
   {
-    const auto src = b.source;
-    const auto fn = b.function;
-    const auto addr = b.address;
-    const auto resume = b.resume_address;
-    const auto so = b.shared_object_load;
-    const auto ex = b.exception;
-    const auto jmp = b.long_jump;
+    std::array<std::string_view, 7> types_names{};
+    auto idx = 0u;
+    if (b.source) {
+      types_names[idx] = "src";
+      ++idx;
+    }
 
-    return fmt::format_to(ctx.out(),
-                          "BpType: [ src: {}, fn: {}, addr: {}, resume: {}, so: {}, exception: {}, long_jmp: {}]",
-                          src, fn, addr, resume, so, ex, jmp);
+    if (b.function) {
+      types_names[idx] = "fn";
+      ++idx;
+    }
+
+    if (b.address) {
+      types_names[idx] = "addr";
+      ++idx;
+    }
+
+    if (b.resume_address) {
+      types_names[idx] = "resume";
+      ++idx;
+    }
+
+    if (b.shared_object_load) {
+      types_names[idx] = "so";
+      ++idx;
+    }
+
+    if (b.exception) {
+      types_names[idx] = "exception";
+      ++idx;
+    }
+
+    if (b.long_jump) {
+      types_names[idx] = "long_jmp";
+      ++idx;
+    }
+
+    std::span<std::string_view> types{types_names.begin(), types_names.begin() + idx};
+
+    return fmt::format_to(ctx.out(), "BpType: [ {} ]", fmt::join(types, ", "));
   }
 };
 } // namespace fmt

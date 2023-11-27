@@ -17,7 +17,7 @@ baz()
 int
 bar()
 {
-  print("bar", 10);
+  print("bar", 10); // BP3
   return 10;
 }
 

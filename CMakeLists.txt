@@ -156,14 +156,14 @@ find_program(NODEJS "node")
 if(NODEJS)
   # Sub-test suites.
   set(DRIVER_TEST_SUITES
-      disassemble 
+      disassemble
       exited
-      initialize 
-      launch 
+      initialize
+      launch
       nextInstruction
-      nextLine 
-      setBreakpoints 
-      setInstructionBreakpoints 
+      nextLine
+      setBreakpoints
+      setInstructionBreakpoints
       unwinder
       threadExited
       moduleEvent
@@ -171,13 +171,13 @@ if(NODEJS)
       variables
   )
 
-  # These define 
+  # These define
   set(disassemble "backAndForward")
   set(exited "programExit")
   set(initialize)
   set(launch "launch" "main" "disconnect")
   set(nextInstruction "oneInstruction")
-  set(nextLine "nextLineOverFunction")
+  set(nextLine "nextLineOverFunction" "stopBecauseBpWhenNextLine")
   set(setBreakpoints "set4Breakpoints")
   set(setInstructionBreakpoints "set1Bp") 
   set(unwinder "insidePrologue" "normal" "insideEpilogue" "unwindFromSharedObject")
