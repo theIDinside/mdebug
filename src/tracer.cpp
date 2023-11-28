@@ -136,6 +136,24 @@ Tracer::get_current() noexcept
 }
 
 void
+Tracer::handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept
+{
+  auto tc = get_controller(process_group);
+  tc->set_pending_waitstatus(wait_res);
+  auto task = tc->get_task(wait_res.tid);
+  tc->ptracestop_handler->handle_wait_event(task);
+}
+
+void
+Tracer::handle_command(ui::UICommandPtr cmd) noexcept
+{
+  DLOG("mdb", "accepted command {}", cmd->name());
+  auto result = cmd->execute(this);
+  dap->post_event(result);
+  delete cmd;
+}
+
+void
 Tracer::wait_for_tracee_events(Tid target_pid) noexcept
 {
   auto tc = get_controller(target_pid);

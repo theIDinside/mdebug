@@ -7,7 +7,6 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
-struct TaskWaitResult;
 struct TaskInfo;
 
 enum class RunType : u8

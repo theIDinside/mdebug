@@ -809,7 +809,7 @@ TraceeController::notify_self() noexcept
 void
 TraceeController::start_awaiter_thread() noexcept
 {
-  awaiter_thread->start_awaiter_thread();
+  awaiter_thread->start_awaiter_thread(this);
 }
 
 sym::Frame
@@ -1113,6 +1113,17 @@ bool
 TraceeController::all_stopped() const noexcept
 {
   return std::ranges::all_of(threads, [](const auto &t) { return t.stop_processed(); });
+}
+
+void
+TraceeController::set_pending_waitstatus(TaskWaitResult wait_result) noexcept
+{
+  const auto tid = wait_result.tid;
+  auto task = get_task(tid);
+  ASSERT(task != nullptr, "couldn't find task {}", tid);
+  task->wait_status = wait_result.ws;
+  task->tracer_stopped = true;
+  task->stop_collected = false;
 }
 
 #pragma GCC diagnostic pop

@@ -306,6 +306,8 @@ public:
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
 
+  void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
+
 private:
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;

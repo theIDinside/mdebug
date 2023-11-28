@@ -8,7 +8,6 @@ struct UICommand;
 enum class EventType
 {
   WaitStatus,
-  NewTask,
   Command
 };
 

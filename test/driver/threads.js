@@ -35,7 +35,8 @@ async function threads() {
 
   if (!response.success) throw new Error(`Expected 'next' command to succeed; got ${JSON.stringify(response)}`)
 
-  frames = await da_client.stackTrace(threads[0].id)
+  frames = await da_client.stackTrace(threads[1].id)
+  console.log(`Stack frames for ${threads[1].id}: ${JSON.stringify(frames, null, 2)}`)
   const end_line = frames.body.stackFrames[0].line
   if (end_line != bp_lines[0].line + 1) {
     throw new Error(
