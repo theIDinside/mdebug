@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
   src/main.cpp
+  src/event_queue.cpp
+  src/event_queue.h
   src/utils/logger.cpp
   src/utils/logger.h
   src/tracer.cpp
@@ -28,6 +30,8 @@ set(MIDAS_SOURCES
   src/breakpoint.h
   src/so_loading.cpp
   src/so_loading.h
+  src/events/event.cpp
+  src/events/event.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
   src/symbolication/objfile.cpp
@@ -152,14 +156,14 @@ find_program(NODEJS "node")
 if(NODEJS)
   # Sub-test suites.
   set(DRIVER_TEST_SUITES
-      disassemble 
+      disassemble
       exited
-      initialize 
-      launch 
+      initialize
+      launch
       nextInstruction
-      nextLine 
-      setBreakpoints 
-      setInstructionBreakpoints 
+      nextLine
+      setBreakpoints
+      setInstructionBreakpoints
       unwinder
       threadExited
       moduleEvent
@@ -167,16 +171,16 @@ if(NODEJS)
       variables
   )
 
-  # These define 
+  # These define
   set(disassemble "backAndForward")
   set(exited "programExit")
   set(initialize)
   set(launch "launch" "main" "disconnect")
   set(nextInstruction "oneInstruction")
-  set(nextLine "nextLineOverFunction")
+  set(nextLine "nextLineOverFunction" "stopBecauseBpWhenNextLine")
   set(setBreakpoints "set4Breakpoints")
-  set(setInstructionBreakpoints "set1Bp") 
-  set(unwinder "insidePrologue" "normal" "insideEpilogue" "unwindFromSharedObject")
+  set(setInstructionBreakpoints "set1Bp")
+  set(unwinder "insidePrologue" "normal" "insideEpilogue" "unwindFromSharedObject" "unwindWithDwarfExpression")
   set(threadExited "see9ThreadExits")
   set(moduleEvent "6modules")
   set(threads "threads")

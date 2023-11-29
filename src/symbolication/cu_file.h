@@ -125,7 +125,7 @@ private:
 
 class NonExecutableCompilationUnitFile
 {
-  DebugInfoEntry *partial_cu_die;
+  // DebugInfoEntry *partial_cu_die;
 };
 
 namespace fmt {

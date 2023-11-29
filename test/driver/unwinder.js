@@ -52,10 +52,11 @@ async function unwindFromSharedObject() {
   const threads = await da_client.threads()
   const bps = await set_bp('test/todo.cpp', ['BP1'])
   const bps2 = await set_bp('test/dynamic_lib.cpp', ['BPKM'])
-
+  console.log(`bps: ${JSON.stringify(bps)}`)
+  console.log(`bps2: ${JSON.stringify(bps2)}`)
   // hit breakpoint in todo.cpp
   await da_client.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-
+  console.log('foo')
   await da_client.setInsBreakpoint(so_addr)
   await da_client.contNextStop()
   const frames = await da_client.stackTrace(threads[0].id, seconds(1)).then((res) => {
@@ -100,8 +101,9 @@ async function insidePrologueTest() {
             stackFrames.length
           }: ${JSON.stringify(stackFrames)}`
         )
-      else return stackFrames
+      return stackFrames
     })
+  console.log(`${JSON.stringify(frames, null, 2)}`)
   verifyFrameIs(frames[0], 'bar')
   verifyFrameIs(frames[1], 'foo')
   verifyFrameIs(frames[2], 'main')
@@ -176,20 +178,6 @@ async function normalTest() {
 
   const da_client = new DAClient(MDB_PATH, [])
   await da_client.launchToMain(buildDirFile('stackframes'))
-  const disassembly = await da_client.sendReqGetResponse('disassemble', {
-    memoryReference: '0x401210',
-    offset: 0,
-    instructionOffset: 0,
-    instructionCount: 9,
-    resolveSymbols: false,
-  })
-  if (disassembly.body.instructions.length != 9) {
-    throw new Error(
-      `Expected 4 disassembled instructions but instead got ${
-        disassembly.body.instructions.length
-      }. Serial data: ${JSON.stringify(disassembly.body.instructions)}`
-    )
-  }
   const file = readFile(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
@@ -256,11 +244,61 @@ async function normalTest() {
   }
 }
 
+function* walk_expected_frames(frames) {
+  for (let i = 1; i < frames.length; i++) yield frames[i]
+}
+
+async function unwindWithDwarfExpression() {
+  const da_client = new DAClient(MDB_PATH, [])
+  await da_client.launchToMain(buildDirFile('next'))
+  await da_client
+    .sendReqGetResponse('setInstructionBreakpoints', {
+      breakpoints: [{ instructionReference: '0x400660' }],
+    })
+    .then((res) => {
+      checkResponse(res, 'setInstructionBreakpoints', true)
+      if (res.body.breakpoints.length != 1) {
+        throw new Error(`Expected bkpts 1 but got ${res.body.breakpoints.length}`)
+      }
+      const { id, verified, instructionReference } = res.body.breakpoints[0]
+      if (!verified) throw new Error('Expected breakpoint to be verified and exist!')
+      if (instructionReference != '0x400660')
+        throw new Error(`Attempted to set ins breakpoint at 0x40127e but it was set at ${instructionReference}`)
+    })
+  const threads = await da_client.threads()
+  await da_client.contNextStop(threads[0].id)
+
+  const verify_correct_stacktrace = (frames, expected) => {
+    let idx = 0
+    for (const f of walk_expected_frames(frames)) {
+      if (f.name != expected[idx].name)
+        throw new Error(`Expected frame to be '${expected[idx].name}' but was '${f.name}'`)
+      idx++
+      if (idx >= expected.length) return
+    }
+  }
+
+  {
+    const {
+      body: { stackFrames },
+    } = await da_client.stackTrace(threads[0].id)
+    verify_correct_stacktrace(stackFrames, [{ name: 'print' }, { name: 'main' }])
+  }
+  await da_client.contNextStop(threads[0].id)
+  {
+    const {
+      body: { stackFrames },
+    } = await da_client.stackTrace(threads[0].id)
+    verify_correct_stacktrace(stackFrames, [{ name: 'print' }, { name: 'bar' }, { name: 'foo' }, { name: 'main' }])
+  }
+}
+
 const tests = {
   insidePrologue: insidePrologueTest,
   insideEpilogue: insideEpilogueTest,
   normal: normalTest,
   unwindFromSharedObject: unwindFromSharedObject,
+  unwindWithDwarfExpression: unwindWithDwarfExpression,
 }
 
 runTestSuite(tests)

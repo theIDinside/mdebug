@@ -6,7 +6,7 @@
 #include <thread>
 
 using Notify = utils::Notifier::WriteEnd;
-
+struct TraceeController;
 class AwaiterThread
 {
 public:
@@ -30,7 +30,7 @@ public:
    * out of a syscall exit, or a continue-stop-continue cycle, etc.*/
   void reaped_events() noexcept;
   /** Inform AwaiterThread that we've initialized all the state required for it to start listening for events. */
-  void start_awaiter_thread() noexcept;
+  void start_awaiter_thread(TraceeController *tc) noexcept;
   /** Inform AwaiterThread that the process it is waiting on, no longer is executing, i.e. let AwaiterThread
    * finish. */
   void set_process_exited() noexcept;
@@ -41,8 +41,8 @@ private:
   bool events_reaped;
   std::mutex m;
   std::condition_variable cv;
-  bool initialized;
-  std::thread worker_thread;
+  std::thread thread;
   // The keep-alive variable. If the task leader exits, should_cont = false and AwaiterThread is done.
   bool should_cont;
+  Tid process_group_id;
 };

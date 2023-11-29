@@ -38,15 +38,23 @@ Continue::execute(Tracer *tracer) noexcept
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
   auto target = tracer->get_current();
-  if (target->is_running()) {
+  if (continue_all && target->is_running()) {
+    std::vector<Tid> running_tasks{};
+    for (const auto &t : target->threads) {
+      if (!t.is_stopped() || t.tracer_stopped)
+        running_tasks.push_back(t.tid);
+    }
+    DLOG("mdb", "Denying continue request, target is running ([{}])", fmt::join(running_tasks, ", "));
     res->success = false;
   } else {
     res->success = true;
     if (continue_all) {
+      DLOG("mdb", "[request:continue]: continue all");
       target->resume_target(RunType::Continue);
     } else {
+      DLOG("mdb", "[request:continue]: continue single thread: {}", thread_id);
       auto t = target->get_task(thread_id);
-      t->resume(RunType::Continue);
+      target->resume_task(t, RunType::Continue);
     }
   }
 
@@ -70,18 +78,19 @@ UIResultPtr
 Next::execute(Tracer *tracer) noexcept
 {
   auto target = tracer->get_current();
-  if (target->is_running()) {
+  auto task = target->get_task(thread_id);
+
+  if (!task->is_stopped()) {
     return new NextResponse{false, this};
   }
 
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id,
-         target->get_task(thread_id)->registers->rip);
-    target->install_ptracestop_handler<ptracestop::InstructionStep>(thread_id, 1, !continue_all);
+    DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id, task->registers->rip);
+    target->install_ptracestop_handler<ptracestop::InstructionStep>(task->tid, !continue_all, task, 1);
     break;
   case SteppingGranularity::Line:
-    target->install_ptracestop_handler<ptracestop::LineStep>(thread_id, 1, !continue_all);
+    target->install_ptracestop_handler<ptracestop::LineStep>(task->tid, !continue_all, task, 1);
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")

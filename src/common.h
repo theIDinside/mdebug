@@ -135,13 +135,12 @@ std::string_view syscall_name(u64 syscall_number);
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
-    const auto todo_msg =                                                                                         \
-        fmt::format("[TODO {}] in {}:{} - {}", loc.function_name(), loc.file_name(), loc.line(), abort_msg);      \
+    const auto todo_msg = fmt::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
     fmt::println("{}", todo_msg);                                                                                 \
     logging::get_logging()->log("mdb", todo_msg);                                                                 \
     logging::get_logging()->on_abort();                                                                           \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
-    DEAL_WITH_SHITTY_GCC                                                                                          \
+    MIDAS_UNREACHABLE                                                                                             \
   }
 
 #define TODO_FMT(fmt_str, ...)                                                                                    \
@@ -156,7 +155,7 @@ std::string_view syscall_name(u64 syscall_number);
     logging::get_logging()->log("mdb", todo_msg);                                                                 \
     logging::get_logging()->on_abort();                                                                           \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
-    DEAL_WITH_SHITTY_GCC                                                                                          \
+    MIDAS_UNREACHABLE                                                                                             \
   }
 
 // Identical to ASSERT, but doesn't care about build type
@@ -569,7 +568,8 @@ public:
 
   template <typename T>
     requires(!std::is_pointer_v<T>)
-  constexpr T read_value() noexcept
+  constexpr T
+  read_value() noexcept
   {
     ASSERT(remaining_size() >= sizeof(T),
            "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
@@ -579,6 +579,19 @@ public:
     Type value = *(Type *)head;
     head += sz;
     return value;
+  }
+
+  template <typename T>
+    requires(!std::is_pointer_v<T>)
+  constexpr void
+  skip_value() noexcept
+  {
+    ASSERT(remaining_size() >= sizeof(T),
+           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
+           remaining_size());
+    using Type = typename std::remove_cv_t<T>;
+    constexpr auto sz = sizeof(Type);
+    head += sz;
   }
 
   template <ByteCode T>
@@ -670,6 +683,7 @@ public:
 
   std::span<const u8> get_span(u64 size) noexcept;
   std::string_view read_string() noexcept;
+  void skip_string() noexcept;
   DataBlock read_block(u64 size) noexcept;
 
   /**

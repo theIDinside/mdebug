@@ -136,6 +136,24 @@ Tracer::get_current() noexcept
 }
 
 void
+Tracer::handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept
+{
+  auto tc = get_controller(process_group);
+  tc->set_pending_waitstatus(wait_res);
+  auto task = tc->get_task(wait_res.tid);
+  tc->ptracestop_handler->handle_wait_event(task);
+}
+
+void
+Tracer::handle_command(ui::UICommandPtr cmd) noexcept
+{
+  DLOG("mdb", "accepted command {}", cmd->name());
+  auto result = cmd->execute(this);
+  dap->post_event(result);
+  delete cmd;
+}
+
+void
 Tracer::wait_for_tracee_events(Tid target_pid) noexcept
 {
   auto tc = get_controller(target_pid);
@@ -143,11 +161,11 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
   if (!wait_res.has_value())
     return;
   auto wait = *wait_res;
-  if (!tc->has_task(wait.waited_pid)) {
-    tc->new_task(wait.waited_pid, true);
+  if (!tc->has_task(wait.tid)) {
+    tc->new_task(wait.tid, true);
   }
   auto task = tc->register_task_waited(wait);
-  tc->ptracestop_handler->handle_execution_event(task);
+  tc->ptracestop_handler->handle_wait_event(task);
 }
 
 void
@@ -251,7 +269,7 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
     const auto leader = res.pid;
     add_target_set_current(res.pid, program, TargetSession::Launched);
     if (Tracer::use_traceme) {
-      TaskWaitResult twr{.waited_pid = leader, .ws = {.ws = WaitStatusKind::Execed}};
+      TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed}};
       get_current()->process_exec(get_current()->register_task_waited(twr));
       dap->add_tty(res.fd);
     } else {
@@ -261,8 +279,8 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
           if ((stat >> 8) == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
             TaskWaitResult twr;
             twr.ws.ws = WaitStatusKind::Execed;
-            twr.waited_pid = leader;
-            DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.waited_pid, res.pid);
+            twr.tid = leader;
+            DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.tid, res.pid);
             get_current()->process_exec(get_current()->register_task_waited(twr));
             dap->add_tty(res.fd);
             break;

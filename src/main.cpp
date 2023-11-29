@@ -1,11 +1,13 @@
 /** COPYRIGHT TEMPLATE */
 #include "./utils/logger.h"
 #include "common.h"
+#include "event_queue.h"
 #include "interface/dap/interface.h"
 #include "notify_pipe.h"
 #include "tracer.h"
 #include <array>
 #include <asm-generic/errno-base.h>
+#include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
@@ -86,20 +88,20 @@ main(int argc, const char **argv)
   }};
 
   while (!ui_thread_setup) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
   }
 
   std::vector<utils::NotifyResult> notify_events{};
   while (Tracer::Instance->KeepAlive) {
-    if (notifiers.poll(10)) {
-      notifiers.has_wait_ready(notify_events, true);
-      for (const auto target : notify_events) {
-        // handle await events on `target`
-        tracer.wait_for_tracee_events(target.pid);
-      }
-      // handle IO event
-      if (notifiers.has_io_ready()) {
-        tracer.execute_pending_commands();
-      }
+    const auto evt = poll_event();
+    switch (evt.type) {
+    case EventType::WaitStatus: {
+      tracer.handle_wait_event(evt.process_group, evt.wait);
+    } break;
+    case EventType::Command: {
+      tracer.handle_command(evt.cmd);
+      break;
+    }
     }
   }
   exit_debug_session = true;

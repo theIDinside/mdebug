@@ -1,51 +1,22 @@
 #include "awaiter.h"
 #include "common.h"
+#include "event_queue.h"
+#include "supervisor.h"
 #include "tracer.h"
 #include <bits/chrono.h>
+#include <bits/types/idtype_t.h>
 #include <chrono>
 #include <sys/wait.h>
 
 AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
-    : notifier(notifier), events_reaped(true), m{}, cv{}, initialized(false), should_cont(true)
-{
-
-  worker_thread = std::thread{[&n = this->notifier, t = task_leader, &cv = cv, &m = m, &ready = events_reaped,
-                               &initialized = initialized, &c = should_cont]() {
-    int error_tries = 0;
-    {
-      std::unique_lock lk(m);
-      while (!initialized) {
-        cv.wait(lk);
-      }
-    }
-
-    while (c) {
-      siginfo_t info_ptr;
-      auto res = waitid(P_ALL, t, &info_ptr, WEXITED | WSTOPPED | WNOWAIT);
-      if (res == -1) {
-        error_tries++;
-        VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
-        continue;
-      }
-      error_tries = 0;
-      // notify Tracer thread that it can pull out wait status info
-      n.notify();
-      {
-        std::unique_lock lk(m);
-        ready = false;
-        while (!ready && c)
-          cv.wait(lk);
-      }
-      ready = false;
-    }
-  }};
-};
+    : notifier(notifier), events_reaped(true), m{}, cv{}, thread(), should_cont(true),
+      process_group_id(task_leader){};
 
 AwaiterThread::~AwaiterThread() noexcept
 {
   should_cont = false;
   reaped_events();
-  worker_thread.join();
+  thread.join();
 }
 
 void
@@ -56,10 +27,25 @@ AwaiterThread::reaped_events() noexcept
 }
 
 void
-AwaiterThread::start_awaiter_thread() noexcept
+AwaiterThread::start_awaiter_thread(TraceeController *tc) noexcept
 {
-  this->initialized = true;
-  cv.notify_all();
+  thread = std::thread{[tc, &ready = events_reaped, &c = should_cont]() {
+    int error_tries = 0;
+    const auto pgid = -(tc->task_leader);
+    while (c) {
+      int status = 0;
+      const auto res = waitpid(pgid, &status, 0 | __WALL);
+      if (res == -1) {
+        error_tries++;
+        VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
+        continue;
+      }
+      DLOG("mdb", "[wait]: waited for {}", res);
+      const auto wait_result = process_status(res, status);
+      push_event(Event{.process_group = tc->task_leader, .type = EventType::WaitStatus, .wait = wait_result});
+      ready = false;
+    }
+  }};
 }
 
 void

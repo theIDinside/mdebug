@@ -4,6 +4,7 @@
 #include "interface/ui_command.h"
 #include "interface/ui_result.h"
 #include "notify_pipe.h"
+#include "ptrace.h"
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -70,6 +71,8 @@ public:
   void thread_exited(LWP lwp, int status) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
   TraceeController *get_current() noexcept;
+  void handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept;
+  void handle_command(ui::UICommandPtr cmd) noexcept;
 
   void wait_for_tracee_events(Tid target) noexcept;
   void set_ui(ui::dap::DAP *dap) noexcept;
@@ -85,10 +88,10 @@ public:
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
   void disconnect() noexcept;
   std::vector<std::unique_ptr<TraceeController>> targets;
+  ui::dap::DAP *dap;
 
 private:
   TraceeController *current_target = nullptr;
-  ui::dap::DAP *dap;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;
   utils::Notifier::ReadEnd io_thread_pipe;

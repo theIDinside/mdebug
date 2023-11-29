@@ -56,12 +56,13 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      tracee_r_debug(nullptr), shared_objects(), var_refs(), spin_lock{}, interpreter_base{}, entry{},
-      session(session), is_in_user_ptrace_stop(false), ptracestop_handler(new ptracestop::StopHandler{this}),
-      unwinders(), null_unwinder(new sym::Unwinder{nullptr})
+      tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), stopped_observer(), var_refs(),
+      spin_lock{}, interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
+      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
+  threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
-  threads.push_back(TaskInfo{process_space_id});
+  threads.push_back(TaskInfo::create_running(process_space_id));
   threads.back().initialize();
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
@@ -99,12 +100,14 @@ parse_stapsdt_note(const ElfSection *section) noexcept
     const auto stapsdt = reader.read_string();
     ASSERT(stapsdt == "stapsdt", "Failed to see 'stapsdt' deliminator; saw {}", stapsdt);
     const auto ptr = reader.read_value<u64>();
-    const auto base = reader.read_value<u64>();
-    const auto semaphore = reader.read_value<u64>();
+    // base =
+    reader.skip_value<u64>();
+    // semaphore =
+    reader.skip_value<u64>();
     const auto provider = reader.read_string();
     ASSERT(provider == "rtld", "Supported provider is rtld, got {}", provider);
     const auto probe_name = reader.read_string();
-    const auto description = reader.read_string();
+    reader.skip_string();
     if (reader.bytes_read() % 4 != 0)
       reader.skip(4 - reader.bytes_read() % 4);
     if (required_probes.contains(probe_name)) {
@@ -177,7 +180,7 @@ TraceeController::on_so_event() noexcept
     }
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
-      r_debug_extended rdebug_ext = read_type(next);
+      rdebug_ext = read_type(next);
     } else {
       break;
     }
@@ -222,7 +225,6 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
       }
       CompilationUnitBuilder cu_builder{so->objfile};
       auto total = cu_builder.build_cu_headers();
-      const auto total_sz = total.size();
       for (const auto &hdr : total) {
         ASSERT(so->objfile != nullptr, "Objfile is null!");
         auto proc = prepare_cu_processing(so->objfile, hdr, this);
@@ -254,22 +256,15 @@ std::optional<TaskWaitResult>
 TraceeController::wait_pid(TaskInfo *requested_task) noexcept
 {
   const auto tid = requested_task == nullptr ? -1 : requested_task->tid;
-  return waitpid_block(tid).transform([this](auto &&wpid) {
-    TaskWaitResult wait{};
-    wait.waited_pid = wpid.tid;
-    task_wait_emplace(wpid.status, &wait);
-    return wait;
-  });
+  return waitpid_block(tid).transform([](auto &&wpid) { return process_status(wpid.tid, wpid.status); });
 }
 
 void
 TraceeController::new_task(Tid tid, bool ui_update) noexcept
 {
   VERIFY(tid != 0, "Invalid tid {}", tid);
-  auto evt = new ui::dap::OutputEvent{
-      "console"sv, fmt::format("Task ({}) {} created (task leader: {})", threads.size() + 1, tid, task_leader)};
-  Tracer::Instance->post_event(evt);
-  threads.push_back(TaskInfo{tid});
+  ASSERT(!has_task(tid), "Task {} has already been created!", tid);
+  threads.push_back(TaskInfo::create_running(tid));
 
   ASSERT(std::ranges::all_of(threads, [](TaskInfo &t) { return t.tid != 0; }),
          "Fucking hidden move construction fucked a Task in the ass and gave it 0 as pid");
@@ -293,21 +288,30 @@ void
 TraceeController::resume_target(RunType type) noexcept
 {
   DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
+  waiting_for_all_stopped = false;
   for (auto &t : threads) {
     if (t.can_continue()) {
-      if (t.bstat)
-        t.step_over_breakpoint(this);
-      if (type == RunType::Continue)
-        t.resume(type);
+      resume_task(&t, type);
     }
   }
-  ptracestop_handler->can_resume();
+}
+
+void
+TraceeController::resume_task(TaskInfo *task, RunType type) noexcept
+{
+  waiting_for_all_stopped = false;
+  if (task->bstat) {
+    task->step_over_breakpoint(this, type);
+  } else {
+    task->ptrace_resume(type);
+  }
 }
 
 void
 TraceeController::stop_all() noexcept
 {
   DLOG("mdb", "Stopping all threads")
+  waiting_for_all_stopped = true;
   for (auto &t : threads) {
     if (!t.user_stopped && !t.tracer_stopped) {
       DLOG("mdb", "Stopping {}", t.tid);
@@ -318,6 +322,11 @@ TraceeController::stop_all() noexcept
       // we upgraded our tracer-stop to a user-stop
       t.set_stop();
     }
+    auto action = ptracestop_handler->get_proceed_action(&t);
+    if (action) {
+      action->cancel();
+      ptracestop_handler->remove_action(&t);
+    }
   }
 }
 
@@ -327,7 +336,7 @@ TraceeController::reap_task(TaskInfo *task) noexcept
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
   task->exited = true;
-  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.data.exit_signal);
+  Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.exit_code);
   if (task->tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
@@ -336,8 +345,8 @@ TraceeController::reap_task(TaskInfo *task) noexcept
 TaskInfo *
 TraceeController::register_task_waited(TaskWaitResult wait) noexcept
 {
-  ASSERT(has_task(wait.waited_pid), "Target did not contain task {}", wait.waited_pid);
-  auto task = get_task(wait.waited_pid);
+  ASSERT(has_task(wait.tid), "Target did not contain task {}", wait.tid);
+  auto task = get_task(wait.tid);
   task->set_taskwait(wait);
   task->tracer_stopped = true;
   return task;
@@ -357,7 +366,6 @@ TraceeController::get_caching_pc(TaskInfo *t) noexcept
 void
 TraceeController::set_pc(TaskInfo *t, AddrPtr addr) noexcept
 {
-  DLOG("mdb", "Setting pc to {}", addr);
   constexpr auto rip_offset = offsetof(user_regs_struct, rip);
   VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
   t->registers->rip = addr;
@@ -392,7 +400,6 @@ TraceeController::set_tracer_bp(TPtr<u64> addr, BpType type) noexcept
     bp->bp_type.type |= type.type;
     return true;
   }
-  DLOG("mdb", "Installing tracer breakpoint at {}", addr);
   u8 bkpt = 0xcc;
   const auto original_byte = read_type_safe(addr.as<u8>());
   ASSERT(original_byte.has_value(), "Failed to read byte at {}", addr);
@@ -417,7 +424,6 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
   }
   DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
   for (const auto &sym : matching_symbols) {
-    DLOG("mdb", "Setting breakpoint @ {}", sym.address);
     constexpr u64 bkpt = 0xcc;
     if (bps.contains(sym.address)) {
       auto bp = bps.get(sym.address);
@@ -436,18 +442,17 @@ void
 TraceeController::set_source_breakpoints(std::string_view src,
                                          std::vector<SourceBreakpointDescriptor> &&descs) noexcept
 {
-  logging::get_logging()->log("mdb",
-                              fmt::format("Setting breakpoints in {}; requested {} bps", src, descs.size()));
+  DLOG("mdb", "[bkpt:source]: Requested {} source breakpoints for {}", descs.size(), src);
   for (const auto obj : object_files) {
     const auto f_it = find(obj->m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
     if (f_it != std::end(obj->m_full_cu)) {
+      DLOG("mdb", "[bkpt:source]: objfile {} has file {}", obj->path.c_str(), src);
       for (auto &&desc : descs) {
         // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
         const auto &lt = f_it->line_table();
         for (const auto &lte : lt) {
           if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
             if (!bps.contains(lte.pc)) {
-              logging::get_logging()->log("mdb", fmt::format("Setting breakpoint at {}", lte.pc));
               u8 original_byte = write_bp_byte(lte.pc);
               bps.insert(lte.pc, original_byte, BpType{.source = true});
               const auto &bp = bps.breakpoints.back();
@@ -460,8 +465,6 @@ TraceeController::set_source_breakpoints(std::string_view src,
           }
         }
       }
-    } else {
-      logging::get_logging()->log("mdb", fmt::format("Could not find file!!!", src, descs.size()));
     }
   }
   logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", bps.breakpoints.size()));
@@ -470,6 +473,9 @@ TraceeController::set_source_breakpoints(std::string_view src,
 void
 TraceeController::emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept
 {
+  /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
+   *  that all get stopped during this event. */
+  DLOG("mdb", "[dap event]: stopped at breakpoint {} emitted", bp_id);
   auto evt =
       new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
   evt->bp_ids.push_back(bp_id);
@@ -479,13 +485,23 @@ TraceeController::emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept
 void
 TraceeController::emit_stepped_stop(LWP lwp) noexcept
 {
+  /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
+   *  that all get stopped during this event. */
+  emit_stepped_stop(lwp, true);
+}
+
+void
+TraceeController::emit_stepped_stop(LWP lwp, bool all_stopped) noexcept
+{
   Tracer::Instance->post_event(
-      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", true});
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", all_stopped});
 }
 
 void
 TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 {
+  /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
+   *  that all get stopped during this event. */
   Tracer::Instance->post_event(new ui::dap::StoppedEvent{
       ui::dap::StoppedReason::Exception, fmt::format("Signalled {}", signal), lwp.tid, {}, "", true});
 }
@@ -553,7 +569,7 @@ TraceeController::detach() noexcept
     stop_all();
   }
   std::vector<std::pair<Tid, int>> errs;
-  for (auto t : threads) {
+  for (const auto &t : threads) {
     const auto res = ptrace(PTRACE_DETACH, t.tid, 0, 0);
     if (res == -1)
       errs.push_back(std::make_pair(t.tid, errno));
@@ -561,83 +577,6 @@ TraceeController::detach() noexcept
 
   // todo(simon): construct a way to let this information bubble up to caller
   return errs.empty();
-}
-
-void
-TraceeController::restore_default_handler() noexcept
-{
-  ptracestop_handler->restore_default();
-}
-
-void
-TraceeController::task_wait_emplace(int status, TaskWaitResult *wait) noexcept
-{
-  ASSERT(wait != nullptr, "wait param must not be null");
-  if (WIFSTOPPED(status)) {
-    task_wait_emplace_stopped(status, wait);
-    return;
-  }
-
-  if (WIFEXITED(status)) {
-    task_wait_emplace_exited(status, wait);
-    return;
-  }
-
-  if (WIFSIGNALED(status)) {
-    task_wait_emplace_signalled(status, wait);
-    return;
-  }
-}
-
-void
-TraceeController::task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept
-{
-  using enum WaitStatusKind;
-  if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
-    PtraceSyscallInfo info;
-    constexpr auto size = sizeof(PtraceSyscallInfo);
-    PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, wait->waited_pid, size, &info);
-    if (info.is_entry()) {
-      wait->ws.ws = SyscallEntry;
-    } else {
-      wait->ws.ws = SyscallExit;
-    }
-    return;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
-    wait->ws.ws = Cloned;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
-    wait->ws.ws = Execed;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
-    wait->ws.ws = Exited;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
-    wait->ws.ws = Forked;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
-    wait->ws.ws = VForked;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
-    wait->ws.ws = VForkDone;
-  } else if (WSTOPSIG(status) == SIGTRAP) {
-    wait->ws.ws = Stopped;
-  } else if (WSTOPSIG(status) == SIGSTOP) {
-    wait->ws.ws = Stopped;
-  } else {
-    wait->ws.ws = Stopped;
-    fmt::println("SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait->waited_pid, WSTOPSIG(status));
-    sleep(1);
-  }
-}
-
-void
-TraceeController::task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept
-{
-  wait->ws.ws = WaitStatusKind::Signalled;
-  wait->ws.data.signal = WTERMSIG(status);
-}
-
-void
-TraceeController::task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept
-{
-  wait->ws.ws = WaitStatusKind::Exited;
-  wait->ws.data.exit_signal = WEXITSTATUS(status);
 }
 
 void
@@ -654,13 +593,11 @@ Tid
 TraceeController::process_clone(TaskInfo *t) noexcept
 {
   DLOG("mdb", "Processing CLONE for {}", t->tid);
-  const auto stopped_tid = t->tid;
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
   t->cache_registers();
   pid_t np = -1;
   if (t->registers->orig_rax == SYS_clone) {
-    const auto flags = sys_arg_n<1>(*t->registers);
     const TPtr<void> stack_ptr = sys_arg_n<2>(*t->registers);
     const TPtr<int> child_tid = sys_arg_n<4>(*t->registers);
     const u64 tls = sys_arg_n<5>(*t->registers);
@@ -685,26 +622,6 @@ TraceeController::process_clone(TaskInfo *t) noexcept
   } else {
     ASSERT(false, "Unknown clone syscall!");
   }
-}
-
-BpEvent
-TraceeController::process_stopped(TaskInfo *t) noexcept
-{
-  const auto pc = get_caching_pc(t);
-  DLOG("mdb", "Processing stopped for {} at {}", t->tid, AddrPtr{t->registers->rip});
-  const auto prev_pc_byte = offset(pc, -1);
-  if (auto bp = bps.get(prev_pc_byte); bp != nullptr) {
-    if (t->bstat && t->bstat->stepped_over) {
-      t->bstat = std::nullopt;
-      return BpEvent{BpEventType::None, {nullptr}};
-    }
-    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
-    set_pc(t, prev_pc_byte);
-    t->add_bpstat(bp);
-    return BpEvent{bp->event_type(), {.bp = bp}};
-  }
-  t->bstat = std::nullopt;
-  return BpEvent{BpEventType::None, {nullptr}};
 }
 
 bool
@@ -872,14 +789,11 @@ TraceeController::add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept
       obj->m_partial_units.push_back({});
     }
   }
-  auto evt = new ui::dap::OutputEvent{"console"sv, fmt::format("Adding file {}", file)};
-  Tracer::Instance->post_event(evt);
 }
 
 void
 TraceeController::reaped_events() noexcept
 {
-  DLOG("mdb", "Reaped events");
   awaiter_thread->reaped_events();
 }
 
@@ -895,7 +809,7 @@ TraceeController::notify_self() noexcept
 void
 TraceeController::start_awaiter_thread() noexcept
 {
-  awaiter_thread->start_awaiter_thread();
+  awaiter_thread->start_awaiter_thread(this);
 }
 
 sym::Frame
@@ -917,7 +831,7 @@ TraceeController::current_frame(TaskInfo *task) noexcept
         .symbol = nullptr,
         .cu_file = nullptr,
         .level = 0,
-        .type = sym::FrameType::Full,
+        .type = sym::FrameType::Unknown,
     };
 }
 
@@ -1186,6 +1100,30 @@ TraceeController::frame(int frame_id) noexcept
   const auto frame_ref_info = var_refs[frame_id];
   auto task = get_task(frame_ref_info.thread_id);
   return task->call_stack->get_frame(frame_id);
+}
+
+void
+TraceeController::notify_all_stopped() noexcept
+{
+  DLOG("mdb", "[all-stopped]: sending registered notifications");
+  stopped_observer.send_notifications();
+}
+
+bool
+TraceeController::all_stopped() const noexcept
+{
+  return std::ranges::all_of(threads, [](const auto &t) { return t.stop_processed(); });
+}
+
+void
+TraceeController::set_pending_waitstatus(TaskWaitResult wait_result) noexcept
+{
+  const auto tid = wait_result.tid;
+  auto task = get_task(tid);
+  ASSERT(task != nullptr, "couldn't find task {}", tid);
+  task->wait_status = wait_result.ws;
+  task->tracer_stopped = true;
+  task->stop_collected = false;
 }
 
 #pragma GCC diagnostic pop

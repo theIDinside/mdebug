@@ -10,6 +10,8 @@ async function test() {
     if (i == 0 && !response.success) {
       throw new Error(`Request continue failed. Message: ${response.message}`)
     }
+    // The reason why this should fail, is because, we hit the breakpoint at main, and then continue { threads[0] }, should step over the bp, and then continue
+    // which means, that when the second continue requests comes in, target should be running (thus returning a "continue request failed response")
     if (i > 0 && response.success) {
       throw new Error(`Did not expect continue request to succeed!: Response ${JSON.stringify(response)}`)
     }

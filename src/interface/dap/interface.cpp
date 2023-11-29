@@ -1,4 +1,5 @@
 #include "interface.h"
+#include "../../event_queue.h"
 #include "../../tracer.h"
 #include "../../utils/logger.h"
 #include "commands.h"
@@ -160,23 +161,18 @@ DAP::run_ui_loop()
             for (auto &&hdr : request_headers) {
               const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
               const auto cmd = parse_command(std::string{cd->payload()});
-              tracer->accept_command(cmd);
+              push_event(::Event{.type = EventType::Command, .cmd = cmd});
             }
-            command_notifier.notify();
             // since there's no partials left in the buffer, we reset it
             parse_swapbuffer.clear();
           } else {
             if (request_headers.size() > 1) {
-              bool parsed_commands = false;
               for (auto i = 0ull; i < request_headers.size() - 1; i++) {
                 const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
                 const auto cmd = parse_command(std::string{cd->payload()});
-                tracer->accept_command(cmd);
-                parsed_commands = true;
+                push_event(::Event{.type = EventType::Command, .cmd = cmd});
               }
-              if (parsed_commands) {
-                command_notifier.notify();
-              }
+
               auto rd = maybe_unwrap<RemainderData>(request_headers.back());
               parse_swapbuffer.swap(rd->offset);
               ASSERT(parse_swapbuffer.current_size() == rd->length,

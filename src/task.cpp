@@ -8,10 +8,23 @@
 #include <sys/ptrace.h>
 #include <sys/user.h>
 
-TaskInfo::TaskInfo(pid_t tid) noexcept
-    : tid(tid), wait_status(), user_stopped(true), tracer_stopped(true), initialized(false), cache_dirty(true),
-      rip_dirty(true), exited(false), registers(new user_regs_struct{}), call_stack(new sym::CallStack{tid})
+TaskInfo::TaskInfo(pid_t tid, bool user_stopped) noexcept
+    : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
+      cache_dirty(true), rip_dirty(true), exited(false), registers(new user_regs_struct{}),
+      call_stack(new sym::CallStack{tid})
 {
+}
+
+TaskInfo
+TaskInfo::create_stopped(pid_t tid)
+{
+  return TaskInfo{tid, true};
+}
+
+TaskInfo
+TaskInfo::create_running(pid_t tid)
+{
+  return TaskInfo{tid, false};
 }
 
 u64
@@ -49,13 +62,13 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
     return call_stack->pcs;
   else {
     call_stack->pcs.clear();
-    // TODO(SIMON), todo(SIMON), todo(simon) uncomment this, when DWARF stack unwinding is good.
   }
 
   if (cache_dirty)
     cache_registers();
 
   // initialize bottom frame's registers with actual live register contents
+  DLOG("mdb", "servicing return addresses...");
   auto &buf = call_stack->reg_unwind_buffer;
   buf.clear();
   buf.reserve(call_stack->pcs.size());
@@ -69,12 +82,14 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   }
 
   sym::UnwindIterator it{tc, registers->rip};
+  DLOG("mdb", "Unwind iterator is null: {} for pc: {}", it.is_null(), registers->rip);
   ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{registers->rip});
   const sym::UnwindInfo *un_info = it.get_info(registers->rip);
+  ASSERT(un_info != nullptr, "unwind info iterator returned null for 0x{:x}", registers->rip);
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(tc, this, un_info, registers->rip);
 
   const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
-
+  DLOG("mdb", "servicing return addresses...");
   switch (req.req) {
   case CallStackRequest::Type::Full: {
     for (auto uinf = un_info; uinf != nullptr; uinf = it.get_info(get_current_pc())) {
@@ -119,42 +134,51 @@ TaskInfo::consume_wait() noexcept
 }
 
 void
-TaskInfo::resume(RunType type) noexcept
+TaskInfo::ptrace_resume(RunType type) noexcept
 {
+  ASSERT(user_stopped || tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})", bool{user_stopped},
+         bool{tracer_stopped});
   if (user_stopped) {
-    DLOG("mdb", "restarting {} ({}) from user-stop", tid,
+    DLOG("mdb", "[ptrace]: restarting {} ({}) from user-stop", tid,
          type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    user_stopped = false;
-    tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   } else if (tracer_stopped) {
-    DLOG("mdb", "restarting {} ({}) from tracer-stop", tid,
+    DLOG("mdb", "[ptrace]: restarting {} ({}) from tracer-stop", tid,
          type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    user_stopped = false;
-    tracer_stopped = false;
     PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
   }
+  stop_collected = false;
+  user_stopped = false;
+  tracer_stopped = false;
   set_dirty();
 }
 
+WaitStatus
+TaskInfo::pending_wait_status() const noexcept
+{
+  ASSERT(wait_status.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", tid);
+  return wait_status;
+}
+
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc) noexcept
+TaskInfo::step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept
 {
   ASSERT(bstat.has_value(), "Requires a valid bpstat");
   auto bp = tc->bps.get_by_id(bstat->bp_id);
   DLOG("mdb", "[TaskInfo {}] Stepping over bp {} at {}", tid, bstat->bp_id, bp->address);
 
   bp->disable(tc->task_leader);
-  resume(RunType::Step);
-  consume_wait();
-  bp->enable(tc->task_leader);
-  bstat = std::nullopt;
+  bstat->stepped_over = true;
+  bstat->re_enable_bp = true;
+  bstat->should_resume = resume_action != RunType::None;
+  ptrace_resume(RunType::Step);
 }
 
 void
 TaskInfo::set_stop() noexcept
 {
   user_stopped = true;
+  tracer_stopped = true;
 }
 
 void
@@ -180,7 +204,7 @@ TaskInfo::set_dirty() noexcept
 void
 TaskInfo::add_bpstat(Breakpoint *bp) noexcept
 {
-  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false};
+  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false, .re_enable_bp = false};
 }
 
 void
@@ -194,6 +218,12 @@ bool
 TaskInfo::is_stopped() const noexcept
 {
   return user_stopped;
+}
+
+bool
+TaskInfo::stop_processed() const noexcept
+{
+  return stop_collected;
 }
 
 TaskVMInfo

@@ -1,11 +1,14 @@
 #include "breakpoint.h"
+#include "ptrace.h"
 #include "supervisor.h"
 #include <sys/ptrace.h>
 #include <utility>
 
 Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BpType type) noexcept
-    : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true)
+    : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true),
+      ignore(false)
 {
+  DLOG("mdb", "[bkpt]: bp {} created for {} = {}", id, addr, type);
 }
 
 void
@@ -39,13 +42,44 @@ Breakpoint::type() const noexcept
   return bp_type;
 }
 
+bool
+Breakpoint::should_resume() const noexcept
+{
+  return ignore || bp_type.shared_object_load;
+}
+
+void
+Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
+{
+  switch (event_type()) {
+  // even if underlying bp is both user and tracer bp; it always handles it prioritized as user.
+  case BpEventType::Both: {
+    if (bp_type.shared_object_load) {
+      tc->on_so_event();
+    }
+  }
+  case BpEventType::UserBreakpointHit: {
+    // TODO(simon): if breakpoint doesn't stop all, emit stop event directly, but only for that one thread
+    if (!ignore) {
+      tc->stop_all();
+      tc->stopped_observer.add_notification<BreakpointHit>(tc, int{id}, int{t->tid});
+    }
+    break;
+  }
+  case BpEventType::TracerBreakpointHit: {
+    if (bp_type.shared_object_load) {
+      tc->on_so_event();
+    }
+  } break;
+  }
+}
+
 #define UL(BpEvt) std::to_underlying(BpEventType::BpEvt)
 
 BpEventType
 Breakpoint::event_type() const noexcept
 {
   const auto t = bp_type.type;
-  DLOG("mdb", "Breakpoint type: {:b}", bp_type.type);
   if (bp_type.type & 0b1111) {
     const auto underlying = (UL(Both) * (t > 0b1111) + (UL(UserBreakpointHit) * t <= 0b1111));
     return (BpEventType)underlying;
@@ -90,20 +124,6 @@ BreakpointMap::clear(TraceeController *target, BpType type) noexcept
   });
 }
 
-void
-BreakpointMap::disable_breakpoint(u16 id) noexcept
-{
-  auto bp = get_by_id(id);
-  bp->disable(address_space_tid);
-}
-
-void
-BreakpointMap::enable_breakpoint(u16 id) noexcept
-{
-  auto bp = get_by_id(id);
-  bp->enable(address_space_tid);
-}
-
 Breakpoint *
 BreakpointMap::get_by_id(u32 id) noexcept
 {
@@ -125,13 +145,13 @@ BreakpointMap::get(AddrPtr addr) noexcept
 void
 BreakpointMap::remove_breakpoint(AddrPtr addr, BpType type) noexcept
 {
-  DLOG("mdb", "Remove breakpoint type {} @ {}", type, addr);
+  DLOG("mdb", "[bkpt]: remove {} at {}", type, addr);
   std::erase_if(breakpoints, [pid = address_space_tid, addr, type](Breakpoint &bp) {
     if (bp.address == addr) {
       bp.bp_type.unset(type);
       if (bp.bp_type.type == 0) {
         bp.disable(pid);
-        DLOG("mdb", "Deleted breakpoint at {}", bp.address);
+        DLOG("mdb", "[bkpt] deleted bp {} at {}", bp.id, bp.address);
         return true;
       }
     }

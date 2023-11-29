@@ -2,8 +2,10 @@
 #include "awaiter.h"
 #include "breakpoint.h"
 #include "common.h"
+#include "events/event.h"
 #include "interface/dap/types.h"
 #include "lib/spinlock.h"
+#include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
@@ -18,7 +20,6 @@
 #include <link.h>
 #include <optional>
 #include <sys/mman.h>
-#include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/user.h>
 #include <thread>
@@ -55,6 +56,8 @@ struct SearchFnSymResult
 using Address = std::uintptr_t;
 struct ObjectFile;
 
+class StopObserver;
+
 struct TraceeController
 {
   using handle = std::unique_ptr<TraceeController>;
@@ -70,6 +73,8 @@ struct TraceeController
   BreakpointMap bps;
   TPtr<r_debug_extended> tracee_r_debug;
   SharedObjectMap shared_objects;
+  bool waiting_for_all_stopped;
+  StopObserver stopped_observer;
 
 private:
   int next_var_ref = 0;
@@ -118,6 +123,8 @@ public:
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(RunType type) noexcept;
+  /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
+  void resume_task(TaskInfo *task, RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all() noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
@@ -143,6 +150,7 @@ public:
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
+  void emit_stepped_stop(LWP lwp, bool all_stopped) noexcept;
   void emit_signal_event(LWP lwp, int signal) noexcept;
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
@@ -161,24 +169,17 @@ public:
 
   template <typename StopAction, typename... Args>
   void
-  install_ptracestop_handler(Args... args) noexcept
+  install_ptracestop_handler(Tid tid, bool resume_others, Args... args) noexcept
   {
     DLOG("mdb", "[ptrace stop]: install action {}", ptracestop::action_name<StopAction>());
-    ptracestop_handler->set_action(new StopAction{ptracestop_handler, args...});
-    ptracestop_handler->start_action();
+    if (resume_others) {
+      DLOG("mdb", "[ptrace stop]: should resume all other tasks...");
+    }
+    ptracestop_handler->set_action(tid, new StopAction{ptracestop_handler, args...});
   }
-
-  void restore_default_handler() noexcept;
-
-  // todo(simon): These need re-factoring. They're only confusing as hell and misleading.
-  void task_wait_emplace(int status, TaskWaitResult *wait) noexcept;
-  void task_wait_emplace_stopped(int status, TaskWaitResult *wait) noexcept;
-  void task_wait_emplace_signalled(int status, TaskWaitResult *wait) noexcept;
-  void task_wait_emplace_exited(int status, TaskWaitResult *wait) noexcept;
 
   void process_exec(TaskInfo *t) noexcept;
   Tid process_clone(TaskInfo *t) noexcept;
-  BpEvent process_stopped(TaskInfo *t) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;
@@ -302,6 +303,10 @@ public:
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
   const sym::Frame *frame(int frame_id) noexcept;
+  void notify_all_stopped() noexcept;
+  bool all_stopped() const noexcept;
+
+  void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

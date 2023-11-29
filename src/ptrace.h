@@ -7,8 +7,53 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
-struct TaskWaitResult;
 struct TaskInfo;
+
+enum class RunType : u8
+{
+  Step = 0b0001,
+  Continue = 0b0010,
+  SyscallContinue = 0b0011,
+  UNKNOWN = 0b0000,
+  None = UNKNOWN
+};
+
+std::string_view to_str(RunType type) noexcept;
+
+enum class WaitStatusKind : u16
+{
+#define ITEM(IT, Value) IT = Value,
+#include "./defs/waitstatus.def"
+#undef ITEM
+};
+
+constexpr std::string_view
+to_str(WaitStatusKind ws)
+{
+  switch (ws) {
+#define ITEM(IT, Value)                                                                                           \
+  case WaitStatusKind::IT:                                                                                        \
+    return #IT;
+#include "./defs/waitstatus.def"
+#undef ITEM
+  }
+}
+
+struct WaitStatus
+{
+  WaitStatusKind ws;
+  union
+  {
+    int exit_code;
+    int signal;
+  };
+};
+
+struct TaskWaitResult
+{
+  Tid tid;
+  WaitStatus ws;
+};
 
 std::string_view request_name(__ptrace_request req);
 
@@ -203,3 +248,5 @@ IS_TRACE_EVENT(auto stopsig, auto ptrace_event) noexcept -> bool
 {
   return stopsig >> 8 == (SIGTRAP | (ptrace_event << 8));
 }
+
+TaskWaitResult process_status(Tid tid, int status) noexcept;

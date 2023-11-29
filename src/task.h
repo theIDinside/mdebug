@@ -2,8 +2,8 @@
 
 #include "breakpoint.h"
 #include "common.h"
+#include "ptrace.h"
 #include <linux/sched.h>
-#include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
@@ -12,25 +12,6 @@ using namespace std::string_view_literals;
 struct TraceeController;
 namespace sym {
 struct CallStack;
-}
-
-enum class WaitStatusKind : u16
-{
-#define ITEM(IT, Value) IT = Value,
-#include "./defs/waitstatus.def"
-#undef ITEM
-};
-
-constexpr std::string_view
-to_str(WaitStatusKind ws)
-{
-  switch (ws) {
-#define ITEM(IT, Value)                                                                                           \
-  case WaitStatusKind::IT:                                                                                        \
-    return #IT;
-#include "./defs/waitstatus.def"
-#undef ITEM
-  }
 }
 
 struct CallStackRequest
@@ -46,48 +27,11 @@ struct CallStackRequest
   static CallStackRequest full() noexcept;
 };
 
-struct WaitStatus
-{
-  WaitStatusKind ws;
-  union
-  {
-    int exit_signal;
-    int signal;
-  } data;
-};
-
-struct TaskWaitResult
-{
-  Tid waited_pid;
-  WaitStatus ws;
-};
-
-enum class RunType : u8
-{
-  Step = 0b0001,
-  Continue = 0b0010,
-  SyscallContinue = 0b0011,
-  UNKNOWN = 0b0000,
-};
-
-static constexpr std::string_view
-to_str(RunType type) noexcept
-{
-  switch (type) {
-  case RunType::Step:
-    return "RunType::Step";
-  case RunType::Continue:
-    return "RunType::Continue";
-  case RunType::SyscallContinue:
-    return "RunType::SyscallContinue";
-  case RunType::UNKNOWN:
-    return "RunType::UNKNOWN";
-    break;
-  }
-}
-
 struct TaskInfo
 {
+  friend struct TraceeController;
+  static constexpr bool IS_USER_STOPPED = true;
+  static constexpr bool IS_USER_RUNNING = false;
   pid_t tid;
   WaitStatus wait_status;
   union
@@ -95,11 +39,14 @@ struct TaskInfo
     u16 bit_set;
     struct
     {
+      bool stop_collected : 1; // if we're in a "waiting for all stop" state, we check if we've collected the stop
+                               // for this task
       bool user_stopped : 1;   // stops visible (possibly) to the user
-      bool tracer_stopped : 1; // stops invisible to the user - may be upgraded to user stops
+      bool tracer_stopped : 1; // stops invisible to the user - may be upgraded to user stops. tracer_stop always
+                               // occur when waitpid has returned a result for this task
       bool initialized : 1;    // fully initialized task. after a clone syscall some setup is required
       bool cache_dirty : 1;    // register is dirty and requires refetching
-      bool rip_dirty : 1;      // rip requires fetching
+      bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
       bool exited : 1;         // task has exited
     };
   };
@@ -108,19 +55,26 @@ struct TaskInfo
   std::optional<BpStat> bstat;
 
   TaskInfo() = delete;
-  TaskInfo(pid_t tid) noexcept;
-  TaskInfo(const TaskInfo &o) noexcept = default;
+  // Create a new task; either in a user-stopped state or user running state
+  TaskInfo(pid_t tid, bool user_stopped) noexcept;
   TaskInfo(TaskInfo &&o) noexcept = default;
-  TaskInfo &operator=(TaskInfo &t) noexcept = default;
-  TaskInfo &operator=(const TaskInfo &o) = default;
+  TaskInfo &operator=(TaskInfo &&) noexcept = default;
+  // Delete copy constructors. These are unique values.
+  TaskInfo(const TaskInfo &o) noexcept = delete;
+  TaskInfo(TaskInfo &o) noexcept = delete;
+  TaskInfo &operator=(TaskInfo &t) noexcept = delete;
+  TaskInfo &operator=(const TaskInfo &o) = delete;
+
+  static TaskInfo create_stopped(pid_t tid);
+  static TaskInfo create_running(pid_t tid);
 
   u64 get_register(u64 reg_num) noexcept;
   void cache_registers() noexcept;
   const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
   void consume_wait() noexcept;
-  void resume(RunType) noexcept;
-  void step_over_breakpoint(TraceeController *tc) noexcept;
+
+  void step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept;
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
@@ -131,6 +85,11 @@ struct TaskInfo
    * being delivered, etc.
    */
   bool is_stopped() const noexcept;
+  bool stop_processed() const noexcept;
+  WaitStatus pending_wait_status() const noexcept;
+
+private:
+  void ptrace_resume(RunType) noexcept;
 };
 
 struct TaskStepInfo

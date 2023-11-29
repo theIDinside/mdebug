@@ -34,7 +34,9 @@ private:
 Logger *get_logging() noexcept;
 
 #ifdef MDB_DEBUG
-#define DLOG(channel, ...) logging::get_logging()->log(channel, fmt::format(__VA_ARGS__));
+#define DLOG(channel, ...)                                                                                        \
+  if (MDB_DEBUG)                                                                                                  \
+    logging::get_logging()->log(channel, fmt::format(__VA_ARGS__));
 #else
 #define DLOG(channel, ...)
 #endif

@@ -25,14 +25,14 @@ struct BpType
     u8 type = 0;
     struct
     {
-      bool lsb_padding : 1;
+      bool lsb_padding : 1; // low bit
       bool source : 1;
       bool function : 1;
       bool address : 1;
       bool resume_address : 1;
       bool shared_object_load : 1;
       bool exception : 1;
-      bool long_jump : 1;
+      bool long_jump : 1; // high bit
     };
   };
 
@@ -70,27 +70,59 @@ template <> struct formatter<BpType>
   auto
   format(const BpType &b, FormatContext &ctx)
   {
-    const auto src = b.source;
-    const auto fn = b.function;
-    const auto addr = b.address;
-    const auto resume = b.resume_address;
-    const auto so = b.shared_object_load;
-    const auto ex = b.exception;
-    const auto jmp = b.long_jump;
+    std::array<std::string_view, 7> types_names{};
+    auto idx = 0u;
+    if (b.source) {
+      types_names[idx] = "src";
+      ++idx;
+    }
 
-    return fmt::format_to(ctx.out(),
-                          "BpType: [ src: {}, fn: {}, addr: {}, resume: {}, so: {}, exception: {}, long_jmp: {}]",
-                          src, fn, addr, resume, so, ex, jmp);
+    if (b.function) {
+      types_names[idx] = "fn";
+      ++idx;
+    }
+
+    if (b.address) {
+      types_names[idx] = "addr";
+      ++idx;
+    }
+
+    if (b.resume_address) {
+      types_names[idx] = "resume";
+      ++idx;
+    }
+
+    if (b.shared_object_load) {
+      types_names[idx] = "so";
+      ++idx;
+    }
+
+    if (b.exception) {
+      types_names[idx] = "exception";
+      ++idx;
+    }
+
+    if (b.long_jump) {
+      types_names[idx] = "long_jmp";
+      ++idx;
+    }
+
+    std::span<std::string_view> types{types_names.begin(), types_names.begin() + idx};
+
+    return fmt::format_to(ctx.out(), "BpType: [ {} ]", fmt::join(types, ", "));
   }
 };
 } // namespace fmt
 
 enum class BpEventType : u8
 {
+  // Breakpoints that are visible to the user
   UserBreakpointHit = 1,
+  // Breakpoints invisble to user
   TracerBreakpointHit = 2,
-  Both = 3,
-  None = 4,
+  // Breakpoints that are both; meaning they're a tracer breakpoint that shares address
+  // with a user set breakpoint.
+  Both = 3
 };
 
 struct SourceBreakpointDescriptor
@@ -116,6 +148,14 @@ public:
   void disable(Tid tid) noexcept;
   BpType type() const noexcept;
 
+  /* Should we resume after hitting this breakpoint?
+   *  Possible scenarios:
+   * - user wants this breakpoint ignored, possibly due to some condition
+   * - it's a tracer breakpoint, and as such should appear invisible to user
+   */
+  bool should_resume() const noexcept;
+  void on_hit(TraceeController *tc, TaskInfo *t) noexcept;
+
   // The type of the event this breakpoint will generate
   BpEventType event_type() const noexcept;
 
@@ -125,6 +165,7 @@ public:
   u32 times_hit;
   TPtr<void> address;
   bool enabled;
+  bool ignore;
 };
 
 struct BpEvent
@@ -147,7 +188,9 @@ struct BpStat
 {
   u16 bp_id;
   BpType type;
-  bool stepped_over;
+  bool should_resume : 1;
+  bool stepped_over : 1;
+  bool re_enable_bp : 1;
 };
 
 struct BreakpointMap
@@ -179,8 +222,6 @@ struct BreakpointMap
 
   bool insert(AddrPtr addr, u8 overwritten_byte, BpType type) noexcept;
   void clear(TraceeController *target, BpType type) noexcept;
-  void disable_breakpoint(u16 id) noexcept;
-  void enable_breakpoint(u16 id) noexcept;
 
   Breakpoint *get_by_id(u32 id) noexcept;
   Breakpoint *get(AddrPtr addr) noexcept;

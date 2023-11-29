@@ -275,6 +275,13 @@ DwarfBinaryReader::read_string() noexcept
   return str;
 }
 
+void
+DwarfBinaryReader::skip_string() noexcept
+{
+  std::string_view str{(const char *)(head)};
+  head += str.size() + 1;
+}
+
 DataBlock
 DwarfBinaryReader::read_block(u64 size) noexcept
 {
