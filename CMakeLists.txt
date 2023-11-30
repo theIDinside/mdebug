@@ -10,6 +10,10 @@ set(MIDAS_SOURCES
   src/event_queue.h
   src/utils/logger.cpp
   src/utils/logger.h
+  src/utils/thread_pool.cpp
+  src/utils/thread_pool.h
+  src/utils/worker_task.cpp
+  src/utils/worker_task.h
   src/tracer.cpp
   src/tracer.h
   src/supervisor.cpp
