@@ -5,6 +5,7 @@
 #include "interface/dap/interface.h"
 #include "notify_pipe.h"
 #include "tracer.h"
+#include "utils/thread_pool.h"
 #include <array>
 #include <asm-generic/errno-base.h>
 #include <chrono>
@@ -40,31 +41,22 @@ std::string data;
 bool ready = false;
 bool exit_debug_session = false;
 
-enum AwaitablePipes : u64
-{
-  AwaiterThread = 0,
-  IOThread = 1
-};
-
-template <AwaitablePipes AP>
-constexpr size_t
-idx()
-{
-  return std::to_underlying(AP);
-}
-
 termios Tracer::original_tty = {};
 winsize Tracer::ws = {};
 bool Tracer::use_traceme = true;
 
+utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool{};
+
 int
 main(int argc, const char **argv)
 {
+  const int cpus = std::thread::hardware_concurrency();
   logging::Logger::get_logger()->setup_channel("mdb");
   logging::Logger::get_logger()->setup_channel("dap");
   logging::Logger::get_logger()->setup_channel("dwarf");
   logging::Logger::get_logger()->setup_channel("awaiter");
   logging::Logger::get_logger()->setup_channel("eh");
+  utils::ThreadPool::get_global_pool()->initialize(cpus > 4 ? cpus / 2 : cpus);
 
   std::span<const char *> args(argv, argc);
   logging::get_logging()->log("mdb", "MDB CLI Arguments");
