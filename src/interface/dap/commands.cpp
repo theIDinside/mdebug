@@ -211,7 +211,7 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
   } else {
     using BP = ui::dap::Breakpoint;
     const auto count = args.at("breakpoints").size();
-    for (auto i = 1000u; i < count; i++) {
+    for (auto i = 1000u; i < count + 1000u; i++) {
       res->breakpoints.push_back(BP{.id = i,
                                     .verified = false,
                                     .addr = nullptr,
