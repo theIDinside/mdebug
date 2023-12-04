@@ -465,6 +465,13 @@ template <typename T> struct LEB128
 
 template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
 
+/* Holds the decoded value of a ULEB/LEB128 as well as the length of the decoded data (in bytes). */
+template <IsBitsType T> struct LEB128Read
+{
+  T result;
+  u8 bytes_read;
+};
+
 const u8 *
 decode_uleb128(const u8 *data, IsBitsType auto &value) noexcept
 {

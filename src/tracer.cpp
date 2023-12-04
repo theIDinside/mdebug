@@ -13,11 +13,15 @@
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
 #include "symbolication/cu.h"
+#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "task.h"
+#include "tasks/dwarf_unit_data.h"
+#include "tasks/index_die_names.h"
 #include "utils/logger.h"
+#include "utils/worker_task.h"
 #include <algorithm>
 #include <bits/chrono.h>
 #include <bits/ranges_util.h>
@@ -93,6 +97,27 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 
   for (auto &&j : jobs) {
     j.join();
+  }
+
+  // TODO(simon): This should be re-factored, but is left here to remind me of how it is supposed to work
+  //  when we have removed all old DWARF code. Possibly, I can imagine a scenario where we string together
+  //  TaskGroups (i.e. the "full" batch of work that needs to be done), like for instance the indexing
+  //  task-taskgroup, depends on the compilation unit data-taskgroup, so that it can spin up the indexing task
+  //  group when it's done, or something like that.. That's a "quality of life" feature though.
+  {
+    utils::TaskGroup tg("Compilation Unit Data");
+    auto work = sym::dw::UnitDataTask::create_jobs_for(obj_file);
+    for (auto w : work)
+      tg.add_task(w);
+    tg.schedule_work().wait();
+  }
+
+  {
+    utils::TaskGroup tg("Name Indexing");
+    auto work = sym::dw::IndexingTask::create_jobs_for(obj_file);
+    for (auto w : work)
+      tg.add_task(w);
+    tg.schedule_work().wait();
   }
 }
 

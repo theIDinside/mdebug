@@ -62,6 +62,12 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf_expressions.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/symbolication/dwarf/debug_info_reader.cpp
+  src/symbolication/dwarf/debug_info_reader.h
+  src/symbolication/dwarf/die.cpp
+  src/symbolication/dwarf/die.h
+  src/symbolication/dwarf/name_index.cpp
+  src/symbolication/dwarf/name_index.h
   src/lib/lockguard.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
@@ -78,6 +84,10 @@ set(MIDAS_SOURCES
   src/interface/pty.h
   src/utils/base64.cpp
   src/utils/base64.h
+  src/tasks/dwarf_unit_data.cpp
+  src/tasks/dwarf_unit_data.h
+  src/tasks/index_die_names.cpp
+  src/tasks/index_die_names.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)

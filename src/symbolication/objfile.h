@@ -13,6 +13,11 @@ class NonExecutableCompilationUnitFile;
 namespace sym {
 class Unwinder;
 class Type;
+
+namespace dw {
+class UnitData;
+struct ObjectFileNameIndex;
+} // namespace dw
 } // namespace sym
 
 class Elf;
@@ -76,6 +81,14 @@ struct ObjectFile
   bool found_min_syms() const noexcept;
   LineHeader *line_table_header(u64 offset) noexcept;
   SearchResult<CompilationUnitFile> get_cu_iterable(AddrPtr addr) const noexcept;
+  void set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept;
+  std::vector<sym::dw::UnitData *> &compilation_units() noexcept;
+  sym::dw::ObjectFileNameIndex *name_index() noexcept;
+
+private:
+  std::mutex unit_data_lock;
+  std::vector<sym::dw::UnitData *> dwarf_units;
+  std::unique_ptr<sym::dw::ObjectFileNameIndex> name_to_die_index;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

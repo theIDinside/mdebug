@@ -27,7 +27,12 @@ Task::execute() noexcept
   }
 }
 
-TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name), m_task_lock(), m_done_tasks() {}
+TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name), m_task_lock(), m_done_tasks()
+{
+  DLOG("mdb", "Created task group {}", name);
+}
+
+TaskGroup::~TaskGroup() noexcept { DLOG("mdb", "Task group {} finished - destroying task group", m_name); }
 
 void
 TaskGroup::add_task(Task *task) noexcept
@@ -40,6 +45,7 @@ TaskGroup::add_task(Task *task) noexcept
 std::future<void>
 TaskGroup::schedule_work() noexcept
 {
+  DLOG("mdb", "[TG: {}] - Scheduling {} tasks", m_name, m_tasks.size());
   if constexpr (MDB_DEBUG == 1) {
     start = std::chrono::high_resolution_clock::now();
   }
@@ -55,9 +61,14 @@ void
 TaskGroup::task_done(Task *task) noexcept
 {
   std::lock_guard lock(m_task_lock);
+  if (std::ranges::any_of(m_done_tasks, [task](auto t) { return t == task; })) {
+    std::vector<std::uintptr_t> tasks_{};
+    std::transform(m_done_tasks.begin(), m_done_tasks.end(), std::back_inserter(tasks_),
+                   [](auto t) { return std::uintptr_t(t); });
+    ASSERT(false, "Task 0x{:x} has already been added to done list: [0x{:x}]", std::uintptr_t(task),
+           fmt::join(tasks_, ", "));
+  }
   m_done_tasks.push_back(task);
-  ASSERT(!std::ranges::any_of(m_done_tasks, [task](auto t) { return t == task; }),
-         "Task has already been added to done list!");
   if (m_done_tasks.size() == m_tasks.size()) {
     if constexpr (MDB_DEBUG == 1) {
       auto time =

@@ -39,6 +39,12 @@ ThreadPool::initialize(u32 pool_size) noexcept
   }
 }
 
+u32
+ThreadPool::worker_count() const noexcept
+{
+  return thread_pool.size();
+}
+
 void
 ThreadPool::worker(std::stop_token stop_token, const char *name) noexcept
 {

@@ -1,6 +1,8 @@
 #include "objfile.h"
 #include "../so_loading.h"
+#include "./dwarf/name_index.h"
 #include "cu.h"
+#include "dwarf/die.h"
 #include "elf_symbols.h"
 #include "type.h"
 #include <optional>
@@ -8,9 +10,10 @@
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
       types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
-      m_partial_units()
+      m_partial_units(), unit_data_lock(), dwarf_units()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
+  name_to_die_index = std::make_unique<sym::dw::ObjectFileNameIndex>();
 }
 
 ObjectFile::~ObjectFile() noexcept
@@ -88,6 +91,31 @@ ObjectFile::get_cu_iterable(AddrPtr addr) const noexcept
                                              .cap = static_cast<u32>(m_full_cu.size())};
   }
   return {nullptr, 0, 0};
+}
+
+void
+ObjectFile::set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept
+{
+  ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
+  DLOG("mdb", "Caching {} unit datas", unit_data.size());
+  std::lock_guard lock(unit_data_lock);
+  auto first_id = unit_data.front()->section_offset();
+  const auto it =
+      std::lower_bound(dwarf_units.begin(), dwarf_units.end(), first_id,
+                       [](const sym::dw::UnitData *ptr, u64 id) { return ptr->section_offset() < id; });
+  dwarf_units.insert(it, unit_data.begin(), unit_data.end());
+}
+
+std::vector<sym::dw::UnitData *> &
+ObjectFile::compilation_units() noexcept
+{
+  return dwarf_units;
+}
+
+sym::dw::ObjectFileNameIndex *
+ObjectFile::name_index() noexcept
+{
+  return name_to_die_index.get();
 }
 
 ObjectFile *

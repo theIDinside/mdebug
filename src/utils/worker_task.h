@@ -28,7 +28,7 @@ class TaskGroup
 {
 public:
   TaskGroup(std::string_view name) noexcept;
-  ~TaskGroup() noexcept = default;
+  ~TaskGroup() noexcept;
 
   void add_task(Task *task) noexcept;
   std::future<void> schedule_work() noexcept;
