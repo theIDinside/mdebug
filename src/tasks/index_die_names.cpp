@@ -218,6 +218,12 @@ IndexingTask::execute_task() noexcept
     comp_unit->load_dies();
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->get_dies();
+    if (dies.front().tag == DwarfTag::DW_TAG_compile_unit) {
+      initialize_compilation_unit(comp_unit, dies.front());
+    } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
+      initialize_partial_compilation_unit(comp_unit, dies.front());
+    }
+
     UnitReader reader{comp_unit};
     for (const auto &[die_index, die] : utils::EnumerateView(dies)) {
       // work only on dies, that can have a name associated (via DW_AT_name attribute)
@@ -358,6 +364,17 @@ IndexingTask::execute_task() noexcept
   idx->global_variables.merge(global_variables);
   idx->methods.merge(methods);
   idx->types.merge(types);
+}
+
+void
+IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept
+{
+  // TODO("IndexingTask::initialize_compilation_unit not yet implemented");
+}
+void
+IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &pcu_die) noexcept
+{
+  // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
 }
 
 }; // namespace sym::dw

@@ -7,6 +7,7 @@
 
 class Elf;
 struct ElfSection;
+class DwarfBinaryReader;
 
 struct DirEntry
 {
@@ -76,9 +77,9 @@ struct LineHeader
   std::vector<FileEntry> file_names;
   LineTable *line_table;
 
-  void parse_linetable(AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept;
+  void parse_linetable(const Elf *elf, AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept;
   void set_linetable_storage(LineTable *storage) noexcept;
-  DwarfBinaryReader get_reader() const noexcept;
+  DwarfBinaryReader get_reader(const Elf *elf) const noexcept;
   bool has_entries() const noexcept;
 };
 
@@ -99,7 +100,7 @@ std::unique_ptr<LineHeader> read_lineheader_v5(const u8 *bytes, Elf *elf) noexce
 /**
  * See description for `read_lineheader_v5`; only the implementation details differ.
  */
-std::unique_ptr<LineHeader> read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept;
+std::unique_ptr<LineHeader> read_lineheader_v4(Elf *elf, const u8 *ptr, u8 addr_size) noexcept;
 
 namespace fmt {
 template <> struct formatter<LineTableEntry>

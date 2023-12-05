@@ -14,6 +14,7 @@
 #include "symbolication/callstack.h"
 #include "symbolication/cu.h"
 #include "symbolication/cu_file.h"
+#include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
@@ -85,10 +86,10 @@ struct ProbeInfo
 };
 
 static std::vector<ProbeInfo>
-parse_stapsdt_note(const ElfSection *section) noexcept
+parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
-  DwarfBinaryReader reader{section};
+  DwarfBinaryReader reader{elf, section};
   std::set<std::string_view> required_probes{{"map_complete", "reloc_complete", "unmap_complete"}};
   // stapsdt, location 8 bytes, base 8 bytes, semaphore 8 bytes, desc=string of N bytes, then more bytes we don't
   // care for
@@ -132,13 +133,14 @@ TraceeController::install_loader_breakpoints() noexcept
 {
   ASSERT(interpreter_base.has_value(),
          "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
-  auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
+  auto int_path =
+      interpreter_path(object_files.front()->parsed_elf, object_files.front()->parsed_elf->get_section(".interp"));
   auto tmp_objfile = mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
   Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
   tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
-  const auto probes = parse_stapsdt_note(system_tap_sec);
+  const auto probes = parse_stapsdt_note(tmp_objfile->parsed_elf, system_tap_sec);
   tracee_r_debug = get_rdebug_state(tmp_objfile);
   DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
   for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
@@ -657,7 +659,7 @@ TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
   const auto section = obj->parsed_elf->get_section(".debug_frame");
   if (section) {
     DLOG("mdb", ".debug_frame section found; parsing DWARF CFI section");
-    sym::parse_dwarf_eh(unwinder, section, -1);
+    sym::parse_dwarf_eh(obj->parsed_elf, unwinder, section, -1);
   }
 
   unwinders.push_back(unwinder);

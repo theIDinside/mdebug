@@ -1,4 +1,5 @@
 #include "die.h"
+#include "../dwarf_binary_reader.h"
 #include "../elf.h"
 #include "../objfile.h"
 #include "debug_info_reader.h"
@@ -333,7 +334,7 @@ read_unit_headers(ObjectFile *obj) noexcept
   DLOG("dwarf", "Reading {} obfile compilation unit headers", obj->path.c_str());
   const auto dbg_info = obj->parsed_elf->debug_info;
   std::vector<UnitHeader> result{};
-  DwarfBinaryReader reader{dbg_info};
+  DwarfBinaryReader reader{obj->parsed_elf, dbg_info};
   while (reader.has_more()) {
     const auto sec_offset = reader.bytes_read();
     u64 unit_len = reader.peek_value<u32>();

@@ -4,6 +4,7 @@
 #include "ptrace.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
+#include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include <sys/ptrace.h>
 #include <sys/user.h>
@@ -46,11 +47,14 @@ TaskInfo::cache_registers() noexcept
 static void
 decode_eh_insts(const sym::UnwindInfo *inf, sym::CFAStateMachine &state) noexcept
 {
-  DwarfBinaryReader reader{inf->cie->instructions.data(), inf->cie->instructions.size()};
+  // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
+  // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
+  // actually know how to read DWARF binary data here.
+  DwarfBinaryReader reader{nullptr, inf->cie->instructions.data(), inf->cie->instructions.size()};
 
   const auto cie_cnt = sym::decode(reader, state, inf);
   DLOG("eh", "CIE ins decoded={}", cie_cnt);
-  DwarfBinaryReader fde{inf->fde_insts.data(), inf->fde_insts.size()};
+  DwarfBinaryReader fde{nullptr, inf->fde_insts.data(), inf->fde_insts.size()};
   const auto fde_cnt = sym::decode(fde, state, inf);
   DLOG("eh", "FDE ins decoded={}", fde_cnt);
 }

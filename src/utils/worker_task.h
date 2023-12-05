@@ -19,7 +19,7 @@ protected:
 
 private:
   bool is_group_job() const noexcept;
-  TaskGroup *owning_group;
+  TaskGroup *owning_group{nullptr};
 };
 
 using JobPtr = Task *;

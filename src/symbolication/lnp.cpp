@@ -1,5 +1,6 @@
 #include "lnp.h"
 #include "block.h"
+#include "dwarf_binary_reader.h"
 #include "elf.h"
 #include <algorithm>
 #include <optional>
@@ -204,99 +205,99 @@ private:
   bool should_record_lines = true;
 };
 
-u64
-read_content_index(DwarfBinaryReader &reader, AttributeForm form)
-{
-  using enum AttributeForm;
-  switch (form) {
-  case DW_FORM_udata:
-    return reader.read_uleb128<u64>();
-  case DW_FORM_data1:
-    return reader.read_value<u8>();
-  case DW_FORM_data2:
-    return reader.read_value<u16>();
-  default:
-    PANIC(fmt::format("Unsupported form for dir index {}", form));
-  }
-}
+// u64
+// read_content_index(DwarfBinaryReader &reader, AttributeForm form)
+// {
+//   using enum AttributeForm;
+//   switch (form) {
+//   case DW_FORM_udata:
+//     return reader.read_uleb128<u64>();
+//   case DW_FORM_data1:
+//     return reader.read_value<u8>();
+//   case DW_FORM_data2:
+//     return reader.read_value<u16>();
+//   default:
+//     PANIC(fmt::format("Unsupported form for dir index {}", form));
+//   }
+// }
 
-std::string_view
-read_content_str(DwarfBinaryReader &reader, AttributeForm form, const Elf *elf)
-{
-  using enum AttributeForm;
-  switch (form) {
-  case DW_FORM_string:
-    return reader.read_string();
-  case DW_FORM_line_strp:
-    ASSERT(elf->debug_line != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
-    return std::string_view{(const char *)elf->debug_line->offset(reader.read_offset())};
-  case DW_FORM_strp:
-    ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
-    return std::string_view{(const char *)elf->debug_str->offset(reader.read_offset())};
-  case DW_FORM_strp_sup:
-  case DW_FORM_strx:
-  case DW_FORM_strx1:
-  case DW_FORM_strx2:
-  case DW_FORM_strx3:
-  case DW_FORM_strx4:
-  default:
-    PANIC(fmt::format("Reading string of form {} not yet supported", form));
-  }
-}
+// std::string_view
+// read_content_str(DwarfBinaryReader &reader, AttributeForm form, const Elf *elf)
+// {
+//   using enum AttributeForm;
+//   switch (form) {
+//   case DW_FORM_string:
+//     return reader.read_string();
+//   case DW_FORM_line_strp:
+//     ASSERT(elf->debug_line != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
+//     return std::string_view{(const char *)elf->debug_line->offset(reader.read_offset())};
+//   case DW_FORM_strp:
+//     ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
+//     return std::string_view{(const char *)elf->debug_str->offset(reader.read_offset())};
+//   case DW_FORM_strp_sup:
+//   case DW_FORM_strx:
+//   case DW_FORM_strx1:
+//   case DW_FORM_strx2:
+//   case DW_FORM_strx3:
+//   case DW_FORM_strx4:
+//   default:
+//     PANIC(fmt::format("Reading string of form {} not yet supported", form));
+//   }
+// }
 
-DataBlock
-read_content_datablock(DwarfBinaryReader &reader, AttributeForm form)
-{
-  switch (form) {
-  case AttributeForm::DW_FORM_data16:
-    return reader.read_block(16);
-  case AttributeForm::DW_FORM_block: {
-    const auto sz = reader.read_uleb128<u64>();
-    return reader.read_block(sz);
-  }
-  default:
-    PANIC(fmt::format("Unsupported block form {}", form));
-  }
-}
+// DataBlock
+// read_content_datablock(DwarfBinaryReader &reader, AttributeForm form)
+// {
+//   switch (form) {
+//   case AttributeForm::DW_FORM_data16:
+//     return reader.read_block(16);
+//   case AttributeForm::DW_FORM_block: {
+//     const auto sz = reader.read_uleb128<u64>();
+//     return reader.read_block(sz);
+//   }
+//   default:
+//     PANIC(fmt::format("Unsupported block form {}", form));
+//   }
+// }
 
-std::variant<std::string_view, u64, DataBlock>
-read_content(DwarfBinaryReader &reader, AttributeForm form)
-{
-  using enum AttributeForm;
-  switch (form) {
-  case DW_FORM_string:
-    return reader.read_string();
-  case DW_FORM_line_strp:
-    [[fallthrough]];
-  case DW_FORM_strp:
-    [[fallthrough]];
-  case DW_FORM_strp_sup:
-    return reader.dwarf_spec_read_value();
-  case DW_FORM_udata:
-    return reader.read_uleb128<u64>();
-  case DW_FORM_data1:
-    return reader.read_value<u8>();
-  case DW_FORM_data2:
-    return reader.read_value<u16>();
-  case DW_FORM_data4:
-    return reader.read_value<u32>();
-  case DW_FORM_data8:
-    return reader.read_value<u64>();
-  case DW_FORM_data16:
-    return reader.read_block(16);
-  case DW_FORM_block: {
-    const auto sz = reader.read_uleb128<u64>();
-    return reader.read_block(sz);
-  }
-  default:
-    PANIC(fmt::format("Unacceptable form {} while reading LNP content description", form));
-  }
-}
+// std::variant<std::string_view, u64, DataBlock>
+// read_content(DwarfBinaryReader &reader, AttributeForm form)
+// {
+//   using enum AttributeForm;
+//   switch (form) {
+//   case DW_FORM_string:
+//     return reader.read_string();
+//   case DW_FORM_line_strp:
+//     [[fallthrough]];
+//   case DW_FORM_strp:
+//     [[fallthrough]];
+//   case DW_FORM_strp_sup:
+//     return reader.dwarf_spec_read_value();
+//   case DW_FORM_udata:
+//     return reader.read_uleb128<u64>();
+//   case DW_FORM_data1:
+//     return reader.read_value<u8>();
+//   case DW_FORM_data2:
+//     return reader.read_value<u16>();
+//   case DW_FORM_data4:
+//     return reader.read_value<u32>();
+//   case DW_FORM_data8:
+//     return reader.read_value<u64>();
+//   case DW_FORM_data16:
+//     return reader.read_block(16);
+//   case DW_FORM_block: {
+//     const auto sz = reader.read_uleb128<u64>();
+//     return reader.read_block(sz);
+//   }
+//   default:
+//     PANIC(fmt::format("Unacceptable form {} while reading LNP content description", form));
+//   }
+// }
 
 std::unique_ptr<LineHeader>
 read_lineheader_v5(const u8 *ptr, Elf *elf) noexcept
 {
-  DwarfBinaryReader reader{ptr, 4096};
+  DwarfBinaryReader reader{elf, ptr, 4096};
   const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
   const auto version = reader.read_value<u16>();
   const auto addr_size = reader.read_value<u8>();
@@ -332,11 +333,13 @@ read_lineheader_v5(const u8 *ptr, Elf *elf) noexcept
 
     for (const auto &[content, form] : dir_entry_fmt) {
       if (content == LineNumberProgramContent::DW_LNCT_path) {
-        ent.path = read_content_str(reader, form, elf);
+        ent.path = reader.read_content_str(form);
       } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-        ent.md5.emplace(read_content_datablock(reader, form));
+        ent.md5.emplace((reader.read_content_datablock(form)));
       } else {
-        read_content(reader, form);
+        // TODO(simon): implement a skip feature, that takes a DWARF form and skips the appropriate amount of bytes
+        // forward.
+        reader.read_content(form);
       }
     }
     dirs.push_back(ent);
@@ -358,13 +361,15 @@ read_lineheader_v5(const u8 *ptr, Elf *elf) noexcept
     FileEntry entry;
     for (const auto &[content, form] : filename_ent_formats) {
       if (content == LineNumberProgramContent::DW_LNCT_directory_index) {
-        entry.dir_index = read_content_index(reader, form);
+        entry.dir_index = reader.read_content_index(form);
       } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-        entry.md5.emplace(read_content_datablock(reader, form));
+        entry.md5.emplace(reader.read_content_datablock(form));
       } else if (content == LineNumberProgramContent::DW_LNCT_path) {
-        entry.file_name = read_content_str(reader, form, elf);
+        entry.file_name = reader.read_content_str(form);
       } else {
-        read_content(reader, form);
+        // TODO(simon): implement a skip feature, that takes a DWARF form and skips the appropriate amount of bytes
+        // forward.
+        reader.read_content(form);
       }
     }
     files.push_back(entry);
@@ -385,9 +390,9 @@ read_lineheader_v5(const u8 *ptr, Elf *elf) noexcept
 }
 
 std::unique_ptr<LineHeader>
-read_lineheader_v4(const u8 *ptr, u8 addr_size) noexcept
+read_lineheader_v4(Elf *elf, const u8 *ptr, u8 addr_size) noexcept
 {
-  DwarfBinaryReader reader{ptr, 4096};
+  DwarfBinaryReader reader{elf, ptr, 4096};
   // https://dwarfstd.org/doc/DWARF4.pdf#page=126
   const auto init_len = reader.read_initial_length<DwarfBinaryReader::UpdateBufferSize>();
   reader.bookmark();
@@ -446,7 +451,7 @@ parse_lnp_headers(const Elf *elf) noexcept
   auto header_count = 0u;
   // determine header count
   {
-    DwarfBinaryReader reader{debug_line};
+    DwarfBinaryReader reader{elf, debug_line};
     while (reader.has_more()) {
       header_count++;
       const auto init_len = reader.read_initial_length<DwarfBinaryReader::Ignore>();
@@ -456,7 +461,7 @@ parse_lnp_headers(const Elf *elf) noexcept
 
   std::vector<LineHeader> headers{};
   headers.reserve(header_count);
-  DwarfBinaryReader reader{debug_line};
+  DwarfBinaryReader reader{elf, debug_line};
 
   u8 addr_size = 8u;
   for (auto i = 0u; i < header_count; ++i) {
@@ -537,11 +542,14 @@ parse_lnp_headers(const Elf *elf) noexcept
 
         for (const auto &[content, form] : dir_entry_fmt) {
           if (content == LineNumberProgramContent::DW_LNCT_path) {
-            ent.path = read_content_str(reader, form, elf);
+            ent.path = reader.read_content_str(form);
           } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-            ent.md5.emplace(read_content_datablock(reader, form));
+            ent.md5.emplace(reader.read_content_datablock(form));
           } else {
-            read_content(reader, form);
+            // TODO(simon): implement a skip feature, that takes a DWARF form and skips the appropriate amount of
+            // bytes
+            // forward.
+            reader.read_content(form);
           }
         }
         dirs.push_back(ent);
@@ -563,13 +571,14 @@ parse_lnp_headers(const Elf *elf) noexcept
         FileEntry entry;
         for (const auto &[content, form] : filename_ent_formats) {
           if (content == LineNumberProgramContent::DW_LNCT_directory_index) {
-            entry.dir_index = read_content_index(reader, form);
+
+            entry.dir_index = reader.read_content_index(form);
           } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-            entry.md5.emplace(read_content_datablock(reader, form));
+            entry.md5.emplace(reader.read_content_datablock(form));
           } else if (content == LineNumberProgramContent::DW_LNCT_path) {
-            entry.file_name = read_content_str(reader, form, elf);
+            entry.file_name = reader.read_content_str(form);
           } else {
-            read_content(reader, form);
+            reader.read_content(form);
           }
         }
         files.push_back(entry);
@@ -600,9 +609,9 @@ parse_lnp_headers(const Elf *elf) noexcept
 }
 
 DwarfBinaryReader
-LineHeader::get_reader() const noexcept
+LineHeader::get_reader(const Elf *elf) const noexcept
 {
-  return DwarfBinaryReader{data, static_cast<u64>(data_end - data)};
+  return DwarfBinaryReader{elf, data, static_cast<u64>(data_end - data)};
 }
 
 bool
@@ -618,10 +627,10 @@ LineHeader::set_linetable_storage(LineTable *storage) noexcept
 }
 
 void
-LineHeader::parse_linetable(AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept
+LineHeader::parse_linetable(const Elf *elf, AddrPtr reloc_base, std::optional<AddressRange> bounds) noexcept
 {
   using OpCode = LineNumberProgramOpCode;
-  auto reader = get_reader();
+  auto reader = get_reader(elf);
   std::vector<LineTable> sequences{};
   sequences.push_back({});
   while (reader.has_more()) {

@@ -38,6 +38,8 @@ set(MIDAS_SOURCES
   src/events/event.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
+  src/symbolication/dwarf_binary_reader.cpp
+  src/symbolication/dwarf_binary_reader.h
   src/symbolication/objfile.cpp
   src/symbolication/objfile.h
   src/symbolication/cu.cpp

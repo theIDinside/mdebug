@@ -3,6 +3,7 @@
 #include "block.h"
 #include "cu_file.h"
 #include "dwarf.h"
+#include "dwarf_binary_reader.h"
 #include "dwarf_defs.h"
 #include "elf.h"
 #include "lnp.h"
@@ -355,7 +356,7 @@ CUProcessor::determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept
     const u64 offset = r.value().address();
     const auto elf = obj_file->parsed_elf;
     if (header.version == DwarfVersion::D4) {
-      DwarfBinaryReader reader{elf->debug_ranges, offset};
+      DwarfBinaryReader reader{elf, elf->debug_ranges, offset};
       BoundsBuilder builder{};
       while (true) {
         if (!builder.next(reader.read_value<u64>(), reader.read_value<u64>()))
@@ -365,7 +366,7 @@ CUProcessor::determine_unrelocated_bounds(DebugInfoEntry *die) const noexcept
              "Failed to determine PC bounds from CU that contains .debug_ranges section reference.");
       return builder.done(nullptr);
     } else {
-      DwarfBinaryReader reader{elf->debug_rnglists, offset};
+      DwarfBinaryReader reader{elf, elf->debug_rnglists, offset};
       auto range_entry_type = reader.read_value<RangeListEntry>();
       BoundsBuilder builder{};
 
@@ -414,7 +415,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
         // todo(simon): re-add/re-design for opportunity of aligned loads/stores
         const u64 value = att.address();
         if (header.version == DwarfVersion::D4) {
-          DwarfBinaryReader reader{elf->debug_ranges, value};
+          DwarfBinaryReader reader{elf, elf->debug_ranges, value};
           while (true) {
             auto start = reader.read_value<u64>();
             auto end = reader.read_value<u64>();
@@ -423,7 +424,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
             f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(end));
           }
         } else {
-          DwarfBinaryReader reader{elf->debug_rnglists, value};
+          DwarfBinaryReader reader{elf, elf->debug_rnglists, value};
           auto range_entry_type = reader.read_value<RangeListEntry>();
           while (range_entry_type != RangeListEntry::DW_RLE_end_of_list) {
             switch (range_entry_type) {
@@ -447,7 +448,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
       } else if (att.name == Attribute::DW_AT_stmt_list) {
         const auto offset = att.address();
         auto header = obj_file->line_table_header(offset);
-        header->parse_linetable(elf->relocate_addr(nullptr), bounds);
+        header->parse_linetable(elf, elf->relocate_addr(nullptr), bounds);
         f.set_linetable(header);
       } else if (att.name == Attribute::DW_AT_low_pc) {
         const auto low = att.address();

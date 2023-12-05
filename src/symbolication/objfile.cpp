@@ -61,7 +61,7 @@ ObjectFile::get_min_obj_sym(std::string_view name) noexcept
 Path
 ObjectFile::interpreter() const noexcept
 {
-  const auto path = interpreter_path(parsed_elf->get_section(".interp"));
+  const auto path = interpreter_path(parsed_elf, parsed_elf->get_section(".interp"));
   return path;
 }
 

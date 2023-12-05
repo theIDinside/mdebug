@@ -45,7 +45,8 @@ DwarfStack::swap() noexcept
 
 ExprByteCodeInterpreter::ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t,
                                                  std::span<const u8> byte_stream) noexcept
-    : stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)), reader(byte_stream.data(), byte_stream.size())
+    : stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)),
+      reader(nullptr, byte_stream.data(), byte_stream.size())
 {
 }
 
