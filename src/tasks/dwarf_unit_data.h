@@ -1,5 +1,6 @@
 #pragma once
 #include "../symbolication/dwarf/die.h"
+#include "../symbolication/dwarf/lnp.h"
 #include "../utils/worker_task.h"
 
 struct ObjectFile;
@@ -15,9 +16,11 @@ public:
 
 protected:
   void execute_task() noexcept override;
+  void set_lnp_headers(std::span<LNPHeader::shr_ptr> lnp_headers) noexcept;
 
 private:
   ObjectFile *obj;
   std::vector<UnitHeader> cus_to_parse;
+  std::span<LNPHeader::shr_ptr> lnp_headers;
 };
 } // namespace sym::dw

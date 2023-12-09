@@ -1,10 +1,11 @@
 #include "dwarf_unit_data.h"
+#include "../symbolication/dwarf/lnp.h"
 #include "../symbolication/objfile.h"
 #include "../utils/thread_pool.h"
 namespace sym::dw {
 
 UnitDataTask::UnitDataTask(ObjectFile *obj, std::vector<UnitHeader> &&headers) noexcept
-    : obj(obj), cus_to_parse(std::move(headers))
+    : obj(obj), cus_to_parse(std::move(headers)), lnp_headers()
 {
 }
 
@@ -17,6 +18,12 @@ UnitDataTask::execute_task() noexcept
     result.push_back(unit_data);
   }
   obj->set_unit_data(result);
+}
+
+void
+UnitDataTask::set_lnp_headers(std::span<LNPHeader::shr_ptr> headers) noexcept
+{
+  lnp_headers = headers;
 }
 
 /*static*/

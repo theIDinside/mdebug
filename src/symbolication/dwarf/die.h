@@ -1,5 +1,6 @@
 #pragma once
 #include "../../common.h"
+#include "../dwarf.h"
 #include "../dwarf_defs.h"
 
 struct ObjectFile;
@@ -32,7 +33,7 @@ struct AbbreviationInfo
   u32 code;
   DwarfTag tag;
   bool has_children;
-  u32 sibling_offset;
+  bool is_declaration;
   std::vector<Abbreviation> attributes;
   std::vector<i64> implicit_consts;
   // TODO(simon): implement. These will be needed/useful when we resolve indirect/inter-DIE references. Ugh. DWARF.
@@ -82,8 +83,8 @@ struct DieMetaData
 class UnitHeader
 {
 public:
-  UnitHeader(u64 sec_offset, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size, u8 format,
-             DwarfVersion version, DwarfUnitType unit_type) noexcept;
+  UnitHeader(u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size,
+             u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept;
   u8 offset_size() const noexcept;
   u8 addr_size() const noexcept;
   const u8 *abbreviation_data(const ElfSection *abbrev_sec) const noexcept;
@@ -93,9 +94,11 @@ public:
   u8 format() const noexcept;
   u8 header_len() const noexcept;
   std::span<const u8> get_die_data() const noexcept;
+  bool spans_across(u64 sec_offset) const noexcept;
 
 private:
   u64 sec_offset;
+  u64 unit_size;
   std::span<const u8> die_data;
   u64 abbreviation_sec_offset;
   u8 address_size;
@@ -128,6 +131,10 @@ public:
   ResolvedAbbreviationSet get_resolved_attributes(u64 abbreviation) noexcept;
   const UnitHeader &header() const noexcept;
   u64 section_offset() const noexcept;
+  bool spans_across(u64 sec_offset) const noexcept;
+  u32 index_of(const DieMetaData *die) noexcept;
+  std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
+  const DieMetaData *get_die(u64 offset) noexcept;
 
 private:
   ObjectFile *objfile;
@@ -159,4 +166,20 @@ private:
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
 std::vector<UnitHeader> read_unit_headers(ObjectFile *obj) noexcept;
+
+struct DieReference
+{
+  UnitData *cu;
+  const DieMetaData *die;
+  bool valid() const noexcept;
+};
+
+struct IndexedDieReference
+{
+  UnitData *cu;
+  u32 die_index;
+
+  bool valid() const noexcept;
+};
+
 } // namespace sym::dw

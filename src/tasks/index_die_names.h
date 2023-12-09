@@ -4,6 +4,10 @@
 
 struct ObjectFile;
 
+namespace sym {
+class CompilationUnit;
+}
+
 namespace sym::dw {
 struct DieMetaData;
 class IndexingTask : public utils::Task
@@ -23,7 +27,8 @@ private:
   // Initializes sym::dw::CompilationUnit objects with `ObjectFile` (`obj`), setting it's high/low PC boundary as
   // well as "stamps out" it's line number program entries (See source_file.h for `sym::dw::LineTable` and
   // `sym::dw::CompilationUnit`)
-  void initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept;
+  void initialize_compilation_unit(std::vector<sym::CompilationUnit> &initialized_cus, UnitData *cu,
+                                   const DieMetaData &cu_die) noexcept;
   void initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &pcu_die) noexcept;
   ObjectFile *obj;
   std::span<UnitData *> cus_to_index;

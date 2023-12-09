@@ -4,6 +4,8 @@
 class Elf;
 struct ObjectFile;
 
+struct AttributeValue;
+
 namespace sym::dw {
 class UnitReader
 {
@@ -58,4 +60,7 @@ private:
   UnitData *compilation_unit;
   const u8 *current_ptr;
 };
+
+AttributeValue read_attribute_value(UnitReader &reader, Abbreviation abbr,
+                                    std::vector<i64> &implicit_consts) noexcept;
 } // namespace sym::dw

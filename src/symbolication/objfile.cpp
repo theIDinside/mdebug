@@ -3,17 +3,24 @@
 #include "./dwarf/name_index.h"
 #include "cu.h"
 #include "dwarf/die.h"
+#include "dwarf/lnp.h"
 #include "elf_symbols.h"
+#include "source_file.h"
 #include "type.h"
+#include <algorithm>
+#include <bits/ranges_algo.h>
 #include <optional>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
       types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
-      m_partial_units(), unit_data_lock(), dwarf_units()
+      m_partial_units(), unit_data_write_lock(), dwarf_units(),
+      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
+      lnp_headers(nullptr),
+      parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
+      comp_units()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
-  name_to_die_index = std::make_unique<sym::dw::ObjectFileNameIndex>();
 }
 
 ObjectFile::~ObjectFile() noexcept
@@ -98,7 +105,7 @@ ObjectFile::set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noe
 {
   ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
   DLOG("mdb", "Caching {} unit datas", unit_data.size());
-  std::lock_guard lock(unit_data_lock);
+  std::lock_guard lock(unit_data_write_lock);
   auto first_id = unit_data.front()->section_offset();
   const auto it =
       std::lower_bound(dwarf_units.begin(), dwarf_units.end(), first_id,
@@ -112,10 +119,109 @@ ObjectFile::compilation_units() noexcept
   return dwarf_units;
 }
 
+sym::dw::UnitData *
+ObjectFile::get_cu_from_offset(u64 offset) noexcept
+{
+  auto it = std::find_if(dwarf_units.begin(), dwarf_units.end(),
+                         [&](sym::dw::UnitData *cu) { return cu->spans_across(offset); });
+  if (it != std::end(dwarf_units))
+    return *it;
+  else
+    return nullptr;
+}
+
+std::optional<sym::dw::DieReference>
+ObjectFile::get_die_reference(u64 offset) noexcept
+{
+  auto cu = get_cu_from_offset(offset);
+  if (cu == nullptr)
+    return {};
+  auto die = cu->get_die(offset);
+  if (die == nullptr)
+    return {};
+
+  return sym::dw::DieReference{cu, die};
+}
+
 sym::dw::ObjectFileNameIndex *
 ObjectFile::name_index() noexcept
 {
   return name_to_die_index.get();
+}
+
+sym::dw::LNPHeader *
+ObjectFile::get_lnp_header(u64 offset) noexcept
+{
+  for (auto &header : *lnp_headers) {
+    if (header.sec_offset == offset)
+      return &header;
+  }
+  TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
+}
+
+sym::dw::LineTable
+ObjectFile::get_linetable(u64 offset) noexcept
+{
+  auto &headers = *lnp_headers;
+  auto header = std::ranges::find_if(
+      headers, [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
+  ASSERT(header != std::end(headers), "Failed to find LNP Header with offset 0x{:x}", offset);
+  auto kvp = std::find_if(parsed_ltes->begin(), parsed_ltes->end(),
+                          [offset](const auto &kvp) { return kvp.first == offset; });
+  ASSERT(kvp != std::end(*parsed_ltes), "Failed to find parsed LineTable Entries for offset 0x{:x}", offset);
+  return sym::dw::LineTable{header.base(), &kvp->second, parsed_elf->relocate_addr(nullptr)};
+}
+
+void
+ObjectFile::read_lnp_headers() noexcept
+{
+  lnp_headers = sym::dw::read_lnp_headers(parsed_elf);
+}
+
+// No synchronization needed, parsed 1, in 1 thread
+std::span<sym::dw::LNPHeader>
+ObjectFile::get_lnp_headers() noexcept
+{
+  if (lnp_headers)
+    return std::span{*lnp_headers};
+  else {
+    read_lnp_headers();
+    return std::span{*lnp_headers};
+  }
+}
+
+// Synchronization needed - parsed by multiple threads and results registered asynchronously + in parallel
+void
+ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
+                            std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes)
+{
+  ASSERT(headers.size() == parsed_ltes.size(), "headers != parsed_lte count!");
+  auto h = headers.begin();
+  auto p = std::make_move_iterator(parsed_ltes.begin());
+  auto &stored = *this->parsed_ltes;
+  for (; h != std::end(headers); h++, p++) {
+    stored.emplace(h->sec_offset, std::move(*p));
+  }
+}
+
+void
+ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept
+{
+  DLOG("mdb", "Adding {} compilation units", new_cus.size());
+  std::lock_guard lock(cu_write_lock);
+  auto insert_it =
+      std::find_if(comp_units.begin(), comp_units.end(),
+                   [pc = new_cus.begin()->low_pc()](const sym::CompilationUnit &cu) { return pc < cu.low_pc(); });
+
+  comp_units.insert(insert_it, std::make_move_iterator(new_cus.begin()), std::make_move_iterator(new_cus.end()));
+  ASSERT(std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnit::SortByBounds{}),
+         "Compilation units is not sorted");
+}
+
+std::vector<sym::CompilationUnit> &
+ObjectFile::source_units() noexcept
+{
+  return comp_units;
 }
 
 ObjectFile *

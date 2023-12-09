@@ -25,8 +25,14 @@ struct FileEntry
  */
 struct LNPHeader
 {
+  using shr_ptr = std::shared_ptr<LNPHeader>;
+  using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;
   using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
   using FileNameEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
+  LNPHeader(u64 section_offset, u64 initial_length, const u8 *data, const u8 *data_end, DwarfVersion version,
+            u8 addr_size, u8 min_len, u8 max_ops, bool default_is_stmt, i8 line_base, u8 line_range,
+            u8 opcode_base, OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
+            std::vector<FileEntry> &&file_names) noexcept;
   u64 sec_offset;
   u64 initial_length;
   const u8 *data;
@@ -58,6 +64,7 @@ struct LineTableEntry
 
 struct ParsedLineTableEntries
 {
+  using shr_ptr = std::shared_ptr<ParsedLineTableEntries>;
   std::vector<LineTableEntry> table;
 };
 
@@ -78,13 +85,13 @@ public:
   RelocatedLteIterator(Iter iter, AddrPtr base) noexcept;
 
   LineTableEntry operator*();
-  LineTableEntry operator->();
-  auto &operator+=(difference_type diff);
-  auto &operator-=(difference_type diff);
-  auto &operator++();
-  auto operator++(int);
-  auto &operator--();
-  auto operator--(int);
+
+  RelocatedLteIterator &operator+=(difference_type diff);
+  RelocatedLteIterator &operator-=(difference_type diff);
+  RelocatedLteIterator &operator++();
+  RelocatedLteIterator operator++(int);
+  RelocatedLteIterator &operator--();
+  RelocatedLteIterator operator--(int);
 
   friend bool operator==(const RelocatedLteIterator &l, const RelocatedLteIterator &r);
   friend bool operator!=(const RelocatedLteIterator &l, const RelocatedLteIterator &r);
@@ -94,20 +101,32 @@ public:
   friend bool operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r);
 };
 
+/**
+ * LineTable is a light weight "handle" class and owns no data of it's own. It connects a line number program
+ * header with the parsed line table entries from that line number program. This is, so that when we finally get to
+ * multi process debugging two processes with the same object file(s) can share that parsed data and only alter the
+ * small/cheap bits (like base address, or what we call relocated_base).
+ */
 class LineTable
 {
 public:
-  LineTable(LNPHeader *header, std::shared_ptr<ParsedLineTableEntries> ltes, AddrPtr relocated_base) noexcept;
+  LineTable() noexcept;
+  LineTable(LNPHeader *header, ParsedLineTableEntries *ltes, AddrPtr relocated_base) noexcept;
+
+  bool is_valid() const noexcept;
 
   RelocatedLteIterator begin() const;
   RelocatedLteIterator end() const;
 
+  LineTableEntry front() const;
+  LineTableEntry back() const;
+
 private:
   AddrPtr relocated_base;
   LNPHeader *line_header;
-  std::shared_ptr<ParsedLineTableEntries> ltes;
+  ParsedLineTableEntries *ltes;
 };
 
-std::vector<LNPHeader> parse_lnp_headers(const Elf *elf) noexcept;
-std::shared_ptr<ParsedLineTableEntries> compute_line_number_program(const LNPHeader *header);
+std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;
+ParsedLineTableEntries compute_line_number_program(const Elf *elf, LNPHeader *header);
 } // namespace sym::dw

@@ -20,6 +20,7 @@
 #include "task.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
+#include "tasks/lnp.h"
 #include "utils/logger.h"
 #include "utils/worker_task.h"
 #include <algorithm>
@@ -107,18 +108,29 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   {
     utils::TaskGroup tg("Compilation Unit Data");
     auto work = sym::dw::UnitDataTask::create_jobs_for(obj_file);
-    for (auto w : work)
-      tg.add_task(w);
+    tg.add_tasks(std::span{work});
+    tg.schedule_work().wait();
+  }
+
+  obj_file->read_lnp_headers();
+  {
+    utils::TaskGroup tg("Line number programs");
+    auto work = sym::dw::LineNumberProgramTask::create_jobs_for(obj_file);
+    tg.add_tasks(std::span{work});
     tg.schedule_work().wait();
   }
 
   {
     utils::TaskGroup tg("Name Indexing");
     auto work = sym::dw::IndexingTask::create_jobs_for(obj_file);
-    for (auto w : work)
-      tg.add_task(w);
+    tg.add_tasks(std::span{work});
     tg.schedule_work().wait();
   }
+  auto &init_cus = obj_file->source_units();
+  ASSERT(!init_cus.empty(), "No Source Units initialized");
+
+  for (auto &c : init_cus)
+    c.get_fn_by_pc(nullptr);
 }
 
 void

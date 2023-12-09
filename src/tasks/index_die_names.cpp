@@ -1,188 +1,16 @@
 #include "index_die_names.h"
 #include "../symbolication/dwarf.h"
 #include "../symbolication/dwarf/debug_info_reader.h"
+#include "../symbolication/dwarf/lnp.h"
 #include "../symbolication/dwarf/name_index.h"
 #include "../symbolication/elf.h"
 #include "../symbolication/objfile.h"
+#include "../symbolication/source_file.h"
 #include "../utils/enumerator.h"
 #include "../utils/thread_pool.h"
+#include <algorithm>
 
 namespace sym::dw {
-
-static AttributeValue
-read_attribute_value(UnitReader &reader, Abbreviation abbr, std::vector<i64> &implicit_consts) noexcept
-{
-  static constexpr auto IS_DWZ = false;
-  ASSERT(IS_DWZ == false, ".dwo files not supported yet");
-  if (abbr.IMPLICIT_CONST_INDEX != UINT8_MAX) {
-    return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], AttributeForm::DW_FORM_implicit_const,
-                          abbr.name};
-  }
-
-  const auto elf = reader.elf();
-
-  switch (abbr.form) {
-  case AttributeForm::DW_FORM_ref_addr:
-    return AttributeValue{reader.read_offset(), abbr.form, abbr.name};
-    break;
-  case AttributeForm::DW_FORM_addr: {
-    return AttributeValue{reader.read_address(), abbr.form, abbr.name};
-  }
-  case AttributeForm::Reserved:
-    PANIC("Can't handle RESERVED");
-  case AttributeForm::DW_FORM_block2:
-    return AttributeValue{reader.read_block(2), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_block4:
-    return AttributeValue{reader.read_block(4), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_data2:
-    return AttributeValue{reader.read_integral<u16>(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_data4:
-    return AttributeValue{reader.read_integral<u32>(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_data8:
-    return AttributeValue{reader.read_integral<u64>(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_data16:
-    return AttributeValue{reader.read_block(16), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_string:
-    return AttributeValue{reader.read_string(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_exprloc:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_block: {
-    const auto size = reader.uleb128();
-    return AttributeValue{reader.read_block(size), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_block1: {
-    const auto size = reader.read_integral<u8>();
-    return AttributeValue{reader.read_block(size), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_data1:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_flag:
-    return AttributeValue{reader.read_integral<u8>(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_sdata:
-    return AttributeValue{reader.leb128(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_strp: {
-    ASSERT(elf->debug_str != nullptr, ".debug_str expected to be not null");
-    if (!IS_DWZ) {
-      const auto offset = reader.read_offset();
-      std::string_view indirect_str{(const char *)elf->debug_str->begin() + offset};
-      return AttributeValue{indirect_str, abbr.form, abbr.name};
-    }
-  }
-  case AttributeForm::DW_FORM_line_strp: {
-    ASSERT(elf->debug_line_str != nullptr, ".debug_line expected to be not null");
-    if (!IS_DWZ) {
-      const auto offset = reader.read_offset();
-      const auto ptr = elf->debug_line_str->begin() + offset;
-      const std::string_view indirect_str{(const char *)ptr};
-      return AttributeValue{indirect_str, abbr.form, abbr.name};
-    }
-  }
-  case AttributeForm::DW_FORM_udata:
-    return AttributeValue{reader.uleb128(), abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_ref1: {
-    const auto offset = reader.read_integral<u8>();
-    return AttributeValue{reader.read_section_offset(offset), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_ref2: {
-    const auto offset = reader.read_integral<u16>();
-    return AttributeValue{reader.read_section_offset(offset), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_ref4: {
-    const auto offset = reader.read_integral<u32>();
-    return AttributeValue{reader.read_section_offset(offset), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_ref8: {
-    const auto offset = reader.read_integral<u64>();
-    return AttributeValue{reader.read_section_offset(offset), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_ref_udata: {
-    const auto offset = reader.uleb128();
-    return AttributeValue{reader.read_section_offset(offset), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_indirect: {
-    const auto new_form = (AttributeForm)reader.uleb128();
-    Abbreviation new_abbr{.name = abbr.name, .form = new_form, .IMPLICIT_CONST_INDEX = UINT8_MAX};
-    if (new_form == AttributeForm::DW_FORM_implicit_const) {
-      const auto value = reader.leb128();
-      new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
-      implicit_consts.push_back(value);
-    }
-    return read_attribute_value(reader, new_abbr, implicit_consts);
-  }
-  case AttributeForm::DW_FORM_sec_offset: {
-    const auto offset = reader.read_offset();
-    return AttributeValue{offset, abbr.form, abbr.name};
-  }
-
-  case AttributeForm::DW_FORM_flag_present:
-    return AttributeValue{(u64) true, abbr.form, abbr.name};
-  // fall through. Nasty attribute forms; beware
-  case AttributeForm::DW_FORM_strx1:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_strx2:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_strx3:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_strx4: {
-    const auto base = std::to_underlying(AttributeForm::DW_FORM_strx1) - 1;
-    const auto bytes_to_read = std::to_underlying(abbr.form) - base;
-    const auto idx = reader.read_n_bytes(bytes_to_read);
-    return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_strx: {
-    const auto idx = reader.uleb128();
-    return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
-  }
-
-  // fall through. Nasty attribute forms; beware
-  case AttributeForm::DW_FORM_addrx1:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_addrx2:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_addrx3:
-    [[fallthrough]];
-  case AttributeForm::DW_FORM_addrx4: {
-    ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
-    const auto base = std::to_underlying(AttributeForm::DW_FORM_addrx1) - 1;
-    const auto bytes_to_read = std::to_underlying(abbr.form) - base;
-    const auto addr_index = reader.read_n_bytes(bytes_to_read);
-    return AttributeValue{reader.read_by_idx_from_addr_table(addr_index, {}), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_addrx: {
-    ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
-    const auto addr_table_index = reader.uleb128();
-    return AttributeValue{reader.read_by_idx_from_addr_table(addr_table_index, {}), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_ref_sup4:
-    PANIC("Unsupported attribute form DW_FORM_ref_sup4");
-  case AttributeForm::DW_FORM_strp_sup:
-    PANIC("Unsupported attribute form DW_FORM_strp_sup");
-  case AttributeForm::DW_FORM_ref_sig8:
-    PANIC("Unsupported attribute form DW_FORM_ref_sig8");
-  case AttributeForm::DW_FORM_implicit_const:
-    ASSERT(abbr.IMPLICIT_CONST_INDEX != UINT8_MAX, "Invalid implicit const index");
-    return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], abbr.form, abbr.name};
-  case AttributeForm::DW_FORM_loclistx: {
-    ASSERT(elf->debug_loclist != nullptr, ".debug_rnglists not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
-    const auto idx = reader.uleb128();
-    return AttributeValue{reader.read_loclist_index(idx, {}), abbr.form, abbr.name};
-  }
-
-  case AttributeForm::DW_FORM_rnglistx: {
-    ASSERT(elf->debug_rnglists != nullptr, ".debug_rnglists not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
-    const auto addr_table_index = reader.uleb128();
-    return AttributeValue{reader.read_by_idx_from_rnglist(addr_table_index, {}), abbr.form, abbr.name};
-  }
-  case AttributeForm::DW_FORM_ref_sup8:
-    PANIC("Unsupported attribute form DW_FORM_ref_sup8");
-    break;
-  }
-  PANIC("Unknown Attribute Form");
-}
 
 IndexingTask::IndexingTask(ObjectFile *obj, std::span<UnitData *> cus_to_index) noexcept
     : obj(obj), cus_to_index(cus_to_index)
@@ -214,18 +42,18 @@ IndexingTask::execute_task() noexcept
   NameSet global_variables;
   NameSet namespaces;
 
+  std::vector<sym::CompilationUnit> initialized_cus{};
   for (auto comp_unit : cus_to_index) {
-    comp_unit->load_dies();
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->get_dies();
     if (dies.front().tag == DwarfTag::DW_TAG_compile_unit) {
-      initialize_compilation_unit(comp_unit, dies.front());
+      initialize_compilation_unit(initialized_cus, comp_unit, dies.front());
     } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
       initialize_partial_compilation_unit(comp_unit, dies.front());
     }
 
     UnitReader reader{comp_unit};
-    for (const auto &[die_index, die] : utils::EnumerateView(dies)) {
+    for (auto [die_index, die] : utils::EnumerateView(dies)) {
       // work only on dies, that can have a name associated (via DW_AT_name attribute)
       switch (die.tag) {
       case DwarfTag::DW_TAG_array_type:
@@ -364,13 +192,58 @@ IndexingTask::execute_task() noexcept
   idx->global_variables.merge(global_variables);
   idx->methods.merge(methods);
   idx->types.merge(types);
+  std::sort(initialized_cus.begin(), initialized_cus.end(), sym::CompilationUnit::SortByBounds{});
+  ASSERT(std::is_sorted(initialized_cus.begin(), initialized_cus.end(), sym::CompilationUnit::SortByBounds{}),
+         "Compilation units to be added not sorted by low pc boundary");
+  obj->add_initialized_cus(initialized_cus);
 }
 
 void
-IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept
+IndexingTask::initialize_compilation_unit(std::vector<sym::CompilationUnit> &init_cus, UnitData *cu,
+                                          const DieMetaData &cu_die) noexcept
 {
-  // TODO("IndexingTask::initialize_compilation_unit not yet implemented");
+  const auto &abbrs = cu->get_abbreviation(cu_die.abbreviation_code);
+  UnitReader reader{cu};
+  reader.seek_die(cu_die);
+  std::vector<i64> implicit_consts{};
+  init_cus.emplace_back(cu);
+  auto &cu_file = init_cus.back();
+  std::optional<AddrPtr> low;
+  std::optional<AddrPtr> high;
+
+  for (const auto &abbr : abbrs.attributes) {
+    auto attr = read_attribute_value(reader, abbr, implicit_consts);
+    switch (attr.name) {
+    case Attribute::DW_AT_stmt_list: {
+      const auto offset = attr.address();
+      cu_file.set_linetable(obj->get_linetable(offset));
+      break;
+    }
+    case Attribute::DW_AT_name: {
+      auto name = attr.string();
+      cu_file.set_name(name);
+      break;
+    }
+    case Attribute::DW_AT_ranges:
+      break;
+    case Attribute::DW_AT_low_pc: {
+      low = attr.address();
+    } break;
+    case Attribute::DW_AT_high_pc: {
+      high = attr.address();
+    } break;
+    default:
+      continue;
+    }
+  }
+  if (!cu_file.known_address()) {
+    ASSERT(low && high, "No address boundary known for Compilation Unit!");
+    cu_file.set_address_boundary(low.value(), high.value());
+  }
+
+  DLOG("mdb", "Compilation unit {} for range [{} .. {}]", cu_file.name(), cu_file.low_pc(), cu_file.high_pc());
 }
+
 void
 IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &pcu_die) noexcept
 {
