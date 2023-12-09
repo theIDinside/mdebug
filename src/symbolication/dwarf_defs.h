@@ -353,6 +353,27 @@ to_str(DwarfTag attr) noexcept
 
 #undef ITEM
 
+constexpr bool
+intra_reference(AttributeForm form) noexcept
+{
+  switch (form) {
+  case AttributeForm::DW_FORM_ref1:
+  case AttributeForm::DW_FORM_ref2:
+  case AttributeForm::DW_FORM_ref4:
+  case AttributeForm::DW_FORM_ref8:
+    return true;
+  default:
+    return false;
+  }
+}
+
+constexpr bool
+is_class_type(DwarfTag tag) noexcept
+{
+  return tag == DwarfTag::DW_TAG_class_type || tag == DwarfTag::DW_TAG_structure_type ||
+         tag == DwarfTag::DW_TAG_union_type;
+}
+
 namespace fmt {
 template <> struct formatter<Attribute>
 {
