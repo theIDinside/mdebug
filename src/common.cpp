@@ -89,6 +89,16 @@ sanitize(std::string &name)
   replace_regex(name);
 }
 
+[[noreturn]] static void
+panic_exit()
+{
+  if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
+    raise(SIGTERM);
+    exit(-1);
+  } else
+    exit(-1);
+}
+
 void
 panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
 {
@@ -140,7 +150,7 @@ ifbacktrace_failed:
       "{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}--- [PANIC] ---",
                         loc.file_name(), loc.line(), loc.function_name(), err_msg, errno));
   delete logging::get_logging();
-  exit(EXIT_FAILURE);
+  panic_exit();
 }
 
 ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path))
