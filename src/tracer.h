@@ -3,6 +3,7 @@
 #include "common.h"
 #include "interface/ui_command.h"
 #include "interface/ui_result.h"
+#include "mdb_config.h"
 #include "notify_pipe.h"
 #include "ptrace.h"
 #include <chrono>
@@ -65,12 +66,14 @@ public:
   static bool KeepAlive;
   static bool use_traceme;
   friend struct ui::UICommand;
-  Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept;
+  Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
+         sys::DebuggerInitialization) noexcept;
   void add_target_set_current(pid_t task_leader, const Path &path, TargetSession session) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
   TraceeController *get_current() noexcept;
+  void config_done() noexcept;
   void handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept;
   void handle_command(ui::UICommandPtr cmd) noexcept;
 
@@ -97,4 +100,5 @@ private:
   utils::Notifier::ReadEnd io_thread_pipe;
   bool already_launched;
   utils::NotifyManager *events_notifier;
+  sys::DebuggerInitialization config;
 };

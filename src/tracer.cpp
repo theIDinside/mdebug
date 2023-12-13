@@ -1,6 +1,7 @@
 #include "tracer.h"
 #include "./interface/dap/interface.h"
 #include "common.h"
+#include "event_queue.h"
 #include "fmt/format.h"
 #include "interface/dap/events.h"
 #include "interface/pty.h"
@@ -22,6 +23,7 @@
 #include "tasks/index_die_names.h"
 #include "tasks/lnp.h"
 #include "utils/logger.h"
+#include "utils/thread_pool.h"
 #include "utils/worker_task.h"
 #include <algorithm>
 #include <bits/chrono.h>
@@ -56,15 +58,28 @@ add_object_err(AddObjectResult r)
   }
 }
 
-Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
+void
+on_sigcld(int sig)
+{
+  pid_t pid;
+  int stat;
+  while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
+    const auto wait_result = process_status(pid, stat);
+    push_event(Event{.process_group = 0, .type = EventType::WaitStatus, .wait = wait_result});
+  }
+}
+
+Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
+               sys::DebuggerInitialization init) noexcept
     : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
-      events_notifier(events_notifier)
+      events_notifier(events_notifier), config(init)
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
          (uintptr_t)this, (uintptr_t)Instance);
   Instance = this;
-  this->command_queue = {};
+  command_queue = {};
+  utils::ThreadPool::get_global_pool()->initialize(config.thread_pool_size());
 }
 
 void
@@ -173,8 +188,24 @@ Tracer::get_current() noexcept
 }
 
 void
+Tracer::config_done() noexcept
+{
+  switch (config.waitsystem()) {
+  case sys::WaitSystem::UseAwaiterThread:
+    get_current()->start_awaiter_thread();
+    break;
+  case sys::WaitSystem::UseSignalHandler:
+    signal(SIGCHLD, on_sigcld);
+    break;
+  }
+}
+
+void
 Tracer::handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept
 {
+  if (process_group == 0) {
+    process_group = (*targets.begin())->task_leader;
+  }
   auto tc = get_controller(process_group);
   tc->set_pending_waitstatus(wait_res);
   auto task = tc->get_task(wait_res.tid);

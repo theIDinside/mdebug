@@ -352,7 +352,7 @@ UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
   tracer->get_current()->resume_target(RunType::Continue);
-  tracer->get_current()->start_awaiter_thread();
+  tracer->config_done();
   return new ConfigurationDoneResponse{true, this};
 }
 

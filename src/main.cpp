@@ -3,6 +3,7 @@
 #include "common.h"
 #include "event_queue.h"
 #include "interface/dap/interface.h"
+#include "mdb_config.h"
 #include "notify_pipe.h"
 #include "tracer.h"
 #include "utils/thread_pool.h"
@@ -47,27 +48,26 @@ bool Tracer::use_traceme = true;
 
 utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool{};
 
+static constexpr auto default_log_channels = {"mdb", "dap", "dwarf", "awaiter", "eh"};
+
 int
 main(int argc, const char **argv)
 {
-  const int cpus = std::thread::hardware_concurrency();
-  logging::Logger::get_logger()->setup_channel("mdb");
-  logging::Logger::get_logger()->setup_channel("dap");
-  logging::Logger::get_logger()->setup_channel("dwarf");
-  logging::Logger::get_logger()->setup_channel("awaiter");
-  logging::Logger::get_logger()->setup_channel("eh");
-  utils::ThreadPool::get_global_pool()->initialize(cpus > 4 ? cpus / 2 : cpus);
-
+  for (const auto &channel : default_log_channels) {
+    logging::Logger::get_logger()->setup_channel(channel);
+  }
+  auto res = sys::parse_cli(argc, argv);
+  ASSERT(res.has_value(), "Faulty CLI options passed to MDB");
   std::span<const char *> args(argv, argc);
   logging::get_logging()->log("mdb", "MDB CLI Arguments");
-  for (const auto arg : args) {
+  for (const auto arg : args.subspan(1)) {
     logging::get_logging()->log("mdb", fmt::format("{}", arg));
   }
 
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 
   utils::NotifyManager notifiers{io_read};
-  Tracer::Instance = new Tracer{io_read, &notifiers};
+  Tracer::Instance = new Tracer{io_read, &notifiers, res.value_or(sys::DebuggerInitialization::Default())};
   auto &tracer = *Tracer::Instance;
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;
