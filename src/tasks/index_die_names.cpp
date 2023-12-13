@@ -1,11 +1,11 @@
 #include "index_die_names.h"
+#include "../symbolication/cu_symbol_info.h"
 #include "../symbolication/dwarf.h"
 #include "../symbolication/dwarf/debug_info_reader.h"
 #include "../symbolication/dwarf/lnp.h"
 #include "../symbolication/dwarf/name_index.h"
 #include "../symbolication/elf.h"
 #include "../symbolication/objfile.h"
-#include "../symbolication/source_file.h"
 #include "../utils/enumerator.h"
 #include "../utils/thread_pool.h"
 #include <algorithm>
@@ -42,14 +42,16 @@ IndexingTask::execute_task() noexcept
   NameSet global_variables;
   NameSet namespaces;
 
-  std::vector<sym::CompilationUnit> initialized_cus{};
+  std::vector<sym::CompilationUnitSymbolInfo> initialized_cus{};
   for (auto comp_unit : cus_to_index) {
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->get_dies();
     if (dies.front().tag == DwarfTag::DW_TAG_compile_unit) {
-      initialize_compilation_unit(initialized_cus, comp_unit, dies.front());
+      sym::CompilationUnitSymbolInfo new_cu_file = initialize_compilation_unit(comp_unit, dies.front());
+      initialized_cus.push_back(std::move(new_cu_file));
     } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
-      initialize_partial_compilation_unit(comp_unit, dies.front());
+      sym::PartialCompilationUnitSymbolInfo partial_cu_file =
+          initialize_partial_compilation_unit(comp_unit, dies.front());
     }
 
     UnitReader reader{comp_unit};
@@ -90,8 +92,8 @@ IndexingTask::execute_task() noexcept
       auto is_super_scope_var = false;
       auto has_loc = false;
       reader.seek_die(die);
-      for (const auto value : abb.attributes) {
-        auto attr = read_attribute_value(reader, value, implicit_consts);
+      for (auto value : abb.attributes) {
+        auto attr = read_attribute_value(reader, value, abb.implicit_consts);
         switch (value.name) {
         // register name
         case Attribute::DW_AT_name:
@@ -192,36 +194,34 @@ IndexingTask::execute_task() noexcept
   idx->global_variables.merge(global_variables);
   idx->methods.merge(methods);
   idx->types.merge(types);
-  std::sort(initialized_cus.begin(), initialized_cus.end(), sym::CompilationUnit::SortByBounds{});
-  ASSERT(std::is_sorted(initialized_cus.begin(), initialized_cus.end(), sym::CompilationUnit::SortByBounds{}),
-         "Compilation units to be added not sorted by low pc boundary");
-  obj->add_initialized_cus(initialized_cus);
+
+  if (!initialized_cus.empty())
+    obj->add_initialized_cus(initialized_cus);
 }
 
-void
-IndexingTask::initialize_compilation_unit(std::vector<sym::CompilationUnit> &init_cus, UnitData *cu,
-                                          const DieMetaData &cu_die) noexcept
+sym::CompilationUnitSymbolInfo
+IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept
 {
   const auto &abbrs = cu->get_abbreviation(cu_die.abbreviation_code);
   UnitReader reader{cu};
   reader.seek_die(cu_die);
-  std::vector<i64> implicit_consts{};
-  init_cus.emplace_back(cu);
-  auto &cu_file = init_cus.back();
+  sym::CompilationUnitSymbolInfo new_cu{cu};
+
   std::optional<AddrPtr> low;
   std::optional<AddrPtr> high;
 
   for (const auto &abbr : abbrs.attributes) {
-    auto attr = read_attribute_value(reader, abbr, implicit_consts);
+    auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
     switch (attr.name) {
     case Attribute::DW_AT_stmt_list: {
       const auto offset = attr.address();
-      cu_file.set_linetable(obj->get_linetable(offset));
+      auto lt = obj->get_linetable(offset);
+      new_cu.set_linetable(lt);
       break;
     }
     case Attribute::DW_AT_name: {
       auto name = attr.string();
-      cu_file.set_name(name);
+      new_cu.set_name(name);
       break;
     }
     case Attribute::DW_AT_ranges:
@@ -232,22 +232,26 @@ IndexingTask::initialize_compilation_unit(std::vector<sym::CompilationUnit> &ini
     case Attribute::DW_AT_high_pc: {
       high = attr.address();
     } break;
+    case Attribute::DW_AT_import:
+      break;
     default:
       continue;
     }
   }
-  if (!cu_file.known_address()) {
-    ASSERT(low && high, "No address boundary known for Compilation Unit!");
-    cu_file.set_address_boundary(low.value(), high.value());
+
+  const auto boundary_seen = (low.has_value() && high.has_value());
+  if (!new_cu.known_address_boundary() && boundary_seen) {
+    new_cu.set_address_boundary(low.value(), low.value() + high.value());
   }
 
-  DLOG("mdb", "Compilation unit {} for range [{} .. {}]", cu_file.name(), cu_file.low_pc(), cu_file.high_pc());
+  return new_cu;
 }
 
-void
+sym::PartialCompilationUnitSymbolInfo
 IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &pcu_die) noexcept
 {
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
+  return sym::PartialCompilationUnitSymbolInfo{partial_cu};
 }
 
 }; // namespace sym::dw

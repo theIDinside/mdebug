@@ -115,11 +115,17 @@ public:
 
   bool is_valid() const noexcept;
 
-  RelocatedLteIterator begin() const;
-  RelocatedLteIterator end() const;
+  RelocatedLteIterator begin() const noexcept;
+  RelocatedLteIterator end() const noexcept;
 
-  LineTableEntry front() const;
-  LineTableEntry back() const;
+  LineTableEntry front() const noexcept;
+  LineTableEntry back() const noexcept;
+
+  bool no_entries() const noexcept;
+  u64 table_id() const noexcept;
+
+  std::optional<sym::dw::DirEntry> directory(u64 dir_index) const noexcept;
+  std::optional<sym::dw::FileEntry> file(u64 file_index) const noexcept;
 
 private:
   AddrPtr relocated_base;

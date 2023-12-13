@@ -1,4 +1,4 @@
-#include "source_file.h"
+#include "cu_symbol_info.h"
 #include "../utils/filter.h"
 #include "dwarf.h"
 #include "dwarf/debug_info_reader.h"
@@ -13,86 +13,124 @@
 
 namespace sym {
 
-CompilationUnit::CompilationUnit(dw::UnitData *cu_data) noexcept
-    : unit_data(cu_data), low(nullptr), high(nullptr), line_table(), cu_name("unknown"), fns()
+PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(dw::UnitData *data) noexcept
+    : unit_data(data), line_table(), fns(), imported_units()
 {
 }
 
-CompilationUnit::CompilationUnit(CompilationUnit &&from) noexcept
-    : unit_data(from.unit_data), low(from.low), high(from.high), line_table(from.line_table),
-      fns(std::move(from.fns))
+PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(PartialCompilationUnitSymbolInfo &&o) noexcept
+    : unit_data(o.unit_data), line_table(o.line_table), fns(std::move(o.fns)),
+      imported_units(std::move(o.imported_units))
 {
 }
 
-CompilationUnit &
-CompilationUnit::operator=(CompilationUnit &&from) noexcept
+PartialCompilationUnitSymbolInfo &
+PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&rhs) noexcept
+{
+  if (this == &rhs)
+    return *this;
+  unit_data = rhs.unit_data;
+  line_table = rhs.line_table;
+  fns = std::move(rhs.fns);
+  imported_units = std::move(rhs.imported_units);
+  return *this;
+}
+
+CompilationUnitSymbolInfo::CompilationUnitSymbolInfo(dw::UnitData *cu_data) noexcept
+    : unit_data(cu_data), pc_start(nullptr), pc_end_exclusive(nullptr), line_table(), cu_name("unknown"), fns(),
+      id()
+{
+}
+
+CompilationUnitSymbolInfo::CompilationUnitSymbolInfo(CompilationUnitSymbolInfo &&from) noexcept
+    : unit_data(from.unit_data), pc_start(from.pc_start), pc_end_exclusive(from.pc_end_exclusive),
+      line_table(from.line_table), fns(std::move(from.fns)), imported_units(std::move(from.imported_units)),
+      id(from.id)
+{
+}
+
+CompilationUnitSymbolInfo &
+CompilationUnitSymbolInfo::operator=(CompilationUnitSymbolInfo &&from) noexcept
 {
   if (this == &from)
     return *this;
   unit_data = from.unit_data;
-  low = from.low;
-  high = from.high;
+  pc_start = from.pc_start;
+  pc_end_exclusive = from.pc_end_exclusive;
   line_table = from.line_table;
   fns = std::move(from.fns);
+  imported_units = std::move(from.imported_units);
+  id = from.id;
   return *this;
 }
 
 void
-CompilationUnit::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
+CompilationUnitSymbolInfo::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
-  low = lowest;
-  high = end_exclusive;
+  pc_start = lowest;
+  pc_end_exclusive = end_exclusive;
 }
 
 void
-CompilationUnit::set_linetable(dw::LineTable table) noexcept
+CompilationUnitSymbolInfo::set_linetable(dw::LineTable table) noexcept
 {
   line_table = table;
-  set_address_boundary(line_table.front().pc, line_table.back().pc);
 }
 
 void
-CompilationUnit::set_name(std::string_view name) noexcept
+CompilationUnitSymbolInfo::set_id(SymbolInfoId info_id) noexcept
+{
+  id = info_id;
+}
+
+void
+CompilationUnitSymbolInfo::set_name(std::string_view name) noexcept
 {
   cu_name = name;
 }
 
 bool
-CompilationUnit::known_address() const noexcept
+CompilationUnitSymbolInfo::known_address_boundary() const noexcept
 {
-  return low != nullptr && high != nullptr;
+  return pc_start != nullptr && pc_end_exclusive != nullptr;
 }
 
 AddrPtr
-CompilationUnit::low_pc() const noexcept
+CompilationUnitSymbolInfo::start_pc() const noexcept
 {
-  return low;
+  return pc_start;
 }
 
 AddrPtr
-CompilationUnit::high_pc() const noexcept
+CompilationUnitSymbolInfo::end_pc() const noexcept
 {
-  return high;
+  return pc_end_exclusive;
 }
 
 std::string_view
-CompilationUnit::name() const noexcept
+CompilationUnitSymbolInfo::name() const noexcept
 {
   return cu_name;
 }
 
 bool
-CompilationUnit::function_symbols_resolved() const noexcept
+CompilationUnitSymbolInfo::function_symbols_resolved() const noexcept
 {
   return !fns.empty();
 }
 
 std::optional<sym::FunctionSymbol>
-CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
+CompilationUnitSymbolInfo::get_fn_by_pc(AddrPtr pc) noexcept
 {
   if (!function_symbols_resolved())
     resolve_fn_symbols();
   return std::nullopt;
+}
+
+dw::UnitData *
+CompilationUnitSymbolInfo::get_dwarf_unit() const noexcept
+{
+  return unit_data;
 }
 
 enum class DieType
@@ -103,8 +141,8 @@ enum class DieType
 };
 
 void
-CompilationUnit::maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc,
-                                        AddrOpt high_pc) noexcept
+CompilationUnitSymbolInfo::maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc,
+                                                  AddrOpt high_pc) noexcept
 {
   if ((name || mangled_name) && (low_pc && high_pc)) {
     auto &lo = low_pc.value();
@@ -155,8 +193,8 @@ struct ResolveFnSymbolState
   complete(Elf *elf) const
   {
 
-    return sym::FunctionSymbol{.start = elf->relocate_addr(low_pc),
-                               .end = elf->relocate_addr(high_pc),
+    return sym::FunctionSymbol{.pc_start = elf->relocate_addr(low_pc),
+                               .pc_end_exclusive = elf->relocate_addr(high_pc),
                                .member_of = "",
                                .name = name.empty() ? mangled_name : name,
                                .maybe_origin_dies = maybe_origin_dies};
@@ -182,7 +220,7 @@ follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
     state.add_maybe_origin({.cu = ref.cu, .die_index = ref.cu->index_of(ref.die)});
   std::vector<i64> implicit_consts{};
   for (const auto &attr : abbreviation.attributes) {
-    auto value = read_attribute_value(reader, attr, implicit_consts);
+    auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
     switch (value.name) {
     case Attribute::DW_AT_name:
       state.name = value.string();
@@ -213,7 +251,7 @@ follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
 }
 
 void
-CompilationUnit::resolve_fn_symbols() noexcept
+CompilationUnitSymbolInfo::resolve_fn_symbols() noexcept
 {
   auto elf = unit_data->get_objfile()->parsed_elf;
   const auto &dies = unit_data->get_dies();
@@ -242,7 +280,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
     ResolveFnSymbolState state{};
     std::list<dw::DieReference> die_refs{};
     for (const auto &attr : abbreviation.attributes) {
-      auto value = read_attribute_value(reader, attr, implicit_consts);
+      auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
       switch (value.name) {
       case Attribute::DW_AT_name:
         state.name = value.string();
@@ -291,13 +329,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
       }
     }
   }
-  std::sort(fns.begin(), fns.end(), [](auto &a, auto &b) { return a.start < b.start; });
-}
-
-bool
-CompilationUnit::SortByBounds::operator()(CompilationUnit &a, CompilationUnit &b)
-{
-  return a.low < b.low;
+  std::sort(fns.begin(), fns.end(), FunctionSymbol::Sorter());
 }
 
 } // namespace sym

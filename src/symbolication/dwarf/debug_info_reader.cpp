@@ -329,7 +329,7 @@ UnitReader::objfile() const noexcept
 }
 
 AttributeValue
-read_attribute_value(UnitReader &reader, Abbreviation abbr, std::vector<i64> &implicit_consts) noexcept
+read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicit_consts) noexcept
 {
   static constexpr auto IS_DWZ = false;
   ASSERT(IS_DWZ == false, ".dwo files not supported yet");
@@ -422,9 +422,10 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, std::vector<i64> &im
     const auto new_form = (AttributeForm)reader.uleb128();
     Abbreviation new_abbr{.name = abbr.name, .form = new_form, .IMPLICIT_CONST_INDEX = UINT8_MAX};
     if (new_form == AttributeForm::DW_FORM_implicit_const) {
-      const auto value = reader.leb128();
-      new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
-      implicit_consts.push_back(value);
+      ASSERT("mdb", "This implicit const as a dynamic form just FEELS wrong!");
+      // const auto value = reader.leb128();
+      // new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
+      // implicit_consts.push_back(value);
     }
     return read_attribute_value(reader, new_abbr, implicit_consts);
   }

@@ -18,6 +18,15 @@ ThreadPool::post_task(Task *task) noexcept
   m_task_cv.notify_one();
 }
 
+void
+ThreadPool::post_tasks(std::span<Task *> tasks) noexcept
+{
+  std::lock_guard lock(m_task_mutex);
+  for (auto t : tasks)
+    m_task_queue.push(t);
+  m_task_cv.notify_all();
+}
+
 ThreadPool::ThreadPool() noexcept : thread_pool(), m_task_queue(), m_groups(), m_task_mutex(), m_task_cv() {}
 
 ThreadPool::~ThreadPool()

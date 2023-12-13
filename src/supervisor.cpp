@@ -22,8 +22,13 @@
 #include "symbolication/lnp.h"
 #include "symbolication/objfile.h"
 #include "task.h"
+#include "tasks/dwarf_unit_data.h"
+#include "tasks/index_die_names.h"
+#include "tasks/lnp.h"
 #include "tracer.h"
+#include "utils/enumerator.h"
 #include "utils/logger.h"
+#include "utils/worker_task.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
 #include <chrono>
@@ -112,7 +117,6 @@ parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
     if (reader.bytes_read() % 4 != 0)
       reader.skip(4 - reader.bytes_read() % 4);
     if (required_probes.contains(probe_name)) {
-      DLOG("mdb", "adding {} probe at {}", probe_name, ptr);
       probes.push_back(ProbeInfo{.address = ptr, .name = std::string{probe_name}});
       required_probes.erase(std::find(required_probes.begin(), required_probes.end(), probe_name));
     }
@@ -193,10 +197,9 @@ TraceeController::on_so_event() noexcept
   std::vector<SharedObject::SoId> sos;
   for (auto i = 0; i < new_sos; ++i) {
     auto so = shared_objects.get_so(new_so_ids[i]);
-    const auto so_of = mmap_objectfile(so->path);
-    so->objfile = so_of;
-    if (so_of) {
-      register_object_file(so_of, false, so->elf_vma_addr_diff);
+    so->objfile = mmap_objectfile(so->path);
+    if (so->objfile) {
+      register_object_file(so->objfile, false, so->elf_vma_addr_diff);
       sos.push_back(new_so_ids[i]);
     }
   }
@@ -218,20 +221,34 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   //  it.
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
-    if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
-      so->objfile->line_table_headers = parse_lnp_headers(so->objfile->parsed_elf);
-      so->objfile->line_tables.reserve(so->objfile->line_table_headers.size());
-      for (auto &lth : so->objfile->line_table_headers) {
-        so->objfile->line_tables.push_back({});
-        lth.set_linetable_storage(&so->objfile->line_tables.back());
+    if (so->has_debug_info()) {
+      {
+        const auto name = fmt::format("Compilation Unit Data for {}", so->name());
+        utils::TaskGroup tg(name);
+        auto work = sym::dw::UnitDataTask::create_jobs_for(so->objfile);
+        tg.add_tasks(std::span{work});
+        tg.schedule_work().wait();
       }
-      CompilationUnitBuilder cu_builder{so->objfile};
-      auto total = cu_builder.build_cu_headers();
-      for (const auto &hdr : total) {
-        ASSERT(so->objfile != nullptr, "Objfile is null!");
-        auto proc = prepare_cu_processing(so->objfile, hdr, this);
-        auto die = proc->read_dies();
-        proc->process_compile_unit_die(die.release());
+
+      so->objfile->read_lnp_headers();
+      {
+        if (so->name() == "ld-linux-x86-64.so.2") {
+          ASSERT(so->objfile->get_lnp_headers().size() == 112,
+                 "Expected ld.so to have 112 line number program headers");
+        }
+        const auto name = fmt::format("Line number programs for {}", so->name());
+        utils::TaskGroup tg(name);
+        auto work = sym::dw::LineNumberProgramTask::create_jobs_for(so->objfile);
+        tg.add_tasks(std::span{work});
+        tg.schedule_work().wait();
+      }
+
+      {
+        const auto name = fmt::format("Name Indexing for {}", so->name());
+        utils::TaskGroup tg(name);
+        auto work = sym::dw::IndexingTask::create_jobs_for(so->objfile);
+        tg.add_tasks(std::span{work});
+        tg.schedule_work().wait();
       }
     }
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});

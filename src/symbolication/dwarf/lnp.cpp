@@ -225,29 +225,59 @@ LineTable::is_valid() const noexcept
 }
 
 RelocatedLteIterator
-LineTable::begin() const
+LineTable::begin() const noexcept
 {
   return RelocatedLteIterator(ltes->table.cbegin(), relocated_base);
 }
 
 RelocatedLteIterator
-LineTable::end() const
+LineTable::end() const noexcept
 {
   return RelocatedLteIterator(ltes->table.cend(), relocated_base);
 }
 
 LineTableEntry
-LineTable::front() const
+LineTable::front() const noexcept
 {
+  ASSERT(!ltes->table.empty(), "[0x{:x}] Line Table has no entries!", line_header->sec_offset);
   auto first = begin();
   return *first;
 }
 
 LineTableEntry
-LineTable::back() const
+LineTable::back() const noexcept
 {
+  ASSERT(!ltes->table.empty(), "[0x{:x}] Line Table has no entries!", line_header->sec_offset);
   auto last = end()--;
   return *last;
+}
+
+bool
+LineTable::no_entries() const noexcept
+{
+  return ltes->table.empty();
+}
+
+u64
+LineTable::table_id() const noexcept
+{
+  return line_header->sec_offset;
+}
+
+std::optional<sym::dw::DirEntry>
+LineTable::directory(u64 dir_index) const noexcept
+{
+  ASSERT(line_header && dir_index < line_header->directories.size(), "dir_index={} not found in {} dirs",
+         dir_index, line_header->directories.size());
+  return line_header->directories[dir_index];
+}
+
+std::optional<sym::dw::FileEntry>
+LineTable::file(u64 file_index) const noexcept
+{
+  ASSERT(line_header && file_index < line_header->directories.size(), "file_index={} not found in {} files",
+         file_index, line_header->file_names.size());
+  return line_header->file_names[file_index];
 }
 
 LineTable::LineTable() noexcept : relocated_base(nullptr), line_header(nullptr), ltes(nullptr) {}

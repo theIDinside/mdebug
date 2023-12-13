@@ -1,5 +1,7 @@
 #pragma once
 #include "../common.h"
+#include "addr_sorter.h"
+#include "dwarf/common.h"
 
 /**
  * Description of a range of executable code, inside of a compilation unit.
@@ -49,3 +51,53 @@ public:
     return low != UINTMAX_MAX && high != 0;
   }
 };
+
+namespace sym {
+enum class BlockType
+{
+  Unit,
+  Function,
+  Lexical
+};
+
+class Block
+{
+  AddrPtr pc_start;
+  AddrPtr pc_end_exclusive;
+  Block *contained_in;
+  SymbolInfoId containing_sym_info;
+
+public:
+  Block(AddrPtr start, AddrPtr end) noexcept;
+  AddrPtr start_pc() const noexcept;
+  AddrPtr end_pc() const noexcept;
+  Block *containing_block() const noexcept;
+  void set_contained_by(Block *block) noexcept;
+  void set_containing_sym_info(SymbolInfoId info) noexcept;
+
+  static constexpr auto
+  Sort()
+  {
+    return AddressableSorter<Block, true>{};
+  }
+};
+
+class BlockArray
+{
+  AddrPtr pc_start;
+  AddrPtr pc_end_exclusive;
+  std::vector<Block> blocks;
+
+  static constexpr auto
+  Sort()
+  {
+    return AddressableSorter<BlockArray, false>{};
+  }
+
+public:
+  BlockArray(AddrPtr start, AddrPtr end_exclusive) noexcept;
+  const Block *block_from_pc(AddrPtr pc) noexcept;
+  AddrPtr start_pc() const noexcept;
+  AddrPtr end_pc() const noexcept;
+};
+} // namespace sym

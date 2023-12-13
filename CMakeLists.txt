@@ -52,6 +52,8 @@ set(MIDAS_SOURCES
   src/symbolication/lnp.h
   src/symbolication/elf_symbols.cpp
   src/symbolication/elf_symbols.h
+  src/symbolication/fnsymbol.cpp
+  src/symbolication/fnsymbol.h
   src/symbolication/block.cpp
   src/symbolication/block.h
   src/symbolication/cu_file.cpp
@@ -64,8 +66,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf_frameunwinder.h
   src/symbolication/dwarf_expressions.cpp
   src/symbolication/dwarf_expressions.h
-  src/symbolication/source_file.cpp
-  src/symbolication/source_file.h
+  src/symbolication/cu_symbol_info.cpp
+  src/symbolication/cu_symbol_info.h
   src/symbolication/type.cpp
   src/symbolication/type.h
   src/symbolication/dwarf/debug_info_reader.cpp

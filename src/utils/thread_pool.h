@@ -26,6 +26,7 @@ public:
   u32 worker_count() const noexcept;
   static ThreadPool *get_global_pool() noexcept;
   void post_task(Task *task) noexcept;
+  void post_tasks(std::span<Task *> tasks) noexcept;
   void worker(std::stop_token stop_token, const char *name) noexcept;
 
   template <Containerish T>

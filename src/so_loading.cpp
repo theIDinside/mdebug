@@ -6,11 +6,11 @@
 #include "symbolication/objfile.h"
 #include <filesystem>
 
-SharedObject::SharedObject(int so_id, TPtr<link_map> tloc, AddrPtr addr, Path &&path,
-                           AddressRange address_range) noexcept
+SharedObject::SharedObject(int so_id, TPtr<link_map> tloc, AddrPtr addr, Path &&path) noexcept
     : so_id(so_id), tracee_location(tloc), elf_vma_addr_diff(addr), path(std::move(path)),
-      so_name(path.filename()), symbol_info(SharedObjectSymbols::None), addr_range(address_range), objfile(nullptr)
+      so_name(this->path.filename()), symbol_info(SharedObjectSymbols::None), objfile(nullptr)
 {
+  addr_range.low = addr;
 }
 
 std::string_view
@@ -50,9 +50,20 @@ SharedObject::load_objectfile() noexcept
   if (objfile)
     return objfile;
 
+  if (!std::filesystem::exists(path))
+    return nullptr;
   objfile = mmap_objectfile(path);
   ASSERT(objfile != nullptr, "Failed to mmap objfile {}", path.c_str());
   return objfile;
+}
+
+bool
+SharedObject::has_debug_info() const noexcept
+{
+  if (objfile == nullptr)
+    return false;
+
+  return objfile->parsed_elf->get_section(".debug_info") != nullptr;
 }
 
 Path
@@ -71,7 +82,7 @@ SharedObjectMap::add_if_new(TPtr<link_map> tracee_location, AddrPtr elf_diff, Pa
   auto it = find(shared_objects, [&p = path](const auto &so) { return so.path == p; });
   if (it == std::end(shared_objects)) {
     const auto so_id = next_so_id++;
-    shared_objects.push_back(SharedObject{so_id, tracee_location, elf_diff, std::move(path), {}});
+    shared_objects.push_back(SharedObject{so_id, tracee_location, elf_diff, std::move(path)});
     return so_id;
   }
   return std::nullopt;

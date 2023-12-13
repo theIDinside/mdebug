@@ -1,11 +1,11 @@
 #pragma once
 #include "../common.h"
+#include "cu_symbol_info.h"
 #include "dwarf.h"
 #include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
 #include "lnp.h"
-#include "source_file.h"
 #include <string_view>
 #include <sys/mman.h>
 
@@ -97,8 +97,8 @@ struct ObjectFile
   std::span<sym::dw::LNPHeader> get_lnp_headers() noexcept;
   void add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
                        std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes);
-  void add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept;
-  std::vector<sym::CompilationUnit> &source_units() noexcept;
+  void add_initialized_cus(std::span<sym::CompilationUnitSymbolInfo> new_cus) noexcept;
+  std::vector<sym::CompilationUnitSymbolInfo> &source_units() noexcept;
 
 private:
   std::mutex unit_data_write_lock;
@@ -111,7 +111,10 @@ private:
   std::shared_ptr<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>> parsed_ltes;
 
   std::mutex cu_write_lock;
-  std::vector<sym::CompilationUnit> comp_units;
+  std::vector<sym::CompilationUnitSymbolInfo> comp_units;
+
+  std::mutex block_array_write_lock;
+  std::vector<sym::BlockArray> block_array;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

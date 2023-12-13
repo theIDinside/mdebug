@@ -3,6 +3,7 @@
 #include "../dwarf_binary_reader.h"
 #include "../elf.h"
 #include "../objfile.h"
+#include "common.h"
 #include "debug_info_reader.h"
 
 namespace sym::dw {
@@ -79,10 +80,11 @@ DieMetaData::create_die(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent
                      .tag = abbr.tag};
 }
 
-UnitHeader::UnitHeader(u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset,
-                       u8 addr_size, u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept
+UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
+                       u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
+                       DwarfUnitType unit_type) noexcept
     : sec_offset(sec_offset), unit_size(unit_size), die_data(die_data), abbreviation_sec_offset(abbrev_offset),
-      address_size(addr_size), dwarf_format(format), version(version), unit_type(unit_type)
+      address_size(addr_size), dwarf_format(format), version(version), unit_type(unit_type), id(id)
 {
 }
 
@@ -154,6 +156,12 @@ bool
 UnitHeader::spans_across(u64 offset) const noexcept
 {
   return offset >= sec_offset && offset <= (sec_offset + unit_size);
+}
+
+SymbolInfoId
+UnitHeader::unit_id() const noexcept
+{
+  return id;
 }
 
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
@@ -266,10 +274,9 @@ UnitData::load_dies() noexcept
   const auto die_sec_offset = reader.sec_offset();
   const auto [abbr_code, uleb_sz] = reader.read_uleb128();
 
-  ASSERT(abbr_code < abbreviations.size(), "Abbreviation code {} is invalid", abbr_code);
-  DLOG("dwarf", "First die in new code: 0x{:x} (code={})", std::uintptr_t(reader.ptr()), abbr_code);
-  ASSERT(abbr_code != 0 && abbreviations.size() > 3,
-         "Top level DIE expected to not be null (i.e. abbrev code != 0)");
+  ASSERT(abbr_code <= abbreviations.size() && abbr_code != 0,
+         "[cu=0x{:x}]: Unit DIE abbreviation code {} is invalid, max={}", section_offset(), abbr_code,
+         abbreviations.size());
   auto &abbreviation = abbreviations[abbr_code - 1];
   reader.skip_attributes(abbreviation.attributes);
   // Siblings and parent ids stored here
@@ -316,8 +323,6 @@ UnitData::load_dies() noexcept
 
     dies.push_back(new_entry);
   }
-
-  DLOG("mdb", "CU 0x{:x} loaded {} dies", static_cast<u64>(unit_die.section_offset), dies.size());
 }
 
 UnitData *
@@ -379,6 +384,7 @@ read_unit_headers(ObjectFile *obj) noexcept
   const auto dbg_info = obj->parsed_elf->debug_info;
   std::vector<UnitHeader> result{};
   DwarfBinaryReader reader{obj->parsed_elf, dbg_info};
+  auto unit_index = 0u;
   while (reader.has_more()) {
     const auto sec_offset = reader.bytes_read();
     u64 unit_len = reader.peek_value<u32>();
@@ -417,9 +423,17 @@ read_unit_headers(ObjectFile *obj) noexcept
     }
     const auto header_len = reader.pop_bookmark();
     const auto die_data_len = unit_len - header_len;
-    UnitHeader h{sec_offset, total_unit_size, reader.get_span(die_data_len), abb_offs,
-                 addr_size,  format,          (DwarfVersion)version,         unit_type};
+    UnitHeader h{SymbolInfoId{unit_index},
+                 sec_offset,
+                 total_unit_size,
+                 reader.get_span(die_data_len),
+                 abb_offs,
+                 addr_size,
+                 format,
+                 (DwarfVersion)version,
+                 unit_type};
     result.push_back(h);
+    ++unit_index;
     ASSERT(reader.bytes_read() == sec_offset + unit_len + init_len,
            "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,
            reader.bytes_read());

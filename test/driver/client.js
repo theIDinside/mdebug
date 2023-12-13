@@ -86,9 +86,12 @@ class DAClient {
         const { path, args } = parsed
         console.log(`${JSON.stringify(parsed)}`)
         console.log(`Recording using ${process.env['REC']}`)
-        this.mdb = spawn(path, ['record', ...args, mdb, ...mdb_args])
+        let mdb_recorded_arg = ['-r', '--thread-pool-size', '2', ...mdb_args]
+        this.mdb = spawn(path, ['record', ...args, mdb, ...mdb_recorded_arg])
       } else {
-        this.mdb = spawn(mdb, mdb_args, {
+        // let config_args = ['--thread-pool-size', 8, '--test-foo']
+        let config_args = ['-t', 12]
+        this.mdb = spawn(mdb, [...config_args, ...mdb_args], {
           shell: true,
           stdio: 'pipe',
         })

@@ -2,6 +2,7 @@
 #include "../../common.h"
 #include "../dwarf.h"
 #include "../dwarf_defs.h"
+#include "common.h"
 
 struct ObjectFile;
 struct ElfSection;
@@ -83,8 +84,8 @@ struct DieMetaData
 class UnitHeader
 {
 public:
-  UnitHeader(u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size,
-             u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept;
+  UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset,
+             u8 addr_size, u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept;
   u8 offset_size() const noexcept;
   u8 addr_size() const noexcept;
   const u8 *abbreviation_data(const ElfSection *abbrev_sec) const noexcept;
@@ -95,6 +96,7 @@ public:
   u8 header_len() const noexcept;
   std::span<const u8> get_die_data() const noexcept;
   bool spans_across(u64 sec_offset) const noexcept;
+  SymbolInfoId unit_id() const noexcept;
 
 private:
   u64 sec_offset;
@@ -105,6 +107,7 @@ private:
   u8 dwarf_format;
   DwarfVersion version;
   DwarfUnitType unit_type;
+  SymbolInfoId id;
 };
 
 // TODO(simon): ResolveAbbreviation

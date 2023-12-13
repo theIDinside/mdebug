@@ -51,9 +51,7 @@ TaskGroup::schedule_work() noexcept
   }
   auto fut = m_promise.get_future();
   m_done_tasks.reserve(m_tasks.size());
-  for (auto w : m_tasks) {
-    ThreadPool::get_global_pool()->post_task(w);
-  }
+  ThreadPool::get_global_pool()->post_tasks(m_tasks);
   return fut;
 }
 

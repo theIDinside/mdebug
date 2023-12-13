@@ -2,10 +2,10 @@
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
 #include "cu.h"
+#include "cu_symbol_info.h"
 #include "dwarf/die.h"
 #include "dwarf/lnp.h"
 #include "elf_symbols.h"
-#include "source_file.h"
 #include "type.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
@@ -18,7 +18,7 @@ ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
       lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units()
+      comp_units(), block_array()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -163,13 +163,18 @@ sym::dw::LineTable
 ObjectFile::get_linetable(u64 offset) noexcept
 {
   auto &headers = *lnp_headers;
-  auto header = std::ranges::find_if(
-      headers, [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
+  auto header = std::find_if(headers.begin(), headers.end(),
+                             [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
   ASSERT(header != std::end(headers), "Failed to find LNP Header with offset 0x{:x}", offset);
   auto kvp = std::find_if(parsed_ltes->begin(), parsed_ltes->end(),
                           [offset](const auto &kvp) { return kvp.first == offset; });
-  ASSERT(kvp != std::end(*parsed_ltes), "Failed to find parsed LineTable Entries for offset 0x{:x}", offset);
-  return sym::dw::LineTable{header.base(), &kvp->second, parsed_elf->relocate_addr(nullptr)};
+  if (kvp == std::end(*parsed_ltes)) {
+    for (const auto &kvp : *parsed_ltes) {
+      DLOG("mdb", "LTE: 0x{:x}", kvp.first);
+    }
+    ASSERT(false, "Failed to find parsed LineTable Entries for offset 0x{:x}", offset);
+  }
+  return sym::dw::LineTable{&(*header), &kvp->second, parsed_elf->relocate_addr(nullptr)};
 }
 
 void
@@ -195,6 +200,7 @@ void
 ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
                             std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes)
 {
+  std::lock_guard lock(parsed_lte_write_lock);
   ASSERT(headers.size() == parsed_ltes.size(), "headers != parsed_lte count!");
   auto h = headers.begin();
   auto p = std::make_move_iterator(parsed_ltes.begin());
@@ -205,20 +211,24 @@ ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
 }
 
 void
-ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept
+ObjectFile::add_initialized_cus(std::span<sym::CompilationUnitSymbolInfo> new_cus) noexcept
 {
-  DLOG("mdb", "Adding {} compilation units", new_cus.size());
+  // TODO(simon): We do stupid sorting. implement something better optimized
   std::lock_guard lock(cu_write_lock);
-  auto insert_it =
-      std::find_if(comp_units.begin(), comp_units.end(),
-                   [pc = new_cus.begin()->low_pc()](const sym::CompilationUnit &cu) { return pc < cu.low_pc(); });
+  comp_units.insert(comp_units.end(), std::make_move_iterator(new_cus.begin()),
+                    std::make_move_iterator(new_cus.end()));
+  std::sort(comp_units.begin(), comp_units.end(), sym::CompilationUnitSymbolInfo::Sorter());
 
-  comp_units.insert(insert_it, std::make_move_iterator(new_cus.begin()), std::make_move_iterator(new_cus.end()));
-  ASSERT(std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnit::SortByBounds{}),
-         "Compilation units is not sorted");
+  if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnitSymbolInfo::Sorter())) {
+    for (const auto &cu : comp_units) {
+      DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
+           cu.start_pc(), cu.end_pc());
+    }
+    ASSERT(false, "Dumped CU contents");
+  }
 }
 
-std::vector<sym::CompilationUnit> &
+std::vector<sym::CompilationUnitSymbolInfo> &
 ObjectFile::source_units() noexcept
 {
   return comp_units;
