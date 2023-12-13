@@ -7,7 +7,6 @@
 #include <cxxabi.h>
 #include <exception>
 #include <execinfo.h>
-#include <expected>
 #include <fcntl.h>
 #include <filesystem>
 #include <optional>
