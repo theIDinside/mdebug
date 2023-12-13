@@ -2,6 +2,7 @@
 #include "../../event_queue.h"
 #include "../../tracer.h"
 #include "../../utils/logger.h"
+#include "../../utils/signal.h"
 #include "commands.h"
 #include "events.h"
 #include "fmt/core.h"
@@ -122,6 +123,7 @@ DAP::write_protocol_message(std::string_view msg) noexcept
 void
 DAP::run_ui_loop()
 {
+  utils::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
   auto cleanup_times = 5;
   ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 4};
   static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
