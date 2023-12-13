@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(MIDAS_SOURCES
   src/main.cpp
+  src/mdb_config.cpp
+  src/mdb_config.h
   src/event_queue.cpp
   src/event_queue.h
   src/utils/logger.cpp
