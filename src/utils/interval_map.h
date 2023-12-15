@@ -144,7 +144,7 @@ private:
   constexpr auto
   find_index_to_insert_at(A pc) const noexcept
   {
-    constexpr auto find = [](const IntervalNode<MapDatum, A> &node, int pc) { return node.addr < pc; };
+    constexpr auto find = [](const IntervalNode<MapDatum, A> &node, auto pc) { return node.addr < pc; };
 
     auto it = std::lower_bound(interval.begin(), interval.end(), pc, find);
     auto dist = std::distance(interval.begin(), it);
