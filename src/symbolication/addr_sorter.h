@@ -37,3 +37,10 @@ public:
     return this->operator()(*a, *b);
   }
 };
+
+template <Addressable T>
+constexpr auto
+contained_in(const T &t, AddrPtr pc) noexcept -> bool
+{
+  return t.start_pc() <= pc && t.end_pc() >= pc;
+}

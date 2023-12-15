@@ -20,6 +20,14 @@ struct AddressRange
   bool contains(AddressRange &range) const noexcept;
   bool contains(AddrPtr ptr) const noexcept;
   bool is_valid() const noexcept;
+  AddrPtr start_pc() const noexcept;
+  AddrPtr end_pc() const noexcept;
+
+  constexpr static auto
+  Sorter()
+  {
+    return AddressableSorter<AddressRange, true>{};
+  }
 };
 
 class BoundsBuilder
