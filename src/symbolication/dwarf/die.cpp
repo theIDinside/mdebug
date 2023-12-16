@@ -84,7 +84,7 @@ UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span
                        u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
                        DwarfUnitType unit_type) noexcept
     : sec_offset(sec_offset), unit_size(unit_size), die_data(die_data), abbreviation_sec_offset(abbrev_offset),
-      address_size(addr_size), dwarf_format(format), version(version), unit_type(unit_type), id(id)
+      address_size(addr_size), dwarf_format(format), dw_version(version), unit_type(unit_type), id(id)
 {
 }
 
@@ -138,9 +138,9 @@ UnitHeader::header_len() const noexcept
   // if we're DWARF64, init length is 8 + 4 + 8, whereas DWARF32 contains 4 + 0 + 4
   switch (format()) {
   case 4:
-    return (4 * 2) + 2 + 1 + (version == DwarfVersion::D5 ? 1 : 0);
+    return (4 * 2) + 2 + 1 + (dw_version == DwarfVersion::D5 ? 1 : 0);
   case 8:
-    return (8 * 2 + 4) + 2 + 1 + (version == DwarfVersion::D5 ? 1 : 0);
+    return (8 * 2 + 4) + 2 + 1 + (dw_version == DwarfVersion::D5 ? 1 : 0);
   default:
     PANIC("Invalid Dwarf Format (32-bit / 64-bit)");
   }
@@ -164,6 +164,12 @@ UnitHeader::unit_id() const noexcept
   return id;
 }
 
+DwarfVersion
+UnitHeader::version() const noexcept
+{
+  return dw_version;
+}
+
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
     : objfile(owning_objfile), unit_header(header), unit_die(), dies(), fully_loaded(false), abbreviations()
 {
@@ -175,21 +181,6 @@ UnitData::set_abbreviations(AbbreviationInfo::Table &&table) noexcept
   abbreviations = std::move(table);
 }
 
-bool
-UnitData::has_loaded_dies() const noexcept
-{
-  return fully_loaded;
-}
-
-void
-UnitData::clear_die_metadata() noexcept
-{
-  dies.clear();
-  // actually release the memory. Otherwise, what's the point?
-  dies.shrink_to_fit();
-  fully_loaded = false;
-}
-
 const AbbreviationInfo &
 UnitData::get_abbreviation(u32 abbreviation_code) const noexcept
 {
@@ -199,11 +190,26 @@ UnitData::get_abbreviation(u32 abbreviation_code) const noexcept
   return abbreviations[adjusted];
 }
 
+bool
+UnitData::has_loaded_dies() const noexcept
+{
+  return fully_loaded;
+}
+
 const std::vector<DieMetaData> &
 UnitData::get_dies() noexcept
 {
   load_dies();
   return dies;
+}
+
+void
+UnitData::clear_die_metadata() noexcept
+{
+  dies.clear();
+  // actually release the memory. Otherwise, what's the point?
+  dies.shrink_to_fit();
+  fully_loaded = false;
 }
 
 ObjectFile *
@@ -257,10 +263,23 @@ UnitData::continue_from(const DieMetaData *die) noexcept
 const DieMetaData *
 UnitData::get_die(u64 offset) noexcept
 {
+  load_dies();
   auto it = std::ranges::find_if(dies, [&](const dw::DieMetaData &die) { return die.section_offset == offset; });
   if (it == std::end(dies))
     return nullptr;
   return &(*it);
+}
+
+DieReference
+UnitData::get_cu_die_ref(u64 offset) noexcept
+{
+  return DieReference{this, get_die(offset)};
+}
+
+DieReference
+UnitData::get_cu_die_ref(Index offset) noexcept
+{
+  return DieReference{this, &get_dies()[offset.value()]};
 }
 
 void
@@ -452,5 +471,20 @@ bool
 IndexedDieReference::valid() const noexcept
 {
   return cu != nullptr;
+}
+
+std::optional<AttributeValue>
+DieReference::read_attribute(Attribute attr) noexcept
+{
+  UnitReader reader{cu};
+  const auto &attrs = cu->get_abbreviation(die->abbreviation_code);
+  reader.seek_die(*die);
+  for (auto attribute : attrs.attributes) {
+    const auto value = read_attribute_value(reader, attribute, attrs.implicit_consts);
+    if (value.name == attr) {
+      return value;
+    }
+  }
+  return std::nullopt;
 }
 } // namespace sym::dw

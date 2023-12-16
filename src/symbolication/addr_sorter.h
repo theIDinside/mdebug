@@ -38,6 +38,22 @@ public:
   }
 };
 
+template <Addressable T> class AddressableLowBoundSorter
+{
+public:
+  constexpr bool
+  operator()(const T &a, const T &b) const noexcept
+  {
+    return a.start_pc() < b.start_pc();
+  }
+
+  constexpr bool
+  operator()(const T *a, const T *b) const noexcept
+  {
+    return this->operator()(*a, *b);
+  }
+};
+
 template <Addressable T>
 constexpr auto
 contained_in(const T &t, AddrPtr pc) noexcept -> bool

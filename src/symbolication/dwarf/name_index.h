@@ -24,7 +24,7 @@ struct DieNameReference
     struct
     {
       UnitData *cu;
-      u32 die_index;
+      Index die_index;
     };
     // Collision variant - if two identical exists, but refer to different DIE's, this DieNameReference signals
     // that
@@ -38,6 +38,7 @@ struct DieNameReference
 
   DieNameReference() : cu(nullptr), die_index(0) {}
   DieNameReference(UnitData *cu, u32 die_index) : cu(cu), die_index(die_index) {}
+  DieNameReference(UnitData *cu, Index die_index) : cu(cu), die_index(die_index) {}
 
   bool is_valid() const;
   bool is_unique() const noexcept;
@@ -56,7 +57,6 @@ public:
   {
     DieNameReference *dies;
     u32 count;
-
     bool
     is_some() const noexcept
     {
@@ -71,6 +71,7 @@ public:
   };
 
   NameIndex(std::string_view name) noexcept;
+  std::optional<std::span<const DieNameReference>> search(std::string_view name) noexcept;
   FindResult get_dies(std::string_view name) noexcept;
   void merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
 

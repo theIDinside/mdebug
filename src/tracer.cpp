@@ -141,11 +141,6 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
     tg.add_tasks(std::span{work});
     tg.schedule_work().wait();
   }
-  auto &init_cus = obj_file->source_units();
-  ASSERT(!init_cus.empty(), "No Source Units initialized");
-
-  for (auto &c : init_cus)
-    c.get_fn_by_pc(nullptr);
 }
 
 void

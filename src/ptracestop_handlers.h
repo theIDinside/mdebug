@@ -65,7 +65,6 @@ private:
   bool resumed_to_resume_addr;
   sym::Frame start_frame;
   LineTableEntry entry;
-  const CompilationUnitFile *cu;
 };
 
 template <typename A>

@@ -56,8 +56,6 @@ async function unwindFromSharedObject() {
   console.log(`bps2: ${JSON.stringify(bps2)}`)
   // hit breakpoint in todo.cpp
   await da_client.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-  console.log('foo')
-  await da_client.setInsBreakpoint(so_addr)
   await da_client.contNextStop()
   const frames = await da_client.stackTrace(threads[0].id, seconds(1)).then((res) => {
     checkResponse(res, 'stackTrace', true)

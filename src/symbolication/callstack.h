@@ -1,6 +1,6 @@
 #pragma once
 #include "../common.h"
-#include "cu_file.h"
+#include <symbolication/fnsymbol.h>
 #include <vector>
 
 namespace ui::dap {
@@ -26,8 +26,7 @@ struct Frame
   InsideRange inside(TPtr<void> addr) const noexcept;
   std::optional<std::string_view> name() const noexcept;
   AddrPtr rip;
-  const FunctionSymbol *symbol;
-  const CompilationUnitFile *cu_file;
+  const sym::FunctionSymbol *symbol;
   int level;
   FrameType type;
   int frame_id;
@@ -35,13 +34,13 @@ struct Frame
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept
   {
-    return l.level == r.level && l.cu_file == r.cu_file && l.symbol == r.symbol;
+    return sym::is_same(l.symbol, r.symbol);
   }
 
   friend constexpr bool
   same_symbol(const Frame &l, const Frame &r) noexcept
   {
-    return l.symbol == r.symbol && l.cu_file == r.cu_file;
+    return l == r;
   }
 
   friend constexpr AddrPtr resume_address(const Frame &f) noexcept;

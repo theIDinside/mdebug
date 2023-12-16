@@ -1,6 +1,7 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "block.h"
 #include "cu.h"
 #include "cu_symbol_info.h"
 #include "dwarf/die.h"
@@ -19,7 +20,7 @@ ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
       lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), block_array()
+      comp_units(), block_array(), addr_cu_map()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -212,27 +213,34 @@ ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
 }
 
 void
-ObjectFile::add_initialized_cus(std::span<sym::CompilationUnitSymbolInfo> new_cus) noexcept
+ObjectFile::add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept
 {
   // TODO(simon): We do stupid sorting. implement something better optimized
   std::lock_guard lock(cu_write_lock);
   comp_units.insert(comp_units.end(), std::make_move_iterator(new_cus.begin()),
                     std::make_move_iterator(new_cus.end()));
-  std::sort(comp_units.begin(), comp_units.end(), sym::CompilationUnitSymbolInfo::Sorter());
+  std::sort(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter());
 
-  if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnitSymbolInfo::Sorter())) {
+  if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter())) {
     for (const auto &cu : comp_units) {
       DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
            cu.start_pc(), cu.end_pc());
     }
     ASSERT(false, "Dumped CU contents");
   }
+  addr_cu_map.add_cus(new_cus);
 }
 
-std::vector<sym::CompilationUnitSymbolInfo> &
+std::vector<sym::SourceFileSymbolInfo> &
 ObjectFile::source_units() noexcept
 {
   return comp_units;
+}
+
+std::vector<sym::dw::UnitData *>
+ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
+{
+  return addr_cu_map.find_by_pc(pc - parsed_elf->relocate_addr(nullptr));
 }
 
 ObjectFile *

@@ -85,6 +85,11 @@ public:
   RelocatedLteIterator(Iter iter, AddrPtr base) noexcept;
 
   LineTableEntry operator*();
+  LineTableEntry get() const noexcept;
+
+  RelocatedLteIterator operator+(difference_type diff);
+  RelocatedLteIterator operator-(difference_type diff);
+  difference_type operator-(RelocatedLteIterator diff);
 
   RelocatedLteIterator &operator+=(difference_type diff);
   RelocatedLteIterator &operator-=(difference_type diff);
@@ -126,6 +131,8 @@ public:
 
   std::optional<sym::dw::DirEntry> directory(u64 dir_index) const noexcept;
   std::optional<sym::dw::FileEntry> file(u64 file_index) const noexcept;
+  RelocatedLteIterator find_by_pc(AddrPtr addr) noexcept;
+  u64 size() const noexcept;
 
 private:
   AddrPtr relocated_base;

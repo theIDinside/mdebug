@@ -14,6 +14,7 @@
 #include "symbolication/callstack.h"
 #include "symbolication/cu.h"
 #include "symbolication/cu_file.h"
+#include "symbolication/dwarf/name_index.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
@@ -440,7 +441,21 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {
       matching_symbols.push_back(*s);
     }
+    auto ni = obj->name_index();
+    auto res = ni->free_functions.search(function_name).value_or(std::span<sym::dw::DieNameReference>{});
+    for (const auto &ref : res) {
+      auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
+      auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
+      auto high_pc = die_ref.read_attribute(Attribute::DW_AT_high_pc);
+      if (low_pc) {
+        auto addr = obj->parsed_elf->relocate_addr(low_pc->address());
+        matching_symbols.emplace_back(function_name, addr, 0);
+        DLOG("mdb", "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path.c_str(),
+             die_ref.cu->section_offset(), die_ref.die->section_offset, function_name, addr);
+      }
+    }
   }
+
   DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
   for (const auto &sym : matching_symbols) {
     constexpr u64 bkpt = 0xcc;
@@ -839,8 +854,7 @@ TraceeController::current_frame(TaskInfo *task) noexcept
   if (symbol)
     return sym::Frame{
         .rip = task->registers->rip,
-        .symbol = symbol->fn_sym,
-        .cu_file = symbol->cu_file,
+        .symbol = symbol,
         .level = 0,
         .type = sym::FrameType::Full,
     };
@@ -848,7 +862,6 @@ TraceeController::current_frame(TaskInfo *task) noexcept
     return sym::Frame{
         .rip = task->registers->rip,
         .symbol = nullptr,
-        .cu_file = nullptr,
         .level = 0,
         .type = sym::FrameType::Unknown,
     };
@@ -994,13 +1007,13 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
   auto frame_pcs = task->return_addresses(this, req);
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
-    auto symbol = find_fn_by_pc(i->as_void());
+    auto frame_pc = i->as_void();
+    auto symbol = find_fn_by_pc(frame_pc);
     const auto id = new_frame_id(task);
     if (symbol)
       cs.frames.push_back(sym::Frame{
           .rip = i->as_void(),
-          .symbol = symbol->fn_sym,
-          .cu_file = symbol->cu_file,
+          .symbol = symbol,
           .level = static_cast<int>(levels - level),
           .type = sym::FrameType::Full,
           .frame_id = id,
@@ -1009,7 +1022,6 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
       cs.frames.push_back(sym::Frame{
           .rip = i->as_void(),
           .symbol = nullptr,
-          .cu_file = nullptr,
           .level = static_cast<int>(levels - level),
           .type = sym::FrameType::Unknown,
           .frame_id = id,
@@ -1031,20 +1043,26 @@ TraceeController::find_obj_by_pc(AddrPtr addr) const noexcept
   return nullptr;
 }
 
-std::optional<SearchFnSymResult>
+sym::FunctionSymbol *
 TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 {
   const auto obj = find_obj_by_pc(addr);
-  for (auto &f : obj->m_full_cu) {
-    if (f.may_contain(addr)) {
-      const auto fn = f.find_subprogram(addr);
-      if (fn != nullptr) {
-        return SearchFnSymResult{.fn_sym = fn, .cu_file = &f};
+  if (obj == nullptr)
+    return {};
+
+  auto cus_matching_addr = obj->get_cus_from_pc(addr);
+
+  // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
+  //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
+  for (auto cu : cus_matching_addr) {
+    for (auto &src : obj->source_units()) {
+      if (cu == src.get_dwarf_unit()) {
+        if (auto fn = src.get_fn_by_pc(addr); fn)
+          return fn;
       }
     }
   }
-  DLOG("mdb", "couldn't find fn for pc {}", addr);
-  return std::nullopt;
+  return nullptr;
 }
 
 std::optional<std::string_view>

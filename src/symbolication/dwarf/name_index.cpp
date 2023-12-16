@@ -7,7 +7,7 @@ bool
 DieNameReference::is_valid() const
 {
   if (cu == nullptr) {
-    return die_index != 0;
+    return die_index.value() != 0;
   }
   return true;
 }
@@ -59,7 +59,7 @@ NameIndex::add_name(std::string_view name, u32 die_index, UnitData *cu) noexcept
     }
   } else {
     elem.cu = cu;
-    elem.die_index = die_index;
+    elem.die_index = Index{die_index};
   }
 }
 
@@ -82,6 +82,22 @@ NameIndex::merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_ref
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
   }
+}
+
+std::optional<std::span<const DieNameReference>>
+NameIndex::search(std::string_view name) noexcept
+{
+  auto it = mapping.find(name);
+  if (it == std::end(mapping))
+    return std::nullopt;
+
+  if (it->second.is_unique()) {
+    return std::span{&(it->second), 1};
+  }
+
+  const auto collision_index = it->second.collision_displacement_index;
+  auto &dies = colliding_die_name_refs[collision_index];
+  return std::span{dies};
 }
 
 NameIndex::FindResult

@@ -1,5 +1,6 @@
 #pragma once
 #include "../../common.h"
+#include "../block.h"
 #include "../dwarf.h"
 #include "../dwarf_defs.h"
 #include "common.h"
@@ -97,6 +98,7 @@ public:
   std::span<const u8> get_die_data() const noexcept;
   bool spans_across(u64 sec_offset) const noexcept;
   SymbolInfoId unit_id() const noexcept;
+  DwarfVersion version() const noexcept;
 
 private:
   u64 sec_offset;
@@ -105,7 +107,7 @@ private:
   u64 abbreviation_sec_offset;
   u8 address_size;
   u8 dwarf_format;
-  DwarfVersion version;
+  DwarfVersion dw_version;
   DwarfUnitType unit_type;
   SymbolInfoId id;
 };
@@ -118,18 +120,19 @@ class ResolvedAbbreviationSet
 public:
 };
 
+struct DieReference;
+
 class UnitData
 {
 public:
   UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept;
   void set_abbreviations(AbbreviationInfo::Table &&table) noexcept;
-  void load_dies() noexcept;
+
   bool has_loaded_dies() const noexcept;
+  const std::vector<DieMetaData> &get_dies() noexcept;
   void clear_die_metadata() noexcept;
   const AbbreviationInfo &get_abbreviation(u32 abbreviation_code) const noexcept;
-  const std::vector<DieMetaData> &get_dies() noexcept;
   ObjectFile *get_objfile() const noexcept;
-
   /* TODO(simon): Resolve abbreviations which contains indirections to other abbreviations.*/
   ResolvedAbbreviationSet get_resolved_attributes(u64 abbreviation) noexcept;
   const UnitHeader &header() const noexcept;
@@ -138,8 +141,11 @@ public:
   u32 index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
   const DieMetaData *get_die(u64 offset) noexcept;
+  DieReference get_cu_die_ref(u64 offset) noexcept;
+  DieReference get_cu_die_ref(Index offset) noexcept;
 
 private:
+  void load_dies() noexcept;
   ObjectFile *objfile;
   UnitHeader unit_header;
   // The Compilation unit die (i.e. the die with DW_TAG_compile_unit; also the first DIE found in `dies` - but as
@@ -148,6 +154,12 @@ private:
   std::vector<DieMetaData> dies;
   bool fully_loaded;
   AbbreviationInfo::Table abbreviations;
+};
+
+struct AddrRangeToCu
+{
+  AddressRange range;
+  UnitData *data;
 };
 
 /** Interface to read, parse/resolve information described by a DWARF "debug information entry". It uses the DIE
@@ -175,6 +187,7 @@ struct DieReference
   UnitData *cu;
   const DieMetaData *die;
   bool valid() const noexcept;
+  std::optional<AttributeValue> read_attribute(Attribute attr) noexcept;
 };
 
 struct IndexedDieReference

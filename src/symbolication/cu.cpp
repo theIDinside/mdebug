@@ -397,6 +397,8 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
 {
   LineTable ltes;
   const auto elf = obj_file->parsed_elf;
+  AddrPtr low = UINTMAX_MAX;
+  AddrPtr hi = nullptr;
 
   CompilationUnitFile f{cu_die};
   if (header.addr_size == 4) {
@@ -421,7 +423,8 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
             auto end = reader.read_value<u64>();
             if (start == 0 && end == 0)
               break;
-            f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(end));
+            if (start != 0)
+              f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(end));
           }
         } else {
           DwarfBinaryReader reader{elf, elf->debug_rnglists, value};
@@ -430,7 +433,9 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
             switch (range_entry_type) {
             case RangeListEntry::DW_RLE_start_length: {
               u64 start = reader.read_value<u64>();
+              low = std::min(low, elf->relocate_addr(start));
               u64 length = reader.read_uleb128<u64>();
+              hi = std::max(hi, elf->relocate_addr(start + length));
               f.add_addr_rng(elf->relocate_addr(start), elf->relocate_addr(start + length));
             } break;
             case RangeListEntry::DW_RLE_offset_pair: {
@@ -451,7 +456,7 @@ CUProcessor::process_compile_unit_die(DebugInfoEntry *cu_die) noexcept
         header->parse_linetable(elf, elf->relocate_addr(nullptr), bounds);
         f.set_linetable(header);
       } else if (att.name == Attribute::DW_AT_low_pc) {
-        const auto low = att.address();
+        low = att.address();
         if (!cu_die->get_attribute(Attribute::DW_AT_high_pc)) {
           f.set_default_base_addr(low);
         }

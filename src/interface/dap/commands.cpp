@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <symbolication/cu_symbol_info.h>
 #include <unistd.h>
 #include <unordered_set>
 #include <valarray>
@@ -533,27 +534,34 @@ StackTrace::execute(Tracer *tracer) noexcept
   stack_frames.reserve(cfs.frames.size());
   for (const auto &frame : cfs.frames) {
     if (frame.type == sym::FrameType::Full) {
-      const auto &lt = frame.cu_file->line_table();
-      DLOG("dwarf", "walking line table of CU: {} for frame {} at pc {}", frame.cu_file->name(),
-           frame.function_name().value_or("could not find fn name"), frame.rip);
+      const auto lt = frame.symbol->decl_file->get_linetable().value_or(sym::dw::LineTable{});
+
       auto line = 0;
       auto col = 0;
-      // todo(simon): linear search is horrid. But binary search is so fragile instead. So for now, we do the
-      // absolute worst, so long it works.
-      for (auto ita = lt.cbegin(), itb = ita + 1; ita != lt.cend() && itb != lt.cend(); ita++, itb++) {
-        if (ita->pc <= frame.rip && itb->pc > frame.rip) {
-          line = ita->line;
-          col = ita->column;
-          break;
+      if (lt.is_valid()) {
+        // todo(simon): linear search is horrid. But binary search is so fragile instead. So for now, we do the
+        // absolute worst, so long it works.
+        auto iter_count = 0u;
+        const auto end = std::end(lt);
+        for (auto ita = std::begin(lt), itb = ita + 1; ita != end && itb != end; ++ita, ++itb) {
+          if ((*ita).pc <= frame.rip && (*itb).pc > frame.rip) {
+            line = (*ita).line;
+            col = (*ita).column;
+            break;
+          }
+          if constexpr (MDB_DEBUG == 1) {
+            ++iter_count;
+            ASSERT(iter_count <= lt.size(), "Iterated beyond table size");
+          }
         }
+        stack_frames.push_back(StackFrame{
+            .id = frame.frame_id,
+            .name = frame.name().value_or("unknown"),
+            .source = Source{.name = frame.symbol->decl_file->name(), .path = frame.symbol->decl_file->name()},
+            .line = line,
+            .column = col,
+            .rip = fmt::format("{}", frame.rip)});
       }
-      stack_frames.push_back(
-          StackFrame{.id = frame.frame_id,
-                     .name = frame.name().value_or("unknown"),
-                     .source = Source{.name = frame.cu_file->name(), .path = frame.cu_file->name()},
-                     .line = line,
-                     .column = col,
-                     .rip = fmt::format("{}", frame.rip)});
     } else {
       stack_frames.push_back(StackFrame{.id = frame.frame_id,
                                         .name = frame.name().value_or("unknown"),

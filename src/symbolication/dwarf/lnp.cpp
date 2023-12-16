@@ -2,6 +2,7 @@
 #include "../block.h"
 #include "../dwarf_binary_reader.h"
 #include "../elf.h"
+#include <algorithm>
 
 namespace sym::dw {
 
@@ -280,6 +281,29 @@ LineTable::file(u64 file_index) const noexcept
   return line_header->file_names[file_index];
 }
 
+RelocatedLteIterator
+LineTable::find_by_pc(AddrPtr addr) noexcept
+{
+  auto start = begin();
+  if ((*start).pc == addr)
+    return start;
+
+  auto it =
+      std::lower_bound(begin(), end(), addr, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  if (it == end())
+    return end();
+
+  auto lte = it.get();
+  DLOG("mdb", "[lte]: search by {}; found pc={}, {}:{}", addr, lte.pc, lte.line, u32{lte.column});
+  return it;
+}
+
+u64
+LineTable::size() const noexcept
+{
+  return this->ltes->table.size();
+}
+
 LineTable::LineTable() noexcept : relocated_base(nullptr), line_header(nullptr), ltes(nullptr) {}
 
 LineTable::LineTable(LNPHeader *header, ParsedLineTableEntries *ltes, AddrPtr relocated_base) noexcept
@@ -290,9 +314,35 @@ LineTable::LineTable(LNPHeader *header, ParsedLineTableEntries *ltes, AddrPtr re
 LineTableEntry
 RelocatedLteIterator::operator*()
 {
+  return get();
+}
+
+LineTableEntry
+RelocatedLteIterator::get() const noexcept
+{
   auto lte = *it;
   lte.pc += base.get();
   return lte;
+}
+
+RelocatedLteIterator
+RelocatedLteIterator::operator+(difference_type diff)
+{
+  auto copy = *this;
+  return copy += diff;
+}
+
+RelocatedLteIterator
+RelocatedLteIterator::operator-(difference_type diff)
+{
+  auto copy = *this;
+  return copy -= diff;
+}
+
+RelocatedLteIterator::difference_type
+RelocatedLteIterator::operator-(RelocatedLteIterator other)
+{
+  return it - other.it;
 }
 
 RelocatedLteIterator &

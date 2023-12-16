@@ -5,6 +5,7 @@
 #include "dwarf/common.h"
 #include "dwarf_defs.h"
 #include "fnsymbol.h"
+#include "utils/interval_map.h"
 #include <iterator>
 #include <optional>
 
@@ -32,7 +33,7 @@ public:
   PartialCompilationUnitSymbolInfo &operator=(const PartialCompilationUnitSymbolInfo &) noexcept = delete;
 };
 
-class CompilationUnitSymbolInfo
+class SourceFileSymbolInfo
 {
   dw::UnitData *unit_data;
   AddrPtr pc_start;
@@ -44,13 +45,13 @@ class CompilationUnitSymbolInfo
   SymbolInfoId id;
 
 public:
-  CompilationUnitSymbolInfo(dw::UnitData *cu_data) noexcept;
+  SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept;
 
-  CompilationUnitSymbolInfo(const CompilationUnitSymbolInfo &from) noexcept = delete;
-  CompilationUnitSymbolInfo &operator=(const CompilationUnitSymbolInfo &from) noexcept = delete;
+  SourceFileSymbolInfo(const SourceFileSymbolInfo &from) noexcept = delete;
+  SourceFileSymbolInfo &operator=(const SourceFileSymbolInfo &from) noexcept = delete;
 
-  CompilationUnitSymbolInfo(CompilationUnitSymbolInfo &&from) noexcept;
-  CompilationUnitSymbolInfo &operator=(CompilationUnitSymbolInfo &&from) noexcept;
+  SourceFileSymbolInfo(SourceFileSymbolInfo &&from) noexcept;
+  SourceFileSymbolInfo &operator=(SourceFileSymbolInfo &&from) noexcept;
 
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
@@ -62,17 +63,30 @@ public:
   AddrPtr end_pc() const noexcept;
   std::string_view name() const noexcept;
   bool function_symbols_resolved() const noexcept;
-  std::optional<sym::FunctionSymbol> get_fn_by_pc(AddrPtr pc) noexcept;
+  sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;
   dw::UnitData *get_dwarf_unit() const noexcept;
-
+  std::optional<dw::LineTable> get_linetable() noexcept;
   static constexpr auto
   Sorter() noexcept
   {
-    return AddressableSorter<CompilationUnitSymbolInfo, false>{};
+    return AddressableSorter<SourceFileSymbolInfo, false>{};
   }
 
 private:
   void resolve_fn_symbols() noexcept;
   void maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc, AddrOpt high_pc) noexcept;
+};
+
+class AddressToCompilationUnitMap
+{
+public:
+  AddressToCompilationUnitMap() noexcept;
+  std::vector<sym::dw::UnitData *> find_by_pc(AddrPtr pc) noexcept;
+  void add_cus(const std::span<SourceFileSymbolInfo> &cus) noexcept;
+
+private:
+  void add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept;
+  std::mutex mutex;
+  utils::IntervalMapping<AddrPtr, sym::dw::UnitData *> mapping;
 };
 } // namespace sym

@@ -295,7 +295,7 @@ public:
   std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
   const std::vector<AddrPtr> &dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept;
   sym::Frame current_frame(TaskInfo *task) noexcept;
-  std::optional<SearchFnSymResult> find_fn_by_pc(AddrPtr addr) const noexcept;
+  sym::FunctionSymbol *find_fn_by_pc(AddrPtr addr) const noexcept;
   ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
