@@ -175,6 +175,7 @@ add_subdirectory(dependencies/nlohmann_json)
 
 target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zydis)
 target_include_directories(mdb PUBLIC ./dependencies)
+target_include_directories(mdb PUBLIC ./src)
 
 find_program(NODEJS "node")
 
