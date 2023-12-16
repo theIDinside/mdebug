@@ -2,10 +2,10 @@
 #include "../../event_queue.h"
 #include "../../tracer.h"
 #include "../../utils/logger.h"
-#include "../../utils/signal.h"
 #include "commands.h"
 #include "events.h"
 #include "fmt/core.h"
+#include "lib/lockguard.h"
 #include "parse_buffer.h"
 #include <algorithm>
 #include <charconv>
@@ -27,8 +27,27 @@
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <thread>
+#include <utils/signals.h>
 namespace ui::dap {
 using namespace std::string_literals;
+
+constexpr pollfd
+cfg_write_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLOUT | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
+
+constexpr pollfd
+cfg_read_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLIN | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
 
 std::string_view
 ContentDescriptor::payload() const noexcept

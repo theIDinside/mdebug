@@ -59,6 +59,7 @@ ElfSection::get_ptr_offset(const u8 *inside_ptr) const noexcept
 const u8 *
 ElfSection::offset(u64 offset) const noexcept
 {
+  ASSERT(offset < m_section_size, "Offset {} is outside of section of size {}", offset, m_section_size);
   return m_section_ptr + offset;
 }
 

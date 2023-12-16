@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <bits/ranges_algo.h>
 #include <optional>
+#include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
@@ -241,8 +242,8 @@ mmap_objectfile(const Path &path) noexcept
     return nullptr;
   }
 
-  auto fd = ScopedFd::open_read_only(path);
-  const auto addr = mmap_file<u8>(fd, fd.file_size(), true);
+  auto fd = utils::ScopedFd::open_read_only(path);
+  const auto addr = fd.mmap_file<u8>({}, true);
   auto objfile = new ObjectFile{path, fd.file_size(), addr};
   return objfile;
 }

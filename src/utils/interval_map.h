@@ -155,7 +155,7 @@ private:
   constexpr auto
   find_index_of(A pc) const noexcept
   {
-    constexpr auto find = [](const IntervalNode<MapDatum, A> &node, int pc) {
+    constexpr auto find = [](const IntervalNode<MapDatum, A> &node, auto pc) {
       if constexpr (AlsoEquals) {
         return node.addr <= pc;
       } else {
@@ -164,7 +164,8 @@ private:
     };
 
     auto it = std::lower_bound(interval.begin(), interval.end(), pc, find);
-    auto dist = std::distance(interval.begin(), it);
+    u32 dist = std::distance(interval.begin(), it);
+    ASSERT(dist >= 0, "This function is expected to return positive values");
     return dist;
   }
 

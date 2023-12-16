@@ -258,7 +258,7 @@ void
 Tracer::accept_command(ui::UICommand *cmd) noexcept
 {
   {
-    SpinGuard lock{command_queue_lock};
+    LockGuard<SpinLock> lock{command_queue_lock};
     command_queue.push(cmd);
   }
   DLOG("mdb", "accepted command {}", cmd->name());
@@ -271,7 +271,7 @@ Tracer::execute_pending_commands() noexcept
   while (!command_queue.empty()) {
     // keep the lock as minimum of a time span as possible
     {
-      SpinGuard lock{command_queue_lock};
+      LockGuard<SpinLock> lock{command_queue_lock};
       pending_command = command_queue.front();
       command_queue.pop();
     }

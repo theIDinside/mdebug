@@ -11,8 +11,8 @@
 #include "symbolication/callstack.h"
 #include "symbolication/cu_file.h"
 #include "symbolication/elf.h"
+#include "symbolication/fnsymbol.h"
 #include "task.h"
-#include "utils/static_vector.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -27,6 +27,8 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <utils/scoped_fd.h>
+#include <utils/static_vector.h>
 
 namespace sym {
 class Unwinder;
@@ -67,7 +69,7 @@ struct TraceeController
   pid_t task_leader;
   std::vector<ObjectFile *> object_files;
   ObjectFile *main_executable;
-  ScopedFd procfs_memfd;
+  utils::ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   BreakpointMap bps;
@@ -114,7 +116,7 @@ public:
   // could determine how much thread resources are subscribed to parsing a shared object.)
   void process_dwarf(std::vector<SharedObject::SoId> sos) noexcept;
   /** Return the open mem fd */
-  ScopedFd &mem_fd() noexcept;
+  utils::ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;

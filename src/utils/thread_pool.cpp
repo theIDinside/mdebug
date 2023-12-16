@@ -1,6 +1,6 @@
 #include "thread_pool.h"
-#include "signal.h"
 #include <sys/prctl.h>
+#include <utils/signals.h>
 
 namespace utils {
 

@@ -1,7 +1,4 @@
 #pragma once
-
-#include "lib/lockguard.h"
-#include "lib/spinlock.h"
 #include "utils/logger.h"
 #include "utils/macros.h"
 #include <algorithm>
@@ -10,15 +7,12 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <execinfo.h>
-#include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
 #include <optional>
 #include <source_location>
 #include <span>
 #include <sys/mman.h>
-#include <sys/poll.h>
 #include <sys/user.h>
 #include <type_traits>
 #include <unistd.h>
@@ -74,13 +68,6 @@ micros(TimeStamp a, TimeStamp b)
 
 template <typename T> using Option = std::optional<T>;
 
-/** C++-ified result from waitpid syscall. */
-struct WaitPid
-{
-  Tid tid;
-  int status;
-};
-
 enum class TargetSession
 {
   Launched,
@@ -99,14 +86,6 @@ struct Index
 
   u32 i;
 };
-
-/** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
- * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
-Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
-/** `wait`'s for `tid` in a non-blocking way. If waiting on `tid` yielded no wait status, returns `none` */
-Option<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
-
-Option<WaitPid> waitpid_block(pid_t tid) noexcept;
 
 // "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
 template <typename T> using ActualType = std::remove_cvref_t<T>;
@@ -403,65 +382,6 @@ struct UnrelocatedTraceePointer : public TraceePointer<void>
 using AddrPtr = TraceePointer<void>;
 template <typename T> using TPtr = TraceePointer<T>;
 
-class ScopedFd
-{
-public:
-  ScopedFd() noexcept : fd(-1), p{} {}
-  ScopedFd(int fd) noexcept;
-  ScopedFd(int fd, Path p) noexcept;
-  ~ScopedFd() noexcept;
-
-  ScopedFd &
-  operator=(ScopedFd &&other) noexcept
-  {
-    if (this == &other)
-      return *this;
-    close();
-    fd = other.fd;
-    p = std::move(other.p);
-    file_size_ = other.file_size_;
-    other.fd = -1;
-    return *this;
-  }
-
-  ScopedFd(ScopedFd &&) noexcept;
-
-  int get() const noexcept;
-  bool is_open() const noexcept;
-  void close() noexcept;
-  operator int() const noexcept;
-  u64 file_size() const noexcept;
-  const Path &path() const noexcept;
-  void forget() noexcept;
-
-  static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
-  static ScopedFd open_read_only(const Path &p) noexcept;
-  static ScopedFd take_ownership(int fd) noexcept;
-
-private:
-  int fd;
-  Path p;
-  u64 file_size_;
-};
-
-constexpr pollfd
-cfg_read_poll(int fd, int additional_flags) noexcept
-{
-  pollfd pfd{0, 0, 0};
-  pfd.events = POLLIN | additional_flags;
-  pfd.fd = fd;
-  return pfd;
-}
-
-constexpr pollfd
-cfg_write_poll(int fd, int additional_flags) noexcept
-{
-  pollfd pfd{0, 0, 0};
-  pfd.events = POLLOUT | additional_flags;
-  pfd.fd = fd;
-  return pfd;
-}
-
 static constexpr u8 LEB128_MASK = 0b0111'1111;
 
 template <typename T> struct LEB128
@@ -587,16 +507,6 @@ mmap_buffer(u64 size) noexcept
   return ptr;
 }
 
-template <typename T>
-T *
-mmap_file(ScopedFd &fd, u64 size, bool read_only) noexcept
-{
-  ASSERT(fd.is_open(), "Backing file not open: {}", fd.path().c_str());
-  auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, fd.get(), 0);
-  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, fd.path().c_str());
-  return ptr;
-}
-
 template <std::integral Value>
 constexpr Option<Value>
 to_integral(std::string_view s)
@@ -608,8 +518,6 @@ to_integral(std::string_view s)
 }
 
 Option<AddrPtr> to_addr(std::string_view s) noexcept;
-
-using SpinGuard = LockGuard<SpinLock>;
 
 template <typename T, typename Predicate>
 constexpr bool

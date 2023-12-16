@@ -94,6 +94,8 @@ set(MIDAS_SOURCES
   src/interface/pty.h
   src/utils/base64.cpp
   src/utils/base64.h
+  src/utils/scoped_fd.cpp
+  src/utils/scoped_fd.h
   src/tasks/dwarf_unit_data.cpp
   src/tasks/dwarf_unit_data.h
   src/tasks/index_die_names.cpp
@@ -159,9 +161,25 @@ target_link_libraries(
   mdb_spinlock
 )
 
+add_executable(test_utils
+  test/unittest/util_testing.cpp
+  src/common.cpp
+  src/utils/logger.cpp
+  src/lib/spinlock.cpp
+)
+
+target_link_libraries(test_utils
+  GTest::gtest_main
+  fmt::fmt
+  mdb_spinlock
+)
+
+target_include_directories(test_utils PRIVATE ./src/utils)
+
 include(GoogleTest)
 gtest_discover_tests(parse_dap_requests)
 gtest_discover_tests(base64_encoding)
+gtest_discover_tests(test_utils)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
@@ -234,3 +252,4 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
+target_compile_definitions(parse_dap_requests PUBLIC JSON_HAS_RANGES=0)

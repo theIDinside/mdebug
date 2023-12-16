@@ -72,7 +72,7 @@ TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::Writ
   threads.back().initialize();
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-    procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
+    procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
   }
 }
 
@@ -80,7 +80,7 @@ bool
 TraceeController::reopen_memfd() noexcept
 {
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", task_leader, task_leader);
-  procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
+  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
   return procfs_memfd.is_open();
 }
 
@@ -255,7 +255,7 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   }
 }
 
-ScopedFd &
+utils::ScopedFd &
 TraceeController::mem_fd() noexcept
 {
   return procfs_memfd;
@@ -746,7 +746,7 @@ std::string
 TraceeController::get_thread_name(Tid tid) const noexcept
 {
   Path p = fmt::format("/proc/{}/task/{}/comm", task_leader, tid);
-  ScopedFd f = ScopedFd::open_read_only(p);
+  utils::ScopedFd f = utils::ScopedFd::open_read_only(p);
   char buf[16];
   std::memset(buf, 0, 16);
   ::read(f, buf, 16);

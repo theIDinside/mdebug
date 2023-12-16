@@ -57,8 +57,8 @@ public:
       return *iter;
     }
 
-    auto
-    operator*() const noexcept -> std::conditional_t<IsConst::value, const_reference, reference>
+    reference
+    operator*() const noexcept
     {
       return *iter;
     }
@@ -97,13 +97,13 @@ public:
   begin() noexcept
   {
     auto it = skip_it();
-    return Iterator{it};
+    return Iterator<decltype(c.begin())>{it};
   }
 
   auto
   end() noexcept
   {
-    return Iterator{c.end()};
+    return Iterator<decltype(c.end())>{c.end()};
   }
 
   auto

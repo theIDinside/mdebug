@@ -1,4 +1,5 @@
 #include "notify_pipe.h"
+#include <fcntl.h>
 
 struct pollfd;
 
