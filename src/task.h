@@ -128,6 +128,28 @@ template <> struct formatter<TaskVMInfo>
                           vm_info.stack_size, vm_info.tls.to_string());
   }
 };
+// CallStackRequest
+template <> struct formatter<CallStackRequest>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(CallStackRequest const &req, FormatContext &ctx) const
+  {
+    if (req.req == CallStackRequest::Type::Full) {
+      return fmt::format_to(ctx.out(), "all");
+    } else {
+      return fmt::format_to(ctx.out(), "{}", req.count);
+    }
+  }
+};
 
 template <> struct formatter<TaskInfo>
 {

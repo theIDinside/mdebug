@@ -72,7 +72,6 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
     cache_registers();
 
   // initialize bottom frame's registers with actual live register contents
-  DLOG("mdb", "servicing return addresses...");
   auto &buf = call_stack->reg_unwind_buffer;
   buf.clear();
   buf.reserve(call_stack->pcs.size());
@@ -86,14 +85,14 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   }
 
   sym::UnwindIterator it{tc, registers->rip};
-  DLOG("mdb", "Unwind iterator is null: {} for pc: {}", it.is_null(), registers->rip);
+  DLOG("mdb", "Unwind iterator is null: {} for pc: {}", it.is_null(), AddrPtr{registers->rip});
   ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{registers->rip});
   const sym::UnwindInfo *un_info = it.get_info(registers->rip);
   ASSERT(un_info != nullptr, "unwind info iterator returned null for 0x{:x}", registers->rip);
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(tc, this, un_info, registers->rip);
 
   const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
-  DLOG("mdb", "servicing return addresses...");
+  DLOG("mdb", "Servicing call stack request: {}", req);
   switch (req.req) {
   case CallStackRequest::Type::Full: {
     for (auto uinf = un_info; uinf != nullptr; uinf = it.get_info(get_current_pc())) {
@@ -119,6 +118,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
     call_stack->resolved = call_stack->resolved - req.count;
   }
   }
+  DLOG("mdb", "Resume address stack:\n{}", fmt::join(call_stack->pcs, "\n"))
   return call_stack->pcs;
 }
 
