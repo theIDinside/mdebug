@@ -89,8 +89,15 @@ enum class TargetSession
 
 struct Index
 {
-  operator u64() noexcept { return i; }
-  u64 i;
+
+  operator u32() const noexcept { return i; }
+  constexpr u32
+  value() const noexcept
+  {
+    return i;
+  }
+
+  u32 i;
 };
 
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
@@ -376,7 +383,7 @@ template <typename T> struct formatter<TraceePointer<T>>
 
   template <typename FormatContext>
   auto
-  format(TraceePointer<T> const &tptr, FormatContext &ctx)
+  format(TraceePointer<T> const &tptr, FormatContext &ctx) const
   {
     return fmt::format_to(ctx.out(), "0x{:x}", tptr.get());
   }
