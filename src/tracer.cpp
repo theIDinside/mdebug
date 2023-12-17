@@ -1,19 +1,13 @@
 #include "tracer.h"
-#include "./interface/dap/interface.h"
-#include "common.h"
 #include "event_queue.h"
-#include "fmt/format.h"
 #include "interface/dap/events.h"
+#include "interface/dap/interface.h"
 #include "interface/pty.h"
-#include "interface/ui_command.h"
-#include "interface/ui_result.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
-#include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
-#include "symbolication/cu.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
@@ -22,41 +16,17 @@
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
 #include "tasks/lnp.h"
-#include "utils/logger.h"
 #include "utils/thread_pool.h"
 #include "utils/worker_task.h"
-#include <algorithm>
-#include <bits/chrono.h>
-#include <bits/ranges_util.h>
-#include <chrono>
-#include <cstdlib>
-#include <exception>
 #include <fcntl.h>
-#include <filesystem>
-#include <nlohmann/json.hpp>
-#include <sys/mman.h>
+#include <fmt/format.h>
 #include <sys/personality.h>
-#include <sys/ptrace.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 
 Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
-
-std::string_view
-add_object_err(AddObjectResult r)
-{
-  switch (r) {
-  case AddObjectResult::OK:
-    return "OK";
-  case AddObjectResult::MMAP_FAILED:
-    return "Mmap Failed";
-  case AddObjectResult::FILE_NOT_EXIST:
-    return "File didn't exist";
-  }
-}
 
 void
 on_sigcld(int sig)
@@ -89,31 +59,6 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
-  CompilationUnitBuilder cu_builder{obj_file};
-  obj_file->line_table_headers = parse_lnp_headers(obj_file->parsed_elf);
-  obj_file->line_tables.reserve(obj_file->line_table_headers.size());
-  for (auto &lth : obj_file->line_table_headers) {
-    obj_file->line_tables.push_back({});
-    lth.set_linetable_storage(&obj_file->line_tables.back());
-  }
-  auto total = cu_builder.build_cu_headers();
-  std::vector<std::thread> jobs{};
-
-  for (auto &cu_hdr : total) {
-    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target]() {
-      auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
-      auto compile_unit_die = proc->read_dies();
-      if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-        proc->process_compile_unit_die(compile_unit_die.release());
-      } else {
-        PANIC("Unexpected non-compile unit DIE parsed");
-      }
-    }});
-  }
-
-  for (auto &&j : jobs) {
-    j.join();
-  }
 
   // TODO(simon): This should be re-factored, but is left here to remind me of how it is supposed to work
   //  when we have removed all old DWARF code. Possibly, I can imagine a scenario where we string together
@@ -127,6 +72,12 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
     tg.schedule_work().wait();
   }
 
+  // TODO(simon): Add lazy reading for LNP headers and Line Number Programs.
+  //  one way could be; as soon as a user requests compilation units, because some iteration over them needs to
+  //  happen and process them, but we don't know which one of them we're interested in, we can post a task per CU,
+  //  to run the LNP in the background and protect access to the LNP behind a mutex, that way. That way we will
+  //  "fuzzily" build additional LNP's as well, which in turn, hopefully will increase efficiency. That's if we
+  //  can' figure out a heuristic that is, to know which CU's LNP will be needed in the near future.
   obj_file->read_lnp_headers();
   {
     utils::TaskGroup tg("Line number programs");

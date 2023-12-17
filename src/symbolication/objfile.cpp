@@ -1,26 +1,17 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
-#include "block.h"
-#include "cu.h"
-#include "cu_symbol_info.h"
-#include "dwarf/die.h"
-#include "dwarf/lnp.h"
-#include "elf_symbols.h"
 #include "type.h"
-#include <algorithm>
-#include <bits/ranges_algo.h>
 #include <optional>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
-      types(), line_tables(), line_table_headers(), unwinder(nullptr), address_bounds(), m_full_cu(),
-      m_partial_units(), unit_data_write_lock(), dwarf_units(),
+      types(), address_bounds(), unit_data_write_lock(), dwarf_units(),
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
       lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), block_array(), addr_cu_map()
+      comp_units(), addr_cu_map()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -78,28 +69,6 @@ bool
 ObjectFile::found_min_syms() const noexcept
 {
   return min_syms;
-}
-
-LineHeader *
-ObjectFile::line_table_header(u64 offset) noexcept
-{
-  for (auto &lth : line_table_headers) {
-    if (lth.sec_offset == offset)
-      return &lth;
-  }
-  TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
-}
-
-SearchResult<CompilationUnitFile>
-ObjectFile::get_cu_iterable(AddrPtr addr) const noexcept
-{
-  if (const auto it = find(m_full_cu, [addr](const auto &f) { return f.may_contain(addr); });
-      it != std::cend(m_full_cu)) {
-    return SearchResult<CompilationUnitFile>{.ptr = it.base(),
-                                             .index = static_cast<u32>(std::distance(m_full_cu.cbegin(), it)),
-                                             .cap = static_cast<u32>(m_full_cu.size())};
-  }
-  return {nullptr, 0, 0};
 }
 
 void
@@ -241,6 +210,22 @@ std::vector<sym::dw::UnitData *>
 ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
 {
   return addr_cu_map.find_by_pc(pc - parsed_elf->relocate_addr(nullptr));
+}
+
+// TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
+// uninteresting for now and not really important, as it can be fixed at any point in time.
+std::vector<sym::SourceFileSymbolInfo *>
+ObjectFile::get_source_infos(AddrPtr pc) noexcept
+{
+  std::vector<sym::SourceFileSymbolInfo *> result;
+  auto unit_datas = addr_cu_map.find_by_pc(pc - parsed_elf->relocate_addr(nullptr));
+  for (auto &src : source_units()) {
+    for (auto *unit : unit_datas) {
+      if (src.get_dwarf_unit() == unit)
+        result.push_back(&src);
+    }
+  }
+  return result;
 }
 
 ObjectFile *

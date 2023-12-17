@@ -9,24 +9,13 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
-#include "symbolication/cu_file.h"
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
 #include "task.h"
-#include <algorithm>
-#include <chrono>
-#include <cstdint>
-#include <cstdio>
 #include <link.h>
 #include <optional>
-#include <sys/mman.h>
-#include <sys/uio.h>
-#include <sys/user.h>
 #include <thread>
-#include <type_traits>
-#include <unistd.h>
 #include <unordered_map>
-#include <unordered_set>
 #include <utils/scoped_fd.h>
 #include <utils/static_vector.h>
 
@@ -47,12 +36,6 @@ struct LWP
   Tid tid;
 
   constexpr bool operator<=>(const LWP &other) const = default;
-};
-
-struct SearchFnSymResult
-{
-  const FunctionSymbol *fn_sym;
-  const CompilationUnitFile *cu_file;
 };
 
 using Address = std::uintptr_t;
@@ -81,14 +64,12 @@ struct TraceeController
 private:
   int next_var_ref = 0;
   std::unordered_map<int, ui::dap::VariablesReference> var_refs;
-  SpinLock spin_lock;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
-  bool is_in_user_ptrace_stop;
   ptracestop::StopHandler *ptracestop_handler;
-  std::vector<sym::Unwinder *> unwinders;
+  std::vector<std::unique_ptr<sym::Unwinder>> unwinders;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *null_unwinder;
 
@@ -271,21 +252,8 @@ public:
 
   std::optional<std::string> read_string(TraceePointer<char> address) noexcept;
 
-  /* Add parsed DWARF debug info for `file` into `obj`. One could let `ObjectFile` handle this. But for the most
-   * part I want ObjectFile to be *data* about the system, and constrain the amount of *behavior* it can do. At
-   * least for now. This function is a critical section and as such is "synchronized". */
-  void add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept;
-
   // Inform awaiter threads that event has been consumed & handled. "Wakes up" the awaiter thread.
   void reaped_events() noexcept;
-
-  /* N.B.(simon):
-   * Notify "self" of events; while awaiter thread is blocked/yielded. This is particularly useful
-   * during stepping, as we *know* there will be awaitable events. This reduces that extra `wait` system call,
-   * which can be quite the overhead when stepping through thousands of instructions. Naive measurements show a
-   * >50% time reducation in waiting on each event in each step (from 7us -> 2us).
-   */
-  void notify_self() noexcept;
   void start_awaiter_thread() noexcept;
   // Get the unwinder for `pc` - if no such unwinder exists, the "NullUnwinder" is returned, an unwinder that
   // always returns UnwindInfo* = `nullptr` results. This is to not have to do nullchecks against the Unwinder
@@ -300,14 +268,12 @@ public:
   std::optional<std::string_view> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
   const ElfSection *get_text_section(AddrPtr addr) const noexcept;
-  const CompilationUnitFile *get_cu_from_pc(AddrPtr address) const noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
   const sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
-
   void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
 private:

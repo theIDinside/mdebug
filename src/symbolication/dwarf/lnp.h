@@ -1,6 +1,6 @@
 #pragma once
-#include "../../common.h"
 #include "../dwarf_defs.h"
+#include <common.h>
 #include <optional>
 
 class Elf;

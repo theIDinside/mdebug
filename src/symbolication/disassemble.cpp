@@ -1,16 +1,36 @@
 #include "disassemble.h"
 #include "../supervisor.h"
-#include "cu_file.h"
 #include "elf.h"
 #include "fmt/core.h"
-#include "lnp.h"
 #include "objfile.h"
+#include "symbolication/dwarf/lnp.h"
+#include "symbolication/fnsymbol.h"
 #include "zydis/Zydis.h"
 #include <algorithm>
 #include <charconv>
+#include <optional>
 #include <set>
 
 namespace sym {
+
+std::optional<std::tuple<dw::RelocatedLteIterator, dw::RelocatedLteIterator, dw::LineTable>>
+get_lte_range(std::vector<sym::SourceFileSymbolInfo *> symtabs, AddrPtr addr)
+{
+  for (auto st : symtabs) {
+    if (auto lt_opt = st->get_linetable(); lt_opt) {
+      auto lt = lt_opt.value();
+      auto lte_it = lt.find_by_pc(addr);
+      if (lte_it != std::end(lt)) {
+        if (lte_it.get().pc > addr && (lte_it - 1).get().pc <= addr) {
+          return std::optional{std::tuple{lte_it - 1, lte_it, lt}};
+        } else if (lte_it.get().pc <= addr && (lte_it + 1).get().pc > addr) {
+          return std::optional{std::tuple{lte_it, lte_it + 1, lt}};
+        }
+      }
+    }
+  }
+  return std::nullopt;
+}
 
 static sym::Disassembly
 create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDisassembledInstruction &ins,
@@ -23,20 +43,23 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
     fmt::format_to(mc_b, "{:02x}", *(exec_data_ptr + i));
     mc_b += 3;
   }
-  auto f = target->get_cu_from_pc(vm_address);
-  if (f) {
-    const auto [begin, end] = f->get_range(vm_address);
-    if (begin && end) {
-      ASSERT(begin != nullptr && end != nullptr, "Expected to be able to find LT Entries; but didn't");
-      ASSERT(vm_address >= begin->pc && vm_address <= end->pc,
-             "Address {} does not land inside LTE range {} .. {}", vm_address, begin->pc, end->pc);
+  auto obj = target->find_obj_by_pc(vm_address);
+  auto cus = obj->get_source_infos(vm_address);
+  if (!cus.empty()) {
+    auto lte_range_opt = get_lte_range(cus, vm_address);
+    if (lte_range_opt) {
+      const auto [begin_rel, end_rel, lt] = lte_range_opt.value();
+      const auto begin = begin_rel.get();
+      const auto end = end_rel.get();
+      ASSERT(vm_address >= begin.pc && vm_address <= end.pc, "Address {} does not land inside LTE range {} .. {}",
+             vm_address, begin.pc, end.pc);
       return sym::Disassembly{.address = vm_address,
                               .opcode = std::move(machine_code),
                               .instruction = ins.text,
-                              .source_name = f->file(begin->file),
-                              .source_path = f->path_of_file(begin->file),
-                              .line = begin->line,
-                              .column = begin->column};
+                              .source_name = lt.file(begin.file)->file_name,
+                              .source_path = lt.file(begin.file)->file_name,
+                              .line = begin.line,
+                              .column = begin.column};
     } else {
       return sym::Disassembly{.address = vm_address,
                               .opcode = std::move(machine_code),
@@ -67,12 +90,13 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
 
   // This hurts my soul and is so hacky.
   std::set<AddrPtr> disassembled_addresses{};
+  auto srcs = objfile->get_source_infos(addr);
 
-  if (auto res = objfile->get_cu_iterable(addr); res.found()) {
-    auto iter = res.ptr;
-    auto index = static_cast<i64>(res.index);
-    while (index >= 0 && static_cast<int>(output.size()) <= ins_offset) {
-      auto add = iter->low_pc();
+  std::sort(srcs.begin(), srcs.end(), [](auto a, auto b) { return a->start_pc() >= b->start_pc(); });
+
+  for (auto src : srcs) {
+    if (static_cast<int>(output.size()) <= ins_offset) {
+      auto add = src->start_pc();
       auto exec_data_ptr = text->into(add);
       std::vector<sym::Disassembly> result;
       while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
@@ -84,12 +108,10 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
         add = offset(add, instruction.info.length);
         exec_data_ptr += instruction.info.length;
       }
-      addr = iter->low_pc();
+      addr = src->start_pc();
       for (auto i = result.rbegin(); i != result.rend(); i++) {
         output.insert(output.begin(), *i);
       }
-      --index;
-      --iter;
     }
   }
 

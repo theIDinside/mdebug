@@ -1,11 +1,10 @@
 #pragma once
-#include "../../common.h"
+#include <common.h>
 #include <map>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 namespace sym::dw {
 

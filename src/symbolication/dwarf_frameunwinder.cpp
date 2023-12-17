@@ -456,14 +456,14 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
   PANIC("reading lsda failed");
 }
 
-Unwinder *
+std::unique_ptr<Unwinder>
 parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noexcept
 {
   ASSERT(eh_frame != nullptr, "Expected a .eh_frame section!");
   DwarfBinaryReader reader{objfile->parsed_elf, eh_frame->m_section_ptr, eh_frame->size()};
   DLOG("eh", "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->path.c_str(),
        reader.remaining_size(), eh_frame->file_offset);
-  auto unwinder_db = new Unwinder{objfile};
+  auto unwinder_db = std::make_unique<Unwinder>(objfile);
 
   using CieId = u64;
   using CieIdx = u64;

@@ -1,9 +1,7 @@
 #pragma once
-#include "../../common.h"
-#include "../block.h"
-#include "../dwarf.h"
-#include "../dwarf_defs.h"
 #include "common.h"
+#include <symbolication/block.h>
+#include <symbolication/dwarf.h>
 
 struct ObjectFile;
 struct ElfSection;

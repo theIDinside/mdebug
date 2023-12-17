@@ -1,7 +1,7 @@
 #pragma once
 #include "../common.h"
-#include "cu_file.h"
 #include "dwarf_defs.h"
+#include "symbolication/dwarf/die.h"
 #include <stack>
 #include <string_view>
 
@@ -49,7 +49,7 @@ public:
   TypeEncoding type_code;
   std::vector<Field> fields;
   bool resolved;
-  DebugInfoEntry *die;
+  dw::IndexedDieReference die_ref;
 };
 
 class Value
@@ -61,30 +61,5 @@ private:
   Type *type;
   std::vector<u8> bytes;
 };
-
-class TypeReader
-{
-public:
-  TypeReader(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *type) noexcept;
-  auto read_in() noexcept -> void;
-
-private:
-  auto read_type_from_signature() noexcept -> void;
-  auto read_structured() noexcept -> void;
-  auto read_primitive() noexcept -> void;
-  auto sec_offset(const DebugInfoEntry *ent) noexcept -> u64;
-
-  [[clang::always_inline]] inline auto current() noexcept -> const DebugInfoEntry *;
-
-  u64 dbg_inf_start_offs;
-  TypeMap &storage;
-  const DebugInfoEntry *root;
-  std::stack<const DebugInfoEntry *> curr_stack;
-};
-
-void read_type_from_signature(u64 dbg_inf_start_offs, TypeMap &storage, u64 type_signature,
-                              const DebugInfoEntry *die) noexcept;
-void read_structured(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *die) noexcept;
-void read_type(u64 dbg_inf_start_offs, TypeMap &storage, const DebugInfoEntry *die) noexcept;
 
 } // namespace sym

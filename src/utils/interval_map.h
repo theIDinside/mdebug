@@ -1,7 +1,5 @@
 #pragma once
-#include "../common.h"
-#include <algorithm>
-#include <vector>
+#include <common.h>
 
 namespace utils {
 

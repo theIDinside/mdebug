@@ -1,6 +1,4 @@
 #pragma once
-#include "utils/logger.h"
-#include "utils/macros.h"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -17,6 +15,8 @@
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
+#include <utils/logger.h>
+#include <utils/macros.h>
 #include <variant>
 #include <vector>
 

@@ -1,7 +1,6 @@
 #pragma once
-#include "../common.h"
+#include <common.h>
 #include <symbolication/fnsymbol.h>
-#include <vector>
 
 namespace ui::dap {
 struct Scope;

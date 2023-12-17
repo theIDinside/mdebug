@@ -1,13 +1,8 @@
 #include "task.h"
-#include "breakpoint.h"
-#include "common.h"
-#include "ptrace.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
-#include <sys/ptrace.h>
-#include <sys/user.h>
 
 TaskInfo::TaskInfo(pid_t tid, bool user_stopped) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),

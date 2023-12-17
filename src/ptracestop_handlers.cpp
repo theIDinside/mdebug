@@ -1,20 +1,14 @@
 #include "ptracestop_handlers.h"
-#include "breakpoint.h"
-#include "common.h"
-#include "events/event.h"
-#include "ptrace.h"
-#include "supervisor.h"
-#include "symbolication/lnp.h"
-#include "task.h"
-#include "tracer.h"
-#include "utils/logger.h"
-#include "utils/macros.h"
-#include <algorithm>
-#include <bits/ranges_algo.h>
-#include <chrono>
+#include <breakpoint.h>
+#include <common.h>
+#include <events/event.h>
+#include <ptrace.h>
+#include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/lnp.h>
-#include <sys/wait.h>
+#include <symbolication/objfile.h>
+#include <task.h>
+#include <tracer.h>
 
 namespace ptracestop {
 
@@ -68,13 +62,29 @@ LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
   auto tc = handler->tc;
   auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
-  if (auto cu = tc->get_cu_from_pc(start_frame.rip); cu) {
-    const auto [a, b] = cu->get_range(start_frame.rip);
-    ASSERT(a != nullptr, "Expected a line table entry");
-    entry = *a;
-  } else {
-    VERIFY(false, "Couldn't find Compilation Unit File for this frame");
+  auto obj = tc->find_obj_by_pc(start_frame.rip);
+  auto src_infos = obj->get_source_infos(start_frame.rip);
+  auto found = false;
+  for (auto *src : src_infos) {
+    auto ltopt = src->get_linetable();
+    if (ltopt) {
+      auto lt = *ltopt;
+      auto it = lt.find_by_pc(start_frame.rip);
+      if (it != std::end(lt)) {
+        auto lte = it.get();
+        if (lte.pc == start_frame.rip) {
+          found = true;
+          entry = lte;
+          break;
+        } else {
+          found = true;
+          entry = (it - 1).get();
+          break;
+        }
+      }
+    }
   }
+  VERIFY(found, "Couldn't find Line Table Entry Information needed to navigate source code lines");
 }
 
 LineStep::~LineStep() noexcept

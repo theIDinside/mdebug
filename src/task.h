@@ -4,9 +4,6 @@
 #include "common.h"
 #include "ptrace.h"
 #include <linux/sched.h>
-#include <sys/types.h>
-#include <sys/user.h>
-#include <sys/wait.h>
 
 using namespace std::string_view_literals;
 struct TraceeController;

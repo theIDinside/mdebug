@@ -1,6 +1,5 @@
 #pragma once
-#include "../common.h"
-#include <concepts>
+#include <common.h>
 
 template <typename AddressContainingType>
 concept Addressable = requires(AddressContainingType t) {

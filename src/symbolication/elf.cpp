@@ -1,10 +1,6 @@
 #include "elf.h"
 #include "elf_symbols.h"
 #include "objfile.h"
-#include <algorithm>
-#include <bits/ranges_util.h>
-#include <cstdint>
-#include <elf.h>
 
 std::string_view
 ElfSection::get_name() const noexcept

@@ -2,12 +2,10 @@
 
 #include "breakpoint.h"
 #include "common.h"
-#include "symbolication/callstack.h"
-#include "symbolication/lnp.h"
-#include "task.h"
-#include <chrono>
 #include <map>
-#include <vector>
+#include <symbolication/callstack.h>
+#include <symbolication/dwarf/lnp.h>
+#include <task.h>
 
 struct TraceeController;
 struct BpStat;
@@ -38,7 +36,7 @@ class InstructionStep : public ThreadProceedAction
 {
 public:
   InstructionStep(StopHandler *handler, TaskInfo *task, int steps) noexcept;
-  ~InstructionStep();
+  ~InstructionStep() override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
   void update_stepped() noexcept override;
@@ -52,7 +50,7 @@ class LineStep : public ThreadProceedAction
 {
 public:
   LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept;
-  ~LineStep() noexcept;
+  ~LineStep() noexcept override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
   void update_stepped() noexcept override;
@@ -64,7 +62,7 @@ private:
   std::optional<AddrPtr> resume_address;
   bool resumed_to_resume_addr;
   sym::Frame start_frame;
-  LineTableEntry entry;
+  sym::dw::LineTableEntry entry;
 };
 
 template <typename A>

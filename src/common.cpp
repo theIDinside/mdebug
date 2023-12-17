@@ -1,21 +1,15 @@
 #include "common.h"
-#include "elf.h"
 #include "fmt/core.h"
 #include "utils/logger.h"
-#include <cstdlib>
-#include <cstring>
 #include <cxxabi.h>
-#include <exception>
 #include <execinfo.h>
 #include <fcntl.h>
-#include <filesystem>
 #include <optional>
 #include <regex>
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 std::string_view
 syscall_name(u64 syscall_number)

@@ -1,8 +1,8 @@
 #pragma once
-#include "../utils/macros.h"
 #include <cstdint>
 #include <fmt/core.h>
 #include <string_view>
+#include <utils/macros.h>
 
 enum class DwarfVersion : std::uint8_t
 {

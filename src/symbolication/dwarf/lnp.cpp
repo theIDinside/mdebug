@@ -1,8 +1,7 @@
 #include "lnp.h"
-#include "../block.h"
-#include "../dwarf_binary_reader.h"
-#include "../elf.h"
-#include <algorithm>
+#include <symbolication/block.h>
+#include <symbolication/dwarf_binary_reader.h>
+#include <symbolication/elf.h>
 
 namespace sym::dw {
 

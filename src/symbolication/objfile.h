@@ -1,5 +1,4 @@
 #pragma once
-#include "../common.h"
 #include "block.h"
 #include "cu_symbol_info.h"
 #include "dwarf.h"
@@ -7,7 +6,7 @@
 #include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
-#include "lnp.h"
+#include <common.h>
 #include <string_view>
 #include <sys/mman.h>
 
@@ -46,14 +45,8 @@ struct ObjectFile
 
   // Should the key be something much better than a string, here? If so, how and what?
   std::unordered_map<u64, sym::Type> types;
-
-  std::vector<LineTable> line_tables;
-  std::vector<LineHeader> line_table_headers;
-  sym::Unwinder *unwinder;
   // Address bounds determined by reading the program segments of the elf binary
   AddressRange address_bounds;
-  std::vector<CompilationUnitFile> m_full_cu;
-  std::vector<NonExecutableCompilationUnitFile> m_partial_units;
 
   ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
@@ -85,8 +78,6 @@ struct ObjectFile
 
   Path interpreter() const noexcept;
   bool found_min_syms() const noexcept;
-  LineHeader *line_table_header(u64 offset) noexcept;
-  SearchResult<CompilationUnitFile> get_cu_iterable(AddrPtr addr) const noexcept;
   void set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept;
   std::vector<sym::dw::UnitData *> &compilation_units() noexcept;
   sym::dw::UnitData *get_cu_from_offset(u64 offset) noexcept;
@@ -102,6 +93,9 @@ struct ObjectFile
   void add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept;
   std::vector<sym::SourceFileSymbolInfo> &source_units() noexcept;
   std::vector<sym::dw::UnitData *> get_cus_from_pc(AddrPtr pc) noexcept;
+  // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
+  // uninteresting for now and not really important, as it can be fixed at any point in time.
+  std::vector<sym::SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
 
 private:
   std::mutex unit_data_write_lock;
@@ -115,9 +109,6 @@ private:
 
   std::mutex cu_write_lock;
   std::vector<sym::SourceFileSymbolInfo> comp_units;
-
-  std::mutex block_array_write_lock;
-  std::vector<sym::BlockArray> block_array;
 
   sym::AddressToCompilationUnitMap addr_cu_map;
 };

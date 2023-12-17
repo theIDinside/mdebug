@@ -1,7 +1,6 @@
 #include "dwarf_unit_data.h"
-#include "../symbolication/dwarf/lnp.h"
-#include "../symbolication/objfile.h"
-#include "../utils/thread_pool.h"
+#include <symbolication/objfile.h>
+#include <utils/thread_pool.h>
 namespace sym::dw {
 
 UnitDataTask::UnitDataTask(ObjectFile *obj, std::vector<UnitHeader> &&headers) noexcept

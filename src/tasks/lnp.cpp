@@ -1,8 +1,8 @@
 #include "lnp.h"
-#include "../symbolication/dwarf/lnp.h"
-#include "../symbolication/elf.h"
-#include "../symbolication/objfile.h"
-#include "../utils/thread_pool.h"
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/elf.h>
+#include <symbolication/objfile.h>
+#include <utils/thread_pool.h>
 
 namespace sym::dw {
 LineNumberProgramTask::LineNumberProgramTask(ObjectFile *obj, std::span<LNPHeader> programs_to_parse) noexcept

@@ -1,10 +1,9 @@
 #include "die.h"
-#include "../../utils/enumerator.h"
-#include "../dwarf_binary_reader.h"
-#include "../elf.h"
-#include "../objfile.h"
-#include "common.h"
 #include "debug_info_reader.h"
+#include <symbolication/dwarf_binary_reader.h>
+#include <symbolication/elf.h>
+#include <symbolication/objfile.h>
+#include <utils/enumerator.h>
 
 namespace sym::dw {
 const DieMetaData *

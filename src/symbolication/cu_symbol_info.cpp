@@ -1,17 +1,14 @@
 #include "cu_symbol_info.h"
-#include "../utils/filter.h"
 #include "dwarf.h"
 #include "dwarf/debug_info_reader.h"
 #include "dwarf/die.h"
 #include "dwarf/lnp.h"
-#include "dwarf_defs.h"
 #include "fmt/format.h"
 #include "fnsymbol.h"
 #include "objfile.h"
-#include <algorithm>
 #include <array>
 #include <list>
-#include <span>
+#include <utils/filter.h>
 
 namespace sym {
 
@@ -151,13 +148,6 @@ SourceFileSymbolInfo::get_linetable() noexcept
   else
     return {};
 }
-
-enum class DieType
-{
-  Full,
-  Declaration,
-  Specification
-};
 
 void
 SourceFileSymbolInfo::maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc,
