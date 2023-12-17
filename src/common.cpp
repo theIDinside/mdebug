@@ -1,54 +1,15 @@
 #include "common.h"
 #include "fmt/core.h"
 #include "utils/logger.h"
-#include <cstdlib>
-#include <cstring>
 #include <cxxabi.h>
-#include <exception>
 #include <execinfo.h>
-#include <expected>
 #include <fcntl.h>
-#include <filesystem>
 #include <optional>
 #include <regex>
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <unistd.h>
-
-Option<WaitPid>
-waitpid_peek(pid_t tid) noexcept
-{
-  int status;
-  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG | WNOWAIT);
-  if (waited_pid == 0)
-    return {};
-  if (waited_pid == -1)
-    return {};
-
-  return WaitPid{.tid = waited_pid, .status = status};
-}
-
-Option<WaitPid>
-waitpid_nonblock(pid_t tid) noexcept
-{
-  int status;
-  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG);
-  if (waited_pid == 0 || waited_pid == -1)
-    return Option<WaitPid>{};
-  return WaitPid{waited_pid, status};
-}
-
-Option<WaitPid>
-waitpid_block(pid_t tid) noexcept
-{
-  int status;
-  const auto waited_pid = waitpid(tid, &status, 0);
-  if (waited_pid == 0 || waited_pid == -1)
-    return Option<WaitPid>{};
-  return WaitPid{waited_pid, status};
-}
 
 std::string_view
 syscall_name(u64 syscall_number)
@@ -86,6 +47,16 @@ static void
 sanitize(std::string &name)
 {
   replace_regex(name);
+}
+
+[[noreturn]] static void
+panic_exit()
+{
+  if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
+    raise(SIGTERM);
+    exit(-1);
+  } else
+    exit(-1);
 }
 
 void
@@ -139,237 +110,7 @@ ifbacktrace_failed:
       "{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}--- [PANIC] ---",
                         loc.file_name(), loc.line(), loc.function_name(), err_msg, errno));
   delete logging::get_logging();
-  exit(EXIT_FAILURE);
-}
-
-ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path))
-{
-  if (fs::exists(p)) {
-    struct stat s;
-    if (-1 != stat(p.c_str(), &s))
-      file_size_ = s.st_size;
-    else
-      file_size_ = 0;
-  } else {
-    file_size_ = 0;
-  }
-  ASSERT(fd != -1, "Failed to open {} [{}]", p.c_str(), strerror(errno));
-}
-
-ScopedFd::ScopedFd(int fd) noexcept : fd(fd)
-{
-  VERIFY(fd != -1, "Taking ownership of a closed file or error file: {}", strerror(errno));
-}
-
-ScopedFd::~ScopedFd() noexcept { close(); }
-
-ScopedFd::ScopedFd(ScopedFd &&other) noexcept : fd(other.fd) { other.fd = -1; }
-
-int
-ScopedFd::get() const noexcept
-{
-  return fd;
-}
-
-bool
-ScopedFd::is_open() const noexcept
-{
-  return fd != -1;
-}
-
-void
-ScopedFd::close() noexcept
-{
-  if (fd >= 0) {
-    const auto err = ::close(fd);
-    if (err != 0 && err != -EINTR && err != EIO) {
-      PANIC("Failed to close file");
-    }
-  }
-  fd = -1;
-}
-
-ScopedFd::operator int() const noexcept { return get(); }
-
-u64
-ScopedFd::file_size() const noexcept
-{
-  if (file_size_ > 0)
-    return file_size_;
-
-  if (!is_open()) {
-    return 0;
-  }
-
-  const auto curr = lseek(fd, 0, SEEK_CUR);
-  ASSERT(-1 != curr, "Failed to fseek");
-  auto size = lseek(fd, 0, SEEK_END);
-  ASSERT((off_t)-1 != size, "Failed to get size");
-  lseek(fd, curr, SEEK_SET);
-  return size;
-}
-
-const Path &
-ScopedFd::path() const noexcept
-{
-  return p;
-}
-
-void
-ScopedFd::forget() noexcept
-{
-  p = "";
-  fd = -1;
-}
-
-/* static */
-ScopedFd
-ScopedFd::open(const Path &p, int flags, mode_t mode) noexcept
-{
-  ASSERT(fs::exists(p), "File did not exist {}", p.c_str());
-  return ScopedFd{::open(p.c_str(), flags, mode), p};
-}
-
-/* static */
-ScopedFd
-ScopedFd::open_read_only(const Path &p) noexcept
-{
-  return ScopedFd{::open(p.c_str(), O_RDONLY), p};
-}
-
-/*static*/
-ScopedFd
-ScopedFd::take_ownership(int fd) noexcept
-{
-  return ScopedFd{fd};
-}
-
-u64
-DwarfBinaryReader::dwarf_spec_read_value() noexcept
-{
-  switch (offset_size) {
-  case 4:
-    return read_value<u32>();
-  case 8:
-    return read_value<u64>();
-  default:
-    PANIC(fmt::format("Unsupported offset size {}", offset_size));
-  }
-}
-
-std::span<const u8>
-DwarfBinaryReader::get_span(u64 size) noexcept
-{
-  ASSERT(size <= remaining_size(), "Not enough bytes left in reader. Requested {}, remaining {}", size,
-         remaining_size());
-  const auto span = std::span{head, size};
-  head += size;
-  return span;
-}
-
-std::string_view
-DwarfBinaryReader::read_string() noexcept
-{
-  std::string_view str{(const char *)(head)};
-  head += str.size() + 1;
-  return str;
-}
-
-void
-DwarfBinaryReader::skip_string() noexcept
-{
-  std::string_view str{(const char *)(head)};
-  head += str.size() + 1;
-}
-
-DataBlock
-DwarfBinaryReader::read_block(u64 size) noexcept
-{
-  const auto ptr = head;
-  head += size;
-  return {.ptr = ptr, .size = size};
-}
-
-u64
-DwarfBinaryReader::read_offset() noexcept
-{
-  switch (offset_size) {
-  case 8:
-    return read_value<u64>();
-  case 4:
-    return read_value<u32>();
-  default:
-    TODO_FMT("Reading offsets/addresses of size {} not yet supported", offset_size);
-  }
-}
-
-const u8 *
-DwarfBinaryReader::current_ptr() const noexcept
-{
-  return head;
-}
-
-DwarfBinaryReader::DwarfBinaryReader(const u8 *buffer, u64 size) noexcept
-    : buffer(buffer), head(buffer), end(buffer + size), size(size), bookmarks()
-{
-}
-
-DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
-    : buffer(reader.buffer), head(reader.head), end(reader.end), size(reader.size), bookmarks()
-{
-}
-
-bool
-DwarfBinaryReader::has_more() noexcept
-{
-  return head < end;
-}
-
-u64
-DwarfBinaryReader::remaining_size() const noexcept
-{
-  return (end - head);
-}
-
-u64
-DwarfBinaryReader::bytes_read() const noexcept
-{
-  return head - buffer;
-}
-
-void
-DwarfBinaryReader::skip(i64 bytes) noexcept
-{
-  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head + bytes > buffer,
-         "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, remaining_size());
-  head += bytes;
-}
-
-void
-DwarfBinaryReader::bookmark() noexcept
-{
-  bookmarks.push_back(bytes_read());
-}
-
-u64
-DwarfBinaryReader::pop_bookmark() noexcept
-{
-  const auto bookmark = bookmarks.back();
-  bookmarks.pop_back();
-  return bytes_read() - bookmark;
-}
-
-DwarfBinaryReader
-sub_reader(const DwarfBinaryReader &reader) noexcept
-{
-  return DwarfBinaryReader{reader.head, reader.size - (reader.head - reader.buffer)};
-}
-
-void
-DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
-{
-  end = buffer + new_size;
-  size = new_size;
+  panic_exit();
 }
 
 Option<AddrPtr>

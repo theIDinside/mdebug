@@ -56,8 +56,6 @@ async function unwindFromSharedObject() {
   console.log(`bps2: ${JSON.stringify(bps2)}`)
   // hit breakpoint in todo.cpp
   await da_client.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-  console.log('foo')
-  await da_client.setInsBreakpoint(so_addr)
   await da_client.contNextStop()
   const frames = await da_client.stackTrace(threads[0].id, seconds(1)).then((res) => {
     checkResponse(res, 'stackTrace', true)
@@ -70,8 +68,8 @@ async function unwindFromSharedObject() {
   if (!response.success) throw new Error(`Failed to disconnect. ${JSON.stringify(response)}`)
 }
 
-const INSIDE_BAR_PROLOGUE = '0x00000000004008a0'
-const INSIDE_BAR_EPILOGUE = '0x00000000004008c3'
+const INSIDE_BAR_PROLOGUE = '0x00000000004008b0'
+const INSIDE_BAR_EPILOGUE = '0x00000000004008d3'
 
 function verifyFrameIs(frame, name) {
   if (frame.name != name) {
@@ -141,35 +139,35 @@ async function insideEpilogueTest() {
 async function normalTest() {
   const expectedStackTraces = [
     [
-      { line: 39, name: 'foo' },
-      { line: 46, name: 'main' },
+      { line: 48, name: 'foo' },
+      { line: 55, name: 'main' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
     ],
     [
-      { line: 33, name: 'bar' },
-      { line: 40, name: 'foo' },
-      { line: 46, name: 'main' },
+      { line: 42, name: 'bar' },
+      { line: 49, name: 'foo' },
+      { line: 55, name: 'main' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
     ],
     [
-      { line: 14, name: 'baz' },
-      { line: 34, name: 'bar' },
-      { line: 40, name: 'foo' },
-      { line: 46, name: 'main' },
+      { line: 23, name: 'baz' },
+      { line: 43, name: 'bar' },
+      { line: 49, name: 'foo' },
+      { line: 55, name: 'main' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
     ],
     [
-      { line: 7, name: 'quux' },
-      { line: 16, name: 'baz' },
-      { line: 34, name: 'bar' },
-      { line: 40, name: 'foo' },
-      { line: 46, name: 'main' },
+      { line: 16, name: 'quux' },
+      { line: 25, name: 'baz' },
+      { line: 43, name: 'bar' },
+      { line: 49, name: 'foo' },
+      { line: 55, name: 'main' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
       { line: 0, name: 'unknown' },
@@ -209,7 +207,6 @@ async function normalTest() {
     for (const frame of frames) {
       scopes.push(await da_client.sendReqGetResponse('scopes', { frameId: frame.id }))
     }
-    console.log(prettyJson(scopes))
     if (scopes.length != frames.length) throw new Error(`Expected ${frames.length} scopes but got ${scopes.length}`)
   }
   const total = 5

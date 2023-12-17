@@ -1,5 +1,6 @@
 #include "thread_pool.h"
 #include <sys/prctl.h>
+#include <utils/signals.h>
 
 namespace utils {
 
@@ -15,6 +16,15 @@ ThreadPool::post_task(Task *task) noexcept
   std::lock_guard lock(m_task_mutex);
   m_task_queue.push(task);
   m_task_cv.notify_one();
+}
+
+void
+ThreadPool::post_tasks(std::span<Task *> tasks) noexcept
+{
+  std::lock_guard lock(m_task_mutex);
+  for (auto t : tasks)
+    m_task_queue.push(t);
+  m_task_cv.notify_all();
 }
 
 ThreadPool::ThreadPool() noexcept : thread_pool(), m_task_queue(), m_groups(), m_task_mutex(), m_task_cv() {}
@@ -39,10 +49,17 @@ ThreadPool::initialize(u32 pool_size) noexcept
   }
 }
 
+u32
+ThreadPool::worker_count() const noexcept
+{
+  return thread_pool.size();
+}
+
 void
 ThreadPool::worker(std::stop_token stop_token, const char *name) noexcept
 {
   VERIFY(prctl(PR_SET_NAME, name) != -1, "Failed to set worker thread name");
+  ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
   DLOG("mdb", "Worker thread {} spawned", name);
   while (true && !stop_token.stop_requested()) {
     Task *job = nullptr;

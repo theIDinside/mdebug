@@ -1,6 +1,5 @@
 #pragma once
 #include "common.h"
-#include <functional>
 
 struct TraceeController;
 struct TaskInfo;
@@ -133,6 +132,12 @@ struct SourceBreakpointDescriptor
   std::optional<std::string> condition;
   std::optional<int> hit_condition;
   std::optional<std::string> log_message;
+
+  friend constexpr bool
+  operator==(const SourceBreakpointDescriptor &a, const SourceBreakpointDescriptor &b) noexcept
+  {
+    return a.source_file == b.source_file && a.line == b.line && a.column == b.column;
+  }
 };
 
 class Breakpoint
@@ -196,22 +201,19 @@ struct BpStat
 struct BreakpointMap
 {
   explicit BreakpointMap(Tid address_space) noexcept
-      : bp_id_counter(1), breakpoints(), address_space_tid(address_space), fn_breakpoint_names(),
-        source_breakpoints()
+      : address_space_tid(address_space), breakpoints(), fn_breakpoint_names(), source_breakpoints()
   {
   }
 
-  u32 bp_id_counter;
+  Tid address_space_tid;
+  u32 bp_id_counter = 1;
   // All breakpoints are stored in `breakpoints` - and they map to either `fn_breakpoint_names` or
   // `source_breakpoints` depending on their type (or to neither - if they're address breakpoints). So we don't
   // allow for multiple breakpoints on the same loc, because I argue it's a bad decision that makes breakpoint
   // design much more complex for almost 0 gain.
   std::vector<Breakpoint> breakpoints;
-  Tid address_space_tid;
   std::unordered_map<u32, std::string> fn_breakpoint_names;
   std::unordered_map<u32, SourceBreakpointDescriptor> source_breakpoints;
-
-  std::vector<Breakpoint> ld_breakpoints;
 
   template <typename T>
   bool

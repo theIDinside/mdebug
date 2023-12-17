@@ -6,6 +6,7 @@
 
 struct ObjectFile;
 struct ElfSection;
+class Elf;
 
 constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
     "r_debug_state",      "_r_debug_state",          "_dl_debug_state",
@@ -38,8 +39,7 @@ struct SharedObject
 {
   NO_COPY(SharedObject);
   using SoId = int;
-  SharedObject(int so_id, TPtr<link_map> tracee_loc, AddrPtr elf_addr_diff, Path &&path,
-               AddressRange addr_range) noexcept;
+  SharedObject(int so_id, TPtr<link_map> tracee_loc, AddrPtr elf_addr_diff, Path &&path) noexcept;
   SharedObject(SharedObject &&) noexcept = default;
   SharedObject &operator=(SharedObject &&) = default;
   std::string_view name() const noexcept;
@@ -48,6 +48,8 @@ struct SharedObject
   std::optional<bool> is_optimized() const noexcept;
   std::optional<std::string> version() const noexcept;
   ObjectFile *load_objectfile() noexcept;
+
+  bool has_debug_info() const noexcept;
 
 public:
   int so_id;
@@ -75,4 +77,4 @@ private:
   int next_so_id;
 };
 
-Path interpreter_path(const ElfSection *interp) noexcept;
+Path interpreter_path(const Elf *elf, const ElfSection *interp) noexcept;

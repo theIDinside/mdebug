@@ -8,6 +8,8 @@ struct ElfSection;
 struct ObjectFile;
 struct TraceeController;
 struct TaskInfo;
+class DwarfBinaryReader;
+class Elf;
 
 namespace sym {
 
@@ -210,8 +212,8 @@ private:
 std::pair<u64, u64> elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 std::pair<u64, u64> dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 CommonInformationEntry read_cie(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
-Unwinder *parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noexcept;
-void parse_dwarf_eh(Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_count) noexcept;
+std::unique_ptr<Unwinder> parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noexcept;
+void parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_count) noexcept;
 
 FrameDescriptionEntry read_fde(DwarfBinaryReader &reader);
 

@@ -16,7 +16,8 @@ AwaiterThread::~AwaiterThread() noexcept
 {
   should_cont = false;
   reaped_events();
-  thread.join();
+  if (thread.joinable())
+    thread.join();
 }
 
 void

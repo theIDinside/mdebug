@@ -12,38 +12,33 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
-#include "symbolication/cu.h"
-#include "symbolication/cu_file.h"
+#include "symbolication/dwarf/lnp.h"
+#include "symbolication/dwarf/name_index.h"
+#include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
-#include "symbolication/lnp.h"
 #include "symbolication/objfile.h"
 #include "task.h"
+#include "tasks/dwarf_unit_data.h"
+#include "tasks/index_die_names.h"
+#include "tasks/lnp.h"
 #include "tracer.h"
+#include "utils/enumerator.h"
 #include "utils/logger.h"
+#include "utils/worker_task.h"
 #include <algorithm>
-#include <bits/ranges_algo.h>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <cstdlib>
 #include <elf.h>
 #include <fcntl.h>
 #include <filesystem>
 #include <link.h>
-#include <linux/auxvec.h>
 #include <memory_resource>
 #include <optional>
 #include <set>
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
-#include <sys/ptrace.h>
-#include <sys/ucontext.h>
-#include <sys/user.h>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <unordered_set>
 
@@ -57,8 +52,8 @@ TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::Writ
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
       tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), stopped_observer(), var_refs(),
-      spin_lock{}, interpreter_base{}, entry{}, session(session), is_in_user_ptrace_stop(false),
-      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
+      interpreter_base{}, entry{}, session(session), ptracestop_handler(new ptracestop::StopHandler{this}),
+      unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
   threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
@@ -66,7 +61,7 @@ TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::Writ
   threads.back().initialize();
   if (open_mem_fd) {
     const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-    procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
+    procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
   }
 }
 
@@ -74,7 +69,7 @@ bool
 TraceeController::reopen_memfd() noexcept
 {
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", task_leader, task_leader);
-  procfs_memfd = ScopedFd::open(procfs_path, O_RDWR);
+  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
   return procfs_memfd.is_open();
 }
 
@@ -85,10 +80,10 @@ struct ProbeInfo
 };
 
 static std::vector<ProbeInfo>
-parse_stapsdt_note(const ElfSection *section) noexcept
+parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
-  DwarfBinaryReader reader{section};
+  DwarfBinaryReader reader{elf, section};
   std::set<std::string_view> required_probes{{"map_complete", "reloc_complete", "unmap_complete"}};
   // stapsdt, location 8 bytes, base 8 bytes, semaphore 8 bytes, desc=string of N bytes, then more bytes we don't
   // care for
@@ -111,7 +106,6 @@ parse_stapsdt_note(const ElfSection *section) noexcept
     if (reader.bytes_read() % 4 != 0)
       reader.skip(4 - reader.bytes_read() % 4);
     if (required_probes.contains(probe_name)) {
-      DLOG("mdb", "adding {} probe at {}", probe_name, ptr);
       probes.push_back(ProbeInfo{.address = ptr, .name = std::string{probe_name}});
       required_probes.erase(std::find(required_probes.begin(), required_probes.end(), probe_name));
     }
@@ -132,13 +126,14 @@ TraceeController::install_loader_breakpoints() noexcept
 {
   ASSERT(interpreter_base.has_value(),
          "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
-  auto int_path = interpreter_path(object_files.front()->parsed_elf->get_section(".interp"));
+  auto int_path =
+      interpreter_path(object_files.front()->parsed_elf, object_files.front()->parsed_elf->get_section(".interp"));
   auto tmp_objfile = mmap_objectfile(int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
   Elf::parse_elf_owned_by_obj(tmp_objfile, interpreter_base.value());
   tmp_objfile->parsed_elf->parse_min_symbols(AddrPtr{interpreter_base.value()});
   const auto system_tap_sec = tmp_objfile->parsed_elf->get_section(".note.stapsdt");
-  const auto probes = parse_stapsdt_note(system_tap_sec);
+  const auto probes = parse_stapsdt_note(tmp_objfile->parsed_elf, system_tap_sec);
   tracee_r_debug = get_rdebug_state(tmp_objfile);
   DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
   for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
@@ -191,10 +186,9 @@ TraceeController::on_so_event() noexcept
   std::vector<SharedObject::SoId> sos;
   for (auto i = 0; i < new_sos; ++i) {
     auto so = shared_objects.get_so(new_so_ids[i]);
-    const auto so_of = mmap_objectfile(so->path);
-    so->objfile = so_of;
-    if (so_of) {
-      register_object_file(so_of, false, so->elf_vma_addr_diff);
+    so->objfile = mmap_objectfile(so->path);
+    if (so->objfile) {
+      register_object_file(so->objfile, false, so->elf_vma_addr_diff);
       sos.push_back(new_so_ids[i]);
     }
   }
@@ -216,27 +210,41 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   //  it.
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
-    if (so->objfile != nullptr && so->objfile->parsed_elf->get_section(".debug_info") != nullptr) {
-      so->objfile->line_table_headers = parse_lnp_headers(so->objfile->parsed_elf);
-      so->objfile->line_tables.reserve(so->objfile->line_table_headers.size());
-      for (auto &lth : so->objfile->line_table_headers) {
-        so->objfile->line_tables.push_back({});
-        lth.set_linetable_storage(&so->objfile->line_tables.back());
+    if (so->has_debug_info()) {
+      {
+        const auto name = fmt::format("Compilation Unit Data for {}", so->name());
+        utils::TaskGroup tg(name);
+        auto work = sym::dw::UnitDataTask::create_jobs_for(so->objfile);
+        tg.add_tasks(std::span{work});
+        tg.schedule_work().wait();
       }
-      CompilationUnitBuilder cu_builder{so->objfile};
-      auto total = cu_builder.build_cu_headers();
-      for (const auto &hdr : total) {
-        ASSERT(so->objfile != nullptr, "Objfile is null!");
-        auto proc = prepare_cu_processing(so->objfile, hdr, this);
-        auto die = proc->read_dies();
-        proc->process_compile_unit_die(die.release());
+
+      so->objfile->read_lnp_headers();
+      {
+        if (so->name() == "ld-linux-x86-64.so.2") {
+          ASSERT(so->objfile->get_lnp_headers().size() == 112,
+                 "Expected ld.so to have 112 line number program headers");
+        }
+        const auto name = fmt::format("Line number programs for {}", so->name());
+        utils::TaskGroup tg(name);
+        auto work = sym::dw::LineNumberProgramTask::create_jobs_for(so->objfile);
+        tg.add_tasks(std::span{work});
+        tg.schedule_work().wait();
+      }
+
+      {
+        const auto name = fmt::format("Name Indexing for {}", so->name());
+        utils::TaskGroup tg(name);
+        auto work = sym::dw::IndexingTask::create_jobs_for(so->objfile);
+        tg.add_tasks(std::span{work});
+        tg.schedule_work().wait();
       }
     }
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
   }
 }
 
-ScopedFd &
+utils::ScopedFd &
 TraceeController::mem_fd() noexcept
 {
   return procfs_memfd;
@@ -421,7 +429,21 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     if (auto s = obj->get_min_fn_sym(function_name); s.has_value()) {
       matching_symbols.push_back(*s);
     }
+    auto ni = obj->name_index();
+    auto res = ni->free_functions.search(function_name).value_or(std::span<sym::dw::DieNameReference>{});
+    for (const auto &ref : res) {
+      auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
+      auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
+      auto high_pc = die_ref.read_attribute(Attribute::DW_AT_high_pc);
+      if (low_pc) {
+        auto addr = obj->parsed_elf->relocate_addr(low_pc->address());
+        matching_symbols.emplace_back(function_name, addr, 0);
+        DLOG("mdb", "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path.c_str(),
+             die_ref.cu->section_offset(), die_ref.die->section_offset, function_name, addr);
+      }
+    }
   }
+
   DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
   for (const auto &sym : matching_symbols) {
     constexpr u64 bkpt = 0xcc;
@@ -442,29 +464,31 @@ void
 TraceeController::set_source_breakpoints(std::string_view src,
                                          std::vector<SourceBreakpointDescriptor> &&descs) noexcept
 {
-  DLOG("mdb", "[bkpt:source]: Requested {} source breakpoints for {}", descs.size(), src);
+  DLOG("mdb", "[bkpt:source]: Requested {} new source breakpoints for {}", descs.size(), src);
   for (const auto obj : object_files) {
-    const auto f_it = find(obj->m_full_cu, [src](const CompilationUnitFile &cu) { return cu.fullpath() == src; });
-    if (f_it != std::end(obj->m_full_cu)) {
+    auto &syminfos = obj->source_units();
+    auto it =
+        std::ranges::find_if(syminfos, [src](const sym::SourceFileSymbolInfo &c) { return c.name() == src; });
+    if (it != std::end(syminfos)) {
       DLOG("mdb", "[bkpt:source]: objfile {} has file {}", obj->path.c_str(), src);
-      for (auto &&desc : descs) {
-        // naming it, because who the fuck knows if C++ decides to copy it behind our backs.
-        const auto &lt = f_it->line_table();
-        for (const auto &lte : lt) {
-          if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
-            if (!bps.contains(lte.pc)) {
-              u8 original_byte = write_bp_byte(lte.pc);
-              bps.insert(lte.pc, original_byte, BpType{.source = true});
-              const auto &bp = bps.breakpoints.back();
-              bps.source_breakpoints[bp.id] = std::move(desc);
-              break;
-            } else {
-              auto bp = bps.get(lte.pc);
-              bp->bp_type.source = true;
+      const auto lt = it->get_linetable();
+      if (lt->is_valid())
+        for (auto &&desc : descs) {
+          for (const auto &lte : *lt) {
+            if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
+              if (!bps.contains(lte.pc)) {
+                u8 original_byte = write_bp_byte(lte.pc);
+                bps.insert(lte.pc, original_byte, BpType{.source = true});
+                const auto &bp = bps.breakpoints.back();
+                bps.source_breakpoints[bp.id] = std::move(desc);
+                break;
+              } else {
+                auto bp = bps.get(lte.pc);
+                bp->bp_type.source = true;
+              }
             }
           }
         }
-      }
     }
   }
   logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", bps.breakpoints.size()));
@@ -527,12 +551,41 @@ TraceeController::reset_fn_breakpoints(std::vector<std::string_view> fn_names) n
 
 void
 TraceeController::reset_source_breakpoints(std::string_view source_filepath,
-                                           std::vector<SourceBreakpointDescriptor> &&bps) noexcept
+                                           std::vector<SourceBreakpointDescriptor> &&desc) noexcept
 {
   auto type = BpType{0};
   type.source = true;
-  this->bps.clear(this, type);
-  set_source_breakpoints(source_filepath, std::move(bps));
+  std::erase_if(bps.breakpoints, [&](Breakpoint &bp) {
+    if (bp.type() & type) {
+      // if enabled, and if new setting, means that it's not a combination of any breakpoint types left, disable it
+      // and erase it.
+      if (bp.bp_type.source && type.source) {
+        auto &bp_descriptor = bps.source_breakpoints[bp.id];
+        if (source_filepath != bp_descriptor.source_file)
+          return false;
+        auto it = std::find(desc.begin(), desc.end(), bp_descriptor);
+        if (it != std::end(desc)) {
+          desc.erase(it);
+          return false;
+        }
+        bps.source_breakpoints.erase(bp.id);
+      }
+      if (bp.bp_type.function && type.function) {
+        bps.fn_breakpoint_names.erase(bp.id);
+      }
+
+      // If flipping off all `type` bits in bp results in == 0, means it should be deleted.
+      if (bp.enabled && !(bp.type() & type)) {
+        bp.disable(task_leader);
+        return true;
+      } else {
+        // turn off all types passed in as `type`, keep the rest
+        bp.bp_type.unset(type);
+      }
+    }
+    return false;
+  });
+  set_source_breakpoints(source_filepath, std::move(desc));
 }
 
 void
@@ -657,12 +710,12 @@ TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
   const auto section = obj->parsed_elf->get_section(".debug_frame");
   if (section) {
     DLOG("mdb", ".debug_frame section found; parsing DWARF CFI section");
-    sym::parse_dwarf_eh(unwinder, section, -1);
+    sym::parse_dwarf_eh(obj->parsed_elf, unwinder.get(), section, -1);
   }
 
-  unwinders.push_back(unwinder);
+  unwinders.push_back(std::move(unwinder));
   // todo(simon): optimization possible; insert in a sorted fashion instead.
-  std::sort(unwinders.begin(), unwinders.end(), [](auto a, auto b) {
+  std::sort(unwinders.begin(), unwinders.end(), [](auto &&a, auto &&b) {
     return a->addr_range.low < b->addr_range.low && a->addr_range.high < b->addr_range.high;
   });
 }
@@ -727,7 +780,7 @@ std::string
 TraceeController::get_thread_name(Tid tid) const noexcept
 {
   Path p = fmt::format("/proc/{}/task/{}/comm", task_leader, tid);
-  ScopedFd f = ScopedFd::open_read_only(p);
+  utils::ScopedFd f = utils::ScopedFd::open_read_only(p);
   char buf[16];
   std::memset(buf, 0, 16);
   ::read(f, buf, 16);
@@ -773,35 +826,9 @@ TraceeController::read_string(TraceePointer<char> address) noexcept
 }
 
 void
-TraceeController::add_file(ObjectFile *obj, CompilationUnitFile &&file) noexcept
-{
-  {
-    LockGuard guard{spin_lock};
-    if (file.low_high_pc().is_valid()) {
-      constexpr auto file_sorter_by_addresses = [](CompilationUnitFile &f, const AddressRange &range) noexcept {
-        const auto faddr_rng = f.low_high_pc();
-        return range.high > faddr_rng.low;
-      };
-      auto it_pos = std::lower_bound(obj->m_full_cu.begin(), obj->m_full_cu.end(), file.low_high_pc(),
-                                     file_sorter_by_addresses);
-      obj->m_full_cu.insert(it_pos, std::move(file));
-    } else {
-      obj->m_partial_units.push_back({});
-    }
-  }
-}
-
-void
 TraceeController::reaped_events() noexcept
 {
   awaiter_thread->reaped_events();
-}
-
-void
-TraceeController::notify_self() noexcept
-{
-  DLOG("mdb", "Notifying self...");
-  awaiter_thread->get_notifier().notify();
 }
 
 /** Called after an exec has been processed and we've set up the necessary data structures
@@ -820,8 +847,7 @@ TraceeController::current_frame(TaskInfo *task) noexcept
   if (symbol)
     return sym::Frame{
         .rip = task->registers->rip,
-        .symbol = symbol->fn_sym,
-        .cu_file = symbol->cu_file,
+        .symbol = symbol,
         .level = 0,
         .type = sym::FrameType::Full,
     };
@@ -829,7 +855,6 @@ TraceeController::current_frame(TaskInfo *task) noexcept
     return sym::Frame{
         .rip = task->registers->rip,
         .symbol = nullptr,
-        .cu_file = nullptr,
         .level = 0,
         .type = sym::FrameType::Unknown,
     };
@@ -838,9 +863,9 @@ TraceeController::current_frame(TaskInfo *task) noexcept
 sym::Unwinder *
 TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
 {
-  for (auto unwinder : unwinders) {
+  for (auto &unwinder : unwinders) {
     if (unwinder->addr_range.contains(pc)) {
-      return unwinder;
+      return unwinder.get();
     }
   }
   return null_unwinder;
@@ -879,11 +904,21 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 
     frame_pcs.push_back(task->registers->rip);
     bool inside_prologue = false;
-    auto cu = get_cu_from_pc(task->registers->rip);
-    if (cu) {
-      const auto [a, b] = cu->get_range(frame_pcs.front().as_void());
-      if (b && b->prologue_end)
-        inside_prologue = true;
+    auto obj = find_obj_by_pc(task->registers->rip);
+
+    auto syminfos = obj->get_source_infos(task->registers->rip);
+    sym::SourceFileSymbolInfo *current_symtab = nullptr;
+    if (!syminfos.empty()) {
+      for (auto *symtab : syminfos) {
+        auto lt = symtab->get_linetable();
+        ASSERT(lt, "No line table for {}", symtab->name());
+        auto it = lt->find_by_pc(frame_pcs.front());
+        if (it != std::end(*lt) && it.get().prologue_end) {
+          inside_prologue = true;
+          current_symtab = symtab;
+          break;
+        }
+      }
     }
 
     for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
@@ -901,7 +936,7 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 
       bool resolved = false;
       if (ret_val_a != 0) {
-        if (cu->may_contain(AddrPtr{ret_val_a})) {
+        if (current_symtab && current_symtab->start_pc() <= ret_val_a && current_symtab->end_pc() >= ret_val_a) {
           frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
           resolved = true;
         }
@@ -910,7 +945,7 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
       if (!resolved) {
         auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
         if (!resolved && ret_val_b != 0) {
-          if (cu->may_contain(AddrPtr{ret_val_b})) {
+          if (current_symtab && current_symtab->start_pc() <= ret_val_b && current_symtab->end_pc() >= ret_val_b) {
             frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
           }
         }
@@ -975,13 +1010,13 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
   auto frame_pcs = task->return_addresses(this, req);
   const auto levels = frame_pcs.size();
   for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
-    auto symbol = find_fn_by_pc(i->as_void());
+    auto frame_pc = i->as_void();
+    auto symbol = find_fn_by_pc(frame_pc);
     const auto id = new_frame_id(task);
     if (symbol)
       cs.frames.push_back(sym::Frame{
           .rip = i->as_void(),
-          .symbol = symbol->fn_sym,
-          .cu_file = symbol->cu_file,
+          .symbol = symbol,
           .level = static_cast<int>(levels - level),
           .type = sym::FrameType::Full,
           .frame_id = id,
@@ -990,7 +1025,6 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
       cs.frames.push_back(sym::Frame{
           .rip = i->as_void(),
           .symbol = nullptr,
-          .cu_file = nullptr,
           .level = static_cast<int>(levels - level),
           .type = sym::FrameType::Unknown,
           .frame_id = id,
@@ -1012,27 +1046,33 @@ TraceeController::find_obj_by_pc(AddrPtr addr) const noexcept
   return nullptr;
 }
 
-std::optional<SearchFnSymResult>
+sym::FunctionSymbol *
 TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
 {
   const auto obj = find_obj_by_pc(addr);
-  for (auto &f : obj->m_full_cu) {
-    if (f.may_contain(addr)) {
-      const auto fn = f.find_subprogram(addr);
-      if (fn != nullptr) {
-        return SearchFnSymResult{.fn_sym = fn, .cu_file = &f};
+  if (obj == nullptr)
+    return {};
+
+  auto cus_matching_addr = obj->get_cus_from_pc(addr);
+
+  // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
+  //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
+  for (auto cu : cus_matching_addr) {
+    for (auto &src : obj->source_units()) {
+      if (cu == src.get_dwarf_unit()) {
+        if (auto fn = src.get_fn_by_pc(addr); fn)
+          return fn;
       }
     }
   }
-  DLOG("mdb", "couldn't find fn for pc {}", addr);
-  return std::nullopt;
+  return nullptr;
 }
 
 std::optional<std::string_view>
 TraceeController::get_source(std::string_view name) noexcept
 {
   for (auto obj : object_files) {
-    for (const auto &f : obj->m_full_cu) {
+    for (const auto &f : obj->source_units()) {
       if (f.name() == name) {
         return f.name();
       }
@@ -1048,17 +1088,6 @@ TraceeController::get_text_section(AddrPtr addr) const noexcept
   if (obj) {
     const auto text = obj->parsed_elf->get_section(".text");
     return text;
-  }
-  return nullptr;
-}
-
-const CompilationUnitFile *
-TraceeController::get_cu_from_pc(AddrPtr address) const noexcept
-{
-  const auto obj = find_obj_by_pc(address);
-  if (auto it = find(obj->m_full_cu, [addr = address](const auto &f) { return f.may_contain(addr); });
-      it != std::cend(obj->m_full_cu)) {
-    return it.base();
   }
   return nullptr;
 }

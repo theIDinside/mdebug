@@ -4,9 +4,6 @@
 #include "common.h"
 #include "ptrace.h"
 #include <linux/sched.h>
-#include <sys/types.h>
-#include <sys/user.h>
-#include <sys/wait.h>
 
 using namespace std::string_view_literals;
 struct TraceeController;
@@ -126,6 +123,28 @@ template <> struct formatter<TaskVMInfo>
   {
     return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low.to_string(),
                           vm_info.stack_size, vm_info.tls.to_string());
+  }
+};
+// CallStackRequest
+template <> struct formatter<CallStackRequest>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(CallStackRequest const &req, FormatContext &ctx) const
+  {
+    if (req.req == CallStackRequest::Type::Full) {
+      return fmt::format_to(ctx.out(), "all");
+    } else {
+      return fmt::format_to(ctx.out(), "{}", req.count);
+    }
   }
 };
 

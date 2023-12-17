@@ -1,5 +1,4 @@
 #include "ptrace.h"
-#include "common.h"
 #include "task.h"
 #include <cstdlib>
 #include <source_location>
@@ -282,4 +281,37 @@ to_str(RunType type) noexcept
     break;
   }
   __builtin_unreachable();
+}
+
+Option<WaitPid>
+waitpid_peek(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG | WNOWAIT);
+  if (waited_pid == 0)
+    return {};
+  if (waited_pid == -1)
+    return {};
+
+  return WaitPid{.tid = waited_pid, .status = status};
+}
+
+Option<WaitPid>
+waitpid_nonblock(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG);
+  if (waited_pid == 0 || waited_pid == -1)
+    return Option<WaitPid>{};
+  return WaitPid{waited_pid, status};
+}
+
+Option<WaitPid>
+waitpid_block(pid_t tid) noexcept
+{
+  int status;
+  const auto waited_pid = waitpid(tid, &status, 0);
+  if (waited_pid == 0 || waited_pid == -1)
+    return Option<WaitPid>{};
+  return WaitPid{waited_pid, status};
 }

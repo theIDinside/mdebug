@@ -1,65 +1,55 @@
 #include "tracer.h"
-#include "./interface/dap/interface.h"
-#include "common.h"
-#include "fmt/format.h"
+#include "event_queue.h"
 #include "interface/dap/events.h"
+#include "interface/dap/interface.h"
 #include "interface/pty.h"
-#include "interface/ui_command.h"
-#include "interface/ui_result.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
-#include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
-#include "symbolication/cu.h"
+#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "task.h"
-#include "utils/logger.h"
-#include <algorithm>
-#include <bits/chrono.h>
-#include <bits/ranges_util.h>
-#include <chrono>
-#include <cstdlib>
-#include <exception>
+#include "tasks/dwarf_unit_data.h"
+#include "tasks/index_die_names.h"
+#include "tasks/lnp.h"
+#include "utils/thread_pool.h"
+#include "utils/worker_task.h"
 #include <fcntl.h>
-#include <filesystem>
-#include <nlohmann/json.hpp>
-#include <sys/mman.h>
+#include <fmt/format.h>
 #include <sys/personality.h>
-#include <sys/ptrace.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 
 Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
 
-std::string_view
-add_object_err(AddObjectResult r)
+void
+on_sigcld(int sig)
 {
-  switch (r) {
-  case AddObjectResult::OK:
-    return "OK";
-  case AddObjectResult::MMAP_FAILED:
-    return "Mmap Failed";
-  case AddObjectResult::FILE_NOT_EXIST:
-    return "File didn't exist";
+  pid_t pid;
+  int stat;
+  while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
+    const auto wait_result = process_status(pid, stat);
+    push_event(Event{.process_group = 0, .type = EventType::WaitStatus, .wait = wait_result});
   }
 }
 
-Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier) noexcept
+Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
+               sys::DebuggerInitialization init) noexcept
     : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
-      events_notifier(events_notifier)
+      events_notifier(events_notifier), config(init)
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
          (uintptr_t)this, (uintptr_t)Instance);
   Instance = this;
-  this->command_queue = {};
+  command_queue = {};
+  utils::ThreadPool::get_global_pool()->initialize(config.thread_pool_size());
 }
 
 void
@@ -69,30 +59,38 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
-  CompilationUnitBuilder cu_builder{obj_file};
-  obj_file->line_table_headers = parse_lnp_headers(obj_file->parsed_elf);
-  obj_file->line_tables.reserve(obj_file->line_table_headers.size());
-  for (auto &lth : obj_file->line_table_headers) {
-    obj_file->line_tables.push_back({});
-    lth.set_linetable_storage(&obj_file->line_tables.back());
-  }
-  auto total = cu_builder.build_cu_headers();
-  std::vector<std::thread> jobs{};
 
-  for (auto &cu_hdr : total) {
-    jobs.push_back(std::thread{[obj_file, cu_hdr, tgt = target]() {
-      auto proc = prepare_cu_processing(obj_file, cu_hdr, tgt);
-      auto compile_unit_die = proc->read_dies();
-      if (compile_unit_die->tag == DwarfTag::DW_TAG_compile_unit) {
-        proc->process_compile_unit_die(compile_unit_die.release());
-      } else {
-        PANIC("Unexpected non-compile unit DIE parsed");
-      }
-    }});
+  // TODO(simon): This should be re-factored, but is left here to remind me of how it is supposed to work
+  //  when we have removed all old DWARF code. Possibly, I can imagine a scenario where we string together
+  //  TaskGroups (i.e. the "full" batch of work that needs to be done), like for instance the indexing
+  //  task-taskgroup, depends on the compilation unit data-taskgroup, so that it can spin up the indexing task
+  //  group when it's done, or something like that.. That's a "quality of life" feature though.
+  {
+    utils::TaskGroup tg("Compilation Unit Data");
+    auto work = sym::dw::UnitDataTask::create_jobs_for(obj_file);
+    tg.add_tasks(std::span{work});
+    tg.schedule_work().wait();
   }
 
-  for (auto &&j : jobs) {
-    j.join();
+  // TODO(simon): Add lazy reading for LNP headers and Line Number Programs.
+  //  one way could be; as soon as a user requests compilation units, because some iteration over them needs to
+  //  happen and process them, but we don't know which one of them we're interested in, we can post a task per CU,
+  //  to run the LNP in the background and protect access to the LNP behind a mutex, that way. That way we will
+  //  "fuzzily" build additional LNP's as well, which in turn, hopefully will increase efficiency. That's if we
+  //  can' figure out a heuristic that is, to know which CU's LNP will be needed in the near future.
+  obj_file->read_lnp_headers();
+  {
+    utils::TaskGroup tg("Line number programs");
+    auto work = sym::dw::LineNumberProgramTask::create_jobs_for(obj_file);
+    tg.add_tasks(std::span{work});
+    tg.schedule_work().wait();
+  }
+
+  {
+    utils::TaskGroup tg("Name Indexing");
+    auto work = sym::dw::IndexingTask::create_jobs_for(obj_file);
+    tg.add_tasks(std::span{work});
+    tg.schedule_work().wait();
   }
 }
 
@@ -136,8 +134,24 @@ Tracer::get_current() noexcept
 }
 
 void
+Tracer::config_done() noexcept
+{
+  switch (config.waitsystem()) {
+  case sys::WaitSystem::UseAwaiterThread:
+    get_current()->start_awaiter_thread();
+    break;
+  case sys::WaitSystem::UseSignalHandler:
+    signal(SIGCHLD, on_sigcld);
+    break;
+  }
+}
+
+void
 Tracer::handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept
 {
+  if (process_group == 0) {
+    process_group = (*targets.begin())->task_leader;
+  }
   auto tc = get_controller(process_group);
   tc->set_pending_waitstatus(wait_res);
   auto task = tc->get_task(wait_res.tid);
@@ -190,7 +204,7 @@ void
 Tracer::accept_command(ui::UICommand *cmd) noexcept
 {
   {
-    SpinGuard lock{command_queue_lock};
+    LockGuard<SpinLock> lock{command_queue_lock};
     command_queue.push(cmd);
   }
   DLOG("mdb", "accepted command {}", cmd->name());
@@ -203,7 +217,7 @@ Tracer::execute_pending_commands() noexcept
   while (!command_queue.empty()) {
     // keep the lock as minimum of a time span as possible
     {
-      SpinGuard lock{command_queue_lock};
+      LockGuard<SpinLock> lock{command_queue_lock};
       pending_command = command_queue.front();
       command_queue.pop();
     }

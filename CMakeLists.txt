@@ -4,80 +4,104 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(MIDAS_SOURCES
+  # root
   src/main.cpp
-  src/event_queue.cpp
-  src/event_queue.h
-  src/utils/logger.cpp
-  src/utils/logger.h
-  src/utils/thread_pool.cpp
-  src/utils/thread_pool.h
-  src/utils/worker_task.cpp
-  src/utils/worker_task.h
-  src/tracer.cpp
-  src/tracer.h
-  src/supervisor.cpp
-  src/supervisor.h
-  src/ptracestop_handlers.cpp
-  src/ptracestop_handlers.h
-  src/common.cpp
-  src/common.h
-  src/ptrace.cpp
-  src/ptrace.h
-  src/task.cpp
-  src/task.h
-  src/notify_pipe.cpp
-  src/notify_pipe.h
   src/awaiter.cpp
   src/awaiter.h
   src/breakpoint.cpp
   src/breakpoint.h
+  src/common.cpp
+  src/common.h
+  src/event_queue.cpp
+  src/event_queue.h
+  src/mdb_config.cpp
+  src/mdb_config.h
+  src/notify_pipe.cpp
+  src/notify_pipe.h
+  src/ptrace.cpp
+  src/ptrace.h
+  src/ptracestop_handlers.cpp
+  src/ptracestop_handlers.h
   src/so_loading.cpp
   src/so_loading.h
+  src/supervisor.cpp
+  src/supervisor.h
+  src/task.cpp
+  src/task.h
+  src/tracer.cpp
+  src/tracer.h
+  # events
   src/events/event.cpp
   src/events/event.h
-  src/symbolication/elf.cpp
-  src/symbolication/elf.h
-  src/symbolication/objfile.cpp
-  src/symbolication/objfile.h
-  src/symbolication/cu.cpp
-  src/symbolication/cu.h
-  src/symbolication/dwarf.cpp
-  src/symbolication/dwarf.h
-  src/symbolication/lnp.cpp
-  src/symbolication/lnp.h
-  src/symbolication/elf_symbols.cpp
-  src/symbolication/elf_symbols.h
-  src/symbolication/block.cpp
-  src/symbolication/block.h
-  src/symbolication/cu_file.cpp
-  src/symbolication/cu_file.h
-  src/symbolication/callstack.cpp
-  src/symbolication/callstack.h
-  src/symbolication/disassemble.cpp
-  src/symbolication/disassemble.h
-  src/symbolication/dwarf_frameunwinder.cpp
-  src/symbolication/dwarf_frameunwinder.h
-  src/symbolication/dwarf_expressions.cpp
-  src/symbolication/dwarf_expressions.h
-  src/symbolication/type.cpp
-  src/symbolication/type.h
-  src/lib/lockguard.h
-  src/interface/dap/interface.cpp
-  src/interface/dap/interface.h
+  # interface
   src/interface/dap/commands.cpp
   src/interface/dap/commands.h
   src/interface/dap/dap_defs.h
-  src/interface/dap/parse_buffer.cpp
-  src/interface/dap/parse_buffer.h
   src/interface/dap/events.cpp
   src/interface/dap/events.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
   src/interface/dap/types.cpp
   src/interface/dap/types.h
   src/interface/pty.cpp
   src/interface/pty.h
+  # lib
+  src/lib/lockguard.h
+  # symbolication
+  src/symbolication/block.cpp
+  src/symbolication/block.h
+  src/symbolication/callstack.cpp
+  src/symbolication/callstack.h
+  src/symbolication/cu_symbol_info.cpp
+  src/symbolication/cu_symbol_info.h
+  src/symbolication/disassemble.cpp
+  src/symbolication/disassemble.h
+  src/symbolication/dwarf_binary_reader.cpp
+  src/symbolication/dwarf_binary_reader.h
+  src/symbolication/dwarf_expressions.cpp
+  src/symbolication/dwarf_expressions.h
+  src/symbolication/dwarf_frameunwinder.cpp
+  src/symbolication/dwarf_frameunwinder.h
+  src/symbolication/dwarf.h
+  src/symbolication/dwarf/debug_info_reader.cpp
+  src/symbolication/dwarf/debug_info_reader.h
+  src/symbolication/dwarf/die.cpp
+  src/symbolication/dwarf/die.h
+  src/symbolication/dwarf/lnp.cpp
+  src/symbolication/dwarf/lnp.h
+  src/symbolication/dwarf/name_index.cpp
+  src/symbolication/dwarf/name_index.h
+  src/symbolication/elf_symbols.h
+  src/symbolication/elf.cpp
+  src/symbolication/elf.h
+  src/symbolication/fnsymbol.cpp
+  src/symbolication/fnsymbol.h
+  src/symbolication/objfile.cpp
+  src/symbolication/objfile.h
+  src/symbolication/type.cpp
+  src/symbolication/type.h
+  # tasks
+  src/tasks/dwarf_unit_data.cpp
+  src/tasks/dwarf_unit_data.h
+  src/tasks/index_die_names.cpp
+  src/tasks/index_die_names.h
+  src/tasks/lnp.cpp
+  src/tasks/lnp.h
+  # utils
   src/utils/base64.cpp
   src/utils/base64.h
+  src/utils/logger.cpp
+  src/utils/logger.h
+  src/utils/scoped_fd.cpp
+  src/utils/scoped_fd.h
+  src/utils/thread_pool.cpp
+  src/utils/thread_pool.h
+  src/utils/worker_task.cpp
+  src/utils/worker_task.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
@@ -102,44 +126,29 @@ execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py 
 add_subdirectory(test)
 enable_testing()
 # Unit Testing (using googletest)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-add_subdirectory(dependencies/googletest)
+include(cmake/AddTest.cmake)
 
-add_executable(
-  parse_dap_requests
-  test/unittest/parse_dap_requests.cpp
-  src/interface/dap/parse_buffer.cpp
-  src/interface/dap/parse_buffer.h
-  src/utils/logger.cpp
-  ${COMMON_SRC}
+AddTest(NAME parse_dap_requests
+  SOURCES
+    test/unittest/parse_dap_requests.cpp
+    src/interface/dap/parse_buffer.cpp
+    src/interface/dap/parse_buffer.h
+    src/utils/logger.cpp
+    ${COMMON_SRC}
+  LIBS
+    fmt::fmt
+    mdb_spinlock
+    nlohmann_json::nlohmann_json
 )
 
-target_link_libraries(
-  parse_dap_requests
-  GTest::gtest_main
-  fmt::fmt
-  mdb_spinlock
-  nlohmann_json::nlohmann_json
+AddTest(NAME base64_encoding
+  SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC}
+  LIBS fmt::fmt mdb_spinlock
 )
 
-add_executable(
-  base64_encoding
-  test/unittest/base64.cpp
-  src/utils/base64.cpp
-  src/utils/logger.cpp
-  ${COMMON_SRC}
-)
-
-target_link_libraries(
-  base64_encoding
-  GTest::gtest_main
-  fmt::fmt
-  mdb_spinlock
-)
-
-include(GoogleTest)
-gtest_discover_tests(parse_dap_requests)
-gtest_discover_tests(base64_encoding)
+AddTest(NAME test_utils
+  SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp
+  LIBS fmt::fmt mdb_spinlock)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
@@ -153,6 +162,7 @@ add_subdirectory(dependencies/nlohmann_json)
 
 target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zydis)
 target_include_directories(mdb PUBLIC ./dependencies)
+target_include_directories(mdb PUBLIC ./src)
 
 find_program(NODEJS "node")
 
@@ -211,3 +221,4 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
+target_compile_definitions(parse_dap_requests PUBLIC JSON_HAS_RANGES=0)

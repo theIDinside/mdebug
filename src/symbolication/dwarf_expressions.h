@@ -1,5 +1,6 @@
 #pragma once
 #include "../common.h"
+#include "dwarf_binary_reader.h"
 #include "dwarf_defs.h"
 #include <concepts>
 #include <stack>

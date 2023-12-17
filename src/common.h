@@ -1,28 +1,22 @@
 #pragma once
-
-#include "lib/lockguard.h"
-#include "lib/spinlock.h"
-#include "utils/logger.h"
-#include "utils/macros.h"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <execinfo.h>
-#include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
 #include <optional>
 #include <source_location>
 #include <span>
 #include <sys/mman.h>
-#include <sys/poll.h>
 #include <sys/user.h>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
+#include <utils/logger.h>
+#include <utils/macros.h>
 #include <variant>
 #include <vector>
 
@@ -74,13 +68,6 @@ micros(TimeStamp a, TimeStamp b)
 
 template <typename T> using Option = std::optional<T>;
 
-/** C++-ified result from waitpid syscall. */
-struct WaitPid
-{
-  Tid tid;
-  int status;
-};
-
 enum class TargetSession
 {
   Launched,
@@ -89,17 +76,16 @@ enum class TargetSession
 
 struct Index
 {
-  operator u64() noexcept { return i; }
-  u64 i;
+
+  operator u32() const noexcept { return i; }
+  constexpr u32
+  value() const noexcept
+  {
+    return i;
+  }
+
+  u32 i;
 };
-
-/** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
- * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
-Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
-/** `wait`'s for `tid` in a non-blocking way. If waiting on `tid` yielded no wait status, returns `none` */
-Option<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
-
-Option<WaitPid> waitpid_block(pid_t tid) noexcept;
 
 // "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
 template <typename T> using ActualType = std::remove_cvref_t<T>;
@@ -376,7 +362,7 @@ template <typename T> struct formatter<TraceePointer<T>>
 
   template <typename FormatContext>
   auto
-  format(TraceePointer<T> const &tptr, FormatContext &ctx)
+  format(TraceePointer<T> const &tptr, FormatContext &ctx) const
   {
     return fmt::format_to(ctx.out(), "0x{:x}", tptr.get());
   }
@@ -396,65 +382,6 @@ struct UnrelocatedTraceePointer : public TraceePointer<void>
 using AddrPtr = TraceePointer<void>;
 template <typename T> using TPtr = TraceePointer<T>;
 
-class ScopedFd
-{
-public:
-  ScopedFd() noexcept : fd(-1), p{} {}
-  ScopedFd(int fd) noexcept;
-  ScopedFd(int fd, Path p) noexcept;
-  ~ScopedFd() noexcept;
-
-  ScopedFd &
-  operator=(ScopedFd &&other) noexcept
-  {
-    if (this == &other)
-      return *this;
-    close();
-    fd = other.fd;
-    p = std::move(other.p);
-    file_size_ = other.file_size_;
-    other.fd = -1;
-    return *this;
-  }
-
-  ScopedFd(ScopedFd &&) noexcept;
-
-  int get() const noexcept;
-  bool is_open() const noexcept;
-  void close() noexcept;
-  operator int() const noexcept;
-  u64 file_size() const noexcept;
-  const Path &path() const noexcept;
-  void forget() noexcept;
-
-  static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
-  static ScopedFd open_read_only(const Path &p) noexcept;
-  static ScopedFd take_ownership(int fd) noexcept;
-
-private:
-  int fd;
-  Path p;
-  u64 file_size_;
-};
-
-constexpr pollfd
-cfg_read_poll(int fd, int additional_flags) noexcept
-{
-  pollfd pfd{0, 0, 0};
-  pfd.events = POLLIN | additional_flags;
-  pfd.fd = fd;
-  return pfd;
-}
-
-constexpr pollfd
-cfg_write_poll(int fd, int additional_flags) noexcept
-{
-  pollfd pfd{0, 0, 0};
-  pfd.events = POLLOUT | additional_flags;
-  pfd.fd = fd;
-  return pfd;
-}
-
 static constexpr u8 LEB128_MASK = 0b0111'1111;
 
 template <typename T> struct LEB128
@@ -464,6 +391,13 @@ template <typename T> struct LEB128
 };
 
 template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
+
+/* Holds the decoded value of a ULEB/LEB128 as well as the length of the decoded data (in bytes). */
+template <IsBitsType T> struct LEB128Read
+{
+  T result;
+  u8 bytes_read;
+};
 
 const u8 *
 decode_uleb128(const u8 *data, IsBitsType auto &value) noexcept
@@ -527,197 +461,6 @@ concept ByteCode = requires(ByteType bt) {
   { std::to_underlying(bt) } -> std::convertible_to<u8>;
 } && std::is_enum<ByteType>::value;
 // clang-format on
-class DwarfBinaryReader
-{
-public:
-  enum class InitLengthRead
-  {
-    UpdateBufferSize,
-    Ignore
-  };
-
-  using enum InitLengthRead;
-
-  DwarfBinaryReader(const u8 *buffer, u64 size) noexcept;
-  DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept;
-
-  template <ByteContainer BC>
-  DwarfBinaryReader(const BC &bc)
-      : buffer(bc.begin()), head(bc.begin()), end(bc.end()), size(bc.size()), bookmarks()
-  {
-  }
-
-  template <ByteContainer BC>
-  DwarfBinaryReader(const BC *bc)
-      : buffer(bc->begin()), head(bc->begin()), end(bc->end()), size(bc->size()), bookmarks()
-  {
-  }
-
-  template <ByteContainer BC>
-  DwarfBinaryReader(const BC &bc, u64 offset)
-      : buffer(bc.offset(offset)), head(bc.offset(offset)), end(bc.end()), size(bc.size() - offset), bookmarks()
-  {
-  }
-
-  template <ByteContainer BC>
-  DwarfBinaryReader(const BC *bc, u64 offset)
-      : buffer(bc->offset(offset)), head(bc->offset(offset)), end(bc->end()), size(bc->size() - offset),
-        bookmarks()
-  {
-  }
-
-  template <typename T>
-    requires(!std::is_pointer_v<T>)
-  constexpr T
-  read_value() noexcept
-  {
-    ASSERT(remaining_size() >= sizeof(T),
-           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
-           remaining_size());
-    using Type = typename std::remove_cv_t<T>;
-    constexpr auto sz = sizeof(Type);
-    Type value = *(Type *)head;
-    head += sz;
-    return value;
-  }
-
-  template <typename T>
-    requires(!std::is_pointer_v<T>)
-  constexpr void
-  skip_value() noexcept
-  {
-    ASSERT(remaining_size() >= sizeof(T),
-           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T),
-           remaining_size());
-    using Type = typename std::remove_cv_t<T>;
-    constexpr auto sz = sizeof(Type);
-    head += sz;
-  }
-
-  template <ByteCode T>
-  constexpr T
-  read_byte() noexcept
-  {
-    const auto res = head;
-    ++head;
-    return (T)*res;
-  }
-
-  template <typename T, size_t N>
-  constexpr void
-  read_into_array(std::array<T, N> &out)
-  {
-    for (auto &elem : out) {
-      elem = read_value<T>();
-    }
-  }
-
-  template <typename T>
-  T
-  peek_value() noexcept
-  {
-    return *(T *)head;
-  }
-
-  template <InitLengthRead InitReadAction>
-  u64
-  read_initial_length() noexcept
-  {
-    u32 peeked = peek_value<u32>();
-    if (peeked != 0xff'ff'ff'ff) {
-      if constexpr (InitReadAction == UpdateBufferSize)
-        set_wrapped_buffer_size(peeked + 4);
-      offset_size = 4;
-      return read_value<u32>();
-    } else {
-      head += 4;
-      const auto sz = read_value<u64>();
-      if constexpr (InitReadAction == UpdateBufferSize)
-        set_wrapped_buffer_size(sz + 12);
-      offset_size = 8;
-      return sz;
-    }
-  }
-
-  template <InitLengthRead InitReadAction>
-  InitLength
-  read_initial_length_additional() noexcept
-  {
-    u32 peeked = peek_value<u32>();
-    if (peeked != 0xff'ff'ff'ff) {
-      if constexpr (InitReadAction == UpdateBufferSize)
-        set_wrapped_buffer_size(peeked + 4);
-      offset_size = 4;
-      const auto len = read_value<u32>();
-      return InitLength{.format = DwFormat::DW32, .length = len};
-    } else {
-      head += 4;
-      const auto sz = read_value<u64>();
-      if constexpr (InitReadAction == UpdateBufferSize)
-        set_wrapped_buffer_size(sz + 12);
-      offset_size = 8;
-      return InitLength{.format = DwFormat::DW32, .length = sz};
-    }
-  }
-
-  /** Reads value from buffer according to dwarf spec, which can determine size of addresess, offsets etc. We
-   * always make the results u64, but DWARF might represent the data as 32-bit values etc.*/
-  u64 dwarf_spec_read_value() noexcept;
-  template <IsBitsType T>
-  constexpr auto
-  read_uleb128() noexcept
-  {
-    T value;
-    head = decode_uleb128(head, value);
-    return value;
-  }
-
-  template <IsBitsType T>
-  T
-  read_leb128() noexcept
-  {
-    T value;
-    head = decode_leb128(head, value);
-    return value;
-  }
-
-  std::span<const u8> get_span(u64 size) noexcept;
-  std::string_view read_string() noexcept;
-  void skip_string() noexcept;
-  DataBlock read_block(u64 size) noexcept;
-
-  /**
-   * @brief Reads an 'offset value' from the binary data stream. The offset size is determined when reading the
-   * initial length (unit length) of a unit header in one of the many DWARF sections.
-   *
-   * @return u64 - the offset value found at the current position in the data stream.
-   */
-  u64 read_offset() noexcept;
-  const u8 *current_ptr() const noexcept;
-  bool has_more() noexcept;
-  u64 remaining_size() const noexcept;
-  u64 bytes_read() const noexcept;
-  void skip(i64 bytes) noexcept;
-
-  // sets a mark at the "currently read to bytes", to be able to compare at some time later how many bytes have
-  // been read since that mark, by popping that mark and comparing
-  void bookmark() noexcept;
-
-  // pops the latest bookmark and subtracts current head position - that position, which calculates how many bytes
-  // has been read since then
-  u64 pop_bookmark() noexcept;
-
-  friend DwarfBinaryReader sub_reader(const DwarfBinaryReader &reader) noexcept;
-
-private:
-  void set_wrapped_buffer_size(u64 size) noexcept;
-  const u8 *buffer;
-  const u8 *head;
-  const u8 *end;
-  u64 size;
-  u8 offset_size = 4;
-  std::vector<u64> bookmarks;
-};
 
 template <typename T, typename... Args>
 constexpr const T *
@@ -764,16 +507,6 @@ mmap_buffer(u64 size) noexcept
   return ptr;
 }
 
-template <typename T>
-T *
-mmap_file(ScopedFd &fd, u64 size, bool read_only) noexcept
-{
-  ASSERT(fd.is_open(), "Backing file not open: {}", fd.path().c_str());
-  auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, fd.get(), 0);
-  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, fd.path().c_str());
-  return ptr;
-}
-
 template <std::integral Value>
 constexpr Option<Value>
 to_integral(std::string_view s)
@@ -785,8 +518,6 @@ to_integral(std::string_view s)
 }
 
 Option<AddrPtr> to_addr(std::string_view s) noexcept;
-
-using SpinGuard = LockGuard<SpinLock>;
 
 template <typename T, typename Predicate>
 constexpr bool
@@ -905,4 +636,14 @@ template <typename T> struct SearchResult
   {
     return ptr != nullptr;
   }
+};
+
+template <typename DeferFn> class ScopedDefer
+{
+public:
+  explicit ScopedDefer(DeferFn &&fn) noexcept : defer_fn(std::move(fn)) {}
+  ~ScopedDefer() noexcept { defer_fn(); }
+
+private:
+  DeferFn defer_fn;
 };

@@ -6,7 +6,7 @@ InsideRange
 Frame::inside(TPtr<void> addr) const noexcept
 {
   if (symbol) {
-    return (addr >= symbol->start && addr < symbol->end) ? InsideRange::Yes : InsideRange::No;
+    return (addr >= symbol->start_pc() && addr < symbol->end_pc()) ? InsideRange::Yes : InsideRange::No;
   } else
     return InsideRange::Unknown;
 }

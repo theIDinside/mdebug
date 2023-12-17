@@ -17,3 +17,15 @@ AddressRange::is_valid() const noexcept
 {
   return low != TPtr<void>{nullptr} && high != TPtr<void>{nullptr};
 }
+
+AddrPtr
+AddressRange::start_pc() const noexcept
+{
+  return low;
+}
+
+AddrPtr
+AddressRange::end_pc() const noexcept
+{
+  return high;
+}

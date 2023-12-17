@@ -1,18 +1,14 @@
 #include "ptracestop_handlers.h"
-#include "breakpoint.h"
-#include "common.h"
-#include "events/event.h"
-#include "ptrace.h"
-#include "supervisor.h"
-#include "symbolication/lnp.h"
-#include "task.h"
-#include "tracer.h"
-#include "utils/logger.h"
-#include "utils/macros.h"
-#include <algorithm>
-#include <bits/ranges_algo.h>
-#include <chrono>
-#include <sys/wait.h>
+#include <breakpoint.h>
+#include <common.h>
+#include <events/event.h>
+#include <ptrace.h>
+#include <supervisor.h>
+#include <symbolication/cu_symbol_info.h>
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/objfile.h>
+#include <task.h>
+#include <tracer.h>
 
 namespace ptracestop {
 
@@ -61,21 +57,34 @@ InstructionStep::~InstructionStep()
 
 LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
     : ThreadProceedAction(handler, task), lines_requested(lines), lines_stepped(0), is_done(false),
-      resume_address(), resumed_to_resume_addr(false), start_frame(), entry(), cu(nullptr)
+      resume_address(), resumed_to_resume_addr(false), start_frame(), entry()
 {
   auto tc = handler->tc;
   auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
-  DLOG("mdb", "frame rip: {} cu: {:p} sym: {:p}. frame info {}", start_frame.rip, (void *)start_frame.cu_file,
-       (void *)start_frame.symbol, start_frame);
-  if (auto cu = tc->get_cu_from_pc(start_frame.rip); cu) {
-    const auto [a, b] = cu->get_range(start_frame.rip);
-    ASSERT(a != nullptr, "Expected a line table entry");
-    entry = *a;
-    this->cu = cu;
-  } else {
-    VERIFY(false, "Couldn't find Compilation Unit File for this frame");
+  auto obj = tc->find_obj_by_pc(start_frame.rip);
+  auto src_infos = obj->get_source_infos(start_frame.rip);
+  auto found = false;
+  for (auto *src : src_infos) {
+    auto ltopt = src->get_linetable();
+    if (ltopt) {
+      auto lt = *ltopt;
+      auto it = lt.find_by_pc(start_frame.rip);
+      if (it != std::end(lt)) {
+        auto lte = it.get();
+        if (lte.pc == start_frame.rip) {
+          found = true;
+          entry = lte;
+          break;
+        } else {
+          found = true;
+          entry = (it - 1).get();
+          break;
+        }
+      }
+    }
   }
+  VERIFY(found, "Couldn't find Line Table Entry Information needed to navigate source code lines");
 }
 
 LineStep::~LineStep() noexcept
@@ -112,24 +121,25 @@ LineStep::update_stepped() noexcept
 {
   const auto frame = tc->current_frame(task);
   // if we're in the same frame, we single step
-  DLOG("mdb", "[line step]: frame: {}; start-frame: {}", frame, start_frame);
   if (same_symbol(frame, start_frame)) {
-    const auto [a, b] = cu->get_range_of_pc(frame.rip);
-    if (!a || !b) {
-      DLOG("mdb", "[line step]: couldn't find CU range, line stepping will end.");
+    auto lt = frame.symbol->decl_file->get_linetable();
+    if (!lt) {
       is_done = true;
       return;
     }
 
-    if (a->line != entry.line) {
-      DLOG("mdb",
-           "[line step]: New LTE pc {} found by using {}, line {} != start LTE pc {}, line {}. (pc {}, line {})",
-           a->pc, frame.rip, a->line, entry.pc, entry.line, b->pc, b->line);
+    auto lte = lt->find_by_pc(frame.rip);
+    if (lte == lt->end()) {
+      is_done = true;
+    }
+    if (frame.rip < lte.get().pc && frame.rip > (lte - 1).get().pc) {
+      return;
+    }
+    if ((*lte).line != entry.line) {
       is_done = true;
     }
   } else {
-    DLOG("mdb", "[line step]: {} left origin frame {} ----> {}", task->tid, start_frame, frame);
-    auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(2));
+    auto &callstack = tc->build_callframe_stack(task, CallStackRequest::full());
     const auto ret_addr = map<AddrPtr>(
         callstack.frames,
         [sf = start_frame](const auto &f) {

@@ -1,5 +1,14 @@
 #include <cstdio>
 #include <sys/signal.h>
+struct Foo
+{
+  int foo_value;
+};
+struct Bar
+{
+  Foo foo;
+  int bar_value;
+};
 
 static int
 quux(int acc, int a)
@@ -43,4 +52,5 @@ int
 main(int argc, const char **argv)
 {
   foo();
+  Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2};
 }

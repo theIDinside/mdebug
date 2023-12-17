@@ -1,8 +1,6 @@
 #include "breakpoint.h"
 #include "ptrace.h"
 #include "supervisor.h"
-#include <sys/ptrace.h>
-#include <utility>
 
 Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BpType type) noexcept
     : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true),

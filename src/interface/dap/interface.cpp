@@ -5,6 +5,7 @@
 #include "commands.h"
 #include "events.h"
 #include "fmt/core.h"
+#include "lib/lockguard.h"
 #include "parse_buffer.h"
 #include <algorithm>
 #include <charconv>
@@ -26,8 +27,27 @@
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <thread>
+#include <utils/signals.h>
 namespace ui::dap {
 using namespace std::string_literals;
+
+constexpr pollfd
+cfg_write_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLOUT | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
+
+constexpr pollfd
+cfg_read_poll(int fd, int additional_flags) noexcept
+{
+  pollfd pfd{0, 0, 0};
+  pfd.events = POLLIN | additional_flags;
+  pfd.fd = fd;
+  return pfd;
+}
 
 std::string_view
 ContentDescriptor::payload() const noexcept
@@ -122,6 +142,7 @@ DAP::write_protocol_message(std::string_view msg) noexcept
 void
 DAP::run_ui_loop()
 {
+  utils::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
   auto cleanup_times = 5;
   ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 4};
   static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
