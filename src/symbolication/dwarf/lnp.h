@@ -87,16 +87,16 @@ public:
   LineTableEntry operator*();
   LineTableEntry get() const noexcept;
 
-  RelocatedLteIterator operator+(difference_type diff);
-  RelocatedLteIterator operator-(difference_type diff);
-  difference_type operator-(RelocatedLteIterator diff);
+  RelocatedLteIterator operator+(difference_type diff) const noexcept;
+  RelocatedLteIterator operator-(difference_type diff) const noexcept;
+  difference_type operator-(RelocatedLteIterator diff) const noexcept;
 
-  RelocatedLteIterator &operator+=(difference_type diff);
-  RelocatedLteIterator &operator-=(difference_type diff);
-  RelocatedLteIterator &operator++();
-  RelocatedLteIterator operator++(int);
-  RelocatedLteIterator &operator--();
-  RelocatedLteIterator operator--(int);
+  RelocatedLteIterator &operator+=(difference_type diff) noexcept;
+  RelocatedLteIterator &operator-=(difference_type diff) noexcept;
+  RelocatedLteIterator &operator++() noexcept;
+  RelocatedLteIterator operator++(int) noexcept;
+  RelocatedLteIterator &operator--() noexcept;
+  RelocatedLteIterator operator--(int) noexcept;
 
   friend bool operator==(const RelocatedLteIterator &l, const RelocatedLteIterator &r);
   friend bool operator!=(const RelocatedLteIterator &l, const RelocatedLteIterator &r);

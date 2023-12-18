@@ -325,48 +325,48 @@ RelocatedLteIterator::get() const noexcept
 }
 
 RelocatedLteIterator
-RelocatedLteIterator::operator+(difference_type diff)
+RelocatedLteIterator::operator+(difference_type diff) const noexcept
 {
   auto copy = *this;
   return copy += diff;
 }
 
 RelocatedLteIterator
-RelocatedLteIterator::operator-(difference_type diff)
+RelocatedLteIterator::operator-(difference_type diff) const noexcept
 {
   auto copy = *this;
   return copy -= diff;
 }
 
 RelocatedLteIterator::difference_type
-RelocatedLteIterator::operator-(RelocatedLteIterator other)
+RelocatedLteIterator::operator-(RelocatedLteIterator other) const noexcept
 {
   return it - other.it;
 }
 
 RelocatedLteIterator &
-RelocatedLteIterator::operator+=(difference_type diff)
+RelocatedLteIterator::operator+=(difference_type diff) noexcept
 {
   it += diff;
   return *this;
 }
 
 RelocatedLteIterator &
-RelocatedLteIterator::operator-=(difference_type diff)
+RelocatedLteIterator::operator-=(difference_type diff) noexcept
 {
   it -= diff;
   return *this;
 }
 
 RelocatedLteIterator &
-RelocatedLteIterator::operator++()
+RelocatedLteIterator::operator++() noexcept
 {
   ++it;
   return *this;
 }
 
 RelocatedLteIterator
-RelocatedLteIterator::operator++(int)
+RelocatedLteIterator::operator++(int) noexcept
 {
   auto copy = *this;
   ++copy.it;
@@ -374,14 +374,14 @@ RelocatedLteIterator::operator++(int)
 }
 
 RelocatedLteIterator &
-RelocatedLteIterator::operator--()
+RelocatedLteIterator::operator--() noexcept
 {
   --it;
   return *this;
 }
 
 RelocatedLteIterator
-RelocatedLteIterator::operator--(int)
+RelocatedLteIterator::operator--(int) noexcept
 {
   auto copy = *this;
   --copy.it;
