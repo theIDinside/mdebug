@@ -211,34 +211,7 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
   for (auto so_id : sos) {
     const auto so = shared_objects.get_so(so_id);
     if (so->has_debug_info()) {
-      {
-        const auto name = fmt::format("Compilation Unit Data for {}", so->name());
-        utils::TaskGroup tg(name);
-        auto work = sym::dw::UnitDataTask::create_jobs_for(so->objfile);
-        tg.add_tasks(std::span{work});
-        tg.schedule_work().wait();
-      }
-
-      so->objfile->read_lnp_headers();
-      {
-        if (so->name() == "ld-linux-x86-64.so.2") {
-          ASSERT(so->objfile->get_lnp_headers().size() == 112,
-                 "Expected ld.so to have 112 line number program headers");
-        }
-        const auto name = fmt::format("Line number programs for {}", so->name());
-        utils::TaskGroup tg(name);
-        auto work = sym::dw::LineNumberProgramTask::create_jobs_for(so->objfile);
-        tg.add_tasks(std::span{work});
-        tg.schedule_work().wait();
-      }
-
-      {
-        const auto name = fmt::format("Name Indexing for {}", so->name());
-        utils::TaskGroup tg(name);
-        auto work = sym::dw::IndexingTask::create_jobs_for(so->objfile);
-        tg.add_tasks(std::span{work});
-        tg.schedule_work().wait();
-      }
+      so->objfile->initial_dwarf_setup(Tracer::Instance->get_configuration().dwarf_config());
     }
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
   }

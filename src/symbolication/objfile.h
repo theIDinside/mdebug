@@ -6,6 +6,7 @@
 #include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
+#include "mdb_config.h"
 #include <common.h>
 #include <string_view>
 #include <sys/mman.h>
@@ -90,12 +91,16 @@ struct ObjectFile
   std::span<sym::dw::LNPHeader> get_lnp_headers() noexcept;
   void add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
                        std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes);
+  void init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers);
+  sym::dw::ParsedLineTableEntries &get_plte(u64 offset) noexcept;
   void add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept;
   std::vector<sym::SourceFileSymbolInfo> &source_units() noexcept;
   std::vector<sym::dw::UnitData *> get_cus_from_pc(AddrPtr pc) noexcept;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   std::vector<sym::SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
+
+  void initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept;
 
 private:
   std::mutex unit_data_write_lock;

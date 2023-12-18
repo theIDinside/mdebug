@@ -30,9 +30,11 @@ void
 LineNumberProgramTask::execute_task() noexcept
 {
   std::vector<ParsedLineTableEntries> result;
+
   for (auto &header : lnp_headers) {
-    result.emplace_back(sym::dw::compute_line_number_program(obj->parsed_elf, &header));
+    sym::dw::compute_line_number_program(obj->get_plte(header.sec_offset), obj->parsed_elf, &header);
+    // result.emplace_back(sym::dw::compute_line_number_program(obj->parsed_elf, &header));
   }
-  obj->add_parsed_ltes(lnp_headers, std::move(result));
+  // obj->add_parsed_ltes(lnp_headers, std::move(result));
 }
 } // namespace sym::dw

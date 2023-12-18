@@ -1,7 +1,12 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "symbolication/dwarf/lnp.h"
+#include "tasks/dwarf_unit_data.h"
+#include "tasks/index_die_names.h"
+#include "tasks/lnp.h"
 #include "type.h"
+#include "utils/worker_task.h"
 #include <optional>
 #include <utils/scoped_fd.h>
 
@@ -145,6 +150,9 @@ ObjectFile::get_linetable(u64 offset) noexcept
     }
     ASSERT(false, "Failed to find parsed LineTable Entries for offset 0x{:x}", offset);
   }
+  if (kvp->second.table.empty()) {
+    sym::dw::compute_line_number_program(kvp->second, parsed_elf, &*header);
+  }
   return sym::dw::LineTable{&(*header), &kvp->second, parsed_elf->relocate_addr(nullptr)};
 }
 
@@ -152,6 +160,7 @@ void
 ObjectFile::read_lnp_headers() noexcept
 {
   lnp_headers = sym::dw::read_lnp_headers(parsed_elf);
+  init_lnp_storage(*lnp_headers);
 }
 
 // No synchronization needed, parsed 1, in 1 thread
@@ -179,6 +188,22 @@ ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
   for (; h != std::end(headers); h++, p++) {
     stored.emplace(h->sec_offset, std::move(*p));
   }
+}
+
+void
+ObjectFile::init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers)
+{
+  std::lock_guard lock(parsed_lte_write_lock);
+  parsed_ltes->reserve(headers.size());
+  for (const auto &header : headers) {
+    parsed_ltes->emplace(header.sec_offset, sym::dw::ParsedLineTableEntries{});
+  }
+}
+
+sym::dw::ParsedLineTableEntries &
+ObjectFile::get_plte(u64 offset) noexcept
+{
+  return (*parsed_ltes)[offset];
 }
 
 void
@@ -221,11 +246,44 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
   auto unit_datas = addr_cu_map.find_by_pc(pc - parsed_elf->relocate_addr(nullptr));
   for (auto &src : source_units()) {
     for (auto *unit : unit_datas) {
-      if (src.get_dwarf_unit() == unit)
+      if (src.get_dwarf_unit() == unit) {
+        src.get_linetable();
         result.push_back(&src);
+      }
     }
   }
   return result;
+}
+
+void
+ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept
+{
+  // First block of tasks need to finish before continuing with anything else.
+  {
+    utils::TaskGroup tg("Compilation Unit Data");
+    auto work = sym::dw::UnitDataTask::create_jobs_for(this);
+    tg.add_tasks(std::span{work});
+    tg.schedule_work().wait();
+    read_lnp_headers();
+  }
+
+  std::optional<std::future<void>> lnp_promise;
+  if (config.eager_lnp_parse) {
+    utils::TaskGroup tg("Line number programs");
+    auto work = sym::dw::LineNumberProgramTask::create_jobs_for(this);
+    tg.add_tasks(std::span{work});
+    lnp_promise = tg.schedule_work();
+  }
+
+  {
+    utils::TaskGroup tg("Name Indexing");
+    auto work = sym::dw::IndexingTask::create_jobs_for(this);
+    tg.add_tasks(std::span{work});
+    tg.schedule_work().wait();
+    if (lnp_promise) {
+      lnp_promise->wait();
+    }
+  }
 }
 
 ObjectFile *

@@ -55,43 +55,13 @@ Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *ev
 void
 Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noexcept
 {
+  // TODO(simon) Once "shared object symbols" (NOT to be confused with Linux' shared objects/so's!) is implemented
+  //  we should check if the object file from `objfile_path` has already been loaded into memory
   const auto obj_file = mmap_objectfile(objfile_path);
   ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   auto target = get_controller(target_pid);
   target->register_object_file(obj_file, true, std::nullopt);
-
-  // TODO(simon): This should be re-factored, but is left here to remind me of how it is supposed to work
-  //  when we have removed all old DWARF code. Possibly, I can imagine a scenario where we string together
-  //  TaskGroups (i.e. the "full" batch of work that needs to be done), like for instance the indexing
-  //  task-taskgroup, depends on the compilation unit data-taskgroup, so that it can spin up the indexing task
-  //  group when it's done, or something like that.. That's a "quality of life" feature though.
-  {
-    utils::TaskGroup tg("Compilation Unit Data");
-    auto work = sym::dw::UnitDataTask::create_jobs_for(obj_file);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-  }
-
-  // TODO(simon): Add lazy reading for LNP headers and Line Number Programs.
-  //  one way could be; as soon as a user requests compilation units, because some iteration over them needs to
-  //  happen and process them, but we don't know which one of them we're interested in, we can post a task per CU,
-  //  to run the LNP in the background and protect access to the LNP behind a mutex, that way. That way we will
-  //  "fuzzily" build additional LNP's as well, which in turn, hopefully will increase efficiency. That's if we
-  //  can' figure out a heuristic that is, to know which CU's LNP will be needed in the near future.
-  obj_file->read_lnp_headers();
-  {
-    utils::TaskGroup tg("Line number programs");
-    auto work = sym::dw::LineNumberProgramTask::create_jobs_for(obj_file);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-  }
-
-  {
-    utils::TaskGroup tg("Name Indexing");
-    auto work = sym::dw::IndexingTask::create_jobs_for(obj_file);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-  }
+  obj_file->initial_dwarf_setup(config.dwarf_config());
 }
 
 void

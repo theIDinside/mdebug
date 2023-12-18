@@ -424,10 +424,10 @@ operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r)
   return l.it >= r.it;
 }
 
-ParsedLineTableEntries
-compute_line_number_program(const Elf *elf, LNPHeader *header)
+void
+compute_line_number_program(ParsedLineTableEntries &parsed_lte, const Elf *elf, LNPHeader *header)
 {
-  ParsedLineTableEntries parsed_lte{};
+  DLOG("dwarf", "[lnp]: computing lnp at 0x{:x}", header->sec_offset);
   using OpCode = LineNumberProgramOpCode;
   DwarfBinaryReader reader{elf, header->data, static_cast<u64>(header->data_end - header->data)};
   std::vector<std::vector<LineTableEntry>> sequences{};
@@ -531,7 +531,6 @@ compute_line_number_program(const Elf *elf, LNPHeader *header)
   for (const auto &seq : sequences) {
     std::copy(seq.cbegin(), seq.cend(), std::back_inserter(parsed_lte.table));
   }
-  return parsed_lte;
 }
 
 std::shared_ptr<std::vector<LNPHeader>>

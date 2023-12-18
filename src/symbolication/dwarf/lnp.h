@@ -141,5 +141,5 @@ private:
 };
 
 std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;
-ParsedLineTableEntries compute_line_number_program(const Elf *elf, LNPHeader *header);
+void compute_line_number_program(ParsedLineTableEntries &output, const Elf *elf, LNPHeader *header);
 } // namespace sym::dw

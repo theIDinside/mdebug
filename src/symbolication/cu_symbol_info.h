@@ -11,8 +11,8 @@
 
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;
+struct ObjectFile;
 namespace sym {
-
 namespace dw {
 class UnitData;
 }
@@ -38,7 +38,7 @@ class SourceFileSymbolInfo
   dw::UnitData *unit_data;
   AddrPtr pc_start;
   AddrPtr pc_end_exclusive;
-  dw::LineTable line_table;
+  u64 line_table;
   std::string_view cu_name;
   std::vector<sym::FunctionSymbol> fns;
   std::vector<u32> imported_units;
@@ -55,7 +55,7 @@ public:
 
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
-  void set_linetable(dw::LineTable line_table) noexcept;
+  void set_linetable(u64 line_table) noexcept;
   void set_id(SymbolInfoId id) noexcept;
 
   bool known_address_boundary() const noexcept;
@@ -88,5 +88,20 @@ private:
   void add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept;
   std::mutex mutex;
   utils::IntervalMapping<AddrPtr, sym::dw::UnitData *> mapping;
+};
+
+class SourceFileSymbolManager
+{
+  std::mutex m;
+  std::vector<SourceFileSymbolInfo> source_units;
+  ObjectFile *objfile;
+
+public:
+  SourceFileSymbolManager(ObjectFile *obj) noexcept;
+  /*
+   * Search and find what SourceFileSymbolInfo spans `pc`. This function will also pre-fetch data for the returned
+   * info's, like building their Line Number Program table, by posting the work to the global thread pool.
+   */
+  std::vector<SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
 };
 } // namespace sym
