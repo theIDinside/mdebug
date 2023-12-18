@@ -62,23 +62,23 @@ LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
   auto tc = handler->tc;
   auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
-  auto obj = tc->find_obj_by_pc(start_frame.rip);
+  ObjectFile *obj = tc->find_obj_by_pc(start_frame.rip);
   auto src_infos = obj->get_source_infos(start_frame.rip);
-  auto found = false;
+  bool found = false;
   for (auto *src : src_infos) {
     auto ltopt = src->get_linetable();
     if (ltopt) {
       auto lt = *ltopt;
-      auto it = lt.find_by_pc(start_frame.rip);
-      if (it != std::end(lt)) {
-        auto lte = it.get();
+      const auto iter = lt.find_by_pc(start_frame.rip);
+      if (iter != std::end(lt)) {
+        const sym::dw::LineTableEntry lte = iter.get();
         if (lte.pc == start_frame.rip) {
           found = true;
           entry = lte;
           break;
         } else {
           found = true;
-          entry = (it - 1).get();
+          entry = (iter - 1).get();
           break;
         }
       }
