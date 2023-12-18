@@ -1,8 +1,4 @@
 #include "commands.h"
-#include "../../ptracestop_handlers.h"
-#include "../../supervisor.h"
-#include "../../tracer.h"
-#include "../../utils/base64.h"
 #include "fmt/format.h"
 #include "nlohmann/json_fwd.hpp"
 #include "parse_buffer.h"
@@ -11,10 +7,14 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <ptracestop_handlers.h>
 #include <string>
+#include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
+#include <tracer.h>
 #include <unistd.h>
 #include <unordered_set>
+#include <utils/base64.h>
 #include <valarray>
 
 namespace ui::dap {

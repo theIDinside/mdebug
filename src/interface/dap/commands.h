@@ -1,11 +1,11 @@
 #pragma once
-#include "../ui_command.h"
-#include "../ui_result.h"
+#include <interface/ui_command.h>
+#include <interface/ui_result.h>
 // NOLINTNEXTLINE
-#include "../../breakpoint.h"
-#include "../../symbolication/disassemble.h"
-#include "nlohmann/json.hpp"
 #include "types.h"
+#include <breakpoint.h>
+#include <nlohmann/json.hpp>
+#include <symbolication/disassemble.h>
 #include <tuple>
 #include <vector>
 
