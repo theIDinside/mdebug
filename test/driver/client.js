@@ -53,14 +53,21 @@ if (!fs.existsSync(BUILD_BIN_DIR)) {
 const MDB_PATH = path.join(BUILD_BIN_DIR, 'mdb')
 console.log(`MDB Path: ${MDB_PATH}`)
 
-// currently, mdb takes no args
-const mdb_args = []
-// End of environment setup
-
 function unpackRecordArgs(param) {
   const p = param.split(';')
   const [recorder] = p.splice(0, 1)
   return { path: recorder, args: p }
+}
+
+function unpackDebuggerArgs() {
+  if (process.env.hasOwnProperty('MDB')) {
+    const env = process.env['MDB']
+    console.log(`MDB=${env}`)
+    const params = env.split(';')
+    return params
+  } else {
+    return []
+  }
 }
 
 const regex = /Content-Length: (\d+)\s{4}/gm
@@ -86,12 +93,22 @@ class DAClient {
         const { path, args } = parsed
         console.log(`${JSON.stringify(parsed)}`)
         console.log(`Recording using ${process.env['REC']}`)
-        let mdb_recorded_arg = ['-r', '--thread-pool-size', '2', ...mdb_args]
-        this.mdb = spawn(path, ['record', ...args, mdb, ...mdb_recorded_arg])
+        let mdb_recorded_arg = ['-r']
+        const cfg = unpackDebuggerArgs()
+        if (!cfg.some((v) => v == '-t')) {
+          mdb_recorded_arg.push('-t', 2)
+        }
+        const test_spawn_args = ['record', ...args, mdb, ...mdb_recorded_arg]
+        console.log(`Spawning test with: ${path} ${test_spawn_args.join(' ')}`)
+        this.mdb = spawn(path, test_spawn_args)
       } else {
-        // let config_args = ['--thread-pool-size', 8, '--test-foo']
-        let config_args = ['-t', 12]
-        this.mdb = spawn(mdb, [...config_args, ...mdb_args], {
+        let config_args = unpackDebuggerArgs()
+        // if no thread pool size is configured, set it to 12. MDB will attempt to automatically set it to half available threads otherwise
+        if (!config_args.some((v) => v == '-t')) {
+          // config_args.push('-t', 12)
+        }
+        console.log(`Spawning test with: ${mdb} ${config_args.join(' ')}`)
+        this.mdb = spawn(mdb, [...config_args], {
           shell: true,
           stdio: 'pipe',
         })

@@ -26,13 +26,13 @@ parse_int(std::string_view str)
 }
 
 WaitSystem
-DebuggerInitialization::waitsystem() const noexcept
+DebuggerConfiguration::waitsystem() const noexcept
 {
   return wait_system;
 }
 
 int
-DebuggerInitialization::thread_pool_size() const noexcept
+DebuggerConfiguration::thread_pool_size() const noexcept
 {
   constexpr auto get_default = []() {
     const auto cpus = std::thread::hardware_concurrency();
@@ -41,16 +41,26 @@ DebuggerInitialization::thread_pool_size() const noexcept
   return worker_thread_pool_size.value_or(get_default());
 }
 
-std::optional<DebuggerInitialization>
+DwarfParseConfiguration
+DebuggerConfiguration::dwarf_config() const noexcept
+{
+  return dwarf_parsing;
+}
+
+std::optional<DebuggerConfiguration>
 parse_cli(int argc, const char **argv) noexcept
 {
-  auto init = DebuggerInitialization::Default();
+  auto init = DebuggerConfiguration::Default();
   int option_index = 0;
   int opt;
-  option long_opts[]{{"rr", OptNoArgument, 0, 'r'}, {"thread-pool-size", OptArgRequired, 0, 't'}};
+  option long_opts[]{// flags
+                     {"rr", OptNoArgument, 0, 'r'},
+                     {"eager-lnp-parse", OptNoArgument, 0, 'e'},
+                     // parameters
+                     {"thread-pool-size", OptArgRequired, 0, 't'}};
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "r:t:", long_opts, &option_index)) != -1) {
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:", long_opts, &option_index)) != -1) {
     switch (opt) {
     case 0:
       break;
@@ -62,6 +72,9 @@ parse_cli(int argc, const char **argv) noexcept
       if (optarg) {
         init.worker_thread_pool_size = parse_int(std::string_view{optarg});
       }
+      break;
+    case 'e':
+      init.dwarf_parsing.eager_lnp_parse = true;
       break;
     case '?':
       DLOG("mdb", "Usage: mdb [-r]");

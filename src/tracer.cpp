@@ -40,7 +40,7 @@ on_sigcld(int sig)
 }
 
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
-               sys::DebuggerInitialization init) noexcept
+               sys::DebuggerConfiguration init) noexcept
     : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
       events_notifier(events_notifier), config(init)
 {
@@ -341,4 +341,10 @@ Tracer::disconnect() noexcept
 {
   kill_all_targets();
   Tracer::KeepAlive = false;
+}
+
+const sys::DebuggerConfiguration &
+Tracer::get_configuration() const noexcept
+{
+  return config;
 }

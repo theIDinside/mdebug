@@ -67,7 +67,7 @@ main(int argc, const char **argv)
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 
   utils::NotifyManager notifiers{io_read};
-  Tracer::Instance = new Tracer{io_read, &notifiers, res.value_or(sys::DebuggerInitialization::Default())};
+  Tracer::Instance = new Tracer{io_read, &notifiers, res.value_or(sys::DebuggerConfiguration::Default())};
   auto &tracer = *Tracer::Instance;
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;

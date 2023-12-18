@@ -12,27 +12,35 @@ enum class WaitSystem
   UseSignalHandler,
 };
 
-class DebuggerInitialization
+struct DwarfParseConfiguration
+{
+  bool eager_lnp_parse;
+};
+
+class DebuggerConfiguration
 {
 
   WaitSystem wait_system;
   std::optional<int> worker_thread_pool_size;
+  DwarfParseConfiguration dwarf_parsing;
 
 public:
-  friend std::optional<DebuggerInitialization> parse_cli(int argc, const char **argv) noexcept;
+  friend std::optional<DebuggerConfiguration> parse_cli(int argc, const char **argv) noexcept;
   static constexpr auto
   Default() noexcept
   {
-    auto res = DebuggerInitialization{};
+    auto res = DebuggerConfiguration{};
     res.wait_system = WaitSystem::UseAwaiterThread;
     res.worker_thread_pool_size = std::nullopt;
+    res.dwarf_parsing.eager_lnp_parse = false;
     return res;
   }
 
   WaitSystem waitsystem() const noexcept;
   int thread_pool_size() const noexcept;
+  DwarfParseConfiguration dwarf_config() const noexcept;
 };
 
-std::optional<DebuggerInitialization> parse_cli(int argc, const char **argv) noexcept;
+std::optional<DebuggerConfiguration> parse_cli(int argc, const char **argv) noexcept;
 
 }; // namespace sys

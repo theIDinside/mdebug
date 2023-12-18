@@ -44,7 +44,7 @@ public:
   static bool use_traceme;
   friend struct ui::UICommand;
   Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
-         sys::DebuggerInitialization) noexcept;
+         sys::DebuggerConfiguration) noexcept;
   void add_target_set_current(pid_t task_leader, const Path &path, TargetSession session) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
@@ -67,6 +67,8 @@ public:
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
   void disconnect() noexcept;
+
+  const sys::DebuggerConfiguration &get_configuration() const noexcept;
   std::vector<std::unique_ptr<TraceeController>> targets;
   ui::dap::DAP *dap;
 
@@ -77,5 +79,5 @@ private:
   utils::Notifier::ReadEnd io_thread_pipe;
   bool already_launched;
   utils::NotifyManager *events_notifier;
-  sys::DebuggerInitialization config;
+  sys::DebuggerConfiguration config;
 };
