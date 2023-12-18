@@ -407,7 +407,6 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
     for (const auto &ref : res) {
       auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
       auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
-      auto high_pc = die_ref.read_attribute(Attribute::DW_AT_high_pc);
       if (low_pc) {
         auto addr = obj->parsed_elf->relocate_addr(low_pc->address());
         matching_symbols.emplace_back(function_name, addr, 0);

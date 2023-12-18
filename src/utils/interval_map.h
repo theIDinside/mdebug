@@ -163,7 +163,6 @@ private:
 
     auto it = std::lower_bound(interval.begin(), interval.end(), pc, find);
     u32 dist = std::distance(interval.begin(), it);
-    ASSERT(dist >= 0, "This function is expected to return positive values");
     return dist;
   }
 

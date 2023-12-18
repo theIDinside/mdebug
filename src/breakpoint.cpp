@@ -55,6 +55,7 @@ Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
     if (bp_type.shared_object_load) {
       tc->on_so_event();
     }
+    [[fallthrough]];
   }
   case BpEventType::UserBreakpointHit: {
     // TODO(simon): if breakpoint doesn't stop all, emit stop event directly, but only for that one thread
