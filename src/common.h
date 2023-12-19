@@ -74,14 +74,48 @@ enum class TargetSession
   Attached
 };
 
+struct Offset
+{
+  u64 i;
+  constexpr operator u64() const noexcept { return i; }
+  constexpr u64
+  value() const noexcept
+  {
+    return i;
+  }
+
+  friend i64
+  operator-(const Offset &a, const Offset &b) noexcept
+  {
+    return static_cast<i64>(a.i) - static_cast<i64>(b.i);
+  }
+
+  friend i64
+  operator+(const Offset &a, const Offset &b) noexcept
+  {
+    return static_cast<i64>(a.i) + static_cast<i64>(b.i);
+  }
+};
+
 struct Index
 {
-
-  operator u32() const noexcept { return i; }
+  constexpr operator u32() const noexcept { return i; }
   constexpr u32
   value() const noexcept
   {
     return i;
+  }
+
+  friend i64
+  operator-(const Index &a, const Index &b) noexcept
+  {
+    return static_cast<i64>(a.i) - static_cast<i64>(b.i);
+  }
+
+  friend i64
+  operator+(const Index &a, const Index &b) noexcept
+  {
+    return static_cast<i64>(a.i) + static_cast<i64>(b.i);
   }
 
   u32 i;
