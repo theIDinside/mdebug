@@ -127,7 +127,7 @@ SourceFileSymbolInfo::get_fn_by_pc(AddrPtr pc) noexcept
     resolve_fn_symbols();
 
   auto iter = std::find_if(fns.begin(), fns.end(),
-                           [pc](sym::FunctionSymbol &fn) { return fn.start_pc() <= pc && pc <= fn.end_pc(); });
+                           [pc](sym::FunctionSymbol &fn) { return fn.start_pc() <= pc && pc < fn.end_pc(); });
   if (iter != std::end(fns)) {
     return iter.base();
   }
