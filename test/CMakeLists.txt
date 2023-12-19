@@ -46,4 +46,24 @@ endfunction()
 
 build_tests("${MDB_TESTS}")
 
+# builds a test executable that has default settings
+function(build_test)
+  set(oneValueArgs NAME)
+  set(multiValueArgs SOURCES)
+  cmake_parse_arguments(BUILD_TEST "${options}"
+                        "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  add_executable(${BUILD_TEST_NAME} ${BUILD_TEST_SOURCES})
+  set_target_properties(${BUILD_TEST_NAME} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
+  set_target_properties(${BUILD_TEST_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+endfunction()
+
+build_test(
+  NAME templated
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/templated_code/template_main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/templated_code/template_foo.cpp
+)
+
+
 message("Test build type: ${CMAKE_BUILD_TYPE}")
