@@ -74,6 +74,7 @@ public:
   const ElfSection *debug_str;
   const ElfSection *debug_line_str;
   const ElfSection *debug_ranges;
+  const ElfSection *debug_aranges;
   const ElfSection *debug_line;
   const ElfSection *debug_addr;
   const ElfSection *debug_str_offsets;
