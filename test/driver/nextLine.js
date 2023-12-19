@@ -110,9 +110,12 @@ async function stopBecauseBpWhenNextLine() {
   }
 }
 
+async function nextLineInTemplateCode() {}
+
 const tests = {
   nextLineOverFunction: nextLineOverFunction,
   stopBecauseBpWhenNextLine: stopBecauseBpWhenNextLine,
+  nextLineInTemplateCode: nextLineInTemplateCode,
 }
 
 runTestSuite(tests)

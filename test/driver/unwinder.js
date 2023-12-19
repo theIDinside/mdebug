@@ -1,15 +1,7 @@
-const {
-  DAClient,
-  MDB_PATH,
-  prettyJson,
-  buildDirFile,
-  checkResponse,
-  getLineOf,
-  readFile,
-  repoDirFile,
-  seconds,
-  runTestSuite,
-} = require('./client')(__filename)
+const { DAClient, MDB_PATH, buildDirFile, checkResponse, getLineOf, readFile, repoDirFile, seconds, runTestSuite } =
+  require('./client')(__filename)
+
+const { objdump, hexStrAddressesEquals } = require('./utils')
 
 async function unwindFromSharedObject() {
   const da_client = new DAClient(MDB_PATH, [])
@@ -68,8 +60,32 @@ async function unwindFromSharedObject() {
   if (!response.success) throw new Error(`Failed to disconnect. ${JSON.stringify(response)}`)
 }
 
-const INSIDE_BAR_PROLOGUE = '0x00000000004008b0'
-const INSIDE_BAR_EPILOGUE = '0x00000000004008d3'
+function parse_prologue_and_epilogue() {
+  const objdumped = objdump(buildDirFile('stackframes')).split('\n')
+  let lineNumber = 0
+  let found = false
+  let res = { prologue: null, epilogue: null }
+  for (const line of objdumped) {
+    if (!found) {
+      let i = line.indexOf('<_ZL3barii>:')
+      if (i != -1) {
+        const addr = line.substring(0, i).trim()
+        res.prologue = `0x${addr}`
+        found = true
+      }
+    } else {
+      let i = line.indexOf('ret')
+      if (i != -1) {
+        const addr = line.substring(0, i).trim()
+        res.epilogue = `0x${addr}`
+        console.log(`bar frame: ${JSON.stringify(res)}`)
+        return res
+      }
+    }
+    lineNumber += 1
+  }
+  throw new Error('Could not find prologue and epilogue of bar')
+}
 
 function verifyFrameIs(frame, name) {
   if (frame.name != name) {
@@ -78,9 +94,10 @@ function verifyFrameIs(frame, name) {
 }
 
 async function insidePrologueTest() {
+  const { prologue, epilogue } = parse_prologue_and_epilogue()
   const da_client = new DAClient(MDB_PATH, [])
   await da_client.launchToMain(buildDirFile('stackframes'))
-  await da_client.setInsBreakpoint(INSIDE_BAR_PROLOGUE)
+  await da_client.setInsBreakpoint(prologue)
   await da_client.contNextStop()
   const frames = await da_client
     .stackTrace()
@@ -108,9 +125,10 @@ async function insidePrologueTest() {
 }
 
 async function insideEpilogueTest() {
+  const { prologue, epilogue } = parse_prologue_and_epilogue()
   const da_client = new DAClient(MDB_PATH, [])
   await da_client.launchToMain(buildDirFile('stackframes'))
-  await da_client.setInsBreakpoint(INSIDE_BAR_EPILOGUE)
+  await da_client.setInsBreakpoint(epilogue)
   await da_client.contNextStop()
   const frames = await da_client
     .stackTrace()
@@ -245,12 +263,26 @@ function* walk_expected_frames(frames) {
   for (let i = 1; i < frames.length; i++) yield frames[i]
 }
 
+function getPrintfPlt() {
+  const objdumped = objdump(buildDirFile('next')).split('\n')
+  for (const line of objdumped) {
+    let i = line.indexOf('<printf@plt>:')
+    if (i != -1) {
+      const addr = line.substring(0, i).trim()
+      return `0x${addr}`
+    }
+  }
+  throw new Error('Could not find prologue and epilogue of bar')
+}
+
 async function unwindWithDwarfExpression() {
+  const printf_plt_addr = getPrintfPlt()
+  console.log(`printf@plt address: ${printf_plt_addr}`)
   const da_client = new DAClient(MDB_PATH, [])
   await da_client.launchToMain(buildDirFile('next'))
   await da_client
     .sendReqGetResponse('setInstructionBreakpoints', {
-      breakpoints: [{ instructionReference: '0x400660' }],
+      breakpoints: [{ instructionReference: printf_plt_addr }],
     })
     .then((res) => {
       checkResponse(res, 'setInstructionBreakpoints', true)
@@ -259,8 +291,10 @@ async function unwindWithDwarfExpression() {
       }
       const { id, verified, instructionReference } = res.body.breakpoints[0]
       if (!verified) throw new Error('Expected breakpoint to be verified and exist!')
-      if (instructionReference != '0x400660')
-        throw new Error(`Attempted to set ins breakpoint at 0x40127e but it was set at ${instructionReference}`)
+      if (!hexStrAddressesEquals(instructionReference, printf_plt_addr))
+        throw new Error(
+          `Attempted to set ins breakpoint at ${printf_plt_addr} but it was set at ${instructionReference}`
+        )
     })
   const threads = await da_client.threads()
   await da_client.contNextStop(threads[0].id)

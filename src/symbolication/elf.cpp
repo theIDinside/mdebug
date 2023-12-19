@@ -87,8 +87,9 @@ from_str(std::string_view str)
 
 Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept
     : reloc(nullptr), header(header), m_sections(sections), obj_file(obj_file), str_table{nullptr},
-      debug_info{nullptr}, debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr}, debug_line{nullptr},
-      debug_addr{nullptr}, debug_str_offsets{nullptr}, debug_rnglists{nullptr}, debug_loclist{nullptr}
+      debug_info{nullptr}, debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr},
+      debug_aranges{nullptr}, debug_line{nullptr}, debug_addr{nullptr}, debug_str_offsets{nullptr},
+      debug_rnglists{nullptr}, debug_loclist{nullptr}
 {
   obj_file->parsed_elf = this;
   str_table = get_section(".strtab");
@@ -101,6 +102,7 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noe
   debug_str_offsets = get_section(".debug_str_offsets");
   debug_rnglists = get_section(".debug_rnglists");
   debug_loclist = get_section(".debug_loclists");
+  debug_aranges = get_section(".debug_aranges");
 }
 
 std::span<ElfSection>

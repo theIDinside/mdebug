@@ -65,6 +65,8 @@ LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
   ObjectFile *obj = tc->find_obj_by_pc(start_frame.rip);
   auto src_infos = obj->get_source_infos(start_frame.rip);
   bool found = false;
+  // TODO(simon): Is it possible to design it such that a search here, determines the _exact_ src_info up front?
+  //   so that we don't have to make sure that the found LT and it's LTE's land within the frame's low_pc / high_pc
   for (auto *src : src_infos) {
     auto ltopt = src->get_linetable();
     if (ltopt) {
@@ -72,14 +74,16 @@ LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
       const auto iter = lt.find_by_pc(start_frame.rip);
       if (iter != std::end(lt)) {
         const sym::dw::LineTableEntry lte = iter.get();
-        if (lte.pc == start_frame.rip) {
-          found = true;
-          entry = lte;
-          break;
-        } else {
-          found = true;
-          entry = (iter - 1).get();
-          break;
+        if (start_frame.inside(lte.pc.as_void()) == sym::InsideRange::Yes) {
+          if (lte.pc == start_frame.rip) {
+            found = true;
+            entry = lte;
+            break;
+          } else {
+            found = true;
+            entry = (iter - 1).get();
+            break;
+          }
         }
       }
     }

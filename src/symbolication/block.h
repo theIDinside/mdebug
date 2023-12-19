@@ -28,3 +28,15 @@ struct AddressRange
     return AddressableSorter<AddressRange, true>{};
   }
 };
+
+class BoundaryBuilder
+{
+  AddrPtr high{nullptr};
+  AddrPtr low{std::numeric_limits<u64>::max()};
+
+public:
+  void compare_swap_low(AddrPtr pc) noexcept;
+  void compare_swap_high(AddrPtr pc) noexcept;
+  void compare_boundary(AddrPtr low, AddrPtr high) noexcept;
+  AddressRange build() const noexcept;
+};

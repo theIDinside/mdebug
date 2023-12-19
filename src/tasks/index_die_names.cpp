@@ -8,6 +8,9 @@
 #include "../symbolication/objfile.h"
 #include "../utils/enumerator.h"
 #include "../utils/thread_pool.h"
+#include "symbolication/dwarf/rnglists.h"
+#include "symbolication/dwarf_binary_reader.h"
+#include "symbolication/dwarf_defs.h"
 #include <algorithm>
 #include <cstdint>
 
@@ -207,6 +210,49 @@ IndexingTask::execute_task() noexcept
     obj->add_initialized_cus(initialized_cus);
 }
 
+static void
+process_cu_boundary(u64 ranges_offset, sym::SourceFileSymbolInfo &src) noexcept
+{
+  auto cu = src.get_dwarf_unit();
+  const auto version = cu->header().version();
+  ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
+  auto elf = cu->get_objfile()->parsed_elf;
+  if (version == DwarfVersion::D4) {
+    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset));
+    auto lowest = UINTMAX_MAX;
+    auto highest = 0ul;
+    auto start = 0ul;
+    auto end = 1ul;
+    bool found_a_range = false;
+    while (true) {
+      start = *byte_ptr++;
+      end = *byte_ptr++;
+      if (start == 0) {
+        // garbage garbled DW_AT_ranges data is *super* common, and when start == 0.
+        // after some research of the DWARF data (using llvm-dwarfdump), it seems to be the case that
+        // DW_AT_ranges values with start=0, end=N, are actually some form of duplicate DIE's that has not been
+        // de-duplicated. Which is shite.
+        if (end == 0)
+          break;
+        else
+          continue;
+      } else {
+        lowest = std::min(start, lowest);
+        highest = std::max(end, highest);
+        found_a_range = true;
+      }
+    }
+    if (found_a_range) {
+      src.set_address_boundary(lowest, highest);
+    }
+  } else if (version == DwarfVersion::D5) {
+    ASSERT(elf->debug_aranges != nullptr,
+           "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
+    auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset);
+    src.set_address_boundary(addr_range.start_pc(), addr_range.end_pc());
+  }
+}
+
 sym::SourceFileSymbolInfo
 IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept
 {
@@ -232,40 +278,11 @@ IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_di
       break;
     }
     case Attribute::DW_AT_ranges: {
-      if (cu->header().version() == DwarfVersion::D4) {
-        const auto ranges_offset = attr.address();
-        auto elf = cu->get_objfile()->parsed_elf;
-        auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset));
-        auto lowest = UINTMAX_MAX;
-        auto highest = 0ul;
-        auto start = 0ul;
-        auto end = 1ul;
-        bool found_a_range = false;
-        while (true) {
-          start = *byte_ptr++;
-          end = *byte_ptr++;
-          if (start == 0) {
-            // garbage garbled DW_AT_ranges data is *super* common, and when start == 0.
-            // after some research of the DWARF data (using llvm-dwarfdump), it seems to be the case that
-            // DW_AT_ranges values with start=0, end=N, are actually some form of duplicate DIE's that has not been
-            // de-duplicated. Which is shite.
-            if (end == 0)
-              break;
-            else
-              continue;
-          } else {
-            lowest = std::min(start, lowest);
-            highest = std::max(end, highest);
-            found_a_range = true;
-          }
-        }
-        if (found_a_range) {
-          new_cu.set_address_boundary(lowest, highest);
-        }
-      }
+      process_cu_boundary(attr.address(), new_cu);
     } break;
     case Attribute::DW_AT_low_pc: {
-      low = attr.address();
+      if (!low)
+        low = attr.address();
     } break;
     case Attribute::DW_AT_high_pc: {
       high = attr.address();

@@ -149,8 +149,8 @@ DwarfBinaryReader::read_content_str(AttributeForm form) noexcept
   case DW_FORM_string:
     return read_string();
   case DW_FORM_line_strp:
-    ASSERT(elf->debug_line != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
-    return std::string_view{(const char *)elf->debug_line->offset(read_offset())};
+    ASSERT(elf->debug_line_str != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
+    return std::string_view{(const char *)elf->debug_line_str->offset(read_offset())};
   case DW_FORM_strp:
     ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
     return std::string_view{(const char *)elf->debug_str->offset(read_offset())};
