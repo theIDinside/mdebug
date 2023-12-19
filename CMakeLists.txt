@@ -75,6 +75,10 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
   src/symbolication/dwarf/name_index.h
+  src/symbolication/dwarf/reader_funcs.cpp
+  src/symbolication/dwarf/reader_funcs.h
+  src/symbolication/dwarf/rnglists.cpp
+  src/symbolication/dwarf/rnglists.h
   src/symbolication/elf_symbols.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
