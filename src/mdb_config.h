@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/expected.h"
 #include <optional>
 #include <span>
 #include <string_view>
@@ -6,6 +7,14 @@
 // system namespace - anything and everything that involves the configuration of mdb
 namespace sys {
 
+enum class CLIError
+{
+  UnknownArgs,
+  BadArgValue
+};
+
+// Awaiter thread should be used in most circumstances; but this system won't function under RR (yet).
+// So if MDB is to be recorded by RR, the signal handler system should be used instead.
 enum class WaitSystem
 {
   UseAwaiterThread,
@@ -25,7 +34,7 @@ class DebuggerConfiguration
   DwarfParseConfiguration dwarf_parsing;
 
 public:
-  friend std::optional<DebuggerConfiguration> parse_cli(int argc, const char **argv) noexcept;
+  friend utils::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
   static constexpr auto
   Default() noexcept
   {
@@ -41,6 +50,6 @@ public:
   DwarfParseConfiguration dwarf_config() const noexcept;
 };
 
-std::optional<DebuggerConfiguration> parse_cli(int argc, const char **argv) noexcept;
+utils::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
 
 }; // namespace sys

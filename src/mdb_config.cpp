@@ -47,7 +47,7 @@ DebuggerConfiguration::dwarf_config() const noexcept
   return dwarf_parsing;
 }
 
-std::optional<DebuggerConfiguration>
+utils::Expected<DebuggerConfiguration, CLIError>
 parse_cli(int argc, const char **argv) noexcept
 {
   auto init = DebuggerConfiguration::Default();
@@ -77,9 +77,8 @@ parse_cli(int argc, const char **argv) noexcept
       init.dwarf_parsing.eager_lnp_parse = true;
       break;
     case '?':
-      DLOG("mdb", "Usage: mdb [-r]");
-      exit(-1);
-      return std::nullopt;
+      DLOG("mdb", "Usage: mdb [-r|-e|-t <thread pool size>]");
+      return utils::unexpected(CLIError::UnknownArgs);
       break;
     default:
       continue;

@@ -35,6 +35,7 @@
 #include <thread>
 #include <unistd.h>
 #include <utility>
+#include <utils/expected.h>
 
 std::mutex m;
 std::condition_variable cv;
@@ -57,7 +58,17 @@ main(int argc, const char **argv)
     logging::Logger::get_logger()->setup_channel(channel);
   }
   auto res = sys::parse_cli(argc, argv);
-  ASSERT(res.has_value(), "Faulty CLI options passed to MDB");
+  if (!res.is_expected()) {
+    switch (res.error()) {
+    case sys::CLIError::BadArgValue:
+      fmt::println("Bad CLI argument value");
+      break;
+    case sys::CLIError::UnknownArgs:
+      fmt::println("Unknown CLI argument");
+      break;
+    }
+    exit(-1);
+  }
   std::span<const char *> args(argv, argc);
   logging::get_logging()->log("mdb", "MDB CLI Arguments");
   for (const auto arg : args.subspan(1)) {
@@ -67,7 +78,7 @@ main(int argc, const char **argv)
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 
   utils::NotifyManager notifiers{io_read};
-  Tracer::Instance = new Tracer{io_read, &notifiers, res.value_or(sys::DebuggerConfiguration::Default())};
+  Tracer::Instance = new Tracer{io_read, &notifiers, res.value()};
   auto &tracer = *Tracer::Instance;
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;

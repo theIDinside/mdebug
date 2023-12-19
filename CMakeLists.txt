@@ -154,6 +154,10 @@ AddTest(NAME test_utils
   SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp
   LIBS fmt::fmt mdb_spinlock)
 
+AddTest(NAME expected_tests
+  SOURCES test/unittest/expected_tests.cpp
+  LIBS fmt::fmt)
+
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
