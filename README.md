@@ -6,6 +6,7 @@
   - [How to use & write driver tests](#how-to-use--write-driver-tests)
     - [Adding a new sub-suite](#adding-a-new-sub-suite)
     - [Adding a test to existing sub-suite](#adding-a-test-to-existing-sub-suite)
+    - [Running tests](#running-tests)
 - [Contribute & Develop Midas](#contribute--develop-midas)
   - [Dependencies](#dependencies)
   - [Dev-dependencies](#dev-dependencies)
@@ -35,8 +36,6 @@ The driver tests contains sub-suites meant to test some functionality in the deb
 - Write the test logic. Each sub test should be a separate function and a name. These function<->name pairs must be exported as a JS object, like what is done in [stackframes.js](./test/driver/stackframes.js#L194) and passed to `runTestSuite` a function defined in [client.js](./test/driver/client.js#L450).
 - In [`CMakeLists.txt`](./CMakeLists.txt) inside the `if(NODEJS)` add the sub-suite name (which must be named the same as the file name, but without the file extension) to the `DRIVER_TEST_SUITES` list and then also define a new variable with the same name as the name added to `DRIVER_TEST_SUITES`. This variable is supposed to hold all names of the sub-tests.
 
-Now the test should be executed when `ctest` is executed from the build folder. But it's subtests should also be executable, stand alone, by saying `ctest -R <subSuiteName>.<subTestName>` (if the sub test name is unique, all you have to do is type `ctest -R <subTestName>` - without the <> of course)
-
 ### Adding a test to existing sub-suite
 
 - Write the test logic in the file where the test logically fits
@@ -44,6 +43,46 @@ Now the test should be executed when `ctest` is executed from the build folder. 
 - In [`CMakeLists.txt`](./CMakeLists.txt) find the variable named the same as the test you've added it to, and add the test name to the list of tests of that sub-suite (see the stackframes variable, for example on how to do it)
 
 Now the test will be executed with the `ctest` command (for individual test-execution see [Adding a new sub-suite](#adding-a-new-sub-suite))
+
+### Running tests
+
+To run all tests, first make sure you've built the project.
+
+For utility purposes, while in your terminal source [devsetup.sh](./devsetup.sh):
+
+```bash
+  source devsetup.sh
+```
+
+It adds the aliases `drivertest` and `rectest` for `ctest` which
+makes ctest default to sane settings (like output on failure).
+
+To run all tests do:
+
+```bash
+  drivertest
+```
+
+If you want all tests to be recorded under RR do
+
+```bash
+  rectest
+```
+
+To run individual test suites, `ctest` takes a `-R <regex>` and runs the tests that matches the regex.
+
+So running a suite becomes
+
+```bash
+  drivertest -R <suitename>
+  rectest -R <suitename>
+```
+
+Or say, you want to run (and record) the `threads` test inside the `threads` suite:
+
+```bash
+  rectest -R threads.threads
+```
 
 # Contribute & Develop Midas
 
