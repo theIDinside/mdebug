@@ -4,10 +4,10 @@
  * The DA Client driver. This file contains no tests but is included by the test to be able to spawn
  * a new mdb session. It emulates that of an Inline DA in VSCode (look at the extension `Midas` for examples)
  */
-
+Error.stackTraceLimit = 5
 const path = require('path')
 const fs = require('fs')
-const { spawn, spawnSync } = require('child_process')
+const { spawn } = require('child_process')
 const EventEmitter = require('events')
 
 let IMPORTING_FILE = ''
@@ -224,7 +224,7 @@ class DAClient {
   /* Called _before_ an action that is expected to create an event.
    * Calling this after, may or may not work, as the event handler might not be set up in time,
    * before the actual event comes across the wire.*/
-  prepareWaitForEventN(evt, n, timeout) {
+  prepareWaitForEventN(evt, n, timeout, fn = this.prepareWaitForEventN) {
     const ctrl = new AbortController()
     const signal = ctrl.signal
     const timeOut = setTimeout(() => {
@@ -232,6 +232,9 @@ class DAClient {
     }, timeout)
 
     let evts = []
+    // we create the exception object here, to report decent stack traces for when it actually does fail.
+    const err = new Error('Timed out')
+    Error.captureStackTrace(err, fn)
     let p = new Promise((res, rej) => {
       this.events.on(evt, (body) => {
         evts.push(body)
@@ -248,7 +251,8 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          rej(new Error(`Timed out waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`))
+          err.message = `Timed out: Waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`
+          rej(err)
         })
       }),
     ])
@@ -272,10 +276,13 @@ class DAClient {
    * @param { number } failureTimeout - The maximum time (in milliseconds) that we should wait for response. If the request takes longer, the test will fail.
    * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
    */
-  async sendReqGetResponse(req, args, failureTimeout = seconds(2)) {
+  async sendReqGetResponse(req, args, failureTimeout = seconds(2), fn = this.sendReqGetResponse) {
     const ctrl = new AbortController()
     const signal = ctrl.signal
     const req_promise = this._sendReqGetResponseImpl(req, args)
+    // we create the exception object here, to report decent stack traces for when it actually does fail.
+    const err = new Error('Timed out')
+    Error.captureStackTrace(err, fn)
     const timeOut = setTimeout(() => {
       ctrl.abort()
     }, failureTimeout)
@@ -287,7 +294,8 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          rej(new Error(`Timed out waiting for response from request ${req}`))
+          err.message = `Timed out waiting for response from request ${req}`
+          rej(err)
         })
       }),
     ])
@@ -300,10 +308,9 @@ class DAClient {
    */
   async stackTrace(threadId, timeout = 1000) {
     threadId = threadId != null ? threadId : await this.getAnyThreadId()
-    return this.sendReqGetResponse('stackTrace', { threadId: threadId }, timeout).then((response) => {
-      checkResponse(response, 'stackTrace', true)
-      return response
-    })
+    const response = await this.sendReqGetResponse('stackTrace', { threadId: threadId }, timeout)
+    checkResponse(response, 'stackTrace', true, this.stackTrace)
+    return response
   }
 
   async getAnyThreadId() {
@@ -353,13 +360,10 @@ class DAClient {
 
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = seconds(1)) {
-    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout)
-    await this.sendReqGetResponse('initialize', {}, timeout)
-      .then((response) => {
-        checkResponse(response, 'initialize', true)
-      })
-      .catch(testException)
-    await this.sendReqGetResponse(
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.launchToMain)
+    let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
+    checkResponse(init_res, 'initialize', true)
+    let launch_res = await this.sendReqGetResponse(
       'launch',
       {
         program: program,
@@ -367,55 +371,37 @@ class DAClient {
       },
       timeout
     )
-      .then((response) => {
-        checkResponse(response, 'launch', true)
-      })
-      .catch(testException)
-    await this.sendReqGetResponse('configurationDone', {}, timeout).catch(testException)
-    await stopped_promise
-  }
-
-  // utility function to initialize, launch `program` and run to `main`
-  async launchToAddress(program, addr, timeout = 1000) {
-    let stopped_promise = this.prepareWaitForEvent('stopped')
-    await this.sendReqGetResponse('initialize', {}, timeout)
-      .then((response) => {
-        checkResponse(response, 'initialize', true)
-      })
-      .catch(testException)
-    await this.sendReqGetResponse(
-      'launch',
-      {
-        program: program,
-        stopAtEntry: false,
-      },
-      timeout
-    )
-      .then((response) => {
-        checkResponse(response, 'launch', true)
-      })
-      .catch(testException)
-    await this.setInsBreakpoint(addr)
-    await this.sendReqGetResponse('configurationDone', {}, timeout).catch(testException)
+    checkResponse(launch_res, 'launch', true)
+    await this.sendReqGetResponse('configurationDone', {}, timeout)
     await stopped_promise
   }
 
   async setInsBreakpoint(addr) {
-    return this.sendReqGetResponse('setInstructionBreakpoints', {
-      breakpoints: [{ instructionReference: addr }],
-    })
+    return this.sendReqGetResponse(
+      'setInstructionBreakpoints',
+      {
+        breakpoints: [{ instructionReference: addr }],
+      },
+      1000,
+      this.setInsBreakpoint
+    )
   }
 
-  async contNextStop(threadId) {
+  async contNextStop(threadId, timeout = 1000) {
     if (threadId == null) {
       const thrs = await this.threads()
       threadId = thrs[0].id
     }
-    let stopped_promise = this.prepareWaitForEventN('stopped', 1, 1000)
-    await this.sendReqGetResponse('continue', {
-      threadId: threadId,
-      singleThread: false,
-    })
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.contNextStop)
+    await this.sendReqGetResponse(
+      'continue',
+      {
+        threadId: threadId,
+        singleThread: false,
+      },
+      timeout,
+      this.contNextStop
+    )
     return await stopped_promise
   }
 
@@ -445,11 +431,13 @@ class DAClient {
    * @param {number} failureTimeout
    * @returns {Promise<{ event_body: object, response: object }>}
    */
-  async sendReqWaitEvent(req, args, event, failureTimeout) {
+  async sendReqWaitEvent(req, args, event, failureTimeout, fn = this.sendReqWaitEvent) {
     const ctrl = new AbortController()
     const signal = ctrl.signal
+    const err = new Error('Timed out')
+    Error.captureStackTrace(err, fn)
     const event_promise = this.prepareWaitForEvent(event)
-    const response = await this.sendReqGetResponse(req, args, failureTimeout)
+    const response = await this.sendReqGetResponse(req, args, failureTimeout, fn)
     const timeOut = setTimeout(() => {
       ctrl.abort()
     }, failureTimeout)
@@ -461,7 +449,8 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          rej(new Error(`Timed out waiting for event ${event} after request ${req} for ${failureTimeout}`))
+          err.message = `Timed out waiting for event ${event} after request ${req} for ${failureTimeout}`
+          rej(err)
         })
       }),
     ])
@@ -484,19 +473,28 @@ function repoDirFile(filePath) {
   return path.join(REPO_DIR, filePath)
 }
 
-function checkResponse(response, command, expected_success = true) {
+function checkResponse(response, command, expected_success = true, fn = checkResponse) {
   if (response.type != 'response') {
     dump_log()
-    throw new Error(`Type of message was expected to be 'response' but was '${response.type}'`)
+    const err = new Error()
+    Error.captureStackTrace(err, fn)
+    err.message = `Type of message was expected to be 'response' but was '${response.type}'`
+    throw err
   }
   if (response.success != expected_success) {
     dump_log()
-    throw new Error(`Expected response to succeed ${expected_success} but got ${response.success}`)
+    const err = new Error()
+    Error.captureStackTrace(err, fn)
+    err.message = `Expected response to succeed ${expected_success} but got ${response.success}`
+    throw err
   }
 
   if (response.command != command) {
     dump_log()
-    throw new Error(`Expected command to be ${command} but got ${response.command}`)
+    const err = new Error()
+    Error.captureStackTrace(err, fn)
+    err.message = `Expected command to be ${command} but got ${response.command}`
+    throw err
   }
 }
 
@@ -570,5 +568,6 @@ module.exports = function (file) {
     runTestSuite,
     getRequestedTest,
     prettyJson,
+    checkResponse,
   }
 }

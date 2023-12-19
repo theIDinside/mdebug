@@ -32,7 +32,7 @@ async function nextLineOverFunction() {
   const bp_lines = getLinesOf(['BP1', 'BP2'])
   const da_client = await clientSpawn(['BP1'])
   const threads = await da_client.threads()
-  let stopped = await da_client.contNextStop(threads[0].id)
+  await da_client.contNextStop(threads[0].id)
   let frames = await da_client.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
   if (start_line != bp_lines[0].line)
