@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include <unordered_set>
 
 struct TraceeController;
 struct TaskInfo;
@@ -140,26 +141,57 @@ struct SourceBreakpointDescriptor
   }
 };
 
+enum class OnBpHit
+{
+  Continue,
+  Stop
+};
+
+enum class BpNote
+{
+  BreakpointHit,
+  FinishedFunction
+};
+
 class Breakpoint
 {
+  using TemporaryNotes = std::unordered_map<Tid, BpNote>;
+  using StopSet = std::unordered_set<Tid>;
+
 public:
   explicit Breakpoint(AddrPtr, u8 original_byte, u32 id, BpType type) noexcept;
-  Breakpoint() noexcept = default;
-  Breakpoint(const Breakpoint &) noexcept = default;
-  Breakpoint &operator=(const Breakpoint &) noexcept = default;
-  Breakpoint &operator=(Breakpoint &&) noexcept = default;
+  Breakpoint(Breakpoint &&b) noexcept;
+  Breakpoint &operator=(Breakpoint &&) noexcept;
+  Breakpoint(const Breakpoint &) noexcept = delete;
+  Breakpoint &operator=(const Breakpoint &) noexcept = delete;
 
+  /* Enable this breakpoint. Use `tid` as parameter to ptrace. */
   void enable(Tid tid) noexcept;
+
+  /* Disable this breakpoint. Use `tid` as parameter to ptrace. */
   void disable(Tid tid) noexcept;
+
+  /* Get breakpoint type. */
   BpType type() const noexcept;
 
-  /* Should we resume after hitting this breakpoint?
-   *  Possible scenarios:
-   * - user wants this breakpoint ignored, possibly due to some condition
-   * - it's a tracer breakpoint, and as such should appear invisible to user
-   */
-  bool should_resume() const noexcept;
-  void on_hit(TraceeController *tc, TaskInfo *t) noexcept;
+  /* Breakpoint logic to perform when hit by Task `t`. */
+  OnBpHit on_hit(TraceeController *tc, TaskInfo *t) noexcept;
+
+  /* Check if Task `t` should report stop to user. */
+  bool ignore_task(TaskInfo *t) noexcept;
+
+  /* Retrieve stop notification type for this breakpoint, for `t`. */
+  BpNote stop_notification(TaskInfo *t) noexcept;
+
+  /* Set default notification type for this breakpoint. */
+  void set_note(BpNote) noexcept;
+
+  /* Set temporary notification for this breakpoint, for task `t`. */
+  void set_temporary_note(TaskInfo *t, BpNote n) noexcept;
+
+  /* Add `tid` to set of tasks that should be reported to the user when they hit this breakpoint. If no tasks has
+   * been registered, all tasks will report stop to user.*/
+  void add_stop_for(Tid tid) noexcept;
 
   // The type of the event this breakpoint will generate
   BpEventType event_type() const noexcept;
@@ -167,10 +199,12 @@ public:
   u8 original_byte;
   BpType bp_type;
   u16 id;
-  u32 times_hit;
   TPtr<void> address;
-  bool enabled;
-  bool ignore;
+  bool enabled = true;
+  u32 times_hit = 0;
+  BpNote on_notify = BpNote::BreakpointHit;
+  std::unique_ptr<StopSet> stop_these = nullptr;
+  std::unique_ptr<TemporaryNotes> temporary_notes = nullptr;
 };
 
 struct BpEvent

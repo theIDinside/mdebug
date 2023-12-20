@@ -69,9 +69,8 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   // initialize bottom frame's registers with actual live register contents
   auto &buf = call_stack->reg_unwind_buffer;
   buf.clear();
-  buf.reserve(call_stack->pcs.size());
+  buf.reserve(call_stack->pcs.capacity());
   buf.push_back({});
-  call_stack->resolved = req.count;
   {
     auto &init = buf.back();
     for (auto i = 0; i <= 16; ++i) {
@@ -87,14 +86,12 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(tc, this, un_info, registers->rip);
 
   const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
-  DLOG("mdb", "Servicing call stack request: {}", req);
   switch (req.req) {
   case CallStackRequest::Type::Full: {
     for (auto uinf = un_info; uinf != nullptr; uinf = it.get_info(get_current_pc())) {
       const auto pc = get_current_pc();
       cfa_state.reset(uinf, buf.back(), pc);
       call_stack->pcs.push_back(pc);
-      DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc=0x{:x}", uinf->cie->offset, uinf->fde_eh_offset, pc);
       decode_eh_insts(uinf, cfa_state);
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
     }
@@ -105,12 +102,10 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       const auto pc = get_current_pc();
       cfa_state.reset(uinf, buf.back(), pc);
       call_stack->pcs.push_back(pc);
-      DLOG("eh", "[unwind] CIE=0x{:x}, FDE=0x{:x}, pc=0x{:x}", uinf->cie->offset, uinf->fde_eh_offset, pc);
       decode_eh_insts(uinf, cfa_state);
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
       --req.count;
     }
-    call_stack->resolved = call_stack->resolved - req.count;
   }
   }
   DLOG("mdb", "Resume address stack:\n{}", fmt::join(call_stack->pcs, "\n"))

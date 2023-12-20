@@ -88,12 +88,8 @@ struct StepOut final : public ui::UICommand
 {
   int thread_id;
   bool continue_all;
-  SteppingGranularity granularity;
 
-  StepOut(std::uint64_t seq, int tid, bool all, SteppingGranularity granularity) noexcept
-      : UICommand(seq), thread_id(tid), continue_all(all), granularity(granularity)
-  {
-  }
+  StepOut(std::uint64_t seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   DEFINE_NAME(StepOut);

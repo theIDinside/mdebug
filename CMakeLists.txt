@@ -191,6 +191,7 @@ if(NODEJS)
       moduleEvent
       threads
       variables
+      finish
   )
 
   # These define
@@ -207,6 +208,7 @@ if(NODEJS)
   set(moduleEvent "6modules")
   set(threads "threads")
   set(variables "baseTypes")
+  set(finish "finish")
 
   foreach(driver_test ${DRIVER_TEST_SUITES})
     list(LENGTH ${driver_test} LIST_LENGTH)

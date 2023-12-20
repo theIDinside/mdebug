@@ -116,7 +116,31 @@ StepOutResponse::serialize(int seq) const noexcept
 UIResultPtr
 StepOut::execute(Tracer *tracer) noexcept
 {
-  TODO("StepOut::execute");
+  auto target = tracer->get_current();
+  auto task = target->get_task(thread_id);
+
+  if (!task->is_stopped()) {
+    return new StepOutResponse{false, this};
+  }
+  const auto req = CallStackRequest::partial(2);
+  auto resume_addrs = task->return_addresses(target, req);
+  ASSERT(resume_addrs.size() >= req.count, "Could not find frame info");
+  auto rip = resume_addrs[1];
+  if (auto bp = target->bps.get(rip); bp) {
+    bp->set_temporary_note(task, BpNote::FinishedFunction);
+    target->install_ptracestop_handler<ptracestop::FinishFunction>(task->tid, !continue_all, task, bp, false);
+    return new StepOutResponse{true, this};
+  } else {
+    bp = target->set_finish_fn_bp(rip);
+    if (bp) {
+      bp->set_note(BpNote::FinishedFunction);
+      bp->add_stop_for(task->tid);
+      target->install_ptracestop_handler<ptracestop::FinishFunction>(task->tid, !continue_all, task, bp, true);
+      return new StepOutResponse{true, this};
+    } else {
+      return new StepOutResponse{false, this};
+    }
+  }
 }
 
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept
@@ -842,8 +866,16 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::StepIn");
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
-  case CommandType::StepOut:
-    TODO("Command::StepOut");
+  case CommandType::StepOut: {
+    ASSERT(args.contains("threadId"),
+           "Next requests must contain a threadId whether or not all-stop is the execution mode");
+    int thread_id = args["threadId"];
+    bool single_thread = false;
+    if (args.contains("singleThread")) {
+      single_thread = args["singleThread"];
+    }
+    return new ui::dap::StepOut{seq, thread_id, !single_thread};
+  }
   case CommandType::Terminate:
     return new Terminate{seq};
   case CommandType::TerminateThreads:

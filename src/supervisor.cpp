@@ -51,9 +51,9 @@ template <typename T> using Set = std::unordered_set<T>;
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession session, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
-      tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), stopped_observer(), var_refs(),
-      interpreter_base{}, entry{}, session(session), ptracestop_handler(new ptracestop::StopHandler{this}),
-      unwinders(), null_unwinder(new sym::Unwinder{nullptr})
+      tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), all_stopped_observer(),
+      var_refs(), interpreter_base{}, entry{}, session(session),
+      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
 {
   threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
@@ -289,7 +289,7 @@ TraceeController::resume_task(TaskInfo *task, RunType type) noexcept
 }
 
 void
-TraceeController::stop_all() noexcept
+TraceeController::stop_all(TaskInfo *requesting_task) noexcept
 {
   DLOG("mdb", "Stopping all threads")
   waiting_for_all_stopped = true;
@@ -303,10 +303,14 @@ TraceeController::stop_all() noexcept
       // we upgraded our tracer-stop to a user-stop
       t.set_stop();
     }
-    auto action = ptracestop_handler->get_proceed_action(&t);
-    if (action) {
-      action->cancel();
-      ptracestop_handler->remove_action(&t);
+    // if the stop is requested by `requesting_task` we don't want
+    // to remove it's ptrace action as it might be the one requesting the stop
+    if (&t != requesting_task) {
+      auto action = ptracestop_handler->get_proceed_action(&t);
+      if (action) {
+        action->cancel();
+        ptracestop_handler->remove_action(&t);
+      }
     }
   }
 }
@@ -387,6 +391,24 @@ TraceeController::set_tracer_bp(TPtr<u64> addr, BpType type) noexcept
   write(addr.as<u8>(), bkpt);
   bps.insert(addr.as_void(), *original_byte, type);
   return true;
+}
+
+Breakpoint *
+TraceeController::set_finish_fn_bp(TraceePointer<void> addr) noexcept
+{
+  BpType type{.address = true, .resume_address = true};
+  if (bps.contains(addr)) {
+    auto bp = bps.get(addr.as<void>());
+    DLOG("mdb", "Configuring bp {} at {} to be {} bp as well", bp->id, addr, type);
+    bp->bp_type.type |= type.type;
+    return bp;
+  }
+  u8 bkpt = 0xcc;
+  const auto original_byte = read_type_safe(addr.as<u8>());
+  ASSERT(original_byte.has_value(), "Failed to read byte at {}", addr);
+  write(addr.as<u8>(), bkpt);
+  bps.insert(addr.as_void(), *original_byte, type);
+  return bps.get(addr);
 }
 
 void
@@ -473,7 +495,7 @@ TraceeController::emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept
    *  that all get stopped during this event. */
   DLOG("mdb", "[dap event]: stopped at breakpoint {} emitted", bp_id);
   auto evt =
-      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", true};
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", false};
   evt->bp_ids.push_back(bp_id);
   Tracer::Instance->post_event(evt);
 }
@@ -483,14 +505,14 @@ TraceeController::emit_stepped_stop(LWP lwp) noexcept
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
-  emit_stepped_stop(lwp, true);
+  emit_stepped_stop(lwp, "Stepping finished", false);
 }
 
 void
-TraceeController::emit_stepped_stop(LWP lwp, bool all_stopped) noexcept
+TraceeController::emit_stepped_stop(LWP lwp, std::string_view message, bool all_stopped) noexcept
 {
   Tracer::Instance->post_event(
-      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, "Stepping finished", lwp.tid, {}, "", all_stopped});
+      new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, message, lwp.tid, {}, "", all_stopped});
 }
 
 void
@@ -582,7 +604,7 @@ TraceeController::terminate_gracefully() noexcept
 {
   DLOG("mdb", "[TraceeController]: terminate gracefully");
   if (is_running()) {
-    stop_all();
+    stop_all(nullptr);
   }
   return ::kill(task_leader, SIGKILL) == 0;
 }
@@ -591,7 +613,7 @@ bool
 TraceeController::detach() noexcept
 {
   if (is_running()) {
-    stop_all();
+    stop_all(nullptr);
   }
   std::vector<std::pair<Tid, int>> errs;
   for (const auto &t : threads) {
@@ -1107,7 +1129,7 @@ void
 TraceeController::notify_all_stopped() noexcept
 {
   DLOG("mdb", "[all-stopped]: sending registered notifications");
-  stopped_observer.send_notifications();
+  all_stopped_observer.send_notifications();
 }
 
 bool

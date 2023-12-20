@@ -1,12 +1,36 @@
 #include "breakpoint.h"
+#include "events/event.h"
 #include "ptrace.h"
 #include "supervisor.h"
 
 Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BpType type) noexcept
-    : original_byte(original_byte), bp_type(type), id(id), times_hit(0), address(addr), enabled(true),
-      ignore(false)
+    : original_byte(original_byte), bp_type(type), id(id), address(addr)
 {
   DLOG("mdb", "[bkpt]: bp {} created for {} = {}", id, addr, type);
+}
+
+Breakpoint::Breakpoint(Breakpoint &&b) noexcept
+    : original_byte(b.original_byte), bp_type(b.type()), id(b.id), address(b.address), enabled(b.enabled),
+      times_hit(b.times_hit), on_notify(b.on_notify), stop_these(std::move(b.stop_these)),
+      temporary_notes(std::move(b.temporary_notes))
+{
+}
+
+Breakpoint &
+Breakpoint::operator=(Breakpoint &&b) noexcept
+{
+  if (this == &b)
+    return *this;
+  original_byte = b.original_byte;
+  bp_type = b.bp_type;
+  id = b.id;
+  address = b.address;
+  enabled = b.enabled;
+  times_hit = b.times_hit;
+  on_notify = b.on_notify;
+  stop_these = std::move(b.stop_these);
+  temporary_notes = std::move(b.temporary_notes);
+  return *this;
 }
 
 void
@@ -40,15 +64,10 @@ Breakpoint::type() const noexcept
   return bp_type;
 }
 
-bool
-Breakpoint::should_resume() const noexcept
-{
-  return ignore || bp_type.shared_object_load;
-}
-
-void
+OnBpHit
 Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
 {
+  ++times_hit;
   switch (event_type()) {
   // even if underlying bp is both user and tracer bp; it always handles it prioritized as user.
   case BpEventType::Both: {
@@ -58,10 +77,29 @@ Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
     [[fallthrough]];
   }
   case BpEventType::UserBreakpointHit: {
-    // TODO(simon): if breakpoint doesn't stop all, emit stop event directly, but only for that one thread
-    if (!ignore) {
-      tc->stop_all();
-      tc->stopped_observer.add_notification<BreakpointHit>(tc, int{id}, int{t->tid});
+    // TODO(simon): if breakpoint doesn't stop all, emit stop event directly, but only for that one thread.
+    //   N.B! For that to be solved we have multiple problems to consider
+    //   if we don't stop all, any action then taken by any part of the debugger, will have to keep in mind
+    //   that all threads aren't (might not be) stopped. So, if for instance some code wants to set a breakpoint
+    //   somewhere in the tracee, first, that part of the code will have to stop all threads, reap the wait status
+    //   and _then_ proceed with it's actions of what it wants to do, which is setting a breakpoint. After it's
+    //   done, it has to restart/reset the state of the program, to what it was before it stopped everything. This
+    //   complexity absolutely astronomically balloons everything. Therefore, for now at least, it's decided that
+    //   _any_ user breakpoint that gets hit, will stop all threads. The user can still resume/continue, step, do
+    //   "next line" etc, on individual threads, but as soon as a bp is hit, all threads will stop.
+    //   the reason for this complexity, is because if MDB wants to set a breakpoint it has to write to tracee
+    //   memory, and for that to work reliably it must be stopped.
+    if (!ignore_task(t)) {
+      tc->stop_all(t);
+      switch (stop_notification(t)) {
+      case BpNote::BreakpointHit: {
+        tc->all_stopped_observer.add_notification<BreakpointHit>(tc, int{id}, int{t->tid});
+        return OnBpHit::Stop;
+      }
+      case BpNote::FinishedFunction:
+        tc->all_stopped_observer.add_notification<Step>(tc, int{t->tid}, "Finished function");
+        return OnBpHit::Stop;
+      }
     }
     break;
   }
@@ -71,6 +109,53 @@ Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
     }
   } break;
   }
+  return OnBpHit::Continue;
+}
+
+bool
+Breakpoint::ignore_task(TaskInfo *t) noexcept
+{
+  return stop_these && !stop_these->contains(t->tid);
+}
+
+BpNote
+Breakpoint::stop_notification(TaskInfo *task) noexcept
+{
+  if (temporary_notes) {
+    auto i = temporary_notes->find(task->tid);
+    if (i != std::end(*temporary_notes)) {
+      const auto n = i->second;
+      temporary_notes->erase(i);
+      if (temporary_notes->empty())
+        temporary_notes.reset();
+      return n;
+    }
+  }
+  return on_notify;
+}
+
+void
+Breakpoint::set_note(BpNote bpnote) noexcept
+{
+  on_notify = bpnote;
+}
+
+void
+Breakpoint::set_temporary_note(TaskInfo *t, BpNote n) noexcept
+{
+  if (!temporary_notes) {
+    temporary_notes = std::make_unique<TemporaryNotes>();
+  }
+  temporary_notes->insert({t->tid, n});
+}
+
+void
+Breakpoint::add_stop_for(Tid tid) noexcept
+{
+  if (!stop_these) {
+    stop_these = std::make_unique<StopSet>();
+  }
+  stop_these->insert(tid);
 }
 
 #define UL(BpEvt) std::to_underlying(BpEventType::BpEvt)

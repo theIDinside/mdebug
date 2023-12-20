@@ -555,7 +555,6 @@ module.exports = function (file) {
     BUILD_BIN_DIR,
     MDB_PATH,
     buildDirFile,
-    checkResponse,
     DAClient,
     getLineOf,
     getStackFramePc,

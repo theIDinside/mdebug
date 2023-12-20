@@ -221,10 +221,11 @@ wait_result_stopped(Tid tid, int status)
     wait.ws.ws = Stopped;
   } else if (WSTOPSIG(status) == SIGSTOP) {
     wait.ws.ws = Stopped;
+  } else if (WSTOPSIG(status) == SIGTERM) {
+    DLOG("mdb", "SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait.tid, WSTOPSIG(status));
+    wait.ws.ws = Stopped;
   } else {
     wait.ws.ws = Stopped;
-    DLOG("mdb", "SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait.tid, WSTOPSIG(status));
-    sleep(1);
   }
   return wait;
 }
