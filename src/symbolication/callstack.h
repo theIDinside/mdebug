@@ -63,7 +63,6 @@ struct CallStack
 
   Tid tid; // the task associated with this call stack
   bool dirty;
-  u8 resolved;
   std::vector<Frame> frames; // the call stack
   std::vector<AddrPtr> pcs;
   std::vector<std::array<u64, 17>> reg_unwind_buffer;

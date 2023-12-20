@@ -13,6 +13,18 @@ public:
   virtual void send() noexcept = 0;
 };
 
+class Step : public StopEventNotification
+{
+public:
+  explicit Step(TraceeController *tc, int tid, std::string_view msg) noexcept;
+  void send() noexcept override;
+
+private:
+  TraceeController *tc;
+  int tid;
+  std::string_view msg;
+};
+
 class BreakpointHit : public StopEventNotification
 {
 public:

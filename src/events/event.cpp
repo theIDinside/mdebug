@@ -12,6 +12,14 @@ StopObserver::send_notifications() noexcept
   notifications.clear();
 }
 
+Step::Step(TraceeController *tc, int tid, std::string_view msg) noexcept : tc(tc), tid(tid), msg(msg) {}
+
+void
+Step::send() noexcept
+{
+  tc->emit_stepped_stop({tc->task_leader, tid}, msg, true);
+}
+
 BreakpointHit::BreakpointHit(TraceeController *tc, int bp_id, int tid) noexcept : tc(tc), bp_id(bp_id), tid(tid) {}
 
 void

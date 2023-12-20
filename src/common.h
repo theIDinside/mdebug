@@ -681,3 +681,14 @@ public:
 private:
   DeferFn defer_fn;
 };
+
+template <typename T>
+constexpr std::optional<T>
+take(std::optional<T> &&value) noexcept
+{
+  if (!value)
+    return std::nullopt;
+  auto v = value.value();
+  value.reset();
+  return v;
+}

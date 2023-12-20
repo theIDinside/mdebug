@@ -59,7 +59,7 @@ struct TraceeController
   TPtr<r_debug_extended> tracee_r_debug;
   SharedObjectMap shared_objects;
   bool waiting_for_all_stopped;
-  StopObserver stopped_observer;
+  StopObserver all_stopped_observer;
 
 private:
   int next_var_ref = 0;
@@ -109,7 +109,7 @@ public:
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
   void resume_task(TaskInfo *task, RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
-  void stop_all() noexcept;
+  void stop_all(TaskInfo *requesting_task) noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
    * interface of the event */
   void reap_task(TaskInfo *task) noexcept;
@@ -130,10 +130,11 @@ public:
   void set_fn_breakpoint(std::string_view function_name) noexcept;
   void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   bool set_tracer_bp(TPtr<u64> addr, BpType type) noexcept;
+  Breakpoint *set_finish_fn_bp(TraceePointer<void> addr) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
   void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
-  void emit_stepped_stop(LWP lwp, bool all_stopped) noexcept;
+  void emit_stepped_stop(LWP lwp, std::string_view message, bool all_stopped) noexcept;
   void emit_signal_event(LWP lwp, int signal) noexcept;
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to

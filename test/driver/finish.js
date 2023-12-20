@@ -44,6 +44,7 @@ async function finish() {
   )
 
   if (!response.success) throw new Error(`Request was unsuccessful: ${JSON.stringify(response)}`)
+  console.log(`stopped event: ${JSON.stringify(event_body, null, 2)}`)
 
   if (event_body.reason != 'step') {
     throw new Error(`Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(event_body)}`)

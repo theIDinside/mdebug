@@ -23,6 +23,42 @@ ThreadProceedAction::cancel() noexcept
   cancelled = true;
 }
 
+FinishFunction::FinishFunction(StopHandler *handler, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept
+    : ThreadProceedAction(handler, t), bp(bp), should_cleanup(should_clean_up)
+{
+}
+
+FinishFunction::~FinishFunction() noexcept
+{
+  if (should_cleanup) {
+    DLOG("mdb", "Requesting delete of bp @ {}", bp->address);
+    tc->bps.remove_breakpoint(bp->address, bp->type());
+  }
+}
+
+bool
+FinishFunction::has_completed() const noexcept
+{
+  if (task->bstat) {
+    DLOG("mdb", "finished function for {}", task->tid);
+    return task->bstat->bp_id == bp->id;
+  } else {
+    return false;
+  }
+}
+
+void
+FinishFunction::proceed() noexcept
+{
+  tc->resume_task(task, RunType::Continue);
+}
+
+void
+FinishFunction::update_stepped() noexcept
+{
+  // essentially no-op.
+}
+
 InstructionStep::InstructionStep(StopHandler *handler, TaskInfo *thread, int steps) noexcept
     : ThreadProceedAction(handler, thread), steps_requested(steps), steps_taken(0)
 {
@@ -51,7 +87,7 @@ InstructionStep::~InstructionStep()
 {
   if (!cancelled) {
     DLOG("mdb", "[inst step]: instruction step for {} ended", task->tid);
-    tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, false);
+    tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, "Instruction stepping finished", false);
   }
 }
 
@@ -97,7 +133,7 @@ LineStep::~LineStep() noexcept
     tc->remove_breakpoint(*resume_address, BpType{.resume_address = true});
   if (!cancelled) {
     DLOG("mdb", "[line step]: line step for {} ended", task->tid);
-    tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, false);
+    tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, "Line stepping finished", false);
   }
 }
 
@@ -206,6 +242,8 @@ StopHandler::handle_proceed(TaskInfo *info, bool should_resume) noexcept
          should_resume && info->can_continue());
     if (should_resume && info->can_continue()) {
       tc->resume_task(info, RunType::Continue);
+    } else {
+      info->set_stop();
     }
   }
 }
@@ -243,8 +281,7 @@ process_stopped(TraceeController *tc, TaskInfo *t)
     DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
     tc->set_pc(t, prev_pc_byte);
     t->add_bpstat(bp);
-    bp->on_hit(tc, t);
-    should_resume = bp->should_resume();
+    should_resume = bp->on_hit(tc, t) == OnBpHit::Continue;
   }
 
   DLOG("mdb", "[wait status]: Processed STOPPED for {}. should_resume={}, user_stopped={}", t->tid, should_resume,
@@ -283,8 +320,8 @@ StopHandler::process_waitstatus_for(TaskInfo *t) noexcept
     return !event_settings.clone_stop;
   } break;
   case WaitStatusKind::Signalled:
-    tc->stop_all();
-    tc->stopped_observer.add_notification<SignalStop>(tc, t->wait_status.signal, int{t->tid});
+    tc->stop_all(nullptr);
+    tc->all_stopped_observer.add_notification<SignalStop>(tc, t->wait_status.signal, int{t->tid});
     return false;
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");

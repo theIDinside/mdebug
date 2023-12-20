@@ -18,7 +18,7 @@ class ThreadProceedAction
 {
 public:
   ThreadProceedAction(StopHandler *handler, TaskInfo *task) noexcept;
-  void cancel() noexcept;
+  virtual void cancel() noexcept;
 
   // Abstract Interface
   virtual ~ThreadProceedAction() = default;
@@ -65,6 +65,20 @@ private:
   sym::dw::LineTableEntry entry;
 };
 
+class FinishFunction : public ThreadProceedAction
+{
+public:
+  FinishFunction(StopHandler *handler, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept;
+  ~FinishFunction() noexcept override;
+  bool has_completed() const noexcept override;
+  void proceed() noexcept override;
+  void update_stepped() noexcept override;
+
+private:
+  Breakpoint *bp;
+  bool should_cleanup;
+};
+
 template <typename A>
 constexpr std::string_view
 action_name()
@@ -73,6 +87,8 @@ action_name()
     return "Instruction Step";
   } else if constexpr (std::is_same_v<A, LineStep>) {
     return "Line Step";
+  } else if constexpr (std::is_same_v<A, FinishFunction>) {
+    return "Finish Function";
   } else {
     static_assert(always_false<A>, "Unknown action type");
   }
