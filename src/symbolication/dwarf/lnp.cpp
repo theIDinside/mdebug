@@ -292,8 +292,6 @@ LineTable::find_by_pc(AddrPtr addr) noexcept
   if (it == end())
     return end();
 
-  auto lte = it.get();
-  DLOG("mdb", "[lte]: search by {}; found pc={}, {}:{}", addr, lte.pc, lte.line, u32{lte.column});
   return it;
 }
 
@@ -664,7 +662,7 @@ read_lnp_headers(const Elf *elf) noexcept
       reader.skip(init_len - reader.pop_bookmark());
     }
   }
-  DLOG("dwarf", "[lnp]: parsed {} headers", headers->size());
+
   ASSERT(!reader.has_more(),
          ".debug_line section is expected to have been consumed here, but {} bytes were remaining",
          reader.remaining_size());

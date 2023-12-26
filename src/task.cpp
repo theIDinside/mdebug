@@ -47,11 +47,9 @@ decode_eh_insts(const sym::UnwindInfo *inf, sym::CFAStateMachine &state) noexcep
   // actually know how to read DWARF binary data here.
   DwarfBinaryReader reader{nullptr, inf->cie->instructions.data(), inf->cie->instructions.size()};
 
-  const auto cie_cnt = sym::decode(reader, state, inf);
-  DLOG("eh", "CIE ins decoded={}", cie_cnt);
+  sym::decode(reader, state, inf);
   DwarfBinaryReader fde{nullptr, inf->fde_insts.data(), inf->fde_insts.size()};
-  const auto fde_cnt = sym::decode(fde, state, inf);
-  DLOG("eh", "FDE ins decoded={}", fde_cnt);
+  sym::decode(fde, state, inf);
 }
 
 const std::vector<AddrPtr> &

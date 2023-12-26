@@ -45,8 +45,9 @@ NotifyManager::has_io_ready() noexcept
   const auto ok = (pollfds[0].revents & POLLIN) == POLLIN;
   if (ok) {
     char c;
-    PERFORM_ASSERT(::read(pollfds[0].fd, &c, 1) != -1 && errno != EAGAIN,
-                   "Attempting to read from pipe when it would block");
+    if (::read(pollfds[0].fd, &c, 1) != -1 && errno != EAGAIN) {
+      PANIC("Attempting to read from pipe when it would block");
+    }
   }
   pollfds[0].revents = 0;
   pollfds[0].events = POLLIN;

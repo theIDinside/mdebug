@@ -543,6 +543,15 @@ StackTraceResponse::serialize(int seq) const noexcept
       seq, response_seq, fmt::join(stack_frames, ","));
 }
 
+constexpr bool
+is_debug_build()
+{
+  if constexpr (MDB_DEBUG == 0)
+    return false;
+  else
+    return true;
+}
+
 UIResultPtr
 StackTrace::execute(Tracer *tracer) noexcept
 {
@@ -565,17 +574,12 @@ StackTrace::execute(Tracer *tracer) noexcept
       if (lt.is_valid()) {
         // todo(simon): linear search is horrid. But binary search is so fragile instead. So for now, we do the
         // absolute worst, so long it works.
-        auto iter_count = 0u;
         const auto end = std::end(lt);
         for (auto ita = std::begin(lt), itb = ita + 1; ita != end && itb != end; ++ita, ++itb) {
           if ((*ita).pc <= frame.rip && (*itb).pc > frame.rip) {
             line = (*ita).line;
             col = (*ita).column;
             break;
-          }
-          if constexpr (MDB_DEBUG == 1) {
-            ++iter_count;
-            ASSERT(iter_count <= lt.size(), "Iterated beyond table size");
           }
         }
         stack_frames.push_back(StackFrame{
@@ -680,9 +684,6 @@ Variables::execute(Tracer *tracer) noexcept
   DLOG("mdb", "[dap cmd]: variables command returns an empty list for now");
   auto current = tracer->get_current();
   if (const auto varref = current->var_ref(this->var_ref); varref) {
-    const auto frame_id = varref->frame_id;
-    const auto frame = current->frame(frame_id);
-    DLOG("mdb", "Get variables for frame {}", *frame);
     return new VariablesResponse{true, this, {}};
   } else {
     return new VariablesResponse{false, this, {}};

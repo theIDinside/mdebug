@@ -3,6 +3,8 @@
 #include "ptrace.h"
 #include "supervisor.h"
 
+extern bool MDB_LOG;
+
 Breakpoint::Breakpoint(AddrPtr addr, u8 original_byte, u32 id, BpType type) noexcept
     : original_byte(original_byte), bp_type(type), id(id), address(addr)
 {

@@ -1,12 +1,14 @@
 #include "mdb_config.h"
 #include "fmt/core.h"
 #include "utils/logger.h"
+#include "utils/util.h"
 #include <charconv>
 #include <getopt.h>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unistd.h>
+#include <unordered_set>
 #include <variant>
 
 namespace sys {
@@ -47,6 +49,13 @@ DebuggerConfiguration::dwarf_config() const noexcept
   return dwarf_parsing;
 }
 
+LogConfig
+DebuggerConfiguration::log_config() const noexcept
+{
+  return log;
+}
+
+static constexpr auto USAGE_STR = "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]";
 utils::Expected<DebuggerConfiguration, CLIError>
 parse_cli(int argc, const char **argv) noexcept
 {
@@ -57,12 +66,32 @@ parse_cli(int argc, const char **argv) noexcept
                      {"rr", OptNoArgument, 0, 'r'},
                      {"eager-lnp-parse", OptNoArgument, 0, 'e'},
                      // parameters
-                     {"thread-pool-size", OptArgRequired, 0, 't'}};
+                     {"thread-pool-size", OptArgRequired, 0, 't'},
+                     {"log", OptArgRequired, 0, 'l'},
+                     {"perf", OptNoArgument, 0, 'p'}};
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:", long_opts, &option_index)) != -1) {
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:p", long_opts, &option_index)) != -1) {
     switch (opt) {
     case 0:
+      break;
+    case 'l':
+      if (optarg) {
+        std::string_view args{optarg};
+        auto input_logs = utils::split_string(args, ",");
+        if (const auto res = LogConfig::verify_ok(input_logs); !res.is_expected()) {
+          return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue,
+                                            .msg = fmt::format("Unknown log value: {}\nSupported: ", res.error(),
+                                                               fmt::join(LogConfig::LOGS, ","))});
+        }
+        for (auto i : input_logs)
+          init.log.set(i);
+      } else {
+        return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
+      }
+      break;
+    case 'p':
+      init.log.time_log = true;
       break;
     case 'r':
       // If '-r' is found, set the flag
@@ -77,8 +106,10 @@ parse_cli(int argc, const char **argv) noexcept
       init.dwarf_parsing.eager_lnp_parse = true;
       break;
     case '?':
-      DLOG("mdb", "Usage: mdb [-r|-e|-t <thread pool size>]");
-      return utils::unexpected(CLIError::UnknownArgs);
+      DLOG("mdb", "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
+      return utils::unexpected(
+          CLIError{.info = CLIErrorInfo::UnknownArgs,
+                   .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])});
       break;
     default:
       continue;

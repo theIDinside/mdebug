@@ -33,11 +33,12 @@ private:
 
 Logger *get_logging() noexcept;
 
-#ifdef MDB_DEBUG
-#define DLOG(channel, ...)                                                                                        \
-  if (MDB_DEBUG)                                                                                                  \
-    logging::get_logging()->log(channel, fmt::format(__VA_ARGS__));
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
+#define DLOG(channel, ...) logging::get_logging()->log(channel, fmt::format(__VA_ARGS__));
 #else
 #define DLOG(channel, ...)
 #endif
+
+#define LOG(channel, ...) logging::get_logging()->log(channel, fmt::format(__VA_ARGS__));
+
 } // namespace logging

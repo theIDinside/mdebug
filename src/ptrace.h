@@ -133,7 +133,7 @@ struct SyscallArguments
 
   SyscallArguments(const user_regs_struct &regs);
 
-#ifdef MDB_DEBUG
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
   void debug_print(bool flush, bool pretty);
 #else
 

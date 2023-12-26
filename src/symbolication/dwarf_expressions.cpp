@@ -472,10 +472,10 @@ op_call_ref(ExprByteCodeInterpreter &i) noexcept
 }
 
 void
-op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
+op_call_frame_cfa(ExprByteCodeInterpreter &) noexcept
 {
   // ??
-  DLOG("dwarf", "I have no idea if this is correct");
+  TODO("op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept");
 }
 
 void

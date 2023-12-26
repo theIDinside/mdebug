@@ -8,6 +8,8 @@
 #include <chrono>
 #include <sys/wait.h>
 
+extern bool AwaiterLog;
+
 AwaiterThread::AwaiterThread(Notify notifier, Tid task_leader) noexcept
     : notifier(notifier), events_reaped(true), m{}, cv{}, thread(), should_cont(true),
       process_group_id(task_leader){};
@@ -41,7 +43,9 @@ AwaiterThread::start_awaiter_thread(TraceeController *tc) noexcept
         VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
         continue;
       }
-      DLOG("mdb", "[wait]: waited for {}", res);
+      if (AwaiterLog) {
+        LOG("awaiter", "[wait]: wait={}. status={}", res, status);
+      }
       const auto wait_result = process_status(res, status);
       push_event(Event{.process_group = tc->task_leader, .type = EventType::WaitStatus, .wait = wait_result});
       ready = false;

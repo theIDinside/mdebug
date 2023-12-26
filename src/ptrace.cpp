@@ -101,6 +101,11 @@ new_target_set_options(pid_t pid)
 {
   const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
+    int stat;
+    if (-1 == waitpid(pid, &stat, 0)) {
+      perror("failed to set new target & options");
+      PANIC("Exiting");
+    }
     if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
       PANIC(fmt::format("Failed to set PTRACE options for {}: {}", pid, strerror(errno)));
     }
@@ -120,11 +125,6 @@ PtraceSyscallInfo::ip() const noexcept
 SyscallStop
 PtraceSyscallInfo::syscall_stop() const noexcept
 {
-#ifdef MDB_DEBUG
-  if (!is_entry() && !is_exit()) {
-    PANIC("Sanitized value is invalid.");
-  }
-#endif
   return (SyscallStop)m_info.op;
 }
 bool
@@ -157,7 +157,7 @@ ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location &loc)
 
 SyscallArguments::SyscallArguments(const user_regs_struct &regs) : regs(&regs) {}
 
-#ifdef MDB_DEBUG
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
 void
 SyscallArguments::debug_print(bool flush, bool pretty)
 {

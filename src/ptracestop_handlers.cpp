@@ -192,10 +192,9 @@ LineStep::update_stepped() noexcept
       tc->set_tracer_bp(ret_addr->as<u64>(), BpType{.resume_address = true});
       resume_address = ret_addr;
     } else {
-      DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
-      for (const auto &frame : callstack.frames) {
-        DLOG("mdb", "{}", frame);
-      }
+      DBG(DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
+          for (const auto &frame
+               : callstack.frames) { DLOG("mdb", "{}", frame); })
     }
   }
 }

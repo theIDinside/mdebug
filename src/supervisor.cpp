@@ -43,7 +43,6 @@
 #include <unordered_set>
 
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 
 template <typename T> using Set = std::unordered_set<T>;
@@ -440,7 +439,6 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
 
   DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), function_name);
   for (const auto &sym : matching_symbols) {
-    constexpr u64 bkpt = 0xcc;
     if (bps.contains(sym.address)) {
       auto bp = bps.get(sym.address);
       bp->bp_type.add_setting({.function = true});
@@ -667,7 +665,7 @@ TraceeController::process_clone(TaskInfo *t) noexcept
     set_task_vm_info(np, TaskVMInfo::from_clone_args(res));
     return np;
   } else {
-    ASSERT(false, "Unknown clone syscall!");
+    PANIC("Unknown clone syscall!");
   }
 }
 

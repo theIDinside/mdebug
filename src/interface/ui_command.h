@@ -8,7 +8,7 @@ namespace ui {
 struct UIResult;
 using UIResultPtr = const UIResult *;
 
-#if defined(MDB_DEBUG)
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
 #define DEFINE_NAME(Type)                                                                                         \
   constexpr std::string_view name() noexcept override final { return #Type; }
 #else
@@ -26,7 +26,7 @@ public:
   virtual UIResultPtr execute(Tracer *tracer) noexcept = 0;
 
   std::uint64_t seq;
-#if defined(MDB_DEBUG)
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
   constexpr virtual std::string_view name() noexcept = 0;
 #endif
 };

@@ -369,13 +369,4 @@ AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitDat
   mapping.add_mapping(start, end, cu);
 }
 
-SourceFileSymbolManager::SourceFileSymbolManager(ObjectFile *obj) noexcept : m(), source_units(), objfile(obj) {}
-// Search and find what SourceFileSymbolInfo spans `pc`. This function will also pre-fetch data for the returned
-// info's, like building their Line Number Program table, by posting the work to the global thread pool.
-std::vector<SourceFileSymbolInfo *>
-SourceFileSymbolManager::get_source_infos(AddrPtr pc) noexcept
-{
-  TODO_FMT("Not yet implemented");
-}
-
 } // namespace sym
