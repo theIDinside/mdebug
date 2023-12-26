@@ -4,7 +4,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
+string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 set(MIDAS_SOURCES
   # root
   src/main.cpp
@@ -75,7 +75,6 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
   src/symbolication/dwarf/name_index.h
-  src/symbolication/dwarf/reader_funcs.cpp
   src/symbolication/dwarf/reader_funcs.h
   src/symbolication/dwarf/rnglists.cpp
   src/symbolication/dwarf/rnglists.h
@@ -226,8 +225,10 @@ endif()
 
 # To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_definitions(mdb PRIVATE MDB_DEBUG)
+if(MIDAS_BUILD_TYPE STREQUAL "DEBUG")
+    target_compile_definitions(mdb PRIVATE MDB_DEBUG=1)
+elseif(MIDAS_BUILD_TYPE STREQUAL "RELEASE")
+  target_compile_definitions(mdb PRIVATE MDB_DEBUG=0)
 endif()
 
 target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
