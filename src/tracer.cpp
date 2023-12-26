@@ -29,7 +29,7 @@ Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
 
 void
-on_sigcld(int sig)
+on_sigcld(int)
 {
   pid_t pid;
   int stat;
