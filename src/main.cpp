@@ -5,8 +5,10 @@
 #include "interface/dap/interface.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
+#include "symbolication/dwarf/die.h"
 #include "tracer.h"
 #include "utils/thread_pool.h"
+#include "utils/worker_task.h"
 #include <array>
 #include <asm-generic/errno-base.h>
 #include <chrono>
@@ -51,6 +53,13 @@ utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool
 
 static constexpr auto default_log_channels = {"mdb", "dap", "dwarf", "awaiter", "eh"};
 
+bool LogTaskGroup = false;
+bool DwarfLog = false;
+bool AwaiterLog = false;
+bool EhLog = false;
+bool DapLog = false;
+bool MdbLog = false;
+
 int
 main(int argc, const char **argv)
 {
@@ -59,16 +68,18 @@ main(int argc, const char **argv)
   }
   auto res = sys::parse_cli(argc, argv);
   if (!res.is_expected()) {
-    switch (res.error()) {
-    case sys::CLIError::BadArgValue:
+    auto &&err = res.error();
+    switch (err.info) {
+    case sys::CLIErrorInfo::BadArgValue:
       fmt::println("Bad CLI argument value");
       break;
-    case sys::CLIError::UnknownArgs:
+    case sys::CLIErrorInfo::UnknownArgs:
       fmt::println("Unknown CLI argument");
       break;
     }
     exit(-1);
   }
+
   std::span<const char *> args(argv, argc);
   logging::get_logging()->log("mdb", "MDB CLI Arguments");
   for (const auto arg : args.subspan(1)) {
@@ -77,8 +88,15 @@ main(int argc, const char **argv)
 
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 
+  auto config = res.value();
+  auto log = config.log_config();
+  log.configure(&LogTaskGroup, &DwarfLog, &AwaiterLog, &EhLog, &DapLog, &MdbLog);
+  if (log.awaiter) {
+    logging::get_logging()->log("mdb", "Setting awaiter log on");
+  }
+
   utils::NotifyManager notifiers{io_read};
-  Tracer::Instance = new Tracer{io_read, &notifiers, res.value()};
+  Tracer::Instance = new Tracer{io_read, &notifiers, config};
   auto &tracer = *Tracer::Instance;
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;

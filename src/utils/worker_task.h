@@ -46,7 +46,7 @@ public:
   void task_done(Task *task) noexcept;
 
 private:
-  std::enable_if_t<MDB_DEBUG == 1, std::chrono::high_resolution_clock::time_point> start;
+  std::chrono::high_resolution_clock::time_point start;
   std::promise<void> m_promise;
   std::string_view m_name;
   std::mutex m_task_lock;

@@ -20,6 +20,7 @@ enum class BreakpointType : std::uint8_t
 
 struct BpType
 {
+
   union
   {
     u8 type = 0;
@@ -53,6 +54,55 @@ struct BpType
   add_setting(const BpType &setting) noexcept
   {
     type |= setting.type;
+  }
+
+  constexpr BpType &
+  Source(bool setting) noexcept
+  {
+    source = setting;
+    return *this;
+  }
+
+  constexpr BpType &
+  Function(bool setting) noexcept
+  {
+    function = setting;
+    return *this;
+  }
+
+  constexpr BpType &
+  Addr(bool setting) noexcept
+  {
+    address = setting;
+    return *this;
+  }
+
+  constexpr BpType &
+  Resume(bool set) noexcept
+  {
+    resume_address = set;
+    return *this;
+  }
+
+  constexpr BpType &
+  SharedObj(bool set) noexcept
+  {
+    shared_object_load = set;
+    return *this;
+  }
+
+  constexpr BpType &
+  Exception(bool set) noexcept
+  {
+    exception = set;
+    return *this;
+  }
+
+  constexpr BpType &
+  LongJump(bool set)
+  {
+    long_jump = set;
+    return *this;
   }
 };
 

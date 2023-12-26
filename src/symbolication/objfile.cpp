@@ -145,10 +145,7 @@ ObjectFile::get_linetable(u64 offset) noexcept
   auto kvp = std::find_if(parsed_ltes->begin(), parsed_ltes->end(),
                           [offset](const auto &kvp) { return kvp.first == offset; });
   if (kvp == std::end(*parsed_ltes)) {
-    for (const auto &kvp : *parsed_ltes) {
-      DLOG("mdb", "LTE: 0x{:x}", kvp.first);
-    }
-    ASSERT(false, "Failed to find parsed LineTable Entries for offset 0x{:x}", offset);
+    PANIC(fmt::format("Failed to find parsed LineTable Entries for offset 0x{:x}", offset));
   }
   if (kvp->second.table.empty()) {
     sym::dw::compute_line_number_program(kvp->second, parsed_elf, &*header);
@@ -215,13 +212,15 @@ ObjectFile::add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) no
                     std::make_move_iterator(new_cus.end()));
   std::sort(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter());
 
-  if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter())) {
-    for (const auto &cu : comp_units) {
-      DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
-           cu.start_pc(), cu.end_pc());
+  DBG({
+    if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter())) {
+      for (const auto &cu : comp_units) {
+        DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
+             cu.start_pc(), cu.end_pc());
+      }
+      PANIC("Dumped CU contents");
     }
-    ASSERT(false, "Dumped CU contents");
-  }
+  })
   addr_cu_map.add_cus(new_cus);
 }
 

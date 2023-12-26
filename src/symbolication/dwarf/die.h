@@ -97,6 +97,7 @@ public:
   bool spans_across(u64 sec_offset) const noexcept;
   SymbolInfoId unit_id() const noexcept;
   DwarfVersion version() const noexcept;
+  DwarfUnitType get_unit_type() const noexcept;
 
 private:
   u64 sec_offset;

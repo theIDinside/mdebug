@@ -303,7 +303,7 @@ IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_di
 }
 
 sym::PartialCompilationUnitSymbolInfo
-IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &pcu_die) noexcept
+IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &) noexcept
 {
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
   return sym::PartialCompilationUnitSymbolInfo{partial_cu};

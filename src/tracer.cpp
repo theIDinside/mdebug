@@ -29,7 +29,7 @@ Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
 
 void
-on_sigcld(int sig)
+on_sigcld(int)
 {
   pid_t pid;
   int stat;
@@ -253,7 +253,7 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
     const auto leader = res.pid;
     add_target_set_current(res.pid, program, TargetSession::Launched);
     if (Tracer::use_traceme) {
-      TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed}};
+      TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
       get_current()->process_exec(get_current()->register_task_waited(twr));
       dap->add_tty(res.fd);
     } else {

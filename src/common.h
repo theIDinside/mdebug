@@ -187,13 +187,19 @@ std::string_view syscall_name(u64 syscall_number);
     }                                                                                                             \
   }
 
-#if defined(MDB_DEBUG)
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
 #define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 /* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
 #define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
 #else
 #define ASSERT(cond, msg, ...)
 #define PERFORM_ASSERT(op, msg, ...) op
+#endif
+
+#if defined(MDB_DEBUG) and MDB_DEBUG == 1
+#define DBG(x) x
+#else
+#define DBG(x)
 #endif
 
 template <typename T> class TraceePointer

@@ -41,6 +41,7 @@ function(build_tests tests)
         endif()
         set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
         set_target_properties(${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+        target_compile_options(${target_name} PRIVATE -O0 -g3)
     endforeach()
 endfunction()
 

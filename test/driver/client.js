@@ -98,7 +98,7 @@ class DAClient {
         if (!cfg.some((v) => v == '-t')) {
           mdb_recorded_arg.push('-t', 2)
         }
-        const test_spawn_args = ['record', ...args, mdb, ...mdb_recorded_arg]
+        const test_spawn_args = ['record', ...args, mdb, ...mdb_recorded_arg, ...cfg]
         console.log(`Spawning test with: ${path} ${test_spawn_args.join(' ')}`)
         this.mdb = spawn(path, test_spawn_args)
       } else {

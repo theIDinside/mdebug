@@ -89,19 +89,4 @@ private:
   std::mutex mutex;
   utils::IntervalMapping<AddrPtr, sym::dw::UnitData *> mapping;
 };
-
-class SourceFileSymbolManager
-{
-  std::mutex m;
-  std::vector<SourceFileSymbolInfo> source_units;
-  ObjectFile *objfile;
-
-public:
-  SourceFileSymbolManager(ObjectFile *obj) noexcept;
-  /*
-   * Search and find what SourceFileSymbolInfo spans `pc`. This function will also pre-fetch data for the returned
-   * info's, like building their Line Number Program table, by posting the work to the global thread pool.
-   */
-  std::vector<SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
-};
 } // namespace sym

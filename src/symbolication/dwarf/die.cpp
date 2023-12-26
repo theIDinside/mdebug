@@ -5,6 +5,7 @@
 #include <symbolication/objfile.h>
 #include <utils/enumerator.h>
 
+extern bool DwarfLog;
 namespace sym::dw {
 const DieMetaData *
 DieMetaData::parent() const noexcept
@@ -169,6 +170,12 @@ UnitHeader::version() const noexcept
   return dw_version;
 }
 
+DwarfUnitType
+UnitHeader::get_unit_type() const noexcept
+{
+  return unit_type;
+}
+
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
     : objfile(owning_objfile), unit_header(header), unit_die(), dies(), fully_loaded(false), abbreviations()
 {
@@ -247,7 +254,7 @@ UnitData::index_of(const DieMetaData *die) noexcept
 {
   ASSERT(die != nullptr, "You passed a nullptr");
   auto begin = dies.data();
-  auto end = dies.data() + dies.size();
+  DBG(auto end = dies.data() + dies.size());
   ASSERT(die >= begin && die < end, "die does not belong to this CU or the dies has been unloaded!");
   return static_cast<u32>(die - begin);
 }
@@ -304,9 +311,6 @@ UnitData::load_dies() noexcept
   sibling_node.push_back(0);
   unit_die = DieMetaData::create_die(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
   dies.push_back(unit_die);
-  bool has_children = abbreviation.has_children;
-
-  ASSERT(has_children, "Compile Unit had no children");
   bool new_level = true;
   while (reader.has_more()) {
     const auto die_sec_offset = reader.sec_offset();
@@ -398,7 +402,9 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
 std::vector<UnitHeader>
 read_unit_headers(ObjectFile *obj) noexcept
 {
-  DLOG("dwarf", "Reading {} obfile compilation unit headers", obj->path.c_str());
+  if (DwarfLog) {
+    LOG("dwarf", "Reading {} obfile compilation unit headers", obj->path.c_str());
+  }
   const auto dbg_info = obj->parsed_elf->debug_info;
   std::vector<UnitHeader> result{};
   DwarfBinaryReader reader{obj->parsed_elf, dbg_info};
@@ -456,7 +462,8 @@ read_unit_headers(ObjectFile *obj) noexcept
            "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,
            reader.bytes_read());
   }
-  DLOG("dwarf", "Read {} compilation unit headers", result.size());
+  if (DwarfLog)
+    LOG("dwarf", "Read {} compilation unit headers", result.size());
   return result;
 }
 

@@ -180,7 +180,7 @@ struct ResolveFnSymbolState
   std::string_view namespace_ish{};
   AddrPtr low_pc = nullptr;
   AddrPtr high_pc = nullptr;
-  u8 maybe_count;
+  u8 maybe_count = 0;
 
   ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
 
@@ -311,8 +311,9 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         const auto declaring_die_offset = value.unsigned_value();
         if (auto die_ref = unit_data->get_objfile()->get_die_reference(declaring_die_offset); die_ref)
           die_refs.push_back(*die_ref);
-        else
+        else {
           DLOG("mdb", "Could not find die reference");
+        }
       } break;
       default:
         break;
@@ -367,15 +368,6 @@ void
 AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept
 {
   mapping.add_mapping(start, end, cu);
-}
-
-SourceFileSymbolManager::SourceFileSymbolManager(ObjectFile *obj) noexcept : m(), source_units(), objfile(obj) {}
-// Search and find what SourceFileSymbolInfo spans `pc`. This function will also pre-fetch data for the returned
-// info's, like building their Line Number Program table, by posting the work to the global thread pool.
-std::vector<SourceFileSymbolInfo *>
-SourceFileSymbolManager::get_source_infos(AddrPtr pc) noexcept
-{
-  TODO_FMT("Not yet implemented");
 }
 
 } // namespace sym

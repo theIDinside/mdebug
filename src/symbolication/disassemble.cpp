@@ -50,9 +50,8 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
     if (lte_range_opt) {
       const auto [begin_rel, end_rel, lt] = lte_range_opt.value();
       const auto begin = begin_rel.get();
-      const auto end = end_rel.get();
-      ASSERT(vm_address >= begin.pc && vm_address <= end.pc, "Address {} does not land inside LTE range {} .. {}",
-             vm_address, begin.pc, end.pc);
+      ASSERT(vm_address >= begin.pc && vm_address <= end_rel.get().pc,
+             "Address {} does not land inside LTE range {} .. {}", vm_address, begin.pc, end_rel.get().pc);
       return sym::Disassembly{.address = vm_address,
                               .opcode = std::move(machine_code),
                               .instruction = ins.text,

@@ -132,9 +132,9 @@ void
 DAP::write_protocol_message(std::string_view msg) noexcept
 {
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
-#ifdef MDB_DEBUG
-  logging::Logger::get_logger()->log("dap", fmt::format("WRITING -->{}{}<---", header, msg));
-#endif
+  if constexpr (MDB_DEBUG == 1) {
+    logging::Logger::get_logger()->log("dap", fmt::format("WRITING -->{}{}<---", header, msg));
+  }
   VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
   VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
 }
@@ -182,7 +182,7 @@ DAP::run_ui_loop()
             for (auto &&hdr : request_headers) {
               const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
               const auto cmd = parse_command(std::string{cd->payload()});
-              push_event(::Event{.type = EventType::Command, .cmd = cmd});
+              push_event(::Event{.process_group = 0, .type = EventType::Command, .cmd = cmd});
             }
             // since there's no partials left in the buffer, we reset it
             parse_swapbuffer.clear();
@@ -191,7 +191,7 @@ DAP::run_ui_loop()
               for (auto i = 0ull; i < request_headers.size() - 1; i++) {
                 const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
                 const auto cmd = parse_command(std::string{cd->payload()});
-                push_event(::Event{.type = EventType::Command, .cmd = cmd});
+                push_event(::Event{.process_group = 0, .type = EventType::Command, .cmd = cmd});
               }
 
               auto rd = maybe_unwrap<RemainderData>(request_headers.back());

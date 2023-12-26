@@ -47,11 +47,9 @@ decode_eh_insts(const sym::UnwindInfo *inf, sym::CFAStateMachine &state) noexcep
   // actually know how to read DWARF binary data here.
   DwarfBinaryReader reader{nullptr, inf->cie->instructions.data(), inf->cie->instructions.size()};
 
-  const auto cie_cnt = sym::decode(reader, state, inf);
-  DLOG("eh", "CIE ins decoded={}", cie_cnt);
+  sym::decode(reader, state, inf);
   DwarfBinaryReader fde{nullptr, inf->fde_insts.data(), inf->fde_insts.size()};
-  const auto fde_cnt = sym::decode(fde, state, inf);
-  DLOG("eh", "FDE ins decoded={}", fde_cnt);
+  sym::decode(fde, state, inf);
 }
 
 const std::vector<AddrPtr> &
@@ -96,6 +94,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
     }
     call_stack->dirty = false;
+    break;
   }
   case CallStackRequest::Type::Partial: {
     for (auto uinf = un_info; uinf != nullptr && req.count != 0; uinf = it.get_info(get_current_pc())) {
@@ -106,6 +105,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
       --req.count;
     }
+    break;
   }
   }
   DLOG("mdb", "Resume address stack:\n{}", fmt::join(call_stack->pcs, "\n"))
@@ -198,7 +198,8 @@ TaskInfo::set_dirty() noexcept
 void
 TaskInfo::add_bpstat(Breakpoint *bp) noexcept
 {
-  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false, .re_enable_bp = false};
+  bstat = BpStat{
+      .bp_id = bp->id, .type = bp->type(), .should_resume = false, .stepped_over = false, .re_enable_bp = false};
 }
 
 void
