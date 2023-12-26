@@ -42,9 +42,6 @@
 #include <unistd.h>
 #include <unordered_set>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-
 template <typename T> using Set = std::unordered_set<T>;
 
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
@@ -1151,7 +1148,3 @@ TraceeController::set_pending_waitstatus(TaskWaitResult wait_result) noexcept
   task->tracer_stopped = true;
   task->stop_collected = false;
 }
-
-#pragma GCC diagnostic pop
-
-// 0x405e6b

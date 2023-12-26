@@ -732,5 +732,3 @@ UnwindIterator::is_null() const noexcept
 }
 
 } // namespace sym
-
-// #pragma GCC diagnostic pop
