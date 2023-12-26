@@ -91,15 +91,21 @@ parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
     reader.read_value<u32>();
     reader.read_value<u32>();
     reader.read_value<u32>();
-    const auto stapsdt = reader.read_string();
-    ASSERT(stapsdt == "stapsdt", "Failed to see 'stapsdt' deliminator; saw {}", stapsdt);
+    // const auto stapsdt = reader.read_string();
+    // ASSERT(stapsdt == "stapsdt", "Failed to see 'stapsdt' deliminator; saw {}", stapsdt);
+    // instead just skip:
+    reader.skip_string();
+
     const auto ptr = reader.read_value<u64>();
     // base =
     reader.skip_value<u64>();
     // semaphore =
     reader.skip_value<u64>();
-    const auto provider = reader.read_string();
-    ASSERT(provider == "rtld", "Supported provider is rtld, got {}", provider);
+
+    // same here
+    // const auto provider = reader.read_string();
+    // ASSERT(provider == "rtld", "Supported provider is rtld, got {}", provider);
+    reader.skip_string();
     const auto probe_name = reader.read_string();
     reader.skip_string();
     if (reader.bytes_read() % 4 != 0)
@@ -139,7 +145,7 @@ TraceeController::install_loader_breakpoints() noexcept
     if (tmp_objfile->minimal_fn_symbols.contains(symbol_name)) {
       const auto addr = tmp_objfile->minimal_fn_symbols[symbol_name].address;
       DLOG("mdb", "Setting ld breakpoint at {}", addr);
-      set_tracer_bp(addr.as<u64>(), BpType{.shared_object_load = true});
+      set_tracer_bp(addr.as<u64>(), BpType{}.SharedObj(true));
     }
   }
   delete tmp_objfile;
@@ -372,7 +378,7 @@ TraceeController::set_addr_breakpoint(TraceePointer<u64> address) noexcept
     return;
   }
   u8 original_byte = write_bp_byte(address.as_void());
-  bps.insert(address.as_void(), original_byte, BpType{.address = true});
+  bps.insert(address.as_void(), original_byte, BpType{}.Addr(true));
 }
 
 bool
@@ -445,7 +451,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
       bps.fn_breakpoint_names[bp->id] = function_name;
     } else {
       auto ins_byte = write_bp_byte(sym.address);
-      bps.insert(sym.address, ins_byte, BpType{.function = true});
+      bps.insert(sym.address, ins_byte, BpType{}.Function(true));
       auto &bp = bps.breakpoints.back();
       bps.fn_breakpoint_names[bp.id] = function_name;
     }
@@ -470,7 +476,7 @@ TraceeController::set_source_breakpoints(std::string_view src,
             if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
               if (!bps.contains(lte.pc)) {
                 u8 original_byte = write_bp_byte(lte.pc);
-                bps.insert(lte.pc, original_byte, BpType{.source = true});
+                bps.insert(lte.pc, original_byte, BpType{}.Source(true));
                 const auto &bp = bps.breakpoints.back();
                 bps.source_breakpoints[bp.id] = std::move(desc);
                 break;
@@ -525,7 +531,7 @@ TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
 void
 TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept
 {
-  bps.clear(this, BpType{.address = true});
+  bps.clear(this, BpType{}.Addr(true));
   for (auto addr : addresses) {
     set_addr_breakpoint(addr.as<u64>());
   }
@@ -534,7 +540,7 @@ TraceeController::reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcep
 void
 TraceeController::reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept
 {
-  bps.clear(this, BpType{.function = true});
+  bps.clear(this, BpType{}.Function(true));
   bps.fn_breakpoint_names.clear();
   for (auto fn_name : fn_names) {
     set_fn_breakpoint(fn_name);
@@ -545,8 +551,7 @@ void
 TraceeController::reset_source_breakpoints(std::string_view source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&desc) noexcept
 {
-  auto type = BpType{0};
-  type.source = true;
+  auto type = BpType{}.Source(true);
   std::erase_if(bps.breakpoints, [&](Breakpoint &bp) {
     if (bp.type() & type) {
       // if enabled, and if new setting, means that it's not a combination of any breakpoint types left, disable it

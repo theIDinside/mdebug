@@ -47,6 +47,7 @@ struct Breakpoint
   std::optional<std::string_view> error_message;
 
   std::string serialize() const noexcept;
+  static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
 };
 
 struct DataBreakpoint

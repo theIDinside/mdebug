@@ -1,3 +1,4 @@
+#include "utils/expected.h"
 #include <gtest/gtest.h>
 #include <set>
 #include <string_view>

@@ -94,6 +94,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
     }
     call_stack->dirty = false;
+    break;
   }
   case CallStackRequest::Type::Partial: {
     for (auto uinf = un_info; uinf != nullptr && req.count != 0; uinf = it.get_info(get_current_pc())) {
@@ -104,6 +105,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
       --req.count;
     }
+    break;
   }
   }
   DLOG("mdb", "Resume address stack:\n{}", fmt::join(call_stack->pcs, "\n"))
@@ -196,7 +198,8 @@ TaskInfo::set_dirty() noexcept
 void
 TaskInfo::add_bpstat(Breakpoint *bp) noexcept
 {
-  bstat = BpStat{.bp_id = bp->id, .type = bp->type(), .stepped_over = false, .re_enable_bp = false};
+  bstat = BpStat{
+      .bp_id = bp->id, .type = bp->type(), .should_resume = false, .stepped_over = false, .re_enable_bp = false};
 }
 
 void

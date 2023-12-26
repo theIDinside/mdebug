@@ -180,7 +180,7 @@ struct ResolveFnSymbolState
   std::string_view namespace_ish{};
   AddrPtr low_pc = nullptr;
   AddrPtr high_pc = nullptr;
-  u8 maybe_count;
+  u8 maybe_count = 0;
 
   ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
 
@@ -311,8 +311,9 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         const auto declaring_die_offset = value.unsigned_value();
         if (auto die_ref = unit_data->get_objfile()->get_die_reference(declaring_die_offset); die_ref)
           die_refs.push_back(*die_ref);
-        else
+        else {
           DLOG("mdb", "Could not find die reference");
+        }
       } break;
       default:
         break;

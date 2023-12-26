@@ -55,7 +55,7 @@ Reg::Reg() noexcept : value(0), rule(RegisterRule::Undefined) {}
 CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept
     : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), rule_table()
 {
-  std::memset(rule_table.data(), 0, sizeof(Reg) * rule_table.size());
+  rule_table.fill(Reg{});
 }
 
 CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const RegisterValues &frame_below,
@@ -342,9 +342,8 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       case 0x3f:
         TODO("DW_CFA_hi_user not supported");
       default: {
-        PANIC(fmt::format(
-            "Could not decode byte code: {:x} == {:b} at position {}, cie offset: 0x{:x} fde offset: 0x{:x}", op,
-            op, reader.bytes_read() - 1, cfi->cie->offset, cfi->fde_eh_offset));
+        PANIC(fmt::format("Could not decode byte code: {:x} == {:b} at position {}, cie offset: 0x{:x}", op, op,
+                          reader.bytes_read() - 1, cfi->cie->offset));
       }
       }
     }
@@ -524,7 +523,6 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noex
           .aug_data_len = aug_data_length,
           .lsda = lsda,
           .cie = &cie,
-          .fde_eh_offset = eh_offset,
           .fde_insts = ins,
       });
     }

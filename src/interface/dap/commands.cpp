@@ -230,20 +230,15 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
                                       .addr = bp.address,
                                       .line = description.line,
                                       .col = description.column,
-                                      .source_path = description.source_file});
+                                      .source_path = description.source_file,
+                                      .error_message = {}});
       }
     }
   } else {
     using BP = ui::dap::Breakpoint;
     const auto count = args.at("breakpoints").size();
     for (auto i = 1000u; i < count + 1000u; i++) {
-      res->breakpoints.push_back(BP{.id = i,
-                                    .verified = false,
-                                    .addr = nullptr,
-                                    .line = std::nullopt,
-                                    .col = std::nullopt,
-                                    .source_path = std::nullopt,
-                                    .error_message = "Could not find source file"});
+      res->breakpoints.push_back(BP::non_verified(i, "Could not find source file"));
     }
   }
   return res;
@@ -279,14 +274,13 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
 
   for (const auto &bp : target->bps.breakpoints) {
     if (bp.type().address) {
-      res->breakpoints.push_back(BP{
-          .id = bp.id,
-          .verified = true,
-          .addr = bp.address,
-          .line = std::nullopt,
-          .col = std::nullopt,
-          .source_path = std::nullopt,
-      });
+      res->breakpoints.push_back(BP{.id = bp.id,
+                                    .verified = true,
+                                    .addr = bp.address,
+                                    .line = {},
+                                    .col = {},
+                                    .source_path = {},
+                                    .error_message = {}});
     }
   }
   ASSERT(res->breakpoints.size() == addresses.size(), "Response value size does not match result size");
@@ -326,9 +320,10 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
           .id = bp.id,
           .verified = true,
           .addr = bp.address,
-          .line = std::nullopt,
-          .col = std::nullopt,
-          .source_path = std::nullopt,
+          .line = {},
+          .col = {},
+          .source_path = {},
+          .error_message{},
       });
     }
   }

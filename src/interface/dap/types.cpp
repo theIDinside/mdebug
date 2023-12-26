@@ -20,4 +20,17 @@ Breakpoint::serialize() const noexcept
     return fmt::format(R"({{"id": {}, "verified": {}, "instructionReference": "{}" }})", id, verified, addr);
   }
 }
+
+/*static*/
+Breakpoint
+Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
+{
+  return Breakpoint{.id = id,
+                    .verified = false,
+                    .addr = nullptr,
+                    .line = {},
+                    .col = {},
+                    .source_path = {},
+                    .error_message = msg};
+}
 }; // namespace ui::dap

@@ -168,7 +168,6 @@ struct UnwindInfo
   u8 aug_data_len;
   AddrPtr lsda;
   CIE *cie;
-  u64 fde_eh_offset;
   std::span<const u8> fde_insts{};
 };
 

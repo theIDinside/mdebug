@@ -43,25 +43,8 @@ template <typename T, typename Err> class Expected
   };
   bool has_value;
 
-  friend auto unexpected(Err &&) noexcept;
-  friend auto unexpected(const Err &) noexcept;
-
 public:
-  // template <typename... Args> Expected(Args... args) noexcept : val(std::forward<Args>(args)...) {}
-
-  Expected(T t) noexcept
-    requires(!std::is_trivially_destructible_v<T>)
-      : val(std::move(t)), has_value(true)
-  {
-  }
-
-  Expected(T t) noexcept
-    requires(std::is_trivially_destructible_v<T>)
-      : val(t), has_value(true)
-  {
-  }
-
-  template <typename... Args> Expected(Args... args) noexcept : val(std::forward<Args>(args)...), has_value(true)
+  template <typename... Args> Expected(Args &&...args) noexcept : val(std::forward<Args>(args)...), has_value(true)
   {
   }
 

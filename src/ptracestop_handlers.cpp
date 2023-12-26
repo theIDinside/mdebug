@@ -129,8 +129,9 @@ LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
 
 LineStep::~LineStep() noexcept
 {
-  if (resume_address)
-    tc->remove_breakpoint(*resume_address, BpType{.resume_address = true});
+  if (resume_address) {
+    tc->remove_breakpoint(*resume_address, BpType{}.Resume(true));
+  }
   if (!cancelled) {
     DLOG("mdb", "[line step]: line step for {} ended", task->tid);
     tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, "Line stepping finished", false);
@@ -189,7 +190,7 @@ LineStep::update_stepped() noexcept
         },
         sym::resume_address);
     if (ret_addr) {
-      tc->set_tracer_bp(ret_addr->as<u64>(), BpType{.resume_address = true});
+      tc->set_tracer_bp(ret_addr->as<u64>(), BpType{}.Resume(true));
       resume_address = ret_addr;
     } else {
       DBG(DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);

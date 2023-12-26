@@ -2,6 +2,7 @@
 #include "common.h"
 #include "link.h"
 #include "symbolication/block.h"
+#include "utils/macros.h"
 #include <array>
 
 struct ObjectFile;
@@ -33,6 +34,7 @@ so_sym_info_description(SharedObjectSymbols sos)
   case SharedObjectSymbols::None:
     return "No symbols loaded";
   }
+  MIDAS_UNREACHABLE
 }
 
 struct SharedObject

@@ -182,7 +182,7 @@ DAP::run_ui_loop()
             for (auto &&hdr : request_headers) {
               const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
               const auto cmd = parse_command(std::string{cd->payload()});
-              push_event(::Event{.type = EventType::Command, .cmd = cmd});
+              push_event(::Event{.process_group = 0, .type = EventType::Command, .cmd = cmd});
             }
             // since there's no partials left in the buffer, we reset it
             parse_swapbuffer.clear();
@@ -191,7 +191,7 @@ DAP::run_ui_loop()
               for (auto i = 0ull; i < request_headers.size() - 1; i++) {
                 const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
                 const auto cmd = parse_command(std::string{cd->payload()});
-                push_event(::Event{.type = EventType::Command, .cmd = cmd});
+                push_event(::Event{.process_group = 0, .type = EventType::Command, .cmd = cmd});
               }
 
               auto rd = maybe_unwrap<RemainderData>(request_headers.back());
