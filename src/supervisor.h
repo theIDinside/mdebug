@@ -3,6 +3,7 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "events/event.h"
+#include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
@@ -72,16 +73,12 @@ private:
   std::vector<std::unique_ptr<sym::Unwinder>> unwinders;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *null_unwinder;
-
-  int new_frame_id(TaskInfo *task) noexcept;
-  int new_scope_id(const sym::Frame *frame) noexcept;
-  int new_var_id(int parent_id) noexcept;
-  void reset_variable_references() noexcept;
+  bool ptrace_session_seized;
 
 public:
   // Constructors
   TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
-                   bool open_mem_fd = true) noexcept;
+                   bool seize_session, bool open_mem_fd = true) noexcept;
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
@@ -136,6 +133,9 @@ public:
   void emit_stepped_stop(LWP lwp) noexcept;
   void emit_stepped_stop(LWP lwp, std::string_view message, bool all_stopped) noexcept;
   void emit_signal_event(LWP lwp, int signal) noexcept;
+  void emit_stopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool all_stopped,
+                    std::vector<int> bps_hit) noexcept;
+
   // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
   //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
   // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
@@ -153,13 +153,10 @@ public:
 
   template <typename StopAction, typename... Args>
   void
-  install_ptracestop_handler(Tid tid, bool resume_others, Args... args) noexcept
+  install_thread_proceed(TaskInfo *t, Args... args) noexcept
   {
-    DLOG("mdb", "[ptrace stop]: install action {}", ptracestop::action_name<StopAction>());
-    if (resume_others) {
-      DLOG("mdb", "[ptrace stop]: should resume all other tasks...");
-    }
-    ptracestop_handler->set_action(tid, new StopAction{ptracestop_handler, args...});
+    DLOG("mdb", "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
+    ptracestop_handler->set_and_run_action(t->tid, new StopAction{this, t, args...});
   }
 
   void process_exec(TaskInfo *t) noexcept;
@@ -276,8 +273,13 @@ public:
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
   void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
+  bool ptrace_was_seized() const noexcept;
 
 private:
+  int new_frame_id(TaskInfo *task) noexcept;
+  int new_scope_id(const sym::Frame *frame) noexcept;
+  int new_var_id(int parent_id) noexcept;
+  void reset_variable_references() noexcept;
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;
 };

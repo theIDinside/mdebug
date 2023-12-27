@@ -69,7 +69,8 @@ Tracer::add_target_set_current(pid_t task_leader, const Path &path, TargetSessio
 {
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
   events_notifier->add_notifier(io_read, path.string(), task_leader);
-  targets.push_back(std::make_unique<TraceeController>(task_leader, io_write, session, true));
+  targets.push_back(
+      std::make_unique<TraceeController>(task_leader, io_write, session, !Tracer::use_traceme, true));
   auto evt = new ui::dap::OutputEvent{
       "console"sv, fmt::format("Task ({}) {} created (task leader: {})", 1, task_leader, task_leader)};
   Tracer::Instance->post_event(evt);

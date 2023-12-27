@@ -1,6 +1,7 @@
 #include "elf.h"
 #include "elf_symbols.h"
 #include "objfile.h"
+#include "symbolication/addr_sorter.h"
 
 std::string_view
 ElfSection::get_name() const noexcept
@@ -194,8 +195,10 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
       for (auto &symbol : symbols) {
         if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
           std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
-          obj_file->minimal_fn_symbols[name] =
+          const auto res =
               MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
+          obj_file->minimal_fn_symbols[name] = res;
+          obj_file->min_fn_symbols_sorted.push_back(res);
         } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
           std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
           obj_file->minimal_obj_symbols[name] =
@@ -205,6 +208,10 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     }
   }
   obj_file->min_syms = true;
+
+  // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
+  std::sort(obj_file->min_fn_symbols_sorted.begin(), obj_file->min_fn_symbols_sorted.end(),
+            SortLowPc<MinSymbol>());
 }
 
 void

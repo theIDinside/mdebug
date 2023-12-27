@@ -1,19 +1,22 @@
 #include "ptracestop_handlers.h"
+#include "symbolication/callstack.h"
 #include <breakpoint.h>
 #include <common.h>
+#include <cstring>
 #include <events/event.h>
 #include <ptrace.h>
 #include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/lnp.h>
 #include <symbolication/objfile.h>
+#include <sys/ptrace.h>
 #include <task.h>
 #include <tracer.h>
 
 namespace ptracestop {
 
-ThreadProceedAction::ThreadProceedAction(StopHandler *handler, TaskInfo *task) noexcept
-    : tc(handler->tc), task(task), cancelled(false)
+ThreadProceedAction::ThreadProceedAction(TraceeController *ctrl, TaskInfo *task) noexcept
+    : tc(ctrl), task(task), cancelled(false)
 {
 }
 
@@ -23,8 +26,8 @@ ThreadProceedAction::cancel() noexcept
   cancelled = true;
 }
 
-FinishFunction::FinishFunction(StopHandler *handler, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept
-    : ThreadProceedAction(handler, t), bp(bp), should_cleanup(should_clean_up)
+FinishFunction::FinishFunction(TraceeController *ctrl, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept
+    : ThreadProceedAction(ctrl, t), bp(bp), should_cleanup(should_clean_up)
 {
 }
 
@@ -59,8 +62,8 @@ FinishFunction::update_stepped() noexcept
   // essentially no-op.
 }
 
-InstructionStep::InstructionStep(StopHandler *handler, TaskInfo *thread, int steps) noexcept
-    : ThreadProceedAction(handler, thread), steps_requested(steps), steps_taken(0)
+InstructionStep::InstructionStep(TraceeController *ctrl, TaskInfo *thread, int steps) noexcept
+    : ThreadProceedAction(ctrl, thread), steps_requested(steps), steps_taken(0)
 {
 }
 
@@ -91,15 +94,15 @@ InstructionStep::~InstructionStep()
   }
 }
 
-LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
-    : ThreadProceedAction(handler, task), lines_requested(lines), lines_stepped(0), is_done(false),
-      resume_address(), resumed_to_resume_addr(false), start_frame(), entry()
+LineStep::LineStep(TraceeController *ctrl, TaskInfo *task, int lines) noexcept
+    : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false), resume_address(),
+      resumed_to_resume_addr(false), start_frame{-1, -1, nullptr, nullptr}, entry()
 {
-  auto tc = handler->tc;
   auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
-  ObjectFile *obj = tc->find_obj_by_pc(start_frame.rip);
-  auto src_infos = obj->get_source_infos(start_frame.rip);
+  const auto fpc = start_frame.pc();
+  ObjectFile *obj = tc->find_obj_by_pc(fpc);
+  auto src_infos = obj->get_source_infos(fpc);
   bool found = false;
   // TODO(simon): Is it possible to design it such that a search here, determines the _exact_ src_info up front?
   //   so that we don't have to make sure that the found LT and it's LTE's land within the frame's low_pc / high_pc
@@ -107,11 +110,11 @@ LineStep::LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept
     auto ltopt = src->get_linetable();
     if (ltopt) {
       auto lt = *ltopt;
-      const auto iter = lt.find_by_pc(start_frame.rip);
+      const auto iter = lt.find_by_pc(fpc);
       if (iter != std::end(lt)) {
         const sym::dw::LineTableEntry lte = iter.get();
         if (start_frame.inside(lte.pc.as_void()) == sym::InsideRange::Yes) {
-          if (lte.pc == start_frame.rip) {
+          if (lte.pc == fpc) {
             found = true;
             entry = lte;
             break;
@@ -162,18 +165,18 @@ LineStep::update_stepped() noexcept
 {
   const auto frame = tc->current_frame(task);
   // if we're in the same frame, we single step
-  if (same_symbol(frame, start_frame)) {
-    auto lt = frame.symbol->decl_file->get_linetable();
+  if (frame.frame_type() == sym::FrameType::Full && same_symbol(frame, start_frame)) {
+    auto lt = frame.full_symbol_info()->decl_file->get_linetable();
     if (!lt) {
       is_done = true;
       return;
     }
-
-    auto lte = lt->find_by_pc(frame.rip);
+    const auto fpc = frame.pc();
+    auto lte = lt->find_by_pc(fpc);
     if (lte == lt->end()) {
       is_done = true;
     }
-    if (frame.rip < lte.get().pc && frame.rip > (lte - 1).get().pc) {
+    if (fpc < lte.get().pc && fpc > (lte - 1).get().pc) {
       return;
     }
     if ((*lte).line != entry.line) {
@@ -184,8 +187,8 @@ LineStep::update_stepped() noexcept
     const auto ret_addr = map<AddrPtr>(
         callstack.frames,
         [sf = start_frame](const auto &f) {
-          if (f.symbol)
-            return f.symbol->name == sf.symbol->name;
+          if (f.has_symbol_info())
+            return f.name() == sf.name();
           return same_symbol(f, sf);
         },
         sym::resume_address);
@@ -360,10 +363,50 @@ StopHandler::stop_on_thread_exit() noexcept
 }
 
 void
-StopHandler::set_action(Tid tid, ThreadProceedAction *action) noexcept
+StopHandler::set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept
 {
+  ASSERT(proceed_actions[tid] == nullptr,
+         "Attempted to set new thread proceed action, without performing cleanup of old");
   proceed_actions[tid] = action;
   action->proceed();
+}
+
+StopImmediately::StopImmediately(TraceeController *ctrl, TaskInfo *task, ui::dap::StoppedReason reason) noexcept
+    : ThreadProceedAction(ctrl, task), reason(reason), ptrace_session_is_seize(ctrl->ptrace_was_seized())
+{
+}
+
+StopImmediately::~StopImmediately() noexcept { notify_stopped(); }
+
+void
+StopImmediately::notify_stopped() noexcept
+{
+  tc->emit_stopped(task->tid, reason, "stopped", false, {});
+}
+
+bool
+StopImmediately::has_completed() const noexcept
+{
+  return true;
+}
+
+void
+StopImmediately::proceed() noexcept
+{
+  if (ptrace_session_is_seize) {
+    if (ptrace(PTRACE_INTERRUPT, task->tid, nullptr, nullptr) == -1) {
+      PANIC(fmt::format("failed to interrupt (ptrace) task {}: {}", task->tid, strerror(errno)));
+    }
+  } else {
+    if (tgkill(tc->task_leader, task->tid, SIGTRAP) == -1) {
+      PANIC(fmt::format("failed to interrupt (tgkill) task {}: {}", task->tid, strerror(errno)));
+    }
+  }
+}
+
+void
+StopImmediately::update_stepped() noexcept
+{
 }
 
 } // namespace ptracestop

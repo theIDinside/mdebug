@@ -1,5 +1,6 @@
 #pragma once
 #include "../common.h"
+#include "symbolication/addr_sorter.h"
 #include <string_view>
 
 /**
@@ -11,7 +12,20 @@
 
 struct MinSymbol
 {
+
   std::string_view name;
   AddrPtr address;
   u64 maybe_size;
+
+  constexpr AddrPtr
+  start_pc() const noexcept
+  {
+    return address;
+  }
+
+  constexpr AddrPtr
+  end_pc() const noexcept
+  {
+    return address + ((maybe_size > 0) ? maybe_size : 1);
+  }
 };

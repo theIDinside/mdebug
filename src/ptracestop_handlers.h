@@ -2,6 +2,7 @@
 
 #include "breakpoint.h"
 #include "common.h"
+#include "interface/dap/dap_defs.h"
 #include <map>
 #include <symbolication/callstack.h>
 #include <symbolication/dwarf/lnp.h>
@@ -17,7 +18,7 @@ class StopHandler;
 class ThreadProceedAction
 {
 public:
-  ThreadProceedAction(StopHandler *handler, TaskInfo *task) noexcept;
+  ThreadProceedAction(TraceeController *ctrl, TaskInfo *task) noexcept;
   virtual void cancel() noexcept;
 
   // Abstract Interface
@@ -32,10 +33,27 @@ protected:
   bool cancelled;
 };
 
+// A proceed-handler / stop-handler, that stops a task immediately, possibly to perform some one-time task (like
+// for instance, notifying an observer)
+class StopImmediately : public ThreadProceedAction
+{
+public:
+  StopImmediately(TraceeController *ctrl, TaskInfo *task, ui::dap::StoppedReason reason) noexcept;
+  ~StopImmediately() noexcept override;
+  bool has_completed() const noexcept override;
+  void proceed() noexcept override;
+  void update_stepped() noexcept override;
+
+private:
+  void notify_stopped() noexcept;
+  ui::dap::StoppedReason reason;
+  bool ptrace_session_is_seize;
+};
+
 class InstructionStep : public ThreadProceedAction
 {
 public:
-  InstructionStep(StopHandler *handler, TaskInfo *task, int steps) noexcept;
+  InstructionStep(TraceeController *handler, TaskInfo *task, int steps) noexcept;
   ~InstructionStep() override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -49,7 +67,7 @@ private:
 class LineStep : public ThreadProceedAction
 {
 public:
-  LineStep(StopHandler *handler, TaskInfo *task, int lines) noexcept;
+  LineStep(TraceeController *handler, TaskInfo *task, int lines) noexcept;
   ~LineStep() noexcept override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -68,7 +86,7 @@ private:
 class FinishFunction : public ThreadProceedAction
 {
 public:
-  FinishFunction(StopHandler *handler, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept;
+  FinishFunction(TraceeController *handler, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept;
   ~FinishFunction() noexcept override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -89,6 +107,8 @@ action_name()
     return "Line Step";
   } else if constexpr (std::is_same_v<A, FinishFunction>) {
     return "Finish Function";
+  } else if constexpr (std::is_same_v<A, StopImmediately>) {
+    return "Stop Immediately";
   } else {
     static_assert(always_false<A>, "Unknown action type");
   }
@@ -111,7 +131,7 @@ public:
   constexpr void stop_on_exec() noexcept;
   constexpr void stop_on_thread_exit() noexcept;
 
-  void set_action(Tid tid, ThreadProceedAction *action) noexcept;
+  void set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept;
 
   TraceeController *tc;
 

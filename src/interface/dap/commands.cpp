@@ -1,4 +1,5 @@
 #include "commands.h"
+#include "events/event.h"
 #include "fmt/format.h"
 #include "nlohmann/json_fwd.hpp"
 #include "parse_buffer.h"
@@ -31,6 +32,32 @@ ContinueResponse::serialize(int seq) const noexcept
     return fmt::format(
         R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
         seq, response_seq);
+}
+
+std::string
+PauseResponse::serialize(int seq) const noexcept
+{
+  if (success) {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "pause" }})", seq,
+        response_seq);
+  } else {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "pause", "message": "task was not running" }})",
+        seq, response_seq);
+  }
+}
+
+UIResultPtr
+Pause::execute(Tracer *tc) noexcept
+{
+  auto target = tc->get_current();
+  auto task = target->get_task(pauseArgs.threadId);
+  if (task->is_stopped()) {
+    return new PauseResponse{false, this};
+  }
+  target->install_thread_proceed<ptracestop::StopImmediately>(task, StoppedReason::Pause);
+  return new PauseResponse{true, this};
 }
 
 UIResultPtr
@@ -88,10 +115,10 @@ Next::execute(Tracer *tracer) noexcept
   switch (granularity) {
   case SteppingGranularity::Instruction:
     DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id, task->registers->rip);
-    target->install_ptracestop_handler<ptracestop::InstructionStep>(task->tid, !continue_all, task, 1);
+    target->install_thread_proceed<ptracestop::InstructionStep>(task, 1);
     break;
   case SteppingGranularity::Line:
-    target->install_ptracestop_handler<ptracestop::LineStep>(task->tid, !continue_all, task, 1);
+    target->install_thread_proceed<ptracestop::LineStep>(task, 1);
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -128,14 +155,14 @@ StepOut::execute(Tracer *tracer) noexcept
   auto rip = resume_addrs[1];
   if (auto bp = target->bps.get(rip); bp) {
     bp->set_temporary_note(task, BpNote::FinishedFunction);
-    target->install_ptracestop_handler<ptracestop::FinishFunction>(task->tid, !continue_all, task, bp, false);
+    target->install_thread_proceed<ptracestop::FinishFunction>(task, bp, false);
     return new StepOutResponse{true, this};
   } else {
     bp = target->set_finish_fn_bp(rip);
     if (bp) {
       bp->set_note(BpNote::FinishedFunction);
       bp->add_stop_for(task->tid);
-      target->install_ptracestop_handler<ptracestop::FinishFunction>(task->tid, !continue_all, task, bp, true);
+      target->install_thread_proceed<ptracestop::FinishFunction>(task, bp, true);
       return new StepOutResponse{true, this};
     } else {
       return new StepOutResponse{false, this};
@@ -561,37 +588,40 @@ StackTrace::execute(Tracer *tracer) noexcept
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.frames.size());
   for (const auto &frame : cfs.frames) {
-    if (frame.type == sym::FrameType::Full) {
-      const auto lt = frame.symbol->decl_file->get_linetable().value_or(sym::dw::LineTable{});
+    if (frame.frame_type() == sym::FrameType::Full) {
+      const auto full = frame.full_symbol_info();
+      const auto lt = full->decl_file->get_linetable().value_or(sym::dw::LineTable{});
 
       auto line = 0;
       auto col = 0;
       if (lt.is_valid()) {
         // todo(simon): linear search is horrid. But binary search is so fragile instead. So for now, we do the
         // absolute worst, so long it works.
+        const auto fpc = frame.pc();
         const auto end = std::end(lt);
         for (auto ita = std::begin(lt), itb = ita + 1; ita != end && itb != end; ++ita, ++itb) {
-          if ((*ita).pc <= frame.rip && (*itb).pc > frame.rip) {
+          if ((*ita).pc <= fpc && (*itb).pc > fpc) {
             line = (*ita).line;
             col = (*ita).column;
             break;
           }
         }
-        stack_frames.push_back(StackFrame{
-            .id = frame.frame_id,
-            .name = frame.name().value_or("unknown"),
-            .source = Source{.name = frame.symbol->decl_file->name(), .path = frame.symbol->decl_file->name()},
-            .line = line,
-            .column = col,
-            .rip = fmt::format("{}", frame.rip)});
+        // todo(simon): Source {name, path} should consist of what it says, {name, path}, not {path, path}
+        const auto src = full->decl_file->name();
+        stack_frames.push_back(StackFrame{.id = frame.id(),
+                                          .name = frame.name().value_or("unknown"),
+                                          .source = Source{.name = src, .path = src},
+                                          .line = line,
+                                          .column = col,
+                                          .rip = fmt::format("{}", fpc)});
       }
     } else {
-      stack_frames.push_back(StackFrame{.id = frame.frame_id,
+      stack_frames.push_back(StackFrame{.id = frame.id(),
                                         .name = frame.name().value_or("unknown"),
                                         .source = std::nullopt,
                                         .line = 0,
                                         .column = 0,
-                                        .rip = fmt::format("{}", frame.rip)});
+                                        .rip = fmt::format("{}", frame.pc())});
     }
   }
   return new StackTraceResponse{true, this, std::move(stack_frames)};
@@ -794,8 +824,10 @@ parse_command(std::string &&packet) noexcept
     }
     return new Next{seq, thread_id, !single_thread, step_type};
   }
-  case CommandType::Pause:
-    TODO("Command::Pause");
+  case CommandType::Pause: {
+    int thread_id = args["threadId"];
+    return new Pause(seq, Pause::Args{thread_id});
+  }
   case CommandType::ReadMemory: {
     ASSERT(args.contains("memoryReference") && args.contains("count"),
            "args didn't contain memoryReference or count");

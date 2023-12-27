@@ -53,6 +53,8 @@ public:
   }
 };
 
+template <Addressable T> using SortLowPc = AddressableLowBoundSorter<T>;
+
 template <Addressable T>
 constexpr auto
 contained_in(const T &t, AddrPtr pc) noexcept -> bool

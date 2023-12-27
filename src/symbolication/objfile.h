@@ -42,6 +42,7 @@ struct ObjectFile
   Elf *parsed_elf = nullptr;
   bool min_syms = false;
   std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
+  std::vector<MinSymbol> min_fn_symbols_sorted;
   std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
 
   // Should the key be something much better than a string, here? If so, how and what?
@@ -75,6 +76,7 @@ struct ObjectFile
   u8 *get_section(Elf *elf, u32 index) const noexcept;
   AddrPtr text_section_offset() const noexcept;
   std::optional<MinSymbol> get_min_fn_sym(std::string_view name) noexcept;
+  const MinSymbol *search_minsym_fn_info(AddrPtr pc) noexcept;
   std::optional<MinSymbol> get_min_obj_sym(std::string_view name) noexcept;
 
   Path interpreter() const noexcept;

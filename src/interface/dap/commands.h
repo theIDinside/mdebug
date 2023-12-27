@@ -34,6 +34,28 @@ struct Continue final : public ui::UICommand
   DEFINE_NAME(Continue);
 };
 
+struct PauseResponse final : ui::UIResult
+{
+  CTOR(PauseResponse);
+  ~PauseResponse() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
+};
+
+struct Pause final : public ui::UICommand
+{
+  DEFINE_NAME(Pause);
+  struct Args
+  {
+    int threadId;
+  };
+
+  Pause(std::uint64_t seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
+  ~Pause() override = default;
+  UIResultPtr execute(Tracer *tc) noexcept final;
+
+  Args pauseArgs;
+};
+
 enum class SteppingGranularity
 {
   Instruction,

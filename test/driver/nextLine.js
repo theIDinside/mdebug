@@ -36,7 +36,13 @@ async function nextLineOverFunction() {
   let frames = await da_client.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
   if (start_line != bp_lines[0].line)
-    throw new Error(`Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}`)
+    throw new Error(
+      `Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}. Frames: ${JSON.stringify(
+        frames,
+        null,
+        2
+      )}`
+    )
   const allThreadsStop = true
   const { event_body, response } = await da_client.sendReqWaitEvent(
     'next',

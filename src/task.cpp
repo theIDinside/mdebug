@@ -23,6 +23,13 @@ TaskInfo::create_running(pid_t tid)
   return TaskInfo{tid, false};
 }
 
+AddrPtr
+TaskInfo::pc() noexcept
+{
+  cache_registers();
+  return registers->rip;
+}
+
 u64
 TaskInfo::get_register(u64 reg_num) noexcept
 {

@@ -159,26 +159,26 @@ async function normalTest() {
     [
       { line: 48, name: 'foo' },
       { line: 55, name: 'main' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
+      { line: 0, name: '*' },
+      { line: 0, name: '*' },
+      { line: 0, name: '_start' },
     ],
     [
       { line: 42, name: 'bar' },
       { line: 49, name: 'foo' },
       { line: 55, name: 'main' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
+      { line: 0, name: '*' },
+      { line: 0, name: '*' },
+      { line: 0, name: '_start' },
     ],
     [
       { line: 23, name: 'baz' },
       { line: 43, name: 'bar' },
       { line: 49, name: 'foo' },
       { line: 55, name: 'main' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
+      { line: 0, name: '*' },
+      { line: 0, name: '*' },
+      { line: 0, name: '_start' },
     ],
     [
       { line: 16, name: 'quux' },
@@ -186,9 +186,9 @@ async function normalTest() {
       { line: 43, name: 'bar' },
       { line: 49, name: 'foo' },
       { line: 55, name: 'main' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
-      { line: 0, name: 'unknown' },
+      { line: 0, name: '*' },
+      { line: 0, name: '*' },
+      { line: 0, name: '_start' },
     ],
   ]
 
@@ -247,7 +247,10 @@ async function normalTest() {
             }: ${JSON.stringify(stackFrames, null, 2)}`
           )
         }
-        if (stackFrames[idx].name != expectedStackTraces[i - total][idx].name) {
+        if (
+          stackFrames[idx].name != expectedStackTraces[i - total][idx].name &&
+          expectedStackTraces[i - total][idx].name != '*'
+        ) {
           throw new Error(
             `Expected name to be ${expectedStackTraces[i - total][idx].name} but was ${
               stackFrames[idx].name

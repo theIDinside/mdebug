@@ -191,6 +191,7 @@ if(NODEJS)
       threads
       variables
       finish
+      pause
   )
 
   # These define
@@ -208,6 +209,7 @@ if(NODEJS)
   set(threads "threads")
   set(variables "baseTypes")
   set(finish "finish")
+  set(pause "pause")
 
   foreach(driver_test ${DRIVER_TEST_SUITES})
     list(LENGTH ${driver_test} LIST_LENGTH)

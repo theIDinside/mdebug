@@ -546,6 +546,14 @@ function prettyJson(obj) {
   return JSON.stringify(obj, null, 2)
 }
 
+async function doSomethingDelayed(fn, delay) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(fn())
+    }, delay)
+  })
+}
+
 module.exports = function (file) {
   IMPORTING_FILE = file
   return {
@@ -568,5 +576,6 @@ module.exports = function (file) {
     getRequestedTest,
     prettyJson,
     checkResponse,
+    doSomethingDelayed,
   }
 }

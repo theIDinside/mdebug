@@ -65,8 +65,9 @@ struct TaskInfo
   static TaskInfo create_stopped(pid_t tid);
   static TaskInfo create_running(pid_t tid);
 
+  AddrPtr pc() noexcept;
   u64 get_register(u64 reg_num) noexcept;
-  void cache_registers() noexcept;
+
   const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
   void consume_wait() noexcept;
@@ -87,6 +88,7 @@ struct TaskInfo
 
 private:
   void ptrace_resume(RunType) noexcept;
+  void cache_registers() noexcept;
 };
 
 struct TaskStepInfo

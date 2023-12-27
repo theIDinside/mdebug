@@ -7,12 +7,13 @@
 #include "tasks/lnp.h"
 #include "type.h"
 #include "utils/worker_task.h"
+#include <algorithm>
 #include <optional>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, minimal_obj_symbols{},
-      types(), address_bounds(), unit_data_write_lock(), dwarf_units(),
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, min_fn_symbols_sorted(),
+      minimal_obj_symbols{}, types(), address_bounds(), unit_data_write_lock(), dwarf_units(),
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
       lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
@@ -50,6 +51,22 @@ ObjectFile::get_min_fn_sym(std::string_view name) noexcept
     return minimal_fn_symbols[name];
   } else {
     return std::nullopt;
+  }
+}
+
+const MinSymbol *
+ObjectFile::search_minsym_fn_info(AddrPtr pc) noexcept
+{
+  auto it = std::lower_bound(min_fn_symbols_sorted.begin(), min_fn_symbols_sorted.end(), pc,
+                             [](auto &sym, AddrPtr addr) { return sym.start_pc() < addr; });
+  if (it == std::end(min_fn_symbols_sorted))
+    return nullptr;
+
+  auto prev = (it == std::begin(min_fn_symbols_sorted)) ? it : it - 1;
+  if (prev->start_pc() <= pc && prev->end_pc() >= pc) {
+    return prev.base();
+  } else {
+    return nullptr;
   }
 }
 

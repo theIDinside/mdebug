@@ -45,11 +45,12 @@
 template <typename T> using Set = std::unordered_set<T>;
 
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
-                                   TargetSession session, bool open_mem_fd) noexcept
+                                   TargetSession session, bool seized, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
       tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), all_stopped_observer(),
       var_refs(), interpreter_base{}, entry{}, session(session),
-      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(), null_unwinder(new sym::Unwinder{nullptr})
+      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(),
+      null_unwinder(new sym::Unwinder{nullptr}), ptrace_session_seized(seized)
 {
   threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
@@ -398,7 +399,7 @@ TraceeController::set_tracer_bp(TPtr<u64> addr, BpType type) noexcept
 Breakpoint *
 TraceeController::set_finish_fn_bp(TraceePointer<void> addr) noexcept
 {
-  BpType type{.address = true, .resume_address = true};
+  BpType type = BpType{}.Addr(true).Resume(true);
   if (bps.contains(addr)) {
     auto bp = bps.get(addr.as<void>());
     DLOG("mdb", "Configuring bp {} at {} to be {} bp as well", bp->id, addr, type);
@@ -444,7 +445,7 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
   for (const auto &sym : matching_symbols) {
     if (bps.contains(sym.address)) {
       auto bp = bps.get(sym.address);
-      bp->bp_type.add_setting({.function = true});
+      bp->bp_type.add_setting(BpType{}.Function(true));
       bps.fn_breakpoint_names[bp->id] = function_name;
     } else {
       auto ins_byte = write_bp_byte(sym.address);
@@ -523,6 +524,13 @@ TraceeController::emit_signal_event(LWP lwp, int signal) noexcept
    *  that all get stopped during this event. */
   Tracer::Instance->post_event(new ui::dap::StoppedEvent{
       ui::dap::StoppedReason::Exception, fmt::format("Signalled {}", signal), lwp.tid, {}, "", true});
+}
+
+void
+TraceeController::emit_stopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool all_stopped,
+                               std::vector<int> bps_hit) noexcept
+{
+  Tracer::Instance->post_event(new ui::dap::StoppedEvent{reason, message, tid, bps_hit, message, all_stopped});
 }
 
 void
@@ -836,22 +844,19 @@ TraceeController::start_awaiter_thread() noexcept
 sym::Frame
 TraceeController::current_frame(TaskInfo *task) noexcept
 {
-  task->cache_registers();
-  auto symbol = find_fn_by_pc(task->registers->rip);
-  if (symbol)
-    return sym::Frame{
-        .rip = task->registers->rip,
-        .symbol = symbol,
-        .level = 0,
-        .type = sym::FrameType::Full,
-    };
+  const auto pc = task->pc();
+  if (const auto symbol = find_fn_by_pc(pc); symbol) {
+    return sym::Frame{0, 0, pc, symbol};
+  }
+
+  auto obj = find_obj_by_pc(pc);
+  if (obj == nullptr) {
+    return sym::Frame{0, 0, pc, nullptr};
+  }
+  if (auto min_sym = obj->search_minsym_fn_info(pc); min_sym != nullptr)
+    return sym::Frame{0, 0, pc, min_sym};
   else
-    return sym::Frame{
-        .rip = task->registers->rip,
-        .symbol = nullptr,
-        .level = 0,
-        .type = sym::FrameType::Unknown,
-    };
+    return sym::Frame{0, 0, pc, nullptr};
 }
 
 sym::Unwinder *
@@ -964,11 +969,10 @@ TraceeController::new_scope_id(const sym::Frame *frame) noexcept
 {
   using VR = ui::dap::VariablesReference;
   const auto res = next_var_ref;
-  const auto vr = var_refs[frame->frame_id];
-  var_refs[res] = VR{.thread_id = vr.thread_id,
-                     .frame_id = frame->frame_id,
-                     .parent = frame->frame_id,
-                     .type = ui::dap::EntityType::Scope};
+  const auto fid = frame->id();
+  const auto vr = var_refs[fid];
+  var_refs[res] =
+      VR{.thread_id = vr.thread_id, .frame_id = fid, .parent = fid, .type = ui::dap::EntityType::Scope};
   ++next_var_ref;
   return res;
 }
@@ -1007,22 +1011,16 @@ TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) no
     auto frame_pc = i->as_void();
     auto symbol = find_fn_by_pc(frame_pc);
     const auto id = new_frame_id(task);
-    if (symbol)
-      cs.frames.push_back(sym::Frame{
-          .rip = i->as_void(),
-          .symbol = symbol,
-          .level = static_cast<int>(levels - level),
-          .type = sym::FrameType::Full,
-          .frame_id = id,
-      });
-    else {
-      cs.frames.push_back(sym::Frame{
-          .rip = i->as_void(),
-          .symbol = nullptr,
-          .level = static_cast<int>(levels - level),
-          .type = sym::FrameType::Unknown,
-          .frame_id = id,
-      });
+    if (symbol) {
+      cs.frames.push_back(sym::Frame{static_cast<int>(levels - level), id, i->as_void(), symbol});
+    } else {
+      auto obj = find_obj_by_pc(frame_pc);
+      auto min_sym = obj->search_minsym_fn_info(frame_pc);
+      if (min_sym) {
+        cs.frames.push_back(sym::Frame{static_cast<int>(levels - level), id, i->as_void(), min_sym});
+      } else {
+        cs.frames.push_back(sym::Frame{static_cast<int>(levels - level), id, i->as_void(), nullptr});
+      }
     }
     ++level;
   }
@@ -1147,4 +1145,10 @@ TraceeController::set_pending_waitstatus(TaskWaitResult wait_result) noexcept
   task->wait_status = wait_result.ws;
   task->tracer_stopped = true;
   task->stop_collected = false;
+}
+
+bool
+TraceeController::ptrace_was_seized() const noexcept
+{
+  return ptrace_session_seized;
 }

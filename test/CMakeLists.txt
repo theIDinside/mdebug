@@ -11,6 +11,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${COMMON_FLAGS} -g3")
 
 set(MDB_TESTS
   helloworld
+  pause
   threads_shared # all tests that uses shared libraries, must have shared in their name
   stackframes
   next
