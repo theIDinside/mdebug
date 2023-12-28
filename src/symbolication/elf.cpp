@@ -2,6 +2,7 @@
 #include "elf_symbols.h"
 #include "objfile.h"
 #include "symbolication/addr_sorter.h"
+#include "utils/enumerator.h"
 
 std::string_view
 ElfSection::get_name() const noexcept
@@ -28,21 +29,6 @@ ElfSection::into(AddrPtr vm_addr) const noexcept
   ASSERT((vm_addr - address) < size(), "Virtual memory address {} is > {}", vm_addr, address + size());
   const AddrPtr offset = (vm_addr - address);
   return begin() + offset.get();
-}
-
-bool
-ElfSection::contains_relo_addr(AddrPtr vm_address) const noexcept
-{
-  const auto addr = vma();
-  if (vm_address < addr)
-    return false;
-  return (vm_address - addr) < size();
-}
-
-AddrPtr
-ElfSection::vma() const noexcept
-{
-  return reloc_base + address;
 }
 
 u64
@@ -75,7 +61,7 @@ ElfSection::size() const noexcept
   return m_section_size;
 }
 
-DwarfSectionIdent
+ElfSec
 from_str(std::string_view str)
 {
 #define SECTION(Ident, StringKey)                                                                                 \
@@ -93,23 +79,29 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noe
       debug_rnglists{nullptr}, debug_loclist{nullptr}
 {
   obj_file->parsed_elf = this;
-  str_table = get_section(".strtab");
-  debug_info = get_section(".debug_info");
-  debug_abbrev = get_section(".debug_abbrev");
-  debug_str = get_section(".debug_str");
-  debug_line = get_section(".debug_line");
-  debug_ranges = get_section(".debug_ranges");
-  debug_line_str = get_section(".debug_line_str");
-  debug_str_offsets = get_section(".debug_str_offsets");
-  debug_rnglists = get_section(".debug_rnglists");
-  debug_loclist = get_section(".debug_loclists");
-  debug_aranges = get_section(".debug_aranges");
+  str_table = get_section(ElfSec::StringTable);
+  debug_info = get_section(ElfSec::DebugInfo);
+  debug_abbrev = get_section(ElfSec::DebugAbbrev);
+  debug_str = get_section(ElfSec::DebugStr);
+  debug_line = get_section(ElfSec::DebugLine);
+  debug_ranges = get_section(ElfSec::DebugRanges);
+  debug_line_str = get_section(ElfSec::DebugLineStr);
+  debug_str_offsets = get_section(ElfSec::DebugStrOffsets);
+  debug_rnglists = get_section(ElfSec::DebugRngLists);
+  debug_loclist = get_section(ElfSec::DebugLocLists);
+  debug_aranges = get_section(ElfSec::DebugAranges);
 }
 
 std::span<ElfSection>
 Elf::sections() const noexcept
 {
   return std::span<ElfSection>{m_sections.sections, m_sections.sections + m_sections.count};
+}
+
+constexpr const ElfSection *
+Elf::get_section(ElfSec section) const noexcept
+{
+  return get_section(sec_name(section));
 }
 
 const ElfSection *
@@ -178,40 +170,38 @@ Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcep
 void
 Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
 {
-  std::span<ElfSection> sects = sections();
-  auto strtable = std::ranges::find_if(sects, [](ElfSection &sect) { return sect.get_name() == ".strtab"; });
-  if (strtable == sects.end()) {
-    obj_file->min_syms = false;
+  if (auto strtab = get_section(ElfSec::StringTable); !strtab) {
+    obj_file->has_elf_symbols = false;
     return;
   }
   DLOG("mdb", "{} min symbols, base_vma={}", obj_file->path.c_str(), base_vma);
 
-  for (auto &sec : sections()) {
-    if (sec.get_name() == ".symtab") {
-      auto start = sec.m_section_ptr;
-      auto end = start + sec.m_section_size;
-      auto entries = (end - start) / sizeof(Elf64_Sym);
-      std::span<Elf64_Sym> symbols{(Elf64_Sym *)sec.m_section_ptr, entries};
-      for (auto &symbol : symbols) {
-        if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
-          std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
-          const auto res =
-              MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
-          obj_file->minimal_fn_symbols[name] = res;
-          obj_file->min_fn_symbols_sorted.push_back(res);
-        } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
-          std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
-          obj_file->minimal_obj_symbols[name] =
-              MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
-        }
+  std::vector<MinSymbol> elf_fn_symbols{};
+  std::unordered_map<std::string_view, MinSymbol> elf_object_symbols{};
+
+  if (const auto sec = get_section(ElfSec::SymbolTable); sec) {
+    auto start = sec->m_section_ptr;
+    auto end = start + sec->m_section_size;
+    auto entries = (end - start) / sizeof(Elf64_Sym);
+    std::span<Elf64_Sym> symbols{(Elf64_Sym *)sec->m_section_ptr, entries};
+    for (auto &symbol : symbols) {
+      if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
+        std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
+        const auto res =
+            MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
+        elf_fn_symbols.push_back(res);
+      } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
+        std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
+        elf_object_symbols[name] =
+            MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
       }
     }
+    // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
+    std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), SortLowPc<MinSymbol>());
+    obj_file->add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
+  } else {
+    LOG("mdb", "[warning]: No .symtab for {}", obj_file->path.c_str());
   }
-  obj_file->min_syms = true;
-
-  // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
-  std::sort(obj_file->min_fn_symbols_sorted.begin(), obj_file->min_fn_symbols_sorted.end(),
-            SortLowPc<MinSymbol>());
 }
 
 void

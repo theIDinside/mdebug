@@ -140,8 +140,8 @@ TraceeController::install_loader_breakpoints() noexcept
   tracee_r_debug = get_rdebug_state(tmp_objfile);
   DLOG("mdb", "_r_debug found at {}", tracee_r_debug);
   for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
-    if (tmp_objfile->minimal_fn_symbols.contains(symbol_name)) {
-      const auto addr = tmp_objfile->minimal_fn_symbols[symbol_name].address;
+    if (auto symbol = tmp_objfile->get_min_fn_sym(symbol_name); symbol) {
+      const auto addr = symbol->address;
       DLOG("mdb", "Setting ld breakpoint at {}", addr);
       set_tracer_bp(addr.as<u64>(), BpType{}.SharedObj(true));
     }
@@ -702,7 +702,7 @@ TraceeController::register_object_file(ObjectFile *obj, bool is_main_executable,
   ASSERT(obj != nullptr, "Object file is null");
   Elf::parse_elf_owned_by_obj(obj, base_vma.value_or(0));
   object_files.push_back(obj);
-  if (obj->minimal_fn_symbols.empty()) {
+  if (!obj->has_elf_symbols) {
     obj->parsed_elf->parse_min_symbols(base_vma.value_or(0));
   }
   if (is_main_executable)

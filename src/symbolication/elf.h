@@ -10,6 +10,34 @@ constexpr static u8 ELF_MAGIC_[4]{EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3};
 using Elf64Header = Elf64_Ehdr;
 struct ObjectFile;
 
+enum class ElfSec : u8
+{
+#define SECTION(Ident, StringKey) Ident,
+#include "../defs/elf.defs"
+#undef SECTION
+  COUNT
+};
+
+ElfSec from_str(std::string_view str);
+
+std::optional<ElfSec> to_identifier(std::string_view str);
+
+constexpr std::string_view
+sec_name(ElfSec ident) noexcept
+{
+  using enum ElfSec;
+#define SECTION(Ident, Name)                                                                                      \
+  case Ident:                                                                                                     \
+    return #Name;
+  switch (ident) {
+#include "../defs/elf.defs"
+#undef SECTION
+  case ElfSec::COUNT:
+    return "ERROR_SECTION";
+    break;
+  }
+}
+
 struct ElfSection
 {
   u8 *m_section_ptr;
@@ -23,8 +51,6 @@ struct ElfSection
   const u8 *begin() const noexcept;
   const u8 *end() const noexcept;
   const u8 *into(AddrPtr addr) const noexcept;
-  bool contains_relo_addr(AddrPtr addr) const noexcept;
-  AddrPtr vma() const noexcept;
 
   /**
    * Determines offset of `inside_ptr` from `m_section_ptr`.
@@ -50,6 +76,7 @@ public:
   static void parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept;
   std::span<ElfSection> sections() const noexcept;
   const ElfSection *get_section(std::string_view name) const noexcept;
+  constexpr const ElfSection *get_section(ElfSec section) const noexcept;
   const ElfSection *get_section_or_panic(std::string_view name) const noexcept;
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
@@ -81,13 +108,3 @@ public:
   const ElfSection *debug_rnglists;
   const ElfSection *debug_loclist;
 };
-
-enum class DwarfSectionIdent : u8
-{
-#define SECTION(Ident, StringKey) Ident,
-#include "../defs/elf.defs"
-#undef SECTION
-  COUNT
-};
-
-DwarfSectionIdent from_str(std::string_view str);

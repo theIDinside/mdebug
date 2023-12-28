@@ -6,14 +6,15 @@
 #include "tasks/index_die_names.h"
 #include "tasks/lnp.h"
 #include "type.h"
+#include "utils/enumerator.h"
 #include "utils/worker_task.h"
 #include <algorithm>
 #include <optional>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), minimal_fn_symbols{}, min_fn_symbols_sorted(),
-      minimal_obj_symbols{}, types(), address_bounds(), unit_data_write_lock(), dwarf_units(),
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(), address_bounds(),
+      minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
       lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
@@ -48,7 +49,8 @@ std::optional<MinSymbol>
 ObjectFile::get_min_fn_sym(std::string_view name) noexcept
 {
   if (minimal_fn_symbols.contains(name)) {
-    return minimal_fn_symbols[name];
+    auto &index = minimal_fn_symbols[name];
+    return min_fn_symbols_sorted[index];
   } else {
     return std::nullopt;
   }
@@ -90,7 +92,7 @@ ObjectFile::interpreter() const noexcept
 bool
 ObjectFile::found_min_syms() const noexcept
 {
-  return min_syms;
+  return has_elf_symbols;
 }
 
 void
@@ -299,6 +301,24 @@ ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noex
     if (lnp_promise) {
       lnp_promise->wait();
     }
+  }
+}
+
+void
+ObjectFile::add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
+                            std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept
+{
+  min_fn_symbols_sorted = std::move(fn_symbols);
+  minimal_obj_symbols = std::move(obj_symbols);
+  init_minsym_name_lookup();
+  has_elf_symbols = true;
+}
+
+void
+ObjectFile::init_minsym_name_lookup() noexcept
+{
+  for (const auto &[index, sym] : utils::EnumerateView(min_fn_symbols_sorted)) {
+    minimal_fn_symbols[sym.name] = Index{static_cast<u32>(index)};
   }
 }
 

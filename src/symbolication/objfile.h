@@ -40,10 +40,7 @@ struct ObjectFile
   u64 size;
   const u8 *loaded_binary;
   Elf *parsed_elf = nullptr;
-  bool min_syms = false;
-  std::unordered_map<std::string_view, MinSymbol> minimal_fn_symbols;
-  std::vector<MinSymbol> min_fn_symbols_sorted;
-  std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
+  bool has_elf_symbols = false;
 
   // Should the key be something much better than a string, here? If so, how and what?
   std::unordered_map<u64, sym::Type> types;
@@ -103,8 +100,15 @@ struct ObjectFile
   std::vector<sym::SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
 
   void initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept;
+  void add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
+                       std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept;
+  void init_minsym_name_lookup() noexcept;
 
 private:
+  std::unordered_map<std::string_view, Index> minimal_fn_symbols;
+  std::vector<MinSymbol> min_fn_symbols_sorted;
+  std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;
+
   std::mutex unit_data_write_lock;
   std::vector<sym::dw::UnitData *> dwarf_units;
   std::unique_ptr<sym::dw::ObjectFileNameIndex> name_to_die_index;
