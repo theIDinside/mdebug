@@ -11,22 +11,23 @@ enum class EventType
   Command
 };
 
-struct Wait
+struct WaitEvent
 {
-  int pid;
-  int tid;
+  Tid process_group;
+  TaskWaitResult wait;
 };
 
 struct Event
 {
-  Tid process_group;
   EventType type;
   union
   {
-    TaskWaitResult wait;
+    WaitEvent wait;
     ui::UICommand *cmd;
   };
 };
 
-void push_event(Event);
+void push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept;
+void push_command_event(ui::UICommand *cmd) noexcept;
+
 Event poll_event();

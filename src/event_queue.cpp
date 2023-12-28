@@ -13,12 +13,24 @@ static std::mutex event_queue_wait_mutex{};
 static std::condition_variable cv{};
 static std::queue<Event> events{};
 
-void
+static void
 push_event(Event e)
 {
   std::lock_guard lock(event_queue_mutex);
   events.push(e);
   cv.notify_all();
+}
+
+void
+push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept
+{
+  push_event(Event{.type = EventType::WaitStatus, .wait = {.process_group = process_group, .wait = wait_result}});
+}
+
+void
+push_command_event(ui::UICommand *cmd) noexcept
+{
+  push_event(Event{.type = EventType::Command, .cmd = cmd});
 }
 
 Event

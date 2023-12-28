@@ -47,7 +47,7 @@ AwaiterThread::start_awaiter_thread(TraceeController *tc) noexcept
         LOG("awaiter", "[wait]: wait={}. status={}", res, status);
       }
       const auto wait_result = process_status(res, status);
-      push_event(Event{.process_group = tc->task_leader, .type = EventType::WaitStatus, .wait = wait_result});
+      push_wait_event(tc->task_leader, wait_result);
       ready = false;
     }
   }};

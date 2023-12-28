@@ -117,7 +117,7 @@ main(int argc, const char **argv)
     const auto evt = poll_event();
     switch (evt.type) {
     case EventType::WaitStatus: {
-      tracer.handle_wait_event(evt.process_group, evt.wait);
+      tracer.handle_wait_event(evt.wait.process_group, evt.wait.wait);
     } break;
     case EventType::Command: {
       tracer.handle_command(evt.cmd);

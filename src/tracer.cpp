@@ -35,7 +35,7 @@ on_sigcld(int)
   int stat;
   while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
     const auto wait_result = process_status(pid, stat);
-    push_event(Event{.process_group = 0, .type = EventType::WaitStatus, .wait = wait_result});
+    push_wait_event(0, wait_result);
   }
 }
 
