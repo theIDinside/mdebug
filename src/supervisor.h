@@ -280,6 +280,8 @@ private:
   int new_scope_id(const sym::Frame *frame) noexcept;
   int new_var_id(int parent_id) noexcept;
   void reset_variable_references() noexcept;
+  void next_variable_ref_id() noexcept;
+  void reset_variable_ref_id() noexcept;
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;
 };

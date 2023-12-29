@@ -101,13 +101,15 @@ enum class EntityType
 
 struct VariablesReference
 {
+  bool has_parent() const noexcept;
+  std::optional<int> parent() const noexcept;
   // The execution context (Task) that this variable reference exists in
   int thread_id;
   // The frame id this variable reference exists in
   int frame_id;
   // (Possible) parent reference. A scope has a frame as it's parent. A variable has a scope or another variable as
   // it's parent. To walk up the hierarchy, one would read the variables reference map using the parent key
-  int parent;
+  int parent_;
   // The reference type
   EntityType type;
 };

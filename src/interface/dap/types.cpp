@@ -33,4 +33,20 @@ Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
                     .source_path = {},
                     .error_message = msg};
 }
+
+bool
+VariablesReference::has_parent() const noexcept
+{
+  return parent_ != 0;
+}
+
+std::optional<int>
+VariablesReference::parent() const noexcept
+{
+  if (has_parent())
+    return parent_;
+  else
+    return std::nullopt;
+}
+
 }; // namespace ui::dap
