@@ -54,10 +54,24 @@ args(int a, float b, long c)
   long res_c = c * 8; // ARGS_BP
 }
 
+void
+lexical_block(bool should_take)
+{
+  int a = 0;
+  if (should_take) {
+    a = 1;
+    float b = 3.14;
+    long c = 1337;
+    args(a, b, c); // LEX_BLOCK
+  } else {
+    locals();
+  }
+}
+
 int
 main(int argc, const char **argv)
 {
-  locals();
-  args(1, 2.0f, 3l);
+  lexical_block(true);
+  lexical_block(false);
   structured("foo", 42, 0.39);
 }
