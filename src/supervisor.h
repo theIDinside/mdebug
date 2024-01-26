@@ -269,7 +269,7 @@ public:
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
-  const sym::Frame *frame(int frame_id) noexcept;
+  sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
   void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;

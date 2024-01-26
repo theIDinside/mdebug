@@ -1132,11 +1132,11 @@ TraceeController::scopes_reference(int frame_id) noexcept
                           S{"Registers", "registers", new_scope_id(f)}};
 }
 
-const sym::Frame *
+sym::Frame *
 TraceeController::frame(int frame_id) noexcept
 {
   const auto frame_ref_info = var_refs[frame_id];
-  auto task = get_task(frame_ref_info.thread_id);
+  auto task = get_task(frame_ref_info.thread_id());
   return task->call_stack->get_frame(frame_id);
 }
 
