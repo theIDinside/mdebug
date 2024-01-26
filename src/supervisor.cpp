@@ -957,23 +957,18 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 int
 TraceeController::new_frame_id(TaskInfo *task) noexcept
 {
-  using VR = ui::dap::VariablesReference;
-  const auto res = next_var_ref;
-  var_refs[res] = VR{.thread_id = task->tid, .frame_id = res, .parent_ = 0, .type = ui::dap::EntityType::Frame};
-  ++next_var_ref;
+  const auto res = take_new_varref_id();
+  var_refs[res] = ui::dap::VariablesReference{res, task->tid, res, 0, ui::dap::EntityType::Frame};
   return res;
 }
 
 int
 TraceeController::new_scope_id(const sym::Frame *frame) noexcept
 {
-  using VR = ui::dap::VariablesReference;
-  const auto res = next_var_ref;
+  const auto res = take_new_varref_id();
   const auto fid = frame->id();
   const auto vr = var_refs[fid];
-  var_refs[res] =
-      VR{.thread_id = vr.thread_id, .frame_id = fid, .parent_ = fid, .type = ui::dap::EntityType::Scope};
-  ++next_var_ref;
+  var_refs[res] = ui::dap::VariablesReference{res, vr.thread_id(), fid, fid, ui::dap::EntityType::Scope};
   return res;
 }
 
@@ -981,14 +976,10 @@ int
 TraceeController::new_var_id(int parent_id) noexcept
 {
   using VR = ui::dap::VariablesReference;
-  const auto res = next_var_ref;
+  const auto res = take_new_varref_id();
   const auto vr = var_refs[parent_id];
-  var_refs[res] = VR{.thread_id = vr.thread_id,
-                     .frame_id = vr.frame_id,
-                     .parent_ = parent_id,
-                     .type = ui::dap::EntityType::Variable};
-  next_variable_ref_id();
-  ++next_var_ref;
+  var_refs[res] =
+      VR{res, vr.thread_id(), vr.get_frame_id(), vr.parent().value_or(0), ui::dap::EntityType::Variable};
   return res;
 }
 
@@ -1002,10 +993,10 @@ TraceeController::reset_variable_references() noexcept
 // These two simple functions have been refactored out, because later on in the future
 // when we do multiprocess debugging, variable references must be unique across _all_ processes not just inside a
 // single process. meaning, both process A and B can't have a variable reference with an id of 2.
-void
-TraceeController::next_variable_ref_id() noexcept
+int
+TraceeController::take_new_varref_id() noexcept
 {
-  next_var_ref += 1;
+  return next_var_ref++;
 }
 
 void
