@@ -74,7 +74,6 @@ public:
 
 private:
   void resolve_fn_symbols() noexcept;
-  void maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc, AddrOpt high_pc) noexcept;
 };
 
 class AddressToCompilationUnitMap

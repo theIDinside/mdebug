@@ -5,7 +5,9 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utils/indexing.h>
 
+struct ObjectFile;
 namespace sym::dw {
 
 class UnitData;
@@ -51,7 +53,7 @@ class UnitData;
 class NameIndex
 {
 public:
-  using NameDieTuple = std::tuple<std::string_view, u32, UnitData *>;
+  using NameDieTuple = std::tuple<std::string_view, Index, UnitData *>;
   struct FindResult
   {
     DieNameReference *dies;
@@ -73,10 +75,11 @@ public:
   std::optional<std::span<const DieNameReference>> search(std::string_view name) noexcept;
   FindResult get_dies(std::string_view name) noexcept;
   void merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
+  void merge_types(ObjectFile *objfile, const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
 
 private:
-  void add_name(std::string_view name, u32 die_index, UnitData *cu) noexcept;
-  void convert_to_collision_variant(DieNameReference &elem, u32 die_index, UnitData *cu) noexcept;
+  void add_name(std::string_view name, Index die_index, UnitData *cu) noexcept;
+  void convert_to_collision_variant(DieNameReference &elem, Index die_index, UnitData *cu) noexcept;
   // The mutex only guars insert operations, because when the user is going to use query operations (finding a die
   // by it's name) the entire name index should be fully built.
   std::string_view index_name;

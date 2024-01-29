@@ -249,14 +249,14 @@ UnitData::spans_across(u64 offset) const noexcept
   return header().spans_across(offset);
 }
 
-u32
+Index
 UnitData::index_of(const DieMetaData *die) noexcept
 {
   ASSERT(die != nullptr && !dies.empty(), "You passed a nullptr or DIE's for this unit has not been loaded");
   auto begin = dies.data();
   DBG(auto end = dies.data() + dies.size());
   ASSERT(die >= begin && die < end, "die does not belong to this CU or the dies has been unloaded!");
-  return static_cast<u32>(die - begin);
+  return Index{static_cast<u32>(die - begin)};
 }
 
 std::span<const DieMetaData>

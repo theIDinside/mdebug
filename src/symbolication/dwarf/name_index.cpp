@@ -44,11 +44,12 @@ NameIndex::NameIndex(std::string_view name) noexcept
 }
 
 void
-NameIndex::add_name(std::string_view name, u32 die_index, UnitData *cu) noexcept
+NameIndex::add_name(std::string_view name, Index die_index, UnitData *cu) noexcept
 {
   // default constructs a DieNameReference{nullptr, 0} when mapping[name] doesn't exist
   // which DieNameReference::is_valid => false (i.e. mapping contains no `name` key)
-  DLOG("dwarf", "adding {} for die #{} in Compilation Unit at offset {}", name, die_index, cu->section_offset());
+  DLOG("dwarf", "adding {} for die #{} in Compilation Unit at offset {}", name, die_index.value(),
+       cu->section_offset());
   auto &elem = mapping[name];
   if (elem.is_valid()) {
     if (elem.is_unique()) {
@@ -64,7 +65,7 @@ NameIndex::add_name(std::string_view name, u32 die_index, UnitData *cu) noexcept
 }
 
 void
-NameIndex::convert_to_collision_variant(DieNameReference &elem, u32 die_index, UnitData *cu) noexcept
+NameIndex::convert_to_collision_variant(DieNameReference &elem, Index die_index, UnitData *cu) noexcept
 {
   const auto index = colliding_die_name_refs.size();
   colliding_die_name_refs.push_back({});

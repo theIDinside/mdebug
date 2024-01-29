@@ -146,26 +146,6 @@ SourceFileSymbolInfo::get_linetable() noexcept
   return unit_data->get_objfile()->get_linetable(line_table);
 }
 
-void
-SourceFileSymbolInfo::maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc,
-                                             AddrOpt high_pc) noexcept
-{
-  if ((name || mangled_name) && (low_pc && high_pc)) {
-    auto &lo = low_pc.value();
-    auto &hi = high_pc.value();
-    if (name) {
-      auto &n = name.value();
-      fns.emplace_back(lo, hi, n);
-    } else {
-      fns.emplace_back(lo, hi, mangled_name.value());
-    }
-  } else {
-    DLOG("mdb", "Warning! Incomplete function symbol. name={}, mangled_name={}, low_pc={}, high_pc={}",
-         name.value_or("NONE"), mangled_name.value_or("NONE"), low_pc.value_or(nullptr),
-         high_pc.value_or(nullptr));
-  }
-}
-
 using DieOffset = u64;
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;

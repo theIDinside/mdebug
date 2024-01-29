@@ -2,6 +2,7 @@
 #include "common.h"
 #include <symbolication/block.h>
 #include <symbolication/dwarf.h>
+#include <utils/indexing.h>
 
 struct ObjectFile;
 struct ElfSection;
@@ -137,7 +138,7 @@ public:
   const UnitHeader &header() const noexcept;
   u64 section_offset() const noexcept;
   bool spans_across(u64 sec_offset) const noexcept;
-  u32 index_of(const DieMetaData *die) noexcept;
+  Index index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
   const DieMetaData *get_die(u64 offset) noexcept;
   DieReference get_cu_die_ref(u64 offset) noexcept;
@@ -192,7 +193,7 @@ struct DieReference
 struct IndexedDieReference
 {
   UnitData *cu;
-  u32 die_index;
+  Index die_index;
 
   bool valid() const noexcept;
 };
