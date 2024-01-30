@@ -497,7 +497,9 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noex
       auto cie_idx = cies[current_offset - cie_ptr];
       auto &cie = unwinder_db->elf_eh_cies[cie_idx];
       auto initial_loc = reader.read_value<i32>();
-      ASSERT(initial_loc < 0, "Expected initial loc to be negative offset");
+      if (initial_loc < 0) {
+        DLOG("mdb", "[eh]: expected initial loc to be < 0, but was 0x{:x}", initial_loc);
+      }
       AddrPtr begin = base_vma + (eh_frame->address + reader.bytes_read() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.read_value<u32>();
       u8 aug_data_length = 0u;
