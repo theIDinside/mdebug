@@ -155,11 +155,10 @@ IndexingTask::execute_task() noexcept
       case DwarfTag::DW_TAG_typedef:
       case DwarfTag::DW_TAG_union_type:
       case DwarfTag::DW_TAG_unspecified_type:
-        if (!name.empty() && !is_decl)
-          // names.types.insert({name, DieKey{die.sec_offset}});
+        if (!name.empty() && !is_decl) {
           types.push_back({name, die_index, comp_unit});
+        }
         if (!mangled_name.empty() && !is_decl)
-          // names.types.insert({mangled_name, DieKey{die.sec_offset}});
           types.push_back({mangled_name, die_index, comp_unit});
         break;
       case DwarfTag::DW_TAG_inlined_subroutine:
@@ -171,27 +170,22 @@ IndexingTask::execute_task() noexcept
         if (!name.empty()) {
           if (is_mem_fn) {
             methods.push_back({name, die_index, comp_unit});
-            // names.methods.insert(std::make_pair(name, DieKey{die.sec_offset}));
           } else {
             free_functions.push_back({name, die_index, comp_unit});
-            // names.free_functions.insert(std::make_pair(name, DieKey{die.sec_offset}));
           }
         }
 
         if (!mangled_name.empty()) {
           if (is_mem_fn) {
             methods.push_back({mangled_name, die_index, comp_unit});
-            // names.methods.insert(std::make_pair(name, DieKey{die.sec_offset}));
           } else {
             free_functions.push_back({mangled_name, die_index, comp_unit});
-            // names.free_functions.insert(std::make_pair(name, DieKey{die.sec_offset}));
           }
         }
       } break;
       case DwarfTag::DW_TAG_namespace:
       case DwarfTag::DW_TAG_imported_declaration:
         if (!name.empty())
-          // names.namespaces.insert({name, DieKey{die.sec_offset}});
           namespaces.push_back({name, die_index, comp_unit});
         break;
       default:
@@ -204,7 +198,7 @@ IndexingTask::execute_task() noexcept
   idx->free_functions.merge(free_functions);
   idx->global_variables.merge(global_variables);
   idx->methods.merge(methods);
-  idx->types.merge(types);
+  idx->types.merge_types(obj, types);
 
   if (!initialized_cus.empty())
     obj->add_initialized_cus(initialized_cus);
