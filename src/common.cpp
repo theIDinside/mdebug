@@ -131,3 +131,9 @@ get_register(user_regs_struct *regs, int reg_number) noexcept
   ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
   return *(u64 *)(((std::uintptr_t)regs) + offsets[reg_number]);
 }
+
+std::span<const u8>
+as_span(DataBlock block) noexcept
+{
+  return std::span{block.ptr, block.ptr + block.size};
+}

@@ -144,7 +144,7 @@ DAP::run_ui_loop()
 {
   utils::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
   auto cleanup_times = 5;
-  ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 4};
+  ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
   static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
 
   // These are stack data. So when we process events, we don't want to be

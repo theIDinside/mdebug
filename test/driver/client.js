@@ -360,6 +360,7 @@ class DAClient {
 
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = seconds(1)) {
+    console.log(`TEST BINARY: ${program}`)
     let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.launchToMain)
     let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
     checkResponse(init_res, 'initialize', true)

@@ -1,4 +1,5 @@
 #include "types.h"
+#include <supervisor.h>
 
 namespace ui::dap {
 
@@ -34,10 +35,16 @@ Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
                     .error_message = msg};
 }
 
+VariablesReference::VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
+                                       EntityType type) noexcept
+    : id(ref), thread_id(thread), frame_id(frame_id), parent_(parent), type(type), object_file(obj)
+{
+}
+
 bool
 VariablesReference::has_parent() const noexcept
 {
-  return parent_ != 0;
+  return 0 != *parent_;
 }
 
 std::optional<int>
@@ -48,5 +55,26 @@ VariablesReference::parent() const noexcept
   else
     return std::nullopt;
 }
+
+NonNullPtr<ObjectFile>
+VariablesReference::objectfile() const noexcept
+{
+  return object_file;
+}
+
+TaskInfo *
+VariablesReference::task(TraceeController *tc) const noexcept
+{
+  return tc->get_task(thread_id);
+}
+
+sym::Frame *
+VariablesReference::frame(TraceeController *tc) const noexcept
+{
+  return tc->frame(frame_id);
+}
+
+// VarRef::VarRef(NonNullPtr<ObjectFile> obj, NonNullPtr<TraceeController> tc, RefKind ref) noexcept :
+// obj_file(obj), tc(tc), kind(ref){}
 
 }; // namespace ui::dap

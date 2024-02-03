@@ -1,6 +1,10 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "interface/dap/types.h"
+#include "supervisor.h"
+#include "symbolication/dwarf/debug_info_reader.h"
+#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
@@ -10,15 +14,17 @@
 #include "utils/worker_task.h"
 #include <algorithm>
 #include <optional>
+#include <string>
+#include <symbolication/dwarf/typeread.h>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(), address_bounds(),
-      minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
-      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
-      lnp_headers(nullptr),
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(std::make_unique<TypeStorage>()),
+      address_bounds(), minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{},
+      unit_data_write_lock(), dwarf_units(), name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()),
+      parsed_lte_write_lock(), line_table(), lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), addr_cu_map()
+      comp_units(), addr_cu_map(), valobj_cache{}
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -320,6 +326,37 @@ ObjectFile::init_minsym_name_lookup() noexcept
   for (const auto &[index, sym] : utils::EnumerateView(min_fn_symbols_sorted)) {
     minimal_fn_symbols[sym.name] = Index{static_cast<u32>(index)};
   }
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+{
+  sym::dw::FunctionSymbolicationContext{this, frame}.process_symbol_information();
+  switch (set) {
+  case sym::VariableSet::Arguments: {
+    auto &args_symbols = frame.get_args();
+    std::vector<ui::dap::Variable> result{};
+    result.reserve(args_symbols.size());
+    for (auto &arg : args_symbols) {
+      const auto ref = tc.new_var_id(frame.id());
+      auto value_object =
+          sym::MemoryContentsObject::create_frame_variable(tc, frame.task, frame, const_cast<sym::Symbol &>(arg));
+      result.push_back(ui::dap::Variable{ref, value_object});
+    }
+    return result;
+  }
+  case sym::VariableSet::Locals:
+    // return frame->get_locals();
+  case sym::VariableSet::FrameVariables: {
+    // std::vector<ui::dap::Variable> result = frame->get_args();
+    // auto rest = frame->get_locals();
+  } break;
+  case sym::VariableSet::Static:
+  case sym::VariableSet::Global:
+    TODO("Static or global variables request not yet supported.");
+    break;
+  }
+  return {};
 }
 
 ObjectFile *

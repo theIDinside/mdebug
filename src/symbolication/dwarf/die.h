@@ -99,6 +99,7 @@ public:
   SymbolInfoId unit_id() const noexcept;
   DwarfVersion version() const noexcept;
   DwarfUnitType get_unit_type() const noexcept;
+  u64 cu_size() const noexcept;
 
 private:
   u64 sec_offset;
@@ -153,6 +154,7 @@ private:
   DieMetaData unit_die;
   std::vector<DieMetaData> dies;
   bool fully_loaded;
+  u32 loaded_die_count;
   AbbreviationInfo::Table abbreviations;
 };
 
@@ -196,6 +198,13 @@ struct IndexedDieReference
   Index die_index;
 
   bool valid() const noexcept;
+  const DieMetaData *get_die() noexcept;
+
+  friend constexpr auto
+  operator==(const auto &lhs, const auto &rhs)
+  {
+    return lhs.cu == rhs.cu && lhs.die_index == rhs.die_index;
+  }
 };
 
 } // namespace sym::dw

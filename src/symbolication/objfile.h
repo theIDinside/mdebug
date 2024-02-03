@@ -6,7 +6,9 @@
 #include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
+#include "interface/dap/types.h"
 #include "mdb_config.h"
+#include "symbolication/callstack.h"
 #include <common.h>
 #include <string_view>
 #include <sys/mman.h>
@@ -43,7 +45,7 @@ struct ObjectFile
   bool has_elf_symbols = false;
 
   // Should the key be something much better than a string, here? If so, how and what?
-  std::unordered_map<u64, sym::Type> types;
+  std::unique_ptr<TypeStorage> types;
   // Address bounds determined by reading the program segments of the elf binary
   AddressRange address_bounds;
 
@@ -98,6 +100,8 @@ struct ObjectFile
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   std::vector<sym::SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
+  std::vector<ui::dap::Variable> get_variables(TraceeController &tc, sym::Frame &frame,
+                                               sym::VariableSet set) noexcept;
 
   void initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept;
   void add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
@@ -122,6 +126,7 @@ private:
   std::vector<sym::SourceFileSymbolInfo> comp_units;
 
   sym::AddressToCompilationUnitMap addr_cu_map;
+  std::unordered_map<int, SharedPtr<sym::Value>> valobj_cache;
 };
 
 ObjectFile *mmap_objectfile(const Path &path) noexcept;

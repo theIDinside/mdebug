@@ -52,13 +52,13 @@ Reg::set_register(u64 reg) noexcept
 
 Reg::Reg() noexcept : value(0), rule(RegisterRule::Undefined) {}
 
-CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept
+CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept
     : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), rule_table()
 {
   rule_table.fill(Reg{});
 }
 
-CFAStateMachine::CFAStateMachine(TraceeController *tc, TaskInfo *task, const RegisterValues &frame_below,
+CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frame_below,
                                  const UnwindInfo *cfi, AddrPtr pc) noexcept
     : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}})
 {
@@ -87,21 +87,22 @@ CFAStateMachine::reset(const UnwindInfo *inf, const RegisterValues &frame_below,
 // then.
 /* static */
 CFAStateMachine
-CFAStateMachine::Init(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept
+CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept
 {
   auto cfa_sm = CFAStateMachine{tc, task, cfi, pc};
   for (auto i = 0; i <= 16; i++) {
     cfa_sm.rule_table[i].rule = RegisterRule::Undefined;
-    cfa_sm.rule_table[i].value = task->get_register(i);
+    cfa_sm.rule_table[i].value = task.get_register(i);
   }
   return cfa_sm;
 }
 
 u64
-CFAStateMachine::compute_expression(std::span<const u8> bytes) const noexcept
+CFAStateMachine::compute_expression(std::span<const u8> bytes) noexcept
 {
   DLOG("eh", "compute_expression of dwarf expression of {} bytes", bytes.size());
-  return ExprByteCodeInterpreter{tc, task, bytes}.run();
+  auto intepreter = ExprByteCodeInterpreter{-1, *tc, task, bytes};
+  return intepreter.run();
 }
 
 RegisterValues
@@ -497,7 +498,7 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noex
       auto cie_idx = cies[current_offset - cie_ptr];
       auto &cie = unwinder_db->elf_eh_cies[cie_idx];
       auto initial_loc = reader.read_value<i32>();
-      if (initial_loc < 0) {
+      if (initial_loc > 0) {
         DLOG("mdb", "[eh]: expected initial loc to be < 0, but was 0x{:x}", initial_loc);
       }
       AddrPtr begin = base_vma + (eh_frame->address + reader.bytes_read() - len_field_len) + initial_loc;

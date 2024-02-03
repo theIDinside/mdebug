@@ -63,4 +63,7 @@ private:
 
 AttributeValue read_attribute_value(UnitReader &reader, Abbreviation abbr,
                                     const std::vector<i64> &implicit_consts) noexcept;
+std::optional<AttributeValue> read_specific_attribute(UnitData *cu, const DieMetaData *die,
+                                                      Attribute abbr) noexcept;
+
 } // namespace sym::dw

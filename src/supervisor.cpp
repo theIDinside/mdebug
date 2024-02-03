@@ -26,6 +26,7 @@
 #include "tasks/lnp.h"
 #include "tracer.h"
 #include "utils/enumerator.h"
+#include "utils/immutable.h"
 #include "utils/logger.h"
 #include "utils/worker_task.h"
 #include <algorithm>
@@ -41,6 +42,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <unordered_set>
+#include <utility>
+#include <variant>
 
 template <typename T> using Set = std::unordered_set<T>;
 
@@ -48,9 +51,10 @@ TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::Writ
                                    TargetSession session, bool seized, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, object_files{}, main_executable(nullptr), threads{}, bps(process_space_id),
       tracee_r_debug(nullptr), shared_objects(), waiting_for_all_stopped(false), all_stopped_observer(),
-      var_refs(), interpreter_base{}, entry{}, session(session),
-      ptracestop_handler(new ptracestop::StopHandler{this}), unwinders(),
-      null_unwinder(new sym::Unwinder{nullptr}), ptrace_session_seized(seized)
+      var_refs(),
+      // vr{},
+      interpreter_base{}, entry{}, session(session), ptracestop_handler(new ptracestop::StopHandler{*this}),
+      unwinders(), null_unwinder(new sym::Unwinder{nullptr}), ptrace_session_seized(seized)
 {
   threads.reserve(256);
   awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
@@ -275,19 +279,19 @@ TraceeController::resume_target(RunType type) noexcept
   waiting_for_all_stopped = false;
   for (auto &t : threads) {
     if (t.can_continue()) {
-      resume_task(&t, type);
+      resume_task(t, type);
     }
   }
 }
 
 void
-TraceeController::resume_task(TaskInfo *task, RunType type) noexcept
+TraceeController::resume_task(TaskInfo &task, RunType type) noexcept
 {
   waiting_for_all_stopped = false;
-  if (task->bstat) {
-    task->step_over_breakpoint(this, type);
+  if (task.bstat) {
+    task.step_over_breakpoint(this, type);
   } else {
-    task->ptrace_resume(type);
+    task.ptrace_resume(type);
   }
 }
 
@@ -309,23 +313,23 @@ TraceeController::stop_all(TaskInfo *requesting_task) noexcept
     // if the stop is requested by `requesting_task` we don't want
     // to remove it's ptrace action as it might be the one requesting the stop
     if (&t != requesting_task) {
-      auto action = ptracestop_handler->get_proceed_action(&t);
+      auto action = ptracestop_handler->get_proceed_action(t);
       if (action) {
         action->cancel();
-        ptracestop_handler->remove_action(&t);
+        ptracestop_handler->remove_action(t);
       }
     }
   }
 }
 
 void
-TraceeController::reap_task(TaskInfo *task) noexcept
+TraceeController::reap_task(TaskInfo &task) noexcept
 {
-  auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task->tid; });
-  VERIFY(it != std::end(threads), "Could not find Task with pid {}", task->tid);
-  task->exited = true;
+  auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task.tid; });
+  VERIFY(it != std::end(threads), "Could not find Task with pid {}", task.tid);
+  task.exited = true;
   Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.exit_code);
-  if (task->tid == task_leader) {
+  if (task.tid == task_leader) {
     awaiter_thread->set_process_exited();
   }
 }
@@ -341,23 +345,23 @@ TraceeController::register_task_waited(TaskWaitResult wait) noexcept
 }
 
 AddrPtr
-TraceeController::get_caching_pc(TaskInfo *t) noexcept
+TraceeController::get_caching_pc(TaskInfo &t) noexcept
 {
-  if (t->rip_dirty) {
-    t->cache_registers();
-    return t->registers->rip;
+  if (t.rip_dirty) {
+    t.cache_registers();
+    return t.registers->rip;
   } else {
-    return t->registers->rip;
+    return t.registers->rip;
   }
 }
 
 void
-TraceeController::set_pc(TaskInfo *t, AddrPtr addr) noexcept
+TraceeController::set_pc(TaskInfo &t, AddrPtr addr) noexcept
 {
   constexpr auto rip_offset = offsetof(user_regs_struct, rip);
-  VERIFY(ptrace(PTRACE_POKEUSER, t->tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
-  t->registers->rip = addr;
-  t->rip_dirty = false;
+  VERIFY(ptrace(PTRACE_POKEUSER, t.tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
+  t.registers->rip = addr;
+  t.rip_dirty = false;
 }
 
 void
@@ -635,35 +639,35 @@ TraceeController::detach() noexcept
 }
 
 void
-TraceeController::process_exec(TaskInfo *t) noexcept
+TraceeController::process_exec(TaskInfo &t) noexcept
 {
-  DLOG("mdb", "Processing EXEC for {}", t->tid);
+  DLOG("mdb", "Processing EXEC for {}", t.tid);
   reopen_memfd();
-  t->cache_registers();
+  t.cache_registers();
   read_auxv(t);
   install_loader_breakpoints();
 }
 
 Tid
-TraceeController::process_clone(TaskInfo *t) noexcept
+TraceeController::process_clone(TaskInfo &t) noexcept
 {
-  DLOG("mdb", "Processing CLONE for {}", t->tid);
+  DLOG("mdb", "Processing CLONE for {}", t.tid);
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
-  t->cache_registers();
+  t.cache_registers();
   pid_t np = -1;
-  if (t->registers->orig_rax == SYS_clone) {
-    const TPtr<void> stack_ptr = sys_arg_n<2>(*t->registers);
-    const TPtr<int> child_tid = sys_arg_n<4>(*t->registers);
-    const u64 tls = sys_arg_n<5>(*t->registers);
+  if (t.registers->orig_rax == SYS_clone) {
+    const TPtr<void> stack_ptr = sys_arg_n<2>(*t.registers);
+    const TPtr<int> child_tid = sys_arg_n<4>(*t.registers);
+    const u64 tls = sys_arg_n<5>(*t.registers);
     np = read_type(child_tid);
     if (!has_task(np))
       new_task(np, true);
     get_task(np)->initialize();
     set_task_vm_info(np, TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls});
     return np;
-  } else if (t->registers->orig_rax == SYS_clone3) {
-    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t->registers);
+  } else if (t.registers->orig_rax == SYS_clone3) {
+    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*t.registers);
     const auto res = read_type(ptr);
     np = read_type(TPtr<pid_t>{res.parent_tid});
     if (!has_task(np))
@@ -728,11 +732,11 @@ struct AuxvPair
 };
 
 void
-TraceeController::read_auxv(TaskInfo *task)
+TraceeController::read_auxv(const TaskInfo &task)
 {
-  ASSERT(task->wait_status.ws == WaitStatusKind::Execed,
+  ASSERT(task.wait_status.ws == WaitStatusKind::Execed,
          "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
-  TPtr<i64> stack_ptr = task->registers->rsp;
+  TPtr<i64> stack_ptr = task.registers->rsp;
   i64 argc = read_type(stack_ptr);
 
   stack_ptr += argc + 1;
@@ -793,6 +797,26 @@ TraceeController::get_thread_name(Tid tid) const noexcept
   return name;
 }
 
+std::vector<u8>
+TraceeController::read_to_vec(AddrPtr addr, u64 bytes) noexcept
+{
+  std::vector<u8> data{};
+  data.resize(bytes);
+
+  auto total_read = 0ull;
+  while (total_read < bytes) {
+    auto read_bytes = pread64(mem_fd().get(), data.data() + total_read, bytes - total_read, addr);
+    if (-1 == read_bytes || 0 == read_bytes) {
+      PANIC(fmt::format("Failed to proc_fs read from {}", addr));
+    }
+    total_read += read_bytes;
+  }
+  if (total_read != data.size()) {
+    PANIC("failed to read into std::vector");
+  }
+  return data;
+}
+
 utils::StaticVector<u8>::OwnPtr
 TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
 {
@@ -842,21 +866,21 @@ TraceeController::start_awaiter_thread() noexcept
 }
 
 sym::Frame
-TraceeController::current_frame(TaskInfo *task) noexcept
+TraceeController::current_frame(NonNullPtr<TaskInfo> task) noexcept
 {
   const auto pc = task->pc();
-  if (const auto symbol = find_fn_by_pc(pc); symbol) {
-    return sym::Frame{0, 0, pc, symbol};
+  if (const auto symbol = find_fn_by_pc(pc, nullptr); symbol) {
+    return sym::Frame{task, 0, 0, pc, symbol};
   }
 
   auto obj = find_obj_by_pc(pc);
   if (obj == nullptr) {
-    return sym::Frame{0, 0, pc, nullptr};
+    return sym::Frame{task, 0, 0, pc, nullptr};
   }
   if (auto min_sym = obj->search_minsym_fn_info(pc); min_sym != nullptr)
-    return sym::Frame{0, 0, pc, min_sym};
+    return sym::Frame{task, 0, 0, pc, min_sym};
   else
-    return sym::Frame{0, 0, pc, nullptr};
+    return sym::Frame{task, 0, 0, pc, nullptr};
 }
 
 sym::Unwinder *
@@ -955,31 +979,38 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
 }
 
 int
-TraceeController::new_frame_id(TaskInfo *task) noexcept
+TraceeController::new_frame_id(NonNullPtr<ObjectFile> owning_obj, TaskInfo &task) noexcept
 {
   const auto res = take_new_varref_id();
-  var_refs[res] = ui::dap::VariablesReference{res, task->tid, res, 0, ui::dap::EntityType::Frame};
+  var_refs.emplace(std::piecewise_construct, std::forward_as_tuple(res),
+                   std::forward_as_tuple(owning_obj, res, task.tid, res, 0, ui::dap::EntityType::Frame));
   return res;
 }
 
 int
-TraceeController::new_scope_id(const sym::Frame *frame) noexcept
+TraceeController::new_scope_id(NonNullPtr<ObjectFile> owning_obj, const sym::Frame *frame) noexcept
 {
   const auto res = take_new_varref_id();
   const auto fid = frame->id();
-  const auto vr = var_refs[fid];
-  var_refs[res] = ui::dap::VariablesReference{res, vr.thread_id(), fid, fid, ui::dap::EntityType::Scope};
+  const auto iter = var_refs.find(fid);
+  if (iter == std::end(var_refs))
+    PANIC("Expected to find object with variables reference of");
+  var_refs.emplace(
+      std::piecewise_construct, std::forward_as_tuple(res),
+      std::forward_as_tuple(owning_obj, res, iter->second.thread_id, fid, fid, ui::dap::EntityType::Scope));
   return res;
 }
 
 int
 TraceeController::new_var_id(int parent_id) noexcept
 {
-  using VR = ui::dap::VariablesReference;
   const auto res = take_new_varref_id();
-  const auto vr = var_refs[parent_id];
-  var_refs[res] =
-      VR{res, vr.thread_id(), vr.get_frame_id(), vr.parent().value_or(0), ui::dap::EntityType::Variable};
+  const auto it = var_refs.find(parent_id);
+  const auto &vr = it->second;
+  var_refs.emplace(std::piecewise_construct, std::forward_as_tuple(res),
+                   std::forward_as_tuple(NonNullPtr<ObjectFile>(vr.objectfile()), res, int{vr.thread_id},
+                                         int{vr.frame_id}, int{vr.parent().value_or(0)},
+                                         ui::dap::EntityType::Variable));
   return res;
 }
 
@@ -1006,34 +1037,37 @@ TraceeController::reset_variable_ref_id() noexcept
 }
 
 sym::CallStack &
-TraceeController::build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept
+TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept
 {
-  DLOG("mdb", "stacktrace for {}", task->tid);
-  task->cache_registers();
-  auto &cs = *task->call_stack;
-  cs.frames.clear();
-  auto level = 1;
-  auto frame_pcs = task->return_addresses(this, req);
-  const auto levels = frame_pcs.size();
-  for (auto i = frame_pcs.begin(); i != frame_pcs.end(); i++) {
-    auto frame_pc = i->as_void();
-    auto symbol = find_fn_by_pc(frame_pc);
-    const auto id = new_frame_id(task);
+  DLOG("mdb", "stacktrace for {}", task.tid);
+  task.cache_registers();
+  auto &cs_ref = *task.call_stack;
+  cs_ref.frames.clear();
+
+  auto frame_pcs = task.return_addresses(this, req);
+  for (const auto &[depth, i] : utils::EnumerateView{frame_pcs}) {
+    auto frame_pc = i.as_void();
+    ObjectFile *obj;
+    auto symbol = find_fn_by_pc(frame_pc, &obj);
+    if (obj == nullptr) {
+      PANIC("No object file related to pc - that should be impossible.");
+    }
+    const auto id = new_frame_id(NonNullPtr(*obj), task);
     if (symbol) {
-      cs.frames.push_back(sym::Frame{static_cast<int>(levels - level), id, i->as_void(), symbol});
+      cs_ref.frames.push_back(sym::Frame{task, depth, id, i.as_void(), symbol});
     } else {
       auto obj = find_obj_by_pc(frame_pc);
       auto min_sym = obj->search_minsym_fn_info(frame_pc);
       if (min_sym) {
-        cs.frames.push_back(sym::Frame{static_cast<int>(levels - level), id, i->as_void(), min_sym});
+        cs_ref.frames.push_back(sym::Frame{task, depth, id, i.as_void(), min_sym});
       } else {
-        cs.frames.push_back(sym::Frame{static_cast<int>(levels - level), id, i->as_void(), nullptr});
+        DLOG("mdb", "[stackframe]: WARNING, no frame info for pc {}", i.as_void());
+        cs_ref.frames.push_back(sym::Frame{task, depth, id, i.as_void(), nullptr});
       }
     }
-    ++level;
   }
-  task->call_stack->dirty = false;
-  return *task->call_stack;
+  cs_ref.dirty = false;
+  return cs_ref;
 }
 
 ObjectFile *
@@ -1047,12 +1081,14 @@ TraceeController::find_obj_by_pc(AddrPtr addr) const noexcept
 }
 
 sym::FunctionSymbol *
-TraceeController::find_fn_by_pc(AddrPtr addr) const noexcept
+TraceeController::find_fn_by_pc(AddrPtr addr, ObjectFile **foundIn = nullptr) const noexcept
 {
   const auto obj = find_obj_by_pc(addr);
   if (obj == nullptr)
     return {};
 
+  if (foundIn)
+    *foundIn = obj;
   auto cus_matching_addr = obj->get_cus_from_pc(addr);
 
   // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
@@ -1119,15 +1155,21 @@ TraceeController::scopes_reference(int frame_id) noexcept
 {
   using S = ui::dap::Scope;
   const auto f = frame(frame_id);
-  return std::array<S, 3>{S{"Arguments", "arguments", new_scope_id(f)}, S{"Locals", "locals", new_scope_id(f)},
-                          S{"Registers", "registers", new_scope_id(f)}};
+  auto obj = var_refs.find(f->id())->second.objectfile();
+
+  return std::array<S, 3>{S{"Arguments", "arguments", new_scope_id(obj, f)},
+                          S{"Locals", "locals", new_scope_id(obj, f)},
+                          S{"Registers", "registers", new_scope_id(obj, f)}};
 }
 
 sym::Frame *
 TraceeController::frame(int frame_id) noexcept
 {
-  const auto frame_ref_info = var_refs[frame_id];
-  auto task = get_task(frame_ref_info.thread_id());
+  const auto it = var_refs.find(frame_id);
+  if (it == std::end(var_refs))
+    PANIC("expected to find frame with frame id");
+
+  auto task = get_task(it->second.thread_id);
   return task->call_stack->get_frame(frame_id);
 }
 

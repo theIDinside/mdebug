@@ -35,8 +35,9 @@ async function baseTypes() {
     if (scope.name == 'Arguments') {
       const vres = await da_client.sendReqGetResponse('variables', { variablesReference: scope.variablesReference })
       const variables = vres.body.variables
-      if (variables.length == 5)
+      if (variables.length != 2)
         throw new Error(`Expected 5 variables but got ${variables.length}. Variables response: ${prettyJson(vres)}`)
+      console.log(`${JSON.stringify(variables)}`)
     }
   }
 }

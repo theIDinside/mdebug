@@ -33,7 +33,7 @@ struct Request
 struct ParseBuffer
 {
 public:
-  ParseBuffer(size_t size) noexcept : size{0, 0}, current_buffer_index(0), buffer_size(size)
+  ParseBuffer(size_t size) noexcept : size{0, 0}, buffer_size(size)
   {
     swap_buffers[0] = mmap_buffer<const char>(size);
     swap_buffers[1] = mmap_buffer<const char>(size);
@@ -112,7 +112,7 @@ private:
   }
   size_t size[2];
   const char *swap_buffers[2];
-  size_t current_buffer_index;
+  size_t current_buffer_index = 0;
   const size_t buffer_size;
 };
 

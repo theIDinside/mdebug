@@ -1,8 +1,14 @@
 #pragma once
 #include "../../common.h"
 #include "../../symbolication/callstack.h"
+#include "symbolication/type.h"
+#include "utils/immutable.h"
 #include <fmt/format.h>
 #include <string_view>
+
+struct TaskInfo;
+struct TraceeController;
+
 namespace ui::dap {
 
 struct SourceBreakpoint
@@ -99,29 +105,130 @@ enum class EntityType
   Variable
 };
 
-struct VariablesReference
+// class ValueRef
+// {
+//   sym::Value *value{nullptr};
+
+// public:
+//   static constexpr EntityType
+//   type() noexcept
+//   {
+//     return EntityType::Variable;
+//   }
+//   template <typename Out>
+//   void
+//   serialize(Out out) const noexcept
+//   {
+//   }
+// };
+
+// class ScopeRef
+// {
+//   std::vector<std::shared_ptr<ValueRef>> vars{};
+
+// public:
+//   static constexpr EntityType
+//   type() noexcept
+//   {
+//     return EntityType::Scope;
+//   }
+//   template <typename Out>
+//   void
+//   serialize(Out out) const noexcept
+//   {
+//   }
+// };
+
+// class StackFrameRef
+// {
+//   std::vector<std::shared_ptr<ScopeRef>> scopes{};
+
+// public:
+//   static constexpr EntityType
+//   type() noexcept
+//   {
+//     return EntityType::Frame;
+//   }
+//   template <typename Out>
+//   void
+//   serialize(Out out) const noexcept
+//   {
+//   }
+// };
+
+// using RefKind = std::variant<StackFrameRef, ScopeRef, ValueRef>;
+// class VarRef
+// {
+
+//   NonNullPtr<ObjectFile> obj_file;
+//   NonNullPtr<TraceeController> tc;
+//   RefKind kind;
+
+// public:
+//   VarRef(NonNullPtr<ObjectFile> obj, NonNullPtr<TraceeController> tc, RefKind ref) noexcept;
+//   template <typename Out>
+//   constexpr auto
+//   serialize(Out out) const noexcept
+//   {
+//     std::visit([&](const auto &ref) { ref.serialise(out); }, kind);
+//   }
+
+//   EntityType
+//   entity_type() const noexcept
+//   {
+//     EntityType res;
+//     std::visit([&res](const auto &ref) { res = ref.type(); }, kind);
+//     return res;
+//   }
+
+//   RefKind &
+//   get_kind() noexcept
+//   {
+//     return kind;
+//   }
+// };
+
+class VariablesReference
 {
+public:
+  VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
+                     EntityType type) noexcept;
+  VariablesReference &operator=(const VariablesReference &) = default;
+  VariablesReference &operator=(VariablesReference &&) = default;
+  VariablesReference(VariablesReference &&) = default;
+  VariablesReference(const VariablesReference &) = default;
+
   bool has_parent() const noexcept;
   std::optional<int> parent() const noexcept;
+  NonNullPtr<ObjectFile> objectfile() const noexcept;
+
+  TaskInfo *task(TraceeController *tc) const noexcept;
+  sym::Frame *frame(TraceeController *tc) const noexcept;
+
+  // actual variablesReference value
+  Immutable<int> id;
   // The execution context (Task) that this variable reference exists in
-  int thread_id;
+  Immutable<int> thread_id;
   // The frame id this variable reference exists in
-  int frame_id;
+  Immutable<int> frame_id;
   // (Possible) parent reference. A scope has a frame as it's parent. A variable has a scope or another variable as
   // it's parent. To walk up the hierarchy, one would read the variables reference map using the parent key
-  int parent_;
+  Immutable<int> parent_;
   // The reference type
-  EntityType type;
+  Immutable<EntityType> type;
+
+private:
+  // The "symbol context" for this variable reference.
+  // Keep it a NonNullPtr<ObjectFile> instead of a reference, because we want pointer comparison for equality /
+  // identify. Because only 1 objectfile of some binary will *ever* be loaded into memory.
+  NonNullPtr<ObjectFile> object_file;
 };
 
 // DAP Result for `variables` request.
 struct Variable
 {
   int ref;
-  std::string_view name;
-  std::string_view type;
-  std::string value;
-  AddrPtr mem_ref;
+  SharedPtr<sym::Value> variable_value;
 };
 
 }; // namespace ui::dap
@@ -141,9 +248,14 @@ template <> struct formatter<ui::dap::Variable>
   auto
   format(const ui::dap::Variable &var, FormatContext &ctx) const
   {
+    const auto type_name = var.variable_value->type()->typename_to_str();
+    std::string n{};
+    std::copy(type_name.begin(), type_name.end(), std::back_inserter(n));
+
     return fmt::format_to(
-        ctx.out(), R"({{ "name": "{}", "value": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-        var.name, var.value, var.ref, var.mem_ref);
+        ctx.out(),
+        R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
+        var.variable_value->name, (*var.variable_value), n, var.ref, var.variable_value->address());
   }
 };
 

@@ -8,8 +8,13 @@ template <typename T> class Immutable
   T data;
 
 public:
-  constexpr Immutable(T t) noexcept : data(t) {}
-  constexpr Immutable(T &&t) noexcept : data(std::move(t)) {}
+  constexpr Immutable(const T &t) noexcept : data(t) {}
+
+  constexpr Immutable(T &&t) noexcept
+    requires(!std::is_trivial_v<T> && !std::is_trivially_copyable_v<T>)
+      : data(std::move(t))
+  {
+  }
   constexpr Immutable(const Immutable &) noexcept = default;
   constexpr Immutable(Immutable &&other) noexcept = default;
   constexpr Immutable &operator=(const Immutable &) noexcept = default;
@@ -54,7 +59,22 @@ public:
   {
     return lhs <=> rhs.data;
   }
+
+  // template <typename R>
+  // constexpr Immutable
+  // operator+(const Immutable<R> &rhs) const noexcept
+  // {
+  //   return data + rhs;
+  // }
 };
+
+template <typename T, typename U>
+constexpr auto
+operator+(const Immutable<T> &l, const Immutable<U> &r)
+{
+  // explicit coercion.
+  return (*l) + (*r);
+}
 
 namespace fmt {
 
@@ -81,12 +101,29 @@ template <typename T> class NonNullPtr
   T *ptr;
 
 public:
-  explicit NonNullPtr(T *ptr __attribute__((nonnull))) noexcept : ptr(ptr)
+  // We don't want/need captures of references to be explicit. It's nice, because we know references are non-null
+  NonNullPtr(T &ref) noexcept : ptr(&ref) {}
+
+  NonNullPtr &
+  operator=(const NonNullPtr &o) noexcept
   {
-    if (ptr == nullptr) {
-      PANIC("Explicit NonNullPtr was passed a nullptr, breaking the invariant.");
+    if (this != &o) {
+      this->ptr = o.ptr;
     }
+    return *this;
   }
+
+  NonNullPtr &
+  operator=(NonNullPtr &&o) noexcept
+  {
+    if (this != &o) {
+      ptr = o.ptr;
+    }
+    return *this;
+  }
+
+  NonNullPtr(const NonNullPtr &o) noexcept : ptr(o.ptr) {}
+  NonNullPtr(NonNullPtr &&o) noexcept : ptr(o.ptr) {}
 
   T &
   operator*() noexcept
@@ -95,9 +132,15 @@ public:
   }
 
   [[gnu::returns_nonnull]] T *
-  operator->() noexcept
+  operator->() const noexcept
   {
     return ptr;
+  }
+
+  constexpr
+  operator T &() noexcept
+  {
+    return *ptr;
   }
 
   [[gnu::returns_nonnull]]
@@ -105,4 +148,6 @@ public:
   {
     return ptr;
   }
+
+  [[gnu::returns_nonnull]] operator const T *() const noexcept { return ptr; }
 };

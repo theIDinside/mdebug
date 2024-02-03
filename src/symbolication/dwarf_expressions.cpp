@@ -1,6 +1,7 @@
 #include "dwarf_expressions.h"
 #include "../supervisor.h"
 #include "../task.h"
+#include "common.h"
 #include "dwarf_defs.h"
 #include "dwarf_frameunwinder.h"
 #include <utility>
@@ -43,9 +44,9 @@ DwarfStack::swap() noexcept
   stack[size - 2] = tmp;
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t,
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
                                                  std::span<const u8> byte_stream) noexcept
-    : stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)),
+    : frame_level(frame_level), stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)),
       reader(nullptr, byte_stream.data(), byte_stream.size())
 {
 }
@@ -69,9 +70,15 @@ op_literal(ExprByteCodeInterpreter &i) noexcept
 }
 
 void
-op_reg(ExprByteCodeInterpreter &) noexcept
+op_reg(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_reg(ExprByteCodeInterpreter&)");
+  const auto bytecode = std::to_underlying(i.latest_decoded);
+  ASSERT(bytecode >= std::to_underlying(DwarfOp::DW_OP_reg0) &&
+             bytecode <= std::to_underlying(DwarfOp::DW_OP_reg31),
+         "Byte code for DW_OP_reg<n> out of range");
+  const auto reg_no = std::to_underlying(i.latest_decoded) - std::to_underlying(DwarfOp::DW_OP_reg0);
+  const auto reg_contents = i.task.get_register(reg_no);
+  i.stack.push<u64>(reg_contents);
 }
 
 void
@@ -79,7 +86,7 @@ op_breg(ExprByteCodeInterpreter &i) noexcept
 {
   const auto offset = i.reader.read_leb128<i64>();
   const auto reg_num = std::to_underlying(i.latest_decoded) - std::to_underlying(DwarfOp::DW_OP_breg0);
-  const auto reg_contents = i.task->get_register(reg_num);
+  const auto reg_contents = i.task.get_register(reg_num);
   const auto result = reg_contents + offset;
   i.stack.push<u64>(result);
 }
@@ -421,25 +428,27 @@ op_ne(ExprByteCodeInterpreter &i) noexcept
 }
 
 void
-op_regx(ExprByteCodeInterpreter &) noexcept
+op_regx(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_regx")
+  const auto reg_no = i.reader.read_uleb128<u64>();
+  i.stack.push(reg_no);
 }
+
 void
 op_fbreg(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto offset = i.reader.read_leb128<i64>();
+  const i64 offset = i.reader.read_leb128<i64>();
+  const auto frame_base = i.request_frame_base();
   // const auto frame_base_addr = i.request_frame_base();
   // const auto result = frame_base_addr + offset;
-  // i.stack.push<u64>(result.get());
-  TODO_FMT("op_fbreg with offset {}", offset);
+  i.stack.push<u64>(frame_base + offset);
 }
 void
 op_bregx(ExprByteCodeInterpreter &i) noexcept
 {
   const auto reg_num = i.reader.read_uleb128<u64>();
   const auto offset = i.reader.read_leb128<i64>();
-  const auto reg_contents = i.task->get_register(reg_num);
+  const auto reg_contents = i.task.get_register(reg_num);
   const auto result = reg_contents + offset;
   i.stack.push<u64>(result);
   TODO("op_bregx")
@@ -535,7 +544,6 @@ static Op ops[0xff] = {
     &op_shr,                 // 0x25
     &op_shra,                // 0x26
     &op_xor,                 // 0x27
-    &op_skip,                // 0x2f
     &op_bra,                 // 0x28
     &op_eq,                  // 0x29
     &op_ge,                  // 0x2a
@@ -543,7 +551,7 @@ static Op ops[0xff] = {
     &op_le,                  // 0x2c
     &op_lt,                  // 0x2d
     &op_ne,                  // 0x2e
-    &ub,                     // 0x2f
+    &op_skip,                // 0x2f
     &op_literal,             // 0x30
     &op_literal,             // 0x31
     &op_literal,             // 0x32
@@ -560,7 +568,7 @@ static Op ops[0xff] = {
     &op_literal,             // 0x3d
     &op_literal,             // 0x3e
     &op_literal,             // 0x3f
-    &op_literal,             // 0x40
+    &op_literal,             // 0x40value
     &op_literal,             // 0x41
     &op_literal,             // 0x42
     &op_literal,             // 0x43
@@ -670,16 +678,35 @@ static Op ops[0xff] = {
     // clang-format-on
 };
 
+AddrPtr ExprByteCodeInterpreter::request_frame_base() noexcept {
+  ASSERT(frame_level != -1, "Did not expect to use FRAME_LEVEL for this DWARF expression computation.");
+  ASSERT(this->task.call_stack->reg_unwind_buffer.front()[6] == get_register(this->task.registers, 6), "Expected first level to be equal, but it wasn't.");
+  return this->task.call_stack->reg_unwind_buffer[frame_level][6];
+}
+
+// DwarfExpressionResult ExprByteCodeInterpreter::execute_location() noexcept {
+//  while (reader.has_more()) {
+//     const auto op = reader.read_byte<DwarfOp>();
+//     this->latest_decoded = op;
+//     DLOG("eh", "Decoded CFA expression op: {}", to_str(op));
+//     const auto idx = std::to_underlying(op);
+//     ops[idx](*this);
+//   }
+//   DLOG("eh", "Computed result: 0x{:x}", stack.stack[0]);
+//   return stack.stack[0];
+// }
+
 u64
 ExprByteCodeInterpreter::run() noexcept
 {
   while (reader.has_more()) {
     const auto op = reader.read_byte<DwarfOp>();
     this->latest_decoded = op;
-    DLOG("eh", "Decoded CFA expression op: {}", to_str(op));
-    ops[std::to_underlying(op)](*this);
+    // DLOG("eh", "Decoded CFA expression op: {}", to_str(op));
+    const auto idx = std::to_underlying(op);
+    ops[idx](*this);
   }
-  DLOG("eh", "Computed result: 0x{:x}", stack.stack[0]);
+  // DLOG("eh", "Computed result: 0x{:x}", stack.stack[0]);
   return stack.stack[0];
 }
 } // namespace sym

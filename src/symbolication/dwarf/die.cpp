@@ -176,8 +176,15 @@ UnitHeader::get_unit_type() const noexcept
   return unit_type;
 }
 
+u64
+UnitHeader::cu_size() const noexcept
+{
+  return unit_size;
+}
+
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
-    : objfile(owning_objfile), unit_header(header), unit_die(), dies(), fully_loaded(false), abbreviations()
+    : objfile(owning_objfile), unit_header(header), unit_die(), dies(), fully_loaded(false), loaded_die_count(0),
+      abbreviations()
 {
 }
 
@@ -288,6 +295,12 @@ UnitData::get_cu_die_ref(Index offset) noexcept
   return DieReference{this, &get_dies()[offset.value()]};
 }
 
+static constexpr auto
+guess_die_count(auto unit_size) noexcept
+{
+  return unit_size / 24;
+}
+
 void
 UnitData::load_dies() noexcept
 {
@@ -310,6 +323,8 @@ UnitData::load_dies() noexcept
   parent_node.push_back(0);
   sibling_node.push_back(0);
   unit_die = DieMetaData::create_die(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
+  ASSERT(dies.empty(), "Expected dies to be empty, but wasn't! (cu=0x{:x})", section_offset());
+  dies.reserve(loaded_die_count > 0 ? loaded_die_count : guess_die_count(header().cu_size()));
   dies.push_back(unit_die);
   bool new_level = true;
   while (reader.has_more()) {
@@ -345,6 +360,7 @@ UnitData::load_dies() noexcept
 
     dies.push_back(new_entry);
   }
+  loaded_die_count = dies.size();
 }
 
 UnitData *
@@ -492,5 +508,11 @@ DieReference::read_attribute(Attribute attr) noexcept
     }
   }
   return std::nullopt;
+}
+
+const DieMetaData *
+IndexedDieReference::get_die() noexcept
+{
+  return &cu->get_dies()[die_index.value()];
 }
 } // namespace sym::dw

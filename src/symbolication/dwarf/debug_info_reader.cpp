@@ -1,5 +1,7 @@
 #include "debug_info_reader.h"
 #include "../objfile.h"
+#include "symbolication/dwarf/die.h"
+#include <optional>
 
 namespace sym::dw {
 
@@ -326,6 +328,21 @@ ObjectFile *
 UnitReader::objfile() const noexcept
 {
   return compilation_unit->get_objfile();
+}
+
+std::optional<AttributeValue>
+read_specific_attribute(UnitData *cu, const DieMetaData *die, Attribute attr) noexcept
+{
+  UnitReader reader{cu};
+  reader.seek_die(*die);
+  const auto &abbrs = cu->get_abbreviation(die->abbreviation_code);
+  for (const auto decl : abbrs.attributes) {
+    const auto v = read_attribute_value(reader, decl, abbrs.implicit_consts);
+    if (decl.name == attr) {
+      return v;
+    }
+  }
+  return std::nullopt;
 }
 
 AttributeValue
