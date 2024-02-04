@@ -2,6 +2,7 @@
 #include "../common.h"
 #include "block.h"
 #include "dwarf_defs.h"
+#include "utils/immutable.h"
 #include <cstdint>
 
 struct ElfSection;
@@ -83,14 +84,14 @@ class CFAStateMachine
   friend int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
 public:
-  CFAStateMachine(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
+  CFAStateMachine(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
 
-  CFAStateMachine(TraceeController *tc, TaskInfo *task, const RegisterValues &frame_below, const UnwindInfo *cfi,
+  CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frame_below, const UnwindInfo *cfi,
                   AddrPtr pc) noexcept;
   /* Initialization routine for the statemachine - it saves the current task register into the state machine
    * registers. */
-  static CFAStateMachine Init(TraceeController *tc, TaskInfo *task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
-  u64 compute_expression(std::span<const u8> bytes) const noexcept;
+  static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
+  u64 compute_expression(std::span<const u8> bytes) noexcept;
   // Reads the register rule of `reg_number` and resolves it's saved (or live, if it hasn't been modified / stored
   // somewhere in memory) contents
   u64 resolve_reg_contents(u64 reg_number, const RegisterValues &reg) noexcept;
@@ -101,8 +102,8 @@ public:
   void reset(const UnwindInfo *inf, const RegisterValues &frame_below, AddrPtr pc) noexcept;
 
 private:
-  TraceeController *tc;
-  TaskInfo *task;
+  TraceeController &tc;
+  TaskInfo &task;
   AddrPtr fde_pc;
   AddrPtr end_pc;
   CFA cfa;

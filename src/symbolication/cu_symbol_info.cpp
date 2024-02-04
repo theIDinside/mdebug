@@ -6,6 +6,8 @@
 #include "fmt/format.h"
 #include "fnsymbol.h"
 #include "objfile.h"
+#include "symbolication/dwarf_defs.h"
+#include "symbolication/dwarf_expressions.h"
 #include <array>
 #include <list>
 #include <utils/filter.h>
@@ -161,6 +163,7 @@ struct ResolveFnSymbolState
   AddrPtr low_pc = nullptr;
   AddrPtr high_pc = nullptr;
   u8 maybe_count = 0;
+  std::optional<std::span<const u8>> frame_base_description{};
 
   ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
 
@@ -181,18 +184,20 @@ struct ResolveFnSymbolState
   sym::FunctionSymbol
   complete(Elf *elf) const
   {
-    return sym::FunctionSymbol{.pc_start = elf->relocate_addr(low_pc),
-                               .pc_end_exclusive = elf->relocate_addr(high_pc),
-                               .member_of = "",
-                               .name = name.empty() ? mangled_name : name,
-                               .maybe_origin_dies = maybe_origin_dies,
-                               .decl_file = symtab};
+    return sym::FunctionSymbol{elf->relocate_addr(low_pc),
+                               elf->relocate_addr(high_pc),
+                               name.empty() ? mangled_name : name,
+                               "",
+                               maybe_origin_dies,
+                               *symtab,
+                               dw::FrameBaseExpression::Take(frame_base_description)};
   }
 
   void
   add_maybe_origin(dw::IndexedDieReference indexed) noexcept
   {
-    if (maybe_count < 3) {
+    if (maybe_count < 3 && !std::any_of(maybe_origin_dies.begin(), maybe_origin_dies.begin() + maybe_count,
+                                        [&](const auto &idr) { return idr == indexed; })) {
       maybe_origin_dies[maybe_count++] = indexed;
     }
   }
@@ -207,7 +212,7 @@ follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
   const auto &abbreviation = ref.cu->get_abbreviation(ref.die->abbreviation_code);
   if (!abbreviation.is_declaration)
     state.add_maybe_origin({.cu = ref.cu, .die_index = ref.cu->index_of(ref.die)});
-  std::vector<i64> implicit_consts{};
+
   for (const auto &attr : abbreviation.attributes) {
     auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
     switch (value.name) {
@@ -271,6 +276,9 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
     for (const auto &attr : abbreviation.attributes) {
       auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
       switch (value.name) {
+      case Attribute::DW_AT_frame_base:
+        state.frame_base_description = as_span(value.block());
+        break;
       case Attribute::DW_AT_name:
         state.name = value.string();
         break;
@@ -299,6 +307,7 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         break;
       }
     }
+
     state.add_maybe_origin(dw::IndexedDieReference{unit_data, unit_data->index_of(&die)});
     if (state.done(die_refs.empty())) {
       fns.emplace_back(state.complete(elf));

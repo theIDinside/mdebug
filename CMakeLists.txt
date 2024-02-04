@@ -81,6 +81,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/reader_funcs.h
   src/symbolication/dwarf/rnglists.cpp
   src/symbolication/dwarf/rnglists.h
+  src/symbolication/dwarf/typeread.cpp
+  src/symbolication/dwarf/typeread.h
   src/symbolication/elf_symbols.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h

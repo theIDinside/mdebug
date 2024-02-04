@@ -1,6 +1,7 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "supervisor.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
@@ -8,17 +9,16 @@
 #include "type.h"
 #include "utils/enumerator.h"
 #include "utils/worker_task.h"
-#include <algorithm>
-#include <optional>
+#include <symbolication/dwarf/typeread.h>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(), address_bounds(),
-      minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
-      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
-      lnp_headers(nullptr),
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(std::make_unique<TypeStorage>()),
+      address_bounds(), minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{},
+      unit_data_write_lock(), dwarf_units(), name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()),
+      parsed_lte_write_lock(), line_table(), lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), addr_cu_map()
+      comp_units(), addr_cu_map(), valobj_cache{}
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -320,6 +320,80 @@ ObjectFile::init_minsym_name_lookup() noexcept
   for (const auto &[index, sym] : utils::EnumerateView(min_fn_symbols_sorted)) {
     minimal_fn_symbols[sym.name] = Index{static_cast<u32>(index)};
   }
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_member_variables_of(TraceeController &tc, int ref) noexcept
+{
+  if (!valobj_cache.contains(ref)) {
+    DLOG("mdb", "WARNING expected variable reference {} had no data associated with it.", ref);
+    return {};
+  }
+
+  auto &value = valobj_cache[ref];
+  auto type = value->type();
+  if (!type->is_resolved()) {
+    sym::dw::TypeSymbolicationContext ts_ctx{*this, type};
+    ts_ctx.resolve_type();
+  }
+  std::vector<ui::dap::Variable> result{};
+  result.reserve(type->member_variables().size());
+
+  for (auto &mem : type->member_variables()) {
+    auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
+                                                     value->mem_contents_offset, value->take_memory_reference());
+    const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+    if (new_ref > 0)
+      valobj_cache.emplace(new_ref, member_value);
+    result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+  }
+  return result;
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_variables(sym::FrameVariableKind variables_kind, TraceeController &tc, sym::Frame &frame) noexcept
+{
+  std::vector<ui::dap::Variable> result{};
+  switch (variables_kind) {
+  case sym::FrameVariableKind::Arguments:
+    result.reserve(frame.frame_args_count());
+    break;
+  case sym::FrameVariableKind::Locals:
+    result.reserve(frame.frame_locals_count());
+    break;
+  }
+  for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
+    const auto ref = symbol.type->is_primitive() ? 0 : tc.new_var_id(frame.id());
+    auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
+                                                                         const_cast<sym::Symbol &>(symbol));
+    if (ref > 0)
+      valobj_cache.emplace(ref, value_object);
+    result.push_back(ui::dap::Variable{ref, std::move(value_object)});
+  }
+  return result;
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+{
+  if (!frame.full_symbol_info().is_resolved()) {
+    sym::dw::FunctionSymbolicationContext sym_ctx{this, frame};
+    sym_ctx.process_symbol_information();
+  }
+
+  switch (set) {
+  case sym::VariableSet::Arguments: {
+    return get_variables(sym::FrameVariableKind::Arguments, tc, frame);
+  }
+  case sym::VariableSet::Locals: {
+    return get_variables(sym::FrameVariableKind::Locals, tc, frame);
+  }
+  case sym::VariableSet::Static:
+  case sym::VariableSet::Global:
+    TODO("Static or global variables request not yet supported.");
+    break;
+  }
+  return {};
 }
 
 ObjectFile *

@@ -3,6 +3,10 @@
 #include "../../symbolication/callstack.h"
 #include <fmt/format.h>
 #include <string_view>
+
+struct TaskInfo;
+struct TraceeController;
+
 namespace ui::dap {
 
 struct SourceBreakpoint
@@ -85,6 +89,13 @@ struct StackTraceFormat
   bool includeAll : 1;
 };
 
+enum class ScopeType
+{
+  Arguments,
+  Locals,
+  Registers
+};
+
 struct Scope
 {
   std::string_view name;
@@ -99,29 +110,49 @@ enum class EntityType
   Variable
 };
 
-struct VariablesReference
+class VariablesReference
 {
+public:
+  VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
+                     EntityType type) noexcept;
+  VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent, EntityType type,
+                     ScopeType scopeType) noexcept;
+  VariablesReference &operator=(const VariablesReference &) = default;
+  VariablesReference &operator=(VariablesReference &&) = default;
+  VariablesReference(VariablesReference &&) = default;
+  VariablesReference(const VariablesReference &) = default;
+
   bool has_parent() const noexcept;
   std::optional<int> parent() const noexcept;
+  // NonNullPtr<ObjectFile> objectfile() const noexcept;
+
+  // actual variablesReference value
+  Immutable<int> id;
   // The execution context (Task) that this variable reference exists in
-  int thread_id;
+  Immutable<int> thread_id;
   // The frame id this variable reference exists in
-  int frame_id;
+  Immutable<int> frame_id;
   // (Possible) parent reference. A scope has a frame as it's parent. A variable has a scope or another variable as
   // it's parent. To walk up the hierarchy, one would read the variables reference map using the parent key
-  int parent_;
+  Immutable<int> parent_;
   // The reference type
-  EntityType type;
+  Immutable<EntityType> type;
+  // TODO(simon): INCREDIBLE HACK. We should refactor VariablesReferences. See "our own" implementation in Midas
+  // (though written in Python). That is a better solution than having to carry this extra field for a WHOLE BUNCH
+  // of variables references that aren't of "scope type"
+  Immutable<std::optional<ScopeType>> scope_type;
+
+  // The "symbol context" for this variable reference.
+  // Keep it a NonNullPtr<ObjectFile> instead of a reference, because we want pointer comparison for equality /
+  // identify. Because only 1 objectfile of some binary will *ever* be loaded into memory.
+  Immutable<NonNullPtr<ObjectFile>> object_file;
 };
 
 // DAP Result for `variables` request.
 struct Variable
 {
   int ref;
-  std::string_view name;
-  std::string_view type;
-  std::string value;
-  AddrPtr mem_ref;
+  SharedPtr<sym::Value> variable_value;
 };
 
 }; // namespace ui::dap
@@ -141,9 +172,14 @@ template <> struct formatter<ui::dap::Variable>
   auto
   format(const ui::dap::Variable &var, FormatContext &ctx) const
   {
+    const auto type_name = var.variable_value->type()->typename_to_str();
+    std::string n{};
+    std::copy(type_name.begin(), type_name.end(), std::back_inserter(n));
+
     return fmt::format_to(
-        ctx.out(), R"({{ "name": "{}", "value": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-        var.name, var.value, var.ref, var.mem_ref);
+        ctx.out(),
+        R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
+        var.variable_value->name, (*var.variable_value), n, var.ref, var.variable_value->address());
   }
 };
 

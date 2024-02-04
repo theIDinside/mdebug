@@ -18,7 +18,7 @@ class StopHandler;
 class ThreadProceedAction
 {
 public:
-  ThreadProceedAction(TraceeController *ctrl, TaskInfo *task) noexcept;
+  ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept;
   virtual void cancel() noexcept;
 
   // Abstract Interface
@@ -28,8 +28,8 @@ public:
   virtual void update_stepped() noexcept = 0;
 
 protected:
-  TraceeController *tc;
-  TaskInfo *task;
+  TraceeController &tc;
+  TaskInfo &task;
   bool cancelled;
 };
 
@@ -38,7 +38,7 @@ protected:
 class StopImmediately : public ThreadProceedAction
 {
 public:
-  StopImmediately(TraceeController *ctrl, TaskInfo *task, ui::dap::StoppedReason reason) noexcept;
+  StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
   ~StopImmediately() noexcept override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -53,7 +53,7 @@ private:
 class InstructionStep : public ThreadProceedAction
 {
 public:
-  InstructionStep(TraceeController *handler, TaskInfo *task, int steps) noexcept;
+  InstructionStep(TraceeController &ctrl, TaskInfo &task, int steps) noexcept;
   ~InstructionStep() override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -67,7 +67,7 @@ private:
 class LineStep : public ThreadProceedAction
 {
 public:
-  LineStep(TraceeController *handler, TaskInfo *task, int lines) noexcept;
+  LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept;
   ~LineStep() noexcept override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -86,7 +86,7 @@ private:
 class FinishFunction : public ThreadProceedAction
 {
 public:
-  FinishFunction(TraceeController *handler, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept;
+  FinishFunction(TraceeController &ctrl, TaskInfo &t, Breakpoint *bp, bool should_clean_up) noexcept;
   ~FinishFunction() noexcept override;
   bool has_completed() const noexcept override;
   void proceed() noexcept override;
@@ -117,15 +117,15 @@ action_name()
 class StopHandler
 {
 public:
-  StopHandler(TraceeController *tc) noexcept;
+  StopHandler(TraceeController &tc) noexcept;
   virtual ~StopHandler() = default;
 
   bool has_action_installed(TaskInfo *t) noexcept;
-  ThreadProceedAction *get_proceed_action(TaskInfo *t) noexcept;
-  void remove_action(TaskInfo *t) noexcept;
+  ThreadProceedAction *get_proceed_action(const TaskInfo &t) noexcept;
+  void remove_action(const TaskInfo &t) noexcept;
 
-  void handle_proceed(TaskInfo *info, bool should_resume) noexcept;
-  void handle_wait_event(TaskInfo *info) noexcept;
+  void handle_proceed(TaskInfo &info, bool should_resume) noexcept;
+  void handle_wait_event(TaskInfo &info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;
   constexpr void stop_on_exec() noexcept;
@@ -133,7 +133,7 @@ public:
 
   void set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept;
 
-  TraceeController *tc;
+  TraceeController &tc;
 
   bool stop_all;
   union
@@ -150,7 +150,7 @@ public:
   } event_settings;
 
 private:
-  bool process_waitstatus_for(TaskInfo *t) noexcept;
+  bool process_waitstatus_for(TaskInfo &t) noexcept;
   std::map<Tid, ThreadProceedAction *> proceed_actions;
 };
 } // namespace ptracestop

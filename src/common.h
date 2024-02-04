@@ -38,6 +38,9 @@ using i8 = std::int8_t;
 using Tid = pid_t;
 using Pid = pid_t;
 
+template <typename T> using SharedPtr = std::shared_ptr<T>;
+template <typename T> using UniquePtr = std::unique_ptr<T>;
+
 enum class DwFormat : std::uint8_t
 {
   DW32,
@@ -82,6 +85,8 @@ struct DataBlock
   const u8 *const ptr;
   u64 size;
 };
+
+std::span<const u8> as_span(DataBlock block) noexcept;
 
 template <class... T> constexpr bool always_false = false;
 template <size_t... T> constexpr bool always_false_i = false;

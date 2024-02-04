@@ -55,9 +55,10 @@ args(int a, float b, long c)
 }
 
 void
-lexical_block(bool should_take)
+lexical_block(const char *name, bool should_take)
 {
   int a = 0;
+  Structure structure{name, 1, 1.25};
   if (should_take) {
     a = 1;
     float b = 3.14;
@@ -66,12 +67,16 @@ lexical_block(bool should_take)
   } else {
     locals();
   }
+  {
+    int lastInt = 42;
+  }
+  int anotherMofo = 1337;
 }
 
 int
 main(int argc, const char **argv)
 {
-  lexical_block(true);
-  lexical_block(false);
+  lexical_block("Args", true);
+  lexical_block("Locals", false);
   structured("foo", 42, 0.39);
 }

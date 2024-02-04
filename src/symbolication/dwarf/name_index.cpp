@@ -1,5 +1,7 @@
 #include "name_index.h"
 #include "die.h"
+#include "symbolication/dwarf/debug_info_reader.h"
+#include <symbolication/objfile.h>
 
 namespace sym::dw {
 
@@ -46,10 +48,6 @@ NameIndex::NameIndex(std::string_view name) noexcept
 void
 NameIndex::add_name(std::string_view name, Index die_index, UnitData *cu) noexcept
 {
-  // default constructs a DieNameReference{nullptr, 0} when mapping[name] doesn't exist
-  // which DieNameReference::is_valid => false (i.e. mapping contains no `name` key)
-  DLOG("dwarf", "adding {} for die #{} in Compilation Unit at offset {}", name, die_index.value(),
-       cu->section_offset());
   auto &elem = mapping[name];
   if (elem.is_valid()) {
     if (elem.is_unique()) {
@@ -82,6 +80,37 @@ NameIndex::merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_ref
   DLOG("dwarf", "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
+  }
+}
+
+void
+NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_die_name_references) noexcept
+{
+  std::lock_guard lock(mutex);
+  DLOG("dwarf", "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
+  for (const auto &[name, idx, cu] : parsed_die_name_references) {
+    add_name(name, idx, cu);
+    const auto die_ref = cu->get_cu_die_ref(idx);
+    const auto this_die = die_ref.die;
+    if (this_die->tag == DwarfTag::DW_TAG_typedef || this_die->tag == DwarfTag::DW_TAG_array_type) {
+      continue;
+    }
+    const auto offs = Offset{die_ref.die->section_offset};
+    const auto possible_size = read_specific_attribute(cu, die_ref.die, Attribute::DW_AT_byte_size);
+    ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
+           cu->section_offset(), die_ref.die->section_offset);
+    auto type =
+        obj->types->emplace_type(offs, IndexedDieReference{cu, idx}, possible_size->unsigned_value(), name);
+    if (die_ref.die->tag == DwarfTag::DW_TAG_base_type) {
+      UnitReader reader{cu};
+      reader.seek_die(*die_ref.die);
+      auto attr = read_specific_attribute(cu, die_ref.die, Attribute::DW_AT_encoding);
+      ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
+             die_ref.die->section_offset);
+      auto encoding = attr.and_then(
+          [](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.unsigned_value())}; });
+      type->set_base_type_encoding(encoding.value());
+    }
   }
 }
 

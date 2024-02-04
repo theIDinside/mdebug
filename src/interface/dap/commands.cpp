@@ -3,6 +3,7 @@
 #include "fmt/format.h"
 #include "nlohmann/json_fwd.hpp"
 #include "parse_buffer.h"
+#include "symbolication/callstack.h"
 #include "types.h"
 #include <algorithm>
 #include <iterator>
@@ -12,6 +13,7 @@
 #include <string>
 #include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
+#include <symbolication/objfile.h>
 #include <tracer.h>
 #include <unistd.h>
 #include <unordered_set>
@@ -56,7 +58,7 @@ Pause::execute(Tracer *tc) noexcept
   if (task->is_stopped()) {
     return new PauseResponse{false, this};
   }
-  target->install_thread_proceed<ptracestop::StopImmediately>(task, StoppedReason::Pause);
+  target->install_thread_proceed<ptracestop::StopImmediately>(*task, StoppedReason::Pause);
   return new PauseResponse{true, this};
 }
 
@@ -82,7 +84,7 @@ Continue::execute(Tracer *tracer) noexcept
     } else {
       DLOG("mdb", "[request:continue]: continue single thread: {}", thread_id);
       auto t = target->get_task(thread_id);
-      target->resume_task(t, RunType::Continue);
+      target->resume_task(*t, RunType::Continue);
     }
   }
 
@@ -115,10 +117,10 @@ Next::execute(Tracer *tracer) noexcept
   switch (granularity) {
   case SteppingGranularity::Instruction:
     DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id, task->registers->rip);
-    target->install_thread_proceed<ptracestop::InstructionStep>(task, 1);
+    target->install_thread_proceed<ptracestop::InstructionStep>(*task, 1);
     break;
   case SteppingGranularity::Line:
-    target->install_thread_proceed<ptracestop::LineStep>(task, 1);
+    target->install_thread_proceed<ptracestop::LineStep>(*task, 1);
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -154,15 +156,15 @@ StepOut::execute(Tracer *tracer) noexcept
   ASSERT(resume_addrs.size() >= req.count, "Could not find frame info");
   auto rip = resume_addrs[1];
   if (auto bp = target->bps.get(rip); bp) {
-    bp->set_temporary_note(task, BpNote::FinishedFunction);
-    target->install_thread_proceed<ptracestop::FinishFunction>(task, bp, false);
+    bp->set_temporary_note(*task, BpNote::FinishedFunction);
+    target->install_thread_proceed<ptracestop::FinishFunction>(*task, bp, false);
     return new StepOutResponse{true, this};
   } else {
     bp = target->set_finish_fn_bp(rip);
     if (bp) {
       bp->set_note(BpNote::FinishedFunction);
       bp->add_stop_for(task->tid);
-      target->install_thread_proceed<ptracestop::FinishFunction>(task, bp, true);
+      target->install_thread_proceed<ptracestop::FinishFunction>(*task, bp, true);
       return new StepOutResponse{true, this};
     } else {
       return new StepOutResponse{false, this};
@@ -583,14 +585,13 @@ StackTrace::execute(Tracer *tracer) noexcept
   if (task == nullptr) {
     TODO(fmt::format("Handle not-found thread by threadId {}", threadId));
   }
-  auto &cfs = target->build_callframe_stack(task, CallStackRequest::full());
+  auto &cfs = target->build_callframe_stack(*task, CallStackRequest::full());
 
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.frames.size());
   for (const auto &frame : cfs.frames) {
     if (frame.frame_type() == sym::FrameType::Full) {
-      const auto full = frame.full_symbol_info();
-      const auto lt = full->decl_file->get_linetable().value_or(sym::dw::LineTable{});
+      const auto lt = frame.cu_line_table().value_or(sym::dw::LineTable{});
 
       auto line = 0;
       auto col = 0;
@@ -607,7 +608,7 @@ StackTrace::execute(Tracer *tracer) noexcept
           }
         }
         // todo(simon): Source {name, path} should consist of what it says, {name, path}, not {path, path}
-        const auto src = full->decl_file->name();
+        const auto src = frame.full_symbol_info().symbol_info()->name();
         stack_frames.push_back(StackFrame{.id = frame.id(),
                                           .name = frame.name().value_or("unknown"),
                                           .source = Source{.name = src, .path = src},
@@ -708,11 +709,37 @@ Variables::execute(Tracer *tracer) noexcept
 {
   DLOG("mdb", "[dap cmd]: variables command returns an empty list for now");
   auto current = tracer->get_current();
-  if (const auto varref = current->var_ref(this->var_ref); varref) {
-    return new VariablesResponse{true, this, {}};
-  } else {
-    return new VariablesResponse{false, this, {}};
+  if (auto varref = current->var_ref(var_ref); varref) {
+    auto frame = tracer->get_current()->frame(varref->frame_id);
+    ObjectFile *obj = varref->object_file.mut();
+    switch (varref->type) {
+    case EntityType::Scope: {
+      switch (varref->scope_type->value()) {
+      case ScopeType::Arguments: {
+        auto vars = obj->get_variables(current, *frame, sym::VariableSet::Arguments);
+        return new VariablesResponse{true, this, std::move(vars)};
+      }
+      case ScopeType::Locals: {
+        auto vars = obj->get_variables(current, *frame, sym::VariableSet::Locals);
+        return new VariablesResponse{true, this, std::move(vars)};
+      }
+      case ScopeType::Registers: {
+        TODO_FMT("get variables for registers not implemented");
+        break;
+      }
+      }
+    }
+    case EntityType::Variable: {
+      return new VariablesResponse{true, this, obj->get_member_variables_of(current, var_ref)};
+    }
+    case EntityType::Frame: {
+      TODO("This branch should return a success=false, and a message saying that the varRef id was wrong/faulty, "
+           "because var refs for frames don't contain variables (scopes do, or other variables do.)");
+    } break;
+    }
   }
+  // Variable reference `this->varref` could not be resolved.
+  return new VariablesResponse{false, this, {}};
 }
 
 VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept

@@ -15,7 +15,7 @@
 
 namespace ptracestop {
 
-ThreadProceedAction::ThreadProceedAction(TraceeController *ctrl, TaskInfo *task) noexcept
+ThreadProceedAction::ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept
     : tc(ctrl), task(task), cancelled(false)
 {
 }
@@ -26,7 +26,7 @@ ThreadProceedAction::cancel() noexcept
   cancelled = true;
 }
 
-FinishFunction::FinishFunction(TraceeController *ctrl, TaskInfo *t, Breakpoint *bp, bool should_clean_up) noexcept
+FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, Breakpoint *bp, bool should_clean_up) noexcept
     : ThreadProceedAction(ctrl, t), bp(bp), should_cleanup(should_clean_up)
 {
 }
@@ -35,16 +35,16 @@ FinishFunction::~FinishFunction() noexcept
 {
   if (should_cleanup) {
     DLOG("mdb", "Requesting delete of bp @ {}", bp->address);
-    tc->bps.remove_breakpoint(bp->address, bp->type());
+    tc.bps.remove_breakpoint(bp->address, bp->type());
   }
 }
 
 bool
 FinishFunction::has_completed() const noexcept
 {
-  if (task->bstat) {
-    DLOG("mdb", "finished function for {}", task->tid);
-    return task->bstat->bp_id == bp->id;
+  if (task.bstat) {
+    DLOG("mdb", "finished function for {}", task.tid);
+    return task.bstat->bp_id == bp->id;
   } else {
     return false;
   }
@@ -53,7 +53,7 @@ FinishFunction::has_completed() const noexcept
 void
 FinishFunction::proceed() noexcept
 {
-  tc->resume_task(task, RunType::Continue);
+  tc.resume_task(task, RunType::Continue);
 }
 
 void
@@ -62,7 +62,7 @@ FinishFunction::update_stepped() noexcept
   // essentially no-op.
 }
 
-InstructionStep::InstructionStep(TraceeController *ctrl, TaskInfo *thread, int steps) noexcept
+InstructionStep::InstructionStep(TraceeController &ctrl, TaskInfo &thread, int steps) noexcept
     : ThreadProceedAction(ctrl, thread), steps_requested(steps), steps_taken(0)
 {
 }
@@ -76,8 +76,8 @@ InstructionStep::has_completed() const noexcept
 void
 InstructionStep::proceed() noexcept
 {
-  DLOG("mdb", "[InstructionStep] stepping 1 instruction for {}", task->tid);
-  tc->resume_task(task, RunType::Step);
+  DLOG("mdb", "[InstructionStep] stepping 1 instruction for {}", task.tid);
+  tc.resume_task(task, RunType::Step);
 }
 
 void
@@ -89,19 +89,19 @@ InstructionStep::update_stepped() noexcept
 InstructionStep::~InstructionStep()
 {
   if (!cancelled) {
-    DLOG("mdb", "[inst step]: instruction step for {} ended", task->tid);
-    tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, "Instruction stepping finished", false);
+    DLOG("mdb", "[inst step]: instruction step for {} ended", task.tid);
+    tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Instruction stepping finished", false);
   }
 }
 
-LineStep::LineStep(TraceeController *ctrl, TaskInfo *task, int lines) noexcept
+LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
     : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false), resume_address(),
-      resumed_to_resume_addr(false), start_frame{-1, -1, nullptr, nullptr}, entry()
+      resumed_to_resume_addr(false), start_frame{task, static_cast<u32>(-1), -1, nullptr, nullptr}, entry()
 {
-  auto &callstack = tc->build_callframe_stack(task, CallStackRequest::partial(1));
+  auto &callstack = tc.build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
   const auto fpc = start_frame.pc();
-  ObjectFile *obj = tc->find_obj_by_pc(fpc);
+  ObjectFile *obj = tc.find_obj_by_pc(fpc);
   auto src_infos = obj->get_source_infos(fpc);
   bool found = false;
   // TODO(simon): Is it possible to design it such that a search here, determines the _exact_ src_info up front?
@@ -133,11 +133,11 @@ LineStep::LineStep(TraceeController *ctrl, TaskInfo *task, int lines) noexcept
 LineStep::~LineStep() noexcept
 {
   if (resume_address) {
-    tc->remove_breakpoint(*resume_address, BpType{}.Resume(true));
+    tc.remove_breakpoint(*resume_address, BpType{}.Resume(true));
   }
   if (!cancelled) {
-    DLOG("mdb", "[line step]: line step for {} ended", task->tid);
-    tc->emit_stepped_stop(LWP{.pid = tc->task_leader, .tid = task->tid}, "Line stepping finished", false);
+    DLOG("mdb", "[line step]: line step for {} ended", task.tid);
+    tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Line stepping finished", false);
   }
 }
 
@@ -151,22 +151,22 @@ void
 LineStep::proceed() noexcept
 {
   if (resume_address && !resumed_to_resume_addr) {
-    DLOG("mdb", "[line step]: continuing sub frame for {}", task->tid);
-    tc->resume_task(task, RunType::Continue);
+    DLOG("mdb", "[line step]: continuing sub frame for {}", task.tid);
+    tc.resume_task(task, RunType::Continue);
     resumed_to_resume_addr = true;
   } else {
     DLOG("mdb", "[line step]: no resume address set, keep istepping");
-    tc->resume_task(task, RunType::Step);
+    tc.resume_task(task, RunType::Step);
   }
 }
 
 void
 LineStep::update_stepped() noexcept
 {
-  const auto frame = tc->current_frame(task);
+  const auto frame = tc.current_frame(task);
   // if we're in the same frame, we single step
   if (frame.frame_type() == sym::FrameType::Full && same_symbol(frame, start_frame)) {
-    auto lt = frame.full_symbol_info()->decl_file->get_linetable();
+    auto lt = frame.cu_line_table();
     if (!lt) {
       is_done = true;
       return;
@@ -183,7 +183,7 @@ LineStep::update_stepped() noexcept
       is_done = true;
     }
   } else {
-    auto &callstack = tc->build_callframe_stack(task, CallStackRequest::full());
+    auto &callstack = tc.build_callframe_stack(task, CallStackRequest::full());
     const auto ret_addr = map<AddrPtr>(
         callstack.frames,
         [sf = start_frame](const auto &f) {
@@ -193,7 +193,7 @@ LineStep::update_stepped() noexcept
         },
         sym::resume_address);
     if (ret_addr) {
-      tc->set_tracer_bp(ret_addr->as<u64>(), BpType{}.Resume(true));
+      tc.set_tracer_bp(ret_addr->as<u64>(), BpType{}.Resume(true));
       resume_address = ret_addr;
     } else {
       DBG(DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
@@ -203,7 +203,7 @@ LineStep::update_stepped() noexcept
   }
 }
 
-StopHandler::StopHandler(TraceeController *tc) noexcept
+StopHandler::StopHandler(TraceeController &tc) noexcept
     : tc(tc), stop_all(true), event_settings{.bitset = 0x00}, // all OFF by default
       proceed_actions()
 {
@@ -216,22 +216,22 @@ StopHandler::has_action_installed(TaskInfo *t) noexcept
 }
 
 void
-StopHandler::remove_action(TaskInfo *t) noexcept
+StopHandler::remove_action(const TaskInfo &t) noexcept
 {
-  ASSERT(proceed_actions.contains(t->tid), "No proceed action installed for {}", t->tid);
-  ThreadProceedAction *ptr = proceed_actions[t->tid];
+  ASSERT(proceed_actions.contains(t.tid), "No proceed action installed for {}", t.tid);
+  ThreadProceedAction *ptr = proceed_actions[t.tid];
   delete ptr;
-  proceed_actions[t->tid] = nullptr;
+  proceed_actions[t.tid] = nullptr;
 }
 
 ThreadProceedAction *
-StopHandler::get_proceed_action(TaskInfo *t) noexcept
+StopHandler::get_proceed_action(const TaskInfo &t) noexcept
 {
-  return proceed_actions[t->tid];
+  return proceed_actions[t.tid];
 }
 
 void
-StopHandler::handle_proceed(TaskInfo *info, bool should_resume) noexcept
+StopHandler::handle_proceed(TaskInfo &info, bool should_resume) noexcept
 {
   auto proceed_action = get_proceed_action(info);
   if (proceed_action) {
@@ -241,73 +241,73 @@ StopHandler::handle_proceed(TaskInfo *info, bool should_resume) noexcept
     else
       proceed_action->proceed();
   } else {
-    DLOG("mdb", "[action]: {} will resume (should_resume={}) => {}", info->tid, should_resume,
-         should_resume && info->can_continue());
-    if (should_resume && info->can_continue()) {
-      tc->resume_task(info, RunType::Continue);
+    DLOG("mdb", "[action]: {} will resume (should_resume={}) => {}", info.tid, should_resume,
+         should_resume && info.can_continue());
+    if (should_resume && info.can_continue()) {
+      tc.resume_task(info, RunType::Continue);
     } else {
-      info->set_stop();
+      info.set_stop();
     }
   }
 }
 
 void
-StopHandler::handle_wait_event(TaskInfo *info) noexcept
+StopHandler::handle_wait_event(TaskInfo &info) noexcept
 {
   const auto should_resume = process_waitstatus_for(info);
-  if (tc->waiting_for_all_stopped) {
-    if (tc->all_stopped())
-      tc->notify_all_stopped();
+  if (tc.waiting_for_all_stopped) {
+    if (tc.all_stopped())
+      tc.notify_all_stopped();
   } else {
     handle_proceed(info, should_resume);
   }
-  tc->reaped_events();
+  tc.reaped_events();
 }
 
 static bool
-process_stopped(TraceeController *tc, TaskInfo *t)
+process_stopped(TraceeController &tc, TaskInfo &t)
 {
   bool should_resume = true;
   auto stepped_over_bp_id = 0;
-  if (t->bstat) {
-    stepped_over_bp_id = t->bstat->bp_id;
-    if (t->bstat->re_enable_bp) {
-      tc->bps.get_by_id(t->bstat->bp_id)->enable(t->tid);
+  if (t.bstat) {
+    stepped_over_bp_id = t.bstat->bp_id;
+    if (t.bstat->re_enable_bp) {
+      tc.bps.get_by_id(t.bstat->bp_id)->enable(t.tid);
     }
-    should_resume = t->bstat->should_resume;
-    t->bstat = std::nullopt;
+    should_resume = t.bstat->should_resume;
+    t.bstat = std::nullopt;
   }
-  const auto pc = tc->get_caching_pc(t);
+  const auto pc = tc.get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
-  auto bp = tc->bps.get(prev_pc_byte);
+  auto bp = tc.bps.get(prev_pc_byte);
   if (bp != nullptr && bp->id != stepped_over_bp_id) {
-    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t->tid, bp->id, prev_pc_byte, bp->type());
-    tc->set_pc(t, prev_pc_byte);
-    t->add_bpstat(bp);
+    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t.tid, bp->id, prev_pc_byte, bp->type());
+    tc.set_pc(t, prev_pc_byte);
+    t.add_bpstat(bp);
     should_resume = bp->on_hit(tc, t) == OnBpHit::Continue;
   }
 
-  DLOG("mdb", "[wait status]: Processed STOPPED for {}. should_resume={}, user_stopped={}", t->tid, should_resume,
-       bool{t->user_stopped});
-  const auto result = should_resume && !(t->user_stopped);
+  DLOG("mdb", "[wait status]: Processed STOPPED for {}. should_resume={}, user_stopped={}", t.tid, should_resume,
+       bool{t.user_stopped});
+  const auto result = should_resume && !(t.user_stopped);
   return result;
 }
 
 bool
-StopHandler::process_waitstatus_for(TaskInfo *t) noexcept
+StopHandler::process_waitstatus_for(TaskInfo &t) noexcept
 {
-  t->set_dirty();
-  t->stop_collected = true;
-  const auto ws = t->pending_wait_status();
+  t.set_dirty();
+  t.stop_collected = true;
+  const auto ws = t.pending_wait_status();
   switch (ws.ws) {
   case WaitStatusKind::Stopped: {
     return process_stopped(tc, t);
   } break;
   case WaitStatusKind::Execed:
-    tc->process_exec(t);
+    tc.process_exec(t);
     return !event_settings.exec_stop;
   case WaitStatusKind::Exited:
-    tc->reap_task(t);
+    tc.reap_task(t);
     return !event_settings.thread_exit_stop;
   case WaitStatusKind::Forked:
     TODO("WaitStatusKind::Forked");
@@ -319,12 +319,12 @@ StopHandler::process_waitstatus_for(TaskInfo *t) noexcept
     TODO("WaitStatusKind::VForkDone");
     break;
   case WaitStatusKind::Cloned: {
-    tc->process_clone(t);
+    tc.process_clone(t);
     return !event_settings.clone_stop;
   } break;
   case WaitStatusKind::Signalled:
-    tc->stop_all(nullptr);
-    tc->all_stopped_observer.add_notification<SignalStop>(tc, t->wait_status.signal, int{t->tid});
+    tc.stop_all(nullptr);
+    tc.all_stopped_observer.add_notification<SignalStop>(tc, t.wait_status.signal, int{t.tid});
     return false;
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
@@ -371,8 +371,8 @@ StopHandler::set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept
   action->proceed();
 }
 
-StopImmediately::StopImmediately(TraceeController *ctrl, TaskInfo *task, ui::dap::StoppedReason reason) noexcept
-    : ThreadProceedAction(ctrl, task), reason(reason), ptrace_session_is_seize(ctrl->ptrace_was_seized())
+StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept
+    : ThreadProceedAction(ctrl, task), reason(reason), ptrace_session_is_seize(ctrl.ptrace_was_seized())
 {
 }
 
@@ -381,7 +381,7 @@ StopImmediately::~StopImmediately() noexcept { notify_stopped(); }
 void
 StopImmediately::notify_stopped() noexcept
 {
-  tc->emit_stopped(task->tid, reason, "stopped", false, {});
+  tc.emit_stopped(task.tid, reason, "stopped", false, {});
 }
 
 bool
@@ -394,12 +394,12 @@ void
 StopImmediately::proceed() noexcept
 {
   if (ptrace_session_is_seize) {
-    if (ptrace(PTRACE_INTERRUPT, task->tid, nullptr, nullptr) == -1) {
-      PANIC(fmt::format("failed to interrupt (ptrace) task {}: {}", task->tid, strerror(errno)));
+    if (ptrace(PTRACE_INTERRUPT, task.tid, nullptr, nullptr) == -1) {
+      PANIC(fmt::format("failed to interrupt (ptrace) task {}: {}", task.tid, strerror(errno)));
     }
   } else {
-    if (tgkill(tc->task_leader, task->tid, SIGTRAP) == -1) {
-      PANIC(fmt::format("failed to interrupt (tgkill) task {}: {}", task->tid, strerror(errno)));
+    if (tgkill(tc.task_leader, task.tid, SIGTRAP) == -1) {
+      PANIC(fmt::format("failed to interrupt (tgkill) task {}: {}", task.tid, strerror(errno)));
     }
   }
 }

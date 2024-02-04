@@ -98,10 +98,10 @@ Tracer::get_controller(pid_t pid) noexcept
   return it->get();
 }
 
-TraceeController *
+NonNullPtr<TraceeController>
 Tracer::get_current() noexcept
 {
-  return current_target;
+  return NonNull(*current_target);
 }
 
 void
@@ -126,7 +126,7 @@ Tracer::handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept
   auto tc = get_controller(process_group);
   tc->set_pending_waitstatus(wait_res);
   auto task = tc->get_task(wait_res.tid);
-  tc->ptracestop_handler->handle_wait_event(task);
+  tc->ptracestop_handler->handle_wait_event(*task);
 }
 
 void
@@ -150,7 +150,7 @@ Tracer::wait_for_tracee_events(Tid target_pid) noexcept
     tc->new_task(wait.tid, true);
   }
   auto task = tc->register_task_waited(wait);
-  tc->ptracestop_handler->handle_wait_event(task);
+  tc->ptracestop_handler->handle_wait_event(*task);
 }
 
 void
@@ -255,7 +255,11 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
     add_target_set_current(res.pid, program, TargetSession::Launched);
     if (Tracer::use_traceme) {
       TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
-      get_current()->process_exec(get_current()->register_task_waited(twr));
+      auto task = get_current()->register_task_waited(twr);
+      if (task == nullptr) {
+        PANIC("Expected a task but could not find one for that wait status");
+      }
+      get_current()->process_exec(*task);
       dap->add_tty(res.fd);
     } else {
       for (;;) {
@@ -266,7 +270,11 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
             twr.ws.ws = WaitStatusKind::Execed;
             twr.tid = leader;
             DLOG("mdb", "Waited pid after exec! {}, previous: {}", twr.tid, res.pid);
-            get_current()->process_exec(get_current()->register_task_waited(twr));
+            auto task = get_current()->register_task_waited(twr);
+            if (task == nullptr) {
+              PANIC("Got no task from registered task wait");
+            }
+            get_current()->process_exec(*task);
             dap->add_tty(res.fd);
             break;
           }

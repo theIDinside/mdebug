@@ -8,8 +8,13 @@ template <typename T> class Immutable
   T data;
 
 public:
-  constexpr Immutable(T t) noexcept : data(t) {}
-  constexpr Immutable(T &&t) noexcept : data(std::move(t)) {}
+  constexpr Immutable(const T &t) noexcept : data(t) {}
+
+  constexpr Immutable(T &&t) noexcept
+    requires(!std::is_trivial_v<T> && !std::is_trivially_copyable_v<T>)
+      : data(std::move(t))
+  {
+  }
   constexpr Immutable(const Immutable &) noexcept = default;
   constexpr Immutable(Immutable &&other) noexcept = default;
   constexpr Immutable &operator=(const Immutable &) noexcept = default;
@@ -54,7 +59,23 @@ public:
   {
     return lhs <=> rhs.data;
   }
+
+  // An Immutable<T> member variable, might want to hand out a mutable reference to a sub object. This is
+  // absolutely fine.
+  constexpr T &
+  mut() noexcept
+  {
+    return data;
+  }
 };
+
+template <typename T, typename U>
+constexpr auto
+operator+(const Immutable<T> &l, const Immutable<U> &r)
+{
+  // explicit coercion.
+  return (*l) + (*r);
+}
 
 namespace fmt {
 
@@ -76,17 +97,9 @@ template <typename T> struct formatter<Immutable<T>>
 };
 } // namespace fmt
 
-template <typename T> class NonNullPtr
+template <typename T> struct NonNullPtr
 {
   T *ptr;
-
-public:
-  explicit NonNullPtr(T *ptr __attribute__((nonnull))) noexcept : ptr(ptr)
-  {
-    if (ptr == nullptr) {
-      PANIC("Explicit NonNullPtr was passed a nullptr, breaking the invariant.");
-    }
-  }
 
   T &
   operator*() noexcept
@@ -100,9 +113,30 @@ public:
     return ptr;
   }
 
+  [[gnu::returns_nonnull]] const T *
+  operator->() const noexcept
+  {
+    return ptr;
+  }
+
+  constexpr
+  operator T &() noexcept
+  {
+    return *ptr;
+  }
+
   [[gnu::returns_nonnull]]
   operator T *() noexcept
   {
     return ptr;
   }
+
+  [[gnu::returns_nonnull]] operator const T *() const noexcept { return ptr; }
 };
+
+template <typename U>
+static constexpr auto
+NonNull(U &ref) noexcept
+{
+  return NonNullPtr<U>{.ptr = &ref};
+}

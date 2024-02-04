@@ -67,14 +67,14 @@ Breakpoint::type() const noexcept
 }
 
 OnBpHit
-Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
+Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 {
   ++times_hit;
   switch (event_type()) {
   // even if underlying bp is both user and tracer bp; it always handles it prioritized as user.
   case BpEventType::Both: {
     if (bp_type.shared_object_load) {
-      tc->on_so_event();
+      tc.on_so_event();
     }
     [[fallthrough]];
   }
@@ -92,14 +92,14 @@ Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
     //   the reason for this complexity, is because if MDB wants to set a breakpoint it has to write to tracee
     //   memory, and for that to work reliably it must be stopped.
     if (!ignore_task(t)) {
-      tc->stop_all(t);
+      tc.stop_all(&t);
       switch (stop_notification(t)) {
       case BpNote::BreakpointHit: {
-        tc->all_stopped_observer.add_notification<BreakpointHit>(tc, int{id}, int{t->tid});
+        tc.all_stopped_observer.add_notification<BreakpointHit>(tc, id, t.tid);
         return OnBpHit::Stop;
       }
       case BpNote::FinishedFunction:
-        tc->all_stopped_observer.add_notification<Step>(tc, int{t->tid}, "Finished function");
+        tc.all_stopped_observer.add_notification<Step>(tc, t.tid, "Finished function");
         return OnBpHit::Stop;
       }
     }
@@ -107,7 +107,7 @@ Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
   }
   case BpEventType::TracerBreakpointHit: {
     if (bp_type.shared_object_load) {
-      tc->on_so_event();
+      tc.on_so_event();
     }
   } break;
   }
@@ -115,16 +115,16 @@ Breakpoint::on_hit(TraceeController *tc, TaskInfo *t) noexcept
 }
 
 bool
-Breakpoint::ignore_task(TaskInfo *t) noexcept
+Breakpoint::ignore_task(const TaskInfo &t) noexcept
 {
-  return stop_these && !stop_these->contains(t->tid);
+  return stop_these && !stop_these->contains(t.tid);
 }
 
 BpNote
-Breakpoint::stop_notification(TaskInfo *task) noexcept
+Breakpoint::stop_notification(const TaskInfo &task) noexcept
 {
   if (temporary_notes) {
-    auto i = temporary_notes->find(task->tid);
+    auto i = temporary_notes->find(task.tid);
     if (i != std::end(*temporary_notes)) {
       const auto n = i->second;
       temporary_notes->erase(i);
@@ -143,12 +143,12 @@ Breakpoint::set_note(BpNote bpnote) noexcept
 }
 
 void
-Breakpoint::set_temporary_note(TaskInfo *t, BpNote n) noexcept
+Breakpoint::set_temporary_note(const TaskInfo &t, BpNote n) noexcept
 {
   if (!temporary_notes) {
     temporary_notes = std::make_unique<TemporaryNotes>();
   }
-  temporary_notes->insert({t->tid, n});
+  temporary_notes->insert({t.tid, n});
 }
 
 void
@@ -184,22 +184,22 @@ BreakpointMap::insert(AddrPtr addr, u8 ins_byte, BpType type) noexcept
 }
 
 void
-BreakpointMap::clear(TraceeController *target, BpType type) noexcept
+BreakpointMap::clear(TraceeController &target, BpType type) noexcept
 {
-  std::erase_if(breakpoints, [t = this, target, type](Breakpoint &bp) {
+  std::erase_if(breakpoints, [&t = *this, &target, type](Breakpoint &bp) {
     if (bp.type() & type) {
       // if enabled, and if new setting, means that it's not a combination of any breakpoint types left, disable it
       // and erase it.
       if (bp.bp_type.source && type.source) {
-        t->source_breakpoints.erase(bp.id);
+        t.source_breakpoints.erase(bp.id);
       }
       if (bp.bp_type.function && type.function) {
-        t->fn_breakpoint_names.erase(bp.id);
+        t.fn_breakpoint_names.erase(bp.id);
       }
 
       // If flipping off all `type` bits in bp results in == 0, means it should be deleted.
       if (bp.enabled && !(bp.type() & type)) {
-        bp.disable(target->task_leader);
+        bp.disable(target.task_leader);
         return true;
       } else {
         // turn off all types passed in as `type`, keep the rest
