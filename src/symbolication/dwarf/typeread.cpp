@@ -1,5 +1,6 @@
 #include "typeread.h"
 #include "symbolication/dwarf/debug_info_reader.h"
+#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf_defs.h"
 #include <atomic>
 #include <symbolication/callstack.h>
@@ -7,7 +8,7 @@
 
 namespace sym::dw {
 
-FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile *obj, sym::Frame &frame) noexcept
+FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : obj(obj), fn_ctx(frame.maybe_get_full_symbols()),
       params{.entry_pc = fn_ctx->start_pc(), .end_pc = fn_ctx->end_pc(), .symbols = {}},
       lexicalBlockStack({params})
@@ -16,9 +17,9 @@ FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile *obj, sym:
 }
 
 NonNullPtr<Type>
-FunctionSymbolicationContext::process_type(UnitData *cu, const DieMetaData *die) noexcept
+FunctionSymbolicationContext::process_type(DieReference cu_die) noexcept
 {
-  auto t = obj->types->get_or_prepare_new_type(sym::dw::IndexedDieReference{cu, cu->index_of(die)});
+  auto t = obj.types->get_or_prepare_new_type(cu_die.as_indexed());
   if (t == nullptr) {
     PANIC("Failed to get or prepare new type to be realized");
   }
@@ -26,13 +27,13 @@ FunctionSymbolicationContext::process_type(UnitData *cu, const DieMetaData *die)
 }
 
 void
-FunctionSymbolicationContext::process_lexical_block(UnitData *cu, const DieMetaData *die) noexcept
+FunctionSymbolicationContext::process_lexical_block(DieReference cu_die) noexcept
 {
   AddrPtr low = nullptr, hi = nullptr;
   const auto block_seen = [&]() { return low != nullptr && hi != nullptr; };
-  auto &attr = cu->get_abbreviation(die->abbreviation_code);
-  UnitReader reader{cu};
-  reader.seek_die(*die);
+  auto &attr = cu_die.cu->get_abbreviation(cu_die.die->abbreviation_code);
+  UnitReader reader{cu_die.cu};
+  reader.seek_die(*cu_die.die);
 
   for (const auto abbr : attr.attributes) {
     auto value = read_attribute_value(reader, abbr, attr.implicit_consts);
@@ -49,53 +50,62 @@ FunctionSymbolicationContext::process_lexical_block(UnitData *cu, const DieMetaD
 }
 
 void
-FunctionSymbolicationContext::process_inlined(UnitData *cu, const DieMetaData *die) noexcept
+FunctionSymbolicationContext::process_inlined(DieReference cu_die) noexcept
 {
-  DLOG("mdb", "[symbolication]: process_inline not implemented (cu={}, die={})", cu->section_offset(),
-       die->section_offset);
+  DLOG("mdb", "[symbolication]: process_inline not implemented (cu={}, die={})", cu_die.cu->section_offset(),
+       cu_die.die->section_offset);
 }
 
 void
-FunctionSymbolicationContext::process_variable(UnitData *cu, const DieMetaData *die) noexcept
+FunctionSymbolicationContext::process_variable(DieReference cu_die) noexcept
 {
-  const auto location = read_specific_attribute(cu, die, Attribute::DW_AT_location);
-  const auto name = read_specific_attribute(cu, die, Attribute::DW_AT_name);
-  const auto type_id = read_specific_attribute(cu, die, Attribute::DW_AT_type);
-  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset,
-         to_str(die->tag));
+
+  const auto location = cu_die.read_attribute(Attribute::DW_AT_location);
+  const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
+  const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
+
+  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
-         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
-         die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset, to_str(die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset,
-         to_str(die->tag));
-  auto containing_cu = obj->get_cu_from_offset(type_id->unsigned_value());
-  ASSERT(cu != nullptr, "Failed to get compilation unit from DIE offset: 0x{:x}", type_id->unsigned_value());
-  auto referenced_die = containing_cu->get_die(type_id->unsigned_value());
-  auto type = process_type(containing_cu, referenced_die);
+         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
+         cu_die.die->section_offset);
+  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+  ASSERT(containing_cu_die_ref.has_value(), "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
+         type_id->unsigned_value());
+
+  auto type = process_type(containing_cu_die_ref.value());
   DataBlock dwarf_expr_block = location->block();
   std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
   lexicalBlockStack.back().symbols.emplace_back(type, SymbolLocation::Expression(expr), name->string());
 }
 
 void
-FunctionSymbolicationContext::process_formal_param(UnitData *cu, const DieMetaData *die) noexcept
+FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
 {
-  const auto location = read_specific_attribute(cu, die, Attribute::DW_AT_location);
-  const auto name = read_specific_attribute(cu, die, Attribute::DW_AT_name);
-  const auto type_id = read_specific_attribute(cu, die, Attribute::DW_AT_type);
-  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset,
-         to_str(die->tag));
+
+  const auto location = cu_die.read_attribute(Attribute::DW_AT_location);
+  const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
+  const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
+
+  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
-         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
-         die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset, to_str(die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset,
-         to_str(die->tag));
-  auto containing_cu = obj->get_cu_from_offset(type_id->unsigned_value());
-  ASSERT(cu != nullptr, "Failed to get compilation unit from DIE offset: 0x{:x}", type_id->unsigned_value());
-  auto referenced_die = containing_cu->get_die(type_id->unsigned_value());
-  auto type = process_type(containing_cu, referenced_die);
+         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
+         cu_die.die->section_offset);
+  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+
+  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+  ASSERT(containing_cu_die_ref.has_value(), "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
+         type_id->unsigned_value());
+
+  auto type = process_type(*containing_cu_die_ref);
   DataBlock dwarf_expr_block = location->block();
   std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
   params.symbols.emplace_back(type, SymbolLocation::Expression(expr), name->string());
@@ -130,20 +140,20 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
     while (die_it != parent) {
       switch (die_it->tag) {
       case DwarfTag::DW_TAG_formal_parameter: {
-        process_formal_param(cu_die_ref.cu, die_it);
+        process_formal_param(DieReference{cu_die_ref.cu, die_it});
         die_it = next(die_it, die_it->sibling());
       } break;
       case DwarfTag::DW_TAG_variable:
         ++frame_locals_count;
-        process_variable(cu_die_ref.cu, die_it);
+        process_variable(DieReference{cu_die_ref.cu, die_it});
         die_it = next(die_it, die_it->sibling());
         break;
       case DwarfTag::DW_TAG_lexical_block:
-        process_lexical_block(cu_die_ref.cu, die_it);
+        process_lexical_block(DieReference{cu_die_ref.cu, die_it});
         die_it = next(die_it, die_it->children());
         break;
       case DwarfTag::DW_TAG_inlined_subroutine:
-        process_inlined(cu_die_ref.cu, die_it);
+        process_inlined(DieReference{cu_die_ref.cu, die_it});
         die_it = next(die_it, die_it->children());
         break;
       default:
@@ -158,31 +168,34 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
 }
 
 TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type *type) noexcept
-    : obj(&object_file), current_type(type)
+    : obj(object_file), current_type(type)
 {
 }
 // Fully resolves `Type`
 
 void
-TypeSymbolicationContext::process_member_variable(UnitData *cu, const DieMetaData *die) noexcept
+TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 {
-  const auto location = read_specific_attribute(cu, die, Attribute::DW_AT_data_member_location);
-  const auto name = read_specific_attribute(cu, die, Attribute::DW_AT_name);
-  const auto type_id = read_specific_attribute(cu, die, Attribute::DW_AT_type);
-  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset,
-         to_str(die->tag));
-  ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
-         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
-         die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset, to_str(die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", die->section_offset,
-         to_str(die->tag));
-  auto containing_cu = obj->get_cu_from_offset(type_id->unsigned_value());
-  ASSERT(cu != nullptr, "Failed to get compilation unit from DIE offset: 0x{:x}", type_id->unsigned_value());
-  auto referenced_die = containing_cu->get_die(type_id->unsigned_value());
 
-  auto type = obj->types->get_or_prepare_new_type(
-      sym::dw::IndexedDieReference{containing_cu, cu->index_of(referenced_die)});
+  const auto location = cu_die.read_attribute(Attribute::DW_AT_data_member_location);
+  const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
+  const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
+
+  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+  ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
+         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
+         cu_die.die->section_offset);
+  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+         to_str(cu_die.die->tag));
+
+  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+  ASSERT(containing_cu_die_ref.has_value(),
+         "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
+
+  auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
   const auto member_offset = location->unsigned_value();
   this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
 }
@@ -198,7 +211,7 @@ TypeSymbolicationContext::resolve_type() noexcept
   while (die < end && die != nullptr) {
     switch (die->tag) {
     case DwarfTag::DW_TAG_member:
-      process_member_variable(cu, die);
+      process_member_variable(DieReference{cu, die});
       die = die->sibling();
       break;
     default:

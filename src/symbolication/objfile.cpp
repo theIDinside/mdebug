@@ -377,7 +377,7 @@ std::vector<ui::dap::Variable>
 ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
 {
   if (!frame.full_symbol_info().is_resolved()) {
-    sym::dw::FunctionSymbolicationContext sym_ctx{this, frame};
+    sym::dw::FunctionSymbolicationContext sym_ctx{*this, frame};
     sym_ctx.process_symbol_information();
   }
 

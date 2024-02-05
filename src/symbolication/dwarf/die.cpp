@@ -495,8 +495,14 @@ IndexedDieReference::valid() const noexcept
   return cu != nullptr;
 }
 
+IndexedDieReference
+DieReference::as_indexed() const noexcept
+{
+  return IndexedDieReference{.cu = cu, .die_index = cu->index_of(die)};
+}
+
 std::optional<AttributeValue>
-DieReference::read_attribute(Attribute attr) noexcept
+DieReference::read_attribute(Attribute attr) const noexcept
 {
   UnitReader reader{cu};
   const auto &attrs = cu->get_abbreviation(die->abbreviation_code);

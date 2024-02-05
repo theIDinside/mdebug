@@ -166,7 +166,6 @@ IndexingTask::execute_task() noexcept
         if (!addr_representable)
           break;
         const bool is_mem_fn = false;
-        // = DIEReference(comp_unit, &die).is_member_fn();
         if (!name.empty()) {
           if (is_mem_fn) {
             methods.push_back({name, die_index, comp_unit});

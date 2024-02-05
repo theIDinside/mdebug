@@ -96,7 +96,7 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
       continue;
     }
     const auto offs = Offset{die_ref.die->section_offset};
-    const auto possible_size = read_specific_attribute(cu, die_ref.die, Attribute::DW_AT_byte_size);
+    const auto possible_size = die_ref.read_attribute(Attribute::DW_AT_byte_size);
     ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
            cu->section_offset(), die_ref.die->section_offset);
     auto type =
@@ -104,7 +104,7 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
     if (die_ref.die->tag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{cu};
       reader.seek_die(*die_ref.die);
-      auto attr = read_specific_attribute(cu, die_ref.die, Attribute::DW_AT_encoding);
+      auto attr = die_ref.read_attribute(Attribute::DW_AT_encoding);
       ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
              die_ref.die->section_offset);
       auto encoding = attr.and_then(

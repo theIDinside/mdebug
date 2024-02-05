@@ -330,21 +330,6 @@ UnitReader::objfile() const noexcept
   return compilation_unit->get_objfile();
 }
 
-std::optional<AttributeValue>
-read_specific_attribute(UnitData *cu, const DieMetaData *die, Attribute attr) noexcept
-{
-  UnitReader reader{cu};
-  reader.seek_die(*die);
-  const auto &abbrs = cu->get_abbreviation(die->abbreviation_code);
-  for (const auto decl : abbrs.attributes) {
-    const auto v = read_attribute_value(reader, decl, abbrs.implicit_consts);
-    if (decl.name == attr) {
-      return v;
-    }
-  }
-  return std::nullopt;
-}
-
 AttributeValue
 read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicit_consts) noexcept
 {

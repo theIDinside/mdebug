@@ -2,6 +2,7 @@
 #include "common.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"
+#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf_expressions.h"
 #include "utils/immutable.h"
 #include <supervisor.h>
@@ -104,39 +105,36 @@ static constexpr auto REFERENCE_SIZE = 8u;
 sym::Type *
 TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexcept
 {
-  const auto this_die = die_ref.get_die();
-  const auto type_id = this_die->section_offset;
+  const sym::dw::DieReference this_ref{.cu = die_ref.cu, .die = die_ref.get_die()};
+  const auto type_id = this_ref.die->section_offset;
   if (types.contains(type_id)) {
     auto t = types[type_id];
     return t;
   }
 
-  if (is_not_complete_type_die(this_die)) {
-    const auto attr = sym::dw::read_specific_attribute(die_ref.cu, die_ref.get_die(), Attribute::DW_AT_type);
-    const auto containing_cu = die_ref.cu->get_objfile()->get_cu_from_offset(attr->unsigned_value());
-    const auto die = containing_cu->get_die(attr->unsigned_value());
-    auto base_type =
-        get_or_prepare_new_type(sym::dw::IndexedDieReference{containing_cu, containing_cu->index_of(die)});
+  if (is_not_complete_type_die(this_ref.die)) {
+    const auto attr = this_ref.read_attribute(Attribute::DW_AT_type);
+    const auto containing_cu_die = die_ref.cu->get_objfile()->get_die_reference(attr->unsigned_value()).value();
+    auto base_type = get_or_prepare_new_type(containing_cu_die.as_indexed());
     auto size = 0u;
 
     // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
     // are 8 bytes large
-    if (sym::is_reference_like(this_die) || base_type->is_reference()) {
+    if (sym::is_reference_like(this_ref.die) || base_type->is_reference()) {
       size = REFERENCE_SIZE;
     } else {
       size = base_type->size();
     }
     auto type = new sym::Type{this, die_ref, size, base_type};
-    types[this_die->section_offset] = type;
+    types[this_ref.die->section_offset] = type;
     return type;
   } else {
-    const auto name = sym::dw::read_specific_attribute(die_ref.cu, this_die, Attribute::DW_AT_name);
+    const auto name = this_ref.read_attribute(Attribute::DW_AT_name);
     ASSERT(name, "Expected die 0x{:x} to have a name attribute in it's abbreviation declaration.",
            die_ref.get_die()->section_offset);
-    const u32 sz =
-        sym::dw::read_specific_attribute(die_ref.cu, this_die, Attribute::DW_AT_byte_size)->unsigned_value();
+    const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
     auto type = new sym::Type{this, die_ref, sz, name->string()};
-    types[this_die->section_offset] = type;
+    types[this_ref.die->section_offset] = type;
     return type;
   }
 }

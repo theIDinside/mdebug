@@ -142,6 +142,7 @@ public:
   Index index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
   const DieMetaData *get_die(u64 offset) noexcept;
+
   DieReference get_cu_die_ref(u64 offset) noexcept;
   DieReference get_cu_die_ref(Index offset) noexcept;
 
@@ -158,38 +159,19 @@ private:
   AbbreviationInfo::Table abbreviations;
 };
 
-struct AddrRangeToCu
-{
-  AddressRange range;
-  UnitData *data;
-};
-
-/** Interface to read, parse/resolve information described by a DWARF "debug information entry". It uses the DIE
- * metadata to find where in memory we need to read from together with what's found in UnitData to finally
- * understand that memory we read from. */
-class DebugInfoEntry
-{
-public:
-  DebugInfoEntry(DieMetaData *die, UnitData *data) noexcept;
-  bool has_children() const noexcept;
-  UnitData *get_cu_data() const noexcept;
-  DieMetaData *get_die() const noexcept;
-
-private:
-  DieMetaData *die;
-  UnitData *unit;
-};
-
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
 std::vector<UnitHeader> read_unit_headers(ObjectFile *obj) noexcept;
+
+struct IndexedDieReference;
 
 struct DieReference
 {
   UnitData *cu;
   const DieMetaData *die;
   bool valid() const noexcept;
-  std::optional<AttributeValue> read_attribute(Attribute attr) noexcept;
+  IndexedDieReference as_indexed() const noexcept;
+  std::optional<AttributeValue> read_attribute(Attribute attr) const noexcept;
 };
 
 struct IndexedDieReference
