@@ -40,9 +40,17 @@ main(int argc, const char **argv)
   degF = convert_celsius_to_fahrenheit(degC);
   printf("%.0f degrees Celsius equals %.0f degrees Fahrenheit\n", degC, degF);
 
+  auto myLambda = [&degF]() {
+    printf("weirdest shit in the world is that C++ does not give me a type name. What kind of odd ball crazy shit "
+           "is that?\n");
+  };
+
+  myLambda();
+
   ThreadPool thread_pool;
 
   for (auto i = 0; i < 8; i++) {
+
     thread_pool.push_back(std::thread{[i, &foo, &spin_lock]() {
       pthread_setname_np(pthread_self(), thread_names[i].data());
       auto pos = i / 2 % 4;

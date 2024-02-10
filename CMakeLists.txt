@@ -211,7 +211,7 @@ if(NODEJS)
   set(threadExited "see9ThreadExits")
   set(moduleEvent "6modules")
   set(threads "threads")
-  set(variables "baseTypes")
+  set(variables "scopeLocalsTest" "scopeArgsTest" "membersOfVariableTest" "inConstructor" "returnValue")
   set(finish "finish")
   set(pause "pause")
 
