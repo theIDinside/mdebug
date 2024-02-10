@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "symbolication/dwarf_defs.h"
 #include <symbolication/block.h>
 #include <symbolication/dwarf.h>
 #include <utils/indexing.h>
@@ -81,6 +82,15 @@ struct DieMetaData
                                 u64 next_sibling) noexcept;
 };
 
+template <DwarfTag... tags>
+constexpr bool
+maybe_null_any_of(const DieMetaData *die)
+{
+  if (die == nullptr)
+    return false;
+  return ((die->tag == tags) || ...);
+}
+
 class UnitHeader
 {
 public:
@@ -145,9 +155,13 @@ public:
 
   DieReference get_cu_die_ref(u64 offset) noexcept;
   DieReference get_cu_die_ref(Index offset) noexcept;
+  void take_reference() noexcept;
 
 private:
   void load_dies() noexcept;
+  // Users don't call release explicitly. They request a `clear_die_metadata` instead.
+  // TODO(simon): Wrap this functionality in it's own type.
+  void release_reference() noexcept;
   ObjectFile *objfile;
   UnitHeader unit_header;
   // The Compilation unit die (i.e. the die with DW_TAG_compile_unit; also the first DIE found in `dies` - but as
@@ -157,6 +171,8 @@ private:
   bool fully_loaded;
   u32 loaded_die_count;
   AbbreviationInfo::Table abbreviations;
+  i32 explicit_references;
+  mutable std::mutex load_dies_mutex;
 };
 
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */

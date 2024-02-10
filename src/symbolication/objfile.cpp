@@ -13,7 +13,7 @@
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(std::make_unique<TypeStorage>()),
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(std::make_unique<TypeStorage>(*this)),
       address_bounds(), minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{},
       unit_data_write_lock(), dwarf_units(), name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()),
       parsed_lte_write_lock(), line_table(), lnp_headers(nullptr),

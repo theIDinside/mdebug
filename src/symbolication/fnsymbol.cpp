@@ -2,12 +2,21 @@
 #include "symbolication/dwarf_expressions.h"
 namespace sym {
 
+ReturnValueClass
+determine_ret_class(sym::Type *type) noexcept
+{
+  if (type->size() > 16) {
+    return ReturnValueClass::ImplicitPointerToMemory;
+  }
+  return ReturnValueClass::Unknown;
+}
+
 FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
-                               std::array<dw::IndexedDieReference, 3> maybe_origin,
+                               sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
                                SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr) noexcept
     : decl_file(NonNull(decl_file)), formal_parameters(start, end, {}), function_body_variables(),
-      maybe_origin_dies(maybe_origin), framebase_expr(fb_expr), pc_start(start), pc_end_exclusive(end),
-      member_of(member_of), name(name)
+      maybe_origin_dies(maybe_origin), framebase_expr(fb_expr), return_type(return_type), pc_start(start),
+      pc_end_exclusive(end), member_of(member_of), name(name)
 {
 }
 
@@ -15,32 +24,9 @@ FunctionSymbol::FunctionSymbol(FunctionSymbol &&fn) noexcept
     : decl_file(fn.decl_file), formal_parameters(std::move(fn.formal_parameters)),
       function_body_variables(std::move(fn.function_body_variables)),
       maybe_origin_dies(std::move(fn.maybe_origin_dies)), framebase_expr(std::move(fn.framebase_expr)),
-      pc_start(fn.pc_start), pc_end_exclusive(fn.pc_end_exclusive), member_of(std::move(fn.member_of)),
-      name(std::move(fn.name))
+      return_type(fn.return_type), pc_start(fn.pc_start), pc_end_exclusive(fn.pc_end_exclusive),
+      member_of(std::move(fn.member_of)), name(std::move(fn.name))
 {
-}
-
-void
-FunctionSymbol::resolve_symbols() noexcept
-{
-  if (fully_parsed)
-    return;
-  fully_parsed = true;
-  TODO("resolve_symbols not implemented");
-}
-
-const SymbolBlock &
-FunctionSymbol::get_fn_parameters() noexcept
-{
-  resolve_symbols();
-  return formal_parameters;
-}
-
-std::span<const SymbolBlock>
-FunctionSymbol::get_function_variables() noexcept
-{
-  resolve_symbols();
-  return function_body_variables;
 }
 
 std::string

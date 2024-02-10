@@ -28,9 +28,10 @@ class TypeStorage
 {
   std::mutex m;
   std::unordered_map<u64, sym::Type *> types;
+  ObjectFile &obj;
 
 public:
-  TypeStorage() noexcept;
+  TypeStorage(ObjectFile &obj) noexcept;
   ~TypeStorage() noexcept;
 
   /** Search for a type that has type_id with the section offset specified by die_ref (indirectly, one must

@@ -13,6 +13,16 @@ class SourceFileSymbolInfo;
 
 struct ResolveFnSymbolState;
 
+enum class ReturnValueClass
+{
+  ImplicitPointerToMemory,
+  RaxRdxPair,
+  XmmRaxRdx,
+  Unknown
+};
+
+ReturnValueClass determine_ret_class(sym::Type *type) noexcept;
+
 class FunctionSymbol
 {
 public:
@@ -32,13 +42,12 @@ private:
   std::vector<SymbolBlock> function_body_variables;
   Immutable<std::array<dw::IndexedDieReference, 3>> maybe_origin_dies;
   dw::FrameBaseExpression framebase_expr;
+  sym::Type *return_type;
 
   // Private member functions
   FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
-                 std::array<dw::IndexedDieReference, 3> maybe_origin, SourceFileSymbolInfo &decl_file,
-                 dw::FrameBaseExpression fb_expr) noexcept;
-
-  void resolve_symbols() noexcept;
+                 sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
+                 SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr) noexcept;
 
 public:
   // Only really used when constructing the full function symbols for a compilation unit, as std::vector grows, it
@@ -51,9 +60,6 @@ public:
   Immutable<AddrPtr> pc_end_exclusive;
   Immutable<std::string_view> member_of;
   Immutable<std::string_view> name;
-
-  const SymbolBlock &get_fn_parameters() noexcept;
-  std::span<const SymbolBlock> get_function_variables() noexcept;
 
   std::string build_full_name() const noexcept;
   AddrPtr start_pc() const noexcept;

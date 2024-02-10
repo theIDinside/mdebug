@@ -1,5 +1,6 @@
 #include "die.h"
 #include "debug_info_reader.h"
+#include <string_view>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
@@ -184,7 +185,7 @@ UnitHeader::cu_size() const noexcept
 
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
     : objfile(owning_objfile), unit_header(header), unit_die(), dies(), fully_loaded(false), loaded_die_count(0),
-      abbreviations()
+      abbreviations(), explicit_references(0), load_dies_mutex{}
 {
 }
 
@@ -206,6 +207,7 @@ UnitData::get_abbreviation(u32 abbreviation_code) const noexcept
 bool
 UnitData::has_loaded_dies() const noexcept
 {
+  std::lock_guard lock(load_dies_mutex);
   return fully_loaded;
 }
 
@@ -219,10 +221,14 @@ UnitData::get_dies() noexcept
 void
 UnitData::clear_die_metadata() noexcept
 {
-  dies.clear();
-  // actually release the memory. Otherwise, what's the point?
-  dies.shrink_to_fit();
-  fully_loaded = false;
+  release_reference();
+  std::lock_guard lock(load_dies_mutex);
+  if (explicit_references <= 0) {
+    dies.clear();
+    // actually release the memory. Otherwise, what's the point?
+    dies.shrink_to_fit();
+    fully_loaded = false;
+  }
 }
 
 ObjectFile *
@@ -295,6 +301,21 @@ UnitData::get_cu_die_ref(Index offset) noexcept
   return DieReference{this, &get_dies()[offset.value()]};
 }
 
+void
+UnitData::take_reference() noexcept
+{
+  std::lock_guard lock(load_dies_mutex);
+  explicit_references += 1;
+}
+
+void
+UnitData::release_reference() noexcept
+{
+  ASSERT(explicit_references > 0, "Explicitly taken references can not be 0 when we release a reference.");
+  std::lock_guard lock(load_dies_mutex);
+  explicit_references -= 1;
+}
+
 static constexpr auto
 guess_die_count(auto unit_size) noexcept
 {
@@ -304,7 +325,8 @@ guess_die_count(auto unit_size) noexcept
 void
 UnitData::load_dies() noexcept
 {
-  if (has_loaded_dies())
+  std::lock_guard lock(load_dies_mutex);
+  if (fully_loaded)
     return;
   fully_loaded = true;
   UnitReader reader{this};
@@ -394,6 +416,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
           info.is_declaration = true;
         }
       }
+
       if (abbr.form == AttributeForm::DW_FORM_implicit_const) {
         ASSERT((u8)info.implicit_consts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
         abbr.IMPLICIT_CONST_INDEX = info.implicit_consts.size();

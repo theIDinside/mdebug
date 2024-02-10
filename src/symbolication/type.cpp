@@ -80,6 +80,7 @@ sym::to_type_modifier_will_panic(DwarfTag tag) noexcept
   case DwarfTag::DW_TAG_structure_type:
   case DwarfTag::DW_TAG_enumeration_type:
   case DwarfTag::DW_TAG_union_type:
+  case DwarfTag::DW_TAG_typedef:
     return sym::Type::Modifier::None;
   default:
     break;
@@ -87,7 +88,7 @@ sym::to_type_modifier_will_panic(DwarfTag tag) noexcept
   PANIC(fmt::format("DwarfTag not convertable to Type::Modifier: {}", to_str(tag)));
 }
 
-TypeStorage::TypeStorage() noexcept : m(), types() {}
+TypeStorage::TypeStorage(ObjectFile &obj) noexcept : m(), types(), obj(obj) {}
 
 TypeStorage::~TypeStorage() noexcept
 {
@@ -129,11 +130,13 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     types[this_ref.die->section_offset] = type;
     return type;
   } else {
-    const auto name = this_ref.read_attribute(Attribute::DW_AT_name);
-    ASSERT(name, "Expected die 0x{:x} to have a name attribute in it's abbreviation declaration.",
-           die_ref.get_die()->section_offset);
+    // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
+    // Like come on dog. Give it a bogus name, whatever really. But nothing?
+    const auto name = this_ref.read_attribute(Attribute::DW_AT_name)
+                          .transform([](auto v) { return v.string(); })
+                          .value_or("lambda");
     const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
-    auto type = new sym::Type{this, die_ref, sz, name->string()};
+    auto type = new sym::Type{this, die_ref, sz, name};
     types[this_ref.die->section_offset] = type;
     return type;
   }

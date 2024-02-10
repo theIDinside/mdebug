@@ -164,6 +164,7 @@ struct ResolveFnSymbolState
   AddrPtr high_pc = nullptr;
   u8 maybe_count = 0;
   std::optional<std::span<const u8>> frame_base_description{};
+  sym::Type *ret_type{nullptr};
 
   ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
 
@@ -187,7 +188,8 @@ struct ResolveFnSymbolState
     return sym::FunctionSymbol{elf->relocate_addr(low_pc),
                                elf->relocate_addr(high_pc),
                                name.empty() ? mangled_name : name,
-                               "",
+                               namespace_ish,
+                               ret_type,
                                maybe_origin_dies,
                                *symtab,
                                dw::FrameBaseExpression::Take(frame_base_description)};
@@ -212,6 +214,14 @@ follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
   const auto &abbreviation = ref.cu->get_abbreviation(ref.die->abbreviation_code);
   if (!abbreviation.is_declaration)
     state.add_maybe_origin({.cu = ref.cu, .die_index = ref.cu->index_of(ref.die)});
+
+  if (const auto parent = ref.die->parent();
+      maybe_null_any_of<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
+    dw::DieReference parent_ref{.cu = ref.cu, .die = parent};
+    if (auto class_name = parent_ref.read_attribute(Attribute::DW_AT_name); class_name) {
+      state.namespace_ish = class_name->string();
+    }
+  }
 
   for (const auto &attr : abbreviation.attributes) {
     auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
@@ -302,7 +312,15 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         else {
           DLOG("mdb", "Could not find die reference");
         }
-      } break;
+        break;
+      }
+      case Attribute::DW_AT_type: {
+        const auto type_id = value.unsigned_value();
+        auto obj = unit_data->get_objfile();
+        const auto ref = obj->get_die_reference(type_id);
+        state.ret_type = obj->types->get_or_prepare_new_type(ref->as_indexed());
+        break;
+      }
       default:
         break;
       }

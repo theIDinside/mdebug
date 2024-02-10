@@ -8,6 +8,7 @@
 #include "../symbolication/objfile.h"
 #include "../utils/enumerator.h"
 #include "../utils/thread_pool.h"
+#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/rnglists.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_defs.h"
@@ -36,6 +37,65 @@ IndexingTask::create_jobs_for(ObjectFile *obj)
   return result;
 }
 
+template <Attribute... Attrs>
+std::vector<AttributeValue>
+read_values(UnitData &cu, const DieMetaData &die) noexcept
+{
+  UnitReader reader{&cu};
+  const auto &attrs = cu.get_abbreviation(die.abbreviation_code);
+  reader.seek_die(die);
+  std::vector<AttributeValue> attribute_values{};
+  for (auto attribute : attrs.attributes) {
+    const auto value = read_attribute_value(reader, attribute, attrs.implicit_consts);
+    if (((value.name == Attrs) || ...)) {
+      attribute_values.push_back(value);
+    }
+  }
+  return attribute_values;
+}
+
+static auto
+is_member_fn(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu, const DieMetaData &die) noexcept
+    -> std::tuple<bool, std::optional<std::string_view>>
+{
+  ASSERT((maybe_null_any_of<DwarfTag::DW_TAG_subprogram, DwarfTag::DW_TAG_inlined_subroutine>(&die)),
+         "Asking if die is a member function die when it's not a subprogram die doesn't make sense. "
+         "die=0x{:x}, "
+         "tag={}",
+         die.section_offset, to_str(die.tag));
+
+  UnitReader reader{&cu};
+  reader.seek_die(die);
+
+  auto parent_die = die.parent();
+  using enum DwarfTag;
+  const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(parent_die);
+  const auto attrs = read_values<Attribute::DW_AT_abstract_origin, Attribute::DW_AT_specification>(cu, die);
+  if (!attrs.empty()) {
+    for (const auto &value : attrs) {
+      const auto offset = value.unsigned_value();
+      auto that_ref = cu.get_objfile()->get_die_reference(offset).value();
+
+      const auto not_already_added = [id = that_ref.cu->section_offset()](auto cu) {
+        return cu->section_offset() != id;
+      };
+
+      if (that_ref.cu != &cu && std::ranges::all_of(followed_references, not_already_added)) {
+        that_ref.cu->take_reference();
+        followed_references.push_back(that_ref.cu);
+      }
+      const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(that_ref.die->parent());
+      const auto name =
+          that_ref.read_attribute(Attribute::DW_AT_name).transform([](auto attr) { return attr.string(); });
+      if (result) {
+        const auto result = std::make_tuple(true, name);
+        return result;
+      }
+    }
+  }
+  return std::make_tuple(result, std::nullopt);
+}
+
 void
 IndexingTask::execute_task() noexcept
 {
@@ -47,14 +107,20 @@ IndexingTask::execute_task() noexcept
   NameSet namespaces;
 
   std::vector<sym::SourceFileSymbolInfo> initialized_cus{};
+  std::vector<sym::dw::UnitData *> followed_references{};
 
   ScopedDefer clear_metadata{[&]() {
     for (auto &comp_unit : cus_to_index) {
       comp_unit->clear_die_metadata();
     }
+
+    for (auto cu : followed_references) {
+      cu->clear_die_metadata();
+    }
   }};
 
   for (auto comp_unit : cus_to_index) {
+    comp_unit->take_reference();
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->get_dies();
     if (dies.front().tag == DwarfTag::DW_TAG_compile_unit) {
@@ -92,10 +158,8 @@ IndexingTask::execute_task() noexcept
         // skip other dies
         continue;
       }
-
-      // const auto resolved_attributes = unit_data->get_resolved_attributes(die.abbrev_code);
-
       const auto &abb = comp_unit->get_abbreviation(die.abbreviation_code);
+
       std::string_view name;
       std::string_view mangled_name;
       auto addr_representable = false;
@@ -165,12 +229,13 @@ IndexingTask::execute_task() noexcept
       case DwarfTag::DW_TAG_subprogram: {
         if (!addr_representable)
           break;
-        const bool is_mem_fn = false;
-        if (!name.empty()) {
+
+        const auto &[is_mem_fn, resolved_name] = is_member_fn(followed_references, *comp_unit, die);
+        if (!name.empty() || resolved_name.has_value()) {
           if (is_mem_fn) {
-            methods.push_back({name, die_index, comp_unit});
+            methods.push_back({resolved_name.value_or(name), die_index, comp_unit});
           } else {
-            free_functions.push_back({name, die_index, comp_unit});
+            free_functions.push_back({resolved_name.value_or(name), die_index, comp_unit});
           }
         }
 
@@ -301,5 +366,4 @@ IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const Di
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
   return sym::PartialCompilationUnitSymbolInfo{partial_cu};
 }
-
 }; // namespace sym::dw
