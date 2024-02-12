@@ -71,8 +71,14 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
  * @param { string } expectedFrameName - frame name we expect to see on first stop.
  * @returns { { object[], object[], object[] } }
  */
-async function launchToGetFramesAndScopes(debugAdapter, filePath, bpIdentifiers, expectedFrameName) {
-  await debugAdapter.launchToMain(buildDirFile('basetypes'))
+async function launchToGetFramesAndScopes(
+  debugAdapter,
+  filePath,
+  bpIdentifiers,
+  expectedFrameName,
+  exeFile = 'basetypes'
+) {
+  await debugAdapter.launchToMain(buildDirFile(exeFile), 5000)
   await SetBreakpoints(debugAdapter, filePath, bpIdentifiers)
   const threads = await debugAdapter.threads()
   await debugAdapter.contNextStop(threads[0].id)
@@ -239,12 +245,25 @@ async function membersOfVariableTest() {
 
 async function returnValue() {}
 
+async function interpretTemplateTypes() {
+  const FileToSetBpIn = 'test/templated_code/template.h'
+  const debugAdapter = new DAClient(MDB_PATH, [])
+  let { threads, frames, scopes } = await launchToGetFramesAndScopes(
+    debugAdapter,
+    FileToSetBpIn,
+    ['CTOR1'],
+    'TemplateType',
+    'templated'
+  )
+}
+
 const tests = {
   scopeLocalsTest: scopeLocalsTest,
   scopeArgsTest: scopeArgsTest,
   membersOfVariableTest: membersOfVariableTest,
   inConstructor: inConstructor,
   returnValue: returnValue,
+  interpretTemplateTypes: interpretTemplateTypes,
 }
 
 runTestSuite(tests)

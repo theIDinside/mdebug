@@ -14,6 +14,8 @@ main(int argc, const char **argv)
   TemplateType<int> a_and_b{10, 20};
   TestObject obj{30, 40};
 
+  TemplateType<int> a_and_b_equal{10};
+
   const auto lt = obj._less_than();
   const auto gt = obj._greater_than();
   const auto eq = obj._equals();
