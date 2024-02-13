@@ -6,6 +6,8 @@
 #include "fmt/format.h"
 #include "fnsymbol.h"
 #include "objfile.h"
+#include "symbolication/dwarf_defs.h"
+#include "symbolication/dwarf_expressions.h"
 #include <array>
 #include <list>
 #include <utils/filter.h>
@@ -41,30 +43,6 @@ SourceFileSymbolInfo::SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept
 {
 }
 
-SourceFileSymbolInfo::SourceFileSymbolInfo(SourceFileSymbolInfo &&from) noexcept
-    : unit_data(from.unit_data), pc_start(from.pc_start), pc_end_exclusive(from.pc_end_exclusive),
-      line_table(from.line_table), fns(std::move(from.fns)), imported_units(std::move(from.imported_units)),
-      id(from.id)
-{
-  set_name(from.name());
-}
-
-SourceFileSymbolInfo &
-SourceFileSymbolInfo::operator=(SourceFileSymbolInfo &&from) noexcept
-{
-  if (this == &from)
-    return *this;
-  unit_data = from.unit_data;
-  pc_start = from.pc_start;
-  pc_end_exclusive = from.pc_end_exclusive;
-  line_table = from.line_table;
-  fns = std::move(from.fns);
-  imported_units = std::move(from.imported_units);
-  id = from.id;
-  set_name(from.name());
-  return *this;
-}
-
 void
 SourceFileSymbolInfo::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
@@ -72,16 +50,44 @@ SourceFileSymbolInfo::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive
   pc_end_exclusive = end_exclusive;
 }
 
+// the line table consists of a list of directory entries and file entries
+// that are relevant for this line table. As such, we are informed of all the
+// source files used over some range of addressess etc. These source files
+// might be included in multiple places (compilation units). We de-duplicate them
+// by storing them by name in `ObjectFile` in a map and then add the references to them
+// to the newly minted compilation unit handle (process_source_code_files)
 void
-SourceFileSymbolInfo::set_linetable(u64 table) noexcept
+SourceFileSymbolInfo::process_source_code_files(u64 table) noexcept
 {
   line_table = table;
+  auto obj = unit_data->get_objfile();
+  auto header = unit_data->get_objfile()->get_lnp_header(line_table);
+  for (auto &&file : header->files()) {
+    std::string_view path{file.c_str()};
+    auto source_code_file = obj->get_source_file(path);
+    add_source_file(std::move(source_code_file));
+  }
 }
 
 void
 SourceFileSymbolInfo::set_id(SymbolInfoId info_id) noexcept
 {
   id = info_id;
+}
+
+void
+SourceFileSymbolInfo::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept
+{
+  if (unit_data->get_objfile()->path.filename() == "next") {
+    DLOG("mdb", "adding file {} to cu=0x{:x}", src_file->full_path->c_str(), unit_data->section_offset());
+  }
+  source_code_files.emplace_back(std::move(src_file));
+}
+
+std::span<std::shared_ptr<dw::SourceCodeFile>>
+SourceFileSymbolInfo::sources() noexcept
+{
+  return source_code_files;
 }
 
 void
@@ -146,26 +152,6 @@ SourceFileSymbolInfo::get_linetable() noexcept
   return unit_data->get_objfile()->get_linetable(line_table);
 }
 
-void
-SourceFileSymbolInfo::maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc,
-                                             AddrOpt high_pc) noexcept
-{
-  if ((name || mangled_name) && (low_pc && high_pc)) {
-    auto &lo = low_pc.value();
-    auto &hi = high_pc.value();
-    if (name) {
-      auto &n = name.value();
-      fns.emplace_back(lo, hi, n);
-    } else {
-      fns.emplace_back(lo, hi, mangled_name.value());
-    }
-  } else {
-    DLOG("mdb", "Warning! Incomplete function symbol. name={}, mangled_name={}, low_pc={}, high_pc={}",
-         name.value_or("NONE"), mangled_name.value_or("NONE"), low_pc.value_or(nullptr),
-         high_pc.value_or(nullptr));
-  }
-}
-
 using DieOffset = u64;
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;
@@ -181,6 +167,8 @@ struct ResolveFnSymbolState
   AddrPtr low_pc = nullptr;
   AddrPtr high_pc = nullptr;
   u8 maybe_count = 0;
+  std::optional<std::span<const u8>> frame_base_description{};
+  sym::Type *ret_type{nullptr};
 
   ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
 
@@ -201,18 +189,21 @@ struct ResolveFnSymbolState
   sym::FunctionSymbol
   complete(Elf *elf) const
   {
-    return sym::FunctionSymbol{.pc_start = elf->relocate_addr(low_pc),
-                               .pc_end_exclusive = elf->relocate_addr(high_pc),
-                               .member_of = "",
-                               .name = name.empty() ? mangled_name : name,
-                               .maybe_origin_dies = maybe_origin_dies,
-                               .decl_file = symtab};
+    return sym::FunctionSymbol{elf->relocate_addr(low_pc),
+                               elf->relocate_addr(high_pc),
+                               name.empty() ? mangled_name : name,
+                               namespace_ish,
+                               ret_type,
+                               maybe_origin_dies,
+                               *symtab,
+                               dw::FrameBaseExpression::Take(frame_base_description)};
   }
 
   void
   add_maybe_origin(dw::IndexedDieReference indexed) noexcept
   {
-    if (maybe_count < 3) {
+    if (maybe_count < 3 && !std::any_of(maybe_origin_dies.begin(), maybe_origin_dies.begin() + maybe_count,
+                                        [&](const auto &idr) { return idr == indexed; })) {
       maybe_origin_dies[maybe_count++] = indexed;
     }
   }
@@ -227,7 +218,15 @@ follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
   const auto &abbreviation = ref.cu->get_abbreviation(ref.die->abbreviation_code);
   if (!abbreviation.is_declaration)
     state.add_maybe_origin({.cu = ref.cu, .die_index = ref.cu->index_of(ref.die)});
-  std::vector<i64> implicit_consts{};
+
+  if (const auto parent = ref.die->parent();
+      maybe_null_any_of<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
+    dw::DieReference parent_ref{.cu = ref.cu, .die = parent};
+    if (auto class_name = parent_ref.read_attribute(Attribute::DW_AT_name); class_name) {
+      state.namespace_ish = class_name->string();
+    }
+  }
+
   for (const auto &attr : abbreviation.attributes) {
     auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
     switch (value.name) {
@@ -291,6 +290,9 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
     for (const auto &attr : abbreviation.attributes) {
       auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
       switch (value.name) {
+      case Attribute::DW_AT_frame_base:
+        state.frame_base_description = as_span(value.block());
+        break;
       case Attribute::DW_AT_name:
         state.name = value.string();
         break;
@@ -314,11 +316,20 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         else {
           DLOG("mdb", "Could not find die reference");
         }
-      } break;
+        break;
+      }
+      case Attribute::DW_AT_type: {
+        const auto type_id = value.unsigned_value();
+        auto obj = unit_data->get_objfile();
+        const auto ref = obj->get_die_reference(type_id);
+        state.ret_type = obj->types->get_or_prepare_new_type(ref->as_indexed());
+        break;
+      }
       default:
         break;
       }
     }
+
     state.add_maybe_origin(dw::IndexedDieReference{unit_data, unit_data->index_of(&die)});
     if (state.done(die_refs.empty())) {
       fns.emplace_back(state.complete(elf));

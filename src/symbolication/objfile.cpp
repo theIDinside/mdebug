@@ -1,6 +1,7 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "supervisor.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
@@ -8,17 +9,16 @@
 #include "type.h"
 #include "utils/enumerator.h"
 #include "utils/worker_task.h"
-#include <algorithm>
-#include <optional>
+#include <symbolication/dwarf/typeread.h>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(), address_bounds(),
-      minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
-      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
-      lnp_headers(nullptr),
+    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(std::make_unique<TypeStorage>(*this)),
+      address_bounds(), minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{},
+      unit_data_write_lock(), dwarf_units(), name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()),
+      parsed_lte_write_lock(), line_table(), lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), addr_cu_map()
+      comp_units(), addr_cu_map(), valobj_cache{}
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -176,6 +176,28 @@ void
 ObjectFile::read_lnp_headers() noexcept
 {
   lnp_headers = sym::dw::read_lnp_headers(parsed_elf);
+
+  std::string path_buf{};
+  path_buf.reserve(1024);
+  for (auto &hdr : *lnp_headers) {
+    for (const auto &f : hdr.file_names) {
+      path_buf.clear();
+      const auto index = hdr.version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+      // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
+      // and we have not made copies.
+      fmt::format_to(std::back_inserter(path_buf), "{}/{}", hdr.directories[index].path, f.file_name);
+      const auto canonical = std::filesystem::path{path_buf}.lexically_normal();
+      auto it = lnp_source_code_files.find(canonical);
+      if (it != std::end(lnp_source_code_files)) {
+        it->second->add_header(&hdr);
+      } else {
+        std::vector<sym::dw::LNPHeader *> src_headers{};
+        src_headers.push_back(&hdr);
+        lnp_source_code_files.emplace(
+            canonical, std::make_shared<sym::dw::SourceCodeFile>(parsed_elf, canonical, std::move(src_headers)));
+      }
+    }
+  }
   init_lnp_storage(*lnp_headers);
 }
 
@@ -249,6 +271,16 @@ ObjectFile::source_units() noexcept
   return comp_units;
 }
 
+SharedPtr<sym::dw::SourceCodeFile>
+ObjectFile::get_source_file(const std::filesystem::path &fullpath) noexcept
+{
+  auto it = lnp_source_code_files.find(fullpath);
+  if (it != std::end(lnp_source_code_files)) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 std::vector<sym::dw::UnitData *>
 ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
 {
@@ -265,7 +297,6 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
   for (auto &src : source_units()) {
     for (auto *unit : unit_datas) {
       if (src.get_dwarf_unit() == unit) {
-        src.get_linetable();
         result.push_back(&src);
       }
     }
@@ -277,31 +308,24 @@ void
 ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
-  {
-    utils::TaskGroup tg("Compilation Unit Data");
-    auto work = sym::dw::UnitDataTask::create_jobs_for(this);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-    read_lnp_headers();
-  }
+  utils::TaskGroup cu_taskgroup("Compilation Unit Data");
+  auto cu_work = sym::dw::UnitDataTask::create_jobs_for(this);
+  cu_taskgroup.add_tasks(std::span{cu_work});
+  cu_taskgroup.schedule_work().wait();
+  read_lnp_headers();
 
-  std::optional<std::future<void>> lnp_promise;
   if (config.eager_lnp_parse) {
-    utils::TaskGroup tg("Line number programs");
-    auto work = sym::dw::LineNumberProgramTask::create_jobs_for(this);
-    tg.add_tasks(std::span{work});
-    lnp_promise = tg.schedule_work();
+    utils::TaskGroup lnp_tg("Line number programs");
+    auto lnp_work = sym::dw::LineNumberProgramTask::create_jobs_for(this);
+    lnp_tg.add_tasks(std::span{lnp_work});
+    lnp_tg.schedule_work().wait();
   }
 
-  {
-    utils::TaskGroup tg("Name Indexing");
-    auto work = sym::dw::IndexingTask::create_jobs_for(this);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-    if (lnp_promise) {
-      lnp_promise->wait();
-    }
-  }
+  utils::TaskGroup name_index_taskgroup("Name Indexing");
+  auto ni_work = sym::dw::IndexingTask::create_jobs_for(this);
+  name_index_taskgroup.add_tasks(std::span{ni_work});
+  name_index_taskgroup.schedule_work().wait();
+  DLOG("mdb", "Name Indexing block done");
 }
 
 void
@@ -320,6 +344,80 @@ ObjectFile::init_minsym_name_lookup() noexcept
   for (const auto &[index, sym] : utils::EnumerateView(min_fn_symbols_sorted)) {
     minimal_fn_symbols[sym.name] = Index{static_cast<u32>(index)};
   }
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_member_variables_of(TraceeController &tc, int ref) noexcept
+{
+  if (!valobj_cache.contains(ref)) {
+    DLOG("mdb", "WARNING expected variable reference {} had no data associated with it.", ref);
+    return {};
+  }
+
+  auto &value = valobj_cache[ref];
+  auto type = value->type();
+  if (!type->is_resolved()) {
+    sym::dw::TypeSymbolicationContext ts_ctx{*this, type};
+    ts_ctx.resolve_type();
+  }
+  std::vector<ui::dap::Variable> result{};
+  result.reserve(type->member_variables().size());
+
+  for (auto &mem : type->member_variables()) {
+    auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
+                                                     value->mem_contents_offset, value->take_memory_reference());
+    const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+    if (new_ref > 0)
+      valobj_cache.emplace(new_ref, member_value);
+    result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+  }
+  return result;
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_variables(sym::FrameVariableKind variables_kind, TraceeController &tc, sym::Frame &frame) noexcept
+{
+  std::vector<ui::dap::Variable> result{};
+  switch (variables_kind) {
+  case sym::FrameVariableKind::Arguments:
+    result.reserve(frame.frame_args_count());
+    break;
+  case sym::FrameVariableKind::Locals:
+    result.reserve(frame.frame_locals_count());
+    break;
+  }
+  for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
+    const auto ref = symbol.type->is_primitive() ? 0 : tc.new_var_id(frame.id());
+    auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
+                                                                         const_cast<sym::Symbol &>(symbol));
+    if (ref > 0)
+      valobj_cache.emplace(ref, value_object);
+    result.push_back(ui::dap::Variable{ref, std::move(value_object)});
+  }
+  return result;
+}
+
+std::vector<ui::dap::Variable>
+ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+{
+  if (!frame.full_symbol_info().is_resolved()) {
+    sym::dw::FunctionSymbolicationContext sym_ctx{*this, frame};
+    sym_ctx.process_symbol_information();
+  }
+
+  switch (set) {
+  case sym::VariableSet::Arguments: {
+    return get_variables(sym::FrameVariableKind::Arguments, tc, frame);
+  }
+  case sym::VariableSet::Locals: {
+    return get_variables(sym::FrameVariableKind::Locals, tc, frame);
+  }
+  case sym::VariableSet::Static:
+  case sym::VariableSet::Global:
+    TODO("Static or global variables request not yet supported.");
+    break;
+  }
+  return {};
 }
 
 ObjectFile *

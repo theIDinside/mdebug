@@ -63,4 +63,5 @@ private:
 
 AttributeValue read_attribute_value(UnitReader &reader, Abbreviation abbr,
                                     const std::vector<i64> &implicit_consts) noexcept;
+
 } // namespace sym::dw

@@ -1,5 +1,6 @@
 #pragma once
 #include "../dwarf_defs.h"
+#include "utils/immutable.h"
 #include <common.h>
 #include <optional>
 
@@ -20,11 +21,13 @@ struct FileEntry
   std::optional<DataBlock> md5;
   std::optional<u64> last_modified;
 };
+
 /**
  * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
  */
 struct LNPHeader
 {
+  NO_COPY_DEFAULTED_MOVE(LNPHeader);
   using shr_ptr = std::shared_ptr<LNPHeader>;
   using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;
   using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
@@ -33,6 +36,10 @@ struct LNPHeader
             u8 addr_size, u8 min_len, u8 max_ops, bool default_is_stmt, i8 line_base, u8 line_range,
             u8 opcode_base, OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
             std::vector<FileEntry> &&file_names) noexcept;
+
+  std::vector<std::filesystem::path> files() const noexcept;
+  std::optional<u32> file_entry_index(const std::filesystem::path &p) const noexcept;
+
   u64 sec_offset;
   u64 initial_length;
   const u8 *data;
@@ -60,6 +67,12 @@ struct LineTableEntry
   bool prologue_end : 1;
   bool basic_block : 1;
   bool epilogue_begin : 1;
+
+  friend auto
+  operator<=>(const LineTableEntry &l, const LineTableEntry &r) noexcept
+  {
+    return l.pc.get() <=> r.pc.get();
+  }
 };
 
 struct ParsedLineTableEntries
@@ -138,6 +151,43 @@ private:
   AddrPtr relocated_base;
   LNPHeader *line_header;
   ParsedLineTableEntries *ltes;
+};
+
+// A source code file is a file that's either represented (and thus realized, when parsed) in the Line Number
+// Program or referenced somehow from an actual Compilation Unit/Translation unit; Meaning, DWARF does not
+// represent it as a single, solitary "binary blob" of debug symbol info. Something which generally tend to only be
+// "source code file" (Our own, Midas definition for it) are header files which can be included in many different
+// s files. This is generally true for templated code, for instance. A `SourceCodeFile` does not "own" any
+// particular
+// debug info metadata that responsibility is left to a `SourceFileSymbolInfo`. I guess, GDB also makes a sort of
+// similar distinction with it's "symtabs" and "psymtabs" - I guess?
+
+class SourceCodeFile
+{
+  NO_COPY(SourceCodeFile);
+  std::vector<LNPHeader *> headers;
+  // Resolved lazily when needed, by walking `line_table`
+  SharedPtr<std::vector<LineTableEntry>> line_table;
+  AddrPtr low;
+  AddrPtr high;
+  mutable std::mutex m;
+  bool computed;
+  Elf *elf;
+  bool is_computed() const noexcept;
+  void compute_line_tables() noexcept;
+
+public:
+  SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept;
+
+  Immutable<AddrPtr> relocated_base;
+  Immutable<std::filesystem::path> full_path;
+
+  RelocatedLteIterator begin() const noexcept;
+  RelocatedLteIterator end() const noexcept;
+
+  auto first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>;
+  auto find_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
+  void add_header(LNPHeader *header) noexcept;
 };
 
 std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;

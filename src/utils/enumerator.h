@@ -1,6 +1,8 @@
 #pragma once
 
+#include "common.h"
 #include <iterator>
+#include <utils/indexing.h>
 namespace utils {
 /** An enumerating view over `Container`. Only deals with immutable values (because, it is a view!)*/
 template <typename Container> class EnumerateView
@@ -10,14 +12,14 @@ template <typename Container> class EnumerateView
 public:
   template <typename IterValueType> struct Enumeration
   {
-    int index;
+    Index index;
     IterValueType &T;
   };
 
   template <typename ContainerIterator = typename Container::iterator> class Enumerator
   {
     ContainerIterator iter;
-    int index;
+    Index index;
 
   public:
     using IsConst = std::is_const<typename std::remove_reference<decltype(*iter)>::type>;

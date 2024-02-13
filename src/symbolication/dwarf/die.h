@@ -1,10 +1,14 @@
 #pragma once
 #include "common.h"
+#include "symbolication/dwarf_defs.h"
 #include <symbolication/block.h>
 #include <symbolication/dwarf.h>
+#include <utils/indexing.h>
 
 struct ObjectFile;
 struct ElfSection;
+
+void SetDwarfLogConfig(bool value) noexcept;
 
 namespace sym::dw {
 
@@ -80,6 +84,15 @@ struct DieMetaData
                                 u64 next_sibling) noexcept;
 };
 
+template <DwarfTag... tags>
+constexpr bool
+maybe_null_any_of(const DieMetaData *die)
+{
+  if (die == nullptr)
+    return false;
+  return ((die->tag == tags) || ...);
+}
+
 class UnitHeader
 {
 public:
@@ -98,6 +111,7 @@ public:
   SymbolInfoId unit_id() const noexcept;
   DwarfVersion version() const noexcept;
   DwarfUnitType get_unit_type() const noexcept;
+  u64 cu_size() const noexcept;
 
 private:
   u64 sec_offset;
@@ -137,14 +151,19 @@ public:
   const UnitHeader &header() const noexcept;
   u64 section_offset() const noexcept;
   bool spans_across(u64 sec_offset) const noexcept;
-  u32 index_of(const DieMetaData *die) noexcept;
+  Index index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
   const DieMetaData *get_die(u64 offset) noexcept;
+
   DieReference get_cu_die_ref(u64 offset) noexcept;
   DieReference get_cu_die_ref(Index offset) noexcept;
+  void take_reference() noexcept;
 
 private:
   void load_dies() noexcept;
+  // Users don't call release explicitly. They request a `clear_die_metadata` instead.
+  // TODO(simon): Wrap this functionality in it's own type.
+  void release_reference() noexcept;
   ObjectFile *objfile;
   UnitHeader unit_header;
   // The Compilation unit die (i.e. the die with DW_TAG_compile_unit; also the first DIE found in `dies` - but as
@@ -152,49 +171,40 @@ private:
   DieMetaData unit_die;
   std::vector<DieMetaData> dies;
   bool fully_loaded;
+  u32 loaded_die_count;
   AbbreviationInfo::Table abbreviations;
-};
-
-struct AddrRangeToCu
-{
-  AddressRange range;
-  UnitData *data;
-};
-
-/** Interface to read, parse/resolve information described by a DWARF "debug information entry". It uses the DIE
- * metadata to find where in memory we need to read from together with what's found in UnitData to finally
- * understand that memory we read from. */
-class DebugInfoEntry
-{
-public:
-  DebugInfoEntry(DieMetaData *die, UnitData *data) noexcept;
-  bool has_children() const noexcept;
-  UnitData *get_cu_data() const noexcept;
-  DieMetaData *get_die() const noexcept;
-
-private:
-  DieMetaData *die;
-  UnitData *unit;
+  i32 explicit_references;
+  mutable std::mutex load_dies_mutex;
 };
 
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
 std::vector<UnitHeader> read_unit_headers(ObjectFile *obj) noexcept;
 
+struct IndexedDieReference;
+
 struct DieReference
 {
   UnitData *cu;
   const DieMetaData *die;
   bool valid() const noexcept;
-  std::optional<AttributeValue> read_attribute(Attribute attr) noexcept;
+  IndexedDieReference as_indexed() const noexcept;
+  std::optional<AttributeValue> read_attribute(Attribute attr) const noexcept;
 };
 
 struct IndexedDieReference
 {
   UnitData *cu;
-  u32 die_index;
+  Index die_index;
 
   bool valid() const noexcept;
+  const DieMetaData *get_die() noexcept;
+
+  friend constexpr auto
+  operator==(const auto &lhs, const auto &rhs)
+  {
+    return lhs.cu == rhs.cu && lhs.die_index == rhs.die_index;
+  }
 };
 
 } // namespace sym::dw

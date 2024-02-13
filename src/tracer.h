@@ -5,6 +5,7 @@
 #include "mdb_config.h"
 #include "notify_pipe.h"
 #include "ptrace.h"
+#include "utils/immutable.h"
 #include <queue>
 #include <sys/ioctl.h>
 #include <termios.h>
@@ -49,7 +50,9 @@ public:
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
-  TraceeController *get_current() noexcept;
+  // TODO(simon): This should be removed. When multiprocess becomes a thing _all_ supervisor access must happen via
+  // a process id or some other handle/id. this is just for convenience when developing the product, really.
+  NonNullPtr<TraceeController> get_current() noexcept;
   void config_done() noexcept;
   void handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept;
   void handle_command(ui::UICommandPtr cmd) noexcept;

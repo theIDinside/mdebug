@@ -1,4 +1,4 @@
-const { DAClient, MDB_PATH, buildDirFile, readFile, runTestSuite, repoDirFile, getLineOf } =
+const { DAClient, MDB_PATH, buildDirFile, readFile, runTestSuite, repoDirFile, getLineOf, prettyJson } =
   require('./client')(__filename)
 
 function getLinesOf(names) {
@@ -18,13 +18,24 @@ async function clientSpawn(bps) {
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
 
-  await da_client.sendReqGetResponse('setBreakpoints', {
+  if (bp_lines.length != bps.length) {
+    throw new Error(`Could not parse contents of ${repoDirFile('test/next.cpp')} to find all string identifiers`)
+  }
+
+  const breakpoint_response = await da_client.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/next.cpp'),
       path: repoDirFile('test/next.cpp'),
     },
     breakpoints: bp_lines,
   })
+  if (breakpoint_response.body.breakpoints.length != bps.length) {
+    throw new Error(
+      `Expected to have set ${bps.length} breakpoints but only successfully set ${
+        breakpoint_response.body.breakpoints.length
+      }:\n${prettyJson(breakpoint_response)}`
+    )
+  }
   return da_client
 }
 
@@ -97,7 +108,9 @@ async function stopBecauseBpWhenNextLine() {
   )
 
   if (event_body.reason != 'breakpoint') {
-    throw new Error(`Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(event_body)}`)
+    throw new Error(
+      `Expected to see a 'stopped' event with 'breakpoint' as reason. Got event ${JSON.stringify(event_body)}`
+    )
   }
 
   {

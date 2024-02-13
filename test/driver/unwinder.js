@@ -8,7 +8,6 @@ async function unwindFromSharedObject() {
 
   const sharedObjectsCount = 6
 
-  const so_addr = '0x7ffff7fbc189'
   async function set_bp(source, bps) {
     const file = readFile(repoDirFile(source))
     const bp_lines = bps

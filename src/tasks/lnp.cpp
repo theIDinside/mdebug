@@ -29,8 +29,6 @@ LineNumberProgramTask::create_jobs_for(ObjectFile *obj)
 void
 LineNumberProgramTask::execute_task() noexcept
 {
-  std::vector<ParsedLineTableEntries> result;
-
   for (auto &header : lnp_headers) {
     sym::dw::compute_line_number_program(obj->get_plte(header.sec_offset), obj->parsed_elf, &header);
   }

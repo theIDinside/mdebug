@@ -53,13 +53,6 @@ utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool
 
 static constexpr auto default_log_channels = {"mdb", "dap", "dwarf", "awaiter", "eh"};
 
-bool LogTaskGroup = false;
-bool DwarfLog = false;
-bool AwaiterLog = false;
-bool EhLog = false;
-bool DapLog = false;
-bool MdbLog = false;
-
 int
 main(int argc, const char **argv)
 {
@@ -90,7 +83,7 @@ main(int argc, const char **argv)
 
   auto config = res.value();
   auto log = config.log_config();
-  log.configure(&LogTaskGroup, &DwarfLog, &AwaiterLog, &EhLog, &DapLog, &MdbLog);
+  log.configure_logging(true);
   if (log.awaiter) {
     logging::get_logging()->log("mdb", "Setting awaiter log on");
   }

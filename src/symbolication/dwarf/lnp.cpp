@@ -1,9 +1,214 @@
 #include "lnp.h"
+#include "symbolication/dwarf_defs.h"
+#include <algorithm>
+#include <set>
 #include <symbolication/block.h>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
+#include <symbolication/objfile.h>
 
 namespace sym::dw {
+using FileIndex = u32;
+
+class SourceCodeFileLNPResolver
+{
+public:
+  SourceCodeFileLNPResolver(LNPHeader *header, std::set<LineTableEntry> &table,
+                            std::optional<AddressRange> valid_bounds, u32 file_index) noexcept
+      : header{header}, table(table), address(0), line(1), column(0), op_index(0), file(1),
+        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
+        epilogue_begin(false), isa(0), discriminator(0), bounds(valid_bounds), file_index(file_index)
+  {
+  }
+
+  constexpr bool
+  sequence_ended() const noexcept
+  {
+    return end_sequence;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  stamp_entry() noexcept
+  {
+    if (should_record_lines()) {
+      table.insert(LineTableEntry{.pc = address,
+                                  .line = line,
+                                  .column = column,
+                                  .file = static_cast<u16>(file),
+                                  .is_stmt = is_stmt,
+                                  .prologue_end = prologue_end,
+                                  .basic_block = basic_block,
+                                  .epilogue_begin = epilogue_begin});
+    }
+    discriminator = 0;
+    basic_block = false;
+    prologue_end = false;
+    epilogue_begin = false;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  advance_pc(u64 adjust_value) noexcept
+  {
+    const auto address_adjust = ((op_index + adjust_value) / header->max_ops) * header->min_len;
+    address += address_adjust;
+    op_index = ((op_index + adjust_value) % header->max_ops);
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  advance_line(i64 value) noexcept
+  {
+    line += value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_file(u64 value) noexcept
+  {
+    file = value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_column(u64 value) noexcept
+  {
+    column = value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  negate_stmt() noexcept
+  {
+    is_stmt = !is_stmt;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_basic_block() noexcept
+  {
+    basic_block = true;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  const_add_pc() noexcept
+  {
+    special_opindex_advance(255);
+  }
+
+  // DWARF V4 Spec page 120:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  advance_fixed_pc(u64 advance) noexcept
+  {
+    address += advance;
+    op_index = 0;
+  }
+
+  // DWARF V4 Spec page 120:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  set_prologue_end() noexcept
+  {
+    prologue_end = true;
+  }
+
+  // DWARF V4 Spec page 121:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=135
+  constexpr void
+  set_epilogue_begin() noexcept
+  {
+    epilogue_begin = true;
+  }
+
+  constexpr void
+  set_isa(u64 isa) noexcept
+  {
+    this->isa = isa;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=130
+  constexpr void
+  execute_special_opcode(u8 opcode) noexcept
+  {
+    special_opindex_advance(opcode);
+    const auto line_inc = header->line_base + ((opcode - header->opcode_base) % header->line_range);
+    line += line_inc;
+    stamp_entry();
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_sequence_ended() noexcept
+  {
+    end_sequence = true;
+    stamp_entry();
+  }
+
+  constexpr void
+  set_address(u64 addr) noexcept
+  {
+    address = addr;
+    op_index = 0;
+  }
+
+  constexpr void
+  define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
+  {
+    header->file_names.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
+  }
+
+  constexpr void
+  set_discriminator(u64 value) noexcept
+  {
+    discriminator = value;
+  }
+
+private:
+  constexpr void
+  special_opindex_advance(u8 opcode)
+  {
+    const auto advance = op_advance(opcode);
+    const auto new_address = address + header->min_len * ((op_index + advance) / header->max_ops);
+    const auto new_op_index = (op_index + advance) % header->max_ops;
+    address = new_address;
+    op_index = new_op_index;
+  }
+
+  constexpr u64
+  op_advance(u8 opcode) const noexcept
+  {
+    const auto adjusted_op = opcode - header->opcode_base;
+    const auto advance = adjusted_op / header->line_range;
+    return advance;
+  }
+
+  bool
+  should_record_lines() const noexcept
+  {
+    return file == file_index;
+  }
+
+  LNPHeader *header;
+  std::set<LineTableEntry> &table;
+  // State machine register
+  u64 address;
+  u32 line;
+  u32 column;
+  u16 op_index;
+  u32 file;
+  bool is_stmt;
+  bool basic_block;
+  bool end_sequence;
+  bool prologue_end;
+  bool epilogue_begin;
+  u8 isa;
+  u32 discriminator;
+  std::optional<AddressRange> bounds;
+  u32 file_index;
+};
 
 class LNPStateMachine
 {
@@ -211,6 +416,43 @@ LNPHeader::LNPHeader(u64 section_offset, u64 initial_length, const u8 *data, con
       line_base(line_base), line_range(line_range), opcode_base(opcode_base), std_opcode_lengths(opcode_lengths),
       directories(std::move(directories)), file_names(std::move(file_names))
 {
+}
+
+std::vector<std::filesystem::path>
+LNPHeader::files() const noexcept
+{
+  std::vector<std::filesystem::path> files{};
+  files.reserve(file_names.size());
+  std::string path_buf{};
+  path_buf.reserve(1024);
+  for (const auto &f : file_names) {
+    path_buf.clear();
+    const auto index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+    // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
+    // and we have not made copies.
+    fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
+    files.emplace_back(std::filesystem::path{path_buf}.lexically_normal());
+  }
+  return files;
+}
+
+std::optional<u32>
+LNPHeader::file_entry_index(const std::filesystem::path &p) const noexcept
+{
+  std::string path_buf{};
+  path_buf.reserve(1024);
+  auto file_index = 0;
+  for (const auto &f : file_names) {
+    path_buf.clear();
+    const auto index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+    fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
+    const auto file_path = std::filesystem::path{path_buf}.lexically_normal();
+    if (p == file_path) {
+      return file_index + 1;
+    }
+    ++file_index;
+  }
+  return std::nullopt;
 }
 
 RelocatedLteIterator::RelocatedLteIterator(RelocatedLteIterator::Iter iter, AddrPtr base) noexcept
@@ -522,6 +764,7 @@ compute_line_number_program(ParsedLineTableEntries &parsed_lte, const Elf *elf, 
       }
     }
   }
+
   // N.B: This kind of double work always irks me. But it *is* simple.
   // optimizations possible here.
   std::erase_if(sequences, [](auto &seq) { return seq.empty(); });
@@ -667,6 +910,192 @@ read_lnp_headers(const Elf *elf) noexcept
          ".debug_line section is expected to have been consumed here, but {} bytes were remaining",
          reader.remaining_size());
   return headers;
+}
+
+RelocatedLteIterator
+SourceCodeFile::begin() const noexcept
+{
+  // Rust would call this "interior" mutability. So kindly go fuck yourself.
+  if (!is_computed()) {
+    const_cast<SourceCodeFile *>(this)->compute_line_tables();
+  }
+  return RelocatedLteIterator(line_table->cbegin(), relocated_base);
+}
+
+RelocatedLteIterator
+SourceCodeFile::end() const noexcept
+{
+  return RelocatedLteIterator(line_table->cend(), relocated_base);
+}
+
+SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept
+    : headers(std::move(headers)), line_table(std::make_shared<std::vector<LineTableEntry>>()), low(nullptr),
+      high(nullptr), m(), computed(false), elf(elf), relocated_base(elf->relocate_addr(nullptr)),
+      full_path(std::move(path))
+{
+}
+
+auto
+SourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>
+{
+  auto lte_it = std::find_if(begin(), end(), [&](const auto &lte) {
+    return line == lte.line && lte.column == column.value_or(lte.column);
+  });
+  if (lte_it != end()) {
+    return lte_it.get();
+  } else {
+    return std::nullopt;
+  }
+}
+
+auto
+SourceCodeFile::find_by_pc(AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
+{
+  auto start = begin();
+  // might be a source code file with no line number info. e.g. include/stdio.h
+  if (start == end())
+    return std::nullopt;
+  if ((*start).pc == addr)
+    return start;
+
+  auto it =
+      std::lower_bound(begin(), end(), addr, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  if (it == end())
+    return std::nullopt;
+
+  return it;
+}
+
+void
+SourceCodeFile::add_header(LNPHeader *header) noexcept
+{
+  if (std::ranges::none_of(headers, [header](auto h) { return h == header; })) {
+    headers.push_back(header);
+  }
+}
+
+bool
+SourceCodeFile::is_computed() const noexcept
+{
+  return computed;
+}
+
+void
+SourceCodeFile::compute_line_tables() noexcept
+{
+  std::lock_guard lock(m);
+  if (computed)
+    return;
+
+  std::set<LineTableEntry> unique_ltes{};
+  for (auto header : headers) {
+    auto file_entry_index = header->file_entry_index(full_path);
+    ASSERT(file_entry_index, "Expected a file entry index but did not find one");
+
+    DLOG("dwarf", "[lnp]: computing lnp at 0x{:x}", header->sec_offset);
+    using OpCode = LineNumberProgramOpCode;
+    DwarfBinaryReader reader{elf, header->data, static_cast<u64>(header->data_end - header->data)};
+    while (reader.has_more()) {
+      SourceCodeFileLNPResolver state{header, unique_ltes, std::nullopt, file_entry_index.value()};
+      while (reader.has_more() && !state.sequence_ended()) {
+        const auto opcode = reader.read_value<OpCode>();
+        if (const auto spec_op = std::to_underlying(opcode); spec_op >= header->opcode_base) {
+          state.execute_special_opcode(spec_op);
+          continue;
+        }
+        if (std::to_underlying(opcode) == 0) {
+          // Extended Op Codes
+          const auto len = reader.read_uleb128<u64>();
+          const auto end = reader.current_ptr() + len;
+          auto ext_op = reader.read_value<LineNumberProgramExtendedOpCode>();
+          switch (ext_op) {
+          case LineNumberProgramExtendedOpCode::DW_LNE_end_sequence:
+            state.set_sequence_ended();
+            break;
+          case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
+            if (header->addr_size == 4) {
+              const auto addr = reader.read_value<u32>();
+              state.set_address(addr);
+            } else {
+              const auto addr = reader.read_value<u64>();
+              state.set_address(addr);
+            }
+            break;
+          case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
+            if (header->version == DwarfVersion::D4) {
+              // https://dwarfstd.org/doc/DWARF4.pdf#page=136
+              const auto filename = reader.read_string();
+              const auto dir_index = reader.read_uleb128<u64>();
+              const auto last_modified = reader.read_uleb128<u64>();
+              const auto file_size = reader.read_uleb128<u64>();
+              state.define_file(filename, dir_index, last_modified, file_size);
+            } else {
+              PANIC(fmt::format("DWARF V5 line tables not yet implemented"));
+            }
+            break;
+          }
+          case LineNumberProgramExtendedOpCode::DW_LNE_set_discriminator: {
+            state.set_discriminator(reader.read_uleb128<u64>());
+            break;
+          }
+          default:
+            // Vendor extensions
+            while (reader.current_ptr() < end)
+              reader.read_value<u8>();
+            break;
+          }
+        }
+        switch (opcode) {
+        case OpCode::DW_LNS_copy:
+          state.stamp_entry();
+          break;
+        case OpCode::DW_LNS_advance_pc:
+          state.advance_pc(reader.read_uleb128<u64>());
+          break;
+        case OpCode::DW_LNS_advance_line:
+          state.advance_line(reader.read_leb128<i64>());
+          break;
+        case OpCode::DW_LNS_set_file:
+          state.set_file(reader.read_uleb128<u64>());
+          break;
+        case OpCode::DW_LNS_set_column:
+          state.set_column(reader.read_uleb128<u64>());
+          break;
+        case OpCode::DW_LNS_negate_stmt:
+          state.negate_stmt();
+          break;
+        case OpCode::DW_LNS_set_basic_block:
+          state.set_basic_block();
+          break;
+        case OpCode::DW_LNS_const_add_pc:
+          state.const_add_pc();
+          break;
+        case OpCode::DW_LNS_fixed_advance_pc:
+          state.advance_fixed_pc(reader.read_value<u16>());
+          break;
+        case OpCode::DW_LNS_set_prologue_end:
+          state.set_prologue_end();
+          break;
+        case OpCode::DW_LNS_set_epilogue_begin:
+          state.set_epilogue_begin();
+          break;
+        case OpCode::DW_LNS_set_isa:
+          state.set_isa(reader.read_value<u64>());
+          break;
+        }
+      }
+    }
+  }
+  line_table->reserve(unique_ltes.size());
+  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(*line_table));
+  auto &lt = *line_table;
+  ASSERT(std::is_sorted(lt.begin(), lt.end(), [](auto &a, auto &b) { return a.pc < b.pc; }),
+         "Line Table was not sorted by Program Counter!");
+  if (lt.size() > 2) {
+    low = lt.begin()->pc;
+    high = std::next(lt.begin(), (lt.size() - 1))->pc;
+  }
+  computed = true;
 }
 
 } // namespace sym::dw

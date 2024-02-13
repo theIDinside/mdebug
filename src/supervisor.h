@@ -27,7 +27,7 @@ class Unwinder;
 namespace ui {
 struct UICommand;
 namespace dap {
-struct VariablesReference;
+class VariablesReference;
 };
 }; // namespace ui
 
@@ -51,7 +51,7 @@ struct TraceeController
   friend struct ui::UICommand;
   // Members
   pid_t task_leader;
-  std::vector<ObjectFile *> object_files;
+  std::vector<NonNullPtr<ObjectFile>> object_files;
   ObjectFile *main_executable;
   utils::ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
@@ -104,18 +104,18 @@ public:
   /* Resumes all tasks in this target. */
   void resume_target(RunType type) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
-  void resume_task(TaskInfo *task, RunType type) noexcept;
+  void resume_task(TaskInfo &task, RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all(TaskInfo *requesting_task) noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
    * interface of the event */
-  void reap_task(TaskInfo *task) noexcept;
+  void reap_task(TaskInfo &task) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *register_task_waited(TaskWaitResult wait) noexcept;
 
-  AddrPtr get_caching_pc(TaskInfo *t) noexcept;
-  void set_pc(TaskInfo *t, AddrPtr addr) noexcept;
+  AddrPtr get_caching_pc(TaskInfo &t) noexcept;
+  void set_pc(TaskInfo &t, AddrPtr addr) noexcept;
 
   /** Set a task's virtual memory info, which for now involves the stack size for a task as well as it's stack
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
@@ -125,7 +125,8 @@ public:
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
-  void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
+  void set_source_breakpoints(const std::filesystem::path &src,
+                              std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   bool set_tracer_bp(TPtr<u64> addr, BpType type) noexcept;
   Breakpoint *set_finish_fn_bp(TraceePointer<void> addr) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
@@ -142,7 +143,7 @@ public:
   // thing
   void reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept;
   void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
-  void reset_source_breakpoints(std::string_view source_filepath,
+  void reset_source_breakpoints(const std::filesystem::path &source_filepath,
                                 std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
 
   void remove_breakpoint(AddrPtr addr, BpType type) noexcept;
@@ -153,14 +154,14 @@ public:
 
   template <typename StopAction, typename... Args>
   void
-  install_thread_proceed(TaskInfo *t, Args... args) noexcept
+  install_thread_proceed(TaskInfo &t, Args... args) noexcept
   {
     DLOG("mdb", "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
-    ptracestop_handler->set_and_run_action(t->tid, new StopAction{this, t, args...});
+    ptracestop_handler->set_and_run_action(t.tid, new StopAction{*this, t, args...});
   }
 
-  void process_exec(TaskInfo *t) noexcept;
-  Tid process_clone(TaskInfo *t) noexcept;
+  void process_exec(TaskInfo &t) noexcept;
+  Tid process_clone(TaskInfo &t) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;
@@ -172,9 +173,10 @@ public:
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
-  void read_auxv(TaskInfo *task);
+  void read_auxv(const TaskInfo &task);
   TargetSession session_type() const noexcept;
   std::string get_thread_name(Tid tid) const noexcept;
+  std::vector<u8> read_to_vec(AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
 
   /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
@@ -257,30 +259,31 @@ public:
   // always returns UnwindInfo* = `nullptr` results. This is to not have to do nullchecks against the Unwinder
   // itself.
   sym::Unwinder *get_unwinder_from_pc(AddrPtr pc) noexcept;
-  sym::CallStack &build_callframe_stack(TaskInfo *task, CallStackRequest req) noexcept;
+  sym::CallStack &build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept;
   std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
-  const std::vector<AddrPtr> &dwarf_unwind_callstack(TaskInfo *task, CallStackRequest req) noexcept;
-  sym::Frame current_frame(TaskInfo *task) noexcept;
-  sym::FunctionSymbol *find_fn_by_pc(AddrPtr addr) const noexcept;
+  sym::Frame current_frame(TaskInfo &task) noexcept;
+  sym::FunctionSymbol *find_fn_by_pc(AddrPtr addr, ObjectFile **foundIn) const noexcept;
   ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
-  std::optional<std::string_view> get_source(std::string_view name) noexcept;
+
+  std::optional<std::filesystem::path> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
   const ElfSection *get_text_section(AddrPtr addr) const noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
-  const sym::Frame *frame(int frame_id) noexcept;
+  sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
   void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
   bool ptrace_was_seized() const noexcept;
 
-private:
-  int new_frame_id(TaskInfo *task) noexcept;
-  int new_scope_id(const sym::Frame *frame) noexcept;
+  int new_frame_id(NonNullPtr<ObjectFile> owning_obj, TaskInfo &task) noexcept;
+  int new_scope_id(NonNullPtr<ObjectFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
   int new_var_id(int parent_id) noexcept;
+
+private:
   void reset_variable_references() noexcept;
-  void next_variable_ref_id() noexcept;
+  int take_new_varref_id() noexcept;
   void reset_variable_ref_id() noexcept;
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;

@@ -1,5 +1,7 @@
 #include "debug_info_reader.h"
 #include "../objfile.h"
+#include "symbolication/dwarf/die.h"
+#include <optional>
 
 namespace sym::dw {
 
@@ -350,9 +352,9 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   case AttributeForm::Reserved:
     PANIC("Can't handle RESERVED");
   case AttributeForm::DW_FORM_block2:
-    return AttributeValue{reader.read_block(2), abbr.form, abbr.name};
+    return AttributeValue{reader.read_block(reader.read_integral<u16>()), abbr.form, abbr.name};
   case AttributeForm::DW_FORM_block4:
-    return AttributeValue{reader.read_block(4), abbr.form, abbr.name};
+    return AttributeValue{reader.read_block(reader.read_integral<u32>()), abbr.form, abbr.name};
   case AttributeForm::DW_FORM_data2:
     return AttributeValue{reader.read_integral<u16>(), abbr.form, abbr.name};
   case AttributeForm::DW_FORM_data4:
@@ -370,8 +372,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     return AttributeValue{reader.read_block(size), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_block1: {
-    const auto size = reader.read_integral<u8>();
-    return AttributeValue{reader.read_block(size), abbr.form, abbr.name};
+    return AttributeValue{reader.read_block(reader.read_integral<u8>()), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_data1:
     [[fallthrough]];

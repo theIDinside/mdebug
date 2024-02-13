@@ -43,20 +43,18 @@ class SourceFileSymbolInfo
   std::vector<sym::FunctionSymbol> fns;
   std::vector<u32> imported_units;
   SymbolInfoId id;
+  std::vector<std::shared_ptr<dw::SourceCodeFile>> source_code_files{};
 
 public:
+  NO_COPY_DEFAULTED_MOVE(SourceFileSymbolInfo);
   SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept;
-
-  SourceFileSymbolInfo(const SourceFileSymbolInfo &from) noexcept = delete;
-  SourceFileSymbolInfo &operator=(const SourceFileSymbolInfo &from) noexcept = delete;
-
-  SourceFileSymbolInfo(SourceFileSymbolInfo &&from) noexcept;
-  SourceFileSymbolInfo &operator=(SourceFileSymbolInfo &&from) noexcept;
 
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
-  void set_linetable(u64 line_table) noexcept;
+  void process_source_code_files(u64 line_table) noexcept;
   void set_id(SymbolInfoId id) noexcept;
+  void add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept;
+  std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
 
   bool known_address_boundary() const noexcept;
   AddrPtr start_pc() const noexcept;
@@ -74,7 +72,6 @@ public:
 
 private:
   void resolve_fn_symbols() noexcept;
-  void maybe_create_fn_symbol(StringOpt name, StringOpt mangled_name, AddrOpt low_pc, AddrOpt high_pc) noexcept;
 };
 
 class AddressToCompilationUnitMap

@@ -1,9 +1,9 @@
 #pragma once
+#include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf_symbols.h"
+#include "symbolication/type.h"
 #include <common.h>
-#include <cstddef>
 #include <symbolication/fnsymbol.h>
-#include <type_traits>
 
 namespace ui::dap {
 struct Scope;
@@ -24,25 +24,43 @@ enum class InsideRange
   Unknown
 };
 
+enum class VariableSet
+{
+  Arguments,
+  Locals,
+  Static,
+  Global
+};
+
+enum class FrameVariableKind
+{
+  Arguments,
+  Locals
+};
+
+class IterateFrameSymbols;
+
 class Frame
 {
 private:
   AddrPtr rip = nullptr;
   union
   {
-    const sym::FunctionSymbol *full_symbol;
+    sym::FunctionSymbol *full_symbol;
     const MinSymbol *min_symbol;
     std::nullptr_t null;
   } symbol = {nullptr};
 
-  int lvl = -1;
+  u32 lvl = -1;
   FrameType type = FrameType::Unknown;
-  int frame_id = -1;
+  u32 frame_id = -1;
 
 public:
+  Immutable<NonNullPtr<TaskInfo>> task;
+
   template <typename T>
-  explicit Frame(int level, int frame_id, AddrPtr pc, T sym_info) noexcept
-      : rip(pc), lvl(level), frame_id(frame_id)
+  explicit Frame(TaskInfo &task, u32 level, int frame_id, AddrPtr pc, T sym_info) noexcept
+      : rip(pc), lvl(level), frame_id(frame_id), task(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
     static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::nullptr_t>,
@@ -50,9 +68,11 @@ public:
     if constexpr (std::is_same_v<Type, sym::FunctionSymbol> || std::is_same_v<Type, const sym::FunctionSymbol>) {
       type = FrameType::Full;
       symbol.full_symbol = sym_info;
+      ASSERT(symbol.full_symbol != nullptr, "Setting to nullptr when expecting full symbol information to exist.");
     } else if constexpr (std::is_same_v<Type, MinSymbol> || std::is_same_v<Type, const MinSymbol>) {
       type = FrameType::ElfSymbol;
       symbol.min_symbol = sym_info;
+      ASSERT(symbol.min_symbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
     } else if constexpr (std::is_null_pointer_v<T>) {
       type = FrameType::Unknown;
       symbol.null = std::nullptr_t{};
@@ -74,8 +94,15 @@ public:
   int id() const noexcept;
   int level() const noexcept;
   AddrPtr pc() const noexcept;
-  const sym::FunctionSymbol *full_symbol_info() const noexcept;
-  const MinSymbol *min_symbol_info() const noexcept;
+
+  const sym::FunctionSymbol &full_symbol_info() const noexcept;
+
+  sym::FunctionSymbol *maybe_get_full_symbols() const noexcept;
+  const MinSymbol *maybe_get_min_symbols() const noexcept;
+
+  IterateFrameSymbols block_symbol_iterator(FrameVariableKind variable_set) noexcept;
+  u32 frame_locals_count() const noexcept;
+  u32 frame_args_count() const noexcept;
 
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept
@@ -109,6 +136,47 @@ public:
   }
 
   std::optional<std::string_view> function_name() const noexcept;
+
+  /**
+   * Return the line table for the compilation unit where this Frame exists in.
+   */
+  std::optional<dw::LineTable> cu_line_table() const noexcept;
+};
+
+class IterateFrameSymbols
+{
+public:
+  IterateFrameSymbols(Frame &frame, FrameVariableKind type) noexcept : frame(frame), type(type) {}
+
+  BlockSymbolIterator
+  begin() noexcept
+  {
+    switch (type) {
+    case FrameVariableKind::Arguments:
+      return BlockSymbolIterator::Begin(&frame.full_symbol_info().get_args(), 1);
+      break;
+    case FrameVariableKind::Locals:
+      return BlockSymbolIterator::Begin(frame.full_symbol_info().get_frame_locals());
+      break;
+    }
+  }
+
+  BlockSymbolIterator
+  end() noexcept
+  {
+    switch (type) {
+    case FrameVariableKind::Arguments:
+      return BlockSymbolIterator::End(&frame.full_symbol_info().get_args(), 1);
+      break;
+    case FrameVariableKind::Locals:
+      return BlockSymbolIterator::End(frame.full_symbol_info().get_frame_locals());
+      break;
+    }
+  }
+
+private:
+  Frame &frame;
+  FrameVariableKind type;
 };
 
 constexpr AddrPtr
@@ -123,7 +191,7 @@ struct CallStack
   explicit CallStack(Tid tid) noexcept;
   ~CallStack() = default;
 
-  const Frame *get_frame(int frame_id) const noexcept;
+  Frame *get_frame(int frame_id) noexcept;
 
   Tid tid; // the task associated with this call stack
   bool dirty;

@@ -16,11 +16,11 @@ public:
 class Step : public StopEventNotification
 {
 public:
-  explicit Step(TraceeController *tc, int tid, std::string_view msg) noexcept;
+  explicit Step(TraceeController &tc, int tid, std::string_view msg) noexcept;
   void send() noexcept override;
 
 private:
-  TraceeController *tc;
+  TraceeController &tc;
   int tid;
   std::string_view msg;
 };
@@ -28,11 +28,11 @@ private:
 class BreakpointHit : public StopEventNotification
 {
 public:
-  explicit BreakpointHit(TraceeController *tc, int bp_id, int tid) noexcept;
+  explicit BreakpointHit(TraceeController &tc, int bp_id, int tid) noexcept;
   void send() noexcept override;
 
 private:
-  TraceeController *tc;
+  TraceeController &tc;
   int bp_id;
   int tid;
 };
@@ -40,11 +40,11 @@ private:
 class SignalStop : public StopEventNotification
 {
 public:
-  SignalStop(TraceeController *tc, int signal, int tid) noexcept;
+  SignalStop(TraceeController &tc, int signal, int tid) noexcept;
   void send() noexcept override;
 
 private:
-  TraceeController *tc;
+  TraceeController &tc;
   int signal;
   int tid;
 };
@@ -56,7 +56,7 @@ public:
 
   template <typename NotificationType, typename... Args>
   constexpr void
-  add_notification(Args... args) noexcept
+  add_notification(Args &&...args) noexcept
   {
     notifications.emplace_back(std::make_unique<NotificationType>(std::forward<Args>(args)...));
   }

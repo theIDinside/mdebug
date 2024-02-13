@@ -88,7 +88,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{registers->rip});
   const sym::UnwindInfo *un_info = it.get_info(registers->rip);
   ASSERT(un_info != nullptr, "unwind info iterator returned null for 0x{:x}", registers->rip);
-  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(tc, this, un_info, registers->rip);
+  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, un_info, registers->rip);
 
   const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
   switch (req.req) {

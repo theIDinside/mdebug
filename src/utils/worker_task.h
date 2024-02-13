@@ -3,6 +3,7 @@
 #include <future>
 #include <vector>
 
+void SetTaskGroupLog(bool value) noexcept;
 namespace utils {
 class TaskGroup;
 

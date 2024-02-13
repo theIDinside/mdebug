@@ -4,6 +4,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug symbols" OFF)
+
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 set(MIDAS_SOURCES
   # root
@@ -78,6 +81,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/reader_funcs.h
   src/symbolication/dwarf/rnglists.cpp
   src/symbolication/dwarf/rnglists.h
+  src/symbolication/dwarf/typeread.cpp
+  src/symbolication/dwarf/typeread.h
   src/symbolication/elf_symbols.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
@@ -117,7 +122,6 @@ target_include_directories(zydis PRIVATE ./dependencies/zydis)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__ -march=native -mavx -mavx2")
 set(MIDAS_DEBUG_FLAGS "-g3 -O0 -Wall -Wextra -fpermissive")
-set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
 set(MIDAS_TEST_FLAGS "${MIDAS_DEBUG_FLAGS}")
 
 set(CMAKE_CXX_FLAGS_DEBUG "${COMMON_FLAGS} ${MIDAS_DEBUG_FLAGS}")
@@ -207,7 +211,7 @@ if(NODEJS)
   set(threadExited "see9ThreadExits")
   set(moduleEvent "6modules")
   set(threads "threads")
-  set(variables "baseTypes")
+  set(variables "scopeLocalsTest" "scopeArgsTest" "membersOfVariableTest" "inConstructor" "returnValue" "interpretTemplateTypes")
   set(finish "finish")
   set(pause "pause")
 
@@ -228,10 +232,31 @@ endif()
 # To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)
 if(MIDAS_BUILD_TYPE STREQUAL "DEBUG")
-    target_compile_definitions(mdb PRIVATE MDB_DEBUG=1)
+  target_compile_definitions(mdb PRIVATE MDB_DEBUG=1)
 elseif(MIDAS_BUILD_TYPE STREQUAL "RELEASE")
   target_compile_definitions(mdb PRIVATE MDB_DEBUG=0)
 endif()
 
-target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
-target_compile_definitions(parse_dap_requests PUBLIC JSON_HAS_RANGES=0)
+target_link_options(mdb PRIVATE "-fuse-ld=lld")
+
+# Check if the compiler name contains gcc or clang
+if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
+  message("Compiler is GNU, and it gives false positives on dangling references for libfmt, making release builds impossible. Therefore gcc uses -Wno-error=dangling-reference")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
+elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  # clang using GNU's stdlib ranges, is.... iffy at the moment.
+  target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
+  target_compile_definitions(parse_dap_requests PUBLIC JSON_HAS_RANGES=0)
+  message("Compiler is clang - no special options required.")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
+else ()
+  message("Unknown compiler")
+endif ()
+
+if(USE_DWARF5)
+  set(___OLD_FLAGS "${MIDAS_DEBUG_FLAGS}")
+  set(MIDAS_DEBUG_FLAGS "${MIDAS_DEBUG_FLAGS} -gdwarf-5 -fdebug-types-section")
+  message("Re-configured midas debug flags from:\n${___OLD_FLAGS} \nto\n${MIDAS_DEBUG_FLAGS}")
+else()
+  message("Using default DWARF output from compiler.")
+endif()

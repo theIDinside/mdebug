@@ -27,6 +27,12 @@ parse_int(std::string_view str)
     return std::nullopt;
 }
 
+void
+LogConfig::configure_logging(bool taskgroup_log) noexcept
+{
+  SetTaskGroupLog(taskgroup_log);
+}
+
 WaitSystem
 DebuggerConfiguration::waitsystem() const noexcept
 {

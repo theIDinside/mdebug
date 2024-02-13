@@ -2,13 +2,46 @@
 #include "../common.h"
 #include "dwarf_binary_reader.h"
 #include "dwarf_defs.h"
-#include <concepts>
-#include <stack>
+#include "utils/immutable.h"
 
 struct TraceeController;
 struct TaskInfo;
 
 namespace sym {
+
+namespace dw {
+class FrameBaseExpression
+{
+  Immutable<std::span<const u8>> bytecode;
+
+public:
+  constexpr explicit FrameBaseExpression(std::span<const u8> expr_bytecode) noexcept : bytecode(expr_bytecode) {}
+
+  static constexpr FrameBaseExpression
+  Empty() noexcept
+  {
+    return FrameBaseExpression{{}};
+  }
+
+  static constexpr FrameBaseExpression
+  Take(std::optional<std::span<const u8>> maybe_expr_bytecode) noexcept
+  {
+    return FrameBaseExpression{maybe_expr_bytecode.value_or(std::span<const u8>{})};
+  }
+
+  std::span<const u8>
+  get_expression() const noexcept
+  {
+    return bytecode;
+  }
+
+  constexpr bool
+  has_expression() const noexcept
+  {
+    return !bytecode->empty();
+  }
+};
+} // namespace dw
 
 struct UnwindInfo;
 
@@ -45,18 +78,59 @@ struct DwarfStack
   std::array<u64, 1028> stack;
 };
 
+// enum class ExpressionResultKind
+// {
+//   RegisterContentsOf,
+//   RegisterContentsOfWithOffset,
+//   SignedValue,
+//   UnsignedValue
+// };
+
+// struct RegisterContents
+// {
+//   u64 contents;
+// };
+
+// struct RegisterContentsWithOffset
+// {
+//   u64 contents;
+//   i64 offset;
+// };
+
+// struct Value
+// {
+//   union
+//   {
+//     i64 i;
+//     u64 u;
+//   };
+// };
+
+// struct DwarfExpressionResult
+// {
+//   ExpressionResultKind kind;
+//   union
+//   {
+//     Value value;
+//     RegisterContents reg_contents;
+//     RegisterContentsWithOffset reg_contents_w_offset;
+//   };
+// };
+
 // The byte code interpreter needs all state set up, so that any possibly data it reference during execution, is
 // already "there".
 struct ExprByteCodeInterpreter
 {
-  explicit ExprByteCodeInterpreter(TraceeController *tc, TaskInfo *t, std::span<const u8> byte_stream) noexcept;
+  explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
+                                   std::span<const u8> byte_stream) noexcept;
   AddrPtr request_frame_base() noexcept;
   u64 run() noexcept;
 
+  int frame_level;
   DwarfStack stack;
   DwarfOp latest_decoded;
-  TraceeController *tc;
-  TaskInfo *task;
+  TraceeController &tc;
+  TaskInfo &task;
   std::span<const u8> byte_stream;
   DwarfBinaryReader reader;
 };

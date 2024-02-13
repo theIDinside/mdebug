@@ -1,5 +1,9 @@
 #include "callstack.h"
+#include "common.h"
+#include "symbolication/block.h"
+#include "symbolication/dwarf/debug_info_reader.h"
 #include "utils/macros.h"
+#include <symbolication/cu_symbol_info.h>
 
 namespace sym {
 
@@ -57,18 +61,56 @@ Frame::pc() const noexcept
   return rip;
 }
 
-const sym::FunctionSymbol *
+const sym::FunctionSymbol &
 Frame::full_symbol_info() const noexcept
+{
+  auto ptr = maybe_get_full_symbols();
+  if (ptr == nullptr) {
+    PANIC("No symbol information for frame, but expected there to be one");
+  }
+  return *ptr;
+}
+
+std::optional<dw::LineTable>
+Frame::cu_line_table() const noexcept
+{
+  if (type != FrameType::Full)
+    return std::nullopt;
+  const auto symbol_info = symbol.full_symbol->symbol_info();
+  ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
+  return symbol_info->get_linetable();
+}
+
+sym::FunctionSymbol *
+Frame::maybe_get_full_symbols() const noexcept
 {
   ASSERT(type == FrameType::Full, "Frame has no full symbol info");
   return symbol.full_symbol;
 }
 
 const MinSymbol *
-Frame::min_symbol_info() const noexcept
+Frame::maybe_get_min_symbols() const noexcept
 {
   ASSERT(type == FrameType::ElfSymbol, "Frame has no ELF symbol info");
   return symbol.min_symbol;
+}
+
+IterateFrameSymbols
+Frame::block_symbol_iterator(FrameVariableKind variables_kind) noexcept
+{
+  return IterateFrameSymbols{*this, variables_kind};
+}
+
+u32
+Frame::frame_locals_count() const noexcept
+{
+  return full_symbol_info().local_variable_count();
+}
+
+u32
+Frame::frame_args_count() const noexcept
+{
+  return full_symbol_info().get_args().symbols.size();
 }
 
 std::optional<std::string_view>
@@ -93,10 +135,10 @@ Frame::function_name() const noexcept
 
 CallStack::CallStack(Tid tid) noexcept : tid(tid), dirty(true), frames(), pcs() {}
 
-const Frame *
-CallStack::get_frame(int frame_id) const noexcept
+Frame *
+CallStack::get_frame(int frame_id) noexcept
 {
-  for (const auto &f : frames) {
+  for (auto &f : frames) {
     if (f.id() == frame_id)
       return &f;
   }

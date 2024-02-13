@@ -1,5 +1,7 @@
 #pragma once
+#include "awaiter.h"
 #include "utils/expected.h"
+#include "utils/worker_task.h"
 #include <optional>
 #include <span>
 #include <string_view>
@@ -78,16 +80,7 @@ struct LogConfig
     }
   }
 
-  constexpr void
-  configure(bool *LogTaskGroup, bool *DwarfLog, bool *AwaiterLog, bool *EhLog, bool *DapLog, bool *MdbLog) noexcept
-  {
-    *LogTaskGroup = time_log;
-    *DwarfLog = dwarf;
-    *AwaiterLog = AwaiterLog;
-    *EhLog = eh;
-    *DapLog = dap;
-    *MdbLog = mdb;
-  }
+  void configure_logging(bool taskgroup_log) noexcept;
 };
 
 class DebuggerConfiguration

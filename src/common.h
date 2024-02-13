@@ -38,6 +38,9 @@ using i8 = std::int8_t;
 using Tid = pid_t;
 using Pid = pid_t;
 
+template <typename T> using SharedPtr = std::shared_ptr<T>;
+template <typename T> using UniquePtr = std::unique_ptr<T>;
+
 enum class DwFormat : std::uint8_t
 {
   DW32,
@@ -74,53 +77,6 @@ enum class TargetSession
   Attached
 };
 
-struct Offset
-{
-  u64 i;
-  constexpr operator u64() const noexcept { return i; }
-  constexpr u64
-  value() const noexcept
-  {
-    return i;
-  }
-
-  friend i64
-  operator-(const Offset &a, const Offset &b) noexcept
-  {
-    return static_cast<i64>(a.i) - static_cast<i64>(b.i);
-  }
-
-  friend i64
-  operator+(const Offset &a, const Offset &b) noexcept
-  {
-    return static_cast<i64>(a.i) + static_cast<i64>(b.i);
-  }
-};
-
-struct Index
-{
-  constexpr operator u32() const noexcept { return i; }
-  constexpr u32
-  value() const noexcept
-  {
-    return i;
-  }
-
-  friend i64
-  operator-(const Index &a, const Index &b) noexcept
-  {
-    return static_cast<i64>(a.i) - static_cast<i64>(b.i);
-  }
-
-  friend i64
-  operator+(const Index &a, const Index &b) noexcept
-  {
-    return static_cast<i64>(a.i) + static_cast<i64>(b.i);
-  }
-
-  u32 i;
-};
-
 // "remove_cvref_t" is an absolutely retarded name. We therefore call it `ActualType<T>` to signal clear intent.
 template <typename T> using ActualType = std::remove_cvref_t<T>;
 
@@ -130,6 +86,8 @@ struct DataBlock
   u64 size;
 };
 
+std::span<const u8> as_span(DataBlock block) noexcept;
+
 template <class... T> constexpr bool always_false = false;
 template <size_t... T> constexpr bool always_false_i = false;
 
@@ -138,6 +96,11 @@ template <size_t... T> constexpr bool always_false_i = false;
   CLASS(CLASS &) = delete;                                                                                        \
   CLASS &operator=(CLASS &) = delete;                                                                             \
   CLASS &operator=(const CLASS &) = delete;
+
+#define NO_COPY_DEFAULTED_MOVE(CLASS)                                                                             \
+  NO_COPY(CLASS)                                                                                                  \
+  CLASS(CLASS &&) noexcept = default;                                                                             \
+  CLASS &operator=(CLASS &&) noexcept = default;
 
 [[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
 
@@ -698,3 +661,6 @@ take(std::optional<T> &&value) noexcept
   value.reset();
   return v;
 }
+
+using SecString = std::string_view;
+using CString = const char *;

@@ -177,7 +177,7 @@ enum class BpEventType : u8
 
 struct SourceBreakpointDescriptor
 {
-  std::string_view source_file;
+  std::string source_file;
   u32 line;
   std::optional<u32> column;
   std::optional<std::string> condition;
@@ -225,19 +225,19 @@ public:
   BpType type() const noexcept;
 
   /* Breakpoint logic to perform when hit by Task `t`. */
-  OnBpHit on_hit(TraceeController *tc, TaskInfo *t) noexcept;
+  OnBpHit on_hit(TraceeController &tc, TaskInfo &t) noexcept;
 
   /* Check if Task `t` should report stop to user. */
-  bool ignore_task(TaskInfo *t) noexcept;
+  bool ignore_task(const TaskInfo &t) noexcept;
 
   /* Retrieve stop notification type for this breakpoint, for `t`. */
-  BpNote stop_notification(TaskInfo *t) noexcept;
+  BpNote stop_notification(const TaskInfo &t) noexcept;
 
   /* Set default notification type for this breakpoint. */
   void set_note(BpNote) noexcept;
 
   /* Set temporary notification for this breakpoint, for task `t`. */
-  void set_temporary_note(TaskInfo *t, BpNote n) noexcept;
+  void set_temporary_note(const TaskInfo &t, BpNote n) noexcept;
 
   /* Add `tid` to set of tasks that should be reported to the user when they hit this breakpoint. If no tasks has
    * been registered, all tasks will report stop to user.*/
@@ -307,7 +307,7 @@ struct BreakpointMap
   }
 
   bool insert(AddrPtr addr, u8 overwritten_byte, BpType type) noexcept;
-  void clear(TraceeController *target, BpType type) noexcept;
+  void clear(TraceeController &target, BpType type) noexcept;
 
   Breakpoint *get_by_id(u32 id) noexcept;
   Breakpoint *get(AddrPtr addr) noexcept;
