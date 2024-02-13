@@ -102,32 +102,35 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
   start_frame = callstack.frames[0];
   const auto fpc = start_frame.pc();
   ObjectFile *obj = tc.find_obj_by_pc(fpc);
+  ASSERT(obj, "Expected to find a ObjectFile from pc: {}", fpc);
   auto src_infos = obj->get_source_infos(fpc);
   bool found = false;
-  // TODO(simon): Is it possible to design it such that a search here, determines the _exact_ src_info up front?
-  //   so that we don't have to make sure that the found LT and it's LTE's land within the frame's low_pc / high_pc
-  for (auto *src : src_infos) {
-    auto ltopt = src->get_linetable();
-    if (ltopt) {
-      auto lt = *ltopt;
-      const auto iter = lt.find_by_pc(fpc);
-      if (iter != std::end(lt)) {
-        const sym::dw::LineTableEntry lte = iter.get();
-        if (start_frame.inside(lte.pc.as_void()) == sym::InsideRange::Yes) {
-          if (lte.pc == fpc) {
-            found = true;
-            entry = lte;
-            break;
-          } else {
-            found = true;
-            entry = (iter - 1).get();
-            break;
-          }
+
+  // the std::unordered_set here is just for de-duplication.
+  std::unordered_set<SharedPtr<sym::dw::SourceCodeFile>> files_of_interest{};
+  for (auto src : src_infos) {
+    auto files = src->sources();
+    files_of_interest.insert(files.begin(), files.end());
+  }
+
+  for (auto &&file : files_of_interest) {
+    if (auto it = file->find_by_pc(fpc); it) {
+      auto lte = it.transform([](auto it) { return it.get(); });
+      if (start_frame.inside(lte->pc.as_void()) == sym::InsideRange::Yes) {
+        if (lte->pc == fpc) {
+          found = true;
+          entry = *lte;
+          break;
+        } else {
+          found = true;
+          entry = (it.value() - 1).get();
+          break;
         }
       }
     }
   }
-  VERIFY(found, "Couldn't find Line Table Entry Information needed to navigate source code lines");
+  VERIFY(found, "Couldn't find Line Table Entry Information needed to navigate source code lines based on pc = {}",
+         fpc);
 }
 
 LineStep::~LineStep() noexcept

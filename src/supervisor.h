@@ -125,7 +125,8 @@ public:
    * multiple breakpoints at the same location.*/
   void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
   void set_fn_breakpoint(std::string_view function_name) noexcept;
-  void set_source_breakpoints(std::string_view src, std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
+  void set_source_breakpoints(const std::filesystem::path &src,
+                              std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
   bool set_tracer_bp(TPtr<u64> addr, BpType type) noexcept;
   Breakpoint *set_finish_fn_bp(TraceePointer<void> addr) noexcept;
   void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
@@ -142,7 +143,7 @@ public:
   // thing
   void reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept;
   void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
-  void reset_source_breakpoints(std::string_view source_filepath,
+  void reset_source_breakpoints(const std::filesystem::path &source_filepath,
                                 std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
 
   void remove_breakpoint(AddrPtr addr, BpType type) noexcept;
@@ -263,7 +264,8 @@ public:
   sym::Frame current_frame(TaskInfo &task) noexcept;
   sym::FunctionSymbol *find_fn_by_pc(AddrPtr addr, ObjectFile **foundIn) const noexcept;
   ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
-  std::optional<std::string_view> get_source(std::string_view name) noexcept;
+
+  std::optional<std::filesystem::path> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
   const ElfSection *get_text_section(AddrPtr addr) const noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;

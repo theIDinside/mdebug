@@ -249,7 +249,7 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
       src_bps.push_back(
           SourceBreakpointDescriptor{*source_file, line, col, condition, hit_condition, log_message});
     }
-    target->reset_source_breakpoints(*source_file, std::move(src_bps));
+    target->reset_source_breakpoints(source_file.value(), std::move(src_bps));
     using BP = ui::dap::Breakpoint;
     for (const auto &bp : target->bps.breakpoints) {
       if (bp.type().source && target->bps.source_breakpoints[bp.id].source_file == *source_file) {

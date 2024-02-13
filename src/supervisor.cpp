@@ -460,34 +460,27 @@ TraceeController::set_fn_breakpoint(std::string_view function_name) noexcept
 }
 
 void
-TraceeController::set_source_breakpoints(std::string_view src,
+TraceeController::set_source_breakpoints(const std::filesystem::path &src,
                                          std::vector<SourceBreakpointDescriptor> &&descs) noexcept
 {
-  DLOG("mdb", "[bkpt:source]: Requested {} new source breakpoints for {}", descs.size(), src);
+  DLOG("mdb", "[bkpt:source]: Requested {} new source breakpoints for {}", descs.size(), src.c_str());
   for (auto obj : object_files) {
-    auto &syminfos = obj->source_units();
-    auto it =
-        std::ranges::find_if(syminfos, [src](const sym::SourceFileSymbolInfo &c) { return c.name() == src; });
-    if (it != std::end(syminfos)) {
-      DLOG("mdb", "[bkpt:source]: objfile {} has file {}", obj->path.c_str(), src);
-      const auto lt = it->get_linetable();
-      if (lt->is_valid())
-        for (auto &&desc : descs) {
-          for (const auto &lte : *lt) {
-            if (desc.line == lte.line && lte.column == desc.column.value_or(lte.column)) {
-              if (!bps.contains(lte.pc)) {
-                u8 original_byte = write_bp_byte(lte.pc);
-                bps.insert(lte.pc, original_byte, BpType{}.Source(true));
-                const auto &bp = bps.breakpoints.back();
-                bps.source_breakpoints[bp.id] = std::move(desc);
-                break;
-              } else {
-                auto bp = bps.get(lte.pc);
-                bp->bp_type.source = true;
-              }
-            }
+    if (auto source_code_file = obj->get_source_file(src); source_code_file) {
+      DLOG("mdb", "[bkpt:source]: objfile {} has file {}", obj->path.c_str(), src.c_str());
+      for (auto &&desc : descs) {
+        if (auto lte = source_code_file->first_linetable_entry(desc.line, desc.column); lte) {
+          const auto pc = lte->pc;
+          if (!bps.contains(pc)) {
+            u8 original_byte = write_bp_byte(pc);
+            bps.insert(pc, original_byte, BpType{}.Source(true));
+            const auto &bp = bps.breakpoints.back();
+            bps.source_breakpoints[bp.id] = std::move(desc);
+          } else {
+            auto bp = bps.get(pc);
+            bp->bp_type.source = true;
           }
         }
+      }
     }
   }
   logging::get_logging()->log("mdb", fmt::format("Total breakpoints {}", bps.breakpoints.size()));
@@ -556,7 +549,7 @@ TraceeController::reset_fn_breakpoints(std::vector<std::string_view> fn_names) n
 }
 
 void
-TraceeController::reset_source_breakpoints(std::string_view source_filepath,
+TraceeController::reset_source_breakpoints(const std::filesystem::path &source_filepath,
                                            std::vector<SourceBreakpointDescriptor> &&desc) noexcept
 {
   auto type = BpType{}.Source(true);
@@ -1097,14 +1090,13 @@ TraceeController::find_fn_by_pc(AddrPtr addr, ObjectFile **foundIn = nullptr) co
   return nullptr;
 }
 
-std::optional<std::string_view>
+std::optional<std::filesystem::path>
 TraceeController::get_source(std::string_view name) noexcept
 {
   for (auto obj : object_files) {
-    for (const auto &f : obj->source_units()) {
-      if (f.name() == name) {
-        return f.name();
-      }
+    auto source = obj->get_source_file(name);
+    if (source) {
+      return source->full_path;
     }
   }
   return std::nullopt;

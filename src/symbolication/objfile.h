@@ -93,11 +93,16 @@ struct ObjectFile
   void init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers);
   sym::dw::ParsedLineTableEntries &get_plte(u64 offset) noexcept;
   void add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept;
-  std::vector<sym::SourceFileSymbolInfo> &source_units() noexcept;
-  std::vector<sym::dw::UnitData *> get_cus_from_pc(AddrPtr pc) noexcept;
+
+  auto get_source_file(const std::filesystem::path &fullpath) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
+  auto source_code_files() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
+  auto source_units() noexcept -> std::vector<sym::SourceFileSymbolInfo> &;
+
+  auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   std::vector<sym::SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
+  std::vector<sym::dw::SourceCodeFile *> get_source_code_files(AddrPtr pc) noexcept;
   std::vector<ui::dap::Variable> get_variables(TraceeController &tc, sym::Frame &frame,
                                                sym::VariableSet set) noexcept;
 
@@ -126,6 +131,10 @@ private:
 
   std::mutex cu_write_lock;
   std::vector<sym::SourceFileSymbolInfo> comp_units;
+
+  // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
+  //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable
+  std::unordered_map<std::filesystem::path, std::shared_ptr<sym::dw::SourceCodeFile>> lnp_source_code_files;
 
   sym::AddressToCompilationUnitMap addr_cu_map;
   std::unordered_map<int, SharedPtr<sym::Value>> valobj_cache;

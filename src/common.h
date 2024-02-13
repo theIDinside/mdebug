@@ -97,6 +97,11 @@ template <size_t... T> constexpr bool always_false_i = false;
   CLASS &operator=(CLASS &) = delete;                                                                             \
   CLASS &operator=(const CLASS &) = delete;
 
+#define NO_COPY_DEFAULTED_MOVE(CLASS)                                                                             \
+  NO_COPY(CLASS)                                                                                                  \
+  CLASS(CLASS &&) noexcept = default;                                                                             \
+  CLASS &operator=(CLASS &&) noexcept = default;
+
 [[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
 
 /**

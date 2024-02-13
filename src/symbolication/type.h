@@ -122,7 +122,6 @@ bit_copy(std::span<const FromRepr> from)
 // This is meant to be the interface via which we interpret a range of bytes
 class Type
 {
-  TypeStorage *owner;
   static constexpr auto ModifierNameStrSize = "const"sv.size() + "volatile"sv.size() + " *"sv.size();
   friend sym::dw::TypeSymbolicationContext;
 
@@ -146,10 +145,10 @@ public:
   };
 
   // Qualified, i.e. some variant of cvref-types
-  Type(TypeStorage *ts, dw::IndexedDieReference die_ref, u32 size_of, Type *target) noexcept;
+  Type(dw::IndexedDieReference die_ref, u32 size_of, Type *target) noexcept;
 
   // "Normal" type constructor
-  Type(TypeStorage *ts, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
+  Type(dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
   Type(Type &&o) noexcept;
 
   void add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept;

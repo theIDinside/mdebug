@@ -176,6 +176,28 @@ void
 ObjectFile::read_lnp_headers() noexcept
 {
   lnp_headers = sym::dw::read_lnp_headers(parsed_elf);
+
+  std::string path_buf{};
+  path_buf.reserve(1024);
+  for (auto &hdr : *lnp_headers) {
+    for (const auto &f : hdr.file_names) {
+      path_buf.clear();
+      const auto index = hdr.version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+      // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
+      // and we have not made copies.
+      fmt::format_to(std::back_inserter(path_buf), "{}/{}", hdr.directories[index].path, f.file_name);
+      const auto canonical = std::filesystem::path{path_buf}.lexically_normal();
+      auto it = lnp_source_code_files.find(canonical);
+      if (it != std::end(lnp_source_code_files)) {
+        it->second->add_header(&hdr);
+      } else {
+        std::vector<sym::dw::LNPHeader *> src_headers{};
+        src_headers.push_back(&hdr);
+        lnp_source_code_files.emplace(
+            canonical, std::make_shared<sym::dw::SourceCodeFile>(parsed_elf, canonical, std::move(src_headers)));
+      }
+    }
+  }
   init_lnp_storage(*lnp_headers);
 }
 
@@ -249,6 +271,16 @@ ObjectFile::source_units() noexcept
   return comp_units;
 }
 
+SharedPtr<sym::dw::SourceCodeFile>
+ObjectFile::get_source_file(const std::filesystem::path &fullpath) noexcept
+{
+  auto it = lnp_source_code_files.find(fullpath);
+  if (it != std::end(lnp_source_code_files)) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 std::vector<sym::dw::UnitData *>
 ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
 {
@@ -265,7 +297,6 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
   for (auto &src : source_units()) {
     for (auto *unit : unit_datas) {
       if (src.get_dwarf_unit() == unit) {
-        src.get_linetable();
         result.push_back(&src);
       }
     }
@@ -277,31 +308,24 @@ void
 ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
-  {
-    utils::TaskGroup tg("Compilation Unit Data");
-    auto work = sym::dw::UnitDataTask::create_jobs_for(this);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-    read_lnp_headers();
-  }
+  utils::TaskGroup cu_taskgroup("Compilation Unit Data");
+  auto cu_work = sym::dw::UnitDataTask::create_jobs_for(this);
+  cu_taskgroup.add_tasks(std::span{cu_work});
+  cu_taskgroup.schedule_work().wait();
+  read_lnp_headers();
 
-  std::optional<std::future<void>> lnp_promise;
   if (config.eager_lnp_parse) {
-    utils::TaskGroup tg("Line number programs");
-    auto work = sym::dw::LineNumberProgramTask::create_jobs_for(this);
-    tg.add_tasks(std::span{work});
-    lnp_promise = tg.schedule_work();
+    utils::TaskGroup lnp_tg("Line number programs");
+    auto lnp_work = sym::dw::LineNumberProgramTask::create_jobs_for(this);
+    lnp_tg.add_tasks(std::span{lnp_work});
+    lnp_tg.schedule_work().wait();
   }
 
-  {
-    utils::TaskGroup tg("Name Indexing");
-    auto work = sym::dw::IndexingTask::create_jobs_for(this);
-    tg.add_tasks(std::span{work});
-    tg.schedule_work().wait();
-    if (lnp_promise) {
-      lnp_promise->wait();
-    }
-  }
+  utils::TaskGroup name_index_taskgroup("Name Indexing");
+  auto ni_work = sym::dw::IndexingTask::create_jobs_for(this);
+  name_index_taskgroup.add_tasks(std::span{ni_work});
+  name_index_taskgroup.schedule_work().wait();
+  DLOG("mdb", "Name Indexing block done");
 }
 
 void

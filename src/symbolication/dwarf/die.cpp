@@ -6,7 +6,14 @@
 #include <symbolication/objfile.h>
 #include <utils/enumerator.h>
 
-extern bool DwarfLog;
+static bool DwarfLog = false;
+
+void
+SetDwarfLogConfig(bool value) noexcept
+{
+  DwarfLog = value;
+}
+
 namespace sym::dw {
 const DieMetaData *
 DieMetaData::parent() const noexcept

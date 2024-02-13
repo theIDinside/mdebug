@@ -126,7 +126,7 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     } else {
       size = base_type->size();
     }
-    auto type = new sym::Type{this, die_ref, size, base_type};
+    auto type = new sym::Type{die_ref, size, base_type};
     types[this_ref.die->section_offset] = type;
     return type;
   } else {
@@ -136,7 +136,7 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
                           .transform([](auto v) { return v.string(); })
                           .value_or("lambda");
     const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
-    auto type = new sym::Type{this, die_ref, sz, name};
+    auto type = new sym::Type{die_ref, sz, name};
     types[this_ref.die->section_offset] = type;
     return type;
   }
@@ -146,7 +146,7 @@ sym::Type *
 TypeStorage::emplace_type(Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
                           std::string_view name) noexcept
 {
-  auto pair = types.emplace(type_id, new sym::Type{this, die_ref, type_size, name});
+  auto pair = types.emplace(type_id, new sym::Type{die_ref, type_size, name});
   if (pair.second) {
     return pair.first->second;
   }
@@ -161,23 +161,21 @@ TypeStorage::get_mutex() noexcept
 
 namespace sym {
 
-Type::Type(TypeStorage *ts, dw::IndexedDieReference die_ref, u32 size_of, Type *target) noexcept
-    : owner(ts), name(target->name), cu_die_ref(die_ref),
-      modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)}, size_of(size_of), type_chain(target),
-      fields(), base_type(), resolved(false), processing(false)
+Type::Type(dw::IndexedDieReference die_ref, u32 size_of, Type *target) noexcept
+    : name(target->name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
+      size_of(size_of), type_chain(target), fields(), base_type(), resolved(false), processing(false)
 {
 }
 
-Type::Type(TypeStorage *ts, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept
-    : owner(ts), name(name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
+Type::Type(dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept
+    : name(name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
       size_of(size_of), type_chain(nullptr), fields(), base_type(), resolved(false), processing(false)
 {
 }
 
 Type::Type(Type &&o) noexcept
-    : owner(o.owner), name(o.name), cu_die_ref(o.cu_die_ref), modifier(o.modifier), size_of(o.size_of),
-      type_chain(o.type_chain), fields(std::move(o.fields)), base_type(o.base_type), resolved(o.resolved),
-      processing(o.processing)
+    : name(o.name), cu_die_ref(o.cu_die_ref), modifier(o.modifier), size_of(o.size_of), type_chain(o.type_chain),
+      fields(std::move(o.fields)), base_type(o.base_type), resolved(o.resolved), processing(o.processing)
 {
   ASSERT(!processing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }

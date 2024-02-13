@@ -327,7 +327,7 @@ IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_di
     switch (attr.name) {
     case Attribute::DW_AT_stmt_list: {
       const auto offset = attr.address();
-      new_cu.set_linetable(offset);
+      new_cu.process_source_code_files(offset);
       break;
     }
     case Attribute::DW_AT_name: {

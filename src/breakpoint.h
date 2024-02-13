@@ -177,7 +177,7 @@ enum class BpEventType : u8
 
 struct SourceBreakpointDescriptor
 {
-  std::string_view source_file;
+  std::string source_file;
   u32 line;
   std::optional<u32> column;
   std::optional<std::string> condition;

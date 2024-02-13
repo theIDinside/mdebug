@@ -8,6 +8,8 @@
 struct ObjectFile;
 struct ElfSection;
 
+void SetDwarfLogConfig(bool value) noexcept;
+
 namespace sym::dw {
 
 // Represents an index value that points to nothing.

@@ -3,7 +3,14 @@
 #include "thread_pool.h"
 #include <chrono>
 
-extern bool LogTaskGroup;
+static bool LogTaskGroup = false;
+
+void
+SetTaskGroupLog(bool value) noexcept
+{
+  DLOG("mdb", "Setting TaskGroup logging to {}", value);
+  LogTaskGroup = value;
+}
 
 namespace utils {
 

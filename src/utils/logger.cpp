@@ -3,6 +3,8 @@
 #include "../lib/lockguard.h"
 #include <filesystem>
 
+using namespace std::string_view_literals;
+
 namespace logging {
 
 logging::Logger *logging::Logger::logger_instance = new logging::Logger{};
@@ -51,9 +53,18 @@ void
 Logger::on_abort() noexcept
 {
   for (const auto &[name, channel] : log_files) {
-    channel->log("\n - flushed");
+    channel->log("\n - flushed"sv);
     channel->fstream.flush();
   }
+}
+
+Logger::LogChannel *
+Logger::channel(std::string_view name)
+{
+  auto it = log_files.find(name);
+  if (it != std::end(log_files))
+    return it->second;
+  return nullptr;
 }
 
 void
@@ -61,6 +72,22 @@ Logger::LogChannel::log(std::string_view msg) noexcept
 {
   LockGuard<SpinLock> guard{spin_lock};
   fstream << msg << std::endl;
+}
+
+void
+Logger::LogChannel::log(std::string &&msg) noexcept
+{
+  LockGuard<SpinLock> guard{spin_lock};
+  fstream << msg << std::endl;
+}
+
+Logger::LogChannel *
+get_log_channel(std::string_view log_channel) noexcept
+{
+  if (auto logger = Logger::get_logger(); logger) {
+    return logger->channel(log_channel);
+  }
+  return nullptr;
 }
 
 Logger *
