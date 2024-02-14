@@ -10,20 +10,37 @@ const fs = require('fs')
 const { spawn } = require('child_process')
 const EventEmitter = require('events')
 
-let IMPORTING_FILE = ''
-
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename)
 const TEST_DIR = path.dirname(DRIVER_DIR)
 const REPO_DIR = path.dirname(TEST_DIR)
 
-const TestArgs = process.argv.slice(2)
+let MDB_PATH = undefined
 
-if (TestArgs.length == 0) {
-  console.error(
-    `Tests require to pass the build directory as the developer might choose different locations for their build dir.`
-  )
-  process.exit(-1)
+/**
+ * @returns { { mdb: string, cwd: string, testSuite: string, test: string | null } }
+ */
+function getExecutorArgs() {
+  if (process.argv.length < 4) {
+    throw new Error(
+      `Test executor not received the required parameters. It requires 3 parameters.\nWorking dir: the directory from which the test is executed in\nTest suite name: The test suite\nTest name: An optional test name, if only a single test in the suite should be executed. Usage:\nnode source/to/client.js current/working/dir testSuiteName testSuite`
+    )
+  }
+  const UserBuildDir = process.argv[2]
+  const BUILD_BIN_DIR = path.join(UserBuildDir, 'bin')
+  if (!fs.existsSync(BUILD_BIN_DIR)) {
+    console.error(`Could not find the build directory '${BUILD_BIN_DIR}'`)
+    process.exit(-1)
+  }
+
+  const config = {
+    mdb: path.join(BUILD_BIN_DIR, 'mdb'),
+    buildDir: BUILD_BIN_DIR,
+    cwd: process.argv[2],
+    testSuite: process.argv[3],
+    test: process.argv[4],
+  }
+  return config
 }
 
 /**
@@ -43,15 +60,6 @@ function getLineOf(fileData, string_identifier) {
 function readFile(path) {
   return fs.readFileSync(path).toString()
 }
-
-const UserBuildDir = TestArgs[0]
-const BUILD_BIN_DIR = path.join(UserBuildDir, 'bin')
-if (!fs.existsSync(BUILD_BIN_DIR)) {
-  console.error(`Could not find the build directory '${BUILD_BIN_DIR}'`)
-  process.exit(-1)
-}
-const MDB_PATH = path.join(BUILD_BIN_DIR, 'mdb')
-console.log(`MDB Path: ${MDB_PATH}`)
 
 function unpackRecordArgs(param) {
   const p = param.split(';')
@@ -84,8 +92,11 @@ class DAClient {
   /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
   buf
 
-  constructor(mdb, mdb_args) {
+  config
+
+  constructor(mdb, mdb_args, config) {
     // for future work when we get recording in tests suites working.
+    this.config = config
     try {
       this.recording = process.env.hasOwnProperty('REC')
       if (this.recording) {
@@ -131,8 +142,7 @@ class DAClient {
     process.on('exit', (code) => {
       this.mdb.kill('SIGTERM')
       if (code != 0) {
-        console.log(`DUMPING LOG`)
-        dump_log()
+        dump_log(this.config.testSuite)
       }
     })
     this.seq = 1
@@ -183,6 +193,10 @@ class DAClient {
       }
       this.buf.receive_buffer = this.buf.receive_buffer.slice(last_ends)
     })
+  }
+
+  buildDirFile(fileName) {
+    return path.join(this.config.buildDir, fileName)
   }
 
   serializeRequest(req, args = {}) {
@@ -461,13 +475,9 @@ class DAClient {
 // Since we're running in a test suite, we want individual tests to
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
-function dump_log() {
+function dump_log(testSuite) {
   const mdblog = fs.readFileSync(path.join(process.cwd(), 'mdb.log'))
-  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(IMPORTING_FILE)}.log`), mdblog)
-}
-
-function buildDirFile(fileName) {
-  return path.join(BUILD_BIN_DIR, fileName)
+  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(testSuite)}.log`), mdblog)
 }
 
 function repoDirFile(filePath) {
@@ -497,6 +507,7 @@ function checkResponse(response, command, expected_success = true, fn = checkRes
     err.message = `Expected command to be ${command} but got ${response.command}`
     throw err
   }
+  return response
 }
 
 /**
@@ -509,28 +520,32 @@ function getStackFramePc(stackTraceRes, level) {
   return stackTraceRes.body.stackFrames[level].instructionPointerReference
 }
 
-function testSuccess() {
-  console.log(`Test ${IMPORTING_FILE} succeeded`)
+function testSuccess(testSuite) {
+  console.log(`Test ${testSuite} succeeded`)
   process.exit(0)
 }
 
 function testException(err) {
-  console.error(`Test ${IMPORTING_FILE} failed: ${err}`)
-  throw err
+  console.log(err)
+  process.exit(-1)
 }
 
-async function runTest(test, should_exit = true) {
-  if (should_exit) test().then(testSuccess).catch(testException)
-  else test().catch(testException)
+async function runTest(DA, testFn, should_exit = true) {
+  if (should_exit) testFn(DA).then(testSuccess).catch(testException)
+  else testFn(DA).catch(testException)
 }
 
-async function runTestSuite(tests) {
-  const requested = getRequestedTest()
-  if (tests.hasOwnProperty(requested)) {
-    console.log(`Running ${requested} test`)
-    await runTest(tests[requested])
-  } else {
-    throw new Error(`No test called ${requested} in this suite`)
+async function runTestSuite(config, tests) {
+  for (const testName in tests) {
+    if (config.test != undefined) {
+      if (config.test == testName) {
+        const DA = new DAClient(config.mdb, [], config)
+        await runTest(DA, tests[testName])
+      }
+    } else {
+      const DA = new DAClient(config.mdb, [], config)
+      await runTest(DA, tests[testName])
+    }
   }
 }
 
@@ -540,6 +555,7 @@ function seconds(sec) {
 
 // each test is executed like: node ./path/to/test <working dir> <desired test name>. This function returns the passed in name.
 function getRequestedTest() {
+  console.log(`${JSON.stringify(process.argv, null, 2)}`)
   return process.argv[3]
 }
 
@@ -582,31 +598,24 @@ function assertEqAInB(a, b) {
   }
 }
 
-module.exports = function (file) {
-  IMPORTING_FILE = file
-  return {
-    DRIVER_DIR,
-    TEST_DIR,
-    REPO_DIR,
-    BUILD_BIN_DIR,
-    MDB_PATH,
-    buildDirFile,
-    DAClient,
-    getLineOf,
-    getStackFramePc,
-    readFile,
-    repoDirFile,
-    seconds,
-    testException,
-    testSuccess,
-    runTest,
-    runTestSuite,
-    getRequestedTest,
-    prettyJson,
-    checkResponse,
-    doSomethingDelayed,
-    compareEqMemberValues,
-    compareEqObjectLayout,
-    assertEqAInB,
-  }
+module.exports = {
+  MDB_PATH,
+  DAClient,
+  getLineOf,
+  getStackFramePc,
+  readFile,
+  repoDirFile,
+  seconds,
+  testException,
+  testSuccess,
+  runTest,
+  runTestSuite,
+  getRequestedTest,
+  prettyJson,
+  checkResponse,
+  doSomethingDelayed,
+  compareEqMemberValues,
+  compareEqObjectLayout,
+  assertEqAInB,
+  getExecutorArgs,
 }

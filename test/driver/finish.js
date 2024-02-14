@@ -1,30 +1,26 @@
-const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite, seconds, readFile, repoDirFile, getLineOf } =
-  require('./client')(__filename)
+const { readFile, repoDirFile, getLineOf, prettyJson } = require('./client')
+const { todo, assert } = require('./utils')
 
-async function finish() {
-  const da_client = new DAClient(MDB_PATH, [])
-  await da_client.launchToMain(buildDirFile('stackframes'))
+async function finish(DA) {
+  await DA.launchToMain(DA.buildDirFile('stackframes'))
   const file = readFile(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP3']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
-  const res = await da_client.sendReqGetResponse('setBreakpoints', {
+  const res = await DA.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/stackframes.cpp'),
       path: repoDirFile('test/stackframes.cpp'),
     },
     breakpoints: bp_lines,
   })
-  const threads = await da_client.threads()
-  await da_client.contNextStop(threads[0].id)
+  const threads = await DA.threads()
+  await DA.contNextStop(threads[0].id)
 
-  let frames = await da_client.stackTrace(threads[0].id)
+  let frames = await DA.stackTrace(threads[0].id)
   const next_up_frame = frames.body.stackFrames[1]
-  // await da_client.setInsBreakpoint("0x40121f");
-  const allThreadsStop = true
-  // await da_client.contNextStop(threads[0].id);
-  const { event_body, response } = await da_client.sendReqWaitEvent(
+  const { event_body, response } = await DA.sendReqWaitEvent(
     'stepOut',
     {
       threadId: threads[0].id,
@@ -43,24 +39,27 @@ async function finish() {
     )}`
   )
 
-  if (!response.success) throw new Error(`Request was unsuccessful: ${JSON.stringify(response)}`)
-  console.log(`stopped event: ${JSON.stringify(event_body, null, 2)}`)
+  assert(response.success, `Request was unsuccessful: ${JSON.stringify(response)}`)
+  assert(
+    event_body.reason == 'step',
+    `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
+  )
 
-  if (event_body.reason != 'step') {
-    throw new Error(`Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(event_body)}`)
-  }
-
-  frames = await da_client.stackTrace(threads[0].id)
+  frames = await DA.stackTrace(threads[0].id)
   console.log(`Stopped at ${JSON.stringify(frames.body.stackFrames[0], null, 2)}`)
-  if (frames.body.stackFrames[0].line != next_up_frame.line) {
-    throw new Error(`Expected to be at line ${next_up_frame.line} but was at ${frames.body.stackFrames[0].line}`)
-  }
+  assert(
+    frames.body.stackFrames[0].line == next_up_frame.line,
+    `Expected to be at line ${next_up_frame.line} but was at ${frames.body.stackFrames[0].line}`
+  )
 }
+
+const finishAbortedDueToBkpt = todo('finishAbortedDueToBkpt')
 
 const tests = {
   finish: finish,
+  finishAbortedDueToBkpt: finishAbortedDueToBkpt,
 }
 
-runTestSuite(tests).then(() => {
-  console.log(`done with test`)
-})
+module.exports = {
+  tests: tests,
+}

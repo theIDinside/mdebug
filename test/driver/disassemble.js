@@ -1,5 +1,6 @@
-const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite } = require('./client')(__filename)
+const { getStackFramePc, prettyJson } = require('./client')
 const { spawnSync } = require('child_process')
+const { assert, assert_eq } = require('./utils')
 
 const regex = /[0-9a-f]+:/
 function getTextSection(objdumpOutput) {
@@ -49,14 +50,16 @@ function compareDisassembly(pc, objdump, mdbResult) {
   }
   console.log(`MDB Instruction Output: ${mdbResult.length} == objdump Instruction Output: ${objdump.length}`)
   for (let i = 0; i < objdump.length; ++i) {
-    if (mdbResult[i].address != objdump[i].addr) {
-      const serial = JSON.stringify(mdbResult, null, 2)
-      throw new Error(
-        `(${pc}): Expected disassembled instruction #${i} at address ${objdump[i].addr} but got ${
-          mdbResult[i].address
-        }. Serial data: ${serial}. Expected data ${JSON.stringify(objdump, null, 2)}`
-      )
-    }
+    const resAddr = mdbResult[i].address
+    const dumpAddr = objdump[i].addr
+    assert(
+      resAddr == dumpAddr,
+      () =>
+        `(${pc}): Expected disassembled instruction #${i} at address ${dumpAddr} but got ${resAddr}. Serial data: ${prettyJson(
+          mdbResult
+        )}. Expected data ${prettyJson(objdump)}`
+    )
+
     if (
       mdbResult[i].instructionBytes != objdump.opcode &&
       mdbResult[i].instructionBytes.split(' ').join('') != objdump[i].opcode.split(' ').join('')
@@ -85,26 +88,27 @@ async function disasm_verify(objdump, client, pc, insOffset, insCount) {
   console.log(`[offset: ${insOffset}, pc: ${pc}, count: ${insCount}]\n\t - MDB output == objdump output!`)
 }
 
-async function backAndForward() {
-  const da_client = new DAClient(MDB_PATH, [])
-  const objdumped = spawnSync('objdump', ['-d', buildDirFile('stackframes')]).stdout.toString()
+async function backAndForward(DA) {
+  const objdumped = spawnSync('objdump', ['-d', DA.buildDirFile('stackframes')]).stdout.toString()
   const insts_of_interest = getTextSection(objdumped)
   const objdump = processObjdumpLines(insts_of_interest)
-  await da_client.launchToMain(buildDirFile('stackframes'))
-  const threads = await da_client.threads()
-  const frames = await da_client.stackTrace(threads[0].id)
+  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  const threads = await DA.threads()
+  const frames = await DA.stackTrace(threads[0].id)
   const pc = getStackFramePc(frames, 0)
-  await disasm_verify(objdump, da_client, pc, 0, 10)
-  await disasm_verify(objdump, da_client, pc, 5, 10)
-  await disasm_verify(objdump, da_client, pc, -5, 10)
-  await disasm_verify(objdump, da_client, pc, -30, 10)
-  await disasm_verify(objdump, da_client, pc, -50, 10)
-  await disasm_verify(objdump, da_client, pc, -100, 200)
-  await disasm_verify(objdump, da_client, pc, 10, 2000)
+  await disasm_verify(objdump, DA, pc, 0, 10)
+  await disasm_verify(objdump, DA, pc, 5, 10)
+  await disasm_verify(objdump, DA, pc, -5, 10)
+  await disasm_verify(objdump, DA, pc, -30, 10)
+  await disasm_verify(objdump, DA, pc, -50, 10)
+  await disasm_verify(objdump, DA, pc, -100, 200)
+  await disasm_verify(objdump, DA, pc, 10, 2000)
 }
 
 const tests = {
   backAndForward: backAndForward,
 }
 
-runTestSuite(tests)
+module.exports = {
+  tests: tests,
+}

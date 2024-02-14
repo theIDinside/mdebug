@@ -52,9 +52,44 @@ function hexStrAddressesEquals(a, b) {
   return addr_a == addr_b
 }
 
+function assert(boolCondition, errMsg) {
+  if (!boolCondition) {
+    if (typeof errMsg === 'function') {
+      const errMessage = errMsg()
+      if (typeof errMessage !== 'string')
+        throw new Error('Expected return type from errMessage function to be of string')
+      throw new Error(errMessage)
+    } else if (typeof errMsg === 'string') {
+      throw new Error(errMsg)
+    } else {
+      throw new Error('errMsg parameter expected to be a string or a function returning a string.')
+    }
+  }
+}
+
+/**
+ * @param {any} a
+ * @param {any} b
+ * @param {string | () => string } errMsg
+ */
+function assert_eq(a, b, errMsg) {
+  assert(a == b, errMsg)
+}
+
+function todo(fnName) {
+  const err = new Error()
+  err.message = `The ${fnName} test is not implemented`
+  return async (da) => {
+    throw err
+  }
+}
+
 module.exports = {
   objdump,
   getTextSection,
   processObjdumpLines,
   hexStrAddressesEquals,
+  todo,
+  assert,
+  assert_eq,
 }

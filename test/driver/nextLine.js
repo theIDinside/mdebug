@@ -1,5 +1,5 @@
-const { DAClient, MDB_PATH, buildDirFile, readFile, runTestSuite, repoDirFile, getLineOf, prettyJson } =
-  require('./client')(__filename)
+const { readFile, repoDirFile, getLineOf, prettyJson } = require('./client')
+const { todo, assert } = require('./utils')
 
 function getLinesOf(names) {
   const file = readFile(repoDirFile('test/next.cpp'))
@@ -9,53 +9,48 @@ function getLinesOf(names) {
     .map((l) => ({ line: l }))
 }
 
-async function clientSpawn(bps) {
-  const da_client = new DAClient(MDB_PATH, [])
-  await da_client.launchToMain(buildDirFile('next'))
+async function setup(DA, bps) {
+  await DA.launchToMain(DA.buildDirFile('next'))
   const file = readFile(repoDirFile('test/next.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
 
-  if (bp_lines.length != bps.length) {
-    throw new Error(`Could not parse contents of ${repoDirFile('test/next.cpp')} to find all string identifiers`)
-  }
+  assert(
+    bp_lines.length == bps.length,
+    `Could not parse contents of ${repoDirFile('test/next.cpp')} to find all string identifiers`
+  )
 
-  const breakpoint_response = await da_client.sendReqGetResponse('setBreakpoints', {
+  const breakpoint_response = await DA.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/next.cpp'),
       path: repoDirFile('test/next.cpp'),
     },
     breakpoints: bp_lines,
   })
-  if (breakpoint_response.body.breakpoints.length != bps.length) {
-    throw new Error(
-      `Expected to have set ${bps.length} breakpoints but only successfully set ${
-        breakpoint_response.body.breakpoints.length
-      }:\n${prettyJson(breakpoint_response)}`
-    )
-  }
-  return da_client
+  assert(
+    breakpoint_response.body.breakpoints.length == bps.length,
+    `Expected to have set ${bps.length} breakpoints but only successfully set ${
+      breakpoint_response.body.breakpoints.length
+    }:\n${prettyJson(breakpoint_response)}`
+  )
 }
 
-async function nextLineOverFunction() {
+async function nextLineOverFunction(DA) {
   const bp_lines = getLinesOf(['BP1', 'BP2'])
-  const da_client = await clientSpawn(['BP1'])
-  const threads = await da_client.threads()
-  await da_client.contNextStop(threads[0].id)
-  let frames = await da_client.stackTrace(threads[0].id)
+  await setup(DA, ['BP1'])
+  const threads = await DA.threads()
+  await DA.contNextStop(threads[0].id)
+  let frames = await DA.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
-  if (start_line != bp_lines[0].line)
-    throw new Error(
-      `Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}. Frames: ${JSON.stringify(
-        frames,
-        null,
-        2
-      )}`
-    )
+  assert(
+    start_line == bp_lines[0].line,
+    `Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}. Frames: ${prettyJson(frames)}`
+  )
+
   const allThreadsStop = true
-  const { event_body, response } = await da_client.sendReqWaitEvent(
+  const { event_body, response } = await DA.sendReqWaitEvent(
     'next',
     {
       threadId: threads[0].id,
@@ -66,37 +61,35 @@ async function nextLineOverFunction() {
     1000
   )
 
-  if (event_body.reason != 'step') {
-    throw new Error(`Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(event_body)}`)
-  }
+  assert(
+    event_body.reason == 'step',
+    `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
+  )
 
   {
-    frames = await da_client.stackTrace(threads[0].id)
+    frames = await DA.stackTrace(threads[0].id)
     const end_line = frames.body.stackFrames[0].line
-    if (end_line != bp_lines[1].line) {
-      throw new Error(
-        `Expected to be at line ${bp_lines[1].line} but we're at line ${end_line}: ${JSON.stringify(
-          frames.body.stackFrames,
-          null,
-          2
-        )}`
-      )
-    }
+    assert(
+      end_line == bp_lines[1].line,
+      `Expected to be at line ${bp_lines[1].line} but we're at line ${end_line}: ${prettyJson(frames.body.stackFrames)}`
+    )
     console.log(`at correct line ${end_line}`)
   }
 }
 
-async function stopBecauseBpWhenNextLine() {
+async function stopBecauseBpWhenNextLine(DA) {
   const bp_lines = getLinesOf(['BP1', 'BP3'])
-  const da_client = await clientSpawn(['BP1', 'BP3'])
-  const threads = await da_client.threads()
-  let stopped = await da_client.contNextStop(threads[0].id)
-  let frames = await da_client.stackTrace(threads[0].id)
+  await setup(DA, ['BP1', 'BP3'])
+  const threads = await DA.threads()
+  let stopped = await DA.contNextStop(threads[0].id)
+  let frames = await DA.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
-  if (start_line != bp_lines[0].line)
-    throw new Error(`Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}`)
+  assert(
+    start_line == bp_lines[0].line,
+    `Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}`
+  )
   const allThreadsStop = true
-  const { event_body, response } = await da_client.sendReqWaitEvent(
+  const { event_body, response } = await DA.sendReqWaitEvent(
     'next',
     {
       threadId: threads[0].id,
@@ -106,35 +99,32 @@ async function stopBecauseBpWhenNextLine() {
     'stopped',
     1000
   )
-
-  if (event_body.reason != 'breakpoint') {
-    throw new Error(
-      `Expected to see a 'stopped' event with 'breakpoint' as reason. Got event ${JSON.stringify(event_body)}`
-    )
-  }
+  assert(
+    event_body.reason == 'breakpoint',
+    `Expected to see a 'stopped' event with 'breakpoint' as reason. Got event ${JSON.stringify(event_body)}`
+  )
 
   {
-    frames = await da_client.stackTrace(threads[0].id)
+    frames = await DA.stackTrace(threads[0].id)
     const end_line = frames.body.stackFrames[0].line
-    if (end_line != bp_lines[1].line) {
-      throw new Error(
-        `Expected to be at line ${bp_lines[1].line} but we're at line ${end_line}: ${JSON.stringify(
-          frames.body.stackFrames,
-          null,
-          2
-        )}`
-      )
-    }
+    assert(
+      end_line == bp_lines[1].line,
+      `Expected to be at line ${bp_lines[1].line} but we're at line ${end_line}: ${prettyJson(frames.body.stackFrames)}`
+    )
     console.log(`at correct line ${end_line}`)
   }
 }
 
-async function nextLineInTemplateCode() {}
+const nextLineInTemplateCode = todo('nextLineInTemplateCode')
+const nextInstruction = todo('nextInstruction')
 
 const tests = {
   nextLineOverFunction: nextLineOverFunction,
   stopBecauseBpWhenNextLine: stopBecauseBpWhenNextLine,
   nextLineInTemplateCode: nextLineInTemplateCode,
+  nextInstruction: nextInstruction,
 }
 
-runTestSuite(tests)
+module.exports = {
+  tests: tests,
+}

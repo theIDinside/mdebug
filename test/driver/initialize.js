@@ -1,8 +1,13 @@
-const { DAClient, MDB_PATH, checkResponse, runTest } = require('./client')(__filename)
+const { DAClient, MDB_PATH, checkResponse } = require('./client')
 
-async function test() {
-  const da_client = new DAClient(MDB_PATH, [])
-  await da_client.sendReqGetResponse('initialize', {}, 1000).then((res) => checkResponse(res, 'initialize', true))
+async function init(DA) {
+  await DA.sendReqGetResponse('initialize', {}, 1000).then((res) => checkResponse(res, 'initialize', true))
 }
 
-runTest(test)
+const tests = {
+  init: init,
+}
+
+module.exports = {
+  tests: tests,
+}

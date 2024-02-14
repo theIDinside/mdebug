@@ -1,13 +1,13 @@
-const { DAClient, MDB_PATH, buildDirFile, getStackFramePc, runTestSuite, seconds } = require('./client')(__filename)
+const { getStackFramePc, prettyJson } = require('./client')
+const { assert } = require('./utils')
 
-async function test() {
-  const da_client = new DAClient(MDB_PATH, [])
-  await da_client.launchToMain(buildDirFile('stackframes'))
-  const threads = await da_client.threads()
-  let frames = await da_client.stackTrace(threads[0].id)
+async function test(DA) {
+  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  const threads = await DA.threads()
+  let frames = await DA.stackTrace(threads[0].id)
   // await da_client.setInsBreakpoint("0x40121f");
   const pc = getStackFramePc(frames, 0)
-  const disassembly = await da_client.sendReqGetResponse('disassemble', {
+  const disassembly = await DA.sendReqGetResponse('disassemble', {
     memoryReference: pc,
     offset: 0,
     instructionOffset: 0,
@@ -16,7 +16,7 @@ async function test() {
   })
   const allThreadsStop = true
   // await da_client.contNextStop(threads[0].id);
-  const { event_body, response } = await da_client.sendReqWaitEvent(
+  const { event_body, response } = await DA.sendReqWaitEvent(
     'next',
     {
       threadId: threads[0].id,
@@ -26,30 +26,24 @@ async function test() {
     'stopped',
     1000
   )
+  assert(response.success, `Request was unsuccessful: ${prettyJson(response)}`)
+  assert(
+    event_body.reason == 'step',
+    `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
+  )
 
-  if (!response.success) throw new Error(`Request was unsuccessful: ${JSON.stringify(response)}`)
-
-  if (event_body.reason != 'step') {
-    throw new Error(`Expected to see a 'stopped' event with 'step' as reason. Got event ${JSON.stringify(event_body)}`)
-  }
-
-  frames = await da_client.stackTrace(threads[0].id)
+  frames = await DA.stackTrace(threads[0].id)
   const next_pc = getStackFramePc(frames, 0)
-  if (next_pc != disassembly.body.instructions[1].address) {
-    throw new Error(
-      `Expected to be at ${disassembly.body.instructions[1].address} but RIP=${next_pc} (previos pc: ${pc})`
-    )
-  }
+  assert(
+    next_pc == disassembly.body.instructions[1].address,
+    `Expected to be at ${disassembly.body.instructions[1].address} but RIP=${next_pc} (previous pc: ${pc})`
+  )
 }
 
 const tests = {
   oneInstruction: test,
 }
 
-try {
-  runTestSuite(tests).then(() => {
-    console.log(`done with test`)
-  })
-} catch (ex) {
-  throw ex
+module.exports = {
+  tests: tests,
 }

@@ -1,16 +1,15 @@
-const { DAClient, MDB_PATH, prettyJson, buildDirFile, getLineOf, readFile, repoDirFile, runTestSuite, assertEqAInB } =
-  require('./client')(__filename)
-
-const assert = require('assert')
+const { prettyJson, getLineOf, readFile, repoDirFile, assertEqAInB } = require('./client')
+const { todo, assert } = require('./utils')
+const stdAssert = require('assert')
 
 /**
  * Verify that all objects in `varRefs` have unique variablesReference value.
  */
 function assertAllVariableReferencesUnique(varRefs) {
-  if (!allUniqueVariableReferences(varRefs))
-    throw new Error(
-      `Duplicate variablesReferences found (that were non-zero).\nResponse:\n${JSON.stringify(varRefs, null, 2)}`
-    )
+  assert(
+    allUniqueVariableReferences(varRefs),
+    `Duplicate variablesReferences found (that were non-zero).\nResponse:\n${prettyJson(varRefs)}`
+  )
 }
 
 function allUniqueVariableReferences(variables) {
@@ -27,12 +26,13 @@ function allUniqueVariableReferences(variables) {
  * the variablesReference we requested `vars` for. `response` was the full response
  */
 function assertVarResponseLength(vars, expectedCount, varRef, response) {
-  if (vars.length != expectedCount)
-    throw new Error(
+  assert(
+    vars.length == expectedCount,
+    () =>
       `[varRef: ${varRef}]: Expected ${expectedCount} variables but got ${
         vars.length
       }. Variables response: ${prettyJson(response)}`
-    )
+  )
 }
 
 async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
@@ -41,9 +41,7 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
-  if (bp_lines.length != bpIdentifiers.length) {
-    throw new Error(`Could not find these identifiers: ${bpIdentifiers}`)
-  }
+  assert(bp_lines.length == bpIdentifiers.length, `Could not find these identifiers: ${bpIdentifiers}`)
   const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile(filePath),
@@ -51,11 +49,10 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
     },
     breakpoints: bp_lines,
   })
-  if (bkpt_res.body.breakpoints.length != bpIdentifiers.length) {
-    throw new Error(
-      `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${JSON.stringify(bkpt_res, null, 2)}`
-    )
-  }
+  assert(
+    bkpt_res.body.breakpoints.length == bpIdentifiers.length,
+    `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
+  )
   return bp_lines
 }
 
@@ -65,45 +62,39 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
  * with a `scopes` request for the first frame in the stack trace.
  *
  * Returns the threads, stacktrace and the scopes of the newest frame
- * @param { DAClient } debugAdapter
+ * @param { DAClient } DA
  * @param { string } filePath - path to .cpp file that we are testing against
  * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
  * @param { string } expectedFrameName - frame name we expect to see on first stop.
  * @returns { { object[], object[], object[] } }
  */
-async function launchToGetFramesAndScopes(
-  debugAdapter,
-  filePath,
-  bpIdentifiers,
-  expectedFrameName,
-  exeFile = 'basetypes'
-) {
-  await debugAdapter.launchToMain(buildDirFile(exeFile), 5000)
-  await SetBreakpoints(debugAdapter, filePath, bpIdentifiers)
-  const threads = await debugAdapter.threads()
-  await debugAdapter.contNextStop(threads[0].id)
-  const fres = await debugAdapter.stackTrace(threads[0].id, 1000)
+async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile = 'basetypes') {
+  await DA.launchToMain(DA.buildDirFile(exeFile), 5000)
+  await SetBreakpoints(DA, filePath, bpIdentifiers)
+  const threads = await DA.threads()
+  await DA.contNextStop(threads[0].id)
+  const fres = await DA.stackTrace(threads[0].id, 1000)
   const frames = fres.body.stackFrames
-  if (frames[0].name != expectedFrameName) {
-    throw new Error(
+  assert(
+    frames[0].name == expectedFrameName,
+    () =>
       `Expected to be inside of frame '${expectedFrameName}'. Actual: ${frames[0].name}. Stacktrace:\n${prettyJson(
         frames
       )}`
-    )
-  }
+  )
 
-  const scopes_res = await debugAdapter.sendReqGetResponse('scopes', { frameId: frames[0].id })
+  const scopes_res = await DA.sendReqGetResponse('scopes', { frameId: frames[0].id })
   const scopes = scopes_res.body.scopes
-  if (scopes.length != 3)
-    throw new Error(`expected 3 scopes but got ${scopes.length}. Scopes response: ${prettyJson(scopes_res)}`)
-  if (!allUniqueVariableReferences(scopes))
-    throw new Error(`Expected unique variableReference for all scopes. Scopes:\n${JSON.stringify(scopes, null, 2)}`)
+  assert(scopes.length == 3, `expected 3 scopes but got ${scopes.length}. Scopes response: ${prettyJson(scopes_res)}`)
+  assert(
+    allUniqueVariableReferences(scopes),
+    `Expected unique variableReference for all scopes. Scopes:\n${prettyJson(scopes)}`
+  )
 
   return { threads, frames, scopes }
 }
 
-async function inConstructor() {
-  const debugAdapter = new DAClient(MDB_PATH, [])
+async function inConstructor(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
     'test/basetypes.cpp',
@@ -124,9 +115,8 @@ async function inConstructor() {
   }
 }
 
-async function scopeLocalsTest() {
+async function scopeLocalsTest(debugAdapter) {
   const MAIN_FILE = 'test/basetypes.cpp'
-  const debugAdapter = new DAClient(MDB_PATH, [])
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
     MAIN_FILE,
@@ -143,6 +133,13 @@ async function scopeLocalsTest() {
       assertVarResponseLength(variables, expectedCount, scope.variablesReference, vres)
 
       for (const v of variables) {
+        console.log(`variable: ${v.name}`)
+        if (v.name == 'a') {
+          stdAssert.deepEqual(v.value, '1', `expected a=1, but was ${v.value}`)
+        }
+        if (v.name == 'b') {
+          stdAssert.deepEqual(v.value, '3.14', `expected b=3.14, but was ${v.value}`)
+        }
         if (v.name == 'structure') {
           console.log(`[variables request]: varRef: ${v.variablesReference}, name='${v.name}'`)
           const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: v.variablesReference })
@@ -156,9 +153,8 @@ async function scopeLocalsTest() {
   }
 }
 
-async function scopeArgsTest() {
+async function scopeArgsTest(debugAdapter) {
   const MAIN_FILE = 'test/basetypes.cpp'
-  const debugAdapter = new DAClient(MDB_PATH, [])
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
     MAIN_FILE,
@@ -177,7 +173,7 @@ async function scopeArgsTest() {
         { name: 'name', type: 'const char *' },
         { name: 'should_take', type: 'bool' },
       ]
-      assert.deepEqual(
+      stdAssert.deepEqual(
         args.length,
         expectedArgs.length,
         `Expected to see ${expectedArgs.length} member variables but saw ${args.length}`
@@ -191,9 +187,8 @@ async function scopeArgsTest() {
   }
 }
 
-async function membersOfVariableTest() {
+async function membersOfVariableTest(debugAdapter) {
   const MAIN_FILE = 'test/basetypes.cpp'
-  const debugAdapter = new DAClient(MDB_PATH, [])
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
     MAIN_FILE,
@@ -229,7 +224,7 @@ async function membersOfVariableTest() {
       })
 
       const structMembers = structMembersResponse.body.variables
-      assert.deepEqual(
+      stdAssert.deepEqual(
         structMembers.length,
         expected.length,
         `Expected to see ${expected.length} member variables but saw ${structMembers.length}`
@@ -243,11 +238,12 @@ async function membersOfVariableTest() {
   }
 }
 
-async function returnValue() {}
+const returnValue = todo('returnValue')
+const shadowed = todo('shadowed')
+const readStringMember = todo('readStringMember')
 
-async function interpretTemplateTypes() {
+async function interpretTemplateTypes(debugAdapter) {
   const FileToSetBpIn = 'test/templated_code/template.h'
-  const debugAdapter = new DAClient(MDB_PATH, [])
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
     FileToSetBpIn,
@@ -264,6 +260,10 @@ const tests = {
   inConstructor: inConstructor,
   returnValue: returnValue,
   interpretTemplateTypes: interpretTemplateTypes,
+  shadowed: shadowed,
+  readStringMember: readStringMember,
 }
 
-runTestSuite(tests)
+module.exports = {
+  tests: tests,
+}

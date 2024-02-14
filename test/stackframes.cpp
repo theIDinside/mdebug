@@ -1,3 +1,4 @@
+#include "./templated_code/template.h"
 #include <cstdio>
 #include <sys/signal.h>
 struct Foo
@@ -25,6 +26,9 @@ baz(int a, int b, int times)
     res_a = quux(res_a, a);
     res_b = quux(res_b, b);
     --times;
+  }
+  if (!equals(res_a, res_b)) {
+    printf("values are not equal: a=%d, b=%d", res_a, res_b);
   }
   return a * b;
 }

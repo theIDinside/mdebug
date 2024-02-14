@@ -78,9 +78,6 @@ SourceFileSymbolInfo::set_id(SymbolInfoId info_id) noexcept
 void
 SourceFileSymbolInfo::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept
 {
-  if (unit_data->get_objfile()->path.filename() == "next") {
-    DLOG("mdb", "adding file {} to cu=0x{:x}", src_file->full_path->c_str(), unit_data->section_offset());
-  }
   source_code_files.emplace_back(std::move(src_file));
 }
 
