@@ -1,5 +1,5 @@
-const { getLineOf, readFile, repoDirFile, prettyJson } = require('./client')
-const { assert } = require('./utils')
+const { getLineOf, readFile, repoDirFile } = require('./client')
+const { assert, prettyJson } = require('./utils')
 
 async function threads(DA) {
   await DA.launchToMain(DA.buildDirFile('threads_shared'))

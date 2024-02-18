@@ -1,10 +1,12 @@
 #include "commands.h"
 #include "events/event.h"
 #include "fmt/format.h"
+#include "interface/ui_command.h"
 #include "nlohmann/json_fwd.hpp"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
 #include "types.h"
+#include "utils/expected.h"
 #include <algorithm>
 #include <iterator>
 #include <memory>
@@ -21,6 +23,35 @@
 #include <valarray>
 
 namespace ui::dap {
+
+ErrorResponse::ErrorResponse(std::string &&command, ui::UICommandPtr cmd,
+                             std::optional<std::string> &&short_message, std::optional<Message> &&message) noexcept
+    : ui::UIResult(false, cmd), command(std::move(command)), short_message(std::move(short_message)),
+      message(std::move(message))
+{
+}
+
+std::string
+ErrorResponse::serialize(int seq) const noexcept
+{
+  if (short_message && message) {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}", body: {{ error: {} }} }})",
+        seq, response_seq, command, *short_message, *message);
+  } else if (short_message && !message) {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}" }})",
+        seq, response_seq, command, *short_message);
+  } else if (!short_message && message) {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", body: {{ error: {} }} }})",
+        seq, response_seq, command, *message);
+  } else {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}" }})", seq,
+        response_seq, command);
+  }
+}
 
 std::string
 ContinueResponse::serialize(int seq) const noexcept
@@ -78,6 +109,7 @@ Continue::execute(Tracer *tracer) noexcept
     res->success = false;
   } else {
     res->success = true;
+    target->invalidate_stop_state();
     if (continue_all) {
       DLOG("mdb", "[request:continue]: continue all");
       target->resume_target(RunType::Continue);
@@ -372,7 +404,7 @@ ReadMemoryResponse::serialize(int seq) const noexcept
   }
 }
 
-ReadMemory::ReadMemory(std::uint64_t seq, AddrPtr address, int offset, u64 bytes) noexcept
+ReadMemory::ReadMemory(std::uint64_t seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept
     : UICommand(seq), address(address), offset(offset), bytes(bytes)
 {
 }
@@ -380,13 +412,17 @@ ReadMemory::ReadMemory(std::uint64_t seq, AddrPtr address, int offset, u64 bytes
 UIResultPtr
 ReadMemory::execute(Tracer *tracer) noexcept
 {
-  auto sv = tracer->get_current()->read_to_vector(address, bytes);
-  auto res = new ReadMemoryResponse{true, this};
-  res->data_base64 = utils::encode_base64(sv->span());
-  res->first_readable_address = address;
-  res->success = true;
-  res->unreadable_bytes = 0;
-  return res;
+  if (address) {
+    auto sv = tracer->get_current()->read_to_vector(*address, bytes);
+    auto res = new ReadMemoryResponse{true, this};
+    res->data_base64 = utils::encode_base64(sv->span());
+    res->first_readable_address = *address;
+    res->success = true;
+    res->unreadable_bytes = 0;
+    return res;
+  } else {
+    return new ErrorResponse{"readMemory", this, "Address parameter could not be parsed.", std::nullopt};
+  }
 }
 
 std::string
@@ -650,8 +686,8 @@ Scopes::execute(Tracer *tracer) noexcept
   return new ScopesResponse{true, this, current->scopes_reference(frameId)};
 }
 
-Disassemble::Disassemble(std::uint64_t seq, AddrPtr address, int byte_offset, int ins_offset, int ins_count,
-                         bool resolve_symbols) noexcept
+Disassemble::Disassemble(std::uint64_t seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset,
+                         int ins_count, bool resolve_symbols) noexcept
     : UICommand(seq), address(address), byte_offset(byte_offset), ins_offset(ins_offset), ins_count(ins_count),
       resolve_symbols(resolve_symbols)
 {
@@ -660,38 +696,42 @@ Disassemble::Disassemble(std::uint64_t seq, AddrPtr address, int byte_offset, in
 UIResultPtr
 Disassemble::execute(Tracer *tracer) noexcept
 {
-  auto res = new DisassembleResponse{true, this};
-  res->instructions.reserve(ins_count);
-  int remaining = ins_count;
-  if (ins_offset < 0) {
-    const int negative_offset = std::abs(ins_offset);
-    sym::zydis_disasm_backwards(tracer->get_current(), address, static_cast<u32>(negative_offset),
-                                res->instructions);
-    if (negative_offset < ins_count) {
-      for (auto i = 0u; i < res->instructions.size(); i++) {
-        if (res->instructions[i].address == address) {
-          keep_range(res->instructions, i - negative_offset, i);
-          break;
+  if (address) {
+    auto res = new DisassembleResponse{true, this};
+    res->instructions.reserve(ins_count);
+    int remaining = ins_count;
+    if (ins_offset < 0) {
+      const int negative_offset = std::abs(ins_offset);
+      sym::zydis_disasm_backwards(tracer->get_current(), address.value(), static_cast<u32>(negative_offset),
+                                  res->instructions);
+      if (negative_offset < ins_count) {
+        for (auto i = 0u; i < res->instructions.size(); i++) {
+          if (res->instructions[i].address == address) {
+            keep_range(res->instructions, i - negative_offset, i);
+            break;
+          }
         }
-      }
-    } else {
-      for (auto i = 0u; i < res->instructions.size(); i++) {
-        if (res->instructions[i].address == address) {
-          keep_range(res->instructions, i - negative_offset, i - negative_offset + ins_count);
-          break;
+      } else {
+        for (auto i = 0u; i < res->instructions.size(); i++) {
+          if (res->instructions[i].address == address) {
+            keep_range(res->instructions, i - negative_offset, i - negative_offset + ins_count);
+            break;
+          }
         }
+        return res;
       }
-      return res;
+      remaining -= res->instructions.size();
+      ins_offset = 0;
     }
-    remaining -= res->instructions.size();
-    ins_offset = 0;
-  }
 
-  if (remaining > 0) {
-    sym::zydis_disasm(tracer->get_current(), address, static_cast<u32>(std::abs(ins_offset)), remaining,
-                      res->instructions);
+    if (remaining > 0) {
+      sym::zydis_disasm(tracer->get_current(), address.value(), static_cast<u32>(std::abs(ins_offset)), remaining,
+                        res->instructions);
+    }
+    return res;
+  } else {
+    return new ErrorResponse{"disassemble", this, "Address parameter could not be parsed.", std::nullopt};
   }
-  return res;
 }
 
 std::string
@@ -702,12 +742,14 @@ DisassembleResponse::serialize(int seq) const noexcept
       seq, response_seq, fmt::join(instructions, ","));
 }
 
-Variables::Variables(std::uint64_t seq, int var_ref) noexcept : UICommand(seq), var_ref(var_ref) {}
+Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
+    : UICommand(seq), var_ref(var_ref), start(start), count(count)
+{
+}
 
 UIResultPtr
 Variables::execute(Tracer *tracer) noexcept
 {
-  DLOG("mdb", "[dap cmd]: variables command returns an empty list for now");
   auto current = tracer->get_current();
   if (auto varref = current->var_ref(var_ref); varref) {
     auto frame = tracer->get_current()->frame(varref->frame_id);
@@ -730,7 +772,7 @@ Variables::execute(Tracer *tracer) noexcept
       }
     }
     case EntityType::Variable: {
-      return new VariablesResponse{true, this, obj->get_member_variables_of(current, var_ref)};
+      return new VariablesResponse{true, this, obj->resolve(current, var_ref, start, count)};
     }
     case EntityType::Frame: {
       TODO("This branch should return a success=false, and a message saying that the varRef id was wrong/faulty, "
@@ -738,26 +780,111 @@ Variables::execute(Tracer *tracer) noexcept
     } break;
     }
   }
-  // Variable reference `this->varref` could not be resolved.
-  return new VariablesResponse{false, this, {}};
+
+  return new ErrorResponse{
+      "variables", this,
+      std::make_optional(fmt::format("Could not find variable with variablesReference {}", var_ref)),
+      std::nullopt};
 }
 
 VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept
-    : UIResult(success, cmd), variables(std::move(vars))
+    : UIResult(success, cmd), requested_reference(cmd != nullptr ? cmd->var_ref : 0), variables(std::move(vars))
 {
 }
 
 std::string
 VariablesResponse::serialize(int seq) const noexcept
 {
+  if (variables.empty()) {
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "variables", "body": {{ "variables": [] }} }})",
+        seq, response_seq);
+  }
+  std::string variables_contents{};
+  auto it = std::back_inserter(variables_contents);
+  for (const auto &v : variables) {
+    if (v.variable_value->has_visualizer()) {
+      auto opt = v.variable_value->get_visualizer()->dap_format(v.variable_value->name, v.ref);
+      if (opt) {
+        it = fmt::format_to(it, "{},", *opt);
+      } else {
+        return fmt::format(
+            R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "variables", "message": "Could not retrieve value for {}" }})",
+            seq, response_seq, v.variable_value->name);
+      }
+    } else {
+      ASSERT(v.variable_value->type()->is_reference(), "Add visualizer & resolver for T* types. It will look more "
+                                                       "or less identical to CStringResolver & ArrayResolver");
+      // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we do
+      // individual type checking again.
+      //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
+      auto span = v.variable_value->memory_view();
+      const std::uintptr_t ptr = sym::bit_copy<std::uintptr_t>(span);
+      auto ptr_str = fmt::format("0x{:x}", ptr);
+      it = fmt::format_to(
+          it,
+          R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }},)",
+          v.variable_value->name, ptr_str, *v.variable_value->type(), v.ref, v.variable_value->address());
+    }
+  }
+
+  variables_contents.pop_back();
   return fmt::format(
       R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "variables", "body": {{ "variables": [{}] }} }})",
-      seq, response_seq, fmt::join(variables, ","));
+      seq, response_seq, variables_contents);
+}
+
+InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
+    : UICommand(seq), command(command), missing_arguments(std::move(missing_args))
+{
+}
+
+UIResultPtr
+InvalidArgs::execute(Tracer *tracer) noexcept
+{
+  return new InvalidArgsResponse{command, std::move(missing_arguments)};
+}
+
+InvalidArgsResponse::InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
+    : command(command), missing_arguments(std::move(missing_args))
+{
+}
+
+std::string
+InvalidArgsResponse::serialize(int seq) const noexcept
+{
+  std::vector<std::string_view> missing{};
+  std::vector<std::string_view> invalid{};
+  missing.reserve(missing_arguments.size());
+  for (const auto &[k, v] : missing_arguments) {
+    switch (k.kind) {
+    case ArgumentErrorKind::Missing:
+      missing.push_back(v);
+      break;
+    case ArgumentErrorKind::InvalidInput:
+      invalid.push_back(v);
+      break;
+    }
+  }
+
+  std::array<char, 1024> message{};
+  auto it = !missing.empty() ? fmt::format_to(message.begin(), "Missing arguments: {}. ", fmt::join(missing, ", "))
+                             : message.begin();
+
+  it = !invalid.empty() ? fmt::format_to(it, "Invalid input: {}. ", fmt::join(invalid, ", ")) : it;
+  *it = 0;
+  std::string_view msg{message.begin(), message.begin() + std::distance(message.begin(), it)};
+
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}" }})",
+      seq, response_seq, command, msg);
 }
 
 ui::UICommand *
 parse_command(std::string &&packet) noexcept
 {
+  using namespace ui::dap;
+
   auto obj = nlohmann::json::parse(packet, nullptr, false);
   std::string_view cmd_name;
   obj["command"].get_to(cmd_name);
@@ -776,27 +903,32 @@ parse_command(std::string &&packet) noexcept
     return new ConfigurationDone{seq};
     break;
   case CommandType::Continue: {
+    if (auto missing = UICommand::check_args<Continue>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "continue", std::move(missing.value())};
+    }
     const auto all_threads = !args.contains("singleThread") ? true : false;
-    return new ui::dap::Continue{seq, args.at("threadId"), all_threads};
+    return new Continue{seq, args.at("threadId"), all_threads};
   }
   case CommandType::CustomRequest:
     TODO("Command::CustomRequest");
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
   case CommandType::Disassemble: {
-    ASSERT(args.contains("memoryReference"), "Args did not contain 'memoryReference'");
-    ASSERT(args.contains("offset"), "Args did not contain 'offset'");
-    ASSERT(args.contains("instructionCount"), "Args did not contain 'instructionCount'");
-    ASSERT(args.contains("instructionOffset"), "Args did not contain 'instructionOffset'");
+    if (auto &&invalid = UICommand::check_args<Disassemble>(args); invalid) {
+      return new InvalidArgs{seq, "disassemble", std::move(invalid.value())};
+    }
     std::string_view addr_str;
     args["memoryReference"].get_to(addr_str);
     const auto addr = to_addr(addr_str);
     int offset = args.at("offset");
     int instructionOffset = args.at("instructionOffset");
     int instructionCount = args.at("instructionCount");
-    return new ui::dap::Disassemble{seq, *addr, offset, instructionOffset, instructionCount, false};
+    return new ui::dap::Disassemble{seq, addr, offset, instructionOffset, instructionCount, false};
   }
   case CommandType::Disconnect: {
+    if (auto missing = UICommand::check_args<Disconnect>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "disconnect", std::move(missing.value())};
+    }
     bool restart = false;
     bool terminate_debuggee = false;
     bool suspend_debuggee = false;
@@ -822,7 +954,9 @@ parse_command(std::string &&packet) noexcept
   case CommandType::Initialize:
     return new Initialize{seq, std::move(args)};
   case CommandType::Launch: {
-    ASSERT(args.contains("program"), "Launch must contain 'program' field in args");
+    if (auto missing = UICommand::check_args<Launch>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "launch", std::move(missing.value())};
+    }
     Path path = args.at("program");
     std::vector<std::string> prog_args;
     if (args.contains("args")) {
@@ -836,8 +970,9 @@ parse_command(std::string &&packet) noexcept
   case CommandType::Modules:
     TODO("Command::Modules");
   case CommandType::Next: {
-    ASSERT(args.contains("threadId"),
-           "Next requests must contain a threadId whether or not all-stop is the execution mode");
+    if (auto missing = UICommand::check_args<Next>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "next", std::move(missing.value())};
+    }
     int thread_id = args["threadId"];
     bool single_thread = false;
     SteppingGranularity step_type = SteppingGranularity::Line;
@@ -852,18 +987,23 @@ parse_command(std::string &&packet) noexcept
     return new Next{seq, thread_id, !single_thread, step_type};
   }
   case CommandType::Pause: {
+    if (auto missing = UICommand::check_args<Pause>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "pause", std::move(missing.value())};
+    }
     int thread_id = args["threadId"];
     return new Pause(seq, Pause::Args{thread_id});
   }
   case CommandType::ReadMemory: {
-    ASSERT(args.contains("memoryReference") && args.contains("count"),
-           "args didn't contain memoryReference or count");
+    if (auto missing = UICommand::check_args<ReadMemory>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "readMemory", std::move(missing.value())};
+    }
+
     std::string_view addr_str;
     args.at("memoryReference").get_to(addr_str);
     const auto addr = to_addr(addr_str);
     const auto offset = args.value("offset", 0);
     const u64 count = args.at("count");
-    return new ui::dap::ReadMemory{seq, *addr, offset, count};
+    return new ui::dap::ReadMemory{seq, addr, offset, count};
   }
   case CommandType::Restart:
     TODO("Command::Restart");
@@ -872,10 +1012,16 @@ parse_command(std::string &&packet) noexcept
   case CommandType::ReverseContinue:
     TODO("Command::ReverseContinue");
   case CommandType::Scopes: {
+    if (auto missing = UICommand::check_args<Scopes>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "scopes", std::move(missing.value())};
+    }
     const int frame_id = args.at("frameId");
     return new ui::dap::Scopes{seq, frame_id};
   }
   case CommandType::SetBreakpoints:
+    if (auto missing = UICommand::check_args<SetBreakpoints>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "setBreakpoints", std::move(missing.value())};
+    }
     return new SetBreakpoints{seq, std::move(args)};
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
@@ -884,14 +1030,23 @@ parse_command(std::string &&packet) noexcept
   case CommandType::SetExpression:
     TODO("Command::SetExpression");
   case CommandType::SetFunctionBreakpoints:
+    if (auto missing = UICommand::check_args<SetFunctionBreakpoints>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "setFunctionBreakpoints", std::move(missing.value())};
+    }
     return new SetFunctionBreakpoints{seq, std::move(args)};
   case CommandType::SetInstructionBreakpoints:
+    if (auto missing = UICommand::check_args<SetInstructionBreakpoints>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "setInstructionBreakpoints", std::move(missing.value())};
+    }
     return new SetInstructionBreakpoints{seq, std::move(args)};
   case CommandType::SetVariable:
     TODO("Command::SetVariable");
   case CommandType::Source:
     TODO("Command::Source");
   case CommandType::StackTrace: {
+    if (auto missing = UICommand::check_args<StackTrace>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "stackTrace", std::move(missing.value())};
+    }
     std::optional<int> startFrame;
     std::optional<int> levels;
     std::optional<StackTraceFormat> format_;
@@ -922,8 +1077,9 @@ parse_command(std::string &&packet) noexcept
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
   case CommandType::StepOut: {
-    ASSERT(args.contains("threadId"),
-           "Next requests must contain a threadId whether or not all-stop is the execution mode");
+    if (auto missing = UICommand::check_args<StepOut>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "stepOut", std::move(missing.value())};
+    }
     int thread_id = args["threadId"];
     bool single_thread = false;
     if (args.contains("singleThread")) {
@@ -932,14 +1088,31 @@ parse_command(std::string &&packet) noexcept
     return new ui::dap::StepOut{seq, thread_id, !single_thread};
   }
   case CommandType::Terminate:
+    if (auto missing = UICommand::check_args<Terminate>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "terminate", std::move(missing.value())};
+    }
     return new Terminate{seq};
   case CommandType::TerminateThreads:
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
+    if (auto missing = UICommand::check_args<Threads>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "threads", std::move(missing.value())};
+    }
     return new Threads{seq};
   case CommandType::Variables: {
+    if (auto missing = UICommand::check_args<Variables>(args); missing) {
+      return new ui::dap::InvalidArgs{seq, "variables", std::move(missing.value())};
+    }
     int var_ref = args["variablesReference"];
-    return new Variables{seq, var_ref};
+    std::optional<u32> start{};
+    std::optional<u32> count{};
+    if (args.contains("start")) {
+      start = args.at("start");
+    }
+    if (args.contains("count")) {
+      count = args.at("count");
+    }
+    return new Variables{seq, var_ref, start, count};
   }
   case CommandType::WriteMemory:
     TODO("Command::WriteMemory");

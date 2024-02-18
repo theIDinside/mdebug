@@ -8,9 +8,13 @@
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
 #include "mdb_config.h"
+#include "symbolication/type.h"
+#include "symbolication/value_visualizer.h"
 #include <common.h>
 #include <string_view>
 #include <sys/mman.h>
+
+using VariablesReference = int;
 
 class CompilationUnitFile;
 class NonExecutableCompilationUnitFile;
@@ -106,16 +110,30 @@ struct ObjectFile
   std::vector<ui::dap::Variable> get_variables(TraceeController &tc, sym::Frame &frame,
                                                sym::VariableSet set) noexcept;
 
-  std::vector<ui::dap::Variable> get_member_variables_of(TraceeController &tc, int ref) noexcept;
+  std::vector<ui::dap::Variable> resolve(TraceeController &tc, int ref, std::optional<u32> start,
+                                         std::optional<u32> count) noexcept;
 
   void initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept;
   void add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
                        std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept;
   void init_minsym_name_lookup() noexcept;
 
+  // Clears the variablesReference cache - not that this doesn't necessarily mean the objects will die; it only
+  // mean that from a Variables Reference standpoint, they're no longer reachable. For instance, in the future, we
+  // might open for extending the debugger so that the user can do scripts etc, and they might want to hold on to
+  // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
+  // user will have created something that holds a reference to the value it will now become the sole owner.
+  void invalidate_variable_references() noexcept;
+  std::unique_ptr<sym::ValueVisualizer> find_custom_visualizer(sym::Type &type) noexcept;
+  std::unique_ptr<sym::ValueResolver> find_custom_resolver(sym::Type &type) noexcept;
+  void init_visualizer(std::shared_ptr<sym::Value> &value) noexcept;
+  void register_resolver(std::shared_ptr<sym::Value> &value) noexcept;
+  void cache_value(VariablesReference ref, sym::Value::ShrPtr value) noexcept;
+
 private:
-  std::vector<ui::dap::Variable> get_variables(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                                               sym::Frame &frame) noexcept;
+  std::vector<ui::dap::Variable> get_variables_impl(sym::FrameVariableKind variables_kind, TraceeController &tc,
+                                                    sym::Frame &frame) noexcept;
+
   std::unordered_map<std::string_view, Index> minimal_fn_symbols;
   std::vector<MinSymbol> min_fn_symbols_sorted;
   std::unordered_map<std::string_view, MinSymbol> minimal_obj_symbols;

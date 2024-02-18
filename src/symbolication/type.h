@@ -3,8 +3,12 @@
 #include "dwarf_defs.h"
 #include "fmt/core.h"
 #include "symbolication/dwarf/die.h"
+#include "symbolication/value_visualizer.h"
 #include "task.h"
+#include "utils/byte_buffer.h"
+#include "utils/expected.h"
 #include "utils/immutable.h"
+#include "utils/macros.h"
 
 struct DebugInfoEntry;
 struct TraceeController;
@@ -16,7 +20,7 @@ class Frame;
 using TypeMap = std::unordered_map<u64, Type>;
 using NameTypeMap = std::unordered_map<std::string_view, u64>;
 using Bytes = std::span<const u8>;
-using MemoryContentBytes = std::vector<u8>;
+using MemoryContentBytes = std::unique_ptr<utils::ByteBuffer>;
 
 namespace dw {
 class TypeSymbolicationContext;
@@ -41,10 +45,9 @@ public:
    * This has multiple problems, first of all, when we run into a Foo*, we must make sure that Foo also exist
    * before we return Foo* here, because the target type will be defined by Foo. */
   sym::Type *get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexcept;
+  sym::Type *get_unit_type() noexcept;
   sym::Type *emplace_type(Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
                           std::string_view name) noexcept;
-
-  std::mutex &get_mutex() noexcept;
 };
 
 namespace sym {
@@ -119,163 +122,66 @@ bit_copy(std::span<const FromRepr> from)
   return to;
 }
 
+enum class Modifier : i8
+{
+  Const = -2,
+  Volatile = -1,
+  None = 0,
+  Pointer = 1,
+  Reference = 2,
+  RValueReference = 3,
+  Array = 4,
+  Atomic = 5,
+  Immutable,
+  Packed,
+  Restrict,
+  Shared,
+};
+
+static constexpr std::string_view
+ModifierToString(Modifier mod)
+{
+  switch (mod) {
+  case Modifier::Const:
+    return "const";
+  case Modifier::Volatile:
+    return "volatile";
+  case Modifier::None:
+    return "";
+  case Modifier::Pointer:
+    return "*";
+  case Modifier::Reference:
+    return "&";
+  case Modifier::RValueReference:
+    return "&&";
+  case Modifier::Array:
+    return "[";
+  // these needs updating. it's not how they are supposed to look. This is language dependent too.
+  case Modifier::Atomic:
+    return "atomic";
+  case Modifier::Immutable:
+    return "immutable";
+  case Modifier::Packed:
+    return "packed";
+  case Modifier::Restrict:
+    return "restrict";
+  case Modifier::Shared:
+    return "shared";
+  }
+}
+
 // This is meant to be the interface via which we interpret a range of bytes
 class Type
 {
   static constexpr auto ModifierNameStrSize = "const"sv.size() + "volatile"sv.size() + " *"sv.size();
   friend sym::dw::TypeSymbolicationContext;
+  friend fmt::formatter<sym::Type>;
 
 public:
   Immutable<std::string_view> name;
   Immutable<dw::IndexedDieReference> cu_die_ref;
-
-  enum class Modifier : i8
-  {
-    Const = -2,
-    Volatile = -1,
-    None = 0,
-    Pointer = 1,
-    Reference = 2,
-    RValueReference = 3,
-    Atomic = 4,
-    Immutable,
-    Packed,
-    Restrict,
-    Shared,
-  };
-
-  // Qualified, i.e. some variant of cvref-types
-  Type(dw::IndexedDieReference die_ref, u32 size_of, Type *target) noexcept;
-
-  // "Normal" type constructor
-  Type(dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
-  Type(Type &&o) noexcept;
-
-  void add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept;
-  void set_base_type_encoding(BaseTypeEncoding enc) noexcept;
-  bool set_processing() noexcept;
-  NonNullPtr<Type> target_type() noexcept;
-  // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
-  // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,
-  // Foo). We do different than gdb though. We say all references are the same thing: an address value
-  bool is_reference() const noexcept;
-  bool is_resolved() const noexcept;
-  u32 size() const noexcept;
-  bool is_primitive() const noexcept;
-  const std::vector<Field> &member_variables() const noexcept;
-
-  static std::string_view
-  ModifierToString(Modifier mod)
-  {
-    switch (mod) {
-    case Modifier::Const:
-      return "const";
-    case Modifier::Volatile:
-      return "volatile";
-    case Modifier::None:
-      PANIC("None modifier does not make sense");
-    case Modifier::Pointer:
-      return "*";
-    case Modifier::Reference:
-      return "&";
-    case Modifier::RValueReference:
-      return "&&";
-    // these needs updating. it's not how they are supposed to look. This is language dependent too.
-    case Modifier::Atomic:
-      return "atomic";
-    case Modifier::Immutable:
-      return "immutable";
-    case Modifier::Packed:
-      return "packed";
-    case Modifier::Restrict:
-      return "restrict";
-    case Modifier::Shared:
-      return "shared";
-    }
-  }
-
-  template <typename Out>
-  constexpr auto
-  serialize_type_name(Out out)
-  {
-    std::array<Type *, 10> ordered{};
-    i8 idx = 0;
-    auto it = type_chain;
-    ordered[idx++] = this;
-    while (it != nullptr) {
-      ordered[idx++] = it;
-      it = it->type_chain;
-    }
-    std::sort(ordered.begin(), ordered.begin() + idx, [](sym::Type *ptra, sym::Type *ptrb) noexcept {
-      return std::to_underlying(*ptra->modifier) < std::to_underlying(*ptrb->modifier);
-    });
-
-    auto o = out;
-    auto i = 0;
-    if (ordered[i]->modifier != Modifier::None) {
-      o = fmt::format_to(o, "{}", ModifierToString(ordered[i]->modifier));
-    } else {
-      o = fmt::format_to(o, "{}", *ordered[i]->name);
-    }
-    ++i;
-
-    for (; i < idx; ++i) {
-      if (ordered[i]->modifier != Modifier::None) {
-        o = fmt::format_to(o, " {}", ModifierToString(ordered[i]->modifier));
-      } else {
-        o = fmt::format_to(o, " {}", *ordered[i]->name);
-      }
-    }
-
-    return o;
-  }
-
-  constexpr auto
-  typename_to_str()
-  {
-    std::array<Type *, 10> ordered{};
-    u8 idx = 0;
-    auto it = type_chain;
-    ordered[idx++] = this;
-    while (it != nullptr) {
-      ordered[idx++] = it;
-      it = it->type_chain;
-    }
-    std::sort(ordered.begin(), ordered.begin() + idx, [](sym::Type *ptra, sym::Type *ptrb) noexcept {
-      return std::to_underlying(*ptra->modifier) < std::to_underlying(*ptrb->modifier);
-    });
-
-    std::vector<char> name_str{};
-    name_str.reserve(name->size() + ModifierNameStrSize);
-    auto out_iter = std::back_inserter(name_str);
-    std::span<Type *> span{ordered.begin(), ordered.begin() + idx};
-
-    auto i = 0;
-    if (ordered[i]->modifier != Modifier::None) {
-      out_iter = fmt::format_to(out_iter, "{}", ModifierToString(ordered[i]->modifier));
-    } else {
-      out_iter = fmt::format_to(out_iter, "{}", *ordered[i]->name);
-    }
-    ++i;
-
-    for (; i < idx; ++i) {
-      if (ordered[i]->modifier != Modifier::None) {
-        out_iter = fmt::format_to(out_iter, " {}", ModifierToString(ordered[i]->modifier));
-      } else {
-        out_iter = fmt::format_to(out_iter, " {}", *ordered[i]->name);
-      }
-    }
-    return name_str;
-  }
-
   Immutable<Modifier> modifier;
   Immutable<u32> size_of;
-
-  constexpr std::optional<BaseTypeEncoding>
-  get_base_type() const noexcept
-  {
-    return base_type;
-  }
 
 private:
   friend class TypeSymbolicationContext;
@@ -285,28 +191,70 @@ private:
   // A disengaged optional, means this type does *not* represent one of the primitives (what DWARF calls "base
   // types").
   std::optional<BaseTypeEncoding> base_type;
-
+  u32 array_bounds{0};
+  bool is_typedef;
   // Flags used when constructing and "realizing" a type from the debug info data.
   bool resolved;
   bool processing;
+
+public:
+  // Qualified, i.e. some variant of cvref-types or type defs
+  Type(dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept;
+
+  // "Normal" type constructor
+  Type(dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
+
+  // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
+  Type(std::string_view name) noexcept;
+  Type(Type &&o) noexcept;
+
+  void add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept;
+  void set_base_type_encoding(BaseTypeEncoding enc) noexcept;
+  bool set_processing() noexcept;
+  NonNullPtr<const Type> target_type() const noexcept;
+  // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
+  // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,
+  // Foo). We do different than gdb though. We say all references are the same thing: an address value
+  bool is_reference() const noexcept;
+  bool is_resolved() const noexcept;
+  bool is_primitive() const noexcept;
+  bool is_char_type() const noexcept;
+  bool is_array_type() const noexcept;
+
+  u32 size() noexcept;
+  u32 size_bytes() noexcept;
+
+  u32 members_count() const noexcept;
+  const std::vector<Field> &member_variables() const noexcept;
+
+  Type *get_layout_type() noexcept;
+  // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
+  void set_array_bounds(u32 bounds) noexcept;
+
+  /** Walks the type chain for this type, looking for a base type encoding (if it's a primitive of some sort). */
+  constexpr std::optional<BaseTypeEncoding>
+  get_base_type() const noexcept
+  {
+    auto it = this;
+    while (it != nullptr) {
+      if (it->base_type)
+        return it->base_type;
+      it = it->type_chain;
+    }
+    return std::nullopt;
+  }
+
+  constexpr u32
+  array_size() const noexcept
+  {
+    return array_bounds;
+  }
 };
 
-static constexpr bool
-is_ref(Type::Modifier mod)
-{
-  const auto i = std::to_underlying(mod);
-  return i < 4 && i > 0;
-}
-
-static constexpr bool
-is_c_or_v(Type::Modifier mod)
-{
-  const auto i = std::to_underlying(mod);
-  return i < 0;
-}
-
-Type::Modifier to_type_modifier_will_panic(DwarfTag tag) noexcept;
-bool is_reference_like(Type::Modifier modifier) noexcept;
+Modifier to_type_modifier_will_panic(DwarfTag tag) noexcept;
+// A type that is reference like, is a type with inherent indirection. Pointers, references, r-value references,
+// ranges, arrays.
+bool is_reference_like(Modifier modifier) noexcept;
 bool is_reference_like(const dw::DieMetaData *die) noexcept;
 
 struct Symbol
@@ -448,27 +396,57 @@ struct ValueDescriptor
 };
 
 class MemoryContentsObject;
+class LazyMemoryContentsObject;
+
+enum class ValueError
+{
+  Success,
+  InvalidSize,
+  SegFault
+};
+
+class ValueResolver;
 
 class Value
 {
 public:
+  friend struct fmt::formatter<sym::Value>;
   using ShrPtr = std::shared_ptr<Value>;
   // contructor for `Values` that represent a block symbol (so a frame argument, stack variable, static / global
   // variable)
   Value(std::string_view name, Symbol &kind, u32 mem_contents_offset,
-        std::shared_ptr<MemoryContentsObject> value_object) noexcept;
+        std::shared_ptr<MemoryContentsObject> &&value_object) noexcept;
 
   // constructor for `Value`s that represent a member variable (possibly of some other `Value`)
   Value(std::string_view member_name, Field &kind, u32 mem_contents_offset,
         std::shared_ptr<MemoryContentsObject> value_object) noexcept;
 
   Value(Type &type, u32 mem_contents_offset, std::shared_ptr<MemoryContentsObject> value_object) noexcept;
+  Value(std::string &&name, Type &type, u32 mem_contents_offset,
+        std::shared_ptr<MemoryContentsObject> value_object) noexcept;
+
+  ~Value() noexcept;
+
+  template <typename Vis, typename... Args>
+  static std::shared_ptr<Value>
+  WithVisualizer(std::shared_ptr<Value> &&value, Args... args) noexcept
+  {
+    value->visualizer = std::make_unique<Vis>(value, args...);
+    return value;
+  }
 
   AddrPtr address() const noexcept;
   Type *type() const noexcept;
   std::span<const u8> memory_view() const noexcept;
+  std::span<const u8> full_memory_view() const noexcept;
   SharedPtr<MemoryContentsObject> take_memory_reference() noexcept;
-  Immutable<std::string_view> name;
+  utils::Expected<AddrPtr, ValueError> to_remote_pointer() noexcept;
+  void set_resolver(std::unique_ptr<ValueResolver> &&vis) noexcept;
+  ValueResolver *get_resolver() noexcept;
+  bool has_visualizer() const noexcept;
+  ValueVisualizer *get_visualizer() noexcept;
+
+  Immutable<std::string> name;
   Immutable<u32> mem_contents_offset;
 
 private:
@@ -477,19 +455,37 @@ private:
   // The actual backing storage for this value. For instance, we may want to create multiple values out of a single
   // range of bytes in the target which is the case for struct Foo { int a; int b; } foo_val; we may want a Value
   // for a and b. The `MemoryContentsObject` is the storage for foo_val
-  SharedPtr<MemoryContentsObject> value_object;
+  std::shared_ptr<MemoryContentsObject> value_object;
+  std::unique_ptr<ValueResolver> resolver{nullptr};
+  std::unique_ptr<ValueVisualizer> visualizer{nullptr};
+};
+
+enum class ReadResultInfo
+{
+  Success,
+  Partial,
+  Failed,
 };
 
 class MemoryContentsObject
 {
-  Immutable<MemoryContentBytes> bytes;
-
 public:
+  NO_COPY(MemoryContentsObject);
+
+  struct ReadResult
+  {
+    ReadResultInfo info;
+    std::optional<int> errno;
+    MemoryContentBytes value;
+  };
   Immutable<AddrPtr> start;
   Immutable<AddrPtr> end;
-  MemoryContentsObject(AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept;
 
-  std::span<const u8> view(u32 offset, u32 size) const noexcept;
+  MemoryContentsObject(AddrPtr start, AddrPtr end) noexcept;
+  virtual ~MemoryContentsObject() noexcept = default;
+
+  virtual std::span<const u8> raw_view() noexcept = 0;
+  virtual std::span<const u8> view(u32 offset, u32 size) noexcept = 0;
 
   // constructs a Value, essentially the "master value"; which represents the full MemoryContentsObject
   // Then we can chop that up into more sub values, all referring back to this MemoryContentsObject
@@ -504,122 +500,39 @@ public:
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
   static std::shared_ptr<Value> create_frame_variable(TraceeController &tc, NonNullPtr<TaskInfo> task,
-                                                      NonNullPtr<sym::Frame> frame, Symbol &symbol) noexcept;
+                                                      NonNullPtr<sym::Frame> frame, Symbol &symbol,
+                                                      bool lazy) noexcept;
+
+  static ReadResult read_memory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
 };
 
-template <typename OutBuf>
-constexpr auto
-format_primitive_to(Type &type, const Bytes &span, OutBuf outbuffer) noexcept
+class EagerMemoryContentsObject final : public MemoryContentsObject
 {
-  const auto size_of = type.size_of;
-  // 0 represents structured types
-  const auto base_sz = type.get_base_type().transform([&](auto) { return *size_of; }).value_or(0);
-  if (span.size() < base_sz)
-    PANIC("Wanted to write a base type but the memory view in bytes was not large enough");
+  MemoryContentBytes bytes;
 
-  if (type.is_reference()) {
-    std::uintptr_t ptr = bit_copy<std::uintptr_t>(span);
-    auto type_name_serialized = type.serialize_type_name(outbuffer);
-    return fmt::format_to(type_name_serialized, " (0x{:x})", ptr);
-  }
+public:
+  EagerMemoryContentsObject(AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept;
 
-  if (base_sz == 0) {
-    return type.serialize_type_name(outbuffer);
-  }
+  std::span<const u8> raw_view() noexcept final;
+  std::span<const u8> view(u32 offset, u32 size) noexcept final;
+};
 
-  // std::span span{data};
-  switch (type.get_base_type().value()) {
-  case BaseTypeEncoding::DW_ATE_address: {
-    std::uintptr_t value = bit_copy<std::uintptr_t>(span);
-    return fmt::format_to(outbuffer, "0x{}", value);
-  }
-  case BaseTypeEncoding::DW_ATE_boolean: {
-    bool value = bit_copy<bool>(span);
-    return fmt::format_to(outbuffer, "{}", value);
-  }
-  case BaseTypeEncoding::DW_ATE_float: {
-    if (size_of == 4) {
-      float value = bit_copy<float>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    } else if (size_of == 8) {
-      double value = bit_copy<double>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    } else {
-      PANIC("Expected byte size of a floating point to be 4 or 8");
-    }
-  }
-  case BaseTypeEncoding::DW_ATE_signed_char:
-  case BaseTypeEncoding::DW_ATE_signed:
-    switch (size_of) {
-    case 1: {
-      signed char value = bit_copy<signed char>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    case 2: {
-      signed short value = bit_copy<signed short>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    case 4: {
-      int value = bit_copy<int>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    case 8: {
-      signed long long value = bit_copy<signed long long>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    }
-    break;
-  case BaseTypeEncoding::DW_ATE_unsigned_char:
-  case BaseTypeEncoding::DW_ATE_unsigned:
-    switch (size_of) {
-    case 1: {
-      u8 value = bit_copy<unsigned char>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    case 2: {
-      u16 value = bit_copy<unsigned short>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    case 4: {
-      u32 value = bit_copy<u32>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    case 8: {
-      u64 value = bit_copy<u64>(span);
-      return fmt::format_to(outbuffer, "{}", value);
-    }
-    }
-    break;
-  case BaseTypeEncoding::DW_ATE_UTF: {
-    u32 value = bit_copy<u32>(span);
-    return fmt::format_to(outbuffer, "{}", value);
-  } break;
-  case BaseTypeEncoding::DW_ATE_ASCII:
-  case BaseTypeEncoding::DW_ATE_edited:
-  case BaseTypeEncoding::DW_ATE_signed_fixed:
-  case BaseTypeEncoding::DW_ATE_unsigned_fixed:
-  case BaseTypeEncoding::DW_ATE_decimal_float:
-  case BaseTypeEncoding::DW_ATE_imaginary_float:
-  case BaseTypeEncoding::DW_ATE_packed_decimal:
-  case BaseTypeEncoding::DW_ATE_numeric_string:
-  case BaseTypeEncoding::DW_ATE_complex_float:
+class LazyMemoryContentsObject final : public MemoryContentsObject
+{
+  TraceeController &supervisor;
+  MemoryContentBytes bytes{nullptr};
+  void cache_memory() noexcept;
 
-  case BaseTypeEncoding::DW_ATE_UCS: {
-    TODO_FMT("Currently not implemented base type encoding: {}", to_str(type.get_base_type().value()));
-    break;
-  }
-  case BaseTypeEncoding::DW_ATE_lo_user:
-  case BaseTypeEncoding::DW_ATE_hi_user:
-    break;
-  }
-  PANIC("unknown base type encoding");
-}
+public:
+  LazyMemoryContentsObject(TraceeController &supervisor, AddrPtr start, AddrPtr end) noexcept;
+  std::span<const u8> raw_view() noexcept final;
+  std::span<const u8> view(u32 offset, u32 size) noexcept final;
+};
 
 } // namespace sym
 
 namespace fmt {
-
-template <> struct formatter<sym::Value>
+template <> struct formatter<sym::Type>
 {
   template <typename ParseContext>
   constexpr auto
@@ -630,9 +543,38 @@ template <> struct formatter<sym::Value>
 
   template <typename FormatContext>
   auto
-  format(const sym::Value &val, FormatContext &ctx)
+  format(const sym::Type &type, FormatContext &ctx) const
   {
-    return format_primitive_to(*(val.type()), val.memory_view(), ctx.out());
+    std::array<const sym::Type *, 10> types{};
+    i8 idx = 0;
+    auto it = type.type_chain;
+    types[idx++] = &type;
+    while (it != nullptr) {
+      if (!it->is_typedef)
+        types[idx++] = it;
+      it = it->type_chain;
+    }
+    std::sort(types.begin(), types.begin() + idx, [](const auto ptra, const auto ptrb) noexcept {
+      return std::to_underlying(*ptra->modifier) < std::to_underlying(*ptrb->modifier);
+    });
+
+    auto index = 0u;
+    auto out = ctx.out();
+    auto type_span = std::span{types.begin(), types.begin() + idx};
+    for (const auto t : type_span) {
+      if (t->modifier != sym::Modifier::None) {
+        out = fmt::format_to(out, "{}", ModifierToString(t->modifier));
+        if (t->modifier == sym::Modifier::Array) {
+          out = fmt::format_to(out, "{}]", t->array_bounds);
+        }
+      } else {
+        out = fmt::format_to(out, "{}", t->name);
+      }
+      if (++index != type_span.size()) {
+        out = fmt::format_to(out, " ");
+      }
+    }
+    return out;
   }
 };
 } // namespace fmt

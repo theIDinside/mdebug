@@ -78,45 +78,6 @@ struct DwarfStack
   std::array<u64, 1028> stack;
 };
 
-// enum class ExpressionResultKind
-// {
-//   RegisterContentsOf,
-//   RegisterContentsOfWithOffset,
-//   SignedValue,
-//   UnsignedValue
-// };
-
-// struct RegisterContents
-// {
-//   u64 contents;
-// };
-
-// struct RegisterContentsWithOffset
-// {
-//   u64 contents;
-//   i64 offset;
-// };
-
-// struct Value
-// {
-//   union
-//   {
-//     i64 i;
-//     u64 u;
-//   };
-// };
-
-// struct DwarfExpressionResult
-// {
-//   ExpressionResultKind kind;
-//   union
-//   {
-//     Value value;
-//     RegisterContents reg_contents;
-//     RegisterContentsWithOffset reg_contents_w_offset;
-//   };
-// };
-
 // The byte code interpreter needs all state set up, so that any possibly data it reference during execution, is
 // already "there".
 struct ExprByteCodeInterpreter

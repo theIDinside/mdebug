@@ -1,5 +1,5 @@
-const { seconds, prettyJson } = require('./client')
-const { assert } = require('./utils')
+const { seconds } = require('./client')
+const { assert, prettyJson } = require('./utils')
 
 async function programExit(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))

@@ -1,5 +1,5 @@
-const { checkResponse, getLineOf, readFile, repoDirFile, prettyJson } = require('./client')
-const { assert, assert_eq } = require('./utils')
+const { checkResponse, getLineOf, readFile, repoDirFile } = require('./client')
+const { assert, assert_eq, prettyJson } = require('./utils')
 
 async function setup(DA, executableFile) {
   const init = await DA.sendReqGetResponse('initialize', {})

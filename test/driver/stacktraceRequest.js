@@ -74,7 +74,7 @@ function parse_prologue_and_epilogue(DA) {
     } else {
       let i = line.indexOf('ret')
       if (i != -1) {
-        const addr = line.substring(0, i).trim()
+        const addr = line.substring(0, i).trim().split(':')[0].trim()
         res.epilogue = `0x${addr}`
         console.log(`bar frame: ${JSON.stringify(res)}`)
         return res

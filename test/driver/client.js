@@ -559,43 +559,12 @@ function getRequestedTest() {
   return process.argv[3]
 }
 
-function prettyJson(obj) {
-  return JSON.stringify(obj, null, 2)
-}
-
 async function doSomethingDelayed(fn, delay) {
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve(fn())
     }, delay)
   })
-}
-
-function compareEqObjectLayout(obj1, obj2) {
-  for (let prop in obj1) {
-    if (obj2[prop] === undefined) return false
-  }
-
-  return true
-}
-
-function compareEqMemberValues(obj1, obj2) {
-  if (!compareEqObjectLayout(obj1, obj2)) return false
-  for (let prop in obj1) {
-    if (obj1[prop] != obj2[prop]) return false
-  }
-  return true
-}
-
-// Compares all values in a and makes sure they exist and are equal in B. Note that this does not necessarily mean that B == A, only that A is a subset of B.
-function assertEqAInB(a, b) {
-  if (a == undefined) throw new Error(`a was undefined`)
-  if (b == undefined) throw new Error(`b was undefined`)
-  for (let prop in a) {
-    if (a[prop] !== b[prop]) {
-      throw new Error(`a["${prop}"] != b["${prop}"]. a = ${prettyJson(a)}\nb = ${prettyJson(b)}`)
-    }
-  }
 }
 
 module.exports = {
@@ -611,11 +580,7 @@ module.exports = {
   runTest,
   runTestSuite,
   getRequestedTest,
-  prettyJson,
   checkResponse,
   doSomethingDelayed,
-  compareEqMemberValues,
-  compareEqObjectLayout,
-  assertEqAInB,
   getExecutorArgs,
 }

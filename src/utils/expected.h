@@ -136,6 +136,13 @@ public:
     return std::move(val);
   }
 
+  // Just make it explicit. Easier for everyone to know, we are *definitely* moving out of this value.
+  T &&
+  take_value() noexcept
+  {
+    return std::move(val);
+  }
+
   const T &
   value() const & noexcept
   {
@@ -146,6 +153,12 @@ public:
   error() & noexcept
   {
     return err;
+  }
+
+  Err &&
+  take_error() noexcept
+  {
+    return std::move(err);
   }
 
   Err &&

@@ -1,6 +1,11 @@
 #pragma once
+#include "nlohmann/json_fwd.hpp"
+#include "utils/expected.h"
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 class Tracer;
 
@@ -8,12 +13,55 @@ namespace ui {
 struct UIResult;
 using UIResultPtr = const UIResult *;
 
+enum class ArgumentErrorKind
+{
+  Missing,
+  InvalidInput,
+};
+
+struct ArgumentError
+{
+  ArgumentErrorKind kind;
+  std::optional<std::string_view> description;
+
+  constexpr static ArgumentError
+  Invalid(std::string_view desc) noexcept
+  {
+    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput, .description = desc};
+  }
+
+  constexpr static ArgumentError
+  RequiredNumberType() noexcept
+  {
+    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                         .description = "Argument required to be a number"};
+  }
+
+  constexpr static ArgumentError
+  RequiredStringType() noexcept
+  {
+    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                         .description = "Argument required to be a string"};
+  }
+};
+
+using InvalidArg = std::pair<ArgumentError, std::string>;
+using MissingOrInvalidArgs = std::vector<InvalidArg>;
+using MissingOrInvalidResult = std::optional<MissingOrInvalidArgs>;
+
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
 #define DEFINE_NAME(Type)                                                                                         \
   constexpr std::string_view name() noexcept override final { return #Type; }
 #else
 #define DEFINE_NAME(Type)
 #endif
+
+template <typename DerivedCommand, typename Json>
+concept HasValidation = requires(const Json &json) {
+  {
+    DerivedCommand::ValidateArg(std::string_view{}, json)
+  } -> std::convertible_to<std::optional<InvalidArg>>;
+};
 
 struct UICommand
 {
@@ -24,6 +72,40 @@ public:
   /* Executes the command. This is always performed in the Tracer thread (where all tracee controller actions are
    * performed. )*/
   virtual UIResultPtr execute(Tracer *tracer) noexcept = 0;
+
+  template <typename Derived, typename JsonArgs>
+  static constexpr MissingOrInvalidResult
+  check_args(const JsonArgs &args)
+  {
+    constexpr auto expectedCommandArgs = Derived::Arguments();
+    MissingOrInvalidArgs faulty_args;
+    for (const auto &arg : expectedCommandArgs) {
+      if (auto r = check_arg_contains(args, arg); r) {
+        faulty_args.push_back(r.value());
+      } else if constexpr (HasValidation<Derived, decltype(args[arg])>) {
+        if (auto processed = Derived::ValidateArg(arg, args[arg]); processed) {
+          faulty_args.emplace_back(processed.value());
+        }
+      }
+    }
+
+    if (faulty_args.empty())
+      return std::nullopt;
+    else
+      return MissingOrInvalidResult{faulty_args};
+  }
+
+  template <typename JsonArgs, typename CommandArg>
+  static auto
+  check_arg_contains(const JsonArgs &args, const CommandArg &cmd_arg)
+      -> std::optional<std::pair<ArgumentError, std::string>>
+  {
+    if (!args.contains(cmd_arg)) {
+      return std::make_pair<ArgumentError, std::string>(
+          {ArgumentErrorKind::Missing, "Required argument is missing"}, std::string{cmd_arg});
+    }
+    return std::nullopt;
+  }
 
   std::uint64_t seq;
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1

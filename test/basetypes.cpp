@@ -209,7 +209,7 @@ void
 lexical_block(const char *name, bool should_take)
 {
   int a = 0;
-  Structure structure = createStruct(name, 1, 1.25);
+  const Structure structure = createStruct(name, 1, 1.25);
   if (should_take) {
     a = 1;
     float b = 3.14;

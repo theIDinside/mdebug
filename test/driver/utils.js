@@ -1,5 +1,9 @@
 const { spawnSync } = require('child_process')
 
+function prettyJson(obj) {
+  return JSON.stringify(obj, null, 2)
+}
+
 const regex = /[0-9a-f]+:/
 function getTextSection(objdumpOutput) {
   const lines = objdumpOutput.split('\n')
@@ -84,6 +88,28 @@ function todo(fnName) {
   }
 }
 
+// Compares all values in a and makes sure they exist and are equal in B. Note that this does not necessarily mean that B == A, only that A is a subset of B.
+function assertEqAInB(expectedValue, b) {
+  if (expectedValue == undefined) throw new Error(`expectedValue was undefined`)
+  if (b == undefined) throw new Error(`b was undefined`)
+  for (let prop in expectedValue) {
+    if (typeof expectedValue[prop] === 'function') {
+      if (!expectedValue[prop](b[prop])) {
+        throw new Error(`Comparison function failed: ${expectedValue[prop]}\nInput value:\n${prettyJson(b)}`)
+      }
+    } else if (expectedValue[prop] !== b[prop]) {
+      throw new Error(
+        `expectedValue["${prop}"] != b["${prop}"]. expectedValue = ${prettyJson(expectedValue)}\nb = ${prettyJson(b)}`
+      )
+    }
+  }
+}
+
+function isHexadecimalString(input) {
+  if (input.split(' ').length > 1) throw new Error(`String should not contain white spaces: ${input}`)
+  return !isNaN(input)
+}
+
 module.exports = {
   objdump,
   getTextSection,
@@ -92,4 +118,7 @@ module.exports = {
   todo,
   assert,
   assert_eq,
+  assertEqAInB,
+  isHexadecimalString,
+  prettyJson,
 }

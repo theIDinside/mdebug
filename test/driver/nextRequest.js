@@ -1,5 +1,5 @@
-const { readFile, repoDirFile, getLineOf, prettyJson } = require('./client')
-const { todo, assert } = require('./utils')
+const { readFile, repoDirFile, getLineOf, getStackFramePc } = require('./client')
+const { todo, assert, prettyJson } = require('./utils')
 
 function getLinesOf(names) {
   const file = readFile(repoDirFile('test/next.cpp'))
@@ -81,7 +81,7 @@ async function stopBecauseBpWhenNextLine(DA) {
   const bp_lines = getLinesOf(['BP1', 'BP3'])
   await setup(DA, ['BP1', 'BP3'])
   const threads = await DA.threads()
-  let stopped = await DA.contNextStop(threads[0].id)
+  await DA.contNextStop(threads[0].id)
   let frames = await DA.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
   assert(
@@ -116,7 +116,45 @@ async function stopBecauseBpWhenNextLine(DA) {
 }
 
 const nextLineInTemplateCode = todo('nextLineInTemplateCode')
-const nextInstruction = todo('nextInstruction')
+
+async function nextInstruction(DA) {
+  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  const threads = await DA.threads()
+  let frames = await DA.stackTrace(threads[0].id)
+  // await da_client.setInsBreakpoint("0x40121f");
+  const pc = getStackFramePc(frames, 0)
+  const disassembly = await DA.sendReqGetResponse('disassemble', {
+    memoryReference: pc,
+    offset: 0,
+    instructionOffset: 0,
+    instructionCount: 10,
+    resolveSymbols: false,
+  })
+  const allThreadsStop = true
+  // await da_client.contNextStop(threads[0].id);
+  const { event_body, response } = await DA.sendReqWaitEvent(
+    'next',
+    {
+      threadId: threads[0].id,
+      singleThread: !allThreadsStop,
+      granularity: 'instruction',
+    },
+    'stopped',
+    1000
+  )
+  assert(response.success, `Request was unsuccessful: ${prettyJson(response)}`)
+  assert(
+    event_body.reason == 'step',
+    `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
+  )
+
+  frames = await DA.stackTrace(threads[0].id)
+  const next_pc = getStackFramePc(frames, 0)
+  assert(
+    next_pc == disassembly.body.instructions[1].address,
+    `Expected to be at ${disassembly.body.instructions[1].address} but RIP=${next_pc} (previous pc: ${pc})`
+  )
+}
 
 const tests = {
   nextLineOverFunction: nextLineOverFunction,

@@ -74,6 +74,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/debug_info_reader.h
   src/symbolication/dwarf/die.cpp
   src/symbolication/dwarf/die.h
+  src/symbolication/dwarf/die_iterator.cpp
+  src/symbolication/dwarf/die_iterator.h
   src/symbolication/dwarf/lnp.cpp
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
@@ -92,6 +94,8 @@ set(MIDAS_SOURCES
   src/symbolication/objfile.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/symbolication/value_visualizer.cpp
+  src/symbolication/value_visualizer.h
   # tasks
   src/tasks/dwarf_unit_data.cpp
   src/tasks/dwarf_unit_data.h
@@ -102,6 +106,8 @@ set(MIDAS_SOURCES
   # utils
   src/utils/base64.cpp
   src/utils/base64.h
+  src/utils/byte_buffer.cpp
+  src/utils/byte_buffer.h
   src/utils/logger.cpp
   src/utils/logger.h
   src/utils/scoped_fd.cpp
