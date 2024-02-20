@@ -118,11 +118,14 @@ to_addr(std::string_view s) noexcept
 {
   if (s.starts_with("0x"))
     s.remove_prefix(2);
-
-  if (u64 value; std::from_chars(s.data(), s.data() + s.size(), value, 16).ec == std::errc{})
+  u64 value;
+  DLOG("mdb", "to_addr on string: '{}'", s);
+  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value, 16);
+  if (ec == std::errc() && ptr == s.data() + s.size()) {
     return AddrPtr{value};
-  else
+  } else {
     return std::nullopt;
+  }
 }
 
 u64

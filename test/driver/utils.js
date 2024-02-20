@@ -1,5 +1,9 @@
 const { spawnSync } = require('child_process')
 
+function prettyJson(obj) {
+  return JSON.stringify(obj, null, 2)
+}
+
 const regex = /[0-9a-f]+:/
 function getTextSection(objdumpOutput) {
   const lines = objdumpOutput.split('\n')
@@ -52,9 +56,69 @@ function hexStrAddressesEquals(a, b) {
   return addr_a == addr_b
 }
 
+function assert(boolCondition, errMsg) {
+  if (!boolCondition) {
+    if (typeof errMsg === 'function') {
+      const errMessage = errMsg()
+      if (typeof errMessage !== 'string')
+        throw new Error('Expected return type from errMessage function to be of string')
+      throw new Error(errMessage)
+    } else if (typeof errMsg === 'string') {
+      throw new Error(errMsg)
+    } else {
+      throw new Error('errMsg parameter expected to be a string or a function returning a string.')
+    }
+  }
+}
+
+/**
+ * @param {any} a
+ * @param {any} b
+ * @param {string | () => string } errMsg
+ */
+function assert_eq(a, b, errMsg) {
+  assert(a == b, errMsg)
+}
+
+function todo(fnName) {
+  const err = new Error()
+  err.message = `The ${fnName} test is not implemented`
+  return async (da) => {
+    throw err
+  }
+}
+
+// Compares all values in a and makes sure they exist and are equal in B. Note that this does not necessarily mean that B == A, only that A is a subset of B.
+function assertEqAInB(expectedValue, b) {
+  if (expectedValue == undefined) throw new Error(`expectedValue was undefined`)
+  if (b == undefined) throw new Error(`b was undefined`)
+  for (let prop in expectedValue) {
+    if (typeof expectedValue[prop] === 'function') {
+      if (!expectedValue[prop](b[prop])) {
+        throw new Error(`Comparison function failed: ${expectedValue[prop]}\nInput value:\n${prettyJson(b)}`)
+      }
+    } else if (expectedValue[prop] !== b[prop]) {
+      throw new Error(
+        `expectedValue["${prop}"] != b["${prop}"]. expectedValue = ${prettyJson(expectedValue)}\nb = ${prettyJson(b)}`
+      )
+    }
+  }
+}
+
+function isHexadecimalString(input) {
+  if (input.split(' ').length > 1) throw new Error(`String should not contain white spaces: ${input}`)
+  return !isNaN(input)
+}
+
 module.exports = {
   objdump,
   getTextSection,
   processObjdumpLines,
   hexStrAddressesEquals,
+  todo,
+  assert,
+  assert_eq,
+  assertEqAInB,
+  isHexadecimalString,
+  prettyJson,
 }

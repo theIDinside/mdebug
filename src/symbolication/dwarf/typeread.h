@@ -45,7 +45,7 @@ class TypeSymbolicationContext
   void process_member_variable(DieReference cu_die) noexcept;
 
 public:
-  TypeSymbolicationContext(ObjectFile &object_file, Type *type) noexcept;
+  TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept;
   // Fully resolves `Type`
   void resolve_type() noexcept;
 };

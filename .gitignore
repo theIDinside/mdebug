@@ -3,3 +3,4 @@ src/defs/syscalls.def
 src/symbolication_reference
 build-gcc/
 *.log
+DriverTests.cmake

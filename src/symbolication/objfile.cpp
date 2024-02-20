@@ -3,6 +3,8 @@
 #include "./dwarf/name_index.h"
 #include "supervisor.h"
 #include "symbolication/dwarf/lnp.h"
+#include "symbolication/dwarf_defs.h"
+#include "symbolication/value_visualizer.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
 #include "tasks/lnp.h"
@@ -347,35 +349,131 @@ ObjectFile::init_minsym_name_lookup() noexcept
 }
 
 std::vector<ui::dap::Variable>
-ObjectFile::get_member_variables_of(TraceeController &tc, int ref) noexcept
+ObjectFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
 {
   if (!valobj_cache.contains(ref)) {
     DLOG("mdb", "WARNING expected variable reference {} had no data associated with it.", ref);
     return {};
   }
-
   auto &value = valobj_cache[ref];
   auto type = value->type();
   if (!type->is_resolved()) {
-    sym::dw::TypeSymbolicationContext ts_ctx{*this, type};
+    sym::dw::TypeSymbolicationContext ts_ctx{*this, *type};
     ts_ctx.resolve_type();
   }
-  std::vector<ui::dap::Variable> result{};
-  result.reserve(type->member_variables().size());
 
-  for (auto &mem : type->member_variables()) {
-    auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-                                                     value->mem_contents_offset, value->take_memory_reference());
-    const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-    if (new_ref > 0)
-      valobj_cache.emplace(new_ref, member_value);
-    result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+  auto value_resolver = value->get_resolver();
+  if (value_resolver != nullptr) {
+    auto variables = value_resolver->resolve(tc, start, count);
+    std::vector<ui::dap::Variable> result{};
+
+    for (auto &var : variables) {
+      init_visualizer(var);
+      register_resolver(var);
+      const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+      if (new_ref > 0)
+        cache_value(new_ref, var);
+      result.push_back(ui::dap::Variable{new_ref, var});
+    }
+
+    return result;
+  } else {
+    std::vector<ui::dap::Variable> result{};
+    result.reserve(type->member_variables().size());
+
+    for (auto &mem : type->member_variables()) {
+      auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
+                                                       value->mem_contents_offset, value->take_memory_reference());
+      init_visualizer(member_value);
+      register_resolver(member_value);
+      const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+      if (new_ref > 0)
+        cache_value(new_ref, member_value);
+      result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+    }
+    return result;
   }
-  return result;
+}
+
+std::unique_ptr<sym::ValueVisualizer>
+ObjectFile::find_custom_visualizer(sym::Type &) noexcept
+{
+  return nullptr;
+}
+
+std::unique_ptr<sym::ValueResolver>
+ObjectFile::find_custom_resolver(sym::Type &) noexcept
+{
+  return nullptr;
+}
+
+void
+ObjectFile::init_visualizer(std::shared_ptr<sym::Value> &value) noexcept
+{
+  if (value->has_visualizer())
+    return;
+
+  auto &type = *value->type();
+  if (auto custom_visualiser = find_custom_visualizer(type); custom_visualiser != nullptr) {
+    return;
+  }
+
+  if (type.is_array_type()) {
+    value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
+  } else if (type.is_primitive() || type.is_reference()) {
+    value = sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(std::move(value));
+  } else {
+    value = sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(std::move(value));
+  }
+}
+
+void
+ObjectFile::register_resolver(std::shared_ptr<sym::Value> &value) noexcept
+{
+  // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
+  //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
+  //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
+  //   values and how to display them, which *is* the issue with GDB's pretty printers
+  auto type = value->type();
+
+  if (auto resolver = find_custom_resolver(*type); resolver != nullptr) {
+    value->set_resolver(std::move(resolver));
+    return;
+  }
+  auto layout_type = type->get_layout_type();
+  if (type->is_reference() && layout_type->is_char_type()) {
+    DLOG("mdb", "setting cstring resolver for value");
+    auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->type());
+    value->set_resolver(std::move(ptr));
+    return;
+  }
+
+  // todo: again, this is hardcoded, which is counter to the whole idea here.
+  if (type->is_array_type()) {
+    DLOG("mdb", "setting array resolver for value");
+    auto layout_type = type->get_layout_type();
+    auto ptr = std::make_unique<sym::ArrayResolver>(this, layout_type, type->array_size(), value->address());
+    value->set_resolver(std::move(ptr));
+    value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
+  }
+}
+
+void
+ObjectFile::cache_value(VariablesReference ref, sym::Value::ShrPtr value) noexcept
+{
+  ASSERT(!valobj_cache.contains(ref), "Value object cache already contains value with reference {}", ref);
+  valobj_cache.emplace(ref, std::move(value));
+}
+
+void
+ObjectFile::invalidate_variable_references() noexcept
+{
+  valobj_cache.clear();
 }
 
 std::vector<ui::dap::Variable>
-ObjectFile::get_variables(sym::FrameVariableKind variables_kind, TraceeController &tc, sym::Frame &frame) noexcept
+ObjectFile::get_variables_impl(sym::FrameVariableKind variables_kind, TraceeController &tc,
+                               sym::Frame &frame) noexcept
 {
   std::vector<ui::dap::Variable> result{};
   switch (variables_kind) {
@@ -388,10 +486,17 @@ ObjectFile::get_variables(sym::FrameVariableKind variables_kind, TraceeControlle
   }
   for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
     const auto ref = symbol.type->is_primitive() ? 0 : tc.new_var_id(frame.id());
+    if (ref == 0 && !symbol.type->is_resolved()) {
+      sym::dw::TypeSymbolicationContext ts_ctx{*this, symbol.type};
+      ts_ctx.resolve_type();
+    }
     auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
-                                                                         const_cast<sym::Symbol &>(symbol));
+                                                                         const_cast<sym::Symbol &>(symbol), true);
+    init_visualizer(value_object);
+    register_resolver(value_object);
+
     if (ref > 0)
-      valobj_cache.emplace(ref, value_object);
+      cache_value(ref, value_object);
     result.push_back(ui::dap::Variable{ref, std::move(value_object)});
   }
   return result;
@@ -407,10 +512,10 @@ ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::Variable
 
   switch (set) {
   case sym::VariableSet::Arguments: {
-    return get_variables(sym::FrameVariableKind::Arguments, tc, frame);
+    return get_variables_impl(sym::FrameVariableKind::Arguments, tc, frame);
   }
   case sym::VariableSet::Locals: {
-    return get_variables(sym::FrameVariableKind::Locals, tc, frame);
+    return get_variables_impl(sym::FrameVariableKind::Locals, tc, frame);
   }
   case sym::VariableSet::Static:
   case sym::VariableSet::Global:

@@ -1,6 +1,7 @@
 #include "typeread.h"
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die.h"
+#include "symbolication/dwarf/die_iterator.h"
 #include "symbolication/dwarf_defs.h"
 #include <atomic>
 #include <symbolication/callstack.h>
@@ -167,8 +168,8 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
   fn_ctx->fully_parsed = true;
 }
 
-TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type *type) noexcept
-    : obj(object_file), current_type(type)
+TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept
+    : obj(object_file), current_type(&type)
 {
 }
 // Fully resolves `Type`
@@ -203,23 +204,29 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 void
 TypeSymbolicationContext::resolve_type() noexcept
 {
-  auto cu = current_type->cu_die_ref->cu;
-  auto die = current_type->cu_die_ref.mut().get_die();
-  auto end = die->sibling();
-  die = die->children();
-  // pointers! Yay! F#&/ an iterator.
-  while (die < end && die != nullptr) {
-    switch (die->tag) {
-    case DwarfTag::DW_TAG_member:
-      process_member_variable(DieReference{cu, die});
-      die = die->sibling();
-      break;
-    default:
+  auto type_iter = current_type;
+  while (type_iter != nullptr) {
+    if (type_iter->resolved) {
+      type_iter = type_iter->type_chain;
       continue;
     }
+    auto cu = type_iter->cu_die_ref->cu;
+    auto die = type_iter->cu_die_ref.mut().get_die();
+    die = die->children();
+    for (const auto die : sym::dw::IterateSiblings{cu, die}) {
+      switch (die.tag) {
+      case DwarfTag::DW_TAG_member:
+        process_member_variable(DieReference{cu, &die});
+        break;
+      default:
+        continue;
+      }
+    }
+    if (!type_fields.empty())
+      std::swap(type_iter->fields, this->type_fields);
+    type_iter->resolved = true;
+    type_iter = type_iter->type_chain;
   }
-  std::swap(current_type->fields, this->type_fields);
-  current_type->resolved = true;
 }
 
 } // namespace sym::dw

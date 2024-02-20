@@ -78,5 +78,10 @@ build_test(
   ${CMAKE_CURRENT_SOURCE_DIR}/templated_code/template_foo.cpp
 )
 
+build_test(
+  NAME readMemory
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/readMemory.cpp
+)
+
 
 message("Test build type: ${CMAKE_BUILD_TYPE}")

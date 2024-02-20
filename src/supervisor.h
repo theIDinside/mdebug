@@ -13,6 +13,7 @@
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
 #include "task.h"
+#include "utils/byte_buffer.h"
 #include <link.h>
 #include <optional>
 #include <thread>
@@ -43,6 +44,13 @@ using Address = std::uintptr_t;
 struct ObjectFile;
 
 class StopObserver;
+
+struct NonFullRead
+{
+  std::unique_ptr<utils::ByteBuffer> bytes;
+  u32 unread_bytes;
+  int err_no;
+};
 
 struct TraceeController
 {
@@ -177,6 +185,7 @@ public:
   TargetSession session_type() const noexcept;
   std::string get_thread_name(Tid tid) const noexcept;
   std::vector<u8> read_to_vec(AddrPtr addr, u64 bytes) noexcept;
+  utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> safe_read(AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
 
   /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
@@ -280,6 +289,7 @@ public:
   int new_frame_id(NonNullPtr<ObjectFile> owning_obj, TaskInfo &task) noexcept;
   int new_scope_id(NonNullPtr<ObjectFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
   int new_var_id(int parent_id) noexcept;
+  void invalidate_stop_state() noexcept;
 
 private:
   void reset_variable_references() noexcept;

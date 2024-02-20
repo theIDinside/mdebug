@@ -517,9 +517,12 @@ LineTable::directory(u64 dir_index) const noexcept
 std::optional<sym::dw::FileEntry>
 LineTable::file(u64 file_index) const noexcept
 {
-  ASSERT(line_header && file_index < line_header->directories.size(), "file_index={} not found in {} files",
-         file_index, line_header->file_names.size());
-  return line_header->file_names[file_index];
+  const auto adjusted = line_header->version == DwarfVersion::D4 ? file_index - 1 : file_index;
+  ASSERT(line_header, "Line table doesn't have a line number program header");
+  ASSERT(adjusted < line_header->file_names.size(), "file_index={} not found in {} files", adjusted,
+         line_header->file_names.size());
+
+  return line_header->file_names[adjusted];
 }
 
 RelocatedLteIterator

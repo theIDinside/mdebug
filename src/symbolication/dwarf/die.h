@@ -208,3 +208,54 @@ struct IndexedDieReference
 };
 
 } // namespace sym::dw
+
+namespace fmt {
+template <> struct formatter<sym::dw::DieReference>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const sym::dw::DieReference &ref, FormatContext &ctx) const
+  {
+    if (ref.cu && ref.die) {
+      if (ref.cu->has_loaded_dies()) {
+        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", ref.cu->section_offset(),
+                              ref.die->section_offset, to_str(ref.die->tag));
+      } else {
+        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", ref.cu->section_offset());
+      }
+    }
+    return fmt::format_to(ctx.out(), "DieRef {{ ??? }}");
+  }
+};
+
+template <> struct formatter<sym::dw::IndexedDieReference>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const sym::dw::IndexedDieReference &ref, FormatContext &ctx) const
+  {
+    if (ref.cu) {
+      return fmt::format_to(ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}", ref.cu->section_offset(),
+                            ref.die_index);
+    }
+    return fmt::format_to(ctx.out(), "IndexedDieRef {{ ??? }}");
+  }
+};
+
+} // namespace fmt

@@ -74,6 +74,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/debug_info_reader.h
   src/symbolication/dwarf/die.cpp
   src/symbolication/dwarf/die.h
+  src/symbolication/dwarf/die_iterator.cpp
+  src/symbolication/dwarf/die_iterator.h
   src/symbolication/dwarf/lnp.cpp
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
@@ -92,6 +94,8 @@ set(MIDAS_SOURCES
   src/symbolication/objfile.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/symbolication/value_visualizer.cpp
+  src/symbolication/value_visualizer.h
   # tasks
   src/tasks/dwarf_unit_data.cpp
   src/tasks/dwarf_unit_data.h
@@ -102,6 +106,8 @@ set(MIDAS_SOURCES
   # utils
   src/utils/base64.cpp
   src/utils/base64.h
+  src/utils/byte_buffer.cpp
+  src/utils/byte_buffer.h
   src/utils/logger.cpp
   src/utils/logger.h
   src/utils/scoped_fd.cpp
@@ -179,51 +185,27 @@ find_program(NODEJS "node")
 
 # The Driver Test Suite
 if(NODEJS)
+  message("Exporting tests using MDB test exporter: ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js")
+  execute_process(COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js
+   RESULT_VARIABLE GENERATOR_EXIT_CODE
+   ERROR_VARIABLE GENERATOR_ERROR
+   OUTPUT_VARIABLE GENERATOR_OUTPUT)
+  if(GENERATOR_EXIT_CODE EQUAL 0)
+    message(STATUS "CTest suites generated successfully")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/test/driver/DriverTests.cmake)
+  else()
+    message(WARNING "Could not generate test suite configuration. Error message:\n${GENERATOR_OUTPUT}\nGenerator exited with code ${GENERATOR_EXIT_CODE}")
+  endif()
   # Sub-test suites.
-  set(DRIVER_TEST_SUITES
-      disassemble
-      exited
-      initialize
-      launch
-      nextInstruction
-      nextLine
-      setBreakpoints
-      setInstructionBreakpoints
-      unwinder
-      threadExited
-      moduleEvent
-      threads
-      variables
-      finish
-      pause
-  )
-
-  # These define
-  set(disassemble "backAndForward")
-  set(exited "programExit")
-  set(initialize)
-  set(launch "launch" "main" "disconnect")
-  set(nextInstruction "oneInstruction")
-  set(nextLine "nextLineOverFunction" "stopBecauseBpWhenNextLine" "nextLineInTemplateCode")
-  set(setBreakpoints "set4Breakpoints")
-  set(setInstructionBreakpoints "set1Bp")
-  set(unwinder "insidePrologue" "normal" "insideEpilogue" "unwindFromSharedObject" "unwindWithDwarfExpression")
-  set(threadExited "see9ThreadExits")
-  set(moduleEvent "6modules")
-  set(threads "threads")
-  set(variables "scopeLocalsTest" "scopeArgsTest" "membersOfVariableTest" "inConstructor" "returnValue" "interpretTemplateTypes")
-  set(finish "finish")
-  set(pause "pause")
-
   foreach(driver_test ${DRIVER_TEST_SUITES})
     list(LENGTH ${driver_test} LIST_LENGTH)
     if(${LIST_LENGTH} EQUAL 0)
-      add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR} ${test})
+      add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js ${CMAKE_BINARY_DIR} ${driver_test} ${test})
     else()
     message("Suite ${driver_test}:")
       foreach(test ${${driver_test}})
         message("  - ${test}")
-        add_test(NAME DriverTest.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/${driver_test}.js ${CMAKE_BINARY_DIR} ${test})
+        add_test(NAME DriverTest.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js ${CMAKE_BINARY_DIR} ${driver_test} ${test})
       endforeach()
     endif()
   endforeach()

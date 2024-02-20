@@ -25,7 +25,9 @@
 #include "tasks/index_die_names.h"
 #include "tasks/lnp.h"
 #include "tracer.h"
+#include "utils/byte_buffer.h"
 #include "utils/enumerator.h"
+#include "utils/expected.h"
 #include "utils/immutable.h"
 #include "utils/logger.h"
 #include "utils/worker_task.h"
@@ -809,6 +811,23 @@ TraceeController::read_to_vec(AddrPtr addr, u64 bytes) noexcept
   return data;
 }
 
+utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>
+TraceeController::safe_read(AddrPtr addr, u64 bytes) noexcept
+{
+  auto buffer = utils::ByteBuffer::create(bytes);
+
+  auto total_read = 0ull;
+  while (total_read < bytes) {
+    auto read_bytes = pread64(mem_fd().get(), buffer->next(), bytes - total_read, addr + total_read);
+    if (-1 == read_bytes || 0 == read_bytes) {
+      return utils::unexpected(NonFullRead{std::move(buffer), static_cast<u32>(bytes - total_read), errno});
+    }
+    buffer->wrote_bytes(read_bytes);
+    total_read += read_bytes;
+  }
+  return utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>{std::move(buffer)};
+}
+
 utils::StaticVector<u8>::OwnPtr
 TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
 {
@@ -986,6 +1005,14 @@ TraceeController::new_scope_id(NonNullPtr<ObjectFile> owning_obj, const sym::Fra
       std::piecewise_construct, std::forward_as_tuple(res),
       std::forward_as_tuple(owning_obj, res, iter->second.thread_id, fid, fid, ui::dap::EntityType::Scope, type));
   return res;
+}
+
+void
+TraceeController::invalidate_stop_state() noexcept
+{
+  for (auto obj : object_files) {
+    obj->invalidate_variable_references();
+  }
 }
 
 int

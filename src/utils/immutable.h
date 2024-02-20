@@ -69,6 +69,120 @@ public:
   }
 };
 
+template <> class Immutable<std::string>
+{
+  using T = std::string;
+  T data;
+
+public:
+  constexpr Immutable(const T &t) noexcept : data(t) {}
+  constexpr Immutable(T &&t) noexcept : data(std::move(t)) {}
+
+  constexpr Immutable(const Immutable &) noexcept = default;
+  constexpr Immutable(Immutable &&other) noexcept = default;
+  constexpr Immutable &operator=(const Immutable &) noexcept = default;
+  constexpr Immutable &operator=(Immutable &&other) noexcept = default;
+
+  template <typename... Args> Immutable(Args... args) noexcept : data(std::forward<Args>(args)...) {}
+
+  constexpr operator const std::string_view() const & { return data; }
+
+  constexpr const std::string_view
+  operator*() const & noexcept
+  {
+    return std::string_view{data};
+  }
+
+  constexpr
+  operator T &&() &&
+  {
+    return std::move(data);
+  }
+
+  constexpr friend auto
+  operator<=>(const Immutable<T> &lhs, const Immutable<T> &rhs) noexcept
+  {
+    return lhs.data <=> rhs.data;
+  }
+
+  constexpr friend auto
+  operator<=>(const Immutable<T> &lhs, const T &rhs) noexcept
+  {
+    return lhs.data <=> rhs;
+  }
+
+  constexpr friend auto
+  operator<=>(const T &lhs, const Immutable<T> &rhs) noexcept
+  {
+    return lhs <=> rhs.data;
+  }
+};
+
+template <typename T> class Immutable<std::unique_ptr<T>>
+{
+  std::unique_ptr<T> data;
+
+public:
+  // Unique ptrs never copy
+  constexpr Immutable(const Immutable &) noexcept = delete;
+  constexpr Immutable &operator=(const Immutable &) noexcept = delete;
+
+  constexpr Immutable(std::unique_ptr<T> &&t) noexcept : data(std::move(t)) {}
+  constexpr Immutable(Immutable &&other) noexcept = default;
+  constexpr Immutable &operator=(Immutable &&other) noexcept = default;
+
+  template <typename... Args>
+  Immutable(Args... args) noexcept : data(std::make_unique<T>(std::forward<Args>(args)...))
+  {
+  }
+
+  constexpr operator const T &() const & { return *data; }
+
+  constexpr const T &
+  operator*() const & noexcept
+  {
+    return *data;
+  }
+
+  constexpr const T *
+  operator->() const noexcept
+  {
+    return data.get();
+  }
+
+  constexpr
+  operator T &&() &&
+  {
+    return std::move(data);
+  }
+
+  constexpr friend auto
+  operator<=>(const Immutable<T> &lhs, const Immutable<T> &rhs) noexcept
+  {
+    return lhs.data <=> rhs.data;
+  }
+
+  constexpr friend auto
+  operator<=>(const Immutable<T> &lhs, const T &rhs) noexcept
+  {
+    return *(lhs.data) <=> rhs;
+  }
+
+  constexpr friend auto
+  operator<=>(const T &lhs, const Immutable<T> &rhs) noexcept
+  {
+    return lhs <=> *(rhs.data);
+  }
+
+  // An Immutable<T> member variable, might want to hand out a mutable reference to a sub object. This is
+  // absolutely fine.
+  constexpr T &
+  mut() noexcept
+  {
+    return *data;
+  }
+};
+
 template <typename T, typename U>
 constexpr auto
 operator+(const Immutable<T> &l, const Immutable<U> &r)
@@ -121,6 +235,12 @@ template <typename T> struct NonNullPtr
 
   constexpr
   operator T &() noexcept
+  {
+    return *ptr;
+  }
+
+  constexpr
+  operator T &() const noexcept
   {
     return *ptr;
   }
