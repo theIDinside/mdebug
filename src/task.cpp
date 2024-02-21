@@ -3,6 +3,7 @@
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
+#include <tracee/util.h>
 
 TaskInfo::TaskInfo(pid_t tid, bool user_stopped) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
@@ -62,6 +63,7 @@ decode_eh_insts(const sym::UnwindInfo *inf, sym::CFAStateMachine &state) noexcep
 const std::vector<AddrPtr> &
 TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
+  static constexpr auto X86_64_RIP_REGISTER = 16;
   if (!call_stack->dirty)
     return call_stack->pcs;
   else {

@@ -1,6 +1,6 @@
 #pragma once
-#include <symbolication/dwarf/die.h>
 #include <symbolication/dwarf/lnp.h>
+#include <symbolication/dwarf/unit_header.h>
 #include <utils/worker_task.h>
 
 struct ObjectFile;

@@ -1,4 +1,5 @@
 #include "dwarf_unit_data.h"
+#include "symbolication/dwarf/die.h"
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
 namespace sym::dw {

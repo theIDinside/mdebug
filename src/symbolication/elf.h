@@ -1,8 +1,8 @@
 #pragma once
 #include <common.h>
-#include <string_view>
-
 #include <elf.h>
+#include <string_view>
+#include <typedefs.h>
 #include <unordered_map>
 
 constexpr static u8 ELF_MAGIC[4]{0x7F, 0x45, 0x4C, 0x46};

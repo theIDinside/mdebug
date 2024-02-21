@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include <typedefs.h>
 #include <unordered_set>
 
 struct TraceeController;

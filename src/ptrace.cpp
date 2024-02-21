@@ -280,7 +280,7 @@ to_str(RunType type) noexcept
   __builtin_unreachable();
 }
 
-Option<WaitPid>
+std::optional<WaitPid>
 waitpid_peek(pid_t tid) noexcept
 {
   int status;
@@ -293,7 +293,7 @@ waitpid_peek(pid_t tid) noexcept
   return WaitPid{.tid = waited_pid, .status = status};
 }
 
-Option<WaitPid>
+std::optional<WaitPid>
 waitpid_nonblock(pid_t tid) noexcept
 {
   int status;
@@ -303,7 +303,7 @@ waitpid_nonblock(pid_t tid) noexcept
   return WaitPid{waited_pid, status};
 }
 
-Option<WaitPid>
+std::optional<WaitPid>
 waitpid_block(pid_t tid) noexcept
 {
   int status;

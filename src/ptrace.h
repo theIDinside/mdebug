@@ -1,11 +1,16 @@
 #pragma once
-#include "common.h"
+#include <optional>
+#include <source_location>
+#include <string_view>
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+#include <typedefs.h>
 
 struct TaskInfo;
+
+template <size_t... T> constexpr bool always_false_i = false;
 
 enum class RunType : u8
 {
@@ -62,11 +67,11 @@ struct WaitPid
 
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
  * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
-Option<WaitPid> waitpid_peek(pid_t tid) noexcept;
+std::optional<WaitPid> waitpid_peek(pid_t tid) noexcept;
 /** `wait`'s for `tid` in a non-blocking way. If waiting on `tid` yielded no wait status, returns `none` */
-Option<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
+std::optional<WaitPid> waitpid_nonblock(pid_t tid) noexcept;
 
-Option<WaitPid> waitpid_block(pid_t tid) noexcept;
+std::optional<WaitPid> waitpid_block(pid_t tid) noexcept;
 
 std::string_view request_name(__ptrace_request req);
 

@@ -1,14 +1,14 @@
 #include "commands.h"
 #include "events/event.h"
-#include "fmt/format.h"
 #include "interface/ui_command.h"
-#include "nlohmann/json_fwd.hpp"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
 #include "types.h"
 #include "utils/expected.h"
 #include <algorithm>
-#include <iterator>
+#include <breakpoint.h>
+#include <fmt/core.h>
+#include <fmt/format.h>
 #include <memory>
 #include <optional>
 #include <ptracestop_handlers.h>
@@ -16,13 +16,27 @@
 #include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
+#include <symbolication/value.h>
+#include <symbolication/value_visualizer.h>
 #include <tracer.h>
-#include <unistd.h>
 #include <unordered_set>
 #include <utils/base64.h>
-#include <valarray>
 
 namespace ui::dap {
+
+static constexpr SteppingGranularity
+from_str(std::string_view granularity) noexcept
+{
+  if (granularity == "statement") {
+    return SteppingGranularity::LogicalBreakpointLocation; // default
+  } else if (granularity == "line") {
+    return SteppingGranularity::Line; // default
+  } else if (granularity == "instruction") {
+    return SteppingGranularity::Instruction; // default
+  } else {
+    return SteppingGranularity::Line; // default
+  }
+}
 
 ErrorResponse::ErrorResponse(std::string &&command, ui::UICommandPtr cmd,
                              std::optional<std::string> &&short_message, std::optional<Message> &&message) noexcept
@@ -840,7 +854,7 @@ InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrI
 }
 
 UIResultPtr
-InvalidArgs::execute(Tracer *tracer) noexcept
+InvalidArgs::execute(Tracer *) noexcept
 {
   return new InvalidArgsResponse{command, std::move(missing_arguments)};
 }

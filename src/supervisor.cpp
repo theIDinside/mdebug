@@ -221,7 +221,7 @@ TraceeController::process_dwarf(std::vector<SharedObject::SoId> sos) noexcept
     if (so->has_debug_info()) {
       so->objfile->initial_dwarf_setup(Tracer::Instance->get_configuration().dwarf_config());
     }
-    Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", so});
+    Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", *so});
   }
 }
 

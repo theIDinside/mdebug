@@ -1,6 +1,6 @@
 #pragma once
-#include "../common.h"
 #include "addr_sorter.h"
+#include <typedefs.h>
 
 /**
  * Description of a range of executable code, inside of a compilation unit.

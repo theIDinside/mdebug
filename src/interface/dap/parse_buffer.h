@@ -3,6 +3,7 @@
 #include "dap_defs.h"
 #include <memory_resource>
 #include <regex>
+#include <typedefs.h>
 #include <utility>
 
 namespace ui::dap {

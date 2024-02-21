@@ -3,10 +3,10 @@
 #include "breakpoint.h"
 #include "common.h"
 #include "interface/dap/dap_defs.h"
-#include <map>
 #include <symbolication/callstack.h>
 #include <symbolication/dwarf/lnp.h>
 #include <task.h>
+#include <unordered_map>
 
 struct TraceeController;
 struct BpStat;
@@ -151,6 +151,6 @@ public:
 
 private:
   bool process_waitstatus_for(TaskInfo &t) noexcept;
-  std::map<Tid, ThreadProceedAction *> proceed_actions;
+  std::unordered_map<Tid, ThreadProceedAction *> proceed_actions;
 };
 } // namespace ptracestop

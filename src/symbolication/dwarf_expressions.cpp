@@ -678,7 +678,7 @@ static Op ops[0xff] = {
 
 AddrPtr ExprByteCodeInterpreter::request_frame_base() noexcept {
   ASSERT(frame_level != -1, "Did not expect to use FRAME_LEVEL for this DWARF expression computation.");
-  ASSERT(this->task.call_stack->reg_unwind_buffer.front()[6] == get_register(this->task.registers, 6), "Expected first level to be equal, but it wasn't.");
+  ASSERT(this->task.call_stack->reg_unwind_buffer.front()[6] == task.get_register(6), "Expected first level to be equal, but it wasn't.");
   return this->task.call_stack->reg_unwind_buffer[frame_level][6];
 }
 

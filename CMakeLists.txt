@@ -76,6 +76,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/die.h
   src/symbolication/dwarf/die_iterator.cpp
   src/symbolication/dwarf/die_iterator.h
+  src/symbolication/dwarf/die_ref.cpp
+  src/symbolication/dwarf/die_ref.h
   src/symbolication/dwarf/lnp.cpp
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
@@ -85,6 +87,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/rnglists.h
   src/symbolication/dwarf/typeread.cpp
   src/symbolication/dwarf/typeread.h
+  src/symbolication/dwarf/unit_header.cpp
+  src/symbolication/dwarf/unit_header.h
   src/symbolication/elf_symbols.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
@@ -94,6 +98,8 @@ set(MIDAS_SOURCES
   src/symbolication/objfile.h
   src/symbolication/type.cpp
   src/symbolication/type.h
+  src/symbolication/value.cpp
+  src/symbolication/value.h
   src/symbolication/value_visualizer.cpp
   src/symbolication/value_visualizer.h
   # tasks
@@ -116,6 +122,12 @@ set(MIDAS_SOURCES
   src/utils/thread_pool.h
   src/utils/worker_task.cpp
   src/utils/worker_task.h
+  # eval
+  src/eval/eval.cpp
+  src/eval/eval.h
+
+  src/tracee/util.cpp
+  src/tracee/util.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)

@@ -1,15 +1,22 @@
 #include "events.h"
+#include "../../so_loading.h"
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
-#include <iterator>
 
 namespace ui::dap {
 
-ModuleEvent::ModuleEvent(std::string_view reason, SharedObject *so) noexcept
-    : id(so->so_id), reason(reason), name(so->name()), path(so->path), addr_range(so->relocated_addr_range()),
-      sym_info(so->symbol_info), symbol_file_path(so->symbol_file_path()), version(so->version())
+ModuleEvent::ModuleEvent(int id, std::string_view reason, std::string &&name, Path &&path,
+                         std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
+                         AddressRange range, SharedObjectSymbols so_sym_info) noexcept
+    : id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
+      sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)), version(std::move(version))
 {
-  ASSERT(so != nullptr, "Shared object was null");
+}
+
+ModuleEvent::ModuleEvent(std::string_view reason, const SharedObject &so) noexcept
+    : id(so.so_id), reason(reason), name(so.name()), path(so.path), addr_range(so.relocated_addr_range()),
+      sym_info(so.symbol_info), symbol_file_path(so.symbol_file_path()), version(so.version())
+{
 }
 
 std::string

@@ -12,6 +12,7 @@
 #include "symbolication/dwarf/rnglists.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_defs.h"
+#include "utils/scope_defer.h"
 #include <algorithm>
 #include <cstdint>
 

@@ -1,6 +1,5 @@
 #pragma once
 #include "nlohmann/json_fwd.hpp"
-#include "utils/expected.h"
 #include <cstdint>
 #include <optional>
 #include <string>

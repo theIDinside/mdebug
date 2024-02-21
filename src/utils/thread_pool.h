@@ -1,9 +1,9 @@
 #pragma once
-#include "../common.h"
 #include "worker_task.h"
 #include <numeric>
 #include <queue>
 #include <thread>
+#include <typedefs.h>
 #include <vector>
 
 namespace utils {

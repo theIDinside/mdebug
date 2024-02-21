@@ -2,6 +2,7 @@
 #include "common.h"
 #include "type.h"
 #include "utils/enumerator.h"
+#include "value.h"
 #include <algorithm>
 #include <bits/ranges_util.h>
 #include <iterator>
@@ -375,7 +376,7 @@ ArrayVisualizer::format_value() noexcept
   TODO("not impl");
 }
 std::optional<std::string>
-ArrayVisualizer::dap_format(std::string_view name, int variablesReference) noexcept
+ArrayVisualizer::dap_format(std::string_view, int variablesReference) noexcept
 {
   auto ptr = this->data_provider.lock();
   if (!ptr) {

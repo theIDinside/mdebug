@@ -1,11 +1,16 @@
 #pragma once
-#include "../../common.h"
-#include "../../symbolication/callstack.h"
+#include "utils/immutable.h"
 #include <fmt/format.h>
 #include <string_view>
+#include <typedefs.h>
 
 struct TaskInfo;
 struct TraceeController;
+struct ObjectFile;
+
+namespace sym {
+class Value;
+}
 
 namespace ui::dap {
 
@@ -158,44 +163,6 @@ struct Variable
 }; // namespace ui::dap
 
 namespace fmt {
-
-template <> struct formatter<ui::dap::Variable>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx) noexcept
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const ui::dap::Variable &var, FormatContext &ctx) const noexcept
-  {
-    if (var.variable_value->has_visualizer()) {
-      auto viz = var.variable_value->get_visualizer();
-      const auto res = viz->dap_format(var.variable_value->name, var.ref);
-      return fmt::format_to(ctx.out(), "{}", res.value());
-    } else {
-      // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we do
-      // individual type checking again.
-      //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
-      if (var.variable_value->type()->is_array_type()) {
-        return fmt::format_to(
-            ctx.out(),
-            R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-            var.variable_value->name, (*var.variable_value), *var.variable_value->type(), var.ref,
-            var.variable_value->address(), var.variable_value->type()->array_size());
-      } else {
-        return fmt::format_to(
-            ctx.out(),
-            R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-            var.variable_value->name, (*var.variable_value), *var.variable_value->type(), var.ref,
-            var.variable_value->address());
-      }
-    }
-  }
-};
 
 template <> struct formatter<ui::dap::Scope>
 {

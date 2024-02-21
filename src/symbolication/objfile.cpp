@@ -1,6 +1,9 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "dwarf.h"
+#include "dwarf/die.h"
+#include "dwarf/lnp.h"
 #include "supervisor.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf_defs.h"
@@ -11,6 +14,7 @@
 #include "type.h"
 #include "utils/enumerator.h"
 #include "utils/worker_task.h"
+#include "value.h"
 #include <symbolication/dwarf/typeread.h>
 #include <utils/scoped_fd.h>
 
@@ -82,13 +86,6 @@ ObjectFile::get_min_obj_sym(std::string_view name) noexcept
   } else {
     return std::nullopt;
   }
-}
-
-Path
-ObjectFile::interpreter() const noexcept
-{
-  const auto path = interpreter_path(parsed_elf, parsed_elf->get_section(".interp"));
-  return path;
 }
 
 bool
@@ -218,7 +215,7 @@ ObjectFile::get_lnp_headers() noexcept
 // Synchronization needed - parsed by multiple threads and results registered asynchronously + in parallel
 void
 ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
-                            std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes)
+                            std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes) noexcept
 {
   std::lock_guard lock(parsed_lte_write_lock);
   ASSERT(headers.size() == parsed_ltes.size(), "headers != parsed_lte count!");

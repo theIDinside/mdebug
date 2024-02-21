@@ -12,12 +12,14 @@ namespace utils {
 
 /**
  * Byte container to be used instead of std::vector. Notice that, there's no actual "mutation" methods on this
- * type. It simply hands out it's pointer, and then requests of the user to inform it of how much has been written
- * there. That's all.
+ * type. It simply hands out it's pointer, and then requests of the user to inform it of how much has been
+ * written there. That's all.
  */
 class ByteBuffer
 {
+public:
   NO_COPY(ByteBuffer)
+private:
   u8 *buffer;
   u32 value_size;
   u32 capacity;
@@ -37,6 +39,6 @@ public:
   void wrote_bytes(u32 bytes) noexcept;
   u8 *next() noexcept;
   std::span<u8> span() const noexcept;
-  static std::unique_ptr<ByteBuffer> create(u64 size) noexcept;
+  static ByteBuffer::OwnPtr create(u64 size) noexcept;
 };
 } // namespace utils

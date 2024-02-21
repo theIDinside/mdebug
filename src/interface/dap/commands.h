@@ -3,14 +3,11 @@
 #include <interface/ui_result.h>
 // NOLINTNEXTLINE
 #include "types.h"
-#include <breakpoint.h>
 #include <nlohmann/json.hpp>
 #include <symbolication/disassemble.h>
-#include <tuple>
-#include <utility>
-#include <vector>
 
 using namespace std::string_view_literals;
+enum class BreakpointType : std::uint8_t;
 
 namespace ui::dap {
 
@@ -119,20 +116,6 @@ enum class SteppingGranularity
   Line,
   LogicalBreakpointLocation
 };
-
-static constexpr SteppingGranularity
-from_str(std::string_view granularity) noexcept
-{
-  if (granularity == "statement") {
-    return SteppingGranularity::LogicalBreakpointLocation; // default
-  } else if (granularity == "line") {
-    return SteppingGranularity::Line; // default
-  } else if (granularity == "instruction") {
-    return SteppingGranularity::Instruction; // default
-  } else {
-    return SteppingGranularity::Line; // default
-  }
-}
 
 struct NextResponse final : ui::UIResult
 {

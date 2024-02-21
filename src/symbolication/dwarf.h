@@ -19,9 +19,9 @@ struct StrSlice
   }
 
 template <typename T>
-concept AttributeValueType = std::is_same_v<T, u64> || std::is_same_v<T, i64> || std::is_same_v<T, DataBlock> ||
-                             std::is_same_v<T, StrSlice> || std::is_same_v<T, std::string_view> ||
-                             std::is_same_v<T, UnrelocatedTraceePointer>;
+concept AttributeValueType =
+    std::is_same_v<T, u64> || std::is_same_v<T, i64> || std::is_same_v<T, DataBlock> ||
+    std::is_same_v<T, StrSlice> || std::is_same_v<T, std::string_view> || std::is_same_v<T, AddrPtr>;
 
 /** Fully-formed attribtue */
 struct AttributeValue
@@ -73,13 +73,13 @@ private:
     constexpr _value(DataBlock block) noexcept : block(block) {}
     constexpr _value(u64 u) noexcept : u(u) {}
     constexpr _value(i64 i) noexcept : i(i) {}
-    constexpr _value(UnrelocatedTraceePointer ptr) noexcept : addr(ptr) {}
+    constexpr _value(AddrPtr ptr) noexcept : addr(ptr) {}
 
     DataBlock block;
     // StrSlice str;
     std::string_view str;
     u64 u;
     i64 i;
-    UnrelocatedTraceePointer addr;
+    AddrPtr addr;
   } value;
 };

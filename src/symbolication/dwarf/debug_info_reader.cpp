@@ -1,7 +1,6 @@
 #include "debug_info_reader.h"
 #include "../objfile.h"
 #include "symbolication/dwarf/die.h"
-#include <optional>
 
 namespace sym::dw {
 
@@ -115,7 +114,7 @@ UnitReader::skip_attributes(const std::span<const Abbreviation> &attributes) noe
   }
 }
 
-UnrelocatedTraceePointer
+AddrPtr
 UnitReader::read_address() noexcept
 {
   ASSERT(current_ptr < compilation_unit->header().end_excl(),
@@ -124,12 +123,12 @@ UnitReader::read_address() noexcept
   case 4: {
     u32 addr = *(u32 *)current_ptr;
     current_ptr += 4;
-    return UnrelocatedTraceePointer{addr};
+    return AddrPtr{addr};
   }
   case 8: {
     u64 addr = *(u64 *)current_ptr;
     current_ptr += 8;
-    return UnrelocatedTraceePointer{addr};
+    return AddrPtr{addr};
   }
   default:
     PANIC(fmt::format("Currently unsupported address size {}", compilation_unit->header().addr_size()));
@@ -225,7 +224,7 @@ UnitReader::read_n_bytes(u8 n_bytes) noexcept
   return result;
 }
 
-UnrelocatedTraceePointer
+AddrPtr
 UnitReader::read_by_idx_from_addr_table(u64 address_index, std::optional<u64> addr_table_base) const noexcept
 {
   auto obj = compilation_unit->get_objfile();
@@ -235,10 +234,10 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index, std::optional<u64> ad
   const auto ptr = (obj->parsed_elf->debug_addr->m_section_ptr + addr_table_offset);
   if (header.addr_size() == 4) {
     const auto value = *(u32 *)ptr;
-    return UnrelocatedTraceePointer{value};
+    return AddrPtr{value};
   } else {
     const auto value = *(u64 *)ptr;
-    return UnrelocatedTraceePointer{value};
+    return AddrPtr{value};
   }
 }
 

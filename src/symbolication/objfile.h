@@ -1,15 +1,10 @@
 #pragma once
 #include "block.h"
 #include "cu_symbol_info.h"
-#include "dwarf.h"
-#include "dwarf/die.h"
-#include "dwarf/lnp.h"
 #include "elf.h"
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
 #include "mdb_config.h"
-#include "symbolication/type.h"
-#include "symbolication/value_visualizer.h"
 #include <common.h>
 #include <string_view>
 #include <sys/mman.h>
@@ -19,9 +14,16 @@ using VariablesReference = int;
 class CompilationUnitFile;
 class NonExecutableCompilationUnitFile;
 
+template <typename T> using Optional = std::optional<T>;
+
 namespace sym {
 class Unwinder;
 class Type;
+class Value;
+class ValueVisualizer;
+class ValueResolver;
+enum class VariableSet : u8;
+enum class FrameVariableKind : u8;
 
 namespace dw {
 struct LNPHeader;
@@ -55,15 +57,15 @@ struct ObjectFile
   ~ObjectFile() noexcept;
 
   template <typename T>
-  T *
-  get_at_offset(u64 offset)
+  auto
+  get_at_offset(u64 offset) -> T *
   {
     return (T *)(loaded_binary + offset);
   }
 
   template <typename T>
-  const T *
-  get_at(const u8 *ptr)
+  auto
+  get_at(const u8 *ptr) -> const T *
   {
     ASSERT(ptr > loaded_binary, "Pointer is outside (below) memory mapped object file by {} bytes at {:p}",
            (u64)(loaded_binary - ptr), (void *)ptr);
@@ -73,30 +75,30 @@ struct ObjectFile
     return (T *)(ptr);
   }
 
-  u64 get_offset(u8 *ptr) const noexcept;
-  u8 *get_section(Elf *elf, u32 index) const noexcept;
-  AddrPtr text_section_offset() const noexcept;
-  std::optional<MinSymbol> get_min_fn_sym(std::string_view name) noexcept;
-  const MinSymbol *search_minsym_fn_info(AddrPtr pc) noexcept;
-  std::optional<MinSymbol> get_min_obj_sym(std::string_view name) noexcept;
+  auto get_offset(u8 *ptr) const noexcept -> u64;
+  auto get_section(Elf *elf, u32 index) const noexcept -> u8 *;
+  auto text_section_offset() const noexcept -> AddrPtr;
+  auto get_min_fn_sym(std::string_view name) noexcept -> std::optional<MinSymbol>;
+  auto search_minsym_fn_info(AddrPtr pc) noexcept -> const MinSymbol *;
+  auto get_min_obj_sym(std::string_view name) noexcept -> std::optional<MinSymbol>;
 
-  Path interpreter() const noexcept;
-  bool found_min_syms() const noexcept;
-  void set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept;
-  std::vector<sym::dw::UnitData *> &compilation_units() noexcept;
-  sym::dw::UnitData *get_cu_from_offset(u64 offset) noexcept;
-  std::optional<sym::dw::DieReference> get_die_reference(u64 offset) noexcept;
-  sym::dw::ObjectFileNameIndex *name_index() noexcept;
+  auto found_min_syms() const noexcept -> bool;
+  auto set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept -> void;
+  auto compilation_units() noexcept -> std::vector<sym::dw::UnitData *> &;
+  auto get_cu_from_offset(u64 offset) noexcept -> sym::dw::UnitData *;
+  auto get_die_reference(u64 offset) noexcept -> std::optional<sym::dw::DieReference>;
+  auto name_index() noexcept -> sym::dw::ObjectFileNameIndex *;
 
-  sym::dw::LNPHeader *get_lnp_header(u64 offset) noexcept;
-  sym::dw::LineTable get_linetable(u64 offset) noexcept;
-  void read_lnp_headers() noexcept;
-  std::span<sym::dw::LNPHeader> get_lnp_headers() noexcept;
-  void add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
-                       std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes);
-  void init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers);
-  sym::dw::ParsedLineTableEntries &get_plte(u64 offset) noexcept;
-  void add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept;
+  auto get_lnp_header(u64 offset) noexcept -> sym::dw::LNPHeader *;
+  auto get_linetable(u64 offset) noexcept -> sym::dw::LineTable;
+  auto read_lnp_headers() noexcept -> void;
+  auto get_lnp_headers() noexcept -> std::span<sym::dw::LNPHeader>;
+  auto add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
+                       std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes) noexcept -> void;
+
+  auto init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers) -> void;
+  auto get_plte(u64 offset) noexcept -> sym::dw::ParsedLineTableEntries &;
+  auto add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept -> void;
 
   auto get_source_file(const std::filesystem::path &fullpath) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
   auto source_code_files() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
@@ -105,34 +107,35 @@ struct ObjectFile
   auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
-  std::vector<sym::SourceFileSymbolInfo *> get_source_infos(AddrPtr pc) noexcept;
-  std::vector<sym::dw::SourceCodeFile *> get_source_code_files(AddrPtr pc) noexcept;
-  std::vector<ui::dap::Variable> get_variables(TraceeController &tc, sym::Frame &frame,
-                                               sym::VariableSet set) noexcept;
+  auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::SourceFileSymbolInfo *>;
+  auto get_source_code_files(AddrPtr pc) noexcept -> std::vector<sym::dw::SourceCodeFile *>;
+  auto get_variables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+      -> std::vector<ui::dap::Variable>;
 
-  std::vector<ui::dap::Variable> resolve(TraceeController &tc, int ref, std::optional<u32> start,
-                                         std::optional<u32> count) noexcept;
+  auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
+      -> std::vector<ui::dap::Variable>;
 
-  void initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept;
-  void add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
-                       std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept;
-  void init_minsym_name_lookup() noexcept;
+  auto initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept -> void;
+  auto add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
+                       std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept -> void;
+
+  auto init_minsym_name_lookup() noexcept -> void;
 
   // Clears the variablesReference cache - not that this doesn't necessarily mean the objects will die; it only
   // mean that from a Variables Reference standpoint, they're no longer reachable. For instance, in the future, we
   // might open for extending the debugger so that the user can do scripts etc, and they might want to hold on to
   // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
   // user will have created something that holds a reference to the value it will now become the sole owner.
-  void invalidate_variable_references() noexcept;
-  std::unique_ptr<sym::ValueVisualizer> find_custom_visualizer(sym::Type &type) noexcept;
-  std::unique_ptr<sym::ValueResolver> find_custom_resolver(sym::Type &type) noexcept;
-  void init_visualizer(std::shared_ptr<sym::Value> &value) noexcept;
-  void register_resolver(std::shared_ptr<sym::Value> &value) noexcept;
-  void cache_value(VariablesReference ref, sym::Value::ShrPtr value) noexcept;
+  auto invalidate_variable_references() noexcept -> void;
+  auto find_custom_visualizer(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueVisualizer>;
+  auto find_custom_resolver(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueResolver>;
+  auto init_visualizer(std::shared_ptr<sym::Value> &value) noexcept -> void;
+  auto register_resolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
+  auto cache_value(VariablesReference ref, std::shared_ptr<sym::Value> value) noexcept -> void;
 
 private:
-  std::vector<ui::dap::Variable> get_variables_impl(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                                                    sym::Frame &frame) noexcept;
+  auto get_variables_impl(sym::FrameVariableKind variables_kind, TraceeController &tc, sym::Frame &frame) noexcept
+      -> std::vector<ui::dap::Variable>;
 
   std::unordered_map<std::string_view, Index> minimal_fn_symbols;
   std::vector<MinSymbol> min_fn_symbols_sorted;

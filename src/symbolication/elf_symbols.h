@@ -2,6 +2,7 @@
 #include "../common.h"
 #include "symbolication/addr_sorter.h"
 #include <string_view>
+#include <typedefs.h>
 
 /**
  * Parsing & Decoding minimalistic symbols found in the elf symtable (.symtab)

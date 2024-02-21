@@ -16,7 +16,7 @@ constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
 
 constexpr std::string_view LOADER_STATE = "_r_debug_extended";
 
-enum class SharedObjectSymbols
+enum class SharedObjectSymbols : u8
 {
   Minimum,
   Full,

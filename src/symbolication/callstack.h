@@ -24,7 +24,7 @@ enum class InsideRange
   Unknown
 };
 
-enum class VariableSet
+enum class VariableSet : u8
 {
   Arguments,
   Locals,
@@ -32,7 +32,7 @@ enum class VariableSet
   Global
 };
 
-enum class FrameVariableKind
+enum class FrameVariableKind : u8
 {
   Arguments,
   Locals

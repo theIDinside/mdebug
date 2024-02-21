@@ -1,8 +1,73 @@
 #pragma once
 #include "../common.h"
 #include "dwarf_defs.h"
+#include <typedefs.h>
 
 class Elf;
+
+static constexpr u8 LEB128_MASK = 0b0111'1111;
+
+const u8 *
+decode_uleb128(const u8 *data, IsBitsType auto &value) noexcept
+{
+  u64 res = 0;
+  u64 shift = 0;
+  u8 index = 0;
+  for (;;) {
+    u8 byte = data[index];
+    res |= ((byte & LEB128_MASK) << shift);
+    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x1), "Decoding of ULEB128 failed at index {}", index);
+    ++index;
+    if ((byte & ~LEB128_MASK) == 0) {
+      // We don't want C++ to set a "good" enum value
+      // if `value` is of type enum. We literally want a bit blast here (and we rely on that being the case)
+      std::memcpy(&value, &res, sizeof(decltype(value)));
+      return data + index;
+    }
+    shift += 7;
+  }
+}
+
+const u8 *
+decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
+{
+  i64 res = 0;
+  u64 shift = 0;
+  u8 index = 0;
+  u64 size = 64;
+  u8 byte;
+  for (;;) {
+    byte = data[index];
+    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x7f), "Decoding of LEB128 failed at index {}", index);
+    res |= ((byte & LEB128_MASK) << shift);
+    shift += 7;
+    ++index;
+    if ((byte & ~LEB128_MASK) == 0)
+      break;
+  }
+  if (shift < size && (byte & 0x40)) {
+    res |= ((-1) << shift);
+  }
+  // We don't want C++ to set a "good" enum value
+  // if `value` is of type enum. We literally want a bit blast here (and we rely on that being the case)
+  std::memcpy(&value, &res, sizeof(decltype(value)));
+  return data + index;
+}
+
+// clang-format off
+template <typename BufferType>
+concept ByteContainer = requires(BufferType t) {
+  { t.size() } -> std::convertible_to<u64>;
+  { t.begin() } -> std::convertible_to<const u8 *>;
+  { t.end() } -> std::convertible_to<const u8 *>;
+  { t.offset(10) } -> std::convertible_to<const u8 *>;
+};
+
+template <typename ByteType>
+concept ByteCode = requires(ByteType bt) {
+  { std::to_underlying(bt) } -> std::convertible_to<u8>;
+} && std::is_enum<ByteType>::value;
+// clang-format on
 
 class DwarfBinaryReader
 {

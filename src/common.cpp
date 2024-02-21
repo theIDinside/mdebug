@@ -7,9 +7,11 @@
 #include <optional>
 #include <regex>
 #include <source_location>
+#include <string>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <typedefs.h>
 
 std::string_view
 syscall_name(u64 syscall_number)
@@ -126,17 +128,4 @@ to_addr(std::string_view s) noexcept
   } else {
     return std::nullopt;
   }
-}
-
-u64
-get_register(user_regs_struct *regs, int reg_number) noexcept
-{
-  ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
-  return *(u64 *)(((std::uintptr_t)regs) + offsets[reg_number]);
-}
-
-std::span<const u8>
-as_span(DataBlock block) noexcept
-{
-  return std::span{block.ptr, block.ptr + block.size};
 }

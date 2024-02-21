@@ -1,6 +1,8 @@
 #pragma once
 #include "common.h"
+#include "die_ref.h"
 #include "symbolication/dwarf_defs.h"
+#include "unit_header.h"
 #include <symbolication/block.h>
 #include <symbolication/dwarf.h>
 #include <utils/indexing.h>
@@ -93,38 +95,6 @@ maybe_null_any_of(const DieMetaData *die)
   return ((die->tag == tags) || ...);
 }
 
-class UnitHeader
-{
-public:
-  UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset,
-             u8 addr_size, u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept;
-  u8 offset_size() const noexcept;
-  u8 addr_size() const noexcept;
-  const u8 *abbreviation_data(const ElfSection *abbrev_sec) const noexcept;
-  const u8 *data() const noexcept;
-  const u8 *end_excl() const noexcept;
-  u64 debug_info_offset() const noexcept;
-  u8 format() const noexcept;
-  u8 header_len() const noexcept;
-  std::span<const u8> get_die_data() const noexcept;
-  bool spans_across(u64 sec_offset) const noexcept;
-  SymbolInfoId unit_id() const noexcept;
-  DwarfVersion version() const noexcept;
-  DwarfUnitType get_unit_type() const noexcept;
-  u64 cu_size() const noexcept;
-
-private:
-  u64 sec_offset;
-  u64 unit_size;
-  std::span<const u8> die_data;
-  u64 abbreviation_sec_offset;
-  u8 address_size;
-  u8 dwarf_format;
-  DwarfVersion dw_version;
-  DwarfUnitType unit_type;
-  SymbolInfoId id;
-};
-
 // TODO(simon): ResolveAbbreviation
 //  some abbreviations unfortunately, due to the infinite wisdom of the DWARF standard, have indirections. Save,
 //  what, a few kb? Great? No. thus we will need a normal abbreviation set and a resolved one.
@@ -180,32 +150,6 @@ private:
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
 std::vector<UnitHeader> read_unit_headers(ObjectFile *obj) noexcept;
-
-struct IndexedDieReference;
-
-struct DieReference
-{
-  UnitData *cu;
-  const DieMetaData *die;
-  bool valid() const noexcept;
-  IndexedDieReference as_indexed() const noexcept;
-  std::optional<AttributeValue> read_attribute(Attribute attr) const noexcept;
-};
-
-struct IndexedDieReference
-{
-  UnitData *cu;
-  Index die_index;
-
-  bool valid() const noexcept;
-  const DieMetaData *get_die() noexcept;
-
-  friend constexpr auto
-  operator==(const auto &lhs, const auto &rhs)
-  {
-    return lhs.cu == rhs.cu && lhs.die_index == rhs.die_index;
-  }
-};
 
 } // namespace sym::dw
 

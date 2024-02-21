@@ -2,6 +2,7 @@
 #include "../common.h"
 #include <filesystem>
 #include <sys/mman.h>
+#include <typedefs.h>
 
 using Path = std::filesystem::path;
 

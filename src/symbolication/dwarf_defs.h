@@ -1,8 +1,31 @@
 #pragma once
 #include <cstdint>
 #include <fmt/core.h>
+#include <span>
 #include <string_view>
+#include <typedefs.h>
 #include <utils/macros.h>
+
+template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
+
+/* Holds the decoded value of a ULEB/LEB128 as well as the length of the decoded data (in bytes). */
+template <IsBitsType T> struct LEB128Read
+{
+  T result;
+  u8 bytes_read;
+};
+
+struct DataBlock
+{
+  const u8 *const ptr;
+  u64 size;
+};
+
+constexpr std::span<const u8>
+as_span(DataBlock block) noexcept
+{
+  return std::span{block.ptr, block.ptr + block.size};
+}
 
 enum class DwarfVersion : std::uint8_t
 {

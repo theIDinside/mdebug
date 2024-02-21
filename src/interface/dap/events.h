@@ -1,12 +1,14 @@
 #pragma once
 
-#include "../../common.h"
-#include "../../so_loading.h"
 #include "../../symbolication/block.h"
 #include "../ui_result.h"
 #include "dap_defs.h"
 #include "types.h"
 #include <nlohmann/json_fwd.hpp>
+#include <typedefs.h>
+
+enum class SharedObjectSymbols : u8;
+struct SharedObject;
 
 namespace ui::dap {
 
@@ -23,13 +25,9 @@ struct ModuleEvent final : public ui::UIResult
 {
   ModuleEvent(int id, std::string_view reason, std::string &&name, Path &&path,
               std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
-              AddressRange range, SharedObjectSymbols so_sym_info) noexcept
-      : id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
-        sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)), version(std::move(version))
-  {
-  }
+              AddressRange range, SharedObjectSymbols so_sym_info) noexcept;
 
-  ModuleEvent(std::string_view reason, SharedObject *shared_object) noexcept;
+  ModuleEvent(std::string_view reason, const SharedObject &shared_object) noexcept;
   int id;
   std::string_view reason;
   std::string name;
@@ -39,7 +37,7 @@ struct ModuleEvent final : public ui::UIResult
   std::optional<std::string> symbol_file_path;
   std::optional<std::string> version;
 
-  std::string serialize(int seq) const noexcept override final;
+  std::string serialize(int seq) const noexcept final;
 };
 
 struct ContinuedEvent final : public ui::UIResult
@@ -49,7 +47,7 @@ struct ContinuedEvent final : public ui::UIResult
   // allThreadsContinued
   bool all_threads_continued;
   ContinuedEvent(Tid tid, bool all_threads) noexcept;
-  std::string serialize(int seq) const noexcept override final;
+  std::string serialize(int seq) const noexcept final;
 };
 
 struct ExitedEvent final : public ui::UIResult
@@ -57,21 +55,21 @@ struct ExitedEvent final : public ui::UIResult
   // exitCode
   int exit_code;
   ExitedEvent(int exit_code) noexcept;
-  std::string serialize(int seq) const noexcept override final;
+  std::string serialize(int seq) const noexcept final;
 };
 
 struct ThreadEvent final : public ui::UIResult
 {
   ThreadEvent(ThreadReason reason, Tid tid) noexcept;
-  virtual ~ThreadEvent() noexcept = default;
-  std::string serialize(int seq) const noexcept override final;
+  ~ThreadEvent() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
   ThreadReason reason;
   Tid tid;
 };
 
 struct StoppedEvent final : public ui::UIResult
 {
-  virtual ~StoppedEvent() noexcept = default;
+  ~StoppedEvent() noexcept override = default;
   StoppedEvent(StoppedReason reason, std::string_view description, Tid tid, std::vector<int> bps,
                std::string_view text, bool all_stopped) noexcept;
   StoppedReason reason;
@@ -82,23 +80,23 @@ struct StoppedEvent final : public ui::UIResult
   // static additional information, name of exception for instance
   std::string_view text;
   bool all_threads_stopped;
-  std::string serialize(int seq) const noexcept override final;
+  std::string serialize(int seq) const noexcept final;
 };
 
 struct BreakpointEvent final : public ui::UIResult
 {
   ui::dap::Breakpoint breakpoint;
-  std::string serialize(int seq) const noexcept override final;
+  std::string serialize(int seq) const noexcept final;
 };
 
 struct OutputEvent final : public ui::UIResult
 {
-  virtual ~OutputEvent() noexcept = default;
+  ~OutputEvent() noexcept override = default;
   OutputEvent(std::string_view category, std::string &&output) noexcept;
 
   std::string_view category; // static category strings exist, we always pass literals to this
   std::string output;
-  std::string serialize(int seq) const noexcept override final;
+  std::string serialize(int seq) const noexcept final;
 };
 
 }; // namespace ui::dap

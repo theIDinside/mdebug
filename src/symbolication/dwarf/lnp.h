@@ -2,7 +2,6 @@
 #include "../dwarf_defs.h"
 #include "utils/immutable.h"
 #include <common.h>
-#include <optional>
 
 class Elf;
 

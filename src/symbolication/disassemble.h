@@ -1,5 +1,6 @@
 #pragma once
-#include "../common.h"
+#include <common.h>
+#include <typedefs.h>
 
 struct TraceeController;
 struct ElfSection;

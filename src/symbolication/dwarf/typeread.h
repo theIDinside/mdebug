@@ -1,7 +1,6 @@
 #pragma once
-
-#include "symbolication/dwarf/die.h"
-#include "symbolication/type.h"
+#include <symbolication/dwarf/die_ref.h>
+#include <symbolication/type.h>
 
 namespace sym {
 class FunctionSymbol;

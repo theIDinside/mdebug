@@ -1,24 +1,21 @@
 #pragma once
 
-#include "../../common.h"
 #include "../../lib/spinlock.h"
 #include "../../notify_pipe.h"
-#include "../ui_result.h"
 #include "dap_defs.h"
-#include <algorithm>
-#include <array>
 #include <cstring>
-#include <fstream>
-#include <linux/limits.h>
 #include <nlohmann/json.hpp>
 #include <queue>
 #include <string_view>
-#include <sys/epoll.h>
-#include <utility>
-#include <variant>
+#include <typedefs.h>
 #include <vector>
 class Tracer;
 /* The different DAP commands/requests */
+
+namespace ui {
+struct UIResult;
+using UIResultPtr = const UIResult *;
+} // namespace ui
 
 namespace ui::dap {
 
