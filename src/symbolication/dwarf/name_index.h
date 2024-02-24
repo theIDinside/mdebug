@@ -70,7 +70,7 @@ public:
   };
 
   NameIndex(std::string_view name) noexcept;
-  std::optional<std::span<const DieNameReference>> search(std::string_view name) noexcept;
+  std::optional<std::span<const DieNameReference>> search(std::string_view name) const noexcept;
   FindResult get_dies(std::string_view name) noexcept;
   void merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
   void merge_types(ObjectFile *objfile, const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
@@ -93,5 +93,8 @@ struct ObjectFileNameIndex
   NameIndex types{"types"};
   NameIndex global_variables{"global variables"};
   NameIndex namespaces{"namespaces"};
+
+  // searches both free functions and member functions/methods
+  std::vector<std::span<const DieNameReference>> search_fns(std::string_view name) const noexcept;
 };
 } // namespace sym::dw

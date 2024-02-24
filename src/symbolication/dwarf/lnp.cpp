@@ -1,5 +1,6 @@
 #include "lnp.h"
 #include "symbolication/dwarf_defs.h"
+#include "utils/enumerator.h"
 #include <algorithm>
 #include <set>
 #include <symbolication/block.h>
@@ -434,6 +435,24 @@ LNPHeader::files() const noexcept
     files.emplace_back(std::filesystem::path{path_buf}.lexically_normal());
   }
   return files;
+}
+
+std::optional<Path>
+LNPHeader::file(u32 f_index) const noexcept
+{
+  const auto adjusted_index = version == DwarfVersion::D4 ? f_index - 1 : f_index;
+  if (adjusted_index >= file_names.size())
+    return {};
+
+  for (const auto &[i, f] : utils::EnumerateView(file_names)) {
+    if (i == adjusted_index) {
+      const auto dir_index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+      return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
+          .lexically_normal();
+    }
+  }
+
+  return std::nullopt;
 }
 
 std::optional<u32>

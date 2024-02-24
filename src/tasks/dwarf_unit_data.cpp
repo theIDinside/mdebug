@@ -44,4 +44,19 @@ UnitDataTask::create_jobs_for(ObjectFile *obj)
   return result;
 }
 
+UnitRefCountDrop::UnitRefCountDrop(std::vector<sym::dw::UnitData *> &&cus) noexcept
+    : compilation_units(std::move(cus))
+{
+}
+
+void
+UnitRefCountDrop::execute_task() noexcept
+{
+  DLOG("mdb", "dropping CU ref counts");
+  for (auto cu : compilation_units) {
+    DLOG("mdb", "{}", *cu);
+    cu->clear_die_metadata();
+  }
+}
+
 } // namespace sym::dw

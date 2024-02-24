@@ -47,7 +47,8 @@ private:
   // Private member functions
   FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
                  sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                 SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr) noexcept;
+                 SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr,
+                 std::optional<SourceCoordinate> &&source_coord) noexcept;
 
 public:
   // Only really used when constructing the full function symbols for a compilation unit, as std::vector grows, it
@@ -60,6 +61,7 @@ public:
   Immutable<AddrPtr> pc_end_exclusive;
   Immutable<std::string_view> member_of;
   Immutable<std::string_view> name;
+  Immutable<std::optional<SourceCoordinate>> source;
 
   std::string build_full_name() const noexcept;
   AddrPtr start_pc() const noexcept;

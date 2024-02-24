@@ -37,6 +37,7 @@ struct LNPHeader
             std::vector<FileEntry> &&file_names) noexcept;
 
   std::vector<std::filesystem::path> files() const noexcept;
+  std::optional<Path> file(u32 index) const noexcept;
   std::optional<u32> file_entry_index(const std::filesystem::path &p) const noexcept;
 
   u64 sec_offset;

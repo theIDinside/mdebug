@@ -22,6 +22,21 @@ using Path = fs::path;
 using Tid = pid_t;
 using Pid = pid_t;
 
+// A line/col-source coordinate. Identifies a source file by full path and a line and column number
+struct SourceCoordinate
+{
+  std::string path;
+  std::uint32_t line;
+  std::uint32_t column;
+};
+
+struct SourceCoordinateRef
+{
+  std::string_view path;
+  std::uint32_t line;
+  std::uint32_t column;
+};
+
 template <typename T> using SharedPtr = std::shared_ptr<T>;
 template <typename T> using UniquePtr = std::unique_ptr<T>;
 
@@ -121,6 +136,7 @@ public:
   constexpr operator std::uintptr_t() const { return get(); }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
   constexpr TraceePointer(T *t) noexcept : remote_addr(reinterpret_cast<std::uintptr_t>(t)) {}
+  constexpr ~TraceePointer() = default;
 
   // Utility function. When one needs to be sure we are offseting by *bytes* and not by sizeof(T) * n.
   friend TraceePointer<T> constexpr offset(TraceePointer<T> ptr, unsigned long long bytes) noexcept
@@ -297,6 +313,18 @@ private:
   std::uintptr_t remote_addr;
 };
 
+template <typename T> struct std::hash<TraceePointer<T>>
+{
+  using argument_type = TraceePointer<T>;
+  using result_type = size_t;
+
+  result_type
+  operator()(const argument_type &m) const
+  {
+    return m.get();
+  }
+};
+
 namespace fmt {
 template <typename T> struct formatter<TraceePointer<T>>
 {
@@ -418,6 +446,24 @@ map(std::vector<T> &vec, Predicate &&p, Transform &&transform) noexcept -> std::
       return transform(*it);
   }
   return std::nullopt;
+}
+
+constexpr auto
+accumulate(const auto &container, auto &&init, auto &&fn) noexcept
+{
+  return std::accumulate(container.cbegin(), container.cend(), init, fn);
+}
+
+template <typename T, typename Fn>
+constexpr auto
+ptr_and_then(T *t, Fn &&f)
+{
+  using RetType = decltype(f(*t));
+  if (t != nullptr) {
+    return f(*t);
+  } else {
+    return RetType{};
+  }
 }
 
 template <typename Container>

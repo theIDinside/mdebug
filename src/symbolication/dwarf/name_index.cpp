@@ -115,7 +115,7 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
 }
 
 std::optional<std::span<const DieNameReference>>
-NameIndex::search(std::string_view name) noexcept
+NameIndex::search(std::string_view name) const noexcept
 {
   auto it = mapping.find(name);
   if (it == std::end(mapping))
@@ -143,6 +143,20 @@ NameIndex::get_dies(std::string_view name) noexcept
   const auto collision_index = it->second.collision_displacement_index;
   auto &dies = colliding_die_name_refs[collision_index];
   return FindResult{dies.data(), static_cast<u32>(dies.size())};
+}
+
+std::vector<std::span<const DieNameReference>>
+ObjectFileNameIndex::search_fns(std::string_view name) const noexcept
+{
+  std::vector<std::span<const DieNameReference>> result{};
+  if (const auto ff_res = free_functions.search(name); ff_res) {
+    result.push_back(ff_res.value());
+  }
+
+  if (const auto mf_res = methods.search(name); mf_res) {
+    result.push_back(mf_res.value());
+  }
+  return result;
 }
 
 } // namespace sym::dw

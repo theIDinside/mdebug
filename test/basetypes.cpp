@@ -110,13 +110,13 @@ struct Structure
   float fraction;
 };
 
-class Class
+class Person
 {
   int classInt;
   Structure classInfo;
 
 public:
-  Class(int constructorInt, Structure info) : classInt(constructorInt), classInfo(info)
+  Person(int constructorInt, Structure info) : classInt(constructorInt), classInfo(info)
   {
     int a = 42; // CLASS_BP
   }
@@ -214,7 +214,7 @@ lexical_block(const char *name, bool should_take)
     a = 1;
     float b = 3.14;
     args(a, b, 1337); // LEX_BLOCK
-    Class myClass{a, structure};
+    Person myClass{a, structure};
     const auto newStructure = myClass.getClassInfo();
     const auto big = createBig("Args", "Locals");
   } else {

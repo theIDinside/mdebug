@@ -154,6 +154,24 @@ std::vector<UnitHeader> read_unit_headers(ObjectFile *obj) noexcept;
 } // namespace sym::dw
 
 namespace fmt {
+template <> struct formatter<sym::dw::UnitData>
+{
+
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const sym::dw::UnitData &cu, FormatContext &ctx) const
+  {
+    return fmt::format_to(ctx.out(), "CompilationUnit {{ cu=0x{:x} }}", cu.section_offset());
+  }
+};
+
 template <> struct formatter<sym::dw::DieReference>
 {
 

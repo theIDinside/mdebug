@@ -149,6 +149,14 @@ SourceFileSymbolInfo::get_linetable() noexcept
   return unit_data->get_objfile()->get_linetable(line_table);
 }
 
+std::optional<Path>
+SourceFileSymbolInfo::get_lnp_file(u32 index) noexcept
+{
+  // TODO(simon): we really should store a pointer to the line number program table (or header) in either UnitData
+  // or SourceFileSymbolInfo directly.
+  return unit_data->get_objfile()->get_lnp_header(line_table)->file(index);
+}
+
 using DieOffset = u64;
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;
@@ -161,13 +169,16 @@ struct ResolveFnSymbolState
   // a namespace or a class, so foo::foo, like a constructor, or utils::foo for a namespace with foo as a fn, for
   // instance.
   std::string_view namespace_ish{};
-  AddrPtr low_pc = nullptr;
-  AddrPtr high_pc = nullptr;
-  u8 maybe_count = 0;
+  AddrPtr low_pc{nullptr};
+  AddrPtr high_pc{nullptr};
+  u8 maybe_count{0};
   std::optional<std::span<const u8>> frame_base_description{};
   sym::Type *ret_type{nullptr};
 
-  ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
+  std::optional<u32> line{std::nullopt};
+  std::optional<std::string> lnp_file{std::nullopt};
+
+  explicit ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
 
   std::array<dw::IndexedDieReference, 3> maybe_origin_dies{};
   bool
@@ -184,8 +195,16 @@ struct ResolveFnSymbolState
   }
 
   sym::FunctionSymbol
-  complete(Elf *elf) const
+  complete(Elf *elf)
   {
+    std::optional<SourceCoordinate> source = lnp_file.transform(
+        [&](auto &&path) { return SourceCoordinate{.path = std::move(path), .line = this->line.value_or(0)}; });
+    if (lnp_file) {
+      ASSERT(lnp_file.value().empty(), "Should have moved std string!");
+    }
+    if (source) {
+      DLOG("mdb", "fn {} is defined in {}", name.empty() ? mangled_name : name, source.value().path);
+    }
     return sym::FunctionSymbol{elf->relocate_addr(low_pc),
                                elf->relocate_addr(high_pc),
                                name.empty() ? mangled_name : name,
@@ -193,7 +212,8 @@ struct ResolveFnSymbolState
                                ret_type,
                                maybe_origin_dies,
                                *symtab,
-                               dw::FrameBaseExpression::Take(frame_base_description)};
+                               dw::FrameBaseExpression::Take(frame_base_description),
+                               std::move(source)};
   }
 
   void
@@ -207,7 +227,7 @@ struct ResolveFnSymbolState
 };
 
 static std::optional<dw::DieReference>
-follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
+follow_reference(SourceFileSymbolInfo &src_file, ResolveFnSymbolState &state, dw::DieReference ref) noexcept
 {
   std::optional<dw::DieReference> additional_die_reference = std::optional<dw::DieReference>{};
   dw::UnitReader reader{ref.cu};
@@ -236,6 +256,18 @@ follow_reference(ResolveFnSymbolState &state, dw::DieReference ref) noexcept
     // is address-representable?
     case Attribute::DW_AT_low_pc:
       state.low_pc = value.address();
+      break;
+    case Attribute::DW_AT_decl_file: {
+      if (!state.lnp_file) {
+        ASSERT(ref.cu == src_file.get_dwarf_unit(), "Cross CU requires another LNP. This will be wrong.");
+        state.lnp_file =
+            src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+      }
+    } break;
+    case Attribute::DW_AT_decl_line:
+      if (!state.line) {
+        state.line = value.unsigned_value();
+      }
       break;
     case Attribute::DW_AT_high_pc:
       if (value.form != AttributeForm::DW_FORM_addr)
@@ -305,6 +337,16 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         } else
           state.high_pc = value.address();
         break;
+      case Attribute::DW_AT_decl_file: {
+        ASSERT(!state.lnp_file.has_value(), "lnp file has been set already, to {}, new {}", state.lnp_file.value(),
+               value.unsigned_value());
+        state.lnp_file = this->get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+      } break;
+      case Attribute::DW_AT_decl_line:
+        ASSERT(!state.line.has_value(), "file line number has been set already, to {}, new {}", state.line.value(),
+               value.unsigned_value());
+        state.line = value.unsigned_value();
+        break;
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
         const auto declaring_die_offset = value.unsigned_value();
@@ -333,7 +375,7 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
     } else {
       // reset e = end() at each iteration, because we might have extended the list during iteration.
       for (auto it = die_refs.begin(), e = die_refs.end(); it != e; ++it) {
-        auto new_ref = follow_reference(state, *it);
+        auto new_ref = follow_reference(*this, state, *it);
         // we use a linked list here, *specifically* so we can push back references while iterating.
         if (new_ref) {
           die_refs.push_back(*new_ref);

@@ -13,10 +13,11 @@ determine_ret_class(sym::Type *type) noexcept
 
 FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
                                sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                               SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr) noexcept
+                               SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr,
+                               std::optional<SourceCoordinate> &&source) noexcept
     : decl_file(NonNull(decl_file)), formal_parameters(start, end, {}), function_body_variables(),
       maybe_origin_dies(maybe_origin), framebase_expr(fb_expr), return_type(return_type), pc_start(start),
-      pc_end_exclusive(end), member_of(member_of), name(name)
+      pc_end_exclusive(end), member_of(member_of), name(name), source(std::move(source))
 {
 }
 
@@ -25,7 +26,7 @@ FunctionSymbol::FunctionSymbol(FunctionSymbol &&fn) noexcept
       function_body_variables(std::move(fn.function_body_variables)),
       maybe_origin_dies(std::move(fn.maybe_origin_dies)), framebase_expr(std::move(fn.framebase_expr)),
       return_type(fn.return_type), pc_start(fn.pc_start), pc_end_exclusive(fn.pc_end_exclusive),
-      member_of(std::move(fn.member_of)), name(std::move(fn.name))
+      member_of(std::move(fn.member_of)), name(std::move(fn.name)), source(std::move(fn.source))
 {
 }
 

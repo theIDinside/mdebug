@@ -83,5 +83,10 @@ build_test(
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/readMemory.cpp
 )
 
+build_test(
+  NAME functionBreakpoints
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/functionBreakpoints.cpp
+)
+
 
 message("Test build type: ${CMAKE_BUILD_TYPE}")

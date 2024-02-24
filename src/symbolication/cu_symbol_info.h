@@ -64,6 +64,7 @@ public:
   sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;
   dw::UnitData *get_dwarf_unit() const noexcept;
   std::optional<dw::LineTable> get_linetable() noexcept;
+  std::optional<Path> get_lnp_file(u32 index) noexcept;
   static constexpr auto
   Sorter() noexcept
   {

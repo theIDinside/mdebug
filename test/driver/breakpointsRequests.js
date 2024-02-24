@@ -1,6 +1,35 @@
 const { checkResponse, getLineOf, readFile, repoDirFile } = require('./client')
 const { assert, assert_eq, prettyJson } = require('./utils')
 
+async function initLaunchToMain(DA, exe, { file, bps } = {}) {
+  await DA.launchToMain(DA.buildDirFile(exe))
+  if (file) {
+    const fileContent = readFile(repoDirFile(file))
+    const bp_lines = bps
+      .map((ident) => getLineOf(fileContent, ident))
+      .filter((item) => item != null)
+      .map((l) => ({ line: l }))
+    assert(
+      bp_lines.length == bps.length,
+      `Could not parse contents of  ${repoDirFile('test/next.cpp')} to find all string identifiers`
+    )
+
+    const breakpoint_response = await DA.sendReqGetResponse('setBreakpoints', {
+      source: {
+        name: repoDirFile(file),
+        path: repoDirFile(file),
+      },
+      breakpoints: bp_lines,
+    })
+    assert(
+      breakpoint_response.body.breakpoints.length == bps.length,
+      `Expected to have set ${bps.length} breakpoints but only successfully set ${
+        breakpoint_response.body.breakpoints.length
+      }:\n${prettyJson(breakpoint_response)}`
+    )
+  }
+}
+
 async function setup(DA, executableFile) {
   const init = await DA.sendReqGetResponse('initialize', {})
   checkResponse(init, 'initialize', true)
@@ -87,10 +116,28 @@ async function set2InDifferentCompUnit(debuggerAdapter) {
   }
 }
 
+async function setFunctionBreakpoint(DA) {
+  await initLaunchToMain(DA, 'functionBreakpoints')
+  const functions = ['Person', 'sayHello'].map((n) => ({ name: n }))
+
+  const fnBreakpointResponse = await DA.sendReqGetResponse('setFunctionBreakpoints', {
+    breakpoints: functions,
+  })
+  assert(
+    fnBreakpointResponse.body.breakpoints.length == 5,
+    () =>
+      `Expected 5 breakpoints from breakpoint requests: [${functions.map((v) => v.name)}] but only got ${
+        fnBreakpointResponse.body.breakpoints.length
+      }`
+  )
+  console.log(prettyJson(fnBreakpointResponse))
+}
+
 const tests = {
   set4InSameCompUnit: set4InSameCompUnit,
   set2InDifferentCompUnit: set2InDifferentCompUnit,
   setInstructionBreakpoint: setInstructionBreakpoint,
+  setFunctionBreakpoint: setFunctionBreakpoint,
 }
 
 module.exports = {
