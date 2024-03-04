@@ -1,6 +1,6 @@
 #pragma once
 
-#include "breakpoint.h"
+#include "bp.h"
 #include "common.h"
 #include "interface/dap/dap_defs.h"
 #include <symbolication/callstack.h>
@@ -23,7 +23,7 @@ public:
 
   // Abstract Interface
   virtual ~ThreadProceedAction() = default;
-  virtual bool has_completed() const noexcept = 0;
+  virtual bool has_completed(bool was_stopped) const noexcept = 0;
   virtual void proceed() noexcept = 0;
   virtual void update_stepped() noexcept = 0;
 
@@ -40,7 +40,7 @@ class StopImmediately : public ThreadProceedAction
 public:
   StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
   ~StopImmediately() noexcept override;
-  bool has_completed() const noexcept override;
+  bool has_completed(bool was_stopped) const noexcept override;
   void proceed() noexcept override;
   void update_stepped() noexcept override;
 
@@ -55,7 +55,7 @@ class InstructionStep : public ThreadProceedAction
 public:
   InstructionStep(TraceeController &ctrl, TaskInfo &task, int steps) noexcept;
   ~InstructionStep() override;
-  bool has_completed() const noexcept override;
+  bool has_completed(bool was_stopped) const noexcept override;
   void proceed() noexcept override;
   void update_stepped() noexcept override;
 
@@ -69,7 +69,7 @@ class LineStep : public ThreadProceedAction
 public:
   LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept;
   ~LineStep() noexcept override;
-  bool has_completed() const noexcept override;
+  bool has_completed(bool was_stopped) const noexcept override;
   void proceed() noexcept override;
   void update_stepped() noexcept override;
 
@@ -77,23 +77,24 @@ private:
   int lines_requested;
   int lines_stepped;
   bool is_done;
-  std::optional<AddrPtr> resume_address;
   bool resumed_to_resume_addr;
   sym::Frame start_frame;
   sym::dw::LineTableEntry entry;
+  std::shared_ptr<UserBreakpoint> resume_bp{nullptr};
 };
 
 class FinishFunction : public ThreadProceedAction
 {
 public:
-  FinishFunction(TraceeController &ctrl, TaskInfo &t, Breakpoint *bp, bool should_clean_up) noexcept;
+  FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_ptr<UserBreakpoint> bp,
+                 bool should_clean_up) noexcept;
   ~FinishFunction() noexcept override;
-  bool has_completed() const noexcept override;
+  bool has_completed(bool was_stopped) const noexcept override;
   void proceed() noexcept override;
   void update_stepped() noexcept override;
 
 private:
-  Breakpoint *bp;
+  std::shared_ptr<UserBreakpoint> bp;
   bool should_cleanup;
 };
 

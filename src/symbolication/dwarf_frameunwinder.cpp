@@ -460,7 +460,7 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noex
 {
   ASSERT(eh_frame != nullptr, "Expected a .eh_frame section!");
   DwarfBinaryReader reader{objfile->parsed_elf, eh_frame->m_section_ptr, eh_frame->size()};
-  DLOG("eh", "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->path.c_str(),
+  DLOG("eh", "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->path->c_str(),
        reader.remaining_size(), eh_frame->file_offset);
   auto unwinder_db = std::make_unique<Unwinder>(objfile);
 

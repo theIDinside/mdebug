@@ -25,7 +25,7 @@ BreakpointHit::BreakpointHit(TraceeController &tc, int bp_id, int tid) noexcept 
 void
 BreakpointHit::send() noexcept
 {
-  tc.emit_stopped_at_breakpoint({.pid = tc.task_leader, .tid = tid}, bp_id);
+  tc.emit_stopped_at_breakpoint({.pid = tc.task_leader, .tid = tid}, bp_id, true);
 }
 
 SignalStop::SignalStop(TraceeController &tc, int signal, int tid) noexcept : tc(tc), signal(signal), tid(tid) {}

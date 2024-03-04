@@ -1,4 +1,6 @@
 #include "commands.h"
+#include "bp.h"
+#include "common.h"
 #include "events/event.h"
 #include "interface/ui_command.h"
 #include "parse_buffer.h"
@@ -6,7 +8,6 @@
 #include "types.h"
 #include "utils/expected.h"
 #include <algorithm>
-#include <breakpoint.h>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <memory>
@@ -200,25 +201,18 @@ StepOut::execute(Tracer *tracer) noexcept
   const auto req = CallStackRequest::partial(2);
   auto resume_addrs = task->return_addresses(target, req);
   ASSERT(resume_addrs.size() >= req.count, "Could not find frame info");
-  auto rip = resume_addrs[1];
-  if (auto bp = target->bps.get(rip); bp) {
-    bp->set_temporary_note(*task, BpNote::FinishedFunction);
-    target->install_thread_proceed<ptracestop::FinishFunction>(*task, bp, false);
-    return new StepOutResponse{true, this};
-  } else {
-    bp = target->set_finish_fn_bp(rip);
-    if (bp) {
-      bp->set_note(BpNote::FinishedFunction);
-      bp->add_stop_for(task->tid);
-      target->install_thread_proceed<ptracestop::FinishFunction>(*task, bp, true);
-      return new StepOutResponse{true, this};
-    } else {
-      return new StepOutResponse{false, this};
-    }
+  const auto rip = resume_addrs[1];
+  const auto loc = target->get_or_create_bp_location(rip, false);
+  if (loc == nullptr) {
+    return new StepOutResponse{false, this};
   }
+  auto user = target->pbps.create_loc_user<FinishBreakpoint>(*target, loc, task->tid, task->tid);
+  target->install_thread_proceed<ptracestop::FinishFunction>(*task, user, false);
+  return new StepOutResponse{true, this};
 }
 
-SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept
+SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd,
+                                               BreakpointRequestKind type) noexcept
     : ui::UIResult(success, cmd), type(type), breakpoints()
 {
 }
@@ -233,15 +227,15 @@ SetBreakpointsResponse::serialize(int seq) const noexcept
       serialized_bkpts.push_back(bp.serialize());
     }
     switch (this->type) {
-    case BreakpointType::Source:
+    case BreakpointRequestKind::source:
       return fmt::format(
           R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
           seq, response_seq, fmt::join(serialized_bkpts, ","));
-    case BreakpointType::Function:
+    case BreakpointRequestKind::function:
       return fmt::format(
           R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setFunctionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
           seq, response_seq, fmt::join(serialized_bkpts, ","));
-    case BreakpointType::Address:
+    case BreakpointRequestKind::instruction:
       return fmt::format(
           R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setInstructionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
           seq, response_seq, fmt::join(serialized_bkpts, ","));
@@ -261,53 +255,39 @@ SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) no
          "Arguments did not contain 'breakpoints' field or wasn't an array");
 }
 
+template <typename Res, typename JsonObj>
+inline std::optional<Res>
+get(const JsonObj &obj, std::string_view field)
+{
+  if (obj.contains(field)) {
+    return obj[field];
+  }
+  return std::nullopt;
+}
+
 UIResultPtr
 SetBreakpoints::execute(Tracer *tracer) noexcept
 {
-  auto res = new SetBreakpointsResponse{true, this, BreakpointType::Source};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
   auto target = tracer->get_current();
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
   std::string file = args["source"]["path"];
   const auto source_file = target->get_source(file);
-  std::vector<SourceBreakpointDescriptor> src_bps;
+  Set<SourceBreakpoint> src_bps;
   if (source_file.has_value()) {
     for (const auto &src_bp : args.at("breakpoints")) {
       ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
-      u32 line = src_bp["line"];
-      std::optional<u32> col = std::nullopt;
-      std::optional<std::string> condition = std::nullopt;
-      std::optional<int> hit_condition = std::nullopt;
-      std::optional<std::string> log_message = std::nullopt;
-
-      if (src_bp.contains("column")) {
-        col = src_bp["column"];
-      }
-      if (src_bp.contains("condition")) {
-        condition = src_bp["condition"];
-      }
-      if (src_bp.contains("hitCondition")) {
-        hit_condition = src_bp["hitCondition"];
-      }
-      if (src_bp.contains("logMessage")) {
-        log_message = std::make_optional(src_bp["logMessage"]);
-      }
-      src_bps.push_back(
-          SourceBreakpointDescriptor{*source_file, line, col, condition, hit_condition, log_message});
+      const u32 line = src_bp["line"];
+      src_bps.insert(SourceBreakpoint{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
+                                      get<std::string>(src_bp, "logMessage")});
     }
-    target->reset_source_breakpoints(source_file.value(), std::move(src_bps));
+    target->set_source_breakpoints(source_file.value(), src_bps);
+
     using BP = ui::dap::Breakpoint;
-    for (const auto &bp : target->bps.breakpoints) {
-      if (bp.type().source && target->bps.source_breakpoints[bp.id].source_file == *source_file) {
-        const auto &description = target->bps.source_breakpoints[bp.id];
-        res->breakpoints.push_back(BP{.id = bp.id,
-                                      .verified = true,
-                                      .addr = bp.address,
-                                      .line = description.line,
-                                      .col = description.column,
-                                      .source_path = description.source_file,
-                                      .error_message = {}});
-      }
+    for (const auto &[bp, id] : target->pbps.source_breakpoints[source_file.value()]) {
+      const auto user = target->pbps.get_user(id);
+      res->breakpoints.push_back(BP::from_user_bp(user));
     }
   } else {
     using BP = ui::dap::Breakpoint;
@@ -330,35 +310,25 @@ UIResultPtr
 SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
 {
   using BP = ui::dap::Breakpoint;
-  std::vector<AddrPtr> addresses;
-  addresses.reserve(args.at("breakpoints").size());
-  for (const auto &ibkpt : args.at("breakpoints")) {
+  Set<InstructionBreakpoint> bps{};
+  const auto ibps = args.at("breakpoints");
+  for (const auto &ibkpt : ibps) {
     ASSERT(ibkpt.contains("instructionReference") && ibkpt["instructionReference"].is_string(),
            "instructionReference field not in args or wasn't of type string");
     std::string_view addr_str;
     ibkpt["instructionReference"].get_to(addr_str);
-    auto addr = to_addr(addr_str);
-    ASSERT(addr.has_value(), "Couldn't parse address from {}", addr_str);
-    addresses.push_back(*addr);
+    bps.insert(InstructionBreakpoint{.instructionReference = std::string{addr_str}, .condition = {}});
   }
   auto target = tracer->get_current();
-  target->reset_addr_breakpoints(addresses);
+  target->set_instruction_breakpoints(bps);
 
-  auto res = new SetBreakpointsResponse{true, this, BreakpointType::Address};
-  res->breakpoints.reserve(target->bps.breakpoints.size());
+  auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
+  res->breakpoints.reserve(target->pbps.instruction_breakpoints.size());
 
-  for (const auto &bp : target->bps.breakpoints) {
-    if (bp.type().address) {
-      res->breakpoints.push_back(BP{.id = bp.id,
-                                    .verified = true,
-                                    .addr = bp.address,
-                                    .line = {},
-                                    .col = {},
-                                    .source_path = {},
-                                    .error_message = {}});
-    }
+  for (const auto &[k, id] : target->pbps.instruction_breakpoints) {
+    res->breakpoints.push_back(BP::from_user_bp(target->pbps.get_user(id)));
   }
-  ASSERT(res->breakpoints.size() == addresses.size(), "Response value size does not match result size");
+
   res->success = true;
 
   return res;
@@ -375,29 +345,27 @@ UIResultPtr
 SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
 {
   using BP = ui::dap::Breakpoint;
-  std::vector<std::string_view> bkpts{};
+  Set<FunctionBreakpoint> bkpts{};
   std::vector<std::string_view> new_ones{};
-  auto res = new SetBreakpointsResponse{true, this, BreakpointType::Function};
+  auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::function};
   for (const auto &fnbkpt : args.at("breakpoints")) {
     ASSERT(fnbkpt.contains("name") && fnbkpt["name"].is_string(),
            "instructionReference field not in args or wasn't of type string");
-    std::string_view fn_name;
-    fnbkpt["name"].get_to(fn_name);
-    ASSERT(!fn_name.empty(), "Couldn't parse fn name from fn breakpoint request");
-    bkpts.push_back(fn_name);
+    std::string fn_name = fnbkpt["name"];
+    bkpts.insert(FunctionBreakpoint{fn_name, std::nullopt});
   }
   auto target = tracer->get_current();
-  target->reset_fn_breakpoints(bkpts);
 
-  for (const auto &bp : target->bps.breakpoints) {
-    if (bp.type().function) {
+  target->set_fn_breakpoints(bkpts);
+  for (const auto &user : target->pbps.all_users()) {
+    if (user->kind == LocationUserKind::Function) {
       res->breakpoints.push_back(BP{
-          .id = bp.id,
-          .verified = true,
-          .addr = bp.address,
-          .line = {},
-          .col = {},
-          .source_path = {},
+          .id = user->id,
+          .verified = user->verified(),
+          .addr = user->address().value(),
+          .line = user->line(),
+          .col = user->column(),
+          .source_path = user->source_file(),
           .error_message{},
       });
     }
@@ -789,7 +757,8 @@ Variables::execute(Tracer *tracer) noexcept
       return new VariablesResponse{true, this, obj->resolve(current, var_ref, start, count)};
     }
     case EntityType::Frame: {
-      TODO("This branch should return a success=false, and a message saying that the varRef id was wrong/faulty, "
+      TODO("This branch should return a success=false, and a message saying that the varRef id was "
+           "wrong/faulty, "
            "because var refs for frames don't contain variables (scopes do, or other variables do.)");
     } break;
     }
@@ -829,8 +798,8 @@ VariablesResponse::serialize(int seq) const noexcept
     } else {
       ASSERT(v.variable_value->type()->is_reference(), "Add visualizer & resolver for T* types. It will look more "
                                                        "or less identical to CStringResolver & ArrayResolver");
-      // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we do
-      // individual type checking again.
+      // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we
+      // do individual type checking again.
       //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
       auto span = v.variable_value->memory_view();
       const std::uintptr_t ptr = sym::bit_copy<std::uintptr_t>(span);

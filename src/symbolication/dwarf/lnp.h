@@ -1,5 +1,6 @@
 #pragma once
 #include "../dwarf_defs.h"
+#include "symbolication/block.h"
 #include "utils/immutable.h"
 #include <common.h>
 
@@ -188,6 +189,7 @@ public:
   auto first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>;
   auto find_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
   void add_header(LNPHeader *header) noexcept;
+  AddressRange address_bounds() noexcept;
 };
 
 std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;

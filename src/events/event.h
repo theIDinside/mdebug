@@ -1,7 +1,13 @@
 #pragma once
 
+#include "utils/macros.h"
+#include <algorithm>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <sys/types.h>
+#include <type_traits>
+#include <utils/algorithm.h>
 #include <vector>
 
 struct TraceeController;
@@ -63,4 +69,165 @@ public:
 
 private:
   std::vector<std::unique_ptr<StopEventNotification>> notifications;
+};
+
+struct SubscriberIdentity
+{
+
+  constexpr SubscriberIdentity(const SubscriberIdentity &) = default;
+  constexpr SubscriberIdentity &operator=(const SubscriberIdentity &) = default;
+  constexpr SubscriberIdentity(SubscriberIdentity &&) = default;
+  constexpr SubscriberIdentity &operator=(SubscriberIdentity &&) = default;
+
+  template <typename T>
+  constexpr explicit SubscriberIdentity(T *obj) noexcept : addr(reinterpret_cast<std::uintptr_t>(obj))
+  {
+  }
+  template <typename T>
+  constexpr explicit SubscriberIdentity(const T *obj) noexcept : addr(reinterpret_cast<std::uintptr_t>(obj))
+  {
+  }
+
+  template <typename T>
+  static constexpr SubscriberIdentity
+  Of(T *t) noexcept
+  {
+    return SubscriberIdentity{t};
+  }
+
+  template <typename T>
+  static constexpr SubscriberIdentity
+  Of(const T *t) noexcept
+  {
+    return SubscriberIdentity{t};
+  }
+
+  std::uintptr_t addr;
+
+  constexpr friend auto operator<=>(const SubscriberIdentity &l, const SubscriberIdentity &r) noexcept = default;
+  constexpr friend auto
+  operator==(const SubscriberIdentity &l, const SubscriberIdentity &r) noexcept
+  {
+    return l.addr == r.addr;
+  }
+
+  constexpr friend auto
+  operator!=(const SubscriberIdentity &l, const SubscriberIdentity &r) noexcept
+  {
+    return !(l == r);
+  }
+};
+
+template <typename EventData> class Publisher
+{
+  using SubscriberAction = std::function<void(EventData)>;
+
+  struct Subscriber
+  {
+    NO_COPY_DEFAULTED_MOVE(Subscriber);
+    Subscriber(SubscriberIdentity id, SubscriberAction &&fn) noexcept : identity(id), fn(std::move(fn)) {}
+    SubscriberIdentity identity;
+    SubscriberAction fn;
+  };
+
+  std::vector<Subscriber> subscribers{};
+  std::vector<SubscriberAction> sub_once{};
+
+public:
+  template <typename Fn>
+  void
+  subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
+  {
+    ASSERT(utils::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
+           "Expected Identity to be a unique value");
+    subscribers.emplace_back(identity, std::move(fn));
+  }
+
+  void
+  unsubscribe(SubscriberIdentity identity) noexcept
+  {
+    auto it = std::find_if(subscribers.begin(), subscribers.end(),
+                           [&identity](const auto &sub) { return sub.identity == identity; });
+    if (it != std::end(subscribers)) {
+      subscribers.erase(it);
+    }
+  }
+
+  template <typename Fn>
+  void
+  once(Fn &&fn) noexcept
+  {
+    sub_once.push_back(std::move(fn));
+  }
+
+  void
+  emit(const EventData &evt) noexcept
+    requires(!std::is_void_v<EventData>)
+  {
+    DLOG("mdb", "Publisher emitted an event");
+    for (auto &&fn : sub_once) {
+      fn(evt);
+    }
+    sub_once.clear();
+
+    for (auto &sub : subscribers) {
+      sub.fn(evt);
+    }
+  }
+};
+
+template <> class Publisher<void>
+{
+  using SubscriberAction = std::function<void()>;
+
+  struct Subscriber
+  {
+    NO_COPY_DEFAULTED_MOVE(Subscriber);
+    Subscriber(SubscriberIdentity id, SubscriberAction &&fn) noexcept : identity(id), fn(std::move(fn)) {}
+    SubscriberIdentity identity;
+    SubscriberAction fn;
+  };
+
+  std::vector<Subscriber> subscribers{};
+  std::vector<SubscriberAction> sub_once{};
+
+public:
+  template <typename Fn>
+  void
+  subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
+  {
+    ASSERT(utils::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
+           "Expected Identity to be a unique value");
+    subscribers.emplace_back(identity, std::move(fn));
+  }
+
+  void
+  unsubscribe(SubscriberIdentity identity) noexcept
+  {
+    auto it = std::find_if(subscribers.begin(), subscribers.end(),
+                           [&identity](auto &sub) { return sub.identity == identity; });
+    if (it != std::end(subscribers)) {
+      subscribers.erase(it);
+    }
+  }
+
+  template <typename Fn>
+  void
+  once(Fn &&fn) noexcept
+  {
+    sub_once.push_back(std::move(fn));
+  }
+
+  void
+  emit() noexcept
+  {
+    for (auto &&fn : sub_once) {
+      fn();
+    }
+    sub_once.clear();
+
+    for (auto &sub : subscribers) {
+      sub.fn();
+    }
+  }
 };

@@ -23,12 +23,13 @@ static constexpr std::string_view reasons[3]{"new", "changed", "removed"};
 // Module event: https://microsoft.github.io/debug-adapter-protocol/specification#Events_Module
 struct ModuleEvent final : public ui::UIResult
 {
-  ModuleEvent(int id, std::string_view reason, std::string &&name, Path &&path,
+  ModuleEvent(std::string_view id, std::string_view reason, std::string &&name, Path &&path,
               std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
               AddressRange range, SharedObjectSymbols so_sym_info) noexcept;
 
   ModuleEvent(std::string_view reason, const SharedObject &shared_object) noexcept;
-  int id;
+  ModuleEvent(std::string_view reason, const ObjectFile &object_file) noexcept;
+  std::string_view objfile_id;
   std::string_view reason;
   std::string name;
   Path path;

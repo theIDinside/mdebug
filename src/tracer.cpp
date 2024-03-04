@@ -57,11 +57,12 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 {
   // TODO(simon) Once "shared object symbols" (NOT to be confused with Linux' shared objects/so's!) is implemented
   //  we should check if the object file from `objfile_path` has already been loaded into memory
-  const auto obj_file = mmap_objectfile(objfile_path);
-  ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   auto target = get_controller(target_pid);
+  const auto obj_file = mmap_objectfile(*target, objfile_path);
+  ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
   target->register_object_file(obj_file, true, std::nullopt);
   obj_file->initial_dwarf_setup(config.dwarf_config());
+  target->new_objectfile.emit(obj_file);
 }
 
 void
@@ -136,6 +137,16 @@ Tracer::handle_command(ui::UICommandPtr cmd) noexcept
   auto result = cmd->execute(this);
   dap->post_event(result);
   delete cmd;
+}
+
+void
+Tracer::handle_debugger_event(const DebuggerEventData &evt) noexcept
+{
+  DLOG("mdb", "handling debugger event: {}", to_str(evt.type));
+  switch (evt.type) {
+  case DebuggerEvent::Proceed:
+    break;
+  }
 }
 
 void
@@ -285,7 +296,9 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
     }
     get_current()->reaped_events();
     if (stopAtEntry) {
-      get_current()->set_fn_breakpoint("main");
+      Set<FunctionBreakpoint> fns{};
+      fns.insert({"main", {}});
+      get_current()->set_fn_breakpoints(fns);
     }
     break;
   }

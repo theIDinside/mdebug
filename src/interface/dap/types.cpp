@@ -35,6 +35,28 @@ Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
                     .error_message = msg};
 }
 
+Breakpoint
+Breakpoint::from_user_bp(std::shared_ptr<UserBreakpoint> user_bp) noexcept
+{
+  if (const auto addr = user_bp->address(); addr) {
+    return Breakpoint{.id = user_bp->id,
+                      .verified = true,
+                      .addr = addr.value(),
+                      .line = user_bp->line(),
+                      .col = user_bp->column(),
+                      .source_path = user_bp->source_file(),
+                      .error_message = {}};
+  } else {
+    return Breakpoint{.id = user_bp->id,
+                      .verified = false,
+                      .addr = nullptr,
+                      .line = {},
+                      .col = {},
+                      .source_path = {},
+                      .error_message = "Address not in resident memory of tracee"};
+  }
+}
+
 VariablesReference::VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
                                        EntityType type) noexcept
     : id(ref), thread_id(thread), frame_id(frame_id), parent_(parent), type(type), scope_type(), object_file(obj)

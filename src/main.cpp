@@ -114,8 +114,10 @@ main(int argc, const char **argv)
     } break;
     case EventType::Command: {
       tracer.handle_command(evt.cmd);
-      break;
-    }
+    } break;
+    case EventType::DebuggerEvent: {
+      tracer.handle_debugger_event(evt.debugger);
+    } break;
     }
   }
   exit_debug_session = true;

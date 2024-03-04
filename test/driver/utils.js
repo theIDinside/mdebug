@@ -110,6 +110,18 @@ function isHexadecimalString(input) {
   return !isNaN(input)
 }
 
+function getPrintfPlt(DA, executable) {
+  const objdumped = objdump(DA.buildDirFile(executable)).split('\n')
+  for (const line of objdumped) {
+    let i = line.indexOf('<printf@plt>:')
+    if (i != -1) {
+      const addr = line.substring(0, i).trim()
+      return `0x${addr}`
+    }
+  }
+  throw new Error('Could not find prologue and epilogue of bar')
+}
+
 module.exports = {
   objdump,
   getTextSection,
@@ -121,4 +133,5 @@ module.exports = {
   assertEqAInB,
   isHexadecimalString,
   prettyJson,
+  getPrintfPlt,
 }

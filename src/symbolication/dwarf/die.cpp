@@ -347,7 +347,7 @@ std::vector<UnitHeader>
 read_unit_headers(ObjectFile *obj) noexcept
 {
   if (DwarfLog) {
-    LOG("dwarf", "Reading {} obfile compilation unit headers", obj->path.c_str());
+    LOG("dwarf", "Reading {} obfile compilation unit headers", obj->path->c_str());
   }
   const auto dbg_info = obj->parsed_elf->debug_info;
   std::vector<UnitHeader> result{};

@@ -1,5 +1,5 @@
 const { checkResponse, getLineOf, readFile, repoDirFile } = require('./client')
-const { assert, assert_eq, prettyJson } = require('./utils')
+const { assert, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
 
 async function initLaunchToMain(DA, exe, { file, bps } = {}) {
   await DA.launchToMain(DA.buildDirFile(exe))
@@ -43,10 +43,10 @@ async function setup(DA, executableFile) {
 async function setInstructionBreakpoint(debuggerAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await setup(debuggerAdapter, 'stackframes')
-
+  const instructionAddress = '0x40088c'
   await debuggerAdapter
     .sendReqGetResponse('setInstructionBreakpoints', {
-      breakpoints: [{ instructionReference: '0x40127e' }],
+      breakpoints: [{ instructionReference: instructionAddress }],
     })
     .then((res) => {
       checkResponse(res, 'setInstructionBreakpoints', true)
@@ -56,8 +56,8 @@ async function setInstructionBreakpoint(debuggerAdapter) {
       assert(verified, 'Expected breakpoint to be verified and exist!')
       assert_eq(
         instructionReference,
-        '0x40127e',
-        `Attempted to set ins breakpoint at 0x40127e but it was set at ${instructionReference}`
+        instructionAddress,
+        `Attempted to set ins breakpoint at ${instructionAddress} but it was set at ${instructionReference}`
       )
     })
 }
@@ -102,17 +102,22 @@ async function set2InDifferentCompUnit(debuggerAdapter) {
   let bps = files.map((file) => {
     const fullFilePath = repoDirFile(file)
     console.log(`Full file path: ${fullFilePath}`)
-    return { file: fullFilePath, line: getLineOf(readFile(fullFilePath), bpIdentifier) }
+    return { file: fullFilePath, breakpoints: [{ line: getLineOf(readFile(fullFilePath), bpIdentifier) }] }
   })
 
-  for (const { file, line } of bps) {
+  for (const { file, breakpoints } of bps) {
     const res = await debuggerAdapter.sendReqGetResponse('setBreakpoints', {
       source: {
         name: file,
         path: file,
       },
-      breakpoints: [{ line: line }],
+      breakpoints: breakpoints,
     })
+    assert(
+      res.body.breakpoints.length == breakpoints.length,
+      () => `Expected to see ${breakpoints.length} but saw ${res.body.breakpoints.length}.\n${prettyJson(res)}`
+    )
+    console.log(prettyJson(res))
   }
 }
 
@@ -133,11 +138,47 @@ async function setFunctionBreakpoint(DA) {
   console.log(prettyJson(fnBreakpointResponse))
 }
 
+async function setBreakpointsThatArePending(debuggerAdapter) {
+  // we don't care for initialize, that's tested elsewhere
+  let stopped_promise = debuggerAdapter.prepareWaitForEventN('stopped', 1, 1000, setBreakpointsThatArePending)
+  await setup(debuggerAdapter, 'stackframes')
+  const printf_plt_addr = getPrintfPlt(debuggerAdapter, 'stackframes')
+  const invalidAddressess = ['0x300000', '0x200000', '0x9800000', printf_plt_addr].map((v) => ({
+    instructionReference: v,
+  }))
+  await debuggerAdapter
+    .sendReqGetResponse('setInstructionBreakpoints', {
+      breakpoints: invalidAddressess,
+    })
+    .then((res) => {
+      console.log(prettyJson(res))
+      checkResponse(res, 'setInstructionBreakpoints', true)
+      assert(
+        res.body.breakpoints.length == invalidAddressess.length,
+        `Expected bkpts 1 but got ${res.body.breakpoints.length}`
+      )
+
+      let expected = [{ verified: false }, { verified: false }, { verified: false }, { verified: true }]
+
+      for (let i = 0; i < 4; ++i) {
+        assert(
+          res.body.breakpoints[i].verified == expected[i].verified,
+          `Expected verified for ${i} to be ${expected[i].verified}`
+        )
+      }
+    })
+
+  const cfg = await debuggerAdapter.sendReqGetResponse('configurationDone', {})
+  assert(cfg.success)
+  await stopped_promise
+}
+
 const tests = {
   set4InSameCompUnit: set4InSameCompUnit,
   set2InDifferentCompUnit: set2InDifferentCompUnit,
   setInstructionBreakpoint: setInstructionBreakpoint,
   setFunctionBreakpoint: setFunctionBreakpoint,
+  setBreakpointsThatArePending: setBreakpointsThatArePending,
 }
 
 module.exports = {

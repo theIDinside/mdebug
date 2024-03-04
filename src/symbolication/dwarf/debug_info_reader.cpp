@@ -463,7 +463,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     [[fallthrough]];
   case AttributeForm::DW_FORM_addrx4: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
+           reader.objfile()->path->c_str());
     const auto base = std::to_underlying(AttributeForm::DW_FORM_addrx1) - 1;
     const auto bytes_to_read = std::to_underlying(abbr.form) - base;
     const auto addr_index = reader.read_n_bytes(bytes_to_read);
@@ -471,7 +471,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   }
   case AttributeForm::DW_FORM_addrx: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
+           reader.objfile()->path->c_str());
     const auto addr_table_index = reader.uleb128();
     return AttributeValue{reader.read_by_idx_from_addr_table(addr_table_index, {}), abbr.form, abbr.name};
   }
@@ -486,14 +486,14 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], abbr.form, abbr.name};
   case AttributeForm::DW_FORM_loclistx: {
     ASSERT(elf->debug_loclist != nullptr, ".debug_rnglists not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
+           reader.objfile()->path->c_str());
     const auto idx = reader.uleb128();
     return AttributeValue{reader.read_loclist_index(idx, {}), abbr.form, abbr.name};
   }
 
   case AttributeForm::DW_FORM_rnglistx: {
     ASSERT(elf->debug_rnglists != nullptr, ".debug_rnglists not read in or found in objfile {}",
-           reader.objfile()->path.c_str());
+           reader.objfile()->path->c_str());
     const auto addr_table_index = reader.uleb128();
     return AttributeValue{reader.read_by_idx_from_rnglist(addr_table_index, {}), abbr.form, abbr.name};
   }

@@ -1,6 +1,5 @@
-const { checkResponse, getLineOf, readFile, repoDirFile, seconds, prettyJson } = require('./client')
-
-const { objdump, hexStrAddressesEquals, assert } = require('./utils')
+const { checkResponse, getLineOf, readFile, repoDirFile, seconds } = require('./client')
+const { objdump, hexStrAddressesEquals, assert, prettyJson, getPrintfPlt } = require('./utils')
 
 async function unwindFromSharedObject(DA) {
   const sharedObjectsCount = 6
@@ -259,27 +258,19 @@ function* walk_expected_frames(frames) {
   for (let i = 1; i < frames.length; i++) yield frames[i]
 }
 
-function getPrintfPlt(DA) {
-  const objdumped = objdump(DA.buildDirFile('next')).split('\n')
-  for (const line of objdumped) {
-    let i = line.indexOf('<printf@plt>:')
-    if (i != -1) {
-      const addr = line.substring(0, i).trim()
-      return `0x${addr}`
-    }
-  }
-  throw new Error('Could not find prologue and epilogue of bar')
-}
-
 async function unwindWithDwarfExpression(DA) {
-  const printf_plt_addr = getPrintfPlt(DA)
+  const printf_plt_addr = getPrintfPlt(DA, 'next')
   console.log(`printf@plt address: ${printf_plt_addr}`)
   await DA.launchToMain(DA.buildDirFile('next'))
   await DA.sendReqGetResponse('setInstructionBreakpoints', {
     breakpoints: [{ instructionReference: printf_plt_addr }],
   }).then((res) => {
+    console.log(prettyJson(res))
     checkResponse(res, 'setInstructionBreakpoints', true)
-    assert(res.body.breakpoints.length == 1, `Expected bkpts 1 but got ${res.body.breakpoints.length}`)
+    assert(
+      res.body.breakpoints.length == 1,
+      `Expected bkpts 1 but got ${res.body.breakpoints.length}: ${prettyJson(res)}`
+    )
 
     const { id, verified, instructionReference } = res.body.breakpoints[0]
     assert(verified, 'Expected breakpoint to be verified and exist!')

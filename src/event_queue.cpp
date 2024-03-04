@@ -33,6 +33,12 @@ push_command_event(ui::UICommand *cmd) noexcept
   push_event(Event{.type = EventType::Command, .cmd = cmd});
 }
 
+void
+push_debugger_event(DebuggerEventData &&event) noexcept
+{
+  push_event(Event{.type = EventType::DebuggerEvent, .debugger = std::move(event)});
+}
+
 Event
 poll_event()
 {

@@ -1,6 +1,6 @@
 #pragma once
 #include "awaiter.h"
-#include "breakpoint.h"
+#include "bp.h"
 #include "common.h"
 #include "events/event.h"
 #include "interface/dap/dap_defs.h"
@@ -18,8 +18,11 @@
 #include <optional>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utils/scoped_fd.h>
 #include <utils/static_vector.h>
+
+template <typename T> using Set = std::unordered_set<T>;
 
 namespace sym {
 class Unwinder;
@@ -64,11 +67,12 @@ struct TraceeController
   utils::ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
-  BreakpointMap bps;
+  UserBreakpoints pbps;
   TPtr<r_debug_extended> tracee_r_debug;
   SharedObjectMap shared_objects;
-  bool waiting_for_all_stopped;
-  StopObserver all_stopped_observer;
+  bool stop_all_requested;
+  Publisher<void> all_stop{};
+  Publisher<ObjectFile *> new_objectfile{};
 
 private:
   int next_var_ref = 0;
@@ -97,6 +101,11 @@ public:
   void on_so_event() noexcept;
 
   bool is_null_unwinder(sym::Unwinder *unwinder) const noexcept;
+
+  // signals if threads are independently resumable. so if user does continue { thread: 2 }, it only resumes that
+  // thread also; it also means when for instance { thread: 9 } hits a breakpoint, all threads are stopped in their
+  // track.
+  bool independent_task_resume_control() noexcept;
 
   // N.B(simon): process shared object's in parallell, determined by some heuristic (like for instance file size
   // could determine how much thread resources are subscribed to parsing a shared object.)
@@ -129,32 +138,26 @@ public:
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
-  /* Set breakpoint att tracee `address`. If a breakpoint is already set there, we do nothing. We don't allow for
-   * multiple breakpoints at the same location.*/
-  void set_addr_breakpoint(TraceePointer<u64> address) noexcept;
-  void set_fn_breakpoint(std::string_view function_name) noexcept;
-  void set_source_breakpoints(const std::filesystem::path &src,
-                              std::vector<SourceBreakpointDescriptor> &&descs) noexcept;
-  bool set_tracer_bp(TPtr<u64> addr, BpType type) noexcept;
-  Breakpoint *set_finish_fn_bp(TraceePointer<void> addr) noexcept;
-  void enable_breakpoint(Breakpoint &bp, bool setting) noexcept;
-  void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id) noexcept;
+
+  void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id, bool all_stopped) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
   void emit_stepped_stop(LWP lwp, std::string_view message, bool all_stopped) noexcept;
   void emit_signal_event(LWP lwp, int signal) noexcept;
   void emit_stopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool all_stopped,
                     std::vector<int> bps_hit) noexcept;
 
-  // TODO(simon): major optimization can be done. We naively remove all breakpoints and then set
-  //  what's in `addresses`. Why? because the stupid DAP doesn't do smart work and forces us to
-  // to do it. But since we're not interested in solving this particular problem now, we'll do the stupid
-  // thing
-  void reset_addr_breakpoints(std::vector<AddrPtr> addresses) noexcept;
-  void reset_fn_breakpoints(std::vector<std::string_view> fn_names) noexcept;
-  void reset_source_breakpoints(const std::filesystem::path &source_filepath,
-                                std::vector<SourceBreakpointDescriptor> &&bps) noexcept;
+  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
+  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr,
+                                                                sym::dw::SourceCodeFile &src_code_file) noexcept;
+  void set_source_breakpoints(const std::filesystem::path &source_filepath,
+                              const Set<SourceBreakpoint> &bps) noexcept;
+  void update_source_bps(const std::filesystem::path &source_filepath, std::vector<SourceBreakpoint> &&add,
+                         const std::vector<SourceBreakpoint> &remove) noexcept;
 
-  void remove_breakpoint(AddrPtr addr, BpType type) noexcept;
+  void set_instruction_breakpoints(const Set<InstructionBreakpoint> &bps) noexcept;
+  void set_fn_breakpoints(const Set<FunctionBreakpoint> &bps) noexcept;
+
+  void remove_breakpoint(u32 bp_id) noexcept;
 
   bool kill() noexcept;
   bool terminate_gracefully() noexcept;
@@ -273,6 +276,7 @@ public:
   sym::Frame current_frame(TaskInfo &task) noexcept;
   sym::FunctionSymbol *find_fn_by_pc(AddrPtr addr, ObjectFile **foundIn) const noexcept;
   ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
+  std::optional<NonNullPtr<ObjectFile>> find_obj_containing_pc(AddrPtr addr) const noexcept;
 
   std::optional<std::filesystem::path> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
@@ -297,4 +301,5 @@ private:
   void reset_variable_ref_id() noexcept;
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;
+  std::optional<u8> write_breakpoint_at(AddrPtr addr) noexcept;
 };

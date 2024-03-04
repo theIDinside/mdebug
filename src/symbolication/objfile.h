@@ -43,17 +43,18 @@ struct ElfSection;
  */
 struct ObjectFile
 {
-  Path path;
-  u64 size;
+  Immutable<Path> path;
+  Immutable<std::string> objfile_id;
+  Immutable<u64> size;
   const u8 *loaded_binary;
   Elf *parsed_elf = nullptr;
   bool has_elf_symbols = false;
 
   std::unique_ptr<TypeStorage> types;
   // Address bounds determined by reading the program segments of the elf binary
-  AddressRange address_bounds;
+  AddressRange address_bounds{};
 
-  ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept;
+  ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
 
   template <typename T>
@@ -161,7 +162,16 @@ private:
   std::unordered_map<int, SharedPtr<sym::Value>> valobj_cache;
 };
 
-ObjectFile *mmap_objectfile(const Path &path) noexcept;
+class SymbolFile
+{
+  std::shared_ptr<ObjectFile> binary_object;
+  std::string obj_id;
+
+public:
+  SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> binary);
+};
+
+ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;
 
 struct UnloadObjectFile
 {

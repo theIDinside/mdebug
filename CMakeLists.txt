@@ -13,8 +13,8 @@ set(MIDAS_SOURCES
   src/main.cpp
   src/awaiter.cpp
   src/awaiter.h
-  src/breakpoint.cpp
-  src/breakpoint.h
+  src/bp.cpp
+  src/bp.h
   src/common.cpp
   src/common.h
   src/event_queue.cpp

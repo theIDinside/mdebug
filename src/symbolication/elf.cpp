@@ -119,14 +119,14 @@ const ElfSection *
 Elf::get_section_or_panic(std::string_view name) const noexcept
 {
   auto sec = get_section(name);
-  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, this->obj_file->path.c_str());
+  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, this->obj_file->path->c_str());
   return sec;
 }
 
 void
 Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept
 {
-  DLOG("mdb", "Parsing objfile {}", object_file->path.c_str());
+  DLOG("mdb", "Parsing objfile {}", object_file->path->c_str());
   const auto header = object_file->get_at_offset<Elf64Header>(0);
   ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
@@ -174,7 +174,7 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     obj_file->has_elf_symbols = false;
     return;
   }
-  DLOG("mdb", "{} min symbols, base_vma={}", obj_file->path.c_str(), base_vma);
+  DLOG("mdb", "{} min symbols, base_vma={}", obj_file->path->c_str(), base_vma);
 
   std::vector<MinSymbol> elf_fn_symbols{};
   std::unordered_map<std::string_view, MinSymbol> elf_object_symbols{};
@@ -200,7 +200,7 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), SortLowPc<MinSymbol>());
     obj_file->add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
-    LOG("mdb", "[warning]: No .symtab for {}", obj_file->path.c_str());
+    LOG("mdb", "[warning]: No .symtab for {}", obj_file->path->c_str());
   }
 }
 

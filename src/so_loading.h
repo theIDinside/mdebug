@@ -49,7 +49,6 @@ struct SharedObject
   Path symbol_file_path() const noexcept;
   std::optional<bool> is_optimized() const noexcept;
   std::optional<std::string> version() const noexcept;
-  ObjectFile *load_objectfile() noexcept;
 
   bool has_debug_info() const noexcept;
 
@@ -76,6 +75,7 @@ public:
 
 private:
   std::vector<SharedObject> shared_objects;
+  int new_id() noexcept;
   int next_so_id;
 };
 

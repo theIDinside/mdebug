@@ -18,11 +18,12 @@
 #include <symbolication/dwarf/typeread.h>
 #include <utils/scoped_fd.h>
 
-ObjectFile::ObjectFile(Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), size(size), loaded_binary(loaded_binary), types(std::make_unique<TypeStorage>(*this)),
-      address_bounds(), minimal_fn_symbols{}, min_fn_symbols_sorted(), minimal_obj_symbols{},
-      unit_data_write_lock(), dwarf_units(), name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()),
-      parsed_lte_write_lock(), line_table(), lnp_headers(nullptr),
+ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
+    : path(std::move(p)), objfile_id(std::move(objfile_id)), size(size), loaded_binary(loaded_binary),
+      types(std::make_unique<TypeStorage>(*this)), minimal_fn_symbols{}, min_fn_symbols_sorted(),
+      minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
+      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
+      lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
       comp_units(), addr_cu_map(), valobj_cache{}
 {
@@ -303,6 +304,25 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
   return result;
 }
 
+std::vector<sym::dw::SourceCodeFile *>
+ObjectFile::get_source_code_files(AddrPtr pc) noexcept
+{
+  std::vector<sym::dw::SourceCodeFile *> result;
+  auto cus = get_source_infos(pc);
+  const auto is_unique = [&](auto ptr) noexcept {
+    return std::none_of(result.begin(), result.end(), [ptr](auto cmp) { return ptr == cmp; });
+  };
+  for (auto cu : cus) {
+    for (auto src : cu->sources()) {
+      if (src->address_bounds().contains(pc) && is_unique(src.get())) {
+        result.push_back(src.get());
+      }
+    }
+  }
+
+  return result;
+}
+
 void
 ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept
 {
@@ -523,7 +543,7 @@ ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::Variable
 }
 
 ObjectFile *
-mmap_objectfile(const Path &path) noexcept
+mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -531,6 +551,8 @@ mmap_objectfile(const Path &path) noexcept
 
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
-  auto objfile = new ObjectFile{path, fd.file_size(), addr};
+  const auto objfile =
+      new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
+
   return objfile;
 }

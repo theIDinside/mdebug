@@ -145,18 +145,4 @@ NameIndex::get_dies(std::string_view name) noexcept
   return FindResult{dies.data(), static_cast<u32>(dies.size())};
 }
 
-std::vector<std::span<const DieNameReference>>
-ObjectFileNameIndex::search_fns(std::string_view name) const noexcept
-{
-  std::vector<std::span<const DieNameReference>> result{};
-  if (const auto ff_res = free_functions.search(name); ff_res) {
-    result.push_back(ff_res.value());
-  }
-
-  if (const auto mf_res = methods.search(name); mf_res) {
-    result.push_back(mf_res.value());
-  }
-  return result;
-}
-
 } // namespace sym::dw

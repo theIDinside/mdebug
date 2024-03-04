@@ -1,21 +1,30 @@
 #include "events.h"
-#include "../../so_loading.h"
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
+#include <so_loading.h>
+#include <symbolication/objfile.h>
 
 namespace ui::dap {
 
-ModuleEvent::ModuleEvent(int id, std::string_view reason, std::string &&name, Path &&path,
+ModuleEvent::ModuleEvent(std::string_view id, std::string_view reason, std::string &&name, Path &&path,
                          std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
                          AddressRange range, SharedObjectSymbols so_sym_info) noexcept
-    : id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
+    : objfile_id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
       sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)), version(std::move(version))
 {
 }
 
 ModuleEvent::ModuleEvent(std::string_view reason, const SharedObject &so) noexcept
-    : id(so.so_id), reason(reason), name(so.name()), path(so.path), addr_range(so.relocated_addr_range()),
-      sym_info(so.symbol_info), symbol_file_path(so.symbol_file_path()), version(so.version())
+    : objfile_id(so.objfile->objfile_id), reason(reason), name(so.name()), path(so.path),
+      addr_range(so.relocated_addr_range()), sym_info(so.symbol_info), symbol_file_path(so.symbol_file_path()),
+      version(so.version())
+{
+}
+
+ModuleEvent::ModuleEvent(std::string_view reason, const ObjectFile &object_file) noexcept
+    : objfile_id(object_file.objfile_id), reason(reason), name(object_file.path->filename()),
+      path(object_file.path), addr_range(object_file.address_bounds), sym_info(SharedObjectSymbols::None),
+      symbol_file_path(object_file.path->c_str()), version()
 {
 }
 
@@ -26,8 +35,8 @@ ModuleEvent::serialize(int seq) const noexcept
   constexpr auto bi = [](auto &out) { return std::back_inserter(out); };
   fmt::format_to(
       bi(out),
-      R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":{},"name":"{}","path":"{}")",
-      seq, reason, id, name, path.c_str());
+      R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
+      seq, reason, objfile_id, name, path.c_str());
 
   if (version) {
     fmt::format_to(bi(out), R"(,"version":"{}")", *version);

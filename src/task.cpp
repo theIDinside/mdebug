@@ -1,4 +1,5 @@
 #include "task.h"
+#include "bp.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_binary_reader.h"
@@ -8,7 +9,7 @@
 TaskInfo::TaskInfo(pid_t tid, bool user_stopped) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
       cache_dirty(true), rip_dirty(true), exited(false), registers(new user_regs_struct{}),
-      call_stack(new sym::CallStack{tid})
+      call_stack(new sym::CallStack{tid}), loc_stat()
 {
 }
 
@@ -166,14 +167,15 @@ TaskInfo::pending_wait_status() const noexcept
 void
 TaskInfo::step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept
 {
-  ASSERT(bstat.has_value(), "Requires a valid bpstat");
-  auto bp = tc->bps.get_by_id(bstat->bp_id);
-  DLOG("mdb", "[TaskInfo {}] Stepping over bp {} at {}", tid, bstat->bp_id, bp->address);
+  ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
+  auto loc = tc->pbps.location_at(loc_stat->loc);
+  auto user_ids = loc->loc_users();
+  DLOG("mdb", "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
 
-  bp->disable(tc->task_leader);
-  bstat->stepped_over = true;
-  bstat->re_enable_bp = true;
-  bstat->should_resume = resume_action != RunType::None;
+  loc->disable(tc->task_leader);
+  loc_stat->stepped_over = true;
+  loc_stat->re_enable_bp = true;
+  loc_stat->should_resume = resume_action != RunType::None;
   ptrace_resume(RunType::Step);
 }
 
@@ -205,10 +207,15 @@ TaskInfo::set_dirty() noexcept
 }
 
 void
-TaskInfo::add_bpstat(Breakpoint *bp) noexcept
+TaskInfo::add_bpstat(AddrPtr address) noexcept
 {
-  bstat = BpStat{
-      .bp_id = bp->id, .type = bp->type(), .should_resume = false, .stepped_over = false, .re_enable_bp = false};
+  loc_stat = LocationStatus{.loc = address, .should_resume = false, .stepped_over = false, .re_enable_bp = false};
+}
+
+void
+TaskInfo::remove_bpstat() noexcept
+{
+  loc_stat = std::nullopt;
 }
 
 void

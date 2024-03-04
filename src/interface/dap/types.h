@@ -7,32 +7,13 @@
 struct TaskInfo;
 struct TraceeController;
 struct ObjectFile;
+class UserBreakpoint;
 
 namespace sym {
 class Value;
 }
 
 namespace ui::dap {
-
-struct SourceBreakpoint
-{
-  int line;
-  std::optional<int> column;
-  std::optional<std::string> condition;
-  std::optional<std::string> hit_condition;
-  std::optional<std::string> logMessage;
-};
-
-struct FunctionBreakpoint
-{
-  std::string name;
-  std::optional<std::string> condition;
-  std::optional<std::string> hit_condition;
-};
-
-struct InstructionBreakpoint
-{
-};
 
 struct Source
 {
@@ -57,6 +38,7 @@ struct Breakpoint
 
   std::string serialize() const noexcept;
   static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
+  static Breakpoint from_user_bp(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
 };
 
 struct DataBreakpoint

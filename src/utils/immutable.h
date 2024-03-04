@@ -30,6 +30,8 @@ public:
     return data;
   }
 
+  constexpr operator std::optional<T>() const { return std::optional<T>{data}; }
+
   constexpr const T *
   operator->() const noexcept
   {
@@ -86,6 +88,7 @@ public:
   template <typename... Args> Immutable(Args... args) noexcept : data(std::forward<Args>(args)...) {}
 
   constexpr operator const std::string_view() const & { return data; }
+  constexpr operator const std::optional<std::string_view>() const & { return data; }
 
   constexpr const std::string_view
   operator*() const & noexcept

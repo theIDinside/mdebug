@@ -1,6 +1,6 @@
 #include "ptracestop_handlers.h"
+#include "bp.h"
 #include "symbolication/callstack.h"
-#include <breakpoint.h>
 #include <common.h>
 #include <cstring>
 #include <events/event.h>
@@ -26,28 +26,18 @@ ThreadProceedAction::cancel() noexcept
   cancelled = true;
 }
 
-FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, Breakpoint *bp, bool should_clean_up) noexcept
+FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_ptr<UserBreakpoint> bp,
+                               bool should_clean_up) noexcept
     : ThreadProceedAction(ctrl, t), bp(bp), should_cleanup(should_clean_up)
 {
 }
 
-FinishFunction::~FinishFunction() noexcept
-{
-  if (should_cleanup) {
-    DLOG("mdb", "Requesting delete of bp @ {}", bp->address);
-    tc.bps.remove_breakpoint(bp->address, bp->type());
-  }
-}
+FinishFunction::~FinishFunction() noexcept { tc.remove_breakpoint(bp->id); }
 
 bool
-FinishFunction::has_completed() const noexcept
+FinishFunction::has_completed(bool was_stopped) const noexcept
 {
-  if (task.bstat) {
-    DLOG("mdb", "finished function for {}", task.tid);
-    return task.bstat->bp_id == bp->id;
-  } else {
-    return false;
-  }
+  return task.pc() == bp->address() || was_stopped;
 }
 
 void
@@ -68,9 +58,9 @@ InstructionStep::InstructionStep(TraceeController &ctrl, TaskInfo &thread, int s
 }
 
 bool
-InstructionStep::has_completed() const noexcept
+InstructionStep::has_completed(bool was_stopped) const noexcept
 {
-  return steps_taken == steps_requested;
+  return steps_taken == steps_requested || was_stopped;
 }
 
 void
@@ -95,7 +85,7 @@ InstructionStep::~InstructionStep()
 }
 
 LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
-    : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false), resume_address(),
+    : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false),
       resumed_to_resume_addr(false), start_frame{task, static_cast<u32>(-1), -1, nullptr, nullptr}, entry()
 {
   auto &callstack = tc.build_callframe_stack(task, CallStackRequest::partial(1));
@@ -135,25 +125,25 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
 
 LineStep::~LineStep() noexcept
 {
-  if (resume_address) {
-    tc.remove_breakpoint(*resume_address, BpType{}.Resume(true));
-  }
   if (!cancelled) {
     DLOG("mdb", "[line step]: line step for {} ended", task.tid);
     tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Line stepping finished", false);
+  } else {
+    if (resume_bp)
+      tc.remove_breakpoint(resume_bp->id);
   }
 }
 
 bool
-LineStep::has_completed() const noexcept
+LineStep::has_completed(bool was_stopped) const noexcept
 {
-  return is_done;
+  return is_done || was_stopped;
 }
 
 void
 LineStep::proceed() noexcept
 {
-  if (resume_address && !resumed_to_resume_addr) {
+  if (resume_bp && !resumed_to_resume_addr) {
     DLOG("mdb", "[line step]: continuing sub frame for {}", task.tid);
     tc.resume_task(task, RunType::Continue);
     resumed_to_resume_addr = true;
@@ -196,8 +186,8 @@ LineStep::update_stepped() noexcept
         },
         sym::resume_address);
     if (ret_addr) {
-      tc.set_tracer_bp(ret_addr->as<u64>(), BpType{}.Resume(true));
-      resume_address = ret_addr;
+      resume_bp = tc.pbps.create_loc_user<ResumeToBreakpoint>(
+          tc, tc.get_or_create_bp_location(ret_addr->as_void(), false), task.tid, task.tid);
     } else {
       DBG(DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
           for (const auto &frame
@@ -239,7 +229,8 @@ StopHandler::handle_proceed(TaskInfo &info, bool should_resume) noexcept
   auto proceed_action = get_proceed_action(info);
   if (proceed_action) {
     proceed_action->update_stepped();
-    if (proceed_action->has_completed())
+    const auto was_stopped = !should_resume;
+    if (proceed_action->has_completed(was_stopped))
       remove_action(info);
     else
       proceed_action->proceed();
@@ -258,7 +249,8 @@ void
 StopHandler::handle_wait_event(TaskInfo &info) noexcept
 {
   const auto should_resume = process_waitstatus_for(info);
-  if (tc.waiting_for_all_stopped) {
+
+  if (tc.stop_all_requested) {
     if (tc.all_stopped())
       tc.notify_all_stopped();
   } else {
@@ -271,23 +263,34 @@ static bool
 process_stopped(TraceeController &tc, TaskInfo &t)
 {
   bool should_resume = true;
-  auto stepped_over_bp_id = 0;
-  if (t.bstat) {
-    stepped_over_bp_id = t.bstat->bp_id;
-    if (t.bstat->re_enable_bp) {
-      tc.bps.get_by_id(t.bstat->bp_id)->enable(t.tid);
+  AddrPtr stepped_over_bp_id{nullptr};
+  if (t.loc_stat) {
+    stepped_over_bp_id = t.loc_stat->loc;
+    if (t.loc_stat->re_enable_bp) {
+      auto bploc = tc.pbps.location_at(t.loc_stat->loc);
+      ASSERT(bploc != nullptr, "Expected breakpoint location to exist at {}", t.loc_stat->loc)
+      bploc->enable(t.tid);
     }
-    should_resume = t.bstat->should_resume;
-    t.bstat = std::nullopt;
+    should_resume = t.loc_stat->should_resume;
+    t.remove_bpstat();
   }
   const auto pc = tc.get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
-  auto bp = tc.bps.get(prev_pc_byte);
-  if (bp != nullptr && bp->id != stepped_over_bp_id) {
-    DLOG("mdb", "{} Hit breakpoint {} at {}: {}", t.tid, bp->id, prev_pc_byte, bp->type());
+  auto bp_loc = tc.pbps.location_at(prev_pc_byte);
+  if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
+    const auto users = bp_loc->loc_users();
+    DLOG("mdb", "{} Hit breakpoints {} at {}", t.tid, fmt::join(users, ", "), prev_pc_byte);
+    for (const auto user_id : users) {
+      auto user = tc.pbps.get_user(user_id);
+      auto on_hit = user->on_hit(tc, t);
+      should_resume = should_resume && !on_hit.stop;
+      if (on_hit.retire_bp) {
+        tc.pbps.remove_bp(user->id);
+      } else {
+        t.add_bpstat(user->address().value());
+      }
+    }
     tc.set_pc(t, prev_pc_byte);
-    t.add_bpstat(bp);
-    should_resume = bp->on_hit(tc, t) == OnBpHit::Continue;
   }
 
   DLOG("mdb", "[wait status]: Processed STOPPED for {}. should_resume={}, user_stopped={}", t.tid, should_resume,
@@ -327,7 +330,9 @@ StopHandler::process_waitstatus_for(TaskInfo &t) noexcept
   } break;
   case WaitStatusKind::Signalled:
     tc.stop_all(nullptr);
-    tc.all_stopped_observer.add_notification<SignalStop>(tc, t.wait_status.signal, int{t.tid});
+    tc.all_stop.once([s = t.wait_status.signal, t = t.tid, &tc = tc]() {
+      tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
+    });
     return false;
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
@@ -379,7 +384,12 @@ StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap
 {
 }
 
-StopImmediately::~StopImmediately() noexcept { notify_stopped(); }
+StopImmediately::~StopImmediately() noexcept
+{
+  if (!cancelled) {
+    notify_stopped();
+  }
+}
 
 void
 StopImmediately::notify_stopped() noexcept
@@ -388,7 +398,7 @@ StopImmediately::notify_stopped() noexcept
 }
 
 bool
-StopImmediately::has_completed() const noexcept
+StopImmediately::has_completed(bool was_stopped) const noexcept
 {
   return true;
 }

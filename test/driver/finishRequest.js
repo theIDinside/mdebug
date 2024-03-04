@@ -1,7 +1,7 @@
 const { readFile, repoDirFile, getLineOf } = require('./client')
 const { prettyJson, assert } = require('./utils')
 
-async function finish(DA) {
+async function finishSuccess(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))
   const file = readFile(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP3']
@@ -53,7 +53,7 @@ async function finish(DA) {
   )
 }
 
-async function finishAbortedDueToBkpt(DA) {
+async function abortedDueToBkpt(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))
   const file = readFile(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BPLine1', 'BP3']
@@ -94,13 +94,15 @@ async function finishAbortedDueToBkpt(DA) {
 
   assert(
     frames.body.stackFrames[0].line == bp_lines[1].line,
-    'Expected to have hit breakpoint before finishing function'
+    `Expected to have hit breakpoint before finishing function. Stack frame ${prettyJson(
+      frames.body.stackFrames[0]
+    )} when we should have been at line ${bp_lines[1].line}`
   )
 }
 
 const tests = {
-  finish: finish,
-  finishAbortedDueToBkpt: finishAbortedDueToBkpt,
+  finishSuccess: finishSuccess,
+  abortedDueToBkpt: abortedDueToBkpt,
 }
 
 module.exports = {

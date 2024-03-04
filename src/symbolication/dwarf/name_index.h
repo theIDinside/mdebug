@@ -35,9 +35,9 @@ struct DieNameReference
     };
   };
 
-  DieNameReference() : cu(nullptr), die_index(0) {}
-  DieNameReference(UnitData *cu, u32 die_index) : cu(cu), die_index(die_index) {}
-  DieNameReference(UnitData *cu, Index die_index) : cu(cu), die_index(die_index) {}
+  DieNameReference() noexcept : cu(nullptr), die_index(0) {}
+  DieNameReference(UnitData *cu, u32 die_index) noexcept : cu(cu), die_index(die_index) {}
+  DieNameReference(UnitData *cu, Index die_index) noexcept : cu(cu), die_index(die_index) {}
 
   bool is_valid() const;
   bool is_unique() const noexcept;
@@ -94,7 +94,23 @@ struct ObjectFileNameIndex
   NameIndex global_variables{"global variables"};
   NameIndex namespaces{"namespaces"};
 
-  // searches both free functions and member functions/methods
-  std::vector<std::span<const DieNameReference>> search_fns(std::string_view name) const noexcept;
+  template <typename Fn>
+  void
+  for_each_fn(std::string_view name, Fn &&f) const noexcept
+  {
+    if (const auto ff_res = free_functions.search(name); ff_res) {
+      auto &res = ff_res.value();
+      for (auto &item : res) {
+        f(item);
+      }
+    }
+
+    if (const auto mf_res = methods.search(name); mf_res) {
+      auto &res = mf_res.value();
+      for (auto &item : res) {
+        f(item);
+      }
+    }
+  }
 };
 } // namespace sym::dw

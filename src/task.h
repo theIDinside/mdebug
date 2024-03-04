@@ -1,6 +1,6 @@
 #pragma once
 
-#include "breakpoint.h"
+#include "bp.h"
 #include "common.h"
 #include "ptrace.h"
 #include <linux/sched.h>
@@ -49,7 +49,7 @@ struct TaskInfo
   };
   user_regs_struct *registers;
   sym::CallStack *call_stack;
-  std::optional<BpStat> bstat;
+  std::optional<LocationStatus> loc_stat;
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
@@ -77,7 +77,8 @@ struct TaskInfo
   void initialize() noexcept;
   bool can_continue() noexcept;
   void set_dirty() noexcept;
-  void add_bpstat(Breakpoint *bp) noexcept;
+  void add_bpstat(AddrPtr address) noexcept;
+  void remove_bpstat() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.

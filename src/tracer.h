@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "event_queue.h"
 #include "interface/ui_result.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
@@ -56,6 +57,7 @@ public:
   void config_done() noexcept;
   void handle_wait_event(Tid process_group, TaskWaitResult wait_res) noexcept;
   void handle_command(ui::UICommandPtr cmd) noexcept;
+  void handle_debugger_event(const DebuggerEventData &evt) noexcept;
 
   void wait_for_tracee_events(Tid target) noexcept;
   void set_ui(ui::dap::DAP *dap) noexcept;

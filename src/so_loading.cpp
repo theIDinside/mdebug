@@ -44,19 +44,6 @@ SharedObject::version() const noexcept
   return std::nullopt;
 }
 
-ObjectFile *
-SharedObject::load_objectfile() noexcept
-{
-  if (objfile)
-    return objfile;
-
-  if (!std::filesystem::exists(path))
-    return nullptr;
-  objfile = mmap_objectfile(path);
-  ASSERT(objfile != nullptr, "Failed to mmap objfile {}", path.c_str());
-  return objfile;
-}
-
 bool
 SharedObject::has_debug_info() const noexcept
 {
@@ -79,9 +66,10 @@ interpreter_path(const Elf *elf, const ElfSection *interp) noexcept
 std::optional<SharedObject::SoId>
 SharedObjectMap::add_if_new(TPtr<link_map> tracee_location, AddrPtr elf_diff, Path &&path) noexcept
 {
+  DLOG("mdb", "Shared object {}; elf diff = {}", path.c_str(), elf_diff);
   auto it = find(shared_objects, [&p = path](const auto &so) { return so.path == p; });
   if (it == std::end(shared_objects)) {
-    const auto so_id = next_so_id++;
+    const auto so_id = new_id();
     shared_objects.push_back(SharedObject{so_id, tracee_location, elf_diff, std::move(path)});
     return so_id;
   }
@@ -96,4 +84,12 @@ SharedObjectMap::get_so(int id) noexcept
       return &so;
   }
   return nullptr;
+}
+
+int
+SharedObjectMap::new_id() noexcept
+{
+  const auto it = next_so_id;
+  ++next_so_id;
+  return it;
 }

@@ -996,6 +996,16 @@ SourceCodeFile::add_header(LNPHeader *header) noexcept
   }
 }
 
+AddressRange
+SourceCodeFile::address_bounds() noexcept
+{
+  if (computed) {
+    return AddressRange{low, high};
+  }
+  compute_line_tables();
+  return AddressRange{low, high};
+}
+
 bool
 SourceCodeFile::is_computed() const noexcept
 {

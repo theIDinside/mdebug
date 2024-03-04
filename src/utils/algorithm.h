@@ -101,4 +101,12 @@ find_if(Container &c, Fn &&f) noexcept
     }
   }
 }
+
+template <typename Container, typename Fn>
+constexpr auto
+none_of(const Container &c, Fn &&fn) noexcept
+{
+  return std::none_of(c.begin(), c.end(), std::move(fn));
+}
+
 } // namespace utils

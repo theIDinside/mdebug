@@ -2,6 +2,7 @@
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
 // NOLINTNEXTLINE
+#include "bp.h"
 #include "types.h"
 #include <nlohmann/json.hpp>
 #include <symbolication/disassemble.h>
@@ -187,8 +188,8 @@ struct StepOut final : public ui::UICommand
 // in the DAP spec
 struct SetBreakpointsResponse final : ui::UIResult
 {
-  SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointType type) noexcept;
-  BreakpointType type;
+  SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointRequestKind type) noexcept;
+  BreakpointRequestKind type;
   std::vector<ui::dap::Breakpoint> breakpoints;
   ~SetBreakpointsResponse() noexcept override = default;
   std::string serialize(int seq) const noexcept final;
