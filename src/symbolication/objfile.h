@@ -166,9 +166,11 @@ class SymbolFile
 {
   std::shared_ptr<ObjectFile> binary_object;
   std::string obj_id;
+  AddrPtr relocated_base;
 
 public:
   SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> binary);
+  ObjectFile *object_file() const noexcept;
 };
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;

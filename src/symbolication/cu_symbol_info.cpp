@@ -38,8 +38,7 @@ PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&r
 }
 
 SourceFileSymbolInfo::SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept
-    : unit_data(cu_data), pc_start(nullptr), pc_end_exclusive(nullptr), line_table(), cu_name("unknown"), fns(),
-      id()
+    : unit_data(cu_data), pc_start(nullptr), pc_end_exclusive(nullptr), line_table(), cu_name("unknown"), fns()
 {
 }
 
@@ -67,12 +66,6 @@ SourceFileSymbolInfo::process_source_code_files(u64 table) noexcept
     auto source_code_file = obj->get_source_file(path);
     add_source_file(std::move(source_code_file));
   }
-}
-
-void
-SourceFileSymbolInfo::set_id(SymbolInfoId info_id) noexcept
-{
-  id = info_id;
 }
 
 void

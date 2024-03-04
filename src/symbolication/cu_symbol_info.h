@@ -42,7 +42,6 @@ class SourceFileSymbolInfo
   std::string_view cu_name;
   std::vector<sym::FunctionSymbol> fns;
   std::vector<u32> imported_units;
-  SymbolInfoId id;
   std::vector<std::shared_ptr<dw::SourceCodeFile>> source_code_files{};
 
 public:
@@ -52,7 +51,6 @@ public:
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
   void process_source_code_files(u64 line_table) noexcept;
-  void set_id(SymbolInfoId id) noexcept;
   void add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept;
   std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
 
