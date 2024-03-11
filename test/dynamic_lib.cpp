@@ -1,6 +1,12 @@
 #include "dynamic_lib.h"
-
+#include "templated_code/template.h"
 // Comments are source-code identifiers for setting breakpoints from the driver tests. Do not remove.
+
+float
+min_float(float a, float b)
+{
+  return less_than(a, b);
+}
 
 float
 convert_celsius_to_fahrenheit(float celsius)

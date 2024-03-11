@@ -1,6 +1,8 @@
 #include "bp.h"
 #include "events/event.h"
 #include "ptrace.h"
+#include "symbolication/dwarf/die.h"
+#include "symbolication/dwarf/name_index.h"
 #include <algorithm>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
@@ -106,18 +108,13 @@ BreakpointLocation::add_user(UserBreakpoint &user) noexcept
 
 UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                                std::optional<StopCondition> &&cond) noexcept
-    : enabled(true), bp(std::move(param.loc)), on_hit_count(0), stop_condition(std::move(cond)), id(param.id),
-      tid(param.tid), kind(kind), hit_count(param.times_to_hit.value_or(0))
+    : enabled(true), bp(std::move(param.loc)), stop_condition(std::move(cond)), id(param.id), tid(param.tid),
+      kind(kind), hit_count(param.times_to_hit.value_or(0))
 {
   if (bp) {
     bp->add_user(*this);
   } else {
     objfile_subscriber = &param.tc.new_objectfile;
-    DLOG("mdb", "Subscribing to to newobjectfile publisher for user breakpoint {}", id);
-    objfile_subscriber->subscribe(SubscriberIdentity::Of(this), [id = this->id](ObjectFile *obj) {
-      DLOG("mdb", "New object file {} searched, while attempting to resolve User Breakpoint {}",
-           obj->path->c_str(), id);
-    });
   }
 }
 
@@ -127,6 +124,12 @@ UserBreakpoint::~UserBreakpoint() noexcept
   if (objfile_subscriber) {
     objfile_subscriber->unsubscribe(SubscriberIdentity::Of(this));
   }
+}
+
+void
+UserBreakpoint::update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept
+{
+  bp = std::move(bploc);
 }
 
 void
@@ -245,10 +248,76 @@ UserBreakpoint::source_file() const noexcept
 }
 
 Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                       std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit) noexcept
+                       std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit,
+                       std::unique_ptr<UserBpSpec> &&spec) noexcept
     : UserBreakpoint(param, kind, std::move(stop_condition)), stop_only(stop_only),
-      stop_all_threads_when_hit(stop_all_threads_when_hit)
+      stop_all_threads_when_hit(stop_all_threads_when_hit), bp_spec(std::move(spec))
 {
+  static constexpr auto SOURCE_BREAKPOINT = 0;
+  static constexpr auto FUNCTION_BREAKPOINT = 1;
+  static constexpr auto INSTRUCTION_BREAKPOINT = 2;
+
+  if (!verified()) {
+    objfile_subscriber->subscribe(SubscriberIdentity::Of(this), [this, &tc = param.tc](SymbolFile *symbol_file) {
+      if (this->bp_spec != nullptr) {
+        auto objfile = symbol_file->objectFile();
+        switch (this->bp_spec->index()) {
+        case SOURCE_BREAKPOINT: {
+          const auto &spec = std::get<std::pair<std::string, SourceBreakpoint>>(*this->bp_spec);
+          if (auto source_code_file = objfile->get_source_file(spec.first); source_code_file) {
+            if (auto lte = source_code_file->first_linetable_entry(symbol_file->baseAddress, spec.second.line,
+                                                                   spec.second.column);
+                lte) {
+              const auto pc = lte->pc;
+              this->update_location(tc.get_or_create_bp_location(pc, symbol_file->baseAddress, *source_code_file));
+              tc.pbps.add_bp_location(this);
+              tc.emit_breakpoint_event("changed", *this, std::optional<std::string>{});
+              return RemoveSubscriber();
+            }
+          }
+        } break;
+        case FUNCTION_BREAKPOINT: {
+          const auto &spec = std::get<FunctionBreakpoint>(*this->bp_spec);
+          auto result = symbol_file->lookup_by_spec(spec);
+
+          if (auto it = std::find_if(result.begin(), result.end(),
+                                     [](const auto &it) { return it.loc_src_info.has_value(); });
+              it != end(result)) {
+            this->update_location(tc.get_or_create_bp_location(it->address, std::move(it->loc_src_info.value())));
+            tc.pbps.add_bp_location(this);
+            tc.emit_breakpoint_event("changed", *this, std::optional<std::string>{});
+            return RemoveSubscriber();
+          } else {
+            for (auto &&lookup : result) {
+              this->update_location(tc.get_or_create_bp_location(lookup.address, false));
+              tc.pbps.add_bp_location(this);
+              tc.emit_breakpoint_event("changed", *this, std::optional<std::string>{});
+              return RemoveSubscriber();
+            }
+          }
+        } break;
+        case INSTRUCTION_BREAKPOINT:
+          const auto &spec = std::get<InstructionBreakpoint>(*this->bp_spec);
+          auto addr_opt = to_addr(spec.instructionReference);
+          ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
+          const auto addr = addr_opt.value();
+          auto srcs = symbol_file->getSourceCodeFiles(addr);
+          for (auto src : srcs) {
+            if (src.address_bounds().contains(addr)) {
+              if (auto iter = src.find_lte_by_unrelocated_pc(addr - symbol_file->baseAddress); iter) {
+                this->update_location(tc.get_or_create_bp_location(addr, false));
+                tc.pbps.add_bp_location(this);
+                tc.emit_breakpoint_event("changed", *this, std::optional<std::string>{});
+                return RemoveSubscriber();
+              }
+            }
+          }
+          break;
+        }
+      }
+      return KeepSubscriber();
+    });
+  }
 }
 
 bp_hit
@@ -282,7 +351,7 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                                          std::optional<Tid> stop_only, std::optional<StopCondition> &&cond,
                                          bool stop_all_threads_when_hit) noexcept
-    : Breakpoint(param, kind, stop_only, std::move(cond), stop_all_threads_when_hit)
+    : Breakpoint(param, kind, stop_only, std::move(cond), stop_all_threads_when_hit, nullptr)
 {
 }
 
@@ -360,6 +429,14 @@ u16
 UserBreakpoints::new_id() noexcept
 {
   return ++current_bp_id;
+}
+
+void
+UserBreakpoints::add_bp_location(UserBreakpoint *updated_bp) noexcept
+{
+  ASSERT(updated_bp != nullptr, "Registering a null breakpoint location is not allowed");
+  bps_at_loc[updated_bp->address().value()].push_back(updated_bp->id);
+  current_pending--;
 }
 
 void

@@ -102,14 +102,10 @@ TypeStorage::TypeStorage(ObjectFile &obj) noexcept : m(), types(), obj(obj) { ty
 
 TypeStorage::~TypeStorage() noexcept
 {
-  const auto type_count = types.size();
+  DLOG("mdb", "Destroying type storage for {}", obj.path->c_str());
   for (const auto [k, ptr] : types) {
     delete ptr;
   }
-  // Special types void is ok to destroy, because we created them without DWARF. (void, unit type)
-  if (type_count > 1)
-    PANIC("We don't support unloading Object files during debug session yet - this would introduce all kinds of "
-          "weird behaviors and break (current) assumptions about life times.");
 }
 
 static constexpr auto REFERENCE_SIZE = 8u;

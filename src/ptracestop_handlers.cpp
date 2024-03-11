@@ -86,25 +86,32 @@ InstructionStep::~InstructionStep()
 
 LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
     : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false),
-      resumed_to_resume_addr(false), start_frame{task, static_cast<u32>(-1), -1, nullptr, nullptr}, entry()
+      resumed_to_resume_addr(false), start_frame{nullptr, task, static_cast<u32>(-1), -1, nullptr, nullptr},
+      entry()
 {
   auto &callstack = tc.build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];
   const auto fpc = start_frame.pc();
-  ObjectFile *obj = tc.find_obj_by_pc(fpc);
-  ASSERT(obj, "Expected to find a ObjectFile from pc: {}", fpc);
-  auto src_infos = obj->get_source_infos(fpc);
+  SymbolFile *symbol_file = tc.find_obj_by_pc(fpc);
+  ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
+
+  auto src_infos = symbol_file->getSourceInfos(fpc);
   bool found = false;
 
   // the std::unordered_set here is just for de-duplication.
-  std::unordered_set<SharedPtr<sym::dw::SourceCodeFile>> files_of_interest{};
+  std::vector<sym::dw::RelocatedSourceCodeFile> files_of_interest{};
   for (auto src : src_infos) {
     auto files = src->sources();
-    files_of_interest.insert(files.begin(), files.end());
+
+    for (const auto &f : files) {
+      if (utils::none_of(files_of_interest, [&f](auto &file) { return f->full_path == file.path(); })) {
+        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->baseAddress, f});
+      }
+    }
   }
 
   for (auto &&file : files_of_interest) {
-    if (auto it = file->find_by_pc(fpc); it) {
+    if (auto it = file.find_lte_by_unrelocated_pc(fpc); it) {
       auto lte = it.transform([](auto it) { return it.get(); });
       if (start_frame.inside(lte->pc.as_void()) == sym::InsideRange::Yes) {
         if (lte->pc == fpc) {
@@ -279,7 +286,6 @@ process_stopped(TraceeController &tc, TaskInfo &t)
   auto bp_loc = tc.pbps.location_at(prev_pc_byte);
   if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
     const auto users = bp_loc->loc_users();
-    DLOG("mdb", "{} Hit breakpoints {} at {}", t.tid, fmt::join(users, ", "), prev_pc_byte);
     for (const auto user_id : users) {
       auto user = tc.pbps.get_user(user_id);
       auto on_hit = user->on_hit(tc, t);

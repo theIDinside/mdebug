@@ -1,7 +1,9 @@
 #pragma once
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
+
 namespace utils {
 
 template <typename T>
@@ -173,4 +175,38 @@ public:
     return err;
   }
 };
+
+template <typename Pointee> struct is_smart_ptr : std::false_type
+{
+};
+template <typename Pointee> struct is_smart_ptr<std::shared_ptr<Pointee>> : std::true_type
+{
+};
+template <typename Pointee> struct is_smart_ptr<std::unique_ptr<Pointee>> : std::true_type
+{
+};
+
+template <typename T> concept IsSmartPtr = is_smart_ptr<T>::value;
+
+template <typename Fn>
+auto
+transform(const IsSmartPtr auto &smart_ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*smart_ptr))>
+{
+  if (smart_ptr == nullptr) {
+    return std::nullopt;
+  }
+  return std::make_optional(fn(*smart_ptr));
+}
+
+template <typename Fn>
+auto
+transform(const auto ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*ptr))>
+  requires(std::is_pointer_v<decltype(ptr)>)
+{
+  if (ptr == nullptr) {
+    return std::nullopt;
+  }
+  return std::make_optional(fn(*ptr));
+}
+
 } // namespace utils

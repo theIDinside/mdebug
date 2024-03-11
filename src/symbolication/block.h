@@ -22,10 +22,18 @@ struct AddressRange
   AddrPtr start_pc() const noexcept;
   AddrPtr end_pc() const noexcept;
 
+  static AddressRange relocate(AddressRange range, AddrPtr addr) noexcept;
+
   constexpr static auto
   Sorter()
   {
     return AddressableSorter<AddressRange, true>{};
+  }
+
+  friend bool
+  operator==(const AddressRange &l, const AddressRange &r) noexcept
+  {
+    return l.low == r.low && l.high == r.high;
   }
 };
 

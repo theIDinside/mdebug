@@ -6,6 +6,7 @@
 template <typename T> class Immutable
 {
   T data;
+  using SelfT = Immutable<T>;
 
 public:
   constexpr Immutable(const T &t) noexcept : data(t) {}
@@ -68,6 +69,70 @@ public:
   mut() noexcept
   {
     return data;
+  }
+
+  friend constexpr auto
+  operator-(const Immutable &l, const T &r)
+  {
+    // explicit coercion.
+    return (*l) - r;
+  }
+
+  friend constexpr auto
+  operator-(const T &l, const Immutable<T> &r)
+  {
+    // explicit coercion.
+    return l - (*r);
+  }
+
+  friend constexpr auto
+  operator+(const Immutable<T> &l, const T &r)
+  {
+    // explicit coercion.
+    return (*l) + r;
+  }
+
+  friend constexpr auto
+  operator+(const T &l, const Immutable<T> &r)
+  {
+    // explicit coercion.
+    return l + (*r);
+  }
+
+  friend constexpr auto
+  operator==(const SelfT &l, const SelfT &r) noexcept
+  {
+    return l.data == r.data;
+  }
+
+  friend constexpr auto
+  operator==(const SelfT &l, const T &r) noexcept
+  {
+    return l.data == r;
+  }
+
+  friend constexpr auto
+  operator==(const T &r, const SelfT &l) noexcept
+  {
+    return l.data == r;
+  }
+
+  friend constexpr auto
+  operator!=(const SelfT &l, const SelfT &r) noexcept
+  {
+    return !(l.data == r.data);
+  }
+
+  friend constexpr auto
+  operator!=(const SelfT &l, const T &r) noexcept
+  {
+    return !(l.data == r);
+  }
+
+  friend constexpr bool
+  operator!=(const T &l, const SelfT &r) noexcept
+  {
+    return !(r.data == l);
   }
 };
 

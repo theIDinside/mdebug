@@ -88,6 +88,8 @@ private:
 
 struct ObjectFileNameIndex
 {
+  // backlink to the object file owning this name index
+  ObjectFile *back_pointer;
   NameIndex free_functions{"free functions"};
   NameIndex methods{"methods"};
   NameIndex types{"types"};
@@ -106,6 +108,25 @@ struct ObjectFileNameIndex
     }
 
     if (const auto mf_res = methods.search(name); mf_res) {
+      auto &res = mf_res.value();
+      for (auto &item : res) {
+        f(item);
+      }
+    }
+  }
+
+  template <typename Fn>
+  void
+  regex_for_each_fn(const std::string &regex_pattern, Fn &&f) const noexcept
+  {
+    if (const auto ff_res = free_functions.search(regex_pattern); ff_res) {
+      auto &res = ff_res.value();
+      for (auto &item : res) {
+        f(item);
+      }
+    }
+
+    if (const auto mf_res = methods.search(regex_pattern); mf_res) {
       auto &res = mf_res.value();
       for (auto &item : res) {
         f(item);

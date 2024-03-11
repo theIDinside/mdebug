@@ -30,6 +30,12 @@ AddressRange::end_pc() const noexcept
   return high;
 }
 
+AddressRange
+AddressRange::relocate(AddressRange range, AddrPtr addr) noexcept
+{
+  return AddressRange{range.low + addr, range.high + addr};
+}
+
 void
 BoundaryBuilder::compare_swap_low(AddrPtr pc) noexcept
 {

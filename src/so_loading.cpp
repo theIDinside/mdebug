@@ -50,7 +50,7 @@ SharedObject::has_debug_info() const noexcept
   if (objfile == nullptr)
     return false;
 
-  return objfile->parsed_elf->get_section(".debug_info") != nullptr;
+  return objfile->elf->get_section(".debug_info") != nullptr;
 }
 
 Path

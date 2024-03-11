@@ -275,7 +275,7 @@ process_cu_boundary(u64 ranges_offset, sym::SourceFileSymbolInfo &src) noexcept
   auto cu = src.get_dwarf_unit();
   const auto version = cu->header().version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
-  auto elf = cu->get_objfile()->parsed_elf;
+  auto elf = cu->get_objfile()->elf;
   if (version == DwarfVersion::D4) {
     auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset));
     auto lowest = UINTMAX_MAX;

@@ -14,10 +14,10 @@
 namespace sym {
 
 std::optional<std::tuple<dw::RelocatedLteIterator, dw::RelocatedLteIterator, dw::LineTable>>
-get_lte_range(std::vector<sym::SourceFileSymbolInfo *> symtabs, AddrPtr addr)
+get_lte_range(SymbolFile *obj, std::vector<sym::SourceFileSymbolInfo *> symtabs, AddrPtr addr)
 {
   for (auto st : symtabs) {
-    if (auto lt_opt = st->get_linetable(); lt_opt) {
+    if (auto lt_opt = st->get_linetable(obj); lt_opt) {
       auto lt = lt_opt.value();
       auto lte_it = lt.find_by_pc(addr);
       if (lte_it != std::end(lt)) {
@@ -44,9 +44,9 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
     mc_b += 3;
   }
   auto obj = target->find_obj_by_pc(vm_address);
-  auto cus = obj->get_source_infos(vm_address);
+  auto cus = obj->getSourceInfos(vm_address);
   if (!cus.empty()) {
-    auto lte_range_opt = get_lte_range(cus, vm_address);
+    auto lte_range_opt = get_lte_range(obj, cus, vm_address);
     if (lte_range_opt) {
       const auto [begin_rel, end_rel, lt] = lte_range_opt.value();
       const auto begin = begin_rel.get();
@@ -84,12 +84,12 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
   const auto objfile = target->find_obj_by_pc(addr);
-  const auto text = objfile->parsed_elf->get_section(".text");
+  const auto text = objfile->objectFile()->elf->get_section(".text");
   ZydisDisassembledInstruction instruction;
 
   // This hurts my soul and is so hacky.
   std::set<AddrPtr> disassembled_addresses{};
-  auto srcs = objfile->get_source_infos(addr);
+  auto srcs = objfile->getSourceInfos(addr);
 
   std::sort(srcs.begin(), srcs.end(), [](auto a, auto b) { return a->start_pc() >= b->start_pc(); });
 

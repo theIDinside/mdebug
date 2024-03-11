@@ -57,13 +57,13 @@ Breakpoint::from_user_bp(std::shared_ptr<UserBreakpoint> user_bp) noexcept
   }
 }
 
-VariablesReference::VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
+VariablesReference::VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent,
                                        EntityType type) noexcept
     : id(ref), thread_id(thread), frame_id(frame_id), parent_(parent), type(type), scope_type(), object_file(obj)
 {
 }
 
-VariablesReference::VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
+VariablesReference::VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent,
                                        EntityType type, ScopeType scope_type) noexcept
     : id(ref), thread_id(thread), frame_id(frame_id), parent_(parent), type(type), scope_type(scope_type),
       object_file(obj)

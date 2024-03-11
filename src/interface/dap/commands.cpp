@@ -25,6 +25,16 @@
 
 namespace ui::dap {
 
+template <typename Res, typename JsonObj>
+inline std::optional<Res>
+get(const JsonObj &obj, std::string_view field)
+{
+  if (obj.contains(field)) {
+    return obj[field];
+  }
+  return std::nullopt;
+}
+
 static constexpr SteppingGranularity
 from_str(std::string_view granularity) noexcept
 {
@@ -126,10 +136,10 @@ Continue::execute(Tracer *tracer) noexcept
     res->success = true;
     target->invalidate_stop_state();
     if (continue_all) {
-      DLOG("mdb", "[request:continue]: continue all");
+      DLOG("mdb", "continue all");
       target->resume_target(RunType::Continue);
     } else {
-      DLOG("mdb", "[request:continue]: continue single thread: {}", thread_id);
+      DLOG("mdb", "continue single thread: {}", thread_id);
       auto t = target->get_task(thread_id);
       target->resume_task(*t, RunType::Continue);
     }
@@ -255,16 +265,6 @@ SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) no
          "Arguments did not contain 'breakpoints' field or wasn't an array");
 }
 
-template <typename Res, typename JsonObj>
-inline std::optional<Res>
-get(const JsonObj &obj, std::string_view field)
-{
-  if (obj.contains(field)) {
-    return obj[field];
-  }
-  return std::nullopt;
-}
-
 UIResultPtr
 SetBreakpoints::execute(Tracer *tracer) noexcept
 {
@@ -272,30 +272,24 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
   auto target = tracer->get_current();
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
-  std::string file = args["source"]["path"];
-  const auto source_file = target->get_source(file);
+  const std::string file = args["source"]["path"];
   Set<SourceBreakpoint> src_bps;
-  if (source_file.has_value()) {
-    for (const auto &src_bp : args.at("breakpoints")) {
-      ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
-      const u32 line = src_bp["line"];
-      src_bps.insert(SourceBreakpoint{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
-                                      get<std::string>(src_bp, "logMessage")});
-    }
-    target->set_source_breakpoints(source_file.value(), src_bps);
+  for (const auto &src_bp : args.at("breakpoints")) {
+    ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
+    const u32 line = src_bp["line"];
+    src_bps.insert(SourceBreakpoint{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
+                                    get<std::string>(src_bp, "logMessage")});
+  }
+  target->set_source_breakpoints(file, src_bps);
 
-    using BP = ui::dap::Breakpoint;
-    for (const auto &[bp, id] : target->pbps.source_breakpoints[source_file.value()]) {
+  using BP = ui::dap::Breakpoint;
+  for (const auto &[bp, ids] : target->pbps.source_breakpoints[file]) {
+    for (const auto id : ids) {
       const auto user = target->pbps.get_user(id);
       res->breakpoints.push_back(BP::from_user_bp(user));
     }
-  } else {
-    using BP = ui::dap::Breakpoint;
-    const auto count = args.at("breakpoints").size();
-    for (auto i = 1000u; i < count + 1000u; i++) {
-      res->breakpoints.push_back(BP::non_verified(i, "Could not find source file"));
-    }
   }
+
   return res;
 }
 
@@ -352,22 +346,19 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
     ASSERT(fnbkpt.contains("name") && fnbkpt["name"].is_string(),
            "instructionReference field not in args or wasn't of type string");
     std::string fn_name = fnbkpt["name"];
-    bkpts.insert(FunctionBreakpoint{fn_name, std::nullopt});
+    bool is_regex = false;
+    if (fnbkpt.contains("regex")) {
+      is_regex = fnbkpt["regex"];
+    }
+
+    bkpts.insert(FunctionBreakpoint{fn_name, std::nullopt, is_regex});
   }
   auto target = tracer->get_current();
 
   target->set_fn_breakpoints(bkpts);
   for (const auto &user : target->pbps.all_users()) {
     if (user->kind == LocationUserKind::Function) {
-      res->breakpoints.push_back(BP{
-          .id = user->id,
-          .verified = user->verified(),
-          .addr = user->address().value(),
-          .line = user->line(),
-          .col = user->column(),
-          .source_path = user->source_file(),
-          .error_message{},
-      });
+      res->breakpoints.push_back(BP::from_user_bp(user));
     }
   }
   res->success = true;
@@ -449,7 +440,7 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 UIResultPtr
 Disconnect::execute(Tracer *tracer) noexcept
 {
-  tracer->disconnect();
+  tracer->disconnect(true);
   return new DisconnectResponse{true, this};
 }
 
@@ -735,16 +726,16 @@ Variables::execute(Tracer *tracer) noexcept
   auto current = tracer->get_current();
   if (auto varref = current->var_ref(var_ref); varref) {
     auto frame = tracer->get_current()->frame(varref->frame_id);
-    ObjectFile *obj = varref->object_file.mut();
+    SymbolFile *obj = varref->object_file.mut();
     switch (varref->type) {
     case EntityType::Scope: {
       switch (varref->scope_type->value()) {
       case ScopeType::Arguments: {
-        auto vars = obj->get_variables(current, *frame, sym::VariableSet::Arguments);
+        auto vars = obj->getVariables(current, *frame, sym::VariableSet::Arguments);
         return new VariablesResponse{true, this, std::move(vars)};
       }
       case ScopeType::Locals: {
-        auto vars = obj->get_variables(current, *frame, sym::VariableSet::Locals);
+        auto vars = obj->getVariables(current, *frame, sym::VariableSet::Locals);
         return new VariablesResponse{true, this, std::move(vars)};
       }
       case ScopeType::Registers: {

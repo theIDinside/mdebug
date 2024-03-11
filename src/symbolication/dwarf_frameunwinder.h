@@ -7,6 +7,7 @@
 
 struct ElfSection;
 struct ObjectFile;
+class SymbolFile;
 struct TraceeController;
 struct TaskInfo;
 class DwarfBinaryReader;
@@ -14,6 +15,8 @@ class Elf;
 
 namespace sym {
 
+struct UnwinderSymbolFilePair;
+struct UnwindInfoSymbolFilePair;
 struct UnwindInfo;
 
 static constexpr auto TOP2_BITS = 0xC0;
@@ -84,13 +87,14 @@ class CFAStateMachine
   friend int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
 public:
-  CFAStateMachine(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
+  CFAStateMachine(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
 
-  CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frame_below, const UnwindInfo *cfi,
-                  AddrPtr pc) noexcept;
+  CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frame_below,
+                  UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
   /* Initialization routine for the statemachine - it saves the current task register into the state machine
    * registers. */
-  static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept;
+  static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
+                              AddrPtr pc) noexcept;
   u64 compute_expression(std::span<const u8> bytes) noexcept;
   // Reads the register rule of `reg_number` and resolves it's saved (or live, if it hasn't been modified / stored
   // somewhere in memory) contents
@@ -99,7 +103,7 @@ public:
   const CFA &get_cfa() const noexcept;
   const Registers &get_regs() const noexcept;
   const Reg &ret_reg() const noexcept;
-  void reset(const UnwindInfo *inf, const RegisterValues &frame_below, AddrPtr pc) noexcept;
+  void reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame_below, AddrPtr pc) noexcept;
 
 private:
   TraceeController &tc;
@@ -197,22 +201,38 @@ public:
   std::vector<UnwindInfo> elf_eh_unwind_infos;
 };
 
+struct UnwindInfoSymbolFilePair
+{
+  const UnwindInfo *info;
+  const SymbolFile *sf;
+
+  AddrPtr start() const noexcept;
+  AddrPtr end() const noexcept;
+};
+
+struct UnwinderSymbolFilePair
+{
+  Unwinder *unwinder;
+  SymbolFile *sf;
+  std::optional<UnwindInfoSymbolFilePair> get_unwinder_info(AddrPtr pc) noexcept;
+};
+
 class UnwindIterator
 {
 public:
   UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept;
-  const UnwindInfo *get_info(AddrPtr pc) noexcept;
+  std::optional<UnwindInfoSymbolFilePair> get_info(AddrPtr pc) noexcept;
   bool is_null() const noexcept;
 
 private:
   TraceeController *tc;
-  Unwinder *current;
+  UnwinderSymbolFilePair current;
 };
 
 std::pair<u64, u64> elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 std::pair<u64, u64> dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 CommonInformationEntry read_cie(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
-std::unique_ptr<Unwinder> parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noexcept;
+std::unique_ptr<Unwinder> parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept;
 void parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_count) noexcept;
 
 FrameDescriptionEntry read_fde(DwarfBinaryReader &reader);

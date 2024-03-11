@@ -2,6 +2,7 @@
 
 #include "../../symbolication/block.h"
 #include "../ui_result.h"
+#include "bp.h"
 #include "dap_defs.h"
 #include "types.h"
 #include <nlohmann/json_fwd.hpp>
@@ -29,6 +30,7 @@ struct ModuleEvent final : public ui::UIResult
 
   ModuleEvent(std::string_view reason, const SharedObject &shared_object) noexcept;
   ModuleEvent(std::string_view reason, const ObjectFile &object_file) noexcept;
+  ModuleEvent(std::string_view reason, const SymbolFile &symbol_file) noexcept;
   std::string_view objfile_id;
   std::string_view reason;
   std::string name;
@@ -86,7 +88,12 @@ struct StoppedEvent final : public ui::UIResult
 
 struct BreakpointEvent final : public ui::UIResult
 {
-  ui::dap::Breakpoint breakpoint;
+  std::string_view reason;
+  std::optional<std::string> message;
+  const UserBreakpoint *breakpoint;
+  BreakpointEvent(std::string_view reason, std::optional<std::string> message,
+                  const UserBreakpoint *breakpoint) noexcept;
+  ~BreakpointEvent() override = default;
   std::string serialize(int seq) const noexcept final;
 };
 

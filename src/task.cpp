@@ -49,16 +49,16 @@ TaskInfo::cache_registers() noexcept
 }
 
 static void
-decode_eh_insts(const sym::UnwindInfo *inf, sym::CFAStateMachine &state) noexcept
+decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state) noexcept
 {
   // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
-  DwarfBinaryReader reader{nullptr, inf->cie->instructions.data(), inf->cie->instructions.size()};
+  DwarfBinaryReader reader{nullptr, info.info->cie->instructions.data(), info.info->cie->instructions.size()};
 
-  sym::decode(reader, state, inf);
-  DwarfBinaryReader fde{nullptr, inf->fde_insts.data(), inf->fde_insts.size()};
-  sym::decode(fde, state, inf);
+  sym::decode(reader, state, info.info);
+  DwarfBinaryReader fde{nullptr, info.info->fde_insts.data(), info.info->fde_insts.size()};
+  sym::decode(fde, state, info.info);
 }
 
 const std::vector<AddrPtr> &
@@ -87,38 +87,36 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   }
 
   sym::UnwindIterator it{tc, registers->rip};
-  DLOG("mdb", "Unwind iterator is null: {} for pc: {}", it.is_null(), AddrPtr{registers->rip});
   ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{registers->rip});
-  const sym::UnwindInfo *un_info = it.get_info(registers->rip);
-  ASSERT(un_info != nullptr, "unwind info iterator returned null for 0x{:x}", registers->rip);
-  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, un_info, registers->rip);
+  auto uninfo = it.get_info(registers->rip);
+  ASSERT(uninfo.has_value(), "unwind info iterator returned null for 0x{:x}", registers->rip);
+  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, uninfo.value(), registers->rip);
 
   const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
   switch (req.req) {
   case CallStackRequest::Type::Full: {
-    for (auto uinf = un_info; uinf != nullptr; uinf = it.get_info(get_current_pc())) {
+    for (auto uinf = uninfo; uinf.has_value(); uinf = it.get_info(get_current_pc())) {
       const auto pc = get_current_pc();
-      cfa_state.reset(uinf, buf.back(), pc);
+      cfa_state.reset(uinf.value(), buf.back(), pc);
       call_stack->pcs.push_back(pc);
-      decode_eh_insts(uinf, cfa_state);
+      decode_eh_insts(uinf.value(), cfa_state);
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
     }
     call_stack->dirty = false;
     break;
   }
   case CallStackRequest::Type::Partial: {
-    for (auto uinf = un_info; uinf != nullptr && req.count != 0; uinf = it.get_info(get_current_pc())) {
+    for (auto uinf = uninfo; uinf.has_value() && req.count != 0; uinf = it.get_info(get_current_pc())) {
       const auto pc = get_current_pc();
-      cfa_state.reset(uinf, buf.back(), pc);
+      cfa_state.reset(uinf.value(), buf.back(), pc);
       call_stack->pcs.push_back(pc);
-      decode_eh_insts(uinf, cfa_state);
+      decode_eh_insts(uinf.value(), cfa_state);
       buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
       --req.count;
     }
     break;
   }
   }
-  DLOG("mdb", "Resume address stack:\n{}", fmt::join(call_stack->pcs, "\n"))
   return call_stack->pcs;
 }
 

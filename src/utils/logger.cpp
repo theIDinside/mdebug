@@ -2,14 +2,13 @@
 #include "../common.h"
 #include "../lib/lockguard.h"
 #include <filesystem>
+#include <source_location>
 
 using namespace std::string_view_literals;
 
 namespace logging {
 
 logging::Logger *logging::Logger::logger_instance = new logging::Logger{};
-
-Logger::Logger() noexcept {}
 
 Logger::~Logger() noexcept
 {
@@ -53,7 +52,7 @@ void
 Logger::on_abort() noexcept
 {
   for (const auto &[name, channel] : log_files) {
-    channel->log("\n - flushed"sv);
+    channel->log_message(std::source_location::current(), "\n - flushed"sv);
     channel->fstream.flush();
   }
 }
@@ -68,14 +67,23 @@ Logger::channel(std::string_view name)
 }
 
 void
-Logger::LogChannel::log(std::string_view msg) noexcept
+Logger::LogChannel::log_message(std::source_location loc, std::string_view msg) noexcept
 {
   LockGuard<SpinLock> guard{spin_lock};
-  fstream << msg << std::endl;
+  fstream << msg;
+  fstream << " [" << loc.file_name() << ":" << loc.line() << ":" << loc.column() << "]: " << std::endl;
 }
 
 void
-Logger::LogChannel::log(std::string &&msg) noexcept
+Logger::LogChannel::log_message(std::source_location loc, std::string &&msg) noexcept
+{
+  LockGuard<SpinLock> guard{spin_lock};
+  fstream << msg;
+  fstream << "\t[" << loc.file_name() << ":" << loc.line() << ":" << loc.column() << "]" << std::endl;
+}
+
+void
+Logger::LogChannel::log(std::string_view msg) noexcept
 {
   LockGuard<SpinLock> guard{spin_lock};
   fstream << msg << std::endl;

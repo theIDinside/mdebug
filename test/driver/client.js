@@ -9,6 +9,7 @@ const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
 const EventEmitter = require('events')
+const { assert, prettyJson } = require('./utils')
 
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename)
@@ -567,6 +568,67 @@ async function doSomethingDelayed(fn, delay) {
   })
 }
 
+async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
+  const file = readFile(repoDirFile(filePath))
+  const bp_lines = bpIdentifiers
+    .map((ident) => getLineOf(file, ident))
+    .filter((item) => item != null)
+    .map((l) => ({ line: l }))
+  assert(bp_lines.length == bpIdentifiers.length, `Could not find these identifiers: ${bpIdentifiers}`)
+  const args = {
+    source: {
+      name: repoDirFile(filePath),
+      path: repoDirFile(filePath),
+    },
+    breakpoints: bp_lines,
+  }
+  const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', args)
+  assert(
+    bkpt_res.body.breakpoints.length == bpIdentifiers.length,
+    `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
+  )
+  return bp_lines
+}
+
+/**
+ * Launch tracee to main, then set breakpoints at lines where `bpIdentifiers` can be found, issue a `threads` request
+ * and issue 1 `continue` request stopping at first breakpoint. Issue a `stackTrace` request and a follow that
+ * with a `scopes` request for the first frame in the stack trace.
+ *
+ * Returns the threads, stacktrace and the scopes of the newest frame
+ * @param { DAClient } DA
+ * @param { string } filePath - path to .cpp file that we are testing against
+ * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
+ * @param { string } expectedFrameName - frame name we expect to see on first stop.
+ * @returns { { object[], object[], object[] } }
+ */
+async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
+  const { assert, prettyJson, allUniqueVariableReferences } = require('./utils')
+  await DA.launchToMain(DA.buildDirFile(exeFile), 5000)
+  await SetBreakpoints(DA, filePath, bpIdentifiers)
+  const threads = await DA.threads()
+  await DA.contNextStop(threads[0].id)
+  const fres = await DA.stackTrace(threads[0].id, 1000)
+  const frames = fres.body.stackFrames
+  assert(
+    frames[0].name == expectedFrameName,
+    () =>
+      `Expected to be inside of frame '${expectedFrameName}'. Actual: ${frames[0].name}. Stacktrace:\n${prettyJson(
+        frames
+      )}`
+  )
+
+  const scopes_res = await DA.sendReqGetResponse('scopes', { frameId: frames[0].id })
+  const scopes = scopes_res.body.scopes
+  assert(scopes.length == 3, `expected 3 scopes but got ${scopes.length}. Scopes response: ${prettyJson(scopes_res)}`)
+  assert(
+    allUniqueVariableReferences(scopes),
+    `Expected unique variableReference for all scopes. Scopes:\n${prettyJson(scopes)}`
+  )
+
+  return { threads, frames, scopes }
+}
+
 module.exports = {
   MDB_PATH,
   DAClient,
@@ -583,4 +645,5 @@ module.exports = {
   checkResponse,
   doSomethingDelayed,
   getExecutorArgs,
+  launchToGetFramesAndScopes,
 }

@@ -1,5 +1,7 @@
 #include "events.h"
+#include "fmt/core.h"
 #include "fmt/format.h"
+#include "interface/dap/types.h"
 #include "nlohmann/json.hpp"
 #include <so_loading.h>
 #include <symbolication/objfile.h>
@@ -23,9 +25,27 @@ ModuleEvent::ModuleEvent(std::string_view reason, const SharedObject &so) noexce
 
 ModuleEvent::ModuleEvent(std::string_view reason, const ObjectFile &object_file) noexcept
     : objfile_id(object_file.objfile_id), reason(reason), name(object_file.path->filename()),
-      path(object_file.path), addr_range(object_file.address_bounds), sym_info(SharedObjectSymbols::None),
-      symbol_file_path(object_file.path->c_str()), version()
+      path(object_file.path), addr_range(object_file.unrelocated_address_bounds),
+      sym_info(SharedObjectSymbols::None), symbol_file_path(object_file.path->c_str()), version()
 {
+}
+
+ModuleEvent::ModuleEvent(std::string_view reason, const SymbolFile &symbol_file) noexcept
+    : objfile_id(symbol_file.symbolFileId()), reason(reason), name(symbol_file.path().filename()),
+      path(symbol_file.path()), addr_range(symbol_file.pc_bounds), sym_info(SharedObjectSymbols::Full),
+      symbol_file_path(symbol_file.path().c_str()), version()
+{
+}
+
+template <typename T>
+auto
+format_optional(const std::optional<T> &opt, bool with_quotes) noexcept -> std::string
+{
+  if (with_quotes) {
+    return opt.transform([](auto &value) { return fmt::format(R"("{}")", value); }).value_or("null");
+  } else {
+    return opt.transform([](auto &value) { return fmt::format(R"({})", value); }).value_or("null");
+  }
 }
 
 std::string
@@ -106,10 +126,53 @@ StoppedEvent::serialize(int seq) const noexcept
   }
 }
 
-std::string
-BreakpointEvent::serialize(int) const noexcept
+BreakpointEvent::BreakpointEvent(std::string_view reason, std::optional<std::string> message,
+                                 const UserBreakpoint *breakpoint) noexcept
+    : reason(reason), message(std::move(message)), breakpoint(breakpoint)
 {
-  TODO("unimplemented");
+}
+
+template <typename T, typename Fn, typename... Optionals>
+std::optional<T>
+zip(Fn &&fn, Optionals... opts) noexcept
+{
+  if ((opts && ...)) {
+    return fn(opts.value()...);
+  } else {
+    return std::optional<T>{};
+  }
+}
+
+std::string
+BreakpointEvent::serialize(int seq) const noexcept
+{
+
+  std::string result{};
+  result.reserve(256);
+  auto it = std::back_inserter(result);
+  it = fmt::format_to(
+      it,
+      R"({{"seq":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
+      seq, reason, breakpoint->id, breakpoint->verified());
+
+  if (message) {
+    it = fmt::format_to(it, R"(,"message": "{}")", message.value());
+  }
+  if (auto src = breakpoint->source_file(); src) {
+    it = fmt::format_to(it, R"(,"source": {{"name":"{}", "path": "{}"}})", src.value(), src.value());
+  }
+  if (const auto line = breakpoint->line(); line) {
+    it = fmt::format_to(it, R"(,"line":{})", line.value());
+  }
+  if (const auto col = breakpoint->column(); col) {
+    it = fmt::format_to(it, R"(,"column":{})", col.value());
+  }
+  if (auto addr = breakpoint->address(); addr) {
+    it = fmt::format_to(it, R"(,"instructionReference": "{}")", addr.value());
+  }
+
+  it = fmt::format_to(it, "}}}}}}");
+  return result;
 }
 
 OutputEvent::OutputEvent(std::string_view category, std::string &&output) noexcept

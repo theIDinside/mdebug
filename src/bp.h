@@ -9,6 +9,7 @@
 struct TraceeController;
 struct TaskInfo;
 struct ObjectFile;
+class SymbolFile;
 
 enum class BreakpointRequestKind : u8
 {
@@ -31,9 +32,109 @@ enum class LocationUserKind : u8
   LongJump
 };
 
-struct ThreadStopped
+struct SourceBreakpoint
 {
+  u32 line;
+  std::optional<u32> column;
+  std::optional<std::string> condition;
+  std::optional<std::string> log_message;
+
+  // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
+  // Comparing two `SourceBreakpoint` objects from different source files is non sensical
+  friend constexpr auto operator<=>(const SourceBreakpoint &l, const SourceBreakpoint &r) = default;
+
+  // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
+  // Comparing two `SourceBreakpoint` objects from different source files is non sensical
+  friend constexpr auto
+  operator==(const SourceBreakpoint &l, const SourceBreakpoint &r)
+  {
+    return l.line == r.line && l.column == r.column && l.condition == r.condition &&
+           l.log_message == r.log_message;
+  }
 };
+
+template <> struct std::hash<SourceBreakpoint>
+{
+  using argument_type = SourceBreakpoint;
+  using result_type = size_t;
+
+  result_type
+  operator()(const argument_type &m) const
+  {
+    const auto u32_hasher = std::hash<u32>{};
+
+    const auto line_col_hash =
+        m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
+            .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
+            .value();
+
+    if (m.condition && m.log_message) {
+      return line_col_hash ^ std::hash<std::string_view>{}(m.condition.value()) ^
+             std::hash<std::string_view>{}(m.log_message.value());
+    } else if (!m.condition && m.log_message) {
+      return line_col_hash ^ std::hash<std::string_view>{}(m.log_message.value());
+    } else if (m.condition && !m.log_message) {
+      return line_col_hash ^ std::hash<std::string_view>{}(m.condition.value());
+    } else {
+      return line_col_hash;
+    }
+  }
+};
+
+struct FunctionBreakpoint
+{
+  std::string name;
+  std::optional<std::string> condition;
+  bool is_regex;
+  friend constexpr auto operator<=>(const FunctionBreakpoint &l, const FunctionBreakpoint &r) = default;
+
+  friend constexpr auto
+  operator==(const FunctionBreakpoint &l, const FunctionBreakpoint &r)
+  {
+    return l.name == r.name && l.condition == r.condition;
+  }
+};
+
+template <> struct std::hash<FunctionBreakpoint>
+{
+  using argument_type = FunctionBreakpoint;
+  using result_type = size_t;
+
+  result_type
+  operator()(const argument_type &m) const
+  {
+    return std::hash<std::string_view>{}(m.name) ^ std::hash<std::string_view>{}(m.condition.value_or(""));
+  }
+};
+
+struct InstructionBreakpoint
+{
+  std::string instructionReference;
+  std::optional<std::string> condition;
+  friend constexpr auto operator<=>(const InstructionBreakpoint &l, const InstructionBreakpoint &r) = default;
+  friend constexpr auto
+  operator==(const InstructionBreakpoint &l, const InstructionBreakpoint &r)
+  {
+    return l.instructionReference == r.instructionReference && l.condition == r.condition;
+  }
+};
+
+template <> struct std::hash<InstructionBreakpoint>
+{
+  using argument_type = InstructionBreakpoint;
+  using result_type = size_t;
+
+  result_type
+  operator()(const argument_type &m) const
+  {
+    return std::hash<std::string_view>{}(m.instructionReference) ^
+           std::hash<std::string_view>{}(m.condition.value_or(""));
+  }
+};
+
+using UserBpSpec =
+    std::variant<std::pair<std::string, SourceBreakpoint>, FunctionBreakpoint, InstructionBreakpoint>;
+
 /** A type that informs the supervisor on what to do with the breakpoint after that breakpoint has been hit.
  * Currently describes if the thread should stop and/or if the breakpoint is to be retired. */
 struct bp_hit
@@ -137,9 +238,12 @@ class UserBreakpoint
 private:
   bool enabled;
   std::shared_ptr<BreakpointLocation> bp;
-  u32 on_hit_count;
+  u32 on_hit_count{0};
   std::optional<StopCondition> stop_condition;
-  Publisher<ObjectFile *> *objfile_subscriber{nullptr};
+
+protected:
+  Publisher<SymbolFile *> *objfile_subscriber{nullptr};
+  void update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept;
 
 public:
   Immutable<u32> id;
@@ -172,9 +276,9 @@ public:
 
   template <typename UserBreakpoint, typename... Args>
   static std::shared_ptr<UserBreakpoint>
-  create_user_breakpoint(RequiredUserParameters param, Args... args) noexcept
+  create_user_breakpoint(RequiredUserParameters &&param, Args &&...args) noexcept
   {
-    return std::make_shared<UserBreakpoint>(std::move(param), args...);
+    return std::make_shared<UserBreakpoint>(std::move(param), std::move(args)...);
   }
 };
 
@@ -182,10 +286,12 @@ class Breakpoint : public UserBreakpoint
 {
   std::optional<Tid> stop_only;
   bool stop_all_threads_when_hit;
+  std::unique_ptr<UserBpSpec> bp_spec;
 
 public:
   explicit Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                      std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit) noexcept;
+                      std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit,
+                      std::unique_ptr<UserBpSpec> &&spec) noexcept;
   ~Breakpoint() noexcept override = default;
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept override;
 };
@@ -233,105 +339,6 @@ public:
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
-struct SourceBreakpoint
-{
-  u32 line;
-  std::optional<u32> column;
-  std::optional<std::string> condition;
-  std::optional<std::string> log_message;
-
-  // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
-  // Comparing two `SourceBreakpoint` objects from different source files is non sensical
-  friend constexpr auto operator<=>(const SourceBreakpoint &l, const SourceBreakpoint &r) = default;
-
-  // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
-  // Comparing two `SourceBreakpoint` objects from different source files is non sensical
-  friend constexpr auto
-  operator==(const SourceBreakpoint &l, const SourceBreakpoint &r)
-  {
-    return l.line == r.line && l.column == r.column && l.condition == r.condition &&
-           l.log_message == r.log_message;
-  }
-};
-
-template <> struct std::hash<SourceBreakpoint>
-{
-  using argument_type = SourceBreakpoint;
-  using result_type = size_t;
-
-  result_type
-  operator()(const argument_type &m) const
-  {
-    const auto u32_hasher = std::hash<u32>{};
-
-    const auto line_col_hash =
-        m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
-            .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
-            .value();
-
-    if (m.condition && m.log_message) {
-      return line_col_hash ^ std::hash<std::string_view>{}(m.condition.value()) ^
-             std::hash<std::string_view>{}(m.log_message.value());
-    } else if (!m.condition && m.log_message) {
-      return line_col_hash ^ std::hash<std::string_view>{}(m.log_message.value());
-    } else if (m.condition && !m.log_message) {
-      return line_col_hash ^ std::hash<std::string_view>{}(m.condition.value());
-    } else {
-      return line_col_hash;
-    }
-  }
-};
-
-struct FunctionBreakpoint
-{
-  std::string name;
-  std::optional<std::string> condition;
-  friend constexpr auto operator<=>(const FunctionBreakpoint &l, const FunctionBreakpoint &r) = default;
-
-  friend constexpr auto
-  operator==(const FunctionBreakpoint &l, const FunctionBreakpoint &r)
-  {
-    return l.name == r.name && l.condition == r.condition;
-  }
-};
-
-template <> struct std::hash<FunctionBreakpoint>
-{
-  using argument_type = FunctionBreakpoint;
-  using result_type = size_t;
-
-  result_type
-  operator()(const argument_type &m) const
-  {
-    return std::hash<std::string_view>{}(m.name) ^ std::hash<std::string_view>{}(m.condition.value_or(""));
-  }
-};
-
-struct InstructionBreakpoint
-{
-  std::string instructionReference;
-  std::optional<std::string> condition;
-  friend constexpr auto operator<=>(const InstructionBreakpoint &l, const InstructionBreakpoint &r) = default;
-  friend constexpr auto
-  operator==(const InstructionBreakpoint &l, const InstructionBreakpoint &r)
-  {
-    return l.instructionReference == r.instructionReference && l.condition == r.condition;
-  }
-};
-
-template <> struct std::hash<InstructionBreakpoint>
-{
-  using argument_type = InstructionBreakpoint;
-  using result_type = size_t;
-
-  result_type
-  operator()(const argument_type &m) const
-  {
-    return std::hash<std::string_view>{}(m.instructionReference) ^
-           std::hash<std::string_view>{}(m.condition.value_or(""));
-  }
-};
-
 class UserBreakpoints
 {
   using BpId = u32;
@@ -349,10 +356,11 @@ public:
   // we don't expose here at all, it's behind a shared pointer in the `user_bp_t` types and as such, will die when
   // the last user breakpoint that references it dies (it can also be explicitly killed by instructing a user
   // breakpoint to remove itself from the location's list and if that list becomes empty, the location will die.)
-  std::unordered_map<std::string, std::unordered_map<SourceBreakpoint, BpId>> source_breakpoints{};
+  std::unordered_map<std::string, std::unordered_map<SourceBreakpoint, std::vector<BpId>>> source_breakpoints{};
   std::unordered_map<FunctionBreakpoint, std::vector<BpId>> fn_breakpoints{};
   std::unordered_map<InstructionBreakpoint, BpId> instruction_breakpoints{};
 
+  void add_bp_location(UserBreakpoint *updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;
   std::shared_ptr<BreakpointLocation> location_at(AddrPtr address) noexcept;
@@ -362,12 +370,12 @@ public:
   template <typename BreakpointT, typename... UserBpArgs>
   std::shared_ptr<UserBreakpoint>
   create_loc_user(TraceeController &tc, std::shared_ptr<BreakpointLocation> bp_location, Tid tid,
-                  UserBpArgs... args)
+                  UserBpArgs &&...args)
   {
-    RequiredUserParameters param{
-        .tid = tid, .id = new_id(), .loc = std::move(bp_location), .times_to_hit = {}, .tc = tc};
-
-    auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(param, args...);
+    auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
+        RequiredUserParameters{
+            .tid = tid, .id = new_id(), .loc = std::move(bp_location), .times_to_hit = {}, .tc = tc},
+        args...);
     add_user(user);
 
     return user;

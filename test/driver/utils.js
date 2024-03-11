@@ -110,6 +110,25 @@ function isHexadecimalString(input) {
   return !isNaN(input)
 }
 
+function allUniqueVariableReferences(variables) {
+  // yes I know this is slower. 2 iterations. 2 created arrays. bla bla.
+  const idsOnly = []
+  for (const v of variables) {
+    if (v.variablesReference != 0) idsOnly.push(v.variablesReference)
+  }
+  return new Set(idsOnly).size == idsOnly.length
+}
+
+/**
+ * Verify that all objects in `varRefs` have unique variablesReference value.
+ */
+function assertAllVariableReferencesUnique(varRefs) {
+  assert(
+    allUniqueVariableReferences(varRefs),
+    `Duplicate variablesReferences found (that were non-zero).\nResponse:\n${prettyJson(varRefs)}`
+  )
+}
+
 function getPrintfPlt(DA, executable) {
   const objdumped = objdump(DA.buildDirFile(executable)).split('\n')
   for (const line of objdumped) {
@@ -134,4 +153,6 @@ module.exports = {
   isHexadecimalString,
   prettyJson,
   getPrintfPlt,
+  allUniqueVariableReferences,
+  assertAllVariableReferencesUnique,
 }

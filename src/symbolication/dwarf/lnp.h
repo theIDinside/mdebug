@@ -13,6 +13,18 @@ struct DirEntry
   std::optional<DataBlock> md5;
 };
 
+constexpr u64
+lnp_index(u64 index, DwarfVersion version) noexcept
+{
+  if (version == DwarfVersion::D4) {
+    if (index == 0)
+      return index;
+    else
+      return index - 1;
+  }
+  return index;
+}
+
 struct FileEntry
 {
   std::string_view file_name;
@@ -154,6 +166,8 @@ private:
   ParsedLineTableEntries *ltes;
 };
 
+class RelocatedSourceCodeFile;
+
 // A source code file is a file that's either represented (and thus realized, when parsed) in the Line Number
 // Program or referenced somehow from an actual Compilation Unit/Translation unit; Meaning, DWARF does not
 // represent it as a single, solitary "binary blob" of debug symbol info. Something which generally tend to only be
@@ -166,30 +180,74 @@ private:
 class SourceCodeFile
 {
   NO_COPY(SourceCodeFile);
+  friend RelocatedSourceCodeFile;
+
   std::vector<LNPHeader *> headers;
   // Resolved lazily when needed, by walking `line_table`
-  SharedPtr<std::vector<LineTableEntry>> line_table;
-  AddrPtr low;
-  AddrPtr high;
+  mutable SharedPtr<std::vector<LineTableEntry>> line_table;
+  mutable AddrPtr low;
+  mutable AddrPtr high;
   mutable std::mutex m;
-  bool computed;
+  mutable bool computed;
   Elf *elf;
   bool is_computed() const noexcept;
-  void compute_line_tables() noexcept;
+  void compute_line_tables() const noexcept;
 
 public:
   SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept;
-
-  Immutable<AddrPtr> relocated_base;
   Immutable<std::filesystem::path> full_path;
 
-  RelocatedLteIterator begin() const noexcept;
-  RelocatedLteIterator end() const noexcept;
+  auto begin(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
+  auto end(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
 
+  auto first_linetable_entry(AddrPtr relocatedBase, u32 line, std::optional<u32> column)
+      -> std::optional<LineTableEntry>;
+
+  auto find_by_pc(AddrPtr base, AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
+  auto add_header(LNPHeader *header) noexcept -> void;
+  auto address_bounds() noexcept -> AddressRange;
+};
+
+// RelocatedFoo types are "thin" wrappers around the "raw" debug symbol info data types. This is so that we can
+// potentially reused previously parsed debug data between different processes that we are debugging. I'm not
+// entirely sure, we need this in the year of 2024, but I figured for good measure, let's not even allow for the
+// possibility to duplicate work (when multi-process debugging)
+class RelocatedSourceCodeFile
+{
+  Immutable<AddrPtr> baseAddr;
+  SourceCodeFile &file;
+
+public:
+  RelocatedSourceCodeFile(AddrPtr base_addr, std::shared_ptr<SourceCodeFile> file) noexcept;
+  RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *file) noexcept;
+
+  auto find_lte_by_unrelocated_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
   auto first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>;
-  auto find_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
-  void add_header(LNPHeader *header) noexcept;
-  AddressRange address_bounds() noexcept;
+  auto address_bounds() noexcept -> AddressRange;
+
+  auto
+  path() const noexcept -> Path
+  {
+    return file.full_path;
+  }
+
+  constexpr friend auto
+  operator<=>(const RelocatedSourceCodeFile &l, const RelocatedSourceCodeFile &r) noexcept
+  {
+    return &l.file <=> &r.file;
+  }
+
+  constexpr friend auto
+  operator==(const RelocatedSourceCodeFile &l, const RelocatedSourceCodeFile &r) noexcept
+  {
+    return &l.file == &r.file;
+  }
+
+  SourceCodeFile &
+  get() const noexcept
+  {
+    return file;
+  }
 };
 
 std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;

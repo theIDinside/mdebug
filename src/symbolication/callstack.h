@@ -5,6 +5,8 @@
 #include <common.h>
 #include <symbolication/fnsymbol.h>
 
+class SymbolFile;
+
 namespace ui::dap {
 struct Scope;
 }
@@ -54,13 +56,14 @@ private:
   u32 lvl = -1;
   FrameType type = FrameType::Unknown;
   u32 frame_id = -1;
+  SymbolFile *symbol_file;
 
 public:
   Immutable<NonNullPtr<TaskInfo>> task;
 
   template <typename T>
-  explicit Frame(TaskInfo &task, u32 level, int frame_id, AddrPtr pc, T sym_info) noexcept
-      : rip(pc), lvl(level), frame_id(frame_id), task(NonNull(task))
+  explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, int frame_id, AddrPtr pc, T sym_info) noexcept
+      : rip(pc), lvl(level), frame_id(frame_id), symbol_file(symbol_file), task(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
     static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::nullptr_t>,
@@ -94,6 +97,7 @@ public:
   int id() const noexcept;
   int level() const noexcept;
   AddrPtr pc() const noexcept;
+  SymbolFile *get_symbol_file() noexcept;
 
   const sym::FunctionSymbol &full_symbol_info() const noexcept;
 

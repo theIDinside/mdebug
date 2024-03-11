@@ -428,7 +428,7 @@ LNPHeader::files() const noexcept
   path_buf.reserve(1024);
   for (const auto &f : file_names) {
     path_buf.clear();
-    const auto index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+    const auto index = lnp_index(f.dir_index, version);
     // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
     // and we have not made copies.
     fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
@@ -440,13 +440,13 @@ LNPHeader::files() const noexcept
 std::optional<Path>
 LNPHeader::file(u32 f_index) const noexcept
 {
-  const auto adjusted_index = version == DwarfVersion::D4 ? f_index - 1 : f_index;
+  const auto adjusted_index = version == DwarfVersion::D4 ? (f_index == 0 ? 0 : f_index - 1) : f_index;
   if (adjusted_index >= file_names.size())
     return {};
 
   for (const auto &[i, f] : utils::EnumerateView(file_names)) {
     if (i == adjusted_index) {
-      const auto dir_index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+      const auto dir_index = lnp_index(f.dir_index, version);
       return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
           .lexically_normal();
     }
@@ -463,7 +463,7 @@ LNPHeader::file_entry_index(const std::filesystem::path &p) const noexcept
   auto file_index = 0;
   for (const auto &f : file_names) {
     path_buf.clear();
-    const auto index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+    const auto index = lnp_index(f.dir_index, version);
     fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
     const auto file_path = std::filesystem::path{path_buf}.lexically_normal();
     if (p == file_path) {
@@ -536,7 +536,7 @@ LineTable::directory(u64 dir_index) const noexcept
 std::optional<sym::dw::FileEntry>
 LineTable::file(u64 file_index) const noexcept
 {
-  const auto adjusted = line_header->version == DwarfVersion::D4 ? file_index - 1 : file_index;
+  const auto adjusted = lnp_index(file_index, line_header->version);
   ASSERT(line_header, "Line table doesn't have a line number program header");
   ASSERT(adjusted < line_header->file_names.size(), "file_index={} not found in {} files", adjusted,
          line_header->file_names.size());
@@ -935,35 +935,35 @@ read_lnp_headers(const Elf *elf) noexcept
 }
 
 RelocatedLteIterator
-SourceCodeFile::begin() const noexcept
+SourceCodeFile::begin(AddrPtr relocatedBase) const noexcept
 {
   // Rust would call this "interior" mutability. So kindly go fuck yourself.
   if (!is_computed()) {
-    const_cast<SourceCodeFile *>(this)->compute_line_tables();
+    this->compute_line_tables();
   }
-  return RelocatedLteIterator(line_table->cbegin(), relocated_base);
+  return RelocatedLteIterator(line_table->begin(), relocatedBase);
 }
 
 RelocatedLteIterator
-SourceCodeFile::end() const noexcept
+SourceCodeFile::end(AddrPtr relocatedBase) const noexcept
 {
-  return RelocatedLteIterator(line_table->cend(), relocated_base);
+  return RelocatedLteIterator(line_table->end(), relocatedBase);
 }
 
 SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept
     : headers(std::move(headers)), line_table(std::make_shared<std::vector<LineTableEntry>>()), low(nullptr),
-      high(nullptr), m(), computed(false), elf(elf), relocated_base(elf->relocate_addr(nullptr)),
-      full_path(std::move(path))
+      high(nullptr), m(), computed(false), elf(elf), full_path(std::move(path))
 {
 }
 
 auto
-SourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>
+SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line, std::optional<u32> column)
+    -> std::optional<LineTableEntry>
 {
-  auto lte_it = std::find_if(begin(), end(), [&](const auto &lte) {
+  auto lte_it = std::find_if(begin(relocatedBase), end(relocatedBase), [&](const auto &lte) {
     return line == lte.line && lte.column == column.value_or(lte.column);
   });
-  if (lte_it != end()) {
+  if (lte_it != end(relocatedBase)) {
     return lte_it.get();
   } else {
     return std::nullopt;
@@ -971,18 +971,18 @@ SourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column) -> st
 }
 
 auto
-SourceCodeFile::find_by_pc(AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
+SourceCodeFile::find_by_pc(AddrPtr base, AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
 {
-  auto start = begin();
+  auto start = begin(base);
   // might be a source code file with no line number info. e.g. include/stdio.h
-  if (start == end())
+  if (start == end(base))
     return std::nullopt;
   if ((*start).pc == addr)
     return start;
 
-  auto it =
-      std::lower_bound(begin(), end(), addr, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
-  if (it == end())
+  auto it = std::lower_bound(begin(base), end(base), addr,
+                             [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  if (it == end(base))
     return std::nullopt;
 
   return it;
@@ -1013,7 +1013,7 @@ SourceCodeFile::is_computed() const noexcept
 }
 
 void
-SourceCodeFile::compute_line_tables() noexcept
+SourceCodeFile::compute_line_tables() const noexcept
 {
   std::lock_guard lock(m);
   if (computed)
@@ -1128,6 +1128,37 @@ SourceCodeFile::compute_line_tables() noexcept
     high = std::next(lt.begin(), (lt.size() - 1))->pc;
   }
   computed = true;
+}
+
+RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr,
+                                                 std::shared_ptr<SourceCodeFile> src_file) noexcept
+    : baseAddr(base_addr), file(*src_file)
+{
+}
+
+RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *src_file) noexcept
+    : baseAddr(base_addr), file(*src_file)
+{
+}
+
+auto
+RelocatedSourceCodeFile::find_lte_by_unrelocated_pc(AddrPtr pc) const noexcept
+    -> std::optional<RelocatedLteIterator>
+{
+  return file.find_by_pc(baseAddr, pc);
+}
+
+auto
+RelocatedSourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column)
+    -> std::optional<LineTableEntry>
+{
+  return file.first_linetable_entry(baseAddr, line, column);
+}
+
+AddressRange
+RelocatedSourceCodeFile::address_bounds() noexcept
+{
+  return AddressRange::relocate(file.address_bounds(), baseAddr);
 }
 
 } // namespace sym::dw

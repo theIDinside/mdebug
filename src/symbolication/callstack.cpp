@@ -61,6 +61,12 @@ Frame::pc() const noexcept
   return rip;
 }
 
+SymbolFile *
+Frame::get_symbol_file() noexcept
+{
+  return symbol_file;
+}
+
 const sym::FunctionSymbol &
 Frame::full_symbol_info() const noexcept
 {
@@ -78,7 +84,7 @@ Frame::cu_line_table() const noexcept
     return std::nullopt;
   const auto symbol_info = symbol.full_symbol->symbol_info();
   ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
-  return symbol_info->get_linetable();
+  return symbol_info->get_linetable(symbol_file);
 }
 
 sym::FunctionSymbol *

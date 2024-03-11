@@ -30,7 +30,7 @@ void
 LineNumberProgramTask::execute_task() noexcept
 {
   for (auto &header : lnp_headers) {
-    sym::dw::compute_line_number_program(obj->get_plte(header.sec_offset), obj->parsed_elf, &header);
+    sym::dw::compute_line_number_program(obj->get_plte(header.sec_offset), obj->elf, &header);
   }
 }
 } // namespace sym::dw

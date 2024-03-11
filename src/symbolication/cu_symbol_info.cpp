@@ -137,9 +137,9 @@ SourceFileSymbolInfo::get_dwarf_unit() const noexcept
 }
 
 std::optional<dw::LineTable>
-SourceFileSymbolInfo::get_linetable() noexcept
+SourceFileSymbolInfo::get_linetable(SymbolFile *sf) noexcept
 {
-  return unit_data->get_objfile()->get_linetable(line_table);
+  return sf->getLineTable(line_table);
 }
 
 std::optional<Path>
@@ -188,18 +188,16 @@ struct ResolveFnSymbolState
   }
 
   sym::FunctionSymbol
-  complete(Elf *elf)
+  complete()
   {
     std::optional<SourceCoordinate> source = lnp_file.transform(
         [&](auto &&path) { return SourceCoordinate{.path = std::move(path), .line = this->line.value_or(0)}; });
     if (lnp_file) {
       ASSERT(lnp_file.value().empty(), "Should have moved std string!");
     }
-    if (source) {
-      DLOG("mdb", "fn {} is defined in {}", name.empty() ? mangled_name : name, source.value().path);
-    }
-    return sym::FunctionSymbol{elf->relocate_addr(low_pc),
-                               elf->relocate_addr(high_pc),
+
+    return sym::FunctionSymbol{low_pc,
+                               high_pc,
                                name.empty() ? mangled_name : name,
                                namespace_ish,
                                ret_type,
@@ -283,7 +281,6 @@ follow_reference(SourceFileSymbolInfo &src_file, ResolveFnSymbolState &state, dw
 void
 SourceFileSymbolInfo::resolve_fn_symbols() noexcept
 {
-  auto elf = unit_data->get_objfile()->parsed_elf;
   const auto &dies = unit_data->get_dies();
   constexpr auto program_dies = [](const auto &die) {
     switch (die.tag) {
@@ -364,7 +361,7 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
 
     state.add_maybe_origin(dw::IndexedDieReference{unit_data, unit_data->index_of(&die)});
     if (state.done(die_refs.empty())) {
-      fns.emplace_back(state.complete(elf));
+      fns.emplace_back(state.complete());
     } else {
       // reset e = end() at each iteration, because we might have extended the list during iteration.
       for (auto it = die_refs.begin(), e = die_refs.end(); it != e; ++it) {
@@ -376,7 +373,7 @@ SourceFileSymbolInfo::resolve_fn_symbols() noexcept
         }
 
         if (state.done(std::distance(++auto{it}, e) == 0)) {
-          fns.emplace_back(state.complete(elf));
+          fns.emplace_back(state.complete());
           break;
         }
       }
