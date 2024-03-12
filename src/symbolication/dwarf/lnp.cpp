@@ -1,4 +1,5 @@
 #include "lnp.h"
+#include "common.h"
 #include "symbolication/dwarf_defs.h"
 #include "utils/enumerator.h"
 #include <algorithm>
@@ -16,9 +17,8 @@ class SourceCodeFileLNPResolver
 public:
   SourceCodeFileLNPResolver(LNPHeader *header, std::set<LineTableEntry> &table,
                             std::optional<AddressRange> valid_bounds, u32 file_index) noexcept
-      : header{header}, table(table), address(0), line(1), column(0), op_index(0), file(1),
-        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
-        epilogue_begin(false), isa(0), discriminator(0), bounds(valid_bounds), file_index(file_index)
+      : header{header}, table(table), is_stmt(header->default_is_stmt), bounds(valid_bounds),
+        file_index(file_index)
   {
   }
 
@@ -195,18 +195,18 @@ private:
   LNPHeader *header;
   std::set<LineTableEntry> &table;
   // State machine register
-  u64 address;
-  u32 line;
-  u32 column;
-  u16 op_index;
-  u32 file;
+  u64 address{0};
+  u32 line{1};
+  u32 column{0};
+  u16 op_index{0};
+  u32 file{1};
   bool is_stmt;
-  bool basic_block;
-  bool end_sequence;
-  bool prologue_end;
-  bool epilogue_begin;
-  u8 isa;
-  u32 discriminator;
+  bool basic_block{false};
+  bool end_sequence{false};
+  bool prologue_end{false};
+  bool epilogue_begin{false};
+  u8 isa{0};
+  u32 discriminator{0};
   std::optional<AddressRange> bounds;
   u32 file_index;
 };
@@ -216,9 +216,7 @@ class LNPStateMachine
 public:
   LNPStateMachine(LNPHeader *header, std::vector<LineTableEntry> *table,
                   std::optional<AddressRange> valid_bounds) noexcept
-      : header{header}, table(table), address(0), line(1), column(0), op_index(0), file(1),
-        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
-        epilogue_begin(false), isa(0), discriminator(0), bounds(valid_bounds)
+      : header{header}, table(table), is_stmt(header->default_is_stmt), bounds(valid_bounds)
   {
   }
 
@@ -392,18 +390,18 @@ private:
   LNPHeader *header;
   std::vector<LineTableEntry> *table;
   // State machine register
-  u64 address;
-  u32 line;
-  u32 column;
-  u16 op_index;
-  u32 file;
+  u64 address{0};
+  u32 line{1};
+  u32 column{0};
+  u16 op_index{0};
+  u32 file{1};
   bool is_stmt;
-  bool basic_block;
-  bool end_sequence;
-  bool prologue_end;
-  bool epilogue_begin;
-  u8 isa;
-  u32 discriminator;
+  bool basic_block{false};
+  bool end_sequence{false};
+  bool prologue_end{false};
+  bool epilogue_begin{false};
+  u8 isa{0};
+  u32 discriminator{0};
   std::optional<AddressRange> bounds;
   bool should_record_lines = true;
 };
@@ -1118,14 +1116,14 @@ SourceCodeFile::compute_line_tables() const noexcept
       }
     }
   }
-  line_table->reserve(unique_ltes.size());
-  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(*line_table));
   auto &lt = *line_table;
+  lt.reserve(unique_ltes.size());
+  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(lt));
   ASSERT(std::is_sorted(lt.begin(), lt.end(), [](auto &a, auto &b) { return a.pc < b.pc; }),
          "Line Table was not sorted by Program Counter!");
   if (lt.size() > 2) {
-    low = lt.begin()->pc;
-    high = std::next(lt.begin(), (lt.size() - 1))->pc;
+    low = lt.front().pc;
+    high = lt.back().pc;
   }
   computed = true;
 }
@@ -1142,17 +1140,9 @@ RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFi
 }
 
 auto
-RelocatedSourceCodeFile::find_lte_by_unrelocated_pc(AddrPtr pc) const noexcept
-    -> std::optional<RelocatedLteIterator>
+RelocatedSourceCodeFile::find_lte_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>
 {
   return file.find_by_pc(baseAddr, pc);
-}
-
-auto
-RelocatedSourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column)
-    -> std::optional<LineTableEntry>
-{
-  return file.first_linetable_entry(baseAddr, line, column);
 }
 
 AddressRange

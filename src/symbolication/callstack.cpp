@@ -84,6 +84,7 @@ Frame::cu_line_table() const noexcept
     return std::nullopt;
   const auto symbol_info = symbol.full_symbol->symbol_info();
   ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
+
   return symbol_info->get_linetable(symbol_file);
 }
 

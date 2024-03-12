@@ -14,7 +14,7 @@
 namespace sym {
 
 std::optional<std::tuple<dw::RelocatedLteIterator, dw::RelocatedLteIterator, dw::LineTable>>
-get_lte_range(SymbolFile *obj, std::vector<sym::SourceFileSymbolInfo *> symtabs, AddrPtr addr)
+get_lte_range(SymbolFile *obj, std::vector<sym::CompilationUnit *> symtabs, AddrPtr addr)
 {
   for (auto st : symtabs) {
     if (auto lt_opt = st->get_linetable(obj); lt_opt) {

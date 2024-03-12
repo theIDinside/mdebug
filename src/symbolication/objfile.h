@@ -14,7 +14,6 @@
 using VariablesReference = int;
 template <typename T> using Set = std::unordered_set<T>;
 
-class CompilationUnitFile;
 class NonExecutableCompilationUnitFile;
 
 template <typename T> using Optional = std::optional<T>;
@@ -110,11 +109,11 @@ struct ObjectFile
 
   auto init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers) -> void;
   auto get_plte(u64 offset) noexcept -> sym::dw::ParsedLineTableEntries &;
-  auto add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept -> void;
+  auto add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept -> void;
 
   auto get_source_file(const std::filesystem::path &fullpath) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
   auto source_code_files() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
-  auto source_units() noexcept -> std::vector<sym::SourceFileSymbolInfo> &;
+  auto source_units() noexcept -> std::vector<sym::CompilationUnit> &;
 
   auto initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept -> void;
   auto add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
@@ -131,8 +130,7 @@ private:
   auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
-  auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::SourceFileSymbolInfo *>;
-  auto get_source_code_files(AddrPtr pc) noexcept -> std::vector<sym::dw::SourceCodeFile *>;
+  auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
       -> std::vector<sym::dw::RelocatedSourceCodeFile>;
 
@@ -150,7 +148,7 @@ private:
   std::shared_ptr<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>> parsed_ltes;
 
   std::mutex cu_write_lock;
-  std::vector<sym::SourceFileSymbolInfo> comp_units;
+  std::vector<sym::CompilationUnit> comp_units;
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
   //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable
@@ -191,7 +189,7 @@ public:
   auto registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
       -> std::vector<ui::dap::Variable>;
-  auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::SourceFileSymbolInfo *>;
+  auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
   auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
       -> std::vector<ui::dap::Variable>;
@@ -206,7 +204,7 @@ public:
   auto getLineTable(u64 offset) noexcept -> sym::dw::LineTable;
   auto path() const noexcept -> Path;
 
-  auto lookup_by_spec(const FunctionBreakpoint &spec) noexcept -> std::vector<BreakpointLookup>;
+  auto lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
 
 private:
   std::vector<ui::dap::Variable> getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeController &tc,

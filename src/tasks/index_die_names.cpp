@@ -107,7 +107,7 @@ IndexingTask::execute_task() noexcept
   NameSet global_variables;
   NameSet namespaces;
 
-  std::vector<sym::SourceFileSymbolInfo> initialized_cus{};
+  std::vector<sym::CompilationUnit> initialized_cus{};
   std::vector<sym::dw::UnitData *> followed_references{};
 
   ScopedDefer clear_metadata{[&]() {
@@ -125,7 +125,7 @@ IndexingTask::execute_task() noexcept
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->get_dies();
     if (dies.front().tag == DwarfTag::DW_TAG_compile_unit) {
-      sym::SourceFileSymbolInfo new_cu_file = initialize_compilation_unit(comp_unit, dies.front());
+      sym::CompilationUnit new_cu_file = initialize_compilation_unit(comp_unit, dies.front());
       initialized_cus.push_back(std::move(new_cu_file));
     } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
       sym::PartialCompilationUnitSymbolInfo partial_cu_file =
@@ -270,7 +270,7 @@ IndexingTask::execute_task() noexcept
 }
 
 static void
-process_cu_boundary(u64 ranges_offset, sym::SourceFileSymbolInfo &src) noexcept
+process_cu_boundary(u64 ranges_offset, sym::CompilationUnit &src) noexcept
 {
   auto cu = src.get_dwarf_unit();
   const auto version = cu->header().version();
@@ -312,13 +312,13 @@ process_cu_boundary(u64 ranges_offset, sym::SourceFileSymbolInfo &src) noexcept
   }
 }
 
-sym::SourceFileSymbolInfo
+sym::CompilationUnit
 IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept
 {
   const auto &abbrs = cu->get_abbreviation(cu_die.abbreviation_code);
   UnitReader reader{cu};
   reader.seek_die(cu_die);
-  sym::SourceFileSymbolInfo new_cu{cu};
+  sym::CompilationUnit new_cu{cu};
 
   std::optional<AddrPtr> low;
   std::optional<AddrPtr> high;

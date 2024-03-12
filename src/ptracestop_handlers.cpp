@@ -111,7 +111,7 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
   }
 
   for (auto &&file : files_of_interest) {
-    if (auto it = file.find_lte_by_unrelocated_pc(fpc); it) {
+    if (auto it = file.find_lte_by_pc(fpc); it) {
       auto lte = it.transform([](auto it) { return it.get(); });
       if (start_frame.inside(lte->pc.as_void()) == sym::InsideRange::Yes) {
         if (lte->pc == fpc) {

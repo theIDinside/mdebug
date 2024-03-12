@@ -158,12 +158,12 @@ public:
   std::shared_ptr<BreakpointLocation>
   get_or_create_bp_location(AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void set_source_breakpoints(const std::filesystem::path &source_filepath,
-                              const Set<SourceBreakpoint> &bps) noexcept;
-  void update_source_bps(const std::filesystem::path &source_filepath, std::vector<SourceBreakpoint> &&add,
-                         const std::vector<SourceBreakpoint> &remove) noexcept;
+                              const Set<SourceBreakpointSpec> &bps) noexcept;
+  void update_source_bps(const std::filesystem::path &source_filepath, std::vector<SourceBreakpointSpec> &&add,
+                         const std::vector<SourceBreakpointSpec> &remove) noexcept;
 
-  void set_instruction_breakpoints(const Set<InstructionBreakpoint> &bps) noexcept;
-  void set_fn_breakpoints(const Set<FunctionBreakpoint> &bps) noexcept;
+  void set_instruction_breakpoints(const Set<InstructionBreakpointSpec> &bps) noexcept;
+  void set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noexcept;
 
   void remove_breakpoint(u32 bp_id) noexcept;
 
@@ -288,7 +288,6 @@ public:
   std::optional<std::pair<sym::FunctionSymbol *, NonNullPtr<SymbolFile>>> find_fn_by_pc(AddrPtr addr) noexcept;
   SymbolFile *find_obj_by_pc(AddrPtr addr) noexcept;
 
-  std::optional<std::filesystem::path> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
   const ElfSection *get_text_section(AddrPtr addr) noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;

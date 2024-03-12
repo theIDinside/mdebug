@@ -179,9 +179,11 @@ class RelocatedSourceCodeFile;
 
 class SourceCodeFile
 {
+public:
   NO_COPY(SourceCodeFile);
   friend RelocatedSourceCodeFile;
 
+private:
   std::vector<LNPHeader *> headers;
   // Resolved lazily when needed, by walking `line_table`
   mutable SharedPtr<std::vector<LineTableEntry>> line_table;
@@ -221,8 +223,7 @@ public:
   RelocatedSourceCodeFile(AddrPtr base_addr, std::shared_ptr<SourceCodeFile> file) noexcept;
   RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *file) noexcept;
 
-  auto find_lte_by_unrelocated_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
-  auto first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>;
+  auto find_lte_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
   auto address_bounds() noexcept -> AddressRange;
 
   auto

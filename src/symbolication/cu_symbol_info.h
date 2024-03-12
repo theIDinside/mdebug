@@ -35,7 +35,7 @@ public:
   PartialCompilationUnitSymbolInfo &operator=(const PartialCompilationUnitSymbolInfo &) noexcept = delete;
 };
 
-class SourceFileSymbolInfo
+class CompilationUnit
 {
   dw::UnitData *unit_data;
   AddrPtr pc_start;
@@ -47,8 +47,8 @@ class SourceFileSymbolInfo
   std::vector<std::shared_ptr<dw::SourceCodeFile>> source_code_files{};
 
 public:
-  NO_COPY_DEFAULTED_MOVE(SourceFileSymbolInfo);
-  SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept;
+  NO_COPY_DEFAULTED_MOVE(CompilationUnit);
+  CompilationUnit(dw::UnitData *cu_data) noexcept;
 
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
@@ -68,7 +68,7 @@ public:
   static constexpr auto
   Sorter() noexcept
   {
-    return AddressableSorter<SourceFileSymbolInfo, false>{};
+    return AddressableSorter<CompilationUnit, false>{};
   }
 
 private:
@@ -80,7 +80,7 @@ class AddressToCompilationUnitMap
 public:
   AddressToCompilationUnitMap() noexcept;
   std::vector<sym::dw::UnitData *> find_by_pc(AddrPtr pc) noexcept;
-  void add_cus(const std::span<SourceFileSymbolInfo> &cus) noexcept;
+  void add_cus(const std::span<CompilationUnit> &cus) noexcept;
 
 private:
   void add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept;

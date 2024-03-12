@@ -49,6 +49,8 @@
 #include <utility>
 #include <variant>
 
+using sym::dw::SourceCodeFile;
+
 TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
                                    TargetSession target_session, bool seized, bool open_mem_fd) noexcept
     : task_leader{process_space_id}, main_executable{nullptr}, threads{}, task_vm_infos{}, pbps{*this},
@@ -455,7 +457,7 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, bool attempt_src_resol
     auto srcs = obj->getSourceCodeFiles(addr);
     for (auto src : srcs) {
       if (src.address_bounds().contains(addr)) {
-        if (auto lte = src.find_lte_by_unrelocated_pc(addr).transform([](auto v) { return v.get(); }); lte) {
+        if (auto lte = src.find_lte_by_pc(addr).transform([](auto v) { return v.get(); }); lte) {
           return BreakpointLocation::CreateLocationWithSource(
               addr, original_byte.value(),
               std::make_unique<LocationSourceInfo>(src.path(), lte->line, u32{lte->column}));
@@ -551,17 +553,17 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
 
 void
 TraceeController::update_source_bps(const std::filesystem::path &source_filepath,
-                                    std::vector<SourceBreakpoint> &&add,
-                                    const std::vector<SourceBreakpoint> &remove) noexcept
+                                    std::vector<SourceBreakpointSpec> &&add,
+                                    const std::vector<SourceBreakpointSpec> &remove) noexcept
 {
   auto &map = pbps.source_breakpoints[source_filepath.string()];
 
-  Set<SourceBreakpoint> not_set{add.begin(), add.end()};
+  Set<SourceBreakpointSpec> not_set{add.begin(), add.end()};
 
   for (auto symbol_file : symbol_files) {
     auto obj = symbol_file->objectFile();
 
-    if (auto source_code_file = obj->get_source_file(source_filepath); source_code_file) {
+    if (SourceCodeFile::ShrPtr source_code_file = obj->get_source_file(source_filepath); source_code_file) {
       for (const auto &src_bp : add) {
         if (auto lte =
                 source_code_file->first_linetable_entry(symbol_file->baseAddress, src_bp.line, src_bp.column);
@@ -601,11 +603,11 @@ TraceeController::update_source_bps(const std::filesystem::path &source_filepath
 
 void
 TraceeController::set_source_breakpoints(const std::filesystem::path &source_filepath,
-                                         const Set<SourceBreakpoint> &bps) noexcept
+                                         const Set<SourceBreakpointSpec> &bps) noexcept
 {
   auto &map = pbps.source_breakpoints[source_filepath.string()];
-  std::vector<SourceBreakpoint> remove{};
-  std::vector<SourceBreakpoint> add{};
+  std::vector<SourceBreakpointSpec> remove{};
+  std::vector<SourceBreakpointSpec> add{};
   for (const auto &[b, id] : map) {
     if (!bps.contains(b)) {
       remove.push_back(b);
@@ -622,10 +624,10 @@ TraceeController::set_source_breakpoints(const std::filesystem::path &source_fil
 }
 
 void
-TraceeController::set_instruction_breakpoints(const Set<InstructionBreakpoint> &bps) noexcept
+TraceeController::set_instruction_breakpoints(const Set<InstructionBreakpointSpec> &bps) noexcept
 {
-  std::vector<InstructionBreakpoint> add{};
-  std::vector<InstructionBreakpoint> remove{};
+  std::vector<InstructionBreakpointSpec> add{};
+  std::vector<InstructionBreakpointSpec> remove{};
 
   for (const auto &[bp, id] : pbps.instruction_breakpoints) {
     if (!bps.contains(bp)) {
@@ -647,7 +649,7 @@ TraceeController::set_instruction_breakpoints(const Set<InstructionBreakpoint> &
     bool was_not_set = true;
     for (auto src : srcs) {
       if (src.address_bounds().contains(addr)) {
-        if (auto iter = src.find_lte_by_unrelocated_pc(addr); iter) {
+        if (auto iter = src.find_lte_by_pc(addr); iter) {
           const auto user = pbps.create_loc_user<Breakpoint>(
               *this, get_or_create_bp_location(addr, symbol_file->baseAddress, src.get()), task_leader,
               LocationUserKind::Address, std::nullopt, std::nullopt, !independent_task_resume_control(),
@@ -675,10 +677,10 @@ TraceeController::set_instruction_breakpoints(const Set<InstructionBreakpoint> &
 }
 
 void
-TraceeController::set_fn_breakpoints(const Set<FunctionBreakpoint> &bps) noexcept
+TraceeController::set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noexcept
 {
-  std::vector<FunctionBreakpoint> remove{};
-  std::vector<FunctionBreakpoint> add{};
+  std::vector<FunctionBreakpointSpec> remove{};
+  std::vector<FunctionBreakpointSpec> add{};
   for (const auto &[b, id] : pbps.fn_breakpoints) {
     if (!bps.contains(b)) {
       remove.push_back(b);
@@ -691,7 +693,7 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpoint> &bps) noexcep
     }
   }
 
-  std::unordered_map<FunctionBreakpoint, bool> spec_set{};
+  std::unordered_map<FunctionBreakpointSpec, bool> spec_set{};
   for (const auto &fn : add)
     spec_set[fn] = false;
 
@@ -1171,7 +1173,7 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
     auto obj = find_obj_by_pc(task->registers->rip);
 
     auto syminfos = obj->getSourceInfos(task->registers->rip);
-    sym::SourceFileSymbolInfo *current_symtab = nullptr;
+    sym::CompilationUnit *current_symtab = nullptr;
     if (!syminfos.empty()) {
       for (auto *symtab : syminfos) {
         auto lt = symtab->get_linetable(obj);
@@ -1348,17 +1350,6 @@ TraceeController::find_fn_by_pc(AddrPtr addr) noexcept
   }
 
   return std::make_pair(nullptr, NonNull(*obj));
-}
-
-std::optional<std::filesystem::path>
-TraceeController::get_source(std::string_view name) noexcept
-{
-  for (auto obj : symbol_files) {
-    if (auto source = obj->objectFile()->get_source_file(name); source) {
-      return source->full_path;
-    }
-  }
-  return std::nullopt;
 }
 
 const ElfSection *

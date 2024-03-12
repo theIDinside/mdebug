@@ -228,16 +228,16 @@ ObjectFile::get_plte(u64 offset) noexcept
 }
 
 void
-ObjectFile::add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept
+ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept
 {
   // TODO(simon): We do stupid sorting. implement something better optimized
   std::lock_guard lock(cu_write_lock);
   comp_units.insert(comp_units.end(), std::make_move_iterator(new_cus.begin()),
                     std::make_move_iterator(new_cus.end()));
-  std::sort(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter());
+  std::sort(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter());
 
   DBG({
-    if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter())) {
+    if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter())) {
       for (const auto &cu : comp_units) {
         DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
              cu.start_pc(), cu.end_pc());
@@ -248,7 +248,7 @@ ObjectFile::add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) no
   addr_cu_map.add_cus(new_cus);
 }
 
-std::vector<sym::SourceFileSymbolInfo> &
+std::vector<sym::CompilationUnit> &
 ObjectFile::source_units() noexcept
 {
   return comp_units;
@@ -272,33 +272,15 @@ ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
 
 // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
 // uninteresting for now and not really important, as it can be fixed at any point in time.
-std::vector<sym::SourceFileSymbolInfo *>
+std::vector<sym::CompilationUnit *>
 ObjectFile::get_source_infos(AddrPtr pc) noexcept
 {
-  std::vector<sym::SourceFileSymbolInfo *> result;
+  std::vector<sym::CompilationUnit *> result;
   auto unit_datas = addr_cu_map.find_by_pc(pc);
   for (auto &src : source_units()) {
     for (auto *unit : unit_datas) {
       if (src.get_dwarf_unit() == unit) {
         result.push_back(&src);
-      }
-    }
-  }
-  return result;
-}
-
-std::vector<sym::dw::SourceCodeFile *>
-ObjectFile::get_source_code_files(AddrPtr pc) noexcept
-{
-  std::vector<sym::dw::SourceCodeFile *> result;
-  auto cus = get_source_infos(pc);
-  const auto is_unique = [&](auto ptr) noexcept {
-    return std::none_of(result.begin(), result.end(), [ptr](auto cmp) { return ptr == cmp; });
-  };
-  for (auto cu : cus) {
-    for (auto src : cu->sources()) {
-      if (src->address_bounds().contains(pc) && is_unique(src.get())) {
-        result.push_back(src.get());
       }
     }
   }
@@ -606,7 +588,7 @@ SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableS
   return {};
 }
 auto
-SymbolFile::getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::SourceFileSymbolInfo *>
+SymbolFile::getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
   return binary_object->get_source_infos(pc - *baseAddress);
 }
@@ -728,7 +710,7 @@ SymbolFile::path() const noexcept -> Path
 }
 
 auto
-SymbolFile::lookup_by_spec(const FunctionBreakpoint &spec) noexcept -> std::vector<BreakpointLookup>
+SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>
 {
 
   std::vector<MinSymbol> matching_symbols;
@@ -769,7 +751,7 @@ SymbolFile::lookup_by_spec(const FunctionBreakpoint &spec) noexcept -> std::vect
       auto srcs = getSourceCodeFiles(unrelocated);
       for (auto src : srcs) {
         if (src.address_bounds().contains(adjusted_address)) {
-          if (auto lte = src.find_lte_by_unrelocated_pc(unrelocated).transform([](auto v) { return v.get(); });
+          if (auto lte = src.find_lte_by_pc(unrelocated).transform([](auto v) { return v.get(); });
               lte && !bps_set.contains(unrelocated)) {
             result.emplace_back(adjusted_address, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});
             bps_set.insert(sym.address);

@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "eval/eval.h"
 #include "events/event.h"
 #include "typedefs.h"
 #include "utils/immutable.h"
@@ -32,7 +33,7 @@ enum class LocationUserKind : u8
   LongJump
 };
 
-struct SourceBreakpoint
+struct SourceBreakpointSpec
 {
   u32 line;
   std::optional<u32> column;
@@ -41,21 +42,21 @@ struct SourceBreakpoint
 
   // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
   // Comparing two `SourceBreakpoint` objects from different source files is non sensical
-  friend constexpr auto operator<=>(const SourceBreakpoint &l, const SourceBreakpoint &r) = default;
+  friend constexpr auto operator<=>(const SourceBreakpointSpec &l, const SourceBreakpointSpec &r) = default;
 
   // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
   // Comparing two `SourceBreakpoint` objects from different source files is non sensical
   friend constexpr auto
-  operator==(const SourceBreakpoint &l, const SourceBreakpoint &r)
+  operator==(const SourceBreakpointSpec &l, const SourceBreakpointSpec &r)
   {
     return l.line == r.line && l.column == r.column && l.condition == r.condition &&
            l.log_message == r.log_message;
   }
 };
 
-template <> struct std::hash<SourceBreakpoint>
+template <> struct std::hash<SourceBreakpointSpec>
 {
-  using argument_type = SourceBreakpoint;
+  using argument_type = SourceBreakpointSpec;
   using result_type = size_t;
 
   result_type
@@ -81,23 +82,23 @@ template <> struct std::hash<SourceBreakpoint>
   }
 };
 
-struct FunctionBreakpoint
+struct FunctionBreakpointSpec
 {
   std::string name;
   std::optional<std::string> condition;
   bool is_regex;
-  friend constexpr auto operator<=>(const FunctionBreakpoint &l, const FunctionBreakpoint &r) = default;
+  friend constexpr auto operator<=>(const FunctionBreakpointSpec &l, const FunctionBreakpointSpec &r) = default;
 
   friend constexpr auto
-  operator==(const FunctionBreakpoint &l, const FunctionBreakpoint &r)
+  operator==(const FunctionBreakpointSpec &l, const FunctionBreakpointSpec &r)
   {
     return l.name == r.name && l.condition == r.condition;
   }
 };
 
-template <> struct std::hash<FunctionBreakpoint>
+template <> struct std::hash<FunctionBreakpointSpec>
 {
-  using argument_type = FunctionBreakpoint;
+  using argument_type = FunctionBreakpointSpec;
   using result_type = size_t;
 
   result_type
@@ -107,21 +108,22 @@ template <> struct std::hash<FunctionBreakpoint>
   }
 };
 
-struct InstructionBreakpoint
+struct InstructionBreakpointSpec
 {
   std::string instructionReference;
   std::optional<std::string> condition;
-  friend constexpr auto operator<=>(const InstructionBreakpoint &l, const InstructionBreakpoint &r) = default;
+  friend constexpr auto operator<=>(const InstructionBreakpointSpec &l,
+                                    const InstructionBreakpointSpec &r) = default;
   friend constexpr auto
-  operator==(const InstructionBreakpoint &l, const InstructionBreakpoint &r)
+  operator==(const InstructionBreakpointSpec &l, const InstructionBreakpointSpec &r)
   {
     return l.instructionReference == r.instructionReference && l.condition == r.condition;
   }
 };
 
-template <> struct std::hash<InstructionBreakpoint>
+template <> struct std::hash<InstructionBreakpointSpec>
 {
-  using argument_type = InstructionBreakpoint;
+  using argument_type = InstructionBreakpointSpec;
   using result_type = size_t;
 
   result_type
@@ -133,7 +135,7 @@ template <> struct std::hash<InstructionBreakpoint>
 };
 
 using UserBpSpec =
-    std::variant<std::pair<std::string, SourceBreakpoint>, FunctionBreakpoint, InstructionBreakpoint>;
+    std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
 
 /** A type that informs the supervisor on what to do with the breakpoint after that breakpoint has been hit.
  * Currently describes if the thread should stop and/or if the breakpoint is to be retired. */
@@ -325,10 +327,15 @@ public:
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
-class Logpoint : public UserBreakpoint
+class Logpoint : public Breakpoint
 {
+  std::string expressionString;
+  std::unique_ptr<eval::Expr> compiledExpression{nullptr};
+  void compile_expression() noexcept;
+
 public:
-  explicit Logpoint(RequiredUserParameters param) noexcept;
+  explicit Logpoint(RequiredUserParameters param, std::string expression,
+                    std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept;
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
@@ -356,9 +363,10 @@ public:
   // we don't expose here at all, it's behind a shared pointer in the `user_bp_t` types and as such, will die when
   // the last user breakpoint that references it dies (it can also be explicitly killed by instructing a user
   // breakpoint to remove itself from the location's list and if that list becomes empty, the location will die.)
-  std::unordered_map<std::string, std::unordered_map<SourceBreakpoint, std::vector<BpId>>> source_breakpoints{};
-  std::unordered_map<FunctionBreakpoint, std::vector<BpId>> fn_breakpoints{};
-  std::unordered_map<InstructionBreakpoint, BpId> instruction_breakpoints{};
+  std::unordered_map<std::string, std::unordered_map<SourceBreakpointSpec, std::vector<BpId>>>
+      source_breakpoints{};
+  std::unordered_map<FunctionBreakpointSpec, std::vector<BpId>> fn_breakpoints{};
+  std::unordered_map<InstructionBreakpointSpec, BpId> instruction_breakpoints{};
 
   void add_bp_location(UserBreakpoint *updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;

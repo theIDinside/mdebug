@@ -263,7 +263,7 @@ Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std:
         auto objfile = symbol_file->objectFile();
         switch (this->bp_spec->index()) {
         case SOURCE_BREAKPOINT: {
-          const auto &spec = std::get<std::pair<std::string, SourceBreakpoint>>(*this->bp_spec);
+          const auto &spec = std::get<std::pair<std::string, SourceBreakpointSpec>>(*this->bp_spec);
           if (auto source_code_file = objfile->get_source_file(spec.first); source_code_file) {
             if (auto lte = source_code_file->first_linetable_entry(symbol_file->baseAddress, spec.second.line,
                                                                    spec.second.column);
@@ -277,7 +277,7 @@ Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std:
           }
         } break;
         case FUNCTION_BREAKPOINT: {
-          const auto &spec = std::get<FunctionBreakpoint>(*this->bp_spec);
+          const auto &spec = std::get<FunctionBreakpointSpec>(*this->bp_spec);
           auto result = symbol_file->lookup_by_spec(spec);
 
           if (auto it = std::find_if(result.begin(), result.end(),
@@ -297,14 +297,14 @@ Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std:
           }
         } break;
         case INSTRUCTION_BREAKPOINT:
-          const auto &spec = std::get<InstructionBreakpoint>(*this->bp_spec);
+          const auto &spec = std::get<InstructionBreakpointSpec>(*this->bp_spec);
           auto addr_opt = to_addr(spec.instructionReference);
           ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
           const auto addr = addr_opt.value();
           auto srcs = symbol_file->getSourceCodeFiles(addr);
           for (auto src : srcs) {
             if (src.address_bounds().contains(addr)) {
-              if (auto iter = src.find_lte_by_unrelocated_pc(addr - symbol_file->baseAddress); iter) {
+              if (auto iter = src.find_lte_by_pc(addr - symbol_file->baseAddress); iter) {
                 this->update_location(tc.get_or_create_bp_location(addr, false));
                 tc.pbps.add_bp_location(this);
                 tc.emit_breakpoint_event("changed", *this, std::optional<std::string>{});
@@ -407,6 +407,30 @@ ResumeToBreakpoint::on_hit(TraceeController &, TaskInfo &t) noexcept
   } else {
     return bp_hit::noop();
   }
+}
+
+Logpoint::Logpoint(RequiredUserParameters param, std::string logExpression,
+                   std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept
+    : Breakpoint(param, LocationUserKind::LogPoint, std::nullopt, std::move(stop_condition), false,
+                 std::move(spec)),
+      expressionString(std::move(logExpression))
+{
+}
+
+void
+Logpoint::compile_expression() noexcept
+{
+  // TODO(simon): Implement some form of rudimentary scripting language here. Or perhaps a DSL strictly for
+  // logging. Whatever really.
+}
+
+bp_hit
+Logpoint::on_hit(TraceeController &, TaskInfo &) noexcept
+{
+  if (compiledExpression == nullptr) {
+    compile_expression();
+  }
+  return bp_hit::noop();
 }
 
 SOLoadingBreakpoint::SOLoadingBreakpoint(RequiredUserParameters param) noexcept

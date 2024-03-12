@@ -297,7 +297,7 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
     }
     get_current()->reaped_events();
     if (stopAtEntry) {
-      Set<FunctionBreakpoint> fns{};
+      Set<FunctionBreakpointSpec> fns{};
       fns.insert({"main", {}, false});
       get_current()->set_fn_breakpoints(fns);
     }

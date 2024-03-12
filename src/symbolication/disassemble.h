@@ -4,7 +4,6 @@
 
 struct TraceeController;
 struct ElfSection;
-class CompilationUnitFile;
 struct LineTableEntry;
 
 namespace sym {

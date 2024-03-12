@@ -273,12 +273,12 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
   const std::string file = args["source"]["path"];
-  Set<SourceBreakpoint> src_bps;
+  Set<SourceBreakpointSpec> src_bps;
   for (const auto &src_bp : args.at("breakpoints")) {
     ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
     const u32 line = src_bp["line"];
-    src_bps.insert(SourceBreakpoint{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
-                                    get<std::string>(src_bp, "logMessage")});
+    src_bps.insert(SourceBreakpointSpec{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
+                                        get<std::string>(src_bp, "logMessage")});
   }
   target->set_source_breakpoints(file, src_bps);
 
@@ -304,14 +304,14 @@ UIResultPtr
 SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
 {
   using BP = ui::dap::Breakpoint;
-  Set<InstructionBreakpoint> bps{};
+  Set<InstructionBreakpointSpec> bps{};
   const auto ibps = args.at("breakpoints");
   for (const auto &ibkpt : ibps) {
     ASSERT(ibkpt.contains("instructionReference") && ibkpt["instructionReference"].is_string(),
            "instructionReference field not in args or wasn't of type string");
     std::string_view addr_str;
     ibkpt["instructionReference"].get_to(addr_str);
-    bps.insert(InstructionBreakpoint{.instructionReference = std::string{addr_str}, .condition = {}});
+    bps.insert(InstructionBreakpointSpec{.instructionReference = std::string{addr_str}, .condition = {}});
   }
   auto target = tracer->get_current();
   target->set_instruction_breakpoints(bps);
@@ -339,7 +339,7 @@ UIResultPtr
 SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
 {
   using BP = ui::dap::Breakpoint;
-  Set<FunctionBreakpoint> bkpts{};
+  Set<FunctionBreakpointSpec> bkpts{};
   std::vector<std::string_view> new_ones{};
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::function};
   for (const auto &fnbkpt : args.at("breakpoints")) {
@@ -351,7 +351,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
       is_regex = fnbkpt["regex"];
     }
 
-    bkpts.insert(FunctionBreakpoint{fn_name, std::nullopt, is_regex});
+    bkpts.insert(FunctionBreakpointSpec{fn_name, std::nullopt, is_regex});
   }
   auto target = tracer->get_current();
 

@@ -37,13 +37,13 @@ PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&r
   return *this;
 }
 
-SourceFileSymbolInfo::SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept
+CompilationUnit::CompilationUnit(dw::UnitData *cu_data) noexcept
     : unit_data(cu_data), pc_start(nullptr), pc_end_exclusive(nullptr), line_table(), cu_name("unknown"), fns()
 {
 }
 
 void
-SourceFileSymbolInfo::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
+CompilationUnit::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
   pc_start = lowest;
   pc_end_exclusive = end_exclusive;
@@ -56,7 +56,7 @@ SourceFileSymbolInfo::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive
 // by storing them by name in `ObjectFile` in a map and then add the references to them
 // to the newly minted compilation unit handle (process_source_code_files)
 void
-SourceFileSymbolInfo::process_source_code_files(u64 table) noexcept
+CompilationUnit::process_source_code_files(u64 table) noexcept
 {
   line_table = table;
   auto obj = unit_data->get_objfile();
@@ -69,55 +69,55 @@ SourceFileSymbolInfo::process_source_code_files(u64 table) noexcept
 }
 
 void
-SourceFileSymbolInfo::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept
+CompilationUnit::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept
 {
   source_code_files.emplace_back(std::move(src_file));
 }
 
 std::span<std::shared_ptr<dw::SourceCodeFile>>
-SourceFileSymbolInfo::sources() noexcept
+CompilationUnit::sources() noexcept
 {
   return source_code_files;
 }
 
 void
-SourceFileSymbolInfo::set_name(std::string_view name) noexcept
+CompilationUnit::set_name(std::string_view name) noexcept
 {
   cu_name = name;
 }
 
 bool
-SourceFileSymbolInfo::known_address_boundary() const noexcept
+CompilationUnit::known_address_boundary() const noexcept
 {
   return pc_start != nullptr && pc_end_exclusive != nullptr;
 }
 
 AddrPtr
-SourceFileSymbolInfo::start_pc() const noexcept
+CompilationUnit::start_pc() const noexcept
 {
   return pc_start;
 }
 
 AddrPtr
-SourceFileSymbolInfo::end_pc() const noexcept
+CompilationUnit::end_pc() const noexcept
 {
   return pc_end_exclusive;
 }
 
 std::string_view
-SourceFileSymbolInfo::name() const noexcept
+CompilationUnit::name() const noexcept
 {
   return cu_name;
 }
 
 bool
-SourceFileSymbolInfo::function_symbols_resolved() const noexcept
+CompilationUnit::function_symbols_resolved() const noexcept
 {
   return !fns.empty();
 }
 
 sym::FunctionSymbol *
-SourceFileSymbolInfo::get_fn_by_pc(AddrPtr pc) noexcept
+CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
 {
   if (!function_symbols_resolved())
     resolve_fn_symbols();
@@ -131,19 +131,19 @@ SourceFileSymbolInfo::get_fn_by_pc(AddrPtr pc) noexcept
 }
 
 dw::UnitData *
-SourceFileSymbolInfo::get_dwarf_unit() const noexcept
+CompilationUnit::get_dwarf_unit() const noexcept
 {
   return unit_data;
 }
 
 std::optional<dw::LineTable>
-SourceFileSymbolInfo::get_linetable(SymbolFile *sf) noexcept
+CompilationUnit::get_linetable(SymbolFile *sf) noexcept
 {
   return sf->getLineTable(line_table);
 }
 
 std::optional<Path>
-SourceFileSymbolInfo::get_lnp_file(u32 index) noexcept
+CompilationUnit::get_lnp_file(u32 index) noexcept
 {
   // TODO(simon): we really should store a pointer to the line number program table (or header) in either UnitData
   // or SourceFileSymbolInfo directly.
@@ -156,7 +156,7 @@ using AddrOpt = std::optional<AddrPtr>;
 
 struct ResolveFnSymbolState
 {
-  SourceFileSymbolInfo *symtab;
+  CompilationUnit *symtab;
   std::string_view name{};
   std::string_view mangled_name{};
   // a namespace or a class, so foo::foo, like a constructor, or utils::foo for a namespace with foo as a fn, for
@@ -171,7 +171,7 @@ struct ResolveFnSymbolState
   std::optional<u32> line{std::nullopt};
   std::optional<std::string> lnp_file{std::nullopt};
 
-  explicit ResolveFnSymbolState(SourceFileSymbolInfo *symtable) noexcept : symtab(symtable) {}
+  explicit ResolveFnSymbolState(CompilationUnit *symtable) noexcept : symtab(symtable) {}
 
   std::array<dw::IndexedDieReference, 3> maybe_origin_dies{};
   bool
@@ -218,7 +218,7 @@ struct ResolveFnSymbolState
 };
 
 static std::optional<dw::DieReference>
-follow_reference(SourceFileSymbolInfo &src_file, ResolveFnSymbolState &state, dw::DieReference ref) noexcept
+follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::DieReference ref) noexcept
 {
   std::optional<dw::DieReference> additional_die_reference = std::optional<dw::DieReference>{};
   dw::UnitReader reader{ref.cu};
@@ -279,7 +279,7 @@ follow_reference(SourceFileSymbolInfo &src_file, ResolveFnSymbolState &state, dw
 }
 
 void
-SourceFileSymbolInfo::resolve_fn_symbols() noexcept
+CompilationUnit::resolve_fn_symbols() noexcept
 {
   const auto &dies = unit_data->get_dies();
   constexpr auto program_dies = [](const auto &die) {
@@ -396,7 +396,7 @@ AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 }
 
 void
-AddressToCompilationUnitMap::add_cus(const std::span<SourceFileSymbolInfo> &cus) noexcept
+AddressToCompilationUnitMap::add_cus(const std::span<CompilationUnit> &cus) noexcept
 {
   std::lock_guard lock(mutex);
   for (const auto &src_sym_info : cus) {
