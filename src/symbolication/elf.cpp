@@ -3,6 +3,7 @@
 #include "objfile.h"
 #include "symbolication/addr_sorter.h"
 #include "utils/enumerator.h"
+#include <algorithm>
 
 std::string_view
 ElfSection::get_name() const noexcept
@@ -146,6 +147,7 @@ Elf::parse_min_symbols() const noexcept
     auto entries = (end - start) / sizeof(Elf64_Sym);
     std::span<Elf64_Sym> symbols{(Elf64_Sym *)sec->m_section_ptr, entries};
     for (auto &symbol : symbols) {
+
       if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
         const auto res = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
@@ -157,7 +159,8 @@ Elf::parse_min_symbols() const noexcept
       }
     }
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
-    std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), SortLowPc<MinSymbol>());
+    const auto cmp = [](const auto &a, const auto &b) -> bool { return a.address < b.address; };
+    std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
     obj_file.add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
     LOG("mdb", "[warning]: No .symtab for {}", obj_file.path->c_str());

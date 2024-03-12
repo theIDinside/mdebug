@@ -64,10 +64,11 @@ ObjectFile::get_min_fn_sym(std::string_view name) noexcept
 {
   if (minimal_fn_symbols.contains(name)) {
     auto &index = minimal_fn_symbols[name];
-    return min_fn_symbols_sorted[index];
-  } else {
-    return std::nullopt;
+    if (const auto symbol = min_fn_symbols_sorted[index]; symbol.maybe_size > 0) {
+      return symbol;
+    }
   }
+  return std::nullopt;
 }
 
 const MinSymbol *

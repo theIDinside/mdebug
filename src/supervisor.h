@@ -155,8 +155,8 @@ public:
   std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
   std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr, AddrPtr base,
                                                                 sym::dw::SourceCodeFile &src_code_file) noexcept;
-  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr,
-                                                                LocationSourceInfo &&sourceLocInfo) noexcept;
+  std::shared_ptr<BreakpointLocation>
+  get_or_create_bp_location(AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void set_source_breakpoints(const std::filesystem::path &source_filepath,
                               const Set<SourceBreakpoint> &bps) noexcept;
   void update_source_bps(const std::filesystem::path &source_filepath, std::vector<SourceBreakpoint> &&add,

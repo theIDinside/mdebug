@@ -485,7 +485,8 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, AddrPtr base,
 }
 
 std::shared_ptr<BreakpointLocation>
-TraceeController::get_or_create_bp_location(AddrPtr addr, LocationSourceInfo &&sourceLocInfo) noexcept
+TraceeController::get_or_create_bp_location(AddrPtr addr,
+                                            std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept
 {
   const auto loc = pbps.location_at(addr);
   if (loc) {
@@ -493,8 +494,12 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, LocationSourceInfo &&s
   }
 
   u8 original_byte = write_bp_byte(addr);
-  return BreakpointLocation::CreateLocationWithSource(
-      addr, original_byte, std::make_unique<LocationSourceInfo>(std::move(sourceLocInfo)));
+  if (sourceLocInfo) {
+    return BreakpointLocation::CreateLocationWithSource(
+        addr, original_byte, std::make_unique<LocationSourceInfo>(std::move(sourceLocInfo.value())));
+  } else {
+    return BreakpointLocation::CreateLocation(addr, original_byte);
+  }
 }
 
 void
@@ -534,7 +539,7 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
       auto result = sym->lookup_by_spec(fn);
       for (auto &&lookup : result) {
         auto user = pbps.create_loc_user<Breakpoint>(
-            *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info.value())), task_leader,
+            *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info)), task_leader,
             LocationUserKind::Function, std::nullopt, std::nullopt, !independent_task_resume_control(),
             std::make_unique<UserBpSpec>(fn));
         emit_breakpoint_event("new", *user, {});
@@ -696,7 +701,7 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpoint> &bps) noexcep
       bool spec_empty_result = true;
       for (auto &&lookup : result) {
         auto user = pbps.create_loc_user<Breakpoint>(
-            *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info.value())), task_leader,
+            *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info)), task_leader,
             LocationUserKind::Function, std::nullopt, std::nullopt, !independent_task_resume_control(),
             std::make_unique<UserBpSpec>(fn));
         pbps.fn_breakpoints[fn].push_back(user->id);
