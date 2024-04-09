@@ -1,6 +1,8 @@
 const { checkResponse, getLineOf, readFile, repoDirFile, launchToGetFramesAndScopes } = require('./client')
 const { assert, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
 
+const bpRequest = 'setBreakpoints'
+
 async function initLaunchToMain(DA, exe, { file, bps } = {}) {
   await DA.launchToMain(DA.buildDirFile(exe))
   if (file) {
@@ -64,7 +66,6 @@ async function setInstructionBreakpoint(debuggerAdapter) {
 
 async function set4InSameCompUnit(debuggerAdapter) {
   await setup(debuggerAdapter, 'stackframes')
-  const bpRequest = 'setBreakpoints'
   const file = readFile(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
@@ -191,7 +192,34 @@ async function setBreakpointsThatArePending(debugAdapter) {
   await stopped_promise
 }
 
+async function setNonExistingSourceBp(debugAdapter) {
+  let { threads, frames, scopes } = await launchToGetFramesAndScopes(
+    debugAdapter,
+    'test/dynamicLoading.cpp',
+    ['BP_PRE_OPEN', 'BP_PRE_DLSYM', 'BP_PRE_CALL', 'BP_PRE_CLOSE'],
+    'perform_dynamic',
+    'dynamicLoading'
+  )
+
+  const bp_lines = [{ line: 1 }, { line: 2 }, { line: 3 }]
+
+  const res = await debugAdapter.sendReqGetResponse(bpRequest, {
+    source: {
+      name: repoDirFile('test/doesNotExist.cpp'),
+      path: repoDirFile('test/doesNotExist.cpp'),
+    },
+    breakpoints: bp_lines,
+  })
+
+  console.log(prettyJson(res))
+  assert(
+    res.body.breakpoints.length == bp_lines.length,
+    () => `Expected to see ${bp_lines.length} breakpoints but saw ${res.body.breakpoints.length}: \n${prettyJson(res)}`
+  )
+}
+
 const tests = {
+  setNonExistingSourceBp: setNonExistingSourceBp,
   set4InSameCompUnit: set4InSameCompUnit,
   set2InDifferentCompUnit: set2InDifferentCompUnit,
   setInstructionBreakpoint: setInstructionBreakpoint,

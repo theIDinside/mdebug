@@ -1,8 +1,11 @@
 #pragma once
+#include "common.h"
+#include <deque>
 #include <memory>
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace utils {
 
@@ -36,71 +39,43 @@ unexpected(Err &&err) noexcept
   return Unexpected<Err>{std::forward<Err>(err)};
 }
 
+// Just a thin, stupid, inefficient wrapper around std::variant. It'll do for now.
 template <typename T, typename Err> class Expected
 {
-  union
-  {
-    Err err;
-    T val;
-  };
+  std::variant<T, Err> val_or_err;
   bool has_value;
 
 public:
-  template <typename... Args> Expected(Args &&...args) noexcept : val(std::forward<Args>(args)...), has_value(true)
+  template <typename... Args>
+  Expected(Args &&...args) noexcept : val_or_err(std::forward<Args>(args)...), has_value(true)
   {
   }
 
-  Expected(Err &&e) noexcept : err(std::move(e)), has_value(false) {}
-  Expected(const Err &e) noexcept : err(e), has_value(false) {}
+  Expected(Expected &&move) noexcept : val_or_err(std::move(move.val_or_err)), has_value(move.has_value) {}
 
-  Expected(const Unexpected<Err> &conv) : err(conv.err), has_value(false) {}
-  Expected(Unexpected<Err> &&conv) : err(std::move(conv.err)), has_value(false) {}
+  Expected(Err &&e) noexcept : val_or_err(std::move(e)), has_value(false) {}
+  Expected(const Err &e) noexcept : val_or_err(e), has_value(false) {}
 
-  ~Expected() noexcept
-    requires(trivial_destruct<T>() && trivial_destruct<Err>())
-  = default;
+  Expected(const Unexpected<Err> &conv) : val_or_err(conv.err), has_value(false) {}
+  Expected(Unexpected<Err> &&conv) : val_or_err(std::move(conv.err)), has_value(false) {}
 
-  ~Expected() noexcept
-    requires(!trivial_destruct<T>() && trivial_destruct<Err>())
+  template <typename ConvertT>
+  Expected(Expected<ConvertT, Err> &&ExpectedWithErrorRequiringConversion) noexcept
+      : val_or_err(ExpectedWithErrorRequiringConversion.take_error()), has_value(false)
   {
-    if (has_value) {
-      if constexpr (std::is_array_v<T>) {
-        std::destroy(val, val + std::size(val));
-      } else {
-        std::destroy_at(&val);
-      }
-    }
+    ASSERT(ExpectedWithErrorRequiringConversion.is_expected() != true,
+           "Conversion from expected that had a value, but was expected to be an error");
   }
 
-  ~Expected() noexcept
-    requires(trivial_destruct<T>() && !trivial_destruct<Err>())
+  template <typename ConvertErr>
+  Expected(Expected<T, ConvertErr> &&ExpectedWithValueRequiringConversion) noexcept
+      : val_or_err(ExpectedWithValueRequiringConversion.take_value()), has_value(true)
   {
-    if (!has_value) {
-      if constexpr (std::is_array_v<Err>) {
-        std::destroy(err, err + std::size(err));
-      } else {
-        std::destroy_at(&err);
-      }
-    }
+    ASSERT(ExpectedWithValueRequiringConversion.is_expected(),
+           "Conversion from expected that had a value, but was expected to be an error");
   }
 
-  ~Expected() noexcept
-    requires(!trivial_destruct<T>() && !trivial_destruct<Err>())
-  {
-    if (has_value) {
-      if constexpr (std::is_array_v<T>) {
-        std::destroy(val, val + std::size(val));
-      } else {
-        std::destroy_at(&val);
-      }
-    } else {
-      if constexpr (std::is_array_v<Err>) {
-        std::destroy(err, err + std::size(err));
-      } else {
-        std::destroy_at(&err);
-      }
-    }
-  }
+  ~Expected() noexcept = default;
 
   constexpr bool
   is_expected() const noexcept
@@ -108,71 +83,75 @@ public:
     return has_value;
   }
 
-  std::enable_if<std::is_pointer<T>::value, T *>
+  T *
   operator->() noexcept
   {
-    return val;
-  }
-
-  auto &&
-  operator*() && noexcept
-  {
-    return val;
+    ASSERT(has_value, "Expected did not have a value");
+    return std::get_if<T>(&val_or_err);
   }
 
   auto &
   operator*() & noexcept
   {
-    return val;
+    ASSERT(has_value, "Expected did not have a value");
+    return *std::get_if<T>(&val_or_err);
   }
 
   T &
   value() & noexcept
   {
-    return val;
+    ASSERT(has_value, "Expected did not have a value");
+    return *std::get_if<T>(&val_or_err);
   }
 
   T &&
   value() && noexcept
   {
-    return std::move(val);
+    ASSERT(has_value, "Expected did not have a value");
+    return std::get<T>(std::move(val_or_err));
   }
 
   // Just make it explicit. Easier for everyone to know, we are *definitely* moving out of this value.
   T &&
   take_value() noexcept
   {
-    return std::move(val);
+    ASSERT(has_value, "Expected did not have a value");
+    return std::get<T>(std::move(val_or_err));
   }
 
   const T &
   value() const & noexcept
   {
-    return val;
+    ASSERT(has_value, "Expected did not have a value");
+    return std::get<T>(val_or_err);
   }
 
   Err &
   error() & noexcept
   {
-    return err;
+    ASSERT(!has_value, "Expected have a value");
+    return std::get<Err>(val_or_err);
   }
 
   Err &&
   take_error() noexcept
   {
-    return std::move(err);
+    ASSERT(!has_value, "Expected have a value");
+    return std::get<Err>(std::move(val_or_err));
   }
 
   Err &&
   error() && noexcept
   {
-    return err;
+    ASSERT(!has_value, "Expected have a value");
+    return std::get<Err>(std::move(val_or_err));
   }
 
   const Err &
   error() const & noexcept
   {
-    return err;
+    ASSERT(!has_value, "Expected have a value");
+    return std::get<Err>(val_or_err);
   }
 };
 
@@ -186,27 +165,16 @@ template <typename Pointee> struct is_smart_ptr<std::unique_ptr<Pointee>> : std:
 {
 };
 
-template <typename T> concept IsSmartPtr = is_smart_ptr<T>::value;
+template <typename T> concept IsPointer = is_smart_ptr<T>::value || std::is_pointer_v<T>;
 
 template <typename Fn>
 auto
-transform(const IsSmartPtr auto &smart_ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*smart_ptr))>
+transform(const IsPointer auto &smart_ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*smart_ptr))>
 {
   if (smart_ptr == nullptr) {
     return std::nullopt;
   }
   return std::make_optional(fn(*smart_ptr));
-}
-
-template <typename Fn>
-auto
-transform(const auto ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*ptr))>
-  requires(std::is_pointer_v<decltype(ptr)>)
-{
-  if (ptr == nullptr) {
-    return std::nullopt;
-  }
-  return std::make_optional(fn(*ptr));
 }
 
 } // namespace utils

@@ -212,11 +212,11 @@ StepOut::execute(Tracer *tracer) noexcept
   auto resume_addrs = task->return_addresses(target, req);
   ASSERT(resume_addrs.size() >= req.count, "Could not find frame info");
   const auto rip = resume_addrs[1];
-  const auto loc = target->get_or_create_bp_location(rip, false);
-  if (loc == nullptr) {
+  auto loc = target->get_or_create_bp_location(rip, false);
+  if (!loc.is_expected()) {
     return new StepOutResponse{false, this};
   }
-  auto user = target->pbps.create_loc_user<FinishBreakpoint>(*target, loc, task->tid, task->tid);
+  auto user = target->pbps.create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->tid, task->tid);
   target->install_thread_proceed<ptracestop::FinishFunction>(*task, user, false);
   return new StepOutResponse{true, this};
 }
@@ -283,7 +283,8 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
   target->set_source_breakpoints(file, src_bps);
 
   using BP = ui::dap::Breakpoint;
-  for (const auto &[bp, ids] : target->pbps.source_breakpoints[file]) {
+
+  for (const auto &[bp, ids] : target->pbps.bps_for_source(file)) {
     for (const auto id : ids) {
       const auto user = target->pbps.get_user(id);
       res->breakpoints.push_back(BP::from_user_bp(user));

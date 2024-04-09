@@ -14,6 +14,7 @@
 #include "symbolication/fnsymbol.h"
 #include "task.h"
 #include "utils/byte_buffer.h"
+#include "utils/expected.h"
 #include <link.h>
 #include <optional>
 #include <thread>
@@ -102,6 +103,8 @@ public:
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
   void install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
+  std::optional<std::shared_ptr<BreakpointLocation>> reassess_bploc_for_symfile(SymbolFile &symbol_file,
+                                                                                UserBreakpoint &user_bp) noexcept;
   void do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>> &&new_symbol_files) noexcept;
 
   bool is_null_unwinder(sym::Unwinder *unwinder) const noexcept;
@@ -152,10 +155,12 @@ public:
   void emit_breakpoint_event(std::string_view reason, const UserBreakpoint &bp,
                              std::optional<std::string> message) noexcept;
 
-  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
-  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr, AddrPtr base,
-                                                                sym::dw::SourceCodeFile &src_code_file) noexcept;
-  std::shared_ptr<BreakpointLocation>
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  get_or_create_bp_location(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
+
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   get_or_create_bp_location(AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void set_source_breakpoints(const std::filesystem::path &source_filepath,
                               const Set<SourceBreakpointSpec> &bps) noexcept;
@@ -311,4 +316,5 @@ private:
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;
   std::optional<u8> write_breakpoint_at(AddrPtr addr) noexcept;
+  utils::Expected<u8, BpErr> install_software_bp_loc(AddrPtr addr) noexcept;
 };

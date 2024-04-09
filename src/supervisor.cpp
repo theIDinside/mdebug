@@ -441,16 +441,19 @@ TraceeController::emit_breakpoint_event(std::string_view reason, const UserBreak
   Tracer::Instance->post_event(new ui::dap::BreakpointEvent{reason, message, &bp});
 }
 
-std::shared_ptr<BreakpointLocation>
+utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
 TraceeController::get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept
 {
   const auto loc = pbps.location_at(addr);
   if (loc) {
     return loc;
   }
-  auto original_byte = write_breakpoint_at(addr);
-  if (!original_byte)
-    return nullptr;
+
+  auto res = install_software_bp_loc(addr);
+  if (!res.is_expected()) {
+    return res;
+  }
+  const auto original_byte = res.take_value();
 
   if (attempt_src_resolve) {
     auto obj = find_obj_by_pc(addr);
@@ -459,16 +462,15 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, bool attempt_src_resol
       if (src.address_bounds().contains(addr)) {
         if (auto lte = src.find_lte_by_pc(addr).transform([](auto v) { return v.get(); }); lte) {
           return BreakpointLocation::CreateLocationWithSource(
-              addr, original_byte.value(),
-              std::make_unique<LocationSourceInfo>(src.path(), lte->line, u32{lte->column}));
+              addr, original_byte, std::make_unique<LocationSourceInfo>(src.path(), lte->line, u32{lte->column}));
         }
       }
     }
   }
-  return BreakpointLocation::CreateLocation(addr, original_byte.value());
+  return BreakpointLocation::CreateLocation(addr, original_byte);
 }
 
-std::shared_ptr<BreakpointLocation>
+utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
 TraceeController::get_or_create_bp_location(AddrPtr addr, AddrPtr base,
                                             sym::dw::SourceCodeFile &src_code_file) noexcept
 {
@@ -480,13 +482,17 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, AddrPtr base,
   auto lte = src_code_file.find_by_pc(base, addr).transform([](auto v) { return v.get(); });
   ASSERT(lte, "You're using this function wrong. Expected to find address {} inside the source file {}", addr,
          src_code_file.full_path->c_str());
-  u8 original_byte = write_bp_byte(addr);
+  auto res = install_software_bp_loc(addr);
+  if (!res.is_expected()) {
+    return res;
+  }
+  auto original_byte = res.take_value();
   return BreakpointLocation::CreateLocationWithSource(
       addr, original_byte,
       std::make_unique<LocationSourceInfo>(src_code_file.full_path->string(), lte->line, u32{lte->column}));
 }
 
-std::shared_ptr<BreakpointLocation>
+utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
 TraceeController::get_or_create_bp_location(AddrPtr addr,
                                             std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept
 {
@@ -495,7 +501,11 @@ TraceeController::get_or_create_bp_location(AddrPtr addr,
     return loc;
   }
 
-  u8 original_byte = write_bp_byte(addr);
+  auto res = install_software_bp_loc(addr);
+  if (!res.is_expected()) {
+    return res.take_error();
+  }
+  auto original_byte = res.take_value();
   if (sourceLocInfo) {
     return BreakpointLocation::CreateLocationWithSource(
         addr, original_byte, std::make_unique<LocationSourceInfo>(std::move(sourceLocInfo.value())));
@@ -504,13 +514,96 @@ TraceeController::get_or_create_bp_location(AddrPtr addr,
   }
 }
 
+std::optional<std::shared_ptr<BreakpointLocation>>
+TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakpoint &user) noexcept
+{
+  if (auto specPtr = user.user_spec(); specPtr != nullptr) {
+    auto objfile = symbol_file.objectFile();
+    switch (specPtr->index()) {
+    case UserBreakpoint::SOURCE_BREAKPOINT: {
+      const auto &spec = std::get<std::pair<std::string, SourceBreakpointSpec>>(*specPtr);
+      if (auto source_code_file = objfile->get_source_file(spec.first); source_code_file) {
+        if (auto lte = source_code_file->first_linetable_entry(symbol_file.baseAddress, spec.second.line,
+                                                               spec.second.column);
+            lte) {
+          const auto pc = lte->pc;
+
+          if (auto res = get_or_create_bp_location(pc, symbol_file.baseAddress, *source_code_file);
+              res.is_expected()) {
+            return res.take_value();
+          }
+        }
+      }
+    } break;
+    case UserBreakpoint::FUNCTION_BREAKPOINT: {
+      const auto &spec = std::get<FunctionBreakpointSpec>(*specPtr);
+      auto result = symbol_file.lookup_by_spec(spec);
+
+      if (auto it = std::find_if(result.begin(), result.end(),
+                                 [](const auto &it) { return it.loc_src_info.has_value(); });
+          it != end(result)) {
+        if (auto res = get_or_create_bp_location(it->address, std::move(it->loc_src_info.value()));
+            res.is_expected()) {
+          return res.take_value();
+        }
+      } else {
+        for (auto &&lookup : result) {
+          if (auto res = get_or_create_bp_location(lookup.address, false); res.is_expected()) {
+            return res.take_value();
+          }
+        }
+      }
+    } break;
+    case UserBreakpoint::INSTRUCTION_BREAKPOINT:
+      const auto &spec = std::get<InstructionBreakpointSpec>(*specPtr);
+      auto addr_opt = to_addr(spec.instructionReference);
+      ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
+      const auto addr = addr_opt.value();
+      auto srcs = symbol_file.getSourceCodeFiles(addr);
+      for (auto src : srcs) {
+        if (src.address_bounds().contains(addr)) {
+          if (auto iter = src.find_lte_by_pc(addr - symbol_file.baseAddress); iter) {
+            if (auto res = get_or_create_bp_location(addr, false); res.is_expected()) {
+              return res.take_value();
+            }
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  // No new breakpoint location could be found in symbol file.
+  return std::nullopt;
+}
+
 void
 TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>> &&new_symbol_files) noexcept
 {
   DLOG("mdb", "[breakpoints]: Updating breakpoints due to new symbol files");
+
+  // Check all existing breakpoints and those who are verified = false, check if they can be verified against the
+  // new object files (and thus actually be set)
+  auto non_verified = pbps.non_verified();
+  for (auto &user : non_verified) {
+    for (auto &symbol_file : new_symbol_files) {
+      // this user breakpoint was verified on previous iteration (i.e in another symbol file)
+      if (user->verified())
+        break;
+
+      if (auto bploc = reassess_bploc_for_symfile(*symbol_file, *user); bploc) {
+        user->update_location(std::move(bploc.value()));
+        pbps.add_bp_location(user.get());
+        emit_breakpoint_event("changed", *user, std::optional<std::string>{});
+      }
+    }
+  }
+
+  // Create new breakpoints, based on source specification or fn name spec, if they exist in new object files
   for (auto &&sym : new_symbol_files) {
     auto obj = sym->objectFile();
-    for (auto &[source_file, file_bp_map] : pbps.source_breakpoints) {
+    for (const auto &source_file : pbps.sources_with_bpspecs()) {
+      auto &file_bp_map = pbps.bps_for_source(source_file);
       if (auto source_code_file = obj->get_source_file(source_file); source_code_file) {
         for (auto &[desc, user_ids] : file_bp_map) {
           if (auto lte = source_code_file->first_linetable_entry(sym->baseAddress, desc.line, desc.column); lte) {
@@ -523,7 +616,8 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
               }
             }
             if (same_src_loc_different_pc) {
-              std::unique_ptr<UserBpSpec> spec = std::make_unique<UserBpSpec>(std::make_pair(source_file, desc));
+              std::unique_ptr<UserBpSpec> spec =
+                  std::make_unique<UserBpSpec>(std::make_pair(std::string{source_file}, desc));
               auto user = pbps.create_loc_user<Breakpoint>(
                   *this, get_or_create_bp_location(pc, sym->baseAddress, *source_code_file), task_leader,
                   LocationUserKind::Source, std::nullopt, std::nullopt, !independent_task_resume_control(),
@@ -556,7 +650,7 @@ TraceeController::update_source_bps(const std::filesystem::path &source_filepath
                                     std::vector<SourceBreakpointSpec> &&add,
                                     const std::vector<SourceBreakpointSpec> &remove) noexcept
 {
-  auto &map = pbps.source_breakpoints[source_filepath.string()];
+  UserBreakpoints::SourceFileBreakpointMap &map = pbps.bps_for_source(source_filepath.string());
 
   Set<SourceBreakpointSpec> not_set{add.begin(), add.end()};
 
@@ -585,10 +679,10 @@ TraceeController::update_source_bps(const std::filesystem::path &source_filepath
 
   // set User Breakpoints without breakpoint location; i.e. "pending" breakpoints, in GDB nomenclature
   for (auto &&srcbp : not_set) {
-    auto user = pbps.create_loc_user<Breakpoint>(
-        *this, nullptr, task_leader, LocationUserKind::Source, std::nullopt, std::nullopt,
-        !independent_task_resume_control(),
-        std::make_unique<UserBpSpec>(std::make_pair(source_filepath.string(), srcbp)));
+    auto spec = std::make_unique<UserBpSpec>(std::make_pair(source_filepath.string(), srcbp));
+    auto user = pbps.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec.get()}}, task_leader,
+                                                 LocationUserKind::Source, std::nullopt, std::nullopt,
+                                                 !independent_task_resume_control(), std::move(spec));
     map[srcbp].push_back(user->id);
   }
 
@@ -605,7 +699,7 @@ void
 TraceeController::set_source_breakpoints(const std::filesystem::path &source_filepath,
                                          const Set<SourceBreakpointSpec> &bps) noexcept
 {
-  auto &map = pbps.source_breakpoints[source_filepath.string()];
+  const UserBreakpoints::SourceFileBreakpointMap &map = pbps.bps_for_source(source_filepath.string());
   std::vector<SourceBreakpointSpec> remove{};
   std::vector<SourceBreakpointSpec> add{};
   for (const auto &[b, id] : map) {
@@ -717,9 +811,10 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noe
 
   for (auto &&[spec, was_set] : spec_set) {
     if (!was_set) {
-      auto user = pbps.create_loc_user<Breakpoint>(*this, nullptr, task_leader, LocationUserKind::Function,
-                                                   std::nullopt, std::nullopt, !independent_task_resume_control(),
-                                                   std::make_unique<UserBpSpec>(std::move(spec)));
+      auto spec_ptr = std::make_unique<UserBpSpec>(std::move(spec));
+      auto user = pbps.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec_ptr.get()}}, task_leader,
+                                                   LocationUserKind::Function, std::nullopt, std::nullopt,
+                                                   !independent_task_resume_control(), std::move(spec_ptr));
     }
   }
 
@@ -732,77 +827,6 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noe
     }
     pbps.fn_breakpoints.erase(iter);
   }
-
-  // for (const auto &fn : add) {
-
-  //   std::vector<MinSymbol> matching_symbols;
-
-  //   for (auto &symbol_file : symbol_files) {
-  //     auto obj = symbol_file->objectFile();
-  //     std::vector<std::string> search_for{};
-  //     if (fn.is_regex) {
-  //       const auto start = std::chrono::high_resolution_clock::now();
-  //       search_for = obj->regex_search(fn.name);
-  //       const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-  //                                std::chrono::high_resolution_clock::now() - start)
-  //                                .count();
-  //       DLOG("mdb", "regex searched {} in {}us", obj->path->c_str(), elapsed);
-  //     } else {
-  //       search_for = {fn.name};
-  //     }
-  //     for (const auto &n : search_for) {
-  //       if (auto s = obj->get_min_fn_sym(n); s.has_value()) {
-  //         matching_symbols.push_back(*s);
-  //       }
-  //       auto ni = obj->name_index();
-
-  //       ni->for_each_fn(n, [&](const sym::dw::DieNameReference &ref) {
-  //         auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
-  //         auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
-  //         if (low_pc) {
-  //           const auto addr = symbol_file->baseAddress + low_pc->address();
-  //           matching_symbols.emplace_back(n, addr, 0);
-  //           DLOG("mdb", "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
-  //                die_ref.cu->section_offset(), die_ref.die->section_offset, n, addr);
-  //         }
-  //       });
-  //     }
-  //   }
-
-  //   DLOG("mdb", "Found {} matching symbols for {}", matching_symbols.size(), fn.name);
-  //   std::vector<u32> fn_bp_ids{};
-  //   Set<AddrPtr> bps_set{};
-  //   for (const auto &sym : matching_symbols) {
-  //     if (!bps_set.contains(sym.address)) {
-  //       auto user = pbps.create_loc_user<Breakpoint>(
-  //           *this, get_or_create_bp_location(sym.address, true), task_leader, LocationUserKind::Function,
-  //           std::nullopt, std::nullopt, !independent_task_resume_control(), std::make_unique<UserBpSpec>(fn));
-  //       fn_bp_ids.push_back(user->id);
-  //       bps_set.insert(sym.address);
-  //     }
-  //   }
-
-  //   // No breakpoint locations were found / no breakpoint was set. Set an "empty" user breakpoint, which updates
-  //   on
-  //   // new objectfiles (possibly).
-  //   if (bps_set.empty()) {
-  //     auto user = pbps.create_loc_user<Breakpoint>(*this, nullptr, task_leader, LocationUserKind::Function,
-  //                                                  std::nullopt, std::nullopt,
-  //                                                  !independent_task_resume_control(),
-  //                                                  std::make_unique<UserBpSpec>(fn));
-  //   }
-  //   pbps.fn_breakpoints.emplace(fn, std::move(fn_bp_ids));
-  // }
-
-  // for (const auto &to_remove : remove) {
-  //   auto iter = pbps.fn_breakpoints.find(to_remove);
-  //   ASSERT(iter != std::end(pbps.fn_breakpoints), "Expected to find fn breakpoint in map");
-
-  //   for (auto id : iter->second) {
-  //     pbps.remove_bp(id);
-  //   }
-  //   pbps.fn_breakpoints.erase(iter);
-  // }
 }
 
 void
@@ -1388,6 +1412,24 @@ TraceeController::write_breakpoint_at(AddrPtr addr) noexcept
 
   if (ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp) == -1) {
     return std::nullopt;
+  }
+  return ins_byte;
+}
+
+utils::Expected<u8, BpErr>
+TraceeController::install_software_bp_loc(AddrPtr addr) noexcept
+{
+  constexpr u8 bkpt = 0xcc;
+  const auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr, nullptr);
+  if (read_value == -1) {
+    return utils::unexpected(BpErr{LocReadError{errno, addr}});
+  }
+
+  const u8 ins_byte = static_cast<u8>(read_value & 0xff);
+  const u64 installed_bp = ((read_value & ~0xff) | bkpt);
+
+  if (ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp) == -1) {
+    return utils::unexpected(BpErr{LocWriteError{errno, addr}});
   }
   return ins_byte;
 }

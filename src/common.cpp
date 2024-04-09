@@ -104,13 +104,12 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
 
   free(strings);
 ifbacktrace_failed:
-  logging::get_logging()->log(
-      "mdb", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\n--- [PANIC] ---",
-                         loc.file_name(), loc.line(), loc.function_name(), err_msg));
-
-  fmt::println(
-      "{}", fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}--- [PANIC] ---",
-                        loc.file_name(), loc.line(), loc.function_name(), err_msg, errno));
+  const auto strerr = strerror(errno);
+  const auto message =
+      fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
+                  loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
+  logging::get_logging()->log("mdb", message);
+  fmt::println("{}", message);
   delete logging::get_logging();
   panic_exit();
 }

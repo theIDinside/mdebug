@@ -404,7 +404,7 @@ StopImmediately::notify_stopped() noexcept
 }
 
 bool
-StopImmediately::has_completed(bool was_stopped) const noexcept
+StopImmediately::has_completed(bool) const noexcept
 {
   return true;
 }

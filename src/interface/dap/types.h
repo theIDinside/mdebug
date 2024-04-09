@@ -35,7 +35,7 @@ struct Breakpoint
   std::optional<u32> line;
   std::optional<u32> col;
   std::optional<std::string_view> source_path;
-  std::optional<std::string_view> error_message;
+  std::optional<std::string> error_message;
 
   std::string serialize() const noexcept;
   static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
