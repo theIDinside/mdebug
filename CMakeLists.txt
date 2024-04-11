@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug symbols" OFF)
 
+set(MDB_ROOT ${PROJECT_SOURCE_DIR})
+
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 set(MIDAS_SOURCES
   # root
@@ -147,24 +149,11 @@ set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
 message("Build type for project: ${CMAKE_BUILD_TYPE}")
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dependencies/googletest)
 add_subdirectory(test)
 enable_testing()
 # Unit Testing (using googletest)
 include(cmake/AddTest.cmake)
-
-AddTest(NAME parse_dap_requests
-  SOURCES
-    test/unittest/parse_dap_requests.cpp
-    src/interface/dap/parse_buffer.cpp
-    src/interface/dap/parse_buffer.h
-    src/utils/logger.cpp
-    ${COMMON_SRC}
-  LIBS
-    fmt::fmt
-    mdb_spinlock
-    nlohmann_json::nlohmann_json
-)
 
 AddTest(NAME base64_encoding
   SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC}
@@ -240,7 +229,6 @@ if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   # clang using GNU's stdlib ranges, is.... iffy at the moment.
   target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
-  target_compile_definitions(parse_dap_requests PUBLIC JSON_HAS_RANGES=0)
   message("Compiler is clang - no special options required.")
   set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
 else ()

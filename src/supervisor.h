@@ -14,6 +14,7 @@
 #include "symbolication/fnsymbol.h"
 #include "task.h"
 #include "utils/byte_buffer.h"
+#include "utils/expected.h"
 #include <link.h>
 #include <optional>
 #include <thread>
@@ -26,7 +27,8 @@ template <typename T> using Set = std::unordered_set<T>;
 
 namespace sym {
 class Unwinder;
-};
+struct UnwinderSymbolFilePair;
+}; // namespace sym
 
 namespace ui {
 struct UICommand;
@@ -45,6 +47,7 @@ struct LWP
 
 using Address = std::uintptr_t;
 struct ObjectFile;
+class SymbolFile;
 
 class StopObserver;
 
@@ -62,8 +65,8 @@ struct TraceeController
   friend struct ui::UICommand;
   // Members
   pid_t task_leader;
-  std::vector<NonNullPtr<ObjectFile>> object_files;
-  ObjectFile *main_executable;
+  std::vector<std::shared_ptr<SymbolFile>> symbol_files;
+  std::shared_ptr<SymbolFile> main_executable;
   utils::ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
@@ -72,7 +75,7 @@ struct TraceeController
   SharedObjectMap shared_objects;
   bool stop_all_requested;
   Publisher<void> all_stop{};
-  Publisher<ObjectFile *> new_objectfile{};
+  Publisher<SymbolFile *> new_objectfile{};
 
 private:
   int next_var_ref = 0;
@@ -82,7 +85,6 @@ private:
   AwaiterThread::handle awaiter_thread;
   TargetSession session;
   ptracestop::StopHandler *ptracestop_handler;
-  std::vector<std::unique_ptr<sym::Unwinder>> unwinders;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *null_unwinder;
   bool ptrace_session_seized;
@@ -94,11 +96,16 @@ public:
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
+  std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
+
   /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
   bool reopen_memfd() noexcept;
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
   void install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
+  std::optional<std::shared_ptr<BreakpointLocation>> reassess_bploc_for_symfile(SymbolFile &symbol_file,
+                                                                                UserBreakpoint &user_bp) noexcept;
+  void do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>> &&new_symbol_files) noexcept;
 
   bool is_null_unwinder(sym::Unwinder *unwinder) const noexcept;
 
@@ -145,17 +152,23 @@ public:
   void emit_signal_event(LWP lwp, int signal) noexcept;
   void emit_stopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool all_stopped,
                     std::vector<int> bps_hit) noexcept;
+  void emit_breakpoint_event(std::string_view reason, const UserBreakpoint &bp,
+                             std::optional<std::string> message) noexcept;
 
-  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
-  std::shared_ptr<BreakpointLocation> get_or_create_bp_location(AddrPtr addr,
-                                                                sym::dw::SourceCodeFile &src_code_file) noexcept;
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  get_or_create_bp_location(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
+
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  get_or_create_bp_location(AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void set_source_breakpoints(const std::filesystem::path &source_filepath,
-                              const Set<SourceBreakpoint> &bps) noexcept;
-  void update_source_bps(const std::filesystem::path &source_filepath, std::vector<SourceBreakpoint> &&add,
-                         const std::vector<SourceBreakpoint> &remove) noexcept;
+                              const Set<SourceBreakpointSpec> &bps) noexcept;
+  void update_source_bps(const std::filesystem::path &source_filepath, std::vector<SourceBreakpointSpec> &&add,
+                         const std::vector<SourceBreakpointSpec> &remove) noexcept;
 
-  void set_instruction_breakpoints(const Set<InstructionBreakpoint> &bps) noexcept;
-  void set_fn_breakpoints(const Set<FunctionBreakpoint> &bps) noexcept;
+  void set_instruction_breakpoints(const Set<InstructionBreakpointSpec> &bps) noexcept;
+  void set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noexcept;
 
   void remove_breakpoint(u32 bp_id) noexcept;
 
@@ -179,7 +192,10 @@ public:
   bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
-  void register_object_file(ObjectFile *obj, bool is_main_executable, std::optional<AddrPtr> base_vma) noexcept;
+  void register_object_file(std::shared_ptr<ObjectFile> obj, bool is_main_executable,
+                            AddrPtr relocated_base) noexcept;
+
+  void register_symbol_file(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept;
 
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
@@ -270,17 +286,15 @@ public:
   // Get the unwinder for `pc` - if no such unwinder exists, the "NullUnwinder" is returned, an unwinder that
   // always returns UnwindInfo* = `nullptr` results. This is to not have to do nullchecks against the Unwinder
   // itself.
-  sym::Unwinder *get_unwinder_from_pc(AddrPtr pc) noexcept;
+  sym::UnwinderSymbolFilePair get_unwinder_from_pc(AddrPtr pc) noexcept;
   sym::CallStack &build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept;
   std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
   sym::Frame current_frame(TaskInfo &task) noexcept;
-  sym::FunctionSymbol *find_fn_by_pc(AddrPtr addr, ObjectFile **foundIn) const noexcept;
-  ObjectFile *find_obj_by_pc(AddrPtr addr) const noexcept;
-  std::optional<NonNullPtr<ObjectFile>> find_obj_containing_pc(AddrPtr addr) const noexcept;
+  std::optional<std::pair<sym::FunctionSymbol *, NonNullPtr<SymbolFile>>> find_fn_by_pc(AddrPtr addr) noexcept;
+  SymbolFile *find_obj_by_pc(AddrPtr addr) noexcept;
 
-  std::optional<std::filesystem::path> get_source(std::string_view name) noexcept;
   // u8 *get_in_text_section(AddrPtr address) const noexcept;
-  const ElfSection *get_text_section(AddrPtr addr) const noexcept;
+  const ElfSection *get_text_section(AddrPtr addr) noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
   std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
@@ -290,8 +304,8 @@ public:
   void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
   bool ptrace_was_seized() const noexcept;
 
-  int new_frame_id(NonNullPtr<ObjectFile> owning_obj, TaskInfo &task) noexcept;
-  int new_scope_id(NonNullPtr<ObjectFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
+  int new_frame_id(NonNullPtr<SymbolFile> owning_obj, TaskInfo &task) noexcept;
+  int new_scope_id(NonNullPtr<SymbolFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
   int new_var_id(int parent_id) noexcept;
   void invalidate_stop_state() noexcept;
 
@@ -302,4 +316,5 @@ private:
   // Writes breakpoint point and returns the original value found at that address
   u8 write_bp_byte(AddrPtr addr) noexcept;
   std::optional<u8> write_breakpoint_at(AddrPtr addr) noexcept;
+  utils::Expected<u8, BpErr> install_software_bp_loc(AddrPtr addr) noexcept;
 };

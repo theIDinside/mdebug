@@ -58,11 +58,12 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   // TODO(simon) Once "shared object symbols" (NOT to be confused with Linux' shared objects/so's!) is implemented
   //  we should check if the object file from `objfile_path` has already been loaded into memory
   auto target = get_controller(target_pid);
-  const auto obj_file = mmap_objectfile(*target, objfile_path);
-  ASSERT(obj_file != nullptr, "mmap'ing objfile {} failed", objfile_path.c_str());
-  target->register_object_file(obj_file, true, std::nullopt);
-  obj_file->initial_dwarf_setup(config.dwarf_config());
-  target->new_objectfile.emit(obj_file);
+  if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
+    auto obj = CreateObjectFile(*target, objfile_path);
+    target->register_object_file(obj, true, nullptr);
+  } else {
+    target->register_symbol_file(symbol_obj, true);
+  }
 }
 
 void
@@ -296,8 +297,8 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
     }
     get_current()->reaped_events();
     if (stopAtEntry) {
-      Set<FunctionBreakpoint> fns{};
-      fns.insert({"main", {}});
+      Set<FunctionBreakpointSpec> fns{};
+      fns.insert({"main", {}, false});
       get_current()->set_fn_breakpoints(fns);
     }
     break;
@@ -329,10 +330,31 @@ Tracer::detach(std::unique_ptr<TraceeController> &&target) noexcept
 }
 
 void
-Tracer::disconnect() noexcept
+Tracer::disconnect(bool terminate) noexcept
 {
-  kill_all_targets();
+  if (terminate) {
+    kill_all_targets();
+  } else {
+    TODO("Disconnect without terminating processes not yet implemented");
+  }
   Tracer::KeepAlive = false;
+}
+
+std::shared_ptr<SymbolFile>
+Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
+{
+  for (const auto &t : targets) {
+    if (std::shared_ptr<SymbolFile> sym = t->lookup_symbol_file(path); sym) {
+      return sym;
+    }
+  }
+  return nullptr;
+}
+
+const sys::DebuggerConfiguration &
+Tracer::getConfig() noexcept
+{
+  return config;
 }
 
 const sys::DebuggerConfiguration &

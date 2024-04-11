@@ -3,6 +3,7 @@
 #include "objfile.h"
 #include "symbolication/addr_sorter.h"
 #include "utils/enumerator.h"
+#include <algorithm>
 
 std::string_view
 ElfSection::get_name() const noexcept
@@ -72,13 +73,12 @@ from_str(std::string_view str)
   PANIC(fmt::format("Failed to parse section name {}", str))
 }
 
-Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept
-    : reloc(nullptr), header(header), m_sections(sections), obj_file(obj_file), str_table{nullptr},
-      debug_info{nullptr}, debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr},
-      debug_aranges{nullptr}, debug_line{nullptr}, debug_addr{nullptr}, debug_str_offsets{nullptr},
-      debug_rnglists{nullptr}, debug_loclist{nullptr}
+Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile &obj_file) noexcept
+    : header(header), m_sections(sections), obj_file(obj_file), str_table{nullptr}, debug_info{nullptr},
+      debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr}, debug_aranges{nullptr},
+      debug_line{nullptr}, debug_addr{nullptr}, debug_str_offsets{nullptr}, debug_rnglists{nullptr},
+      debug_loclist{nullptr}
 {
-  obj_file->parsed_elf = this;
   str_table = get_section(ElfSec::StringTable);
   debug_info = get_section(ElfSec::DebugInfo);
   debug_abbrev = get_section(ElfSec::DebugAbbrev);
@@ -91,6 +91,8 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noe
   debug_loclist = get_section(ElfSec::DebugLocLists);
   debug_aranges = get_section(ElfSec::DebugAranges);
 }
+
+Elf::~Elf() noexcept { delete m_sections.sections; }
 
 std::span<ElfSection>
 Elf::sections() const noexcept
@@ -119,62 +121,22 @@ const ElfSection *
 Elf::get_section_or_panic(std::string_view name) const noexcept
 {
   auto sec = get_section(name);
-  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, this->obj_file->path->c_str());
+  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, obj_file.path->c_str());
   return sec;
 }
 
-void
-Elf::parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept
+bool
+Elf::has_dwarf() const noexcept
 {
-  DLOG("mdb", "Parsing objfile {}", object_file->path->c_str());
-  const auto header = object_file->get_at_offset<Elf64Header>(0);
-  ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
-         *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
-  ElfSectionData data = {.sections = new ElfSection[header->e_shnum], .count = header->e_shnum};
-  const auto sec_names_offset_hdr =
-      object_file->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
-
-  auto min = UINTMAX_MAX;
-  auto max = reloc_base.get();
-
-  // good enough heuristic to determine mapped in ranges.
-  for (auto i = 0; i < header->e_phnum; ++i) {
-    auto phdr = object_file->get_at_offset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
-    if (phdr->p_type == PT_LOAD) {
-      min = std::min(phdr->p_vaddr + reloc_base, min);
-      const auto end = phdr->p_vaddr + reloc_base + phdr->p_memsz;
-      const auto align_adjust = phdr->p_align - (end % phdr->p_align);
-      max = std::max(end + align_adjust, max);
-    }
-  }
-
-  object_file->address_bounds = AddressRange{.low = min, .high = max};
-  auto sec_hdrs_offset = header->e_shoff;
-  // parse sections
-  for (auto i = 0; i < data.count; i++) {
-    const auto sec_hdr = object_file->get_at_offset<Elf64_Shdr>(sec_hdrs_offset);
-    sec_hdrs_offset += header->e_shentsize;
-    data.sections[i].m_section_ptr = object_file->get_at_offset<u8>(sec_hdr->sh_offset);
-    data.sections[i].m_section_size = sec_hdr->sh_size;
-    data.sections[i].m_name =
-        object_file->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
-    data.sections[i].file_offset = sec_hdr->sh_offset;
-    data.sections[i].address = sec_hdr->sh_addr;
-    data.sections[i].reloc_base = reloc_base;
-  }
-  // ObjectFile is the owner of `Elf`
-  auto elf = new Elf{header, data, object_file};
-  elf->set_relocation(reloc_base);
+  return debug_info != nullptr;
 }
 
 void
-Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
+Elf::parse_min_symbols() const noexcept
 {
   if (auto strtab = get_section(ElfSec::StringTable); !strtab) {
-    obj_file->has_elf_symbols = false;
     return;
   }
-  DLOG("mdb", "{} min symbols, base_vma={}", obj_file->path->c_str(), base_vma);
 
   std::vector<MinSymbol> elf_fn_symbols{};
   std::unordered_map<std::string_view, MinSymbol> elf_object_symbols{};
@@ -185,40 +147,22 @@ Elf::parse_min_symbols(AddrPtr base_vma) const noexcept
     auto entries = (end - start) / sizeof(Elf64_Sym);
     std::span<Elf64_Sym> symbols{(Elf64_Sym *)sec->m_section_ptr, entries};
     for (auto &symbol : symbols) {
+
       if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
-        const auto res =
-            MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
+        const auto res = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
         elf_fn_symbols.push_back(res);
       } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
         elf_object_symbols[name] =
-            MinSymbol{.name = name, .address = base_vma + symbol.st_value, .maybe_size = symbol.st_size};
+            MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }
     }
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
-    std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), SortLowPc<MinSymbol>());
-    obj_file->add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
+    const auto cmp = [](const auto &a, const auto &b) -> bool { return a.address < b.address; };
+    std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
+    obj_file.add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
-    LOG("mdb", "[warning]: No .symtab for {}", obj_file->path->c_str());
+    LOG("mdb", "[warning]: No .symtab for {}", obj_file.path->c_str());
   }
-}
-
-void
-Elf::set_relocation(AddrPtr vma) noexcept
-{
-  reloc = vma;
-}
-
-AddrPtr
-Elf::relocate_addr(AddrPtr addr) noexcept
-{
-  return addr + reloc;
-}
-
-AddrPtr
-Elf::obj_addr(AddrPtr addr) noexcept
-{
-  ASSERT(addr > reloc, "Address {} is below reloc base {}", addr, reloc);
-  return addr - reloc;
 }

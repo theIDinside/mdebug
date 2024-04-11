@@ -9,7 +9,7 @@ namespace sym {
 namespace dw {
 class FunctionSymbolicationContext;
 }
-class SourceFileSymbolInfo;
+class CompilationUnit;
 
 struct ResolveFnSymbolState;
 
@@ -34,7 +34,7 @@ private:
   friend sym::dw::FunctionSymbolicationContext;
 
   // Private members
-  NonNullPtr<SourceFileSymbolInfo> decl_file;
+  NonNullPtr<CompilationUnit> decl_file;
   bool fully_parsed{false};
   bool is_member_fn{false};
   u32 frame_locals_count{0};
@@ -47,7 +47,7 @@ private:
   // Private member functions
   FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
                  sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                 SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr,
+                 CompilationUnit &decl_file, dw::FrameBaseExpression fb_expr,
                  std::optional<SourceCoordinate> &&source_coord) noexcept;
 
 public:
@@ -66,8 +66,8 @@ public:
   std::string build_full_name() const noexcept;
   AddrPtr start_pc() const noexcept;
   AddrPtr end_pc() const noexcept;
-  SourceFileSymbolInfo *symbol_info() noexcept;
-  const SourceFileSymbolInfo *symbol_info() const noexcept;
+  CompilationUnit *symbol_info() noexcept;
+  const CompilationUnit *symbol_info() const noexcept;
   std::span<const dw::IndexedDieReference> origin_dies() const noexcept;
   bool is_resolved() const noexcept;
   dw::FrameBaseExpression frame_base() const noexcept;

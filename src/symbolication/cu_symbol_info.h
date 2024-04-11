@@ -11,7 +11,9 @@
 
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;
+
 struct ObjectFile;
+class SymbolFile;
 namespace sym {
 namespace dw {
 class UnitData;
@@ -33,7 +35,7 @@ public:
   PartialCompilationUnitSymbolInfo &operator=(const PartialCompilationUnitSymbolInfo &) noexcept = delete;
 };
 
-class SourceFileSymbolInfo
+class CompilationUnit
 {
   dw::UnitData *unit_data;
   AddrPtr pc_start;
@@ -42,17 +44,15 @@ class SourceFileSymbolInfo
   std::string_view cu_name;
   std::vector<sym::FunctionSymbol> fns;
   std::vector<u32> imported_units;
-  SymbolInfoId id;
   std::vector<std::shared_ptr<dw::SourceCodeFile>> source_code_files{};
 
 public:
-  NO_COPY_DEFAULTED_MOVE(SourceFileSymbolInfo);
-  SourceFileSymbolInfo(dw::UnitData *cu_data) noexcept;
+  NO_COPY_DEFAULTED_MOVE(CompilationUnit);
+  CompilationUnit(dw::UnitData *cu_data) noexcept;
 
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
   void process_source_code_files(u64 line_table) noexcept;
-  void set_id(SymbolInfoId id) noexcept;
   void add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept;
   std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
 
@@ -63,12 +63,12 @@ public:
   bool function_symbols_resolved() const noexcept;
   sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;
   dw::UnitData *get_dwarf_unit() const noexcept;
-  std::optional<dw::LineTable> get_linetable() noexcept;
+  std::optional<dw::LineTable> get_linetable(SymbolFile *sf) noexcept;
   std::optional<Path> get_lnp_file(u32 index) noexcept;
   static constexpr auto
   Sorter() noexcept
   {
-    return AddressableSorter<SourceFileSymbolInfo, false>{};
+    return AddressableSorter<CompilationUnit, false>{};
   }
 
 private:
@@ -80,7 +80,7 @@ class AddressToCompilationUnitMap
 public:
   AddressToCompilationUnitMap() noexcept;
   std::vector<sym::dw::UnitData *> find_by_pc(AddrPtr pc) noexcept;
-  void add_cus(const std::span<SourceFileSymbolInfo> &cus) noexcept;
+  void add_cus(const std::span<CompilationUnit> &cus) noexcept;
 
 private:
   void add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept;

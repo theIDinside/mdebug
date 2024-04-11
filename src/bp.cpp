@@ -1,9 +1,16 @@
 #include "bp.h"
+#include "common.h"
 #include "events/event.h"
 #include "ptrace.h"
+#include "symbolication/dwarf/die.h"
+#include "symbolication/dwarf/name_index.h"
+#include "utils/expected.h"
 #include <algorithm>
+#include <optional>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
+#include <type_traits>
+#include <variant>
 
 BreakpointLocation::BreakpointLocation(AddrPtr addr, u8 original) noexcept
     : addr(addr), original_byte(original), source_info()
@@ -106,27 +113,29 @@ BreakpointLocation::add_user(UserBreakpoint &user) noexcept
 
 UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                                std::optional<StopCondition> &&cond) noexcept
-    : enabled(true), bp(std::move(param.loc)), on_hit_count(0), stop_condition(std::move(cond)), id(param.id),
-      tid(param.tid), kind(kind), hit_count(param.times_to_hit.value_or(0))
+    : enabled(true), stop_condition(std::move(cond)), id(param.id), tid(param.tid), kind(kind),
+      hit_count(param.times_to_hit.value_or(0))
 {
-  if (bp) {
-    bp->add_user(*this);
+
+  if (param.loc_or_err.is_expected()) {
+    bp = std::move(param.loc_or_err.take_value());
+    err = nullptr;
   } else {
-    objfile_subscriber = &param.tc.new_objectfile;
-    DLOG("mdb", "Subscribing to to newobjectfile publisher for user breakpoint {}", id);
-    objfile_subscriber->subscribe(SubscriberIdentity::Of(this), [id = this->id](ObjectFile *obj) {
-      DLOG("mdb", "New object file {} searched, while attempting to resolve User Breakpoint {}",
-           obj->path->c_str(), id);
-    });
+    bp = nullptr;
+    err = std::make_unique<BpErr>(param.loc_or_err.take_error());
+  }
+
+  if (bp != nullptr) {
+    bp->add_user(*this);
   }
 }
 
-UserBreakpoint::~UserBreakpoint() noexcept
+UserBreakpoint::~UserBreakpoint() noexcept { remove_location(); }
+
+void
+UserBreakpoint::update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept
 {
-  remove_location();
-  if (objfile_subscriber) {
-    objfile_subscriber->unsubscribe(SubscriberIdentity::Of(this));
-  }
+  bp = std::move(bploc);
 }
 
 void
@@ -244,10 +253,46 @@ UserBreakpoint::source_file() const noexcept
   return std::optional{std::string_view{bp->source_info->source_file}};
 }
 
+std::optional<std::string>
+UserBreakpoint::error_message() const noexcept
+{
+  return utils::transform(err, [t = this](const BpErr &err) {
+    std::string message{};
+    auto it = std::back_inserter(message);
+    std::visit(
+        [t, &it](const auto &e) {
+          using T = std::remove_cvref_t<decltype(e)>;
+          if constexpr (std::is_same_v<T, LocWriteError>) {
+            fmt::format_to(it, "Could not write to {} ({})", e.requested_address, strerror(e.error_no));
+          } else if constexpr (std::is_same_v<T, LocReadError>) {
+            fmt::format_to(it, "Could not access {} ({})", e.requested_address, strerror(e.error_no));
+          } else if constexpr (std::is_same_v<T, ResolveError>) {
+            auto spec = t->user_spec();
+            if (spec) {
+              fmt::format_to(it, "Could not resolve using spec: {}", *spec);
+            } else {
+              fmt::format_to(it, "Could not resolve breakpoint using spec");
+            }
+          } else {
+            static_assert(always_false<T>, "Should be unreachable");
+          }
+        },
+        err);
+    return message;
+  });
+}
+
+UserBpSpec *
+UserBreakpoint::user_spec() const noexcept
+{
+  return nullptr;
+}
+
 Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                       std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit) noexcept
-    : UserBreakpoint(param, kind, std::move(stop_condition)), stop_only(stop_only),
-      stop_all_threads_when_hit(stop_all_threads_when_hit)
+                       std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit,
+                       std::unique_ptr<UserBpSpec> &&spec) noexcept
+    : UserBreakpoint(std::move(param), kind, std::move(stop_condition)), stop_only(stop_only),
+      stop_all_threads_when_hit(stop_all_threads_when_hit), bp_spec(std::move(spec))
 {
 }
 
@@ -279,10 +324,16 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
   return bp_hit::normal_stop();
 }
 
+UserBpSpec *
+Breakpoint::user_spec() const noexcept
+{
+  return bp_spec.get();
+}
+
 TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                                          std::optional<Tid> stop_only, std::optional<StopCondition> &&cond,
                                          bool stop_all_threads_when_hit) noexcept
-    : Breakpoint(param, kind, stop_only, std::move(cond), stop_all_threads_when_hit)
+    : Breakpoint(std::move(param), kind, stop_only, std::move(cond), stop_all_threads_when_hit, nullptr)
 {
 }
 
@@ -299,7 +350,7 @@ TemporaryBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 }
 
 FinishBreakpoint::FinishBreakpoint(RequiredUserParameters param, Tid stop_only) noexcept
-    : UserBreakpoint(param, LocationUserKind::FinishFunction, std::nullopt), stop_only(stop_only)
+    : UserBreakpoint(std::move(param), LocationUserKind::FinishFunction, std::nullopt), stop_only(stop_only)
 {
 }
 
@@ -325,7 +376,7 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 }
 
 ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) noexcept
-    : UserBreakpoint(param, LocationUserKind::ResumeTo, {}), stop_only(tid)
+    : UserBreakpoint(std::move(param), LocationUserKind::ResumeTo, {}), stop_only(tid)
 {
 }
 
@@ -340,8 +391,32 @@ ResumeToBreakpoint::on_hit(TraceeController &, TaskInfo &t) noexcept
   }
 }
 
+Logpoint::Logpoint(RequiredUserParameters param, std::string logExpression,
+                   std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept
+    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::nullopt, std::move(stop_condition), false,
+                 std::move(spec)),
+      expressionString(std::move(logExpression))
+{
+}
+
+void
+Logpoint::compile_expression() noexcept
+{
+  // TODO(simon): Implement some form of rudimentary scripting language here. Or perhaps a DSL strictly for
+  // logging. Whatever really.
+}
+
+bp_hit
+Logpoint::on_hit(TraceeController &, TaskInfo &) noexcept
+{
+  if (compiledExpression == nullptr) {
+    compile_expression();
+  }
+  return bp_hit::noop();
+}
+
 SOLoadingBreakpoint::SOLoadingBreakpoint(RequiredUserParameters param) noexcept
-    : UserBreakpoint(param, LocationUserKind::SharedObjectLoaded, std::nullopt)
+    : UserBreakpoint(std::move(param), LocationUserKind::SharedObjectLoaded, std::nullopt)
 {
 }
 
@@ -360,6 +435,14 @@ u16
 UserBreakpoints::new_id() noexcept
 {
   return ++current_bp_id;
+}
+
+void
+UserBreakpoints::add_bp_location(UserBreakpoint *updated_bp) noexcept
+{
+  ASSERT(updated_bp != nullptr, "Registering a null breakpoint location is not allowed");
+  bps_at_loc[updated_bp->address().value()].push_back(updated_bp->id);
+  current_pending--;
 }
 
 void
@@ -419,6 +502,41 @@ UserBreakpoints::all_users() const noexcept
 
   for (auto [id, user] : user_breakpoints) {
     result.emplace_back(std::move(user));
+  }
+  return result;
+}
+
+std::vector<std::shared_ptr<UserBreakpoint>>
+UserBreakpoints::non_verified() const noexcept
+{
+  std::vector<std::shared_ptr<UserBreakpoint>> result;
+  for (const auto &[id, bp] : user_breakpoints) {
+    if (!bp->verified())
+      result.push_back(bp);
+  }
+
+  return result;
+}
+
+UserBreakpoints::SourceFileBreakpointMap &
+UserBreakpoints::bps_for_source(const SourceCodeFileName &src_file) noexcept
+{
+  return source_breakpoints[src_file];
+}
+
+UserBreakpoints::SourceFileBreakpointMap &
+UserBreakpoints::bps_for_source(std::string_view src_file) noexcept
+{
+  return source_breakpoints[std::string{src_file}];
+}
+
+std::vector<std::string_view>
+UserBreakpoints::sources_with_bpspecs() const noexcept
+{
+  std::vector<std::string_view> result;
+  result.reserve(source_breakpoints.size());
+  for (const auto &[source, _] : source_breakpoints) {
+    result.emplace_back(std::string_view{source});
   }
   return result;
 }

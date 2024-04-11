@@ -7,8 +7,8 @@
 
 using u32 = std::uint32_t;
 
-struct ObjectFile;
 struct TraceeController;
+class SymbolFile;
 
 namespace sym {
 
@@ -30,12 +30,12 @@ class ValueResolver
 protected:
   bool cached{false};
   TypePtr type;
-  ObjectFile *obj;
+  SymbolFile *obj;
   ValuePtr value_ptr;
   ChildStorage children;
 
 public:
-  ValueResolver(ObjectFile *object_file, ValuePtr val, TypePtr type) noexcept;
+  ValueResolver(SymbolFile *object_file, ValuePtr val, TypePtr type) noexcept;
   virtual ~ValueResolver() noexcept = default;
 
   Children resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept;
@@ -53,7 +53,7 @@ class DefaultStructResolver final : public ValueResolver
   VariablesReference ref;
 
 public:
-  DefaultStructResolver(ObjectFile *object_file, ValuePtr value, TypePtr layout_type,
+  DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr layout_type,
                         VariablesReference ref) noexcept;
   ~DefaultStructResolver() noexcept final = default;
 
@@ -67,7 +67,7 @@ class CStringResolver final : public ValueResolver
   std::shared_ptr<MemoryContentsObject> indirect_value_object{nullptr};
 
 public:
-  CStringResolver(ObjectFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
+  CStringResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
   ~CStringResolver() noexcept override = default;
 
 private:
@@ -85,7 +85,7 @@ class ArrayResolver final : public ValueResolver
   Children get_all(TraceeController &tc) noexcept;
 
 public:
-  ArrayResolver(ObjectFile *object_file, TypePtr layout_type, u32 array_size, AddrPtr remote_base_addr) noexcept;
+  ArrayResolver(SymbolFile *object_file, TypePtr layout_type, u32 array_size, AddrPtr remote_base_addr) noexcept;
   ~ArrayResolver() noexcept override = default;
 
   std::optional<Children> has_cached(std::optional<u32> start, std::optional<u32> count) noexcept final;

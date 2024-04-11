@@ -40,16 +40,16 @@ async function unwindFromSharedObject(DA) {
 
   const threads = await DA.threads()
   const bps = await set_bp('test/todo.cpp', ['BP1'])
+  assert(bps.body.breakpoints.length == 1, 'Expected 1 breakpoint')
   const bps2 = await set_bp('test/dynamic_lib.cpp', ['BPKM'])
-  console.log(`bps: ${JSON.stringify(bps)}`)
-  console.log(`bps2: ${JSON.stringify(bps2)}`)
+  assert(bps2.body.breakpoints.length == 1, 'Expected 1 breakpoint')
+
   // hit breakpoint in todo.cpp
   await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
   await DA.contNextStop()
   const frames = await DA.stackTrace(threads[0].id, seconds(1)).then((res) => {
     checkResponse(res, 'stackTrace', true)
     const { stackFrames } = res.body
-    console.log(`${JSON.stringify(stackFrames, null, 2)}`)
     return stackFrames
   })
   verifyFrameIs(frames[0], 'convert_kilometers_to_miles')

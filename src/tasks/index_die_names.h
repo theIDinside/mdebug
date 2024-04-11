@@ -5,7 +5,7 @@
 struct ObjectFile;
 
 namespace sym {
-class SourceFileSymbolInfo;
+class CompilationUnit;
 class PartialCompilationUnitSymbolInfo;
 } // namespace sym
 
@@ -28,7 +28,7 @@ private:
   // Initializes sym::dw::CompilationUnit objects with `ObjectFile` (`obj`), setting it's high/low PC boundary as
   // well as "stamps out" it's line number program entries (See source_file.h for `sym::dw::LineTable` and
   // `sym::dw::CompilationUnit`)
-  sym::SourceFileSymbolInfo initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept;
+  sym::CompilationUnit initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept;
   sym::PartialCompilationUnitSymbolInfo initialize_partial_compilation_unit(UnitData *partial_cu,
                                                                             const DieMetaData &pcu_die) noexcept;
   ObjectFile *obj;

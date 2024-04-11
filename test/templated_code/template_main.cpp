@@ -12,6 +12,7 @@ main(int argc, const char **argv)
 
   // For future tests that involves type parsing
   TemplateType<int> a_and_b{10, 20};
+  TemplateType<float> float_a_and_b{10, 20};
   TestObject obj{30, 40};
 
   TemplateType<int> a_and_b_equal{10};

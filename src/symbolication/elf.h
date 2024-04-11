@@ -45,7 +45,6 @@ struct ElfSection
   u64 m_section_size;
   u64 file_offset;
   AddrPtr address;
-  AddrPtr reloc_base;
   // TODO(simon): add relocated_address field
   std::string_view get_name() const noexcept;
   const u8 *begin() const noexcept;
@@ -72,27 +71,20 @@ struct ElfSectionData
 class Elf
 {
 public:
-  Elf(Elf64Header *header, ElfSectionData sections, ObjectFile *obj_file) noexcept;
-  static void parse_elf_owned_by_obj(ObjectFile *object_file, AddrPtr reloc_base) noexcept;
+  Elf(Elf64Header *header, ElfSectionData sections, ObjectFile &obj_file) noexcept;
+  ~Elf() noexcept;
   std::span<ElfSection> sections() const noexcept;
   const ElfSection *get_section(std::string_view name) const noexcept;
   constexpr const ElfSection *get_section(ElfSec section) const noexcept;
   const ElfSection *get_section_or_panic(std::string_view name) const noexcept;
+  bool has_dwarf() const noexcept;
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
-  void parse_min_symbols(AddrPtr base_vma) const noexcept;
-  void set_relocation(AddrPtr vma) noexcept;
-  // Relocates `addr`. Note, to get the `base relocation` address, one can pass `nullptr` to this method to get it.
-  AddrPtr relocate_addr(AddrPtr addr) noexcept;
-  AddrPtr obj_addr(AddrPtr addr) noexcept;
+  void parse_min_symbols() const noexcept;
 
-private:
-  AddrPtr reloc;
-
-public:
   Elf64Header *header;
   ElfSectionData m_sections;
-  ObjectFile *obj_file;
+  ObjectFile &obj_file;
 
   const ElfSection *str_table;
   // Dwarf Sections, might as well keep direct pointers to them

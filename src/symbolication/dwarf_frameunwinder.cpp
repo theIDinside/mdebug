@@ -51,15 +51,16 @@ Reg::set_register(u64 reg) noexcept
 
 Reg::Reg() noexcept : value(0), rule(RegisterRule::Undefined) {}
 
-CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept
-    : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), rule_table()
+CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
+                                 AddrPtr pc) noexcept
+    : tc(tc), task(task), fde_pc(cfi.start()), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}}), rule_table()
 {
   rule_table.fill(Reg{});
 }
 
 CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frame_below,
-                                 const UnwindInfo *cfi, AddrPtr pc) noexcept
-    : tc(tc), task(task), fde_pc(cfi->start), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}})
+                                 UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
+    : tc(tc), task(task), fde_pc(cfi.start()), end_pc(pc), cfa({.is_expr = false, .reg = {0, 0}})
 {
   for (auto i = 0u; i < rule_table.size(); ++i) {
     rule_table[i].rule = RegisterRule::Undefined;
@@ -68,9 +69,9 @@ CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const Reg
 }
 
 void
-CFAStateMachine::reset(const UnwindInfo *inf, const RegisterValues &frame_below, AddrPtr pc) noexcept
+CFAStateMachine::reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame_below, AddrPtr pc) noexcept
 {
-  fde_pc = inf->start;
+  fde_pc = cfi.start();
   end_pc = pc;
   cfa = {.is_expr = false, .reg = {0, 0}};
   auto i = 0;
@@ -86,7 +87,7 @@ CFAStateMachine::reset(const UnwindInfo *inf, const RegisterValues &frame_below,
 // then.
 /* static */
 CFAStateMachine
-CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, const UnwindInfo *cfi, AddrPtr pc) noexcept
+CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
 {
   auto cfa_sm = CFAStateMachine{tc, task, cfi, pc};
   for (auto i = 0; i <= 16; i++) {
@@ -456,10 +457,10 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
 }
 
 std::unique_ptr<Unwinder>
-parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noexcept
+parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
 {
   ASSERT(eh_frame != nullptr, "Expected a .eh_frame section!");
-  DwarfBinaryReader reader{objfile->parsed_elf, eh_frame->m_section_ptr, eh_frame->size()};
+  DwarfBinaryReader reader{objfile->elf, eh_frame->m_section_ptr, eh_frame->size()};
   DLOG("eh", "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->path->c_str(),
        reader.remaining_size(), eh_frame->file_offset);
   auto unwinder_db = std::make_unique<Unwinder>(objfile);
@@ -500,7 +501,7 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame, AddrPtr base_vma) noex
       if (initial_loc > 0) {
         DLOG("mdb", "[eh]: expected initial loc to be < 0, but was 0x{:x}", initial_loc);
       }
-      AddrPtr begin = base_vma + (eh_frame->address + reader.bytes_read() - len_field_len) + initial_loc;
+      AddrPtr begin = (eh_frame->address + reader.bytes_read() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.read_value<u32>();
       u8 aug_data_length = 0u;
       AddrPtr lsda{nullptr};
@@ -715,22 +716,49 @@ UnwindIterator::UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept
     : tc(tc), current(tc->get_unwinder_from_pc(first_pc))
 {
 }
-const UnwindInfo *
+
+std::optional<UnwindInfoSymbolFilePair>
+UnwinderSymbolFilePair::get_unwinder_info(AddrPtr pc) noexcept
+{
+  if (sf && !sf->pc_bounds->contains(pc)) {
+    return std::nullopt;
+  }
+
+  const auto info = unwinder->get_unwind_info(sf != nullptr ? sf->unrelocate(pc) : pc);
+  if (!info) {
+    return std::nullopt;
+  }
+  return UnwindInfoSymbolFilePair{.info = info, .sf = sf};
+}
+
+std::optional<UnwindInfoSymbolFilePair>
 UnwindIterator::get_info(AddrPtr pc) noexcept
 {
-  auto inf = current->get_unwind_info(pc);
-  if (inf)
+  auto inf = current.get_unwinder_info(pc);
+  if (inf) {
     return inf;
-  else {
+  } else {
     current = tc->get_unwinder_from_pc(pc);
-    return current->get_unwind_info(pc);
+    return current.get_unwinder_info(pc);
   }
 }
 
 bool
 UnwindIterator::is_null() const noexcept
 {
-  return tc->is_null_unwinder(current);
+  return tc->is_null_unwinder(current.unwinder);
+}
+
+AddrPtr
+UnwindInfoSymbolFilePair::start() const noexcept
+{
+  return info->start + sf->baseAddress;
+}
+
+AddrPtr
+UnwindInfoSymbolFilePair::end() const noexcept
+{
+  return info->end + sf->baseAddress;
 }
 
 } // namespace sym

@@ -1,4 +1,5 @@
 #include "lnp.h"
+#include "common.h"
 #include "symbolication/dwarf_defs.h"
 #include "utils/enumerator.h"
 #include <algorithm>
@@ -16,9 +17,8 @@ class SourceCodeFileLNPResolver
 public:
   SourceCodeFileLNPResolver(LNPHeader *header, std::set<LineTableEntry> &table,
                             std::optional<AddressRange> valid_bounds, u32 file_index) noexcept
-      : header{header}, table(table), address(0), line(1), column(0), op_index(0), file(1),
-        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
-        epilogue_begin(false), isa(0), discriminator(0), bounds(valid_bounds), file_index(file_index)
+      : header{header}, table(table), is_stmt(header->default_is_stmt), bounds(valid_bounds),
+        file_index(file_index)
   {
   }
 
@@ -195,18 +195,18 @@ private:
   LNPHeader *header;
   std::set<LineTableEntry> &table;
   // State machine register
-  u64 address;
-  u32 line;
-  u32 column;
-  u16 op_index;
-  u32 file;
+  u64 address{0};
+  u32 line{1};
+  u32 column{0};
+  u16 op_index{0};
+  u32 file{1};
   bool is_stmt;
-  bool basic_block;
-  bool end_sequence;
-  bool prologue_end;
-  bool epilogue_begin;
-  u8 isa;
-  u32 discriminator;
+  bool basic_block{false};
+  bool end_sequence{false};
+  bool prologue_end{false};
+  bool epilogue_begin{false};
+  u8 isa{0};
+  u32 discriminator{0};
   std::optional<AddressRange> bounds;
   u32 file_index;
 };
@@ -216,9 +216,7 @@ class LNPStateMachine
 public:
   LNPStateMachine(LNPHeader *header, std::vector<LineTableEntry> *table,
                   std::optional<AddressRange> valid_bounds) noexcept
-      : header{header}, table(table), address(0), line(1), column(0), op_index(0), file(1),
-        is_stmt(header->default_is_stmt), basic_block(false), end_sequence(false), prologue_end(false),
-        epilogue_begin(false), isa(0), discriminator(0), bounds(valid_bounds)
+      : header{header}, table(table), is_stmt(header->default_is_stmt), bounds(valid_bounds)
   {
   }
 
@@ -392,18 +390,18 @@ private:
   LNPHeader *header;
   std::vector<LineTableEntry> *table;
   // State machine register
-  u64 address;
-  u32 line;
-  u32 column;
-  u16 op_index;
-  u32 file;
+  u64 address{0};
+  u32 line{1};
+  u32 column{0};
+  u16 op_index{0};
+  u32 file{1};
   bool is_stmt;
-  bool basic_block;
-  bool end_sequence;
-  bool prologue_end;
-  bool epilogue_begin;
-  u8 isa;
-  u32 discriminator;
+  bool basic_block{false};
+  bool end_sequence{false};
+  bool prologue_end{false};
+  bool epilogue_begin{false};
+  u8 isa{0};
+  u32 discriminator{0};
   std::optional<AddressRange> bounds;
   bool should_record_lines = true;
 };
@@ -428,7 +426,7 @@ LNPHeader::files() const noexcept
   path_buf.reserve(1024);
   for (const auto &f : file_names) {
     path_buf.clear();
-    const auto index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+    const auto index = lnp_index(f.dir_index, version);
     // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
     // and we have not made copies.
     fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
@@ -440,13 +438,13 @@ LNPHeader::files() const noexcept
 std::optional<Path>
 LNPHeader::file(u32 f_index) const noexcept
 {
-  const auto adjusted_index = version == DwarfVersion::D4 ? f_index - 1 : f_index;
+  const auto adjusted_index = version == DwarfVersion::D4 ? (f_index == 0 ? 0 : f_index - 1) : f_index;
   if (adjusted_index >= file_names.size())
     return {};
 
   for (const auto &[i, f] : utils::EnumerateView(file_names)) {
     if (i == adjusted_index) {
-      const auto dir_index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+      const auto dir_index = lnp_index(f.dir_index, version);
       return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
           .lexically_normal();
     }
@@ -463,7 +461,7 @@ LNPHeader::file_entry_index(const std::filesystem::path &p) const noexcept
   auto file_index = 0;
   for (const auto &f : file_names) {
     path_buf.clear();
-    const auto index = version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+    const auto index = lnp_index(f.dir_index, version);
     fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
     const auto file_path = std::filesystem::path{path_buf}.lexically_normal();
     if (p == file_path) {
@@ -536,7 +534,7 @@ LineTable::directory(u64 dir_index) const noexcept
 std::optional<sym::dw::FileEntry>
 LineTable::file(u64 file_index) const noexcept
 {
-  const auto adjusted = line_header->version == DwarfVersion::D4 ? file_index - 1 : file_index;
+  const auto adjusted = lnp_index(file_index, line_header->version);
   ASSERT(line_header, "Line table doesn't have a line number program header");
   ASSERT(adjusted < line_header->file_names.size(), "file_index={} not found in {} files", adjusted,
          line_header->file_names.size());
@@ -935,35 +933,35 @@ read_lnp_headers(const Elf *elf) noexcept
 }
 
 RelocatedLteIterator
-SourceCodeFile::begin() const noexcept
+SourceCodeFile::begin(AddrPtr relocatedBase) const noexcept
 {
   // Rust would call this "interior" mutability. So kindly go fuck yourself.
   if (!is_computed()) {
-    const_cast<SourceCodeFile *>(this)->compute_line_tables();
+    this->compute_line_tables();
   }
-  return RelocatedLteIterator(line_table->cbegin(), relocated_base);
+  return RelocatedLteIterator(line_table->begin(), relocatedBase);
 }
 
 RelocatedLteIterator
-SourceCodeFile::end() const noexcept
+SourceCodeFile::end(AddrPtr relocatedBase) const noexcept
 {
-  return RelocatedLteIterator(line_table->cend(), relocated_base);
+  return RelocatedLteIterator(line_table->end(), relocatedBase);
 }
 
 SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept
     : headers(std::move(headers)), line_table(std::make_shared<std::vector<LineTableEntry>>()), low(nullptr),
-      high(nullptr), m(), computed(false), elf(elf), relocated_base(elf->relocate_addr(nullptr)),
-      full_path(std::move(path))
+      high(nullptr), m(), computed(false), elf(elf), full_path(std::move(path))
 {
 }
 
 auto
-SourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column) -> std::optional<LineTableEntry>
+SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line, std::optional<u32> column)
+    -> std::optional<LineTableEntry>
 {
-  auto lte_it = std::find_if(begin(), end(), [&](const auto &lte) {
+  auto lte_it = std::find_if(begin(relocatedBase), end(relocatedBase), [&](const auto &lte) {
     return line == lte.line && lte.column == column.value_or(lte.column);
   });
-  if (lte_it != end()) {
+  if (lte_it != end(relocatedBase)) {
     return lte_it.get();
   } else {
     return std::nullopt;
@@ -971,18 +969,18 @@ SourceCodeFile::first_linetable_entry(u32 line, std::optional<u32> column) -> st
 }
 
 auto
-SourceCodeFile::find_by_pc(AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
+SourceCodeFile::find_by_pc(AddrPtr base, AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
 {
-  auto start = begin();
+  auto start = begin(base);
   // might be a source code file with no line number info. e.g. include/stdio.h
-  if (start == end())
+  if (start == end(base))
     return std::nullopt;
   if ((*start).pc == addr)
     return start;
 
-  auto it =
-      std::lower_bound(begin(), end(), addr, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
-  if (it == end())
+  auto it = std::lower_bound(begin(base), end(base), addr,
+                             [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  if (it == end(base))
     return std::nullopt;
 
   return it;
@@ -1013,7 +1011,7 @@ SourceCodeFile::is_computed() const noexcept
 }
 
 void
-SourceCodeFile::compute_line_tables() noexcept
+SourceCodeFile::compute_line_tables() const noexcept
 {
   std::lock_guard lock(m);
   if (computed)
@@ -1118,16 +1116,39 @@ SourceCodeFile::compute_line_tables() noexcept
       }
     }
   }
-  line_table->reserve(unique_ltes.size());
-  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(*line_table));
   auto &lt = *line_table;
+  lt.reserve(unique_ltes.size());
+  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(lt));
   ASSERT(std::is_sorted(lt.begin(), lt.end(), [](auto &a, auto &b) { return a.pc < b.pc; }),
          "Line Table was not sorted by Program Counter!");
   if (lt.size() > 2) {
-    low = lt.begin()->pc;
-    high = std::next(lt.begin(), (lt.size() - 1))->pc;
+    low = lt.front().pc;
+    high = lt.back().pc;
   }
   computed = true;
+}
+
+RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr,
+                                                 std::shared_ptr<SourceCodeFile> src_file) noexcept
+    : baseAddr(base_addr), file(*src_file)
+{
+}
+
+RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *src_file) noexcept
+    : baseAddr(base_addr), file(*src_file)
+{
+}
+
+auto
+RelocatedSourceCodeFile::find_lte_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>
+{
+  return file.find_by_pc(baseAddr, pc);
+}
+
+AddressRange
+RelocatedSourceCodeFile::address_bounds() noexcept
+{
+  return AddressRange::relocate(file.address_bounds(), baseAddr);
 }
 
 } // namespace sym::dw

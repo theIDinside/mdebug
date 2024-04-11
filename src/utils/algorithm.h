@@ -87,17 +87,18 @@ template <typename Container, typename Fn>
 constexpr auto
 find_if(Container &c, Fn &&f) noexcept
 {
+  using ReturnType = decltype(std::optional{c.begin()});
   if constexpr (std::is_const<Container>::value) {
-    if (const auto it = std::find_if(c.cbegin(), c.cend(), f); it != std::end(c)) {
+    if (const auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
       return std::optional{it};
     } else {
-      return std::nullopt;
+      return ReturnType{};
     }
   } else {
     if (auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
       return std::optional{it};
     } else {
-      return std::nullopt;
+      return ReturnType{};
     }
   }
 }

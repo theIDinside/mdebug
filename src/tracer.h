@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 struct ObjectFile;
+class SymbolFile;
 struct TraceeController;
 
 using Pid = pid_t;
@@ -71,7 +72,10 @@ public:
   void launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept;
   void kill_all_targets() noexcept;
   void detach(std::unique_ptr<TraceeController> &&target) noexcept;
-  void disconnect() noexcept;
+  void disconnect(bool terminate) noexcept;
+
+  std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
+  const sys::DebuggerConfiguration &getConfig() noexcept;
 
   const sys::DebuggerConfiguration &get_configuration() const noexcept;
   std::vector<std::unique_ptr<TraceeController>> targets;

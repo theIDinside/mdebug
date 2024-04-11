@@ -13,7 +13,7 @@ determine_ret_class(sym::Type *type) noexcept
 
 FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
                                sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                               SourceFileSymbolInfo &decl_file, dw::FrameBaseExpression fb_expr,
+                               CompilationUnit &decl_file, dw::FrameBaseExpression fb_expr,
                                std::optional<SourceCoordinate> &&source) noexcept
     : decl_file(NonNull(decl_file)), formal_parameters(start, end, {}), function_body_variables(),
       maybe_origin_dies(maybe_origin), framebase_expr(fb_expr), return_type(return_type), pc_start(start),
@@ -50,13 +50,13 @@ FunctionSymbol::end_pc() const noexcept
   return pc_end_exclusive;
 }
 
-const SourceFileSymbolInfo *
+const CompilationUnit *
 FunctionSymbol::symbol_info() const noexcept
 {
   return decl_file;
 }
 
-SourceFileSymbolInfo *
+CompilationUnit *
 FunctionSymbol::symbol_info() noexcept
 {
   return decl_file;

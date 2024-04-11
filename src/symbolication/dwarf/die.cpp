@@ -293,7 +293,7 @@ UnitData::load_dies() noexcept
 UnitData *
 prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
 {
-  const auto abbrev_sec = obj->parsed_elf->debug_abbrev;
+  const auto abbrev_sec = obj->elf->debug_abbrev;
 
   AbbreviationInfo::Table result{};
   const u8 *abbr_ptr = header.abbreviation_data(abbrev_sec);
@@ -349,9 +349,9 @@ read_unit_headers(ObjectFile *obj) noexcept
   if (DwarfLog) {
     LOG("dwarf", "Reading {} obfile compilation unit headers", obj->path->c_str());
   }
-  const auto dbg_info = obj->parsed_elf->debug_info;
+  const auto dbg_info = obj->elf->debug_info;
   std::vector<UnitHeader> result{};
-  DwarfBinaryReader reader{obj->parsed_elf, dbg_info};
+  DwarfBinaryReader reader{obj->elf, dbg_info};
   auto unit_index = 0u;
   while (reader.has_more()) {
     const auto sec_offset = reader.bytes_read();

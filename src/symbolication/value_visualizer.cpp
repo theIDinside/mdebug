@@ -11,7 +11,7 @@
 
 namespace sym {
 
-ValueResolver::ValueResolver(ObjectFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
+ValueResolver::ValueResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
     : type(type), obj(object_file), value_ptr(std::move(val)), children()
 {
 }
@@ -42,7 +42,7 @@ ValueResolver::resolve(TraceeController &tc, std::optional<u32> start, std::opti
   return get_children(tc, start, count);
 }
 
-DefaultStructResolver::DefaultStructResolver(ObjectFile *object_file, ValuePtr value, TypePtr type,
+DefaultStructResolver::DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr type,
                                              VariablesReference var_ref) noexcept
     : ValueResolver(object_file, std::move(value), type), ref(var_ref)
 {
@@ -62,11 +62,11 @@ DefaultStructResolver::get_children(TraceeController &tc, std::optional<u32>, st
   for (auto &mem : type->member_variables()) {
     auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
                                                      ptr->mem_contents_offset, ptr->take_memory_reference());
-    obj->init_visualizer(member_value);
-    obj->register_resolver(member_value);
+    obj->objectFile()->init_visualizer(member_value);
+    obj->registerResolver(member_value);
     const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
     if (new_ref > 0) {
-      obj->cache_value(new_ref, member_value);
+      obj->cacheValue(new_ref, member_value);
     }
     children.emplace_back(std::move(member_value));
   }
@@ -74,7 +74,7 @@ DefaultStructResolver::get_children(TraceeController &tc, std::optional<u32>, st
   return children;
 }
 
-CStringResolver::CStringResolver(ObjectFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
+CStringResolver::CStringResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
     : ValueResolver(object_file, std::move(val), type)
 {
 }
@@ -113,7 +113,7 @@ CStringResolver::get_children(TraceeController &tc, std::optional<u32> start, st
   return children;
 }
 
-ArrayResolver::ArrayResolver(ObjectFile *object_file, TypePtr type, u32 array_size,
+ArrayResolver::ArrayResolver(SymbolFile *object_file, TypePtr type, u32 array_size,
                              AddrPtr remote_base_addr) noexcept
     : ValueResolver(object_file, {}, type), base_addr(remote_base_addr), element_count(array_size),
       layout_type(type->get_layout_type())
@@ -250,10 +250,10 @@ PrimitiveVisualizer::format_value() noexcept
     return fmt::format("{}", value);
   }
   case BaseTypeEncoding::DW_ATE_float: {
-    if (size_of == 4) {
+    if (size_of == 4u) {
       float value = bit_copy<float>(span);
       return fmt::format("{}", value);
-    } else if (size_of == 8) {
+    } else if (size_of == 8u) {
       double value = bit_copy<double>(span);
       return fmt::format("{}", value);
     } else {

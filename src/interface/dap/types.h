@@ -7,6 +7,7 @@
 struct TaskInfo;
 struct TraceeController;
 struct ObjectFile;
+class SymbolFile;
 class UserBreakpoint;
 
 namespace sym {
@@ -34,7 +35,7 @@ struct Breakpoint
   std::optional<u32> line;
   std::optional<u32> col;
   std::optional<std::string_view> source_path;
-  std::optional<std::string_view> error_message;
+  std::optional<std::string> error_message;
 
   std::string serialize() const noexcept;
   static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
@@ -100,9 +101,9 @@ enum class EntityType
 class VariablesReference
 {
 public:
-  VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent,
+  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent,
                      EntityType type) noexcept;
-  VariablesReference(NonNullPtr<ObjectFile> obj, int ref, int thread, int frame_id, int parent, EntityType type,
+  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent, EntityType type,
                      ScopeType scopeType) noexcept;
   VariablesReference &operator=(const VariablesReference &) = default;
   VariablesReference &operator=(VariablesReference &&) = default;
@@ -132,7 +133,7 @@ public:
   // The "symbol context" for this variable reference.
   // Keep it a NonNullPtr<ObjectFile> instead of a reference, because we want pointer comparison for equality /
   // identify. Because only 1 objectfile of some binary will *ever* be loaded into memory.
-  Immutable<NonNullPtr<ObjectFile>> object_file;
+  Immutable<NonNullPtr<SymbolFile>> object_file;
 };
 
 // DAP Result for `variables` request.

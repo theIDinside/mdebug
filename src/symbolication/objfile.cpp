@@ -5,8 +5,11 @@
 #include "dwarf/die.h"
 #include "dwarf/lnp.h"
 #include "supervisor.h"
+#include "symbolication/block.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf_defs.h"
+#include "symbolication/dwarf_frameunwinder.h"
+#include "symbolication/elf_symbols.h"
 #include "symbolication/value_visualizer.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
@@ -15,15 +18,19 @@
 #include "utils/enumerator.h"
 #include "utils/worker_task.h"
 #include "value.h"
+#include <algorithm>
+#include <iterator>
 #include <symbolication/dwarf/typeread.h>
+#include <tracer.h>
+#include <utility>
 #include <utils/scoped_fd.h>
 
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), objfile_id(std::move(objfile_id)), size(size), loaded_binary(loaded_binary),
       types(std::make_unique<TypeStorage>(*this)), minimal_fn_symbols{}, min_fn_symbols_sorted(),
       minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
-      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>()), parsed_lte_write_lock(), line_table(),
-      lnp_headers(nullptr),
+      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>(this)), parsed_lte_write_lock(),
+      line_table(), lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
       comp_units(), addr_cu_map(), valobj_cache{}
 {
@@ -32,7 +39,7 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
 
 ObjectFile::~ObjectFile() noexcept
 {
-  delete parsed_elf;
+  delete elf;
   munmap((void *)loaded_binary, size);
 }
 
@@ -42,14 +49,14 @@ ObjectFile::get_offset(u8 *ptr) const noexcept
   ASSERT(ptr > loaded_binary, "Attempted to take address before {:p} with {:p}", (void *)loaded_binary,
          (void *)ptr);
   ASSERT((u64)(ptr - loaded_binary) < size, "Pointer is outside of bounds of 0x{:x} .. {:x}",
-         (std::uintptr_t)loaded_binary, (std::uintptr_t)(loaded_binary + size))
+         (std::uintptr_t)loaded_binary, (std::uintptr_t)(loaded_binary + *size))
   return ptr - loaded_binary;
 }
 
 AddrPtr
 ObjectFile::text_section_offset() const noexcept
 {
-  return parsed_elf->get_section(".text")->address;
+  return elf->get_section(".text")->address;
 }
 
 std::optional<MinSymbol>
@@ -57,10 +64,11 @@ ObjectFile::get_min_fn_sym(std::string_view name) noexcept
 {
   if (minimal_fn_symbols.contains(name)) {
     auto &index = minimal_fn_symbols[name];
-    return min_fn_symbols_sorted[index];
-  } else {
-    return std::nullopt;
+    if (const auto symbol = min_fn_symbols_sorted[index]; symbol.maybe_size > 0) {
+      return symbol;
+    }
   }
+  return std::nullopt;
 }
 
 const MinSymbol *
@@ -89,17 +97,10 @@ ObjectFile::get_min_obj_sym(std::string_view name) noexcept
   }
 }
 
-bool
-ObjectFile::found_min_syms() const noexcept
-{
-  return has_elf_symbols;
-}
-
 void
 ObjectFile::set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept
 {
   ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
-  DLOG("mdb", "Caching {} unit datas", unit_data.size());
   std::lock_guard lock(unit_data_write_lock);
   auto first_id = unit_data.front()->section_offset();
   const auto it =
@@ -154,35 +155,17 @@ ObjectFile::get_lnp_header(u64 offset) noexcept
   TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
 }
 
-sym::dw::LineTable
-ObjectFile::get_linetable(u64 offset) noexcept
-{
-  auto &headers = *lnp_headers;
-  auto header = std::find_if(headers.begin(), headers.end(),
-                             [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
-  ASSERT(header != std::end(headers), "Failed to find LNP Header with offset 0x{:x}", offset);
-  auto kvp = std::find_if(parsed_ltes->begin(), parsed_ltes->end(),
-                          [offset](const auto &kvp) { return kvp.first == offset; });
-  if (kvp == std::end(*parsed_ltes)) {
-    PANIC(fmt::format("Failed to find parsed LineTable Entries for offset 0x{:x}", offset));
-  }
-  if (kvp->second.table.empty()) {
-    sym::dw::compute_line_number_program(kvp->second, parsed_elf, &*header);
-  }
-  return sym::dw::LineTable{&(*header), &kvp->second, parsed_elf->relocate_addr(nullptr)};
-}
-
 void
 ObjectFile::read_lnp_headers() noexcept
 {
-  lnp_headers = sym::dw::read_lnp_headers(parsed_elf);
+  lnp_headers = sym::dw::read_lnp_headers(elf);
 
   std::string path_buf{};
   path_buf.reserve(1024);
   for (auto &hdr : *lnp_headers) {
     for (const auto &f : hdr.file_names) {
       path_buf.clear();
-      const auto index = hdr.version == DwarfVersion::D4 ? f.dir_index - 1 : f.dir_index;
+      const auto index = sym::dw::lnp_index(f.dir_index, hdr.version);
       // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
       // and we have not made copies.
       fmt::format_to(std::back_inserter(path_buf), "{}/{}", hdr.directories[index].path, f.file_name);
@@ -194,7 +177,7 @@ ObjectFile::read_lnp_headers() noexcept
         std::vector<sym::dw::LNPHeader *> src_headers{};
         src_headers.push_back(&hdr);
         lnp_source_code_files.emplace(
-            canonical, std::make_shared<sym::dw::SourceCodeFile>(parsed_elf, canonical, std::move(src_headers)));
+            canonical, std::make_shared<sym::dw::SourceCodeFile>(elf, canonical, std::move(src_headers)));
       }
     }
   }
@@ -245,16 +228,16 @@ ObjectFile::get_plte(u64 offset) noexcept
 }
 
 void
-ObjectFile::add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) noexcept
+ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept
 {
   // TODO(simon): We do stupid sorting. implement something better optimized
   std::lock_guard lock(cu_write_lock);
   comp_units.insert(comp_units.end(), std::make_move_iterator(new_cus.begin()),
                     std::make_move_iterator(new_cus.end()));
-  std::sort(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter());
+  std::sort(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter());
 
   DBG({
-    if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::SourceFileSymbolInfo::Sorter())) {
+    if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter())) {
       for (const auto &cu : comp_units) {
         DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
              cu.start_pc(), cu.end_pc());
@@ -265,7 +248,7 @@ ObjectFile::add_initialized_cus(std::span<sym::SourceFileSymbolInfo> new_cus) no
   addr_cu_map.add_cus(new_cus);
 }
 
-std::vector<sym::SourceFileSymbolInfo> &
+std::vector<sym::CompilationUnit> &
 ObjectFile::source_units() noexcept
 {
   return comp_units;
@@ -284,16 +267,16 @@ ObjectFile::get_source_file(const std::filesystem::path &fullpath) noexcept
 std::vector<sym::dw::UnitData *>
 ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
 {
-  return addr_cu_map.find_by_pc(pc - parsed_elf->relocate_addr(nullptr));
+  return addr_cu_map.find_by_pc(pc);
 }
 
 // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
 // uninteresting for now and not really important, as it can be fixed at any point in time.
-std::vector<sym::SourceFileSymbolInfo *>
+std::vector<sym::CompilationUnit *>
 ObjectFile::get_source_infos(AddrPtr pc) noexcept
 {
-  std::vector<sym::SourceFileSymbolInfo *> result;
-  auto unit_datas = addr_cu_map.find_by_pc(pc - parsed_elf->relocate_addr(nullptr));
+  std::vector<sym::CompilationUnit *> result;
+  auto unit_datas = addr_cu_map.find_by_pc(pc);
   for (auto &src : source_units()) {
     for (auto *unit : unit_datas) {
       if (src.get_dwarf_unit() == unit) {
@@ -304,22 +287,22 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
   return result;
 }
 
-std::vector<sym::dw::SourceCodeFile *>
-ObjectFile::get_source_code_files(AddrPtr pc) noexcept
+auto
+ObjectFile::relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
+    -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
-  std::vector<sym::dw::SourceCodeFile *> result;
+  std::vector<sym::dw::RelocatedSourceCodeFile> result{};
   auto cus = get_source_infos(pc);
   const auto is_unique = [&](auto ptr) noexcept {
-    return std::none_of(result.begin(), result.end(), [ptr](auto cmp) { return ptr == cmp; });
+    return std::none_of(result.begin(), result.end(), [ptr](auto cmp) { return ptr->full_path == cmp.path(); });
   };
   for (auto cu : cus) {
     for (auto src : cu->sources()) {
       if (src->address_bounds().contains(pc) && is_unique(src.get())) {
-        result.push_back(src.get());
+        result.emplace_back(base, src.get());
       }
     }
   }
-
   return result;
 }
 
@@ -344,7 +327,6 @@ ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noex
   auto ni_work = sym::dw::IndexingTask::create_jobs_for(this);
   name_index_taskgroup.add_tasks(std::span{ni_work});
   name_index_taskgroup.schedule_work().wait();
-  DLOG("mdb", "Name Indexing block done");
 }
 
 void
@@ -354,7 +336,6 @@ ObjectFile::add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
   min_fn_symbols_sorted = std::move(fn_symbols);
   minimal_obj_symbols = std::move(obj_symbols);
   init_minsym_name_lookup();
-  has_elf_symbols = true;
 }
 
 void
@@ -362,53 +343,6 @@ ObjectFile::init_minsym_name_lookup() noexcept
 {
   for (const auto &[index, sym] : utils::EnumerateView(min_fn_symbols_sorted)) {
     minimal_fn_symbols[sym.name] = Index{static_cast<u32>(index)};
-  }
-}
-
-std::vector<ui::dap::Variable>
-ObjectFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
-{
-  if (!valobj_cache.contains(ref)) {
-    DLOG("mdb", "WARNING expected variable reference {} had no data associated with it.", ref);
-    return {};
-  }
-  auto &value = valobj_cache[ref];
-  auto type = value->type();
-  if (!type->is_resolved()) {
-    sym::dw::TypeSymbolicationContext ts_ctx{*this, *type};
-    ts_ctx.resolve_type();
-  }
-
-  auto value_resolver = value->get_resolver();
-  if (value_resolver != nullptr) {
-    auto variables = value_resolver->resolve(tc, start, count);
-    std::vector<ui::dap::Variable> result{};
-
-    for (auto &var : variables) {
-      init_visualizer(var);
-      register_resolver(var);
-      const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-      if (new_ref > 0)
-        cache_value(new_ref, var);
-      result.push_back(ui::dap::Variable{new_ref, var});
-    }
-
-    return result;
-  } else {
-    std::vector<ui::dap::Variable> result{};
-    result.reserve(type->member_variables().size());
-
-    for (auto &mem : type->member_variables()) {
-      auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-                                                       value->mem_contents_offset, value->take_memory_reference());
-      init_visualizer(member_value);
-      register_resolver(member_value);
-      const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-      if (new_ref > 0)
-        cache_value(new_ref, member_value);
-      result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
-    }
-    return result;
   }
 }
 
@@ -444,8 +378,163 @@ ObjectFile::init_visualizer(std::shared_ptr<sym::Value> &value) noexcept
   }
 }
 
-void
-ObjectFile::register_resolver(std::shared_ptr<sym::Value> &value) noexcept
+auto
+ObjectFile::regex_search(const std::string &regex_pattern) const noexcept -> std::vector<std::string>
+{
+  // TODO(simon): Optimize. Regexing .debug_str in for instance libxul.so, takes 15 seconds (on O3, on -O0; it
+  // takes 180 seconds)
+  std::regex re{regex_pattern};
+  if (elf->debug_str == nullptr) {
+    return {};
+  }
+  std::string_view dbg_str{(const char *)elf->debug_str->begin(), elf->debug_str->size()};
+
+  auto it = std::regex_iterator<std::string_view::iterator>{dbg_str.cbegin(), dbg_str.cend(), re};
+  std::vector<std::string> results{};
+
+  for (decltype(it) end; it != end; ++it) {
+    results.push_back((*it).str());
+  }
+
+  return results;
+}
+
+ObjectFile *
+mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
+{
+  if (!fs::exists(path)) {
+    return nullptr;
+  }
+
+  auto fd = utils::ScopedFd::open_read_only(path);
+  const auto addr = fd.mmap_file<u8>({}, true);
+  const auto objfile =
+      new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
+
+  return objfile;
+}
+
+std::shared_ptr<ObjectFile>
+CreateObjectFile(const TraceeController &tc, const Path &path) noexcept
+{
+  if (!fs::exists(path)) {
+    return nullptr;
+  }
+
+  auto fd = utils::ScopedFd::open_read_only(path);
+  const auto addr = fd.mmap_file<u8>({}, true);
+  const auto objfile =
+      std::make_shared<ObjectFile>(fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr);
+
+  DLOG("mdb", "Parsing objfile {}", objfile->path->c_str());
+  const auto header = objfile->get_at_offset<Elf64Header>(0);
+  ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
+         *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
+  ElfSectionData data = {.sections = new ElfSection[header->e_shnum], .count = header->e_shnum};
+  const auto sec_names_offset_hdr =
+      objfile->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
+
+  u64 min = UINTMAX_MAX;
+  u64 max = 0;
+
+  // good enough heuristic to determine mapped in ranges.
+  for (auto i = 0; i < header->e_phnum; ++i) {
+    auto phdr = objfile->get_at_offset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
+    if (phdr->p_type == PT_LOAD) {
+      min = std::min(phdr->p_vaddr, min);
+      const auto end = u64{phdr->p_vaddr + phdr->p_memsz};
+      const auto align_adjust = u64{phdr->p_align - (end % phdr->p_align)};
+      max = std::max(end + align_adjust, max);
+    }
+  }
+
+  objfile->unrelocated_address_bounds = AddressRange{.low = min, .high = max};
+  auto sec_hdrs_offset = header->e_shoff;
+  // parse sections
+  for (auto i = 0; i < data.count; i++) {
+    const auto sec_hdr = objfile->get_at_offset<Elf64_Shdr>(sec_hdrs_offset);
+    sec_hdrs_offset += header->e_shentsize;
+    data.sections[i].m_section_ptr = objfile->get_at_offset<u8>(sec_hdr->sh_offset);
+    data.sections[i].m_section_size = sec_hdr->sh_size;
+    data.sections[i].m_name =
+        objfile->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
+    data.sections[i].file_offset = sec_hdr->sh_offset;
+    data.sections[i].address = sec_hdr->sh_addr;
+  }
+  // ObjectFile is the owner of `Elf`
+  objfile->elf = new Elf{header, data, *objfile};
+  objfile->elf->parse_min_symbols();
+  objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->get_section(".eh_frame"));
+  if (const auto section = objfile->elf->get_section(".debug_frame"); section) {
+    DLOG("mdb", ".debug_frame section found; parsing DWARF CFI section");
+    sym::parse_dwarf_eh(objfile->elf, objfile->unwinder.get(), section, -1);
+  }
+
+  if (objfile->elf->has_dwarf()) {
+    objfile->initial_dwarf_setup(Tracer::Instance->getConfig().dwarf_config());
+  }
+
+  return objfile;
+}
+
+SymbolFile::SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
+    : binary_object(std::move(binary)), obj_id(std::move(obj_id)), baseAddress(relocated_base),
+      pc_bounds(AddressRange::relocate(binary_object->unrelocated_address_bounds, relocated_base))
+{
+}
+
+SymbolFile::shr_ptr
+SymbolFile::Create(const TraceeController &tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
+{
+  ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
+  return std::make_shared<SymbolFile>(fmt::format("{}:{}", tc.task_leader, binary->path->c_str()),
+                                      std::move(binary), relocated_base);
+}
+
+auto
+SymbolFile::copy(const TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
+{
+  return SymbolFile::Create(tc, binary_object, relocated_base);
+}
+
+auto
+SymbolFile::getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
+{
+  return objectFile()->get_cus_from_pc(pc - baseAddress->get());
+}
+
+auto
+SymbolFile::symbolFileId() const noexcept -> std::string_view
+{
+  return obj_id;
+}
+
+inline auto
+SymbolFile::objectFile() const noexcept -> ObjectFile *
+{
+  return binary_object.get();
+}
+
+auto
+SymbolFile::contains(AddrPtr pc) const noexcept -> bool
+{
+  return pc_bounds->contains(pc);
+}
+
+auto
+SymbolFile::unrelocate(AddrPtr pc) const noexcept -> AddrPtr
+{
+  ASSERT(pc > baseAddress, "PC={} is below base address {}.", pc, baseAddress);
+  return pc - baseAddress;
+}
+
+auto
+SymbolFile::invalidateVariableReferences() noexcept -> void
+{
+  valobj_cache.clear();
+}
+auto
+SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void
 {
   // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
@@ -453,7 +542,7 @@ ObjectFile::register_resolver(std::shared_ptr<sym::Value> &value) noexcept
   //   values and how to display them, which *is* the issue with GDB's pretty printers
   auto type = value->type();
 
-  if (auto resolver = find_custom_resolver(*type); resolver != nullptr) {
+  if (auto resolver = objectFile()->find_custom_resolver(*type); resolver != nullptr) {
     value->set_resolver(std::move(resolver));
     return;
   }
@@ -475,22 +564,217 @@ ObjectFile::register_resolver(std::shared_ptr<sym::Value> &value) noexcept
   }
 }
 
-void
-ObjectFile::cache_value(VariablesReference ref, sym::Value::ShrPtr value) noexcept
+auto
+SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+    -> std::vector<ui::dap::Variable>
+{
+  if (!frame.full_symbol_info().is_resolved()) {
+    sym::dw::FunctionSymbolicationContext sym_ctx{*this->objectFile(), frame};
+    sym_ctx.process_symbol_information();
+  }
+
+  switch (set) {
+  case sym::VariableSet::Arguments: {
+    return getVariablesImpl(sym::FrameVariableKind::Arguments, tc, frame);
+  }
+  case sym::VariableSet::Locals: {
+    return getVariablesImpl(sym::FrameVariableKind::Locals, tc, frame);
+  }
+  case sym::VariableSet::Static:
+  case sym::VariableSet::Global:
+    TODO("Static or global variables request not yet supported.");
+    break;
+  }
+  return {};
+}
+auto
+SymbolFile::getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
+{
+  return binary_object->get_source_infos(pc - *baseAddress);
+}
+
+auto
+SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
+{
+  return binary_object->relocated_get_source_code_files(baseAddress, pc);
+}
+
+auto
+SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
+    -> std::vector<ui::dap::Variable>
+{
+  if (!valobj_cache.contains(ref)) {
+    DLOG("mdb", "WARNING expected variable reference {} had no data associated with it.", ref);
+    return {};
+  }
+  auto &value = valobj_cache[ref];
+  auto type = value->type();
+  if (!type->is_resolved()) {
+    sym::dw::TypeSymbolicationContext ts_ctx{*objectFile(), *type};
+    ts_ctx.resolve_type();
+  }
+
+  auto value_resolver = value->get_resolver();
+  if (value_resolver != nullptr) {
+    auto variables = value_resolver->resolve(tc, start, count);
+    std::vector<ui::dap::Variable> result{};
+
+    for (auto &var : variables) {
+      objectFile()->init_visualizer(var);
+      registerResolver(var);
+      const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+      if (new_ref > 0)
+        cacheValue(new_ref, var);
+      result.push_back(ui::dap::Variable{new_ref, var});
+    }
+
+    return result;
+  } else {
+    std::vector<ui::dap::Variable> result{};
+    result.reserve(type->member_variables().size());
+
+    for (auto &mem : type->member_variables()) {
+      auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
+                                                       value->mem_contents_offset, value->take_memory_reference());
+      objectFile()->init_visualizer(member_value);
+      registerResolver(member_value);
+      const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+      if (new_ref > 0)
+        cacheValue(new_ref, member_value);
+      result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+    }
+    return result;
+  }
+}
+
+auto
+SymbolFile::low_pc() noexcept -> AddrPtr
+{
+  return baseAddress + objectFile()->unrelocated_address_bounds.low;
+}
+
+auto
+SymbolFile::high_pc() noexcept -> AddrPtr
+{
+  return baseAddress + objectFile()->unrelocated_address_bounds.high;
+}
+
+auto
+SymbolFile::getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
+{
+  return binary_object->get_min_fn_sym(name);
+}
+
+auto
+SymbolFile::searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *
+{
+  return objectFile()->search_minsym_fn_info(pc - *baseAddress);
+}
+
+auto
+SymbolFile::getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
+{
+  return binary_object->get_min_obj_sym(name);
+}
+
+auto
+SymbolFile::cacheValue(VariablesReference ref, std::shared_ptr<sym::Value> value) noexcept -> void
 {
   ASSERT(!valobj_cache.contains(ref), "Value object cache already contains value with reference {}", ref);
   valobj_cache.emplace(ref, std::move(value));
 }
 
-void
-ObjectFile::invalidate_variable_references() noexcept
+auto
+SymbolFile::getLineTable(u64 offset) noexcept -> sym::dw::LineTable
 {
-  valobj_cache.clear();
+  auto &headers = *objectFile()->lnp_headers;
+  auto header = std::find_if(headers.begin(), headers.end(),
+                             [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
+  ASSERT(header != std::end(headers), "Failed to find LNP Header with offset 0x{:x}", offset);
+
+  auto kvp = std::find_if(objectFile()->parsed_ltes->begin(), objectFile()->parsed_ltes->end(),
+                          [offset](const auto &kvp) { return kvp.first == offset; });
+  if (kvp == std::end(*objectFile()->parsed_ltes)) {
+    PANIC(fmt::format("Failed to find parsed LineTable Entries for offset 0x{:x}", offset));
+  }
+  if (kvp->second.table.empty()) {
+    sym::dw::compute_line_number_program(kvp->second, objectFile()->elf, &*header);
+  }
+  return sym::dw::LineTable{&(*header), &kvp->second, baseAddress};
 }
 
-std::vector<ui::dap::Variable>
-ObjectFile::get_variables_impl(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                               sym::Frame &frame) noexcept
+auto
+SymbolFile::path() const noexcept -> Path
+{
+  return binary_object->path;
+}
+
+auto
+SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>
+{
+
+  std::vector<MinSymbol> matching_symbols;
+  std::vector<BreakpointLookup> result{};
+
+  auto obj = objectFile();
+  std::vector<std::string> search_for{};
+  if (spec.is_regex) {
+    const auto start = std::chrono::high_resolution_clock::now();
+    search_for = obj->regex_search(spec.name);
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+            .count();
+    DLOG("mdb", "regex searched {} in {}us", obj->path->c_str(), elapsed);
+  } else {
+    search_for = {spec.name};
+  }
+
+  for (const auto &n : search_for) {
+    auto ni = obj->name_index();
+    ni->for_each_fn(n, [&](const sym::dw::DieNameReference &ref) {
+      auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
+      auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
+      if (low_pc) {
+        const auto addr = low_pc->address();
+        matching_symbols.emplace_back(n, addr, 0);
+        DLOG("mdb", "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
+             die_ref.cu->section_offset(), die_ref.die->section_offset, n, addr);
+      }
+    });
+  }
+
+  Set<AddrPtr> bps_set{};
+  for (const auto &sym : matching_symbols) {
+    const auto unrelocated = sym.address;
+    const auto adjusted_address = sym.address + baseAddress;
+    if (!bps_set.contains(unrelocated)) {
+      auto srcs = getSourceCodeFiles(unrelocated);
+      for (auto src : srcs) {
+        if (src.address_bounds().contains(adjusted_address)) {
+          if (auto lte = src.find_lte_by_pc(unrelocated).transform([](auto v) { return v.get(); });
+              lte && !bps_set.contains(unrelocated)) {
+            result.emplace_back(adjusted_address, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});
+            bps_set.insert(sym.address);
+          }
+        }
+      }
+    }
+  }
+
+  for (const auto &n : search_for) {
+    if (auto s = obj->get_min_fn_sym(n).transform([&](const auto &sym) { return sym.address + baseAddress; });
+        s.has_value() && !bps_set.contains(s.value())) {
+      result.emplace_back(s.value(), std::nullopt);
+      bps_set.insert(s.value());
+    }
+  }
+
+  return result;
+}
+
+auto
+SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeController &tc,
+                             sym::Frame &frame) noexcept -> std::vector<ui::dap::Variable>
 {
   std::vector<ui::dap::Variable> result{};
   switch (variables_kind) {
@@ -504,55 +788,18 @@ ObjectFile::get_variables_impl(sym::FrameVariableKind variables_kind, TraceeCont
   for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
     const auto ref = symbol.type->is_primitive() ? 0 : tc.new_var_id(frame.id());
     if (ref == 0 && !symbol.type->is_resolved()) {
-      sym::dw::TypeSymbolicationContext ts_ctx{*this, symbol.type};
+      sym::dw::TypeSymbolicationContext ts_ctx{*this->objectFile(), symbol.type};
       ts_ctx.resolve_type();
     }
+
     auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
                                                                          const_cast<sym::Symbol &>(symbol), true);
-    init_visualizer(value_object);
-    register_resolver(value_object);
+    objectFile()->init_visualizer(value_object);
+    registerResolver(value_object);
 
     if (ref > 0)
-      cache_value(ref, value_object);
+      cacheValue(ref, value_object);
     result.push_back(ui::dap::Variable{ref, std::move(value_object)});
   }
   return result;
-}
-
-std::vector<ui::dap::Variable>
-ObjectFile::get_variables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-{
-  if (!frame.full_symbol_info().is_resolved()) {
-    sym::dw::FunctionSymbolicationContext sym_ctx{*this, frame};
-    sym_ctx.process_symbol_information();
-  }
-
-  switch (set) {
-  case sym::VariableSet::Arguments: {
-    return get_variables_impl(sym::FrameVariableKind::Arguments, tc, frame);
-  }
-  case sym::VariableSet::Locals: {
-    return get_variables_impl(sym::FrameVariableKind::Locals, tc, frame);
-  }
-  case sym::VariableSet::Static:
-  case sym::VariableSet::Global:
-    TODO("Static or global variables request not yet supported.");
-    break;
-  }
-  return {};
-}
-
-ObjectFile *
-mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
-{
-  if (!fs::exists(path)) {
-    return nullptr;
-  }
-
-  auto fd = utils::ScopedFd::open_read_only(path);
-  const auto addr = fd.mmap_file<u8>({}, true);
-  const auto objfile =
-      new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
-
-  return objfile;
 }

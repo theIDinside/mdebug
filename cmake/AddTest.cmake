@@ -1,6 +1,22 @@
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/dependencies/googletest)
 include(GoogleTest)
+
+function(BuildTestSubject)
+  set(oneValueArgs NAME)
+  set(multiValueArgs SOURCES LIBS)
+  cmake_parse_arguments(BUILD_TEST "${options}"
+                        "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  add_executable(${BUILD_TEST_NAME} ${BUILD_TEST_SOURCES})
+  set_target_properties(${BUILD_TEST_NAME} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
+  set_target_properties(${BUILD_TEST_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+  target_link_libraries(${BUILD_TEST_NAME} ${BUILD_TEST_LIBS})
+  if(USE_DWARF5)
+    target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
+  else()
+    target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3)
+  endif()
+endfunction()
 
 function(AddTest)
   set(oneValueArgs NAME)

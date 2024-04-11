@@ -118,9 +118,20 @@ struct SubscriberIdentity
   }
 };
 
+static constexpr bool
+KeepSubscriber() noexcept
+{
+  return true;
+}
+static constexpr bool
+RemoveSubscriber() noexcept
+{
+  return false;
+}
+
 template <typename EventData> class Publisher
 {
-  using SubscriberAction = std::function<void(EventData)>;
+  using SubscriberAction = std::function<bool(EventData)>;
 
   struct Subscriber
   {
@@ -146,9 +157,10 @@ public:
   void
   unsubscribe(SubscriberIdentity identity) noexcept
   {
-    auto it = std::find_if(subscribers.begin(), subscribers.end(),
-                           [&identity](const auto &sub) { return sub.identity == identity; });
-    if (it != std::end(subscribers)) {
+
+    if (auto it = std::find_if(subscribers.begin(), subscribers.end(),
+                               [&identity](const auto &sub) { return sub.identity == identity; });
+        it != std::end(subscribers)) {
       subscribers.erase(it);
     }
   }
@@ -164,14 +176,22 @@ public:
   emit(const EventData &evt) noexcept
     requires(!std::is_void_v<EventData>)
   {
-    DLOG("mdb", "Publisher emitted an event");
     for (auto &&fn : sub_once) {
       fn(evt);
     }
     sub_once.clear();
 
+    std::vector<SubscriberIdentity> remove{};
+    remove.reserve(subscribers.size());
     for (auto &sub : subscribers) {
-      sub.fn(evt);
+      const auto keep = sub.fn(evt);
+      if (!keep) {
+        remove.push_back(sub.identity);
+      }
+    }
+
+    for (auto i : remove) {
+      unsubscribe(i);
     }
   }
 };

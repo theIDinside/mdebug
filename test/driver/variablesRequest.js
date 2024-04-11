@@ -1,16 +1,6 @@
-const { getLineOf, readFile, repoDirFile } = require('./client')
-const { todo, assert, assertEqAInB, isHexadecimalString, prettyJson } = require('./utils')
+const { launchToGetFramesAndScopes } = require('./client')
+const { todo, assert, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
 const stdAssert = require('assert')
-
-/**
- * Verify that all objects in `varRefs` have unique variablesReference value.
- */
-function assertAllVariableReferencesUnique(varRefs) {
-  assert(
-    allUniqueVariableReferences(varRefs),
-    `Duplicate variablesReferences found (that were non-zero).\nResponse:\n${prettyJson(varRefs)}`
-  )
-}
 
 function newVarObject(name, value, type, ref = (val) => !isNaN(val)) {
   return {
@@ -20,15 +10,6 @@ function newVarObject(name, value, type, ref = (val) => !isNaN(val)) {
     variablesReference: ref,
     memoryReference: (val) => !isNaN(val),
   }
-}
-
-function allUniqueVariableReferences(variables) {
-  // yes I know this is slower. 2 iterations. 2 created arrays. bla bla.
-  const idsOnly = []
-  for (const v of variables) {
-    if (v.variablesReference != 0) idsOnly.push(v.variablesReference)
-  }
-  return new Set(idsOnly).size == idsOnly.length
 }
 
 /**
@@ -45,71 +26,13 @@ function assertVarResponseLength(vars, expectedCount, varRef, response) {
   )
 }
 
-async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
-  const file = readFile(repoDirFile(filePath))
-  const bp_lines = bpIdentifiers
-    .map((ident) => getLineOf(file, ident))
-    .filter((item) => item != null)
-    .map((l) => ({ line: l }))
-  assert(bp_lines.length == bpIdentifiers.length, `Could not find these identifiers: ${bpIdentifiers}`)
-  const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', {
-    source: {
-      name: repoDirFile(filePath),
-      path: repoDirFile(filePath),
-    },
-    breakpoints: bp_lines,
-  })
-  assert(
-    bkpt_res.body.breakpoints.length == bpIdentifiers.length,
-    `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
-  )
-  return bp_lines
-}
-
-/**
- * Launch tracee to main, then set breakpoints at lines where `bpIdentifiers` can be found, issue a `threads` request
- * and issue 1 `continue` request stopping at first breakpoint. Issue a `stackTrace` request and a follow that
- * with a `scopes` request for the first frame in the stack trace.
- *
- * Returns the threads, stacktrace and the scopes of the newest frame
- * @param { DAClient } DA
- * @param { string } filePath - path to .cpp file that we are testing against
- * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
- * @param { string } expectedFrameName - frame name we expect to see on first stop.
- * @returns { { object[], object[], object[] } }
- */
-async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile = 'basetypes') {
-  await DA.launchToMain(DA.buildDirFile(exeFile), 5000)
-  await SetBreakpoints(DA, filePath, bpIdentifiers)
-  const threads = await DA.threads()
-  await DA.contNextStop(threads[0].id)
-  const fres = await DA.stackTrace(threads[0].id, 1000)
-  const frames = fres.body.stackFrames
-  assert(
-    frames[0].name == expectedFrameName,
-    () =>
-      `Expected to be inside of frame '${expectedFrameName}'. Actual: ${frames[0].name}. Stacktrace:\n${prettyJson(
-        frames
-      )}`
-  )
-
-  const scopes_res = await DA.sendReqGetResponse('scopes', { frameId: frames[0].id })
-  const scopes = scopes_res.body.scopes
-  assert(scopes.length == 3, `expected 3 scopes but got ${scopes.length}. Scopes response: ${prettyJson(scopes_res)}`)
-  assert(
-    allUniqueVariableReferences(scopes),
-    `Expected unique variableReference for all scopes. Scopes:\n${prettyJson(scopes)}`
-  )
-
-  return { threads, frames, scopes }
-}
-
 async function inConstructor(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
     'test/basetypes.cpp',
     ['CLASS_BP'],
-    'Class'
+    'Class',
+    'basetypes'
   )
 
   for (const scope of scopes) {
@@ -132,7 +55,8 @@ async function scopeLocalsTest(debugAdapter) {
     debugAdapter,
     MAIN_FILE,
     ['LEX_BLOCK'],
-    'lexical_block'
+    'lexical_block',
+    'basetypes'
   )
 
   for (const scope of scopes) {
@@ -178,7 +102,8 @@ async function scopeArgsTest(debugAdapter) {
     debugAdapter,
     MAIN_FILE,
     ['LEX_BLOCK'],
-    'lexical_block'
+    'lexical_block',
+    'basetypes'
   )
   for (const scope of scopes) {
     if (scope.name == 'Arguments') {
@@ -217,7 +142,8 @@ async function membersOfVariableTest(debugAdapter) {
     debugAdapter,
     MAIN_FILE,
     ['LEX_BLOCK'],
-    'lexical_block'
+    'lexical_block',
+    'basetypes'
   )
 
   for (const scope of scopes) {
