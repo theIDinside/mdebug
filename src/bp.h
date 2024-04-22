@@ -13,6 +13,10 @@ struct TaskInfo;
 struct ObjectFile;
 class SymbolFile;
 
+namespace tc {
+class TraceeCommandInterface;
+};
+
 enum class BreakpointRequestKind : u8
 {
   source,
@@ -138,13 +142,7 @@ template <> struct std::hash<InstructionBreakpointSpec>
 using UserBpSpec =
     std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
 
-struct LocWriteError
-{
-  int error_no;
-  AddrPtr requested_address;
-};
-
-struct LocReadError
+struct MemoryError
 {
   int error_no;
   AddrPtr requested_address;
@@ -155,7 +153,7 @@ struct ResolveError
   UserBpSpec *spec;
 };
 
-using BpErr = std::variant<LocWriteError, LocReadError, ResolveError>;
+using BpErr = std::variant<MemoryError, ResolveError>;
 
 namespace fmt {
 template <> struct formatter<std::pair<std::string, SourceBreakpointSpec>>
@@ -315,31 +313,30 @@ struct LocationSourceInfo
 
 class BreakpointLocation
 {
-  friend class UserBreakpoint;
-
   AddrPtr addr;
-  u8 original_byte;
   bool installed{true};
   std::vector<UserBreakpoint *> users{};
   std::unique_ptr<LocationSourceInfo> source_info;
 
-  bool remove_user(NonNullPtr<UserBreakpoint> bp) noexcept;
-
 public:
+  Immutable<u8> original_byte;
   using shr_ptr = std::shared_ptr<BreakpointLocation>;
-  static std::shared_ptr<BreakpointLocation> CreateLocation(AddrPtr addr, u8 original) noexcept;
-  static std::shared_ptr<BreakpointLocation>
-  CreateLocationWithSource(AddrPtr addr, u8 original, std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
+  static shr_ptr CreateLocation(AddrPtr addr, u8 original) noexcept;
+  static shr_ptr CreateLocationWithSource(AddrPtr addr, u8 original,
+                                          std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
 
   explicit BreakpointLocation(AddrPtr addr, u8 original) noexcept;
   explicit BreakpointLocation(AddrPtr addr, u8 original, std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
   ~BreakpointLocation() noexcept;
 
-  void enable(Tid tid) noexcept;
-  void disable(Tid tid) noexcept;
-  void add_user(UserBreakpoint &user) noexcept;
+  bool remove_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &bp) noexcept;
+  void enable(tc::TraceeCommandInterface &tc) noexcept;
+  void disable(tc::TraceeCommandInterface &tc) noexcept;
+  bool is_installed() const noexcept;
+  void add_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &user) noexcept;
   bool any_user_active() const noexcept;
   std::vector<u32> loc_users() const noexcept;
+  const LocationSourceInfo *get_source() const noexcept;
 
   constexpr AddrPtr
   address() const noexcept
@@ -369,7 +366,7 @@ struct RequiredUserParameters
 class UserBreakpoint
 {
 private:
-  bool enabled;
+  bool enabled_by_user;
   std::shared_ptr<BreakpointLocation> bp;
   u32 on_hit_count{0};
   std::optional<StopCondition> stop_condition;
@@ -380,6 +377,11 @@ public:
   static constexpr auto FUNCTION_BREAKPOINT = 1;
   static constexpr auto INSTRUCTION_BREAKPOINT = 2;
 
+  // The actual interface that sets a breakpoint "in software" of the tracee. Due to the nature of the current
+  // design we must carry this reference in `UserBreakpoint`, because on destruction of one (`~UserBreakpoint`), we
+  // may be the last user of a `BreakpointLocation` at which point we want to unset it in the tracee. However, we
+  // don't do no manual deletion anywhere, so it can/will happen when std::shared_ptr<UserBreakpoint> gets dropped.
+  // Yay? Anyway, it's "just" 8 bytes.
   Immutable<u32> id;
   Immutable<Tid> tid;
   Immutable<LocationUserKind> kind;
@@ -388,16 +390,13 @@ public:
   explicit UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                           std::optional<StopCondition> &&cond) noexcept;
   virtual ~UserBreakpoint() noexcept;
+  void pre_destruction(tc::TraceeCommandInterface &ctrl) noexcept;
 
-  // Removes the breakpoint location from this user breakpoint - essentially nullifying the object as it no longer
-  // actually represents a live breakpoint no more.
-
-  void remove_location() noexcept;
   std::shared_ptr<BreakpointLocation> bp_location() noexcept;
   void increment_count() noexcept;
   bool is_enabled() noexcept;
-  void enable() noexcept;
-  void disable() noexcept;
+  void enable(tc::TraceeCommandInterface &ctrl) noexcept;
+  void disable(tc::TraceeCommandInterface &ctrl) noexcept;
   Tid get_tid() noexcept;
   bool check_should_stop(TaskInfo &t) noexcept;
   std::optional<AddrPtr> address() const noexcept;

@@ -58,7 +58,7 @@ function getLineOf(fileData, string_identifier) {
   return null
 }
 
-function readFile(path) {
+function readFileContents(path) {
   return fs.readFileSync(path).toString()
 }
 
@@ -569,7 +569,7 @@ async function doSomethingDelayed(fn, delay) {
 }
 
 async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
-  const file = readFile(repoDirFile(filePath))
+  const file = readFileContents(repoDirFile(filePath))
   const bp_lines = bpIdentifiers
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
@@ -634,7 +634,7 @@ module.exports = {
   DAClient,
   getLineOf,
   getStackFramePc,
-  readFile,
+  readFileContents,
   repoDirFile,
   seconds,
   testException,

@@ -1,9 +1,9 @@
-const { readFile, repoDirFile, getLineOf } = require('./client')
+const { readFileContents, repoDirFile, getLineOf } = require('./client')
 const { prettyJson, assert } = require('./utils')
 
 async function finishSuccess(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))
-  const file = readFile(repoDirFile('test/stackframes.cpp'))
+  const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP3']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
@@ -55,7 +55,7 @@ async function finishSuccess(DA) {
 
 async function abortedDueToBkpt(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))
-  const file = readFile(repoDirFile('test/stackframes.cpp'))
+  const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BPLine1', 'BP3']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)

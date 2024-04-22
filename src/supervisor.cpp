@@ -5,6 +5,8 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/dap/types.h"
+#include "interface/tracee_command/ptrace_commander.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
@@ -51,21 +53,15 @@
 
 using sym::dw::SourceCodeFile;
 
-TraceeController::TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify,
-                                   TargetSession target_session, bool seized, bool open_mem_fd) noexcept
-    : task_leader{process_space_id}, main_executable{nullptr}, threads{}, task_vm_infos{}, pbps{*this},
+TraceeController::TraceeController(TargetSession target_session, bool seized, tc::Interface &&interface) noexcept
+    : task_leader{interface->task_leader()}, main_executable{nullptr}, threads{}, task_vm_infos{}, pbps{*this},
       tracee_r_debug{nullptr}, shared_objects{}, stop_all_requested{false}, var_refs(), interpreter_base{},
       entry{}, session{target_session}, ptracestop_handler{new ptracestop::StopHandler{*this}},
-      null_unwinder{new sym::Unwinder{nullptr}}, ptrace_session_seized{seized}
+      null_unwinder{new sym::Unwinder{nullptr}}, tracee_interface(std::move(interface))
 {
   threads.reserve(256);
-  awaiter_thread = std::make_unique<AwaiterThread>(awaiter_notify, process_space_id);
-  threads.push_back(TaskInfo::create_running(process_space_id));
+  threads.push_back(TaskInfo::create_running(tracee_interface->task_leader()));
   threads.back().initialize();
-  if (open_mem_fd) {
-    const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-    procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
-  }
 
   new_objectfile.subscribe(SubscriberIdentity::Of(this), [](const SymbolFile *sf) {
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", *sf});
@@ -86,9 +82,7 @@ TraceeController::lookup_symbol_file(const Path &path) noexcept
 bool
 TraceeController::reopen_memfd() noexcept
 {
-  const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", task_leader, task_leader);
-  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
-  return procfs_memfd.is_open();
+  return tracee_interface->reconfigure(this);
 }
 
 struct ProbeInfo
@@ -236,12 +230,6 @@ TraceeController::independent_task_resume_control() noexcept
   return false;
 }
 
-utils::ScopedFd &
-TraceeController::mem_fd() noexcept
-{
-  return procfs_memfd;
-}
-
 TaskInfo *
 TraceeController::get_task(pid_t tid) noexcept
 {
@@ -285,7 +273,7 @@ TraceeController::has_task(Tid tid) noexcept
 }
 
 void
-TraceeController::resume_target(RunType type) noexcept
+TraceeController::resume_target(tc::RunType type) noexcept
 {
   DLOG("mdb", "[supervisor]: resume tracee {}", to_str(type));
   stop_all_requested = false;
@@ -297,7 +285,7 @@ TraceeController::resume_target(RunType type) noexcept
 }
 
 void
-TraceeController::resume_task(TaskInfo &task, RunType type) noexcept
+TraceeController::resume_task(TaskInfo &task, tc::RunType type) noexcept
 {
   stop_all_requested = false;
   // The breakpoint location which loc_stat refers to, may have been deleted; as such we don't need to step over
@@ -308,10 +296,10 @@ TraceeController::resume_task(TaskInfo &task, RunType type) noexcept
       task.step_over_breakpoint(this, type);
     } else {
       task.remove_bpstat();
-      task.ptrace_resume(type);
+      tracee_interface->resume_task(task, type);
     }
   } else {
-    task.ptrace_resume(type);
+    tracee_interface->resume_task(task, type);
   }
 }
 
@@ -323,7 +311,8 @@ TraceeController::stop_all(TaskInfo *requesting_task) noexcept
   for (auto &t : threads) {
     if (!t.user_stopped && !t.tracer_stopped) {
       DLOG("mdb", "Stopping {}", t.tid);
-      tgkill(task_leader, t.tid, SIGSTOP);
+      const auto response = tracee_interface->stop_task(t);
+      ASSERT(response.is_ok(), "Failed to stop {}: {}", t.tid, strerror(response.sys_errno));
       t.set_stop();
     } else if (t.tracer_stopped) {
       // we're in a tracer-stop, not in a user-stop, so we need no stopping, we only need to inform ourselves that
@@ -348,9 +337,10 @@ TraceeController::reap_task(TaskInfo &task) noexcept
   auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task.tid; });
   VERIFY(it != std::end(threads), "Could not find Task with pid {}", task.tid);
   task.exited = true;
+
   Tracer::Instance->thread_exited({.pid = task_leader, .tid = it->tid}, it->wait_status.exit_code);
   if (task.tid == task_leader) {
-    awaiter_thread->set_process_exited();
+    get_interface().perform_shutdown();
   }
 }
 
@@ -368,7 +358,7 @@ AddrPtr
 TraceeController::get_caching_pc(TaskInfo &t) noexcept
 {
   if (t.rip_dirty) {
-    t.cache_registers();
+    cache_registers(t);
     return t.registers->rip;
   } else {
     return t.registers->rip;
@@ -378,9 +368,9 @@ TraceeController::get_caching_pc(TaskInfo &t) noexcept
 void
 TraceeController::set_pc(TaskInfo &t, AddrPtr addr) noexcept
 {
-  constexpr auto rip_offset = offsetof(user_regs_struct, rip);
-  VERIFY(ptrace(PTRACE_POKEUSER, t.tid, rip_offset, addr.get()) != -1, "Failed to set RIP register");
-  t.registers->rip = addr;
+  auto res = tracee_interface->set_pc(t, addr);
+  ASSERT(res.is_ok(), "Failed to set PC for {}; {}", t.tid, strerror(res.sys_errno));
+  t.registers->rip = addr.get();
   t.rip_dirty = false;
 }
 
@@ -836,41 +826,14 @@ TraceeController::remove_breakpoint(u32 bp_id) noexcept
 }
 
 bool
-TraceeController::kill() noexcept
-{
-  bool done = ptrace(PTRACE_KILL, task_leader, nullptr, nullptr) != -1;
-  bool threads_done = false;
-  for (const auto &t : threads) {
-    threads_done = threads_done && (ptrace(PTRACE_KILL, t.tid, nullptr, nullptr) != -1);
-  }
-  return done || threads_done;
-}
-
-bool
 TraceeController::terminate_gracefully() noexcept
 {
   DLOG("mdb", "[TraceeController]: terminate gracefully");
   if (is_running()) {
     stop_all(nullptr);
   }
+
   return ::kill(task_leader, SIGKILL) == 0;
-}
-
-bool
-TraceeController::detach() noexcept
-{
-  if (is_running()) {
-    stop_all(nullptr);
-  }
-  std::vector<std::pair<Tid, int>> errs;
-  for (const auto &t : threads) {
-    const auto res = ptrace(PTRACE_DETACH, t.tid, 0, 0);
-    if (res == -1)
-      errs.push_back(std::make_pair(t.tid, errno));
-  }
-
-  // todo(simon): construct a way to let this information bubble up to caller
-  return errs.empty();
 }
 
 void
@@ -878,7 +841,7 @@ TraceeController::process_exec(TaskInfo &t) noexcept
 {
   DLOG("mdb", "Processing EXEC for {}", t.tid);
   reopen_memfd();
-  t.cache_registers();
+  cache_registers(t);
   read_auxv(t);
   install_loader_breakpoints();
 }
@@ -889,7 +852,7 @@ TraceeController::process_clone(TaskInfo &t) noexcept
   DLOG("mdb", "Processing CLONE for {}", t.tid);
   // we always have to cache these registers, because we need them to pull out some information
   // about the new clone
-  t.cache_registers();
+  cache_registers(t);
   pid_t np = -1;
   if (t.registers->orig_rax == SYS_clone) {
     const TPtr<void> stack_ptr = sys_arg_n<2>(*t.registers);
@@ -1040,26 +1003,6 @@ TraceeController::get_thread_name(Tid tid) const noexcept
   return name;
 }
 
-std::vector<u8>
-TraceeController::read_to_vec(AddrPtr addr, u64 bytes) noexcept
-{
-  std::vector<u8> data{};
-  data.resize(bytes);
-
-  auto total_read = 0ull;
-  while (total_read < bytes) {
-    auto read_bytes = pread64(mem_fd().get(), data.data() + total_read, bytes - total_read, addr);
-    if (-1 == read_bytes || 0 == read_bytes) {
-      PANIC(fmt::format("Failed to proc_fs read from {}", addr));
-    }
-    total_read += read_bytes;
-  }
-  if (total_read != data.size()) {
-    PANIC("failed to read into std::vector");
-  }
-  return data;
-}
-
 utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>
 TraceeController::safe_read(AddrPtr addr, u64 bytes) noexcept
 {
@@ -1067,12 +1010,12 @@ TraceeController::safe_read(AddrPtr addr, u64 bytes) noexcept
 
   auto total_read = 0ull;
   while (total_read < bytes) {
-    auto read_bytes = pread64(mem_fd().get(), buffer->next(), bytes - total_read, addr + total_read);
-    if (-1 == read_bytes || 0 == read_bytes) {
+    auto res = tracee_interface->read_bytes(addr, bytes - total_read, buffer->next());
+    if (!res.success()) {
       return utils::unexpected(NonFullRead{std::move(buffer), static_cast<u32>(bytes - total_read), errno});
     }
-    buffer->wrote_bytes(read_bytes);
-    total_read += read_bytes;
+    buffer->wrote_bytes(res.bytes_read);
+    total_read += res.bytes_read;
   }
   return utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>{std::move(buffer)};
 }
@@ -1084,11 +1027,13 @@ TraceeController::read_to_vector(AddrPtr addr, u64 bytes) noexcept
 
   auto total_read = 0ull;
   while (total_read < bytes) {
-    auto read_bytes = pread64(mem_fd().get(), data->data_ptr() + total_read, bytes - total_read, addr);
-    if (-1 == read_bytes || 0 == read_bytes) {
+    const auto read_address = addr + total_read;
+    const auto result =
+        tracee_interface->read_bytes(read_address, bytes - total_read, data->data_ptr() + total_read);
+    if (!result.success()) {
       PANIC(fmt::format("Failed to proc_fs read from {}", addr));
     }
-    total_read += read_bytes;
+    total_read += result.bytes_read;
   }
   data->set_size(total_read);
   return data;
@@ -1111,24 +1056,10 @@ TraceeController::read_string(TraceePointer<char> address) noexcept
   return result;
 }
 
-void
-TraceeController::reaped_events() noexcept
-{
-  awaiter_thread->reaped_events();
-}
-
-/** Called after an exec has been processed and we've set up the necessary data structures
-  to manage it.*/
-void
-TraceeController::start_awaiter_thread() noexcept
-{
-  awaiter_thread->start_awaiter_thread(this);
-}
-
 sym::Frame
 TraceeController::current_frame(TaskInfo &task) noexcept
 {
-  const auto pc = task.pc();
+  const auto pc = get_caching_pc(task);
   const auto obj = find_obj_by_pc(pc);
   if (obj == nullptr) {
     return sym::Frame{nullptr, task, 0, 0, pc, nullptr};
@@ -1170,7 +1101,7 @@ TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
 std::vector<AddrPtr> &
 TraceeController::unwind_callstack(TaskInfo *task) noexcept
 {
-  task->cache_registers();
+  cache_registers(*task);
   if (!task->call_stack->dirty) {
     return task->call_stack->pcs;
   } else {
@@ -1277,6 +1208,23 @@ TraceeController::invalidate_stop_state() noexcept
   }
 }
 
+void
+TraceeController::cache_registers(TaskInfo &t) noexcept
+{
+  if (t.cache_dirty) {
+    const auto result = tracee_interface->read_registers(t);
+    ASSERT(result.is_ok(), "Failed to read register file for {}; {}", t.tid, strerror(result.sys_errno));
+    t.cache_dirty = false;
+    t.rip_dirty = false;
+  }
+}
+
+tc::TraceeCommandInterface &
+TraceeController::get_interface() noexcept
+{
+  return *tracee_interface;
+}
+
 int
 TraceeController::new_var_id(int parent_id) noexcept
 {
@@ -1315,7 +1263,7 @@ sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept
 {
   DLOG("mdb", "stacktrace for {}", task.tid);
-  task.cache_registers();
+  cache_registers(task);
   auto &cs_ref = *task.call_stack;
   cs_ref.frames.clear();
 
@@ -1387,51 +1335,14 @@ TraceeController::get_text_section(AddrPtr addr) noexcept
   return nullptr;
 }
 
-u8
-TraceeController::write_bp_byte(AddrPtr addr) noexcept
-{
-  constexpr u8 bkpt = 0xcc;
-  auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr, nullptr);
-  u8 ins_byte = static_cast<u8>(read_value & 0xff);
-  u64 installed_bp = ((read_value & ~0xff) | bkpt);
-  ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp);
-  return ins_byte;
-}
-
-std::optional<u8>
-TraceeController::write_breakpoint_at(AddrPtr addr) noexcept
-{
-  constexpr u8 bkpt = 0xcc;
-  const auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr, nullptr);
-  if (read_value == -1) {
-    return std::nullopt;
-  }
-
-  const u8 ins_byte = static_cast<u8>(read_value & 0xff);
-  const u64 installed_bp = ((read_value & ~0xff) | bkpt);
-
-  if (ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp) == -1) {
-    return std::nullopt;
-  }
-  return ins_byte;
-}
-
 utils::Expected<u8, BpErr>
 TraceeController::install_software_bp_loc(AddrPtr addr) noexcept
 {
-  constexpr u8 bkpt = 0xcc;
-  const auto read_value = ptrace(PTRACE_PEEKDATA, task_leader, addr, nullptr);
-  if (read_value == -1) {
-    return utils::unexpected(BpErr{LocReadError{errno, addr}});
+  const auto res = tracee_interface->install_breakpoint(addr);
+  if (!res.is_ok()) {
+    return utils::unexpected(BpErr{MemoryError{errno, addr}});
   }
-
-  const u8 ins_byte = static_cast<u8>(read_value & 0xff);
-  const u64 installed_bp = ((read_value & ~0xff) | bkpt);
-
-  if (ptrace(PTRACE_POKEDATA, task_leader, addr, installed_bp) == -1) {
-    return utils::unexpected(BpErr{LocWriteError{errno, addr}});
-  }
-  return ins_byte;
+  return static_cast<u8>(res.data);
 }
 
 std::optional<ui::dap::VariablesReference>
@@ -1491,10 +1402,4 @@ TraceeController::set_pending_waitstatus(TaskWaitResult wait_result) noexcept
   task->wait_status = wait_result.ws;
   task->tracer_stopped = true;
   task->stop_collected = false;
-}
-
-bool
-TraceeController::ptrace_was_seized() const noexcept
-{
-  return ptrace_session_seized;
 }

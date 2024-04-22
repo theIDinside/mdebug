@@ -3,6 +3,7 @@
 #include "bp.h"
 #include "common.h"
 #include "interface/dap/dap_defs.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include <symbolication/callstack.h>
 #include <symbolication/dwarf/lnp.h>
 #include <task.h>
@@ -28,6 +29,7 @@ public:
   virtual void update_stepped() noexcept = 0;
 
 protected:
+  tc::TraceeCommandInterface &ctrl;
   TraceeController &tc;
   TaskInfo &task;
   bool cancelled;
@@ -47,7 +49,6 @@ public:
 private:
   void notify_stopped() noexcept;
   ui::dap::StoppedReason reason;
-  bool ptrace_session_is_seize;
 };
 
 class InstructionStep : public ThreadProceedAction

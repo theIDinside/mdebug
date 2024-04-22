@@ -25,27 +25,10 @@ TaskInfo::create_running(pid_t tid)
   return TaskInfo{tid, false};
 }
 
-AddrPtr
-TaskInfo::pc() noexcept
-{
-  cache_registers();
-  return registers->rip;
-}
-
 u64
 TaskInfo::get_register(u64 reg_num) noexcept
 {
   return ::get_register(registers, reg_num);
-}
-
-void
-TaskInfo::cache_registers() noexcept
-{
-  if (cache_dirty) {
-    PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, registers);
-    cache_dirty = false;
-    rip_dirty = false;
-  }
 }
 
 static void
@@ -71,8 +54,9 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
     call_stack->pcs.clear();
   }
 
-  if (cache_dirty)
-    cache_registers();
+  if (cache_dirty) {
+    tc->cache_registers(*this);
+  }
 
   // initialize bottom frame's registers with actual live register contents
   auto &buf = call_stack->reg_unwind_buffer;
@@ -126,35 +110,6 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
   wait_status = wait.ws;
 }
 
-void
-TaskInfo::consume_wait() noexcept
-{
-  int stat;
-  waitpid(tid, &stat, 0);
-  tracer_stopped = true;
-  user_stopped = true;
-}
-
-void
-TaskInfo::ptrace_resume(RunType type) noexcept
-{
-  ASSERT(user_stopped || tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})", bool{user_stopped},
-         bool{tracer_stopped});
-  if (user_stopped) {
-    DLOG("mdb", "[ptrace]: restarting {} ({}) from user-stop", tid,
-         type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
-  } else if (tracer_stopped) {
-    DLOG("mdb", "[ptrace]: restarting {} ({}) from tracer-stop", tid,
-         type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
-  }
-  stop_collected = false;
-  user_stopped = false;
-  tracer_stopped = false;
-  set_dirty();
-}
-
 WaitStatus
 TaskInfo::pending_wait_status() const noexcept
 {
@@ -163,18 +118,19 @@ TaskInfo::pending_wait_status() const noexcept
 }
 
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept
+TaskInfo::step_over_breakpoint(TraceeController *tc, tc::RunType resume_action) noexcept
 {
   ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
   auto loc = tc->pbps.location_at(loc_stat->loc);
   auto user_ids = loc->loc_users();
   DLOG("mdb", "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
 
-  loc->disable(tc->task_leader);
+  auto &control = tc->get_interface();
+  loc->disable(control);
   loc_stat->stepped_over = true;
   loc_stat->re_enable_bp = true;
-  loc_stat->should_resume = resume_action != RunType::None;
-  ptrace_resume(RunType::Step);
+  loc_stat->should_resume = resume_action != tc::RunType::None;
+  control.resume_task(*this, tc::RunType::Step);
 }
 
 void

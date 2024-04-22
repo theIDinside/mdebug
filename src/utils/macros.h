@@ -24,6 +24,14 @@
   USING_SMART_PTRS(CLASS)
 #endif
 
+#ifndef NO_NON_EXPLICIT_CTORS
+#define NO_NON_EXPLICIT_CTORS(CLASS)                                                                              \
+  NO_COPY(CLASS)                                                                                                  \
+  CLASS() noexcept = delete;                                                                                      \
+  CLASS(CLASS &&) noexcept = delete;                                                                              \
+  CLASS &operator=(CLASS &&) noexcept = delete;
+#endif
+
 #ifndef NO_COPY_DEFAULTED_MOVE
 #define NO_COPY_DEFAULTED_MOVE(CLASS)                                                                             \
   NO_COPY(CLASS)                                                                                                  \

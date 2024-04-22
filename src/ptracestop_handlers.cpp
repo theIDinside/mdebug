@@ -16,7 +16,7 @@
 namespace ptracestop {
 
 ThreadProceedAction::ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept
-    : tc(ctrl), task(task), cancelled(false)
+    : ctrl(ctrl.get_interface()), tc(ctrl), task(task), cancelled(false)
 {
 }
 
@@ -37,13 +37,14 @@ FinishFunction::~FinishFunction() noexcept { tc.remove_breakpoint(bp->id); }
 bool
 FinishFunction::has_completed(bool was_stopped) const noexcept
 {
-  return task.pc() == bp->address() || was_stopped;
+
+  return tc.get_caching_pc(task) == bp->address() || was_stopped;
 }
 
 void
 FinishFunction::proceed() noexcept
 {
-  tc.resume_task(task, RunType::Continue);
+  tc.resume_task(task, tc::RunType::Continue);
 }
 
 void
@@ -67,7 +68,7 @@ void
 InstructionStep::proceed() noexcept
 {
   DLOG("mdb", "[InstructionStep] stepping 1 instruction for {}", task.tid);
-  tc.resume_task(task, RunType::Step);
+  tc.resume_task(task, tc::RunType::Step);
 }
 
 void
@@ -152,11 +153,11 @@ LineStep::proceed() noexcept
 {
   if (resume_bp && !resumed_to_resume_addr) {
     DLOG("mdb", "[line step]: continuing sub frame for {}", task.tid);
-    tc.resume_task(task, RunType::Continue);
+    tc.resume_task(task, tc::RunType::Continue);
     resumed_to_resume_addr = true;
   } else {
     DLOG("mdb", "[line step]: no resume address set, keep istepping");
-    tc.resume_task(task, RunType::Step);
+    tc.resume_task(task, tc::RunType::Step);
   }
 }
 
@@ -245,7 +246,7 @@ StopHandler::handle_proceed(TaskInfo &info, bool should_resume) noexcept
     DLOG("mdb", "[action]: {} will resume (should_resume={}) => {}", info.tid, should_resume,
          should_resume && info.can_continue());
     if (should_resume && info.can_continue()) {
-      tc.resume_task(info, RunType::Continue);
+      tc.resume_task(info, tc::RunType::Continue);
     } else {
       info.set_stop();
     }
@@ -263,7 +264,6 @@ StopHandler::handle_wait_event(TaskInfo &info) noexcept
   } else {
     handle_proceed(info, should_resume);
   }
-  tc.reaped_events();
 }
 
 static bool
@@ -276,7 +276,7 @@ process_stopped(TraceeController &tc, TaskInfo &t)
     if (t.loc_stat->re_enable_bp) {
       auto bploc = tc.pbps.location_at(t.loc_stat->loc);
       ASSERT(bploc != nullptr, "Expected breakpoint location to exist at {}", t.loc_stat->loc)
-      bploc->enable(t.tid);
+      bploc->enable(tc.get_interface());
     }
     should_resume = t.loc_stat->should_resume;
     t.remove_bpstat();
@@ -386,7 +386,7 @@ StopHandler::set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept
 }
 
 StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept
-    : ThreadProceedAction(ctrl, task), reason(reason), ptrace_session_is_seize(ctrl.ptrace_was_seized())
+    : ThreadProceedAction(ctrl, task), reason(reason)
 {
 }
 
@@ -412,14 +412,9 @@ StopImmediately::has_completed(bool) const noexcept
 void
 StopImmediately::proceed() noexcept
 {
-  if (ptrace_session_is_seize) {
-    if (ptrace(PTRACE_INTERRUPT, task.tid, nullptr, nullptr) == -1) {
-      PANIC(fmt::format("failed to interrupt (ptrace) task {}: {}", task.tid, strerror(errno)));
-    }
-  } else {
-    if (tgkill(tc.task_leader, task.tid, SIGTRAP) == -1) {
-      PANIC(fmt::format("failed to interrupt (tgkill) task {}: {}", task.tid, strerror(errno)));
-    }
+  const auto res = ctrl.stop_task(task);
+  if (!res.is_ok()) {
+    PANIC(fmt::format("Failed to stop task {}: {}", task.tid, strerror(res.sys_errno)));
   }
 }
 

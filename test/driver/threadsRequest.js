@@ -1,10 +1,10 @@
-const { getLineOf, readFile, repoDirFile } = require('./client')
+const { getLineOf, readFileContents, repoDirFile } = require('./client')
 const { assert, prettyJson } = require('./utils')
 
 async function threads(DA) {
   await DA.launchToMain(DA.buildDirFile('threads_shared'))
   let threads = await DA.threads()
-  const file = readFile(repoDirFile('test/threads_shared.cpp'))
+  const file = readFileContents(repoDirFile('test/threads_shared.cpp'))
   const bp_lines = ['BP1']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)

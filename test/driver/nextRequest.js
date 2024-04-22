@@ -1,8 +1,8 @@
-const { readFile, repoDirFile, getLineOf, getStackFramePc } = require('./client')
+const { readFileContents, repoDirFile, getLineOf, getStackFramePc } = require('./client')
 const { todo, assert, prettyJson } = require('./utils')
 
 function getLinesOf(names) {
-  const file = readFile(repoDirFile('test/next.cpp'))
+  const file = readFileContents(repoDirFile('test/next.cpp'))
   return names
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
@@ -11,7 +11,7 @@ function getLinesOf(names) {
 
 async function setup(DA, bps) {
   await DA.launchToMain(DA.buildDirFile('next'))
-  const file = readFile(repoDirFile('test/next.cpp'))
+  const file = readFileContents(repoDirFile('test/next.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)

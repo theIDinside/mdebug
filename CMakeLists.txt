@@ -130,6 +130,15 @@ set(MIDAS_SOURCES
 
   src/tracee/util.cpp
   src/tracee/util.h
+
+  # Tracee Interfaces
+  src/interface/tracee_command/tracee_command_interface.cpp
+  src/interface/tracee_command/tracee_command_interface.h
+  src/interface/tracee_command/gdb_remote_commander.cpp
+  src/interface/tracee_command/gdb_remote_commander.h
+  src/interface/tracee_command/ptrace_commander.cpp
+  src/interface/tracee_command/ptrace_commander.h
+
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)

@@ -1,4 +1,4 @@
-const { launchToGetFramesAndScopes, readFile, repoDirFile, getLineOf } = require('./client')
+const { launchToGetFramesAndScopes, readFileContents, repoDirFile, getLineOf } = require('./client')
 const { assert, prettyJson } = require('./utils')
 const sharedObjectsCount = 6
 
@@ -14,7 +14,7 @@ async function expect6NewModuleEvents(DA) {
 
 async function assert1Pending(debugAdapter) {
   const dynamic_so_file = 'test/dynamic_lib.cpp'
-  const file = readFile(repoDirFile(dynamic_so_file))
+  const file = readFileContents(repoDirFile(dynamic_so_file))
   const bpIdentifiers = ['BPMI']
   const bp_lines = bpIdentifiers
     .map((ident) => getLineOf(file, ident))
@@ -50,7 +50,7 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
   const bp = await assert1Pending(debugAdapter)
   let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 2000)
   const template_path = repoDirFile('test/templated_code/template.h')
-  const template_line = getLineOf(readFile(template_path), 'BP1')
+  const template_line = getLineOf(readFileContents(template_path), 'BP1')
   let bp_args = { source: { name: template_path, path: template_path }, breakpoints: [{ line: template_line }] }
   const templateBpRes = await debugAdapter.sendReqGetResponse('setBreakpoints', bp_args)
   assert(

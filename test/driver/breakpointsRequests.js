@@ -1,12 +1,12 @@
-const { checkResponse, getLineOf, readFile, repoDirFile, launchToGetFramesAndScopes } = require('./client')
-const { assert, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
+const { checkResponse, getLineOf, readFileContents, repoDirFile, launchToGetFramesAndScopes } = require('./client')
+const { assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
 
 const bpRequest = 'setBreakpoints'
 
 async function initLaunchToMain(DA, exe, { file, bps } = {}) {
   await DA.launchToMain(DA.buildDirFile(exe))
   if (file) {
-    const fileContent = readFile(repoDirFile(file))
+    const fileContent = readFileContents(repoDirFile(file))
     const bp_lines = bps
       .map((ident) => getLineOf(fileContent, ident))
       .filter((item) => item != null)
@@ -23,11 +23,10 @@ async function initLaunchToMain(DA, exe, { file, bps } = {}) {
       },
       breakpoints: bp_lines,
     })
-    assert(
+    assertLog(
       breakpoint_response.body.breakpoints.length == bps.length,
-      `Expected to have set ${bps.length} breakpoints but only successfully set ${
-        breakpoint_response.body.breakpoints.length
-      }:\n${prettyJson(breakpoint_response)}`
+      `Expected to have set ${bps.length} breakpoints`,
+      ` but only successfully set ${breakpoint_response.body.breakpoints.length}:\n${prettyJson(breakpoint_response)}`
     )
   }
 }
@@ -52,10 +51,10 @@ async function setInstructionBreakpoint(debuggerAdapter) {
     })
     .then((res) => {
       checkResponse(res, 'setInstructionBreakpoints', true)
-      assert(res.body.breakpoints.length == 1, `Expected bkpts 1 but got ${res.body.breakpoints.length}`)
+      assertLog(res.body.breakpoints.length == 1, `Expected bkpts 1`, ` but got ${res.body.breakpoints.length}`)
 
       const { id, verified, instructionReference } = res.body.breakpoints[0]
-      assert(verified, 'Expected breakpoint to be verified and exist!')
+      assertLog(verified, 'Expected breakpoint to be verified', ' but failed')
       assert_eq(
         instructionReference,
         instructionAddress,
@@ -66,7 +65,7 @@ async function setInstructionBreakpoint(debuggerAdapter) {
 
 async function set4InSameCompUnit(debuggerAdapter) {
   await setup(debuggerAdapter, 'stackframes')
-  const file = readFile(repoDirFile('test/stackframes.cpp'))
+  const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
@@ -87,12 +86,11 @@ async function set4InSameCompUnit(debuggerAdapter) {
       if (bp.line == bp_lines[i].line) found_all[i] = true
     }
   }
-  assert(
+  assertLog(
     !found_all.some((v) => v == false),
-    `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)} but got ${prettyJson(res.body.breakpoints)}`
+    `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)}`,
+    ` but got ${prettyJson(res.body.breakpoints)}`
   )
-  console.log(`Test ${__filename} succeeded`)
-  process.exit(0)
 }
 
 async function set2InDifferentCompUnit(debuggerAdapter) {
@@ -103,7 +101,7 @@ async function set2InDifferentCompUnit(debuggerAdapter) {
   let bps = files.map((file) => {
     const fullFilePath = repoDirFile(file)
     console.log(`Full file path: ${fullFilePath}`)
-    return { file: fullFilePath, breakpoints: [{ line: getLineOf(readFile(fullFilePath), bpIdentifier) }] }
+    return { file: fullFilePath, breakpoints: [{ line: getLineOf(readFileContents(fullFilePath), bpIdentifier) }] }
   })
 
   for (const { file, breakpoints } of bps) {
@@ -114,9 +112,10 @@ async function set2InDifferentCompUnit(debuggerAdapter) {
       },
       breakpoints: breakpoints,
     })
-    assert(
+    assertLog(
       res.body.breakpoints.length == breakpoints.length,
-      () => `Expected to see ${breakpoints.length} but saw ${res.body.breakpoints.length}.\n${prettyJson(res)}`
+      `Expected to see ${breakpoints.length} breakpoints`,
+      ` but saw ${res.body.breakpoints.length}.\n${prettyJson(res)}`
     )
     console.log(prettyJson(res))
   }
@@ -129,12 +128,10 @@ async function setFunctionBreakpoint(DA) {
   const fnBreakpointResponse = await DA.sendReqGetResponse('setFunctionBreakpoints', {
     breakpoints: functions,
   })
-  assert(
+  assertLog(
     fnBreakpointResponse.body.breakpoints.length == 5,
-    () =>
-      `Expected 5 breakpoints from breakpoint requests: [${functions.map((v) => v.name)}] but only got ${
-        fnBreakpointResponse.body.breakpoints.length
-      }: ${prettyJson(fnBreakpointResponse)}`
+    `Expected 5 breakpoints from breakpoint requests: [${functions.map((v) => v.name)}]`,
+    ` but got ${fnBreakpointResponse.body.breakpoints.length}: ${prettyJson(fnBreakpointResponse)}`
   )
   console.log(prettyJson(fnBreakpointResponse))
 }
@@ -150,7 +147,11 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
 
   const requestArgs = { breakpoints: [{ name: `less_than<\\w+>`, regex: true }] }
   const response = await debugAdapter.sendReqGetResponse('setFunctionBreakpoints', requestArgs)
-  assert(response.body.breakpoints.length == 3, 'Expected 3 breakpoints')
+  assertLog(
+    response.body.breakpoints.length == 3,
+    'Expected 3 breakpoints',
+    ` but saw ${response.body.breakpoints.length}`
+  )
   let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 5000)
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
@@ -172,17 +173,19 @@ async function setBreakpointsThatArePending(debugAdapter) {
     .then((res) => {
       console.log(prettyJson(res))
       checkResponse(res, 'setInstructionBreakpoints', true)
-      assert(
+      assertLog(
         res.body.breakpoints.length == invalidAddressess.length,
-        `Expected bkpts 1 but got ${res.body.breakpoints.length}`
+        `Expected bkpts 1`,
+        ` but got ${res.body.breakpoints.length}`
       )
 
       let expected = [{ verified: false }, { verified: false }, { verified: false }, { verified: true }]
 
       for (let i = 0; i < 4; ++i) {
-        assert(
+        assertLog(
           res.body.breakpoints[i].verified == expected[i].verified,
-          `Expected verified for ${i} to be ${expected[i].verified}`
+          `Expected verified for ${i} to be ${expected[i].verified}`,
+          ` but was ${res.body.breakpoints[i].verified}`
         )
       }
     })
@@ -212,9 +215,80 @@ async function setNonExistingSourceBp(debugAdapter) {
   })
 
   console.log(prettyJson(res))
-  assert(
+  assertLog(
     res.body.breakpoints.length == bp_lines.length,
-    () => `Expected to see ${bp_lines.length} breakpoints but saw ${res.body.breakpoints.length}: \n${prettyJson(res)}`
+    `Expected to see ${bp_lines.length} breakpoints`,
+    ` but saw ${res.body.breakpoints.length}: \n${prettyJson(res)}`
+  )
+}
+
+async function set4ThenSet2(debuggerAdapter) {
+  await debuggerAdapter.launchToMain(debuggerAdapter.buildDirFile('stackframes'))
+  const file = readFileContents(repoDirFile('test/stackframes.cpp'))
+  {
+    const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
+      .map((ident) => getLineOf(file, ident))
+      .filter((item) => item != null)
+      .map((l) => ({ line: l }))
+    const res = await debuggerAdapter.sendReqGetResponse(bpRequest, {
+      source: {
+        name: repoDirFile('test/stackframes.cpp'),
+        path: repoDirFile('test/stackframes.cpp'),
+      },
+      breakpoints: bp_lines,
+    })
+
+    checkResponse(res, bpRequest, true)
+    assertLog(res.body.breakpoints.length == 4, `Expected 4 bkpts`, ` but got ${res.body.breakpoints.length}`)
+    const found_all = [false, false, false]
+    for (let i = 0; i < bp_lines.length; i++) {
+      for (let bp of res.body.breakpoints) {
+        if (bp.line == bp_lines[i].line) found_all[i] = true
+      }
+    }
+    assertLog(
+      !found_all.some((v) => v == false),
+      `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)}`,
+      ` but got ${prettyJson(res.body.breakpoints)}`
+    )
+  }
+  // Now, sending the same request, but only with BP1, BP2, we should get 2 breakpoints back, and the other two shall have been removed.
+  {
+    const bp_lines = ['BP3', 'BP4']
+      .map((ident) => getLineOf(file, ident))
+      .filter((item) => item != null)
+      .map((l) => ({ line: l }))
+    const res = await debuggerAdapter.sendReqGetResponse(bpRequest, {
+      source: {
+        name: repoDirFile('test/stackframes.cpp'),
+        path: repoDirFile('test/stackframes.cpp'),
+      },
+      breakpoints: bp_lines,
+    })
+
+    checkResponse(res, bpRequest, true)
+    assertLog(res.body.breakpoints.length == 2, `Expected 2 bkpts`, ` but got ${res.body.breakpoints.length}`)
+    const found_all = [false, false]
+    for (let i = 0; i < bp_lines.length; i++) {
+      for (let bp of res.body.breakpoints) {
+        if (bp.line == bp_lines[i].line) found_all[i] = true
+      }
+    }
+    assertLog(
+      !found_all.some((v) => v == false),
+      `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)}`,
+      ` but got ${prettyJson(res.body.breakpoints)}`
+    )
+  }
+
+  // continue to make sure we don't hit breakpoints at BP1 and BP2
+  let threads = await debuggerAdapter.threads()
+  await debuggerAdapter.contNextStop(threads[0].id)
+  const frames = await debuggerAdapter.stackTrace()
+  assertLog(
+    frames.body.stackFrames[0].name == 'baz',
+    `Expected to be in function 'baz'`,
+    ` but was in '${frames.body.stackFrames[0].name}'`
   )
 }
 
@@ -226,6 +300,7 @@ const tests = {
   setFunctionBreakpoint: setFunctionBreakpoint,
   setBreakpointsThatArePending: setBreakpointsThatArePending,
   setUsingRegexFunctionBreakpoint: setFunctionBreakpointUsingRegex,
+  set4ThenSet2: set4ThenSet2,
 }
 
 module.exports = {

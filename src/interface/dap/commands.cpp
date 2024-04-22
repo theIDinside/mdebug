@@ -137,11 +137,11 @@ Continue::execute(Tracer *tracer) noexcept
     target->invalidate_stop_state();
     if (continue_all) {
       DLOG("mdb", "continue all");
-      target->resume_target(RunType::Continue);
+      target->resume_target(tc::RunType::Continue);
     } else {
       DLOG("mdb", "continue single thread: {}", thread_id);
       auto t = target->get_task(thread_id);
-      target->resume_task(*t, RunType::Continue);
+      target->resume_task(*t, tc::RunType::Continue);
     }
   }
 
@@ -410,7 +410,7 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
-  tracer->get_current()->resume_target(RunType::Continue);
+  tracer->get_current()->resume_target(tc::RunType::Continue);
   tracer->config_done();
   return new ConfigurationDoneResponse{true, this};
 }
@@ -529,8 +529,8 @@ TerminateResponse::serialize(int seq) const noexcept
 UIResultPtr
 Terminate::execute(Tracer *tracer) noexcept
 {
-  bool success = tracer->get_current()->terminate_gracefully();
-  return new TerminateResponse{success, this};
+  tracer->disconnect(true);
+  return new TerminateResponse{true, this};
 }
 
 std::string

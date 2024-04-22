@@ -2,6 +2,7 @@
 
 #include "bp.h"
 #include "common.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
 #include <linux/sched.h>
 
@@ -27,8 +28,6 @@ struct CallStackRequest
 struct TaskInfo
 {
   friend struct TraceeController;
-  static constexpr bool IS_USER_STOPPED = true;
-  static constexpr bool IS_USER_RUNNING = false;
   pid_t tid;
   WaitStatus wait_status;
   union
@@ -65,14 +64,12 @@ struct TaskInfo
   static TaskInfo create_stopped(pid_t tid);
   static TaskInfo create_running(pid_t tid);
 
-  AddrPtr pc() noexcept;
   u64 get_register(u64 reg_num) noexcept;
 
   const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
-  void consume_wait() noexcept;
 
-  void step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept;
+  void step_over_breakpoint(TraceeController *tc, tc::RunType resume_action) noexcept;
   void set_stop() noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
@@ -86,10 +83,6 @@ struct TaskInfo
   bool is_stopped() const noexcept;
   bool stop_processed() const noexcept;
   WaitStatus pending_wait_status() const noexcept;
-
-private:
-  void ptrace_resume(RunType) noexcept;
-  void cache_registers() noexcept;
 };
 
 struct TaskStepInfo

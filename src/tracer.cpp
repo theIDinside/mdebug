@@ -3,6 +3,8 @@
 #include "interface/dap/events.h"
 #include "interface/dap/interface.h"
 #include "interface/pty.h"
+#include "interface/tracee_command/ptrace_commander.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
@@ -67,21 +69,26 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 }
 
 void
-Tracer::add_target_set_current(pid_t task_leader, const Path &path, TargetSession session) noexcept
+Tracer::add_target_set_current(const tc::InterfaceConfig &config, const Path &path, TargetSession session) noexcept
 {
-  auto [io_read, io_write] = utils::Notifier::notify_pipe();
-  events_notifier->add_notifier(io_read, path.string(), task_leader);
-  targets.push_back(
-      std::make_unique<TraceeController>(task_leader, io_write, session, !Tracer::use_traceme, true));
-  auto evt = new ui::dap::OutputEvent{
-      "console"sv, fmt::format("Task ({}) {} created (task leader: {})", 1, task_leader, task_leader)};
-  Tracer::Instance->post_event(evt);
+  // auto [io_read, io_write] = utils::Notifier::notify_pipe();
+  // events_notifier->add_notifier(io_read, path.string(), task_leader);
+  // First refactor into tc::TraceeInterface; TODO(simon): next is to also allow for GdbRemoteInterface here.
+
+  targets.push_back(std::make_unique<TraceeController>(
+      session, !Tracer::use_traceme, tc::TraceeCommandInterface::createCommandInterface(config)));
   current_target = targets.back().get();
-  load_and_process_objfile(task_leader, path);
+  const auto new_process = current_target->get_interface().task_leader();
+
+  auto evt = new ui::dap::OutputEvent{
+      "console"sv, fmt::format("Task ({}) {} created (task leader: {})", 1, new_process, new_process)};
+  Tracer::Instance->post_event(evt);
+
+  load_and_process_objfile(new_process, path);
   if (!Tracer::use_traceme) {
-    PTRACE_OR_PANIC(PTRACE_ATTACH, task_leader, 0, 0);
+    PTRACE_OR_PANIC(PTRACE_ATTACH, new_process, 0, 0);
   }
-  new_target_set_options(task_leader);
+  new_target_set_options(new_process);
 }
 
 void
@@ -111,7 +118,7 @@ Tracer::config_done() noexcept
 {
   switch (config.waitsystem()) {
   case sys::WaitSystem::UseAwaiterThread:
-    get_current()->start_awaiter_thread();
+    get_current()->get_interface().initialize();
     break;
   case sys::WaitSystem::UseSignalHandler:
     signal(SIGCHLD, on_sigcld);
@@ -229,6 +236,12 @@ exec(const Path &program, const std::vector<std::string> &prog_args)
 }
 
 void
+Tracer::attach(const AttachSettings &) noexcept
+{
+  TODO("Implement ATTACH functionality for debugger");
+}
+
+void
 Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept
 {
   termios original_tty;
@@ -264,7 +277,7 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
   default: {
     const auto res = get<PtyParentResult>(fork_result);
     const auto leader = res.pid;
-    add_target_set_current(res.pid, program, TargetSession::Launched);
+    add_target_set_current(tc::PtraceCfg{leader}, program, TargetSession::Launched);
     if (Tracer::use_traceme) {
       TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
       auto task = get_current()->register_task_waited(twr);
@@ -295,10 +308,10 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
         }
       }
     }
-    get_current()->reaped_events();
+
     if (stopAtEntry) {
-      Set<FunctionBreakpointSpec> fns{};
-      fns.insert({"main", {}, false});
+      Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
+      // fns.insert({"main", {}, false});
       get_current()->set_fn_breakpoints(fns);
     }
     break;
@@ -307,35 +320,17 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
 }
 
 void
-Tracer::kill_all_targets() noexcept
-{
-  for (auto &&t : targets) {
-    switch (t->session_type()) {
-    case TargetSession::Launched:
-      t->terminate_gracefully();
-      break;
-    case TargetSession::Attached:
-      detach(std::move(t));
-      break;
-    }
-  }
-  targets.clear();
-}
-
-void
-Tracer::detach(std::unique_ptr<TraceeController> &&target) noexcept
+Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept
 {
   // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
-  target->detach();
+  target->get_interface().disconnect(!resume_on_detach);
 }
 
 void
 Tracer::disconnect(bool terminate) noexcept
 {
-  if (terminate) {
-    kill_all_targets();
-  } else {
-    TODO("Disconnect without terminating processes not yet implemented");
+  for (auto &&t : targets) {
+    t->get_interface().disconnect(terminate);
   }
   Tracer::KeepAlive = false;
 }

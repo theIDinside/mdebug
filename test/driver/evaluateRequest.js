@@ -1,4 +1,4 @@
-const { readFile, repoDirFile, getLineOf } = require('./client')
+const { readFileContents, repoDirFile, getLineOf } = require('./client')
 const { prettyJson, assert } = require('./utils')
 
 async function evaluateBlockVariable(DA) {

@@ -1,11 +1,11 @@
-const { checkResponse, getLineOf, readFile, repoDirFile, seconds } = require('./client')
-const { objdump, hexStrAddressesEquals, assert, prettyJson, getPrintfPlt } = require('./utils')
+const { checkResponse, getLineOf, readFileContents, repoDirFile, seconds } = require('./client')
+const { objdump, hexStrAddressesEquals, assert, assertLog, prettyJson, getPrintfPlt } = require('./utils')
 
 async function unwindFromSharedObject(DA) {
   const sharedObjectsCount = 6
 
   async function set_bp(source, bps) {
-    const file = readFile(repoDirFile(source))
+    const file = readFileContents(repoDirFile(source))
     const bp_lines = bps
       .map((ident) => getLineOf(file, ident))
       .filter((item) => item != null)
@@ -33,17 +33,16 @@ async function unwindFromSharedObject(DA) {
   const bp_res = await setFnBp(['convert_kilometers_to_miles'])
   console.log(`bpres ${JSON.stringify(bp_res)}`)
 
-  assert(
+  assertLog(
     res.length >= sharedObjectsCount,
-    () => `Expected to see 6 module events for shared objects but saw ${res.length}`
+    `Expected to see >= 6 module events for shared objects, saw ${res.length}`
   )
 
   const threads = await DA.threads()
   const bps = await set_bp('test/todo.cpp', ['BP1'])
-  assert(bps.body.breakpoints.length == 1, 'Expected 1 breakpoint')
+  assertLog(bps.body.breakpoints.length == 1, 'Expected 1 breakpoint')
   const bps2 = await set_bp('test/dynamic_lib.cpp', ['BPKM'])
-  assert(bps2.body.breakpoints.length == 1, 'Expected 1 breakpoint')
-
+  assertLog(bps2.body.breakpoints.length == 1, 'Expected 1 breakpoint')
   // hit breakpoint in todo.cpp
   await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
   await DA.contNextStop()
@@ -54,7 +53,7 @@ async function unwindFromSharedObject(DA) {
   })
   verifyFrameIs(frames[0], 'convert_kilometers_to_miles')
   const response = await DA.disconnect('terminate')
-  assert(response.success, `Failed to disconnect. ${JSON.stringify(response)}`)
+  assertLog(response.success, `Attempted to disconnect`, JSON.stringify(response))
 }
 
 function parse_prologue_and_epilogue(DA) {
@@ -183,7 +182,7 @@ async function normalTest(DA) {
   ]
 
   await DA.launchToMain(DA.buildDirFile('stackframes'))
-  const file = readFile(repoDirFile('test/stackframes.cpp'))
+  const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)

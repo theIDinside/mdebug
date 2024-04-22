@@ -56,6 +56,18 @@ function hexStrAddressesEquals(a, b) {
   return addr_a == addr_b
 }
 
+function assertLog(boolCondition, AssertLogMessage, AssertErrorMessage = null) {
+  if (!boolCondition) {
+    if (AssertErrorMessage !== null) {
+      throw new Error(`${errMessage}: ${AssertErrorMessage}`)
+    } else {
+      throw new Error(AssertLogMessage)
+    }
+  } else {
+    console.log(`${AssertLogMessage}: OK`)
+  }
+}
+
 function assert(boolCondition, errMsg) {
   if (!boolCondition) {
     if (typeof errMsg === 'function') {
@@ -148,6 +160,7 @@ module.exports = {
   hexStrAddressesEquals,
   todo,
   assert,
+  assertLog,
   assert_eq,
   assertEqAInB,
   isHexadecimalString,

@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "event_queue.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "interface/ui_result.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
@@ -18,6 +19,7 @@ struct TraceeController;
 
 using Pid = pid_t;
 using Tid = pid_t;
+
 namespace ui::dap {
 class DAP;
 struct Event;
@@ -33,8 +35,10 @@ struct UICommand;
 }
 
 struct LWP;
-
 struct TaskInfo;
+struct AttachSettings
+{
+};
 
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
@@ -46,9 +50,11 @@ public:
   static bool KeepAlive;
   static bool use_traceme;
   friend struct ui::UICommand;
+
   Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
          sys::DebuggerConfiguration) noexcept;
-  void add_target_set_current(pid_t task_leader, const Path &path, TargetSession session) noexcept;
+
+  void add_target_set_current(const tc::InterfaceConfig &config, const Path &path, TargetSession session) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   void thread_exited(LWP lwp, int status) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
@@ -70,8 +76,8 @@ public:
   void accept_command(ui::UICommand *cmd) noexcept;
   void execute_pending_commands() noexcept;
   void launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept;
-  void kill_all_targets() noexcept;
-  void detach(std::unique_ptr<TraceeController> &&target) noexcept;
+  void attach(const AttachSettings &attach) noexcept;
+  void detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept;
   void disconnect(bool terminate) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;

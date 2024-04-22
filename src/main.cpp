@@ -122,7 +122,6 @@ main(int argc, const char **argv)
   }
   exit_debug_session = true;
   Tracer::Instance->kill_ui();
-  Tracer::Instance->kill_all_targets();
   ui_thread.join();
   DLOG("mdb", "Exited...");
 }
