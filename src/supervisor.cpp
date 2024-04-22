@@ -53,7 +53,7 @@
 
 using sym::dw::SourceCodeFile;
 
-TraceeController::TraceeController(TargetSession target_session, bool seized, tc::Interface &&interface) noexcept
+TraceeController::TraceeController(TargetSession target_session, tc::Interface &&interface) noexcept
     : task_leader{interface->task_leader()}, main_executable{nullptr}, threads{}, task_vm_infos{}, pbps{*this},
       tracee_r_debug{nullptr}, shared_objects{}, stop_all_requested{false}, var_refs(), interpreter_base{},
       entry{}, session{target_session}, ptracestop_handler{new ptracestop::StopHandler{*this}},

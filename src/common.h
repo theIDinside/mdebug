@@ -22,12 +22,6 @@ using Path = fs::path;
 using Tid = pid_t;
 using Pid = pid_t;
 
-template <typename... Ts> struct CallableOverload : Ts...
-{
-  using Ts::operator()...;
-};
-template <class... Ts> CallableOverload(Ts...) -> CallableOverload<Ts...>;
-
 // A line/col-source coordinate. Identifies a source file by full path and a line and column number
 struct SourceCoordinate
 {

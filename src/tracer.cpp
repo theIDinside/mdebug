@@ -75,8 +75,8 @@ Tracer::add_target_set_current(const tc::InterfaceConfig &config, const Path &pa
   // events_notifier->add_notifier(io_read, path.string(), task_leader);
   // First refactor into tc::TraceeInterface; TODO(simon): next is to also allow for GdbRemoteInterface here.
 
-  targets.push_back(std::make_unique<TraceeController>(
-      session, !Tracer::use_traceme, tc::TraceeCommandInterface::createCommandInterface(config)));
+  targets.push_back(
+      std::make_unique<TraceeController>(session, tc::TraceeCommandInterface::createCommandInterface(config)));
   current_target = targets.back().get();
   const auto new_process = current_target->get_interface().task_leader();
 

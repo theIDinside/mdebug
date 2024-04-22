@@ -1,20 +1,27 @@
 #include "tracee_command_interface.h"
+#include "common.h"
+#include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
+#include <type_traits>
 
 namespace tc {
 /*static*/ std::unique_ptr<TraceeCommandInterface>
 TraceeCommandInterface::createCommandInterface(const InterfaceConfig &config) noexcept
 {
-  const auto visitor = CallableOverload{[](const PtraceCfg &config) -> Interface {
-                                          DLOG("mdb", "Initializing ptrace interface...");
-                                          return std::make_unique<PtraceCommander>(config.tid);
-                                        },
-                                        [](const GdbRemoteCfg &) -> Interface {
-                                          PANIC("GdbRemote protocol support not yet implemented");
-                                          DLOG("mdb", "Initializing Gdb Remote Protocol interface...");
-                                          return nullptr;
-                                        }};
-  auto result = std::visit(visitor, config);
+  Interface result = std::visit(
+      [](const auto &config) -> Interface {
+        using T = std::remove_cvref_t<decltype(config)>;
+        if constexpr (std::is_same_v<PtraceCfg, T>) {
+          DLOG("mdb", "Initializing ptrace interface...");
+          return std::make_unique<PtraceCommander>(config.tid);
+        } else if constexpr (std::is_same_v<GdbRemoteCfg, T>) {
+          DLOG("mdb", "Initializing remote protocol interface...");
+          return GdbRemoteCommander::createConnection(config);
+        } else {
+          static_assert(always_false<T>, "Unsupported type T");
+        }
+      },
+      config);
   return result;
 }
 

@@ -90,7 +90,7 @@ private:
 
 public:
   // Constructors
-  TraceeController(TargetSession session, bool seize_session, tc::Interface &&interface) noexcept;
+  TraceeController(TargetSession session, tc::Interface &&interface) noexcept;
 
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;

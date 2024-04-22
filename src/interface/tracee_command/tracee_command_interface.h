@@ -88,6 +88,8 @@ struct PtraceCfg
 
 struct GdbRemoteCfg
 {
+  std::string host;
+  int port;
 };
 
 enum class TaskExecuteResult
