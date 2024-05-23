@@ -1,31 +1,81 @@
 #include "ptrace_commander.h"
+#include "arch.h"
 #include "awaiter.h"
 #include "common.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "symbolication/elf.h"
+#include "symbolication/elf_symbols.h"
+#include "symbolication/objfile.h"
+#include "utils/logger.h"
 #include "utils/scoped_fd.h"
 #include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
 #include <supervisor.h>
 #include <sys/ptrace.h>
+#include <unistd.h>
 
 namespace tc {
 
 PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
-    : TraceeCommandInterface(), procfs_memfd(), awaiter_thread(std::make_unique<AwaiterThread>(process_space_id)),
-      process_id(process_space_id)
+    : TraceeCommandInterface(TargetFormat::Native, std::make_shared<gdb::ArchictectureInfo>()), procfs_memfd(),
+      awaiter_thread(std::make_unique<AwaiterThread>(process_space_id)), process_id(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
   procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
 }
 
-bool
-PtraceCommander::reconfigure(TraceeController *tc) noexcept
+static TPtr<r_debug_extended>
+get_rdebug_state(ObjectFile *obj_file)
 {
-  procfs_memfd = {};
-  const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", tc->task_leader, tc->task_leader);
-  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
+  const auto rdebug_state = obj_file->get_min_obj_sym(LOADER_STATE);
+  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
+  return rdebug_state->address.as<r_debug_extended>();
+}
+
+bool
+PtraceCommander::post_exec(TraceeController *tc) noexcept
+{
   process_id = tc->task_leader;
+  DBGLOG(core, "Post Exec routine for {}", process_id);
+  procfs_memfd = {};
+  const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", process_id, process_id);
+  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
+  ASSERT(procfs_memfd.is_open(), "Failed to open proc mem fs for {}", process_id);
+
+  auto t = tc->get_task(process_id);
+  tc->cache_registers(*t);
+  // Read auxv to find out, e.g. interpreter_base value
+  auto auxv_result = read_auxv();
+  if (auxv_result.is_error()) {
+    PANIC("Failed to read auxv");
+    tc->read_auxv(*t);
+  } else {
+    tc->read_auxv_info(std::move(auxv_result.take_value()));
+  }
+
+  auto interpreter = tc->get_interpreter_base();
+  ASSERT(interpreter.has_value(),
+         "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
+  const auto main_exec = tc->get_main_executable();
+
+  const auto mainExecutableElf = main_exec->objectFile()->elf;
+  auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->get_section(".interp"));
+  auto tmp_objfile = CreateObjectFile(task_leader(), int_path);
+  ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
+  const auto system_tap_sec = tmp_objfile->elf->get_section(".note.stapsdt");
+  const auto probes = parse_stapsdt_note(tmp_objfile->elf, system_tap_sec);
+  tracee_r_debug = interpreter.value() + get_rdebug_state(tmp_objfile.get());
+  DBGLOG(core, "_r_debug found at {}", tracee_r_debug);
+  for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
+    if (auto symbol = tmp_objfile->get_min_fn_sym(symbol_name); symbol) {
+      const auto addr = interpreter.value() + symbol->address;
+      DBGLOG(core, "Setting ld breakpoint at 0x{:x}", addr);
+      tc->pbps.create_loc_user<SOLoadingBreakpoint>(*tc, tc->get_or_create_bp_location(addr, false),
+                                                    task_leader());
+    }
+  }
+
   return procfs_memfd.is_open();
 }
 
@@ -35,16 +85,80 @@ PtraceCommander::task_leader() const noexcept
   return process_id;
 }
 
-TraceeReadResult
+std::optional<Path>
+PtraceCommander::execed_file() noexcept
+{
+  TODO("Implement PtraceCommander::execed_file() noexcept");
+}
+
+std::optional<std::vector<ObjectFileDescriptor>>
+PtraceCommander::read_libraries() noexcept
+{
+  // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
+  auto rdebug_ext_res = read_type(tracee_r_debug);
+  if (rdebug_ext_res.is_error()) {
+    DBGLOG(core, "Could not read rdebug_extended");
+    return {};
+  }
+  r_debug_extended rdebug_ext = rdebug_ext_res.take_value();
+  std::vector<ObjectFileDescriptor> obj_files{};
+  // TODO(simon): Make this asynchronous; so that instead of creating a symbol file inside the loop
+  //  instead make a function that returns a promise of a symbol file. That promise gets added to a std::vector on
+  //  each loop and then when the while loop has finished, we wait on all promises, collecting them.
+  while (true) {
+    // means we've hit some "entry" point in the linker-debugger interface; we need to wait for RT_CONSISTENT to
+    // safely read "link map" containing the shared objects
+    if (rdebug_ext.base.r_state != rdebug_ext.base.RT_CONSISTENT) {
+      if (obj_files.empty()) {
+        DBGLOG(core, "Debug state not consistent: no information about obj files read");
+        return {};
+      } else {
+        return obj_files;
+      }
+    }
+    auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
+    while (linkmap != nullptr) {
+      auto map_res = read_type(linkmap);
+      if (!map_res.is_expected()) {
+        DBGLOG(core, "Failed to read linkmap");
+        return {};
+      }
+      auto map = map_res.take_value();
+      auto name_ptr = TPtr<char>{map.l_name};
+      const auto path = read_nullterminated_string(name_ptr);
+      if (!path) {
+        DBGLOG(core, "Failed to read null-terminated string from tracee at {}", name_ptr);
+        return {};
+      }
+      obj_files.emplace_back(path.value(), map.l_addr);
+      linkmap = TPtr<link_map>{map.l_next};
+    }
+    const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
+    if (next != nullptr) {
+      const auto next_rdebug = read_type(next);
+      if (next_rdebug.is_error()) {
+        break;
+      } else {
+        rdebug_ext = next_rdebug.value();
+      }
+    } else {
+      break;
+    }
+  }
+
+  return obj_files;
+}
+
+ReadResult
 PtraceCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 {
   auto read_bytes = pread64(procfs_memfd.get(), read_buffer, size, address.get());
   if (read_bytes > 0) {
-    return TraceeReadResult::Ok(static_cast<u32>(read_bytes));
+    return ReadResult::Ok(static_cast<u32>(read_bytes));
   } else if (read_bytes == 0) {
-    return TraceeReadResult::EoF();
+    return ReadResult::EoF();
   } else {
-    return TraceeReadResult::Error(errno);
+    return ReadResult::SystemError(errno);
   }
 }
 
@@ -62,8 +176,6 @@ PtraceCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 TaskExecuteResponse
 PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
 {
-  (void)t;
-  (void)type;
   ASSERT(t.user_stopped || t.tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})",
          bool{t.user_stopped}, bool{t.tracer_stopped});
   if (t.user_stopped || t.tracer_stopped) {
@@ -76,6 +188,7 @@ PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
   t.stop_collected = false;
   t.user_stopped = false;
   t.tracer_stopped = false;
+  t.last_resume_command = type;
   t.set_dirty();
   return TaskExecuteResponse::Ok();
 }
@@ -99,7 +212,7 @@ PtraceCommander::enable_breakpoint(BreakpointLocation &location) noexcept
 TaskExecuteResponse
 PtraceCommander::disable_breakpoint(BreakpointLocation &location) noexcept
 {
-  DLOG("mdb", "[bkpt]: disabling breakpoint at {}", location.address());
+  DBGLOG(core, "[bkpt]: disabling breakpoint at {}", location.address());
   const auto addr = location.address().get();
   const auto read_value = ptrace(PTRACE_PEEKDATA, process_id, addr, nullptr);
   if (read_value == -1) {
@@ -135,7 +248,7 @@ PtraceCommander::install_breakpoint(AddrPtr address) noexcept
 TaskExecuteResponse
 PtraceCommander::read_registers(TaskInfo &t) noexcept
 {
-  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.tid, nullptr, t.registers); ptrace_result == -1) {
+  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.tid, nullptr, t.regs.registers); ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   } else {
     return TaskExecuteResponse::Ok();
@@ -156,6 +269,7 @@ PtraceCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
   if (ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   }
+  t.regs.registers->rip = addr;
   return TaskExecuteResponse::Ok();
 }
 
@@ -189,6 +303,46 @@ PtraceCommander::initialize() noexcept
 {
   awaiter_thread->start_awaiter_thread(this);
   return true;
+}
+
+std::shared_ptr<gdb::RemoteConnection>
+PtraceCommander::remote_connection() noexcept
+{
+  return nullptr;
+}
+
+utils::Expected<Auxv, Error>
+PtraceCommander::read_auxv() noexcept
+{
+  auto path = fmt::format("/proc/{}/auxv", task_leader());
+  DBGLOG(core, "Reading auxv for {} at {}", task_leader(), path);
+  utils::ScopedFd procfile = utils::ScopedFd::open_read_only(path);
+  // we can read 256 elements at a time (id + value = u64 * 2)
+  static constexpr auto Count = 512;
+  auto offset = 0;
+  u64 buffer[Count];
+  Auxv res;
+  while (true) {
+    const auto result = pread(procfile, buffer, sizeof(u64) * Count, offset);
+    if (result == -1) {
+      return Error{.sys_errno = errno, .err_msg = strerror(errno)};
+    }
+    ASSERT(result > (8 * 2),
+           "Expected to read at least 1 element (last element should always be a 0, 0 pair, "
+           "thus one element should always exist at the minimum) but read {}",
+           result);
+    const auto item_count = result / 8;
+
+    res.vector.reserve(res.vector.size() + item_count);
+    for (auto i = 0u; i < item_count; i += 2) {
+      if (buffer[i] == 0 && buffer[i + 1] == 0) {
+        return res;
+      }
+      res.vector.emplace_back(buffer[i], buffer[i + 1]);
+    }
+    std::memset(buffer, 0, sizeof(u64) * Count);
+    offset += sizeof(u64) * Count;
+  }
 }
 
 } // namespace tc

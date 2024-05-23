@@ -343,7 +343,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
         if (auto die_ref = unit_data->get_objfile()->get_die_reference(declaring_die_offset); die_ref)
           die_refs.push_back(*die_ref);
         else {
-          DLOG("mdb", "Could not find die reference");
+          DBGLOG(core, "Could not find die reference");
         }
         break;
       }

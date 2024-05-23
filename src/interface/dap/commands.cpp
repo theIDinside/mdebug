@@ -2,11 +2,13 @@
 #include "bp.h"
 #include "common.h"
 #include "events/event.h"
+#include "interface/attach_args.h"
 #include "interface/ui_command.h"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
 #include "types.h"
 #include "utils/expected.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -130,16 +132,16 @@ Continue::execute(Tracer *tracer) noexcept
       if (!t.is_stopped() || t.tracer_stopped)
         running_tasks.push_back(t.tid);
     }
-    DLOG("mdb", "Denying continue request, target is running ([{}])", fmt::join(running_tasks, ", "));
+    DBGLOG(core, "Denying continue request, target is running ([{}])", fmt::join(running_tasks, ", "));
     res->success = false;
   } else {
     res->success = true;
     target->invalidate_stop_state();
     if (continue_all) {
-      DLOG("mdb", "continue all");
+      DBGLOG(core, "continue all");
       target->resume_target(tc::RunType::Continue);
     } else {
-      DLOG("mdb", "continue single thread: {}", thread_id);
+      DBGLOG(core, "continue single thread: {}", thread_id);
       auto t = target->get_task(thread_id);
       target->resume_task(*t, tc::RunType::Continue);
     }
@@ -173,7 +175,7 @@ Next::execute(Tracer *tracer) noexcept
 
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    DLOG("mdb", "Stepping task {} 1 instruction, starting at {:x}", thread_id, task->registers->rip);
+    DBGLOG(core, "Stepping task {} 1 instruction, starting at {:x}", thread_id, task->get_pc());
     target->install_thread_proceed<ptracestop::InstructionStep>(*task, 1);
     break;
   case SteppingGranularity::Line:
@@ -410,8 +412,16 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
-  tracer->get_current()->resume_target(tc::RunType::Continue);
   tracer->config_done();
+  auto current = tracer->get_current();
+  switch (current->session_type()) {
+  case TargetSession::Launched:
+    current->resume_target(tc::RunType::Continue);
+    break;
+  case TargetSession::Attached:
+    break;
+  }
+
   return new ConfigurationDoneResponse{true, this};
 }
 
@@ -485,9 +495,9 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsWriteMemoryRequest"] = false;
   cfg_body["supportsDisassembleRequest"] = true;
   cfg_body["supportsCancelRequest"] = false;
-  cfg_body["supportsBreakpointLocationsRequest"] = false;
+  cfg_body["supportsBreakpointLocationsRequest"] = true;
   cfg_body["supportsClipboardContext"] = false;
-  cfg_body["supportsSteppingGranularity"] = false;
+  cfg_body["supportsSteppingGranularity"] = true;
   cfg_body["supportsInstructionBreakpoints"] = true;
   cfg_body["supportsExceptionFilterOptions"] = false;
   cfg_body["supportsSingleThreadExecutionRequests"] = false;
@@ -516,6 +526,23 @@ Launch::execute(Tracer *tracer) noexcept
 {
   tracer->launch(stopAtEntry, std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
+}
+
+std::string
+AttachResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "attach" }})", seq,
+      response_seq);
+}
+
+Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), attachArgs(std::move(args)) {}
+
+UIResultPtr
+Attach::execute(Tracer *tracer) noexcept
+{
+  const auto res = tracer->attach(attachArgs);
+  return new AttachResponse{res, this};
 }
 
 std::string
@@ -821,7 +848,7 @@ InvalidArgs::execute(Tracer *) noexcept
 }
 
 InvalidArgsResponse::InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-    : command(command), missing_arguments(std::move(missing_args))
+    : command(command), missing_or_invalid(std::move(missing_args))
 {
 }
 
@@ -829,15 +856,16 @@ std::string
 InvalidArgsResponse::serialize(int seq) const noexcept
 {
   std::vector<std::string_view> missing{};
-  std::vector<std::string_view> invalid{};
-  missing.reserve(missing_arguments.size());
-  for (const auto &[k, v] : missing_arguments) {
+  std::vector<const InvalidArg *> parsed_and_invalid{};
+  missing.reserve(missing_or_invalid.size());
+  for (const auto &pair : missing_or_invalid) {
+    const auto &[k, v] = pair;
     switch (k.kind) {
     case ArgumentErrorKind::Missing:
       missing.push_back(v);
       break;
     case ArgumentErrorKind::InvalidInput:
-      invalid.push_back(v);
+      parsed_and_invalid.push_back(&pair);
       break;
     }
   }
@@ -846,7 +874,19 @@ InvalidArgsResponse::serialize(int seq) const noexcept
   auto it = !missing.empty() ? fmt::format_to(message.begin(), "Missing arguments: {}. ", fmt::join(missing, ", "))
                              : message.begin();
 
-  it = !invalid.empty() ? fmt::format_to(it, "Invalid input: {}. ", fmt::join(invalid, ", ")) : it;
+  std::array<char, 1024> invals{};
+  if (!parsed_and_invalid.empty()) {
+    decltype(fmt::format_to(invals.begin(), "")) inv_it;
+    for (auto ref : parsed_and_invalid) {
+      if (ref->first.description) {
+        inv_it = fmt::format_to(invals.begin(), "{}: {}\\n", ref->second, ref->first.description.value());
+      } else {
+        inv_it = fmt::format_to(invals.begin(), "{}\\n", ref->second);
+      }
+    }
+
+    it = fmt::format_to(it, "Invalid input for: {}", std::string_view{invals.begin(), inv_it});
+  }
   *it = 0;
   std::string_view msg{message.begin(), message.begin() + std::distance(message.begin(), it)};
 
@@ -854,6 +894,11 @@ InvalidArgsResponse::serialize(int seq) const noexcept
       R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}" }})",
       seq, response_seq, command, msg);
 }
+
+#define IfInvalidArgsReturn(type)                                                                                 \
+  if (const auto missing = Validate<type>(seq, args); missing) {                                                  \
+    return missing;                                                                                               \
+  }
 
 ui::UICommand *
 parse_command(std::string &&packet) noexcept
@@ -868,8 +913,10 @@ parse_command(std::string &&packet) noexcept
   const auto cmd = parse_command_type(cmd_name);
   auto &&args = std::move(obj["arguments"]);
   switch (cmd) {
-  case CommandType::Attach:
-    TODO("Command::Attach");
+  case CommandType::Attach: {
+    IfInvalidArgsReturn(Attach);
+    return Attach::create(seq, args);
+  }
   case CommandType::BreakpointLocations:
     TODO("Command::BreakpointLocations");
   case CommandType::Completions:
@@ -878,9 +925,8 @@ parse_command(std::string &&packet) noexcept
     return new ConfigurationDone{seq};
     break;
   case CommandType::Continue: {
-    if (auto missing = UICommand::check_args<Continue>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "continue", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Continue);
+
     const auto all_threads = !args.contains("singleThread") ? true : false;
     return new Continue{seq, args.at("threadId"), all_threads};
   }
@@ -889,9 +935,8 @@ parse_command(std::string &&packet) noexcept
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
   case CommandType::Disassemble: {
-    if (auto &&invalid = UICommand::check_args<Disassemble>(args); invalid) {
-      return new InvalidArgs{seq, "disassemble", std::move(invalid.value())};
-    }
+    IfInvalidArgsReturn(Disassemble);
+
     std::string_view addr_str;
     args["memoryReference"].get_to(addr_str);
     const auto addr = to_addr(addr_str);
@@ -901,9 +946,8 @@ parse_command(std::string &&packet) noexcept
     return new ui::dap::Disassemble{seq, addr, offset, instructionOffset, instructionCount, false};
   }
   case CommandType::Disconnect: {
-    if (auto missing = UICommand::check_args<Disconnect>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "disconnect", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Disconnect);
+
     bool restart = false;
     bool terminate_debuggee = false;
     bool suspend_debuggee = false;
@@ -929,9 +973,8 @@ parse_command(std::string &&packet) noexcept
   case CommandType::Initialize:
     return new Initialize{seq, std::move(args)};
   case CommandType::Launch: {
-    if (auto missing = UICommand::check_args<Launch>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "launch", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Launch);
+
     Path path = args.at("program");
     std::vector<std::string> prog_args;
     if (args.contains("args")) {
@@ -945,9 +988,8 @@ parse_command(std::string &&packet) noexcept
   case CommandType::Modules:
     TODO("Command::Modules");
   case CommandType::Next: {
-    if (auto missing = UICommand::check_args<Next>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "next", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Next);
+
     int thread_id = args["threadId"];
     bool single_thread = false;
     SteppingGranularity step_type = SteppingGranularity::Line;
@@ -962,16 +1004,13 @@ parse_command(std::string &&packet) noexcept
     return new Next{seq, thread_id, !single_thread, step_type};
   }
   case CommandType::Pause: {
-    if (auto missing = UICommand::check_args<Pause>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "pause", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Pause);
+
     int thread_id = args["threadId"];
     return new Pause(seq, Pause::Args{thread_id});
   }
   case CommandType::ReadMemory: {
-    if (auto missing = UICommand::check_args<ReadMemory>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "readMemory", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(ReadMemory);
 
     std::string_view addr_str;
     args.at("memoryReference").get_to(addr_str);
@@ -987,16 +1026,14 @@ parse_command(std::string &&packet) noexcept
   case CommandType::ReverseContinue:
     TODO("Command::ReverseContinue");
   case CommandType::Scopes: {
-    if (auto missing = UICommand::check_args<Scopes>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "scopes", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Scopes);
+
     const int frame_id = args.at("frameId");
     return new ui::dap::Scopes{seq, frame_id};
   }
   case CommandType::SetBreakpoints:
-    if (auto missing = UICommand::check_args<SetBreakpoints>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "setBreakpoints", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(SetBreakpoints);
+
     return new SetBreakpoints{seq, std::move(args)};
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
@@ -1005,23 +1042,20 @@ parse_command(std::string &&packet) noexcept
   case CommandType::SetExpression:
     TODO("Command::SetExpression");
   case CommandType::SetFunctionBreakpoints:
-    if (auto missing = UICommand::check_args<SetFunctionBreakpoints>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "setFunctionBreakpoints", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(SetFunctionBreakpoints);
+
     return new SetFunctionBreakpoints{seq, std::move(args)};
   case CommandType::SetInstructionBreakpoints:
-    if (auto missing = UICommand::check_args<SetInstructionBreakpoints>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "setInstructionBreakpoints", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(SetInstructionBreakpoints);
+
     return new SetInstructionBreakpoints{seq, std::move(args)};
   case CommandType::SetVariable:
     TODO("Command::SetVariable");
   case CommandType::Source:
     TODO("Command::Source");
   case CommandType::StackTrace: {
-    if (auto missing = UICommand::check_args<StackTrace>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "stackTrace", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(StackTrace);
+
     std::optional<int> startFrame;
     std::optional<int> levels;
     std::optional<StackTraceFormat> format_;
@@ -1052,9 +1086,8 @@ parse_command(std::string &&packet) noexcept
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
   case CommandType::StepOut: {
-    if (auto missing = UICommand::check_args<StepOut>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "stepOut", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(StepOut);
+
     int thread_id = args["threadId"];
     bool single_thread = false;
     if (args.contains("singleThread")) {
@@ -1063,21 +1096,18 @@ parse_command(std::string &&packet) noexcept
     return new ui::dap::StepOut{seq, thread_id, !single_thread};
   }
   case CommandType::Terminate:
-    if (auto missing = UICommand::check_args<Terminate>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "terminate", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Terminate);
+
     return new Terminate{seq};
   case CommandType::TerminateThreads:
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
-    if (auto missing = UICommand::check_args<Threads>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "threads", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Threads);
+
     return new Threads{seq};
   case CommandType::Variables: {
-    if (auto missing = UICommand::check_args<Variables>(args); missing) {
-      return new ui::dap::InvalidArgs{seq, "variables", std::move(missing.value())};
-    }
+    IfInvalidArgsReturn(Variables);
+
     int var_ref = args["variablesReference"];
     std::optional<u32> start{};
     std::optional<u32> count{};

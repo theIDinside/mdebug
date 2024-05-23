@@ -77,7 +77,7 @@ void
 NameIndex::merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_references) noexcept
 {
   std::lock_guard lock(mutex);
-  DLOG("dwarf", "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
+  DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
   }
@@ -87,7 +87,7 @@ void
 NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_die_name_references) noexcept
 {
   std::lock_guard lock(mutex);
-  DLOG("dwarf", "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
+  DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
     const auto die_ref = cu->get_cu_die_ref(idx);

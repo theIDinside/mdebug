@@ -1,5 +1,10 @@
 #include "scoped_fd.h"
+#include "utils/expected.h"
+#include "utils/scope_defer.h"
 #include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 
 namespace utils {
@@ -105,6 +110,48 @@ ScopedFd::open(const Path &p, int flags, mode_t mode) noexcept
 {
   ASSERT(fs::exists(p), "File did not exist {}", p.c_str());
   return ScopedFd{::open(p.c_str(), flags, mode), p};
+}
+
+/* static */ utils::Expected<ScopedFd, ConnectError>
+ScopedFd::socket_connect(const std::string &host, int port) noexcept
+{
+  addrinfo hints = {};
+  addrinfo *result = nullptr;
+  addrinfo *rp = nullptr;
+  hints.ai_canonname = nullptr;
+  hints.ai_addr = nullptr;
+  hints.ai_next = nullptr;
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+
+  auto port_number = std::to_string(port);
+  if (getaddrinfo(host.c_str(), port_number.c_str(), &hints, &result) != 0) {
+    DBGLOG(core, "getaddrinfo failed when attempting to connect to {}:{}. Reported reason: {}", host, port,
+           strerror(errno));
+    return ConnectError::AddrInfo(errno);
+  }
+
+  ScopedDefer defer{[&]() { freeaddrinfo(result); }};
+
+  bool socket_error_only = true;
+  for (rp = result; rp != nullptr; rp = rp->ai_next) {
+    if (const auto fd = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol); fd != -1) {
+      if (::connect(fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+        DBGLOG(core, "Successfully opened socket and connected to {}:{}", host, port);
+        return ScopedFd{fd};
+      } else {
+        socket_error_only = false;
+        ::close(fd);
+      }
+    }
+  }
+  if (socket_error_only) {
+    DBGLOG(core, "Failed to connect to {}:{} due to socket error. Reported reason: {}", host, port,
+           strerror(errno));
+    return ConnectError::Socket(errno);
+  }
+  DBGLOG(core, "Failed to connect to {}:{}. Reported reason: {}", host, port, strerror(errno));
+  return ConnectError::Connect(host, port, errno);
 }
 
 /* static */

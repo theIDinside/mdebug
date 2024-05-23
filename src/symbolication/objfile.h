@@ -170,8 +170,7 @@ public:
   Immutable<AddressRange> pc_bounds;
   SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
 
-  static shr_ptr Create(const TraceeController &tc, std::shared_ptr<ObjectFile> binary,
-                        AddrPtr relocated_base) noexcept;
+  static shr_ptr Create(Pid process_id, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept;
   auto copy(const TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
 
@@ -212,7 +211,7 @@ private:
 };
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;
-std::shared_ptr<ObjectFile> CreateObjectFile(const TraceeController &tc, const Path &path) noexcept;
+std::shared_ptr<ObjectFile> CreateObjectFile(Pid process_id, const Path &path) noexcept;
 
 struct UnloadObjectFile
 {

@@ -34,7 +34,7 @@ SharedObject::symbol_file_path() const noexcept
 std::optional<bool>
 SharedObject::is_optimized() const noexcept
 {
-  DLOG("mdb", "Knowing if SO is optimized is not implemented");
+  DBGLOG(core, "Knowing if SO is optimized is not implemented");
   return std::nullopt;
 }
 
@@ -59,14 +59,14 @@ interpreter_path(const Elf *elf, const ElfSection *interp) noexcept
   ASSERT(interp->get_name() == ".interp", "Section is not .interp: {}", interp->get_name());
   DwarfBinaryReader reader{elf, interp};
   const auto path = reader.read_string();
-  DLOG("mdb", "Path to system interpreter: {}", path);
+  DBGLOG(core, "Path to system interpreter: {}", path);
   return path;
 }
 
 std::optional<SharedObject::SoId>
 SharedObjectMap::add_if_new(TPtr<link_map> tracee_location, AddrPtr elf_diff, Path &&path) noexcept
 {
-  DLOG("mdb", "Shared object {}; elf diff = {}", path.c_str(), elf_diff);
+  DBGLOG(core, "Shared object {}; elf diff = {}", path.c_str(), elf_diff);
   auto it = find(shared_objects, [&p = path](const auto &so) { return so.path == p; });
   if (it == std::end(shared_objects)) {
     const auto so_id = new_id();

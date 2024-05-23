@@ -5,7 +5,9 @@ async function evaluateBlockVariable(DA) {
   throw new Error('evaluateBlockVariable not implemented')
 }
 
-async function evalateAddressAsVariable(DA) {}
+async function evalateAddressAsVariable(DA) {
+  throw new Error('evaluateBlockVariable not implemented')
+}
 
 const tests = {
   evaluateBlockVariable: evaluateBlockVariable,

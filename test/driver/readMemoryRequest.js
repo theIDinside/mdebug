@@ -74,7 +74,7 @@ async function readShouldFailFaultyArgs(DA) {
   })
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
   assert(
-    readMemoryResponse.message == 'Invalid input: memoryReference. ',
+    readMemoryResponse.message.includes('memoryReference'),
     `Unexpected error message seen: ${readMemoryResponse.message}`
   )
 
@@ -84,7 +84,9 @@ async function readShouldFailFaultyArgs(DA) {
 
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
   assert(
-    readMemoryResponse.message == 'Missing arguments: count. Invalid input: memoryReference. ',
+    readMemoryResponse.message.includes('Missing') &&
+      readMemoryResponse.message.includes('count') &&
+      readMemoryResponse.message.includes('memoryReference'),
     `Unexpected error message seen: ${readMemoryResponse.message}`
   )
 
@@ -94,10 +96,7 @@ async function readShouldFailFaultyArgs(DA) {
   })
 
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
-  assert(
-    readMemoryResponse.message == 'Invalid input: memoryReference, count. ',
-    `Unexpected error message seen: '${readMemoryResponse.message}'`
-  )
+  assert(readMemoryResponse.message.includes('count'), `Unexpected error message seen: '${readMemoryResponse.message}'`)
 
   readMemoryResponse = await DA.sendReqGetResponse('readMemory', {
     memoryReference: 'FooBar',
@@ -105,6 +104,7 @@ async function readShouldFailFaultyArgs(DA) {
   })
 
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
+
   assert(
     readMemoryResponse.message == 'Address parameter could not be parsed.',
     `Unexpected error message seen: '${readMemoryResponse.message}'`

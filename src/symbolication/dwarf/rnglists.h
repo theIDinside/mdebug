@@ -1,12 +1,10 @@
 #pragma once
 #include <cstdint>
 #include <symbolication/dwarf_defs.h>
+#include <typedefs.h>
 
 struct ElfSection;
 struct AddressRange;
-using u8 = std::uint8_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
 
 namespace sym::dw {
 struct RangeListHeader

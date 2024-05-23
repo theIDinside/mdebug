@@ -223,7 +223,7 @@ wait_result_stopped(Tid tid, int status)
   } else if (WSTOPSIG(status) == SIGSTOP) {
     kind = Stopped;
   } else if (WSTOPSIG(status) == SIGTERM) {
-    DLOG("mdb", "SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait.tid, WSTOPSIG(status));
+    DBGLOG(core, "SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait.tid, WSTOPSIG(status));
     kind = Stopped;
   } else {
     kind = Stopped;

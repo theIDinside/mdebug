@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <typedefs.h>
+#include <utils/logger.h>
 
 std::string_view
 syscall_name(u64 syscall_number)
@@ -64,13 +65,15 @@ panic_exit()
 void
 panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
 {
+  using enum logging::Channel;
+#define PLOG(msg) logging::get_logging()->log(core, msg)
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];
   char **strings;
 
   nptrs = backtrace(buffer, BT_BUF_SIZE);
-  logging::get_logging()->log("mdb", fmt::format("backtrace() returned {} addresses\n", nptrs));
+  PLOG(fmt::format("backtrace() returned {} addresses\n", nptrs));
   fmt::println("backtrace() returned {} addresses\n", nptrs);
 
   /* The call backtrace_symbols_fd(buffer, nptrs, STDOUT_FILENO)
@@ -93,12 +96,12 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
       if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
         std::string copy{res};
         sanitize(copy);
-        logging::get_logging()->log("mdb", copy);
+        PLOG(copy);
         fmt::println("{}", copy);
         continue;
       }
     }
-    logging::get_logging()->log("mdb", strings[j]);
+    PLOG(strings[j]);
     fmt::println("{}", strings[j]);
   }
 
@@ -108,10 +111,11 @@ ifbacktrace_failed:
   const auto message =
       fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
                   loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
-  logging::get_logging()->log("mdb", message);
+  PLOG(message);
   fmt::println("{}", message);
   delete logging::get_logging();
   panic_exit();
+#undef PLOG
 }
 
 Option<AddrPtr>

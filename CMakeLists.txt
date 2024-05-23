@@ -40,20 +40,6 @@ set(MIDAS_SOURCES
   # events
   src/events/event.cpp
   src/events/event.h
-  # interface
-  src/interface/dap/commands.cpp
-  src/interface/dap/commands.h
-  src/interface/dap/dap_defs.h
-  src/interface/dap/events.cpp
-  src/interface/dap/events.h
-  src/interface/dap/interface.cpp
-  src/interface/dap/interface.h
-  src/interface/dap/parse_buffer.cpp
-  src/interface/dap/parse_buffer.h
-  src/interface/dap/types.cpp
-  src/interface/dap/types.h
-  src/interface/pty.cpp
-  src/interface/pty.h
   # lib
   src/lib/lockguard.h
   # symbolication
@@ -124,12 +110,41 @@ set(MIDAS_SOURCES
   src/utils/thread_pool.h
   src/utils/worker_task.cpp
   src/utils/worker_task.h
+  src/utils/sync_barrier.cpp
+  src/utils/sync_barrier.h
+  src/utils/xml.cpp
+  src/utils/xml.h
   # eval
   src/eval/eval.cpp
   src/eval/eval.h
 
   src/tracee/util.cpp
   src/tracee/util.h
+
+  # Various interfaces
+  src/interface/dap/commands.cpp
+  src/interface/dap/commands.h
+  src/interface/dap/dap_defs.h
+  src/interface/dap/events.cpp
+  src/interface/dap/events.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
+  src/interface/dap/types.cpp
+  src/interface/dap/types.h
+  src/interface/pty.cpp
+  src/interface/pty.h
+
+  # Gdb Remote interface
+  src/interface/remotegdb/connection.cpp
+  src/interface/remotegdb/connection.h
+  src/interface/remotegdb/stopreply_parser.cpp
+  src/interface/remotegdb/stopreply_parser.h
+  src/interface/remotegdb/target_description.cpp
+  src/interface/remotegdb/target_description.h
+  src/interface/remotegdb/shared.cpp
+  src/interface/remotegdb/shared.h
 
   # Tracee Interfaces
   src/interface/tracee_command/tracee_command_interface.cpp
@@ -177,6 +192,10 @@ AddTest(NAME expected_tests
   SOURCES test/unittest/expected_tests.cpp
   LIBS fmt::fmt)
 
+AddTest(NAME xml_tests
+SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
+LIBS fmt::fmt)
+
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
@@ -215,7 +234,8 @@ if(NODEJS)
     message("Suite ${driver_test}:")
       foreach(test ${${driver_test}})
         message("  - ${test}")
-        add_test(NAME DriverTest.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js ${CMAKE_BINARY_DIR} ${driver_test} ${test})
+        add_test(NAME DriverTest.Native.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=${CMAKE_BINARY_DIR} --test-suite=${driver_test} --test=${test} --session=native)
+        add_test(NAME DriverTest.Remote.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=${CMAKE_BINARY_DIR} --test-suite=${driver_test} --test=${test} --session=remote)
       endforeach()
     endif()
   endforeach()

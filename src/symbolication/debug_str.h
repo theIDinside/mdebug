@@ -1,9 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
+#include <typedefs.h>
 
-using u8 = std::uint8_t;
-using u64 = std::uint64_t;
 using PtrVal = std::uintptr_t;
 
 namespace sym {

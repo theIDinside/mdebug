@@ -1,5 +1,5 @@
-const { launchToGetFramesAndScopes, readFileContents, repoDirFile, getLineOf } = require('./client')
-const { assert, prettyJson } = require('./utils')
+const { launchToGetFramesAndScopes, readFileContents, repoDirFile, getLineOf, SetBreakpoints } = require('./client')
+const { assert, assertLog, prettyJson } = require('./utils')
 const sharedObjectsCount = 6
 
 async function expect6NewModuleEvents(DA) {
@@ -20,7 +20,7 @@ async function assert1Pending(debugAdapter) {
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
-  assert(bp_lines.length == bpIdentifiers.length, `Could not find these identifiers: ${bpIdentifiers}`)
+  assertLog(bp_lines.length == bpIdentifiers.length, `Check that identifiers exist: ${bpIdentifiers}`)
   const args = {
     source: {
       name: repoDirFile(dynamic_so_file),
@@ -29,12 +29,13 @@ async function assert1Pending(debugAdapter) {
     breakpoints: bp_lines,
   }
   const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', args)
-  assert(
+  assertLog(
     bkpt_res.body.breakpoints.length == 1,
-    () => `Could not find these identifiers: ${bpIdentifiers}: ${prettyJson(bkpt_res)}`
+    `Expected to find 1 identifier`,
+    () => `Instead found ${prettyJson(bkpt_res)}`
   )
   const bp = bkpt_res.body.breakpoints[0]
-  assert(!bp.verified, `Expected breakpoint to not be verified`)
+  assertLog(!bp.verified, `Expected breakpoint to not be verified`)
   return bp
 }
 
@@ -46,58 +47,63 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
     'perform_dynamic',
     'dynamicLoading'
   )
-
+  const bp2 = await SetBreakpoints(debugAdapter, 'test/dynamic_lib.cpp', ['BPMI'])
   const bp = await assert1Pending(debugAdapter)
   let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 2000)
   const template_path = repoDirFile('test/templated_code/template.h')
   const template_line = getLineOf(readFileContents(template_path), 'BP1')
   let bp_args = { source: { name: template_path, path: template_path }, breakpoints: [{ line: template_line }] }
   const templateBpRes = await debugAdapter.sendReqGetResponse('setBreakpoints', bp_args)
-  assert(
+  assertLog(
     templateBpRes.body.breakpoints.length == 1,
-    `Expected 1 breakpoint using ${prettyJson(bp_args)} but got ${prettyJson(templateBpRes)}`
+    `Expected 1 breakpoint`,
+    `Bp Args: ${prettyJson(bp_args)}.\n Response ${prettyJson(templateBpRes)}`
   )
 
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
-  assert(
+  assertLog(
     res.length == 2,
-    () => `Expected to see 2 new breakpoint event due to dlopen call but saw ${res.length}: ${prettyJson(res)}`
+    `Expected to see 2 new breakpoint event due to dlopen call`,
+    () => `But saw ${res.length}: ${prettyJson(res)}`
   )
   let obj = { changed_seen: false, new_seen: false }
   for (const evt of res) {
-    assert(evt.breakpoint.verified, `Expected breakpoint to be verified but wasn't: ${prettyJson(evt.breakpoint)}`)
+    assertLog(
+      evt.breakpoint.verified,
+      `Expected breakpoint to be verified`,
+      `But wasn't: ${prettyJson(evt.breakpoint)}`
+    )
     switch (evt.reason) {
       case 'changed':
         changed_seen = true
-        assert(
+        assertLog(
           evt.breakpoint.source.name.includes('dynamic_lib.cpp'),
-          () =>
-            `Expected to see breakpoint changed for source file 'dynamic_lib.cpp' but saw instead ${prettyJson(
-              evt.breakpoint
-            )}`
+          () => `Expected to see breakpoint changed for source file 'dynamic_lib.cpp'`,
+          `But saw instead ${prettyJson(evt.breakpoint)}`
         )
         break
       case 'new':
         {
           new_seen = true
-          assert(
+          assertLog(
             evt.breakpoint.source.name.includes('template.h'),
-            () =>
-              `Expected to see breakpoint changed for source file 'template.h' but saw instead ${prettyJson(
-                evt.breakpoint
-              )}`
+            `Expected to see breakpoint changed for source file 'template.h'`,
+            () => `Change was instead for ${prettyJson(evt.breakpoint)}`
           )
         }
         break
     }
   }
 
-  assert(changed_seen, "Expected to see 'changed' breakpoint event")
-  assert(new_seen, "Expected to see 'new' breakpoint event")
-  console.log(prettyJson(res))
+  assertLog(changed_seen, "Expected to see 'changed' breakpoint event")
+  assertLog(new_seen, "Expected to see 'new' breakpoint event")
   const new_bp = res[0].breakpoint
-  assert(bp.id == new_bp.id, `Expected breakpoint id ${bp.id} to have changed but was ${new_bp.id}`)
+  assertLog(
+    bp.id == new_bp.id,
+    `Expected breakpoint id ${bp.id} to have changed`,
+    `Changed ID was instead ${new_bp.id}`
+  )
 }
 
 async function newFunctionBreakpointAfterLoadedSharedObject(debugAdapter) {

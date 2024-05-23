@@ -15,14 +15,14 @@
 BreakpointLocation::BreakpointLocation(AddrPtr addr, u8 original) noexcept
     : addr(addr), source_info(), original_byte(original)
 {
-  DLOG("mdb", "[breakpoint loc]: Constructed breakpoint location at {}", addr);
+  DBGLOG(core, "[breakpoint loc]: Constructed breakpoint location at {}", addr);
 }
 
 BreakpointLocation::BreakpointLocation(AddrPtr addr, u8 original,
                                        std::unique_ptr<LocationSourceInfo> &&src_info) noexcept
     : addr(addr), source_info(std::move(src_info)), original_byte(original)
 {
-  DLOG("mdb", "[breakpoint loc]: Constructed breakpoint location at {}", addr);
+  DBGLOG(core, "[breakpoint loc]: Constructed breakpoint location at {}", addr);
 }
 
 BreakpointLocation::~BreakpointLocation() noexcept
@@ -30,7 +30,7 @@ BreakpointLocation::~BreakpointLocation() noexcept
   ASSERT(!installed, "Breakpoint location was enabled while being destroyed - this is a hard error");
   ASSERT(users.empty(),
          "This breakpoint location was destroyed when having active (but destroyed) users registered to it");
-  DLOG("mdb", "[breakpoint loc]: Destroying breakpoint location at {}", addr);
+  DBGLOG(core, "[breakpoint loc]: Destroying breakpoint location at {}", addr);
 }
 
 /*static*/ std::shared_ptr<BreakpointLocation>
@@ -330,7 +330,7 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
     return bp_hit::noop();
   }
 
-  DLOG("mdb", "Hit breakpoint {}", id);
+  DBGLOG(core, "Hit breakpoint {}", id);
   increment_count();
   if (stop_all_threads_when_hit) {
     const auto all_stopped = tc.all_stopped();
@@ -364,7 +364,7 @@ TemporaryBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 {
   const auto res = Breakpoint::on_hit(tc, t);
   if (res.stop) {
-    DLOG("mdb", "Hit temporary_breakpoint_t {}", id);
+    DBGLOG(core, "Hit temporary_breakpoint_t {}", id);
     return bp_hit::stop_retire_bp();
   } else {
     return bp_hit::noop();
@@ -382,7 +382,7 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
   if (t.tid != stop_only) {
     return bp_hit::noop();
   }
-  DLOG("mdb", "Hit finish_bp_t {}", id);
+  DBGLOG(core, "Hit finish_bp_t {}", id);
   const auto all_stopped = tc.all_stopped();
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
@@ -406,7 +406,7 @@ bp_hit
 ResumeToBreakpoint::on_hit(TraceeController &, TaskInfo &t) noexcept
 {
   if (t.tid == stop_only) {
-    DLOG("mdb", "Hit resume_bp_t {}", id);
+    DBGLOG(core, "Hit resume_bp_t {}", id);
     return bp_hit::continue_retire_bp();
   } else {
     return bp_hit::noop();

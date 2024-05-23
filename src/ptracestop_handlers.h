@@ -12,6 +12,8 @@
 struct TraceeController;
 struct BpStat;
 
+struct CoreEvent;
+
 namespace ptracestop {
 
 class StopHandler;
@@ -127,7 +129,7 @@ public:
   void remove_action(const TaskInfo &t) noexcept;
 
   void handle_proceed(TaskInfo &info, bool should_resume) noexcept;
-  void handle_wait_event(TaskInfo &info) noexcept;
+  CoreEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;
   constexpr void stop_on_exec() noexcept;
@@ -152,7 +154,8 @@ public:
   } event_settings;
 
 private:
-  bool process_waitstatus_for(TaskInfo &t) noexcept;
+  // native_ because it's generated from a WaitStatus event (and thus comes directly from ptrace, not a remote)
+  CoreEvent *native_core_evt_from_stopped(TaskInfo &t) noexcept;
   std::unordered_map<Tid, ThreadProceedAction *> proceed_actions;
 };
 } // namespace ptracestop

@@ -1,6 +1,7 @@
 #include "debug_info_reader.h"
 #include "../objfile.h"
 #include "symbolication/dwarf/die.h"
+#include "utils/util.h"
 
 namespace sym::dw {
 
@@ -444,8 +445,8 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   case AttributeForm::DW_FORM_strx3:
     [[fallthrough]];
   case AttributeForm::DW_FORM_strx4: {
-    const auto base = std::to_underlying(AttributeForm::DW_FORM_strx1) - 1;
-    const auto bytes_to_read = std::to_underlying(abbr.form) - base;
+    const auto base = utils::castenum(AttributeForm::DW_FORM_strx1) - 1;
+    const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto idx = reader.read_n_bytes(bytes_to_read);
     return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
   }
@@ -464,8 +465,8 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   case AttributeForm::DW_FORM_addrx4: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
            reader.objfile()->path->c_str());
-    const auto base = std::to_underlying(AttributeForm::DW_FORM_addrx1) - 1;
-    const auto bytes_to_read = std::to_underlying(abbr.form) - base;
+    const auto base = utils::castenum(AttributeForm::DW_FORM_addrx1) - 1;
+    const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto addr_index = reader.read_n_bytes(bytes_to_read);
     return AttributeValue{reader.read_by_idx_from_addr_table(addr_index, {}), abbr.form, abbr.name};
   }

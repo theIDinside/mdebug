@@ -163,6 +163,6 @@ Elf::parse_min_symbols() const noexcept
     std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
     obj_file.add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
-    LOG("mdb", "[warning]: No .symtab for {}", obj_file.path->c_str());
+    LOG(core, "[warning]: No .symtab for {}", obj_file.path->c_str());
   }
 }

@@ -21,12 +21,12 @@ enum class ArgumentErrorKind
 struct ArgumentError
 {
   ArgumentErrorKind kind;
-  std::optional<std::string_view> description;
+  std::optional<std::string> description;
 
   constexpr static ArgumentError
   Invalid(std::string_view desc) noexcept
   {
-    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput, .description = desc};
+    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput, .description = std::string{desc}};
   }
 
   constexpr static ArgumentError
@@ -42,18 +42,29 @@ struct ArgumentError
     return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
                          .description = "Argument required to be a string"};
   }
+
+  constexpr static ArgumentError
+  RequiredBooleanType() noexcept
+  {
+    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                         .description = "Argument required to be a boolean"};
+  }
 };
 
 using InvalidArg = std::pair<ArgumentError, std::string>;
 using MissingOrInvalidArgs = std::vector<InvalidArg>;
 using MissingOrInvalidResult = std::optional<MissingOrInvalidArgs>;
 
-#if defined(MDB_DEBUG) and MDB_DEBUG == 1
-#define DEFINE_NAME(Type)                                                                                         \
-  constexpr std::string_view name() noexcept override final { return #Type; }
-#else
-#define DEFINE_NAME(Type)
-#endif
+// #if defined(MDB_DEBUG) and MDB_DEBUG == 1
+// #define DEFINE_NAME(Type) \
+//   constexpr std::string_view name() noexcept override final { return #Type; }
+// #else
+// #define DEFINE_NAME(Type)
+// #endif
+
+#define DEFINE_NAME(Name)                                                                                         \
+  static constexpr std::string_view Request{Name};                                                                \
+  constexpr std::string_view name() const noexcept final { return Request; }
 
 template <typename DerivedCommand, typename Json>
 concept HasValidation = requires(const Json &json) {
@@ -107,9 +118,7 @@ public:
   }
 
   std::uint64_t seq;
-#if defined(MDB_DEBUG) and MDB_DEBUG == 1
-  constexpr virtual std::string_view name() noexcept = 0;
-#endif
+  constexpr virtual std::string_view name() const noexcept = 0;
 };
 
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here

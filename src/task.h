@@ -2,8 +2,10 @@
 
 #include "bp.h"
 #include "common.h"
+#include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
+#include <arch.h>
 #include <linux/sched.h>
 
 using namespace std::string_view_literals;
@@ -25,11 +27,28 @@ struct CallStackRequest
   static CallStackRequest full() noexcept;
 };
 
+struct TaskRegisters
+{
+  Immutable<ArchType> arch;
+  Immutable<TargetFormat> data_format;
+  bool rip_dirty : 1 {true};
+  bool cache_dirty : 1 {true};
+  union
+  {
+    user_regs_struct *registers;
+    RegisterBlock<ArchType::X86_64> *x86_block;
+  };
+
+  void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
+};
+
 struct TaskInfo
 {
   friend struct TraceeController;
   pid_t tid;
   WaitStatus wait_status;
+  TargetFormat session;
+  tc::RunType last_resume_command{tc::RunType::UNKNOWN};
   union
   {
     u16 bit_set;
@@ -46,13 +65,15 @@ struct TaskInfo
       bool exited : 1;         // task has exited
     };
   };
-  user_regs_struct *registers;
+
+  TaskRegisters regs;
+
   sym::CallStack *call_stack;
   std::optional<LocationStatus> loc_stat;
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
-  TaskInfo(pid_t tid, bool user_stopped) noexcept;
+  TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept;
   TaskInfo(TaskInfo &&o) noexcept = default;
   TaskInfo &operator=(TaskInfo &&) noexcept = default;
   // Delete copy constructors. These are unique values.
@@ -61,8 +82,7 @@ struct TaskInfo
   TaskInfo &operator=(TaskInfo &t) noexcept = delete;
   TaskInfo &operator=(const TaskInfo &o) = delete;
 
-  static TaskInfo create_stopped(pid_t tid);
-  static TaskInfo create_running(pid_t tid);
+  static TaskInfo create_running(pid_t tid, TargetFormat format, ArchType arch);
 
   u64 get_register(u64 reg_num) noexcept;
 
@@ -83,6 +103,10 @@ struct TaskInfo
   bool is_stopped() const noexcept;
   bool stop_processed() const noexcept;
   WaitStatus pending_wait_status() const noexcept;
+
+  std::uintptr_t get_rbp() const noexcept;
+  std::uintptr_t get_pc() const noexcept;
+  std::uintptr_t get_rsp() const noexcept;
 };
 
 struct TaskStepInfo

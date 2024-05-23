@@ -1,9 +1,11 @@
 #pragma once
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
+#include <span>
 // NOLINTNEXTLINE
 #include "bp.h"
 #include "types.h"
+#include <interface/attach_args.h>
 #include <nlohmann/json.hpp>
 #include <symbolication/disassemble.h>
 
@@ -17,6 +19,18 @@ namespace ui::dap {
 
 struct Breakpoint;
 
+template <typename... Args>
+consteval auto
+count_tuple(Args... args)
+{
+  return std::tuple_size<decltype(std::make_tuple(std::string_view{args}...))>::value;
+}
+
+#define ReqArg(TypeName, ...)                                                                                     \
+  enum class TypeName##Args : u8{__VA_ARGS__};                                                                    \
+  static constexpr std::array<std::string_view, count_tuple(#__VA_ARGS__)> ArgNames =                             \
+      std::to_array({#__VA_ARGS__});
+
 #define RequiredArguments(...)                                                                                    \
   static constexpr const auto ReqArgs = std::to_array(__VA_ARGS__);                                               \
   static constexpr const auto &Arguments() noexcept { return ReqArgs; }
@@ -24,6 +38,136 @@ struct Breakpoint;
 #define NoRequiredArgs()                                                                                          \
   static constexpr const std::array<std::string_view, 0> ReqArgs{};                                               \
   static constexpr const std::array<std::string_view, 0> &Arguments() noexcept { return ReqArgs; }
+
+using namespace std::string_view_literals;
+
+enum class FieldType
+{
+  String,
+  Float,
+  Int,
+  Boolean,
+  Enumeration
+};
+
+struct VerifyResult
+{
+  Immutable<std::optional<std::pair<ArgumentError, std::string>>> arg_err;
+
+  std::optional<std::pair<ArgumentError, std::string>> &&
+  take() && noexcept
+  {
+    return std::move(arg_err);
+  }
+
+  constexpr operator bool() noexcept { return arg_err->has_value(); }
+};
+
+struct VerifyField
+{
+  static constexpr auto CurrentEnumMax = 5;
+  std::string_view name;
+  FieldType type;
+  std::string_view err_msg{""};
+  std::array<std::string_view, CurrentEnumMax> enum_values{};
+  u8 enum_variants{0};
+
+  constexpr std::span<const std::string_view>
+  get_enum_values() const noexcept
+  {
+    if (enum_variants == 0) {
+      return {};
+    }
+
+    return std::span(enum_values).subspan(0, enum_variants);
+  }
+
+  constexpr VerifyField(std::string_view fieldName, FieldType fieldType) noexcept
+      : name(fieldName), type(fieldType)
+  {
+  }
+
+  consteval VerifyField(std::string_view fieldName, FieldType fieldType,
+                        std::array<std::string_view, CurrentEnumMax> enumerations) noexcept
+      : name(fieldName), type(fieldType), enum_values(enumerations),
+        enum_variants(enumerations.size() - std::count(enumerations.begin(), enumerations.end(), ""))
+  {
+    if (fieldType != FieldType::Enumeration)
+      throw std::exception();
+  }
+
+  constexpr bool
+  has_enum_variant(std::string_view value) const noexcept
+  {
+    for (const auto v : get_enum_values()) {
+      if (value == v) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+template <size_t Size> struct VerifyMap
+{
+  std::array<VerifyField, Size> fields;
+
+  template <typename Json>
+  constexpr VerifyResult
+  isOK(const Json &j, std::string_view fieldName) const noexcept
+  {
+    if (const auto it =
+            std::find_if(fields.cbegin(), fields.cend(), [&](const auto &f) { return fieldName == f.name; });
+        it != std::cend(fields)) {
+      switch (it->type) {
+      case FieldType::String:
+        if (!j.is_string()) {
+          return VerifyResult{std::make_pair(ArgumentError::RequiredStringType(), fieldName)};
+        }
+        return VerifyResult{std::nullopt};
+      case FieldType::Float:
+        if (!j.is_number_float()) {
+          return VerifyResult{std::make_pair(ArgumentError::RequiredNumberType(), fieldName)};
+        }
+        return VerifyResult{std::nullopt};
+      case FieldType::Int:
+        if (!j.is_number_integer()) {
+          return VerifyResult{std::make_pair(ArgumentError::RequiredNumberType(), fieldName)};
+        }
+        return VerifyResult{std::nullopt};
+      case FieldType::Boolean:
+        if (!j.is_boolean()) {
+          return VerifyResult{std::make_pair(ArgumentError::RequiredBooleanType(), fieldName)};
+        }
+        return VerifyResult{std::nullopt};
+      case FieldType::Enumeration: {
+        if (!j.is_string()) {
+          return VerifyResult{
+              std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                                           .description = "Config enumeration values must be of string type"},
+                             fieldName)};
+        }
+        std::string_view value;
+        j.get_to(value);
+        if (!it->has_enum_variant(value)) {
+          return VerifyResult{
+              std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                                           .description = fmt::format("Invalid variant: '{}'. Valid: {}", value,
+                                                                      fmt::join(it->get_enum_values(), "|"))},
+                             fieldName)};
+        }
+        return VerifyResult{std::nullopt};
+      }
+      }
+    } else {
+      return VerifyResult{std::nullopt};
+    }
+  }
+};
+
+#define DefineArgTypes(...)                                                                                       \
+  static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({__VA_ARGS__});                              \
+  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};
 
 struct Message
 {
@@ -61,17 +205,16 @@ struct Continue final : public ui::UICommand
   ~Continue() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
-  DEFINE_NAME(Continue);
+  DEFINE_NAME("continue");
   RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "threadId") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -96,16 +239,16 @@ struct Pause final : public ui::UICommand
   UIResultPtr execute(Tracer *tc) noexcept final;
 
   Args pauseArgs;
-  DEFINE_NAME(Pause);
+  DEFINE_NAME("pause");
   RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
+
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "threadId") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -137,17 +280,16 @@ struct Next final : public ui::UICommand
   }
   ~Next() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(Next);
+  DEFINE_NAME("next");
   RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "threadId") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -168,17 +310,16 @@ struct StepOut final : public ui::UICommand
   StepOut(std::uint64_t seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(StepOut);
+  DEFINE_NAME("stepOut");
   RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "threadId") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -201,7 +342,7 @@ struct SetBreakpoints final : public ui::UICommand
   ~SetBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(SetBreakpoints);
+  DEFINE_NAME("setBreakpoints");
   RequiredArguments({"source"sv});
 };
 
@@ -211,7 +352,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   ~SetInstructionBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(SetInstructionBreakpoints);
+  DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
 
@@ -221,7 +362,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   ~SetFunctionBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(SetFunctionBreakpoints);
+  DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
 
@@ -245,23 +386,16 @@ struct ReadMemory final : public ui::UICommand
   int offset;
   u64 bytes;
 
-  DEFINE_NAME(ReadMemory);
+  DEFINE_NAME("readMemory");
   RequiredArguments({"memoryReference"sv, "count"sv});
+  DefineArgTypes({"memoryReference", FieldType::String}, {"count", FieldType::Int}, {"offset", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "memoryReference") {
-      if (!arg_contents.is_string()) { // "Argument required to be a number type"
-        return std::make_pair(ArgumentError::RequiredStringType(), std::string{arg_name});
-      }
-    }
-
-    if (arg_name == "count" || arg_name == "offset") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -280,7 +414,7 @@ struct ConfigurationDone final : public ui::UICommand
   ~ConfigurationDone() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
-  DEFINE_NAME(ConfigurationDone);
+  DEFINE_NAME("configurationDone");
   NoRequiredArgs();
 };
 
@@ -297,7 +431,7 @@ struct Initialize final : public ui::UICommand
   ~Initialize() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   nlohmann::json args;
-  DEFINE_NAME(Initialize);
+  DEFINE_NAME("initialize");
   NoRequiredArgs();
 };
 
@@ -314,7 +448,7 @@ struct Disconnect final : public UICommand
   ~Disconnect() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   bool restart, terminate_tracee, suspend_tracee;
-  DEFINE_NAME(Disconnect);
+  DEFINE_NAME("disconnect");
   NoRequiredArgs();
 };
 
@@ -333,8 +467,72 @@ struct Launch final : public UICommand
   bool stopAtEntry;
   Path program;
   std::vector<std::string> program_args;
-  DEFINE_NAME(Launch);
+  DEFINE_NAME("launch");
   RequiredArguments({"program"sv});
+  DefineArgTypes({"program", FieldType::String});
+
+  template <typename Json>
+  constexpr static auto
+  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
+  {
+    if (auto &&err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
+    }
+    return std::nullopt;
+  }
+};
+
+struct AttachResponse final : public UIResult
+{
+  CTOR(AttachResponse);
+  ~AttachResponse() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
+};
+
+struct Attach final : public UICommand
+{
+  Attach(std::uint64_t seq, AttachArgs &&args) noexcept;
+  ~Attach() override = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final;
+
+  AttachArgs attachArgs;
+  DEFINE_NAME("attach");
+  RequiredArguments({"type"});
+
+  DefineArgTypes({"port", FieldType::Int}, {"host", FieldType::String}, {"pid", FieldType::Int},
+                 {"type", FieldType::Enumeration, {"ptrace"sv, "gdbremote"sv}});
+
+  template <typename Json>
+  constexpr static auto
+  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
+  {
+    if (auto &&err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
+    }
+    return std::nullopt;
+  }
+
+  // Attach gets a `create` function because in the future, constructing this command will be much more complex
+  // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
+  // bat shit crazy in 2024.
+  static Attach *
+  create(uint64_t seq, const nlohmann::basic_json<> &args)
+  {
+    std::string_view type;
+    args.at("type").get_to(type);
+    if (type == "ptrace") {
+      Pid pid = args.at("pid");
+      return new Attach{seq, PtraceAttachArgs{.pid = pid}};
+    } else {
+      int port = args.at("port");
+      std::string host = args.at("host");
+      bool allstop = true;
+      if (args.contains("allstop") && args.at("allstop").is_boolean()) {
+        allstop = args.at("allstop");
+      }
+      return new Attach{seq, GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop}};
+    };
+  }
 };
 
 struct TerminateResponse final : public UIResult
@@ -349,7 +547,7 @@ struct Terminate final : public UICommand
   Terminate(u64 seq) noexcept : UICommand(seq) {}
   ~Terminate() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(Terminate);
+  DEFINE_NAME("terminate");
   NoRequiredArgs();
 };
 
@@ -366,7 +564,7 @@ struct Threads final : public UICommand
   Threads(u64 seq) noexcept : UICommand(seq) {}
   ~Threads() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  DEFINE_NAME(Threads);
+  DEFINE_NAME("threads");
   NoRequiredArgs();
 };
 
@@ -380,17 +578,16 @@ struct StackTrace final : public UICommand
   std::optional<int> startFrame;
   std::optional<int> levels;
   std::optional<StackTraceFormat> format;
-  DEFINE_NAME(StackTrace);
+  DEFINE_NAME("stackTrace");
   RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "threadId") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -411,17 +608,16 @@ struct Scopes final : public UICommand
   ~Scopes() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   int frameId;
-  DEFINE_NAME(Scopes);
+  DEFINE_NAME("scopes");
   RequiredArguments({"frameId"sv});
+  DefineArgTypes({"frameId", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "frameId") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -444,17 +640,16 @@ struct Variables final : public UICommand
   int var_ref;
   std::optional<u32> start;
   std::optional<u32> count;
-  DEFINE_NAME(Variables);
+  DEFINE_NAME("variables");
   RequiredArguments({"variablesReference"sv});
+  DefineArgTypes({"variablesReference", FieldType::Int}, {"start", FieldType::Int}, {"count", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "variablesReference" || arg_name == "start" || arg_name == "count") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -489,23 +684,17 @@ struct Disassemble final : public UICommand
   int ins_offset;
   int ins_count;
   bool resolve_symbols;
-  DEFINE_NAME(Disassemble);
+  DEFINE_NAME("disassemble");
   RequiredArguments({"memoryReference", "instructionCount"});
+  DefineArgTypes({"memoryReference", FieldType::String}, {"instructionCount", FieldType::Int},
+                 {"instructionOffset", FieldType::Int}, {"offset", FieldType::Int});
 
   template <typename Json>
   constexpr static auto
   ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
   {
-    if (arg_name == "memoryReference") {
-      if (!arg_contents.is_string()) {
-        return std::make_pair(ArgumentError::RequiredStringType(), std::string{arg_name});
-      }
-    }
-
-    if (arg_name == "instructionCount" || arg_name == "instructionOffset" || arg_name == "offset") {
-      if (!arg_contents.is_number()) {
-        return std::make_pair(ArgumentError::RequiredNumberType(), std::string{arg_name});
-      }
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
+      return std::move(err).take();
     }
     return std::nullopt;
   }
@@ -517,7 +706,14 @@ struct InvalidArgsResponse final : public UIResult
   ~InvalidArgsResponse() noexcept override = default;
   std::string serialize(int seq) const noexcept final;
   std::string_view command;
-  MissingOrInvalidArgs missing_arguments;
+  MissingOrInvalidArgs missing_or_invalid;
+};
+
+template <typename T>
+concept HasName = requires(T t) {
+  {
+    T::Request
+  } -> std::convertible_to<std::string_view>;
 };
 
 struct InvalidArgs final : public UICommand
@@ -531,10 +727,21 @@ struct InvalidArgs final : public UICommand
   std::string_view command;
   MissingOrInvalidArgs missing_arguments;
 
-  DEFINE_NAME(Disassemble);
+  DEFINE_NAME("disassemble");
 };
 
 ui::UICommand *parse_command(std::string &&packet) noexcept;
+
+template <typename Derived, typename JsonArgs>
+static constexpr auto
+Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
+{
+  if (auto &&missing = UICommand::check_args<Derived>(args); missing) {
+    return new ui::dap::InvalidArgs{seq, Derived::Request, std::move(missing.value())};
+  } else {
+    return nullptr;
+  }
+}
 }; // namespace ui::dap
 
 namespace fmt {

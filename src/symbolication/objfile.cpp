@@ -239,8 +239,8 @@ ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcep
   DBG({
     if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter())) {
       for (const auto &cu : comp_units) {
-        DLOG("mdb", "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
-             cu.start_pc(), cu.end_pc());
+        DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
+               cu.start_pc(), cu.end_pc());
       }
       PANIC("Dumped CU contents");
     }
@@ -415,7 +415,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
 }
 
 std::shared_ptr<ObjectFile>
-CreateObjectFile(const TraceeController &tc, const Path &path) noexcept
+CreateObjectFile(Pid process_id, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -424,9 +424,9 @@ CreateObjectFile(const TraceeController &tc, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-      std::make_shared<ObjectFile>(fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr);
+      std::make_shared<ObjectFile>(fmt::format("{}:{}", process_id, path.c_str()), path, fd.file_size(), addr);
 
-  DLOG("mdb", "Parsing objfile {}", objfile->path->c_str());
+  DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
   ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
@@ -466,7 +466,7 @@ CreateObjectFile(const TraceeController &tc, const Path &path) noexcept
   objfile->elf->parse_min_symbols();
   objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->get_section(".eh_frame"));
   if (const auto section = objfile->elf->get_section(".debug_frame"); section) {
-    DLOG("mdb", ".debug_frame section found; parsing DWARF CFI section");
+    DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
     sym::parse_dwarf_eh(objfile->elf, objfile->unwinder.get(), section, -1);
   }
 
@@ -484,17 +484,17 @@ SymbolFile::SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
 }
 
 SymbolFile::shr_ptr
-SymbolFile::Create(const TraceeController &tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
+SymbolFile::Create(Pid process_id, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
-  return std::make_shared<SymbolFile>(fmt::format("{}:{}", tc.task_leader, binary->path->c_str()),
-                                      std::move(binary), relocated_base);
+  return std::make_shared<SymbolFile>(fmt::format("{}:{}", process_id, binary->path->c_str()), std::move(binary),
+                                      relocated_base);
 }
 
 auto
 SymbolFile::copy(const TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
-  return SymbolFile::Create(tc, binary_object, relocated_base);
+  return SymbolFile::Create(tc.task_leader, binary_object, relocated_base);
 }
 
 auto
@@ -548,7 +548,7 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
   }
   auto layout_type = type->get_layout_type();
   if (type->is_reference() && layout_type->is_char_type()) {
-    DLOG("mdb", "setting cstring resolver for value");
+    DBGLOG(core, "setting cstring resolver for value");
     auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->type());
     value->set_resolver(std::move(ptr));
     return;
@@ -556,7 +556,7 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
 
   // todo: again, this is hardcoded, which is counter to the whole idea here.
   if (type->is_array_type()) {
-    DLOG("mdb", "setting array resolver for value");
+    DBGLOG(core, "setting array resolver for value");
     auto layout_type = type->get_layout_type();
     auto ptr = std::make_unique<sym::ArrayResolver>(this, layout_type, type->array_size(), value->address());
     value->set_resolver(std::move(ptr));
@@ -604,7 +604,7 @@ SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std
     -> std::vector<ui::dap::Variable>
 {
   if (!valobj_cache.contains(ref)) {
-    DLOG("mdb", "WARNING expected variable reference {} had no data associated with it.", ref);
+    DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ref);
     return {};
   }
   auto &value = valobj_cache[ref];
@@ -724,7 +724,7 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
             .count();
-    DLOG("mdb", "regex searched {} in {}us", obj->path->c_str(), elapsed);
+    DBGLOG(core, "regex searched {} in {}us", obj->path->c_str(), elapsed);
   } else {
     search_for = {spec.name};
   }
@@ -737,8 +737,8 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
       if (low_pc) {
         const auto addr = low_pc->address();
         matching_symbols.emplace_back(n, addr, 0);
-        DLOG("mdb", "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
-             die_ref.cu->section_offset(), die_ref.die->section_offset, n, addr);
+        DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
+               die_ref.cu->section_offset(), die_ref.die->section_offset, n, addr);
       }
     });
   }

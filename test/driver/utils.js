@@ -1,7 +1,102 @@
+const path = require('path')
+const fs = require('fs')
 const { spawnSync } = require('child_process')
 
 function prettyJson(obj) {
   return JSON.stringify(obj, null, 2)
+}
+
+const RecognizedArgsConfig = [
+  { short: 's', long: 'session', values: ['remote', 'native'] },
+  { short: 'b', long: 'build-dir', values: null },
+  { short: 't', long: 'test-suite', values: null },
+  { short: 'u', long: 'test', values: null },
+]
+
+class TestArgs {
+  /**
+   * @param {Map} map
+   */
+  constructor(map) {
+    for (const arg of RecognizedArgsConfig) {
+      let maparg = map.get(arg.short)
+      if (maparg == null) {
+        maparg = map.get(arg.long)
+        map.set(arg.short, maparg)
+      } else {
+        map.set(arg.long, maparg)
+      }
+
+      if (maparg == null) {
+        throw new Error(`Required argument in short (-${arg.short}=<value>) or long form (--${arg.long}=<value>)`)
+      }
+
+      if (arg.values !== null) {
+        if (!arg.values.some((e) => e == maparg)) {
+          throw new Error(`Expected variant ${arg.values.join('|')} but got ${maparg}`)
+        }
+      }
+    }
+    this.map = map
+  }
+
+  getBinary(exe_name) {
+    return path.join(this.binaryDir, exe_name)
+  }
+
+  get binaryDir() {
+    const build = this.buildDir
+    if (build == null) {
+      throw new Error(`No build directory was passed as an argument`)
+    }
+    const bin_path = path.join(build, 'bin')
+    if (!fs.existsSync(bin_path)) {
+      throw new Error(`Binary path did not exist: ${bin_path}`)
+    }
+    return bin_path
+  }
+
+  get buildDir() {
+    return this.map.get('b')
+  }
+
+  get testSuite() {
+    return this.map.get('t')
+  }
+
+  get test() {
+    return this.map.get('u')
+  }
+
+  get sessionKind() {
+    return this.map.get('s')
+  }
+}
+
+function parseCommandLine(argv) {
+  const map = new Map()
+
+  argv.forEach((arg) => {
+    if (arg.startsWith('--')) {
+      if (arg.includes('=')) {
+        const [key, value] = arg.slice(2).split('=')
+        map.set(key, value)
+      } else {
+        const key = arg.slice(2)
+        map.set(key, true)
+      }
+    } else if (arg.startsWith('-')) {
+      if (arg.includes('=')) {
+        const [key, value] = arg.slice(1).split('=')
+        map.set(key, value)
+      } else {
+        const key = arg.slice(1)
+        map.set(key, true)
+      }
+    }
+  })
+
+  return map
 }
 
 const regex = /[0-9a-f]+:/
@@ -56,15 +151,36 @@ function hexStrAddressesEquals(a, b) {
   return addr_a == addr_b
 }
 
+function buildMaybeLazyMessage(msg) {
+  if (typeof msg === 'function') {
+    let res = msg()
+    if (typeof res !== 'string') {
+      throw new Error('Returned data from a (optionally) lazy message builder must be a string')
+    }
+    return res
+  } else if (typeof msg === 'string') {
+    return msg
+  } else {
+    throw new Error(`Type of (optionally) lazy message builder can not be of type ${typeof msg}`)
+  }
+}
+
 function assertLog(boolCondition, AssertLogMessage, AssertErrorMessage = null) {
+  if (AssertLogMessage == null) {
+    throw new Error(
+      'Assertion log message must not be null, it can be a string or a function that returns a string (for lazy construction of err messages)'
+    )
+  }
+  const logMsg = buildMaybeLazyMessage(AssertLogMessage)
   if (!boolCondition) {
     if (AssertErrorMessage !== null) {
-      throw new Error(`${errMessage}: ${AssertErrorMessage}`)
+      const errMsg = buildMaybeLazyMessage(AssertErrorMessage)
+      throw new Error(`${logMsg}: ${errMsg}`)
     } else {
-      throw new Error(AssertLogMessage)
+      throw new Error(logMsg)
     }
   } else {
-    console.log(`${AssertLogMessage}: OK`)
+    console.log(`[ASSERTION]: ${logMsg}: PASSED`)
   }
 }
 
@@ -168,4 +284,6 @@ module.exports = {
   getPrintfPlt,
   allUniqueVariableReferences,
   assertAllVariableReferencesUnique,
+  parseCommandLine,
+  TestArgs,
 }

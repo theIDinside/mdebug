@@ -52,9 +52,9 @@ UnitRefCountDrop::UnitRefCountDrop(std::vector<sym::dw::UnitData *> &&cus) noexc
 void
 UnitRefCountDrop::execute_task() noexcept
 {
-  DLOG("mdb", "dropping CU ref counts");
+  DBGLOG(core, "dropping CU ref counts");
   for (auto cu : compilation_units) {
-    DLOG("mdb", "{}", *cu);
+    DBGLOG(core, "{}", *cu);
     cu->clear_die_metadata();
   }
 }

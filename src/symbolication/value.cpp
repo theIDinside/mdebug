@@ -31,7 +31,7 @@ Value::Value(std::string &&name, Type &type, u32 mem_contents_offset,
 {
 }
 
-Value::~Value() noexcept { DLOG("mdb", "Destroying value {}", name); }
+Value::~Value() noexcept { DBGLOG(core, "Destroying value {}", name); }
 
 AddrPtr
 Value::address() const noexcept
@@ -135,7 +135,7 @@ EagerMemoryContentsObject::view(u32 offset, u32 size) noexcept
 void
 LazyMemoryContentsObject::cache_memory() noexcept
 {
-  DLOG("mdb", "[lazy transfer]: {} .. {}", start, end);
+  DBGLOG(core, "[lazy transfer]: {} .. {}", start, end);
   if (auto res = supervisor.safe_read(start, end->get() - start->get()); res.is_expected()) {
     bytes = std::move(res.take_value());
   } else {

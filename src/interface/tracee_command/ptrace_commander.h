@@ -3,22 +3,35 @@
 #include "awaiter.h"
 #include "tracee_command_interface.h"
 #include "utils/macros.h"
+#include <link.h>
 #include <utils/scoped_fd.h>
 
 struct TraceeController;
 
 namespace tc {
+
+struct ProcessState
+{
+  utils::ScopedFd procfs_memfd;
+  AwaiterThread::handle awaiter_thread;
+  Tid process_id;
+  TPtr<r_debug_extended> tracee_r_debug{nullptr};
+};
+
 class PtraceCommander final : public TraceeCommandInterface
 {
   utils::ScopedFd procfs_memfd;
   AwaiterThread::handle awaiter_thread;
   Tid process_id;
+  TPtr<r_debug_extended> tracee_r_debug{nullptr};
 
 public:
   NO_COPY(PtraceCommander);
   explicit PtraceCommander(Tid task_leader) noexcept;
+  ~PtraceCommander() noexcept override = default;
 
-  TraceeReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
+  // TRACEE COMMAND INTERFACE API
+  ReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse resume_task(TaskInfo &t, RunType type) noexcept final;
@@ -38,7 +51,13 @@ public:
   bool perform_shutdown() noexcept final;
   bool initialize() noexcept final;
 
-  bool reconfigure(TraceeController *) noexcept final;
+  /// Re-open proc fs mem file descriptor. Configure
+  bool post_exec(TraceeController *) noexcept final;
   Tid task_leader() const noexcept final;
+  std::optional<Path> execed_file() noexcept final;
+  std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept final;
+  std::shared_ptr<gdb::RemoteConnection> remote_connection() noexcept final;
+  utils::Expected<Auxv, Error> read_auxv() noexcept final;
+  //
 };
 } // namespace tc

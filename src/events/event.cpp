@@ -5,7 +5,7 @@
 void
 StopObserver::send_notifications() noexcept
 {
-  DLOG("mdb", "notifying {} messages", notifications.size());
+  DBGLOG(core, "notifying {} messages", notifications.size());
   for (auto &&note : notifications) {
     note->send();
   }

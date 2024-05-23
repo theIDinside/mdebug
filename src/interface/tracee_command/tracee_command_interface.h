@@ -1,21 +1,25 @@
 #pragma once
+#include "arch.h"
+#include "interface/remotegdb/target_description.h"
 #include "utils/expected.h"
+#include "utils/immutable.h"
 #include "utils/macros.h"
 #include <cstring>
 #include <memory>
 #include <sys/user.h>
+#include <typedefs.h>
 
 using namespace std::string_view_literals;
-using u8 = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using i8 = std::int8_t;
-using i16 = std::int16_t;
-using i32 = std::int32_t;
 struct TraceeController;
 struct TaskInfo;
+class SymbolFile;
 
 class BreakpointLocation;
+
+namespace gdb {
+class RemoteConnection;
+struct RemoteSettings;
+} // namespace gdb
 
 /// Tracee Control
 namespace tc {
@@ -42,42 +46,55 @@ struct TraceeWriteResult
   }
 };
 
-enum class ReadResult : i8
+enum class ReadResultType : i8
 {
-  ERROR = -1,
+  SystemError = -1,
   EoF = 0,
   OK = 1,
+  DebuggerError
 };
 
-struct TraceeReadResult
+enum class ApplicationError : u32
 {
-  ReadResult op_result;
+  TargetIsRunning
+};
+
+struct ReadResult
+{
+  ReadResultType op_result;
   union
   {
     u32 bytes_read;
     i32 sys_errno;
+    ApplicationError error;
   };
 
   constexpr bool
   success() const noexcept
   {
-    return op_result == ReadResult::OK;
+    return op_result == ReadResultType::OK;
   }
 
-  constexpr static TraceeReadResult
+  constexpr static ReadResult
   Ok(u32 bytes_read) noexcept
   {
-    return TraceeReadResult{.op_result = ReadResult::OK, .bytes_read = bytes_read};
+    return ReadResult{.op_result = ReadResultType::OK, .bytes_read = bytes_read};
   }
-  constexpr static TraceeReadResult
-  Error(int sys_error) noexcept
+  constexpr static ReadResult
+  SystemError(int sys_error) noexcept
   {
-    return TraceeReadResult{.op_result = ReadResult::ERROR, .sys_errno = sys_error};
+    return ReadResult{.op_result = ReadResultType::SystemError, .sys_errno = sys_error};
   }
-  constexpr static TraceeReadResult
+
+  constexpr static ReadResult
+  AppError(ApplicationError err) noexcept
+  {
+    return ReadResult{.op_result = ReadResultType::DebuggerError, .error = err};
+  }
+  constexpr static ReadResult
   EoF() noexcept
   {
-    return TraceeReadResult{.op_result = ReadResult::EoF, .bytes_read = 0};
+    return ReadResult{.op_result = ReadResultType::EoF, .bytes_read = 0};
   }
 };
 
@@ -153,16 +170,46 @@ enum DisconnectBehavior
   TerminateTarget
 };
 
-// Abstract interface for all tracee communication & command types
-// PtraceCommander (a "local" debugging)
-// Remote (a remote debug session that functions )
+struct ObjectFileDescriptor
+{
+  std::filesystem::path path;
+  AddrPtr address;
+};
+
+struct AuxvElement
+{
+  u64 id;
+  u64 entry;
+};
+
+struct Auxv
+{
+  std::vector<AuxvElement> vector;
+};
+
+struct Error
+{
+  Immutable<std::optional<int>> sys_errno;
+  Immutable<std::string_view> err_msg;
+  Immutable<std::optional<std::string>> err{};
+};
+
+class TraceeCommandInterface;
+using Interface = std::unique_ptr<TraceeCommandInterface>;
+
+// Abstract base class & interface for controlling and querying tracees
+// PtraceCommander is the native interface
+// GdbRemoteCommander is the gdb remote protocol interface
 class TraceeCommandInterface
 {
 public:
+  Immutable<TargetFormat> format;
+  Immutable<std::shared_ptr<gdb::ArchictectureInfo>> arch_info;
+
   NO_COPY(TraceeCommandInterface);
-  TraceeCommandInterface() noexcept = default;
+  TraceeCommandInterface(TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info) noexcept;
   virtual ~TraceeCommandInterface() noexcept = default;
-  virtual TraceeReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
+  virtual ReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
   virtual TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse resume_task(TaskInfo &t, RunType run) noexcept = 0;
@@ -184,10 +231,21 @@ public:
   virtual bool perform_shutdown() noexcept = 0;
   virtual bool initialize() noexcept = 0;
 
-  virtual bool reconfigure(TraceeController *) noexcept = 0;
+  /// Called after we've processed an exec or fork (For PtraceCommander we might re-open proc fs files for
+  /// instance).
+  virtual bool post_exec(TraceeController *) noexcept = 0;
   virtual Tid task_leader() const noexcept = 0;
+  virtual std::optional<Path> execed_file() noexcept = 0;
+  virtual std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept = 0;
 
-  static std::unique_ptr<TraceeCommandInterface> createCommandInterface(const InterfaceConfig &config) noexcept;
+  virtual std::shared_ptr<gdb::RemoteConnection> remote_connection() noexcept = 0;
+  virtual utils::Expected<Auxv, Error> read_auxv() noexcept = 0;
+
+  virtual bool target_manages_breakpoints() noexcept;
+
+  static Interface createCommandInterface(const InterfaceConfig &config) noexcept;
+  std::optional<std::string> read_nullterminated_string(TraceePointer<char> address,
+                                                        u32 buffer_size = 128) noexcept;
 
   template <typename T>
   utils::Expected<T, std::string_view>
@@ -196,24 +254,26 @@ public:
     typename TPtr<T>::Type t_result;
     auto total_read = 0ull;
     constexpr auto sz = TPtr<T>::type_size();
-    const u8 *ptr = static_cast<u8 *>(std::addressof(t_result));
+    u8 *ptr = static_cast<u8 *>((void *)std::addressof(t_result));
     while (total_read < sz) {
-      auto read_result = read_bytes(address, sz - total_read, ptr + total_read);
+      auto read_result = read_bytes(address.as_void(), sz - total_read, ptr + total_read);
       switch (read_result.op_result) {
-      case ReadResult::ERROR:
-        return utils::unexpected(strerror(read_result.sys_errno));
-      case ReadResult::EoF:
-        return utils::unexpected("End of file reported"sv);
-      case ReadResult::OK:
+      case ReadResultType::SystemError:
+        return utils::unexpected<std::string_view>(strerror(read_result.sys_errno));
+      case ReadResultType::EoF:
+        return utils::unexpected<std::string_view>("End of file reported"sv);
+      case ReadResultType::DebuggerError:
+        TODO("implement handling of 'DebuggerError' in read_type");
+      case ReadResultType::OK:
         total_read += read_result.bytes_read;
         if (total_read == sz) {
-          return utils::Expected{t_result};
+          break;
         }
         address += read_result.bytes_read;
         continue;
       }
     }
-    return t_result;
+    return utils::Expected<T, std::string_view>{t_result};
   }
 
   template <typename T>
@@ -238,7 +298,5 @@ public:
     return {total_written};
   }
 };
-
-using Interface = std::unique_ptr<TraceeCommandInterface>;
 
 } // namespace tc

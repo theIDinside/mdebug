@@ -53,8 +53,8 @@ FunctionSymbolicationContext::process_lexical_block(DieReference cu_die) noexcep
 void
 FunctionSymbolicationContext::process_inlined(DieReference cu_die) noexcept
 {
-  DLOG("mdb", "[symbolication]: process_inline not implemented (cu={}, die={})", cu_die.cu->section_offset(),
-       cu_die.die->section_offset);
+  DBGLOG(core, "[symbolication]: process_inline not implemented (cu={}, die={})", cu_die.cu->section_offset(),
+         cu_die.die->section_offset);
 }
 
 void
@@ -158,7 +158,7 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
         die_it = next(die_it, die_it->children());
         break;
       default:
-        DLOG("mdb", "[WARNING]: Unexpected Tag in subprorogram die: {}", to_str(die_it->tag));
+        DBGLOG(core, "[WARNING]: Unexpected Tag in subprorogram die: {}", to_str(die_it->tag));
       }
     }
   }

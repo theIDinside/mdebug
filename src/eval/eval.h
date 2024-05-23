@@ -4,10 +4,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <typedefs.h>
 #include <variant>
-
-using u8 = std::uint8_t;
-using u16 = std::uint16_t;
 
 struct TraceeController;
 

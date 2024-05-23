@@ -102,7 +102,7 @@ TypeStorage::TypeStorage(ObjectFile &obj) noexcept : m(), types(), obj(obj) { ty
 
 TypeStorage::~TypeStorage() noexcept
 {
-  DLOG("mdb", "Destroying type storage for {}", obj.path->c_str());
+  DBGLOG(core, "Destroying type storage for {}", obj.path->c_str());
   for (const auto [k, ptr] : types) {
     delete ptr;
   }

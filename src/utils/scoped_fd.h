@@ -1,10 +1,45 @@
 #pragma once
 #include "../common.h"
+#include "utils/expected.h"
 #include <filesystem>
 #include <sys/mman.h>
 #include <typedefs.h>
 
 using Path = std::filesystem::path;
+
+struct ConnectError
+{
+
+  enum class Kind
+  {
+    GetAddressInfo,
+    Socket,
+    Connect
+  };
+
+  Kind kind;
+  std::string msg;
+  int sys_errno;
+
+  static ConnectError
+  AddrInfo(int sys)
+  {
+    return ConnectError{.kind = Kind::GetAddressInfo, .msg = "getaddrinfo failed", .sys_errno = sys};
+  }
+
+  static ConnectError
+  Socket(int sys) noexcept
+  {
+    return ConnectError{.kind = Kind::Socket, .msg = "Failed to open socket", .sys_errno = sys};
+  }
+
+  static ConnectError
+  Connect(const std::string &host, int port, int sys) noexcept
+  {
+    return ConnectError{
+        .kind = Kind::Connect, .msg = fmt::format("Failed to connect to {}:{}", host, port), .sys_errno = sys};
+  }
+};
 
 namespace utils {
 class ScopedFd
@@ -37,6 +72,7 @@ public:
   }
 
   static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
+  static utils::Expected<ScopedFd, ConnectError> socket_connect(const std::string &host, int port) noexcept;
   static ScopedFd open_read_only(const Path &p) noexcept;
   static ScopedFd take_ownership(int fd) noexcept;
 

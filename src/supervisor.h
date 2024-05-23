@@ -16,7 +16,6 @@
 #include "task.h"
 #include "utils/byte_buffer.h"
 #include "utils/expected.h"
-#include <link.h>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -59,6 +58,16 @@ struct NonFullRead
   int err_no;
 };
 
+/// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
+/// When debugging 2 processes with the same binaries, we don't want duplicate storage.
+auto createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>;
+
+enum class InterfaceType
+{
+  Ptrace,
+  GdbRemote
+};
+
 struct TraceeController
 {
   using handle = std::unique_ptr<TraceeController>;
@@ -71,11 +80,11 @@ struct TraceeController
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   UserBreakpoints pbps;
-  TPtr<r_debug_extended> tracee_r_debug;
   SharedObjectMap shared_objects;
   bool stop_all_requested;
   Publisher<void> all_stop{};
   Publisher<SymbolFile *> new_objectfile{};
+  InterfaceType interface_type;
 
 private:
   int next_var_ref = 0;
@@ -83,22 +92,21 @@ private:
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   TargetSession session;
-  ptracestop::StopHandler *ptracestop_handler;
+  ptracestop::StopHandler *stop_handler;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *null_unwinder;
   std::unique_ptr<tc::TraceeCommandInterface> tracee_interface;
+  tc::Auxv auxiliary_vector{};
 
 public:
   // Constructors
-  TraceeController(TargetSession session, tc::Interface &&interface) noexcept;
+  TraceeController(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
 
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
 
-  /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
-  bool reopen_memfd() noexcept;
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
   void install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
@@ -120,7 +128,7 @@ public:
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
   /* Create new task meta data for `tid` */
-  void new_task(Tid tid, bool ui_update) noexcept;
+  void new_task(Tid tid) noexcept;
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(tc::RunType type) noexcept;
@@ -176,12 +184,11 @@ public:
   void
   install_thread_proceed(TaskInfo &t, Args... args) noexcept
   {
-    DLOG("mdb", "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
-    ptracestop_handler->set_and_run_action(t.tid, new StopAction{*this, t, args...});
+    DBGLOG(core, "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
+    stop_handler->set_and_run_action(t.tid, new StopAction{*this, t, args...});
   }
 
-  void process_exec(TaskInfo &t) noexcept;
-  Tid process_clone(TaskInfo &t) noexcept;
+  void post_exec(const std::string &exe) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;
@@ -196,7 +203,9 @@ public:
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
-  void read_auxv(const TaskInfo &task);
+  void read_auxv(TaskInfo &task);
+  void read_auxv_info(tc::Auxv &&aux) noexcept;
+
   TargetSession session_type() const noexcept;
   std::string get_thread_name(Tid tid) const noexcept;
 
@@ -281,7 +290,7 @@ public:
   sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
-  void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
+  TaskInfo *set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
   int new_frame_id(NonNullPtr<SymbolFile> owning_obj, TaskInfo &task) noexcept;
   int new_scope_id(NonNullPtr<SymbolFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
@@ -289,6 +298,8 @@ public:
   void invalidate_stop_state() noexcept;
   void cache_registers(TaskInfo &t) noexcept;
   tc::TraceeCommandInterface &get_interface() noexcept;
+  std::optional<AddrPtr> get_interpreter_base() const noexcept;
+  std::shared_ptr<SymbolFile> get_main_executable() const noexcept;
 
 private:
   void reset_variable_references() noexcept;
@@ -297,3 +308,11 @@ private:
   // Writes breakpoint point and returns the original value found at that address
   utils::Expected<u8, BpErr> install_software_bp_loc(AddrPtr addr) noexcept;
 };
+
+struct ProbeInfo
+{
+  AddrPtr address;
+  std::string name;
+};
+
+std::vector<ProbeInfo> parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept;

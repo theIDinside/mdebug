@@ -4,6 +4,12 @@
 #include <iterator>
 #include <utils/indexing.h>
 namespace utils {
+
+template <typename C> concept HasReferenceAlias = requires(C c) { typename C::reference; };
+template <typename C> concept HasIteratorAlias = requires(C c) { typename C::iterator; };
+template <typename C> concept HasPointerAlias = requires(C c) { typename C::pointer; };
+template <typename C> concept HasValueTypeAlias = requires(C c) { typename C::value_type; };
+
 /** An enumerating view over `Container`. Only deals with immutable values (because, it is a view!)*/
 template <typename Container> class EnumerateView
 {
@@ -23,10 +29,19 @@ public:
 
   public:
     using IsConst = std::is_const<typename std::remove_reference<decltype(*iter)>::type>;
+    static_assert(HasReferenceAlias<Container>,
+                  "Your container type must provide a 'reference' type alias (using declaration or typedef)");
+    static_assert(HasIteratorAlias<Container>,
+                  "Your container type must provide a 'iterator' type alias (using declaration or typedef)");
+    static_assert(HasPointerAlias<Container>,
+                  "Your container type must provide a 'pointer' type alias (using declaration or typedef)");
+    static_assert(HasValueTypeAlias<Container>,
+                  "Your container type must provide a 'value_type' type alias (using declaration or typedef)");
+
     using RefType =
-        std::conditional_t<IsConst::value, typename Container::const_reference, typename Container::reference>;
+        std::conditional_t<IsConst::value, const typename Container::reference, typename Container::reference>;
     using PtrType =
-        std::conditional_t<IsConst::value, typename Container::const_pointer, typename Container::pointer>;
+        std::conditional_t<IsConst::value, const typename Container::pointer, typename Container::pointer>;
 
     using iterator_category = std::forward_iterator_tag;
     using difference_type = std::ptrdiff_t;

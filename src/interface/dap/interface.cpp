@@ -120,9 +120,7 @@ void
 DAP::write_protocol_message(std::string_view msg) noexcept
 {
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
-  if constexpr (MDB_DEBUG == 1) {
-    logging::Logger::get_logger()->log("dap", fmt::format("WRITING -->{}{}<---", header, msg));
-  }
+  CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
   VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
   VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
 }

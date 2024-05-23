@@ -16,11 +16,19 @@ static Foo *global_foo = new Foo{{.next = nullptr, .prev = nullptr}, 10000, 2000
 
 constexpr static std::string_view thread_names[8] = {"Foo", "Bar", "Baz", "Quux", "420", "1337", "MDB", "DAP"};
 
+static bool ShouldRunForever = false;
+
 int
 main(int argc, const char **argv)
 {
+  printf("args passed to threads_shared:\n");
   for (auto i = 1; i < argc; i++) {
     printf("%s\n", argv[i]);
+  }
+
+  printf("\n ---- \n");
+  if (argc > 1) {
+    ShouldRunForever = true;
   }
   Foo foo{};
   foo.a = 1;
@@ -73,6 +81,20 @@ main(int argc, const char **argv)
           spin_lock.unlock();
         }
       }
+      if (ShouldRunForever) {
+        std::this_thread::sleep_for(std::chrono::seconds{i});
+        while (true) {
+          spin_lock.lock();
+          const auto tid = gettid();
+          char name[16];
+          pthread_getname_np(pthread_self(), name, 16);
+          printf("TASK NAME %s with TASK number %d ___ TID: %d ___ EXITED\n", name, i, tid);
+          printf(" --- --- \n");
+          spin_lock.unlock();
+          std::this_thread::sleep_for(std::chrono::seconds{8});
+        }
+      }
+
       spin_lock.lock();
       for (auto idx = 0; idx < 8; idx++) {
         if (ids[idx] == -1) {

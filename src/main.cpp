@@ -51,14 +51,16 @@ bool Tracer::use_traceme = true;
 
 utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool{};
 
-static constexpr auto default_log_channels = {"mdb", "dap", "dwarf", "awaiter", "eh"};
-
 int
 main(int argc, const char **argv)
 {
-  for (const auto &channel : default_log_channels) {
-    logging::Logger::get_logger()->setup_channel(channel);
+  {
+    using enum logging::Channel;
+    for (const auto id : logging::DefaultChannels()) {
+      logging::Logger::get_logger()->setup_channel(id);
+    }
   }
+
   auto res = sys::parse_cli(argc, argv);
   if (!res.is_expected()) {
     auto &&err = res.error();
@@ -74,9 +76,9 @@ main(int argc, const char **argv)
   }
 
   std::span<const char *> args(argv, argc);
-  logging::get_logging()->log("mdb", "MDB CLI Arguments");
+  DBGLOG(core, "MDB CLI Arguments");
   for (const auto arg : args.subspan(1)) {
-    logging::get_logging()->log("mdb", fmt::format("{}", arg));
+    DBGLOG(core, "{}", arg);
   }
 
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
@@ -84,9 +86,7 @@ main(int argc, const char **argv)
   auto config = res.value();
   auto log = config.log_config();
   log.configure_logging(true);
-  if (log.awaiter) {
-    logging::get_logging()->log("mdb", "Setting awaiter log on");
-  }
+  CDLOG(log.awaiter, core, "Setting awaiter log on");
 
   utils::NotifyManager notifiers{io_read};
   Tracer::Instance = new Tracer{io_read, &notifiers, config};
@@ -110,18 +110,24 @@ main(int argc, const char **argv)
     const auto evt = poll_event();
     switch (evt.type) {
     case EventType::WaitStatus: {
-      tracer.handle_wait_event(evt.wait.process_group, evt.wait.wait);
+      if (const auto dbg_evt = tracer.handle_wait_event_2(evt.wait.process_group, evt.wait.wait); dbg_evt) {
+        tracer.handle_core_event(dbg_evt);
+      }
+      // tracer.handle_wait_event(evt.wait.process_group, evt.wait.wait);
     } break;
     case EventType::Command: {
       tracer.handle_command(evt.cmd);
     } break;
     case EventType::DebuggerEvent: {
-      tracer.handle_debugger_event(evt.debugger);
+      tracer.handle_core_event(evt.debugger);
     } break;
+    case EventType::Initialization:
+      tracer.handle_init_event(evt.debugger);
+      break;
     }
   }
   exit_debug_session = true;
   Tracer::Instance->kill_ui();
   ui_thread.join();
-  DLOG("mdb", "Exited...");
+  DBGLOG(core, "Exited...");
 }

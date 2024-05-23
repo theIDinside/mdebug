@@ -1,5 +1,6 @@
 #include "die.h"
 #include "debug_info_reader.h"
+#include "utils/util.h"
 #include <string_view>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
@@ -330,7 +331,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
       } else {
         abbr.IMPLICIT_CONST_INDEX = -1;
       }
-      if (std::to_underlying(abbr.name) == 0) {
+      if (utils::castenum(abbr.name) == 0) {
         break;
       }
       info.attributes.push_back(abbr);
@@ -346,9 +347,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
 std::vector<UnitHeader>
 read_unit_headers(ObjectFile *obj) noexcept
 {
-  if (DwarfLog) {
-    LOG("dwarf", "Reading {} obfile compilation unit headers", obj->path->c_str());
-  }
+  CDLOG(DwarfLog, dwarf, "Reading {} obfile compilation unit headers", obj->path->c_str());
   const auto dbg_info = obj->elf->debug_info;
   std::vector<UnitHeader> result{};
   DwarfBinaryReader reader{obj->elf, dbg_info};
@@ -406,8 +405,7 @@ read_unit_headers(ObjectFile *obj) noexcept
            "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,
            reader.bytes_read());
   }
-  if (DwarfLog)
-    LOG("dwarf", "Read {} compilation unit headers", result.size());
+  CDLOG(DwarfLog, dwarf, "Read {} compilation unit headers", result.size());
   return result;
 }
 } // namespace sym::dw

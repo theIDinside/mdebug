@@ -3,16 +3,21 @@ const { assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./ut
 
 const bpRequest = 'setBreakpoints'
 
+/**
+ * @param {import("./client").DAClient } DA
+ * @param {string} exe
+ */
 async function initLaunchToMain(DA, exe, { file, bps } = {}) {
-  await DA.launchToMain(DA.buildDirFile(exe))
+  await DA.startRunToMain(DA.buildDirFile(exe), [], 1000)
   if (file) {
     const fileContent = readFileContents(repoDirFile(file))
     const bp_lines = bps
       .map((ident) => getLineOf(fileContent, ident))
       .filter((item) => item != null)
       .map((l) => ({ line: l }))
-    assert(
+    assertLog(
       bp_lines.length == bps.length,
+      `Expected ${bps.length} identifiers`,
       `Could not parse contents of  ${repoDirFile('test/next.cpp')} to find all string identifiers`
     )
 
@@ -31,6 +36,7 @@ async function initLaunchToMain(DA, exe, { file, bps } = {}) {
   }
 }
 
+/** @param {import("./client").DAClient } DA */
 async function setup(DA, executableFile) {
   const init = await DA.sendReqGetResponse('initialize', {})
   checkResponse(init, 'initialize', true)
@@ -41,9 +47,10 @@ async function setup(DA, executableFile) {
   checkResponse(launch, 'launch', true)
 }
 
+/** @param {import("./client").DAClient } debuggerAdapter */
 async function setInstructionBreakpoint(debuggerAdapter) {
   // we don't care for initialize, that's tested elsewhere
-  await setup(debuggerAdapter, 'stackframes')
+  await debuggerAdapter.startRunToMain(debuggerAdapter.buildDirFile('stackframes'), [], 1000)
   const instructionAddress = '0x40088c'
   await debuggerAdapter
     .sendReqGetResponse('setInstructionBreakpoints', {
@@ -63,6 +70,7 @@ async function setInstructionBreakpoint(debuggerAdapter) {
     })
 }
 
+/** @param {import("./client").DAClient } debuggerAdapter */
 async function set4InSameCompUnit(debuggerAdapter) {
   await setup(debuggerAdapter, 'stackframes')
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
@@ -93,6 +101,7 @@ async function set4InSameCompUnit(debuggerAdapter) {
   )
 }
 
+/** @param {import("./client").DAClient } debuggerAdapter */
 async function set2InDifferentCompUnit(debuggerAdapter) {
   await setup(debuggerAdapter, 'stackframes')
   const files = ['test/stackframes.cpp', 'test/templated_code/template.h']
@@ -121,6 +130,7 @@ async function set2InDifferentCompUnit(debuggerAdapter) {
   }
 }
 
+/** @param {import("./client").DAClient } DA */
 async function setFunctionBreakpoint(DA) {
   await initLaunchToMain(DA, 'functionBreakpoints')
   const functions = ['Person', 'sayHello'].map((n) => ({ name: n }))
@@ -136,6 +146,7 @@ async function setFunctionBreakpoint(DA) {
   console.log(prettyJson(fnBreakpointResponse))
 }
 
+/** @param {import("./client").DAClient } debugAdapter */
 async function setFunctionBreakpointUsingRegex(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -158,6 +169,7 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
   console.log(prettyJson(res))
 }
 
+/** @param {import("./client").DAClient } debugAdapter */
 async function setBreakpointsThatArePending(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   let stopped_promise = debugAdapter.prepareWaitForEventN('stopped', 1, 1000, setBreakpointsThatArePending)
@@ -191,10 +203,11 @@ async function setBreakpointsThatArePending(debugAdapter) {
     })
 
   const cfg = await debugAdapter.sendReqGetResponse('configurationDone', {})
-  assert(cfg.success)
+  assertLog(cfg.success, `configDone success`)
   await stopped_promise
 }
 
+/** @param {import("./client").DAClient } debugAdapter */
 async function setNonExistingSourceBp(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -222,15 +235,16 @@ async function setNonExistingSourceBp(debugAdapter) {
   )
 }
 
-async function set4ThenSet2(debuggerAdapter) {
-  await debuggerAdapter.launchToMain(debuggerAdapter.buildDirFile('stackframes'))
+/** @param {import("./client").DAClient } debugAdapter */
+async function set4ThenSet2(debugAdapter) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 2000)
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   {
     const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
       .map((ident) => getLineOf(file, ident))
       .filter((item) => item != null)
       .map((l) => ({ line: l }))
-    const res = await debuggerAdapter.sendReqGetResponse(bpRequest, {
+    const res = await debugAdapter.sendReqGetResponse(bpRequest, {
       source: {
         name: repoDirFile('test/stackframes.cpp'),
         path: repoDirFile('test/stackframes.cpp'),
@@ -258,7 +272,7 @@ async function set4ThenSet2(debuggerAdapter) {
       .map((ident) => getLineOf(file, ident))
       .filter((item) => item != null)
       .map((l) => ({ line: l }))
-    const res = await debuggerAdapter.sendReqGetResponse(bpRequest, {
+    const res = await debugAdapter.sendReqGetResponse(bpRequest, {
       source: {
         name: repoDirFile('test/stackframes.cpp'),
         path: repoDirFile('test/stackframes.cpp'),
@@ -282,9 +296,9 @@ async function set4ThenSet2(debuggerAdapter) {
   }
 
   // continue to make sure we don't hit breakpoints at BP1 and BP2
-  let threads = await debuggerAdapter.threads()
-  await debuggerAdapter.contNextStop(threads[0].id)
-  const frames = await debuggerAdapter.stackTrace()
+  let threads = await debugAdapter.threads()
+  await debugAdapter.contNextStop(threads[0].id)
+  const frames = await debugAdapter.stackTrace()
   assertLog(
     frames.body.stackFrames[0].name == 'baz',
     `Expected to be in function 'baz'`,

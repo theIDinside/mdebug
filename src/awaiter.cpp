@@ -38,7 +38,7 @@ AwaiterThread::start_awaiter_thread(tc::TraceeCommandInterface *tc) noexcept
       const auto wait_result = process_status(res, status);
       push_wait_event(pid, wait_result);
     }
-    DLOG("mdb", "Exiting awaiter thread {}", pid);
+    DBGLOG(core, "Exiting awaiter thread {}", pid);
   }};
 }
 

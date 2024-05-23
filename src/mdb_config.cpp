@@ -112,7 +112,7 @@ parse_cli(int argc, const char **argv) noexcept
       init.dwarf_parsing.eager_lnp_parse = true;
       break;
     case '?':
-      DLOG("mdb", "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
+      DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
       return utils::unexpected(
           CLIError{.info = CLIErrorInfo::UnknownArgs,
                    .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])});

@@ -60,7 +60,7 @@ ThreadPool::worker(std::stop_token stop_token, const char *name) noexcept
 {
   VERIFY(prctl(PR_SET_NAME, name) != -1, "Failed to set worker thread name");
   ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
-  DLOG("mdb", "Worker thread {} spawned", name);
+  DBGLOG(core, "Worker thread {} spawned", name);
   while (true && !stop_token.stop_requested()) {
     Task *job = nullptr;
     {

@@ -123,6 +123,7 @@ async function nextInstruction(DA) {
   let frames = await DA.stackTrace(threads[0].id)
   // await da_client.setInsBreakpoint("0x40121f");
   const pc = getStackFramePc(frames, 0)
+  console.log(`STARTING PC THAT WE START DISASSEMBLING FROM: ${pc}`)
   const disassembly = await DA.sendReqGetResponse('disassemble', {
     memoryReference: pc,
     offset: 0,
