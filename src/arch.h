@@ -1,6 +1,8 @@
 #pragma once
 #include "common.h"
 #include "ptrace.h"
+#include "utils/util.h"
+#include <algorithm>
 #include <array>
 #include <typedefs.h>
 #include <utility>
@@ -168,5 +170,11 @@ template <ArchType Type> struct RegisterBlock
   {
     u64 *ptr = (u64 *)(file.data() + ArchRegNum<Type>::RIP.offset);
     *ptr = value;
+  }
+
+  void
+  from_hexdigit_encoding(std::string_view hex_encoded) noexcept
+  {
+    utils::deserialize_hex_encoded(hex_encoded, file);
   }
 };
