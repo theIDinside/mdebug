@@ -151,9 +151,9 @@ async function readAtMMapDetermineAddressByVariablesRequest(DA) {
 }
 
 const tests = {
-  readAtMemoryMappedAddress: readAtMemoryMappedAddress,
-  readAtMMapDetermineAddressByVariablesRequest: readAtMMapDetermineAddressByVariablesRequest,
-  readShouldFailFaultyArgs: readShouldFailFaultyArgs,
+  readAtMemoryMappedAddress: () => readAtMemoryMappedAddress,
+  readAtMMapDetermineAddressByVariablesRequest: () => readAtMMapDetermineAddressByVariablesRequest,
+  readShouldFailFaultyArgs: () => readShouldFailFaultyArgs,
 }
 
 module.exports = {

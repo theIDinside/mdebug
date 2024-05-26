@@ -188,9 +188,6 @@ async function membersOfVariableTest(debugAdapter) {
   }
 }
 
-const returnValue = todo('returnValue')
-const shadowed = todo('shadowed')
-
 async function readStringVariable(DA) {
   const hardcodedMmapAddress = '0x1f21000'
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
@@ -460,18 +457,25 @@ async function interpretTemplateTypes(debugAdapter) {
   )
 }
 
+async function returnValue(da) {
+  throw new Error('returnValue not implemented')
+}
+async function shadowed(da) {
+  throw new Error('shadowed not implemented')
+}
+
 const tests = {
-  scopeLocalsTest: scopeLocalsTest,
-  scopeArgsTest: scopeArgsTest,
-  membersOfVariableTest: membersOfVariableTest,
-  inConstructor: inConstructor,
-  returnValue: returnValue,
-  interpretTemplateTypes: interpretTemplateTypes,
-  shadowed: shadowed,
-  readStringVariable: readStringVariable,
-  readArrayTypes: readArrayTypes,
-  testArrayResolverCaching: testArrayResolverCaching,
-  testArrayResolverCachingDispersed: testArrayResolverCachingDispersed,
+  scopeLocalsTest: () => scopeLocalsTest,
+  scopeArgsTest: () => scopeArgsTest,
+  membersOfVariableTest: () => membersOfVariableTest,
+  inConstructor: () => inConstructor,
+  interpretTemplateTypes: () => interpretTemplateTypes,
+  returnValue: () => todo(returnValue),
+  shadowed: () => todo(shadowed),
+  readStringVariable: () => readStringVariable,
+  readArrayTypes: () => readArrayTypes,
+  testArrayResolverCaching: () => testArrayResolverCaching,
+  testArrayResolverCachingDispersed: () => testArrayResolverCachingDispersed,
 }
 
 module.exports = {

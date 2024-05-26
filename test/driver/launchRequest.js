@@ -21,9 +21,9 @@ async function launchThenDisconnect(DA) {
 }
 
 const tests = {
-  launch: launch,
-  main: launchToMain,
-  disconnect: launchThenDisconnect,
+  launch: () => launch,
+  main: () => launchToMain,
+  disconnect: () => launchThenDisconnect,
 }
 
 module.exports = {

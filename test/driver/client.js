@@ -9,7 +9,7 @@ const path = require('path')
 const fs = require('fs')
 const { spawn, ChildProcess } = require('child_process')
 const EventEmitter = require('events')
-const { assertLog, prettyJson, allUniqueVariableReferences, TestArgs, parseCommandLine } = require('./utils')
+const { assertLog, prettyJson, allUniqueVariableReferences, TestArgs, parseTestConfiguration } = require('./utils')
 const net = require('net')
 
 // Environment setup
@@ -54,24 +54,23 @@ class RemoteService {
 }
 
 /**
- *
+ * @param {string} gdbserver
  * @param {string} host
  * @param {number} port
  * @param {string} binary
  * @param {string[]} args
  * @returns { Promise<RemoteService> }
  */
-async function createRemoteService(host, port, binary, args) {
+async function createRemoteService(gdbserver, host, port, binary, args) {
   port = Number.parseInt(port)
-  console.log(`createRemoteService(host: ${host}, port: ${port}, binary: ${binary}, args: ${args ?? []})`)
   return new Promise((resolve, reject) => {
     let serviceReadyEmitter = new EventEmitter()
 
     if (args == undefined || args == null) {
       args = []
     }
-
-    let service = spawn('gdbserver', ['--multi', `${host}:${port}`, binary, ...args], {
+    // '/home/cx/dev/cx/binutils-gdb/build-release/gdbserver/gdbserver',
+    let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary, ...args], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -185,7 +184,7 @@ function getExecutorArgs() {
       `Test executor not received the required parameters. It requires 3 parameters.\nWorking dir: the directory from which the test is executed in\nTest suite name: The test suite\nTest name: An optional test name, if only a single test in the suite should be executed. Usage:\nnode source/to/client.js current/working/dir testSuiteName testSuite`
     )
   }
-  const testArgs = new TestArgs(parseCommandLine(process.argv.slice(2)))
+  const testArgs = new TestArgs(parseTestConfiguration(process.argv.slice(2)))
 
   const config = {
     mdb: testArgs.getBinary('mdb'),
@@ -539,12 +538,13 @@ class DAClient {
     let stopped_promise = null
     let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
     checkResponse(init_res, 'initialize', true)
-    switch (this.config.args.sessionKind) {
+    switch (this.config.args.getArg('session')) {
       case 'remote':
         {
+          const remoteServerBinaryPath = this.config.args.getServerBinary()
           const host = 'localhost'
           this.remoteService = await checkPortAvailability(20, host).then((port) => {
-            return createRemoteService(host, port, program, args)
+            return createRemoteService(remoteServerBinaryPath, host, port, program, args)
           })
 
           if (!this.isRemoteSession()) {
@@ -572,6 +572,7 @@ class DAClient {
           const thrs = await this.threads()
           const threadId = thrs[0].id
           stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.startRunToMain)
+          await this.sendReqGetResponse('configurationDone', {}, timeout)
           const cont = await this.sendReqGetResponse(
             'continue',
             {
@@ -802,11 +803,13 @@ async function runTestSuite(config, tests) {
     if (config.args.test != undefined) {
       if (config.args.test == testName) {
         const DA = new DAClient(config.mdb, [], config)
-        await runTest(DA, tests[testName])
+        const testFn = tests[testName]()
+        await runTest(DA, testFn)
       }
     } else {
       const DA = new DAClient(config.mdb, [], config)
-      await runTest(DA, tests[testName])
+      const testFn = tests[testName]()
+      await runTest(DA, testFn)
     }
   }
 }

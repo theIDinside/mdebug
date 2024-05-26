@@ -98,13 +98,15 @@ function write_packet(packet) {
 }
 
 socket.on('connect', (err) => {
-  // write_packet(format_packet('?'))
-  // write_packet('+')
-  // write_packet(
-  //   format_packet(
-  //     'qSupported:multiprocess+;swbreak+;hwbreak+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386'
-  //   )
-  // )
+  write_packet(format_packet('QStartNoAckMode'))
+  write_packet(format_packet('!'))
+  write_packet(
+    format_packet(
+      'qSupported:multiprocess+;swbreak+;hwbreak+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386;QNonStop+'
+    )
+  )
+  write_packet(format_packet('QThreadEvents:1'))
+  write_packet(format_packet('qXfer:threads:read::0,8000'))
 })
 
 async function repl_prompt(prompt) {

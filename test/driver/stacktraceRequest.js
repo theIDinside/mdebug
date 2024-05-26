@@ -306,11 +306,11 @@ async function unwindWithDwarfExpression(DA) {
 }
 
 const tests = {
-  insidePrologue: insidePrologueTest,
-  insideEpilogue: insideEpilogueTest,
-  normal: normalTest,
-  unwindFromSharedObject: unwindFromSharedObject,
-  unwindWithDwarfExpression: unwindWithDwarfExpression,
+  insidePrologue: () => insidePrologueTest,
+  insideEpilogue: () => insideEpilogueTest,
+  normal: () => normalTest,
+  unwindFromSharedObject: () => unwindFromSharedObject,
+  unwindWithDwarfExpression: () => unwindWithDwarfExpression,
 }
 
 module.exports = {

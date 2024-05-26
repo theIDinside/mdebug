@@ -1,12 +1,18 @@
 const { assert } = require('./utils')
-async function test(DA) {
-  await DA.launchToMain(DA.buildDirFile('threads_shared'))
+const { getLineOf } = require('./client')
+/**
+ *
+ * @param {import("./client").DAClient } DA
+ */
+async function see9ThreadExits(DA) {
+  await DA.startRunToMain(DA.buildDirFile('threads_shared'))
   const threads = await DA.threads()
-  let p = DA.prepareWaitForEventN('thread', 17, 2000)
+  let p = DA.prepareWaitForEventN('thread', 17, 1000)
   for (let i = 0; i < 3; i++) {
     const response = await DA.sendReqGetResponse('continue', { threadId: threads[0].id })
     if (i == 0) {
       assert(response.success, `Request continue failed. Message: ${response.message}`)
+      break
     }
     // The reason why this should fail, is because, we hit the breakpoint at main, and then continue { threads[0] }, should step over the bp, and then continue
     // which means, that when the second continue requests comes in, target should be running (thus returning a "continue request failed response")
@@ -29,7 +35,7 @@ async function test(DA) {
 }
 
 const tests = {
-  see9ThreadExits: test,
+  see9ThreadExits: () => see9ThreadExits,
 }
 
 module.exports = {

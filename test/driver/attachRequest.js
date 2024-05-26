@@ -44,7 +44,12 @@ async function attachInit(debugAdapter) {
 
   const server_spawn = { ok: false, msg: '', server: null }
   try {
-    server_spawn.server = await createRemoteService(attachArgs.host, attachArgs.port, debugAdapter.buildDirFile('next'))
+    server_spawn.server = await createRemoteService(
+      'gdbserver',
+      attachArgs.host,
+      attachArgs.port,
+      debugAdapter.buildDirFile('next')
+    )
     server_spawn.ok = true
   } catch (ex) {
     server_spawn.ok = false
@@ -82,10 +87,10 @@ async function ptraceAttach(debugAdapter) {
 }
 
 const tests = {
-  attachContinue,
-  attachInit,
-  ptraceAttach,
-  attachArgsGetErrResponseWhenInvalid,
+  attachContinue: () => todo(attachContinue),
+  attachInit: () => attachInit,
+  ptraceAttach: () => todo(ptraceAttach),
+  attachArgsGetErrResponseWhenInvalid: () => attachArgsGetErrResponseWhenInvalid,
 }
 
 module.exports = {

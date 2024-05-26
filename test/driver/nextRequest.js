@@ -115,7 +115,7 @@ async function stopBecauseBpWhenNextLine(DA) {
   }
 }
 
-const nextLineInTemplateCode = todo('nextLineInTemplateCode')
+async function nextLineInTemplateCode(da) {}
 
 async function nextInstruction(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))
@@ -158,10 +158,10 @@ async function nextInstruction(DA) {
 }
 
 const tests = {
-  nextLineOverFunction: nextLineOverFunction,
-  stopBecauseBpWhenNextLine: stopBecauseBpWhenNextLine,
-  nextLineInTemplateCode: nextLineInTemplateCode,
-  nextInstruction: nextInstruction,
+  nextLineOverFunction: () => nextLineOverFunction,
+  stopBecauseBpWhenNextLine: () => stopBecauseBpWhenNextLine,
+  nextLineInTemplateCode: () => todo(nextLineInTemplateCode),
+  nextInstruction: () => nextInstruction,
 }
 
 module.exports = {

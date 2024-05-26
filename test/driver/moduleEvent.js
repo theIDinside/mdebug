@@ -130,9 +130,9 @@ async function newFunctionBreakpointAfterLoadedSharedObject(debugAdapter) {
 }
 
 const tests = {
-  '6modules': expect6NewModuleEvents,
-  DLOpen: seeModuleEventFromDLOpenCall,
-  newFunctionBreakpointAfterLoadedSharedObject: newFunctionBreakpointAfterLoadedSharedObject,
+  '6modules': () => expect6NewModuleEvents,
+  DLOpen: () => seeModuleEventFromDLOpenCall,
+  newFunctionBreakpointAfterLoadedSharedObject: () => newFunctionBreakpointAfterLoadedSharedObject,
 }
 
 module.exports = {

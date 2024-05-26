@@ -106,7 +106,7 @@ async function backAndForward(DA) {
 }
 
 const tests = {
-  backAndForward: backAndForward,
+  backAndForward: () => backAndForward,
 }
 
 module.exports = {

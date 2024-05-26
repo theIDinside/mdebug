@@ -307,14 +307,14 @@ async function set4ThenSet2(debugAdapter) {
 }
 
 const tests = {
-  setNonExistingSourceBp: setNonExistingSourceBp,
-  set4InSameCompUnit: set4InSameCompUnit,
-  set2InDifferentCompUnit: set2InDifferentCompUnit,
-  setInstructionBreakpoint: setInstructionBreakpoint,
-  setFunctionBreakpoint: setFunctionBreakpoint,
-  setBreakpointsThatArePending: setBreakpointsThatArePending,
-  setUsingRegexFunctionBreakpoint: setFunctionBreakpointUsingRegex,
-  set4ThenSet2: set4ThenSet2,
+  setNonExistingSourceBp: () => setNonExistingSourceBp,
+  set4InSameCompUnit: () => set4InSameCompUnit,
+  set2InDifferentCompUnit: () => set2InDifferentCompUnit,
+  setInstructionBreakpoint: () => setInstructionBreakpoint,
+  setFunctionBreakpoint: () => setFunctionBreakpoint,
+  setBreakpointsThatArePending: () => setBreakpointsThatArePending,
+  setUsingRegexFunctionBreakpoint: () => setFunctionBreakpointUsingRegex,
+  set4ThenSet2: () => set4ThenSet2,
 }
 
 module.exports = {

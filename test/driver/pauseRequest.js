@@ -23,7 +23,7 @@ async function pause(DA) {
 }
 
 const tests = {
-  pause: pause,
+  pause: () => pause,
 }
 
 module.exports = {

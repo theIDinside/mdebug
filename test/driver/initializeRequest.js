@@ -5,7 +5,7 @@ async function init(DA) {
 }
 
 const tests = {
-  init: init,
+  init: () => init,
 }
 
 module.exports = {

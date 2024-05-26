@@ -45,7 +45,7 @@ async function threads(DA) {
   )
 }
 const tests = {
-  threads: threads,
+  threads: () => threads,
 }
 
 module.exports = {
