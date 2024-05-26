@@ -152,4 +152,11 @@ CallStack::get_frame(int frame_id) noexcept
   return nullptr;
 }
 
+u64
+CallStack::unwind_buffer_register(u8 level, u16 register_number) noexcept
+{
+  ASSERT(level < reg_unwind_buffer.size(), "out of bounds");
+  return reg_unwind_buffer[level][register_number];
+}
+
 } // namespace sym

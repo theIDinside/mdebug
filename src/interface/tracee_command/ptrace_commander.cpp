@@ -174,6 +174,17 @@ PtraceCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 }
 
 TaskExecuteResponse
+PtraceCommander::resume_target(TraceeController *tc, RunType run) noexcept
+{
+  for (auto &t : tc->threads) {
+    if (t.can_continue()) {
+      tc->resume_task(t, {run, tc::ResumeTarget::Task});
+    }
+  }
+  return TaskExecuteResponse::Ok();
+}
+
+TaskExecuteResponse
 PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
 {
   ASSERT(t.user_stopped || t.tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})",
@@ -185,11 +196,7 @@ PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
       return TaskExecuteResponse::Error(errno);
     }
   }
-  t.stop_collected = false;
-  t.user_stopped = false;
-  t.tracer_stopped = false;
-  t.last_resume_command = type;
-  t.set_dirty();
+  t.set_running(type);
   return TaskExecuteResponse::Ok();
 }
 
@@ -248,7 +255,8 @@ PtraceCommander::install_breakpoint(AddrPtr address) noexcept
 TaskExecuteResponse
 PtraceCommander::read_registers(TaskInfo &t) noexcept
 {
-  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.tid, nullptr, t.regs.registers); ptrace_result == -1) {
+  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.tid, nullptr, t.native_registers());
+      ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   } else {
     return TaskExecuteResponse::Ok();
@@ -269,7 +277,7 @@ PtraceCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
   if (ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   }
-  t.regs.registers->rip = addr;
+  t.native_registers()->rip = addr;
   return TaskExecuteResponse::Ok();
 }
 

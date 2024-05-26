@@ -178,12 +178,12 @@ struct Message
 
 struct ErrorResponse final : ui::UIResult
 {
-  ErrorResponse(std::string &&command, ui::UICommandPtr cmd, std::optional<std::string> &&short_message,
+  ErrorResponse(std::string_view command, ui::UICommandPtr cmd, std::optional<std::string> &&short_message,
                 std::optional<Message> &&message) noexcept;
   ~ErrorResponse() noexcept override = default;
   std::string serialize(int seq) const noexcept final;
 
-  std::string command;
+  std::string_view command;
   std::optional<std::string> short_message;
   std::optional<Message> message;
 };

@@ -17,15 +17,16 @@ public:
   StopReplyParser(const RemoteSettings &settings, std::string_view reply) noexcept;
 
   char stop_reply_kind() noexcept;
-  std::optional<int> parse_exitcode_or_signal() noexcept;
+  std::optional<int> parse_signal() noexcept;
+  std::optional<int> parse_exitcode() noexcept;
   std::optional<Pid> parse_process() noexcept;
-  std::optional<std::pair<Tid, int>> parse_thread_exited() noexcept;
+  std::optional<std::tuple<Pid, Tid, int>> parse_thread_exited() noexcept;
 
   template <char Packet>
   std::pair<std::optional<Pid>, std::optional<int>>
   parse_exited() noexcept
   {
-    const auto signal = parse_exitcode_or_signal();
+    const auto signal = parse_exitcode();
     if (!signal) {
       DLOG(logging::Channel::remote, "Failed to parse signal for {} packet: '{}'", Packet, received_payload);
     }

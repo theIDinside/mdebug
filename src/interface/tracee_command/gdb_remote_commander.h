@@ -71,7 +71,6 @@ class GdbRemoteCommander final : public TraceeCommandInterface
 
   void set_catch_syscalls(bool on) noexcept;
   void inform_supported() noexcept;
-  void configure_session() noexcept;
 
 public:
   GdbRemoteCommander(std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id, std::string &&exec_file,
@@ -82,6 +81,7 @@ public:
   TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse resume_task(TaskInfo &t, RunType type) noexcept final;
+  TaskExecuteResponse resume_target(TraceeController *tc, RunType run) noexcept final;
   TaskExecuteResponse stop_task(TaskInfo &t) noexcept final;
   TaskExecuteResponse enable_breakpoint(BreakpointLocation &location) noexcept final;
   TaskExecuteResponse disable_breakpoint(BreakpointLocation &location) noexcept final;

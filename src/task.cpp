@@ -1,6 +1,7 @@
 #include "task.h"
 #include "arch.h"
 #include "bp.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_binary_reader.h"
@@ -39,6 +40,28 @@ TaskInfo::create_running(pid_t tid, TargetFormat format, ArchType arch)
   return TaskInfo{tid, false, format, arch};
 }
 
+user_regs_struct *
+TaskInfo::native_registers() const noexcept
+{
+  ASSERT(regs.data_format == TargetFormat::Native, "Used in the wrong context");
+  return regs.registers;
+}
+
+RegisterBlock<ArchType::X86_64> *
+TaskInfo::remote_x86_registers() const noexcept
+{
+  ASSERT(regs.data_format == TargetFormat::Remote, "Used in the wrong context");
+  return regs.x86_block;
+}
+
+void
+TaskInfo::remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept
+{
+  ASSERT(regs.data_format == TargetFormat::Remote, "Expected remote format");
+  regs.x86_block->from_hexdigit_encoding(hex_encoded);
+  set_updated();
+}
+
 u64
 TaskInfo::get_register(u64 reg_num) noexcept
 {
@@ -50,6 +73,18 @@ TaskInfo::get_register(u64 reg_num) noexcept
     return regs.x86_block->get_64bit_reg(reg_num);
     break;
   }
+}
+
+u64
+TaskInfo::unwind_buffer_register(u8 level, u16 register_number) const noexcept
+{
+  return call_stack->unwind_buffer_register(level, register_number);
+}
+
+void
+TaskInfo::set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept
+{
+  regs.x86_block->set_registers(data);
 }
 
 static void
@@ -80,6 +115,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   }
 
   // initialize bottom frame's registers with actual live register contents
+
   auto &buf = call_stack->reg_unwind_buffer;
   buf.clear();
   buf.reserve(call_stack->pcs.capacity());
@@ -176,8 +212,19 @@ TaskInfo::get_rsp() const noexcept
   }
 }
 
+std::uintptr_t
+TaskInfo::get_orig_rax() const noexcept
+{
+  switch (regs.data_format) {
+  case TargetFormat::Native:
+    return regs.registers->orig_rax;
+  case TargetFormat::Remote:
+    return regs.x86_block->get_64bit_reg(57);
+  }
+}
+
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc, tc::RunType resume_action) noexcept
+TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept
 {
   ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
   auto loc = tc->pbps.location_at(loc_stat->loc);
@@ -188,8 +235,12 @@ TaskInfo::step_over_breakpoint(TraceeController *tc, tc::RunType resume_action) 
   loc->disable(control);
   loc_stat->stepped_over = true;
   loc_stat->re_enable_bp = true;
-  loc_stat->should_resume = resume_action != tc::RunType::None;
-  control.resume_task(*this, tc::RunType::Step);
+  loc_stat->should_resume = resume_action.type != tc::RunType::None;
+
+  next_resume_action = resume_action;
+
+  const auto result = control.resume_task(*this, tc::RunType::Step);
+  ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 
 void
@@ -197,6 +248,16 @@ TaskInfo::set_stop() noexcept
 {
   user_stopped = true;
   tracer_stopped = true;
+}
+
+void
+TaskInfo::set_running(tc::RunType type) noexcept
+{
+  stop_collected = false;
+  user_stopped = false;
+  tracer_stopped = false;
+  last_resume_command = type;
+  set_dirty();
 }
 
 void
@@ -220,15 +281,24 @@ TaskInfo::set_dirty() noexcept
 }
 
 void
+TaskInfo::set_updated() noexcept
+{
+  rip_dirty = false;
+  cache_dirty = false;
+}
+
+void
 TaskInfo::add_bpstat(AddrPtr address) noexcept
 {
   loc_stat = LocationStatus{.loc = address, .should_resume = false, .stepped_over = false, .re_enable_bp = false};
 }
 
-void
-TaskInfo::remove_bpstat() noexcept
+std::optional<LocationStatus>
+TaskInfo::clear_bpstat() noexcept
 {
+  const auto copy = loc_stat;
   loc_stat = std::nullopt;
+  return copy;
 }
 
 void
@@ -248,6 +318,13 @@ bool
 TaskInfo::stop_processed() const noexcept
 {
   return stop_collected;
+}
+
+void
+TaskInfo::collect_stop() noexcept
+{
+  stop_collected = true;
+  tracer_stopped = true;
 }
 
 TaskVMInfo

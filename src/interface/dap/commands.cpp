@@ -3,6 +3,7 @@
 #include "common.h"
 #include "events/event.h"
 #include "interface/attach_args.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "interface/ui_command.h"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
@@ -51,9 +52,9 @@ from_str(std::string_view granularity) noexcept
   }
 }
 
-ErrorResponse::ErrorResponse(std::string &&command, ui::UICommandPtr cmd,
+ErrorResponse::ErrorResponse(std::string_view command, ui::UICommandPtr cmd,
                              std::optional<std::string> &&short_message, std::optional<Message> &&message) noexcept
-    : ui::UIResult(false, cmd), command(std::move(command)), short_message(std::move(short_message)),
+    : ui::UIResult(false, cmd), command(command), short_message(std::move(short_message)),
       message(std::move(message))
 {
 }
@@ -143,7 +144,7 @@ Continue::execute(Tracer *tracer) noexcept
     } else {
       DBGLOG(core, "continue single thread: {}", thread_id);
       auto t = target->get_task(thread_id);
-      target->resume_task(*t, tc::RunType::Continue);
+      target->resume_task(*t, {tc::RunType::Continue, tc::ResumeTarget::Task});
     }
   }
 
@@ -397,7 +398,7 @@ ReadMemory::execute(Tracer *tracer) noexcept
     res->unreadable_bytes = 0;
     return res;
   } else {
-    return new ErrorResponse{"readMemory", this, "Address parameter could not be parsed.", std::nullopt};
+    return new ErrorResponse{Request, this, "Address parameter could not be parsed.", std::nullopt};
   }
 }
 
@@ -620,7 +621,7 @@ StackTrace::execute(Tracer *tracer) noexcept
   auto target = tracer->get_current();
   auto task = target->get_task(threadId);
   if (task == nullptr) {
-    TODO(fmt::format("Handle not-found thread by threadId {}", threadId));
+    return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
   }
   auto &cfs = target->build_callframe_stack(*task, CallStackRequest::full());
 
@@ -731,7 +732,7 @@ Disassemble::execute(Tracer *tracer) noexcept
     }
     return res;
   } else {
-    return new ErrorResponse{"disassemble", this, "Address parameter could not be parsed.", std::nullopt};
+    return new ErrorResponse{Request, this, "Address parameter could not be parsed.", std::nullopt};
   }
 }
 
@@ -784,7 +785,7 @@ Variables::execute(Tracer *tracer) noexcept
   }
 
   return new ErrorResponse{
-      "variables", this,
+      Request, this,
       std::make_optional(fmt::format("Could not find variable with variablesReference {}", var_ref)),
       std::nullopt};
 }

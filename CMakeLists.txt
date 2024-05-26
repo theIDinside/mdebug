@@ -12,15 +12,16 @@ set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 set(MIDAS_SOURCES
   # root
-  src/main.cpp
   src/awaiter.cpp
   src/awaiter.h
   src/bp.cpp
   src/bp.h
   src/common.cpp
   src/common.h
+  src/event_queue_event_param.h
   src/event_queue.cpp
   src/event_queue.h
+  src/main.cpp
   src/mdb_config.cpp
   src/mdb_config.h
   src/notify_pipe.cpp
@@ -60,12 +61,12 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf.h
   src/symbolication/dwarf/debug_info_reader.cpp
   src/symbolication/dwarf/debug_info_reader.h
-  src/symbolication/dwarf/die.cpp
-  src/symbolication/dwarf/die.h
   src/symbolication/dwarf/die_iterator.cpp
   src/symbolication/dwarf/die_iterator.h
   src/symbolication/dwarf/die_ref.cpp
   src/symbolication/dwarf/die_ref.h
+  src/symbolication/dwarf/die.cpp
+  src/symbolication/dwarf/die.h
   src/symbolication/dwarf/lnp.cpp
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
@@ -86,10 +87,10 @@ set(MIDAS_SOURCES
   src/symbolication/objfile.h
   src/symbolication/type.cpp
   src/symbolication/type.h
-  src/symbolication/value.cpp
-  src/symbolication/value.h
   src/symbolication/value_visualizer.cpp
   src/symbolication/value_visualizer.h
+  src/symbolication/value.cpp
+  src/symbolication/value.h
   # tasks
   src/tasks/dwarf_unit_data.cpp
   src/tasks/dwarf_unit_data.h
@@ -106,12 +107,12 @@ set(MIDAS_SOURCES
   src/utils/logger.h
   src/utils/scoped_fd.cpp
   src/utils/scoped_fd.h
+  src/utils/sync_barrier.cpp
+  src/utils/sync_barrier.h
   src/utils/thread_pool.cpp
   src/utils/thread_pool.h
   src/utils/worker_task.cpp
   src/utils/worker_task.h
-  src/utils/sync_barrier.cpp
-  src/utils/sync_barrier.h
   src/utils/xml.cpp
   src/utils/xml.h
   # eval
@@ -139,20 +140,22 @@ set(MIDAS_SOURCES
   # Gdb Remote interface
   src/interface/remotegdb/connection.cpp
   src/interface/remotegdb/connection.h
+  src/interface/remotegdb/shared.cpp
+  src/interface/remotegdb/shared.h
   src/interface/remotegdb/stopreply_parser.cpp
   src/interface/remotegdb/stopreply_parser.h
   src/interface/remotegdb/target_description.cpp
   src/interface/remotegdb/target_description.h
-  src/interface/remotegdb/shared.cpp
-  src/interface/remotegdb/shared.h
+  src/interface/remotegdb/wait_event_parser.cpp
+  src/interface/remotegdb/wait_event_parser.h
 
   # Tracee Interfaces
-  src/interface/tracee_command/tracee_command_interface.cpp
-  src/interface/tracee_command/tracee_command_interface.h
   src/interface/tracee_command/gdb_remote_commander.cpp
   src/interface/tracee_command/gdb_remote_commander.h
   src/interface/tracee_command/ptrace_commander.cpp
   src/interface/tracee_command/ptrace_commander.h
+  src/interface/tracee_command/tracee_command_interface.cpp
+  src/interface/tracee_command/tracee_command_interface.h
 
 )
 

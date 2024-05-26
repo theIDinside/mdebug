@@ -22,7 +22,24 @@ template <typename T, typename U> using ViewOfParameter = U;
   [&Buf](auto &&...args) noexcept {                                                                               \
     auto it = fmt::format_to(Buf.begin(), FmtStr, args...);                                                       \
     return std::string_view{Buf.begin(), it};                                                                     \
-  }(__VA_ARGS__);
+  }(__VA_ARGS__)
+
+template <std::integral Value>
+static std::string_view
+convert_to_target(std::array<char, 16> &outbuf, Value value) noexcept
+{
+  constexpr auto TSize = sizeof(Value);
+  std::array<u8, TSize> bytes{};
+  std::memcpy(bytes.data(), &value, TSize);
+
+  auto ptr = outbuf.data();
+  for (const auto byte : bytes) {
+    auto res = std::to_chars(ptr, ptr + 2, byte, 16);
+    ASSERT(res.ec == std::errc(), "to_chars conversion failed");
+    ptr = res.ptr;
+  }
+  return std::string_view{outbuf.data(), ptr};
+}
 
 template <size_t N>
 static ViewOfParameter<char[], std::string_view>
@@ -58,10 +75,42 @@ GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexc
     // we can do reads while running
   } else {
   }
-  TODO("Implement");
-  (void)address;
-  (void)size;
-  (void)read_buffer;
+  std::array<char, 64> buf{};
+  const auto cmd = SerializeCommand(buf, "m{:x},{}", address.get(), size);
+
+  const auto res = connection->send_command_with_response(cmd, 1000);
+  if (res.is_error()) {
+    return ReadResult::SystemError(0);
+  }
+
+  const auto &msg = res.value();
+  std::string_view str{msg};
+  str.remove_prefix(1);
+  auto ptr = read_buffer;
+
+  while (str.size() > 2) {
+    if (str[1] == '*') {
+      const char c = str[0];
+      char repeat_value[2]{c, c};
+      const auto hex_encode_repeat_count = static_cast<u32>(str[2] - char{29});
+      const auto binary_repeat_count = (hex_encode_repeat_count + 1) / 2;
+      u8 value = 0;
+      std::from_chars(repeat_value, repeat_value + 2, value, 16);
+      std::fill_n(ptr, binary_repeat_count, value);
+      ptr += binary_repeat_count;
+      str.remove_prefix(3);
+    } else {
+      auto res = std::from_chars(str.data(), str.data() + 2, *ptr, 16);
+      if (res.ec != std::errc()) {
+        PANIC("failed to convert read data from memory from hex digits to binary");
+      }
+      str.remove_prefix(2);
+      ++ptr;
+    }
+  }
+  // NOTA BENE: We actually return the *decoded* size of read bytes, not the actual read bytes from the remote.
+  // That shit would make no sense, since this is represented by the TraceeCommand interface
+  return ReadResult::Ok(ptr - read_buffer);
 }
 TraceeWriteResult
 GdbRemoteCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
@@ -93,22 +142,6 @@ GdbRemoteCommander::set_catch_syscalls(bool on) noexcept
   connection->settings().catch_syscalls = on;
 }
 
-void
-GdbRemoteCommander::configure_session() noexcept
-{
-  // gdb::CommandSerializationBuffer<256> packet_buffer{};
-  // const auto extended_mode = connection->send_packet_wait_ack(packet_buffer.write_packet("{}", "!"));
-  // ASSERT(extended_mode.was_received(), "Expected to have seen extended request but remote never saw it");
-
-  // const auto op_res = connection->send_packet_wait_ack(packet_buffer.write_packet(
-  //     "{}", "qSupported:multiprocess+;swbreak+;hwbreak+;fork-events+;vfork-events+;exec-events+"));
-
-  // ASSERT(op_res.was_received(), "Attempted to send qSupported request but it was never seen");
-  // DLOG(LogChannel::remote, "Configuring remote for No Ack Mode");
-  // const auto no_ack_res = connection->send_packet(packet_buffer.write_packet("{}", "QStartNoAckMode"));
-  // ASSERT(no_ack_res.was_received(), "Attempted to send qSupported request but it was never seen");
-}
-
 TaskExecuteResponse
 GdbRemoteCommander::resume_task(TaskInfo &t, RunType type) noexcept
 {
@@ -119,14 +152,51 @@ GdbRemoteCommander::resume_task(TaskInfo &t, RunType type) noexcept
   std::string_view resume_command;
   switch (type) {
   case RunType::Step: {
-    auto it = fmt::format_to(buf.begin(), "vCont;s:p{:x}.{:x}", pid, t.tid);
-    resume_command = std::string_view{buf.begin(), it};
+    resume_command = SerializeCommand(buf, "vCont;s:p{:x}.{:x}", pid, t.tid);
+    break;
   }
   case RunType::Continue:
   case RunType::SyscallContinue:
   case RunType::UNKNOWN: {
-    auto it = fmt::format_to(buf.begin(), "vCont;c:p{:x}.{:x}", pid, t.tid);
-    resume_command = std::string_view{buf.begin(), it};
+    resume_command = SerializeCommand(buf, "vCont;c:p{:x}.{:x}", pid, t.tid);
+    break;
+  }
+  }
+
+  const auto resume_err = connection->send_vcont_command(resume_command, {});
+  ASSERT(!resume_err.has_value(), "vCont resume command failed");
+  t.set_running(type);
+
+  return TaskExecuteResponse::Ok();
+}
+
+TaskExecuteResponse
+GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
+{
+  set_catch_syscalls(type == RunType::SyscallContinue);
+
+  for (auto &t : tc->threads) {
+    if (t.loc_stat) {
+      t.step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
+      if (!connection->settings().is_non_stop) {
+        return TaskExecuteResponse::Ok();
+      }
+    }
+  }
+
+  const auto pid = task_leader();
+  std::array<char, 128> buf{};
+  std::string_view resume_command;
+  switch (type) {
+  case RunType::Step: {
+    resume_command = SerializeCommand(buf, "vCont;s:p{:x}.-1", pid);
+    break;
+  }
+  case RunType::Continue:
+  case RunType::SyscallContinue:
+  case RunType::UNKNOWN: {
+    resume_command = SerializeCommand(buf, "vCont;c:p{:x}.-1", pid);
+    break;
   }
   }
 
@@ -198,53 +268,16 @@ GdbRemoteCommander::read_registers(TaskInfo &t) noexcept
   }
 
   auto register_contents = result.take_value();
-  DBGLOG(core, "Read register field for {}", t.tid);
-  RegisterData regs{};
+  DBGLOG(remote, "Read register field for {}: {}", t.tid, register_contents);
 
   std::string_view payload{register_contents};
-  std::array<char, 2048> normalized{};
-  auto dec_length = 0u;
 
   ASSERT(payload.front() == '$', "Expected OK response");
   payload.remove_prefix(1);
-  auto rle_decodings = 0;
 
-  std::vector<u8> decoded{};
-
-  const auto now = std::chrono::high_resolution_clock::now();
-  for (auto i = 0u; i < payload.size();) {
-    if (payload[i] == '*') {
-      const auto repeat_count = static_cast<u32>(payload[i + 1] - char{29});
-      std::fill_n(normalized.begin() + dec_length, repeat_count, payload[i - 1]);
-      dec_length += repeat_count;
-      i += 2;
-      ++rle_decodings;
-    } else {
-      normalized[dec_length++] = payload[i];
-      i += 1;
-    }
-  }
-  const auto then = std::chrono::high_resolution_clock::now();
-  const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(then - now).count();
-  DBGLOG(core, "Decoded RLE {} times in {}ns", rle_decodings, nanos);
-
-  ASSERT(dec_length == arch_info->register_block_size * 2,
-         "Expected normalized register data to be x2 of actual register data. Expected: {}, was {}",
-         arch_info->register_block_size * 2, dec_length);
-
-  auto byte_pos = 0;
   switch (arch_info->type) {
   case ArchType::X86_64: {
-    std::string_view normalized_str{normalized.data(), normalized.data() + dec_length};
-    ASSERT(normalized_str.size() % 2 == 0, "Expected string to be divisible by 2");
-    while (!normalized_str.empty()) {
-      ASSERT(
-          std::from_chars(normalized_str.data(), normalized_str.data() + 2, t.regs.x86_block->file[byte_pos], 16)
-                  .ec == std::errc(),
-          "Failed to convert 2-hex digit format into binary form at position {}", byte_pos);
-      byte_pos++;
-      normalized_str.remove_prefix(2);
-    }
+    t.remote_from_hexdigit_encoding(payload);
     break;
   }
   case ArchType::COUNT:
@@ -260,10 +293,33 @@ GdbRemoteCommander::write_registers(const user_regs_struct &input) noexcept
   (void)input;
   TODO("Implement");
 }
+
 TaskExecuteResponse
 GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
 {
-  TODO_FMT("Implement set_pc for {} {}", t.tid, addr);
+  std::array<char, 64> thr_set_bytes{};
+  std::array<char, 64> set_pc_bytes{};
+  std::array<char, 16> register_contents{};
+  auto register_value = convert_to_target(register_contents, addr.get());
+  auto cmds = std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", task_leader(), t.tid),
+                             SerializeCommand(set_pc_bytes, "P{:x}={}", arch_info->pc_number, register_value)});
+  auto response = connection->send_inorder_command_chain(cmds, 1000);
+  if (response.is_error()) {
+    DBGLOG(remote, "Failed to set pc");
+    return TaskExecuteResponse::Error(0);
+  }
+  auto responses = response.take_value();
+  auto i = 0;
+  for (const auto &r : responses) {
+    if (r != "$OK") {
+      DBGLOG(remote, "Response for {} was not OK: {}", cmds[i], r);
+      return TaskExecuteResponse::Error(0);
+    }
+    ++i;
+  }
+
+  t.remote_x86_registers()->set_pc(addr);
+  return TaskExecuteResponse::Ok(0);
 }
 TaskExecuteResponse
 GdbRemoteCommander::disconnect(bool terminate) noexcept
@@ -275,13 +331,17 @@ GdbRemoteCommander::disconnect(bool terminate) noexcept
 bool
 GdbRemoteCommander::perform_shutdown() noexcept
 {
-  TODO("Implement");
+  DBGLOG(core, "Perform shut down for GdbRemote Commander - not sure anything's really needed here?");
+  return true;
 }
 
 bool
 GdbRemoteCommander::initialize() noexcept
 {
-  connection->initialize_thread();
+  // TODO(simon): possibly have args to the attach config, where we do some work here, depending on that arg -
+  // however, we can *not* wait until now
+  //  to actually initialize the remote connection thread. It has to start before this, because it is required to
+  //  determine how many targets we have, object files to parse, etc
   return true;
 }
 bool
@@ -389,6 +449,9 @@ RemoteSessionConfigurator::configure_session() noexcept
       "vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386;QNonStop+"};
   SuccessOtherwiseErr(qSupported, "Failed to request supported options");
   conn->parse_supported(qSupported.result.value());
+
+  SocketCommand enable_thread_events{"QThreadEvents:1"};
+  OkOtherwiseErr(enable_thread_events, "Failed to set ThreadEvents to ON");
 
   // IF WE HAVE CFG = NON STOP, REQUEST TO SET IT
   if (conn->settings().is_non_stop) {

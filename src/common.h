@@ -22,6 +22,14 @@ using Path = fs::path;
 using Tid = pid_t;
 using Pid = pid_t;
 
+struct LWP
+{
+  Pid pid;
+  Tid tid;
+
+  constexpr bool operator<=>(const LWP &other) const = default;
+};
+
 template <typename, typename = void> struct has_begin : std::false_type
 {
 };

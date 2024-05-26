@@ -16,11 +16,27 @@ StopReplyParser::stop_reply_kind() noexcept
 }
 
 std::optional<int>
-StopReplyParser::parse_exitcode_or_signal() noexcept
+StopReplyParser::parse_signal() noexcept
 {
   if (parse_data.size() > 2) {
-    auto signal = RemoteConnection::parse_hexdigits(parse_data.substr(0, 2));
-    parse_data.remove_prefix(2);
+    constexpr auto SignalLengthInHexDigits = 2;
+    auto signal = RemoteConnection::parse_hexdigits(parse_data.substr(0, SignalLengthInHexDigits));
+    parse_data.remove_prefix(SignalLengthInHexDigits);
+    return signal;
+  }
+  return {};
+}
+
+std::optional<int>
+StopReplyParser::parse_exitcode() noexcept
+{
+  if (parse_data.size() > 2) {
+    auto pos = parse_data.find(";");
+    if (pos == parse_data.npos) {
+      return {};
+    }
+    auto signal = RemoteConnection::parse_hexdigits(parse_data.substr(0, pos));
+    parse_data.remove_prefix(pos);
     return signal;
   }
   return {};
@@ -41,10 +57,10 @@ StopReplyParser::parse_process() noexcept
   }
 }
 
-std::optional<std::pair<Tid, int>>
+std::optional<std::tuple<Pid, Tid, int>>
 StopReplyParser::parse_thread_exited() noexcept
 {
-  const auto exit_status = parse_exitcode_or_signal();
+  const auto exit_status = parse_exitcode();
   if (!exit_status) {
     DLOG(logging::Channel::remote, "Failed to parse exit code for w packet: '{}'", received_payload);
   }
@@ -55,13 +71,8 @@ StopReplyParser::parse_thread_exited() noexcept
     return {};
   }
   parse_data.remove_prefix(1);
-  Tid tid{0};
+  const auto [pid, tid] = parse_thread_id(parse_data);
 
-  const auto res = std::from_chars(parse_data.data(), parse_data.data() + parse_data.size(), tid, 16);
-  if (res.ec != std::errc()) {
-    DLOG(logging::Channel::remote, "Invalid 'w' packet. Could not parse thread id from: '{}'", received_payload);
-    return {};
-  }
-  return std::make_pair(tid, exit_status.value());
+  return std::make_tuple(pid, tid, exit_status.value());
 }
 } // namespace gdb

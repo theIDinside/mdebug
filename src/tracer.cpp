@@ -167,64 +167,110 @@ Tracer::handle_init_event(const CoreEvent *evt) noexcept
   tc->emit_stopped(evt->tid, ui::dap::StoppedReason::Entry, "attached", true, {});
 }
 
-bool
+void
+Tracer::handle_core_event(const CoreEvent *evt) noexcept
+{
+  ScopedDefer defer{[&]() { delete evt; }};
+  auto tc = get_controller(evt->target);
+  ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
+
+  tc::ProcessedStopEvent result = process_core_event_determine_proceed(*tc, evt);
+
+  if (tc->stop_all_requested) {
+    if (tc->all_stopped()) {
+      tc->notify_all_stopped();
+    }
+  } else {
+    auto task = tc->get_task(evt->tid);
+    tc->stop_handler->handle_proceed(*task, result);
+  }
+}
+
+tc::ProcessedStopEvent
 Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEvent *evt) noexcept
 {
   // todo(simon): open up for design that involves user-subscribed event handlers (once we get scripting up and
   // running) It is in this event handling, where we can (at the very end of each handler) emit additional "user
   // facing events", that we also can collect values from (perhaps the user wants to stop for a reason, as such
   // their subscribed event handlers will return `false`).
-  using MatchResult = bool;
+  using tc::ProcessedStopEvent;
+  using MatchResult = ProcessedStopEvent;
 
   const auto arch = tc.get_interface().arch_info;
   auto task = tc.get_task(evt->tid);
+  // we _have_ to do this check here, because the event *might* be a ThreadCreated event
+  // and *it* happens *slightly* different depending on if it's a Remote or a Native session that sends it.
+  // Unfortunately.
   if (task) {
     if (!evt->registers->empty()) {
       ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
-      task->regs.x86_block->set_registers(evt->registers);
+      task->set_registers(evt->registers);
       for (const auto &p : evt->registers) {
         if (p.first == 16) {
           task->rip_dirty = false;
         }
       }
     }
+    task->collect_stop();
   }
+  const CoreEvent &r = *evt;
+  LogEvent(r, "Handling");
   // clang-format off
   return std::visit(Match {
       [&](const WatchpointEvent &e) -> MatchResult {
         (void)e;
         TODO("WatchpointEvent");
-        return true;
+        return ProcessedStopEvent::ResumeAny();
       },
       [&](const SyscallEvent &e) -> MatchResult {
         (void)e;
         TODO("SyscallEvent");
-        return true;
+        return ProcessedStopEvent::ResumeAny();
       },
       [&](const ThreadCreated &e) -> MatchResult {
         auto task = tc.get_task(e.thread_id);
+        // means this event was produced by a Remote session. Construct the task now
+        if(!task) {
+          tc.new_task(e.thread_id);
+          task = tc.get_task(e.thread_id);
+          if (!evt->registers->empty()) {
+            ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
+            task->set_registers(evt->registers);
+            for (const auto &p : evt->registers) {
+              if (p.first == 16) {
+                task->rip_dirty = false;
+              }
+            }
+          }
+        }
         task->initialize();
         const auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Started, e.thread_id};
         Tracer::Instance->post_event(evt);
-        return true;
+
+        return ProcessedStopEvent{true, e.resume_action};
+        // return ProcessedStopEvent{true, false, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}};
       },
       [&](const ThreadExited &e) -> MatchResult {
         auto t = tc.get_task(e.thread_id);
         tc.reap_task(*t);
-        return !tc.stop_handler->event_settings.thread_exit_stop;
+        if(e.process_needs_resuming) {
+          return ProcessedStopEvent{!tc.stop_handler->event_settings.thread_exit_stop && e.process_needs_resuming, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+        } else {
+          return ProcessedStopEvent{!tc.stop_handler->event_settings.thread_exit_stop, {}};
+        }
       },
       [&](const BreakpointHitEvent &e) -> MatchResult {
         // todo(simon): here we should start building upon global event system, like in gdb, where the user can hook into specific events.
         // in this particular case, we could emit a BreakpointEvent{user_ids_that_were_hit} and let the user look up the bps, and use them instead of passing
         // the data along; that way we get to make it asynchronous - because user code or core code might want to delete the breakpoint _before_ a user wants to use it.
         // Adding this lookup by key feature makes that possible, it also makes the implementation and reasoning about life times *SUBSTANTIALLY* easier.
-
         auto t = tc.get_task(e.thread_id);
+
         auto bp_addy = e.address_val->or_else([&]() {
           // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
           return std::optional{tc.get_caching_pc(*t).get() - 1};
         }).value();
-        tc.set_pc(*t, bp_addy);
+
         auto bp_loc = tc.pbps.location_at(bp_addy);
         const auto users = bp_loc->loc_users();
         bool should_resume = true;
@@ -238,35 +284,32 @@ Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEve
             t->add_bpstat(user->address().value());
           }
         }
-
-        return should_resume;
+        return ProcessedStopEvent{should_resume, {}};
       },
       [&](const Fork &e) -> MatchResult {
         (void)e;
         TODO("Fork");
-        return true;
+        return ProcessedStopEvent{true, {}};
       },
       [&](const Clone &e) -> MatchResult {
         tc.new_task(e.child_tid);
         if(e.vm_info) {
           tc.set_task_vm_info(e.child_tid, e.vm_info.value());
         }
-
-        return !tc.stop_handler->event_settings.clone_stop;
+        return ProcessedStopEvent{!tc.stop_handler->event_settings.clone_stop,  {}};
       },
       [&](const Exec &e) -> MatchResult {
         tc.post_exec(e.exec_file);
-        return !tc.stop_handler->event_settings.exec_stop;
+        return ProcessedStopEvent{!tc.stop_handler->event_settings.exec_stop, {}};
       },
       [&](const ProcessExited &e) -> MatchResult {
-        (void)e;
-        TODO("ProcessExited");
-        return true;
+        tc.reap_task(*task);
+        return ProcessedStopEvent{false, {}};
       },
       [&](const LibraryEvent &e) -> MatchResult {
         (void)e;
         TODO("LibraryEvent");
-        return true;
+        return ProcessedStopEvent{true, {}};
       },
       [&](const Signal &e) -> MatchResult {
         auto t = tc.get_task(e.thread_id);
@@ -275,43 +318,33 @@ Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEve
           tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
         });
         // TODO: Allow signals through / stop process / etc. Allow for configurability here.
-        return false;
+        return ProcessedStopEvent{false, {}};
       },
       [&](const Stepped& e) -> MatchResult {
+        if(e.loc_stat) {
+          ASSERT(e.loc_stat->stepped_over, "how did we end up here if we did not step over a breakpoint?");
+          auto bp_loc = tc.pbps.location_at(e.loc_stat->loc);
+          if(e.loc_stat->re_enable_bp) {
+            bp_loc->enable(tc.get_interface());
+          }
+        }
+
         if(e.stop) {
           tc.emit_stepped_stop({.pid = tc.task_leader, .tid = task->tid});
-          return false;
+          return ProcessedStopEvent{false,  {}};
         } else {
-          return true;
+          const auto resume = e.loc_stat.transform([](const auto& loc) { return loc.should_resume; }).value_or(false);
+          return ProcessedStopEvent{resume, e.resume_when_done};
         }
       },
-      [&](const DeferToProceed& e) -> MatchResult {
+      [&](const DeferToSupervisor& e) -> MatchResult {
         // And if there is no Proceed action installed, default action is taken (RESUME)
-        return true && !e.attached;
+        return ProcessedStopEvent{true && !e.attached, {}};
       },
     },
     *evt->event
   );
   // clang-format on
-}
-
-void
-Tracer::handle_core_event(const CoreEvent *evt) noexcept
-{
-  ScopedDefer defer{[&]() { delete evt; }};
-  auto tc = get_controller(evt->target);
-  ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
-
-  bool should_resume = process_core_event_determine_proceed(*tc, evt);
-
-  if (tc->stop_all_requested) {
-    if (tc->all_stopped()) {
-      tc->notify_all_stopped();
-    }
-  } else {
-    auto task = tc->get_task(evt->tid);
-    tc->stop_handler->handle_proceed(*task, should_resume);
-  }
 }
 
 void

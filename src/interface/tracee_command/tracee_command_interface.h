@@ -24,6 +24,46 @@ struct RemoteSettings;
 /// Tracee Control
 namespace tc {
 
+enum class RunType : u8
+{
+  Step = 0b0001,
+  Continue = 0b0010,
+  SyscallContinue = 0b0011,
+  UNKNOWN = 0b0000,
+  None = UNKNOWN
+};
+
+enum class ResumeTarget : u8
+{
+  None = 0,
+  Task = 1,
+  AllNonRunningInProcess = 2
+};
+
+struct ResumeAction
+{
+  RunType type;
+  ResumeTarget target;
+};
+
+enum class ShouldProceed
+{
+  DoNothing,
+  Resume,
+  StopAll
+};
+
+struct ProcessedStopEvent
+{
+  bool should_resume;
+  std::optional<tc::ResumeAction> res;
+  constexpr static auto
+  ResumeAny() noexcept
+  {
+    return ProcessedStopEvent{true, {}};
+  }
+};
+
 struct TraceeWriteResult
 {
   bool success;
@@ -144,15 +184,6 @@ struct TaskExecuteResponse
   }
 };
 
-enum class RunType : u8
-{
-  Step = 0b0001,
-  Continue = 0b0010,
-  SyscallContinue = 0b0011,
-  UNKNOWN = 0b0000,
-  None = UNKNOWN
-};
-
 std::string_view to_str(RunType type) noexcept;
 
 using InterfaceConfig = std::variant<PtraceCfg, GdbRemoteCfg>;
@@ -162,12 +193,6 @@ struct WriteError
   AddrPtr address;
   u32 bytes_written;
   int sys_errno;
-};
-
-enum DisconnectBehavior
-{
-  ResumeTarget,
-  TerminateTarget
 };
 
 struct ObjectFileDescriptor
@@ -213,6 +238,7 @@ public:
   virtual TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse resume_task(TaskInfo &t, RunType run) noexcept = 0;
+  virtual TaskExecuteResponse resume_target(TraceeController *tc, RunType run) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse stop_task(TaskInfo &t) noexcept = 0;
 
@@ -300,3 +326,60 @@ public:
 };
 
 } // namespace tc
+
+namespace fmt {
+
+template <> struct formatter<tc::RunType>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const tc::RunType &type, FormatContext &ctx) const
+  {
+    switch (type) {
+    case tc::RunType::Step:
+      return fmt::format_to(ctx.out(), "RunType::Step");
+    case tc::RunType::Continue:
+      return fmt::format_to(ctx.out(), "RunType::Continue");
+    case tc::RunType::SyscallContinue:
+      return fmt::format_to(ctx.out(), "RunType::SyscallContinue");
+    case tc::RunType::UNKNOWN:
+      return fmt::format_to(ctx.out(), "RunType::UNKNOWN");
+    }
+  }
+};
+
+template <> struct formatter<tc::ResumeTarget>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  constexpr auto
+  format(const tc::ResumeTarget &tgt, FormatContext &ctx) const
+  {
+
+    switch (tgt) {
+    case tc::ResumeTarget::Task:
+      return fmt::format_to(ctx.out(), "ResumeTarget::Task");
+    case tc::ResumeTarget::AllNonRunningInProcess:
+      return fmt::format_to(ctx.out(), "ResumeTarget::AllNonRunningInProcess");
+    case tc::ResumeTarget::None:
+      return fmt::format_to(ctx.out(), "ResumeTarget::None");
+    default:
+      static_assert(always_false<FormatContext>, "All cases not handled");
+    }
+  }
+};
+
+} // namespace fmt

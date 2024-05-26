@@ -196,6 +196,7 @@ struct CallStack
   ~CallStack() = default;
 
   Frame *get_frame(int frame_id) noexcept;
+  u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
 
   Tid tid; // the task associated with this call stack
   bool dirty;

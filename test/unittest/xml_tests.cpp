@@ -7,15 +7,23 @@
 #include <utils/xml.h>
 
 /**
+
+Hgp11236.1127a
+
+Hgp0.0
+
+!
++
 qSupported:multiprocess+;swbreak+;hwbreak+;library+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386;QNonStop+
++
+QThreadEvents:1
 +
 QNonStop:1
 +
-!
-+
 QDisableRandomization:1
 +
-Z0,400fd9,0
+Z0,da1140,0
+Z0,4011da,1
 +
 vCont;c
 +

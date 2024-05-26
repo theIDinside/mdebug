@@ -128,7 +128,8 @@ public:
   ThreadProceedAction *get_proceed_action(const TaskInfo &t) noexcept;
   void remove_action(const TaskInfo &t) noexcept;
 
-  void handle_proceed(TaskInfo &info, bool should_resume) noexcept;
+  void handle_proceed(TaskInfo &info, tc::ProcessedStopEvent should_resume) noexcept;
+
   CoreEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;

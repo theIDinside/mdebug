@@ -2,6 +2,7 @@
 #include "awaiter.h"
 #include "bp.h"
 #include "common.h"
+#include "event_queue.h"
 #include "events/event.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
@@ -25,6 +26,8 @@
 
 template <typename T> using Set = std::unordered_set<T>;
 
+struct DeferToSupervisor;
+
 namespace sym {
 class Unwinder;
 struct UnwinderSymbolFilePair;
@@ -36,14 +39,6 @@ namespace dap {
 class VariablesReference;
 };
 }; // namespace ui
-
-struct LWP
-{
-  Pid pid;
-  Tid tid;
-
-  constexpr bool operator<=>(const LWP &other) const = default;
-};
 
 using Address = std::uintptr_t;
 struct ObjectFile;
@@ -133,7 +128,7 @@ public:
   /* Resumes all tasks in this target. */
   void resume_target(tc::RunType type) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
-  void resume_task(TaskInfo &task, tc::RunType type) noexcept;
+  void resume_task(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all(TaskInfo *requesting_task) noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
@@ -159,6 +154,7 @@ public:
                     std::vector<int> bps_hit) noexcept;
   void emit_breakpoint_event(std::string_view reason, const UserBreakpoint &bp,
                              std::optional<std::string> message) noexcept;
+  tc::ProcessedStopEvent process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;

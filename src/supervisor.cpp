@@ -211,15 +211,11 @@ TraceeController::resume_target(tc::RunType type) noexcept
 {
   DBGLOG(core, "[supervisor]: resume tracee {}", to_str(type));
   stop_all_requested = false;
-  for (auto &t : threads) {
-    if (t.can_continue()) {
-      resume_task(t, type);
-    }
-  }
+  tracee_interface->resume_target(this, type);
 }
 
 void
-TraceeController::resume_task(TaskInfo &task, tc::RunType type) noexcept
+TraceeController::resume_task(TaskInfo &task, tc::ResumeAction type) noexcept
 {
   stop_all_requested = false;
   bool resume_task = !(task.loc_stat);
@@ -230,14 +226,14 @@ TraceeController::resume_task(TaskInfo &task, tc::RunType type) noexcept
     if (location) {
       task.step_over_breakpoint(this, type);
     } else {
-      task.remove_bpstat();
+      task.clear_bpstat();
       resume_task = true;
     }
   }
 
   // we do it like this, to not have to say tc->resume_task(...) in multiple places.
   if (resume_task) {
-    const auto res = tracee_interface->resume_task(task, type);
+    const auto res = tracee_interface->resume_task(task, type.type);
     CDLOG(!res.is_ok(), core, "Unable to resume task {}: {}", task.tid, strerror(res.sys_errno));
   }
   task.wait_status = WaitStatus{WaitStatusKind::NotKnown, {}};
@@ -371,6 +367,12 @@ TraceeController::emit_breakpoint_event(std::string_view reason, const UserBreak
                                         std::optional<std::string> message) noexcept
 {
   Tracer::Instance->post_event(new ui::dap::BreakpointEvent{reason, message, &bp});
+}
+
+tc::ProcessedStopEvent
+TraceeController::process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept
+{
+  TODO("implement TraceeController::process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept");
 }
 
 utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>

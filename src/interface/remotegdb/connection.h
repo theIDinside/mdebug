@@ -1,6 +1,7 @@
 #pragma once
 #include "interface/remotegdb/target_description.h"
 #include "utils/macros.h"
+#include "wait_event_parser.h"
 #include <barrier>
 #include <bit>
 #include <charconv>
@@ -37,6 +38,7 @@ struct RemoteSettings
   bool report_thread_events : 1 {true};
   bool is_noack : 1 {true};
   bool multiprocess_configured : 1 {true};
+  bool thread_events : 1 {true};
 };
 
 static constexpr char HexDigits[]{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
@@ -514,35 +516,6 @@ enum class qXferResponse
   Timeout
 };
 
-constexpr u32
-valueOf(std::string_view v)
-{
-  u64 val = 0;
-  for (const auto ch : v) {
-    val += (ch - 'a' + 1);
-  }
-  return val;
-}
-
-enum class TraceeStopReason : u32
-{
-  Watch = valueOf("watch"),
-  RWatch = valueOf("rwatch"),
-  AWatch = valueOf("awatch"),
-  SyscallEntry = valueOf("syscall_entry"),
-  SyscallReturn = valueOf("syscall_return"),
-  Library = valueOf("library"),
-  ReplayLog = valueOf("replaylog"),
-  SWBreak = valueOf("swbreak"),
-  HWBreak = valueOf("hwbreak"),
-  Fork = valueOf("fork"),
-  VFork = valueOf("vfork"),
-  VForkDone = valueOf("vforkdone"),
-  Exec = valueOf("exec"),
-  Clone = valueOf("clone"),
-  Create = valueOf("create"),
-};
-
 class RemoteConnection
 {
 public:
@@ -567,11 +540,8 @@ private:
 
   int request_command_fd[2];
   int received_async_notif_during_core_ctrl[2];
-  std::barrier<std::function<void()>> give_ctrl_sync{
-      2, []() { DLOG(logging::Channel::core, "Control of Remote Connection given to user."); }};
-
-  std::barrier<std::function<void()>> user_done_sync{
-      2, []() { DLOG(logging::Channel::core, "User done with exclusive control of the connection."); }};
+  std::barrier<> give_ctrl_sync{2};
+  std::barrier<> user_done_sync{2};
 
   std::optional<std::string> pending_notification{std::nullopt};
 
@@ -614,6 +584,9 @@ public:
   // Blocking call for `timeout` ms
   utils::Expected<std::string, SendError> send_command_with_response(std::string_view command,
                                                                      std::optional<int> timeout) noexcept;
+
+  utils::Expected<std::vector<std::string>, SendError>
+  send_inorder_command_chain(std::span<std::string_view> commands, std::optional<int> timeout) noexcept;
 
   // For some bozo reason, vCont commands don't reply with `OK` - that only happens when in noack mode. Dumbest
   // fucking "protocol" in the history of the universe.

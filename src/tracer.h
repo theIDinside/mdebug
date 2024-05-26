@@ -103,8 +103,8 @@ public:
   ui::dap::DAP *dap;
 
 private:
-  [[maybe_unused]] bool process_core_event_determine_proceed(TraceeController &tc,
-                                                             const CoreEvent *event) noexcept;
+  [[maybe_unused]] tc::ProcessedStopEvent process_core_event_determine_proceed(TraceeController &tc,
+                                                                               const CoreEvent *event) noexcept;
   TraceeController *current_target = nullptr;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;

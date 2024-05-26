@@ -218,7 +218,7 @@ BufferedSocket::read_payload() noexcept
   std::string result{};
   result.reserve(end.value() - pos);
   std::copy(cbegin() + pos, cbegin() + end.value(), std::back_inserter(result));
-  consume_n(end.transform([](auto value) { return value + 2; }).value());
+  consume_n(end.transform([](auto value) { return value + 3; }).value());
 
   return result;
 }
@@ -566,6 +566,7 @@ RemoteConnection::read_packets() noexcept
       if (!remote_settings.is_noack) {
         write_ack();
       }
+      DBGLOG(remote, "received: {}", *data);
       switch (message_type(*data)) {
       case MessageType::StopReply:
         process_stop_reply_payload(*data, false);
@@ -606,38 +607,6 @@ enum class TArgKinds
   Unknown
 };
 
-static constexpr std::string_view StopReasons[]{
-    "watch",   "rwatch", "awatch", "syscall_entry", "syscall_return", "library", "replaylog", "swbreak",
-    "hwbreak", "fork",   "vfork",  "vforkdone",     "exec",           "clone",   "create"};
-
-consteval std::array<u32, 15>
-StopReasonTokenFactory()
-{
-  static constexpr std::array<u32, 15> StopReasonTokens{
-      valueOf("watch"),          valueOf("rwatch"),  valueOf("awatch"),    valueOf("syscall_entry"),
-      valueOf("syscall_return"), valueOf("library"), valueOf("replaylog"), valueOf("swbreak"),
-      valueOf("hwbreak"),        valueOf("fork"),    valueOf("vfork"),     valueOf("vforkdone"),
-      valueOf("exec"),           valueOf("clone"),   valueOf("create"),
-  };
-  auto tmp = StopReasonTokens;
-  std::sort(tmp.begin(), tmp.end());
-  return tmp;
-}
-
-constexpr static auto StopReasonTokens = StopReasonTokenFactory();
-
-static_assert(
-    []() {
-      for (const auto token : StopReasonTokens) {
-        if (std::count(StopReasonTokens.begin(), StopReasonTokens.end(), token) != 1) {
-          return false;
-        }
-      }
-
-      return true;
-    }(),
-    "All generated TraceeStopReason convert to unique integer values (relative to itself)");
-
 namespace TArg {
 
 struct Register
@@ -653,265 +622,6 @@ struct Core
 };
 
 } // namespace TArg
-
-enum class ArchId
-{
-  X86_64
-};
-
-// Defaulted to x86_64
-struct RegisterNumbers
-{
-  u32 rip_number{16};
-};
-
-struct ArchInfo
-{
-  ArchId id{ArchId::X86_64};
-  RegisterNumbers regs{};
-};
-
-struct WaitEventParser
-{
-  std::optional<TraceeStopReason> stop_reason;
-  bool control_kind_is_attached;
-  int signal{0};
-  Pid pid{0};
-  Tid tid{0};
-  Pid new_pid{0};
-  Tid new_tid{0};
-  u32 core{0};
-  int syscall_no{0};
-  AddrPtr wp_address{nullptr};
-  std::string exec_path{};
-  RegisterData registers;
-
-  ArchInfo arch{};
-
-  EventDataParam
-  param() const noexcept
-  {
-    return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal};
-  }
-
-  void
-  parse_stop_reason(TraceeStopReason reason, std::string_view val) noexcept
-  {
-    set_stop_reason(reason);
-    switch (reason) {
-    case TraceeStopReason::Watch:
-    case TraceeStopReason::RWatch:
-    case TraceeStopReason::AWatch: {
-      const auto addr = to_addr(val);
-      ASSERT(addr, "Failed to parse address for remote stub watchpoint event from: '{}'", val);
-      set_wp_address(addr.value());
-      break;
-    }
-    case TraceeStopReason::SyscallEntry: {
-      const auto sysnum = RemoteConnection::parse_hexdigits(val);
-      set_syscall_entry(*sysnum);
-      break;
-    }
-    case TraceeStopReason::SyscallReturn: {
-      const auto sysnum = RemoteConnection::parse_hexdigits(val);
-      set_syscall_exit(*sysnum);
-      break;
-    }
-    case TraceeStopReason::Library:
-    case TraceeStopReason::ReplayLog:
-    case TraceeStopReason::SWBreak:
-    case TraceeStopReason::HWBreak:
-      break;
-    case TraceeStopReason::Fork: {
-      parse_fork(val);
-    } break;
-    case TraceeStopReason::VFork: {
-      parse_vfork(val);
-    } break;
-    case TraceeStopReason::VForkDone: {
-    } break;
-    case TraceeStopReason::Exec:
-      set_execed(val);
-      break;
-    case TraceeStopReason::Clone: {
-      parse_clone(val);
-    } break;
-    case TraceeStopReason::Create:
-      break;
-    }
-  }
-
-  bool
-  is_stop_reason(u32 maybeStopReason) noexcept
-  {
-    return std::find(StopReasonTokens.begin(), StopReasonTokens.end(), maybeStopReason) !=
-           std::end(StopReasonTokens);
-  }
-
-  void
-  parse_pid_tid(std::string_view arg) noexcept
-  {
-    const auto [pid, tid] = parse_thread_id(arg);
-    set_pid(pid);
-    set_tid(tid);
-  }
-
-  void
-  parse_core(std::string_view arg) noexcept
-  {
-    ASSERT(core == 0, "core has already been set");
-    u32 parsed_core{0};
-    auto parse = std::from_chars(arg.data(), arg.data() + arg.size(), parsed_core, 16);
-    if (parse.ec != std::errc()) {
-      PANIC("Failed to parse core");
-    }
-    core = parsed_core;
-  }
-
-  // Determines PC value, from the payload sent by the remote. Returns nullopt if no PC was provided (or we
-  // couldn't parse it)
-  std::optional<std::uintptr_t>
-  determine_pc() const noexcept
-  {
-    for (const auto &[no, reg] : registers) {
-      if (no == arch.regs.rip_number) {
-        u64 v;
-        std::memcpy(&v, reg.data(), sizeof(v));
-        return v;
-      }
-    }
-    return {};
-  }
-
-  CoreEvent *
-  new_debugger_event() noexcept
-  {
-    if (stop_reason) {
-      switch (*stop_reason) {
-      case TraceeStopReason::Watch:
-        return CoreEvent::WriteWatchpoint(param(), wp_address, std::move(registers));
-      case TraceeStopReason::RWatch:
-        return CoreEvent::ReadWatchpoint(param(), wp_address, std::move(registers));
-      case TraceeStopReason::AWatch:
-        return CoreEvent::AccessWatchpoint(param(), wp_address, std::move(registers));
-      case TraceeStopReason::SyscallEntry:
-        return CoreEvent::SyscallEntry(param(), syscall_no, std::move(registers));
-      case TraceeStopReason::SyscallReturn:
-        return CoreEvent::SyscallExit(param(), syscall_no, std::move(registers));
-      case TraceeStopReason::Library:
-        return CoreEvent::LibraryEvent(param(), std::move(registers));
-      case TraceeStopReason::ReplayLog:
-        TODO("Implement TraceeStopReason::ReplayLog");
-      case TraceeStopReason::SWBreak: {
-        return CoreEvent::SoftwareBreakpointHit(param(), determine_pc(), std::move(registers));
-      }
-      case TraceeStopReason::HWBreak: {
-        return CoreEvent::HardwareBreakpointHit(param(), determine_pc(), std::move(registers));
-      }
-      case TraceeStopReason::Fork:
-        TODO("Implement handling of TraceeStopReason::Fork");
-      case TraceeStopReason::VFork:
-        TODO("Implement handling of TraceeStopReason::VFork");
-      case TraceeStopReason::VForkDone:
-        TODO("Implement handling of TraceeStopReason::VForkDone");
-      case TraceeStopReason::Exec:
-        TODO("Implement handling of TraceeStopReason::Exec");
-      case TraceeStopReason::Clone:
-        TODO("Implement handling of TraceeStopReason::Clone");
-      case TraceeStopReason::Create:
-        TODO("Implement handling of TraceeStopReason::Create");
-      }
-    }
-    return CoreEvent::DeferToProceed(param(), std::move(registers), control_kind_is_attached);
-  }
-
-  void
-  parse_fork(std::string_view data)
-  {
-    ASSERT(new_pid == 0, "new_pid already set");
-    ASSERT(new_tid == 0, "new_tid already set");
-    const auto [pid, tid] = parse_thread_id(data);
-    new_pid = pid;
-    new_tid = tid;
-  }
-
-  void
-  parse_vfork(std::string_view data)
-  {
-    ASSERT(new_pid == 0, "new_pid already set");
-    ASSERT(new_tid == 0, "new_tid already set");
-    const auto [pid, tid] = parse_thread_id(data);
-    new_pid = pid;
-    new_tid = tid;
-  }
-
-  void
-  set_vfork(Pid newpid, Tid newtid) noexcept
-  {
-    ASSERT(new_pid == 0, "new_pid already set");
-    ASSERT(new_tid == 0, "new_tid already set");
-    new_pid = newpid;
-    new_tid = newtid;
-  }
-
-  void
-  set_wp_address(AddrPtr addr) noexcept
-  {
-    ASSERT(wp_address == nullptr, "wp address already set");
-    wp_address = addr;
-  }
-
-  void
-  set_stop_reason(TraceeStopReason stop) noexcept
-  {
-    ASSERT(!stop_reason.has_value(), "Expected stop reason to not be set");
-    stop_reason = stop;
-  }
-
-  void
-  set_pid(Pid process) noexcept
-  {
-    ASSERT(pid == 0, "pid already set");
-    pid = process;
-  }
-
-  void
-  set_tid(Tid thread) noexcept
-  {
-    ASSERT(tid == 0, "tid already set");
-    tid = thread;
-  }
-
-  void
-  set_execed(std::string_view exec) noexcept
-  {
-    exec_path = exec;
-  }
-
-  void
-  parse_clone(std::string_view data) noexcept
-  {
-    ASSERT(new_pid == 0, "new_pid already set");
-    ASSERT(new_tid == 0, "new_pid already set");
-    const auto [pid, tid] = parse_thread_id(data);
-    new_pid = pid;
-    new_tid = tid;
-  }
-
-  void
-  set_syscall_exit(int number) noexcept
-  {
-    ASSERT(syscall_no == 0, "syscall no already set");
-    syscall_no = number;
-  }
-
-  void
-  set_syscall_entry(int number) noexcept
-  {
-    ASSERT(syscall_no == 0, "syscall no already set");
-    syscall_no = number;
-  }
-};
 
 void
 RemoteConnection::put_pending_notification(std::string_view payload) noexcept
@@ -932,7 +642,7 @@ RemoteConnection::process_task_received_signal_extended(int signal, std::string_
                                                         bool is_session_config) noexcept
 {
   auto params = utils::split_string(payload, ";");
-  WaitEventParser parser{};
+  WaitEventParser parser{*this};
   parser.control_kind_is_attached = is_session_config;
   parser.signal = signal;
 
@@ -995,9 +705,9 @@ RemoteConnection::process_task_received_signal_extended(int signal, std::string_
   }
 
   if (!is_session_config) {
-    push_debugger_event(parser.new_debugger_event());
+    push_debugger_event(parser.new_debugger_event(false));
   } else {
-    push_init_event(parser.new_debugger_event());
+    push_init_event(parser.new_debugger_event(true));
   }
 
   return true;
@@ -1006,6 +716,7 @@ RemoteConnection::process_task_received_signal_extended(int signal, std::string_
 bool
 RemoteConnection::process_stop_reply_payload(std::string_view received_payload, bool is_session_config) noexcept
 {
+  DBGLOG(remote, "Stop reply payload: {}", received_payload);
   ASSERT(!received_payload.empty(), "Expected a non-empty payload!");
   if (received_payload.front() == '$') {
     received_payload.remove_prefix(1);
@@ -1018,7 +729,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
     TODO("S is a stop reply we don't yet support");
   }
   case 'T': {
-    const auto signal = parser.parse_exitcode_or_signal();
+    const auto signal = parser.parse_signal();
     ASSERT(signal.has_value(), "Expected to have at least the signal data");
     if (!signal) {
       DLOG(logging::Channel::remote, "Failed to parse signal for T packet: '{}'", received_payload);
@@ -1046,8 +757,12 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
   }
   case 'w': {
     if (const auto res = parser.parse_thread_exited(); res) {
-      const auto &[tid, code] = res.value();
-      push_debugger_event(CoreEvent::ThreadExited({.target = tid, .tid = tid, .sig_or_code = code}, {}));
+      const auto &[pid, tid, code] = res.value();
+      // If we're not non-stop, this will stop the entire process
+      const auto process_needs_resuming = !remote_settings.is_non_stop;
+      push_debugger_event(
+          CoreEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
+      return true;
     } else {
       return false;
     }
@@ -1333,6 +1048,56 @@ RemoteConnection::send_qXfer_command_with_response(qXferCommand &cmd, std::optio
   }
 
   return true;
+}
+
+utils::Expected<std::vector<std::string>, SendError>
+RemoteConnection::send_inorder_command_chain(std::span<std::string_view> commands,
+                                             std::optional<int> timeout) noexcept
+{
+  tracee_control_mutex.lock();
+  ScopedDefer fn{[&]() {
+    user_done_sync.arrive_and_wait();
+    tracee_control_mutex.unlock();
+  }};
+  request_control();
+  std::vector<std::string> result{};
+  result.reserve(commands.size());
+
+  for (const auto c : commands) {
+    for (auto retries = 10;; --retries) {
+      const auto res = socket.write_cmd(c);
+      if (res.is_ok()) {
+        break;
+      }
+      if (retries <= 0) {
+        return send_err(res);
+      }
+    }
+
+    bool ack = !remote_settings.is_noack;
+    if (ack) {
+      auto ack = socket.wait_for_ack(timeout.value_or(-1));
+      if (ack.is_error()) {
+        return Timeout{.msg = "Connection timed out waiting for ack"};
+      }
+      if (!ack->second) {
+        return NAck{};
+      }
+      ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
+      socket.consume_n(ack->first + 1);
+    }
+
+    const auto response = read_command_response(timeout.value_or(-1));
+    if (!response) {
+      if (socket.size() > 0) {
+        return NAck{};
+      } else {
+        return Timeout{.msg = "Timed out waiting for response to command"};
+      }
+    }
+    result.push_back(std::move(*response));
+  }
+  return result;
 }
 
 utils::Expected<std::string, SendError>

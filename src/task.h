@@ -7,6 +7,7 @@
 #include "ptrace.h"
 #include <arch.h>
 #include <linux/sched.h>
+#include <sys/user.h>
 
 using namespace std::string_view_literals;
 struct TraceeController;
@@ -49,6 +50,7 @@ struct TaskInfo
   WaitStatus wait_status;
   TargetFormat session;
   tc::RunType last_resume_command{tc::RunType::UNKNOWN};
+  std::optional<tc::ResumeAction> next_resume_action{};
   union
   {
     u16 bit_set;
@@ -66,9 +68,11 @@ struct TaskInfo
     };
   };
 
+private:
   TaskRegisters regs;
-
   sym::CallStack *call_stack;
+
+public:
   std::optional<LocationStatus> loc_stat;
 
   TaskInfo() = delete;
@@ -84,29 +88,38 @@ struct TaskInfo
 
   static TaskInfo create_running(pid_t tid, TargetFormat format, ArchType arch);
 
+  user_regs_struct *native_registers() const noexcept;
+  RegisterBlock<ArchType::X86_64> *remote_x86_registers() const noexcept;
+  void remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept;
   u64 get_register(u64 reg_num) noexcept;
+  u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
+  void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
   const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
 
-  void step_over_breakpoint(TraceeController *tc, tc::RunType resume_action) noexcept;
+  void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
   void set_stop() noexcept;
+  void set_running(tc::RunType type) noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
   void set_dirty() noexcept;
+  void set_updated() noexcept;
   void add_bpstat(AddrPtr address) noexcept;
-  void remove_bpstat() noexcept;
+  std::optional<LocationStatus> clear_bpstat() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
    */
   bool is_stopped() const noexcept;
   bool stop_processed() const noexcept;
+  void collect_stop() noexcept;
   WaitStatus pending_wait_status() const noexcept;
 
   std::uintptr_t get_rbp() const noexcept;
   std::uintptr_t get_pc() const noexcept;
   std::uintptr_t get_rsp() const noexcept;
+  std::uintptr_t get_orig_rax() const noexcept;
 };
 
 struct TaskStepInfo
