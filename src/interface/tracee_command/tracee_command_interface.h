@@ -16,6 +16,10 @@ class SymbolFile;
 
 class BreakpointLocation;
 
+namespace ui::dap {
+struct Thread;
+};
+
 namespace gdb {
 class RemoteConnection;
 struct RemoteSettings;
@@ -256,6 +260,8 @@ public:
 
   virtual bool perform_shutdown() noexcept = 0;
   virtual bool initialize() noexcept = 0;
+
+  virtual std::string_view get_thread_name(Tid tid) noexcept = 0;
 
   /// Called after we've processed an exec or fork (For PtraceCommander we might re-open proc fs files for
   /// instance).

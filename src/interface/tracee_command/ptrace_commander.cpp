@@ -281,6 +281,32 @@ PtraceCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
   return TaskExecuteResponse::Ok();
 }
 
+std::string_view
+PtraceCommander::get_thread_name(Tid tid) noexcept
+{
+
+  std::array<char, 256> pathbuf{};
+  auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", task_leader(), tid);
+  std::string_view path{pathbuf.data(), it};
+  auto file = utils::ScopedFd::open_read_only(path);
+  char namebuf[16]{0};
+  const auto len = ::read(file, namebuf, 16);
+
+  if (len == -1) {
+    return "???";
+  }
+
+  const auto &[nameit, ok] = thread_names.emplace(tid, std::string{namebuf, static_cast<u32>(len)});
+  if (ok) {
+    if (nameit->second.back() == '\n') {
+      nameit->second.pop_back();
+    }
+    return nameit->second;
+  } else {
+    return "???";
+  }
+}
+
 TaskExecuteResponse
 PtraceCommander::disconnect(bool terminate) noexcept
 {

@@ -1,7 +1,7 @@
 const { readFileContents, repoDirFile, getLineOf, seconds, doSomethingDelayed } = require('./client')
 
 async function pause(DA) {
-  await DA.launchToMain(DA.buildDirFile('pause'))
+  await DA.startRunToMain(DA.buildDirFile('pause'))
   const file = readFileContents(repoDirFile('test/pause.cpp'))
   const line_where_sleep_is_called = ['SLEEPLINE']
     .map((ident) => getLineOf(file, ident))

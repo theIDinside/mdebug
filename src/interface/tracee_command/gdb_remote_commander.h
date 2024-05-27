@@ -69,6 +69,11 @@ class GdbRemoteCommander final : public TraceeCommandInterface
   Pid process_id;
   std::optional<std::string> exec_file{};
 
+  // TODO(simon): allow for smart caching of thread names, by catching system call `prctl` with the parameters that
+  // call the `PR_SET_NAME` request, and on SyscallExit, call qXfer:threads:read:... and update the cache.
+  // This way, we don't have to potentially open N files to /proc/<pid>/task/<tid> on every `Threads` request
+  std::unordered_map<Tid, std::string> thread_names{};
+
   void set_catch_syscalls(bool on) noexcept;
   void inform_supported() noexcept;
 
@@ -93,6 +98,7 @@ public:
   TaskExecuteResponse read_registers(TaskInfo &t) noexcept final;
   TaskExecuteResponse write_registers(const user_regs_struct &input) noexcept final;
   TaskExecuteResponse set_pc(const TaskInfo &t, AddrPtr addr) noexcept final;
+  std::string_view get_thread_name(Tid tid) noexcept final;
 
   TaskExecuteResponse disconnect(bool terminate) noexcept final;
   bool perform_shutdown() noexcept final;

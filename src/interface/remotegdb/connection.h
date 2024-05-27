@@ -30,6 +30,8 @@ class BarrierNotify;
 
 namespace gdb {
 
+class RemoteSessionConfigurator;
+
 struct RemoteSettings
 {
   // Default settings
@@ -491,6 +493,7 @@ struct SocketCommand
   std::string_view cmd;
   bool is_list_response{false};
   bool list_done{false};
+  bool response_is_stop_reply{false};
   std::optional<std::string> result{std::nullopt};
 };
 
@@ -522,6 +525,7 @@ public:
   using SyncBarrier = std::barrier<std::function<void()>>;
   using ShrPtr = std::shared_ptr<RemoteConnection>;
   friend class GdbRemoteCommander;
+  friend class RemoteSessionConfigurator;
 
 private:
   std::string host;
@@ -572,11 +576,10 @@ public:
   void relinquish_control_to_core() noexcept;
   RemoteSettings &settings() noexcept;
   void parse_supported(std::string_view supported) noexcept;
-  bool execute_command(SocketCommand &cmd, int timeout) noexcept;
-  bool execute_command(qXferCommand &cmd, u32 offset, int timeout) noexcept;
+
   // Fill the comms buffer and read it and parse it's contents. If we come across stop replies (whether we are in
   // non-stop or not),
-  std::optional<std::string> read_command_response(int timeout) noexcept;
+  std::optional<std::string> read_command_response(int timeout, bool expectingStopReply) noexcept;
   // Returns {true} if done, {false} if not done and {} if we timeout
   qXferResponse append_read_qXfer_response(int timeout, std::string &output) noexcept;
   std::optional<std::pmr::string> read_command_response(MonotonicResource &arena, int timeout) noexcept;
@@ -587,6 +590,15 @@ public:
 
   utils::Expected<std::vector<std::string>, SendError>
   send_inorder_command_chain(std::span<std::string_view> commands, std::optional<int> timeout) noexcept;
+
+  // Make these private. These should not be called as they place *ultimate* responsibility on the caller that it
+  // has done the acquire + synchronize dance.
+  bool execute_command(SocketCommand &cmd, int timeout) noexcept;
+  bool execute_command(qXferCommand &cmd, u32 offset, int timeout) noexcept;
+
+  utils::Expected<std::vector<std::string>, SendError>
+  send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
+                                 std::optional<int> timeout) noexcept;
 
   // For some bozo reason, vCont commands don't reply with `OK` - that only happens when in noack mode. Dumbest
   // fucking "protocol" in the history of the universe.

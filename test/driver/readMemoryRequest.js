@@ -2,7 +2,7 @@ const { readFileContents, repoDirFile, getLineOf } = require('./client')
 const { prettyJson, assert } = require('./utils')
 
 async function setup(DA, bps) {
-  await DA.launchToMain(DA.buildDirFile('readMemory'))
+  await DA.startRunToMain(DA.buildDirFile('readMemory'))
   const file = readFileContents(repoDirFile('test/readMemory.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))

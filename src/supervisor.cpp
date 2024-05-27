@@ -916,21 +916,6 @@ TraceeController::session_type() const noexcept
   return session;
 }
 
-std::string
-TraceeController::get_thread_name(Tid tid) const noexcept
-{
-  Path p = fmt::format("/proc/{}/task/{}/comm", task_leader, tid);
-  utils::ScopedFd f = utils::ScopedFd::open_read_only(p);
-  char buf[16];
-  std::memset(buf, 0, 16);
-  ::read(f, buf, 16);
-  auto name = std::string{buf};
-  if (name.ends_with("\n")) {
-    name.pop_back();
-  }
-  return name;
-}
-
 utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>
 TraceeController::safe_read(AddrPtr addr, u64 bytes) noexcept
 {

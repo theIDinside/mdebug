@@ -41,6 +41,24 @@ convert_to_target(std::array<char, 16> &outbuf, Value value) noexcept
   return std::string_view{outbuf.data(), ptr};
 }
 
+static std::vector<std::tuple<Pid, Tid, std::string>>
+parse_threads(std::string_view input) noexcept
+{
+  std::vector<std::tuple<Pid, Tid, std::string>> result{};
+  xml::XMLParser parser{input};
+  auto root_element = parser.parse();
+  result.reserve(root_element->children.size());
+
+  for (const auto &thread : root_element->children) {
+    if (const auto lwp = thread->attribute("id"); lwp) {
+      std::string_view str = lwp.value();
+      const auto [pid, tid] = gdb::parse_thread_id(str);
+      result.emplace_back(pid, tid, thread->attribute("name").value_or("None"));
+    }
+  }
+  return result;
+}
+
 template <size_t N>
 static ViewOfParameter<char[], std::string_view>
 append_checksum(char (&buf)[N], std::string_view payload)
@@ -321,6 +339,30 @@ GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
   t.remote_x86_registers()->set_pc(addr);
   return TaskExecuteResponse::Ok(0);
 }
+
+std::string_view
+GdbRemoteCommander::get_thread_name(Tid tid) noexcept
+{
+  // TODO(Implement name change)
+  if (auto opt = utils::find_if(thread_names, [tid](auto &kvp) { return kvp.first == tid; }); opt) {
+    return (*opt)->second;
+  }
+  // READ ALL THREADS THAT REMOTE IS ATTACHED TO
+
+  gdb::qXferCommand read_threads{"qXfer:threads:read:", 0x8000};
+  const auto ok = connection->send_qXfer_command_with_response(read_threads, 1000);
+  if (!ok) {
+    return "";
+  }
+
+  // DETERMINE WHAT PROCESS SPACES WE ARE ATTACHED TO
+  const auto threads = parse_threads(read_threads.response_buffer);
+  for (auto &&[pid, tid, name] : threads) {
+    thread_names.emplace(tid, std::move(name));
+  }
+  return thread_names[tid];
+}
+
 TaskExecuteResponse
 GdbRemoteCommander::disconnect(bool terminate) noexcept
 {
@@ -397,24 +439,6 @@ GdbRemoteCommander::read_auxv() noexcept
 RemoteSessionConfigurator::RemoteSessionConfigurator(gdb::RemoteConnection::ShrPtr remote) noexcept
     : conn(std::move(remote))
 {
-}
-
-std::vector<std::tuple<Pid, Tid, std::string>>
-parse_threads(std::string_view input) noexcept
-{
-  std::vector<std::tuple<Pid, Tid, std::string>> result{};
-  xml::XMLParser parser{input};
-  auto root_element = parser.parse();
-  result.reserve(root_element->children.size());
-
-  for (const auto &thread : root_element->children) {
-    if (const auto lwp = thread->attribute("id"); lwp) {
-      std::string_view str = lwp.value();
-      const auto [pid, tid] = gdb::parse_thread_id(str);
-      result.emplace_back(pid, tid, thread->attribute("name").value_or("None"));
-    }
-  }
-  return result;
 }
 
 // Commands that only return OK response, uses this

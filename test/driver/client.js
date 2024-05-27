@@ -427,7 +427,7 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          err.message = `Timed out: Waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`
+          err.message = `Timed out (${timeout}ms threshold crossed): Waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`
           rej(err)
         })
       }),
@@ -470,7 +470,7 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          err.message = `Timed out waiting for response from request ${req}`
+          err.message = `Timed out (${failureTimeout} milliseconds threshold crossed) waiting for response from request ${req}`
           rej(err)
         })
       }),
@@ -534,78 +534,87 @@ class DAClient {
     this.buf.receive_buffer = this.buf.receive_buffer.concat(data)
   }
 
+  async #startRunToMainNative(launchArgs, timeout) {
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainNative)
+    console.log(`Starting NATIVE session: launchArguments: ${JSON.stringify(launchArgs)}`)
+    let launch_res = await this.sendReqGetResponse(
+      'launch',
+      {
+        program: launchArgs['program'],
+        stopAtEntry: launchArgs['stopAtEntry'],
+      },
+      timeout
+    )
+    checkResponse(launch_res, 'launch', true)
+    await this.sendReqGetResponse('configurationDone', {}, timeout)
+    return stopped_promise
+  }
+
+  async #startRunToMainRemote(program, args, timeout) {
+    const remoteServerBinaryPath = this.config.args.getServerBinary()
+    const host = 'localhost'
+    this.remoteService = await checkPortAvailability(20, host).then((port) => {
+      return createRemoteService(remoteServerBinaryPath, host, port, program, args)
+    })
+
+    if (!this.isRemoteSession()) {
+      throw new Error(`Failed to spawn GDB Server on ${host}:${port}`)
+    }
+
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
+    const attach_res = await this.sendReqGetResponse('attach', this.remoteService.attachArgs, timeout)
+    checkResponse(attach_res, 'attach', true)
+    const functions = ['main'].map((n) => ({ name: n }))
+
+    const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
+      breakpoints: functions,
+    })
+
+    assertLog(
+      fnBreakpointResponse.success,
+      'Function breakpoints request',
+      `Response failed with contents: ${JSON.stringify(fnBreakpointResponse)}`
+    )
+    assertLog(
+      fnBreakpointResponse.body.breakpoints.length == 1,
+      'Expected 1 breakpoint returned',
+      `But received ${JSON.stringify(fnBreakpointResponse.body.breakpoints)}`
+    )
+    const thrs = await this.threads(timeout)
+    const threadId = thrs[0].id
+    await this.sendReqGetResponse('configurationDone', {}, timeout)
+    const cont = await this.sendReqGetResponse(
+      'continue',
+      {
+        threadId: threadId,
+        singleThread: false,
+      },
+      timeout,
+      this.#startRunToMainRemote
+    )
+    checkResponse(cont, 'continue', true)
+    return stopped_promise
+  }
+
   async startRunToMain(program, args = [], timeout = seconds(1)) {
-    let stopped_promise = null
     let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
     checkResponse(init_res, 'initialize', true)
     switch (this.config.args.getArg('session')) {
-      case 'remote':
-        {
-          const remoteServerBinaryPath = this.config.args.getServerBinary()
-          const host = 'localhost'
-          this.remoteService = await checkPortAvailability(20, host).then((port) => {
-            return createRemoteService(remoteServerBinaryPath, host, port, program, args)
-          })
-
-          if (!this.isRemoteSession()) {
-            throw new Error(`Failed to spawn GDB Server on ${host}:${port}`)
-          }
-
-          const attach_res = await this.sendReqGetResponse('attach', this.remoteService.attachArgs, 1000)
-          checkResponse(attach_res, 'attach', true)
-          const functions = ['main'].map((n) => ({ name: n }))
-
-          const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
-            breakpoints: functions,
-          })
-
-          assertLog(
-            fnBreakpointResponse.success,
-            'Function breakpoints request',
-            `Response failed with contents: ${JSON.stringify(fnBreakpointResponse)}`
-          )
-          assertLog(
-            fnBreakpointResponse.body.breakpoints.length == 1,
-            'Expected 1 breakpoint returned',
-            `But received ${JSON.stringify(fnBreakpointResponse.body.breakpoints)}`
-          )
-          const thrs = await this.threads()
-          const threadId = thrs[0].id
-          stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.startRunToMain)
-          await this.sendReqGetResponse('configurationDone', {}, timeout)
-          const cont = await this.sendReqGetResponse(
-            'continue',
-            {
-              threadId: threadId,
-              singleThread: false,
-            },
-            timeout,
-            this.startRunToMain
-          )
-          checkResponse(cont, 'continue', true)
-        }
-        break
-      case 'native':
-        {
-          console.log(`Starting NATIVE session`)
-          let launch_res = await this.sendReqGetResponse(
-            'launch',
-            {
-              program: program,
-              stopAtEntry: true,
-            },
-            timeout
-          )
-          checkResponse(launch_res, 'launch', true)
-          stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.startRunToMain)
-          await this.sendReqGetResponse('configurationDone', {}, timeout)
-        }
-        break
+      case 'remote': {
+        return await this.#startRunToMainRemote(program, args, timeout)
+      }
+      case 'native': {
+        return await this.#startRunToMainNative(
+          {
+            program: program,
+            stopAtEntry: true,
+          },
+          timeout
+        )
+      }
       default:
         throw new Error(`Unknown session kind`)
     }
-
-    await stopped_promise
   }
 
   // utility function to initialize, launch `program` and run to `main`
@@ -869,10 +878,11 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
  * @param { string } filePath - path to .cpp file that we are testing against
  * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
  * @param { string } expectedFrameName - frame name we expect to see on first stop.
+ * @param { string } exeFile - the binary to execute
  * @returns { { object[], object[], object[] } }
  */
 async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
-  await DA.launchToMain(DA.buildDirFile(exeFile), 5000)
+  await DA.startRunToMain(DA.buildDirFile(exeFile), [], 5000)
   await SetBreakpoints(DA, filePath, bpIdentifiers)
   const threads = await DA.threads()
   await DA.contNextStop(threads[0].id)

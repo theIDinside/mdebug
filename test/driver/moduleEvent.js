@@ -4,7 +4,7 @@ const sharedObjectsCount = 6
 
 async function expect6NewModuleEvents(DA) {
   let modules_event_promise = DA.prepareWaitForEventN('module', 6, 2000)
-  await DA.launchToMain(DA.buildDirFile('threads_shared'))
+  await DA.startRunToMain(DA.buildDirFile('threads_shared'))
   const res = await modules_event_promise
   assert(
     res.length >= sharedObjectsCount,

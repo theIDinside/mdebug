@@ -10,7 +10,7 @@ function getLinesOf(names) {
 }
 
 async function setup(DA, bps) {
-  await DA.launchToMain(DA.buildDirFile('next'))
+  await DA.startRunToMain(DA.buildDirFile('next'))
   const file = readFileContents(repoDirFile('test/next.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))
@@ -118,7 +118,7 @@ async function stopBecauseBpWhenNextLine(DA) {
 async function nextLineInTemplateCode(da) {}
 
 async function nextInstruction(DA) {
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'))
   const threads = await DA.threads()
   let frames = await DA.stackTrace(threads[0].id)
   // await da_client.setInsBreakpoint("0x40121f");

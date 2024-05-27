@@ -781,6 +781,14 @@ RemoteConnection::parse_event_consume_remaining() noexcept
 {
   auto pending = take_pending();
   ASSERT(pending.has_value(), "No pending notification has been read");
+  if (!remote_settings.is_non_stop) {
+    auto payload = std::string_view{pending.value()};
+    ASSERT(payload[0] == '$', "Expected 'synchronous non-stop' stop reply but got {}", payload[0]);
+    payload.remove_prefix(1);
+    process_stop_reply_payload(payload, false);
+    // We are done. We are not in non-stop mode, there will be no further rapports.
+    return;
+  }
   auto payload = std::string_view{pending.value()};
   ASSERT(payload[0] == '%', "Expected Notification Header");
   payload.remove_prefix(1);
@@ -824,6 +832,9 @@ RemoteConnection::settings() noexcept
 MessageType
 message_type(std::string_view msg) noexcept
 {
+  if (msg[0] == '$') {
+    msg.remove_prefix(1);
+  }
   switch (msg[0]) {
   case 'S':
     [[fallthrough]];
@@ -893,7 +904,7 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
 }
 
 std::optional<std::string>
-RemoteConnection::read_command_response(int timeout) noexcept
+RemoteConnection::read_command_response(int timeout, bool expectingStopReply) noexcept
 {
   while (true) {
     const auto start = socket.next_message(timeout);
@@ -908,10 +919,13 @@ RemoteConnection::read_command_response(int timeout) noexcept
         return {};
       }
       const auto packet = std::string_view{socket.cbegin() + start->pos, socket.cbegin() + packet_end.value()};
-      if (!remote_settings.is_noack && message_type(packet) == MessageType::StopReply) {
-        TODO("Implement dispatch of incoming stop reply (that is *not* an async notification event, used in "
-             "non-stop) during wait/read/parse for command response");
-        write_ack();
+      if (!remote_settings.is_noack) {
+        TODO("we don't support ack-mode, we only support no-ack mode for now.");
+      }
+      if (message_type(packet) == MessageType::StopReply && !expectingStopReply) {
+        put_pending_notification(packet);
+        socket.consume_n(packet_end.value() + 3);
+        continue;
       } else {
         std::string result{packet};
         socket.consume_n(packet_end.value() + 3);
@@ -947,9 +961,7 @@ RemoteConnection::execute_command(SocketCommand &cmd, int timeout) noexcept
 {
   const auto write_result = socket.write_cmd(cmd.cmd);
   ASSERT(write_result, "Failed to execute command '{}'", cmd.cmd);
-  cmd.result = read_command_response(timeout);
-  if (cmd.result->front() == 'l')
-    DLOG(logging::Channel::remote, "Response read for command |{}|:\t<{}>", cmd.cmd, cmd.result.value_or("ERROR"));
+  cmd.result = read_command_response(timeout, cmd.response_is_stop_reply);
   return cmd.result.has_value();
 }
 
@@ -1049,6 +1061,54 @@ RemoteConnection::send_qXfer_command_with_response(qXferCommand &cmd, std::optio
 
   return true;
 }
+#define MATCH(var, param, result, expr)                                                                           \
+  std::visit(                                                                                                     \
+      [&](auto &param) -> result {                                                                                \
+        using T = ActualType<decltype(param)>;                                                                    \
+        expr                                                                                                      \
+      },                                                                                                          \
+      var)
+
+utils::Expected<std::vector<std::string>, SendError>
+RemoteConnection::send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
+                                                 std::optional<int> timeout) noexcept
+{
+  std::vector<std::string> results{};
+  results.reserve(commands.size());
+  tracee_control_mutex.lock();
+  ScopedDefer fn{[&]() {
+    user_done_sync.arrive_and_wait();
+    tracee_control_mutex.unlock();
+  }};
+
+  request_control();
+  using MatchResult = bool;
+  const auto timeoutValue = timeout.value_or(1000);
+  for (auto &&c : commands) {
+    // clang-format off
+    auto command_result = std::visit(
+      Match{[&](SocketCommand &c) noexcept -> MatchResult {
+              if (!execute_command(c, timeoutValue)) {
+                return false;
+              }
+              results.emplace_back(std::move(c.result.value()));
+              return true;
+            },
+            [&](qXferCommand &c) noexcept -> MatchResult {
+              if (!execute_command(c, 0, timeoutValue)) {
+                return false;
+              }
+              results.emplace_back(std::move(c.response_buffer));
+              return true;
+            }},
+      c);
+    // clang-format on
+    if (!command_result) {
+      return SystemError{0};
+    }
+  }
+  return results;
+}
 
 utils::Expected<std::vector<std::string>, SendError>
 RemoteConnection::send_inorder_command_chain(std::span<std::string_view> commands,
@@ -1087,7 +1147,7 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
       socket.consume_n(ack->first + 1);
     }
 
-    const auto response = read_command_response(timeout.value_or(-1));
+    const auto response = read_command_response(timeout.value_or(-1), false);
     if (!response) {
       if (socket.size() > 0) {
         return NAck{};
@@ -1138,7 +1198,7 @@ RemoteConnection::send_command_with_response(std::string_view command, std::opti
     socket.consume_n(ack->first + 1);
   }
 
-  const auto response = read_command_response(timeout.value_or(-1));
+  const auto response = read_command_response(timeout.value_or(-1), false);
   if (!response) {
     if (socket.size() > 0) {
       return NAck{};
@@ -1177,7 +1237,7 @@ RemoteConnection::send_vcont_command(std::string_view command, std::optional<int
   }
 
   if (remote_settings.is_non_stop) {
-    const auto response = read_command_response(timeout.value_or(-1));
+    const auto response = read_command_response(timeout.value_or(-1), false);
     if (!response) {
       if (socket.size() > 0) {
         return NAck{};
@@ -1204,6 +1264,7 @@ std::optional<ConnInitError>
 RemoteConnection::init_stop_query() noexcept
 {
   SocketCommand current_stop_reply{"?"};
+  current_stop_reply.response_is_stop_reply = true;
   if (remote_settings.is_non_stop) {
     if (!execute_command(current_stop_reply, 5000)) {
       return ConnInitError{.msg = "Failed to request current stop info"};

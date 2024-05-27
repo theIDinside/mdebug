@@ -576,11 +576,12 @@ Threads::execute(Tracer *tracer) noexcept
   // allows for more; it would require some work to get the DAP protocol to play nicely though.
   // therefore we just hand back the threads of the currently active target
   auto response = new ThreadsResponse{true, this};
-  const auto target = tracer->get_current();
+  auto target = tracer->get_current();
 
   response->threads.reserve(target->threads.size());
+  auto &it = target->get_interface();
   for (const auto &thread : target->threads) {
-    response->threads.push_back(Thread{.id = thread.tid, .name = target->get_thread_name(thread.tid)});
+    response->threads.push_back(Thread{.id = thread.tid, .name = it.get_thread_name(thread.tid)});
   }
   return response;
 }

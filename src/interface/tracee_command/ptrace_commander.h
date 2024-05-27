@@ -25,6 +25,8 @@ class PtraceCommander final : public TraceeCommandInterface
   Tid process_id;
   TPtr<r_debug_extended> tracee_r_debug{nullptr};
 
+  std::unordered_map<Tid, std::string> thread_names{};
+
 public:
   NO_COPY(PtraceCommander);
   explicit PtraceCommander(Tid task_leader) noexcept;
@@ -47,6 +49,8 @@ public:
   TaskExecuteResponse read_registers(TaskInfo &t) noexcept final;
   TaskExecuteResponse write_registers(const user_regs_struct &input) noexcept final;
   TaskExecuteResponse set_pc(const TaskInfo &t, AddrPtr addr) noexcept final;
+
+  std::string_view get_thread_name(Tid tid) noexcept final;
 
   TaskExecuteResponse disconnect(bool terminate) noexcept final;
   bool perform_shutdown() noexcept final;

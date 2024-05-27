@@ -203,7 +203,6 @@ public:
   void read_auxv_info(tc::Auxv &&aux) noexcept;
 
   TargetSession session_type() const noexcept;
-  std::string get_thread_name(Tid tid) const noexcept;
 
   utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> safe_read(AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;

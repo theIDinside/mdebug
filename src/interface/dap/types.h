@@ -53,7 +53,7 @@ struct DataBreakpoint
 struct Thread
 {
   int id;
-  std::string name;
+  std::string_view name;
 };
 
 struct StackFrame

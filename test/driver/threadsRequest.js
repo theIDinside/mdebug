@@ -2,7 +2,7 @@ const { getLineOf, readFileContents, repoDirFile } = require('./client')
 const { assert, prettyJson } = require('./utils')
 
 async function threads(DA) {
-  await DA.launchToMain(DA.buildDirFile('threads_shared'))
+  await DA.startRunToMain(DA.buildDirFile('threads_shared'), [], seconds(1))
   let threads = await DA.threads()
   const file = readFileContents(repoDirFile('test/threads_shared.cpp'))
   const bp_lines = ['BP1']

@@ -27,7 +27,7 @@ async function unwindFromSharedObject(DA) {
   }
 
   let modules_event_promise = DA.prepareWaitForEventN('module', 6, seconds(1))
-  await DA.launchToMain(DA.buildDirFile('stupid_shared'), seconds(1))
+  await DA.startRunToMain(DA.buildDirFile('stupid_shared'), [], seconds(1))
   const res = await modules_event_promise
 
   const bp_res = await setFnBp(['convert_kilometers_to_miles'])
@@ -89,7 +89,7 @@ function verifyFrameIs(frame, name) {
 
 async function insidePrologueTest(DA) {
   const { prologue, epilogue } = parse_prologue_and_epilogue(DA)
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
   await DA.setInsBreakpoint(prologue)
   await DA.contNextStop()
   const frames = await DA.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
@@ -117,7 +117,7 @@ async function insidePrologueTest(DA) {
 
 async function insideEpilogueTest(DA) {
   const { prologue, epilogue } = parse_prologue_and_epilogue(DA)
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
   await DA.setInsBreakpoint(epilogue)
   await DA.contNextStop()
   const frames = await DA.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
@@ -181,7 +181,7 @@ async function normalTest(DA) {
     ],
   ]
 
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
@@ -260,7 +260,7 @@ function* walk_expected_frames(frames) {
 async function unwindWithDwarfExpression(DA) {
   const printf_plt_addr = getPrintfPlt(DA, 'next')
   console.log(`printf@plt address: ${printf_plt_addr}`)
-  await DA.launchToMain(DA.buildDirFile('next'))
+  await DA.startRunToMain(DA.buildDirFile('next'), [], seconds(1))
   await DA.sendReqGetResponse('setInstructionBreakpoints', {
     breakpoints: [{ instructionReference: printf_plt_addr }],
   }).then((res) => {
