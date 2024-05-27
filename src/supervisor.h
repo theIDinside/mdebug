@@ -285,6 +285,7 @@ public:
   sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
+  bool session_all_stop_mode() const noexcept;
   TaskInfo *set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
   int new_frame_id(NonNullPtr<SymbolFile> owning_obj, TaskInfo &task) noexcept;

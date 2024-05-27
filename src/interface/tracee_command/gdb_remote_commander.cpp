@@ -436,6 +436,12 @@ GdbRemoteCommander::read_auxv() noexcept
   TODO("GdbRemoteCommander::read_auxv() noexcept");
 }
 
+gdb::RemoteSettings &
+GdbRemoteCommander::remote_settings() noexcept
+{
+  return connection->settings();
+}
+
 RemoteSessionConfigurator::RemoteSessionConfigurator(gdb::RemoteConnection::ShrPtr remote) noexcept
     : conn(std::move(remote))
 {

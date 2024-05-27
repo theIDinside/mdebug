@@ -60,7 +60,10 @@ struct TaskInfo
                                // for this task
       bool user_stopped : 1;   // stops visible (possibly) to the user
       bool tracer_stopped : 1; // stops invisible to the user - may be upgraded to user stops. tracer_stop always
-                               // occur when waitpid has returned a result for this task
+                               // occur when waitpid has returned a result for this task, or when a remote has sent
+                               // a stop reply for a thread if the remote is also in "not non-stop mode", *all*
+                               // threads get set to true on each stop (and false on each continue) regardless of
+                               // what thread the user is operating on. It's "all stop mode".
       bool initialized : 1;    // fully initialized task. after a clone syscall some setup is required
       bool cache_dirty : 1;    // register is dirty and requires refetching
       bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?

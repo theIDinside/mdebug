@@ -176,6 +176,12 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
 
   tc::ProcessedStopEvent result = process_core_event_determine_proceed(*tc, evt);
 
+  // N.B. we _HAVE_ to do this check here (stop_all_requested), not anywhere else, due to the existence of what gdb
+  // calls "all stop mode" which means that if *any* thread stops, all other threads are stopped (but they are not
+  // reported, it's just implicit to the M.O.) because of that, we will hit a stop, which may request to stop_all
+  // and since in all-stop, the other stops are implicit, we won't actually hit this function again, for the other
+  // threads, therefore this particular event *has* to have special attention here.
+
   if (tc->stop_all_requested) {
     if (tc->all_stopped()) {
       tc->notify_all_stopped();
@@ -212,6 +218,11 @@ Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEve
       }
     }
     task->collect_stop();
+  }
+  if (tc.session_all_stop_mode()) {
+    for (auto &t : tc.threads) {
+      t.collect_stop();
+    }
   }
   const CoreEvent &r = *evt;
   LogEvent(r, "Handling");
@@ -313,7 +324,7 @@ Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEve
       },
       [&](const Signal &e) -> MatchResult {
         auto t = tc.get_task(e.thread_id);
-        tc.stop_all(nullptr);
+        tc.stop_all(t);
         tc.all_stop.once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
           tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
         });

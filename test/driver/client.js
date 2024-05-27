@@ -407,17 +407,25 @@ class DAClient {
       ctrl.abort()
     }, timeout)
 
-    let evts = []
+    let eventCount = 0
     // we create the exception object here, to report decent stack traces for when it actually does fail.
     const err = new Error('Timed out')
     Error.captureStackTrace(err, fn)
     let p = new Promise((res, rej) => {
-      this.events.on(evt, (body) => {
+      let evts = []
+      const listener = (body) => {
+        eventCount++
         evts.push(body)
+        console.log(
+          `stopped for ${evt}: ${body.reason}: ${JSON.stringify(body)} (of n=${n} and evts.length=${evts.length})`
+        )
         if (evts.length == n) {
+          console.log(`we hit ${evt} n=${n} times`)
+          this.events.removeListener(evt, listener)
           res(evts)
         }
-      })
+      }
+      this.events.on(evt, listener)
     })
 
     return Promise.race([
@@ -427,7 +435,7 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          err.message = `Timed out (${timeout}ms threshold crossed): Waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`
+          err.message = `Timed out (${timeout}ms threshold crossed): Waiting for ${n} events of type ${evt} to have happened (but saw ${eventCount})`
           rej(err)
         })
       }),
@@ -561,7 +569,7 @@ class DAClient {
       throw new Error(`Failed to spawn GDB Server on ${host}:${port}`)
     }
 
-    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
+    let entry_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
     const attach_res = await this.sendReqGetResponse('attach', this.remoteService.attachArgs, timeout)
     checkResponse(attach_res, 'attach', true)
     const functions = ['main'].map((n) => ({ name: n }))
@@ -569,7 +577,7 @@ class DAClient {
     const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
       breakpoints: functions,
     })
-
+    await entry_stopped_promise
     assertLog(
       fnBreakpointResponse.success,
       'Function breakpoints request',
@@ -583,6 +591,7 @@ class DAClient {
     const thrs = await this.threads(timeout)
     const threadId = thrs[0].id
     await this.sendReqGetResponse('configurationDone', {}, timeout)
+    let hit_main_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
     const cont = await this.sendReqGetResponse(
       'continue',
       {
@@ -593,7 +602,7 @@ class DAClient {
       this.#startRunToMainRemote
     )
     checkResponse(cont, 'continue', true)
-    return stopped_promise
+    return hit_main_stopped_promise
   }
 
   async startRunToMain(program, args = [], timeout = seconds(1)) {

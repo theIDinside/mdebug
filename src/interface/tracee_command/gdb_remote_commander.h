@@ -111,7 +111,7 @@ public:
   std::shared_ptr<gdb::RemoteConnection> remote_connection() noexcept final;
   utils::Expected<Auxv, Error> read_auxv() noexcept final;
 
-  utils::Expected<std::vector<Pid>, std::string_view> pids() noexcept;
+  gdb::RemoteSettings &remote_settings() noexcept;
 };
 
 struct Thread

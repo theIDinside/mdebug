@@ -6,6 +6,7 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/dap/types.h"
+#include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "lib/lockguard.h"
@@ -1323,6 +1324,17 @@ TraceeController::all_stopped() const noexcept
     }
   }
   return true;
+}
+
+bool
+TraceeController::session_all_stop_mode() const noexcept
+{
+  switch (interface_type) {
+  case InterfaceType::Ptrace:
+    return false;
+  case InterfaceType::GdbRemote:
+    return !static_cast<tc::GdbRemoteCommander *>(tracee_interface.get())->remote_settings().is_non_stop;
+  }
 }
 
 TaskInfo *

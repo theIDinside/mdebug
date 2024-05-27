@@ -252,20 +252,29 @@ StopHandler::handle_proceed(TaskInfo &info, tc::ProcessedStopEvent stop) noexcep
            stop.should_resume && info.can_continue());
     const auto kind =
         stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
+    bool resumed = false;
     switch (kind.target) {
     case tc::ResumeTarget::Task:
       if (info.can_continue() && stop.should_resume) {
         tc.resume_task(info, kind);
+        resumed = true;
       } else {
         info.set_stop();
       }
       break;
     case tc::ResumeTarget::AllNonRunningInProcess:
       tc.resume_target(kind.type);
+      resumed = true;
       break;
     case tc::ResumeTarget::None:
       info.set_stop();
       break;
+    }
+
+    if (resumed && tc.session_all_stop_mode()) {
+      for (auto &t : tc.threads) {
+        t.set_running(kind.type);
+      }
     }
   }
 }
