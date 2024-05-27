@@ -21,11 +21,56 @@ enum class ArchType : u8
 
 template <ArchType T>
 consteval auto
-SizeOf() noexcept
+RegisterCount()
 {
   switch (T) {
   case ArchType::X86_64:
-    return 816;
+#ifndef Reg
+#define Reg(name, index, width) width,
+    return std::to_array<u8>({
+#include <defs/x86_64.defs>
+                             })
+        .size();
+#undef Reg
+#endif
+    break;
+  case ArchType::COUNT:
+    std::unreachable();
+  }
+}
+
+template <ArchType T>
+consteval auto
+Widths() -> std::array<u8, RegisterCount<T>()>
+{
+  switch (T) {
+  case ArchType::X86_64:
+#ifndef Reg
+#define Reg(name, index, width) width,
+    return std::to_array<u8>({
+#include <defs/x86_64.defs>
+    });
+#undef Reg
+#endif
+    break;
+  case ArchType::COUNT:
+    std::unreachable();
+  }
+}
+
+template <ArchType T>
+consteval auto
+ArchRegisterBlockSize() noexcept
+{
+  switch (T) {
+  case ArchType::X86_64: {
+    constexpr auto array = Widths<T>();
+    auto reg_file_size = 0;
+    for (auto width : array) {
+      reg_file_size += width;
+    }
+    return reg_file_size;
+  }
   case ArchType::COUNT:
     std::unreachable();
   }
@@ -42,58 +87,42 @@ struct ArchRegInfo
   u16 offset;
 };
 
-template <size_t ArchSize> consteval std::array<ArchRegInfo, 24> Construct();
-
-template <>
-consteval std::array<ArchRegInfo, 24>
-Construct<816>()
+template <ArchType T>
+consteval std::array<ArchRegInfo, Widths<T>().size()>
+Construct()
 {
-  std::array<ArchRegInfo, 24> regs{};
-  auto offset = 0u;
-  for (auto i = 0u; i < 24; ++i) {
-    regs[i] = ArchRegInfo{8, static_cast<u8>(i), static_cast<u16>(offset)};
-    offset += regs[i].width;
-  }
+  switch (T) {
+  case ArchType::X86_64: {
+    constexpr auto arr = Widths<T>();
+    std::array<ArchRegInfo, arr.size()> regs{};
+    auto offset = 0u;
+    for (auto i = 0u; i < arr.size(); ++i) {
+      regs[i] = ArchRegInfo{arr[i], static_cast<u8>(i), static_cast<u16>(offset)};
+      offset += arr[i];
+    }
 
-  return regs;
+    return regs;
+  } break;
+  case ArchType::COUNT:
+    break;
+  }
 }
 
 template <> struct ArchRegNum<ArchType::X86_64>
 {
 
-  static constexpr auto DwarfRegisterTable = Construct<SizeOf<ArchType::X86_64>()>();
+  static constexpr auto DwarfRegisterTable = Construct<ArchType::X86_64>();
 
-  static constexpr auto RAX = DwarfRegisterTable[0];
-  static constexpr auto RBX = DwarfRegisterTable[1];
-  static constexpr auto RCX = DwarfRegisterTable[2];
-  static constexpr auto RDX = DwarfRegisterTable[3];
-  static constexpr auto RSI = DwarfRegisterTable[4];
-  static constexpr auto RDI = DwarfRegisterTable[5];
-  static constexpr auto RBP = DwarfRegisterTable[6];
-  static constexpr auto RSP = DwarfRegisterTable[7];
-  static constexpr auto R8 = DwarfRegisterTable[8];
-  static constexpr auto R9 = DwarfRegisterTable[9];
-  static constexpr auto R10 = DwarfRegisterTable[10];
-  static constexpr auto R11 = DwarfRegisterTable[11];
-  static constexpr auto R12 = DwarfRegisterTable[12];
-  static constexpr auto R13 = DwarfRegisterTable[13];
-  static constexpr auto R14 = DwarfRegisterTable[14];
-  static constexpr auto R15 = DwarfRegisterTable[15];
-  static constexpr auto RIP = DwarfRegisterTable[16];
-  static constexpr auto EFLAGS = DwarfRegisterTable[17];
-  static constexpr auto CS = DwarfRegisterTable[18];
-  static constexpr auto SS = DwarfRegisterTable[19];
-  static constexpr auto DS = DwarfRegisterTable[20];
-  static constexpr auto ES = DwarfRegisterTable[21];
-  static constexpr auto FS = DwarfRegisterTable[22];
-  static constexpr auto GS = DwarfRegisterTable[23];
-
-  static constexpr auto ORIG_RAX = 536;
+#ifndef Reg
+#define Reg(name, index, width) static constexpr auto name = DwarfRegisterTable[index];
+#include <defs/x86_64.defs>
+#undef Reg
+#endif
 };
 
 template <ArchType Type> struct RegisterBlock
 {
-  std::array<u8, SizeOf<Type>()> file;
+  std::array<u8, ArchRegisterBlockSize<Type>()> file;
 
   u32
   pc_number() const noexcept
@@ -104,8 +133,8 @@ template <ArchType Type> struct RegisterBlock
   void
   set_file(const std::vector<u8> &data) noexcept
   {
-    ASSERT(data.size() == SizeOf<Type>(), "Contents of `data` {} is not of ArchSize: {}", data.size(),
-           SizeOf<Type>());
+    ASSERT(data.size() == ArchRegisterBlockSize<Type>(), "Contents of `data` {} is not of ArchSize: {}",
+           data.size(), ArchRegisterBlockSize<Type>());
     std::memcpy(file.data(), data.data(), data.size());
   }
 
