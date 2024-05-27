@@ -130,7 +130,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   auto pc = get_pc();
 
   sym::UnwindIterator it{tc, pc};
-  ASSERT(!it.is_null(), "Could not find unwinder for pc {}", pc);
+  ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{pc});
   auto uninfo = it.get_info(pc);
   ASSERT(uninfo.has_value(), "unwind info iterator returned null for 0x{:x}", pc);
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, uninfo.value(), pc);
