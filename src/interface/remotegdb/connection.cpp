@@ -96,6 +96,10 @@ RemoteConnection::RemoteConnection(std::string &&host, int port, utils::ScopedFd
   if (r == -1) {
     PANIC("Failed to create pipe for command requests");
   }
+  r = ::pipe(quit_fd);
+  if (r == -1) {
+    PANIC("Failed to create pipe for quit request");
+  }
 }
 
 RemoteConnection::~RemoteConnection() noexcept
@@ -104,6 +108,13 @@ RemoteConnection::~RemoteConnection() noexcept
   close(request_command_fd[1]);
   close(received_async_notif_during_core_ctrl[0]);
   close(received_async_notif_during_core_ctrl[1]);
+  const auto r = ::write(quit_fd[1], "+", 1);
+  if (r == -1) {
+    PANIC("Failed to notify connection thread to shut down");
+  }
+  stop_reply_and_event_listener.join();
+  close(quit_fd[0]);
+  close(quit_fd[1]);
 }
 
 BufferedSocket::BufferedSocket(utils::ScopedFd &&fd, u32 reserve_size) noexcept : fd_socket(std::move(fd))
@@ -465,7 +476,8 @@ class PollSetup
   int socket;
   int cmd_request;
   int async_pending;
-  pollfd fds[3];
+  int quit;
+  pollfd fds[4];
 
 public:
   enum class PolledEvent : i8
@@ -475,15 +487,17 @@ public:
     AsyncPending = 1,
     // A remote controller has requested control and is awaiting `RemoteConnection` to relinquish control of the
     // socket/connection.
-    CmdRequested = 2
+    CmdRequested = 2,
+    Quit = 3
   };
 
-  PollSetup(int conn_socket, int cmds, int async) noexcept
-      : socket(conn_socket), cmd_request(cmds), async_pending(async)
+  PollSetup(int conn_socket, int cmds, int async, int quit_pipe) noexcept
+      : socket(conn_socket), cmd_request(cmds), async_pending(async), quit(quit_pipe)
   {
     fds[0] = {socket, POLLIN, 0};
     fds[1] = {async_pending, POLLIN, 0};
     fds[2] = {cmd_request, POLLIN, 0};
+    fds[3] = {quit, POLLIN, 0};
   }
 
   constexpr auto
@@ -496,8 +510,8 @@ public:
   poll(std::optional<int> timeout) noexcept
   {
     static constexpr auto Channels = std::to_array<std::string_view>({"IO", "Async", "User command request"});
-    static constexpr auto Event =
-        std::to_array<PolledEvent>({PolledEvent::HasIo, PolledEvent::AsyncPending, PolledEvent::CmdRequested});
+    static constexpr auto Event = std::to_array<PolledEvent>(
+        {PolledEvent::HasIo, PolledEvent::AsyncPending, PolledEvent::CmdRequested, PolledEvent::Quit});
 
     const auto pull_evt = [&](auto pollfd) {
       if (pollfd.fd == fds[0].fd)
@@ -510,7 +524,7 @@ public:
       return PolledEvent::None;
     }
 
-    for (auto i = 0; i < 3; ++i) {
+    for (auto i = 0; i < 4; ++i) {
       if ((fds[i].revents & POLLIN) == POLLIN) {
         VERIFY(pull_evt(fds[i]), "Expected consumption of one '+' to succeed on: '{}'", Channels[i]);
         return Event[i];
@@ -1279,9 +1293,9 @@ RemoteConnection::initialize_thread() noexcept
   if (!is_initialized) {
     stop_reply_and_event_listener = std::thread{
         [this]() {
-          for (;;) {
+          for (; run;) {
             PollSetup polling{socket.get_pollcfg().fd, request_command_fd[0],
-                              received_async_notif_during_core_ctrl[0]};
+                              received_async_notif_during_core_ctrl[0], quit_fd[0]};
             switch (polling.poll(None())) {
             case PollSetup::PolledEvent::None:
               break;
@@ -1293,6 +1307,9 @@ RemoteConnection::initialize_thread() noexcept
               break;
             case PollSetup::PolledEvent::CmdRequested:
               relinquish_control_to_core();
+              break;
+            case PollSetup::PolledEvent::Quit:
+              run = false;
               break;
             }
           }

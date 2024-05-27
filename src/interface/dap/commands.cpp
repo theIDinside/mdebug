@@ -452,8 +452,8 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 UIResultPtr
 Disconnect::execute(Tracer *tracer) noexcept
 {
-  tracer->disconnect(true);
-  return new DisconnectResponse{true, this};
+  auto ok = tracer->disconnect(true);
+  return new DisconnectResponse{ok, this};
 }
 
 std::string
@@ -557,8 +557,8 @@ TerminateResponse::serialize(int seq) const noexcept
 UIResultPtr
 Terminate::execute(Tracer *tracer) noexcept
 {
-  tracer->disconnect(true);
-  return new TerminateResponse{true, this};
+  auto ok = tracer->disconnect(true);
+  return new TerminateResponse{ok, this};
 }
 
 std::string

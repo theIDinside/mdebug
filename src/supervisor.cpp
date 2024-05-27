@@ -75,6 +75,17 @@ TraceeController::TraceeController(TargetSession target_session, tc::Interface &
   tracee_interface->set_target(this);
 }
 
+TraceeController::~TraceeController() noexcept
+{
+  /// TODO(simon): Introduce arena allocator per supervisor - this way, when a supervisor dies, it blinks out all
+  /// the memory it's consuming without running MANY destructors. We won't be able to just use canonical std::pmr,
+  /// we will need to write our own stuff on top of it, for instance
+  // some data is shared between supervisors (if their symbolfiles are the same, for instance). But, I'm thinking
+  // this won't be that difficult just add some form of reference counting to the actual `SupervisorAllocator`
+  // (e.g.) and when it goes to 0 => blink the memory.
+  DBGLOG(core, "Destroying supervisor state for {}", task_leader);
+}
+
 std::shared_ptr<SymbolFile>
 TraceeController::lookup_symbol_file(const Path &path) noexcept
 {

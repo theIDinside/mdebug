@@ -46,9 +46,6 @@ TEST(StringSplit, CommaSeparated)
 
 TEST(GdbRemote, DecodeNonRunLengthEncodedData) {}
 
-static constexpr std::string_view registerPacket =
-    R"(700840*'d8d6f*"7f0* d82d40*(40*+20*+10**50d5f*"7f0* 30d5f*"7f0*090defcf7ff7f0*!40**e06cbff7ff7f0*!10*<d0fff7ff7f0* d82d40*'f10740*(6020* 330*"2b0*}0*}0* 7f030*(f* 0*Xe8030*+10*(e8030*(f0a1e4f7ff7f0* 18a2e4f7ff7f0* f0a1e4f7ff7f0* 18a2e4f7ff7f0* 90a1e4f7ff7f0* b8a1e4f7ff7f0* 90a1e4f7ff7f0* b8a1e4f7ff7f0* 18a2e4f7ff7f0*0f0a1e4f7ff7f0* 18a2e4f7ff7f0*}0*}0*^801f0* f*,40b2e9f7ff7f0*}0*}0*}0*}0*}0*K)";
-
 static constexpr std::string_view registerPacket2 =
     R"(08e1fff7ff7f0*!8e1fff7ff7f0* d4d5f*"7f0*"d0fff7ff7f0*@b0d8f*"7f0*"d6f*"7f0*"bafff7ff7f0*!f0**c0d5f*"7f0* 46020*(c0e2fff7ff7f0* b0dafff7ff7f0* c0e2fff7ff7f0*0c47bfef7ff7f0*!6020* 330*"2b0*}0*}0* 7f030*(f* 0*Nf*"00ff00ff00ff00ff00f*"ff00010100010001000100010001415445005f5f6c6962635f6561726c79410*:5445005f5f6c6962635f6561726c795f8037cbf7ff7f0* 705fcbf7ff7f0* 480*:705dcbf7ff7f0* e05fcbf7ff7f0*}0*}0*^801f0* f*,4047e9f7ff7f0*}0*}0*}0*}0*}0*K)";
 

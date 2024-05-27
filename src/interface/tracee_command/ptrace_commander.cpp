@@ -25,14 +25,6 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
   procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
 }
 
-static TPtr<r_debug_extended>
-get_rdebug_state(ObjectFile *obj_file)
-{
-  const auto rdebug_state = obj_file->get_min_obj_sym(LOADER_STATE);
-  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
-  return rdebug_state->address.as<r_debug_extended>();
-}
-
 bool
 PtraceCommander::post_exec() noexcept
 {

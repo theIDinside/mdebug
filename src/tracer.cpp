@@ -561,13 +561,18 @@ Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on
   target->get_interface().disconnect(!resume_on_detach);
 }
 
-void
+bool
 Tracer::disconnect(bool terminate) noexcept
 {
-  for (auto &&t : targets) {
-    t->get_interface().disconnect(terminate);
+  while (!targets.empty()) {
+    if (!targets.back()->get_interface().do_disconnect(terminate)) {
+      return false;
+    }
+    targets.pop_back();
   }
+
   Tracer::KeepAlive = false;
+  return true;
 }
 
 std::shared_ptr<SymbolFile>

@@ -393,9 +393,22 @@ GdbRemoteCommander::get_thread_name(Tid tid) noexcept
 TaskExecuteResponse
 GdbRemoteCommander::disconnect(bool terminate) noexcept
 {
-  gdb::CommandSerializationBuffer<4> packet_buffer{};
-  packet_buffer.write_packet("{}", "D");
-  TODO_FMT("Implement GdbRemoteCommander::disconnect {}", terminate);
+  std::array<char, 64> buf{};
+  if (terminate) {
+    auto cmd = SerializeCommand(buf, "vKill;{}", task_leader());
+    const auto res = connection->send_command_with_response(cmd, 1000);
+    if (res.is_expected() && res.value() == "$OK"sv) {
+      return TaskExecuteResponse::Ok();
+    }
+    return TaskExecuteResponse::Error(0);
+  } else {
+    auto cmd = SerializeCommand(buf, "D;{}", task_leader());
+    const auto res = connection->send_command_with_response(cmd, 1000);
+    if (res.is_expected() && res.value() == "$OK"sv) {
+      return TaskExecuteResponse::Ok();
+    }
+    return TaskExecuteResponse::Error(0);
+  }
 }
 bool
 GdbRemoteCommander::perform_shutdown() noexcept

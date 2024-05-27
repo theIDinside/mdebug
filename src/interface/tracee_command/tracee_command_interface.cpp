@@ -38,6 +38,16 @@ TraceeCommandInterface::target_manages_breakpoints() noexcept
   return false;
 }
 
+TaskExecuteResponse
+TraceeCommandInterface::do_disconnect(bool terminate) noexcept
+{
+  for (auto &user : tc->pbps.all_users()) {
+    tc->pbps.remove_bp(user->id);
+  }
+  disconnect(terminate);
+  return TaskExecuteResponse::Ok();
+}
+
 std::optional<std::string>
 TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, u32 buffer_size) noexcept
 {

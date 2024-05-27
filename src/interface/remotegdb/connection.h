@@ -528,6 +528,7 @@ private:
   RemoteSettings remote_settings;
   bool is_initialized{false};
   bool remote_configured{false};
+  bool run{true};
   std::recursive_mutex tracee_control_mutex{};
   // Architectures controlled via this remote connection
   std::unordered_map<Pid, std::shared_ptr<gdb::ArchictectureInfo>> archs{};
@@ -537,6 +538,7 @@ private:
 
   int request_command_fd[2];
   int received_async_notif_during_core_ctrl[2];
+  int quit_fd[2];
   std::barrier<> give_ctrl_sync{2};
   std::barrier<> user_done_sync{2};
 

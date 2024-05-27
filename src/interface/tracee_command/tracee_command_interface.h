@@ -186,6 +186,8 @@ struct TaskExecuteResponse
   {
     return kind == TaskExecuteResult::Ok;
   }
+
+  constexpr operator bool() const noexcept { return is_ok(); }
 };
 
 std::string_view to_str(RunType type) noexcept;
@@ -278,7 +280,7 @@ public:
   virtual utils::Expected<Auxv, Error> read_auxv() noexcept = 0;
 
   virtual bool target_manages_breakpoints() noexcept;
-
+  TaskExecuteResponse do_disconnect(bool terminate) noexcept;
   static Interface createCommandInterface(const InterfaceConfig &config) noexcept;
   std::optional<std::string> read_nullterminated_string(TraceePointer<char> address,
                                                         u32 buffer_size = 128) noexcept;
