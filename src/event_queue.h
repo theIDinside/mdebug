@@ -54,7 +54,7 @@ enum class CoreEventType
 };
 
 #define EventType(Type) static constexpr CoreEventType EvtType = CoreEventType::Type
-#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event {}]: {}", EventObject.event_type, Msg)
+#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event] ({}): {}", EventObject.event_type, Msg)
 
 namespace fmt {
 
