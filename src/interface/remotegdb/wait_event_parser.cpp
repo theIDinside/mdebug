@@ -159,6 +159,10 @@ WaitEventParser::new_debugger_event(bool init) noexcept
       return CoreEvent::Stepped(param(), !locstat->should_resume, locstat, std::move(t->next_resume_action),
                                 std::move(registers));
     }
+
+    if (signal != SIGTRAP) {
+      return CoreEvent::Signal(param(), std::move(registers));
+    }
   }
 
   // We got no stop reason. Defer to supervisor, let it figure it out.Nu

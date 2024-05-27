@@ -588,6 +588,8 @@ public:
   utils::Expected<std::string, SendError> send_command_with_response(std::string_view command,
                                                                      std::optional<int> timeout) noexcept;
 
+  void send_interrupt_byte() noexcept;
+
   utils::Expected<std::vector<std::string>, SendError>
   send_inorder_command_chain(std::span<std::string_view> commands, std::optional<int> timeout) noexcept;
 

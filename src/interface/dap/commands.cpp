@@ -82,20 +82,6 @@ ErrorResponse::serialize(int seq) const noexcept
 }
 
 std::string
-ContinueResponse::serialize(int seq) const noexcept
-{
-
-  if (success)
-    return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
-        seq, response_seq, continue_all);
-  else
-    return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
-        seq, response_seq);
-}
-
-std::string
 PauseResponse::serialize(int seq) const noexcept
 {
   if (success) {
@@ -119,6 +105,20 @@ Pause::execute(Tracer *tc) noexcept
   }
   target->install_thread_proceed<ptracestop::StopImmediately>(*task, StoppedReason::Pause);
   return new PauseResponse{true, this};
+}
+
+std::string
+ContinueResponse::serialize(int seq) const noexcept
+{
+
+  if (success)
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
+        seq, response_seq, continue_all);
+  else
+    return fmt::format(
+        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
+        seq, response_seq);
 }
 
 UIResultPtr

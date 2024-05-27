@@ -227,10 +227,25 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 TaskExecuteResponse
 GdbRemoteCommander::stop_task(TaskInfo &t) noexcept
 {
-  gdb::CommandSerializationBuffer<256> packet_buffer{};
-  const auto pid = task_leader();
-  packet_buffer.write_packet("vCont;t:p{}.{}", pid, t.tid);
-  TODO("GdbRemoteCommander::stop_task(TaskInfo &t) noexcept");
+  if (remote_settings().is_non_stop) {
+    std::array<char, 64> bytes{};
+    const auto pid = task_leader();
+    auto cmd = SerializeCommand(bytes, "vCont;t:p{}.{}", pid, t.tid);
+    auto response = connection->send_command_with_response(cmd, 1000);
+    if (!(response.is_expected() && response.take_value() == "$OK")) {
+      PANIC("Failed to unset breakpoint");
+    }
+    return TaskExecuteResponse::Ok();
+  } else {
+    // std::array<char, 64> bytes{};
+    // auto cmd = SerializeCommand(bytes, "vCtrlC");
+    // auto response = connection->send_command_with_response(cmd, 1000);
+    // if (!(response.is_expected() && response.take_value() == "$OK")) {
+    //   PANIC("Failed to unset breakpoint");
+    // }
+    connection->send_interrupt_byte();
+    return TaskExecuteResponse::Ok();
+  }
 }
 
 TaskExecuteResponse

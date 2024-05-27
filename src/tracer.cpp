@@ -323,12 +323,18 @@ Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEve
         return ProcessedStopEvent{true, {}};
       },
       [&](const Signal &e) -> MatchResult {
+        // TODO: Allow signals through / stop process / etc. Allow for configurability here.
         auto t = tc.get_task(e.thread_id);
         tc.stop_all(t);
-        tc.all_stop.once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
-          tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
-        });
-        // TODO: Allow signals through / stop process / etc. Allow for configurability here.
+        if(evt->signal == SIGINT) {
+          tc.all_stop.once([t = t->tid, &tc = tc]() {
+            tc.emit_stopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {});
+          });
+        } else {
+          tc.all_stop.once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
+            tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
+          });
+        }
         return ProcessedStopEvent{false, {}};
       },
       [&](const Stepped& e) -> MatchResult {

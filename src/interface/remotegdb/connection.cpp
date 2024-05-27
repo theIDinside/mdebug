@@ -1160,6 +1160,23 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
   return result;
 }
 
+void
+RemoteConnection::send_interrupt_byte() noexcept
+{
+  tracee_control_mutex.lock();
+  ScopedDefer fn{[&]() {
+    user_done_sync.arrive_and_wait();
+    tracee_control_mutex.unlock();
+  }};
+
+  request_control();
+  char Int[1] = {3};
+  const auto write_result = socket.write({Int, 1});
+  if (!write_result.is_ok()) {
+    PANIC("Failed to sent interrupt byte");
+  }
+}
+
 utils::Expected<std::string, SendError>
 RemoteConnection::send_command_with_response(std::string_view command, std::optional<int> timeout) noexcept
 {
