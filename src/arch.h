@@ -76,10 +76,6 @@ ArchRegisterBlockSize() noexcept
   }
 }
 
-template <ArchType N> struct ArchRegNum
-{
-};
-
 struct ArchRegInfo
 {
   u8 width;
@@ -108,10 +104,10 @@ Construct()
   }
 }
 
-template <> struct ArchRegNum<ArchType::X86_64>
+template <ArchType Architecture> struct ArchRegNum
 {
 
-  static constexpr auto DwarfRegisterTable = Construct<ArchType::X86_64>();
+  static constexpr auto DwarfRegisterTable = Construct<Architecture>();
 
 #ifndef Reg
 #define Reg(name, index, width) static constexpr auto name = DwarfRegisterTable[index];
