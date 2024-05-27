@@ -1,4 +1,4 @@
-const { getLineOf, readFileContents, repoDirFile } = require('./client')
+const { getLineOf, readFileContents, repoDirFile, seconds } = require('./client')
 const { assert, prettyJson } = require('./utils')
 
 async function threads(DA) {
