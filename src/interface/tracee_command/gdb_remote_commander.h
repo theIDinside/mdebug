@@ -5,6 +5,7 @@
 #include "utils/expected.h"
 #include "utils/scoped_fd.h"
 #include <interface/remotegdb/connection.h>
+#include <link.h>
 #include <mutex>
 
 namespace tc {
@@ -63,11 +64,15 @@ template <size_t N> struct CommandSerializer
   }
 };
 
+using AuxvData = std::optional<std::string>;
+
 class GdbRemoteCommander final : public TraceeCommandInterface
 {
   std::shared_ptr<gdb::RemoteConnection> connection;
   Pid process_id;
   std::optional<std::string> exec_file{};
+  TPtr<r_debug_extended> tracee_r_debug{nullptr};
+  Auxv auxv_data{};
 
   // TODO(simon): allow for smart caching of thread names, by catching system call `prctl` with the parameters that
   // call the `PR_SET_NAME` request, and on SyscallExit, call qXfer:threads:read:... and update the cache.
@@ -104,7 +109,7 @@ public:
   bool perform_shutdown() noexcept final;
   bool initialize() noexcept final;
 
-  bool post_exec(TraceeController *) noexcept final;
+  bool post_exec() noexcept final;
   Tid task_leader() const noexcept final;
   std::optional<Path> execed_file() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept final;

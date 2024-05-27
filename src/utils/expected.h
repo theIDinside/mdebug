@@ -39,6 +39,15 @@ unexpected(Err &&err) noexcept
   return Unexpected<Err>{std::forward<Err>(err)};
 }
 
+// Base template for the variadic template
+template <typename T, typename... Args> struct IsFirstTypeSame;
+
+// Specialization to extract the first type and compare it with T
+template <typename T, typename First, typename... Rest> struct IsFirstTypeSame<T, First, Rest...>
+{
+  static constexpr bool value = std::is_same<T, First>::value;
+};
+
 // Just a thin, stupid, inefficient wrapper around std::variant. It'll do for now.
 template <typename T, typename Err> class Expected
 {
@@ -47,7 +56,9 @@ template <typename T, typename Err> class Expected
 
 public:
   template <typename... Args>
-  Expected(Args &&...args) noexcept : val_or_err(std::forward<Args>(args)...), has_value(true)
+  Expected(Args &&...args) noexcept
+    requires(!IsFirstTypeSame<Err, Args...>::value)
+      : val_or_err(std::forward<Args>(args)...), has_value(true)
   {
     ASSERT(val_or_err.index() == 0, "You've broken the invariant");
   }

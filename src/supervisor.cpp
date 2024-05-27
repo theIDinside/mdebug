@@ -72,6 +72,7 @@ TraceeController::TraceeController(TargetSession target_session, tc::Interface &
     Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", *sf});
     return true;
   });
+  tracee_interface->set_target(this);
 }
 
 std::shared_ptr<SymbolFile>
@@ -138,6 +139,37 @@ createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<
     }
   }
   return nullptr;
+}
+
+static TPtr<r_debug_extended>
+get_rdebug_state(ObjectFile *obj_file)
+{
+  const auto rdebug_state = obj_file->get_min_obj_sym(LOADER_STATE);
+  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
+  return rdebug_state->address.as<r_debug_extended>();
+}
+
+TPtr<r_debug_extended>
+TraceeController::install_loader_breakpoints() noexcept
+{
+  ASSERT(main_executable != nullptr, "No main executable for this target");
+  const auto mainExecutableElf = main_executable->objectFile()->elf;
+  auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->get_section(".interp"));
+  auto tmp_objfile = CreateObjectFile(task_leader, int_path);
+  ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
+  const auto system_tap_sec = tmp_objfile->elf->get_section(".note.stapsdt");
+  const auto probes = parse_stapsdt_note(tmp_objfile->elf, system_tap_sec);
+
+  tracee_r_debug = *interpreter_base + get_rdebug_state(tmp_objfile.get());
+  DBGLOG(core, "_r_debug found at {}", tracee_r_debug);
+  for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
+    if (auto symbol = tmp_objfile->get_min_fn_sym(symbol_name); symbol) {
+      const auto addr = *interpreter_base + symbol->address;
+      DBGLOG(core, "Setting ld breakpoint at 0x{:x}", addr);
+      pbps.create_loc_user<SOLoadingBreakpoint>(*this, get_or_create_bp_location(addr, false), task_leader);
+    }
+  }
+  return tracee_r_debug;
 }
 
 void
@@ -789,7 +821,7 @@ TraceeController::post_exec(const std::string &exe) noexcept
     main_executable = nullptr;
   }
   Tracer::Instance->load_and_process_objfile(task_leader, exe);
-  tracee_interface->post_exec(this);
+  tracee_interface->post_exec();
 }
 
 bool

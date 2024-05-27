@@ -79,6 +79,7 @@ struct TraceeController
   bool stop_all_requested;
   Publisher<void> all_stop{};
   Publisher<SymbolFile *> new_objectfile{};
+  TPtr<r_debug_extended> tracee_r_debug{nullptr};
   InterfaceType interface_type;
 
 private:
@@ -103,7 +104,7 @@ public:
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
 
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
-  void install_loader_breakpoints() noexcept;
+  TPtr<r_debug_extended> install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
   std::optional<std::shared_ptr<BreakpointLocation>> reassess_bploc_for_symfile(SymbolFile &symbol_file,
                                                                                 UserBreakpoint &user_bp) noexcept;

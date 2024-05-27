@@ -57,7 +57,7 @@ public:
   bool initialize() noexcept final;
 
   /// Re-open proc fs mem file descriptor. Configure
-  bool post_exec(TraceeController *) noexcept final;
+  bool post_exec() noexcept final;
   Tid task_leader() const noexcept final;
   std::optional<Path> execed_file() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept final;

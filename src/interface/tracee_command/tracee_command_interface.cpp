@@ -61,6 +61,13 @@ TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, 
   return result;
 }
 
+void
+TraceeCommandInterface::set_target(TraceeController *supervisor) noexcept
+{
+  ASSERT(tc == nullptr, "Target already configured with this interface!");
+  tc = supervisor;
+}
+
 std::string_view
 to_str(RunType type) noexcept
 {

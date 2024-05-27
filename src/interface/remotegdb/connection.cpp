@@ -63,8 +63,6 @@ static constexpr SendError
 send_err(const SendResult &res) noexcept
 {
   switch (res.kind) {
-  case SendResultKind::NonsensePayload:
-    return res.gbg;
   case SendResultKind::ResponseTimeout:
     return res.timeout;
   default:
@@ -646,6 +644,9 @@ RemoteConnection::process_task_received_signal_extended(int signal, std::string_
   parser.control_kind_is_attached = is_session_config;
   parser.signal = signal;
 
+  static constexpr auto DecodeBufferSize = 64;
+  char dec_buf[DecodeBufferSize];
+
   for (const auto param_str : params) {
     const auto pos = param_str.find(':');
     const auto arg = param_str.substr(0, pos);
@@ -662,43 +663,13 @@ RemoteConnection::process_task_received_signal_extended(int signal, std::string_
       } else {
         const auto register_number = RemoteConnection::parse_hexdigits(arg);
         auto contents = val;
-        auto &[no, reg_contents] = parser.registers.emplace_back(register_number.value(), std::vector<u8>{});
-        auto repeat = contents.find('*');
-        if (repeat != contents.npos) {
-          char buf[32]{};
-          auto dec_length = 0;
-          for (auto i = 0u; i < contents.size();) {
-            if (contents[i] == '*') {
-              const auto repeat_count = static_cast<u32>(contents[i + 1] - char{29});
-              std::fill_n(buf + dec_length, repeat_count, contents[i - 1]);
-              dec_length += repeat_count;
-              i += 2;
-            } else {
-              buf[dec_length++] = contents[i];
-              i += 1;
-            }
-          }
-          std::string_view decoded{buf, buf + dec_length};
-          std::array<u8, 32> bytes{};
-          u8 byte_pos = 0;
 
-          while (!decoded.empty()) {
-            const auto ec = std::from_chars(decoded.data(), decoded.data() + 2, bytes[byte_pos++], 16);
-            ASSERT(ec.ec == std::errc(), "Failed to parse register byte from register content parameter in {}",
-                   payload);
-            decoded.remove_prefix(2);
-          }
-          reg_contents.reserve(byte_pos);
-          std::copy(bytes.begin(), bytes.begin() + byte_pos, std::back_inserter(reg_contents));
-        } else {
-          while (!contents.empty()) {
-            u8 byte;
-            const auto ec = std::from_chars(contents.data(), contents.data() + 2, byte, 16);
-            ASSERT(ec.ec == std::errc(), "Failed to parse register byte from register content parameter in {}",
-                   payload);
-            reg_contents.push_back(byte);
-            contents.remove_prefix(2);
-          }
+        auto decoded = gdb::decode_rle_to_str(contents, dec_buf, DecodeBufferSize);
+        auto &[no, reg_contents] = parser.registers.emplace_back(register_number.value(), std::vector<u8>{});
+        reg_contents.reserve(decoded.length() / 2);
+        const auto sz = decoded.size();
+        for (auto i = 0u; i < sz; i += 2) {
+          reg_contents.push_back(utils::fromhex(decoded[i]) * 16 + utils::fromhex(decoded[i + 1]));
         }
       }
     }
@@ -1222,6 +1193,10 @@ RemoteConnection::send_command_with_response(std::string_view command, std::opti
     } else {
       return Timeout{.msg = "Timed out waiting for response to command"};
     }
+  }
+  const auto &ref = response.value();
+  if (ref[0] == '$' && ref[1] == 'E') {
+    return SendError{SystemError{.syserrno = 0}};
   }
 
   return std::move(response.value());

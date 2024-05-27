@@ -231,6 +231,9 @@ using Interface = std::unique_ptr<TraceeCommandInterface>;
 // GdbRemoteCommander is the gdb remote protocol interface
 class TraceeCommandInterface
 {
+private:
+  TraceeController *tc{nullptr};
+
 public:
   Immutable<TargetFormat> format;
   Immutable<std::shared_ptr<gdb::ArchictectureInfo>> arch_info;
@@ -242,6 +245,7 @@ public:
   virtual TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse resume_task(TaskInfo &t, RunType run) noexcept = 0;
+  // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
   virtual TaskExecuteResponse resume_target(TraceeController *tc, RunType run) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse stop_task(TaskInfo &t) noexcept = 0;
@@ -265,7 +269,7 @@ public:
 
   /// Called after we've processed an exec or fork (For PtraceCommander we might re-open proc fs files for
   /// instance).
-  virtual bool post_exec(TraceeController *) noexcept = 0;
+  virtual bool post_exec() noexcept = 0;
   virtual Tid task_leader() const noexcept = 0;
   virtual std::optional<Path> execed_file() noexcept = 0;
   virtual std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept = 0;
@@ -278,6 +282,7 @@ public:
   static Interface createCommandInterface(const InterfaceConfig &config) noexcept;
   std::optional<std::string> read_nullterminated_string(TraceePointer<char> address,
                                                         u32 buffer_size = 128) noexcept;
+  void set_target(TraceeController *tc) noexcept;
 
   template <typename T>
   utils::Expected<T, std::string_view>
@@ -328,6 +333,11 @@ public:
       }
     }
     return {total_written};
+  }
+  inline constexpr TraceeController *
+  supervisor() noexcept
+  {
+    return tc;
   }
 };
 

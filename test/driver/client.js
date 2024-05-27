@@ -874,7 +874,7 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
     `Expected ${bpIdentifiers.length} breakpoints`,
     `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
   )
-  return bp_lines
+  return bkpt_res
 }
 
 /**
@@ -888,11 +888,11 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
  * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
  * @param { string } expectedFrameName - frame name we expect to see on first stop.
  * @param { string } exeFile - the binary to execute
- * @returns { { object[], object[], object[] } }
+ * @returns { { threads: object[], frames: object[], scopes: object[], bpres: object[] } }
  */
 async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
   await DA.startRunToMain(DA.buildDirFile(exeFile), [], 5000)
-  await SetBreakpoints(DA, filePath, bpIdentifiers)
+  const bpres = await SetBreakpoints(DA, filePath, bpIdentifiers)
   const threads = await DA.threads()
   await DA.contNextStop(threads[0].id)
   const fres = await DA.stackTrace(threads[0].id, 1000)
@@ -916,7 +916,7 @@ async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedF
     `Scopes:\n${prettyJson(scopes)}`
   )
 
-  return { threads, frames, scopes }
+  return { threads, frames, scopes, bpres }
 }
 
 module.exports = {

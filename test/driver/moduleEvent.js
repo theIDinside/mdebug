@@ -40,16 +40,16 @@ async function assert1Pending(debugAdapter) {
 }
 
 async function seeModuleEventFromDLOpenCall(debugAdapter) {
-  let { threads, frames, scopes } = await launchToGetFramesAndScopes(
+  let { threads, frames, scopes, bpres } = await launchToGetFramesAndScopes(
     debugAdapter,
     'test/dynamicLoading.cpp',
     ['BP_PRE_OPEN', 'BP_PRE_DLSYM', 'BP_PRE_CALL', 'BP_PRE_CLOSE'],
     'perform_dynamic',
     'dynamicLoading'
   )
-  const bp2 = await SetBreakpoints(debugAdapter, 'test/dynamic_lib.cpp', ['BPMI'])
+  const dyn_bps = await SetBreakpoints(debugAdapter, 'test/dynamic_lib.cpp', ['BPMI'])
   const bp = await assert1Pending(debugAdapter)
-  let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 2000)
+  let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 2, 500)
   const template_path = repoDirFile('test/templated_code/template.h')
   const template_line = getLineOf(readFileContents(template_path), 'BP1')
   let bp_args = { source: { name: template_path, path: template_path }, breakpoints: [{ line: template_line }] }
@@ -67,7 +67,8 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
     `Expected to see 2 new breakpoint event due to dlopen call`,
     () => `But saw ${res.length}: ${prettyJson(res)}`
   )
-  let obj = { changed_seen: false, new_seen: false }
+  let changed_seen = false
+  let new_seen = false
   for (const evt of res) {
     assertLog(
       evt.breakpoint.verified,
@@ -122,9 +123,13 @@ async function newFunctionBreakpointAfterLoadedSharedObject(debugAdapter) {
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
   const bp = res[0].breakpoint
-  assert(bp.verified, 'Expected breakpoint to be verified')
-  assert(bp.line == 9, 'Expected to see a new breakpoint at line 9')
-  assert(bp.source.name.includes('template.h'), "Expected file to be 'template.h'")
+  assertLog(bp.verified, 'Expected breakpoint to be verified', `Breakpoint: ${JSON.stringify(res)}`)
+  assertLog(bp.line == 9, 'Expected to see a new breakpoint at line 9', `Breakpoint: ${JSON.stringify(res)}`)
+  assertLog(
+    bp.source.name.includes('template.h'),
+    "Expected file to be 'template.h'",
+    `Breakpoint: ${JSON.stringify(res)}`
+  )
 
   console.log(prettyJson(res))
 }

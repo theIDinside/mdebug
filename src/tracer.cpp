@@ -314,6 +314,7 @@ Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEve
         return ProcessedStopEvent{!tc.stop_handler->event_settings.exec_stop, {}};
       },
       [&](const ProcessExited &e) -> MatchResult {
+        (void)e;
         tc.reap_task(*task);
         return ProcessedStopEvent{false, {}};
       },
@@ -460,11 +461,8 @@ Tracer::attach(const AttachArgs &args) noexcept
                   targets.push_back(std::make_unique<TraceeController>(
                       TargetSession::Attached, std::move(interface.tc), InterfaceType::GdbRemote));
                   Tracer::Instance->set_current_to_latest_target();
-
-                  if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
-                    const auto new_process = current_target->get_interface().task_leader();
-                    load_and_process_objfile(new_process, *exe_file);
-                  }
+                  auto &ti = current_target->get_interface();
+                  ti.post_exec();
                   auto newtarget = get_current();
                   for (const auto &t : interface.threads) {
                     newtarget->new_task(t.tid);

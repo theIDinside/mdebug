@@ -34,8 +34,9 @@ get_rdebug_state(ObjectFile *obj_file)
 }
 
 bool
-PtraceCommander::post_exec(TraceeController *tc) noexcept
+PtraceCommander::post_exec() noexcept
 {
+  auto tc = supervisor();
   process_id = tc->task_leader;
   DBGLOG(core, "Post Exec routine for {}", process_id);
   procfs_memfd = {};
@@ -54,28 +55,7 @@ PtraceCommander::post_exec(TraceeController *tc) noexcept
     tc->read_auxv_info(std::move(auxv_result.take_value()));
   }
 
-  auto interpreter = tc->get_interpreter_base();
-  ASSERT(interpreter.has_value(),
-         "Haven't read interpreter base address, we will have no idea about where to install breakpoints");
-  const auto main_exec = tc->get_main_executable();
-
-  const auto mainExecutableElf = main_exec->objectFile()->elf;
-  auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->get_section(".interp"));
-  auto tmp_objfile = CreateObjectFile(task_leader(), int_path);
-  ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
-  const auto system_tap_sec = tmp_objfile->elf->get_section(".note.stapsdt");
-  const auto probes = parse_stapsdt_note(tmp_objfile->elf, system_tap_sec);
-  tracee_r_debug = interpreter.value() + get_rdebug_state(tmp_objfile.get());
-  DBGLOG(core, "_r_debug found at {}", tracee_r_debug);
-  for (const auto symbol_name : LOADER_SYMBOL_NAMES) {
-    if (auto symbol = tmp_objfile->get_min_fn_sym(symbol_name); symbol) {
-      const auto addr = interpreter.value() + symbol->address;
-      DBGLOG(core, "Setting ld breakpoint at 0x{:x}", addr);
-      tc->pbps.create_loc_user<SOLoadingBreakpoint>(*tc, tc->get_or_create_bp_location(addr, false),
-                                                    task_leader());
-    }
-  }
-
+  tracee_r_debug = tc->install_loader_breakpoints();
   return procfs_memfd.is_open();
 }
 

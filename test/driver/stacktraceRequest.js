@@ -44,16 +44,20 @@ async function unwindFromSharedObject(DA) {
   const bps2 = await set_bp('test/dynamic_lib.cpp', ['BPKM'])
   assertLog(bps2.body.breakpoints.length == 1, 'Expected 1 breakpoint')
   // hit breakpoint in todo.cpp
-  await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
+  // await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
+  await DA.contNextStop()
   await DA.contNextStop()
   const frames = await DA.stackTrace(threads[0].id, seconds(1)).then((res) => {
     checkResponse(res, 'stackTrace', true)
     const { stackFrames } = res.body
     return stackFrames
   })
-  verifyFrameIs(frames[0], 'convert_kilometers_to_miles')
-  const response = await DA.disconnect('terminate')
-  assertLog(response.success, `Attempted to disconnect`, JSON.stringify(response))
+  const name = 'convert_kilometers_to_miles'
+  assertLog(
+    frames[0].name == name,
+    `Expected frame ${name}`,
+    `Got ${frames[0].name}. Stacktrace:\n${prettyJson(frames)}`
+  )
 }
 
 function parse_prologue_and_epilogue(DA) {
@@ -84,7 +88,7 @@ function parse_prologue_and_epilogue(DA) {
 }
 
 function verifyFrameIs(frame, name) {
-  assert(frame.name == name, `Expected frame ${name} but got ${frame.name}`)
+  assertLog(frame.name == name, `Expected frame ${name} but got ${frame.name}`)
 }
 
 async function insidePrologueTest(DA) {

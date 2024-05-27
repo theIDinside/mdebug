@@ -30,6 +30,8 @@ class BarrierNotify;
 
 namespace gdb {
 
+// std::string cloned_deserialize_buffer(std::string_view buf) noexcept;
+
 class RemoteSessionConfigurator;
 
 struct RemoteSettings
@@ -133,17 +135,12 @@ struct SystemError
   int syserrno;
 };
 
-struct NonsensePayload
-{
-  std::string_view payload;
-};
-
 struct Timeout
 {
   std::string_view msg;
 };
 
-using SendError = std::variant<SystemError, NonsensePayload, Timeout, NAck>;
+using SendError = std::variant<SystemError, Timeout, NAck>;
 
 enum class SendResultKind
 {
@@ -151,8 +148,6 @@ enum class SendResultKind
   SentOk,
   // `send` system call error
   SystemError,
-  // When no sense can be made of what has been read from the data read from the socket to the remote
-  NonsensePayload,
   // Waiting for response timed out
   ResponseTimeout,
   // Remote responded with a NACK
@@ -172,7 +167,6 @@ struct SendResult
 
   SendResult(SentOk ok) noexcept : kind(SendResultKind::SentOk), ok(ok) {}
   SendResult(SystemError error) noexcept : kind(SendResultKind::SystemError), error(error) {}
-  SendResult(NonsensePayload error) noexcept : kind(SendResultKind::NonsensePayload), gbg(std::move(error)) {}
   SendResult(Timeout timeout) noexcept : kind(SendResultKind::ResponseTimeout), timeout(timeout) {}
   SendResult(NAck nack) noexcept : kind(SendResultKind::NotAck), nack(nack) {}
   SendResult(const SocketResult &socket_result) noexcept
@@ -199,7 +193,6 @@ struct SendResult
     SentOk ok;
     RemoteReceived remote_ok;
     SystemError error;
-    NonsensePayload gbg;
     Timeout timeout;
     NAck nack;
   };

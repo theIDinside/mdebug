@@ -32,4 +32,36 @@ format_value(char *ptr, u32 value) noexcept
   }
   return convert.ptr;
 }
+
+u32
+decode_rle(std::string_view v, char *buf, u32 size) noexcept
+{
+  auto ptr = buf;
+  constexpr auto decodedSize = [](auto bptr, auto wptr) noexcept { return static_cast<u32>(wptr - bptr); };
+  for (auto i = 0u; i < v.size() && decodedSize(buf, ptr) < size; ++i) {
+    if (v[i] == '*') {
+      const auto repeat_char = v[i - 1];
+      const auto count = std::min(static_cast<u32>(v[i + 1] - 29), static_cast<u32>(size - (ptr - buf)));
+      ptr = std::fill_n(ptr, count, repeat_char);
+      ++i;
+    } else {
+      const auto c = v[i];
+      // Branchless programming FTW: if it is not 'x', 1 * c + 0 = c, if it IS 'x': 0 * c + '0' * 1 = '0'
+      const char res = (c != 'x') * c + ((c == 'x') * '0');
+      *ptr = res;
+      ++ptr;
+    }
+  }
+  const auto sz = static_cast<u32>(ptr - buf);
+  ASSERT(sz <= size, "buffer overflow assertion failed: {} <= {}", sz, size);
+  return sz;
+}
+
+std::string_view
+decode_rle_to_str(std::string_view v, char *buf, u32 size) noexcept
+{
+  const auto length = decode_rle(v, buf, size);
+  return std::string_view{buf, buf + length};
+}
+
 } // namespace gdb
