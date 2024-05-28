@@ -72,7 +72,7 @@ public:
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   NonNullPtr<TraceeController> get_current() noexcept;
   void config_done() noexcept;
-  CoreEvent *handle_wait_event_2(Tid process_group, TaskWaitResult wait_res) noexcept;
+  CoreEvent *process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept;
   void handle_command(ui::UICommandPtr cmd) noexcept;
   void handle_core_event(const CoreEvent *evt) noexcept;
   void handle_init_event(const CoreEvent *evt) noexcept;
@@ -103,8 +103,8 @@ public:
   ui::dap::DAP *dap;
 
 private:
-  [[maybe_unused]] tc::ProcessedStopEvent process_core_event_determine_proceed(TraceeController &tc,
-                                                                               const CoreEvent *event) noexcept;
+  [[maybe_unused]] tc::ProcessedStopEvent process_core_event(TraceeController &tc,
+                                                             const CoreEvent *event) noexcept;
   TraceeController *current_target = nullptr;
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;

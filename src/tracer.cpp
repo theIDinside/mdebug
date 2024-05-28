@@ -134,7 +134,7 @@ Tracer::config_done() noexcept
 }
 
 CoreEvent *
-Tracer::handle_wait_event_2(Tid process_group, TaskWaitResult wait_res) noexcept
+Tracer::process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept
 {
   if (process_group == 0) {
     for (const auto &tgt : targets) {
@@ -163,7 +163,7 @@ Tracer::handle_init_event(const CoreEvent *evt) noexcept
   ScopedDefer defer{[&]() { delete evt; }};
   auto tc = get_controller(evt->target);
   ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
-  process_core_event_determine_proceed(*tc, evt);
+  process_core_event(*tc, evt);
   tc->emit_stopped(evt->tid, ui::dap::StoppedReason::Entry, "attached", true, {});
 }
 
@@ -174,7 +174,7 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
   auto tc = get_controller(evt->target);
   ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
 
-  tc::ProcessedStopEvent result = process_core_event_determine_proceed(*tc, evt);
+  tc::ProcessedStopEvent result = process_core_event(*tc, evt);
 
   // N.B. we _HAVE_ to do this check here (stop_all_requested), not anywhere else, due to the existence of what gdb
   // calls "all stop mode" which means that if *any* thread stops, all other threads are stopped (but they are not
@@ -193,7 +193,7 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
 }
 
 tc::ProcessedStopEvent
-Tracer::process_core_event_determine_proceed(TraceeController &tc, const CoreEvent *evt) noexcept
+Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
 {
   // todo(simon): open up for design that involves user-subscribed event handlers (once we get scripting up and
   // running) It is in this event handling, where we can (at the very end of each handler) emit additional "user
