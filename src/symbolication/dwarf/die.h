@@ -90,8 +90,9 @@ template <DwarfTag... tags>
 constexpr bool
 maybe_null_any_of(const DieMetaData *die)
 {
-  if (die == nullptr)
+  if (die == nullptr) {
     return false;
+  }
   return ((die->tag == tags) || ...);
 }
 

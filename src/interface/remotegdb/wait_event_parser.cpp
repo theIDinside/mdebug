@@ -144,7 +144,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
       TODO("Implement handling of TraceeStopReason::Clone");
     case TraceeStopReason::Create: {
       const auto target =
-          connection.settings().is_non_stop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
+        connection.settings().is_non_stop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
       return CoreEvent::ThreadCreated(param(), {tc::RunType::Continue, target}, std::move(registers));
     }
     }

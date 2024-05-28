@@ -28,8 +28,9 @@ PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(PartialCompil
 PartialCompilationUnitSymbolInfo &
 PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&rhs) noexcept
 {
-  if (this == &rhs)
+  if (this == &rhs) {
     return *this;
+  }
   unit_data = rhs.unit_data;
   line_table = rhs.line_table;
   fns = std::move(rhs.fns);
@@ -119,8 +120,9 @@ CompilationUnit::function_symbols_resolved() const noexcept
 sym::FunctionSymbol *
 CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
 {
-  if (!function_symbols_resolved())
+  if (!function_symbols_resolved()) {
     resolve_fn_symbols();
+  }
 
   auto iter = std::find_if(fns.begin(), fns.end(),
                            [pc](sym::FunctionSymbol &fn) { return fn.start_pc() <= pc && pc < fn.end_pc(); });
@@ -191,7 +193,7 @@ struct ResolveFnSymbolState
   complete()
   {
     std::optional<SourceCoordinate> source = lnp_file.transform(
-        [&](auto &&path) { return SourceCoordinate{.path = std::move(path), .line = this->line.value_or(0)}; });
+      [&](auto &&path) { return SourceCoordinate{.path = std::move(path), .line = this->line.value_or(0)}; });
     if (lnp_file) {
       ASSERT(lnp_file.value().empty(), "Should have moved std string!");
     }
@@ -224,8 +226,9 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
   dw::UnitReader reader{ref.cu};
   reader.seek_die(*ref.die);
   const auto &abbreviation = ref.cu->get_abbreviation(ref.die->abbreviation_code);
-  if (!abbreviation.is_declaration)
+  if (!abbreviation.is_declaration) {
     state.add_maybe_origin({.cu = ref.cu, .die_index = ref.cu->index_of(ref.die)});
+  }
 
   if (const auto parent = ref.die->parent();
       maybe_null_any_of<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
@@ -252,7 +255,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
       if (!state.lnp_file) {
         ASSERT(ref.cu == src_file.get_dwarf_unit(), "Cross CU requires another LNP. This will be wrong.");
         state.lnp_file =
-            src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+          src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
       }
     } break;
     case Attribute::DW_AT_decl_line:
@@ -261,10 +264,11 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
       }
       break;
     case Attribute::DW_AT_high_pc:
-      if (value.form != AttributeForm::DW_FORM_addr)
+      if (value.form != AttributeForm::DW_FORM_addr) {
         state.high_pc = state.low_pc.get() + value.address();
-      else
+      } else {
         state.high_pc = value.address();
+      }
       break;
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
@@ -324,8 +328,9 @@ CompilationUnit::resolve_fn_symbols() noexcept
       case Attribute::DW_AT_high_pc:
         if (value.form != AttributeForm::DW_FORM_addr) {
           state.high_pc = state.low_pc.get() + value.address();
-        } else
+        } else {
           state.high_pc = value.address();
+        }
         break;
       case Attribute::DW_AT_decl_file: {
         ASSERT(!state.lnp_file.has_value(), "lnp file has been set already, to {}, new {}", state.lnp_file.value(),
@@ -340,9 +345,9 @@ CompilationUnit::resolve_fn_symbols() noexcept
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
         const auto declaring_die_offset = value.unsigned_value();
-        if (auto die_ref = unit_data->get_objfile()->get_die_reference(declaring_die_offset); die_ref)
+        if (auto die_ref = unit_data->get_objfile()->get_die_reference(declaring_die_offset); die_ref) {
           die_refs.push_back(*die_ref);
-        else {
+        } else {
           DBGLOG(core, "Could not find die reference");
         }
         break;

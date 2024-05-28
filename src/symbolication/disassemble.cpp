@@ -101,8 +101,9 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
       while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
                                               text->remaining_bytes(exec_data_ptr), &instruction)) &&
              add <= addr) {
-        if (!disassembled_addresses.contains(add))
+        if (!disassembled_addresses.contains(add)) {
           result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
+        }
         disassembled_addresses.insert(add);
         add = offset(add, instruction.info.length);
         exec_data_ptr += instruction.info.length;
@@ -123,8 +124,9 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
     while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
                                             text->remaining_bytes(exec_data_ptr), &instruction)) &&
            add <= addr) {
-      if (!disassembled_addresses.contains(add))
+      if (!disassembled_addresses.contains(add)) {
         result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
+      }
       disassembled_addresses.insert(add);
       add = offset(add, instruction.info.length);
       exec_data_ptr += instruction.info.length;

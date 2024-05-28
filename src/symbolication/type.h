@@ -238,8 +238,9 @@ public:
   {
     auto it = this;
     while (it != nullptr) {
-      if (it->base_type)
+      if (it->base_type) {
         return it->base_type;
+      }
       it = it->type_chain;
     }
     return std::nullopt;
@@ -297,14 +298,14 @@ struct BlockSymbolIterator
   Begin(const SymbolBlock *blocks, u32 count) noexcept
   {
     return BlockSymbolIterator{
-        .blocks = blocks, .count = count, .current_block = 0, .current_symbol_in_block_index = 0};
+      .blocks = blocks, .count = count, .current_block = 0, .current_symbol_in_block_index = 0};
   }
 
   static BlockSymbolIterator
   End(const SymbolBlock *blocks, u32 count) noexcept
   {
     return BlockSymbolIterator{
-        .blocks = blocks, .count = count, .current_block = count, .current_symbol_in_block_index = 0};
+      .blocks = blocks, .count = count, .current_block = count, .current_symbol_in_block_index = 0};
   }
 
   friend bool
@@ -391,8 +392,9 @@ template <> struct formatter<sym::Type>
     auto it = type.type_chain;
     types[idx++] = &type;
     while (it != nullptr) {
-      if (!it->is_typedef)
+      if (!it->is_typedef) {
         types[idx++] = it;
+      }
       it = it->type_chain;
     }
     std::sort(types.begin(), types.begin() + idx, [](const auto ptra, const auto ptrb) noexcept {

@@ -145,11 +145,11 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
   if (is_not_complete_type_die(this_ref.die)) {
     const auto attr = this_ref.read_attribute(Attribute::DW_AT_type);
     auto base_type =
-        attr.transform([](auto v) { return v.unsigned_value(); })
-            .and_then([&](auto offset) { return die_ref.cu->get_objfile()->get_die_reference(offset); })
-            .transform([this](auto other_cu_die) { return get_or_prepare_new_type(other_cu_die.as_indexed()); })
-            .or_else([this]() -> std::optional<sym::Type *> { return get_unit_type(); })
-            .value();
+      attr.transform([](auto v) { return v.unsigned_value(); })
+        .and_then([&](auto offset) { return die_ref.cu->get_objfile()->get_die_reference(offset); })
+        .transform([this](auto other_cu_die) { return get_or_prepare_new_type(other_cu_die.as_indexed()); })
+        .or_else([this]() -> std::optional<sym::Type *> { return get_unit_type(); })
+        .value();
     auto size = 0u;
     auto array_bounds = 0u;
     // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
@@ -170,8 +170,8 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
     // Like come on dog. Give it a bogus name, whatever really. But nothing?
     const auto name = this_ref.read_attribute(Attribute::DW_AT_name)
-                          .transform([](auto v) { return v.string(); })
-                          .value_or("lambda");
+                        .transform([](auto v) { return v.string(); })
+                        .value_or("lambda");
     const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
     auto type = new sym::Type{die_ref, sz, name};
     types[this_ref.die->section_offset] = type;
@@ -235,8 +235,9 @@ Type::set_base_type_encoding(BaseTypeEncoding enc) noexcept
 NonNullPtr<const Type>
 Type::target_type() const noexcept
 {
-  if (type_chain == nullptr)
+  if (type_chain == nullptr) {
     return NonNull(*this);
+  }
   auto t = type_chain;
   while (t->type_chain) {
     t = t->type_chain;
@@ -250,15 +251,18 @@ Type::is_reference() const noexcept
   auto mod = std::to_underlying(*modifier);
   constexpr auto ReferenceEnd = std::to_underlying(Modifier::Atomic);
   constexpr auto ReferenceStart = std::to_underlying(Modifier::None);
-  if (mod < ReferenceEnd && mod > ReferenceStart)
+  if (mod < ReferenceEnd && mod > ReferenceStart) {
     return true;
-  if (type_chain == nullptr)
+  }
+  if (type_chain == nullptr) {
     return false;
+  }
   auto t = type_chain;
   while (t->type_chain) {
     const auto mod = std::to_underlying(*t->modifier);
-    if (mod < ReferenceEnd && mod > ReferenceStart)
+    if (mod < ReferenceEnd && mod > ReferenceStart) {
       return true;
+    }
     t = t->type_chain;
   }
   return false;
@@ -294,16 +298,19 @@ Type::size_bytes() noexcept
 bool
 Type::is_primitive() const noexcept
 {
-  if (base_type.has_value())
+  if (base_type.has_value()) {
     return true;
+  }
 
-  if (is_reference())
+  if (is_reference()) {
     return false;
+  }
 
   auto it = type_chain;
   while (it != nullptr) {
-    if (it->base_type.has_value())
+    if (it->base_type.has_value()) {
       return true;
+    }
     it = it->type_chain;
   }
   return false;
@@ -313,16 +320,16 @@ bool
 Type::is_char_type() const noexcept
 {
   return base_type
-      .transform([](auto v) {
-        switch (v) {
-        case BaseTypeEncoding::DW_ATE_signed_char:
-        case BaseTypeEncoding::DW_ATE_unsigned_char:
-          return true;
-        default:
-          return false;
-        }
-      })
-      .value_or(false);
+    .transform([](auto v) {
+      switch (v) {
+      case BaseTypeEncoding::DW_ATE_signed_char:
+      case BaseTypeEncoding::DW_ATE_unsigned_char:
+        return true;
+      default:
+        return false;
+      }
+    })
+    .value_or(false);
 }
 
 bool

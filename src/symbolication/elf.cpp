@@ -155,7 +155,7 @@ Elf::parse_min_symbols() const noexcept
       } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
         elf_object_symbols[name] =
-            MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+          MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }
     }
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.

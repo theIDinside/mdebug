@@ -95,8 +95,9 @@ public:
       auto &node = interval[std::max(static_cast<int>(pos - 1), 0)];
       auto &values = node.values;
       for (const auto &v : values) {
-        if (!v.end || key <= node.addr)
+        if (!v.end || key <= node.addr) {
           result.push_back(v.value);
+        }
       }
       return result;
     }
@@ -117,8 +118,9 @@ public:
       auto &values = node.values;
       const auto sz = write_to_result.size();
       for (const auto &v : values) {
-        if (!v.end || key <= node.addr)
+        if (!v.end || key <= node.addr) {
           write_to_result.push_back(v.value);
+        }
       }
       return sz != write_to_result.size();
     }
@@ -174,8 +176,9 @@ private:
     // invalidated.
     if ((static_cast<int>(interval.size()) >= (static_cast<int>(interval.capacity()) - 2))) {
       auto new_cap = static_cast<int>(interval.capacity() * 2);
-      while (new_cap - interval.capacity() <= 2)
+      while (new_cap - interval.capacity() <= 2) {
         new_cap += 2;
+      }
       interval.reserve(new_cap);
     }
   }
@@ -193,8 +196,9 @@ private:
   constexpr auto
   maybe_partition_at(size_t index, A with_addr) noexcept
   {
-    if constexpr (type == EndpointType::Start)
+    if constexpr (type == EndpointType::Start) {
       ensure_no_iterator_invalidation();
+    }
 
     // a node with this address already exists, no need to partition the range
     // [N .. M] that contains `with_addr`
@@ -204,11 +208,11 @@ private:
 
     if constexpr (type == EndpointType::Start) {
       auto it =
-          interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
+        interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
       copy_to(interval[index - 1].values, it->values);
     } else {
       auto it =
-          interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
+        interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
       if (index < interval.size() - 1) {
         copy_to_transform(interval[index + 1].values, it->values, [](auto it) {
           auto copy = it;

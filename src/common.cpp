@@ -33,7 +33,7 @@ replace_regex(T &str)
 {
   static const std::regex str_view_regex("std::basic_string_view<char, std::char_traits<char> >");
   static const std::regex str_regex{
-      "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"};
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"};
   static const std::regex allocator_regex{", std::allocator<.*> "};
 
   const std::string replacement = "std::string_view";
@@ -58,8 +58,9 @@ panic_exit()
   if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
     raise(SIGTERM);
     exit(-1);
-  } else
+  } else {
     exit(-1);
+  }
 }
 
 void
@@ -109,8 +110,8 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
 ifbacktrace_failed:
   const auto strerr = strerror(errno);
   const auto message =
-      fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
-                  loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
+    fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
+                loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
   PLOG(message);
   fmt::println("{}", message);
   delete logging::get_logging();
@@ -121,8 +122,9 @@ ifbacktrace_failed:
 Option<AddrPtr>
 to_addr(std::string_view s) noexcept
 {
-  if (s.starts_with("0x"))
+  if (s.starts_with("0x")) {
     s.remove_prefix(2);
+  }
 
   u64 value;
   auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value, 16);

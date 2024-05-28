@@ -29,7 +29,7 @@ count_tuple(Args... args)
 #define ReqArg(TypeName, ...)                                                                                     \
   enum class TypeName##Args : u8{__VA_ARGS__};                                                                    \
   static constexpr std::array<std::string_view, count_tuple(#__VA_ARGS__)> ArgNames =                             \
-      std::to_array({#__VA_ARGS__});
+    std::to_array({#__VA_ARGS__});
 
 #define RequiredArguments(...)                                                                                    \
   static constexpr const auto ReqArgs = std::to_array(__VA_ARGS__);                                               \
@@ -92,8 +92,9 @@ struct VerifyField
       : name(fieldName), type(fieldType), enum_values(enumerations),
         enum_variants(enumerations.size() - std::count(enumerations.begin(), enumerations.end(), ""))
   {
-    if (fieldType != FieldType::Enumeration)
+    if (fieldType != FieldType::Enumeration) {
       throw std::exception();
+    }
   }
 
   constexpr bool
@@ -117,7 +118,7 @@ template <size_t Size> struct VerifyMap
   isOK(const Json &j, std::string_view fieldName) const noexcept
   {
     if (const auto it =
-            std::find_if(fields.cbegin(), fields.cend(), [&](const auto &f) { return fieldName == f.name; });
+          std::find_if(fields.cbegin(), fields.cend(), [&](const auto &f) { return fieldName == f.name; });
         it != std::cend(fields)) {
       switch (it->type) {
       case FieldType::String:
@@ -143,18 +144,18 @@ template <size_t Size> struct VerifyMap
       case FieldType::Enumeration: {
         if (!j.is_string()) {
           return VerifyResult{
-              std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                                           .description = "Config enumeration values must be of string type"},
-                             fieldName)};
+            std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                                         .description = "Config enumeration values must be of string type"},
+                           fieldName)};
         }
         std::string_view value;
         j.get_to(value);
         if (!it->has_enum_variant(value)) {
           return VerifyResult{
-              std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                                           .description = fmt::format("Invalid variant: '{}'. Valid: {}", value,
-                                                                      fmt::join(it->get_enum_values(), "|"))},
-                             fieldName)};
+            std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                                         .description = fmt::format("Invalid variant: '{}'. Valid: {}", value,
+                                                                    fmt::join(it->get_enum_values(), "|"))},
+                           fieldName)};
         }
         return VerifyResult{std::nullopt};
       }

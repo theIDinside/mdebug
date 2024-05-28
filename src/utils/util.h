@@ -19,10 +19,12 @@ split_string(std::string_view str, std::string_view delim) noexcept
   for (auto i = str.find(delim); i != std::string_view::npos || !last; i = str.find(delim)) {
     last = (i == std::string_view::npos);
     auto sub = str.substr(0, i);
-    if (!sub.empty())
+    if (!sub.empty()) {
       result.push_back(sub);
-    if (!last)
+    }
+    if (!last) {
       str.remove_prefix(i + 1);
+    }
   }
   return result;
 }
@@ -64,13 +66,13 @@ castenum(T &&t) -> decltype(std::to_underlying(t))
 static inline u8
 fromhex(char a)
 {
-  if (a >= '0' && a <= '9')
+  if (a >= '0' && a <= '9') {
     return a - '0';
-  else if (a >= 'a' && a <= 'f')
+  } else if (a >= 'a' && a <= 'f') {
     return a - 'a' + 10;
-  else if (a == 'x')
+  } else if (a == 'x') {
     return 0;
-  else {
+  } else {
     ASSERT(false, "unexpected character");
     return 0;
   }

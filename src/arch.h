@@ -30,7 +30,7 @@ RegisterCount()
     return std::to_array<u8>({
 #include <defs/x86_64.defs>
                              })
-        .size();
+      .size();
 #undef Reg
 #endif
     break;

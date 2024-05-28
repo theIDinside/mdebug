@@ -47,8 +47,9 @@ SharedObject::version() const noexcept
 bool
 SharedObject::has_debug_info() const noexcept
 {
-  if (objfile == nullptr)
+  if (objfile == nullptr) {
     return false;
+  }
 
   return objfile->elf->get_section(".debug_info") != nullptr;
 }
@@ -80,8 +81,9 @@ SharedObject *
 SharedObjectMap::get_so(int id) noexcept
 {
   for (auto &so : shared_objects) {
-    if (so.so_id == id)
+    if (so.so_id == id) {
       return &so;
+    }
   }
   return nullptr;
 }

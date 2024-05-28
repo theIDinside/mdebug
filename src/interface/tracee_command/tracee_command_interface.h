@@ -329,9 +329,8 @@ public:
         total_written += written.bytes_written;
       } else {
         auto addr_value = reinterpret_cast<std::uintptr_t>(ptr) + total_written;
-        return utils::unexpected(WriteError{.address = AddrPtr{addr_value},
-                                            .bytes_written = total_written,
-                                            .sys_errno = written.err.sys_error_num});
+        return utils::unexpected(WriteError{
+          .address = AddrPtr{addr_value}, .bytes_written = total_written, .sys_errno = written.err.sys_error_num});
       }
     }
     return {total_written};

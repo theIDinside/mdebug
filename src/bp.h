@@ -70,9 +70,9 @@ template <> struct std::hash<SourceBreakpointSpec>
     const auto u32_hasher = std::hash<u32>{};
 
     const auto line_col_hash =
-        m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
-            .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
-            .value();
+      m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
+        .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
+        .value();
 
     if (m.condition && m.log_message) {
       return line_col_hash ^ std::hash<std::string_view>{}(m.condition.value()) ^
@@ -140,7 +140,7 @@ template <> struct std::hash<InstructionBreakpointSpec>
 };
 
 using UserBpSpec =
-    std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
+  std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
 
 struct MemoryError
 {
@@ -247,19 +247,19 @@ template <> struct formatter<UserBpSpec>
   {
     auto iterator = ctx.out();
     std::visit(
-        [&iterator](const auto &var) {
-          using T = std::remove_cvref_t<decltype(var)>;
-          if constexpr (std::is_same_v<T, std::pair<std::string, SourceBreakpointSpec>>) {
-            fmt::format_to(iterator, "{}", var);
-          } else if constexpr (std::is_same_v<T, FunctionBreakpointSpec>) {
-            fmt::format_to(iterator, "{}", var);
-          } else if constexpr (std::is_same_v<T, InstructionBreakpointSpec>) {
-            fmt::format_to(iterator, "{}", var);
-          } else {
-            static_assert(always_false<T>, "Unhandled breakpoint spec type");
-          }
-        },
-        spec);
+      [&iterator](const auto &var) {
+        using T = std::remove_cvref_t<decltype(var)>;
+        if constexpr (std::is_same_v<T, std::pair<std::string, SourceBreakpointSpec>>) {
+          fmt::format_to(iterator, "{}", var);
+        } else if constexpr (std::is_same_v<T, FunctionBreakpointSpec>) {
+          fmt::format_to(iterator, "{}", var);
+        } else if constexpr (std::is_same_v<T, InstructionBreakpointSpec>) {
+          fmt::format_to(iterator, "{}", var);
+        } else {
+          static_assert(always_false<T>, "Unhandled breakpoint spec type");
+        }
+      },
+      spec);
     return iterator;
   }
 };
@@ -524,9 +524,9 @@ public:
                   Tid tid, UserBpArgs &&...args)
   {
     auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
-        RequiredUserParameters{
-            .tid = tid, .id = new_id(), .loc_or_err = std::move(loc_or_err), .times_to_hit = {}, .tc = tc},
-        args...);
+      RequiredUserParameters{
+        .tid = tid, .id = new_id(), .loc_or_err = std::move(loc_or_err), .times_to_hit = {}, .tc = tc},
+      args...);
     add_user(user);
 
     return user;

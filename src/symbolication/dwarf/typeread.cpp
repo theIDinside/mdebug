@@ -44,8 +44,9 @@ FunctionSymbolicationContext::process_lexical_block(DieReference cu_die) noexcep
     if (value.name == Attribute::DW_AT_high_pc) {
       hi = value.address();
     }
-    if (block_seen())
+    if (block_seen()) {
       break;
+    }
   }
   lexicalBlockStack.emplace_back(low, low + hi, std::vector<Symbol>{});
 }
@@ -115,8 +116,9 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
 void
 FunctionSymbolicationContext::process_symbol_information() noexcept
 {
-  if (fn_ctx->is_resolved())
+  if (fn_ctx->is_resolved()) {
     return;
+  }
 
   const auto &dies = fn_ctx->origin_dies();
   for (const auto [cu, die_index] : dies) {
@@ -127,9 +129,9 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
     auto die_it = cu_die_ref.die->children();
     const auto parent = cu_die_ref.die;
     const auto next = [&parent](auto curr, auto next) {
-      if (next)
+      if (next) {
         return next;
-      else {
+      } else {
         auto test = curr->parent();
         while (!test->sibling() && test != parent) {
           test = test->parent();
@@ -222,8 +224,9 @@ TypeSymbolicationContext::resolve_type() noexcept
         continue;
       }
     }
-    if (!type_fields.empty())
+    if (!type_fields.empty()) {
       std::swap(type_iter->fields, this->type_fields);
+    }
     type_iter->resolved = true;
     type_iter = type_iter->type_chain;
   }

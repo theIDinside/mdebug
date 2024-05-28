@@ -439,14 +439,15 @@ std::optional<Path>
 LNPHeader::file(u32 f_index) const noexcept
 {
   const auto adjusted_index = version == DwarfVersion::D4 ? (f_index == 0 ? 0 : f_index - 1) : f_index;
-  if (adjusted_index >= file_names.size())
+  if (adjusted_index >= file_names.size()) {
     return {};
+  }
 
   for (const auto &[i, f] : utils::EnumerateView(file_names)) {
     if (i == adjusted_index) {
       const auto dir_index = lnp_index(f.dir_index, version);
       return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
-          .lexically_normal();
+        .lexically_normal();
     }
   }
 
@@ -546,13 +547,15 @@ RelocatedLteIterator
 LineTable::find_by_pc(AddrPtr addr) noexcept
 {
   auto start = begin();
-  if ((*start).pc == addr)
+  if ((*start).pc == addr) {
     return start;
+  }
 
   auto it =
-      std::lower_bound(begin(), end(), addr, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
-  if (it == end())
+    std::lower_bound(begin(), end(), addr, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  if (it == end()) {
     return end();
+  }
 
   return it;
 }
@@ -693,8 +696,9 @@ compute_line_number_program(ParsedLineTableEntries &parsed_lte, const Elf *elf, 
   std::vector<std::vector<LineTableEntry>> sequences{};
   sequences.push_back({});
   while (reader.has_more()) {
-    if (!sequences.empty() && !sequences.back().empty())
+    if (!sequences.empty() && !sequences.back().empty()) {
       sequences.push_back({});
+    }
     LNPStateMachine state{header, &sequences.back(), std::nullopt};
     while (reader.has_more() && !state.sequence_ended()) {
       const auto opcode = reader.read_value<OpCode>();
@@ -739,8 +743,9 @@ compute_line_number_program(ParsedLineTableEntries &parsed_lte, const Elf *elf, 
         }
         default:
           // Vendor extensions
-          while (reader.current_ptr() < end)
+          while (reader.current_ptr() < end) {
             reader.read_value<u8>();
+          }
           break;
         }
       }
@@ -956,7 +961,7 @@ SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector
 
 auto
 SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line, std::optional<u32> column)
-    -> std::optional<LineTableEntry>
+  -> std::optional<LineTableEntry>
 {
   auto lte_it = std::find_if(begin(relocatedBase), end(relocatedBase), [&](const auto &lte) {
     return line == lte.line && lte.column == column.value_or(lte.column);
@@ -973,15 +978,18 @@ SourceCodeFile::find_by_pc(AddrPtr base, AddrPtr addr) const noexcept -> std::op
 {
   auto start = begin(base);
   // might be a source code file with no line number info. e.g. include/stdio.h
-  if (start == end(base))
+  if (start == end(base)) {
     return std::nullopt;
-  if ((*start).pc == addr)
+  }
+  if ((*start).pc == addr) {
     return start;
+  }
 
   auto it = std::lower_bound(begin(base), end(base), addr,
                              [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
-  if (it == end(base))
+  if (it == end(base)) {
     return std::nullopt;
+  }
 
   return it;
 }
@@ -1014,8 +1022,9 @@ void
 SourceCodeFile::compute_line_tables() const noexcept
 {
   std::lock_guard lock(m);
-  if (computed)
+  if (computed) {
     return;
+  }
 
   std::set<LineTableEntry> unique_ltes{};
   for (auto header : headers) {
@@ -1070,8 +1079,9 @@ SourceCodeFile::compute_line_tables() const noexcept
           }
           default:
             // Vendor extensions
-            while (reader.current_ptr() < end)
+            while (reader.current_ptr() < end) {
               reader.read_value<u8>();
+            }
             break;
           }
         }

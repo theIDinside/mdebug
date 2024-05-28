@@ -33,10 +33,11 @@ FunctionSymbol::FunctionSymbol(FunctionSymbol &&fn) noexcept
 std::string
 FunctionSymbol::build_full_name() const noexcept
 {
-  if (!(*member_of).empty())
+  if (!(*member_of).empty()) {
     return fmt::format("{}::{}", member_of, name);
-  else
+  } else {
     return std::string{name};
+  }
 }
 
 AddrPtr
@@ -131,8 +132,9 @@ FunctionSymbolSearchResult::operator*() const noexcept
 bool
 is_same(const FunctionSymbol *l, const FunctionSymbol *r) noexcept
 {
-  if (!l || !r)
+  if (!l || !r) {
     return false;
+  }
   return is_same(*l, *r);
 }
 

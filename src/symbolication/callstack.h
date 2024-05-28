@@ -125,8 +125,9 @@ public:
   friend constexpr bool
   compare_eq(const Frame &l, const Frame &r) noexcept
   {
-    if (l.type != r.type)
+    if (l.type != r.type) {
       return false;
+    }
 
     switch (l.type) {
     case FrameType::Full:

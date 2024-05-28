@@ -9,7 +9,7 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
 {
   const auto &header = compilation_unit->header();
   current_ptr =
-      compilation_unit->get_objfile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
+    compilation_unit->get_objfile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
 }
 
 void
@@ -198,10 +198,11 @@ UnitReader::read_offset() noexcept
 {
   const auto format = compilation_unit->header().format();
   ASSERT(format == 4 || format == 8, "Unsupported format: {}. Offset sizes supported are 4 and 8", format);
-  if (format == 4)
+  if (format == 4) {
     return read_integral<u32>();
-  else
+  } else {
     return read_integral<u64>();
+  }
 }
 
 u64
@@ -309,7 +310,7 @@ void
 UnitReader::seek_die(const DieMetaData &entry) noexcept
 {
   current_ptr =
-      compilation_unit->get_objfile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
+    compilation_unit->get_objfile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
 }
 
 Elf *

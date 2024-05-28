@@ -171,8 +171,9 @@ SyscallArguments::debug_print(bool flush, bool pretty)
     fmt::print("{{ arg1 0x{:x}, arg2 0x{:x}, arg3 0x{:x}, arg4 0x{:x}, arg5 0x{:x}, arg6 0x{:x} }}", arg_n<1>(),
                arg_n<2>(), arg_n<3>(), arg_n<4>(), arg_n<5>(), arg_n<6>());
   }
-  if (flush)
+  if (flush) {
     fmt::println("");
+  }
 }
 #else
 
@@ -268,10 +269,12 @@ waitpid_peek(pid_t tid) noexcept
 {
   int status;
   const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG | WNOWAIT);
-  if (waited_pid == 0)
+  if (waited_pid == 0) {
     return {};
-  if (waited_pid == -1)
+  }
+  if (waited_pid == -1) {
     return {};
+  }
 
   return WaitPid{.tid = waited_pid, .status = status};
 }
@@ -281,8 +284,9 @@ waitpid_nonblock(pid_t tid) noexcept
 {
   int status;
   const auto waited_pid = waitpid(tid, &status, __WALL | WNOHANG);
-  if (waited_pid == 0 || waited_pid == -1)
+  if (waited_pid == 0 || waited_pid == -1) {
     return Option<WaitPid>{};
+  }
   return WaitPid{waited_pid, status};
 }
 
@@ -291,7 +295,8 @@ waitpid_block(pid_t tid) noexcept
 {
   int status;
   const auto waited_pid = waitpid(tid, &status, 0);
-  if (waited_pid == 0 || waited_pid == -1)
+  if (waited_pid == 0 || waited_pid == -1) {
     return Option<WaitPid>{};
+  }
   return WaitPid{waited_pid, status};
 }

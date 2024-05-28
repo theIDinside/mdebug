@@ -17,18 +17,18 @@ TraceeCommandInterface::TraceeCommandInterface(TargetFormat format,
 TraceeCommandInterface::createCommandInterface(const InterfaceConfig &config) noexcept
 {
   Interface result = std::visit(
-      [](const auto &config) -> Interface {
-        using T = std::remove_cvref_t<decltype(config)>;
-        if constexpr (std::is_same_v<PtraceCfg, T>) {
-          DBGLOG(core, "Initializing ptrace interface...");
-          return std::make_unique<PtraceCommander>(config.tid);
-        } else if constexpr (std::is_same_v<GdbRemoteCfg, T>) {
-          TODO("Implement createCommandInterface via add_target_set_current");
-        } else {
-          static_assert(always_false<T>, "Unsupported type T");
-        }
-      },
-      config);
+    [](const auto &config) -> Interface {
+      using T = std::remove_cvref_t<decltype(config)>;
+      if constexpr (std::is_same_v<PtraceCfg, T>) {
+        DBGLOG(core, "Initializing ptrace interface...");
+        return std::make_unique<PtraceCommander>(config.tid);
+      } else if constexpr (std::is_same_v<GdbRemoteCfg, T>) {
+        TODO("Implement createCommandInterface via add_target_set_current");
+      } else {
+        static_assert(always_false<T>, "Unsupported type T");
+      }
+    },
+    config);
   return result;
 }
 
@@ -52,8 +52,9 @@ std::optional<std::string>
 TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, u32 buffer_size) noexcept
 {
   std::string result{};
-  if (address == nullptr)
+  if (address == nullptr) {
     return std::nullopt;
+  }
   u8 buf[buffer_size];
   auto res = read_bytes(address.as<void>(), buffer_size, buf);
   while (res.success()) {
@@ -66,8 +67,9 @@ TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, 
     res = read_bytes(address.as<void>(), 128, buf);
   }
 
-  if (result.empty())
+  if (result.empty()) {
     return std::nullopt;
+  }
   return result;
 }
 

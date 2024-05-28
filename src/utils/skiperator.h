@@ -40,9 +40,9 @@ public:
     It iter;
     using IsConst = std::is_const<typename std::remove_reference<decltype(*iter)>::type>;
     using RefType =
-        std::conditional_t<IsConst::value, typename Container::const_reference, typename Container::reference>;
+      std::conditional_t<IsConst::value, typename Container::const_reference, typename Container::reference>;
     using PtrType =
-        std::conditional_t<IsConst::value, typename Container::const_pointer, typename Container::pointer>;
+      std::conditional_t<IsConst::value, typename Container::const_pointer, typename Container::pointer>;
 
     using iterator_category = std::forward_iterator_tag;
     using difference_type = std::ptrdiff_t;

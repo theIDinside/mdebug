@@ -39,9 +39,9 @@ public:
                   "Your container type must provide a 'value_type' type alias (using declaration or typedef)");
 
     using RefType =
-        std::conditional_t<IsConst::value, const typename Container::reference, typename Container::reference>;
+      std::conditional_t<IsConst::value, const typename Container::reference, typename Container::reference>;
     using PtrType =
-        std::conditional_t<IsConst::value, const typename Container::pointer, typename Container::pointer>;
+      std::conditional_t<IsConst::value, const typename Container::pointer, typename Container::pointer>;
 
     using iterator_category = std::forward_iterator_tag;
     using difference_type = std::ptrdiff_t;

@@ -79,7 +79,7 @@ void
 Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession session) noexcept
 {
   targets.push_back(std::make_unique<TraceeController>(
-      session, tc::TraceeCommandInterface::createCommandInterface(config), InterfaceType::Ptrace));
+    session, tc::TraceeCommandInterface::createCommandInterface(config), InterfaceType::Ptrace));
   current_target = targets.back().get();
   const auto new_process = current_target->get_interface().task_leader();
 
@@ -191,7 +191,7 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
     tc->stop_handler->handle_proceed(*task, result);
   }
 }
-
+template <typename... T> using M2 = Match<T...>;
 tc::ProcessedStopEvent
 Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
 {
@@ -226,8 +226,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   }
   const CoreEvent &r = *evt;
   LogEvent(r, "Handling");
-  // clang-format off
-  return std::visit(Match {
+
+  return std::visit(
+    Match{
       [&](const WatchpointEvent &e) -> MatchResult {
         (void)e;
         TODO("WatchpointEvent");
@@ -241,11 +242,12 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       [&](const ThreadCreated &e) -> MatchResult {
         auto task = tc.get_task(e.thread_id);
         // means this event was produced by a Remote session. Construct the task now
-        if(!task) {
+        if (!task) {
           tc.new_task(e.thread_id);
           task = tc.get_task(e.thread_id);
           if (!evt->registers->empty()) {
-            ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
+            ASSERT(*arch != nullptr,
+                   "Passing raw register contents with no architecture description doesn't work.");
             task->set_registers(evt->registers);
             for (const auto &p : evt->registers) {
               if (p.first == 16) {
@@ -259,28 +261,34 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         Tracer::Instance->post_event(evt);
 
         return ProcessedStopEvent{true, e.resume_action};
-        // return ProcessedStopEvent{true, false, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}};
       },
       [&](const ThreadExited &e) -> MatchResult {
         auto t = tc.get_task(e.thread_id);
         tc.reap_task(*t);
-        if(e.process_needs_resuming) {
-          return ProcessedStopEvent{!tc.stop_handler->event_settings.thread_exit_stop && e.process_needs_resuming, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+        if (e.process_needs_resuming) {
+          return ProcessedStopEvent{
+            !tc.stop_handler->event_settings.thread_exit_stop && e.process_needs_resuming,
+            tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
         } else {
           return ProcessedStopEvent{!tc.stop_handler->event_settings.thread_exit_stop, {}};
         }
       },
       [&](const BreakpointHitEvent &e) -> MatchResult {
-        // todo(simon): here we should start building upon global event system, like in gdb, where the user can hook into specific events.
-        // in this particular case, we could emit a BreakpointEvent{user_ids_that_were_hit} and let the user look up the bps, and use them instead of passing
-        // the data along; that way we get to make it asynchronous - because user code or core code might want to delete the breakpoint _before_ a user wants to use it.
-        // Adding this lookup by key feature makes that possible, it also makes the implementation and reasoning about life times *SUBSTANTIALLY* easier.
+        // todo(simon): here we should start building upon global event system, like in gdb, where the user can
+        // hook into specific events. in this particular case, we could emit a
+        // BreakpointEvent{user_ids_that_were_hit} and let the user look up the bps, and use them instead of
+        // passing the data along; that way we get to make it asynchronous - because user code or core code
+        // might want to delete the breakpoint _before_ a user wants to use it. Adding this lookup by key
+        // feature makes that possible, it also makes the implementation and reasoning about life times
+        // *SUBSTANTIALLY* easier.
         auto t = tc.get_task(e.thread_id);
 
-        auto bp_addy = e.address_val->or_else([&]() {
-          // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
-          return std::optional{tc.get_caching_pc(*t).get() - 1};
-        }).value();
+        auto bp_addy = e.address_val
+                         ->or_else([&]() {
+                           // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
+                           return std::optional{tc.get_caching_pc(*t).get() - 1};
+                         })
+                         .value();
 
         auto bp_loc = tc.pbps.location_at(bp_addy);
         const auto users = bp_loc->loc_users();
@@ -304,10 +312,10 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       },
       [&](const Clone &e) -> MatchResult {
         tc.new_task(e.child_tid);
-        if(e.vm_info) {
+        if (e.vm_info) {
           tc.set_task_vm_info(e.child_tid, e.vm_info.value());
         }
-        return ProcessedStopEvent{!tc.stop_handler->event_settings.clone_stop,  {}};
+        return ProcessedStopEvent{!tc.stop_handler->event_settings.clone_stop, {}};
       },
       [&](const Exec &e) -> MatchResult {
         tc.post_exec(e.exec_file);
@@ -327,10 +335,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         // TODO: Allow signals through / stop process / etc. Allow for configurability here.
         auto t = tc.get_task(e.thread_id);
         tc.stop_all(t);
-        if(evt->signal == SIGINT) {
-          tc.all_stop.once([t = t->tid, &tc = tc]() {
-            tc.emit_stopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {});
-          });
+        if (evt->signal == SIGINT) {
+          tc.all_stop.once(
+            [t = t->tid, &tc = tc]() { tc.emit_stopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {}); });
         } else {
           tc.all_stop.once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
             tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
@@ -338,31 +345,30 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         }
         return ProcessedStopEvent{false, {}};
       },
-      [&](const Stepped& e) -> MatchResult {
-        if(e.loc_stat) {
+      [&](const Stepped &e) -> MatchResult {
+        if (e.loc_stat) {
           ASSERT(e.loc_stat->stepped_over, "how did we end up here if we did not step over a breakpoint?");
           auto bp_loc = tc.pbps.location_at(e.loc_stat->loc);
-          if(e.loc_stat->re_enable_bp) {
+          if (e.loc_stat->re_enable_bp) {
             bp_loc->enable(tc.get_interface());
           }
         }
 
-        if(e.stop) {
+        if (e.stop) {
           tc.emit_stepped_stop({.pid = tc.task_leader, .tid = task->tid});
-          return ProcessedStopEvent{false,  {}};
+          return ProcessedStopEvent{false, {}};
         } else {
-          const auto resume = e.loc_stat.transform([](const auto& loc) { return loc.should_resume; }).value_or(false);
+          const auto resume =
+            e.loc_stat.transform([](const auto &loc) { return loc.should_resume; }).value_or(false);
           return ProcessedStopEvent{resume, e.resume_when_done};
         }
       },
-      [&](const DeferToSupervisor& e) -> MatchResult {
+      [&](const DeferToSupervisor &e) -> MatchResult {
         // And if there is no Proceed action installed, default action is taken (RESUME)
         return ProcessedStopEvent{true && !e.attached, {}};
       },
     },
-    *evt->event
-  );
-  // clang-format on
+    *evt->event);
 }
 
 void
@@ -432,48 +438,48 @@ bool
 Tracer::attach(const AttachArgs &args) noexcept
 {
   using MatchResult = bool;
-  const auto visitor =
-      Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
-              auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-              targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(interface),
-                                                                   InterfaceType::Ptrace));
-              current_target = targets.back().get();
-              if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
-                const auto new_process = current_target->get_interface().task_leader();
-                load_and_process_objfile(new_process, *exe_file);
-              }
-              return true;
-            },
-            [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
-              DBGLOG(core, "Initializing remote protocol interface...");
-              // Since we may connect to a remote that is not connected to nuthin,
-              // we need an extra step here (via the RemoteSessionConfiguirator), before
-              // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually 0..N of them)
-              // Why? Because when we ptrace(someprocess), we know we are attaching to 1 process, that's it. But
-              // the remote target might actually be attached to many, and we want our design to be consistent (1
-              // commander / process. Otherwise we turn into gdb hell hole.)
-              auto remote_init = tc::RemoteSessionConfigurator{
-                  Tracer::Instance->connectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
-              auto result = remote_init.configure_session();
-              if (result.is_expected()) {
-                auto &&ifs = result.take_value();
-                for (auto &&interface : ifs) {
-                  targets.push_back(std::make_unique<TraceeController>(
-                      TargetSession::Attached, std::move(interface.tc), InterfaceType::GdbRemote));
-                  Tracer::Instance->set_current_to_latest_target();
-                  auto &ti = current_target->get_interface();
-                  ti.post_exec();
-                  auto newtarget = get_current();
-                  for (const auto &t : interface.threads) {
-                    newtarget->new_task(t.tid);
-                  }
-                }
-                return true;
-              }
-              return false;
-            }};
 
-  return std::visit(visitor, args);
+  return std::visit(Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
+                            auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
+                            targets.push_back(std::make_unique<TraceeController>(
+                              TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
+                            current_target = targets.back().get();
+                            if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
+                              const auto new_process = current_target->get_interface().task_leader();
+                              load_and_process_objfile(new_process, *exe_file);
+                            }
+                            return true;
+                          },
+                          [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
+                            DBGLOG(core, "Initializing remote protocol interface...");
+                            // Since we may connect to a remote that is not connected to nuthin,
+                            // we need an extra step here (via the RemoteSessionConfiguirator), before
+                            // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
+                            // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
+                            // 1 process, that's it. But the remote target might actually be attached to many, and
+                            // we want our design to be consistent (1 commander / process. Otherwise we turn into
+                            // gdb hell hole.)
+                            auto remote_init = tc::RemoteSessionConfigurator{
+                              Tracer::Instance->connectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
+                            auto result = remote_init.configure_session();
+                            if (result.is_expected()) {
+                              auto &&ifs = result.take_value();
+                              for (auto &&interface : ifs) {
+                                targets.push_back(std::make_unique<TraceeController>(
+                                  TargetSession::Attached, std::move(interface.tc), InterfaceType::GdbRemote));
+                                Tracer::Instance->set_current_to_latest_target();
+                                auto &ti = current_target->get_interface();
+                                ti.post_exec();
+                                auto newtarget = get_current();
+                                for (const auto &t : interface.threads) {
+                                  newtarget->new_task(t.tid);
+                                }
+                              }
+                              return true;
+                            }
+                            return false;
+                          }},
+                    args);
 }
 
 void
@@ -483,11 +489,12 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
   winsize ws;
 
   bool could_set_term_settings = (tcgetattr(STDIN_FILENO, &original_tty) != -1);
-  if (could_set_term_settings)
+  if (could_set_term_settings) {
     VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
+  }
 
   const auto fork_result =
-      pty_fork(could_set_term_settings ? &original_tty : nullptr, could_set_term_settings ? &ws : nullptr);
+    pty_fork(could_set_term_settings ? &original_tty : nullptr, could_set_term_settings ? &ws : nullptr);
   // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process
   //  I'd much rather like a "stub" process to exec from, that gets handed to us by some "Fork server" thing,
   //  but the logic for that is way more complex and I'm not really interested in solving that problem right now.

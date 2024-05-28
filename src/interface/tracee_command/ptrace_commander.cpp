@@ -163,7 +163,7 @@ PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
          bool{t.user_stopped}, bool{t.tracer_stopped});
   if (t.user_stopped || t.tracer_stopped) {
     const auto ptrace_result =
-        ptrace(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, t.tid, nullptr, nullptr);
+      ptrace(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, t.tid, nullptr, nullptr);
     if (ptrace_result == -1) {
       return TaskExecuteResponse::Error(errno);
     }

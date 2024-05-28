@@ -95,9 +95,10 @@ VariablesReference::has_parent() const noexcept
 std::optional<int>
 VariablesReference::parent() const noexcept
 {
-  if (has_parent())
+  if (has_parent()) {
     return parent_;
-  else
+  } else {
     return std::nullopt;
+  }
 }
 }; // namespace ui::dap

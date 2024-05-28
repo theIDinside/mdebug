@@ -80,8 +80,9 @@ Frame::full_symbol_info() const noexcept
 std::optional<dw::LineTable>
 Frame::cu_line_table() const noexcept
 {
-  if (type != FrameType::Full)
+  if (type != FrameType::Full) {
     return std::nullopt;
+  }
   const auto symbol_info = symbol.full_symbol->symbol_info();
   ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
 
@@ -146,8 +147,9 @@ Frame *
 CallStack::get_frame(int frame_id) noexcept
 {
   for (auto &f : frames) {
-    if (f.id() == frame_id)
+    if (f.id() == frame_id) {
       return &f;
+    }
   }
   return nullptr;
 }

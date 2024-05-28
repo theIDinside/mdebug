@@ -55,8 +55,8 @@ public:
 
     template <class U = UnderlyingIter>
     Iterator(
-        std::enable_if_t<std::is_same<U, const_value_type_it>::value, Iterator<non_const_value_type_it> const &>
-            other)
+      std::enable_if_t<std::is_same<U, const_value_type_it>::value, Iterator<non_const_value_type_it> const &>
+        other)
         : iter(other.iter), end(other.end), f(other.f)
     {
       iterate_until_predicate_passes();
@@ -118,8 +118,7 @@ public:
 
   template <class U = Container>
   FilterView(
-      std::enable_if_t<std::is_same<U, const_value_type>::value, FilterView<non_const_value_type, Fn> const &>
-          other)
+    std::enable_if_t<std::is_same<U, const_value_type>::value, FilterView<non_const_value_type, Fn> const &> other)
       : c(other.c), f(other.f)
   {
   }

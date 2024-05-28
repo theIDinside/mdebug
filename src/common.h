@@ -132,7 +132,7 @@ std::string_view syscall_name(unsigned long long syscall_number);
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
     const auto todo_msg_hdr =                                                                                     \
-        fmt::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                      \
+      fmt::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                        \
     const auto todo_msg = fmt::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
     fmt::println("{}", todo_msg_hdr);                                                                             \
     fmt::println("{}", todo_msg);                                                                                 \
@@ -262,10 +262,11 @@ public:
   static constexpr unsigned long long
   type_size() noexcept
   {
-    if constexpr (std::is_void_v<T>)
+    if constexpr (std::is_void_v<T>) {
       return 1;
-    else
+    } else {
       return sizeof(T);
+    }
   }
 
   /**
@@ -397,15 +398,15 @@ unwrap(const std::variant<Args...> &variant) noexcept
 {
   const T *r = nullptr;
   std::visit(
-      [&r](auto &&item) {
-        using var_t = ActualType<decltype(item)>;
-        if constexpr (std::is_same_v<var_t, T>) {
-          r = &item;
-        } else {
-          PANIC("Unexpected type in variant");
-        }
-      },
-      variant);
+    [&r](auto &&item) {
+      using var_t = ActualType<decltype(item)>;
+      if constexpr (std::is_same_v<var_t, T>) {
+        r = &item;
+      } else {
+        PANIC("Unexpected type in variant");
+      }
+    },
+    variant);
   return r;
 }
 
@@ -415,15 +416,15 @@ maybe_unwrap(const std::variant<Args...> &variant) noexcept
 {
   const T *r = nullptr;
   std::visit(
-      [&r](auto &&item) {
-        using var_t = ActualType<decltype(item)>;
-        if constexpr (std::is_same_v<var_t, T>) {
-          r = &item;
-        } else {
-          r = nullptr;
-        }
-      },
-      variant);
+    [&r](auto &&item) {
+      using var_t = ActualType<decltype(item)>;
+      if constexpr (std::is_same_v<var_t, T>) {
+        r = &item;
+      } else {
+        r = nullptr;
+      }
+    },
+    variant);
   return r;
 }
 
@@ -440,10 +441,11 @@ template <std::integral Value>
 constexpr Option<Value>
 to_integral(std::string_view s)
 {
-  if (Value value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+  if (Value value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{}) {
     return value;
-  else
+  } else {
     return std::nullopt;
+  }
 }
 
 Option<AddrPtr> to_addr(std::string_view s) noexcept;
@@ -474,8 +476,9 @@ constexpr auto
 find(std::vector<T> &vec, const T &item, Predicate &&p) noexcept
 {
   for (auto it = std::cbegin(vec); it != std::end(vec); ++it) {
-    if (p(*it, item))
+    if (p(*it, item)) {
       return it;
+    }
   }
   return std::cend(vec);
 }
@@ -485,8 +488,9 @@ constexpr auto
 map(std::vector<T> &vec, Predicate &&p, Transform &&transform) noexcept -> std::optional<U>
 {
   for (auto it = std::cbegin(vec); it != std::end(vec); ++it) {
-    if (p(*it))
+    if (p(*it)) {
       return transform(*it);
+    }
   }
   return std::nullopt;
 }

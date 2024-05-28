@@ -100,15 +100,15 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
     ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
            cu->section_offset(), die_ref.die->section_offset);
     auto type =
-        obj->types->emplace_type(offs, IndexedDieReference{cu, idx}, possible_size->unsigned_value(), name);
+      obj->types->emplace_type(offs, IndexedDieReference{cu, idx}, possible_size->unsigned_value(), name);
     if (die_ref.die->tag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{cu};
       reader.seek_die(*die_ref.die);
       auto attr = die_ref.read_attribute(Attribute::DW_AT_encoding);
       ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
              die_ref.die->section_offset);
-      auto encoding = attr.and_then(
-          [](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.unsigned_value())}; });
+      auto encoding =
+        attr.and_then([](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.unsigned_value())}; });
       type->set_base_type_encoding(encoding.value());
     }
   }
@@ -118,8 +118,9 @@ std::optional<std::span<const DieNameReference>>
 NameIndex::search(std::string_view name) const noexcept
 {
   auto it = mapping.find(name);
-  if (it == std::end(mapping))
+  if (it == std::end(mapping)) {
     return std::nullopt;
+  }
 
   if (it->second.is_unique()) {
     return std::span{&(it->second), 1};
@@ -134,11 +135,13 @@ NameIndex::FindResult
 NameIndex::get_dies(std::string_view name) noexcept
 {
   auto it = mapping.find(name);
-  if (it == std::end(mapping))
+  if (it == std::end(mapping)) {
     return FindResult{nullptr, 0};
+  }
 
-  if (it->second.is_unique())
+  if (it->second.is_unique()) {
     return FindResult{&(it->second), 1};
+  }
 
   const auto collision_index = it->second.collision_displacement_index;
   auto &dies = colliding_die_name_refs[collision_index];

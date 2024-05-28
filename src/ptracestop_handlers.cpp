@@ -139,8 +139,9 @@ LineStep::~LineStep() noexcept
     DBGLOG(core, "[line step]: line step for {} ended", task.tid);
     tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Line stepping finished", false);
   } else {
-    if (resume_bp)
+    if (resume_bp) {
       tc.remove_breakpoint(resume_bp->id);
+    }
   }
 }
 
@@ -188,16 +189,17 @@ LineStep::update_stepped() noexcept
   } else {
     auto &callstack = tc.build_callframe_stack(task, CallStackRequest::full());
     const auto ret_addr = map<AddrPtr>(
-        callstack.frames,
-        [sf = start_frame](const auto &f) {
-          if (f.has_symbol_info())
-            return f.name() == sf.name();
-          return same_symbol(f, sf);
-        },
-        sym::resume_address);
+      callstack.frames,
+      [sf = start_frame](const auto &f) {
+        if (f.has_symbol_info()) {
+          return f.name() == sf.name();
+        }
+        return same_symbol(f, sf);
+      },
+      sym::resume_address);
     if (ret_addr) {
       resume_bp = tc.pbps.create_loc_user<ResumeToBreakpoint>(
-          tc, tc.get_or_create_bp_location(ret_addr->as_void(), false), task.tid, task.tid);
+        tc, tc.get_or_create_bp_location(ret_addr->as_void(), false), task.tid, task.tid);
     } else {
       DBG(DBGLOG(core, "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
           for (const auto &frame
@@ -251,7 +253,7 @@ StopHandler::handle_proceed(TaskInfo &info, tc::ProcessedStopEvent stop) noexcep
     DBGLOG(core, "[action]: {} will resume (should_resume={}) => {}", info.tid, stop.should_resume,
            stop.should_resume && info.can_continue());
     const auto kind =
-        stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
+      stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
     bool resumed = false;
     switch (kind.target) {
     case tc::ResumeTarget::Task:

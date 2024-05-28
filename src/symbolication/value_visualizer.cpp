@@ -19,25 +19,28 @@ ValueResolver::ValueResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> 
 Value *
 ValueResolver::value() noexcept
 {
-  if (auto locked = value_ptr.lock(); locked)
+  if (auto locked = value_ptr.lock(); locked) {
     return locked.get();
-  else
+  } else {
     return nullptr;
+  }
 }
 
 std::optional<Children>
 ValueResolver::has_cached(std::optional<u32>, std::optional<u32>) noexcept
 {
-  if (cached)
+  if (cached) {
     return children;
+  }
   return std::nullopt;
 }
 
 Children
 ValueResolver::resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
 {
-  if (const auto res = has_cached(start, count); res)
+  if (const auto res = has_cached(start, count); res) {
     return res.value();
+  }
 
   return get_children(tc, start, count);
 }
@@ -93,7 +96,7 @@ CStringResolver::get_children(TraceeController &tc, std::optional<u32> start, st
     const auto requested_length = count.value_or(32);
     auto memory = sym::MemoryContentsObject::read_memory(tc, adjusted_address, requested_length);
     indirect_value_object = std::make_shared<EagerMemoryContentsObject>(
-        adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
+      adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
     auto span = indirect_value_object->view(0, requested_length);
     for (const auto [index, ch] : utils::EnumerateView(span)) {
@@ -105,7 +108,7 @@ CStringResolver::get_children(TraceeController &tc, std::optional<u32> start, st
     // actual `char` type
     auto layout_type = locked->type()->get_layout_type();
     auto string_value = Value::WithVisualizer<CStringVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object), null_terminator);
+      std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object), null_terminator);
 
     children.push_back(string_value);
   }
@@ -137,10 +140,11 @@ ArrayResolver::has_cached(std::optional<u32> start, std::optional<u32> count) no
   const auto start_index = start.value();
   const auto addr_base = address_of(start_index);
   auto iter =
-      std::find_if(children.begin(), children.end(), [&](const auto &v) { return v->address() == addr_base; });
+    std::find_if(children.begin(), children.end(), [&](const auto &v) { return v->address() == addr_base; });
 
-  if (iter == std::end(children))
+  if (iter == std::end(children)) {
     return std::nullopt;
+  }
 
   const u32 iter_index = std::distance(children.begin(), iter);
   if (children.size() - iter_index < count.value()) {
@@ -149,8 +153,9 @@ ArrayResolver::has_cached(std::optional<u32> start, std::optional<u32> count) no
   const auto e = count.value() + iter_index;
   for (auto i = iter_index + 1; i < e; ++i) {
     auto this_addr = address_of(i);
-    if (children[i]->address() != this_addr)
+    if (children[i]->address() != this_addr) {
       return std::nullopt;
+    }
   }
 
   return std::span{children}.subspan(iter_index, count.value());
@@ -165,11 +170,13 @@ ArrayResolver::address_of(u32 index) noexcept
 Children
 ArrayResolver::get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
 {
-  if (!start)
+  if (!start) {
     return get_all(tc);
+  }
 
-  if (start.value() + count.value_or(0) > element_count)
+  if (start.value() + count.value_or(0) > element_count) {
     return {};
+  }
 
   const u32 s = start.value();
   const u32 e = s + std::min(count.value_or(100), element_count);
@@ -178,8 +185,9 @@ ArrayResolver::get_children(TraceeController &tc, std::optional<u32> start, std:
 
   auto start_insert_at = std::find_if(children.begin(), children.end(), [&](auto &v) {
     const auto cmp = v->address();
-    if (cmp == addr_base)
+    if (cmp == addr_base) {
       return true;
+    }
     return cmp > addr_base;
   });
 
@@ -230,8 +238,9 @@ PrimitiveVisualizer::format_value() noexcept
   }
 
   const auto span = ptr->memory_view();
-  if (span.empty())
+  if (span.empty()) {
     return std::nullopt;
+  }
   auto type = ptr->type();
   const auto size_of = type->size_of;
 
@@ -336,14 +345,15 @@ PrimitiveVisualizer::dap_format(std::string_view name, int variablesReference) n
   }
 
   const auto byte_span = ptr->memory_view();
-  if (byte_span.empty())
+  if (byte_span.empty()) {
     return std::nullopt;
+  }
 
   auto value_field = format_value().value_or("could not serialize value");
 
   return fmt::format(
-      R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-      name, value_field, (*ptr->type()), variablesReference, ptr->address());
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
+    value_field, (*ptr->type()), variablesReference, ptr->address());
 }
 
 DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept : ValueVisualizer(value) {}
@@ -364,8 +374,8 @@ DefaultStructVisualizer::dap_format(std::string_view name, int variablesReferenc
 
   const auto &t = *ptr->type();
   return fmt::format(
-      R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-      name, t, t, variablesReference, ptr->address());
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
+    t, t, variablesReference, ptr->address());
 }
 
 ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(provider) {}
@@ -385,8 +395,8 @@ ArrayVisualizer::dap_format(std::string_view, int variablesReference) noexcept
 
   const auto &t = *ptr->type();
   return fmt::format(
-      R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-      ptr->name, t, t, variablesReference, ptr->address(), ptr->type()->array_size());
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
+    ptr->name, t, t, variablesReference, ptr->address(), ptr->type()->array_size());
 }
 
 CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> data_provider,
@@ -403,8 +413,9 @@ CStringVisualizer::format_value() noexcept
     return std::nullopt;
   }
   const auto byte_span = ptr->full_memory_view();
-  if (byte_span.empty())
+  if (byte_span.empty()) {
     return std::nullopt;
+  }
   std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
   return fmt::format("{}", cast);
 }
@@ -417,13 +428,14 @@ CStringVisualizer::dap_format(std::string_view name, int) noexcept
     return std::nullopt;
   }
   const auto byte_span = ptr->full_memory_view();
-  if (byte_span.empty())
+  if (byte_span.empty()) {
     return std::nullopt;
+  }
 
   std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
 
   return fmt::format(
-      R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-      name, cast, 0, ptr->address());
+    R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
+    name, cast, 0, ptr->address());
 }
 } // namespace sym

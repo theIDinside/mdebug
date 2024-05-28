@@ -104,9 +104,9 @@ const std::vector<AddrPtr> &
 TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
   static constexpr auto X86_64_RIP_REGISTER = 16;
-  if (!call_stack->dirty)
+  if (!call_stack->dirty) {
     return call_stack->pcs;
-  else {
+  } else {
     call_stack->pcs.clear();
   }
 

@@ -99,20 +99,21 @@ public:
       }
     }
 
-    if (faulty_args.empty())
+    if (faulty_args.empty()) {
       return std::nullopt;
-    else
+    } else {
       return MissingOrInvalidResult{faulty_args};
+    }
   }
 
   template <typename JsonArgs, typename CommandArg>
   static auto
   check_arg_contains(const JsonArgs &args, const CommandArg &cmd_arg)
-      -> std::optional<std::pair<ArgumentError, std::string>>
+    -> std::optional<std::pair<ArgumentError, std::string>>
   {
     if (!args.contains(cmd_arg)) {
       return std::make_pair<ArgumentError, std::string>(
-          {ArgumentErrorKind::Missing, "Required argument is missing"}, std::string{cmd_arg});
+        {ArgumentErrorKind::Missing, "Required argument is missing"}, std::string{cmd_arg});
     }
     return std::nullopt;
   }

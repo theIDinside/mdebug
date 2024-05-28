@@ -220,8 +220,9 @@ public:
   std::optional<u32>
   next() noexcept
   {
-    if (ready.empty())
+    if (ready.empty()) {
       return {};
+    }
 
     auto v = ready.back();
     ready.pop_back();

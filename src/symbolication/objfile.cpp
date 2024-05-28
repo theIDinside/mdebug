@@ -76,8 +76,9 @@ ObjectFile::search_minsym_fn_info(AddrPtr pc) noexcept
 {
   auto it = std::lower_bound(min_fn_symbols_sorted.begin(), min_fn_symbols_sorted.end(), pc,
                              [](auto &sym, AddrPtr addr) { return sym.start_pc() < addr; });
-  if (it == std::end(min_fn_symbols_sorted))
+  if (it == std::end(min_fn_symbols_sorted)) {
     return nullptr;
+  }
 
   auto prev = (it == std::begin(min_fn_symbols_sorted)) ? it : it - 1;
   if (prev->start_pc() <= pc && prev->end_pc() >= pc) {
@@ -104,8 +105,8 @@ ObjectFile::set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noe
   std::lock_guard lock(unit_data_write_lock);
   auto first_id = unit_data.front()->section_offset();
   const auto it =
-      std::lower_bound(dwarf_units.begin(), dwarf_units.end(), first_id,
-                       [](const sym::dw::UnitData *ptr, u64 id) { return ptr->section_offset() < id; });
+    std::lower_bound(dwarf_units.begin(), dwarf_units.end(), first_id,
+                     [](const sym::dw::UnitData *ptr, u64 id) { return ptr->section_offset() < id; });
   dwarf_units.insert(it, unit_data.begin(), unit_data.end());
 }
 
@@ -120,21 +121,24 @@ ObjectFile::get_cu_from_offset(u64 offset) noexcept
 {
   auto it = std::find_if(dwarf_units.begin(), dwarf_units.end(),
                          [&](sym::dw::UnitData *cu) { return cu->spans_across(offset); });
-  if (it != std::end(dwarf_units))
+  if (it != std::end(dwarf_units)) {
     return *it;
-  else
+  } else {
     return nullptr;
+  }
 }
 
 std::optional<sym::dw::DieReference>
 ObjectFile::get_die_reference(u64 offset) noexcept
 {
   auto cu = get_cu_from_offset(offset);
-  if (cu == nullptr)
+  if (cu == nullptr) {
     return {};
+  }
   auto die = cu->get_die(offset);
-  if (die == nullptr)
+  if (die == nullptr) {
     return {};
+  }
 
   return sym::dw::DieReference{cu, die};
 }
@@ -149,8 +153,9 @@ sym::dw::LNPHeader *
 ObjectFile::get_lnp_header(u64 offset) noexcept
 {
   for (auto &header : *lnp_headers) {
-    if (header.sec_offset == offset)
+    if (header.sec_offset == offset) {
       return &header;
+    }
   }
   TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
 }
@@ -177,7 +182,7 @@ ObjectFile::read_lnp_headers() noexcept
         std::vector<sym::dw::LNPHeader *> src_headers{};
         src_headers.push_back(&hdr);
         lnp_source_code_files.emplace(
-            canonical, std::make_shared<sym::dw::SourceCodeFile>(elf, canonical, std::move(src_headers)));
+          canonical, std::make_shared<sym::dw::SourceCodeFile>(elf, canonical, std::move(src_headers)));
       }
     }
   }
@@ -188,9 +193,9 @@ ObjectFile::read_lnp_headers() noexcept
 std::span<sym::dw::LNPHeader>
 ObjectFile::get_lnp_headers() noexcept
 {
-  if (lnp_headers)
+  if (lnp_headers) {
     return std::span{*lnp_headers};
-  else {
+  } else {
     read_lnp_headers();
     return std::span{*lnp_headers};
   }
@@ -289,7 +294,7 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
 
 auto
 ObjectFile::relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
-    -> std::vector<sym::dw::RelocatedSourceCodeFile>
+  -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
   std::vector<sym::dw::RelocatedSourceCodeFile> result{};
   auto cus = get_source_infos(pc);
@@ -361,8 +366,9 @@ ObjectFile::find_custom_resolver(sym::Type &) noexcept
 void
 ObjectFile::init_visualizer(std::shared_ptr<sym::Value> &value) noexcept
 {
-  if (value->has_visualizer())
+  if (value->has_visualizer()) {
     return;
+  }
 
   auto &type = *value->type();
   if (auto custom_visualiser = find_custom_visualizer(type); custom_visualiser != nullptr) {
@@ -409,7 +415,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-      new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
+    new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
 
   return objfile;
 }
@@ -424,7 +430,7 @@ CreateObjectFile(Pid process_id, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-      std::make_shared<ObjectFile>(fmt::format("{}:{}", process_id, path.c_str()), path, fd.file_size(), addr);
+    std::make_shared<ObjectFile>(fmt::format("{}:{}", process_id, path.c_str()), path, fd.file_size(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
@@ -432,7 +438,7 @@ CreateObjectFile(Pid process_id, const Path &path) noexcept
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
   ElfSectionData data = {.sections = new ElfSection[header->e_shnum], .count = header->e_shnum};
   const auto sec_names_offset_hdr =
-      objfile->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
+    objfile->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
 
   u64 min = UINTMAX_MAX;
   u64 max = 0;
@@ -457,7 +463,7 @@ CreateObjectFile(Pid process_id, const Path &path) noexcept
     data.sections[i].m_section_ptr = objfile->get_at_offset<u8>(sec_hdr->sh_offset);
     data.sections[i].m_section_size = sec_hdr->sh_size;
     data.sections[i].m_name =
-        objfile->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
+      objfile->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
     data.sections[i].file_offset = sec_hdr->sh_offset;
     data.sections[i].address = sec_hdr->sh_addr;
   }
@@ -566,7 +572,7 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
 
 auto
 SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-    -> std::vector<ui::dap::Variable>
+  -> std::vector<ui::dap::Variable>
 {
   if (!frame.full_symbol_info().is_resolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->objectFile(), frame};
@@ -601,7 +607,7 @@ SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::Relo
 
 auto
 SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
-    -> std::vector<ui::dap::Variable>
+  -> std::vector<ui::dap::Variable>
 {
   if (!valobj_cache.contains(ref)) {
     DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ref);
@@ -623,8 +629,9 @@ SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std
       objectFile()->init_visualizer(var);
       registerResolver(var);
       const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-      if (new_ref > 0)
+      if (new_ref > 0) {
         cacheValue(new_ref, var);
+      }
       result.push_back(ui::dap::Variable{new_ref, var});
     }
 
@@ -639,8 +646,9 @@ SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std
       objectFile()->init_visualizer(member_value);
       registerResolver(member_value);
       const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-      if (new_ref > 0)
+      if (new_ref > 0) {
         cacheValue(new_ref, member_value);
+      }
       result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
     }
     return result;
@@ -722,8 +730,8 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
     const auto start = std::chrono::high_resolution_clock::now();
     search_for = obj->regex_search(spec.name);
     const auto elapsed =
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-            .count();
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+        .count();
     DBGLOG(core, "regex searched {} in {}us", obj->path->c_str(), elapsed);
   } else {
     search_for = {spec.name};
@@ -797,8 +805,9 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     objectFile()->init_visualizer(value_object);
     registerResolver(value_object);
 
-    if (ref > 0)
+    if (ref > 0) {
       cacheValue(ref, value_object);
+    }
     result.push_back(ui::dap::Variable{ref, std::move(value_object)});
   }
   return result;

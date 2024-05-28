@@ -45,17 +45,17 @@ enum class TraceeStopReason : u32
 };
 
 static constexpr std::string_view StopReasons[]{
-    "watch",   "rwatch", "awatch", "syscall_entry", "syscall_return", "library", "replaylog", "swbreak",
-    "hwbreak", "fork",   "vfork",  "vforkdone",     "exec",           "clone",   "create"};
+  "watch",   "rwatch", "awatch", "syscall_entry", "syscall_return", "library", "replaylog", "swbreak",
+  "hwbreak", "fork",   "vfork",  "vforkdone",     "exec",           "clone",   "create"};
 
 consteval std::array<u32, 15>
 StopReasonTokenFactory()
 {
   static constexpr std::array<u32, 15> StopReasonTokens{
-      valueOf("watch"),          valueOf("rwatch"),  valueOf("awatch"),    valueOf("syscall_entry"),
-      valueOf("syscall_return"), valueOf("library"), valueOf("replaylog"), valueOf("swbreak"),
-      valueOf("hwbreak"),        valueOf("fork"),    valueOf("vfork"),     valueOf("vforkdone"),
-      valueOf("exec"),           valueOf("clone"),   valueOf("create"),
+    valueOf("watch"),          valueOf("rwatch"),  valueOf("awatch"),    valueOf("syscall_entry"),
+    valueOf("syscall_return"), valueOf("library"), valueOf("replaylog"), valueOf("swbreak"),
+    valueOf("hwbreak"),        valueOf("fork"),    valueOf("vfork"),     valueOf("vforkdone"),
+    valueOf("exec"),           valueOf("clone"),   valueOf("create"),
   };
   auto tmp = StopReasonTokens;
   std::sort(tmp.begin(), tmp.end());
@@ -65,16 +65,16 @@ StopReasonTokenFactory()
 constexpr static auto StopReasonTokens = StopReasonTokenFactory();
 
 static_assert(
-    []() {
-      for (const auto token : StopReasonTokens) {
-        if (std::count(StopReasonTokens.begin(), StopReasonTokens.end(), token) != 1) {
-          return false;
-        }
+  []() {
+    for (const auto token : StopReasonTokens) {
+      if (std::count(StopReasonTokens.begin(), StopReasonTokens.end(), token) != 1) {
+        return false;
       }
+    }
 
-      return true;
-    }(),
-    "All generated TraceeStopReason convert to unique integer values (relative to itself)");
+    return true;
+  }(),
+  "All generated TraceeStopReason convert to unique integer values (relative to itself)");
 
 struct WaitEventParser
 {

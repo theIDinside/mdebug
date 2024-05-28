@@ -14,8 +14,9 @@ AwaiterThread::AwaiterThread(Tid task_leader) noexcept
 AwaiterThread::~AwaiterThread() noexcept
 {
   keep_going = false;
-  if (thread.joinable())
+  if (thread.joinable()) {
     thread.join();
+  }
 }
 
 void

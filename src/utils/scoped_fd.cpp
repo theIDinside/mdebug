@@ -15,10 +15,11 @@ ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path)), fil
 {
   if (fs::exists(p)) {
     struct stat s;
-    if (-1 != stat(p.c_str(), &s))
+    if (-1 != stat(p.c_str(), &s)) {
       file_size_ = s.st_size;
-    else
+    } else {
       file_size_ = 0;
+    }
   } else {
     file_size_ = 0;
   }
@@ -35,8 +36,9 @@ ScopedFd::ScopedFd(ScopedFd &&other) noexcept : fd(other.fd) { other.fd = -1; }
 ScopedFd &
 ScopedFd::operator=(ScopedFd &&other) noexcept
 {
-  if (this == &other)
+  if (this == &other) {
     return *this;
+  }
   close();
   fd = other.fd;
   p = std::move(other.p);
@@ -76,8 +78,9 @@ ScopedFd::operator int() const noexcept { return get(); }
 u64
 ScopedFd::file_size() const noexcept
 {
-  if (file_size_)
+  if (file_size_) {
     return file_size_.value();
+  }
 
   if (!is_open()) {
     return 0;

@@ -82,8 +82,8 @@ TaskGroup::task_done(Task *task) noexcept
   if (m_done_tasks.size() == m_tasks.size()) {
     if (LogTaskGroup) {
       auto time =
-          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-              .count();
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+          .count();
       DBGLOG(core, "[TG {}]: done, time={}us", m_name, time);
     }
     m_promise.set_value();

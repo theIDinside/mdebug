@@ -37,7 +37,7 @@ struct ConnectError
   Connect(const std::string &host, int port, int sys) noexcept
   {
     return ConnectError{
-        .kind = Kind::Connect, .msg = fmt::format("Failed to connect to {}:{}", host, port), .sys_errno = sys};
+      .kind = Kind::Connect, .msg = fmt::format("Failed to connect to {}:{}", host, port), .sys_errno = sys};
   }
 };
 

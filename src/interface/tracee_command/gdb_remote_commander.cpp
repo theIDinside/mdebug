@@ -92,21 +92,21 @@ static ReadResult
 convert_to_read_result(const gdb::SendError &err) noexcept
 {
   return std::visit(
-      [](auto &err) noexcept -> ReadResult {
-        using T = ActualType<decltype(err)>;
-        // NAck
-        if constexpr (std::is_same_v<T, gdb::SystemError>) {
-          return ReadResult::SystemError(err.syserrno);
-        } else if constexpr (std::is_same_v<T, gdb::Timeout>) {
-          return ReadResult::SystemError(0);
-        } else if constexpr (std::is_same_v<T, gdb::NAck>) {
-          return ReadResult::SystemError(0);
-        } else {
-          static_assert(always_false<T>, "unhandled branch");
-          return ReadResult::SystemError(0);
-        }
-      },
-      err);
+    [](auto &err) noexcept -> ReadResult {
+      using T = ActualType<decltype(err)>;
+      // NAck
+      if constexpr (std::is_same_v<T, gdb::SystemError>) {
+        return ReadResult::SystemError(err.syserrno);
+      } else if constexpr (std::is_same_v<T, gdb::Timeout>) {
+        return ReadResult::SystemError(0);
+      } else if constexpr (std::is_same_v<T, gdb::NAck>) {
+        return ReadResult::SystemError(0);
+      } else {
+        static_assert(always_false<T>, "unhandled branch");
+        return ReadResult::SystemError(0);
+      }
+    },
+    err);
 }
 
 ReadResult
@@ -600,8 +600,8 @@ RemoteSessionConfigurator::configure_session() noexcept
 
   // INFORM REMOTE OF OUR CAPABILITIES; IT WILL RESPOND WITH THEIRS
   SocketCommand qSupported{
-      "qSupported:multiprocess+;swbreak+;hwbreak+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;"
-      "vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386;QNonStop+"};
+    "qSupported:multiprocess+;swbreak+;hwbreak+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;"
+    "vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386;QNonStop+"};
   SuccessOtherwiseErr(qSupported, "Failed to request supported options");
   conn->parse_supported(qSupported.result.value());
 
@@ -660,7 +660,7 @@ RemoteSessionConfigurator::configure_session() noexcept
       // is created when we spawn the TraceeController supervisor struct (it creates a normal thread meta data
       // struct for the process)
       pinfo.push_back(
-          {execfile.response_buffer, pid, {}, std::make_shared<gdb::ArchictectureInfo>(std::move(arch))});
+        {execfile.response_buffer, pid, {}, std::make_shared<gdb::ArchictectureInfo>(std::move(arch))});
     }
   }
 
@@ -676,7 +676,7 @@ RemoteSessionConfigurator::configure_session() noexcept
 
   for (auto &&proc : pinfo) {
     result.emplace_back(std::move(proc.threads), std::make_unique<GdbRemoteCommander>(
-                                                     conn, proc.pid, std::move(proc.exe), std::move(proc.arch)));
+                                                   conn, proc.pid, std::move(proc.exe), std::move(proc.arch)));
   }
 
   if (result.empty()) {

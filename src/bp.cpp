@@ -75,8 +75,9 @@ bool
 BreakpointLocation::remove_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &bp) noexcept
 {
   auto it = std::find(users.begin(), users.end(), &bp);
-  if (it == std::end(users))
+  if (it == std::end(users)) {
     return false;
+  }
 
   users.erase(it);
   if (!any_user_active()) {
@@ -284,22 +285,22 @@ UserBreakpoint::error_message() const noexcept
     std::string message{};
     auto it = std::back_inserter(message);
     std::visit(
-        [t, &it](const auto &e) {
-          using T = std::remove_cvref_t<decltype(e)>;
-          if constexpr (std::is_same_v<T, MemoryError>) {
-            fmt::format_to(it, "Could not write to {} ({})", e.requested_address, strerror(e.error_no));
-          } else if constexpr (std::is_same_v<T, ResolveError>) {
-            auto spec = t->user_spec();
-            if (spec) {
-              fmt::format_to(it, "Could not resolve using spec: {}", *spec);
-            } else {
-              fmt::format_to(it, "Could not resolve breakpoint using spec");
-            }
+      [t, &it](const auto &e) {
+        using T = std::remove_cvref_t<decltype(e)>;
+        if constexpr (std::is_same_v<T, MemoryError>) {
+          fmt::format_to(it, "Could not write to {} ({})", e.requested_address, strerror(e.error_no));
+        } else if constexpr (std::is_same_v<T, ResolveError>) {
+          auto spec = t->user_spec();
+          if (spec) {
+            fmt::format_to(it, "Could not resolve using spec: {}", *spec);
           } else {
-            static_assert(always_false<T>, "Should be unreachable");
+            fmt::format_to(it, "Could not resolve breakpoint using spec");
           }
-        },
-        err);
+        } else {
+          static_assert(always_false<T>, "Should be unreachable");
+        }
+      },
+      err);
     return message;
   });
 }
@@ -511,8 +512,9 @@ std::shared_ptr<UserBreakpoint>
 UserBreakpoints::get_user(u32 id) const noexcept
 {
   auto it = user_breakpoints.find(id);
-  if (it == std::end(user_breakpoints))
+  if (it == std::end(user_breakpoints)) {
     return nullptr;
+  }
 
   return it->second;
 }
@@ -534,8 +536,9 @@ UserBreakpoints::non_verified() const noexcept
 {
   std::vector<std::shared_ptr<UserBreakpoint>> result;
   for (const auto &[id, bp] : user_breakpoints) {
-    if (!bp->verified())
+    if (!bp->verified()) {
       result.push_back(bp);
+    }
   }
 
   return result;

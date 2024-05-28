@@ -371,13 +371,15 @@ elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
   while (reader.has_more()) {
     auto len = reader.read_value<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
-    if (len == 0)
+    if (len == 0) {
       return {cie_count, fde_count};
+    }
     auto id = reader.read_value<u32>();
-    if (id == 0)
+    if (id == 0) {
       ++cie_count;
-    else
+    } else {
       ++fde_count;
+    }
     reader.skip(len - 4);
   }
   return {cie_count, fde_count};
@@ -391,14 +393,16 @@ dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
   while (reader.has_more()) {
     auto len = reader.read_value<u32>();
     // apparently .debug_frame does *not* have a 0-length entry as a terminator. Great. Amazing.
-    if (len == 0)
+    if (len == 0) {
       return {cie_count, fde_count};
+    }
     auto id = reader.read_value<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
-    if (id == 0xff'ff'ff'ff)
+    if (id == 0xff'ff'ff'ff) {
       ++cie_count;
-    else
+    } else {
       ++fde_count;
+    }
     reader.skip(len - 4);
   }
   return {cie_count, fde_count};
@@ -519,14 +523,14 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinder_db->elf_eh_unwind_infos.push_back(UnwindInfo{
-          .start = begin,
-          .end = end,
-          .code_align = static_cast<u8>(cie.code_alignment_factor),
-          .data_align = static_cast<i8>(cie.data_alignment_factor),
-          .aug_data_len = aug_data_length,
-          .lsda = lsda,
-          .cie = &cie,
-          .fde_insts = ins,
+        .start = begin,
+        .end = end,
+        .code_align = static_cast<u8>(cie.code_alignment_factor),
+        .data_align = static_cast<i8>(cie.data_alignment_factor),
+        .aug_data_len = aug_data_length,
+        .lsda = lsda,
+        .cie = &cie,
+        .fde_insts = ins,
       });
     }
   }
@@ -593,14 +597,14 @@ parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_fr
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinder_db->dwarf_unwind_infos.push_back(UnwindInfo{
-          .start = begin,
-          .end = end,
-          .code_align = static_cast<u8>(cie.code_alignment_factor),
-          .data_align = static_cast<i8>(cie.data_alignment_factor),
-          .aug_data_len = aug_data_length,
-          .lsda = lsda,
-          .cie = &cie,
-          .fde_insts = ins,
+        .start = begin,
+        .end = end,
+        .code_align = static_cast<u8>(cie.code_alignment_factor),
+        .data_align = static_cast<i8>(cie.data_alignment_factor),
+        .aug_data_len = aug_data_length,
+        .lsda = lsda,
+        .cie = &cie,
+        .fde_insts = ins,
       });
     }
   }
@@ -699,13 +703,15 @@ Unwinder::get_unwind_info(AddrPtr pc) const noexcept
   // todo(simon): once again, better searching can be done here, particularly binary search, if the elements are
   // ordered
   for (const auto &u : elf_eh_unwind_infos) {
-    if (pc >= u.start && pc < u.end)
+    if (pc >= u.start && pc < u.end) {
       return &u;
+    }
   }
 
   for (const auto &u : dwarf_unwind_infos) {
-    if (pc >= u.start && pc < u.end)
+    if (pc >= u.start && pc < u.end) {
       return &u;
+    }
   }
   return nullptr;
 }

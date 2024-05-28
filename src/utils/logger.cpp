@@ -57,8 +57,8 @@ Logger::setup_channel(std::string_view name) noexcept
   ASSERT(!log_files.contains(name), "Creating log channel {} twice is not allowed.", name);
   Path p = std::filesystem::current_path() / fmt::format("{}.log", name);
   auto channel =
-      new LogChannel{.spin_lock = SpinLock{},
-                     .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
+    new LogChannel{.spin_lock = SpinLock{},
+                   .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
   if (!channel->fstream.is_open()) {
     channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
   }
@@ -71,8 +71,8 @@ Logger::setup_channel(Channel id) noexcept
   ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
   Path p = std::filesystem::current_path() / fmt::format("{}.log", to_str(id));
   auto channel =
-      new LogChannel{.spin_lock = SpinLock{},
-                     .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
+    new LogChannel{.spin_lock = SpinLock{},
+                   .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
   if (!channel->fstream.is_open()) {
     channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
   }
@@ -106,8 +106,9 @@ Logger::LogChannel *
 Logger::channel(std::string_view name)
 {
   auto it = log_files.find(name);
-  if (it != std::end(log_files))
+  if (it != std::end(log_files)) {
     return it->second;
+  }
   return nullptr;
 }
 

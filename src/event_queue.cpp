@@ -41,8 +41,8 @@ CoreEvent::SoftwareBreakpointHit(const EventDataParam &param, std::optional<std:
 {
   DBGLOG(core, "[Core Event]: creating event SoftwareBreakpointHit");
   return new CoreEvent{
-      param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Software, addr},
-      CoreEventType::BreakpointHitEvent, std::move(reg)};
+    param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Software, addr},
+    CoreEventType::BreakpointHitEvent, std::move(reg)};
 }
 
 CoreEvent *
@@ -51,8 +51,8 @@ CoreEvent::HardwareBreakpointHit(const EventDataParam &param, std::optional<std:
 {
   DBGLOG(core, "[Core Event]: creating event HardwareBreakpointHit");
   return new CoreEvent{
-      param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Hardware, addr},
-      CoreEventType::BreakpointHitEvent, std::move(reg)};
+    param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Hardware, addr},
+    CoreEventType::BreakpointHitEvent, std::move(reg)};
 }
 
 CoreEvent *
@@ -82,8 +82,8 @@ CoreEvent::ThreadExited(const EventDataParam &param, bool process_needs_resuming
 {
   DBGLOG(core, "[Core Event]: creating event ThreadExited");
   return new CoreEvent{
-      param, ::ThreadExited{{param.tid.value_or(-1)}, param.sig_or_code.value_or(-1), process_needs_resuming},
-      CoreEventType::ThreadExited, std::move(reg)};
+    param, ::ThreadExited{{param.tid.value_or(-1)}, param.sig_or_code.value_or(-1), process_needs_resuming},
+    CoreEventType::ThreadExited, std::move(reg)};
 }
 
 CoreEvent *
@@ -91,24 +91,24 @@ CoreEvent::WriteWatchpoint(const EventDataParam &param, std::uintptr_t addr, Reg
 {
   DBGLOG(core, "[Core Event]: creating event WriteWatchpoint");
   return new CoreEvent{
-      param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Write, addr},
-      CoreEventType::WatchpointEvent, std::move(reg)};
+    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Write, addr},
+    CoreEventType::WatchpointEvent, std::move(reg)};
 }
 CoreEvent *
 CoreEvent::ReadWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event ReadWatchpoint");
   return new CoreEvent{
-      param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Read, addr},
-      CoreEventType::WatchpointEvent, std::move(reg)};
+    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Read, addr},
+    CoreEventType::WatchpointEvent, std::move(reg)};
 }
 CoreEvent *
 CoreEvent::AccessWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event AccessWatchpoint");
   return new CoreEvent{
-      param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Access, addr},
-      CoreEventType::WatchpointEvent, std::move(reg)};
+    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Access, addr},
+    CoreEventType::WatchpointEvent, std::move(reg)};
 }
 
 CoreEvent *

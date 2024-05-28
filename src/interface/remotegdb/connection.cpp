@@ -43,21 +43,21 @@ namespace gdb {
 using Connection = RemoteConnection::ShrPtr;
 
 std::unordered_map<std::string_view, TraceeStopReason> RemoteConnection::StopReasonMap{
-    {{"watch", TraceeStopReason{valueOf("watch")}},
-     {"rwatch", TraceeStopReason{valueOf("rwatch")}},
-     {"awatch", TraceeStopReason{valueOf("awatch")}},
-     {"syscall_entry", TraceeStopReason{valueOf("syscall_entry")}},
-     {"syscall_return", TraceeStopReason{valueOf("syscall_return")}},
-     {"library", TraceeStopReason{valueOf("library")}},
-     {"replaylog", TraceeStopReason{valueOf("replaylog")}},
-     {"swbreak", TraceeStopReason{valueOf("swbreak")}},
-     {"hwbreak", TraceeStopReason{valueOf("hwbreak")}},
-     {"fork", TraceeStopReason{valueOf("fork")}},
-     {"vfork", TraceeStopReason{valueOf("vfork")}},
-     {"vforkdone", TraceeStopReason{valueOf("vforkdone")}},
-     {"exec", TraceeStopReason{valueOf("exec")}},
-     {"clone", TraceeStopReason{valueOf("clone")}},
-     {"create", TraceeStopReason{valueOf("create")}}}};
+  {{"watch", TraceeStopReason{valueOf("watch")}},
+   {"rwatch", TraceeStopReason{valueOf("rwatch")}},
+   {"awatch", TraceeStopReason{valueOf("awatch")}},
+   {"syscall_entry", TraceeStopReason{valueOf("syscall_entry")}},
+   {"syscall_return", TraceeStopReason{valueOf("syscall_return")}},
+   {"library", TraceeStopReason{valueOf("library")}},
+   {"replaylog", TraceeStopReason{valueOf("replaylog")}},
+   {"swbreak", TraceeStopReason{valueOf("swbreak")}},
+   {"hwbreak", TraceeStopReason{valueOf("hwbreak")}},
+   {"fork", TraceeStopReason{valueOf("fork")}},
+   {"vfork", TraceeStopReason{valueOf("vfork")}},
+   {"vforkdone", TraceeStopReason{valueOf("vforkdone")}},
+   {"exec", TraceeStopReason{valueOf("exec")}},
+   {"clone", TraceeStopReason{valueOf("clone")}},
+   {"create", TraceeStopReason{valueOf("create")}}}};
 
 static constexpr SendError
 send_err(const SendResult &res) noexcept
@@ -247,8 +247,9 @@ BufferedSocket::read_char() noexcept
 char
 BufferedSocket::peek_char() noexcept
 {
-  if (size() == 0)
+  if (size() == 0) {
     return 0;
+  }
   return buffer[head];
 }
 
@@ -257,8 +258,9 @@ BufferedSocket::buffer_n(u32 requested) noexcept
 {
   char buf[requested];
   auto can_read = ready(1);
-  if (!can_read)
+  if (!can_read) {
     return 0;
+  }
   if (const auto res = read(fd_socket, buf, requested); res != -1) {
     std::copy(buf, buf + res, std::back_inserter(buffer));
     return res;
@@ -437,12 +439,12 @@ RemoteConnection::connect(const std::string &host, int port,
 {
   // returns a Expected<ScopedFd, ConnectError>. Transform it into Expected<Connection, ConnectError>
   return utils::ScopedFd::socket_connect(host, port)
-      .and_then<InitError>([&](auto &&socket) -> utils::Expected<Connection, InitError> {
-        std::shared_ptr<RemoteConnection> connection = std::make_shared<RemoteConnection>(
-            std::string{host}, port, std::move(socket), remote_settings.value_or(RemoteSettings{}));
+    .and_then<InitError>([&](auto &&socket) -> utils::Expected<Connection, InitError> {
+      std::shared_ptr<RemoteConnection> connection = std::make_shared<RemoteConnection>(
+        std::string{host}, port, std::move(socket), remote_settings.value_or(RemoteSettings{}));
 
-        return connection;
-      });
+      return connection;
+    });
 }
 
 void
@@ -511,11 +513,12 @@ public:
   {
     static constexpr auto Channels = std::to_array<std::string_view>({"IO", "Async", "User command request"});
     static constexpr auto Event = std::to_array<PolledEvent>(
-        {PolledEvent::HasIo, PolledEvent::AsyncPending, PolledEvent::CmdRequested, PolledEvent::Quit});
+      {PolledEvent::HasIo, PolledEvent::AsyncPending, PolledEvent::CmdRequested, PolledEvent::Quit});
 
     const auto pull_evt = [&](auto pollfd) {
-      if (pollfd.fd == fds[0].fd)
+      if (pollfd.fd == fds[0].fd) {
         return true;
+      }
       char c;
       return ::read(pollfd.fd, &c, 1) != -1;
     };
@@ -746,7 +749,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       // If we're not non-stop, this will stop the entire process
       const auto process_needs_resuming = !remote_settings.is_non_stop;
       push_debugger_event(
-          CoreEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
+        CoreEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
       return true;
     } else {
       return false;
@@ -1048,11 +1051,11 @@ RemoteConnection::send_qXfer_command_with_response(qXferCommand &cmd, std::optio
 }
 #define MATCH(var, param, result, expr)                                                                           \
   std::visit(                                                                                                     \
-      [&](auto &param) -> result {                                                                                \
-        using T = ActualType<decltype(param)>;                                                                    \
-        expr                                                                                                      \
-      },                                                                                                          \
-      var)
+    [&](auto &param) -> result {                                                                                  \
+      using T = ActualType<decltype(param)>;                                                                      \
+      expr                                                                                                        \
+    },                                                                                                            \
+    var)
 
 utils::Expected<std::vector<std::string>, SendError>
 RemoteConnection::send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
@@ -1292,28 +1295,28 @@ RemoteConnection::initialize_thread() noexcept
   std::lock_guard lock(InitMutex);
   if (!is_initialized) {
     stop_reply_and_event_listener = std::thread{
-        [this]() {
-          for (; run;) {
-            PollSetup polling{socket.get_pollcfg().fd, request_command_fd[0],
-                              received_async_notif_during_core_ctrl[0], quit_fd[0]};
-            switch (polling.poll(None())) {
-            case PollSetup::PolledEvent::None:
-              break;
-            case PollSetup::PolledEvent::HasIo:
-              read_packets();
-              break;
-            case PollSetup::PolledEvent::AsyncPending:
-              parse_event_consume_remaining();
-              break;
-            case PollSetup::PolledEvent::CmdRequested:
-              relinquish_control_to_core();
-              break;
-            case PollSetup::PolledEvent::Quit:
-              run = false;
-              break;
-            }
+      [this]() {
+        for (; run;) {
+          PollSetup polling{socket.get_pollcfg().fd, request_command_fd[0],
+                            received_async_notif_during_core_ctrl[0], quit_fd[0]};
+          switch (polling.poll(None())) {
+          case PollSetup::PolledEvent::None:
+            break;
+          case PollSetup::PolledEvent::HasIo:
+            read_packets();
+            break;
+          case PollSetup::PolledEvent::AsyncPending:
+            parse_event_consume_remaining();
+            break;
+          case PollSetup::PolledEvent::CmdRequested:
+            relinquish_control_to_core();
+            break;
+          case PollSetup::PolledEvent::Quit:
+            run = false;
+            break;
           }
-        } // namespace gdb
+        }
+      } // namespace gdb
     };
     is_initialized = true;
   }

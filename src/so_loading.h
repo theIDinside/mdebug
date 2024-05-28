@@ -10,8 +10,8 @@ struct ElfSection;
 class Elf;
 
 constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
-    "r_debug_state",      "_r_debug_state",          "_dl_debug_state",
-    "rtld_db_dlactivity", "__dl_rtld_db_dlactivity", "_rtld_debug_state",
+  "r_debug_state",      "_r_debug_state",          "_dl_debug_state",
+  "rtld_db_dlactivity", "__dl_rtld_db_dlactivity", "_rtld_debug_state",
 };
 
 constexpr std::string_view LOADER_STATE = "_r_debug_extended";

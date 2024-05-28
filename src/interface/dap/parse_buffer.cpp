@@ -27,7 +27,7 @@ parse_headers_from(const std::string_view buffer_view, std::pmr::monotonic_buffe
         const auto header_begin_ptr = internal_view.data() + base_match.position();
         const auto payload_begin_ptr = header_begin_ptr + base_match.length();
         const auto packet_offset =
-            static_cast<u64>(std::distance((const char *)buffer_view.data(), (const char *)header_begin_ptr));
+          static_cast<u64>(std::distance((const char *)buffer_view.data(), (const char *)header_begin_ptr));
         result.push_back(ContentDescriptor{.payload_length = len,
                                            .packet_offset = packet_offset,
                                            .header_begin = header_begin_ptr,
@@ -35,9 +35,9 @@ parse_headers_from(const std::string_view buffer_view, std::pmr::monotonic_buffe
         internal_view.remove_prefix(base_match.position() + base_match.length() + len);
       } else {
         result.push_back(PartialContentDescriptor{
-            .payload_length = len,
-            .payload_missing = (base_match.position() + base_match.length() + len) - internal_view.size(),
-            .payload_begin = internal_view.data() + base_match.position() + base_match.length()});
+          .payload_length = len,
+          .payload_missing = (base_match.position() + base_match.length() + len) - internal_view.size(),
+          .payload_begin = internal_view.data() + base_match.position() + base_match.length()});
         internal_view.remove_prefix(internal_view.size());
         partial_found = true;
       }
@@ -50,8 +50,9 @@ parse_headers_from(const std::string_view buffer_view, std::pmr::monotonic_buffe
     result.push_back(RemainderData{.length = internal_view.size(), .offset = offset});
     partial_found = true;
   }
-  if (all_msgs_ok != nullptr)
+  if (all_msgs_ok != nullptr) {
     *all_msgs_ok = !partial_found;
+  }
   return result;
 }
 } // namespace ui::dap
