@@ -158,6 +158,13 @@ CoreEvent::Stepped(const EventDataParam &param, bool stop, std::optional<Locatio
 }
 
 CoreEvent *
+CoreEvent::SteppingDone(const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept
+{
+  return new CoreEvent{param, ::Stepped{{param.tid.value()}, true, {}, {}, msg}, CoreEventType::Stepped,
+                       std::move(reg)};
+}
+
+CoreEvent *
 CoreEvent::DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bool attached) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event DeferToSupervisor");

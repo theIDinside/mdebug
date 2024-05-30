@@ -208,6 +208,7 @@ struct Stepped : public ThreadEvent
   bool stop;
   std::optional<LocationStatus> loc_stat;
   std::optional<tc::ResumeAction> resume_when_done{};
+  std::string_view msg{};
 };
 
 struct BreakpointHitEvent : public ThreadEvent
@@ -297,7 +298,7 @@ struct CoreEvent
   static CoreEvent *Signal(const EventDataParam &param, RegisterData &&reg) noexcept;
   static CoreEvent *Stepped(const EventDataParam &param, bool stop, std::optional<LocationStatus> bploc,
                             std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept;
-
+  static CoreEvent *SteppingDone(const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept;
   static CoreEvent *DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bool attached) noexcept;
 };
 

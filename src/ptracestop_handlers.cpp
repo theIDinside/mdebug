@@ -137,7 +137,8 @@ LineStep::~LineStep() noexcept
 {
   if (!cancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", task.tid);
-    tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Line stepping finished", false);
+    push_debugger_event(CoreEvent::SteppingDone({.target = tc.task_leader, .tid = task.tid, .sig_or_code = 0},
+                                                "Line stepping finished", {}));
   } else {
     if (resume_bp) {
       tc.remove_breakpoint(resume_bp->id);

@@ -363,6 +363,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         }
 
         if (e.stop) {
+          task->user_stopped = true;
           tc.emit_stepped_stop({.pid = tc.task_leader, .tid = task->tid});
           return ProcessedStopEvent{false, {}};
         } else {
