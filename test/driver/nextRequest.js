@@ -1,8 +1,8 @@
-const { readFile, repoDirFile, getLineOf, getStackFramePc } = require('./client')
+const { readFileContents, repoDirFile, getLineOf, getStackFramePc } = require('./client')
 const { todo, assert, prettyJson } = require('./utils')
 
 function getLinesOf(names) {
-  const file = readFile(repoDirFile('test/next.cpp'))
+  const file = readFileContents(repoDirFile('test/next.cpp'))
   return names
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
@@ -10,8 +10,8 @@ function getLinesOf(names) {
 }
 
 async function setup(DA, bps) {
-  await DA.launchToMain(DA.buildDirFile('next'))
-  const file = readFile(repoDirFile('test/next.cpp'))
+  await DA.startRunToMain(DA.buildDirFile('next'))
+  const file = readFileContents(repoDirFile('test/next.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
@@ -115,14 +115,15 @@ async function stopBecauseBpWhenNextLine(DA) {
   }
 }
 
-const nextLineInTemplateCode = todo('nextLineInTemplateCode')
+async function nextLineInTemplateCode(da) {}
 
 async function nextInstruction(DA) {
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'))
   const threads = await DA.threads()
   let frames = await DA.stackTrace(threads[0].id)
   // await da_client.setInsBreakpoint("0x40121f");
   const pc = getStackFramePc(frames, 0)
+  console.log(`STARTING PC THAT WE START DISASSEMBLING FROM: ${pc}`)
   const disassembly = await DA.sendReqGetResponse('disassemble', {
     memoryReference: pc,
     offset: 0,
@@ -157,10 +158,10 @@ async function nextInstruction(DA) {
 }
 
 const tests = {
-  nextLineOverFunction: nextLineOverFunction,
-  stopBecauseBpWhenNextLine: stopBecauseBpWhenNextLine,
-  nextLineInTemplateCode: nextLineInTemplateCode,
-  nextInstruction: nextInstruction,
+  nextLineOverFunction: () => nextLineOverFunction,
+  stopBecauseBpWhenNextLine: () => stopBecauseBpWhenNextLine,
+  nextLineInTemplateCode: () => todo(nextLineInTemplateCode),
+  nextInstruction: () => nextInstruction,
 }
 
 module.exports = {

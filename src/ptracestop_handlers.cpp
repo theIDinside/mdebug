@@ -1,5 +1,7 @@
 #include "ptracestop_handlers.h"
 #include "bp.h"
+#include "event_queue.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/callstack.h"
 #include <common.h>
 #include <cstring>
@@ -16,7 +18,7 @@
 namespace ptracestop {
 
 ThreadProceedAction::ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept
-    : tc(ctrl), task(task), cancelled(false)
+    : ctrl(ctrl.get_interface()), tc(ctrl), task(task), cancelled(false)
 {
 }
 
@@ -37,13 +39,14 @@ FinishFunction::~FinishFunction() noexcept { tc.remove_breakpoint(bp->id); }
 bool
 FinishFunction::has_completed(bool was_stopped) const noexcept
 {
-  return task.pc() == bp->address() || was_stopped;
+
+  return tc.get_caching_pc(task) == bp->address() || was_stopped;
 }
 
 void
 FinishFunction::proceed() noexcept
 {
-  tc.resume_task(task, RunType::Continue);
+  tc.resume_task(task, {tc::RunType::Continue, tc::ResumeTarget::Task});
 }
 
 void
@@ -66,8 +69,8 @@ InstructionStep::has_completed(bool was_stopped) const noexcept
 void
 InstructionStep::proceed() noexcept
 {
-  DLOG("mdb", "[InstructionStep] stepping 1 instruction for {}", task.tid);
-  tc.resume_task(task, RunType::Step);
+  DBGLOG(core, "[InstructionStep] stepping 1 instruction for {}", task.tid);
+  tc.resume_task(task, {tc::RunType::Step, tc::ResumeTarget::Task});
 }
 
 void
@@ -79,7 +82,7 @@ InstructionStep::update_stepped() noexcept
 InstructionStep::~InstructionStep()
 {
   if (!cancelled) {
-    DLOG("mdb", "[inst step]: instruction step for {} ended", task.tid);
+    DBGLOG(core, "[inst step]: instruction step for {} ended", task.tid);
     tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Instruction stepping finished", false);
   }
 }
@@ -133,11 +136,12 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
 LineStep::~LineStep() noexcept
 {
   if (!cancelled) {
-    DLOG("mdb", "[line step]: line step for {} ended", task.tid);
+    DBGLOG(core, "[line step]: line step for {} ended", task.tid);
     tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Line stepping finished", false);
   } else {
-    if (resume_bp)
+    if (resume_bp) {
       tc.remove_breakpoint(resume_bp->id);
+    }
   }
 }
 
@@ -151,12 +155,12 @@ void
 LineStep::proceed() noexcept
 {
   if (resume_bp && !resumed_to_resume_addr) {
-    DLOG("mdb", "[line step]: continuing sub frame for {}", task.tid);
-    tc.resume_task(task, RunType::Continue);
+    DBGLOG(core, "[line step]: continuing sub frame for {}", task.tid);
+    tc.resume_task(task, {tc::RunType::Continue, tc::ResumeTarget::Task});
     resumed_to_resume_addr = true;
   } else {
-    DLOG("mdb", "[line step]: no resume address set, keep istepping");
-    tc.resume_task(task, RunType::Step);
+    DBGLOG(core, "[line step]: no resume address set, keep istepping");
+    tc.resume_task(task, {tc::RunType::Step, tc::ResumeTarget::Task});
   }
 }
 
@@ -185,20 +189,21 @@ LineStep::update_stepped() noexcept
   } else {
     auto &callstack = tc.build_callframe_stack(task, CallStackRequest::full());
     const auto ret_addr = map<AddrPtr>(
-        callstack.frames,
-        [sf = start_frame](const auto &f) {
-          if (f.has_symbol_info())
-            return f.name() == sf.name();
-          return same_symbol(f, sf);
-        },
-        sym::resume_address);
+      callstack.frames,
+      [sf = start_frame](const auto &f) {
+        if (f.has_symbol_info()) {
+          return f.name() == sf.name();
+        }
+        return same_symbol(f, sf);
+      },
+      sym::resume_address);
     if (ret_addr) {
       resume_bp = tc.pbps.create_loc_user<ResumeToBreakpoint>(
-          tc, tc.get_or_create_bp_location(ret_addr->as_void(), false), task.tid, task.tid);
+        tc, tc.get_or_create_bp_location(ret_addr->as_void(), false), task.tid, task.tid);
     } else {
-      DBG(DLOG("mdb", "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
+      DBG(DBGLOG(core, "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
           for (const auto &frame
-               : callstack.frames) { DLOG("mdb", "{}", frame); })
+               : callstack.frames) { DBGLOG(core, "{}", frame); })
     }
   }
 }
@@ -231,96 +236,130 @@ StopHandler::get_proceed_action(const TaskInfo &t) noexcept
 }
 
 void
-StopHandler::handle_proceed(TaskInfo &info, bool should_resume) noexcept
+StopHandler::handle_proceed(TaskInfo &info, tc::ProcessedStopEvent stop) noexcept
 {
+  static_assert(sizeof(tc::ProcessedStopEvent) < 8, "Pass by value so long as it's register-sized");
+
   auto proceed_action = get_proceed_action(info);
   if (proceed_action) {
     proceed_action->update_stepped();
-    const auto was_stopped = !should_resume;
-    if (proceed_action->has_completed(was_stopped))
+    const auto was_stopped = !stop.should_resume;
+    if (proceed_action->has_completed(was_stopped)) {
       remove_action(info);
-    else
-      proceed_action->proceed();
-  } else {
-    DLOG("mdb", "[action]: {} will resume (should_resume={}) => {}", info.tid, should_resume,
-         should_resume && info.can_continue());
-    if (should_resume && info.can_continue()) {
-      tc.resume_task(info, RunType::Continue);
     } else {
+      proceed_action->proceed();
+    }
+  } else {
+    DBGLOG(core, "[action]: {} will resume (should_resume={}) => {}", info.tid, stop.should_resume,
+           stop.should_resume && info.can_continue());
+    const auto kind =
+      stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
+    bool resumed = false;
+    switch (kind.target) {
+    case tc::ResumeTarget::Task:
+      if (info.can_continue() && stop.should_resume) {
+        tc.resume_task(info, kind);
+        resumed = true;
+      } else {
+        info.set_stop();
+      }
+      break;
+    case tc::ResumeTarget::AllNonRunningInProcess:
+      tc.resume_target(kind.type);
+      resumed = true;
+      break;
+    case tc::ResumeTarget::None:
       info.set_stop();
+      break;
+    }
+
+    if (resumed && tc.session_all_stop_mode()) {
+      for (auto &t : tc.threads) {
+        t.set_running(kind.type);
+      }
     }
   }
 }
 
-void
-StopHandler::handle_wait_event(TaskInfo &info) noexcept
+static CoreEvent *
+native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
 {
-  const auto should_resume = process_waitstatus_for(info);
+  DBGLOG(core, "Processing CLONE for {}", cloning_task.tid);
+  // we always have to cache these registers, because we need them to pull out some information
+  // about the new clone
+  tc.cache_registers(cloning_task);
+  pid_t np = -1;
+  // we should only ever hit this when running debugging a native-hosted session
+  ASSERT(tc.get_interface().format == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
+  auto regs = cloning_task.native_registers();
+  const auto orig_rax = regs->orig_rax;
+  if (orig_rax == SYS_clone) {
+    const TPtr<void> stack_ptr = sys_arg_n<2>(*regs);
+    const TPtr<int> child_tid = sys_arg_n<4>(*regs);
+    const u64 tls = sys_arg_n<5>(*regs);
+    np = tc.read_type(child_tid);
 
-  if (tc.stop_all_requested) {
-    if (tc.all_stopped())
-      tc.notify_all_stopped();
+    ASSERT(!tc.has_task(np), "Tracee controller already has task {} !", np);
+    return CoreEvent::CloneEvent({tc.task_leader, cloning_task.tid, 5},
+                                 TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls}, np, {});
+  } else if (orig_rax == SYS_clone3) {
+    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*regs);
+    const auto res = tc.read_type(ptr);
+    np = tc.read_type(TPtr<pid_t>{res.parent_tid});
+    return CoreEvent::CloneEvent({tc.task_leader, cloning_task.tid, 5}, TaskVMInfo::from_clone_args(res), np, {});
   } else {
-    handle_proceed(info, should_resume);
+    PANIC("Unknown clone syscall!");
   }
-  tc.reaped_events();
 }
 
-static bool
-process_stopped(TraceeController &tc, TaskInfo &t)
+CoreEvent *
+StopHandler::native_core_evt_from_stopped(TaskInfo &t) noexcept
 {
-  bool should_resume = true;
   AddrPtr stepped_over_bp_id{nullptr};
   if (t.loc_stat) {
-    stepped_over_bp_id = t.loc_stat->loc;
-    if (t.loc_stat->re_enable_bp) {
-      auto bploc = tc.pbps.location_at(t.loc_stat->loc);
-      ASSERT(bploc != nullptr, "Expected breakpoint location to exist at {}", t.loc_stat->loc)
-      bploc->enable(t.tid);
-    }
-    should_resume = t.loc_stat->should_resume;
-    t.remove_bpstat();
+    const auto locstat = t.clear_bpstat();
+    return CoreEvent::Stepped({tc.task_leader, t.tid, {}}, !locstat->should_resume, locstat,
+                              std::move(t.next_resume_action), {});
   }
   const auto pc = tc.get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
   auto bp_loc = tc.pbps.location_at(prev_pc_byte);
   if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
-    const auto users = bp_loc->loc_users();
-    for (const auto user_id : users) {
-      auto user = tc.pbps.get_user(user_id);
-      auto on_hit = user->on_hit(tc, t);
-      should_resume = should_resume && !on_hit.stop;
-      if (on_hit.retire_bp) {
-        tc.pbps.remove_bp(user->id);
-      } else {
-        t.add_bpstat(user->address().value());
-      }
-    }
     tc.set_pc(t, prev_pc_byte);
+    return CoreEvent::SoftwareBreakpointHit({.target = tc.task_leader, .tid = t.tid, .sig_or_code = {}},
+                                            prev_pc_byte, {});
   }
 
-  DLOG("mdb", "[wait status]: Processed STOPPED for {}. should_resume={}, user_stopped={}", t.tid, should_resume,
-       bool{t.user_stopped});
-  const auto result = should_resume && !(t.user_stopped);
-  return result;
+  return CoreEvent::DeferToSupervisor({.target = tc.task_leader, .tid = t.tid, .sig_or_code = {}}, {}, false);
 }
 
-bool
-StopHandler::process_waitstatus_for(TaskInfo &t) noexcept
+CoreEvent *
+StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
 {
-  t.set_dirty();
-  t.stop_collected = true;
-  const auto ws = t.pending_wait_status();
+  info.set_dirty();
+  info.stop_collected = true;
+  const auto ws = info.pending_wait_status();
   switch (ws.ws) {
   case WaitStatusKind::Stopped: {
-    return process_stopped(tc, t);
-  } break;
-  case WaitStatusKind::Execed:
-    tc.process_exec(t);
-    return !event_settings.exec_stop;
-  case WaitStatusKind::Exited:
-    tc.reap_task(t);
-    return !event_settings.thread_exit_stop;
+    if (!info.initialized) {
+      return CoreEvent::ThreadCreated({tc.task_leader, info.tid, 5},
+                                      {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
+    }
+    return native_core_evt_from_stopped(info);
+  }
+  case WaitStatusKind::Execed: {
+    const auto read_exe = []() {
+      TODO("Reading exe file of newly exec'ed file not yet implemented");
+      return "";
+    };
+    return CoreEvent::ExecEvent({.target = tc.task_leader, .tid = info.tid, .sig_or_code = 5}, read_exe(), {});
+  }
+  case WaitStatusKind::Exited: {
+    // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
+    // other threads
+    const bool process_needs_resuming = false;
+    return CoreEvent::ThreadExited({tc.task_leader, info.tid, 5}, process_needs_resuming, {});
+  }
   case WaitStatusKind::Forked:
     TODO("WaitStatusKind::Forked");
     break;
@@ -331,15 +370,10 @@ StopHandler::process_waitstatus_for(TaskInfo &t) noexcept
     TODO("WaitStatusKind::VForkDone");
     break;
   case WaitStatusKind::Cloned: {
-    tc.process_clone(t);
-    return !event_settings.clone_stop;
+    return native_create_clone_event(tc, info);
   } break;
   case WaitStatusKind::Signalled:
-    tc.stop_all(nullptr);
-    tc.all_stop.once([s = t.wait_status.signal, t = t.tid, &tc = tc]() {
-      tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
-    });
-    return false;
+    return CoreEvent::Signal({tc.task_leader, info.tid, info.wait_status.signal}, {});
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
     break;
@@ -386,7 +420,7 @@ StopHandler::set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept
 }
 
 StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept
-    : ThreadProceedAction(ctrl, task), reason(reason), ptrace_session_is_seize(ctrl.ptrace_was_seized())
+    : ThreadProceedAction(ctrl, task), reason(reason)
 {
 }
 
@@ -412,14 +446,9 @@ StopImmediately::has_completed(bool) const noexcept
 void
 StopImmediately::proceed() noexcept
 {
-  if (ptrace_session_is_seize) {
-    if (ptrace(PTRACE_INTERRUPT, task.tid, nullptr, nullptr) == -1) {
-      PANIC(fmt::format("failed to interrupt (ptrace) task {}: {}", task.tid, strerror(errno)));
-    }
-  } else {
-    if (tgkill(tc.task_leader, task.tid, SIGTRAP) == -1) {
-      PANIC(fmt::format("failed to interrupt (tgkill) task {}: {}", task.tid, strerror(errno)));
-    }
+  const auto res = ctrl.stop_task(task);
+  if (!res.is_ok()) {
+    PANIC(fmt::format("Failed to stop task {}: {}", task.tid, strerror(res.sys_errno)));
   }
 }
 

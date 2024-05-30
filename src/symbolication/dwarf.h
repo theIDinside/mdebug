@@ -20,8 +20,8 @@ struct StrSlice
 
 template <typename T>
 concept AttributeValueType =
-    std::is_same_v<T, u64> || std::is_same_v<T, i64> || std::is_same_v<T, DataBlock> ||
-    std::is_same_v<T, StrSlice> || std::is_same_v<T, std::string_view> || std::is_same_v<T, AddrPtr>;
+  std::is_same_v<T, u64> || std::is_same_v<T, i64> || std::is_same_v<T, DataBlock> ||
+  std::is_same_v<T, StrSlice> || std::is_same_v<T, std::string_view> || std::is_same_v<T, AddrPtr>;
 
 /** Fully-formed attribtue */
 struct AttributeValue

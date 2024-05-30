@@ -2,9 +2,11 @@
 #include "awaiter.h"
 #include "bp.h"
 #include "common.h"
+#include "event_queue.h"
 #include "events/event.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "lib/spinlock.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
@@ -15,7 +17,6 @@
 #include "task.h"
 #include "utils/byte_buffer.h"
 #include "utils/expected.h"
-#include <link.h>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -24,6 +25,8 @@
 #include <utils/static_vector.h>
 
 template <typename T> using Set = std::unordered_set<T>;
+
+struct DeferToSupervisor;
 
 namespace sym {
 class Unwinder;
@@ -36,14 +39,6 @@ namespace dap {
 class VariablesReference;
 };
 }; // namespace ui
-
-struct LWP
-{
-  Pid pid;
-  Tid tid;
-
-  constexpr bool operator<=>(const LWP &other) const = default;
-};
 
 using Address = std::uintptr_t;
 struct ObjectFile;
@@ -58,6 +53,16 @@ struct NonFullRead
   int err_no;
 };
 
+/// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
+/// When debugging 2 processes with the same binaries, we don't want duplicate storage.
+auto createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>;
+
+enum class InterfaceType
+{
+  Ptrace,
+  GdbRemote
+};
+
 struct TraceeController
 {
   using handle = std::unique_ptr<TraceeController>;
@@ -67,41 +72,40 @@ struct TraceeController
   pid_t task_leader;
   std::vector<std::shared_ptr<SymbolFile>> symbol_files;
   std::shared_ptr<SymbolFile> main_executable;
-  utils::ScopedFd procfs_memfd;
   std::vector<TaskInfo> threads;
   std::unordered_map<pid_t, TaskVMInfo> task_vm_infos;
   UserBreakpoints pbps;
-  TPtr<r_debug_extended> tracee_r_debug;
   SharedObjectMap shared_objects;
   bool stop_all_requested;
   Publisher<void> all_stop{};
   Publisher<SymbolFile *> new_objectfile{};
+  TPtr<r_debug_extended> tracee_r_debug{nullptr};
+  InterfaceType interface_type;
 
 private:
   int next_var_ref = 0;
   std::unordered_map<int, ui::dap::VariablesReference> var_refs;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
-  AwaiterThread::handle awaiter_thread;
   TargetSession session;
-  ptracestop::StopHandler *ptracestop_handler;
+  ptracestop::StopHandler *stop_handler;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *null_unwinder;
-  bool ptrace_session_seized;
+  std::unique_ptr<tc::TraceeCommandInterface> tracee_interface;
+  tc::Auxv auxiliary_vector{};
 
 public:
   // Constructors
-  TraceeController(pid_t process_space_id, utils::Notifier::WriteEnd awaiter_notify, TargetSession session,
-                   bool seize_session, bool open_mem_fd = true) noexcept;
+  TraceeController(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
+  ~TraceeController() noexcept;
+
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
 
-  /** Re-open proc fs mem fd. In cases where task has exec'd, for instance. */
-  bool reopen_memfd() noexcept;
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
-  void install_loader_breakpoints() noexcept;
+  TPtr<r_debug_extended> install_loader_breakpoints() noexcept;
   void on_so_event() noexcept;
   std::optional<std::shared_ptr<BreakpointLocation>> reassess_bploc_for_symfile(SymbolFile &symbol_file,
                                                                                 UserBreakpoint &user_bp) noexcept;
@@ -117,18 +121,16 @@ public:
   // N.B(simon): process shared object's in parallell, determined by some heuristic (like for instance file size
   // could determine how much thread resources are subscribed to parsing a shared object.)
   void process_dwarf(std::vector<SharedObject::SoId> sos) noexcept;
-  /** Return the open mem fd */
-  utils::ScopedFd &mem_fd() noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
   /* Create new task meta data for `tid` */
-  void new_task(Tid tid, bool ui_update) noexcept;
+  void new_task(Tid tid) noexcept;
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
-  void resume_target(RunType type) noexcept;
+  void resume_target(tc::RunType type) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
-  void resume_task(TaskInfo &task, RunType type) noexcept;
+  void resume_task(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all(TaskInfo *requesting_task) noexcept;
   /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
@@ -154,6 +156,7 @@ public:
                     std::vector<int> bps_hit) noexcept;
   void emit_breakpoint_event(std::string_view reason, const UserBreakpoint &bp,
                              std::optional<std::string> message) noexcept;
+  tc::ProcessedStopEvent process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
@@ -172,20 +175,18 @@ public:
 
   void remove_breakpoint(u32 bp_id) noexcept;
 
-  bool kill() noexcept;
   bool terminate_gracefully() noexcept;
-  bool detach() noexcept;
+  bool detach(bool resume) noexcept;
 
   template <typename StopAction, typename... Args>
   void
   install_thread_proceed(TaskInfo &t, Args... args) noexcept
   {
-    DLOG("mdb", "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
-    ptracestop_handler->set_and_run_action(t.tid, new StopAction{*this, t, args...});
+    DBGLOG(core, "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
+    stop_handler->set_and_run_action(t.tid, new StopAction{*this, t, args...});
   }
 
-  void process_exec(TaskInfo &t) noexcept;
-  Tid process_clone(TaskInfo &t) noexcept;
+  void post_exec(const std::string &exe) noexcept;
 
   /* Check if we have any tasks left in the process space. */
   bool execution_not_ended() const noexcept;
@@ -200,10 +201,11 @@ public:
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
-  void read_auxv(const TaskInfo &task);
+  void read_auxv(TaskInfo &task);
+  void read_auxv_info(tc::Auxv &&aux) noexcept;
+
   TargetSession session_type() const noexcept;
-  std::string get_thread_name(Tid tid) const noexcept;
-  std::vector<u8> read_to_vec(AddrPtr addr, u64 bytes) noexcept;
+
   utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> safe_read(AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
 
@@ -222,20 +224,16 @@ public:
   read_type(TraceePointer<T> address) noexcept
   {
     typename TPtr<T>::Type result;
+    u8 *ptr = static_cast<u8 *>(static_cast<void *>(&result));
     auto total_read = 0ull;
     constexpr auto sz = TPtr<T>::type_size();
-    auto EOF_REACHED = 0;
     while (total_read < sz) {
-      auto read_bytes = pread64(mem_fd().get(), &result + total_read, sz - total_read, address.get());
-      if (-1 == read_bytes) {
+      const auto read_address = address.as_void() += total_read;
+      const auto read_result = tracee_interface->read_bytes(read_address, sz - total_read, ptr + total_read);
+      if (!read_result.success()) {
         PANIC(fmt::format("Failed to proc_fs read from {:p} because {}", (void *)address.get(), strerror(errno)));
       }
-      if (0 == read_bytes)
-        EOF_REACHED++;
-
-      if (EOF_REACHED > 3)
-        PANIC("Erred out because we attempted read beyond EOF multiple times.");
-      total_read += read_bytes;
+      total_read += read_result.bytes_read;
     }
     return result;
   }
@@ -245,20 +243,16 @@ public:
   read_type_safe(TPtr<T> addr)
   {
     typename TPtr<T>::Type result;
+    auto ptr = static_cast<u8 *>(static_cast<void *>(&result));
     auto total_read = 0ull;
     constexpr auto sz = TPtr<T>::type_size();
-    auto EOF_REACHED = 0;
     while (total_read < sz) {
-      auto read_bytes = pread64(mem_fd().get(), &result + total_read, sz - total_read, addr.get());
-      if (-1 == read_bytes) {
+      const auto read_address = addr.as_void() += total_read;
+      const auto read_result = tracee_interface->read_bytes(read_address, sz - total_read, ptr + total_read);
+      if (!read_result.success()) {
         return std::nullopt;
       }
-      if (0 == read_bytes)
-        EOF_REACHED++;
-
-      if (EOF_REACHED > 3)
-        return std::nullopt;
-      total_read += read_bytes;
+      total_read += read_result.bytes_read;
     }
     return result;
   }
@@ -267,28 +261,20 @@ public:
   void
   write(TraceePointer<T> address, const T &value)
   {
-    auto total_written = 0ull;
-    constexpr auto sz = address.type_size();
-    while (total_written < sz) {
-      auto written = pwrite64(mem_fd().get(), &value, sz, address.get());
-      if (-1 == written || 0 == written) {
-        PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
-      }
-      total_written += written;
+    auto write_res = tracee_interface->write(address, value);
+    if (!write_res.is_expected()) {
+      PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
     }
   }
 
   std::optional<std::string> read_string(TraceePointer<char> address) noexcept;
-
-  // Inform awaiter threads that event has been consumed & handled. "Wakes up" the awaiter thread.
-  void reaped_events() noexcept;
-  void start_awaiter_thread() noexcept;
   // Get the unwinder for `pc` - if no such unwinder exists, the "NullUnwinder" is returned, an unwinder that
   // always returns UnwindInfo* = `nullptr` results. This is to not have to do nullchecks against the Unwinder
   // itself.
   sym::UnwinderSymbolFilePair get_unwinder_from_pc(AddrPtr pc) noexcept;
   sym::CallStack &build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept;
   std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
+
   sym::Frame current_frame(TaskInfo &task) noexcept;
   std::optional<std::pair<sym::FunctionSymbol *, NonNullPtr<SymbolFile>>> find_fn_by_pc(AddrPtr addr) noexcept;
   SymbolFile *find_obj_by_pc(AddrPtr addr) noexcept;
@@ -301,20 +287,30 @@ public:
   sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
-  void set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
-  bool ptrace_was_seized() const noexcept;
+  bool session_all_stop_mode() const noexcept;
+  TaskInfo *set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
   int new_frame_id(NonNullPtr<SymbolFile> owning_obj, TaskInfo &task) noexcept;
   int new_scope_id(NonNullPtr<SymbolFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
   int new_var_id(int parent_id) noexcept;
   void invalidate_stop_state() noexcept;
+  void cache_registers(TaskInfo &t) noexcept;
+  tc::TraceeCommandInterface &get_interface() noexcept;
+  std::optional<AddrPtr> get_interpreter_base() const noexcept;
+  std::shared_ptr<SymbolFile> get_main_executable() const noexcept;
 
 private:
   void reset_variable_references() noexcept;
   int take_new_varref_id() noexcept;
   void reset_variable_ref_id() noexcept;
   // Writes breakpoint point and returns the original value found at that address
-  u8 write_bp_byte(AddrPtr addr) noexcept;
-  std::optional<u8> write_breakpoint_at(AddrPtr addr) noexcept;
   utils::Expected<u8, BpErr> install_software_bp_loc(AddrPtr addr) noexcept;
 };
+
+struct ProbeInfo
+{
+  AddrPtr address;
+  std::string name;
+};
+
+std::vector<ProbeInfo> parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept;

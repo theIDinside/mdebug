@@ -120,9 +120,7 @@ void
 DAP::write_protocol_message(std::string_view msg) noexcept
 {
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
-  if constexpr (MDB_DEBUG == 1) {
-    logging::Logger::get_logger()->log("dap", fmt::format("WRITING -->{}{}<---", header, msg));
-  }
+  CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
   VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
   VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
 }
@@ -165,7 +163,7 @@ DAP::run_ui_loop()
           parse_swapbuffer.expect_read_from_fd(pfds[i].fd);
           bool no_partials = false;
           const auto request_headers =
-              parse_headers_from(parse_swapbuffer.take_view(), descriptor_resource, &no_partials);
+            parse_headers_from(parse_swapbuffer.take_view(), descriptor_resource, &no_partials);
           if (no_partials && request_headers.size() > 0) {
             for (auto &&hdr : request_headers) {
               const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
@@ -195,15 +193,17 @@ DAP::run_ui_loop()
           flush_events();
         } else if (pfds[i].fd == master_pty && (pfds[i].revents & POLLIN)) {
           const auto bytes_read = read(*master_pty, tracee_stdout_buffer, 4096 * 3);
-          if (bytes_read == -1)
+          if (bytes_read == -1) {
             continue;
+          }
           std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
           post_event(new ui::dap::OutputEvent{"stdout", std::string{data}});
         }
       }
     }
-    if (!keep_running)
+    if (!keep_running) {
       cleanup_times--;
+    }
   }
   cleaned_up = true;
 }
@@ -230,7 +230,7 @@ DAP::flush_events() noexcept
 {
   while (!events_queue.empty()) {
     auto evt = pop_event();
-    const auto protocol_msg = evt->serialize(seq++);
+    const auto protocol_msg = evt->serialize(0);
     write_protocol_message(protocol_msg);
     delete evt;
   }
@@ -261,8 +261,9 @@ DAP::add_tty(int master_pty_fd) noexcept
 std::optional<int>
 DAP::current_tty() noexcept
 {
-  if (tty_fds.empty())
+  if (tty_fds.empty()) {
     return std::nullopt;
+  }
   return tty_fds[current_tty_idx];
 }
 

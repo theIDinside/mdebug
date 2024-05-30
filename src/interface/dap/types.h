@@ -53,7 +53,7 @@ struct DataBreakpoint
 struct Thread
 {
   int id;
-  std::string name;
+  std::string_view name;
 };
 
 struct StackFrame
@@ -239,9 +239,9 @@ template <> struct formatter<ui::dap::StackFrame>
   format(const ui::dap::StackFrame &frame, FormatContext &ctx) const
   {
     return fmt::format_to(
-        ctx.out(),
-        R"({{ "id": {}, "name": "{}", "source": {}, "line": {}, "column": {}, "instructionPointerReference": "{}" }})",
-        frame.id, frame.name, frame.source, frame.line, frame.column, frame.rip);
+      ctx.out(),
+      R"({{ "id": {}, "name": "{}", "source": {}, "line": {}, "column": {}, "instructionPointerReference": "{}" }})",
+      frame.id, frame.name, frame.source, frame.line, frame.column, frame.rip);
   }
 };
 

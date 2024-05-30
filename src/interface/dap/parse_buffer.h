@@ -17,126 +17,168 @@ parse_command_type(const std::string_view view) noexcept
   using namespace std::literals::string_view_literals;
   switch (view.size()) {
   case 4: {
-    if (view == "goto"sv)
+    if (view == "goto"sv) {
       return CommandType::Goto;
-    if (view == "next"sv)
+    }
+    if (view == "next"sv) {
       return CommandType::Next;
+    }
   } break;
   case 5: {
-    if (view == "pause"sv)
+    if (view == "pause"sv) {
       return CommandType::Pause;
+    }
   } break;
   case 6: {
-    if (view == "attach"sv)
+    if (view == "attach"sv) {
       return CommandType::Attach;
-    if (view == "launch"sv)
+    }
+    if (view == "launch"sv) {
       return CommandType::Launch;
-    if (view == "scopes"sv)
+    }
+    if (view == "scopes"sv) {
       return CommandType::Scopes;
-    if (view == "source"sv)
+    }
+    if (view == "source"sv) {
       return CommandType::Source;
-    if (view == "stepIn"sv)
+    }
+    if (view == "stepIn"sv) {
       return CommandType::StepIn;
+    }
   } break;
   case 7: {
-    if (view == "modules"sv)
+    if (view == "modules"sv) {
       return CommandType::Modules;
-    if (view == "restart"sv)
+    }
+    if (view == "restart"sv) {
       return CommandType::Restart;
-    if (view == "stepOut"sv)
+    }
+    if (view == "stepOut"sv) {
       return CommandType::StepOut;
-    if (view == "threads"sv)
+    }
+    if (view == "threads"sv) {
       return CommandType::Threads;
+    }
   } break;
   case 8: {
-    if (view == "continue"sv)
+    if (view == "continue"sv) {
       return CommandType::Continue;
-    if (view == "evaluate"sv)
+    }
+    if (view == "evaluate"sv) {
       return CommandType::Evaluate;
-    if (view == "stepBack"sv)
+    }
+    if (view == "stepBack"sv) {
       return CommandType::StepBack;
+    }
   } break;
   case 9: {
-    if (view == "terminate"sv)
+    if (view == "terminate"sv) {
       return CommandType::Terminate;
-    if (view == "variables"sv)
+    }
+    if (view == "variables"sv) {
       return CommandType::Variables;
+    }
   } break;
   case 10: {
-    if (view == "disconnect"sv)
+    if (view == "disconnect"sv) {
       return CommandType::Disconnect;
-    if (view == "initialize"sv)
+    }
+    if (view == "initialize"sv) {
       return CommandType::Initialize;
-    if (view == "readMemory"sv)
+    }
+    if (view == "readMemory"sv) {
       return CommandType::ReadMemory;
-    if (view == "stackTrace"sv)
+    }
+    if (view == "stackTrace"sv) {
       return CommandType::StackTrace;
+    }
   } break;
   case 11: {
-    if (view == "completions"sv)
+    if (view == "completions"sv) {
       return CommandType::Completions;
-    if (view == "disassemble"sv)
+    }
+    if (view == "disassemble"sv) {
       return CommandType::Disassemble;
-    if (view == "gotoTargets"sv)
+    }
+    if (view == "gotoTargets"sv) {
       return CommandType::GotoTargets;
-    if (view == "setVariable"sv)
+    }
+    if (view == "setVariable"sv) {
       return CommandType::SetVariable;
-    if (view == "writeMemory"sv)
+    }
+    if (view == "writeMemory"sv) {
       return CommandType::WriteMemory;
+    }
   } break;
   case 12: {
-    if (view == "restartFrame"sv)
+    if (view == "restartFrame"sv) {
       return CommandType::RestartFrame;
+    }
   } break;
   case 13: {
-    if (view == "customRequest"sv)
+    if (view == "customRequest"sv) {
       return CommandType::CustomRequest;
-    if (view == "exceptionInfo"sv)
+    }
+    if (view == "exceptionInfo"sv) {
       return CommandType::ExceptionInfo;
-    if (view == "loadedSources"sv)
+    }
+    if (view == "loadedSources"sv) {
       return CommandType::LoadedSources;
-    if (view == "setExpression"sv)
+    }
+    if (view == "setExpression"sv) {
       return CommandType::SetExpression;
-    if (view == "stepInTargets"sv)
+    }
+    if (view == "stepInTargets"sv) {
       return CommandType::StepInTargets;
+    }
   } break;
   case 14: {
-    if (view == "setBreakpoints"sv)
+    if (view == "setBreakpoints"sv) {
       return CommandType::SetBreakpoints;
+    }
   } break;
   case 15: {
-    if (view == "reverseContinue"sv)
+    if (view == "reverseContinue"sv) {
       return CommandType::ReverseContinue;
+    }
   } break;
   case 16: {
-    if (view == "terminateThreads"sv)
+    if (view == "terminateThreads"sv) {
       return CommandType::TerminateThreads;
+    }
   } break;
   case 17: {
-    if (view == "configurationDone"sv)
+    if (view == "configurationDone"sv) {
       return CommandType::ConfigurationDone;
+    }
   } break;
   case 18: {
-    if (view == "dataBreakpointInfo"sv)
+    if (view == "dataBreakpointInfo"sv) {
       return CommandType::DataBreakpointInfo;
-    if (view == "setDataBreakpoints"sv)
+    }
+    if (view == "setDataBreakpoints"sv) {
       return CommandType::SetDataBreakpoints;
+    }
   } break;
   case 19: {
-    if (view == "breakpointLocations"sv)
+    if (view == "breakpointLocations"sv) {
       return CommandType::BreakpointLocations;
+    }
   } break;
   case 22: {
-    if (view == "setFunctionBreakpoints"sv)
+    if (view == "setFunctionBreakpoints"sv) {
       return CommandType::SetFunctionBreakpoints;
+    }
   } break;
   case 23: {
-    if (view == "setExceptionBreakpoints"sv)
+    if (view == "setExceptionBreakpoints"sv) {
       return CommandType::SetExceptionBreakpoints;
+    }
   } break;
   case 25: {
-    if (view == "setInstructionBreakpoints"sv)
+    if (view == "setInstructionBreakpoints"sv) {
       return CommandType::SetInstructionBreakpoints;
+    }
   } break;
   default:
     break;
@@ -155,7 +197,7 @@ template <typename K, std::size_t S> struct RequestMap
   get_command(std::string_view key) const noexcept
   {
     const auto itr =
-        std::find_if(std::cbegin(data), std::cend(data), [&key](const auto &p) { return p.first == key; });
+      std::find_if(std::cbegin(data), std::cend(data), [&key](const auto &p) { return p.first == key; });
     [[likely]] if (itr != std::cend(data)) {
       return itr->second;
     } else {
@@ -164,48 +206,48 @@ template <typename K, std::size_t S> struct RequestMap
   }
 };
 static constexpr std::array<std::pair<std::string_view, CommandType>, std::to_underlying(CommandType::UNKNOWN)>
-    str_cmd_conversion_map{{{"attach"sv, CommandType::Attach},
-                            {"breakpointLocations"sv, CommandType::BreakpointLocations},
-                            {"completions"sv, CommandType::Completions},
-                            {"configurationDone"sv, CommandType::ConfigurationDone},
-                            {"continue"sv, CommandType::Continue},
-                            {"customRequest"sv, CommandType::CustomRequest},
-                            {"dataBreakpointInfo"sv, CommandType::DataBreakpointInfo},
-                            {"disassemble"sv, CommandType::Disassemble},
-                            {"disconnect"sv, CommandType::Disconnect},
-                            {"evaluate"sv, CommandType::Evaluate},
-                            {"exceptionInfo"sv, CommandType::ExceptionInfo},
-                            {"goto"sv, CommandType::Goto},
-                            {"gotoTargets"sv, CommandType::GotoTargets},
-                            {"initialize"sv, CommandType::Initialize},
-                            {"launch"sv, CommandType::Launch},
-                            {"loadedSources"sv, CommandType::LoadedSources},
-                            {"modules"sv, CommandType::Modules},
-                            {"next"sv, CommandType::Next},
-                            {"pause"sv, CommandType::Pause},
-                            {"readMemory"sv, CommandType::ReadMemory},
-                            {"restart"sv, CommandType::Restart},
-                            {"restartFrame"sv, CommandType::RestartFrame},
-                            {"reverseContinue"sv, CommandType::ReverseContinue},
-                            {"scopes"sv, CommandType::Scopes},
-                            {"setBreakpoints"sv, CommandType::SetBreakpoints},
-                            {"setDataBreakpoints"sv, CommandType::SetDataBreakpoints},
-                            {"setExceptionBreakpoints"sv, CommandType::SetExceptionBreakpoints},
-                            {"setExpression"sv, CommandType::SetExpression},
-                            {"setFunctionBreakpoints"sv, CommandType::SetFunctionBreakpoints},
-                            {"setInstructionBreakpoints"sv, CommandType::SetInstructionBreakpoints},
-                            {"setVariable"sv, CommandType::SetVariable},
-                            {"source"sv, CommandType::Source},
-                            {"stackTrace"sv, CommandType::StackTrace},
-                            {"stepBack"sv, CommandType::StepBack},
-                            {"stepIn"sv, CommandType::StepIn},
-                            {"stepInTargets"sv, CommandType::StepInTargets},
-                            {"stepOut"sv, CommandType::StepOut},
-                            {"terminate"sv, CommandType::Terminate},
-                            {"terminateThreads"sv, CommandType::TerminateThreads},
-                            {"threads"sv, CommandType::Threads},
-                            {"variables"sv, CommandType::Variables},
-                            {"writeMemory"sv, CommandType::WriteMemory}}};
+  str_cmd_conversion_map{{{"attach"sv, CommandType::Attach},
+                          {"breakpointLocations"sv, CommandType::BreakpointLocations},
+                          {"completions"sv, CommandType::Completions},
+                          {"configurationDone"sv, CommandType::ConfigurationDone},
+                          {"continue"sv, CommandType::Continue},
+                          {"customRequest"sv, CommandType::CustomRequest},
+                          {"dataBreakpointInfo"sv, CommandType::DataBreakpointInfo},
+                          {"disassemble"sv, CommandType::Disassemble},
+                          {"disconnect"sv, CommandType::Disconnect},
+                          {"evaluate"sv, CommandType::Evaluate},
+                          {"exceptionInfo"sv, CommandType::ExceptionInfo},
+                          {"goto"sv, CommandType::Goto},
+                          {"gotoTargets"sv, CommandType::GotoTargets},
+                          {"initialize"sv, CommandType::Initialize},
+                          {"launch"sv, CommandType::Launch},
+                          {"loadedSources"sv, CommandType::LoadedSources},
+                          {"modules"sv, CommandType::Modules},
+                          {"next"sv, CommandType::Next},
+                          {"pause"sv, CommandType::Pause},
+                          {"readMemory"sv, CommandType::ReadMemory},
+                          {"restart"sv, CommandType::Restart},
+                          {"restartFrame"sv, CommandType::RestartFrame},
+                          {"reverseContinue"sv, CommandType::ReverseContinue},
+                          {"scopes"sv, CommandType::Scopes},
+                          {"setBreakpoints"sv, CommandType::SetBreakpoints},
+                          {"setDataBreakpoints"sv, CommandType::SetDataBreakpoints},
+                          {"setExceptionBreakpoints"sv, CommandType::SetExceptionBreakpoints},
+                          {"setExpression"sv, CommandType::SetExpression},
+                          {"setFunctionBreakpoints"sv, CommandType::SetFunctionBreakpoints},
+                          {"setInstructionBreakpoints"sv, CommandType::SetInstructionBreakpoints},
+                          {"setVariable"sv, CommandType::SetVariable},
+                          {"source"sv, CommandType::Source},
+                          {"stackTrace"sv, CommandType::StackTrace},
+                          {"stepBack"sv, CommandType::StepBack},
+                          {"stepIn"sv, CommandType::StepIn},
+                          {"stepInTargets"sv, CommandType::StepInTargets},
+                          {"stepOut"sv, CommandType::StepOut},
+                          {"terminate"sv, CommandType::Terminate},
+                          {"terminateThreads"sv, CommandType::TerminateThreads},
+                          {"threads"sv, CommandType::Threads},
+                          {"variables"sv, CommandType::Variables},
+                          {"writeMemory"sv, CommandType::WriteMemory}}};
 
 // We've parsed the header of a request / message and we've verified that the body
 // is contained in the buffer that we read into.

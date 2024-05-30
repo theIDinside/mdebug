@@ -92,7 +92,7 @@ async function backAndForward(DA) {
   const objdumped = spawnSync('objdump', ['-d', DA.buildDirFile('stackframes')]).stdout.toString()
   const insts_of_interest = getTextSection(objdumped)
   const objdump = processObjdumpLines(insts_of_interest)
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'))
   const threads = await DA.threads()
   const frames = await DA.stackTrace(threads[0].id)
   const pc = getStackFramePc(frames, 0)
@@ -106,7 +106,7 @@ async function backAndForward(DA) {
 }
 
 const tests = {
-  backAndForward: backAndForward,
+  backAndForward: () => backAndForward,
 }
 
 module.exports = {

@@ -1,12 +1,10 @@
 #pragma once
 
-// clang-format off
 template <typename Lock>
 concept Lockable = requires(Lock lock) {
   lock.lock();
   lock.unlock();
 };
-// clang-format on
 
 template <Lockable Lock> class LockGuard
 {

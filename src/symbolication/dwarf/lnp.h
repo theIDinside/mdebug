@@ -17,10 +17,11 @@ constexpr u64
 lnp_index(u64 index, DwarfVersion version) noexcept
 {
   if (version == DwarfVersion::D4) {
-    if (index == 0)
+    if (index == 0) {
       return index;
-    else
+    } else {
       return index - 1;
+    }
   }
   return index;
 }
@@ -203,7 +204,7 @@ public:
   auto end(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
 
   auto first_linetable_entry(AddrPtr relocatedBase, u32 line, std::optional<u32> column)
-      -> std::optional<LineTableEntry>;
+    -> std::optional<LineTableEntry>;
 
   auto find_by_pc(AddrPtr base, AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
   auto add_header(LNPHeader *header) noexcept -> void;

@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <typedefs.h>
+#include <utils/logger.h>
 
 std::string_view
 syscall_name(u64 syscall_number)
@@ -32,7 +33,7 @@ replace_regex(T &str)
 {
   static const std::regex str_view_regex("std::basic_string_view<char, std::char_traits<char> >");
   static const std::regex str_regex{
-      "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"};
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"};
   static const std::regex allocator_regex{", std::allocator<.*> "};
 
   const std::string replacement = "std::string_view";
@@ -57,20 +58,23 @@ panic_exit()
   if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
     raise(SIGTERM);
     exit(-1);
-  } else
+  } else {
     exit(-1);
+  }
 }
 
 void
 panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
 {
+  using enum logging::Channel;
+#define PLOG(msg) logging::get_logging()->log(core, msg)
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];
   char **strings;
 
   nptrs = backtrace(buffer, BT_BUF_SIZE);
-  logging::get_logging()->log("mdb", fmt::format("backtrace() returned {} addresses\n", nptrs));
+  PLOG(fmt::format("backtrace() returned {} addresses\n", nptrs));
   fmt::println("backtrace() returned {} addresses\n", nptrs);
 
   /* The call backtrace_symbols_fd(buffer, nptrs, STDOUT_FILENO)
@@ -93,12 +97,12 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
       if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
         std::string copy{res};
         sanitize(copy);
-        logging::get_logging()->log("mdb", copy);
+        PLOG(copy);
         fmt::println("{}", copy);
         continue;
       }
     }
-    logging::get_logging()->log("mdb", strings[j]);
+    PLOG(strings[j]);
     fmt::println("{}", strings[j]);
   }
 
@@ -106,19 +110,21 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
 ifbacktrace_failed:
   const auto strerr = strerror(errno);
   const auto message =
-      fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
-                  loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
-  logging::get_logging()->log("mdb", message);
+    fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
+                loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
+  PLOG(message);
   fmt::println("{}", message);
   delete logging::get_logging();
   panic_exit();
+#undef PLOG
 }
 
 Option<AddrPtr>
 to_addr(std::string_view s) noexcept
 {
-  if (s.starts_with("0x"))
+  if (s.starts_with("0x")) {
     s.remove_prefix(2);
+  }
 
   u64 value;
   auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value, 16);

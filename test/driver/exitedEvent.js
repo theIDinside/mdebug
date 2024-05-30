@@ -2,7 +2,7 @@ const { seconds } = require('./client')
 const { assert, prettyJson } = require('./utils')
 
 async function programExit(DA) {
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+  await DA.startRunToMain(DA.buildDirFile('stackframes'))
   const threads = await DA.threads()
   const { event_body, response } = await DA.sendReqWaitEvent(
     'continue',
@@ -18,7 +18,7 @@ async function programExit(DA) {
 }
 
 const tests = {
-  programExit: programExit,
+  programExit: () => programExit,
 }
 
 module.exports = {

@@ -8,6 +8,18 @@
 
 namespace ui::dap {
 
+std::string
+InitializedEvent::serialize(int seq) const noexcept
+{
+  return fmt::format(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
+}
+
+std::string
+TerminatedEvent::serialize(int seq) const noexcept
+{
+  return fmt::format(R"({{"seq":{}, "type":"event", "event":"terminated" }})", seq);
+}
+
 ModuleEvent::ModuleEvent(std::string_view id, std::string_view reason, std::string &&name, Path &&path,
                          std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
                          AddressRange range, SharedObjectSymbols so_sym_info) noexcept
@@ -54,9 +66,9 @@ ModuleEvent::serialize(int seq) const noexcept
   auto out = fmt::memory_buffer();
   constexpr auto bi = [](auto &out) { return std::back_inserter(out); };
   fmt::format_to(
-      bi(out),
-      R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
-      seq, reason, objfile_id, name, path.c_str());
+    bi(out),
+    R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
+    seq, reason, objfile_id, name, path.c_str());
 
   if (version) {
     fmt::format_to(bi(out), R"(,"version":"{}")", *version);
@@ -81,8 +93,8 @@ std::string
 ContinuedEvent::serialize(int seq) const noexcept
 {
   return fmt::format(
-      R"({{"seq":{}, "type":"event", "event":"continued", "body":{{"threadId":{}, "allThreadsContinued":{}}}}})",
-      seq, thread_id, all_threads_continued);
+    R"({{"seq":{}, "type":"event", "event":"continued", "body":{{"threadId":{}, "allThreadsContinued":{}}}}})",
+    seq, thread_id, all_threads_continued);
 }
 
 ExitedEvent::ExitedEvent(int exit_code) noexcept : exit_code(exit_code) {}
@@ -115,14 +127,14 @@ StoppedEvent::serialize(int seq) const noexcept
   const auto description_utf8 = ensure_desc_utf8.dump();
   if (text.empty()) {
     return fmt::format(
-        R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": "", "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
-        seq, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
+      R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": "", "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
+      seq, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
   } else {
     const nlohmann::json ensure_utf8 = text;
     const auto utf8text = ensure_utf8.dump();
     return fmt::format(
-        R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": {}, "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
-        seq, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
+      R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": {}, "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
+      seq, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
   }
 }
 
@@ -151,9 +163,9 @@ BreakpointEvent::serialize(int seq) const noexcept
   result.reserve(256);
   auto it = std::back_inserter(result);
   it = fmt::format_to(
-      it,
-      R"({{"seq":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
-      seq, reason, breakpoint->id, breakpoint->verified());
+    it,
+    R"({{"seq":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
+    seq, reason, breakpoint->id, breakpoint->verified());
 
   if (message) {
     it = fmt::format_to(it, R"(,"message": "{}")", message.value());

@@ -42,8 +42,9 @@ decode_leb128(const u8 *data, IsBitsType auto &value) noexcept
     res |= ((byte & LEB128_MASK) << shift);
     shift += 7;
     ++index;
-    if ((byte & ~LEB128_MASK) == 0)
+    if ((byte & ~LEB128_MASK) == 0) {
       break;
+    }
   }
   if (shift < size && (byte & 0x40)) {
     res |= ((-1) << shift);
@@ -168,15 +169,17 @@ public:
   {
     u32 peeked = peek_value<u32>();
     if (peeked != 0xff'ff'ff'ff) {
-      if constexpr (InitReadAction == UpdateBufferSize)
+      if constexpr (InitReadAction == UpdateBufferSize) {
         set_wrapped_buffer_size(peeked + 4);
+      }
       offset_size = 4;
       return read_value<u32>();
     } else {
       head += 4;
       const auto sz = read_value<u64>();
-      if constexpr (InitReadAction == UpdateBufferSize)
+      if constexpr (InitReadAction == UpdateBufferSize) {
         set_wrapped_buffer_size(sz + 12);
+      }
       offset_size = 8;
       return sz;
     }

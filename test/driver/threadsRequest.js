@@ -1,15 +1,18 @@
-const { getLineOf, readFile, repoDirFile } = require('./client')
+const { getLineOf, readFileContents, repoDirFile, seconds } = require('./client')
 const { assert, prettyJson } = require('./utils')
 
-async function threads(DA) {
-  await DA.launchToMain(DA.buildDirFile('threads_shared'))
-  let threads = await DA.threads()
-  const file = readFile(repoDirFile('test/threads_shared.cpp'))
+/**
+ * @param {import("./client").DAClient } debugAdapter
+ */
+async function threads(debugAdapter) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('threads_shared'), [], seconds(1))
+  let threads = await debugAdapter.threads()
+  const file = readFileContents(repoDirFile('test/threads_shared.cpp'))
   const bp_lines = ['BP1']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
-  await DA.sendReqGetResponse('setBreakpoints', {
+  await debugAdapter.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/threads_shared.cpp'),
       path: repoDirFile('test/threads_shared.cpp'),
@@ -17,11 +20,11 @@ async function threads(DA) {
     breakpoints: bp_lines,
   })
 
-  await DA.contNextStop(threads[0].id)
-  threads = await DA.threads()
-  let frames = await DA.stackTrace(threads[1].id, 1000)
+  await debugAdapter.contNextStop(threads[0].id)
+  threads = await debugAdapter.threads()
+  let frames = await debugAdapter.stackTrace(threads[1].id, 1000)
   console.log(`next line for ${threads[1].id}: (${JSON.stringify(threads[1], null, 2)})`)
-  const { event_body, response } = await DA.sendReqWaitEvent(
+  const { event_body, response } = await debugAdapter.sendReqWaitEvent(
     'next',
     {
       threadId: threads[1].id,
@@ -34,7 +37,7 @@ async function threads(DA) {
 
   assert(response.success, `Expected 'next' command to succeed; got ${JSON.stringify(response)}`)
 
-  frames = await DA.stackTrace(threads[1].id)
+  frames = await debugAdapter.stackTrace(threads[1].id)
   console.log(`Stack frames for ${threads[1].id}: ${JSON.stringify(frames, null, 2)}`)
   const end_line = frames.body.stackFrames[0].line
   assert(
@@ -45,7 +48,7 @@ async function threads(DA) {
   )
 }
 const tests = {
-  threads: threads,
+  threads: () => threads,
 }
 
 module.exports = {

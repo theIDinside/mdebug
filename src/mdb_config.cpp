@@ -21,10 +21,11 @@ parse_int(std::string_view str)
   int result{};
   auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), result);
 
-  if (ec == std::errc())
+  if (ec == std::errc()) {
     return result;
-  else
+  } else {
     return std::nullopt;
+  }
 }
 
 void
@@ -61,23 +62,25 @@ DebuggerConfiguration::log_config() const noexcept
   return log;
 }
 
-static constexpr auto USAGE_STR = "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]";
+static constexpr auto LongOptions = std::to_array<option>({{"rr", OptNoArgument, 0, 'r'},
+                                                           {"eager-lnp-parse", OptNoArgument, 0, 'e'},
+                                                           // parameters
+                                                           {"thread-pool-size", OptArgRequired, 0, 't'},
+                                                           {"log", OptArgRequired, 0, 'l'},
+                                                           {"perf", OptNoArgument, 0, 'p'}});
+
+static constexpr auto USAGE_STR =
+  "Usage: mdb <communication path> [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]";
 utils::Expected<DebuggerConfiguration, CLIError>
 parse_cli(int argc, const char **argv) noexcept
 {
   auto init = DebuggerConfiguration::Default();
   int option_index = 0;
   int opt;
-  option long_opts[]{// flags
-                     {"rr", OptNoArgument, 0, 'r'},
-                     {"eager-lnp-parse", OptNoArgument, 0, 'e'},
-                     // parameters
-                     {"thread-pool-size", OptArgRequired, 0, 't'},
-                     {"log", OptArgRequired, 0, 'l'},
-                     {"perf", OptNoArgument, 0, 'p'}};
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:p", long_opts, &option_index)) != -1) {
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:p", LongOptions.data(),
+                            &option_index)) != -1) {
     switch (opt) {
     case 0:
       break;
@@ -90,8 +93,9 @@ parse_cli(int argc, const char **argv) noexcept
                                             .msg = fmt::format("Unknown log value: {}\nSupported: ", res.error(),
                                                                fmt::join(LogConfig::LOGS, ","))});
         }
-        for (auto i : input_logs)
+        for (auto i : input_logs) {
           init.log.set(i);
+        }
       } else {
         return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
       }
@@ -112,10 +116,10 @@ parse_cli(int argc, const char **argv) noexcept
       init.dwarf_parsing.eager_lnp_parse = true;
       break;
     case '?':
-      DLOG("mdb", "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
+      DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
       return utils::unexpected(
-          CLIError{.info = CLIErrorInfo::UnknownArgs,
-                   .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])});
+        CLIError{.info = CLIErrorInfo::UnknownArgs,
+                 .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])});
       break;
     default:
       continue;

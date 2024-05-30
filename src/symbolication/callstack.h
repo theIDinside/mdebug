@@ -125,8 +125,9 @@ public:
   friend constexpr bool
   compare_eq(const Frame &l, const Frame &r) noexcept
   {
-    if (l.type != r.type)
+    if (l.type != r.type) {
       return false;
+    }
 
     switch (l.type) {
     case FrameType::Full:
@@ -196,6 +197,7 @@ struct CallStack
   ~CallStack() = default;
 
   Frame *get_frame(int frame_id) noexcept;
+  u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
 
   Tid tid; // the task associated with this call stack
   bool dirty;

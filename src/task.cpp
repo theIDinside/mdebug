@@ -1,51 +1,90 @@
 #include "task.h"
+#include "arch.h"
 #include "bp.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
+#include "utils/util.h"
+#include <sys/user.h>
 #include <tracee/util.h>
+#include <utility>
 
-TaskInfo::TaskInfo(pid_t tid, bool user_stopped) noexcept
+TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), registers(new user_regs_struct{}),
-      call_stack(new sym::CallStack{tid}), loc_stat()
+      cache_dirty(true), rip_dirty(true), exited(false), call_stack(new sym::CallStack{tid}), loc_stat()
 {
+  regs = {.arch = arch, .data_format = format, .rip_dirty = true, .cache_dirty = true, .registers = nullptr};
+
+  switch (format) {
+  case TargetFormat::Native:
+    regs.registers = new user_regs_struct{};
+    break;
+  case TargetFormat::Remote:
+    switch (arch) {
+    case ArchType::X86_64:
+      regs.x86_block = new RegisterBlock<ArchType::X86_64>{};
+      break;
+    case ArchType::COUNT:
+      std::unreachable();
+      break;
+    }
+    break;
+  }
 }
 
 TaskInfo
-TaskInfo::create_stopped(pid_t tid)
+TaskInfo::create_running(pid_t tid, TargetFormat format, ArchType arch)
 {
-  return TaskInfo{tid, true};
+  return TaskInfo{tid, false, format, arch};
 }
 
-TaskInfo
-TaskInfo::create_running(pid_t tid)
+user_regs_struct *
+TaskInfo::native_registers() const noexcept
 {
-  return TaskInfo{tid, false};
+  ASSERT(regs.data_format == TargetFormat::Native, "Used in the wrong context");
+  return regs.registers;
 }
 
-AddrPtr
-TaskInfo::pc() noexcept
+RegisterBlock<ArchType::X86_64> *
+TaskInfo::remote_x86_registers() const noexcept
 {
-  cache_registers();
-  return registers->rip;
+  ASSERT(regs.data_format == TargetFormat::Remote, "Used in the wrong context");
+  return regs.x86_block;
+}
+
+void
+TaskInfo::remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept
+{
+  ASSERT(regs.data_format == TargetFormat::Remote, "Expected remote format");
+  regs.x86_block->from_hexdigit_encoding(hex_encoded);
+  set_updated();
 }
 
 u64
 TaskInfo::get_register(u64 reg_num) noexcept
 {
-  return ::get_register(registers, reg_num);
+  switch (regs.data_format) {
+  case TargetFormat::Native:
+    return ::get_register(regs.registers, reg_num);
+  case TargetFormat::Remote:
+    static_assert(utils::castenum(ArchType::COUNT) == 1, "Supported architectures have increased");
+    return regs.x86_block->get_64bit_reg(reg_num);
+    break;
+  }
+}
+
+u64
+TaskInfo::unwind_buffer_register(u8 level, u16 register_number) const noexcept
+{
+  return call_stack->unwind_buffer_register(level, register_number);
 }
 
 void
-TaskInfo::cache_registers() noexcept
+TaskInfo::set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept
 {
-  if (cache_dirty) {
-    PTRACE_OR_PANIC(PTRACE_GETREGS, tid, nullptr, registers);
-    cache_dirty = false;
-    rip_dirty = false;
-  }
+  regs.x86_block->set_registers(data);
 }
 
 static void
@@ -65,16 +104,18 @@ const std::vector<AddrPtr> &
 TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
   static constexpr auto X86_64_RIP_REGISTER = 16;
-  if (!call_stack->dirty)
+  if (!call_stack->dirty) {
     return call_stack->pcs;
-  else {
+  } else {
     call_stack->pcs.clear();
   }
 
-  if (cache_dirty)
-    cache_registers();
+  if (cache_dirty) {
+    tc->cache_registers(*this);
+  }
 
   // initialize bottom frame's registers with actual live register contents
+
   auto &buf = call_stack->reg_unwind_buffer;
   buf.clear();
   buf.reserve(call_stack->pcs.capacity());
@@ -86,11 +127,13 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
     }
   }
 
-  sym::UnwindIterator it{tc, registers->rip};
-  ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{registers->rip});
-  auto uninfo = it.get_info(registers->rip);
-  ASSERT(uninfo.has_value(), "unwind info iterator returned null for 0x{:x}", registers->rip);
-  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, uninfo.value(), registers->rip);
+  auto pc = get_pc();
+
+  sym::UnwindIterator it{tc, pc};
+  ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{pc});
+  auto uninfo = it.get_info(pc);
+  ASSERT(uninfo.has_value(), "unwind info iterator returned null for 0x{:x}", pc);
+  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, uninfo.value(), pc);
 
   const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
   switch (req.req) {
@@ -126,35 +169,6 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
   wait_status = wait.ws;
 }
 
-void
-TaskInfo::consume_wait() noexcept
-{
-  int stat;
-  waitpid(tid, &stat, 0);
-  tracer_stopped = true;
-  user_stopped = true;
-}
-
-void
-TaskInfo::ptrace_resume(RunType type) noexcept
-{
-  ASSERT(user_stopped || tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})", bool{user_stopped},
-         bool{tracer_stopped});
-  if (user_stopped) {
-    DLOG("mdb", "[ptrace]: restarting {} ({}) from user-stop", tid,
-         type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
-  } else if (tracer_stopped) {
-    DLOG("mdb", "[ptrace]: restarting {} ({}) from tracer-stop", tid,
-         type == RunType::Continue ? "PTRACE_CONT" : "PTRACE_SINGLESTEP");
-    PTRACE_OR_PANIC(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, tid, nullptr, nullptr);
-  }
-  stop_collected = false;
-  user_stopped = false;
-  tracer_stopped = false;
-  set_dirty();
-}
-
 WaitStatus
 TaskInfo::pending_wait_status() const noexcept
 {
@@ -162,19 +176,71 @@ TaskInfo::pending_wait_status() const noexcept
   return wait_status;
 }
 
+std::uintptr_t
+TaskInfo::get_rbp() const noexcept
+{
+  switch (regs.data_format) {
+  case TargetFormat::Native:
+    return regs.registers->rbp;
+  case TargetFormat::Remote:
+    static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
+    return regs.x86_block->get_rbp();
+  }
+}
+
+std::uintptr_t
+TaskInfo::get_pc() const noexcept
+{
+  switch (regs.data_format) {
+  case TargetFormat::Native:
+    return regs.registers->rip;
+  case TargetFormat::Remote:
+    static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
+    return regs.x86_block->get_pc();
+  }
+}
+
+std::uintptr_t
+TaskInfo::get_rsp() const noexcept
+{
+  switch (regs.data_format) {
+  case TargetFormat::Native:
+    return regs.registers->rsp;
+  case TargetFormat::Remote:
+    static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
+    return regs.x86_block->get_rsp();
+  }
+}
+
+std::uintptr_t
+TaskInfo::get_orig_rax() const noexcept
+{
+  switch (regs.data_format) {
+  case TargetFormat::Native:
+    return regs.registers->orig_rax;
+  case TargetFormat::Remote:
+    return regs.x86_block->get_64bit_reg(57);
+  }
+}
+
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept
+TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept
 {
   ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
   auto loc = tc->pbps.location_at(loc_stat->loc);
   auto user_ids = loc->loc_users();
-  DLOG("mdb", "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
+  DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
 
-  loc->disable(tc->task_leader);
+  auto &control = tc->get_interface();
+  loc->disable(control);
   loc_stat->stepped_over = true;
   loc_stat->re_enable_bp = true;
-  loc_stat->should_resume = resume_action != RunType::None;
-  ptrace_resume(RunType::Step);
+  loc_stat->should_resume = resume_action.type != tc::RunType::None;
+
+  next_resume_action = resume_action;
+
+  const auto result = control.resume_task(*this, tc::RunType::Step);
+  ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 
 void
@@ -182,6 +248,16 @@ TaskInfo::set_stop() noexcept
 {
   user_stopped = true;
   tracer_stopped = true;
+}
+
+void
+TaskInfo::set_running(tc::RunType type) noexcept
+{
+  stop_collected = false;
+  user_stopped = false;
+  tracer_stopped = false;
+  last_resume_command = type;
+  set_dirty();
 }
 
 void
@@ -205,15 +281,24 @@ TaskInfo::set_dirty() noexcept
 }
 
 void
+TaskInfo::set_updated() noexcept
+{
+  rip_dirty = false;
+  cache_dirty = false;
+}
+
+void
 TaskInfo::add_bpstat(AddrPtr address) noexcept
 {
   loc_stat = LocationStatus{.loc = address, .should_resume = false, .stepped_over = false, .re_enable_bp = false};
 }
 
-void
-TaskInfo::remove_bpstat() noexcept
+std::optional<LocationStatus>
+TaskInfo::clear_bpstat() noexcept
 {
+  const auto copy = loc_stat;
   loc_stat = std::nullopt;
+  return copy;
 }
 
 void
@@ -233,6 +318,13 @@ bool
 TaskInfo::stop_processed() const noexcept
 {
   return stop_collected;
+}
+
+void
+TaskInfo::collect_stop() noexcept
+{
+  stop_collected = true;
+  tracer_stopped = true;
 }
 
 TaskVMInfo

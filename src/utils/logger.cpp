@@ -3,10 +3,33 @@
 #include "../lib/lockguard.h"
 #include <filesystem>
 #include <source_location>
+#include <utility>
 
 using namespace std::string_view_literals;
 
 namespace logging {
+
+constexpr std::string_view
+to_str(Channel id) noexcept
+{
+  switch (id) {
+  case Channel::core:
+    return "core";
+  case Channel::dap:
+    return "dap";
+  case Channel::dwarf:
+    return "dwarf";
+  case Channel::awaiter:
+    return "awaiter";
+  case Channel::eh:
+    return "eh";
+  case Channel::remote:
+    return "remote";
+  case Channel::COUNT:
+    PANIC("Count not a valid Id");
+    break;
+  }
+}
 
 logging::Logger *logging::Logger::logger_instance = new logging::Logger{};
 
@@ -20,6 +43,12 @@ Logger::~Logger() noexcept
     }
     delete l;
   }
+
+  for (auto ptr : LogChannels) {
+    if (ptr) {
+      delete ptr;
+    }
+  }
 }
 
 void
@@ -28,8 +57,8 @@ Logger::setup_channel(std::string_view name) noexcept
   ASSERT(!log_files.contains(name), "Creating log channel {} twice is not allowed.", name);
   Path p = std::filesystem::current_path() / fmt::format("{}.log", name);
   auto channel =
-      new LogChannel{.spin_lock = SpinLock{},
-                     .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
+    new LogChannel{.spin_lock = SpinLock{},
+                   .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
   if (!channel->fstream.is_open()) {
     channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
   }
@@ -37,9 +66,25 @@ Logger::setup_channel(std::string_view name) noexcept
 }
 
 void
-Logger::log(std::string_view log_name, std::string_view log_msg) noexcept
+Logger::setup_channel(Channel id) noexcept
 {
-  log_files[log_name]->log(log_msg);
+  ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
+  Path p = std::filesystem::current_path() / fmt::format("{}.log", to_str(id));
+  auto channel =
+    new LogChannel{.spin_lock = SpinLock{},
+                   .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
+  if (!channel->fstream.is_open()) {
+    channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
+  }
+  LogChannels[std::to_underlying(id)] = channel;
+}
+
+void
+Logger::log(Channel id, std::string_view log_msg) noexcept
+{
+  if (auto ptr = LogChannels[std::to_underlying(id)]; ptr) {
+    ptr->log(log_msg);
+  }
 }
 
 Logger *
@@ -61,9 +106,16 @@ Logger::LogChannel *
 Logger::channel(std::string_view name)
 {
   auto it = log_files.find(name);
-  if (it != std::end(log_files))
+  if (it != std::end(log_files)) {
     return it->second;
+  }
   return nullptr;
+}
+
+Logger::LogChannel *
+Logger::channel(Channel id)
+{
+  return LogChannels[std::to_underlying(id)];
 }
 
 void
@@ -96,6 +148,12 @@ get_log_channel(std::string_view log_channel) noexcept
     return logger->channel(log_channel);
   }
   return nullptr;
+}
+
+Logger::LogChannel *
+get_log_channel(Channel id) noexcept
+{
+  return Logger::get_logger()->channel(id);
 }
 
 Logger *

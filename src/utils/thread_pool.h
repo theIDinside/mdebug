@@ -37,8 +37,9 @@ public:
     if (container_of_works.size() < worker_threads) {
       std::vector<u32> worksize_per_thread{};
       worksize_per_thread.reserve(container_of_works.size());
-      for (auto i = 0u; i < container_of_works.size(); i++)
+      for (auto i = 0u; i < container_of_works.size(); i++) {
         worksize_per_thread.push_back(1);
+      }
       return worksize_per_thread;
     }
     const auto batching = container_of_works.size() / worker_threads;
@@ -52,7 +53,7 @@ public:
     // worker's job count.
     worksize_per_thread.back() += container_of_works.size() - (batching * worker_threads);
     ASSERT(std::accumulate(worksize_per_thread.begin(), worksize_per_thread.end(), 0u) ==
-               container_of_works.size(),
+             container_of_works.size(),
            "Sum of total jobs doesn't amount to {}", container_of_works.size());
     return worksize_per_thread;
   }

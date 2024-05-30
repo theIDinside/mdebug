@@ -39,6 +39,15 @@ unexpected(Err &&err) noexcept
   return Unexpected<Err>{std::forward<Err>(err)};
 }
 
+// Base template for the variadic template
+template <typename T, typename... Args> struct IsFirstTypeSame;
+
+// Specialization to extract the first type and compare it with T
+template <typename T, typename First, typename... Rest> struct IsFirstTypeSame<T, First, Rest...>
+{
+  static constexpr bool value = std::is_same<T, First>::value;
+};
+
 // Just a thin, stupid, inefficient wrapper around std::variant. It'll do for now.
 template <typename T, typename Err> class Expected
 {
@@ -47,8 +56,11 @@ template <typename T, typename Err> class Expected
 
 public:
   template <typename... Args>
-  Expected(Args &&...args) noexcept : val_or_err(std::forward<Args>(args)...), has_value(true)
+  Expected(Args &&...args) noexcept
+    requires(!IsFirstTypeSame<Err, Args...>::value)
+      : val_or_err(std::forward<Args>(args)...), has_value(true)
   {
+    ASSERT(val_or_err.index() == 0, "You've broken the invariant");
   }
 
   Expected(Expected &&move) noexcept : val_or_err(std::move(move.val_or_err)), has_value(move.has_value) {}
@@ -59,28 +71,32 @@ public:
   Expected(const Unexpected<Err> &conv) : val_or_err(conv.err), has_value(false) {}
   Expected(Unexpected<Err> &&conv) : val_or_err(std::move(conv.err)), has_value(false) {}
 
-  template <typename ConvertT>
-  Expected(Expected<ConvertT, Err> &&ExpectedWithErrorRequiringConversion) noexcept
-      : val_or_err(ExpectedWithErrorRequiringConversion.take_error()), has_value(false)
-  {
-    ASSERT(ExpectedWithErrorRequiringConversion.is_expected() != true,
-           "Conversion from expected that had a value, but was expected to be an error");
-  }
-
-  template <typename ConvertErr>
-  Expected(Expected<T, ConvertErr> &&ExpectedWithValueRequiringConversion) noexcept
-      : val_or_err(ExpectedWithValueRequiringConversion.take_value()), has_value(true)
+  template <typename ConvertErr> Expected(Expected<T, ConvertErr> &&ExpectedWithValueRequiringConversion) noexcept
   {
     ASSERT(ExpectedWithValueRequiringConversion.is_expected(),
            "Conversion from expected that had a value, but was expected to be an error");
+    val_or_err = std::move(ExpectedWithValueRequiringConversion.take_value());
+    has_value = true;
   }
 
   ~Expected() noexcept = default;
+
+  template <typename ConvertResult>
+  static Expected<ConvertResult, Err>
+  convert()
+  {
+  }
 
   constexpr bool
   is_expected() const noexcept
   {
     return has_value;
+  }
+
+  constexpr bool
+  is_error() const noexcept
+  {
+    return !is_expected();
   }
 
   T *
@@ -116,7 +132,9 @@ public:
   take_value() noexcept
   {
     ASSERT(has_value, "Expected did not have a value");
-    return std::get<T>(std::move(val_or_err));
+    auto &&moved = std::get<T>(std::move(val_or_err));
+    has_value = false;
+    return moved;
   }
 
   const T &
@@ -152,6 +170,30 @@ public:
   {
     ASSERT(!has_value, "Expected have a value");
     return std::get<Err>(val_or_err);
+  }
+
+  template <typename Transform>
+  constexpr auto
+  transform(Transform &&fn) && noexcept -> utils::Expected<FnResult<Transform, T>, Err>
+  {
+    using Return = FnResult<Transform, T>;
+    if (has_value) {
+      auto &&res = fn(take_value());
+      return utils::Expected<Return, Err>{res};
+    } else {
+      return unexpected(take_error());
+    }
+  }
+
+  template <typename NewErr, typename Transform>
+  constexpr auto
+  and_then(Transform &&fn) && noexcept -> FnResult<Transform, T>
+  {
+    if (has_value) {
+      return fn(take_value());
+    } else {
+      return unexpected(NewErr{take_error()});
+    }
   }
 };
 

@@ -7,9 +7,10 @@
 Error.stackTraceLimit = 5
 const path = require('path')
 const fs = require('fs')
-const { spawn } = require('child_process')
+const { spawn, ChildProcess } = require('child_process')
 const EventEmitter = require('events')
-const { assert, prettyJson } = require('./utils')
+const { assertLog, prettyJson, allUniqueVariableReferences, TestArgs, parseTestConfiguration } = require('./utils')
+const net = require('net')
 
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename)
@@ -18,8 +19,164 @@ const REPO_DIR = path.dirname(TEST_DIR)
 
 let MDB_PATH = undefined
 
+class RemoteService {
+  #host
+  #port
+  #server
+
+  constructor(service, host, port, binary, args = []) {
+    this.#server = service
+    this.#port = port
+    this.#host = host
+    process.on('exit', () => {
+      this.#server.kill('SIGTERM')
+    })
+  }
+
+  /** @returns {number} */
+  get port() {
+    return this.#port
+  }
+
+  /** @returns {ChildProcess} */
+  get serverProcess() {
+    return this.#server
+  }
+
+  get attachArgs() {
+    return {
+      type: 'gdbremote',
+      host: this.#host,
+      port: this.#port,
+      allstop: false,
+    }
+  }
+}
+
 /**
- * @returns { { mdb: string, cwd: string, testSuite: string, test: string | null } }
+ * @param {string} gdbserver
+ * @param {string} host
+ * @param {number} port
+ * @param {string} binary
+ * @param {string[]} args
+ * @returns { Promise<RemoteService> }
+ */
+async function createRemoteService(gdbserver, host, port, binary, args) {
+  port = Number.parseInt(port)
+  return new Promise((resolve, reject) => {
+    let serviceReadyEmitter = new EventEmitter()
+
+    if (args == undefined || args == null) {
+      args = []
+    }
+    // '/home/cx/dev/cx/binutils-gdb/build-release/gdbserver/gdbserver',
+    let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary, ...args], {
+      shell: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    console.log('setup listeners')
+
+    process.stdout.on('data', (data) => {
+      console.log(`PROCESS STDOUT: ${data.toString()}`)
+    })
+
+    const waitUntilServiceReady = (data) => {
+      const str = data.toString()
+      console.log(`DATA: ${str}`)
+      if (str.includes('Listening on port')) {
+        console.log(`Ready to connect to remote service`)
+        serviceReadyEmitter.emit('init', true)
+      }
+    }
+    service.stdout.addListener('data', waitUntilServiceReady)
+    service.stderr.addListener('data', waitUntilServiceReady)
+
+    if (service == null) {
+      reject(`Failed to spawn service`)
+    }
+
+    serviceReadyEmitter.once('init', (done) => {
+      if (done) {
+        service.stderr.removeListener('data', waitUntilServiceReady)
+        service.stdout.removeListener('data', waitUntilServiceReady)
+        resolve(new RemoteService(service, host, port, binary, args))
+      } else {
+        reject(`Failed to initialize gdb server and wait until it starts listening on the port`)
+      }
+    })
+  })
+}
+
+function* randomSeqGenerator() {
+  const min = 10000
+  const max = 60000
+  const set = new Set()
+  while (true) {
+    let value = Math.floor(Math.random() * (max - min + 1)) + min
+    while (set.has(value)) {
+      value = Math.floor(Math.random() * (max - min + 1)) + min
+    }
+    set.add(value)
+    yield value
+  }
+}
+
+function stringToBool(str) {
+  if (typeof str !== 'string') {
+    throw new Error(`str must be of string type, but was ${typeof str}`)
+  }
+  const lowered = str.toLowerCase()
+  if (lowered === 'true') return true
+  else return false
+}
+
+function envVarBool(varName) {
+  const v = process.env[varName]
+  if (v != undefined) {
+    return stringToBool(v)
+  }
+  return false
+}
+
+function checkPortAvailability(maxtries = 20, host = 'localhost') {
+  const portListener = (p) => {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer()
+      server.once('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          resolve(false) // Port is in use
+        } else {
+          reject(err) // Some other error
+        }
+      })
+
+      server.once('listening', () => {
+        server.close()
+        resolve(true) // Port is available
+      })
+
+      server.listen(p, host)
+    })
+  }
+  return new Promise(async (resolve, reject) => {
+    let tries = 0
+
+    for (const port of randomSeqGenerator()) {
+      if (tries >= maxtries) {
+        reject('Max retry count hit')
+      }
+      const free = await portListener(port)
+      if (free) {
+        resolve(port)
+      } else {
+        tries += 1
+      }
+    }
+  })
+}
+
+/**
+ * @returns { { mdb: string, args: TestArgs } }
  */
 function getExecutorArgs() {
   if (process.argv.length < 4) {
@@ -27,19 +184,11 @@ function getExecutorArgs() {
       `Test executor not received the required parameters. It requires 3 parameters.\nWorking dir: the directory from which the test is executed in\nTest suite name: The test suite\nTest name: An optional test name, if only a single test in the suite should be executed. Usage:\nnode source/to/client.js current/working/dir testSuiteName testSuite`
     )
   }
-  const UserBuildDir = process.argv[2]
-  const BUILD_BIN_DIR = path.join(UserBuildDir, 'bin')
-  if (!fs.existsSync(BUILD_BIN_DIR)) {
-    console.error(`Could not find the build directory '${BUILD_BIN_DIR}'`)
-    process.exit(-1)
-  }
+  const testArgs = new TestArgs(parseTestConfiguration(process.argv.slice(2)))
 
   const config = {
-    mdb: path.join(BUILD_BIN_DIR, 'mdb'),
-    buildDir: BUILD_BIN_DIR,
-    cwd: process.argv[2],
-    testSuite: process.argv[3],
-    test: process.argv[4],
+    mdb: testArgs.getBinary('mdb'),
+    args: testArgs,
   }
   return config
 }
@@ -58,7 +207,7 @@ function getLineOf(fileData, string_identifier) {
   return null
 }
 
-function readFile(path) {
+function readFileContents(path) {
   return fs.readFileSync(path).toString()
 }
 
@@ -93,7 +242,15 @@ class DAClient {
   /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
   buf
 
+  /** @type { RemoteService } */
+  remoteService = null
+
+  /** @type { { mdb: string, args: TestArgs } } config */
   config
+
+  isRemoteSession() {
+    return this.remoteService !== null
+  }
 
   constructor(mdb, mdb_args, config) {
     // for future work when we get recording in tests suites working.
@@ -143,7 +300,7 @@ class DAClient {
     process.on('exit', (code) => {
       this.mdb.kill('SIGTERM')
       if (code != 0) {
-        dump_log(this.config.testSuite)
+        dump_log(this.config.args.test)
       }
     })
     this.seq = 1
@@ -196,8 +353,12 @@ class DAClient {
     })
   }
 
+  requestedUseOfRemote() {
+    return this.config.remote
+  }
+
   buildDirFile(fileName) {
-    return path.join(this.config.buildDir, fileName)
+    return this.config.args.getBinary(fileName)
   }
 
   serializeRequest(req, args = {}) {
@@ -246,17 +407,25 @@ class DAClient {
       ctrl.abort()
     }, timeout)
 
-    let evts = []
+    let eventCount = 0
     // we create the exception object here, to report decent stack traces for when it actually does fail.
     const err = new Error('Timed out')
     Error.captureStackTrace(err, fn)
     let p = new Promise((res, rej) => {
-      this.events.on(evt, (body) => {
+      let evts = []
+      const listener = (body) => {
+        eventCount++
         evts.push(body)
+        console.log(
+          `stopped for ${evt}: ${body.reason}: ${JSON.stringify(body)} (of n=${n} and evts.length=${evts.length})`
+        )
         if (evts.length == n) {
+          console.log(`we hit ${evt} n=${n} times`)
+          this.events.removeListener(evt, listener)
           res(evts)
         }
-      })
+      }
+      this.events.on(evt, listener)
     })
 
     return Promise.race([
@@ -266,7 +435,7 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          err.message = `Timed out: Waiting for ${n} events of type ${evt} to have happened (but saw ${evts.length})`
+          err.message = `Timed out (${timeout}ms threshold crossed): Waiting for ${n} events of type ${evt} to have happened (but saw ${eventCount})`
           rej(err)
         })
       }),
@@ -309,7 +478,7 @@ class DAClient {
       }),
       new Promise((_, rej) => {
         signal.addEventListener('abort', () => {
-          err.message = `Timed out waiting for response from request ${req}`
+          err.message = `Timed out (${failureTimeout} milliseconds threshold crossed) waiting for response from request ${req}`
           rej(err)
         })
       }),
@@ -373,9 +542,92 @@ class DAClient {
     this.buf.receive_buffer = this.buf.receive_buffer.concat(data)
   }
 
+  async #startRunToMainNative(launchArgs, timeout) {
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainNative)
+    console.log(`Starting NATIVE session: launchArguments: ${JSON.stringify(launchArgs)}`)
+    let launch_res = await this.sendReqGetResponse(
+      'launch',
+      {
+        program: launchArgs['program'],
+        stopOnEntry: launchArgs['stopOnEntry'],
+      },
+      timeout
+    )
+    checkResponse(launch_res, 'launch', true)
+    await this.sendReqGetResponse('configurationDone', {}, timeout)
+    return stopped_promise
+  }
+
+  async #startRunToMainRemote(program, args, timeout) {
+    const remoteServerBinaryPath = this.config.args.getServerBinary()
+    const host = 'localhost'
+    this.remoteService = await checkPortAvailability(20, host).then((port) => {
+      return createRemoteService(remoteServerBinaryPath, host, port, program, args)
+    })
+
+    if (!this.isRemoteSession()) {
+      throw new Error(`Failed to spawn GDB Server on ${host}:${port}`)
+    }
+
+    let entry_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
+    const attach_res = await this.sendReqGetResponse('attach', this.remoteService.attachArgs, timeout)
+    checkResponse(attach_res, 'attach', true)
+    const functions = ['main'].map((n) => ({ name: n }))
+
+    const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
+      breakpoints: functions,
+    })
+    await entry_stopped_promise
+    assertLog(
+      fnBreakpointResponse.success,
+      'Function breakpoints request',
+      `Response failed with contents: ${JSON.stringify(fnBreakpointResponse)}`
+    )
+    assertLog(
+      fnBreakpointResponse.body.breakpoints.length == 1,
+      'Expected 1 breakpoint returned',
+      `But received ${JSON.stringify(fnBreakpointResponse.body.breakpoints)}`
+    )
+    const thrs = await this.threads(timeout)
+    const threadId = thrs[0].id
+    await this.sendReqGetResponse('configurationDone', {}, timeout)
+    let hit_main_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
+    const cont = await this.sendReqGetResponse(
+      'continue',
+      {
+        threadId: threadId,
+        singleThread: false,
+      },
+      timeout,
+      this.#startRunToMainRemote
+    )
+    checkResponse(cont, 'continue', true)
+    return hit_main_stopped_promise
+  }
+
+  async startRunToMain(program, args = [], timeout = seconds(1)) {
+    let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
+    checkResponse(init_res, 'initialize', true)
+    switch (this.config.args.getArg('session')) {
+      case 'remote': {
+        return await this.#startRunToMainRemote(program, args, timeout)
+      }
+      case 'native': {
+        return await this.#startRunToMainNative(
+          {
+            program: program,
+            stopOnEntry: true,
+          },
+          timeout
+        )
+      }
+      default:
+        throw new Error(`Unknown session kind`)
+    }
+  }
+
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = seconds(1)) {
-    console.log(`TEST BINARY: ${program}`)
     let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.launchToMain)
     let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
     checkResponse(init_res, 'initialize', true)
@@ -383,11 +635,34 @@ class DAClient {
       'launch',
       {
         program: program,
-        stopAtEntry: true,
+        stopOnEntry: true,
       },
       timeout
     )
     checkResponse(launch_res, 'launch', true)
+    await this.sendReqGetResponse('configurationDone', {}, timeout)
+    await stopped_promise
+  }
+
+  async remoteAttach(attachArgs, init, timeout = seconds(1)) {
+    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.remoteAttach)
+    if (init) {
+      let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
+      checkResponse(init_res, 'initialize', true)
+    }
+
+    console.log(`attach args: ${JSON.stringify(attachArgs)}`)
+
+    let attach_res = await this.sendReqGetResponse(
+      'attach',
+      {
+        type: attachArgs['type'] ?? 'gdbremote',
+        host: attachArgs['host'],
+        port: attachArgs['port'],
+      },
+      timeout
+    )
+    checkResponse(attach_res, 'attach', true)
     await this.sendReqGetResponse('configurationDone', {}, timeout)
     await stopped_promise
   }
@@ -477,8 +752,8 @@ class DAClient {
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
 function dump_log(testSuite) {
-  const mdblog = fs.readFileSync(path.join(process.cwd(), 'mdb.log'))
-  fs.writeFileSync(path.join(process.cwd(), `mdb_${path.basename(testSuite)}.log`), mdblog)
+  const mdblog = fs.readFileSync(path.join(process.cwd(), 'core.log'))
+  fs.writeFileSync(path.join(process.cwd(), `core_${path.basename(testSuite)}.log`), mdblog)
 }
 
 function repoDirFile(filePath) {
@@ -536,16 +811,23 @@ async function runTest(DA, testFn, should_exit = true) {
   else testFn(DA).catch(testException)
 }
 
+/**
+ *
+ * @param { { mdb: string, args: TestArgs } } config
+ * @param {*} tests
+ */
 async function runTestSuite(config, tests) {
   for (const testName in tests) {
-    if (config.test != undefined) {
-      if (config.test == testName) {
+    if (config.args.test != undefined) {
+      if (config.args.test == testName) {
         const DA = new DAClient(config.mdb, [], config)
-        await runTest(DA, tests[testName])
+        const testFn = tests[testName]()
+        await runTest(DA, testFn)
       }
     } else {
       const DA = new DAClient(config.mdb, [], config)
-      await runTest(DA, tests[testName])
+      const testFn = tests[testName]()
+      await runTest(DA, testFn)
     }
   }
 }
@@ -569,12 +851,16 @@ async function doSomethingDelayed(fn, delay) {
 }
 
 async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
-  const file = readFile(repoDirFile(filePath))
+  const file = readFileContents(repoDirFile(filePath))
   const bp_lines = bpIdentifiers
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
-  assert(bp_lines.length == bpIdentifiers.length, `Could not find these identifiers: ${bpIdentifiers}`)
+  assertLog(
+    bp_lines.length == bpIdentifiers.length,
+    `Expected ${bpIdentifiers.length} bp identifiers to be found`,
+    `Could not find some of these identifiers: ${bpIdentifiers}`
+  )
   const args = {
     source: {
       name: repoDirFile(filePath),
@@ -583,11 +869,12 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
     breakpoints: bp_lines,
   }
   const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', args)
-  assert(
+  assertLog(
     bkpt_res.body.breakpoints.length == bpIdentifiers.length,
+    `Expected ${bpIdentifiers.length} breakpoints`,
     `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
   )
-  return bp_lines
+  return bkpt_res
 }
 
 /**
@@ -600,33 +887,36 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
  * @param { string } filePath - path to .cpp file that we are testing against
  * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
  * @param { string } expectedFrameName - frame name we expect to see on first stop.
- * @returns { { object[], object[], object[] } }
+ * @param { string } exeFile - the binary to execute
+ * @returns { { threads: object[], frames: object[], scopes: object[], bpres: object[] } }
  */
 async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
-  const { assert, prettyJson, allUniqueVariableReferences } = require('./utils')
-  await DA.launchToMain(DA.buildDirFile(exeFile), 5000)
-  await SetBreakpoints(DA, filePath, bpIdentifiers)
+  await DA.startRunToMain(DA.buildDirFile(exeFile), [], 5000)
+  const bpres = await SetBreakpoints(DA, filePath, bpIdentifiers)
   const threads = await DA.threads()
   await DA.contNextStop(threads[0].id)
   const fres = await DA.stackTrace(threads[0].id, 1000)
   const frames = fres.body.stackFrames
-  assert(
+  assertLog(
     frames[0].name == expectedFrameName,
-    () =>
-      `Expected to be inside of frame '${expectedFrameName}'. Actual: ${frames[0].name}. Stacktrace:\n${prettyJson(
-        frames
-      )}`
+    () => `Expected to be inside of frame '${expectedFrameName}`,
+    () => `Actual frame=${frames[0].name}. Stacktrace:\n${prettyJson(frames)}`
   )
 
   const scopes_res = await DA.sendReqGetResponse('scopes', { frameId: frames[0].id })
   const scopes = scopes_res.body.scopes
-  assert(scopes.length == 3, `expected 3 scopes but got ${scopes.length}. Scopes response: ${prettyJson(scopes_res)}`)
-  assert(
+  assertLog(
+    scopes.length == 3,
+    `expected 3 scopes`,
+    `Got ${scopes.length} scopes. Scopes response: ${prettyJson(scopes_res)}`
+  )
+  assertLog(
     allUniqueVariableReferences(scopes),
-    `Expected unique variableReference for all scopes. Scopes:\n${prettyJson(scopes)}`
+    `Expected unique variableReference for all scopes`,
+    `Scopes:\n${prettyJson(scopes)}`
   )
 
-  return { threads, frames, scopes }
+  return { threads, frames, scopes, bpres }
 }
 
 module.exports = {
@@ -634,16 +924,20 @@ module.exports = {
   DAClient,
   getLineOf,
   getStackFramePc,
-  readFile,
+  readFileContents,
   repoDirFile,
   seconds,
   testException,
   testSuccess,
-  runTest,
   runTestSuite,
   getRequestedTest,
   checkResponse,
   doSomethingDelayed,
   getExecutorArgs,
   launchToGetFramesAndScopes,
+  SetBreakpoints,
+  checkPortAvailability,
+  getRandomNumber: randomSeqGenerator,
+  createRemoteService,
+  RemoteService,
 }

@@ -57,7 +57,7 @@ read_values(UnitData &cu, const DieMetaData &die) noexcept
 
 static auto
 is_member_fn(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu, const DieMetaData &die) noexcept
-    -> std::tuple<bool, std::optional<std::string_view>>
+  -> std::tuple<bool, std::optional<std::string_view>>
 {
   ASSERT((maybe_null_any_of<DwarfTag::DW_TAG_subprogram, DwarfTag::DW_TAG_inlined_subroutine>(&die)),
          "Asking if die is a member function die when it's not a subprogram die doesn't make sense. "
@@ -87,7 +87,7 @@ is_member_fn(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu
       }
       const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(that_ref.die->parent());
       const auto name =
-          that_ref.read_attribute(Attribute::DW_AT_name).transform([](auto attr) { return attr.string(); });
+        that_ref.read_attribute(Attribute::DW_AT_name).transform([](auto attr) { return attr.string(); });
       if (result) {
         const auto result = std::make_tuple(true, name);
         return result;
@@ -129,7 +129,7 @@ IndexingTask::execute_task() noexcept
       initialized_cus.push_back(std::move(new_cu_file));
     } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
       sym::PartialCompilationUnitSymbolInfo partial_cu_file =
-          initialize_partial_compilation_unit(comp_unit, dies.front());
+        initialize_partial_compilation_unit(comp_unit, dies.front());
     }
 
     UnitReader reader{comp_unit};
@@ -223,13 +223,15 @@ IndexingTask::execute_task() noexcept
         if (!name.empty() && !is_decl) {
           types.push_back({name, die_index, comp_unit});
         }
-        if (!mangled_name.empty() && !is_decl)
+        if (!mangled_name.empty() && !is_decl) {
           types.push_back({mangled_name, die_index, comp_unit});
+        }
         break;
       case DwarfTag::DW_TAG_inlined_subroutine:
       case DwarfTag::DW_TAG_subprogram: {
-        if (!addr_representable)
+        if (!addr_representable) {
           break;
+        }
 
         const auto &[is_mem_fn, resolved_name] = is_member_fn(followed_references, *comp_unit, die);
         if (!name.empty() || resolved_name.has_value()) {
@@ -250,8 +252,9 @@ IndexingTask::execute_task() noexcept
       } break;
       case DwarfTag::DW_TAG_namespace:
       case DwarfTag::DW_TAG_imported_declaration:
-        if (!name.empty())
+        if (!name.empty()) {
           namespaces.push_back({name, die_index, comp_unit});
+        }
         break;
       default:
         continue;
@@ -265,8 +268,9 @@ IndexingTask::execute_task() noexcept
   idx->methods.merge(methods);
   idx->types.merge_types(obj, types);
 
-  if (!initialized_cus.empty())
+  if (!initialized_cus.empty()) {
     obj->add_initialized_cus(initialized_cus);
+  }
 }
 
 static void
@@ -291,10 +295,11 @@ process_cu_boundary(u64 ranges_offset, sym::CompilationUnit &src) noexcept
         // after some research of the DWARF data (using llvm-dwarfdump), it seems to be the case that
         // DW_AT_ranges values with start=0, end=N, are actually some form of duplicate DIE's that has not been
         // de-duplicated. Which is shite.
-        if (end == 0)
+        if (end == 0) {
           break;
-        else
+        } else {
           continue;
+        }
       } else {
         lowest = std::min(start, lowest);
         highest = std::max(end, highest);
@@ -340,8 +345,9 @@ IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_di
       process_cu_boundary(attr.address(), new_cu);
     } break;
     case Attribute::DW_AT_low_pc: {
-      if (!low)
+      if (!low) {
         low = attr.address();
+      }
     } break;
     case Attribute::DW_AT_high_pc: {
       high = attr.address();

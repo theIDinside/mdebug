@@ -132,7 +132,7 @@ private:
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
-      -> std::vector<sym::dw::RelocatedSourceCodeFile>;
+    -> std::vector<sym::dw::RelocatedSourceCodeFile>;
 
   std::unordered_map<std::string_view, Index> minimal_fn_symbols;
   std::vector<MinSymbol> min_fn_symbols_sorted;
@@ -170,8 +170,7 @@ public:
   Immutable<AddressRange> pc_bounds;
   SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
 
-  static shr_ptr Create(const TraceeController &tc, std::shared_ptr<ObjectFile> binary,
-                        AddrPtr relocated_base) noexcept;
+  static shr_ptr Create(Pid process_id, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept;
   auto copy(const TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
 
@@ -188,11 +187,11 @@ public:
   auto invalidateVariableReferences() noexcept -> void;
   auto registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-      -> std::vector<ui::dap::Variable>;
+    -> std::vector<ui::dap::Variable>;
   auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
   auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
-      -> std::vector<ui::dap::Variable>;
+    -> std::vector<ui::dap::Variable>;
 
   auto low_pc() noexcept -> AddrPtr;
   auto high_pc() noexcept -> AddrPtr;
@@ -212,7 +211,7 @@ private:
 };
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;
-std::shared_ptr<ObjectFile> CreateObjectFile(const TraceeController &tc, const Path &path) noexcept;
+std::shared_ptr<ObjectFile> CreateObjectFile(Pid process_id, const Path &path) noexcept;
 
 struct UnloadObjectFile
 {

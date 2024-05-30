@@ -64,8 +64,9 @@ struct LogConfig
   {
     std::unordered_set<std::string_view> logs{LogConfig::LOGS.begin(), LogConfig::LOGS.end()};
     for (const auto i : parsed) {
-      if (!logs.contains(i))
+      if (!logs.contains(i)) {
         return utils::unexpected(i);
+      }
     }
     return true;
   }

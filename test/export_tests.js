@@ -22,6 +22,18 @@ function readFiles(directory) {
   })
 }
 
+function addTest(suite, test, is_todo = false) {
+  if (is_todo) {
+    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
+add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
+set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
+set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)`
+  } else {
+    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
+add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)`
+  }
+}
+
 // Test names should match file names (but without .js extension)
 // As such each file should expose a `tests` object containing { "name": theTestFunction },
 // See the other files for an example.
@@ -34,28 +46,36 @@ async function main() {
     .then((res) => res.filter(testFileFilter))
     .then((res) => res.map((e) => path.basename(e, '.js')))
 
-  let testSuite = []
-  let testSuitesContainingTests = []
+  let cmakeTestFileContents = []
+
   for (const test of testNames) {
     const filePath = `./driver/${test}.js`
+
+    let subtest = []
+    let todos = []
+
     let subtestNames = []
-    for (let prop in require(filePath).tests) {
-      subtestNames.push(`${prop}`)
+    let unimplementedTests = []
+
+    const suite = require(filePath)
+    for (let prop in suite.tests) {
+      try {
+        const fn = suite.tests[prop]()
+        subtest.push(addTest(test, prop, false))
+      } catch (ex) {
+        console.log(`exception: ${ex}`)
+        todos.push(addTest(test, prop, true))
+      }
     }
-    if (subtestNames.length > 0) {
-      testSuitesContainingTests.push(test)
-      const cmakeOutput = `set(${test} ${subtestNames.join(' ')})`
-      testSuite.push(cmakeOutput)
-    }
+    cmakeTestFileContents.push(subtest.join('\n'))
+    cmakeTestFileContents.push(todos.join('\n\n'))
   }
 
-  const cmakeDriverTestSuitesContent = `# This is generated content. Do not alter. \n\nset(DRIVER_TEST_SUITES \n\t${testSuitesContainingTests.join(
-    '\n\t'
-  )}\n)`
-  const cmakeContent = testSuite.join('\n')
+  const cmakeContent = `# This is generated content. Do not alter.
+${cmakeTestFileContents.join('\n\n')}`
 
   // Use fs.writeFile to create the file and write the content
-  fs.writeFile(filePath, `${cmakeDriverTestSuitesContent}\n\n${cmakeContent}`, (err) => {
+  fs.writeFile(filePath, `${cmakeContent}`, (err) => {
     if (err) {
       throw new Error(`Couldn't create CMake file: ${err}.\nContents:\n${cmakeContent}`)
     } else {

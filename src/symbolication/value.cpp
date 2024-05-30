@@ -31,7 +31,7 @@ Value::Value(std::string &&name, Type &type, u32 mem_contents_offset,
 {
 }
 
-Value::~Value() noexcept { DLOG("mdb", "Destroying value {}", name); }
+Value::~Value() noexcept { DBGLOG(core, "Destroying value {}", name); }
 
 AddrPtr
 Value::address() const noexcept
@@ -135,7 +135,7 @@ EagerMemoryContentsObject::view(u32 offset, u32 size) noexcept
 void
 LazyMemoryContentsObject::cache_memory() noexcept
 {
-  DLOG("mdb", "[lazy transfer]: {} .. {}", start, end);
+  DBGLOG(core, "[lazy transfer]: {} .. {}", start, end);
   if (auto res = supervisor.safe_read(start, end->get() - start->get()); res.is_expected()) {
     bytes = std::move(res.take_value());
   } else {
@@ -146,8 +146,9 @@ LazyMemoryContentsObject::cache_memory() noexcept
 std::span<const u8>
 LazyMemoryContentsObject::raw_view() noexcept
 {
-  if (bytes == nullptr)
+  if (bytes == nullptr) {
     cache_memory();
+  }
 
   return bytes->span();
 }
@@ -155,8 +156,9 @@ LazyMemoryContentsObject::raw_view() noexcept
 std::span<const u8>
 LazyMemoryContentsObject::view(u32 offset, u32 size) noexcept
 {
-  if (bytes == nullptr)
+  if (bytes == nullptr) {
     cache_memory();
+  }
 
   return bytes->span().subspan(offset, size);
 }
@@ -197,7 +199,7 @@ MemoryContentsObject::create_frame_variable(TraceeController &tc, NonNullPtr<Tas
         PANIC("Expected read to succeed");
       }
       auto memory_object =
-          std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
+        std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
       return std::make_shared<Value>(symbol.name, symbol, 0, std::move(memory_object));
     }
   }

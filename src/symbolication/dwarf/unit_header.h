@@ -3,7 +3,7 @@
 #include <span>
 #include <symbolication/dwarf/common.h>
 #include <symbolication/dwarf_defs.h>
-using u8 = std::uint8_t;
+#include <typedefs.h>
 
 struct ElfSection;
 

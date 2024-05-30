@@ -2,8 +2,12 @@
 
 #include "bp.h"
 #include "common.h"
+#include "interface/remotegdb/target_description.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
+#include <arch.h>
 #include <linux/sched.h>
+#include <sys/user.h>
 
 using namespace std::string_view_literals;
 struct TraceeController;
@@ -24,13 +28,29 @@ struct CallStackRequest
   static CallStackRequest full() noexcept;
 };
 
+struct TaskRegisters
+{
+  Immutable<ArchType> arch;
+  Immutable<TargetFormat> data_format;
+  bool rip_dirty : 1 {true};
+  bool cache_dirty : 1 {true};
+  union
+  {
+    user_regs_struct *registers;
+    RegisterBlock<ArchType::X86_64> *x86_block;
+  };
+
+  void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
+};
+
 struct TaskInfo
 {
   friend struct TraceeController;
-  static constexpr bool IS_USER_STOPPED = true;
-  static constexpr bool IS_USER_RUNNING = false;
   pid_t tid;
   WaitStatus wait_status;
+  TargetFormat session;
+  tc::RunType last_resume_command{tc::RunType::UNKNOWN};
+  std::optional<tc::ResumeAction> next_resume_action{};
   union
   {
     u16 bit_set;
@@ -40,20 +60,27 @@ struct TaskInfo
                                // for this task
       bool user_stopped : 1;   // stops visible (possibly) to the user
       bool tracer_stopped : 1; // stops invisible to the user - may be upgraded to user stops. tracer_stop always
-                               // occur when waitpid has returned a result for this task
+                               // occur when waitpid has returned a result for this task, or when a remote has sent
+                               // a stop reply for a thread if the remote is also in "not non-stop mode", *all*
+                               // threads get set to true on each stop (and false on each continue) regardless of
+                               // what thread the user is operating on. It's "all stop mode".
       bool initialized : 1;    // fully initialized task. after a clone syscall some setup is required
       bool cache_dirty : 1;    // register is dirty and requires refetching
       bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
       bool exited : 1;         // task has exited
     };
   };
-  user_regs_struct *registers;
+
+private:
+  TaskRegisters regs;
   sym::CallStack *call_stack;
+
+public:
   std::optional<LocationStatus> loc_stat;
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
-  TaskInfo(pid_t tid, bool user_stopped) noexcept;
+  TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept;
   TaskInfo(TaskInfo &&o) noexcept = default;
   TaskInfo &operator=(TaskInfo &&) noexcept = default;
   // Delete copy constructors. These are unique values.
@@ -62,34 +89,40 @@ struct TaskInfo
   TaskInfo &operator=(TaskInfo &t) noexcept = delete;
   TaskInfo &operator=(const TaskInfo &o) = delete;
 
-  static TaskInfo create_stopped(pid_t tid);
-  static TaskInfo create_running(pid_t tid);
+  static TaskInfo create_running(pid_t tid, TargetFormat format, ArchType arch);
 
-  AddrPtr pc() noexcept;
+  user_regs_struct *native_registers() const noexcept;
+  RegisterBlock<ArchType::X86_64> *remote_x86_registers() const noexcept;
+  void remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept;
   u64 get_register(u64 reg_num) noexcept;
+  u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
+  void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
   const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
-  void consume_wait() noexcept;
 
-  void step_over_breakpoint(TraceeController *tc, RunType resume_action) noexcept;
+  void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
   void set_stop() noexcept;
+  void set_running(tc::RunType type) noexcept;
   void initialize() noexcept;
   bool can_continue() noexcept;
   void set_dirty() noexcept;
+  void set_updated() noexcept;
   void add_bpstat(AddrPtr address) noexcept;
-  void remove_bpstat() noexcept;
+  std::optional<LocationStatus> clear_bpstat() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
    */
   bool is_stopped() const noexcept;
   bool stop_processed() const noexcept;
+  void collect_stop() noexcept;
   WaitStatus pending_wait_status() const noexcept;
 
-private:
-  void ptrace_resume(RunType) noexcept;
-  void cache_registers() noexcept;
+  std::uintptr_t get_rbp() const noexcept;
+  std::uintptr_t get_pc() const noexcept;
+  std::uintptr_t get_rsp() const noexcept;
+  std::uintptr_t get_orig_rax() const noexcept;
 };
 
 struct TaskStepInfo

@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 
@@ -25,6 +26,12 @@ public:
 
   constexpr operator const T &() const & { return data; }
 
+  constexpr T
+  clone() const noexcept
+  {
+    return data;
+  }
+
   constexpr const T &
   operator*() const & noexcept
   {
@@ -35,8 +42,16 @@ public:
 
   constexpr const T *
   operator->() const noexcept
+    requires(!IsSmartPointer<T>)
   {
     return std::addressof(data);
+  }
+
+  constexpr const auto *
+  operator->() const noexcept
+    requires(IsSmartPointer<T>)
+  {
+    return data.get();
   }
 
   constexpr
@@ -71,6 +86,20 @@ public:
     return data;
   }
 
+  constexpr auto
+  begin() const noexcept
+    requires(IsRange<T>)
+  {
+    return data.cbegin();
+  }
+
+  constexpr auto
+  end() const noexcept
+    requires(IsRange<T>)
+  {
+    return data.cend();
+  }
+
   friend constexpr auto
   operator-(const Immutable &l, const T &r)
   {
@@ -99,6 +128,20 @@ public:
     return l + (*r);
   }
 
+  // friend constexpr auto
+  // operator==(const SelfT &l, std::nullptr_t) noexcept
+  //   requires(IsSmartPointer<T>)
+  // {
+  //   return l.data.get() == nullptr;
+  // }
+
+  // friend constexpr auto
+  // operator!=(const SelfT &l, std::nullptr_t) noexcept
+  //   requires(IsSmartPointer<T>)
+  // {
+  //   return l.data.get() != nullptr;
+  // }
+
   friend constexpr auto
   operator==(const SelfT &l, const SelfT &r) noexcept
   {
@@ -106,25 +149,25 @@ public:
   }
 
   friend constexpr auto
-  operator==(const SelfT &l, const T &r) noexcept
+  operator==(const SelfT &l, const auto &r) noexcept
   {
     return l.data == r;
   }
 
-  friend constexpr auto
+  friend constexpr bool
   operator==(const T &r, const SelfT &l) noexcept
   {
     return l.data == r;
   }
 
-  friend constexpr auto
+  friend constexpr bool
   operator!=(const SelfT &l, const SelfT &r) noexcept
   {
     return !(l.data == r.data);
   }
 
   friend constexpr auto
-  operator!=(const SelfT &l, const T &r) noexcept
+  operator!=(const SelfT &l, const auto &r) noexcept
   {
     return !(l.data == r);
   }

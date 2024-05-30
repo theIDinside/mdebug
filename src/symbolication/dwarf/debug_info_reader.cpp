@@ -1,6 +1,7 @@
 #include "debug_info_reader.h"
 #include "../objfile.h"
 #include "symbolication/dwarf/die.h"
+#include "utils/util.h"
 
 namespace sym::dw {
 
@@ -8,7 +9,7 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
 {
   const auto &header = compilation_unit->header();
   current_ptr =
-      compilation_unit->get_objfile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
+    compilation_unit->get_objfile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
 }
 
 void
@@ -197,10 +198,11 @@ UnitReader::read_offset() noexcept
 {
   const auto format = compilation_unit->header().format();
   ASSERT(format == 4 || format == 8, "Unsupported format: {}. Offset sizes supported are 4 and 8", format);
-  if (format == 4)
+  if (format == 4) {
     return read_integral<u32>();
-  else
+  } else {
     return read_integral<u64>();
+  }
 }
 
 u64
@@ -308,7 +310,7 @@ void
 UnitReader::seek_die(const DieMetaData &entry) noexcept
 {
   current_ptr =
-      compilation_unit->get_objfile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
+    compilation_unit->get_objfile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
 }
 
 Elf *
@@ -444,8 +446,8 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   case AttributeForm::DW_FORM_strx3:
     [[fallthrough]];
   case AttributeForm::DW_FORM_strx4: {
-    const auto base = std::to_underlying(AttributeForm::DW_FORM_strx1) - 1;
-    const auto bytes_to_read = std::to_underlying(abbr.form) - base;
+    const auto base = utils::castenum(AttributeForm::DW_FORM_strx1) - 1;
+    const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto idx = reader.read_n_bytes(bytes_to_read);
     return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
   }
@@ -464,8 +466,8 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   case AttributeForm::DW_FORM_addrx4: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
            reader.objfile()->path->c_str());
-    const auto base = std::to_underlying(AttributeForm::DW_FORM_addrx1) - 1;
-    const auto bytes_to_read = std::to_underlying(abbr.form) - base;
+    const auto base = utils::castenum(AttributeForm::DW_FORM_addrx1) - 1;
+    const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto addr_index = reader.read_n_bytes(bytes_to_read);
     return AttributeValue{reader.read_by_idx_from_addr_table(addr_index, {}), abbr.form, abbr.name};
   }

@@ -41,10 +41,10 @@ template <> struct formatter<sym::Disassembly>
   format(sym::Disassembly const &disasm, FormatContext &ctx) const
   {
     return fmt::format_to(
-        ctx.out(),
-        R"({{ "address": "{}", "instructionBytes": "{}", "instruction": "{}", "location": {{ "name": "{}", "path": "{}/{}" }}, "line": {}, "column": {} }})",
-        disasm.address, disasm.opcode, disasm.instruction, disasm.source_name, disasm.source_path,
-        disasm.source_name, disasm.line, disasm.column);
+      ctx.out(),
+      R"({{ "address": "{}", "instructionBytes": "{}", "instruction": "{}", "location": {{ "name": "{}", "path": "{}/{}" }}, "line": {}, "column": {} }})",
+      disasm.address, disasm.opcode, disasm.instruction, disasm.source_name, disasm.source_path,
+      disasm.source_name, disasm.line, disasm.column);
   }
 };
 }; // namespace fmt

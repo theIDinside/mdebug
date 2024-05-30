@@ -12,15 +12,16 @@ set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 set(MIDAS_SOURCES
   # root
-  src/main.cpp
   src/awaiter.cpp
   src/awaiter.h
   src/bp.cpp
   src/bp.h
   src/common.cpp
   src/common.h
+  src/event_queue_event_param.h
   src/event_queue.cpp
   src/event_queue.h
+  src/main.cpp
   src/mdb_config.cpp
   src/mdb_config.h
   src/notify_pipe.cpp
@@ -40,20 +41,6 @@ set(MIDAS_SOURCES
   # events
   src/events/event.cpp
   src/events/event.h
-  # interface
-  src/interface/dap/commands.cpp
-  src/interface/dap/commands.h
-  src/interface/dap/dap_defs.h
-  src/interface/dap/events.cpp
-  src/interface/dap/events.h
-  src/interface/dap/interface.cpp
-  src/interface/dap/interface.h
-  src/interface/dap/parse_buffer.cpp
-  src/interface/dap/parse_buffer.h
-  src/interface/dap/types.cpp
-  src/interface/dap/types.h
-  src/interface/pty.cpp
-  src/interface/pty.h
   # lib
   src/lib/lockguard.h
   # symbolication
@@ -74,12 +61,12 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf.h
   src/symbolication/dwarf/debug_info_reader.cpp
   src/symbolication/dwarf/debug_info_reader.h
-  src/symbolication/dwarf/die.cpp
-  src/symbolication/dwarf/die.h
   src/symbolication/dwarf/die_iterator.cpp
   src/symbolication/dwarf/die_iterator.h
   src/symbolication/dwarf/die_ref.cpp
   src/symbolication/dwarf/die_ref.h
+  src/symbolication/dwarf/die.cpp
+  src/symbolication/dwarf/die.h
   src/symbolication/dwarf/lnp.cpp
   src/symbolication/dwarf/lnp.h
   src/symbolication/dwarf/name_index.cpp
@@ -100,10 +87,10 @@ set(MIDAS_SOURCES
   src/symbolication/objfile.h
   src/symbolication/type.cpp
   src/symbolication/type.h
-  src/symbolication/value.cpp
-  src/symbolication/value.h
   src/symbolication/value_visualizer.cpp
   src/symbolication/value_visualizer.h
+  src/symbolication/value.cpp
+  src/symbolication/value.h
   # tasks
   src/tasks/dwarf_unit_data.cpp
   src/tasks/dwarf_unit_data.h
@@ -120,16 +107,56 @@ set(MIDAS_SOURCES
   src/utils/logger.h
   src/utils/scoped_fd.cpp
   src/utils/scoped_fd.h
+  src/utils/sync_barrier.cpp
+  src/utils/sync_barrier.h
   src/utils/thread_pool.cpp
   src/utils/thread_pool.h
   src/utils/worker_task.cpp
   src/utils/worker_task.h
+  src/utils/xml.cpp
+  src/utils/xml.h
   # eval
   src/eval/eval.cpp
   src/eval/eval.h
 
   src/tracee/util.cpp
   src/tracee/util.h
+
+  # Various interfaces
+  src/interface/dap/commands.cpp
+  src/interface/dap/commands.h
+  src/interface/dap/dap_defs.h
+  src/interface/dap/events.cpp
+  src/interface/dap/events.h
+  src/interface/dap/interface.cpp
+  src/interface/dap/interface.h
+  src/interface/dap/parse_buffer.cpp
+  src/interface/dap/parse_buffer.h
+  src/interface/dap/types.cpp
+  src/interface/dap/types.h
+  src/interface/pty.cpp
+  src/interface/pty.h
+
+  # Gdb Remote interface
+  src/interface/remotegdb/connection.cpp
+  src/interface/remotegdb/connection.h
+  src/interface/remotegdb/shared.cpp
+  src/interface/remotegdb/shared.h
+  src/interface/remotegdb/stopreply_parser.cpp
+  src/interface/remotegdb/stopreply_parser.h
+  src/interface/remotegdb/target_description.cpp
+  src/interface/remotegdb/target_description.h
+  src/interface/remotegdb/wait_event_parser.cpp
+  src/interface/remotegdb/wait_event_parser.h
+
+  # Tracee Interfaces
+  src/interface/tracee_command/gdb_remote_commander.cpp
+  src/interface/tracee_command/gdb_remote_commander.h
+  src/interface/tracee_command/ptrace_commander.cpp
+  src/interface/tracee_command/ptrace_commander.h
+  src/interface/tracee_command/tracee_command_interface.cpp
+  src/interface/tracee_command/tracee_command_interface.h
+
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
@@ -168,6 +195,10 @@ AddTest(NAME expected_tests
   SOURCES test/unittest/expected_tests.cpp
   LIBS fmt::fmt)
 
+AddTest(NAME xml_tests
+SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
+LIBS fmt::fmt)
+
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
@@ -192,24 +223,11 @@ if(NODEJS)
    ERROR_VARIABLE GENERATOR_ERROR
    OUTPUT_VARIABLE GENERATOR_OUTPUT)
   if(GENERATOR_EXIT_CODE EQUAL 0)
-    message(STATUS "CTest suites generated successfully")
+    message(STATUS "CTest suites generated successfully: ${GENERATOR_OUTPUT}")
     include(${CMAKE_CURRENT_SOURCE_DIR}/test/driver/DriverTests.cmake)
   else()
     message(WARNING "Could not generate test suite configuration. Error message:\n${GENERATOR_OUTPUT}\nGenerator exited with code ${GENERATOR_EXIT_CODE}")
   endif()
-  # Sub-test suites.
-  foreach(driver_test ${DRIVER_TEST_SUITES})
-    list(LENGTH ${driver_test} LIST_LENGTH)
-    if(${LIST_LENGTH} EQUAL 0)
-      add_test(NAME DriverTest.${driver_test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js ${CMAKE_BINARY_DIR} ${driver_test} ${test})
-    else()
-    message("Suite ${driver_test}:")
-      foreach(test ${${driver_test}})
-        message("  - ${test}")
-        add_test(NAME DriverTest.${driver_test}.${test} COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js ${CMAKE_BINARY_DIR} ${driver_test} ${test})
-      endforeach()
-    endif()
-  endforeach()
 endif()
 
 # To be able to print backtrace with symbols (see `man backtrace`)

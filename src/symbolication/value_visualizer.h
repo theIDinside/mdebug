@@ -3,9 +3,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <typedefs.h>
 #include <vector>
-
-using u32 = std::uint32_t;
 
 struct TraceeController;
 class SymbolFile;

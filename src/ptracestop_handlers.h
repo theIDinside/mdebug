@@ -3,6 +3,7 @@
 #include "bp.h"
 #include "common.h"
 #include "interface/dap/dap_defs.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include <symbolication/callstack.h>
 #include <symbolication/dwarf/lnp.h>
 #include <task.h>
@@ -10,6 +11,8 @@
 
 struct TraceeController;
 struct BpStat;
+
+struct CoreEvent;
 
 namespace ptracestop {
 
@@ -28,6 +31,7 @@ public:
   virtual void update_stepped() noexcept = 0;
 
 protected:
+  tc::TraceeCommandInterface &ctrl;
   TraceeController &tc;
   TaskInfo &task;
   bool cancelled;
@@ -47,7 +51,6 @@ public:
 private:
   void notify_stopped() noexcept;
   ui::dap::StoppedReason reason;
-  bool ptrace_session_is_seize;
 };
 
 class InstructionStep : public ThreadProceedAction
@@ -125,8 +128,9 @@ public:
   ThreadProceedAction *get_proceed_action(const TaskInfo &t) noexcept;
   void remove_action(const TaskInfo &t) noexcept;
 
-  void handle_proceed(TaskInfo &info, bool should_resume) noexcept;
-  void handle_wait_event(TaskInfo &info) noexcept;
+  void handle_proceed(TaskInfo &info, tc::ProcessedStopEvent should_resume) noexcept;
+
+  CoreEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;
   constexpr void stop_on_exec() noexcept;
@@ -151,7 +155,8 @@ public:
   } event_settings;
 
 private:
-  bool process_waitstatus_for(TaskInfo &t) noexcept;
+  // native_ because it's generated from a WaitStatus event (and thus comes directly from ptrace, not a remote)
+  CoreEvent *native_core_evt_from_stopped(TaskInfo &t) noexcept;
   std::unordered_map<Tid, ThreadProceedAction *> proceed_actions;
 };
 } // namespace ptracestop

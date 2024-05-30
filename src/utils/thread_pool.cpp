@@ -22,8 +22,9 @@ void
 ThreadPool::post_tasks(std::span<Task *> tasks) noexcept
 {
   std::lock_guard lock(m_task_mutex);
-  for (auto t : tasks)
+  for (auto t : tasks) {
     m_task_queue.push(t);
+  }
   m_task_cv.notify_all();
 }
 
@@ -60,13 +61,14 @@ ThreadPool::worker(std::stop_token stop_token, const char *name) noexcept
 {
   VERIFY(prctl(PR_SET_NAME, name) != -1, "Failed to set worker thread name");
   ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
-  DLOG("mdb", "Worker thread {} spawned", name);
+  DBGLOG(core, "Worker thread {} spawned", name);
   while (true && !stop_token.stop_requested()) {
     Task *job = nullptr;
     {
       std::unique_lock lock(m_task_mutex);
-      while (m_task_queue.empty())
+      while (m_task_queue.empty()) {
         m_task_cv.wait(lock);
+      }
       job = m_task_queue.front();
       m_task_queue.pop();
     }

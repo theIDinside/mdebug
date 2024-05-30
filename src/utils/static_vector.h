@@ -19,7 +19,7 @@ public:
       cap_bytes = MDB_PAGE_SIZE;
     } else {
       const auto pages_required =
-          std::ceil(static_cast<double>(bytes_required) / static_cast<double>(MDB_PAGE_SIZE));
+        std::ceil(static_cast<double>(bytes_required) / static_cast<double>(MDB_PAGE_SIZE));
       cap_bytes = MDB_PAGE_SIZE * static_cast<u64>(pages_required);
       data = mmap_buffer<T>(cap_bytes);
     }

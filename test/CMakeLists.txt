@@ -58,6 +58,12 @@ endfunction()
 build_tests("${MDB_TESTS}")
 
 BuildTestSubject(
+  NAME forever
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/forever.cpp
+)
+
+BuildTestSubject(
   NAME templated
   SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/templated_code/template_main.cpp
@@ -78,6 +84,12 @@ BuildTestSubject(
   NAME dynamicLoading
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/dynamicLoading.cpp
   LIBS dl
+)
+
+BuildTestSubject(
+  NAME fork
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/fork.cpp
 )
 
 message("Test build type: ${CMAKE_BUILD_TYPE}")

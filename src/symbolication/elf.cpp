@@ -155,7 +155,7 @@ Elf::parse_min_symbols() const noexcept
       } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
         std::string_view name{(const char *)str_table->m_section_ptr + symbol.st_name};
         elf_object_symbols[name] =
-            MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+          MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }
     }
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
@@ -163,6 +163,6 @@ Elf::parse_min_symbols() const noexcept
     std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
     obj_file.add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
-    LOG("mdb", "[warning]: No .symtab for {}", obj_file.path->c_str());
+    LOG(core, "[warning]: No .symtab for {}", obj_file.path->c_str());
   }
 }

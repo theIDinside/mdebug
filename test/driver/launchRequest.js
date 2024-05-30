@@ -6,7 +6,7 @@ async function launch(DA) {
   await DA.sendReqGetResponse('initialize', {}, 1000).then((res) => checkResponse(res, 'initialize', true))
   await DA.sendReqGetResponse('launch', {
     program: DA.buildDirFile('stackframes'),
-    stopAtEntry: true,
+    stopOnEntry: true,
   }).then((res) => checkResponse(res, 'launch', true))
 }
 
@@ -21,9 +21,9 @@ async function launchThenDisconnect(DA) {
 }
 
 const tests = {
-  launch: launch,
-  main: launchToMain,
-  disconnect: launchThenDisconnect,
+  launch: () => launch,
+  main: () => launchToMain,
+  disconnect: () => launchThenDisconnect,
 }
 
 module.exports = {

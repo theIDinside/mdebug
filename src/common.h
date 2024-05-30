@@ -22,6 +22,49 @@ using Path = fs::path;
 using Tid = pid_t;
 using Pid = pid_t;
 
+struct LWP
+{
+  Pid pid;
+  Tid tid;
+
+  constexpr bool operator<=>(const LWP &other) const = default;
+};
+
+template <typename, typename = void> struct has_begin : std::false_type
+{
+};
+
+template <typename T> struct has_begin<T, std::void_t<decltype(std::begin(std::declval<T>()))>> : std::true_type
+{
+};
+
+template <typename, typename = void> struct has_end : std::false_type
+{
+};
+
+template <typename T> struct has_end<T, std::void_t<decltype(std::end(std::declval<T>()))>> : std::true_type
+{
+};
+
+template <typename T> struct is_unique_ptr : std::false_type
+{
+};
+
+template <typename T> struct is_unique_ptr<std::unique_ptr<T>> : std::true_type
+{
+};
+
+template <typename T> struct is_shared_ptr : std::false_type
+{
+};
+
+template <typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type
+{
+};
+
+template <typename T> concept IsSmartPointer = is_unique_ptr<T>::value || is_shared_ptr<T>::value;
+template <typename T> concept IsRange = has_begin<T>::value && has_end<T>::value;
+
 // A line/col-source coordinate. Identifies a source file by full path and a line and column number
 struct SourceCoordinate
 {
@@ -79,7 +122,7 @@ std::string_view syscall_name(unsigned long long syscall_number);
     auto loc = std::source_location::current();                                                                   \
     const auto todo_msg = fmt::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
     fmt::println("{}", todo_msg);                                                                                 \
-    logging::get_logging()->log("mdb", todo_msg);                                                                 \
+    logging::get_logging()->log(logging::Channel::core, todo_msg);                                                \
     logging::get_logging()->on_abort();                                                                           \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     MIDAS_UNREACHABLE                                                                                             \
@@ -89,12 +132,12 @@ std::string_view syscall_name(unsigned long long syscall_number);
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
     const auto todo_msg_hdr =                                                                                     \
-        fmt::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                      \
+      fmt::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                        \
     const auto todo_msg = fmt::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
     fmt::println("{}", todo_msg_hdr);                                                                             \
     fmt::println("{}", todo_msg);                                                                                 \
-    logging::get_logging()->log("mdb", todo_msg_hdr);                                                             \
-    logging::get_logging()->log("mdb", todo_msg);                                                                 \
+    logging::get_logging()->log(logging::Channel::core, todo_msg_hdr);                                            \
+    logging::get_logging()->log(logging::Channel::core, todo_msg);                                                \
     logging::get_logging()->on_abort();                                                                           \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     MIDAS_UNREACHABLE                                                                                             \
@@ -219,10 +262,11 @@ public:
   static constexpr unsigned long long
   type_size() noexcept
   {
-    if constexpr (std::is_void_v<T>)
+    if constexpr (std::is_void_v<T>) {
       return 1;
-    else
+    } else {
       return sizeof(T);
+    }
   }
 
   /**
@@ -354,15 +398,15 @@ unwrap(const std::variant<Args...> &variant) noexcept
 {
   const T *r = nullptr;
   std::visit(
-      [&r](auto &&item) {
-        using var_t = ActualType<decltype(item)>;
-        if constexpr (std::is_same_v<var_t, T>) {
-          r = &item;
-        } else {
-          PANIC("Unexpected type in variant");
-        }
-      },
-      variant);
+    [&r](auto &&item) {
+      using var_t = ActualType<decltype(item)>;
+      if constexpr (std::is_same_v<var_t, T>) {
+        r = &item;
+      } else {
+        PANIC("Unexpected type in variant");
+      }
+    },
+    variant);
   return r;
 }
 
@@ -372,15 +416,15 @@ maybe_unwrap(const std::variant<Args...> &variant) noexcept
 {
   const T *r = nullptr;
   std::visit(
-      [&r](auto &&item) {
-        using var_t = ActualType<decltype(item)>;
-        if constexpr (std::is_same_v<var_t, T>) {
-          r = &item;
-        } else {
-          r = nullptr;
-        }
-      },
-      variant);
+    [&r](auto &&item) {
+      using var_t = ActualType<decltype(item)>;
+      if constexpr (std::is_same_v<var_t, T>) {
+        r = &item;
+      } else {
+        r = nullptr;
+      }
+    },
+    variant);
   return r;
 }
 
@@ -397,10 +441,11 @@ template <std::integral Value>
 constexpr Option<Value>
 to_integral(std::string_view s)
 {
-  if (Value value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{})
+  if (Value value; std::from_chars(s.data(), s.data() + s.size(), value).ec == std::errc{}) {
     return value;
-  else
+  } else {
     return std::nullopt;
+  }
 }
 
 Option<AddrPtr> to_addr(std::string_view s) noexcept;
@@ -431,8 +476,9 @@ constexpr auto
 find(std::vector<T> &vec, const T &item, Predicate &&p) noexcept
 {
   for (auto it = std::cbegin(vec); it != std::end(vec); ++it) {
-    if (p(*it, item))
+    if (p(*it, item)) {
       return it;
+    }
   }
   return std::cend(vec);
 }
@@ -442,8 +488,9 @@ constexpr auto
 map(std::vector<T> &vec, Predicate &&p, Transform &&transform) noexcept -> std::optional<U>
 {
   for (auto it = std::cbegin(vec); it != std::end(vec); ++it) {
-    if (p(*it))
+    if (p(*it)) {
       return transform(*it);
+    }
   }
   return std::nullopt;
 }
@@ -478,26 +525,32 @@ keep_range(Container &c, unsigned long start_idx, unsigned long end_idx) noexcep
   c.erase(c.begin(), start);
 }
 
-enum class RegDescriptor : unsigned char
+enum class X86Register : u8
 {
-#define REGISTER(Name, Value) Name = Value,
+#define REG(Name, Value) Name = Value,
 #define REG_DESC
 #include "./defs/registers.defs"
 #undef REG_DESC
-#undef REGISTER
+#undef REG
 };
 
-#define REGISTER(Name, Value)                                                                                     \
-  case Name:                                                                                                      \
-    return #Name;
 static constexpr std::string_view
-reg_name(RegDescriptor reg) noexcept
+reg_name(X86Register reg) noexcept
 {
-  using enum RegDescriptor;
+  using enum X86Register;
   switch (reg) {
 #define REG_DESC
+#define REG(Name, Value)                                                                                          \
+  case Name:                                                                                                      \
+    return #Name;
 #include "./defs/registers.defs"
+#undef REG
 #undef REG_DESC
   }
 }
-#undef REGISTER
+
+template <typename... Ts> struct Match : Ts...
+{
+  using Ts::operator()...;
+};
+template <class... Ts> Match(Ts...) -> Match<Ts...>;

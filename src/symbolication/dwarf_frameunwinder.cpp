@@ -100,7 +100,7 @@ CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFile
 u64
 CFAStateMachine::compute_expression(std::span<const u8> bytes) noexcept
 {
-  DLOG("eh", "compute_expression of dwarf expression of {} bytes", bytes.size());
+  DBGLOG(eh, "compute_expression of dwarf expression of {} bytes", bytes.size());
   auto intepreter = ExprByteCodeInterpreter{-1, tc, task, bytes};
   return intepreter.run();
 }
@@ -115,8 +115,8 @@ CFAStateMachine::resolve_frame_regs(const RegisterValues &frame_live_registers) 
   } else {
     const auto res = static_cast<i64>(frame_live_registers[cfa.reg.number]) + cfa.reg.offset;
     cfa_value = static_cast<u64>(res);
-    DLOG("eh", "CFA=0x{:x} set from reg {} with value 0x{:x}", cfa_value, cfa.reg.number,
-         frame_live_registers[cfa.reg.number]);
+    DBGLOG(eh, "CFA=0x{:x} set from reg {} with value 0x{:x}", cfa_value, cfa.reg.number,
+           frame_live_registers[cfa.reg.number]);
   }
 
   for (auto i = 0u; i < nxt_frame_regs.size(); ++i) {
@@ -371,13 +371,15 @@ elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
   while (reader.has_more()) {
     auto len = reader.read_value<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
-    if (len == 0)
+    if (len == 0) {
       return {cie_count, fde_count};
+    }
     auto id = reader.read_value<u32>();
-    if (id == 0)
+    if (id == 0) {
       ++cie_count;
-    else
+    } else {
       ++fde_count;
+    }
     reader.skip(len - 4);
   }
   return {cie_count, fde_count};
@@ -391,14 +393,16 @@ dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept
   while (reader.has_more()) {
     auto len = reader.read_value<u32>();
     // apparently .debug_frame does *not* have a 0-length entry as a terminator. Great. Amazing.
-    if (len == 0)
+    if (len == 0) {
       return {cie_count, fde_count};
+    }
     auto id = reader.read_value<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
-    if (id == 0xff'ff'ff'ff)
+    if (id == 0xff'ff'ff'ff) {
       ++cie_count;
-    else
+    } else {
       ++fde_count;
+    }
     reader.skip(len - 4);
   }
   return {cie_count, fde_count};
@@ -451,7 +455,7 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
       break;
     }
   } else {
-    DLOG("eh", "Unsupported LSDA application encoding: 0x{:x}", std::to_underlying(cie->lsda_encoding.loc_fmt));
+    DBGLOG(eh, "Unsupported LSDA application encoding: 0x{:x}", std::to_underlying(cie->lsda_encoding.loc_fmt));
   }
   PANIC("reading lsda failed");
 }
@@ -461,8 +465,8 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
 {
   ASSERT(eh_frame != nullptr, "Expected a .eh_frame section!");
   DwarfBinaryReader reader{objfile->elf, eh_frame->m_section_ptr, eh_frame->size()};
-  DLOG("eh", "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->path->c_str(),
-       reader.remaining_size(), eh_frame->file_offset);
+  DBGLOG(eh, "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->path->c_str(),
+         reader.remaining_size(), eh_frame->file_offset);
   auto unwinder_db = std::make_unique<Unwinder>(objfile);
 
   using CieId = u64;
@@ -499,7 +503,7 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
       auto &cie = unwinder_db->elf_eh_cies[cie_idx];
       auto initial_loc = reader.read_value<i32>();
       if (initial_loc > 0) {
-        DLOG("mdb", "[eh]: expected initial loc to be < 0, but was 0x{:x}", initial_loc);
+        DBGLOG(core, "[eh]: expected initial loc to be < 0, but was 0x{:x}", initial_loc);
       }
       AddrPtr begin = (eh_frame->address + reader.bytes_read() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.read_value<u32>();
@@ -519,14 +523,14 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinder_db->elf_eh_unwind_infos.push_back(UnwindInfo{
-          .start = begin,
-          .end = end,
-          .code_align = static_cast<u8>(cie.code_alignment_factor),
-          .data_align = static_cast<i8>(cie.data_alignment_factor),
-          .aug_data_len = aug_data_length,
-          .lsda = lsda,
-          .cie = &cie,
-          .fde_insts = ins,
+        .start = begin,
+        .end = end,
+        .code_align = static_cast<u8>(cie.code_alignment_factor),
+        .data_align = static_cast<i8>(cie.data_alignment_factor),
+        .aug_data_len = aug_data_length,
+        .lsda = lsda,
+        .cie = &cie,
+        .fde_insts = ins,
       });
     }
   }
@@ -588,19 +592,19 @@ parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_fr
       auto ins = reader.get_span(bytes_remaining);
       ASSERT(reader.bytes_read() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
              reader.bytes_read() - current_offset, entry_length);
-      DLOG("mdb", "Unwind Info for {} .. {}; CIE instruction count {}; FDE instruction count: {}", begin, end,
-           cie.instructions.size(), ins.size());
+      DBGLOG(core, "Unwind Info for {} .. {}; CIE instruction count {}; FDE instruction count: {}", begin, end,
+             cie.instructions.size(), ins.size());
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinder_db->dwarf_unwind_infos.push_back(UnwindInfo{
-          .start = begin,
-          .end = end,
-          .code_align = static_cast<u8>(cie.code_alignment_factor),
-          .data_align = static_cast<i8>(cie.data_alignment_factor),
-          .aug_data_len = aug_data_length,
-          .lsda = lsda,
-          .cie = &cie,
-          .fde_insts = ins,
+        .start = begin,
+        .end = end,
+        .code_align = static_cast<u8>(cie.code_alignment_factor),
+        .data_align = static_cast<i8>(cie.data_alignment_factor),
+        .aug_data_len = aug_data_length,
+        .lsda = lsda,
+        .cie = &cie,
+        .fde_insts = ins,
       });
     }
   }
@@ -699,13 +703,15 @@ Unwinder::get_unwind_info(AddrPtr pc) const noexcept
   // todo(simon): once again, better searching can be done here, particularly binary search, if the elements are
   // ordered
   for (const auto &u : elf_eh_unwind_infos) {
-    if (pc >= u.start && pc < u.end)
+    if (pc >= u.start && pc < u.end) {
       return &u;
+    }
   }
 
   for (const auto &u : dwarf_unwind_infos) {
-    if (pc >= u.start && pc < u.end)
+    if (pc >= u.start && pc < u.end) {
       return &u;
+    }
   }
   return nullptr;
 }

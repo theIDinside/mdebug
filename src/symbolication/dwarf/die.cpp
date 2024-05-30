@@ -1,5 +1,6 @@
 #include "die.h"
 #include "debug_info_reader.h"
+#include "utils/util.h"
 #include <string_view>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
@@ -18,23 +19,26 @@ namespace sym::dw {
 const DieMetaData *
 DieMetaData::parent() const noexcept
 {
-  if (parent_id == 0)
+  if (parent_id == 0) {
     return nullptr;
+  }
   return (this - parent_id);
 }
 const DieMetaData *
 DieMetaData::sibling() const noexcept
 {
-  if (next_sibling == 0)
+  if (next_sibling == 0) {
     return nullptr;
+  }
   return (this + next_sibling);
 }
 
 const DieMetaData *
 DieMetaData::children() const noexcept
 {
-  if (!has_children)
+  if (!has_children) {
     return nullptr;
+  }
   return this + 1;
 }
 
@@ -42,8 +46,9 @@ bool
 DieMetaData::is_super_scope_variable() const noexcept
 {
   using enum DwarfTag;
-  if (tag != DW_TAG_variable)
+  if (tag != DW_TAG_variable) {
     return false;
+  }
 
   auto parent_die = parent();
   while (parent_die != nullptr) {
@@ -189,8 +194,9 @@ UnitData::get_die(u64 offset) noexcept
 {
   load_dies();
   auto it = std::ranges::find_if(dies, [&](const dw::DieMetaData &die) { return die.section_offset == offset; });
-  if (it == std::end(dies))
+  if (it == std::end(dies)) {
     return nullptr;
+  }
   return &(*it);
 }
 
@@ -231,8 +237,9 @@ void
 UnitData::load_dies() noexcept
 {
   std::lock_guard lock(load_dies_mutex);
-  if (fully_loaded)
+  if (fully_loaded) {
     return;
+  }
   fully_loaded = true;
   UnitReader reader{this};
 
@@ -260,8 +267,9 @@ UnitData::load_dies() noexcept
     ASSERT(abbr_code <= abbreviations.size(), "Abbreviation code {} is invalid. Dies processed={}", abbr_code,
            dies.size());
     if (abbr_code == 0) {
-      if (parent_node.empty())
+      if (parent_node.empty()) {
         break;
+      }
       new_level = false;
       parent_node.pop_back();
       sibling_node.pop_back();
@@ -276,8 +284,8 @@ UnitData::load_dies() noexcept
     }
 
     auto &abbreviation = abbreviations[abbr_code - 1];
-    auto new_entry = DieMetaData::create_die(die_sec_offset, abbreviation, dies.size() - parent_node.back(),
-                                             uleb_sz, NONE_INDEX);
+    auto new_entry =
+      DieMetaData::create_die(die_sec_offset, abbreviation, dies.size() - parent_node.back(), uleb_sz, NONE_INDEX);
 
     reader.skip_attributes(abbreviation.attributes);
     new_level = abbreviation.has_children;
@@ -330,7 +338,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
       } else {
         abbr.IMPLICIT_CONST_INDEX = -1;
       }
-      if (std::to_underlying(abbr.name) == 0) {
+      if (utils::castenum(abbr.name) == 0) {
         break;
       }
       info.attributes.push_back(abbr);
@@ -346,9 +354,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
 std::vector<UnitHeader>
 read_unit_headers(ObjectFile *obj) noexcept
 {
-  if (DwarfLog) {
-    LOG("dwarf", "Reading {} obfile compilation unit headers", obj->path->c_str());
-  }
+  CDLOG(DwarfLog, dwarf, "Reading {} obfile compilation unit headers", obj->path->c_str());
   const auto dbg_info = obj->elf->debug_info;
   std::vector<UnitHeader> result{};
   DwarfBinaryReader reader{obj->elf, dbg_info};
@@ -406,8 +412,7 @@ read_unit_headers(ObjectFile *obj) noexcept
            "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,
            reader.bytes_read());
   }
-  if (DwarfLog)
-    LOG("dwarf", "Read {} compilation unit headers", result.size());
+  CDLOG(DwarfLog, dwarf, "Read {} compilation unit headers", result.size());
   return result;
 }
 } // namespace sym::dw

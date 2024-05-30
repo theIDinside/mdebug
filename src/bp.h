@@ -13,12 +13,17 @@ struct TaskInfo;
 struct ObjectFile;
 class SymbolFile;
 
+namespace tc {
+class TraceeCommandInterface;
+};
+
 enum class BreakpointRequestKind : u8
 {
   source,
   function,
   instruction,
   data,
+  exception,
 };
 
 enum class LocationUserKind : u8
@@ -66,9 +71,9 @@ template <> struct std::hash<SourceBreakpointSpec>
     const auto u32_hasher = std::hash<u32>{};
 
     const auto line_col_hash =
-        m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
-            .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
-            .value();
+      m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
+        .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
+        .value();
 
     if (m.condition && m.log_message) {
       return line_col_hash ^ std::hash<std::string_view>{}(m.condition.value()) ^
@@ -136,15 +141,16 @@ template <> struct std::hash<InstructionBreakpointSpec>
 };
 
 using UserBpSpec =
-    std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
+  std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
 
-struct LocWriteError
+struct UserRequestedBreakpoint
 {
-  int error_no;
-  AddrPtr requested_address;
+  u32 spec_key;
+  BreakpointRequestKind spec_type;
+  std::vector<u32> user_ids{};
 };
 
-struct LocReadError
+struct MemoryError
 {
   int error_no;
   AddrPtr requested_address;
@@ -155,7 +161,7 @@ struct ResolveError
   UserBpSpec *spec;
 };
 
-using BpErr = std::variant<LocWriteError, LocReadError, ResolveError>;
+using BpErr = std::variant<MemoryError, ResolveError>;
 
 namespace fmt {
 template <> struct formatter<std::pair<std::string, SourceBreakpointSpec>>
@@ -249,19 +255,19 @@ template <> struct formatter<UserBpSpec>
   {
     auto iterator = ctx.out();
     std::visit(
-        [&iterator](const auto &var) {
-          using T = std::remove_cvref_t<decltype(var)>;
-          if constexpr (std::is_same_v<T, std::pair<std::string, SourceBreakpointSpec>>) {
-            fmt::format_to(iterator, "{}", var);
-          } else if constexpr (std::is_same_v<T, FunctionBreakpointSpec>) {
-            fmt::format_to(iterator, "{}", var);
-          } else if constexpr (std::is_same_v<T, InstructionBreakpointSpec>) {
-            fmt::format_to(iterator, "{}", var);
-          } else {
-            static_assert(always_false<T>, "Unhandled breakpoint spec type");
-          }
-        },
-        spec);
+      [&iterator](const auto &var) {
+        using T = std::remove_cvref_t<decltype(var)>;
+        if constexpr (std::is_same_v<T, std::pair<std::string, SourceBreakpointSpec>>) {
+          fmt::format_to(iterator, "{}", var);
+        } else if constexpr (std::is_same_v<T, FunctionBreakpointSpec>) {
+          fmt::format_to(iterator, "{}", var);
+        } else if constexpr (std::is_same_v<T, InstructionBreakpointSpec>) {
+          fmt::format_to(iterator, "{}", var);
+        } else {
+          static_assert(always_false<T>, "Unhandled breakpoint spec type");
+        }
+      },
+      spec);
     return iterator;
   }
 };
@@ -315,31 +321,30 @@ struct LocationSourceInfo
 
 class BreakpointLocation
 {
-  friend class UserBreakpoint;
-
   AddrPtr addr;
-  u8 original_byte;
   bool installed{true};
   std::vector<UserBreakpoint *> users{};
   std::unique_ptr<LocationSourceInfo> source_info;
 
-  bool remove_user(NonNullPtr<UserBreakpoint> bp) noexcept;
-
 public:
+  Immutable<u8> original_byte;
   using shr_ptr = std::shared_ptr<BreakpointLocation>;
-  static std::shared_ptr<BreakpointLocation> CreateLocation(AddrPtr addr, u8 original) noexcept;
-  static std::shared_ptr<BreakpointLocation>
-  CreateLocationWithSource(AddrPtr addr, u8 original, std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
+  static shr_ptr CreateLocation(AddrPtr addr, u8 original) noexcept;
+  static shr_ptr CreateLocationWithSource(AddrPtr addr, u8 original,
+                                          std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
 
   explicit BreakpointLocation(AddrPtr addr, u8 original) noexcept;
   explicit BreakpointLocation(AddrPtr addr, u8 original, std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
   ~BreakpointLocation() noexcept;
 
-  void enable(Tid tid) noexcept;
-  void disable(Tid tid) noexcept;
-  void add_user(UserBreakpoint &user) noexcept;
+  bool remove_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &bp) noexcept;
+  void enable(tc::TraceeCommandInterface &tc) noexcept;
+  void disable(tc::TraceeCommandInterface &tc) noexcept;
+  bool is_installed() const noexcept;
+  void add_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &user) noexcept;
   bool any_user_active() const noexcept;
   std::vector<u32> loc_users() const noexcept;
+  const LocationSourceInfo *get_source() const noexcept;
 
   constexpr AddrPtr
   address() const noexcept
@@ -369,7 +374,7 @@ struct RequiredUserParameters
 class UserBreakpoint
 {
 private:
-  bool enabled;
+  bool enabled_by_user;
   std::shared_ptr<BreakpointLocation> bp;
   u32 on_hit_count{0};
   std::optional<StopCondition> stop_condition;
@@ -380,24 +385,27 @@ public:
   static constexpr auto FUNCTION_BREAKPOINT = 1;
   static constexpr auto INSTRUCTION_BREAKPOINT = 2;
 
+  // The actual interface that sets a breakpoint "in software" of the tracee. Due to the nature of the current
+  // design we must carry this reference in `UserBreakpoint`, because on destruction of one (`~UserBreakpoint`), we
+  // may be the last user of a `BreakpointLocation` at which point we want to unset it in the tracee. However, we
+  // don't do no manual deletion anywhere, so it can/will happen when std::shared_ptr<UserBreakpoint> gets dropped.
+  // Yay? Anyway, it's "just" 8 bytes.
   Immutable<u32> id;
   Immutable<Tid> tid;
   Immutable<LocationUserKind> kind;
   Immutable<u32> hit_count;
+  Immutable<u32> spec_key{};
 
   explicit UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                           std::optional<StopCondition> &&cond) noexcept;
   virtual ~UserBreakpoint() noexcept;
+  void pre_destruction(tc::TraceeCommandInterface &ctrl) noexcept;
 
-  // Removes the breakpoint location from this user breakpoint - essentially nullifying the object as it no longer
-  // actually represents a live breakpoint no more.
-
-  void remove_location() noexcept;
   std::shared_ptr<BreakpointLocation> bp_location() noexcept;
   void increment_count() noexcept;
   bool is_enabled() noexcept;
-  void enable() noexcept;
-  void disable() noexcept;
+  void enable(tc::TraceeCommandInterface &ctrl) noexcept;
+  void disable(tc::TraceeCommandInterface &ctrl) noexcept;
   Tid get_tid() noexcept;
   bool check_should_stop(TaskInfo &t) noexcept;
   std::optional<AddrPtr> address() const noexcept;
@@ -491,8 +499,6 @@ public:
 
 private:
   TraceeController &tc;
-  BpId current_bp_id{0};
-  u32 current_pending{0};
   std::unordered_map<BpId, std::shared_ptr<UserBreakpoint>> user_breakpoints{};
   std::unordered_map<AddrPtr, std::vector<BpId>> bps_at_loc{};
   std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> source_breakpoints{};
@@ -507,7 +513,7 @@ public:
   std::unordered_map<FunctionBreakpointSpec, std::vector<BpId>> fn_breakpoints{};
   std::unordered_map<InstructionBreakpointSpec, BpId> instruction_breakpoints{};
 
-  void add_bp_location(UserBreakpoint *updated_bp) noexcept;
+  void add_bp_location(const UserBreakpoint &updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;
   std::shared_ptr<BreakpointLocation> location_at(AddrPtr address) noexcept;
@@ -525,9 +531,9 @@ public:
                   Tid tid, UserBpArgs &&...args)
   {
     auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
-        RequiredUserParameters{
-            .tid = tid, .id = new_id(), .loc_or_err = std::move(loc_or_err), .times_to_hit = {}, .tc = tc},
-        args...);
+      RequiredUserParameters{
+        .tid = tid, .id = new_id(), .loc_or_err = std::move(loc_or_err), .times_to_hit = {}, .tc = tc},
+      args...);
     add_user(user);
 
     return user;
