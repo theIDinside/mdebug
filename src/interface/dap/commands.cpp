@@ -3,6 +3,7 @@
 #include "common.h"
 #include "events/event.h"
 #include "interface/attach_args.h"
+#include "interface/dap/events.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "interface/ui_command.h"
 #include "parse_buffer.h"
@@ -64,20 +65,19 @@ ErrorResponse::serialize(int seq) const noexcept
 {
   if (short_message && message) {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}", body: {{ error: {} }} }})",
-      seq, response_seq, command, *short_message, *message);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}",body:{{error:{}}}}})",
+      seq, request_seq, command, *short_message, *message);
   } else if (short_message && !message) {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}" }})",
-      seq, response_seq, command, *short_message);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})", seq,
+      request_seq, command, *short_message);
   } else if (!short_message && message) {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", body: {{ error: {} }} }})",
-      seq, response_seq, command, *message);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}",body:{{error:{}}}}})", seq,
+      request_seq, command, *message);
   } else {
-    return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}" }})", seq,
-      response_seq, command);
+    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}"}})", seq,
+                       request_seq, command);
   }
 }
 
@@ -85,13 +85,12 @@ std::string
 PauseResponse::serialize(int seq) const noexcept
 {
   if (success) {
-    return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "pause" }})", seq,
-      response_seq);
+    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"pause"}})", seq,
+                       request_seq);
   } else {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "pause", "message": "task was not running" }})",
-      seq, response_seq);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
+      seq, request_seq);
   }
 }
 
@@ -113,12 +112,12 @@ ContinueResponse::serialize(int seq) const noexcept
 
   if (success) {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "continue", "body": {{ "allThreadsContinued": {} }} }})",
-      seq, response_seq, continue_all);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
+      seq, request_seq, continue_all);
   } else {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "continue", "message": "notStopped" }})",
-      seq, response_seq);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
+      seq, request_seq);
   }
 }
 
@@ -157,13 +156,12 @@ std::string
 NextResponse::serialize(int seq) const noexcept
 {
   if (success) {
-    return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "next" }})", seq,
-      response_seq);
+    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"next"}})", seq,
+                       request_seq);
   } else {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "next", "message": "notStopped" }})",
-      seq, response_seq);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
+      seq, request_seq);
   }
 }
 
@@ -196,13 +194,12 @@ std::string
 StepOutResponse::serialize(int seq) const noexcept
 {
   if (success) {
-    return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "stepOut" }})", seq,
-      response_seq);
+    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepOut"}})",
+                       seq, request_seq);
   } else {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "stepOut", "message": "notStopped" }})",
-      seq, response_seq);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
+      seq, request_seq);
   }
 }
 
@@ -237,31 +234,32 @@ SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cm
 std::string
 SetBreakpointsResponse::serialize(int seq) const noexcept
 {
-  if (success) {
-    std::vector<std::string> serialized_bkpts{};
-    serialized_bkpts.reserve(breakpoints.size());
-    for (auto &bp : breakpoints) {
-      serialized_bkpts.push_back(bp.serialize());
-    }
-    switch (this->type) {
-    case BreakpointRequestKind::source:
-      return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
-        seq, response_seq, fmt::join(serialized_bkpts, ","));
-    case BreakpointRequestKind::function:
-      return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setFunctionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
-        seq, response_seq, fmt::join(serialized_bkpts, ","));
-    case BreakpointRequestKind::instruction:
-      return fmt::format(
-        R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "setInstructionBreakpoints", "body": {{ "breakpoints": [{}] }} }})",
-        seq, response_seq, fmt::join(serialized_bkpts, ","));
-      break;
-    default:
-      PANIC("DAP doesn't expect Tracer breakpoints");
-    }
-  } else {
-    TODO("Unsuccessful set instruction breakpoints event response handling");
+  std::vector<std::string> serialized_bkpts{};
+  serialized_bkpts.reserve(breakpoints.size());
+  for (auto &bp : breakpoints) {
+    serialized_bkpts.push_back(bp.serialize());
+  }
+  switch (this->type) {
+  case BreakpointRequestKind::source:
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, fmt::join(serialized_bkpts, ","));
+  case BreakpointRequestKind::function:
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, fmt::join(serialized_bkpts, ","));
+  case BreakpointRequestKind::instruction:
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, fmt::join(serialized_bkpts, ","));
+    break;
+  case BreakpointRequestKind::exception:
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, success, fmt::join(serialized_bkpts, ","));
+    break;
+  default:
+    PANIC("DAP doesn't expect Tracer breakpoints");
   }
 }
 
@@ -276,7 +274,11 @@ UIResultPtr
 SetBreakpoints::execute(Tracer *tracer) noexcept
 {
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
-  auto target = tracer->get_current();
+  auto target = tracer->maybe_get_current();
+  if (!target) {
+    return res;
+  }
+
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
   const std::string file = args["source"]["path"];
@@ -287,6 +289,7 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
     src_bps.insert(SourceBreakpointSpec{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
                                         get<std::string>(src_bp, "logMessage")});
   }
+
   target->set_source_breakpoints(file, src_bps);
 
   using BP = ui::dap::Breakpoint;
@@ -298,6 +301,21 @@ SetBreakpoints::execute(Tracer *tracer) noexcept
     }
   }
 
+  return res;
+}
+
+SetExceptionBreakpoints::SetExceptionBreakpoints(std::uint64_t sequence, nlohmann::json &&args) noexcept
+    : ui::UICommand{sequence}, args(std::move(args))
+{
+}
+
+UIResultPtr
+SetExceptionBreakpoints::execute(Tracer *tracer) noexcept
+{
+  for (const auto &e : args->at("filters")) {
+    DBGLOG(core, "we have a filter sent to us.. for some fucking reason");
+  }
+  auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::exception};
   return res;
 }
 
@@ -378,8 +396,8 @@ ReadMemoryResponse::serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "readMemory", "body": {{ "address": "{}", "unreadableBytes": {}, "data": "{}" }} }})",
-      seq, response_seq, first_readable_address, unreadable_bytes, data_base64);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
+      seq, request_seq, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
   }
@@ -410,8 +428,8 @@ std::string
 ConfigurationDoneResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "configurationDone" }})",
-    seq, response_seq);
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"configurationDone"}})", seq,
+    request_seq);
 }
 
 UIResultPtr
@@ -444,9 +462,8 @@ Initialize::execute(Tracer *) noexcept
 std::string
 DisconnectResponse::serialize(int seq) const noexcept
 {
-  return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "disconnect" }})", seq,
-    response_seq);
+  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disconnect"}})",
+                     seq, request_seq);
 }
 
 Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
@@ -467,12 +484,20 @@ InitializeResponse::serialize(int seq) const noexcept
 
   nlohmann::json cfg;
   auto &cfg_body = cfg["body"];
+  std::array<nlohmann::json, 3> arrs{};
+  arrs[0] =
+    nlohmann::json::object({{"filter", "throw"}, {"label", "Thrown exceptions"}, {"supportsCondition", false}});
+  arrs[1] = nlohmann::json::object(
+    {{"filter", "rethrow"}, {"label", "Re-thrown exceptions"}, {"supportsCondition", false}});
+  arrs[2] =
+    nlohmann::json::object({{"filter", "catch"}, {"label", "Caught exceptions"}, {"supportsCondition", false}});
+
   cfg_body["supportsConfigurationDoneRequest"] = true;
   cfg_body["supportsFunctionBreakpoints"] = true;
   cfg_body["supportsConditionalBreakpoints"] = false;
   cfg_body["supportsHitConditionalBreakpoints"] = true;
   cfg_body["supportsEvaluateForHovers"] = false;
-  // cfg_body["exceptionBreakpointFilters"] = []
+  // cfg_body["exceptionBreakpointFilters"] = std::array<nlohmann::json, 0>{};
   cfg_body["supportsStepBack"] = false;
   cfg_body["supportsSetVariable"] = false;
   cfg_body["supportsRestartFrame"] = false;
@@ -486,13 +511,14 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsRestartRequest"] = false;
   cfg_body["supportsExceptionOptions"] = false;
   cfg_body["supportsValueFormattingOptions"] = true;
-  cfg_body["supportsExceptionInfoRequest"] = true;
+  cfg_body["supportsExceptionInfoRequest"] = false;
   cfg_body["supportTerminateDebuggee"] = true;
   cfg_body["supportSuspendDebuggee"] = false;
   cfg_body["supportsDelayedStackTraceLoading"] = false;
   cfg_body["supportsLoadedSourcesRequest"] = false;
   cfg_body["supportsLogPoints"] = false;
   cfg_body["supportsTerminateThreadsRequest"] = true;
+  cfg_body["supportsVariableType"] = true;
   cfg_body["supportsSetExpression"] = false;
   cfg_body["supportsTerminateRequest"] = true;
   cfg_body["supportsDataBreakpoints"] = false;
@@ -500,45 +526,44 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsWriteMemoryRequest"] = false;
   cfg_body["supportsDisassembleRequest"] = true;
   cfg_body["supportsCancelRequest"] = false;
-  cfg_body["supportsBreakpointLocationsRequest"] = true;
-  cfg_body["supportsClipboardContext"] = false;
+  cfg_body["supportsBreakpointLocationsRequest"] = false;
   cfg_body["supportsSteppingGranularity"] = true;
   cfg_body["supportsInstructionBreakpoints"] = true;
   cfg_body["supportsExceptionFilterOptions"] = false;
-  cfg_body["supportsSingleThreadExecutionRequests"] = false;
+  cfg_body["supportsSingleThreadExecutionRequests"] = true;
+
+  Tracer::Instance->post_event(new InitializedEvent{});
 
   return fmt::format(
-    R"({{ "response_seq": {}, "type": "response", "success": true, "command": "initialize", "body": {} }})", seq,
-    cfg_body.dump());
+    R"({{"seq":0,"request_seq":{},"type":"response","success":true,"command":"initialize","body":{}}})",
+    request_seq, cfg_body.dump());
 }
 
 std::string
 LaunchResponse::serialize(int seq) const noexcept
 {
-  return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "launch" }})", seq,
-    response_seq);
+  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"launch"}})", seq,
+                     request_seq);
 }
 
-Launch::Launch(std::uint64_t seq, bool stopAtEntry, Path &&program,
+Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
                std::vector<std::string> &&program_args) noexcept
-    : UICommand(seq), stopAtEntry(stopAtEntry), program(std::move(program)), program_args(std::move(program_args))
+    : UICommand(seq), stopOnEntry(stopOnEntry), program(std::move(program)), program_args(std::move(program_args))
 {
 }
 
 UIResultPtr
 Launch::execute(Tracer *tracer) noexcept
 {
-  tracer->launch(stopAtEntry, std::move(program), std::move(program_args));
+  tracer->launch(stopOnEntry, std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
 }
 
 std::string
 AttachResponse::serialize(int seq) const noexcept
 {
-  return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "attach" }})", seq,
-    response_seq);
+  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"attach"}})", seq,
+                     request_seq);
 }
 
 Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), attachArgs(std::move(args)) {}
@@ -553,9 +578,8 @@ Attach::execute(Tracer *tracer) noexcept
 std::string
 TerminateResponse::serialize(int seq) const noexcept
 {
-  return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "terminate" }})", seq,
-    response_seq);
+  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"terminate"}})",
+                     seq, request_seq);
 }
 
 UIResultPtr
@@ -569,8 +593,8 @@ std::string
 ThreadsResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "threads", "body": {{ "threads": [{}] }} }})",
-    seq, response_seq, fmt::join(threads, ","));
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
+    seq, request_seq, fmt::join(threads, ","));
 }
 
 UIResultPtr
@@ -606,8 +630,8 @@ std::string
 StackTraceResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "stackTrace", "body": {{ "stackFrames": [{}] }} }})",
-    seq, response_seq, fmt::join(stack_frames, ","));
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
+    seq, request_seq, fmt::join(stack_frames, ","));
 }
 
 constexpr bool
@@ -678,8 +702,8 @@ std::string
 ScopesResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "scopes", "body": {{ "scopes": [{}] }} }})",
-    seq, response_seq, fmt::join(scopes, ","));
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
+    seq, request_seq, fmt::join(scopes, ","));
 }
 
 ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> scopes) noexcept
@@ -746,8 +770,8 @@ std::string
 DisassembleResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "disassemble", "body": {{ "instructions": [{}] }} }})",
-    seq, response_seq, fmt::join(instructions, ","));
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[{}]}}}})",
+    seq, request_seq, fmt::join(instructions, ","));
 }
 
 Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
@@ -805,8 +829,8 @@ VariablesResponse::serialize(int seq) const noexcept
 {
   if (variables.empty()) {
     return fmt::format(
-      R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "variables", "body": {{ "variables": [] }} }})",
-      seq, response_seq);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
+      seq, request_seq);
   }
   std::string variables_contents{};
   auto it = std::back_inserter(variables_contents);
@@ -817,8 +841,8 @@ VariablesResponse::serialize(int seq) const noexcept
         it = fmt::format_to(it, "{},", *opt);
       } else {
         return fmt::format(
-          R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "variables", "message": "Could not retrieve value for {}" }})",
-          seq, response_seq, v.variable_value->name);
+          R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"Couldnotretrievevaluefor{}"}})",
+          seq, request_seq, v.variable_value->name);
       }
     } else {
       ASSERT(v.variable_value->type()->is_reference(), "Add visualizer & resolver for T* types. It will look more "
@@ -838,8 +862,8 @@ VariablesResponse::serialize(int seq) const noexcept
 
   variables_contents.pop_back();
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": true, "command": "variables", "body": {{ "variables": [{}] }} }})",
-    seq, response_seq, variables_contents);
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
+    seq, request_seq, variables_contents);
 }
 
 InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
@@ -897,8 +921,8 @@ InvalidArgsResponse::serialize(int seq) const noexcept
   std::string_view msg{message.begin(), message.begin() + std::distance(message.begin(), it)};
 
   return fmt::format(
-    R"({{ "seq": {}, "response_seq": {}, "type": "response", "success": false, "command": "{}", "message": "{}" }})",
-    seq, response_seq, command, msg);
+    R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})", seq,
+    request_seq, command, msg);
 }
 
 #define IfInvalidArgsReturn(type)                                                                                 \
@@ -913,6 +937,8 @@ parse_command(std::string &&packet) noexcept
 
   auto obj = nlohmann::json::parse(packet, nullptr, false);
   std::string_view cmd_name;
+  const std::string req = obj.dump();
+  DBGLOG(core, "parsed request: {}", req);
   obj["command"].get_to(cmd_name);
   ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
   const u64 seq = obj["seq"];
@@ -986,8 +1012,8 @@ parse_command(std::string &&packet) noexcept
     if (args.contains("args")) {
       prog_args = args.at("args");
     }
-    const bool stopAtEntry = args.contains("stopAtEntry");
-    return new Launch{seq, stopAtEntry, std::move(path), std::move(prog_args)};
+    const bool stopOnEntry = args.contains("stopOnEntry");
+    return new Launch{seq, stopOnEntry, std::move(path), std::move(prog_args)};
   }
   case CommandType::LoadedSources:
     TODO("Command::LoadedSources");
@@ -1043,8 +1069,10 @@ parse_command(std::string &&packet) noexcept
     return new SetBreakpoints{seq, std::move(args)};
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
-  case CommandType::SetExceptionBreakpoints:
-    TODO("Command::SetExceptionBreakpoints");
+  case CommandType::SetExceptionBreakpoints: {
+    IfInvalidArgsReturn(SetExceptionBreakpoints);
+    return new SetExceptionBreakpoints{seq, std::move(args)};
+  }
   case CommandType::SetExpression:
     TODO("Command::SetExpression");
   case CommandType::SetFunctionBreakpoints:

@@ -23,6 +23,7 @@ enum class BreakpointRequestKind : u8
   function,
   instruction,
   data,
+  exception,
 };
 
 enum class LocationUserKind : u8
@@ -141,6 +142,13 @@ template <> struct std::hash<InstructionBreakpointSpec>
 
 using UserBpSpec =
   std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
+
+struct UserRequestedBreakpoint
+{
+  u32 spec_key;
+  BreakpointRequestKind spec_type;
+  std::vector<u32> user_ids{};
+};
 
 struct MemoryError
 {
@@ -386,6 +394,7 @@ public:
   Immutable<Tid> tid;
   Immutable<LocationUserKind> kind;
   Immutable<u32> hit_count;
+  Immutable<u32> spec_key{};
 
   explicit UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                           std::optional<StopCondition> &&cond) noexcept;
@@ -490,8 +499,6 @@ public:
 
 private:
   TraceeController &tc;
-  BpId current_bp_id{0};
-  u32 current_pending{0};
   std::unordered_map<BpId, std::shared_ptr<UserBreakpoint>> user_breakpoints{};
   std::unordered_map<AddrPtr, std::vector<BpId>> bps_at_loc{};
   std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> source_breakpoints{};
@@ -506,7 +513,7 @@ public:
   std::unordered_map<FunctionBreakpointSpec, std::vector<BpId>> fn_breakpoints{};
   std::unordered_map<InstructionBreakpointSpec, BpId> instruction_breakpoints{};
 
-  void add_bp_location(UserBreakpoint *updated_bp) noexcept;
+  void add_bp_location(const UserBreakpoint &updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;
   std::shared_ptr<BreakpointLocation> location_at(AddrPtr address) noexcept;

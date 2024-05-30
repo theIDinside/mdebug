@@ -49,6 +49,13 @@ struct ArgumentError
     return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
                          .description = "Argument required to be a boolean"};
   }
+
+  constexpr static ArgumentError
+  RequiredArrayType() noexcept
+  {
+    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
+                         .description = "Argument required to be an array"};
+  }
 };
 
 using InvalidArg = std::pair<ArgumentError, std::string>;

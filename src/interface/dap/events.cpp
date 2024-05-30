@@ -8,6 +8,18 @@
 
 namespace ui::dap {
 
+std::string
+InitializedEvent::serialize(int seq) const noexcept
+{
+  return fmt::format(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
+}
+
+std::string
+TerminatedEvent::serialize(int seq) const noexcept
+{
+  return fmt::format(R"({{"seq":{}, "type":"event", "event":"terminated" }})", seq);
+}
+
 ModuleEvent::ModuleEvent(std::string_view id, std::string_view reason, std::string &&name, Path &&path,
                          std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
                          AddressRange range, SharedObjectSymbols so_sym_info) noexcept

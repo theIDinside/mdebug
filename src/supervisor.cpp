@@ -576,7 +576,7 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
 
       if (auto bploc = reassess_bploc_for_symfile(*symbol_file, *user); bploc) {
         user->update_location(std::move(bploc.value()));
-        pbps.add_bp_location(user.get());
+        pbps.add_bp_location(*user);
         emit_breakpoint_event("changed", *user, std::optional<std::string>{});
       }
     }
@@ -778,7 +778,6 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noe
   for (auto &sym : symbol_files) {
     for (const auto &fn : add) {
       auto result = sym->lookup_by_spec(fn);
-      bool spec_empty_result = true;
       for (auto &&lookup : result) {
         auto user = pbps.create_loc_user<Breakpoint>(
           *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info)), task_leader,
@@ -786,9 +785,7 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noe
           std::make_unique<UserBpSpec>(fn));
         pbps.fn_breakpoints[fn].push_back(user->id);
         spec_set[fn] = true;
-      }
-      if (spec_empty_result) {
-        spec_set[fn] = spec_set[fn] || false;
+        Tracer::Instance->post_event(new ui::dap::BreakpointEvent{"new", "Breakpoint was created", user.get()});
       }
     }
   }

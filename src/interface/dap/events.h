@@ -20,6 +20,20 @@ enum ChangeEvent : u8
   Removed = 2,
 };
 
+struct InitializedEvent final : public ui::UIResult
+{
+  InitializedEvent() noexcept = default;
+  ~InitializedEvent() noexcept final = default;
+  std::string serialize(int seq) const noexcept final;
+};
+
+struct TerminatedEvent final : public ui::UIResult
+{
+  TerminatedEvent() noexcept = default;
+  ~TerminatedEvent() noexcept final = default;
+  std::string serialize(int seq) const noexcept final;
+};
+
 static constexpr std::string_view reasons[3]{"new", "changed", "removed"};
 // Module event: https://microsoft.github.io/debug-adapter-protocol/specification#Events_Module
 struct ModuleEvent final : public ui::UIResult

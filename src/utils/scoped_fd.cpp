@@ -23,7 +23,9 @@ ScopedFd::ScopedFd(int fd, Path path) noexcept : fd(fd), p(std::move(path)), fil
   } else {
     file_size_ = 0;
   }
-  ASSERT(fd != -1, "Failed to open {} [{}]", p.c_str(), strerror(errno));
+  if (fd == -1) {
+    DBGLOG(core, "[scopedfd]: Failed to open {}: {}", p.c_str(), strerror(errno));
+  }
 }
 
 ScopedFd::ScopedFd(int fd) noexcept : fd(fd), file_size_()

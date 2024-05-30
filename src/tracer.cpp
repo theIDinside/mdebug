@@ -1,4 +1,5 @@
 #include "tracer.h"
+#include "bp.h"
 #include "common.h"
 #include "event_queue.h"
 #include "interface/attach_args.h"
@@ -108,7 +109,14 @@ Tracer::get_controller(pid_t pid) noexcept
 NonNullPtr<TraceeController>
 Tracer::get_current() noexcept
 {
+  ASSERT(current_target != nullptr, "There is no current target.");
   return NonNull(*current_target);
+}
+
+TraceeController *
+Tracer::maybe_get_current() noexcept
+{
+  return current_target;
 }
 
 void
@@ -483,7 +491,7 @@ Tracer::attach(const AttachArgs &args) noexcept
 }
 
 void
-Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept
+Tracer::launch(bool stopOnEntry, Path program, std::vector<std::string> prog_args) noexcept
 {
   termios original_tty;
   winsize ws;
@@ -551,7 +559,7 @@ Tracer::launch(bool stopAtEntry, Path program, std::vector<std::string> prog_arg
       }
     }
 
-    if (stopAtEntry) {
+    if (stopOnEntry) {
       Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
       // fns.insert({"main", {}, false});
       get_current()->set_fn_breakpoints(fns);
@@ -577,6 +585,8 @@ Tracer::disconnect(bool terminate) noexcept
     }
     targets.pop_back();
   }
+
+  Tracer::Instance->post_event(new ui::dap::TerminatedEvent{});
 
   Tracer::KeepAlive = false;
   return true;
@@ -629,4 +639,10 @@ Tracer::set_current_to_latest_target() noexcept
   ASSERT(!targets.empty(), "Debugger core has no targets");
   current_target = targets.back().get();
   return NonNull(*current_target);
+}
+
+u32
+Tracer::new_breakpoint_id() noexcept
+{
+  return ++breakpoint_ids;
 }

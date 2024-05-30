@@ -47,7 +47,8 @@ enum class FieldType
   Float,
   Int,
   Boolean,
-  Enumeration
+  Enumeration,
+  Array
 };
 
 struct VerifyResult
@@ -125,22 +126,22 @@ template <size_t Size> struct VerifyMap
         if (!j.is_string()) {
           return VerifyResult{std::make_pair(ArgumentError::RequiredStringType(), fieldName)};
         }
-        return VerifyResult{std::nullopt};
+        break;
       case FieldType::Float:
         if (!j.is_number_float()) {
           return VerifyResult{std::make_pair(ArgumentError::RequiredNumberType(), fieldName)};
         }
-        return VerifyResult{std::nullopt};
+        break;
       case FieldType::Int:
         if (!j.is_number_integer()) {
           return VerifyResult{std::make_pair(ArgumentError::RequiredNumberType(), fieldName)};
         }
-        return VerifyResult{std::nullopt};
+        break;
       case FieldType::Boolean:
         if (!j.is_boolean()) {
           return VerifyResult{std::make_pair(ArgumentError::RequiredBooleanType(), fieldName)};
         }
-        return VerifyResult{std::nullopt};
+        break;
       case FieldType::Enumeration: {
         if (!j.is_string()) {
           return VerifyResult{
@@ -157,9 +158,15 @@ template <size_t Size> struct VerifyMap
                                                                     fmt::join(it->get_enum_values(), "|"))},
                            fieldName)};
         }
-        return VerifyResult{std::nullopt};
+        break;
       }
+      case FieldType::Array:
+        if (!j.is_array()) {
+          return VerifyResult{std::make_pair(ArgumentError::RequiredArrayType(), fieldName)};
+        }
+        break;
       }
+      return VerifyResult{std::nullopt};
     } else {
       return VerifyResult{std::nullopt};
     }
@@ -347,6 +354,19 @@ struct SetBreakpoints final : public ui::UICommand
   RequiredArguments({"source"sv});
 };
 
+struct SetExceptionBreakpoints final : public ui::UICommand
+{
+  SetExceptionBreakpoints(std::uint64_t sequence, nlohmann::json &&args) noexcept;
+  ~SetExceptionBreakpoints() override = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final;
+
+  Immutable<nlohmann::json> args;
+
+  DEFINE_NAME("setExceptionBreakpoints");
+  RequiredArguments({"filters"sv});
+  DefineArgTypes({"filters", FieldType::Array});
+};
+
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
   SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
@@ -465,7 +485,7 @@ struct Launch final : public UICommand
   Launch(std::uint64_t seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
-  bool stopAtEntry;
+  bool stopOnEntry;
   Path program;
   std::vector<std::string> program_args;
   DEFINE_NAME("launch");

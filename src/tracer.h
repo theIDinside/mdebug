@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bp.h"
 #include "common.h"
 #include "event_queue.h"
 #include "interface/attach_args.h"
@@ -50,6 +51,8 @@ enum class Proceed
 struct LWP;
 struct TaskInfo;
 
+using BreakpointSpecId = u32;
+
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
@@ -71,6 +74,7 @@ public:
   // TODO(simon): This should be removed. When multiprocess becomes a thing _all_ supervisor access must happen via
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   NonNullPtr<TraceeController> get_current() noexcept;
+  TraceeController *maybe_get_current() noexcept;
   void config_done() noexcept;
   CoreEvent *process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept;
   void handle_command(ui::UICommandPtr cmd) noexcept;
@@ -99,13 +103,16 @@ public:
   connectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
   NonNullPtr<TraceeController> set_current_to_latest_target() noexcept;
 
+  u32 new_breakpoint_id() noexcept;
+
   std::vector<std::unique_ptr<TraceeController>> targets;
   ui::dap::DAP *dap;
 
 private:
   [[maybe_unused]] tc::ProcessedStopEvent process_core_event(TraceeController &tc,
                                                              const CoreEvent *event) noexcept;
-  TraceeController *current_target = nullptr;
+  TraceeController *current_target{nullptr};
+  u32 breakpoint_ids{0};
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;
   utils::Notifier::ReadEnd io_thread_pipe;

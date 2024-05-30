@@ -549,7 +549,7 @@ class DAClient {
       'launch',
       {
         program: launchArgs['program'],
-        stopAtEntry: launchArgs['stopAtEntry'],
+        stopOnEntry: launchArgs['stopOnEntry'],
       },
       timeout
     )
@@ -616,7 +616,7 @@ class DAClient {
         return await this.#startRunToMainNative(
           {
             program: program,
-            stopAtEntry: true,
+            stopOnEntry: true,
           },
           timeout
         )
@@ -635,7 +635,7 @@ class DAClient {
       'launch',
       {
         program: program,
-        stopAtEntry: true,
+        stopOnEntry: true,
       },
       timeout
     )

@@ -230,7 +230,7 @@ DAP::flush_events() noexcept
 {
   while (!events_queue.empty()) {
     auto evt = pop_event();
-    const auto protocol_msg = evt->serialize(seq++);
+    const auto protocol_msg = evt->serialize(0);
     write_protocol_message(protocol_msg);
     delete evt;
   }

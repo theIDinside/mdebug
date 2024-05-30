@@ -54,9 +54,6 @@ utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool
 int
 main(int argc, const char **argv)
 {
-  auto foo = []() {
-
-  };
   {
     using enum logging::Channel;
     for (const auto id : logging::DefaultChannels()) {

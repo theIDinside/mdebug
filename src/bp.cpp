@@ -9,6 +9,7 @@
 #include <optional>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
+#include <tracer.h>
 #include <type_traits>
 #include <variant>
 
@@ -457,15 +458,13 @@ UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : tc(tc) {}
 u16
 UserBreakpoints::new_id() noexcept
 {
-  return ++current_bp_id;
+  return Tracer::Instance->new_breakpoint_id();
 }
 
 void
-UserBreakpoints::add_bp_location(UserBreakpoint *updated_bp) noexcept
+UserBreakpoints::add_bp_location(const UserBreakpoint &updated_bp) noexcept
 {
-  ASSERT(updated_bp != nullptr, "Registering a null breakpoint location is not allowed");
-  bps_at_loc[updated_bp->address().value()].push_back(updated_bp->id);
-  current_pending--;
+  bps_at_loc[updated_bp.address().value()].push_back(updated_bp.id);
 }
 
 void
@@ -473,9 +472,7 @@ UserBreakpoints::add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept
 {
   user_breakpoints[user_bp->id] = user_bp;
   if (user_bp->verified()) {
-    bps_at_loc[user_bp->address().value()].push_back(user_bp->id);
-  } else {
-    ++current_pending;
+    add_bp_location(*user_bp);
   }
 }
 
