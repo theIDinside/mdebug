@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 #include <future>
+#include <thread>
 #include <vector>
 
 void SetTaskGroupLog(bool value) noexcept;
@@ -21,6 +22,16 @@ protected:
 private:
   bool is_group_job() const noexcept;
   TaskGroup *owning_group{nullptr};
+};
+
+class NoOp final : public Task
+{
+public:
+  NoOp() noexcept = default;
+  ~NoOp() noexcept override = default;
+
+protected:
+  void execute_task() noexcept final;
 };
 
 using JobPtr = Task *;

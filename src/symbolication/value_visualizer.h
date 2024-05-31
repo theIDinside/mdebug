@@ -47,18 +47,19 @@ private:
                                 std::optional<u32> count) noexcept = 0;
 };
 
-class DefaultStructResolver final : public ValueResolver
-{
-  VariablesReference ref;
+// class DefaultStructResolver final : public ValueResolver
+// {
+//   VariablesReference ref;
 
-public:
-  DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr layout_type,
-                        VariablesReference ref) noexcept;
-  ~DefaultStructResolver() noexcept final = default;
+// public:
+//   DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr layout_type,
+//                         VariablesReference ref) noexcept;
+//   ~DefaultStructResolver() noexcept final = default;
 
-private:
-  Children get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept final;
-};
+// private:
+//   Children get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
+//   final;
+// };
 
 class CStringResolver final : public ValueResolver
 {

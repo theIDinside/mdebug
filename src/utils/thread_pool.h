@@ -27,6 +27,7 @@ public:
   static ThreadPool *get_global_pool() noexcept;
   void post_task(Task *task) noexcept;
   void post_tasks(std::span<Task *> tasks) noexcept;
+  std::vector<Task *> shutdown_tasks() noexcept;
   void worker(std::stop_token stop_token, const char *name) noexcept;
 
   template <Containerish T>
@@ -56,6 +57,12 @@ public:
              container_of_works.size(),
            "Sum of total jobs doesn't amount to {}", container_of_works.size());
     return worksize_per_thread;
+  }
+
+  static void
+  shutdown_global_pool() noexcept
+  {
+    delete global_thread_pool;
   }
 
 private:

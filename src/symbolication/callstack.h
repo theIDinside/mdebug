@@ -57,12 +57,13 @@ private:
   FrameType type = FrameType::Unknown;
   u32 frame_id = -1;
   SymbolFile *symbol_file;
+  std::array<ui::dap::Scope, 3> cached_scopes{};
 
 public:
   Immutable<NonNullPtr<TaskInfo>> task;
 
   template <typename T>
-  explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, int frame_id, AddrPtr pc, T sym_info) noexcept
+  explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, u32 frame_id, AddrPtr pc, T sym_info) noexcept
       : rip(pc), lvl(level), frame_id(frame_id), symbol_file(symbol_file), task(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
@@ -146,6 +147,8 @@ public:
    * Return the line table for the compilation unit where this Frame exists in.
    */
   std::optional<dw::LineTable> cu_line_table() const noexcept;
+  std::array<ui::dap::Scope, 3> scopes() noexcept;
+  std::optional<ui::dap::Scope> scope(u32 var_ref) noexcept;
 };
 
 class IterateFrameSymbols
@@ -198,6 +201,13 @@ struct CallStack
 
   Frame *get_frame(int frame_id) noexcept;
   u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
+
+  inline void
+  clear() noexcept
+  {
+    frames.clear();
+    pcs.clear();
+  }
 
   Tid tid; // the task associated with this call stack
   bool dirty;

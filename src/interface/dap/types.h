@@ -4,9 +4,6 @@
 #include <string_view>
 #include <typedefs.h>
 
-struct TaskInfo;
-struct TraceeController;
-struct ObjectFile;
 class SymbolFile;
 class UserBreakpoint;
 
@@ -77,18 +74,56 @@ struct StackTraceFormat
   bool includeAll : 1;
 };
 
-enum class ScopeType
+enum class ScopeType : u8
 {
-  Arguments,
+  Arguments = 0,
   Locals,
   Registers
 };
 
+static inline constexpr std::string_view
+to_presentation_hint(ScopeType type) noexcept
+{
+  switch (type) {
+  case ScopeType::Arguments:
+    return "arguments";
+  case ScopeType::Locals:
+    return "locals";
+  case ScopeType::Registers:
+    return "registers";
+  }
+}
+
 struct Scope
 {
-  std::string_view name;
-  std::string_view presentation_hint;
-  int variables_reference;
+  ScopeType type{};
+  u32 variables_reference{};
+
+  constexpr std::string_view
+  name() const noexcept
+  {
+    switch (type) {
+    case ScopeType::Arguments:
+      return "Arguments";
+    case ScopeType::Locals:
+      return "Locals";
+    case ScopeType::Registers:
+      return "Registers";
+    }
+  }
+
+  constexpr std::string_view
+  presentation_hint() const noexcept
+  {
+    switch (type) {
+    case ScopeType::Arguments:
+      return "arguments";
+    case ScopeType::Locals:
+      return "locals";
+    case ScopeType::Registers:
+      return "registers";
+    }
+  }
 };
 
 enum class EntityType
@@ -112,7 +147,6 @@ public:
 
   bool has_parent() const noexcept;
   std::optional<int> parent() const noexcept;
-  // NonNullPtr<ObjectFile> objectfile() const noexcept;
 
   // actual variablesReference value
   Immutable<int> id;
@@ -161,7 +195,7 @@ template <> struct formatter<ui::dap::Scope>
   format(const ui::dap::Scope &scope, FormatContext &ctx) const
   {
     return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": {} }})",
-                          scope.name, scope.presentation_hint, scope.variables_reference);
+                          scope.name(), scope.presentation_hint(), scope.variables_reference);
   }
 };
 

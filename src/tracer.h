@@ -53,6 +53,76 @@ struct TaskInfo;
 
 using BreakpointSpecId = u32;
 
+using VarRefKey = u32;
+
+struct VariableObject
+{
+};
+
+enum class ContextType : u8
+{
+  Frame,
+  Scope,
+  Variable,
+  Global,
+};
+
+struct VariableContext
+{
+  TraceeController *tc{nullptr};
+  TaskInfo *t{nullptr};
+  SymbolFile *symbol_file{nullptr};
+  u32 frame_id{0};
+  u16 id{0};
+  ContextType type{ContextType::Global};
+
+  static VariableContext
+  subcontext(u32 newId, const VariableContext &ctx) noexcept
+  {
+    return VariableContext{
+      ctx.tc, ctx.t, ctx.symbol_file, ctx.frame_id, static_cast<u16>(newId), ContextType::Variable};
+  }
+
+  constexpr bool
+  valid_context() const noexcept
+  {
+    return tc != nullptr && t != nullptr;
+  }
+
+  constexpr std::optional<std::array<ui::dap::Scope, 3>>
+  scopes_reference(VarRefKey frameKey) const noexcept
+  {
+    auto frame = t->get_callstack().get_frame(frameKey);
+    if (!frame) {
+      return {};
+    } else {
+      return frame->scopes();
+    }
+  }
+
+  std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
+  sym::Frame *
+  get_frame(VarRefKey ref) noexcept
+  {
+    switch (type) {
+    case ContextType::Frame:
+      return t->get_callstack().get_frame(ref);
+    case ContextType::Scope:
+    case ContextType::Variable:
+      return t->get_callstack().get_frame(frame_id);
+    case ContextType::Global:
+      PANIC("Global variables not yet supported");
+      break;
+    }
+  }
+
+  SharedPtr<sym::Value>
+  get_maybe_value() const noexcept
+  {
+    return t->get_maybe_value(id);
+  }
+};
+
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
@@ -104,6 +174,12 @@ public:
   NonNullPtr<TraceeController> set_current_to_latest_target() noexcept;
 
   u32 new_breakpoint_id() noexcept;
+  VarRefKey new_key() noexcept;
+  VariableContext var_context(VarRefKey varRefKey) noexcept;
+  VarRefKey new_var_context(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept;
+  void set_var_context(VariableContext ctx) noexcept;
+  u32 clone_from_var_context(const VariableContext &ctx) noexcept;
+  void destroy_reference(VarRefKey key) noexcept;
 
   std::vector<std::unique_ptr<TraceeController>> targets;
   ui::dap::DAP *dap;
@@ -113,6 +189,8 @@ private:
                                                              const CoreEvent *event) noexcept;
   TraceeController *current_target{nullptr};
   u32 breakpoint_ids{0};
+  VarRefKey id_counter{0};
+  std::unordered_map<VarRefKey, VariableContext> refContext{};
   SpinLock command_queue_lock;
   std::queue<ui::UICommand *> command_queue;
   utils::Notifier::ReadEnd io_thread_pipe;

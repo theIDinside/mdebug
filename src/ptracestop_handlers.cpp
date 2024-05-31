@@ -89,8 +89,7 @@ InstructionStep::~InstructionStep()
 
 LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
     : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false),
-      resumed_to_resume_addr(false), start_frame{nullptr, task, static_cast<u32>(-1), -1, nullptr, nullptr},
-      entry()
+      resumed_to_resume_addr(false), start_frame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr}, entry()
 {
   auto &callstack = tc.build_callframe_stack(task, CallStackRequest::partial(1));
   start_frame = callstack.frames[0];

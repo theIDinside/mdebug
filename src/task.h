@@ -2,6 +2,7 @@
 
 #include "bp.h"
 #include "common.h"
+#include "interface/dap/types.h"
 #include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
@@ -11,9 +12,11 @@
 
 using namespace std::string_view_literals;
 struct TraceeController;
+
 namespace sym {
+class Frame;
 struct CallStack;
-}
+} // namespace sym
 
 struct CallStackRequest
 {
@@ -23,6 +26,8 @@ struct CallStackRequest
     Partial
   } req;
   u8 count;
+
+  bool create_frame_ref_ids{true};
 
   static CallStackRequest partial(u8 count) noexcept;
   static CallStackRequest full() noexcept;
@@ -74,6 +79,8 @@ struct TaskInfo
 private:
   TaskRegisters regs;
   sym::CallStack *call_stack;
+  std::vector<u32> variableReferences{};
+  std::unordered_map<u32, SharedPtr<sym::Value>> valobj_cache{};
 
 public:
   std::optional<LocationStatus> loc_stat;
@@ -98,7 +105,7 @@ public:
   u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
   void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
-  const std::vector<AddrPtr> &return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
+  std::span<AddrPtr> return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
 
   void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
@@ -123,6 +130,12 @@ public:
   std::uintptr_t get_pc() const noexcept;
   std::uintptr_t get_rsp() const noexcept;
   std::uintptr_t get_orig_rax() const noexcept;
+
+  sym::CallStack &get_callstack() noexcept;
+  void clear_stop_state() noexcept;
+  void add_reference(u32 id) noexcept;
+  void cache_object(u32 ref, SharedPtr<sym::Value> value) noexcept;
+  SharedPtr<sym::Value> get_maybe_value(u32 ref) noexcept;
 };
 
 struct TaskStepInfo

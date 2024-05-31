@@ -1,5 +1,5 @@
 const { launchToGetFramesAndScopes } = require('./client')
-const { todo, assert, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
+const { todo, assert, assertLog, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
 const stdAssert = require('assert')
 
 function newVarObject(name, value, type, ref = (val) => !isNaN(val)) {
@@ -17,12 +17,10 @@ function newVarObject(name, value, type, ref = (val) => !isNaN(val)) {
  * the variablesReference we requested `vars` for. `response` was the full response
  */
 function assertVarResponseLength(vars, expectedCount, varRef, response) {
-  assert(
+  assertLog(
     vars.length == expectedCount,
-    () =>
-      `[varRef: ${varRef}]: Expected ${expectedCount} variables but got ${
-        vars.length
-      }. Variables response: ${prettyJson(response)}`
+    `[var ref: ${varRef}]: Expected ${expectedCount} variables. `,
+    `Got ${vars.length}. Variables response: ${prettyJson(response)}`
   )
 }
 
@@ -62,7 +60,8 @@ async function scopeLocalsTest(debugAdapter) {
   for (const scope of scopes) {
     if (scope.name == 'Locals') {
       const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: scope.variablesReference })
-      const variables = vres.body.variables
+      const variables = vres?.body?.variables
+      assertLog(variables != null, 'variables', `Request failed. Response: ${JSON.stringify(vres)}`)
       let expectedCount = 8
       assertAllVariableReferencesUnique(variables)
       assertVarResponseLength(variables, expectedCount, scope.variablesReference, vres)
@@ -83,7 +82,8 @@ async function scopeLocalsTest(debugAdapter) {
             fraction: newVarObject('fraction', '1.25', 'float', 0),
           }
           const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: v.variablesReference })
-          const variables = vres.body.variables
+          const variables = vres?.body?.variables
+          assertLog(variables != null, 'variables', `Request failed. Response: ${JSON.stringify(vres)}`)
           assertAllVariableReferencesUnique(variables)
           assertVarResponseLength(variables, 3, scope.variablesReference, vres)
           for (const v of variables) {

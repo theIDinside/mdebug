@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <iterator>
 #include <symbolication/dwarf/typeread.h>
+#include <task.h>
 #include <tracer.h>
 #include <utility>
 #include <utils/scoped_fd.h>
@@ -32,7 +33,7 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>(this)), parsed_lte_write_lock(),
       line_table(), lnp_headers(nullptr),
       parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), addr_cu_map(), valobj_cache{}
+      comp_units(), addr_cu_map()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -421,7 +422,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
 }
 
 std::shared_ptr<ObjectFile>
-CreateObjectFile(Pid process_id, const Path &path) noexcept
+CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -430,7 +431,7 @@ CreateObjectFile(Pid process_id, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-    std::make_shared<ObjectFile>(fmt::format("{}:{}", process_id, path.c_str()), path, fd.file_size(), addr);
+    std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->task_leader, path.c_str()), path, fd.file_size(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
@@ -483,24 +484,26 @@ CreateObjectFile(Pid process_id, const Path &path) noexcept
   return objfile;
 }
 
-SymbolFile::SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
-    : binary_object(std::move(binary)), obj_id(std::move(obj_id)), baseAddress(relocated_base),
+SymbolFile::SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
+                       AddrPtr relocated_base) noexcept
+    : binary_object(std::move(binary)), tc(tc), obj_id(std::move(obj_id)), baseAddress(relocated_base),
       pc_bounds(AddressRange::relocate(binary_object->unrelocated_address_bounds, relocated_base))
 {
 }
 
 SymbolFile::shr_ptr
-SymbolFile::Create(Pid process_id, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
+SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
-  return std::make_shared<SymbolFile>(fmt::format("{}:{}", process_id, binary->path->c_str()), std::move(binary),
-                                      relocated_base);
+
+  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->task_leader, binary->path->c_str()),
+                                      std::move(binary), relocated_base);
 }
 
 auto
-SymbolFile::copy(const TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
+SymbolFile::copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
-  return SymbolFile::Create(tc.task_leader, binary_object, relocated_base);
+  return SymbolFile::Create(&tc, binary_object, relocated_base);
 }
 
 auto
@@ -534,11 +537,6 @@ SymbolFile::unrelocate(AddrPtr pc) const noexcept -> AddrPtr
   return pc - baseAddress;
 }
 
-auto
-SymbolFile::invalidateVariableReferences() noexcept -> void
-{
-  valobj_cache.clear();
-}
 auto
 SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void
 {
@@ -606,14 +604,14 @@ SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::Relo
 }
 
 auto
-SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
+SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
   -> std::vector<ui::dap::Variable>
 {
-  if (!valobj_cache.contains(ref)) {
-    DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ref);
+  auto value = ctx.get_maybe_value();
+  if (value == nullptr) {
+    DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ctx.id);
     return {};
   }
-  auto &value = valobj_cache[ref];
   auto type = value->type();
   if (!type->is_resolved()) {
     sym::dw::TypeSymbolicationContext ts_ctx{*objectFile(), *type};
@@ -622,17 +620,17 @@ SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std
 
   auto value_resolver = value->get_resolver();
   if (value_resolver != nullptr) {
-    auto variables = value_resolver->resolve(tc, start, count);
+    auto variables = value_resolver->resolve(*ctx.tc, start, count);
     std::vector<ui::dap::Variable> result{};
 
     for (auto &var : variables) {
       objectFile()->init_visualizer(var);
       registerResolver(var);
-      const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+      const auto new_ref = var->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
-        cacheValue(new_ref, var);
+        ctx.t->cache_object(new_ref, var);
       }
-      result.push_back(ui::dap::Variable{new_ref, var});
+      result.push_back(ui::dap::Variable{static_cast<int>(new_ref), var});
     }
 
     return result;
@@ -645,15 +643,67 @@ SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std
                                                        value->mem_contents_offset, value->take_memory_reference());
       objectFile()->init_visualizer(member_value);
       registerResolver(member_value);
-      const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+      const auto new_ref =
+        member_value->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
-        cacheValue(new_ref, member_value);
+        ctx.t->cache_object(new_ref, member_value);
       }
-      result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+      result.push_back(ui::dap::Variable{static_cast<int>(new_ref), std::move(member_value)});
     }
     return result;
   }
 }
+
+// auto
+// SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
+//   -> std::vector<ui::dap::Variable>
+// {
+//   if (!valobj_cache.contains(ref)) {
+//     DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ref);
+//     return {};
+//   }
+//   auto &value = valobj_cache[ref];
+//   auto type = value->type();
+//   if (!type->is_resolved()) {
+//     sym::dw::TypeSymbolicationContext ts_ctx{*objectFile(), *type};
+//     ts_ctx.resolve_type();
+//   }
+
+//   auto value_resolver = value->get_resolver();
+//   if (value_resolver != nullptr) {
+//     auto variables = value_resolver->resolve(tc, start, count);
+//     std::vector<ui::dap::Variable> result{};
+
+//     for (auto &var : variables) {
+//       objectFile()->init_visualizer(var);
+//       registerResolver(var);
+//       const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+//       if (new_ref > 0) {
+//         cacheValue(new_ref, var);
+//       }
+//       result.push_back(ui::dap::Variable{new_ref, var});
+//     }
+
+//     return result;
+//   } else {
+//     std::vector<ui::dap::Variable> result{};
+//     result.reserve(type->member_variables().size());
+
+//     for (auto &mem : type->member_variables()) {
+//       auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
+//                                                        value->mem_contents_offset,
+//                                                        value->take_memory_reference());
+//       objectFile()->init_visualizer(member_value);
+//       registerResolver(member_value);
+//       const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+//       if (new_ref > 0) {
+//         cacheValue(new_ref, member_value);
+//       }
+//       result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
+//     }
+//     return result;
+//   }
+// }
 
 auto
 SymbolFile::low_pc() noexcept -> AddrPtr
@@ -686,13 +736,6 @@ SymbolFile::getMinimalSymbol(std::string_view name) noexcept -> std::optional<Mi
 }
 
 auto
-SymbolFile::cacheValue(VariablesReference ref, std::shared_ptr<sym::Value> value) noexcept -> void
-{
-  ASSERT(!valobj_cache.contains(ref), "Value object cache already contains value with reference {}", ref);
-  valobj_cache.emplace(ref, std::move(value));
-}
-
-auto
 SymbolFile::getLineTable(u64 offset) noexcept -> sym::dw::LineTable
 {
   auto &headers = *objectFile()->lnp_headers;
@@ -715,6 +758,12 @@ auto
 SymbolFile::path() const noexcept -> Path
 {
   return binary_object->path;
+}
+
+auto
+SymbolFile::supervisor() noexcept -> TraceeController *
+{
+  return tc;
 }
 
 auto
@@ -794,7 +843,7 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     break;
   }
   for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
-    const auto ref = symbol.type->is_primitive() ? 0 : tc.new_var_id(frame.id());
+    const auto ref = symbol.type->is_primitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.type->is_resolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->objectFile(), symbol.type};
       ts_ctx.resolve_type();
@@ -806,9 +855,12 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     registerResolver(value_object);
 
     if (ref > 0) {
-      cacheValue(ref, value_object);
+      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.get_symbol_file(),
+                                         static_cast<u32>(frame.id()), static_cast<u16>(ref),
+                                         ContextType::Variable});
+      frame.task.mut()->cache_object(ref, value_object);
     }
-    result.push_back(ui::dap::Variable{ref, std::move(value_object)});
+    result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});
   }
   return result;
 }

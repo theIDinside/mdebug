@@ -162,7 +162,9 @@ UserBreakpoint::~UserBreakpoint() noexcept = default;
 void
 UserBreakpoint::pre_destruction(tc::TraceeCommandInterface &ctrl) noexcept
 {
-  bp->remove_user(ctrl, *this);
+  if (bp) {
+    bp->remove_user(ctrl, *this);
+  }
 }
 
 void

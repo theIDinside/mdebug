@@ -45,37 +45,37 @@ ValueResolver::resolve(TraceeController &tc, std::optional<u32> start, std::opti
   return get_children(tc, start, count);
 }
 
-DefaultStructResolver::DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr type,
-                                             VariablesReference var_ref) noexcept
-    : ValueResolver(object_file, std::move(value), type), ref(var_ref)
-{
-}
+// DefaultStructResolver::DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr type,
+//                                              VariablesReference var_ref) noexcept
+//     : ValueResolver(object_file, std::move(value), type), ref(var_ref)
+// {
+// }
 
-Children
-DefaultStructResolver::get_children(TraceeController &tc, std::optional<u32>, std::optional<u32>) noexcept
-{
-  auto ptr = this->value();
+// Children
+// DefaultStructResolver::get_children(TraceeController &tc, std::optional<u32>, std::optional<u32>) noexcept
+// {
+//   auto ptr = this->value();
 
-  if (ptr == nullptr) {
-    return {};
-  }
+//   if (ptr == nullptr) {
+//     return {};
+//   }
 
-  children.reserve(type->member_variables().size());
+//   children.reserve(type->member_variables().size());
 
-  for (auto &mem : type->member_variables()) {
-    auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-                                                     ptr->mem_contents_offset, ptr->take_memory_reference());
-    obj->objectFile()->init_visualizer(member_value);
-    obj->registerResolver(member_value);
-    const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-    if (new_ref > 0) {
-      obj->cacheValue(new_ref, member_value);
-    }
-    children.emplace_back(std::move(member_value));
-  }
-  cached = true;
-  return children;
-}
+//   for (auto &mem : type->member_variables()) {
+//     auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
+//                                                      ptr->mem_contents_offset, ptr->take_memory_reference());
+//     obj->objectFile()->init_visualizer(member_value);
+//     obj->registerResolver(member_value);
+//     const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
+//     if (new_ref > 0) {
+//       obj->cacheValue(new_ref, member_value);
+//     }
+//     children.emplace_back(std::move(member_value));
+//   }
+//   cached = true;
+//   return children;
+// }
 
 CStringResolver::CStringResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
     : ValueResolver(object_file, std::move(val), type)

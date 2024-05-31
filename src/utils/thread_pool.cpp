@@ -1,4 +1,5 @@
 #include "thread_pool.h"
+#include "utils/worker_task.h"
 #include <sys/prctl.h>
 #include <utils/signals.h>
 
@@ -32,10 +33,13 @@ ThreadPool::ThreadPool() noexcept : thread_pool(), m_task_queue(), m_groups(), m
 
 ThreadPool::~ThreadPool()
 {
+  auto tasks = shutdown_tasks();
   for (auto &t : thread_pool) {
     t.request_stop();
   }
-  // destruction of jthread automatically calls .join()
+  for (auto t : tasks) {
+    post_task(t);
+  }
 }
 
 void
@@ -44,7 +48,7 @@ ThreadPool::initialize(u32 pool_size) noexcept
   thread_pool.reserve(pool_size);
   for (auto i = 0u; i < pool_size; ++i) {
     thread_pool.emplace_back([this, i](auto stop_token) {
-      const auto name = "mdb-worker-" + std::to_string(i);
+      const auto name = "mdb-pool-" + std::to_string(i);
       this->worker(stop_token, name.c_str());
     });
   }
@@ -54,6 +58,18 @@ u32
 ThreadPool::worker_count() const noexcept
 {
   return thread_pool.size();
+}
+
+std::vector<Task *>
+ThreadPool::shutdown_tasks() noexcept
+{
+  std::vector<Task *> res;
+  const auto sz = worker_count();
+  res.reserve(sz);
+  for (auto i = 0u; i < sz; ++i) {
+    res.push_back(new NoOp{});
+  }
+  return res;
 }
 
 void

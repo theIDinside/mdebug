@@ -2,8 +2,10 @@
 #include "common.h"
 #include "symbolication/block.h"
 #include "symbolication/dwarf/debug_info_reader.h"
+#include "tracer.h"
 #include "utils/macros.h"
 #include <symbolication/cu_symbol_info.h>
+#include <symbolication/objfile.h>
 
 namespace sym {
 
@@ -87,6 +89,33 @@ Frame::cu_line_table() const noexcept
   ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
 
   return symbol_info->get_linetable(symbol_file);
+}
+
+std::optional<ui::dap::Scope>
+Frame::scope(u32 var_ref) noexcept
+{
+  for (const auto scope : cached_scopes) {
+    if (scope.variables_reference == var_ref) {
+      return scope;
+    }
+  }
+  return {};
+}
+
+std::array<ui::dap::Scope, 3>
+Frame::scopes() noexcept
+{
+  // Variable reference can't be 0, so a zero here, means we haven't created the scopes yet
+  if (cached_scopes[0].variables_reference == 0) {
+    for (auto i = 0u; i < 3; ++i) {
+      cached_scopes[i].type = static_cast<ui::dap::ScopeType>(i);
+      const auto key = Tracer::Instance->new_key();
+      Tracer::Instance->set_var_context({symbol_file->supervisor(), task->ptr, symbol_file, static_cast<u32>(id()),
+                                         static_cast<u16>(key), ContextType::Scope});
+      cached_scopes[i].variables_reference = key;
+    }
+  }
+  return cached_scopes;
 }
 
 sym::FunctionSymbol *

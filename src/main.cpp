@@ -126,6 +126,7 @@ main(int argc, const char **argv)
       break;
     }
   }
+  utils::ThreadPool::shutdown_global_pool();
   exit_debug_session = true;
   Tracer::Instance->kill_ui();
   ui_thread.join();

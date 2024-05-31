@@ -58,7 +58,7 @@ using sym::dw::SourceCodeFile;
 TraceeController::TraceeController(TargetSession target_session, tc::Interface &&interface,
                                    InterfaceType type) noexcept
     : task_leader{interface != nullptr ? interface->task_leader() : 0}, main_executable{nullptr}, threads{},
-      task_vm_infos{}, pbps{*this}, shared_objects{}, stop_all_requested{false}, interface_type(type), var_refs(),
+      task_vm_infos{}, pbps{*this}, shared_objects{}, stop_all_requested{false}, interface_type(type),
       interpreter_base{}, entry{}, session{target_session}, stop_handler{new ptracestop::StopHandler{*this}},
       null_unwinder{new sym::Unwinder{nullptr}}, tracee_interface(std::move(interface))
 {
@@ -146,9 +146,9 @@ createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<
     // if baseAddr == addr; unique = false, return null, because we've already registered it
     return existing_obj->baseAddress != addr ? existing_obj->copy(tc, addr) : nullptr;
   } else {
-    auto obj = CreateObjectFile(tc.task_leader, path);
+    auto obj = CreateObjectFile(&tc, path);
     if (obj != nullptr) {
-      return SymbolFile::Create(tc.task_leader, obj, addr);
+      return SymbolFile::Create(&tc, obj, addr);
     }
   }
   return nullptr;
@@ -168,7 +168,7 @@ TraceeController::install_loader_breakpoints() noexcept
   ASSERT(main_executable != nullptr, "No main executable for this target");
   const auto mainExecutableElf = main_executable->objectFile()->elf;
   auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->get_section(".interp"));
-  auto tmp_objfile = CreateObjectFile(task_leader, int_path);
+  auto tmp_objfile = CreateObjectFile(this, int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
   const auto system_tap_sec = tmp_objfile->elf->get_section(".note.stapsdt");
   const auto probes = parse_stapsdt_note(tmp_objfile->elf, system_tap_sec);
@@ -285,6 +285,7 @@ TraceeController::resume_task(TaskInfo &task, tc::ResumeAction type) noexcept
     CDLOG(!res.is_ok(), core, "Unable to resume task {}: {}", task.tid, strerror(res.sys_errno));
   }
   task.wait_status = WaitStatus{WaitStatusKind::NotKnown, {}};
+  task.clear_stop_state();
 }
 
 void
@@ -883,11 +884,11 @@ TraceeController::register_symbol_file(std::shared_ptr<SymbolFile> symbolFile, b
 
 // Debug Symbols Related Logic
 void
-TraceeController::register_object_file(std::shared_ptr<ObjectFile> obj, bool is_main_executable,
-                                       AddrPtr relocated_base) noexcept
+TraceeController::register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> obj,
+                                       bool is_main_executable, AddrPtr relocated_base) noexcept
 {
   ASSERT(obj != nullptr, "Object file is null");
-  register_symbol_file(SymbolFile::Create(task_leader, obj, relocated_base), is_main_executable);
+  register_symbol_file(SymbolFile::Create(tc, obj, relocated_base), is_main_executable);
 }
 
 struct AuxvPair
@@ -1142,39 +1143,6 @@ TraceeController::unwind_callstack(TaskInfo *task) noexcept
   }
 }
 
-int
-TraceeController::new_frame_id(NonNullPtr<SymbolFile> owning_obj, TaskInfo &task) noexcept
-{
-  const auto res = take_new_varref_id();
-  var_refs.emplace(std::piecewise_construct, std::forward_as_tuple(res),
-                   std::forward_as_tuple(owning_obj, res, task.tid, res, 0, ui::dap::EntityType::Frame));
-  return res;
-}
-
-int
-TraceeController::new_scope_id(NonNullPtr<SymbolFile> owning_obj, const sym::Frame *frame,
-                               ui::dap::ScopeType type) noexcept
-{
-  const auto res = take_new_varref_id();
-  const auto fid = frame->id();
-  const auto iter = var_refs.find(fid);
-  if (iter == std::end(var_refs)) {
-    PANIC("Expected to find object with variables reference of");
-  }
-  var_refs.emplace(
-    std::piecewise_construct, std::forward_as_tuple(res),
-    std::forward_as_tuple(owning_obj, res, iter->second.thread_id, fid, fid, ui::dap::EntityType::Scope, type));
-  return res;
-}
-
-void
-TraceeController::invalidate_stop_state() noexcept
-{
-  for (auto obj : symbol_files) {
-    obj->invalidateVariableReferences();
-  }
-}
-
 void
 TraceeController::cache_registers(TaskInfo &t) noexcept
 {
@@ -1204,40 +1172,6 @@ TraceeController::get_main_executable() const noexcept
   return main_executable;
 }
 
-int
-TraceeController::new_var_id(int parent_id) noexcept
-{
-  const auto res = take_new_varref_id();
-  const auto it = var_refs.find(parent_id);
-  const auto &vr = it->second;
-  var_refs.emplace(std::piecewise_construct, std::forward_as_tuple(res),
-                   std::forward_as_tuple(vr.object_file, res, int{vr.thread_id}, int{vr.frame_id},
-                                         int{vr.parent().value_or(0)}, ui::dap::EntityType::Variable));
-  return res;
-}
-
-void
-TraceeController::reset_variable_references() noexcept
-{
-  var_refs.clear();
-  reset_variable_ref_id();
-}
-
-// These two simple functions have been refactored out, because later on in the future
-// when we do multiprocess debugging, variable references must be unique across _all_ processes not just inside a
-// single process. meaning, both process A and B can't have a variable reference with an id of 2.
-int
-TraceeController::take_new_varref_id() noexcept
-{
-  return next_var_ref++;
-}
-
-void
-TraceeController::reset_variable_ref_id() noexcept
-{
-  next_var_ref = 1;
-}
-
 sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept
 {
@@ -1254,7 +1188,13 @@ TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) no
       PANIC("No object file related to pc - that should be impossible.");
     }
     auto &[symbol, obj] = result.value();
-    const auto id = new_frame_id(obj, task);
+    const auto id = Tracer::Instance->new_key();
+    Tracer::Instance->set_var_context(VariableContext{.tc = this,
+                                                      .t = &task,
+                                                      .symbol_file = obj,
+                                                      .frame_id = id,
+                                                      .id = static_cast<u16>(id),
+                                                      .type = ContextType::Frame});
     if (symbol) {
       cs_ref.frames.push_back(sym::Frame{obj, task, depth, id, i.as_void(), symbol});
     } else {
@@ -1325,42 +1265,6 @@ TraceeController::install_software_bp_loc(AddrPtr addr) noexcept
   }
 
   return static_cast<u8>(res.data);
-}
-
-std::optional<ui::dap::VariablesReference>
-TraceeController::var_ref(int variables_reference) noexcept
-{
-  auto it = std::find_if(var_refs.begin(), var_refs.end(),
-                         [vr = variables_reference](auto &kvp) { return kvp.first == vr; });
-  if (it != std::end(var_refs)) {
-    return it->second;
-  } else {
-    return std::nullopt;
-  }
-}
-
-std::array<ui::dap::Scope, 3>
-TraceeController::scopes_reference(int frame_id) noexcept
-{
-  using S = ui::dap::Scope;
-  const auto f = frame(frame_id);
-  auto obj = var_refs.find(f->id())->second.object_file;
-
-  return std::array<S, 3>{S{"Arguments", "arguments", new_scope_id(obj, f, ui::dap::ScopeType::Arguments)},
-                          S{"Locals", "locals", new_scope_id(obj, f, ui::dap::ScopeType::Locals)},
-                          S{"Registers", "registers", new_scope_id(obj, f, ui::dap::ScopeType::Registers)}};
-}
-
-sym::Frame *
-TraceeController::frame(int frame_id) noexcept
-{
-  const auto it = var_refs.find(frame_id);
-  if (it == std::end(var_refs)) {
-    PANIC("expected to find frame with frame id");
-  }
-
-  auto task = get_task(it->second.thread_id);
-  return task->call_stack->get_frame(frame_id);
 }
 
 void

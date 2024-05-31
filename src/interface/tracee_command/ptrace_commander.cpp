@@ -8,6 +8,7 @@
 #include "symbolication/objfile.h"
 #include "utils/logger.h"
 #include "utils/scoped_fd.h"
+#include "utils/thread_pool.h"
 #include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
@@ -301,6 +302,8 @@ bool
 PtraceCommander::perform_shutdown() noexcept
 {
   awaiter_thread->init_shutdown();
+  auto tasks = utils::ThreadPool::get_global_pool()->shutdown_tasks();
+
   return true;
 }
 

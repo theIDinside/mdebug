@@ -69,8 +69,8 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   //  we should check if the object file from `objfile_path` has already been loaded into memory
   auto target = get_controller(target_pid);
   if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
-    auto obj = CreateObjectFile(target->task_leader, objfile_path);
-    target->register_object_file(obj, true, nullptr);
+    auto obj = CreateObjectFile(target, objfile_path);
+    target->register_object_file(target, obj, true, nullptr);
   } else {
     target->register_symbol_file(symbol_obj, true);
   }
@@ -646,4 +646,46 @@ u32
 Tracer::new_breakpoint_id() noexcept
 {
   return ++breakpoint_ids;
+}
+
+VarRefKey
+Tracer::new_key() noexcept
+{
+  return ++id_counter;
+}
+
+VariableContext
+Tracer::var_context(u32 varRefKey) noexcept
+{
+  return refContext[varRefKey];
+}
+
+VarRefKey
+Tracer::new_var_context(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept
+{
+  auto key = new_key();
+  refContext[key] =
+    VariableContext{.tc = &tc, .t = &t, .symbol_file = file, .frame_id = frameId, .id = static_cast<u16>(key)};
+  return key;
+}
+
+void
+Tracer::destroy_reference(VarRefKey key) noexcept
+{
+  refContext.erase(key);
+}
+
+void
+Tracer::set_var_context(VariableContext ctx) noexcept
+{
+  refContext[ctx.id] = ctx;
+  ctx.t->add_reference(ctx.id);
+}
+
+u32
+Tracer::clone_from_var_context(const VariableContext &ctx) noexcept
+{
+  const auto key = new_key();
+  refContext.emplace(key, VariableContext::subcontext(key, ctx));
+  return key;
 }

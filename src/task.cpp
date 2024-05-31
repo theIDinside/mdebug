@@ -9,6 +9,7 @@
 #include "utils/util.h"
 #include <sys/user.h>
 #include <tracee/util.h>
+#include <tracer.h>
 #include <utility>
 
 TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept
@@ -100,20 +101,17 @@ decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state)
   sym::decode(fde, state, info.info);
 }
 
-const std::vector<AddrPtr> &
+std::span<AddrPtr>
 TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
   static constexpr auto X86_64_RIP_REGISTER = 16;
+
   if (!call_stack->dirty) {
     return call_stack->pcs;
-  } else {
-    call_stack->pcs.clear();
   }
 
-  if (cache_dirty) {
-    tc->cache_registers(*this);
-  }
-
+  tc->cache_registers(*this);
+  call_stack->pcs.clear();
   // initialize bottom frame's registers with actual live register contents
 
   auto &buf = call_stack->reg_unwind_buffer;
@@ -221,6 +219,46 @@ TaskInfo::get_orig_rax() const noexcept
   case TargetFormat::Remote:
     return regs.x86_block->get_64bit_reg(57);
   }
+}
+
+sym::CallStack &
+TaskInfo::get_callstack() noexcept
+{
+  return *call_stack;
+}
+
+void
+TaskInfo::clear_stop_state() noexcept
+{
+  for (const auto ref : variableReferences) {
+    Tracer::Instance->destroy_reference(ref);
+  }
+  for (auto &[k, v] : valobj_cache) {
+  }
+  variableReferences.clear();
+  valobj_cache.clear();
+}
+
+void
+TaskInfo::add_reference(u32 id) noexcept
+{
+  variableReferences.push_back(id);
+}
+
+void
+TaskInfo::cache_object(u32 ref, SharedPtr<sym::Value> value) noexcept
+{
+  valobj_cache.emplace(ref, std::move(value));
+}
+
+SharedPtr<sym::Value>
+TaskInfo::get_maybe_value(u32 ref) noexcept
+{
+  auto it = valobj_cache.find(ref);
+  if (it == std::end(valobj_cache)) {
+    return nullptr;
+  }
+  return it->second;
 }
 
 void

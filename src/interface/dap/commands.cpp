@@ -138,7 +138,6 @@ Continue::execute(Tracer *tracer) noexcept
     res->success = false;
   } else {
     res->success = true;
-    target->invalidate_stop_state();
     if (continue_all) {
       DBGLOG(core, "continue all");
       target->resume_target(tc::RunType::Continue);
@@ -312,9 +311,7 @@ SetExceptionBreakpoints::SetExceptionBreakpoints(std::uint64_t sequence, nlohman
 UIResultPtr
 SetExceptionBreakpoints::execute(Tracer *tracer) noexcept
 {
-  for (const auto &e : args->at("filters")) {
-    DBGLOG(core, "we have a filter sent to us.. for some fucking reason");
-  }
+  DBGLOG(core, "{:p} exception breakpoints not yet implemented", (void *)tracer);
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::exception};
   return res;
 }
@@ -714,8 +711,16 @@ ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> s
 UIResultPtr
 Scopes::execute(Tracer *tracer) noexcept
 {
-  auto current = tracer->get_current();
-  return new ScopesResponse{true, this, current->scopes_reference(frameId)};
+  auto ctx = tracer->var_context(frameId);
+  if (!ctx.valid_context() || ctx.type != ContextType::Frame) {
+    return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", frameId), {}};
+  }
+  auto frame = ctx.get_frame(frameId);
+  if (!frame) {
+    return new ScopesResponse{false, this, {}};
+  }
+  const auto scopes = frame->scopes();
+  return new ScopesResponse{true, this, scopes};
 }
 
 Disassemble::Disassemble(std::uint64_t seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset,
@@ -779,44 +784,51 @@ Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, s
 {
 }
 
+ErrorResponse *
+Variables::error(std::string &&msg) noexcept
+{
+  return new ErrorResponse{Request, this, std::make_optional(std::move(msg)), std::nullopt};
+}
+
 UIResultPtr
 Variables::execute(Tracer *tracer) noexcept
 {
-  auto current = tracer->get_current();
-  if (auto varref = current->var_ref(var_ref); varref) {
-    auto frame = tracer->get_current()->frame(varref->frame_id);
-    SymbolFile *obj = varref->object_file.mut();
-    switch (varref->type) {
-    case EntityType::Scope: {
-      switch (varref->scope_type->value()) {
-      case ScopeType::Arguments: {
-        auto vars = obj->getVariables(current, *frame, sym::VariableSet::Arguments);
-        return new VariablesResponse{true, this, std::move(vars)};
-      }
-      case ScopeType::Locals: {
-        auto vars = obj->getVariables(current, *frame, sym::VariableSet::Locals);
-        return new VariablesResponse{true, this, std::move(vars)};
-      }
-      case ScopeType::Registers: {
-        TODO_FMT("get variables for registers not implemented");
-        break;
-      }
-      }
-    }
-    case EntityType::Variable: {
-      return new VariablesResponse{true, this, obj->resolve(current, var_ref, start, count)};
-    }
-    case EntityType::Frame: {
-      TODO("This branch should return a success=false, and a message saying that the varRef id was "
-           "wrong/faulty, "
-           "because var refs for frames don't contain variables (scopes do, or other variables do.)");
-    } break;
-    }
+  auto context = tracer->var_context(var_ref);
+  if (!context.valid_context()) {
+    return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
+  }
+  auto frame = context.get_frame(var_ref);
+  if (!frame) {
+    return error(fmt::format("Could not find frame that's referenced via variablesReference {}", var_ref));
   }
 
-  return new ErrorResponse{
-    Request, this, std::make_optional(fmt::format("Could not find variable with variablesReference {}", var_ref)),
-    std::nullopt};
+  switch (context.type) {
+  case ContextType::Frame:
+    return error(fmt::format("Sent a variables request using a reference for a frame is an error.", var_ref));
+  case ContextType::Scope: {
+    auto scope = frame->scope(var_ref);
+    switch (scope->type) {
+    case ScopeType::Arguments: {
+      auto vars = context.symbol_file->getVariables(*context.tc, *frame, sym::VariableSet::Arguments);
+      return new VariablesResponse{true, this, std::move(vars)};
+    }
+    case ScopeType::Locals: {
+      auto vars = context.symbol_file->getVariables(*context.tc, *frame, sym::VariableSet::Locals);
+      return new VariablesResponse{true, this, std::move(vars)};
+    }
+    case ScopeType::Registers: {
+      TODO_FMT("get variables for registers not implemented");
+    } break;
+    }
+  } break;
+  case ContextType::Variable:
+    return new VariablesResponse{true, this, context.symbol_file->resolve(context, start, count)};
+  case ContextType::Global:
+    TODO("Global variables not yet implemented support for");
+    break;
+  }
+
+  return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
 }
 
 VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept

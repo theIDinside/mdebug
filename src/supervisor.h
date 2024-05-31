@@ -84,7 +84,6 @@ struct TraceeController
 
 private:
   int next_var_ref = 0;
-  std::unordered_map<int, ui::dap::VariablesReference> var_refs;
   std::optional<TPtr<void>> interpreter_base;
   std::optional<TPtr<void>> entry;
   TargetSession session;
@@ -193,7 +192,7 @@ public:
   bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
-  void register_object_file(std::shared_ptr<ObjectFile> obj, bool is_main_executable,
+  void register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> obj, bool is_main_executable,
                             AddrPtr relocated_base) noexcept;
 
   void register_symbol_file(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept;
@@ -283,26 +282,17 @@ public:
   const ElfSection *get_text_section(AddrPtr addr) noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
-  std::array<ui::dap::Scope, 3> scopes_reference(int frame_id) noexcept;
-  sym::Frame *frame(int frame_id) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
   bool session_all_stop_mode() const noexcept;
   TaskInfo *set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
-  int new_frame_id(NonNullPtr<SymbolFile> owning_obj, TaskInfo &task) noexcept;
-  int new_scope_id(NonNullPtr<SymbolFile> owning_obj, const sym::Frame *frame, ui::dap::ScopeType type) noexcept;
-  int new_var_id(int parent_id) noexcept;
-  void invalidate_stop_state() noexcept;
   void cache_registers(TaskInfo &t) noexcept;
   tc::TraceeCommandInterface &get_interface() noexcept;
   std::optional<AddrPtr> get_interpreter_base() const noexcept;
   std::shared_ptr<SymbolFile> get_main_executable() const noexcept;
 
 private:
-  void reset_variable_references() noexcept;
-  int take_new_varref_id() noexcept;
-  void reset_variable_ref_id() noexcept;
   // Writes breakpoint point and returns the original value found at that address
   utils::Expected<u8, BpErr> install_software_bp_loc(AddrPtr addr) noexcept;
 };

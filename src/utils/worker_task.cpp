@@ -36,6 +36,11 @@ Task::execute() noexcept
   }
 }
 
+void
+NoOp::execute_task() noexcept
+{
+}
+
 TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name), m_task_lock(), m_done_tasks()
 {
   DBGLOG(core, "Created task group {}", name);

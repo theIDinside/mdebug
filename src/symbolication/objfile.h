@@ -6,6 +6,7 @@
 #include "interface/dap/types.h"
 #include "mdb_config.h"
 #include "symbolication/dwarf/lnp.h"
+#include "tracer.h"
 #include <common.h>
 #include <regex>
 #include <string_view>
@@ -13,6 +14,8 @@
 
 using VariablesReference = int;
 template <typename T> using Set = std::unordered_set<T>;
+
+struct TraceeController;
 
 class NonExecutableCompilationUnitFile;
 
@@ -161,17 +164,19 @@ private:
 class SymbolFile
 {
   std::shared_ptr<ObjectFile> binary_object;
-  std::unordered_map<int, SharedPtr<sym::Value>> valobj_cache{};
+  TraceeController *tc{nullptr};
 
 public:
   using shr_ptr = std::shared_ptr<SymbolFile>;
   Immutable<std::string> obj_id;
   Immutable<AddrPtr> baseAddress;
   Immutable<AddressRange> pc_bounds;
-  SymbolFile(std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
 
-  static shr_ptr Create(Pid process_id, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept;
-  auto copy(const TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
+  SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
+             AddrPtr relocated_base) noexcept;
+
+  static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept;
+  auto copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
 
   auto objectFile() const noexcept -> ObjectFile *;
@@ -184,14 +189,15 @@ public:
   // might open for extending the debugger so that the user can do scripts etc, and they might want to hold on to
   // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
   // user will have created something that holds a reference to the value it will now become the sole owner.
-  auto invalidateVariableReferences() noexcept -> void;
   auto registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
     -> std::vector<ui::dap::Variable>;
   auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
-  auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
+  auto resolve(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
     -> std::vector<ui::dap::Variable>;
+  // auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept ->
+  // std::vector<ui::dap::Variable>;
 
   auto low_pc() noexcept -> AddrPtr;
   auto high_pc() noexcept -> AddrPtr;
@@ -199,11 +205,11 @@ public:
   auto getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *;
   auto getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
-  auto cacheValue(VariablesReference ref, std::shared_ptr<sym::Value> value) noexcept -> void;
   auto getLineTable(u64 offset) noexcept -> sym::dw::LineTable;
   auto path() const noexcept -> Path;
 
   auto lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
+  auto supervisor() noexcept -> TraceeController *;
 
 private:
   std::vector<ui::dap::Variable> getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeController &tc,
@@ -211,7 +217,7 @@ private:
 };
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;
-std::shared_ptr<ObjectFile> CreateObjectFile(Pid process_id, const Path &path) noexcept;
+std::shared_ptr<ObjectFile> CreateObjectFile(TraceeController *tc, const Path &path) noexcept;
 
 struct UnloadObjectFile
 {

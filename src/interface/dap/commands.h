@@ -658,6 +658,7 @@ struct Variables final : public UICommand
   Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
+  ErrorResponse *error(std::string &&msg) noexcept;
   int var_ref;
   std::optional<u32> start;
   std::optional<u32> count;
