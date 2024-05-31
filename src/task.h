@@ -156,6 +156,12 @@ struct TaskVMInfo
   TraceePointer<void> tls;
 };
 
+struct ExecutionContext
+{
+  TraceeController *tc;
+  TaskInfo *t;
+};
+
 namespace fmt {
 template <> struct formatter<TaskVMInfo>
 {

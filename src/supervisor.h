@@ -177,6 +177,8 @@ public:
   bool terminate_gracefully() noexcept;
   bool detach(bool resume) noexcept;
 
+  void set_and_run_action(Tid tid, ptracestop::ThreadProceedAction *action) noexcept;
+
   template <typename StopAction, typename... Args>
   void
   install_thread_proceed(TaskInfo &t, Args... args) noexcept
@@ -272,7 +274,6 @@ public:
   // itself.
   sym::UnwinderSymbolFilePair get_unwinder_from_pc(AddrPtr pc) noexcept;
   sym::CallStack &build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept;
-  std::vector<AddrPtr> &unwind_callstack(TaskInfo *task) noexcept;
 
   sym::Frame current_frame(TaskInfo &task) noexcept;
   std::optional<std::pair<sym::FunctionSymbol *, NonNullPtr<SymbolFile>>> find_fn_by_pc(AddrPtr addr) noexcept;

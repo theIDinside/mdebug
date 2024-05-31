@@ -37,10 +37,10 @@ FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_
 FinishFunction::~FinishFunction() noexcept { tc.remove_breakpoint(bp->id); }
 
 bool
-FinishFunction::has_completed(bool was_stopped) const noexcept
+FinishFunction::has_completed(bool stopped_by_user) const noexcept
 {
 
-  return tc.get_caching_pc(task) == bp->address() || was_stopped;
+  return tc.get_caching_pc(task) == bp->address() || stopped_by_user;
 }
 
 void
@@ -61,9 +61,9 @@ InstructionStep::InstructionStep(TraceeController &ctrl, TaskInfo &thread, int s
 }
 
 bool
-InstructionStep::has_completed(bool was_stopped) const noexcept
+InstructionStep::has_completed(bool stopped_by_user) const noexcept
 {
-  return steps_taken == steps_requested || was_stopped;
+  return steps_taken == steps_requested || stopped_by_user;
 }
 
 void
@@ -146,9 +146,9 @@ LineStep::~LineStep() noexcept
 }
 
 bool
-LineStep::has_completed(bool was_stopped) const noexcept
+LineStep::has_completed(bool stopped_by_user) const noexcept
 {
-  return is_done || was_stopped;
+  return is_done || stopped_by_user;
 }
 
 void
@@ -243,8 +243,8 @@ StopHandler::handle_proceed(TaskInfo &info, tc::ProcessedStopEvent stop) noexcep
   auto proceed_action = get_proceed_action(info);
   if (proceed_action) {
     proceed_action->update_stepped();
-    const auto was_stopped = !stop.should_resume;
-    if (proceed_action->has_completed(was_stopped)) {
+    const auto stopped_by_user = !stop.should_resume;
+    if (proceed_action->has_completed(stopped_by_user)) {
       remove_action(info);
     } else {
       proceed_action->proceed();
@@ -455,6 +455,113 @@ StopImmediately::proceed() noexcept
 void
 StopImmediately::update_stepped() noexcept
 {
+}
+
+StepInto::StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame,
+                   sym::dw::LineTableEntry entry) noexcept
+    : ThreadProceedAction(ctrl, task), start_frame(start_frame), starting_line_info(entry)
+{
+}
+
+StepInto::~StepInto() noexcept
+{
+  if (!cancelled) {
+    push_debugger_event(
+      CoreEvent::SteppingDone({.target = tc.task_leader, .tid = task.tid, .sig_or_code = 0}, "Step in done", {}));
+  }
+}
+
+bool
+StepInto::has_completed(bool stopped_by_user) const noexcept
+{
+  return is_done || stopped_by_user;
+}
+
+void
+StepInto::proceed() noexcept
+{
+  tc.resume_task(task, {tc::RunType::Step, tc::ResumeTarget::Task});
+}
+
+bool
+StepInto::is_origin_line(u32 line) const noexcept
+{
+  return line == starting_line_info.line;
+}
+
+bool
+StepInto::inside_origin_frame(const sym::Frame &f) const noexcept
+{
+  return f.frame_type() == sym::FrameType::Full && same_symbol(f, start_frame);
+}
+
+void
+StepInto::update_stepped() noexcept
+{
+  const auto frame = tc.current_frame(task);
+  // if we're in the same frame, we single step
+  if (inside_origin_frame(frame)) {
+    auto lt = frame.cu_line_table();
+    if (!lt) {
+      is_done = true;
+      return;
+    }
+    const auto fpc = frame.pc();
+    auto lte = lt->find_by_pc(fpc);
+    // we could no longer find LTE; which probably means we've left our origin line.
+    if (lte == lt->end()) {
+      is_done = true;
+      return;
+    }
+    if (fpc < lte.get().pc && fpc > (lte - 1).get().pc) {
+      return;
+    }
+    if (!is_origin_line(lte.get().line)) {
+      is_done = true;
+      return;
+    }
+  } else {
+    // means we've left the original frame
+    is_done = true;
+  }
+}
+
+StepInto *
+StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
+{
+  auto &callstack = ctrl.build_callframe_stack(task, CallStackRequest::partial(1));
+  const auto start_frame = callstack.frames[0];
+  const auto fpc = start_frame.pc();
+  SymbolFile *symbol_file = ctrl.find_obj_by_pc(fpc);
+  ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
+
+  auto src_infos = symbol_file->getSourceInfos(fpc);
+
+  // the std::unordered_set here is just for de-duplication.
+  std::vector<sym::dw::RelocatedSourceCodeFile> files_of_interest{};
+  for (auto src : src_infos) {
+    auto files = src->sources();
+
+    for (const auto &f : files) {
+      if (utils::none_of(files_of_interest, [&f](auto &file) { return f->full_path == file.path(); })) {
+        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->baseAddress, f});
+      }
+    }
+  }
+
+  for (auto &&file : files_of_interest) {
+    if (auto it = file.find_lte_by_pc(fpc); it) {
+      auto lte = it->get();
+      if (start_frame.inside(lte.pc.as_void()) == sym::InsideRange::Yes) {
+        if (lte.pc == fpc) {
+          return new StepInto{ctrl, task, start_frame, lte};
+        } else {
+          return new StepInto{ctrl, task, start_frame, (it.value() - 1).get()};
+        }
+      }
+    }
+  }
+  return nullptr;
 }
 
 } // namespace ptracestop

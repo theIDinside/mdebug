@@ -8,6 +8,7 @@
 #include <interface/attach_args.h>
 #include <nlohmann/json.hpp>
 #include <symbolication/disassemble.h>
+#include <typedefs.h>
 
 using namespace std::string_view_literals;
 enum class BreakpointType : std::uint8_t;
@@ -209,7 +210,7 @@ struct Continue final : public ui::UICommand
   int thread_id;
   bool continue_all;
 
-  Continue(std::uint64_t seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
+  Continue(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~Continue() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
@@ -242,7 +243,7 @@ struct Pause final : public ui::UICommand
     int threadId;
   };
 
-  Pause(std::uint64_t seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
+  Pause(u64 seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
   ~Pause() override = default;
   UIResultPtr execute(Tracer *tc) noexcept final;
 
@@ -282,7 +283,7 @@ struct Next final : public ui::UICommand
   bool continue_all;
   SteppingGranularity granularity;
 
-  Next(std::uint64_t seq, int tid, bool all, SteppingGranularity granularity) noexcept
+  Next(u64 seq, int tid, bool all, SteppingGranularity granularity) noexcept
       : UICommand(seq), thread_id(tid), continue_all(all), granularity(granularity)
   {
   }
@@ -290,6 +291,41 @@ struct Next final : public ui::UICommand
   UIResultPtr execute(Tracer *tracer) noexcept final;
   DEFINE_NAME("next");
   RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
+
+  template <typename Json>
+  constexpr static auto
+  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
+  {
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
+    }
+    return std::nullopt;
+  }
+};
+
+struct StepInResponse final : ui::UIResult
+{
+  CTOR(StepInResponse);
+  ~StepInResponse() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
+};
+
+struct StepIn final : public ui::UICommand
+{
+  int thread_id;
+  bool singleThread;
+  SteppingGranularity granularity;
+
+  StepIn(u64 seq, int thread_id, bool singleThread, SteppingGranularity granularity) noexcept
+      : UICommand(seq), thread_id(thread_id), singleThread(singleThread), granularity(granularity)
+  {
+  }
+
+  ~StepIn() noexcept final = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final;
+  DEFINE_NAME("stepIn");
+  RequiredArguments({"threadId"});
   DefineArgTypes({"threadId", FieldType::Int});
 
   template <typename Json>
@@ -315,7 +351,7 @@ struct StepOut final : public ui::UICommand
   int thread_id;
   bool continue_all;
 
-  StepOut(std::uint64_t seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
+  StepOut(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   DEFINE_NAME("stepOut");
@@ -346,7 +382,7 @@ struct SetBreakpointsResponse final : ui::UIResult
 
 struct SetBreakpoints final : public ui::UICommand
 {
-  SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
+  SetBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final;
@@ -356,7 +392,7 @@ struct SetBreakpoints final : public ui::UICommand
 
 struct SetExceptionBreakpoints final : public ui::UICommand
 {
-  SetExceptionBreakpoints(std::uint64_t sequence, nlohmann::json &&args) noexcept;
+  SetExceptionBreakpoints(u64 sequence, nlohmann::json &&args) noexcept;
   ~SetExceptionBreakpoints() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
@@ -369,7 +405,7 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
-  SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
+  SetInstructionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final;
@@ -379,7 +415,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 
 struct SetFunctionBreakpoints final : public ui::UICommand
 {
-  SetFunctionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
+  SetFunctionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetFunctionBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr execute(Tracer *tracer) noexcept final;
@@ -399,7 +435,7 @@ struct ReadMemoryResponse final : public ui::UIResult
 
 struct ReadMemory final : public ui::UICommand
 {
-  ReadMemory(std::uint64_t seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
+  ReadMemory(u64 seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
   ~ReadMemory() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
@@ -431,7 +467,7 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 
 struct ConfigurationDone final : public ui::UICommand
 {
-  ConfigurationDone(std::uint64_t seq) noexcept : UICommand(seq) {}
+  ConfigurationDone(u64 seq) noexcept : UICommand(seq) {}
   ~ConfigurationDone() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
@@ -448,7 +484,7 @@ struct InitializeResponse final : public ui::UIResult
 
 struct Initialize final : public ui::UICommand
 {
-  Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept;
+  Initialize(u64 seq, nlohmann::json &&arguments) noexcept;
   ~Initialize() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   nlohmann::json args;
@@ -465,7 +501,7 @@ struct DisconnectResponse final : public UIResult
 
 struct Disconnect final : public UICommand
 {
-  Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
+  Disconnect(u64 seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
   ~Disconnect() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   bool restart, terminate_tracee, suspend_tracee;
@@ -482,7 +518,7 @@ struct LaunchResponse final : public UIResult
 
 struct Launch final : public UICommand
 {
-  Launch(std::uint64_t seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
+  Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   bool stopOnEntry;
@@ -512,7 +548,7 @@ struct AttachResponse final : public UIResult
 
 struct Attach final : public UICommand
 {
-  Attach(std::uint64_t seq, AttachArgs &&args) noexcept;
+  Attach(u64 seq, AttachArgs &&args) noexcept;
   ~Attach() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
 
@@ -591,7 +627,7 @@ struct Threads final : public UICommand
 
 struct StackTrace final : public UICommand
 {
-  StackTrace(std::uint64_t seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
+  StackTrace(u64 seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
@@ -625,7 +661,7 @@ struct StackTraceResponse final : public UIResult
 
 struct Scopes final : public UICommand
 {
-  Scopes(std::uint64_t seq, int frameId) noexcept;
+  Scopes(u64 seq, int frameId) noexcept;
   ~Scopes() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   int frameId;
@@ -655,7 +691,7 @@ struct ScopesResponse final : public UIResult
 
 struct Variables final : public UICommand
 {
-  Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
+  Variables(u64 seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
@@ -696,7 +732,7 @@ struct DisassembleResponse final : public UIResult
 
 struct Disassemble final : public UICommand
 {
-  Disassemble(std::uint64_t seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
+  Disassemble(u64 seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
   ~Disassemble() override = default;
   UIResultPtr execute(Tracer *tracer) noexcept final;
@@ -740,7 +776,7 @@ concept HasName = requires(T t) {
 
 struct InvalidArgs final : public UICommand
 {
-  InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
+  InvalidArgs(u64 seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgs() override = default;
 
   UIResultPtr execute(Tracer *tracer) noexcept final;

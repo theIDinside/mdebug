@@ -25,7 +25,7 @@ public:
   virtual void cancel() noexcept;
 
   // Abstract Interface
-  virtual ~ThreadProceedAction() = default;
+  virtual ~ThreadProceedAction() noexcept = default;
   virtual bool has_completed(bool was_stopped) const noexcept = 0;
   virtual void proceed() noexcept = 0;
   virtual void update_stepped() noexcept = 0;
@@ -159,4 +159,23 @@ private:
   CoreEvent *native_core_evt_from_stopped(TaskInfo &t) noexcept;
   std::unordered_map<Tid, ThreadProceedAction *> proceed_actions;
 };
+
+class StepInto final : public ThreadProceedAction
+{
+  sym::Frame start_frame;
+  sym::dw::LineTableEntry starting_line_info;
+  bool is_done{false};
+
+public:
+  StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame, sym::dw::LineTableEntry entry) noexcept;
+  ~StepInto() noexcept final;
+  bool has_completed(bool was_stopped) const noexcept final;
+  void proceed() noexcept final;
+  void update_stepped() noexcept final;
+  bool inside_origin_frame(const sym::Frame &f) const noexcept;
+  bool is_origin_line(u32 line) const noexcept;
+
+  static StepInto *create(TraceeController &ctrl, TaskInfo &task) noexcept;
+};
+
 } // namespace ptracestop

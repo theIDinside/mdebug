@@ -190,6 +190,42 @@ Next::execute(Tracer *tracer) noexcept
 }
 
 std::string
+StepInResponse::serialize(int seq) const noexcept
+{
+  if (success) {
+    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepIn"}})", seq,
+                       request_seq);
+  } else {
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
+      seq, request_seq);
+  }
+}
+
+UIResultPtr
+StepIn::execute(Tracer *tracer) noexcept
+{
+  auto target = tracer->get_current();
+  auto task = target->get_task(thread_id);
+
+  if (!task->is_stopped()) {
+    return new StepInResponse{false, this};
+  }
+
+  auto proceeder = ptracestop::StepInto::create(target, *task);
+
+  if (!proceeder) {
+    return new ErrorResponse{
+      Request, this,
+      std::make_optional("No line table information could be found - abstract stepping not possible."),
+      std::nullopt};
+  }
+
+  target->set_and_run_action(task->tid, proceeder);
+  return new StepInResponse{true, this};
+}
+
+std::string
 StepOutResponse::serialize(int seq) const noexcept
 {
   if (success) {
@@ -1127,8 +1163,23 @@ parse_command(std::string &&packet) noexcept
   }
   case CommandType::StepBack:
     TODO("Command::StepBack");
-  case CommandType::StepIn:
-    TODO("Command::StepIn");
+  case CommandType::StepIn: {
+    IfInvalidArgsReturn(StepIn);
+
+    int thread_id = args["threadId"];
+    bool single_thread = false;
+    SteppingGranularity step_type = SteppingGranularity::Line;
+    if (args.contains("granularity")) {
+      std::string_view str_arg;
+      args["granularity"].get_to(str_arg);
+      step_type = from_str(str_arg);
+    }
+    if (args.contains("singleThread")) {
+      single_thread = args["singleThread"];
+    }
+
+    return new StepIn{seq, thread_id, single_thread, step_type};
+  }
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
   case CommandType::StepOut: {

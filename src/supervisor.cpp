@@ -829,6 +829,12 @@ TraceeController::terminate_gracefully() noexcept
 }
 
 void
+TraceeController::set_and_run_action(Tid tid, ptracestop::ThreadProceedAction *action) noexcept
+{
+  stop_handler->set_and_run_action(tid, action);
+}
+
+void
 TraceeController::post_exec(const std::string &exe) noexcept
 {
   DBGLOG(core, "Processing EXEC for {}", task_leader);
@@ -1061,86 +1067,6 @@ TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
     }
   }
   return sym::UnwinderSymbolFilePair{null_unwinder, nullptr};
-}
-
-std::vector<AddrPtr> &
-TraceeController::unwind_callstack(TaskInfo *task) noexcept
-{
-  cache_registers(*task);
-  if (!task->call_stack->dirty) {
-    return task->call_stack->pcs;
-  } else {
-    task->call_stack->dirty = false;
-    task->call_stack->pcs.clear();
-    auto &frame_pcs = task->call_stack->pcs;
-    u8 stack_storage[100 * sizeof(std::uintptr_t)];
-    std::pmr::monotonic_buffer_resource rsrc{&stack_storage, 100 * sizeof(std::uintptr_t)};
-
-    std::pmr::vector<TPtr<std::uintptr_t>> base_ptrs{&rsrc};
-    base_ptrs.reserve(50);
-
-    auto bp = task->get_rbp();
-    base_ptrs.push_back(bp);
-    while (true) {
-      TPtr<std::uintptr_t> bp_addr = base_ptrs.back();
-      const auto prev_bp = read_type_safe(bp_addr).transform([](auto v) { return TPtr<std::uintptr_t>{v}; });
-      if (auto prev = prev_bp.value_or(0x0); prev == bp_addr || !(prev > TPtr<std::uintptr_t>{1})) {
-        break;
-      }
-      base_ptrs.push_back(*prev_bp);
-    }
-    const auto rip = task->get_pc();
-    frame_pcs.push_back(rip);
-    bool inside_prologue = false;
-    auto obj = find_obj_by_pc(rip);
-
-    auto syminfos = obj->getSourceInfos(rip);
-    sym::CompilationUnit *current_symtab = nullptr;
-    if (!syminfos.empty()) {
-      for (auto *symtab : syminfos) {
-        auto lt = symtab->get_linetable(obj);
-        ASSERT(lt, "No line table for {}", symtab->name());
-        auto it = lt->find_by_pc(frame_pcs.front());
-        if (it != std::end(*lt) && it.get().prologue_end) {
-          inside_prologue = true;
-          current_symtab = symtab;
-          break;
-        }
-      }
-    }
-
-    for (auto bp_it = base_ptrs.begin(); bp_it != base_ptrs.end(); ++bp_it) {
-      const auto ret_addr = read_type_safe<TPtr<std::uintptr_t>>({offset(*bp_it, 8)});
-      if (ret_addr) {
-        frame_pcs.push_back(ret_addr->as_void());
-      }
-    }
-
-    // NB(simon): tracee hasn't finalized it's activation record; we need to perform some heuristics
-    // to actually determine return address. For now, this is it.
-    if (inside_prologue) {
-      TPtr<std::uintptr_t> ret_addr = task->get_rsp();
-      auto ret_val_a = read_type_safe(ret_addr).value_or(0);
-
-      bool resolved = false;
-      if (ret_val_a != 0) {
-        if (current_symtab && current_symtab->start_pc() <= ret_val_a && current_symtab->end_pc() >= ret_val_a) {
-          frame_pcs.insert(frame_pcs.begin() + 1, ret_val_a);
-          resolved = true;
-        }
-      }
-
-      if (!resolved) {
-        auto ret_val_b = read_type_safe(offset(ret_addr, 8)).value_or(0);
-        if (!resolved && ret_val_b != 0) {
-          if (current_symtab && current_symtab->start_pc() <= ret_val_b && current_symtab->end_pc() >= ret_val_b) {
-            frame_pcs.insert(frame_pcs.begin() + 1, ret_val_b);
-          }
-        }
-      }
-    }
-    return task->call_stack->pcs;
-  }
 }
 
 void

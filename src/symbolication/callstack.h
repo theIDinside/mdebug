@@ -19,7 +19,7 @@ enum class FrameType : u8
   Unknown
 };
 
-enum class InsideRange
+enum class InsideRange : u8
 {
   Yes,
   No,
