@@ -2,6 +2,7 @@
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf_defs.h"
 #include <atomic>
 #include <symbolication/callstack.h>
@@ -174,7 +175,34 @@ TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type
     : obj(object_file), current_type(&type)
 {
 }
+
+TypeSymbolicationContext
+TypeSymbolicationContext::continueWith(const TypeSymbolicationContext &ctx, Type *t) noexcept
+{
+  return TypeSymbolicationContext{ctx.obj, *t};
+}
+
 // Fully resolves `Type`
+
+void
+TypeSymbolicationContext::process_inheritance(DieReference cu_die) noexcept
+{
+  const auto location = cu_die.read_attribute(Attribute::DW_AT_data_member_location);
+  const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
+  const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
+
+  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+  auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
+  auto ctx = TypeSymbolicationContext::continueWith(*this, type);
+  ctx.resolve_type();
+
+  if (!type->fields.empty()) {
+    const auto member_offset = location->unsigned_value();
+    for (auto t : type->fields) {
+      type_fields.push_back(Field{.type = t.type, .offset_of = *t.offset_of + member_offset, .name = t.name});
+    }
+  }
+}
 
 void
 TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
@@ -220,6 +248,8 @@ TypeSymbolicationContext::resolve_type() noexcept
       case DwarfTag::DW_TAG_member:
         process_member_variable(DieReference{cu, &die});
         break;
+      case DwarfTag::DW_TAG_inheritance:
+        process_inheritance(DieReference{cu, &die});
       default:
         continue;
       }

@@ -279,42 +279,46 @@ struct BlockSymbolIterator
   static BlockSymbolIterator
   Begin(const std::vector<SymbolBlock> &blocks) noexcept
   {
-    return BlockSymbolIterator{.blocks = blocks.data(),
-                               .count = static_cast<u32>(blocks.size()),
-                               .current_block = 0,
-                               .current_symbol_in_block_index = 0};
+    return BlockSymbolIterator{.blocks_data = blocks.data(),
+                               .block_count = static_cast<u32>(blocks.size()),
+                               .current_block_index = 0,
+                               .symbol_index = 0};
   }
 
   static BlockSymbolIterator
   End(const std::vector<SymbolBlock> &blocks) noexcept
   {
-    return BlockSymbolIterator{.blocks = blocks.data(),
-                               .count = static_cast<u32>(blocks.size()),
-                               .current_block = static_cast<u32>(blocks.size()),
-                               .current_symbol_in_block_index = 0};
+    return BlockSymbolIterator{.blocks_data = blocks.data(),
+                               .block_count = static_cast<u32>(blocks.size()),
+                               .current_block_index = static_cast<u32>(blocks.size()),
+                               .symbol_index = 0};
   }
 
   static BlockSymbolIterator
   Begin(const SymbolBlock *blocks, u32 count) noexcept
   {
     return BlockSymbolIterator{
-      .blocks = blocks, .count = count, .current_block = 0, .current_symbol_in_block_index = 0};
+      .blocks_data = blocks, .block_count = count, .current_block_index = 0, .symbol_index = 0};
   }
 
   static BlockSymbolIterator
   End(const SymbolBlock *blocks, u32 count) noexcept
   {
-    return BlockSymbolIterator{
-      .blocks = blocks, .count = count, .current_block = count, .current_symbol_in_block_index = 0};
+    if (count == 1 && blocks[0].symbols.empty()) {
+      return BlockSymbolIterator{
+        .blocks_data = blocks, .block_count = count, .current_block_index = 0, .symbol_index = 0};
+    } else {
+      return BlockSymbolIterator{
+        .blocks_data = blocks, .block_count = count, .current_block_index = count, .symbol_index = 0};
+    }
   }
 
   friend bool
   operator==(const BlockSymbolIterator &l, const BlockSymbolIterator &r) noexcept
   {
-    ASSERT(l.blocks == r.blocks && l.count == r.count,
+    ASSERT(l.blocks_data == r.blocks_data && l.block_count == r.block_count,
            "Expected iterators to be built from the same underlying data. If not, you're a moron.");
-    return l.current_block == r.current_block &&
-           l.current_symbol_in_block_index == r.current_symbol_in_block_index;
+    return l.current_block_index == r.current_block_index && l.symbol_index == r.symbol_index;
   }
 
   BlockSymbolIterator &
@@ -335,40 +339,40 @@ struct BlockSymbolIterator
   const Symbol *
   operator->() noexcept
   {
-    return &blocks[current_block].symbols[current_symbol_in_block_index];
+    return &blocks_data[current_block_index].symbols[symbol_index];
   }
 
   const Symbol *
   operator->() const noexcept
   {
-    return &blocks[current_block].symbols[current_symbol_in_block_index];
+    return &blocks_data[current_block_index].symbols[symbol_index];
   }
 
   const Symbol &
   operator*() noexcept
   {
-    return blocks[current_block].symbols[current_symbol_in_block_index];
+    return blocks_data[current_block_index].symbols[symbol_index];
   }
 
   const Symbol &
   operator*() const noexcept
   {
-    return blocks[current_block].symbols[current_symbol_in_block_index];
+    return blocks_data[current_block_index].symbols[symbol_index];
   }
 
   void
   advance() noexcept
   {
-    ++current_symbol_in_block_index;
-    if (current_symbol_in_block_index == blocks[current_block].symbols.size()) {
-      ++current_block;
-      current_symbol_in_block_index = 0;
+    ++symbol_index;
+    if (symbol_index == blocks_data[current_block_index].symbols.size()) {
+      ++current_block_index;
+      symbol_index = 0;
     }
   }
-  const SymbolBlock *blocks;
-  u32 count;
-  u32 current_block;
-  u32 current_symbol_in_block_index;
+  const SymbolBlock *blocks_data;
+  u32 block_count;
+  u32 current_block_index;
+  u32 symbol_index;
 };
 
 } // namespace sym

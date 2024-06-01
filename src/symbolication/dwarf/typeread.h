@@ -42,9 +42,12 @@ class TypeSymbolicationContext
   std::vector<Field> type_fields;
   sym::Type *current_type;
   void process_member_variable(DieReference cu_die) noexcept;
+  void process_inheritance(DieReference cu_die) noexcept;
 
 public:
   TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept;
+  static TypeSymbolicationContext continueWith(const TypeSymbolicationContext &ctx, Type *t) noexcept;
+
   // Fully resolves `Type`
   void resolve_type() noexcept;
 };
