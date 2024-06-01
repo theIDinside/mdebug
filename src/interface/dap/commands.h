@@ -689,6 +689,56 @@ struct ScopesResponse final : public UIResult
   std::array<Scope, 3> scopes;
 };
 
+enum class EvaluationContext
+{
+  Watch,
+  Repl,
+  Hover,
+  Clipboard,
+  Variables
+};
+
+struct Evaluate final : public UICommand
+{
+  Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
+           std::optional<EvaluationContext> context) noexcept;
+  ~Evaluate() noexcept final = default;
+  UIResultPtr execute(Tracer *tracer) noexcept final;
+
+  Immutable<std::string> expr;
+  Immutable<std::optional<int>> frameId;
+  Immutable<EvaluationContext> context;
+
+  DEFINE_NAME("evaluate");
+  RequiredArguments({"expression"sv});
+  DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int});
+
+  template <typename Json>
+  constexpr static auto
+  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
+  {
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
+      return std::move(err).take();
+    }
+    return std::nullopt;
+  }
+
+  static std::optional<EvaluationContext> parse_context(std::string_view input) noexcept;
+};
+
+struct EvaluateResponse final : public UIResult
+{
+  EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::string &&result,
+                   std::optional<std::string> &&type, std::optional<std::string> &&memoryReference) noexcept;
+  ~EvaluateResponse() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
+
+  std::string result;
+  std::optional<std::string> type;
+  int variablesReference;
+  std::optional<std::string> memoryReference;
+};
+
 struct Variables final : public UICommand
 {
   Variables(u64 seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;

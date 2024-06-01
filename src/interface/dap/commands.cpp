@@ -815,6 +815,52 @@ DisassembleResponse::serialize(int seq) const noexcept
     seq, request_seq, fmt::join(instructions, ","));
 }
 
+Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
+                   std::optional<EvaluationContext> context) noexcept
+    : UICommand(seq), expr(std::move(expression)), frameId(frameId),
+      context(context.value_or(EvaluationContext::Watch))
+{
+}
+
+UIResultPtr
+Evaluate::execute(Tracer *tracer) noexcept
+{
+  return new EvaluateResponse{false, this, {}, "could not evaluate", {}, {}};
+}
+
+std::optional<EvaluationContext>
+Evaluate::parse_context(std::string_view input) noexcept
+{
+
+  static constexpr auto contexts = {
+    std::pair{"watch", EvaluationContext::Watch}, std::pair{"repl", EvaluationContext::Repl},
+    std::pair{"hover", EvaluationContext::Hover}, std::pair{"clipboard", EvaluationContext::Clipboard},
+    std::pair{"variables", EvaluationContext::Variables}};
+
+  for (const auto &[k, v] : contexts) {
+    if (k == input) {
+      return v;
+    }
+  }
+  return {};
+}
+
+EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference,
+                                   std::string &&result, std::optional<std::string> &&type,
+                                   std::optional<std::string> &&memoryReference) noexcept
+    : UIResult(success, cmd), result(std::move(result)), type(std::move(type)),
+      variablesReference(variablesReference.value_or(0)), memoryReference(std::move(memoryReference))
+{
+}
+
+std::string
+EvaluateResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+    R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"disassemble","body":{{ "result":"{}", "variablesReference":{} }}}})",
+    seq, request_seq, success, result, variablesReference);
+}
+
 Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
     : UICommand(seq), var_ref(var_ref), start(start), count(count)
 {
@@ -1042,8 +1088,31 @@ parse_command(std::string &&packet) noexcept
     }
     return new Disconnect{seq, restart, terminate_debuggee, suspend_debuggee};
   }
-  case CommandType::Evaluate:
-    TODO("Command::Evaluate");
+  case CommandType::Evaluate: {
+    IfInvalidArgsReturn(Evaluate);
+
+    std::string expr = args.at("expression");
+    std::optional<int> frameId{};
+    std::optional<EvaluationContext> ctx{};
+
+    if (args.contains("frameId")) {
+      const auto &ref = args.at("frameId");
+      if (ref.is_number()) {
+        frameId = args.at("frameId");
+      }
+    }
+
+    if (args.contains("context")) {
+      const auto &ref = args.at("context");
+      if (ref.is_string()) {
+        std::string_view context;
+        ref.get_to(context);
+        ctx = Evaluate::parse_context(context);
+      }
+    }
+
+    return new ui::dap::Evaluate{seq, std::move(expr), frameId, ctx};
+  }
   case CommandType::ExceptionInfo:
     TODO("Command::ExceptionInfo");
   case CommandType::Goto:
