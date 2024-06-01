@@ -162,7 +162,9 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     } else {
       size = base_type->size();
     }
-    auto type = new sym::Type{die_ref, size, base_type, this_ref.die->tag == DwarfTag::DW_TAG_typedef};
+
+    auto type =
+      new sym::Type{this_ref.die->tag, die_ref, size, base_type, this_ref.die->tag == DwarfTag::DW_TAG_typedef};
     type->set_array_bounds(array_bounds);
     types[this_ref.die->section_offset] = type;
     return type;
@@ -173,17 +175,17 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
                         .transform([](auto v) { return v.string(); })
                         .value_or("lambda");
     const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
-    auto type = new sym::Type{die_ref, sz, name};
+    auto type = new sym::Type{this_ref.die->tag, die_ref, sz, name};
     types[this_ref.die->section_offset] = type;
     return type;
   }
 }
 
 sym::Type *
-TypeStorage::emplace_type(Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
+TypeStorage::emplace_type(DwarfTag tag, Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
                           std::string_view name) noexcept
 {
-  auto pair = types.emplace(type_id, new sym::Type{die_ref, type_size, name});
+  auto pair = types.emplace(type_id, new sym::Type{tag, die_ref, type_size, name});
   if (pair.second) {
     return pair.first->second;
   }
@@ -192,29 +194,29 @@ TypeStorage::emplace_type(Offset type_id, sym::dw::IndexedDieReference die_ref, 
 
 namespace sym {
 
-Type::Type(dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept
+Type::Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept
     : name(target->name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
-      size_of(size_of), type_chain(target), fields(), base_type(), is_typedef(is_typedef), resolved(false),
-      processing(false)
+      is_typedef(is_typedef), resolved(false), processing(false), size_of(size_of), type_chain(target), fields(),
+      base_type(), die_tag(die_tag)
 {
 }
 
-Type::Type(dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept
+Type::Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept
     : name(name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
-      size_of(size_of), type_chain(nullptr), fields(), base_type(), is_typedef(false), resolved(false),
-      processing(false)
+      is_typedef(false), resolved(false), processing(false), size_of(size_of), type_chain(nullptr), fields(),
+      base_type(), die_tag(die_tag)
 {
 }
 
 Type::Type(std::string_view name) noexcept
-    : name(name), cu_die_ref(), modifier(Modifier::None), size_of(0), type_chain(nullptr), fields(), base_type(),
-      is_typedef(false), resolved(true), processing(false)
+    : name(name), cu_die_ref(), modifier(Modifier::None), is_typedef(false), resolved(true), processing(false),
+      size_of(0), type_chain(nullptr), fields(), base_type()
 {
 }
 
 Type::Type(Type &&o) noexcept
-    : name(o.name), cu_die_ref(o.cu_die_ref), modifier(o.modifier), size_of(o.size_of), type_chain(o.type_chain),
-      fields(std::move(o.fields)), base_type(o.base_type), resolved(o.resolved), processing(o.processing)
+    : name(o.name), cu_die_ref(o.cu_die_ref), modifier(o.modifier), resolved(o.resolved), processing(o.processing),
+      size_of(o.size_of), type_chain(o.type_chain), fields(std::move(o.fields)), base_type(o.base_type)
 {
   ASSERT(!processing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }
@@ -258,7 +260,7 @@ Type::is_reference() const noexcept
     return false;
   }
   auto t = type_chain;
-  while (t->type_chain) {
+  while (t) {
     const auto mod = std::to_underlying(*t->modifier);
     if (mod < ReferenceEnd && mod > ReferenceStart) {
       return true;
@@ -298,7 +300,7 @@ Type::size_bytes() noexcept
 bool
 Type::is_primitive() const noexcept
 {
-  if (base_type.has_value()) {
+  if (base_type.has_value() || die_tag == DwarfTag::DW_TAG_enumeration_type) {
     return true;
   }
 
@@ -308,7 +310,7 @@ Type::is_primitive() const noexcept
 
   auto it = type_chain;
   while (it != nullptr) {
-    if (it->base_type.has_value()) {
+    if (it->base_type.has_value() || it->die_tag == DwarfTag::DW_TAG_enumeration_type) {
       return true;
     }
     it = it->type_chain;

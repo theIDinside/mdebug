@@ -227,6 +227,61 @@ ArrayResolver::get_children(TraceeController &tc, std::optional<u32> start, std:
 
 ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : data_provider(provider) {}
 
+std::optional<std::string>
+PrimitiveVisualizer::format_enum(const Type &t, std::span<const u8> span) noexcept
+{
+  auto &enums = t.enumerations();
+  EnumeratorConstValue value;
+  if (enums.is_signed) {
+    switch (t.size_of) {
+    case 1:
+      value.i = bit_copy<i8>(span);
+      break;
+    case 2:
+      value.i = bit_copy<i16>(span);
+      break;
+    case 4:
+      value.i = bit_copy<i32>(span);
+      break;
+    case 8:
+      value.i = bit_copy<i64>(span);
+      break;
+    }
+  } else {
+    switch (t.size_of) {
+    case 1:
+      value.u = bit_copy<u8>(span);
+      break;
+    case 2:
+      value.u = bit_copy<u16>(span);
+      break;
+    case 4:
+      value.u = bit_copy<u32>(span);
+      break;
+    case 8:
+      value.u = bit_copy<u64>(span);
+      break;
+    }
+  }
+
+  const auto &fields = t.member_variables();
+  if (enums.is_signed) {
+    for (auto i = 0u; i < fields.size(); ++i) {
+      if (enums.e_values[i].i == value.i) {
+        return fmt::format("{}::{}", t.name, fields[i].name);
+      }
+    }
+    return fmt::format("{}::(invalid){}", t.name, value.i);
+  } else {
+    for (auto i = 0u; i < fields.size(); ++i) {
+      if (enums.e_values[i].u == value.u) {
+        return fmt::format("{}::{}", t.name, fields[i].name);
+      }
+    }
+    return fmt::format("{}::(invalid){}", t.name, value.u);
+  }
+}
+
 PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(provider) {}
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::string>
@@ -247,6 +302,11 @@ PrimitiveVisualizer::format_value() noexcept
   if (type->is_reference()) {
     const std::uintptr_t ptr = bit_copy<std::uintptr_t>(span);
     return fmt::format("0x{:x}", ptr);
+  }
+
+  auto target_type = type->target_type();
+  if (target_type->tag() == DwarfTag::DW_TAG_enumeration_type) {
+    return format_enum(*target_type, span);
   }
 
   switch (type->get_base_type().value()) {

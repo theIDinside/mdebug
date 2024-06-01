@@ -47,7 +47,7 @@ public:
    * before we return Foo* here, because the target type will be defined by Foo. */
   sym::Type *get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexcept;
   sym::Type *get_unit_type() noexcept;
-  sym::Type *emplace_type(Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
+  sym::Type *emplace_type(DwarfTag tag, Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
                           std::string_view name) noexcept;
 };
 
@@ -171,6 +171,18 @@ ModifierToString(Modifier mod)
   }
 }
 
+union EnumeratorConstValue
+{
+  u64 u;
+  i64 i;
+};
+
+struct EnumeratorValues
+{
+  bool is_signed{false};
+  std::unique_ptr<EnumeratorConstValue[]> e_values{nullptr};
+};
+
 // This is meant to be the interface via which we interpret a range of bytes
 class Type
 {
@@ -182,6 +194,14 @@ public:
   Immutable<std::string_view> name;
   Immutable<dw::IndexedDieReference> cu_die_ref;
   Immutable<Modifier> modifier;
+
+private:
+  bool is_typedef;
+  // Flags used when constructing and "realizing" a type from the debug info data.
+  bool resolved;
+  bool processing;
+
+public:
   Immutable<u32> size_of;
 
 private:
@@ -193,17 +213,15 @@ private:
   // types").
   std::optional<BaseTypeEncoding> base_type;
   u32 array_bounds{0};
-  bool is_typedef;
-  // Flags used when constructing and "realizing" a type from the debug info data.
-  bool resolved;
-  bool processing;
+  EnumeratorValues enum_values{};
+  DwarfTag die_tag;
 
 public:
   // Qualified, i.e. some variant of cvref-types or type defs
-  Type(dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept;
+  Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept;
 
   // "Normal" type constructor
-  Type(dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
+  Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
   Type(std::string_view name) noexcept;
@@ -221,6 +239,17 @@ public:
   bool is_primitive() const noexcept;
   bool is_char_type() const noexcept;
   bool is_array_type() const noexcept;
+  DwarfTag
+  tag() const noexcept
+  {
+    return die_tag;
+  }
+
+  const EnumeratorValues &
+  enumerations() const noexcept
+  {
+    return enum_values;
+  }
 
   u32 size() noexcept;
   u32 size_bytes() noexcept;

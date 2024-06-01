@@ -188,7 +188,6 @@ void
 TypeSymbolicationContext::process_inheritance(DieReference cu_die) noexcept
 {
   const auto location = cu_die.read_attribute(Attribute::DW_AT_data_member_location);
-  const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
   const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
 
   auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
@@ -232,6 +231,27 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 }
 
 void
+TypeSymbolicationContext::process_enum(DieReference cu_die) noexcept
+{
+  const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
+  const auto member_offset = cu_die.read_attribute(Attribute::DW_AT_data_member_location)
+                               .transform([](auto v) { return v.unsigned_value(); })
+                               .value_or(0);
+  const auto const_value = cu_die.read_attribute(Attribute::DW_AT_const_value);
+  if (const_value) {
+    enum_is_signed = const_value->form == AttributeForm::DW_FORM_sdata;
+    if (enum_is_signed) {
+      const_values.push_back(EnumeratorConstValue{.i = const_value->signed_value()});
+    } else {
+      const_values.push_back(EnumeratorConstValue{.u = const_value->unsigned_value()});
+    }
+  }
+
+  this->type_fields.push_back(
+    Field{.type = NonNull(*enumeration_type), .offset_of = member_offset, .name = name->string()});
+}
+
+void
 TypeSymbolicationContext::resolve_type() noexcept
 {
   auto type_iter = current_type;
@@ -242,6 +262,15 @@ TypeSymbolicationContext::resolve_type() noexcept
     }
     auto cu = type_iter->cu_die_ref->cu;
     auto die = type_iter->cu_die_ref.mut().get_die();
+    auto typedie = DieReference{cu, die};
+    if (die->tag == DwarfTag::DW_TAG_enumeration_type) {
+      const auto type_id = typedie.read_attribute(Attribute::DW_AT_type);
+      if (type_id) {
+        auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+        enumeration_type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
+      }
+    }
+
     die = die->children();
     for (const auto die : sym::dw::IterateSiblings{cu, die}) {
       switch (die.tag) {
@@ -250,10 +279,21 @@ TypeSymbolicationContext::resolve_type() noexcept
         break;
       case DwarfTag::DW_TAG_inheritance:
         process_inheritance(DieReference{cu, &die});
+        break;
+      case DwarfTag::DW_TAG_enumerator:
+        process_enum(DieReference{cu, &die});
+        break;
       default:
         continue;
       }
     }
+
+    if (typedie.die->tag == DwarfTag::DW_TAG_enumeration_type) {
+      type_iter->enum_values = {.is_signed = enum_is_signed,
+                                .e_values = std::make_unique<EnumeratorConstValue[]>(type_fields.size())};
+      std::copy(const_values.begin(), const_values.end(), type_iter->enum_values.e_values.get());
+    }
+
     if (!type_fields.empty()) {
       std::swap(type_iter->fields, this->type_fields);
     }

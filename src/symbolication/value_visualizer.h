@@ -119,6 +119,7 @@ public:
   explicit PrimitiveVisualizer(std::weak_ptr<Value>) noexcept;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
   std::optional<std::string> format_value() noexcept final;
+  std::optional<std::string> format_enum(const Type &t, std::span<const u8> span) noexcept;
   std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
 };
 

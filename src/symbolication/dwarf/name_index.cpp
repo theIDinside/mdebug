@@ -99,8 +99,8 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
     const auto possible_size = die_ref.read_attribute(Attribute::DW_AT_byte_size);
     ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
            cu->section_offset(), die_ref.die->section_offset);
-    auto type =
-      obj->types->emplace_type(offs, IndexedDieReference{cu, idx}, possible_size->unsigned_value(), name);
+    auto type = obj->types->emplace_type(this_die->tag, offs, IndexedDieReference{cu, idx},
+                                         possible_size->unsigned_value(), name);
     if (die_ref.die->tag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{cu};
       reader.seek_die(*die_ref.die);

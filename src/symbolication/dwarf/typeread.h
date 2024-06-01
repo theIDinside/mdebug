@@ -41,8 +41,13 @@ class TypeSymbolicationContext
   ObjectFile &obj;
   std::vector<Field> type_fields;
   sym::Type *current_type;
+
+  sym::Type *enumeration_type{nullptr};
+  bool enum_is_signed{false};
+  std::vector<EnumeratorConstValue> const_values{};
   void process_member_variable(DieReference cu_die) noexcept;
   void process_inheritance(DieReference cu_die) noexcept;
+  void process_enum(DieReference cu_die) noexcept;
 
 public:
   TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept;
