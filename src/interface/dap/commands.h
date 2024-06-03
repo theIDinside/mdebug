@@ -181,8 +181,9 @@ template <size_t Size> struct VerifyMap
 struct Message
 {
   std::string format;
-  std::unordered_map<std::string, std::string> variables;
-  bool show_user;
+  std::unordered_map<std::string, std::string> variables{};
+  bool show_user{true};
+  std::optional<int> id{};
 };
 
 struct ErrorResponse final : ui::UIResult
@@ -867,22 +868,27 @@ template <> struct formatter<ui::dap::Message>
   auto
   format(const ui::dap::Message &msg, FormatContext &ctx) const
   {
-    std::vector<char> buf{0};
-    buf.reserve(256);
-    auto sz = 1u;
-    auto max = msg.variables.size();
-    for (const auto &[k, v] : msg.variables) {
-      if (sz < max) {
-        fmt::format_to(std::back_inserter(buf), R"("{}":"{}", )", k, v);
-      } else {
-        fmt::format_to(std::back_inserter(buf), R"("{}":"{}")", k, v);
-      }
-      ++sz;
-    }
-    buf.push_back(0);
 
-    return fmt::format_to(ctx.out(), R"({{ "format": "{}", "variables": {{ {} }}, "showUser": "{}" }})",
-                          msg.format, fmt::join(buf, ""), msg.show_user);
+    if (msg.variables.empty()) {
+      return fmt::format_to(ctx.out(), R"({{"id":{},"format":"{}","showUser":{}}})", msg.id.value_or(-1),
+                            msg.format, msg.show_user);
+    } else {
+      std::vector<char> buf{0};
+      buf.reserve(256);
+      auto sz = 1u;
+      auto max = msg.variables.size();
+      for (const auto &[k, v] : msg.variables) {
+        if (sz < max) {
+          fmt::format_to(std::back_inserter(buf), R"("{}":"{}", )", k, v);
+        } else {
+          fmt::format_to(std::back_inserter(buf), R"("{}":"{}")", k, v);
+        }
+        ++sz;
+      }
+      buf.push_back(0);
+      return fmt::format_to(ctx.out(), R"({{ "id": {}, "format": "{}", "variables":{{ {} }}, "showUser":{}}})",
+                            msg.id.value_or(-1), msg.format, fmt::join(buf, ""), msg.show_user);
+    }
   }
 };
 

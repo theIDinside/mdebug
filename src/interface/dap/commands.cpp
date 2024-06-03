@@ -65,7 +65,7 @@ ErrorResponse::serialize(int seq) const noexcept
 {
   if (short_message && message) {
     return fmt::format(
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}",body:{{error:{}}}}})",
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{ "error":{}}}}})",
       seq, request_seq, command, *short_message, *message);
   } else if (short_message && !message) {
     return fmt::format(
@@ -73,8 +73,8 @@ ErrorResponse::serialize(int seq) const noexcept
       request_seq, command, *short_message);
   } else if (!short_message && message) {
     return fmt::format(
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}",body:{{error:{}}}}})", seq,
-      request_seq, command, *message);
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
+      seq, request_seq, command, *message);
   } else {
     return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}"}})", seq,
                        request_seq, command);
@@ -825,7 +825,7 @@ Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId
 UIResultPtr
 Evaluate::execute(Tracer *tracer) noexcept
 {
-  return new EvaluateResponse{false, this, {}, "could not evaluate", {}, {}};
+  return new ErrorResponse{Request, this, {}, Message{.format = "could not evaluate"}};
 }
 
 std::optional<EvaluationContext>
@@ -856,9 +856,15 @@ EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<in
 std::string
 EvaluateResponse::serialize(int seq) const noexcept
 {
-  return fmt::format(
-    R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"disassemble","body":{{ "result":"{}", "variablesReference":{} }}}})",
-    seq, request_seq, success, result, variablesReference);
+  if (success) {
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
+      seq, request_seq, success, result, variablesReference);
+  } else {
+    return fmt::format(
+      R"({{"seq":0,"request_seq":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
+      request_seq, success, result);
+  }
 }
 
 Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
@@ -869,7 +875,8 @@ Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, s
 ErrorResponse *
 Variables::error(std::string &&msg) noexcept
 {
-  return new ErrorResponse{Request, this, std::make_optional(std::move(msg)), std::nullopt};
+  return new ErrorResponse{
+    Request, this, {}, Message{.format = std::move(msg), .variables = {}, .show_user = true}};
 }
 
 UIResultPtr
@@ -899,7 +906,7 @@ Variables::execute(Tracer *tracer) noexcept
       return new VariablesResponse{true, this, std::move(vars)};
     }
     case ScopeType::Registers: {
-      TODO_FMT("get variables for registers not implemented");
+      return new VariablesResponse{true, this, {}};
     } break;
     }
   } break;
@@ -929,13 +936,13 @@ VariablesResponse::serialize(int seq) const noexcept
   std::string variables_contents{};
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : variables) {
-    if (v.variable_value->has_visualizer()) {
-      auto opt = v.variable_value->get_visualizer()->dap_format(v.variable_value->name, v.ref);
+    if (auto datvis = v.variable_value->get_visualizer(); datvis != nullptr) {
+      auto opt = datvis->dap_format(v.variable_value->name, v.ref);
       if (opt) {
         it = fmt::format_to(it, "{},", *opt);
       } else {
         return fmt::format(
-          R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"Couldnotretrievevaluefor{}"}})",
+          R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
           seq, request_seq, v.variable_value->name);
       }
     } else {
