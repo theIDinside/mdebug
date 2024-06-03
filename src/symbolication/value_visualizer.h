@@ -47,19 +47,17 @@ private:
                                 std::optional<u32> count) noexcept = 0;
 };
 
-// class DefaultStructResolver final : public ValueResolver
-// {
-//   VariablesReference ref;
+class ReferenceResolver final : public ValueResolver
+{
+  std::shared_ptr<MemoryContentsObject> indirect_value_object{nullptr};
 
-// public:
-//   DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr layout_type,
-//                         VariablesReference ref) noexcept;
-//   ~DefaultStructResolver() noexcept final = default;
+  Children get_children(TraceeController &tc, std::optional<u32> start,
+                        std::optional<u32> count) noexcept override;
 
-// private:
-//   Children get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
-//   final;
-// };
+public:
+  ReferenceResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
+  ~ReferenceResolver() noexcept override = default;
+};
 
 class CStringResolver final : public ValueResolver
 {
@@ -119,7 +117,7 @@ public:
   explicit PrimitiveVisualizer(std::weak_ptr<Value>) noexcept;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
   std::optional<std::string> format_value() noexcept final;
-  std::optional<std::string> format_enum(const Type &t, std::span<const u8> span) noexcept;
+  std::optional<std::string> format_enum(Type &t, std::span<const u8> span) noexcept;
   std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
 };
 

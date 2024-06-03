@@ -1,4 +1,5 @@
 // trivial type
+#include <array>
 #include <iterator>
 #include <optional>
 
@@ -43,29 +44,88 @@ struct Employee
   int id;
 };
 
-enum class UnionTag : unsigned char
+enum class NPCKind : unsigned char
 {
-  None = 0,
-  Some = 1
+  Friend,
+  Minion,
+  Boss
 };
 
-struct PrettyPrintMe
+struct Friend
 {
-  UnionTag tag;
-  Employee emp;
-  Person p;
+  const char *name;
+  int health;
+};
 
-  static PrettyPrintMe
-  Some(Employee e) noexcept
+struct Minion
+{
+  const char *type;
+  int health;
+  int damage;
+  int id;
+};
+
+struct Boss
+{
+  const char *type;
+  const char *name;
+  int health;
+  int damage;
+  int id;
+  int spells;
+};
+
+struct NPC
+{
+  NPCKind kind;
+  union
   {
-    return PrettyPrintMe{UnionTag::Some, e};
+    Friend buddy;
+    Minion critter;
+    Boss boss;
+  } payload;
+
+  static NPC
+  Boss(const char *t, const char *n, int health, int dmg, int id, int spells)
+  {
+    return NPC{.kind = NPCKind::Boss, .payload = {.boss = {t, n, health, dmg, id, spells}}};
   }
 
-  static PrettyPrintMe
-  None() noexcept
+  static NPC
+  Friend(const char *n, int h)
   {
-    return PrettyPrintMe{UnionTag::None};
+    return NPC{.kind = NPCKind::Friend, .payload = {.buddy = {n, h}}};
   }
+  static NPC
+  Minion(const char *t, int h, int dmg, int id)
+  {
+    return NPC{.kind = NPCKind::Minion, .payload = {.critter = {t, h, dmg, id}}};
+  }
+};
+
+void
+variants()
+{
+  const auto boss = NPC::Boss("Dragon", "Rat King", 10000, 2748, 999, 42);
+  const auto friend_ = NPC::Friend("Nobby Nobbs", 10);
+  const auto critter = NPC::Minion("rat", 5, 3, 22);
+
+  printf("Can we print these using just DAP requests (particularly when using The Midas Debugger\n"); // VARIANT_BP
+}
+
+void
+heap_allocated_variant()
+{
+  auto p = new Person{1, 2, "Three"};
+  auto theLastOfUs = new NPC{.kind = NPCKind::Friend, .payload = {.buddy = {"Dina", 10000}}}; // VARIANT_POINTER
+  printf("Heap allocated objects get printed correctly.");
+}
+
+enum class UnionTag : unsigned char
+{
+  Person,
+  Employee,
+  Boss
 };
 
 bool
@@ -92,8 +152,9 @@ test(const Person &p)
 {
   Employee employees[3] = {Employee{{0, 42, "John"}, 1}, Employee{{0, 24, "Jane"}, 2},
                            Employee{{0, 67, "Connor"}, 3}};
-  auto some = PrettyPrintMe::Some(employees[0]);
-  auto none = PrettyPrintMe::None();
+
+  const auto employees_array =
+    std::to_array({Employee{{0, 42, "John"}, 1}, Employee{{0, 24, "Jane"}, 2}, Employee{{0, 67, "Connor"}, 3}});
   return check_if_employee(p, employees, std::size(employees)); // ARRAY_VARS_BP
 }
 
@@ -102,7 +163,11 @@ optionals()
 {
   std::optional<Employee> hasValue = Employee{{0, 42, "John"}, 1};
   std::optional<Employee> none = std::nullopt;
-  printf("Algebraic Data Types should be a first class citizen. Really. It's 2024.\n"); // TEST_OPT_BP
+
+  std::optional<int> intHasValue = 42;
+  std::optional<int> intNone = std::nullopt;
+
+  printf("Algebraic Data Types should be a first class citizen. Really. It's 2024.\n"); // OPTIONAL_BP
 }
 
 void
@@ -112,9 +177,31 @@ derived()
   printf("Inheritance yay\n"); // INHERITANCE_BP
 }
 
+enum class Enum
+{
+  Foo,
+  Bar,
+  Baz
+};
+
+void
+enums()
+{
+  const auto a = Enum::Foo;
+  const auto b = Enum::Bar;
+  const auto c = Enum::Baz;
+
+  std::array<Enum, 3> arr{Enum::Baz, Enum::Bar, Enum::Foo};
+
+  printf("Support for enums \n"); // ENUM_BP
+}
+
 int
 main(int argc, const char **argv)
 {
+  enums();
+  heap_allocated_variant();
+  variants();
   derived();
   optionals();
   // Check if we can do a variablesRequest for locals, and get `personId`, `age`, `p`, `p2`, `pcheck_one` and

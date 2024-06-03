@@ -221,6 +221,19 @@ Type::Type(Type &&o) noexcept
   ASSERT(!processing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }
 
+Type *
+Type::resolve_alias() noexcept
+{
+  if (!is_typedef) {
+    return this;
+  }
+  auto t = type_chain;
+  while (t && t->is_typedef) {
+    t = t->type_chain;
+  }
+  return t;
+}
+
 void
 Type::add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept
 {
@@ -234,8 +247,8 @@ Type::set_base_type_encoding(BaseTypeEncoding enc) noexcept
   base_type = enc;
 }
 
-NonNullPtr<const Type>
-Type::target_type() const noexcept
+NonNullPtr<Type>
+Type::target_type() noexcept
 {
   if (type_chain == nullptr) {
     return NonNull(*this);
@@ -244,7 +257,7 @@ Type::target_type() const noexcept
   while (t->type_chain) {
     t = t->type_chain;
   }
-  return NonNull<const Type>(*t);
+  return NonNull<Type>(*t);
 }
 
 bool
@@ -337,18 +350,25 @@ Type::is_char_type() const noexcept
 bool
 Type::is_array_type() const noexcept
 {
-  return this->modifier == Modifier::Array;
+  if (!is_typedef) {
+    return this->modifier == Modifier::Array;
+  }
+  auto t = type_chain;
+  while (t->is_typedef) {
+    t = t->type_chain;
+  }
+  return t->modifier == Modifier::Array;
 }
 
 u32
-Type::members_count() const noexcept
+Type::members_count() noexcept
 {
   ASSERT(resolved, "Type is not fully resolved!");
   return target_type()->fields.size();
 }
 
 const std::vector<Field> &
-Type::member_variables() const noexcept
+Type::member_variables() noexcept
 {
   ASSERT(resolved, "Type is not fully resolved!");
   auto t = target_type();

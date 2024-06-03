@@ -1,5 +1,6 @@
 #include "value_visualizer.h"
 #include "common.h"
+#include "symbolication/dwarf/typeread.h"
 #include "type.h"
 #include "utils/enumerator.h"
 #include "value.h"
@@ -7,6 +8,7 @@
 #include <bits/ranges_util.h>
 #include <iterator>
 #include <supervisor.h>
+#include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
 
 namespace sym {
@@ -45,37 +47,37 @@ ValueResolver::resolve(TraceeController &tc, std::optional<u32> start, std::opti
   return get_children(tc, start, count);
 }
 
-// DefaultStructResolver::DefaultStructResolver(SymbolFile *object_file, ValuePtr value, TypePtr type,
-//                                              VariablesReference var_ref) noexcept
-//     : ValueResolver(object_file, std::move(value), type), ref(var_ref)
-// {
-// }
+ReferenceResolver::ReferenceResolver(SymbolFile *obj, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
+    : ValueResolver(obj, std::move(val), type)
+{
+}
 
-// Children
-// DefaultStructResolver::get_children(TraceeController &tc, std::optional<u32>, std::optional<u32>) noexcept
-// {
-//   auto ptr = this->value();
+Children
+ReferenceResolver::get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
+{
+  auto locked = value_ptr.lock();
+  if (!locked) {
+    children.clear();
+    return children;
+  }
+  if (const auto address = locked->to_remote_pointer(); address.is_expected()) {
+    auto adjusted_address = address.value() + (start.value_or(0) * locked->type()->size());
+    const auto requested_length = count.value_or(32);
+    auto memory = sym::MemoryContentsObject::read_memory(tc, adjusted_address, requested_length);
+    indirect_value_object = std::make_shared<EagerMemoryContentsObject>(
+      adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
-//   if (ptr == nullptr) {
-//     return {};
-//   }
+    // actual `T` type behind the reference
+    auto layout_type = locked->type()->get_layout_type();
 
-//   children.reserve(type->member_variables().size());
+    auto string_value = Value::WithVisualizer<DefaultStructVisualizer>(
+      std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object));
 
-//   for (auto &mem : type->member_variables()) {
-//     auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-//                                                      ptr->mem_contents_offset, ptr->take_memory_reference());
-//     obj->objectFile()->init_visualizer(member_value);
-//     obj->registerResolver(member_value);
-//     const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-//     if (new_ref > 0) {
-//       obj->cacheValue(new_ref, member_value);
-//     }
-//     children.emplace_back(std::move(member_value));
-//   }
-//   cached = true;
-//   return children;
-// }
+    children.push_back(string_value);
+  }
+  cached = true;
+  return children;
+}
 
 CStringResolver::CStringResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
     : ValueResolver(object_file, std::move(val), type)
@@ -228,7 +230,7 @@ ArrayResolver::get_children(TraceeController &tc, std::optional<u32> start, std:
 ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : data_provider(provider) {}
 
 std::optional<std::string>
-PrimitiveVisualizer::format_enum(const Type &t, std::span<const u8> span) noexcept
+PrimitiveVisualizer::format_enum(Type &t, std::span<const u8> span) noexcept
 {
   auto &enums = t.enumerations();
   EnumeratorConstValue value;
@@ -306,6 +308,11 @@ PrimitiveVisualizer::format_value() noexcept
 
   auto target_type = type->target_type();
   if (target_type->tag() == DwarfTag::DW_TAG_enumeration_type) {
+    if (!target_type->is_resolved()) {
+      dw::TypeSymbolicationContext ctx{*target_type->cu_die_ref->cu->get_objfile(), *target_type.ptr};
+      ctx.resolve_type();
+    }
+
     return format_enum(*target_type, span);
   }
 
@@ -453,10 +460,11 @@ ArrayVisualizer::dap_format(std::string_view, int variablesReference) noexcept
     return std::nullopt;
   }
 
-  const auto &t = *ptr->type();
+  auto &t = *ptr->type();
+  const auto no_alias = t.resolve_alias();
   return fmt::format(
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-    ptr->name, t, t, variablesReference, ptr->address(), ptr->type()->array_size());
+    ptr->name, t, t, variablesReference, ptr->address(), no_alias->array_size());
 }
 
 CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> data_provider,

@@ -371,7 +371,7 @@ ObjectFile::init_visualizer(std::shared_ptr<sym::Value> &value) noexcept
     return;
   }
 
-  auto &type = *value->type();
+  sym::Type &type = *value->type()->resolve_alias();
   if (auto custom_visualiser = find_custom_visualizer(type); custom_visualiser != nullptr) {
     return;
   }
@@ -544,27 +544,35 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
   //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
   //   values and how to display them, which *is* the issue with GDB's pretty printers
-  auto type = value->type();
+  auto type = value->type()->resolve_alias();
 
   if (auto resolver = objectFile()->find_custom_resolver(*type); resolver != nullptr) {
     value->set_resolver(std::move(resolver));
     return;
   }
   auto layout_type = type->get_layout_type();
-  if (type->is_reference() && layout_type->is_char_type()) {
-    DBGLOG(core, "setting cstring resolver for value");
-    auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->type());
-    value->set_resolver(std::move(ptr));
+
+  const auto array_type = type->is_array_type();
+  if (type->is_reference() && !array_type) {
+    if (layout_type->is_char_type()) {
+      DBGLOG(core, "[datviz]: setting cstring resolver for value");
+      auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->type());
+      value->set_resolver(std::move(ptr));
+    } else {
+      DBGLOG(core, "[datviz]: setting pointer resolver for value");
+      value->set_resolver(std::make_unique<sym::ReferenceResolver>(this, value, value->type()));
+    }
     return;
   }
 
   // todo: again, this is hardcoded, which is counter to the whole idea here.
-  if (type->is_array_type()) {
-    DBGLOG(core, "setting array resolver for value");
+  if (array_type) {
+    DBGLOG(core, "[datviz]: setting array resolver for value");
     auto layout_type = type->get_layout_type();
     auto ptr = std::make_unique<sym::ArrayResolver>(this, layout_type, type->array_size(), value->address());
     value->set_resolver(std::move(ptr));
     value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
+    return;
   }
 }
 
@@ -653,57 +661,6 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start, std::o
     return result;
   }
 }
-
-// auto
-// SymbolFile::resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept
-//   -> std::vector<ui::dap::Variable>
-// {
-//   if (!valobj_cache.contains(ref)) {
-//     DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ref);
-//     return {};
-//   }
-//   auto &value = valobj_cache[ref];
-//   auto type = value->type();
-//   if (!type->is_resolved()) {
-//     sym::dw::TypeSymbolicationContext ts_ctx{*objectFile(), *type};
-//     ts_ctx.resolve_type();
-//   }
-
-//   auto value_resolver = value->get_resolver();
-//   if (value_resolver != nullptr) {
-//     auto variables = value_resolver->resolve(tc, start, count);
-//     std::vector<ui::dap::Variable> result{};
-
-//     for (auto &var : variables) {
-//       objectFile()->init_visualizer(var);
-//       registerResolver(var);
-//       const auto new_ref = var->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-//       if (new_ref > 0) {
-//         cacheValue(new_ref, var);
-//       }
-//       result.push_back(ui::dap::Variable{new_ref, var});
-//     }
-
-//     return result;
-//   } else {
-//     std::vector<ui::dap::Variable> result{};
-//     result.reserve(type->member_variables().size());
-
-//     for (auto &mem : type->member_variables()) {
-//       auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-//                                                        value->mem_contents_offset,
-//                                                        value->take_memory_reference());
-//       objectFile()->init_visualizer(member_value);
-//       registerResolver(member_value);
-//       const auto new_ref = member_value->type()->is_primitive() ? 0 : tc.new_var_id(ref);
-//       if (new_ref > 0) {
-//         cacheValue(new_ref, member_value);
-//       }
-//       result.push_back(ui::dap::Variable{new_ref, std::move(member_value)});
-//     }
-//     return result;
-//   }
-// }
 
 auto
 SymbolFile::low_pc() noexcept -> AddrPtr

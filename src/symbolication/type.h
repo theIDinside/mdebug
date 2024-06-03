@@ -194,9 +194,9 @@ public:
   Immutable<std::string_view> name;
   Immutable<dw::IndexedDieReference> cu_die_ref;
   Immutable<Modifier> modifier;
+  Immutable<bool> is_typedef;
 
 private:
-  bool is_typedef;
   // Flags used when constructing and "realizing" a type from the debug info data.
   bool resolved;
   bool processing;
@@ -227,10 +227,11 @@ public:
   Type(std::string_view name) noexcept;
   Type(Type &&o) noexcept;
 
+  Type *resolve_alias() noexcept;
   void add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept;
   void set_base_type_encoding(BaseTypeEncoding enc) noexcept;
   bool set_processing() noexcept;
-  NonNullPtr<const Type> target_type() const noexcept;
+  NonNullPtr<Type> target_type() noexcept;
   // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
   // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,
   // Foo). We do different than gdb though. We say all references are the same thing: an address value
@@ -254,8 +255,8 @@ public:
   u32 size() noexcept;
   u32 size_bytes() noexcept;
 
-  u32 members_count() const noexcept;
-  const std::vector<Field> &member_variables() const noexcept;
+  u32 members_count() noexcept;
+  const std::vector<Field> &member_variables() noexcept;
 
   Type *get_layout_type() noexcept;
   // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
