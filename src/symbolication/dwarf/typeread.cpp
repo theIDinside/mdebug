@@ -128,6 +128,11 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
            to_str(cu_die_ref.die->tag));
 
     auto die_it = cu_die_ref.die->children();
+    // Means this fn ctx has no children. Whatever meta data (like pc start, pc end, etc) we may have, must already
+    // have been processed.
+    if (die_it == nullptr) {
+      return;
+    }
     const auto parent = cu_die_ref.die;
     const auto next = [&parent](auto curr, auto next) {
       if (next) {

@@ -259,6 +259,7 @@ public:
   const std::vector<Field> &member_variables() noexcept;
 
   Type *get_layout_type() noexcept;
+  Type *get_referenced_type() noexcept;
   // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
   void set_array_bounds(u32 bounds) noexcept;
 

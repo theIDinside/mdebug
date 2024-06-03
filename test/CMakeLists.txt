@@ -92,4 +92,16 @@ BuildTestSubject(
   ${CMAKE_CURRENT_SOURCE_DIR}/fork.cpp
 )
 
+set(VariablesRequestSubjects arrayOf3 pointer struct)
+
+foreach(name ${VariablesRequestSubjects})
+  BuildTestSubject(
+    NAME ${name}
+    SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/subjects/variablesRequest/${name}.cpp
+    INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+endforeach()
+
+
 message("Test build type: ${CMAKE_BUILD_TYPE}")

@@ -228,6 +228,193 @@ function unpackDebuggerArgs() {
   }
 }
 
+class Thread {
+  #client
+  id
+  name
+  constructor(client, threadId, name) {
+    this.#client = client
+    this.id = threadId
+    this.name = name
+  }
+
+  /**
+   * @param {number} timeout
+   * @returns {Promise<StackFrame[]>}
+   */
+  async stacktrace(timeout) {
+    const response = await this.#client.sendReqGetResponse('stackTrace', { threadId: this.id }, timeout)
+    checkResponse(response, 'stackTrace', true, this.stackTrace)
+    return response.body.stackFrames.map((frame) => {
+      console.log(`STACKFRAME`)
+      return new StackFrame(
+        this.#client,
+        frame.id,
+        frame.name,
+        frame.line,
+        frame.column,
+        frame.instructionPointerReference,
+        frame.source
+      )
+    })
+  }
+}
+
+class Variable {
+  id
+  name
+  value
+  type
+  evaluateName
+  namedVariables
+  indexedVariables
+  memoryReference
+
+  /** @type {DAClient} */
+  #client
+
+  constructor(client, id, name, value, type, evaluateName, namedVariables, indexedVariables, memoryReference) {
+    this.#client = client
+    this.id = id
+    this.name = name
+    this.value = value
+    this.type = type
+    this.evaluateName = evaluateName
+    this.namedVariables = namedVariables
+    this.indexedVariables = indexedVariables
+    this.memoryReference = memoryReference
+  }
+
+  /**
+   * @returns { Promise<Variable[]>}
+   */
+  async variables(timeout = 1000) {
+    if (this.id == 0) {
+      throw new Error("This variable has id == 0 it can't make any requests!")
+    }
+    const {
+      success,
+      body: { variables },
+    } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.id }, timeout)
+    assertLog(success, 'expected success from variables request')
+
+    return variables.map((el) => {
+      return new Variable(
+        this.#client,
+        el.variablesReference,
+        el.name,
+        el.value,
+        el.type,
+        el?.evaluateName,
+        el?.namedVariables,
+        el?.indexedVariables,
+        el?.memoryReference
+      )
+    })
+  }
+}
+const ScopeNames = ['Arguments', 'Locals', 'Registers']
+class StackFrame {
+  /** @type { DAClient } */
+  #client
+  /** @type { number } */
+  id
+  /** @type { string } */
+  name
+
+  /** @type { number } */
+  line
+
+  /** @type {string } */
+  instructionPointerReference
+
+  source
+  /**
+   * order of scopes is: [args, locals, registers]
+   * @type { number[] }
+   */
+  scopes = null
+
+  constructor(client, id, name, line, column, instructionPointerReference, source) {
+    this.#client = client
+    this.id = id
+    this.name = name
+    this.line = line
+    this.column = column
+    this.instructionPointerReference = instructionPointerReference
+    this.source = source
+    this.scopes = null
+  }
+
+  /**
+   * @param {number} timeout
+   * @returns {Promise<Variable[]>}
+   */
+  async locals(timeout = 1000) {
+    await this.get_scopes()
+    const {
+      success,
+      body: { variables },
+    } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.scopes[1] }, timeout)
+    assertLog(success, 'expected success from variables request')
+
+    return variables.map((v) => {
+      return new Variable(
+        this.#client,
+        v.variablesReference,
+        v.name,
+        v.value,
+        v.type,
+        v.evaluateName,
+        v.namedVariables,
+        v.indexedVariables,
+        v.memoryReference
+      )
+    })
+  }
+
+  async args(timeout) {
+    await this.get_scopes()
+    const {
+      success,
+      body: { variables },
+    } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.scopes[0] }, timeout)
+    assertLog(success, 'expected success from variables request')
+
+    return variables.map((v) => {
+      return new Variable(
+        this.#client,
+        v.variablesReference,
+        v.name,
+        v.value,
+        v.type,
+        v.evaluateName,
+        v.namedVariables,
+        v.indexedVariables,
+        v.memoryReference
+      )
+    })
+  }
+
+  async get_scopes() {
+    if (this.scopes !== null) {
+      return
+    }
+
+    const {
+      success,
+      body: { scopes },
+    } = await this.#client.sendReqGetResponse('scopes', { frameId: this.id }, 1000)
+    assertLog(success, `Scopes retrieved for ${this.id}`)
+    assertLog(scopes.length == ScopeNames.length, `Got ${ScopeNames.length} scopes`, `Failed, got: ${scopes.length}`)
+    this.scopes = []
+    for (let i = 0; i < ScopeNames.length; i++) {
+      this.scopes.push(scopes[i].variablesReference)
+      assertLog(scopes[i].name == ScopeNames[i], `Expected scope name ${ScopeNames[i]}`, ` but was ${scopes[i].name}`)
+    }
+  }
+}
+
 const regex = /Content-Length: (\d+)\s{4}/gm
 class DAClient {
   /** @type {EventEmitter} */
@@ -361,6 +548,29 @@ class DAClient {
     return this.config.args.getBinary(fileName)
   }
 
+  async setBreakpoints(filePath, lines) {
+    const bp_lines = lines.map((l) => ({ line: l }))
+
+    const args = {
+      source: {
+        name: repoDirFile(filePath),
+        path: repoDirFile(filePath),
+      },
+      breakpoints: bp_lines,
+    }
+    const res = await this.sendReqGetResponse('setBreakpoints', args)
+    const {
+      success,
+      body: { breakpoints },
+    } = res
+    assertLog(
+      breakpoints.length == lines.length,
+      `Expected ${lines.length} breakpoints`,
+      `Failed to set ${lines.length} breakpoints. Response: \n${prettyJson(res)}`
+    )
+    return breakpoints
+  }
+
   serializeRequest(req, args = {}) {
     const json = {
       seq: this.seq,
@@ -373,6 +583,21 @@ class DAClient {
     const length = data.length
     const res = `Content-Length: ${length}\r\n\r\n${data}`
     return res
+  }
+
+  /**
+   * @returns {Promise<Thread[]>} timeout
+   */
+  async getThreads(timeout) {
+    const threads = await this.sendReqGetResponse('threads', {}, timeout).then((res) => {
+      if (!res.success) {
+        throw new Error('Failed to get threads')
+      }
+      return res.body.threads
+    })
+    return threads.map((thread) => {
+      return new Thread(this, thread.id, thread.name)
+    })
   }
 
   /**
@@ -850,6 +1075,22 @@ async function doSomethingDelayed(fn, delay) {
   })
 }
 
+const IdentifierToken = '// #'
+function allBreakpointIdentifiers(relativeTestFilePath) {
+  const file = readFileContents(repoDirFile(relativeTestFilePath))
+  const result = []
+  let lineIdx = 1
+  for (const line of file.split('\n')) {
+    const pos = line.indexOf(IdentifierToken)
+    if (pos != -1) {
+      const identifier = line.substring(pos + IdentifierToken.length)
+      result.push({ line: lineIdx, identifier })
+    }
+    lineIdx++
+  }
+  return result
+}
+
 async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
   const file = readFileContents(repoDirFile(filePath))
   const bp_lines = bpIdentifiers
@@ -919,9 +1160,29 @@ async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedF
   return { threads, frames, scopes, bpres }
 }
 
+const SubjectSourceFiles = {
+  include: {
+    game: 'test/include/game.h',
+    inheritance: 'test/include/inheritance.h',
+    people: 'test/include/people.h',
+  },
+  subjects: {
+    events: {
+      output: 'test/subjects/events/output.h',
+    },
+    variablesRequest: {
+      arrayOf3: 'test/subjects/variablesRequest/arrayOf3.cpp',
+      pointer: 'test/subjects/variablesRequest/pointer.cpp',
+      struct: 'test/subjects/variablesRequest/struct.cpp',
+    },
+  },
+}
+
 module.exports = {
   MDB_PATH,
   DAClient,
+  SubjectSourceFiles,
+  allBreakpointIdentifiers,
   getLineOf,
   getStackFramePc,
   readFileContents,
@@ -940,4 +1201,7 @@ module.exports = {
   getRandomNumber: randomSeqGenerator,
   createRemoteService,
   RemoteService,
+  Thread,
+  StackFrame,
+  Variable,
 }

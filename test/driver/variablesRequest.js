@@ -1,4 +1,12 @@
-const { launchToGetFramesAndScopes } = require('./client')
+/** @typedef { import("./client").DAClient } MDB */
+
+const {
+  launchToGetFramesAndScopes,
+  repoDirFile,
+  allBreakpointIdentifiers,
+  SubjectSourceFiles: { include, subjects },
+  SetBreakpoints,
+} = require('./client')
 const { todo, assert, assertLog, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
 const stdAssert = require('assert')
 
@@ -464,6 +472,100 @@ async function shadowed(da) {
   throw new Error('shadowed not implemented')
 }
 
+/**
+ * @param { MDB } da
+ */
+async function resolvePointeeValue(da) {
+  const app = da.buildDirFile('pointer')
+  await da.startRunToMain(app, [], 500)
+  const bplocs = allBreakpointIdentifiers(subjects.variablesRequest.pointer)
+  const bps = await da.setBreakpoints(
+    subjects.variablesRequest.pointer,
+    bplocs.map((i) => i.line)
+  )
+  await da.contNextStop(null, 1000)
+  const threads = await da.getThreads(100)
+  {
+    let { ptr, pointee } = await threads[0]
+      .stacktrace(100)
+      .then((frames) => frames[0].locals(100))
+      .then((vars) => vars[0])
+      .then((ptr) => ptr.variables(100).then((r) => ({ ptr: ptr, pointee: r[0] })))
+
+    assertLog(
+      pointee.memoryReference == ptr.value,
+      ' expected memory reference of pointee to be identical with the value of the pointer',
+      `pointee: ${pointee.memoryReference} != pointer value: ${ptr.value}`
+    )
+    assertLog(pointee.value == 10, 'Expected value to be 10', ` But was ${pointee.value}: ${JSON.stringify(pointee)}`)
+  }
+
+  await da.contNextStop(threads[0].id, 1000)
+  {
+    const { ptr, pointee } = await threads[0]
+      .stacktrace(100)
+      .then((frames) => frames[0].locals(100))
+      .then((vars) => vars[0])
+      .then((ptr) => ptr.variables(100).then((r) => ({ ptr: ptr, pointee: r[0] })))
+      .catch((ex) => {
+        console.log(`variables requests failed: ${ex}`)
+        throw ex
+      })
+    assertLog(
+      pointee.memoryReference == ptr.value,
+      ' expected memory reference of pointee to be identical with the value of the pointer',
+      `pointee: ${pointee.memoryReference} != pointer value: ${ptr.value}`
+    )
+    assertLog(pointee.value == 42, 'Expected value to be 42', ` But was ${pointee.value}: ${JSON.stringify(pointee)}`)
+  }
+
+  await da.contNextStop(threads[0].id, 1000)
+  await da.contNextStop(threads[0].id, 1000)
+  {
+    const { john, jane } = await threads[0]
+      .stacktrace(100)
+      .then((frames) => frames[0].locals(100))
+      .then(async (vars) => {
+        const john = await vars[0].variables(100)
+        const jane = await vars[1].variables(100)
+        return { jo: john, ja: jane }
+      })
+      .then(async ({ jo, ja }) => {
+        const john = await jo[0].variables(100)
+        const jane = await ja[0].variables(100)
+        return { john, jane }
+      })
+    const John = { pid: 1, age: 42, name: 'John Doe' }
+    const Jane = { pid: 2, age: 34, name: 'Jane Doe' }
+    const person_expect = async (val, expected) => {
+      if (val.name == 'name') {
+        const name = await val.variables(100)
+        assertLog(name[0].value == expected.name, `Expected name to be '${expected.name}'`, `but was ${name[0].value}`)
+      } else {
+        assertLog(
+          val.value == expected[val.name],
+          `Expected Person.${val.name} to be ${expected[val.name]}`,
+          ` But was ${val.value}`
+        )
+      }
+    }
+    for (let i = 0; i < john.length; ++i) {
+      await person_expect(john[i], John)
+      await person_expect(jane[i], Jane)
+    }
+  }
+  await da.contNextStop(threads[0].id, 100)
+  {
+    const { ptrs, ptr } = await threads[0].stacktrace(100).then(async (frames) => {
+      const [ptr] = await frames[0].locals(100).then((vars) => vars.filter((v) => v.name == 'ptr'))
+      const [ptrs] = await frames[0].args(100).then((vars) => vars.filter((v) => v.name == 'ptrs'))
+      return { ptrs, ptr }
+    })
+    console.log(`ptrs: ${JSON.stringify(ptrs)}`)
+    console.log(`ptr: ${JSON.stringify(ptr)}`)
+  }
+}
+
 const tests = {
   scopeLocalsTest: () => scopeLocalsTest,
   scopeArgsTest: () => scopeArgsTest,
@@ -476,6 +578,7 @@ const tests = {
   readArrayTypes: () => readArrayTypes,
   testArrayResolverCaching: () => testArrayResolverCaching,
   testArrayResolverCachingDispersed: () => testArrayResolverCachingDispersed,
+  resolvePointeeValue: () => resolvePointeeValue,
 }
 
 module.exports = {

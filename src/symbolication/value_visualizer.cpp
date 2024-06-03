@@ -70,10 +70,16 @@ ReferenceResolver::get_children(TraceeController &tc, std::optional<u32> start, 
     // actual `T` type behind the reference
     auto layout_type = locked->type()->get_layout_type();
 
-    auto string_value = Value::WithVisualizer<DefaultStructVisualizer>(
-      std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object));
-
-    children.push_back(string_value);
+    if (layout_type->is_array_type()) {
+      children.push_back(sym::Value::WithVisualizer<sym::ArrayVisualizer>(
+        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object)));
+    } else if (layout_type->is_primitive() || layout_type->is_reference()) {
+      children.push_back(sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(
+        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object)));
+    } else {
+      children.push_back(sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(
+        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object)));
+    }
   }
   cached = true;
   return children;

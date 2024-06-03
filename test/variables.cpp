@@ -1,107 +1,15 @@
-// trivial type
+#include "./include/game.h"
+#include "./include/inheritance.h"
+#include "./include/people.h"
+
 #include <array>
 #include <iterator>
 #include <optional>
 
-class ParentA
-{
-public:
-  ParentA(int a) noexcept : a(a) {}
-  ~ParentA() noexcept = default;
-
-protected:
-  int a;
-};
-
-class ParentB
-{
-public:
-  ParentB(int a, int b) noexcept : a(a), b(b) {}
-  ~ParentB() noexcept = default;
-
-protected:
-  int a;
-  int b;
-};
-
-class Derived : ParentA, ParentB
-{
-public:
-  Derived(int aa, int ba, int bb) : ParentA(aa), ParentB(ba, bb) {}
-};
-
-struct Person
-{
-  int pid;
-  int age;
-  const char *name;
-};
-
-// A multi-layered trivial type
-struct Employee
-{
-  Person person;
-  int id;
-};
-
-enum class NPCKind : unsigned char
-{
-  Friend,
-  Minion,
-  Boss
-};
-
-struct Friend
-{
-  const char *name;
-  int health;
-};
-
-struct Minion
-{
-  const char *type;
-  int health;
-  int damage;
-  int id;
-};
-
-struct Boss
-{
-  const char *type;
-  const char *name;
-  int health;
-  int damage;
-  int id;
-  int spells;
-};
-
-struct NPC
-{
-  NPCKind kind;
-  union
-  {
-    Friend buddy;
-    Minion critter;
-    Boss boss;
-  } payload;
-
-  static NPC
-  Boss(const char *t, const char *n, int health, int dmg, int id, int spells)
-  {
-    return NPC{.kind = NPCKind::Boss, .payload = {.boss = {t, n, health, dmg, id, spells}}};
-  }
-
-  static NPC
-  Friend(const char *n, int h)
-  {
-    return NPC{.kind = NPCKind::Friend, .payload = {.buddy = {n, h}}};
-  }
-  static NPC
-  Minion(const char *t, int h, int dmg, int id)
-  {
-    return NPC{.kind = NPCKind::Minion, .payload = {.critter = {t, h, dmg, id}}};
-  }
-};
+// This is a test-subject program for end-user-developers. We run manual debug sessions against this binary.
+// For normal test suites' debug sessions, they use different test subjects (which are crafted exactly or that
+// test). This binary is meant to contain a little bit of everything, and let a user do QA testing on it,
+// basically.
 
 void
 variants()
