@@ -1,4 +1,15 @@
+#include <array>
 #include <people.h>
+
+void
+stdlib_arr_ptrs()
+{
+  int arr_a[3]{1, 2, 3};
+  int arr_b[3]{10, 20, 30};
+  int arr_c[3]{100, 200, 300};
+
+  std::array<int[3], 3> arr_of_arrs = std::array<int[3], 3>({{1, 2, 3}, {10, 20, 30}, {100, 200, 300}});
+}
 
 int
 ptr_int_ptr_(int **ptrs, std::size_t count)
@@ -30,6 +41,8 @@ ptr_int_ptr()
   ptrs_to_ptrs[1] = intsB;
   ptrs_to_ptrs[2] = intsC;
   ptr_int_ptr_(ptrs_to_ptrs, 3);
+
+  return 1;
 }
 
 int
