@@ -4,6 +4,7 @@
 
 #include <array>
 #include <iterator>
+#include <memory>
 #include <optional>
 
 // This is a test-subject program for end-user-developers. We run manual debug sessions against this binary.
@@ -107,6 +108,9 @@ enums()
 int
 main(int argc, const char **argv)
 {
+  auto ptr = std::make_unique<int>(1);
+  std::unique_ptr<Person> person = std::make_unique<Person>(1, 36, "John Connor");
+  std::unique_ptr<Person> null = nullptr;
   enums();
   heap_allocated_variant();
   variants();

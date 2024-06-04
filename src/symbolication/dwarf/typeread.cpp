@@ -216,6 +216,14 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
   const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
   const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
 
+  // A member without a location is not a member. It can be a static variable or a constexpr variable.
+  if (!location) {
+    DBGLOG(core, "die 0x{:x} (name={}) is DW_TAG_member but had no location (static/constexpr/static-constexpr?)",
+           cu_die.die->section_offset,
+           name.transform([](auto v) { return v.string(); }).value_or("die had no name"));
+    return;
+  }
+
   ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
          to_str(cu_die.die->tag));
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
