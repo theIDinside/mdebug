@@ -93,12 +93,22 @@ BuildTestSubject(
 )
 
 set(VariablesRequestSubjects arrayOf3 pointer struct)
+set(MultiProcessSubjects parent childprogram)
 
 foreach(name ${VariablesRequestSubjects})
   BuildTestSubject(
     NAME ${name}
     SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/subjects/variablesRequest/${name}.cpp
+    INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+endforeach()
+
+foreach(name ${MultiProcessSubjects})
+  BuildTestSubject(
+    NAME ${name}
+    SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/subjects/multiprocess/${name}.cpp
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
 endforeach()
