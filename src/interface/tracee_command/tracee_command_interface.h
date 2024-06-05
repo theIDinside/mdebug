@@ -269,9 +269,13 @@ public:
 
   virtual std::string_view get_thread_name(Tid tid) noexcept = 0;
 
-  /// Called after we've processed an exec or fork (For PtraceCommander we might re-open proc fs files for
-  /// instance).
+  /// Called after we've processed an exec, which during a native debug session, we need to acquire some proc fs
+  /// files, for instance
   virtual bool post_exec() noexcept = 0;
+
+  // Called after a fork for the creation of a new process supervisor
+  virtual Interface on_fork(Pid pid) noexcept = 0;
+
   virtual Tid task_leader() const noexcept = 0;
   virtual std::optional<Path> execed_file() noexcept = 0;
   virtual std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept = 0;
@@ -281,6 +285,7 @@ public:
 
   virtual bool target_manages_breakpoints() noexcept;
   TaskExecuteResponse do_disconnect(bool terminate) noexcept;
+
   static Interface createCommandInterface(const InterfaceConfig &config) noexcept;
   std::optional<std::string> read_nullterminated_string(TraceePointer<char> address,
                                                         u32 buffer_size = 128) noexcept;

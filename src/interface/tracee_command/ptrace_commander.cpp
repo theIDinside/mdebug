@@ -52,6 +52,12 @@ PtraceCommander::post_exec() noexcept
   return procfs_memfd.is_open();
 }
 
+Interface
+PtraceCommander::on_fork(Pid pid) noexcept
+{
+  return std::make_unique<PtraceCommander>(pid);
+}
+
 Tid
 PtraceCommander::task_leader() const noexcept
 {

@@ -94,8 +94,8 @@ main(int argc, const char **argv)
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;
 
-  std::thread ui_thread{[&io_write = io_write, &ui_thread_setup]() {
-    ui::dap::DAP ui_interface{Tracer::Instance, STDIN_FILENO, STDOUT_FILENO, io_write};
+  std::thread ui_thread{[&ui_thread_setup]() {
+    ui::dap::DAP ui_interface{Tracer::Instance, STDIN_FILENO, STDOUT_FILENO};
     Tracer::Instance->set_ui(&ui_interface);
     ui_thread_setup = true;
     ui_interface.run_ui_loop();

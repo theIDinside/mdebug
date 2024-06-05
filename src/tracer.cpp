@@ -314,8 +314,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         return ProcessedStopEvent{should_resume, {}};
       },
       [&](const Fork &e) -> MatchResult {
-        (void)e;
-        TODO("Fork");
+        TODO("Implement multiprocess support");
+        auto new_supervisor = Tracer::Instance->on_fork(&tc, e.child_pid);
+        (void)new_supervisor;
         return ProcessedStopEvent{true, {}};
       },
       [&](const Clone &e) -> MatchResult {
@@ -489,6 +490,16 @@ Tracer::attach(const AttachArgs &args) noexcept
                             return false;
                           }},
                     args);
+}
+
+TraceeController *
+Tracer::on_fork(TraceeController *tc, Pid child_pid) noexcept
+{
+  auto interface = tc->get_interface().on_fork(child_pid);
+
+  targets.push_back(tc->fork(std::move(interface)));
+  current_target = targets.back().get();
+  return current_target;
 }
 
 void

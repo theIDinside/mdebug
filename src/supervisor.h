@@ -93,6 +93,13 @@ private:
   std::unique_ptr<tc::TraceeCommandInterface> tracee_interface;
   tc::Auxv auxiliary_vector{};
 
+  // FORK constructor
+  TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
+
+  // Granting friend status to std::make_unique
+  friend std::unique_ptr<TraceeController> std::make_unique<TraceeController>(TraceeController &parent,
+                                                                              tc::Interface &&interface);
+
 public:
   // Constructors
   TraceeController(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
@@ -100,6 +107,8 @@ public:
 
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
+
+  std::unique_ptr<TraceeController> fork(tc::Interface &&interface) noexcept;
 
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
 

@@ -439,6 +439,12 @@ GdbRemoteCommander::post_exec() noexcept
   return true;
 }
 
+Interface
+GdbRemoteCommander::on_fork(Pid pid) noexcept
+{
+  TODO("implement GdbRemoteCommander::on_fork() noexcept");
+}
+
 std::optional<Path>
 GdbRemoteCommander::execed_file() noexcept
 {

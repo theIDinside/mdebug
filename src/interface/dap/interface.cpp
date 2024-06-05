@@ -94,10 +94,9 @@ static constexpr std::string_view strings[]{
 
 using json = nlohmann::json;
 
-DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
-         utils::Notifier::WriteEnd command_notifier) noexcept
+DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept
     : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), keep_running(true),
-      output_message_lock{}, events_queue{}, seq(0), command_notifier(command_notifier)
+      output_message_lock{}, events_queue{}, seq(0)
 {
   auto [r, w] = utils::Notifier::notify_pipe();
   posted_event_notifier = w;

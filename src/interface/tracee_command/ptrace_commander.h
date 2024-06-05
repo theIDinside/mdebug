@@ -58,6 +58,9 @@ public:
 
   /// Re-open proc fs mem file descriptor. Configure
   bool post_exec() noexcept final;
+  // Called after a fork for the creation of a new process supervisor
+  Interface on_fork(Pid pid) noexcept final;
+
   Tid task_leader() const noexcept final;
   std::optional<Path> execed_file() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept final;

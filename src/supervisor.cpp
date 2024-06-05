@@ -55,6 +55,27 @@
 
 using sym::dw::SourceCodeFile;
 
+// FORK constructor
+TraceeController::TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept
+    : task_leader{interface->task_leader()}, main_executable{parent.main_executable}, threads{}, task_vm_infos{},
+      pbps{*this}, shared_objects{parent.shared_objects.clone()}, stop_all_requested{false},
+      interface_type{parent.interface_type}, interpreter_base{parent.interpreter_base}, entry{parent.entry},
+      session{parent.session}, stop_handler{new ptracestop::StopHandler{*this}},
+      null_unwinder{parent.null_unwinder}, tracee_interface{std::move(interface)}
+{
+  threads.reserve(256);
+
+  threads.push_back(TaskInfo::create_running(tracee_interface->task_leader(), tracee_interface->format,
+                                             tracee_interface->arch_info->type));
+  threads.back().initialize();
+  tracee_interface->set_target(this);
+
+  new_objectfile.subscribe(SubscriberIdentity::Of(this), [](const SymbolFile *sf) {
+    Tracer::Instance->post_event(new ui::dap::ModuleEvent{"new", *sf});
+    return true;
+  });
+}
+
 TraceeController::TraceeController(TargetSession target_session, tc::Interface &&interface,
                                    InterfaceType type) noexcept
     : task_leader{interface != nullptr ? interface->task_leader() : 0}, main_executable{nullptr}, threads{},
@@ -73,6 +94,12 @@ TraceeController::TraceeController(TargetSession target_session, tc::Interface &
     return true;
   });
   tracee_interface->set_target(this);
+}
+
+std::unique_ptr<TraceeController>
+TraceeController::fork(tc::Interface &&interface) noexcept
+{
+  return std::make_unique<TraceeController>(*this, std::move(interface));
 }
 
 TraceeController::~TraceeController() noexcept

@@ -117,8 +117,7 @@ class DAP
 {
 private:
 public:
-  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
-               utils::Notifier::WriteEnd io_write) noexcept;
+  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept;
   ~DAP() = default;
 
   // After setup we call `infinite_poll` that does what the name suggests, polls for messages. We could say that
@@ -158,6 +157,5 @@ private:
   std::deque<UIResultPtr> events_queue;
   u64 seq;
   bool cleaned_up = false;
-  utils::Notifier::WriteEnd command_notifier;
 };
 }; // namespace ui::dap

@@ -360,9 +360,14 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
     const bool process_needs_resuming = false;
     return CoreEvent::ThreadExited({tc.task_leader, info.tid, 5}, process_needs_resuming, {});
   }
-  case WaitStatusKind::Forked:
-    TODO("WaitStatusKind::Forked");
-    break;
+  case WaitStatusKind::Forked: {
+    TODO("Fork & Multi process supports need more work than just this here");
+    Tid new_child = 0;
+    auto result = ptrace(PTRACE_GETEVENTMSG, info.tid, nullptr, &new_child);
+    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    DBGLOG(core, "[fork]: new process after fork {}", new_child);
+    return CoreEvent::ForkEvent({tc.task_leader, info.tid, 5}, new_child, {});
+  }
   case WaitStatusKind::VForked:
     TODO("WaitStatusKind::VForked");
     break;

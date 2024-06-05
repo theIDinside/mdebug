@@ -51,6 +51,7 @@ struct SharedObject
   std::optional<std::string> version() const noexcept;
 
   bool has_debug_info() const noexcept;
+  SharedObject clone() const noexcept;
 
 public:
   int so_id;
@@ -72,6 +73,8 @@ public:
 
   // Do not hold on to this pointer as it may or may not be long lived (due to re-allocation).
   SharedObject *get_so(int id) noexcept;
+
+  SharedObjectMap clone() const noexcept;
 
 private:
   std::vector<SharedObject> shared_objects;

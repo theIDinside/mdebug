@@ -159,6 +159,7 @@ public:
    * hang. */
   void accept_command(ui::UICommand *cmd) noexcept;
   void execute_pending_commands() noexcept;
+  TraceeController *on_fork(TraceeController *tc, Pid child_pid) noexcept;
   void launch(bool stopAtEntry, Path program, std::vector<std::string> prog_args) noexcept;
   bool attach(const AttachArgs &args) noexcept;
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
