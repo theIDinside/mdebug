@@ -37,7 +37,8 @@ namespace ui {
 struct UICommand;
 namespace dap {
 class VariablesReference;
-};
+class DebugAdapterClient;
+}; // namespace dap
 }; // namespace ui
 
 using Address = std::uintptr_t;
@@ -81,6 +82,8 @@ struct TraceeController
   Publisher<SymbolFile *> new_objectfile{};
   TPtr<r_debug_extended> tracee_r_debug{nullptr};
   InterfaceType interface_type;
+  ui::dap::DebugAdapterClient *dap_client{nullptr};
+  std::optional<Pid> parent{};
 
 private:
   int next_var_ref = 0;
@@ -92,6 +95,7 @@ private:
   sym::Unwinder *null_unwinder;
   std::unique_ptr<tc::TraceeCommandInterface> tracee_interface;
   tc::Auxv auxiliary_vector{};
+  bool on_entry{false};
 
   // FORK constructor
   TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
@@ -108,6 +112,7 @@ public:
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
+  void configure_dap_client(ui::dap::DebugAdapterClient *client) noexcept;
   std::unique_ptr<TraceeController> fork(tc::Interface &&interface) noexcept;
 
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
@@ -155,6 +160,9 @@ public:
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
+
+  void set_on_entry(bool setting) noexcept;
+  bool is_on_entry() const noexcept;
 
   void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id, bool all_stopped) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;

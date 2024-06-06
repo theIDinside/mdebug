@@ -146,9 +146,10 @@ public:
     u8 bitset;
     struct
     {
-      bool padding : 4;
+      bool padding : 3;
       bool clone_stop : 1;
       bool exec_stop : 1;
+      bool fork_stop : 1;
       bool thread_exit_stop : 1;
       bool ignore_bps : 1;
     };

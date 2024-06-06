@@ -99,7 +99,8 @@ request_name(__ptrace_request req)
 void
 new_target_set_options(pid_t pid)
 {
-  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD;
+  const auto options =
+    PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXIT;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;
     if (-1 == waitpid(pid, &stat, 0)) {

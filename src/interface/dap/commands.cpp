@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <fmt/core.h>
 #include <fmt/format.h>
+#include <interface/dap/interface.h>
 #include <memory>
 #include <optional>
 #include <ptracestop_handlers.h>
@@ -97,7 +98,7 @@ PauseResponse::serialize(int seq) const noexcept
 UIResultPtr
 Pause::execute(Tracer *tc) noexcept
 {
-  auto target = tc->get_current();
+  auto target = dap_client->supervisor();
   auto task = target->get_task(pauseArgs.threadId);
   if (task->is_stopped()) {
     return new PauseResponse{false, this};
@@ -126,7 +127,7 @@ Continue::execute(Tracer *tracer) noexcept
 {
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
   if (continue_all && target->is_running()) {
     std::vector<Tid> running_tasks{};
     for (const auto &t : target->threads) {
@@ -167,7 +168,7 @@ NextResponse::serialize(int seq) const noexcept
 UIResultPtr
 Next::execute(Tracer *tracer) noexcept
 {
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
   auto task = target->get_task(thread_id);
 
   if (!task->is_stopped()) {
@@ -205,14 +206,14 @@ StepInResponse::serialize(int seq) const noexcept
 UIResultPtr
 StepIn::execute(Tracer *tracer) noexcept
 {
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
   auto task = target->get_task(thread_id);
 
   if (!task->is_stopped()) {
     return new StepInResponse{false, this};
   }
 
-  auto proceeder = ptracestop::StepInto::create(target, *task);
+  auto proceeder = ptracestop::StepInto::create(*target, *task);
 
   if (!proceeder) {
     return new ErrorResponse{
@@ -241,7 +242,7 @@ StepOutResponse::serialize(int seq) const noexcept
 UIResultPtr
 StepOut::execute(Tracer *tracer) noexcept
 {
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
   auto task = target->get_task(thread_id);
 
   if (!task->is_stopped()) {
@@ -309,7 +310,7 @@ UIResultPtr
 SetBreakpoints::execute(Tracer *tracer) noexcept
 {
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
-  auto target = tracer->maybe_get_current();
+  auto target = dap_client->supervisor();
   if (!target) {
     return res;
   }
@@ -372,7 +373,7 @@ SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
     ibkpt["instructionReference"].get_to(addr_str);
     bps.insert(InstructionBreakpointSpec{.instructionReference = std::string{addr_str}, .condition = {}});
   }
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
   target->set_instruction_breakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
@@ -412,7 +413,7 @@ SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
 
     bkpts.insert(FunctionBreakpointSpec{fn_name, std::nullopt, is_regex});
   }
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
 
   target->set_fn_breakpoints(bkpts);
   for (const auto &user : target->pbps.all_users()) {
@@ -445,7 +446,7 @@ UIResultPtr
 ReadMemory::execute(Tracer *tracer) noexcept
 {
   if (address) {
-    auto sv = tracer->get_current()->read_to_vector(*address, bytes);
+    auto sv = dap_client->supervisor()->read_to_vector(*address, bytes);
     auto res = new ReadMemoryResponse{true, this};
     res->data_base64 = utils::encode_base64(sv->span());
     res->first_readable_address = *address;
@@ -468,11 +469,10 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 UIResultPtr
 ConfigurationDone::execute(Tracer *tracer) noexcept
 {
-  tracer->config_done();
-  auto current = tracer->get_current();
-  switch (current->session_type()) {
+  tracer->config_done(dap_client);
+  switch (dap_client->supervisor()->session_type()) {
   case TargetSession::Launched:
-    current->resume_target(tc::RunType::Continue);
+    dap_client->supervisor()->resume_target(tc::RunType::Continue);
     break;
   case TargetSession::Attached:
     break;
@@ -506,7 +506,8 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 UIResultPtr
 Disconnect::execute(Tracer *tracer) noexcept
 {
-  auto ok = tracer->disconnect(true);
+  auto ok = tracer->disconnect(dap_client, true);
+  dap_client->post_event(new TerminatedEvent{});
   return new DisconnectResponse{ok, this};
 }
 
@@ -565,11 +566,13 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsExceptionFilterOptions"] = false;
   cfg_body["supportsSingleThreadExecutionRequests"] = true;
 
-  Tracer::Instance->post_event(new InitializedEvent{});
-
-  return fmt::format(
+  auto payload = fmt::format(
     R"({{"seq":0,"request_seq":{},"type":"response","success":true,"command":"initialize","body":{}}})",
     request_seq, cfg_body.dump());
+
+  client->write(payload);
+  client->write(InitializedEvent{}.serialize(0));
+  return "";
 }
 
 std::string
@@ -588,7 +591,7 @@ Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
 UIResultPtr
 Launch::execute(Tracer *tracer) noexcept
 {
-  tracer->launch(stopOnEntry, std::move(program), std::move(program_args));
+  tracer->launch(dap_client, stopOnEntry, std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
 }
 
@@ -618,7 +621,8 @@ TerminateResponse::serialize(int seq) const noexcept
 UIResultPtr
 Terminate::execute(Tracer *tracer) noexcept
 {
-  auto ok = tracer->disconnect(true);
+  auto ok = tracer->disconnect(dap_client, true);
+  dap_client->post_event(new TerminatedEvent{});
   return new TerminateResponse{ok, this};
 }
 
@@ -637,7 +641,8 @@ Threads::execute(Tracer *tracer) noexcept
   // allows for more; it would require some work to get the DAP protocol to play nicely though.
   // therefore we just hand back the threads of the currently active target
   auto response = new ThreadsResponse{true, this};
-  auto target = tracer->get_current();
+
+  auto target = dap_client->supervisor();
 
   response->threads.reserve(target->threads.size());
   auto &it = target->get_interface();
@@ -681,7 +686,7 @@ UIResultPtr
 StackTrace::execute(Tracer *tracer) noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
-  auto target = tracer->get_current();
+  auto target = dap_client->supervisor();
   auto task = target->get_task(threadId);
   if (task == nullptr) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
@@ -775,7 +780,7 @@ Disassemble::execute(Tracer *tracer) noexcept
     int remaining = ins_count;
     if (ins_offset < 0) {
       const int negative_offset = std::abs(ins_offset);
-      sym::zydis_disasm_backwards(tracer->get_current(), address.value(), static_cast<u32>(negative_offset),
+      sym::zydis_disasm_backwards(dap_client->supervisor(), address.value(), static_cast<u32>(negative_offset),
                                   res->instructions);
       if (negative_offset < ins_count) {
         for (auto i = 0u; i < res->instructions.size(); i++) {
@@ -798,8 +803,8 @@ Disassemble::execute(Tracer *tracer) noexcept
     }
 
     if (remaining > 0) {
-      sym::zydis_disasm(tracer->get_current(), address.value(), static_cast<u32>(std::abs(ins_offset)), remaining,
-                        res->instructions);
+      sym::zydis_disasm(dap_client->supervisor(), address.value(), static_cast<u32>(std::abs(ins_offset)),
+                        remaining, res->instructions);
     }
     return res;
   } else {

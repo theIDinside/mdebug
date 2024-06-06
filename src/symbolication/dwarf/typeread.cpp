@@ -208,6 +208,24 @@ TypeSymbolicationContext::process_inheritance(DieReference cu_die) noexcept
   }
 }
 
+static std::string_view
+name_from_tag(DwarfTag tag) noexcept
+{
+  switch (tag) {
+  case DwarfTag::DW_TAG_class_type:
+    return "class";
+  case DwarfTag::DW_TAG_enumeration_type:
+    return "enum";
+  case DwarfTag::DW_TAG_structure_type:
+    return "structure";
+  case DwarfTag::DW_TAG_union_type:
+    return "union";
+  default:
+    break;
+  }
+  ASSERT(false, "Did not expect that DwarfTag");
+}
+
 void
 TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 {
@@ -224,23 +242,29 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
     return;
   }
 
-  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
-         to_str(cu_die.die->tag));
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
          cu_die.die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
-         to_str(cu_die.die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+  ASSERT(type_id, "Expected to find type attribute for die 0x{:x} ({})", cu_die.die->section_offset,
          to_str(cu_die.die->tag));
 
-  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
-  ASSERT(containing_cu_die_ref.has_value(),
-         "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
-
-  auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
-  const auto member_offset = location->unsigned_value();
-  this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
+  if (!name) {
+    // means we're likely some anonymous structure of some kind
+    auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+    ASSERT(containing_cu_die_ref.has_value(),
+           "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
+    auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
+    const auto member_offset = location->unsigned_value();
+    auto name = name_from_tag(type->die_tag);
+    this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name});
+  } else {
+    auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+    ASSERT(containing_cu_die_ref.has_value(),
+           "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
+    auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
+    const auto member_offset = location->unsigned_value();
+    this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
+  }
 }
 
 void

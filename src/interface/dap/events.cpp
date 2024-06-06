@@ -97,6 +97,16 @@ ContinuedEvent::serialize(int seq) const noexcept
     seq, thread_id, all_threads_continued);
 }
 
+Process::Process(std::string name, bool is_local) noexcept : name(std::move(name)), is_local(is_local) {}
+
+std::string
+Process::serialize(int seq) const noexcept
+{
+  return fmt::format(
+    R"({{"seq":{}, "type":"event", "event":"process", "body":{{"name":"{}", "isLocalProcess": true, "startMethod": "attach" }}}})",
+    seq, name);
+}
+
 ExitedEvent::ExitedEvent(int exit_code) noexcept : exit_code(exit_code) {}
 std::string
 ExitedEvent::serialize(int seq) const noexcept

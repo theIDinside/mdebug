@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -12,7 +13,7 @@ main(int argc, char *argv[])
 
   std::string directoryPath = argv[1];
   pid_t pid = fork();
-
+  // THE DEBUGGER MASTER RACE IS HERE LOL
   if (pid == -1) {
     // Fork failed
     std::cerr << "Error: fork failed." << std::endl;
@@ -20,8 +21,15 @@ main(int argc, char *argv[])
   } else if (pid == 0) {
     // Child process
     // Replace this with the path to the executable created from the previous program
-    const char *program = "./childprogram";
-    execl(program, program, directoryPath.c_str(), nullptr); // #CHILD_EXEC_BP
+
+    auto current = std::filesystem::current_path();
+    std::filesystem::path programpath = directoryPath;
+    programpath = programpath / "childprogram";
+
+    std::cout << " exec=" << programpath << " with parameter: " << directoryPath
+              << " . cwd=" << std::filesystem::current_path() << std::endl;
+
+    execl(programpath.c_str(), programpath.c_str(), directoryPath.c_str(), nullptr); // #CHILD_EXEC_BP
 
     // If execl returns, it must have failed
     std::cerr << "Error: execl failed." << std::endl;
@@ -30,7 +38,6 @@ main(int argc, char *argv[])
     // Parent process
     int status;
     waitpid(pid, &status, 0); // #PARENT_WAITPID
-
     if (WIFEXITED(status)) {
       std::cout << "Child process exited with status " << WEXITSTATUS(status) << std::endl;
     } else {

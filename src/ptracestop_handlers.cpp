@@ -3,6 +3,7 @@
 #include "event_queue.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/callstack.h"
+#include "tracee/util.h"
 #include <common.h>
 #include <cstring>
 #include <events/event.h>
@@ -345,14 +346,14 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
       return CoreEvent::ThreadCreated({tc.task_leader, info.tid, 5},
                                       {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
     }
+    if (tc.is_on_entry()) {
+      return CoreEvent::EntryEvent({tc.task_leader, info.tid, 5}, {}, true);
+    }
     return native_core_evt_from_stopped(info);
   }
   case WaitStatusKind::Execed: {
-    const auto read_exe = []() {
-      TODO("Reading exe file of newly exec'ed file not yet implemented");
-      return "";
-    };
-    return CoreEvent::ExecEvent({.target = tc.task_leader, .tid = info.tid, .sig_or_code = 5}, read_exe(), {});
+    return CoreEvent::ExecEvent({.target = tc.task_leader, .tid = info.tid, .sig_or_code = 5},
+                                process_exe_path(info.tid), {});
   }
   case WaitStatusKind::Exited: {
     // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
@@ -361,7 +362,6 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
     return CoreEvent::ThreadExited({tc.task_leader, info.tid, 5}, process_needs_resuming, {});
   }
   case WaitStatusKind::Forked: {
-    TODO("Fork & Multi process supports need more work than just this here");
     Tid new_child = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.tid, nullptr, &new_child);
     ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));

@@ -57,4 +57,5 @@ main(int argc, const char **argv)
 {
   foo();
   Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2};
+  return -1;
 }

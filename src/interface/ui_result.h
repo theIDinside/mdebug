@@ -8,7 +8,7 @@ struct UIResult
 {
   UIResult() = default;
   UIResult(bool success, UICommandPtr cmd = nullptr) noexcept
-      : success(success), request_seq((cmd != nullptr) ? cmd->seq : 0)
+      : success(success), request_seq((cmd != nullptr) ? cmd->seq : 0), client(cmd->dap_client)
   {
   }
   virtual ~UIResult() = default;
@@ -16,6 +16,7 @@ struct UIResult
 
   bool success;
   std::uint64_t request_seq;
+  ui::dap::DebugAdapterClient *client;
 };
 
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here

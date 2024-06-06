@@ -98,7 +98,7 @@ main(int argc, const char **argv)
     ui::dap::DAP ui_interface{Tracer::Instance, STDIN_FILENO, STDOUT_FILENO};
     Tracer::Instance->set_ui(&ui_interface);
     ui_thread_setup = true;
-    ui_interface.run_ui_loop();
+    ui_interface.start_interface();
   }};
 
   while (!ui_thread_setup) {

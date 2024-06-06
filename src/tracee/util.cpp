@@ -1,6 +1,7 @@
 #include "util.h"
 #include "common.h"
 #include <cstddef>
+#include <filesystem>
 #include <string_view>
 #include <sys/ptrace.h>
 #include <sys/types.h>
@@ -39,4 +40,19 @@ get_register(user_regs_struct *regs, int reg_number) noexcept
 {
   ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
   return *(u64 *)(((std::uintptr_t)regs) + RegNumToX86_64Offsets[reg_number]);
+}
+
+std::string
+process_exe_path(Pid pid) noexcept
+{
+  char buf[128];
+  char resolved[PATH_MAX];
+  auto end = fmt::format_to(buf, "/proc/{}/exe", pid);
+  *end = 0;
+  auto res = realpath(buf, resolved);
+  if (res == nullptr) {
+    PANIC("Failed to resolve exe of exec'd process");
+  }
+
+  return std::string{resolved};
 }
