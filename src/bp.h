@@ -325,6 +325,7 @@ class BreakpointLocation
   bool installed{true};
   std::vector<UserBreakpoint *> users{};
   std::unique_ptr<LocationSourceInfo> source_info;
+  friend UserBreakpoints;
 
 public:
   Immutable<u8> original_byte;
@@ -379,6 +380,7 @@ private:
   u32 on_hit_count{0};
   std::optional<StopCondition> stop_condition;
   std::unique_ptr<BpErr> err;
+  friend UserBreakpoints;
 
 public:
   static constexpr auto SOURCE_BREAKPOINT = 0;
@@ -513,6 +515,7 @@ public:
   std::unordered_map<FunctionBreakpointSpec, std::vector<BpId>> fn_breakpoints{};
   std::unordered_map<InstructionBreakpointSpec, BpId> instruction_breakpoints{};
 
+  void on_exec() noexcept;
   void add_bp_location(const UserBreakpoint &updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;
