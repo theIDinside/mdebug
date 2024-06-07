@@ -5,7 +5,6 @@
 #include "interface/remotegdb/shared.h"
 #include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-// #include "symbolication/dwarf_binary_reader.h"
 #include "task.h"
 #include "utils/logger.h"
 #include "utils/util.h"
@@ -14,6 +13,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <supervisor.h>
 #include <sys/user.h>
 #include <tracer.h>
 

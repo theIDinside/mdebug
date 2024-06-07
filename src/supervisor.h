@@ -146,9 +146,6 @@ public:
   void resume_task(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all(TaskInfo *requesting_task) noexcept;
-  /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
-   * interface of the event */
-  void reap_task(TaskInfo &task) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *register_task_waited(TaskWaitResult wait) noexcept;
@@ -309,6 +306,11 @@ public:
   tc::TraceeCommandInterface &get_interface() noexcept;
   std::optional<AddrPtr> get_interpreter_base() const noexcept;
   std::shared_ptr<SymbolFile> get_main_executable() const noexcept;
+
+  tc::ProcessedStopEvent handle_thread_created(TaskInfo *task, const ThreadCreated &evt,
+                                               const RegisterData &register_data) noexcept;
+  tc::ProcessedStopEvent handle_thread_exited(TaskInfo *task, const ThreadExited &evt) noexcept;
+  tc::ProcessedStopEvent handle_process_exit(const ProcessExited &evt) noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

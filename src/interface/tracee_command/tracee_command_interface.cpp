@@ -2,6 +2,7 @@
 #include "common.h"
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
+#include <supervisor.h>
 #include <tracer.h>
 #include <type_traits>
 

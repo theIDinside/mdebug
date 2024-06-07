@@ -17,6 +17,7 @@
 #include <memory_resource>
 #include <poll.h>
 #include <random>
+#include <supervisor.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/socket.h>

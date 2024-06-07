@@ -73,6 +73,7 @@ struct TaskInfo
       bool cache_dirty : 1;    // register is dirty and requires refetching
       bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
       bool exited : 1;         // task has exited
+      bool reaped : 1;         // task has been reaped after exit
     };
   };
 

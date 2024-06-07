@@ -139,8 +139,8 @@ CoreEvent *
 CoreEvent::ProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event ProcessExitEvent");
-  return new CoreEvent{pid,       tid,           ProcessExited{{tid}, pid}, CoreEventType::ProcessExited,
-                       exit_code, std::move(reg)};
+  return new CoreEvent{
+    pid, tid, ProcessExited{{tid}, pid, exit_code}, CoreEventType::ProcessExited, exit_code, std::move(reg)};
 }
 
 CoreEvent *

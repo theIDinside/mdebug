@@ -501,14 +501,7 @@ class DAClient {
     // Emit processed DAP Events to this event handler
     this.events.on('event', async (evt) => {
       const { event, body } = evt
-      switch (event) {
-        case 'exited':
-          this.mdb.stdin.write(this.serializeRequest('disconnect'))
-          break
-        default:
-          this.events.emit(event, body)
-          break
-      }
+      this.events.emit(event, body)
     })
 
     // Emit processed DAP Responses to this event handler
@@ -641,11 +634,7 @@ class DAClient {
       const listener = (body) => {
         eventCount++
         evts.push(body)
-        console.log(
-          `stopped for ${evt}: ${body.reason}: ${JSON.stringify(body)} (of n=${n} and evts.length=${evts.length})`
-        )
         if (evts.length == n) {
-          console.log(`we hit ${evt} n=${n} times`)
           this.events.removeListener(evt, listener)
           res(evts)
         }

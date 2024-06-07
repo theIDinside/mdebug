@@ -84,44 +84,11 @@ struct VariableContext
       ctx.tc, ctx.t, ctx.symbol_file, ctx.frame_id, static_cast<u16>(newId), ContextType::Variable};
   }
 
-  constexpr bool
-  valid_context() const noexcept
-  {
-    return tc != nullptr && t != nullptr;
-  }
-
-  constexpr std::optional<std::array<ui::dap::Scope, 3>>
-  scopes_reference(VarRefKey frameKey) const noexcept
-  {
-    auto frame = t->get_callstack().get_frame(frameKey);
-    if (!frame) {
-      return {};
-    } else {
-      return frame->scopes();
-    }
-  }
-
+  bool valid_context() const noexcept;
+  std::optional<std::array<ui::dap::Scope, 3>> scopes_reference(VarRefKey frameKey) const noexcept;
   std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
-  sym::Frame *
-  get_frame(VarRefKey ref) noexcept
-  {
-    switch (type) {
-    case ContextType::Frame:
-      return t->get_callstack().get_frame(ref);
-    case ContextType::Scope:
-    case ContextType::Variable:
-      return t->get_callstack().get_frame(frame_id);
-    case ContextType::Global:
-      PANIC("Global variables not yet supported");
-      break;
-    }
-  }
-
-  SharedPtr<sym::Value>
-  get_maybe_value() const noexcept
-  {
-    return t->get_maybe_value(id);
-  }
+  sym::Frame *get_frame(VarRefKey ref) noexcept;
+  SharedPtr<sym::Value> get_maybe_value() const noexcept;
 };
 
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
@@ -181,6 +148,8 @@ public:
 
   std::vector<std::unique_ptr<TraceeController>> targets;
   ui::dap::DAP *dap;
+
+  bool TraceExitConfigured{false};
 
 private:
   [[maybe_unused]] tc::ProcessedStopEvent process_core_event(TraceeController &tc,

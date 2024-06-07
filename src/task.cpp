@@ -14,7 +14,8 @@
 
 TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), call_stack(new sym::CallStack{tid}), loc_stat()
+      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), call_stack(new sym::CallStack{tid}),
+      loc_stat()
 {
   regs = {.arch = arch, .data_format = format, .rip_dirty = true, .cache_dirty = true, .registers = nullptr};
 
@@ -307,7 +308,7 @@ TaskInfo::initialize() noexcept
 bool
 TaskInfo::can_continue() noexcept
 {
-  return initialized && (user_stopped || tracer_stopped) && !exited;
+  return initialized && (user_stopped || tracer_stopped) && !reaped;
 }
 
 void

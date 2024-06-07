@@ -4,7 +4,6 @@
 #include "event_queue_event_param.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
-#include "supervisor.h"
 #include "task.h"
 #include <exception>
 #include <string>
@@ -122,16 +121,6 @@ template <> struct formatter<CoreEventType>
 struct ThreadEvent
 {
   Tid thread_id;
-
-  std::optional<Tid>
-  tid() const noexcept
-  {
-    if (thread_id != -1) {
-      return thread_id;
-    } else {
-      return std::nullopt;
-    }
-  }
 };
 
 struct WatchpointEvent : public ThreadEvent
@@ -170,7 +159,7 @@ struct ThreadCreated : public ThreadEvent
 struct ThreadExited : public ThreadEvent
 {
   EventType(ThreadExited);
-  int signal;
+  int code_or_signal;
   bool process_needs_resuming;
 };
 
@@ -197,6 +186,7 @@ struct ProcessExited : public ThreadEvent
 {
   EventType(ProcessExited);
   Pid pid;
+  int exit_code;
 };
 
 struct LibraryEvent : public ThreadEvent

@@ -358,8 +358,8 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
   case WaitStatusKind::Exited: {
     // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
     // other threads
-    const bool process_needs_resuming = false;
-    return CoreEvent::ThreadExited({tc.task_leader, info.tid, 5}, process_needs_resuming, {});
+    const bool process_needs_resuming = Tracer::Instance->TraceExitConfigured;
+    return CoreEvent::ThreadExited({tc.task_leader, info.tid, ws.exit_code}, process_needs_resuming, {});
   }
   case WaitStatusKind::Forked: {
     Tid new_child = 0;

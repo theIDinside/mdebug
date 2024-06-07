@@ -39,13 +39,48 @@ Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
 
 void
-on_sigcld(int)
+on_sigchild_handler(int)
 {
   pid_t pid;
   int stat;
   while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
-    const auto wait_result = process_status(pid, stat);
-    push_wait_event(0, wait_result);
+    if (WIFSTOPPED(stat)) {
+      const auto res = wait_result_stopped(pid, stat);
+      DBGLOG(awaiter, "stop for {}: {}", res.tid, to_str(res.ws.ws));
+      push_wait_event(0, res);
+    } else if (WIFEXITED(stat)) {
+      // We might as well only report this for process-tasks,
+      // as DAP doesn't support reporting an exit code for a thread, only for a process,
+      // because DAP distinguishes between the two in a way that most OS today, doesn't.
+      if (!Tracer::Instance->TraceExitConfigured) {
+        // means this is the only place we're getting informed of thread exits
+        for (const auto &supervisor : Tracer::Instance->targets) {
+          for (const auto &t : supervisor->threads) {
+            if (t.tid == pid) {
+              DBGLOG(awaiter, "exit for {}", pid);
+              push_debugger_event(
+                CoreEvent::ThreadExited({supervisor->task_leader, pid, WEXITSTATUS(stat)}, false, {}));
+              return;
+            }
+          }
+        }
+      } else {
+        for (const auto &supervisor : Tracer::Instance->targets) {
+          if (supervisor->task_leader == pid) {
+            int exit_code = WEXITSTATUS(stat);
+            DBGLOG(awaiter, "exit for {}: {}", pid, exit_code);
+            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->task_leader, pid, exit_code, {}));
+            return;
+          }
+        }
+      }
+    } else if (WIFSIGNALED(stat)) {
+      auto signaled_evt =
+        TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
+      push_wait_event(0, signaled_evt);
+    } else {
+      PANIC("Unknown wait status event");
+    }
   }
 }
 
@@ -110,12 +145,13 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
     switch (config.waitsystem()) {
     case sys::WaitSystem::UseAwaiterThread:
       if (!WaiterSystemConfigured) {
-        tc->get_interface().initialize();
+        // tc->get_interface().initialize();
+        signal(SIGCHLD, on_sigchild_handler);
       }
       break;
     case sys::WaitSystem::UseSignalHandler:
       if (!WaiterSystemConfigured) {
-        signal(SIGCHLD, on_sigcld);
+        signal(SIGCHLD, on_sigchild_handler);
       }
       break;
     }
@@ -240,40 +276,8 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         TODO("SyscallEvent");
         return ProcessedStopEvent::ResumeAny();
       },
-      [&](const ThreadCreated &e) -> MatchResult {
-        auto task = tc.get_task(e.thread_id);
-        // means this event was produced by a Remote session. Construct the task now
-        if (!task) {
-          tc.new_task(e.thread_id);
-          task = tc.get_task(e.thread_id);
-          if (!evt->registers->empty()) {
-            ASSERT(*arch != nullptr,
-                   "Passing raw register contents with no architecture description doesn't work.");
-            task->set_registers(evt->registers);
-            for (const auto &p : evt->registers) {
-              if (p.first == 16) {
-                task->rip_dirty = false;
-              }
-            }
-          }
-        }
-        task->initialize();
-        const auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Started, e.thread_id};
-        tc.dap_client->post_event(evt);
-
-        return ProcessedStopEvent{true, e.resume_action};
-      },
-      [&](const ThreadExited &e) -> MatchResult {
-        auto t = tc.get_task(e.thread_id);
-        tc.reap_task(*t);
-        if (e.process_needs_resuming) {
-          return ProcessedStopEvent{
-            !tc.stop_handler->event_settings.thread_exit_stop && e.process_needs_resuming,
-            tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
-        } else {
-          return ProcessedStopEvent{!tc.stop_handler->event_settings.thread_exit_stop, {}};
-        }
-      },
+      [&](const ThreadCreated &e) -> MatchResult { return tc.handle_thread_created(task, e, evt->registers); },
+      [&](const ThreadExited &e) -> MatchResult { return tc.handle_thread_exited(task, e); },
       [&](const BreakpointHitEvent &e) -> MatchResult {
         // todo(simon): here we should start building upon global event system, like in gdb, where the user can
         // hook into specific events. in this particular case, we could emit a
@@ -336,11 +340,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         tc.dap_client->post_event(new ui::dap::Process{e.exec_file, true});
         return ProcessedStopEvent{!tc.stop_handler->event_settings.exec_stop, {}};
       },
-      [&](const ProcessExited &e) -> MatchResult {
-        (void)e;
-        tc.reap_task(*task);
-        return ProcessedStopEvent{false, {}};
-      },
+      [&](const ProcessExited &e) -> MatchResult { return tc.handle_process_exit(e); },
       [&](const LibraryEvent &e) -> MatchResult {
         (void)e;
         TODO("LibraryEvent");
@@ -712,4 +712,43 @@ Tracer::clone_from_var_context(const VariableContext &ctx) noexcept
   const auto key = new_key();
   refContext.emplace(key, VariableContext::subcontext(key, ctx));
   return key;
+}
+
+bool
+VariableContext::valid_context() const noexcept
+{
+  return tc != nullptr && t != nullptr;
+}
+
+std::optional<std::array<ui::dap::Scope, 3>>
+VariableContext::scopes_reference(VarRefKey frameKey) const noexcept
+{
+  auto frame = t->get_callstack().get_frame(frameKey);
+  if (!frame) {
+    return {};
+  } else {
+    return frame->scopes();
+  }
+}
+
+std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
+sym::Frame *
+VariableContext::get_frame(VarRefKey ref) noexcept
+{
+  switch (type) {
+  case ContextType::Frame:
+    return t->get_callstack().get_frame(ref);
+  case ContextType::Scope:
+  case ContextType::Variable:
+    return t->get_callstack().get_frame(frame_id);
+  case ContextType::Global:
+    PANIC("Global variables not yet supported");
+    break;
+  }
+}
+
+SharedPtr<sym::Value>
+VariableContext::get_maybe_value() const noexcept
+{
+  return t->get_maybe_value(id);
 }

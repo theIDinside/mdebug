@@ -124,4 +124,6 @@ main(int argc, const char **argv)
     printf("%d\n", id);
   }
   printf("Foo {a: %d, b: %lld, c: %f, d: %f}", foo.a, foo.b, foo.c, foo.d);
+
+  return 42;
 }

@@ -354,37 +354,6 @@ TraceeController::stop_all(TaskInfo *requesting_task) noexcept
   }
 }
 
-void
-TraceeController::reap_task(TaskInfo &task) noexcept
-{
-  auto it = std::ranges::find_if(threads, [&](auto &t) { return t.tid == task.tid; });
-  VERIFY(it != std::end(threads), "Could not find Task with pid {}", task.tid);
-  task.exited = true;
-
-  dap_client->post_event(new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, task.tid});
-  bool all_exited = true;
-  for (auto &t : threads) {
-    all_exited = all_exited && t.exited;
-  }
-  if (all_exited) {
-    i64 exit_code = 0;
-    // due to PTRACE_O_TRACEEXIT option, we will see 2 exits, a pre-exit and a "real" exit
-    // the pre-exit is, so that we can inspect registers and some state - but we can't stop the process from dying.
-    // We need to resume it, so we do that directly here, since for all intents and purposes,
-    // the session, for the end user, is over.
-    if (ptrace(PTRACE_GETEVENTMSG, task.tid, 0, &exit_code) != -1) {
-      auto evt = new ui::dap::ExitedEvent{static_cast<int>(exit_code)};
-      dap_client->post_event(evt);
-      if (ptrace(PTRACE_CONT, task.tid, nullptr, nullptr) == -1) {
-        TODO_FMT("Failed to resume at exit for {}", task.tid);
-      }
-    }
-  }
-  if (task.tid == task_leader) {
-    get_interface().perform_shutdown();
-  }
-}
-
 TaskInfo *
 TraceeController::register_task_waited(TaskWaitResult wait) noexcept
 {
@@ -1304,4 +1273,79 @@ TraceeController::set_pending_waitstatus(TaskWaitResult wait_result) noexcept
   task->tracer_stopped = true;
   task->stop_collected = false;
   return task;
+}
+
+tc::ProcessedStopEvent
+TraceeController::handle_thread_created(TaskInfo *task, const ThreadCreated &e,
+                                        const RegisterData &register_data) noexcept
+{
+  // means this event was produced by a Remote session. Construct the task now
+  if (!task) {
+    new_task(e.thread_id);
+    task = get_task(e.thread_id);
+    if (!register_data.empty()) {
+      ASSERT(*get_interface().arch_info != nullptr,
+             "Passing raw register contents with no architecture description doesn't work.");
+      task->set_registers(register_data);
+      for (const auto &p : register_data) {
+        if (p.first == 16) {
+          task->rip_dirty = false;
+        }
+      }
+    }
+  }
+  task->initialize();
+  const auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Started, e.thread_id};
+  dap_client->post_event(evt);
+
+  return tc::ProcessedStopEvent{true, e.resume_action};
+}
+
+tc::ProcessedStopEvent
+TraceeController::handle_thread_exited(TaskInfo *task, const ThreadExited &evt) noexcept
+{
+  if (!task->exited) {
+    dap_client->post_event(new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, task->tid});
+    task->exited = true;
+    task->reaped = !Tracer::Instance->TraceExitConfigured;
+    if (Tracer::Instance->TraceExitConfigured) {
+      return tc::ProcessedStopEvent{true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}};
+    } else {
+      return tc::ProcessedStopEvent{
+        !stop_handler->event_settings.thread_exit_stop,
+        tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+    }
+  } else if (!task->reaped) {
+    task->reaped = true;
+    return tc::ProcessedStopEvent{
+      !stop_handler->event_settings.thread_exit_stop,
+      tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+  } else {
+    PANIC("Invariants broken");
+  }
+
+  if (evt.process_needs_resuming) {
+    // if (ptrace(PTRACE_CONT, task->tid, nullptr, nullptr) == -1) {
+    // PANIC(fmt::format("Failed to resume at exit for {}", task->tid));
+    // }
+    return tc::ProcessedStopEvent{
+      true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+  }
+  return tc::ProcessedStopEvent{!stop_handler->event_settings.thread_exit_stop,
+                                tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+}
+
+tc::ProcessedStopEvent
+TraceeController::handle_process_exit(const ProcessExited &evt) noexcept
+{
+  auto t = get_task(evt.thread_id);
+  if (!t->exited) {
+    dap_client->post_event(new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, t->tid});
+    t->exited = true;
+  }
+  t->reaped = true;
+  auto dap_evt = new ui::dap::ExitedEvent{evt.exit_code};
+  dap_client->post_event(dap_evt);
+  get_interface().perform_shutdown();
+  return tc::ProcessedStopEvent{false, {}};
 }
