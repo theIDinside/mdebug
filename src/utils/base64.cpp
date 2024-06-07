@@ -1,5 +1,6 @@
 #include "base64.h"
 #include <cmath>
+#include <iterator>
 
 namespace utils {
 

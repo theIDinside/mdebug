@@ -145,10 +145,29 @@ GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexc
 TraceeWriteResult
 GdbRemoteCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 {
-  TODO("Implement");
-  (void)addr;
-  (void)buf;
-  (void)size;
+  static constexpr std::array<char, 16> Table = {'0', '1', '2', '3', '4', '5', '6', '7',
+                                                 '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+  std::string outbuf{};
+  outbuf.reserve(size * 2);
+  for (auto i = 0u; i < size; ++i) {
+    const u8 val = *(buf + i);
+    char hi = Table[((val & 0b1111'0000) >> 4)];
+    char lo = Table[(val & 0b0000'1111)];
+    outbuf.push_back(hi);
+    outbuf.push_back(lo);
+  }
+  auto cmd = fmt::format("M{:x},{}:{}", addr.get(), size, outbuf);
+  const auto res = connection->send_command_with_response(cmd, 1000);
+  if (res.is_error()) {
+    return TraceeWriteResult::Error(0);
+  }
+
+  // TODO: gdb just errors out like a moron, if a partial write was successful
+  // how? Who tf knows. The "protocol" sure leaves much to the imagination.
+  if (res.value() == "$OK") {
+    return TraceeWriteResult::Ok(size);
+  }
+  return TraceeWriteResult::Error(0);
 }
 
 void
