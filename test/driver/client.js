@@ -246,7 +246,6 @@ class Thread {
     const response = await this.#client.sendReqGetResponse('stackTrace', { threadId: this.id }, timeout)
     checkResponse(response, 'stackTrace', true, this.stackTrace)
     return response.body.stackFrames.map((frame) => {
-      console.log(`STACKFRAME`)
       return new StackFrame(
         this.#client,
         frame.id,
@@ -556,6 +555,7 @@ class DAClient {
       success,
       body: { breakpoints },
     } = res
+    assertLog(success, `expected bp request of ${JSON.stringify(bp_lines)} to succeed`, `. It failed`)
     assertLog(
       breakpoints.length == lines.length,
       `Expected ${lines.length} breakpoints`,

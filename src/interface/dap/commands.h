@@ -424,6 +424,39 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   RequiredArguments({"breakpoints"sv});
 };
 
+struct WriteMemoryResponse final : public ui::UIResult
+{
+  CTOR(WriteMemoryResponse);
+  ~WriteMemoryResponse() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
+  u64 bytes_written;
+};
+
+struct WriteMemory final : public ui::UICommand
+{
+  WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept;
+  ~WriteMemory() override = default;
+  UIResultPtr execute() noexcept final;
+
+  std::optional<AddrPtr> address;
+  int offset;
+  std::vector<u8> bytes;
+
+  DEFINE_NAME("writeMemory");
+  RequiredArguments({"memoryReference"sv, "data"sv});
+  DefineArgTypes({"memoryReference", FieldType::String}, {"data", FieldType::String}, {"offset", FieldType::Int});
+
+  template <typename Json>
+  constexpr static auto
+  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
+  {
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
+      return std::move(err).take();
+    }
+    return std::nullopt;
+  }
+};
+
 struct ReadMemoryResponse final : public ui::UIResult
 {
   CTOR(ReadMemoryResponse);

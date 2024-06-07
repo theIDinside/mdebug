@@ -426,6 +426,36 @@ SetFunctionBreakpoints::execute() noexcept
 }
 
 std::string
+WriteMemoryResponse::serialize(int seq) const noexcept
+{
+  return fmt::format(
+    R"({{"seq":0,"request_seq":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
+    request_seq, success, bytes_written);
+}
+
+WriteMemory::WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept
+    : ui::UICommand(seq), address(address), offset(offset), bytes(std::move(bytes))
+{
+}
+
+UIResultPtr
+WriteMemory::execute() noexcept
+{
+  auto supervisor = dap_client->supervisor();
+  auto response = new WriteMemoryResponse{false, this};
+  response->bytes_written = 0;
+  if (address) {
+    const auto result = supervisor->get_interface().write_bytes(address.value(), bytes.data(), bytes.size());
+    response->success = result.success;
+    if (result.success) {
+      response->bytes_written = result.bytes_written;
+    }
+  }
+
+  return response;
+}
+
+std::string
 ReadMemoryResponse::serialize(int seq) const noexcept
 {
   if (success) {
@@ -1312,8 +1342,25 @@ parse_command(std::string &&packet) noexcept
     }
     return new Variables{seq, var_ref, start, count};
   }
-  case CommandType::WriteMemory:
-    TODO("Command::WriteMemory");
+  case CommandType::WriteMemory: {
+    IfInvalidArgsReturn(WriteMemory);
+    std::string_view addr_str;
+    args["memoryReference"].get_to(addr_str);
+    const auto addr = to_addr(addr_str);
+    int offset = 0;
+    if (args.contains("offset")) {
+      args.at("offset").get_to(offset);
+    }
+
+    std::string_view data{};
+    args.at("data").get_to(data);
+
+    if (auto bytes = utils::decode_base64(data); bytes) {
+      return new WriteMemory{seq, addr, offset, std::move(bytes.value())};
+    } else {
+      return new InvalidArgs{seq, "writeMemory", {}};
+    }
+  }
   case CommandType::UNKNOWN:
     break;
   }

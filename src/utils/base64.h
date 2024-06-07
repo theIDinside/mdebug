@@ -1,7 +1,9 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 // see https://arxiv.org/pdf/1704.00605.pdf for fancy pants AVX2 optimizations
 namespace utils {
@@ -40,5 +42,6 @@ constexpr static char lookup_byte4[256] = {
   'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
 
 std::string encode_base64(std::span<std::uint8_t> data) noexcept;
+std::optional<std::vector<std::uint8_t>> decode_base64(std::string_view encoded) noexcept;
 
 } // namespace utils
