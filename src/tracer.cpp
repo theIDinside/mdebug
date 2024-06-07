@@ -138,7 +138,6 @@ static bool WaiterSystemConfigured = false;
 void
 Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
 {
-
   auto tc = client->supervisor();
   switch (tc->interface_type) {
   case InterfaceType::Ptrace: {
@@ -183,7 +182,7 @@ void
 Tracer::handle_command(ui::UICommandPtr cmd) noexcept
 {
   DBGLOG(core, "accepted command {}", cmd->name());
-  auto result = cmd->execute(this);
+  auto result = cmd->execute();
 
   auto data = result->serialize(0);
   if (!data.empty()) {
@@ -599,22 +598,6 @@ Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on
 {
   // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
   target->get_interface().disconnect(!resume_on_detach);
-}
-
-bool
-Tracer::disconnect(ui::dap::DebugAdapterClient *client, bool terminate) noexcept
-{
-  auto it = utils::find_if(targets, [c = client](const auto &t) { return t->dap_client == c; });
-  if (it) {
-    auto ptr = it.value();
-    if (!(*ptr)->get_interface().do_disconnect(terminate)) {
-      return false;
-    }
-    targets.erase(it.value());
-  }
-
-  Tracer::KeepAlive = false;
-  return true;
 }
 
 std::shared_ptr<SymbolFile>

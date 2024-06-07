@@ -213,7 +213,7 @@ struct Continue final : public ui::UICommand
 
   Continue(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~Continue() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   DEFINE_NAME("continue");
   RequiredArguments({"threadId"sv});
@@ -246,7 +246,7 @@ struct Pause final : public ui::UICommand
 
   Pause(u64 seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
   ~Pause() override = default;
-  UIResultPtr execute(Tracer *tc) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   Args pauseArgs;
   DEFINE_NAME("pause");
@@ -289,7 +289,7 @@ struct Next final : public ui::UICommand
   {
   }
   ~Next() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("next");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -324,7 +324,7 @@ struct StepIn final : public ui::UICommand
   }
 
   ~StepIn() noexcept final = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("stepIn");
   RequiredArguments({"threadId"});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -354,7 +354,7 @@ struct StepOut final : public ui::UICommand
 
   StepOut(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("stepOut");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -386,7 +386,7 @@ struct SetBreakpoints final : public ui::UICommand
   SetBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("setBreakpoints");
   RequiredArguments({"source"sv});
 };
@@ -395,7 +395,7 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 {
   SetExceptionBreakpoints(u64 sequence, nlohmann::json &&args) noexcept;
   ~SetExceptionBreakpoints() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   Immutable<nlohmann::json> args;
 
@@ -409,7 +409,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   SetInstructionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
@@ -419,7 +419,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   SetFunctionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetFunctionBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
@@ -438,7 +438,7 @@ struct ReadMemory final : public ui::UICommand
 {
   ReadMemory(u64 seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
   ~ReadMemory() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int offset;
@@ -470,7 +470,7 @@ struct ConfigurationDone final : public ui::UICommand
 {
   ConfigurationDone(u64 seq) noexcept : UICommand(seq) {}
   ~ConfigurationDone() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   DEFINE_NAME("configurationDone");
   NoRequiredArgs();
@@ -487,7 +487,7 @@ struct Initialize final : public ui::UICommand
 {
   Initialize(u64 seq, nlohmann::json &&arguments) noexcept;
   ~Initialize() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   nlohmann::json args;
   DEFINE_NAME("initialize");
   NoRequiredArgs();
@@ -504,7 +504,7 @@ struct Disconnect final : public UICommand
 {
   Disconnect(u64 seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
   ~Disconnect() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   bool restart, terminate_tracee, suspend_tracee;
   DEFINE_NAME("disconnect");
   NoRequiredArgs();
@@ -521,7 +521,7 @@ struct Launch final : public UICommand
 {
   Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   bool stopOnEntry;
   Path program;
   std::vector<std::string> program_args;
@@ -551,7 +551,7 @@ struct Attach final : public UICommand
 {
   Attach(u64 seq, AttachArgs &&args) noexcept;
   ~Attach() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
@@ -604,7 +604,7 @@ struct Terminate final : public UICommand
 {
   Terminate(u64 seq) noexcept : UICommand(seq) {}
   ~Terminate() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("terminate");
   NoRequiredArgs();
 };
@@ -621,7 +621,7 @@ struct Threads final : public UICommand
 {
   Threads(u64 seq) noexcept : UICommand(seq) {}
   ~Threads() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("threads");
   NoRequiredArgs();
 };
@@ -631,7 +631,7 @@ struct StackTrace final : public UICommand
   StackTrace(u64 seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   int threadId;
   std::optional<int> startFrame;
   std::optional<int> levels;
@@ -664,7 +664,7 @@ struct Scopes final : public UICommand
 {
   Scopes(u64 seq, int frameId) noexcept;
   ~Scopes() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   int frameId;
   DEFINE_NAME("scopes");
   RequiredArguments({"frameId"sv});
@@ -704,7 +704,7 @@ struct Evaluate final : public UICommand
   Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
            std::optional<EvaluationContext> context) noexcept;
   ~Evaluate() noexcept final = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   Immutable<std::string> expr;
   Immutable<std::optional<int>> frameId;
@@ -744,7 +744,7 @@ struct Variables final : public UICommand
 {
   Variables(u64 seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
   int var_ref;
   std::optional<u32> start;
@@ -786,7 +786,7 @@ struct Disassemble final : public UICommand
   Disassemble(u64 seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
   ~Disassemble() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int byte_offset;
@@ -830,7 +830,7 @@ struct InvalidArgs final : public UICommand
   InvalidArgs(u64 seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgs() override = default;
 
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   ArgumentErrorKind kind;
   std::string_view command;

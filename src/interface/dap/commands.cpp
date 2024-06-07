@@ -96,7 +96,7 @@ PauseResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Pause::execute(Tracer *tc) noexcept
+Pause::execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->get_task(pauseArgs.threadId);
@@ -123,7 +123,7 @@ ContinueResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Continue::execute(Tracer *tracer) noexcept
+Continue::execute() noexcept
 {
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
@@ -166,7 +166,7 @@ NextResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Next::execute(Tracer *tracer) noexcept
+Next::execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->get_task(thread_id);
@@ -204,7 +204,7 @@ StepInResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-StepIn::execute(Tracer *tracer) noexcept
+StepIn::execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->get_task(thread_id);
@@ -240,7 +240,7 @@ StepOutResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-StepOut::execute(Tracer *tracer) noexcept
+StepOut::execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->get_task(thread_id);
@@ -307,7 +307,7 @@ SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) no
 }
 
 UIResultPtr
-SetBreakpoints::execute(Tracer *tracer) noexcept
+SetBreakpoints::execute() noexcept
 {
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
   auto target = dap_client->supervisor();
@@ -346,9 +346,9 @@ SetExceptionBreakpoints::SetExceptionBreakpoints(std::uint64_t sequence, nlohman
 }
 
 UIResultPtr
-SetExceptionBreakpoints::execute(Tracer *tracer) noexcept
+SetExceptionBreakpoints::execute() noexcept
 {
-  DBGLOG(core, "{:p} exception breakpoints not yet implemented", (void *)tracer);
+  DBGLOG(core, "exception breakpoints not yet implemented");
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::exception};
   return res;
 }
@@ -361,7 +361,7 @@ SetInstructionBreakpoints::SetInstructionBreakpoints(std::uint64_t seq, nlohmann
 }
 
 UIResultPtr
-SetInstructionBreakpoints::execute(Tracer *tracer) noexcept
+SetInstructionBreakpoints::execute() noexcept
 {
   using BP = ui::dap::Breakpoint;
   Set<InstructionBreakpointSpec> bps{};
@@ -396,7 +396,7 @@ SetFunctionBreakpoints::SetFunctionBreakpoints(std::uint64_t seq, nlohmann::json
 }
 
 UIResultPtr
-SetFunctionBreakpoints::execute(Tracer *tracer) noexcept
+SetFunctionBreakpoints::execute() noexcept
 {
   using BP = ui::dap::Breakpoint;
   Set<FunctionBreakpointSpec> bkpts{};
@@ -443,7 +443,7 @@ ReadMemory::ReadMemory(std::uint64_t seq, std::optional<AddrPtr> address, int of
 }
 
 UIResultPtr
-ReadMemory::execute(Tracer *tracer) noexcept
+ReadMemory::execute() noexcept
 {
   if (address) {
     auto sv = dap_client->supervisor()->read_to_vector(*address, bytes);
@@ -467,9 +467,9 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-ConfigurationDone::execute(Tracer *tracer) noexcept
+ConfigurationDone::execute() noexcept
 {
-  tracer->config_done(dap_client);
+  Tracer::Instance->config_done(dap_client);
   switch (dap_client->supervisor()->session_type()) {
   case TargetSession::Launched:
     dap_client->supervisor()->resume_target(tc::RunType::Continue);
@@ -487,7 +487,7 @@ Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
 }
 
 UIResultPtr
-Initialize::execute(Tracer *) noexcept
+Initialize::execute() noexcept
 {
   return new InitializeResponse{true, this};
 }
@@ -504,10 +504,18 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 {
 }
 UIResultPtr
-Disconnect::execute(Tracer *tracer) noexcept
+Disconnect::execute() noexcept
 {
-  auto ok = tracer->disconnect(dap_client, true);
-  dap_client->post_event(new TerminatedEvent{});
+  const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
+  if (ok) {
+    dap_client->post_event(new TerminatedEvent{});
+    auto it = std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
+                           [&](auto &ptr) { return ptr->dap_client == dap_client; });
+
+    Tracer::Instance->targets.erase(it);
+    Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
+  }
+
   return new DisconnectResponse{ok, this};
 }
 
@@ -589,9 +597,9 @@ Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
 }
 
 UIResultPtr
-Launch::execute(Tracer *tracer) noexcept
+Launch::execute() noexcept
 {
-  tracer->launch(dap_client, stopOnEntry, std::move(program), std::move(program_args));
+  Tracer::Instance->launch(dap_client, stopOnEntry, std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
 }
 
@@ -605,9 +613,9 @@ AttachResponse::serialize(int seq) const noexcept
 Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), attachArgs(std::move(args)) {}
 
 UIResultPtr
-Attach::execute(Tracer *tracer) noexcept
+Attach::execute() noexcept
 {
-  const auto res = tracer->attach(attachArgs);
+  const auto res = Tracer::Instance->attach(attachArgs);
   return new AttachResponse{res, this};
 }
 
@@ -619,10 +627,17 @@ TerminateResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Terminate::execute(Tracer *tracer) noexcept
+Terminate::execute() noexcept
 {
-  auto ok = tracer->disconnect(dap_client, true);
-  dap_client->post_event(new TerminatedEvent{});
+  const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
+  if (ok) {
+    dap_client->post_event(new TerminatedEvent{});
+    auto it = std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
+                           [&](auto &ptr) { return ptr->dap_client == dap_client; });
+
+    Tracer::Instance->targets.erase(it);
+    Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
+  }
   return new TerminateResponse{ok, this};
 }
 
@@ -635,7 +650,7 @@ ThreadsResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Threads::execute(Tracer *tracer) noexcept
+Threads::execute() noexcept
 {
   // todo(simon): right now, we only support 1 process, but theoretically the current design
   // allows for more; it would require some work to get the DAP protocol to play nicely though.
@@ -683,7 +698,7 @@ is_debug_build()
 }
 
 UIResultPtr
-StackTrace::execute(Tracer *tracer) noexcept
+StackTrace::execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto target = dap_client->supervisor();
@@ -750,9 +765,9 @@ ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> s
 }
 
 UIResultPtr
-Scopes::execute(Tracer *tracer) noexcept
+Scopes::execute() noexcept
 {
-  auto ctx = tracer->var_context(frameId);
+  auto ctx = Tracer::Instance->var_context(frameId);
   if (!ctx.valid_context() || ctx.type != ContextType::Frame) {
     return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", frameId), {}};
   }
@@ -772,7 +787,7 @@ Disassemble::Disassemble(std::uint64_t seq, std::optional<AddrPtr> address, int 
 }
 
 UIResultPtr
-Disassemble::execute(Tracer *tracer) noexcept
+Disassemble::execute() noexcept
 {
   if (address) {
     auto res = new DisassembleResponse{true, this};
@@ -828,7 +843,7 @@ Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId
 }
 
 UIResultPtr
-Evaluate::execute(Tracer *tracer) noexcept
+Evaluate::execute() noexcept
 {
   return new ErrorResponse{Request, this, {}, Message{.format = "could not evaluate"}};
 }
@@ -885,9 +900,9 @@ Variables::error(std::string &&msg) noexcept
 }
 
 UIResultPtr
-Variables::execute(Tracer *tracer) noexcept
+Variables::execute() noexcept
 {
-  auto context = tracer->var_context(var_ref);
+  auto context = Tracer::Instance->var_context(var_ref);
   if (!context.valid_context()) {
     return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
   }
@@ -978,7 +993,7 @@ InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrI
 }
 
 UIResultPtr
-InvalidArgs::execute(Tracer *) noexcept
+InvalidArgs::execute() noexcept
 {
   return new InvalidArgsResponse{command, std::move(missing_arguments)};
 }

@@ -128,7 +128,6 @@ public:
   bool attach(const AttachArgs &args) noexcept;
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
   void detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept;
-  bool disconnect(ui::dap::DebugAdapterClient *client, bool terminate) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
   const sys::DebuggerConfiguration &getConfig() noexcept;
