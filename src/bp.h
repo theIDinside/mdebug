@@ -516,6 +516,7 @@ public:
   std::unordered_map<InstructionBreakpointSpec, BpId> instruction_breakpoints{};
 
   void on_exec() noexcept;
+  void on_exit() noexcept;
   void add_bp_location(const UserBreakpoint &updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;

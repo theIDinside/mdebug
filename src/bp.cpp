@@ -464,7 +464,7 @@ UserBreakpoints::new_id() noexcept
 }
 
 void
-UserBreakpoints::on_exec() noexcept
+UserBreakpoints::on_exit() noexcept
 {
   for (auto &user : all_users()) {
     if (user->bp) {
@@ -480,6 +480,13 @@ UserBreakpoints::on_exec() noexcept
   source_breakpoints.clear();
   fn_breakpoints.clear();
   instruction_breakpoints.clear();
+}
+
+void
+UserBreakpoints::on_exec() noexcept
+{
+  // we do the same as on exit here - at least I think we should.
+  on_exit();
 }
 
 void
