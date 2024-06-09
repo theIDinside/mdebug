@@ -40,6 +40,12 @@ TraceeCommandInterface::target_manages_breakpoints() noexcept
 }
 
 TaskExecuteResponse
+TraceeCommandInterface::reverse_continue() noexcept
+{
+  return TaskExecuteResponse::Error(0);
+}
+
+TaskExecuteResponse
 TraceeCommandInterface::do_disconnect(bool terminate) noexcept
 {
   for (auto &user : tc->pbps.all_users()) {

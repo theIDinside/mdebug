@@ -52,7 +52,7 @@ public:
 
   std::string_view get_thread_name(Tid tid) noexcept final;
 
-  TaskExecuteResponse disconnect(bool terminate) noexcept final;
+  TaskExecuteResponse disconnect(bool kill_target) noexcept final;
   bool perform_shutdown() noexcept final;
   bool initialize() noexcept final;
 

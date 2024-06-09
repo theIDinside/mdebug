@@ -4,6 +4,12 @@
 #include <typedefs.h>
 #include <variant>
 
+enum class RemoteType
+{
+  RR,
+  GDB
+};
+
 struct PtraceAttachArgs
 {
   Pid pid;
@@ -13,9 +19,9 @@ struct GdbRemoteAttachArgs
 {
   std::string host;
   int port;
-  // Why pid == nullopt? Because.
   std::optional<Pid> pid{std::nullopt};
   bool allstop;
+  RemoteType type;
 };
 
 using AttachArgs = std::variant<PtraceAttachArgs, GdbRemoteAttachArgs>;

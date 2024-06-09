@@ -29,6 +29,25 @@
 namespace ui::dap {
 using namespace std::string_literals;
 
+DapClientSession
+child_session(DapClientSession type) noexcept
+{
+  switch (type) {
+  case DapClientSession::None:
+    PANIC("No session type has been set.");
+  case DapClientSession::Launch:
+    return DapClientSession::LaunchedChildSession;
+  case DapClientSession::Attach:
+    return DapClientSession::AttachedChildSession;
+  case DapClientSession::RR:
+    return DapClientSession::RRChildSession;
+  case DapClientSession::LaunchedChildSession:
+  case DapClientSession::AttachedChildSession:
+  case DapClientSession::RRChildSession:
+    return type;
+  }
+}
+
 constexpr pollfd
 cfg_write_poll(int fd, int additional_flags) noexcept
 {
@@ -270,6 +289,12 @@ DebugAdapterClient::supervisor() const noexcept
 }
 
 void
+DebugAdapterClient::set_session_type(DapClientSession type) noexcept
+{
+  session_type = type;
+}
+
+void
 DAP::notify_new_message() noexcept
 {
   PERFORM_ASSERT(posted_event_notifier.notify(), "failed to notify DAP interface of new message due to {}",
@@ -313,13 +338,13 @@ DAP::configure_tty(int master_pty_fd) noexcept
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
-DebugAdapterClient::DebugAdapterClient(std::filesystem::path &&path, int socket) noexcept
-    : socket_path(std::move(path)), in(socket), out(socket)
+DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
+    : socket_path(std::move(path)), in(socket), out(socket), session_type(type)
 {
 }
 
-DebugAdapterClient::DebugAdapterClient(int standard_in, int standard_out) noexcept
-    : in(standard_in), out(standard_out)
+DebugAdapterClient::DebugAdapterClient(DapClientSession type, int standard_in, int standard_out) noexcept
+    : in(standard_in), out(standard_out), session_type(type)
 {
 }
 
@@ -385,7 +410,7 @@ DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
   for (;;) {
     auto accepted = accept(socket_fd, nullptr, nullptr);
     if (accepted != -1) {
-      return new DebugAdapterClient{std::move(socket_path), accepted};
+      return new DebugAdapterClient{child_session(client->session_type), std::move(socket_path), accepted};
     }
   }
 }
@@ -393,7 +418,7 @@ DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
 DebugAdapterClient *
 DebugAdapterClient::createStandardIOConnection() noexcept
 {
-  return new DebugAdapterClient{STDIN_FILENO, STDOUT_FILENO};
+  return new DebugAdapterClient{DapClientSession::None, STDIN_FILENO, STDOUT_FILENO};
 }
 
 void

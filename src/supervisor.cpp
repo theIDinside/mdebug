@@ -275,10 +275,14 @@ TraceeController::wait_pid(TaskInfo *requested_task) noexcept
 }
 
 void
-TraceeController::new_task(Tid tid) noexcept
+TraceeController::new_task(Tid tid, bool running) noexcept
 {
   ASSERT(tid != 0 && !has_task(tid), "Task {} has already been created!", tid);
-  threads.push_back(TaskInfo::create_running(tid, tracee_interface->format, tracee_interface->arch_info->type));
+  if (running) {
+    threads.push_back(TaskInfo::create_running(tid, tracee_interface->format, tracee_interface->arch_info->type));
+  } else {
+    threads.push_back(TaskInfo::create_stopped(tid, tracee_interface->format, tracee_interface->arch_info->type));
+  }
 }
 
 bool
@@ -1142,6 +1146,9 @@ sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept
 {
   DBGLOG(core, "stacktrace for {}", task.tid);
+  if (!task.call_stack->dirty) {
+    return *task.call_stack;
+  }
   cache_registers(task);
   auto &cs_ref = *task.call_stack;
   cs_ref.frames.clear();
@@ -1281,7 +1288,7 @@ TraceeController::handle_thread_created(TaskInfo *task, const ThreadCreated &e,
 {
   // means this event was produced by a Remote session. Construct the task now
   if (!task) {
-    new_task(e.thread_id);
+    new_task(e.thread_id, true);
     task = get_task(e.thread_id);
     if (!register_data.empty()) {
       ASSERT(*get_interface().arch_info != nullptr,
@@ -1315,24 +1322,13 @@ TraceeController::handle_thread_exited(TaskInfo *task, const ThreadExited &evt) 
         !stop_handler->event_settings.thread_exit_stop,
         tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
     }
-  } else if (!task->reaped) {
+  } else {
+    ASSERT(!task->reaped, "Expected task to not have been reaped");
     task->reaped = true;
     return tc::ProcessedStopEvent{
       !stop_handler->event_settings.thread_exit_stop,
       tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
-  } else {
-    PANIC("Invariants broken");
   }
-
-  if (evt.process_needs_resuming) {
-    // if (ptrace(PTRACE_CONT, task->tid, nullptr, nullptr) == -1) {
-    // PANIC(fmt::format("Failed to resume at exit for {}", task->tid));
-    // }
-    return tc::ProcessedStopEvent{
-      true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
-  }
-  return tc::ProcessedStopEvent{!stop_handler->event_settings.thread_exit_stop,
-                                tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
 }
 
 tc::ProcessedStopEvent
@@ -1344,8 +1340,30 @@ TraceeController::handle_process_exit(const ProcessExited &evt) noexcept
     t->exited = true;
   }
   t->reaped = true;
-  auto dap_evt = new ui::dap::ExitedEvent{evt.exit_code};
-  dap_client->post_event(dap_evt);
+  dap_client->post_event(new ui::dap::ExitedEvent{evt.exit_code});
+  dap_client->post_event(new ui::dap::TerminatedEvent{});
   get_interface().perform_shutdown();
+  reaped = true;
+  pbps.on_exit();
   return tc::ProcessedStopEvent{false, {}};
+}
+
+tc::ProcessedStopEvent
+TraceeController::handle_fork(const Fork &evt) noexcept
+{
+  auto interface = tracee_interface->on_fork(evt.child_pid);
+  auto new_supervisor = Tracer::Instance->new_supervisor(fork(std::move(interface)));
+  auto client = ui::dap::DebugAdapterClient::createSocketConnection(dap_client);
+  Tracer::Instance->dap->new_client({client});
+  client->client_configured(new_supervisor);
+  // the new process space copies the old one; which contains breakpoints.
+  // we restore the newly forked process space to the real contents. New breakpoints will be set
+  // by the initialize -> configDone sequence
+  auto &supervisor = new_supervisor->get_interface();
+  for (auto &user : pbps.all_users()) {
+    if (auto loc = user->bp_location(); loc) {
+      supervisor.disable_breakpoint(*loc);
+    }
+  }
+  return tc::ProcessedStopEvent{true, {}};
 }

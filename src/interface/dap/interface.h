@@ -116,6 +116,20 @@ private:
   const size_t buffer_size;
 };
 
+enum class DapClientSession
+{
+  // This is the strange world we live in.
+  None,
+  Launch,
+  Attach,
+  LaunchedChildSession,
+  AttachedChildSession,
+  RR,
+  RRChildSession
+};
+
+DapClientSession child_session(DapClientSession type) noexcept;
+
 class DebugAdapterClient
 {
   std::filesystem::path socket_path{};
@@ -125,15 +139,16 @@ class DebugAdapterClient
   int tty_fd{-1};
   TraceeController *tc{nullptr};
 
-  DebugAdapterClient(std::filesystem::path &&path, int socket_fd) noexcept;
+  DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
   // be.)
-  DebugAdapterClient(int standard_in, int standard_out) noexcept;
+  DebugAdapterClient(DapClientSession session, int standard_in, int standard_out) noexcept;
 
   std::mutex m{};
   std::queue<UIResultPtr> ui_output_queue{};
 
 public:
+  DapClientSession session_type;
   ~DebugAdapterClient() noexcept;
 
   static DebugAdapterClient *createStandardIOConnection() noexcept;
@@ -149,6 +164,7 @@ public:
   void set_tty_out(int fd) noexcept;
   std::optional<int> tty() const noexcept;
   TraceeController *supervisor() const noexcept;
+  void set_session_type(DapClientSession type) noexcept;
 };
 
 enum class InterfaceNotificationSource

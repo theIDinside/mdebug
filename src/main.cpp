@@ -113,7 +113,6 @@ main(int argc, const char **argv)
       if (const auto dbg_evt = tracer.process_waitevent_to_core(evt.wait.process_group, evt.wait.wait); dbg_evt) {
         tracer.handle_core_event(dbg_evt);
       }
-      // tracer.handle_wait_event(evt.wait.process_group, evt.wait.wait);
     } break;
     case EventType::Command: {
       tracer.handle_command(evt.cmd);

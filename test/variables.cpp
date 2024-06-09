@@ -121,10 +121,10 @@ main(int argc, const char **argv)
   int personId = 0;
   int age = 42;
   Person p{personId, 42, "John"};
-  age = 42; // LOCALS_BP
+  age = 1337; // LOCALS_BP
+  printf("Hello John. Goodbye John.\n");
   Person p2{1337, age, "Jane"};
   bool pcheck_one = test(p);
   bool pcheck_two = test(p2);
-
   test({1337, age, "Jane"}); // MAIN_END
 }

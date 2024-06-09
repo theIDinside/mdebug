@@ -287,9 +287,9 @@ PtraceCommander::get_thread_name(Tid tid) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::disconnect(bool terminate) noexcept
+PtraceCommander::disconnect(bool kill_target) noexcept
 {
-  if (terminate) {
+  if (kill_target) {
     const auto result = tgkill(process_id, process_id, SIGKILL);
     if (result == -1) {
       return TaskExecuteResponse::Error(errno);

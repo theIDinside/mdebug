@@ -96,6 +96,7 @@ private:
   std::unique_ptr<tc::TraceeCommandInterface> tracee_interface;
   tc::Auxv auxiliary_vector{};
   bool on_entry{false};
+  bool reaped{false};
 
   // FORK constructor
   TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
@@ -138,7 +139,7 @@ public:
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
   /* Create new task meta data for `tid` */
-  void new_task(Tid tid) noexcept;
+  void new_task(Tid tid, bool running) noexcept;
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(tc::RunType type) noexcept;
@@ -224,16 +225,6 @@ public:
   utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> safe_read(AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
 
-  /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
-  template <typename T>
-  constexpr std::vector<T>
-  prepare_foreach_thread()
-  {
-    std::vector<T> vec;
-    vec.reserve(threads.size());
-    return vec;
-  }
-
   template <typename T>
   T
   read_type(TraceePointer<T> address) noexcept
@@ -311,6 +302,7 @@ public:
                                                const RegisterData &register_data) noexcept;
   tc::ProcessedStopEvent handle_thread_exited(TaskInfo *task, const ThreadExited &evt) noexcept;
   tc::ProcessedStopEvent handle_process_exit(const ProcessExited &evt) noexcept;
+  tc::ProcessedStopEvent handle_fork(const Fork &evt) noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

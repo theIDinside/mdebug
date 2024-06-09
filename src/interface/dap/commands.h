@@ -176,7 +176,16 @@ template <size_t Size> struct VerifyMap
 
 #define DefineArgTypes(...)                                                                                       \
   static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({__VA_ARGS__});                              \
-  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};
+  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};                                   \
+  template <typename Json>                                                                                        \
+  constexpr static auto ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept                 \
+    -> std::optional<InvalidArg>                                                                                  \
+  {                                                                                                               \
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {                                                  \
+      return std::move(err).take();                                                                               \
+    }                                                                                                             \
+    return std::nullopt;                                                                                          \
+  }
 
 struct Message
 {
@@ -196,6 +205,27 @@ struct ErrorResponse final : ui::UIResult
   std::string_view command;
   std::optional<std::string> short_message;
   std::optional<Message> message;
+};
+
+struct ReverseContinueResponse final : ui::UIResult
+{
+  CTOR(ReverseContinueResponse);
+  ~ReverseContinueResponse() noexcept override = default;
+  bool continue_all;
+  std::string serialize(int seq) const noexcept final;
+};
+
+/** ReverseContinue under RR is *always* "continue all"*/
+struct ReverseContinue final : ui::UICommand
+{
+  ReverseContinue(u64 seq, int thread_id) noexcept;
+  ~ReverseContinue() noexcept override = default;
+  int thread_id;
+  UIResultPtr execute() noexcept final;
+
+  DEFINE_NAME("reverseContinue");
+  RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
 };
 
 struct ContinueResponse final : ui::UIResult
@@ -218,16 +248,6 @@ struct Continue final : public ui::UICommand
   DEFINE_NAME("continue");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct PauseResponse final : ui::UIResult
@@ -252,16 +272,6 @@ struct Pause final : public ui::UICommand
   DEFINE_NAME("pause");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 enum class SteppingGranularity
@@ -293,16 +303,6 @@ struct Next final : public ui::UICommand
   DEFINE_NAME("next");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct StepInResponse final : ui::UIResult
@@ -328,16 +328,6 @@ struct StepIn final : public ui::UICommand
   DEFINE_NAME("stepIn");
   RequiredArguments({"threadId"});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct StepOutResponse final : ui::UIResult
@@ -358,16 +348,6 @@ struct StepOut final : public ui::UICommand
   DEFINE_NAME("stepOut");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 // This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
@@ -445,16 +425,6 @@ struct WriteMemory final : public ui::UICommand
   DEFINE_NAME("writeMemory");
   RequiredArguments({"memoryReference"sv, "data"sv});
   DefineArgTypes({"memoryReference", FieldType::String}, {"data", FieldType::String}, {"offset", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct ReadMemoryResponse final : public ui::UIResult
@@ -480,16 +450,6 @@ struct ReadMemory final : public ui::UICommand
   DEFINE_NAME("readMemory");
   RequiredArguments({"memoryReference"sv, "count"sv});
   DefineArgTypes({"memoryReference", FieldType::String}, {"count", FieldType::Int}, {"offset", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct ConfigurationDoneResponse final : public ui::UIResult
@@ -561,16 +521,6 @@ struct Launch final : public UICommand
   DEFINE_NAME("launch");
   RequiredArguments({"program"sv});
   DefineArgTypes({"program", FieldType::String});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto &&err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct AttachResponse final : public UIResult
@@ -591,17 +541,7 @@ struct Attach final : public UICommand
   RequiredArguments({"type"});
 
   DefineArgTypes({"port", FieldType::Int}, {"host", FieldType::String}, {"pid", FieldType::Int},
-                 {"type", FieldType::Enumeration, {"ptrace"sv, "gdbremote"sv}});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto &&err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
+                 {"type", FieldType::Enumeration, {"ptrace"sv, "gdbremote"sv, "rr"}});
 
   // Attach gets a `create` function because in the future, constructing this command will be much more complex
   // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
@@ -621,7 +561,10 @@ struct Attach final : public UICommand
       if (args.contains("allstop") && args.at("allstop").is_boolean()) {
         allstop = args.at("allstop");
       }
-      return new Attach{seq, GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop}};
+      RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
+
+      return new Attach{seq,
+                        GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop, .type = remote_type}};
     };
   }
 };
@@ -672,16 +615,6 @@ struct StackTrace final : public UICommand
   DEFINE_NAME("stackTrace");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct StackTraceResponse final : public UIResult
@@ -702,16 +635,6 @@ struct Scopes final : public UICommand
   DEFINE_NAME("scopes");
   RequiredArguments({"frameId"sv});
   DefineArgTypes({"frameId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct ScopesResponse final : public UIResult
@@ -747,16 +670,6 @@ struct Evaluate final : public UICommand
   RequiredArguments({"expression"sv});
   DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int});
 
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
-
   static std::optional<EvaluationContext> parse_context(std::string_view input) noexcept;
 };
 
@@ -785,16 +698,6 @@ struct Variables final : public UICommand
   DEFINE_NAME("variables");
   RequiredArguments({"variablesReference"sv});
   DefineArgTypes({"variablesReference", FieldType::Int}, {"start", FieldType::Int}, {"count", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct VariablesResponse final : public UIResult
@@ -830,16 +733,6 @@ struct Disassemble final : public UICommand
   RequiredArguments({"memoryReference", "instructionCount"});
   DefineArgTypes({"memoryReference", FieldType::String}, {"instructionCount", FieldType::Int},
                  {"instructionOffset", FieldType::Int}, {"offset", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct InvalidArgsResponse final : public UIResult

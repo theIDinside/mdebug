@@ -3,6 +3,7 @@
 #include "common.h"
 #include "event_queue.h"
 #include "interface/attach_args.h"
+#include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/dap/interface.h"
 #include "interface/pty.h"
@@ -243,6 +244,13 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   // we _have_ to do this check here, because the event *might* be a ThreadCreated event
   // and *it* happens *slightly* different depending on if it's a Remote or a Native session that sends it.
   // Unfortunately.
+  if (!task) {
+    // rr ends up here.
+    DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->tid);
+    tc.new_task(evt->tid, false);
+    task = tc.get_task(evt->tid);
+    task->initialize();
+  }
   if (task) {
     if (!evt->registers->empty()) {
       ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
@@ -257,7 +265,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   }
   if (tc.session_all_stop_mode()) {
     for (auto &t : tc.threads) {
-      t.collect_stop();
+      t.stop_collected = true;
+      t.tracer_stopped = true;
+      t.user_stopped = true;
     }
   }
   const CoreEvent &r = *evt;
@@ -290,11 +300,12 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         auto bp_addy = e.address_val
                          ->or_else([&]() {
                            // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
-                           return std::optional{tc.get_caching_pc(*t).get() - 1};
+                           return std::optional{tc.get_caching_pc(*t).get()};
                          })
                          .value();
 
         auto bp_loc = tc.pbps.location_at(bp_addy);
+        ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
         bool should_resume = true;
         for (const auto user_id : users) {
@@ -309,24 +320,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         }
         return ProcessedStopEvent{should_resume, {}};
       },
-      [&](const Fork &e) -> MatchResult {
-        auto new_supervisor = Tracer::Instance->on_fork(&tc, e.child_pid);
-        auto client = ui::dap::DebugAdapterClient::createSocketConnection(tc.dap_client);
-        dap->new_client({client});
-        client->client_configured(new_supervisor);
-        // the new process space copies the old one; which contains breakpoints.
-        // we restore the newly forked process space to the real contents. New breakpoints will be set
-        // by the initialize -> configDone sequence
-        auto &supervisor = new_supervisor->get_interface();
-        for (auto &user : tc.pbps.all_users()) {
-          if (auto loc = user->bp_location(); loc) {
-            supervisor.disable_breakpoint(*loc);
-          }
-        }
-        return ProcessedStopEvent{true, {}};
-      },
+      [&](const Fork &e) -> MatchResult { return tc.handle_fork(e); },
       [&](const Clone &e) -> MatchResult {
-        tc.new_task(e.child_tid);
+        tc.new_task(e.child_tid, true);
         if (e.vm_info) {
           tc.set_task_vm_info(e.child_tid, e.vm_info.value());
         }
@@ -462,40 +458,68 @@ Tracer::attach(const AttachArgs &args) noexcept
             // gdb hell hole.)
             auto remote_init = tc::RemoteSessionConfigurator{
               Tracer::Instance->connectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
-            auto result = remote_init.configure_session();
-            if (result.is_expected()) {
-              auto &&ifs = result.take_value();
-              auto it = ifs.begin();
-              const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
-                targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(tc),
-                                                                     InterfaceType::GdbRemote));
-                Tracer::Instance->set_current_to_latest_target();
-                auto &ti = current_target->get_interface();
-                client->client_configured(current_target);
-                ti.post_exec();
-                for (const auto &t : it->threads) {
-                  current_target->new_task(t.tid);
-                }
-              };
-              auto main_connection = dap->main_connection();
-              hookupDapWithRemote(std::move(it->tc), main_connection);
-              ++it;
-              for (; it != std::end(ifs); ++it) {
-                hookupDapWithRemote(std::move(it->tc),
-                                    ui::dap::DebugAdapterClient::createSocketConnection(main_connection));
+
+            std::vector<tc::RemoteProcess> res;
+
+            switch (gdb.type) {
+            case RemoteType::RR: {
+              auto result = remote_init.configure_rr_session();
+              if (result.is_expected()) {
+                res = std::move(result.take_value());
+              } else {
+                PANIC("Failed to configure session");
               }
-              return true;
+            } break;
+            case RemoteType::GDB: {
+              auto result = remote_init.configure_session();
+              if (result.is_expected()) {
+                res = std::move(result.take_value());
+              } else {
+                PANIC("Failed to configure session");
+              }
+            } break;
             }
-            return false;
+
+            auto it = res.begin();
+            const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
+              targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(tc),
+                                                                   InterfaceType::GdbRemote));
+              Tracer::Instance->set_current_to_latest_target();
+              auto &ti = current_target->get_interface();
+              client->client_configured(current_target);
+              ti.post_exec();
+              for (const auto &t : it->threads) {
+                current_target->new_task(t.tid, false);
+              }
+              for (auto &t : current_target->threads) {
+                t.user_stopped = true;
+                t.tracer_stopped = true;
+              }
+              client->post_event(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
+                                                           "attached",
+                                                           client->supervisor()->task_leader,
+                                                           {},
+                                                           "Attached to session",
+                                                           true});
+            };
+
+            auto main_connection = dap->main_connection();
+            hookupDapWithRemote(std::move(it->tc), main_connection);
+
+            ++it;
+            for (; it != std::end(res); ++it) {
+              hookupDapWithRemote(std::move(it->tc),
+                                  ui::dap::DebugAdapterClient::createSocketConnection(main_connection));
+            }
+            return true;
           }},
     args);
 }
 
 TraceeController *
-Tracer::on_fork(TraceeController *tc, Pid child_pid) noexcept
+Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
 {
-  auto interface = tc->get_interface().on_fork(child_pid);
-  targets.push_back(tc->fork(std::move(interface)));
+  targets.push_back(std::move(tc));
   current_target = targets.back().get();
   current_target->set_on_entry(true);
   return current_target;
@@ -553,6 +577,7 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path progr
     const auto leader = res.pid;
     add_target_set_current(tc::PtraceCfg{leader}, TargetSession::Launched);
     client->client_configured(targets.back().get());
+    client->set_session_type(ui::dap::DapClientSession::Launch);
     if (Tracer::use_traceme) {
       TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
       auto task = client->supervisor()->register_task_waited(twr);

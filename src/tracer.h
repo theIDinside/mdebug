@@ -122,7 +122,7 @@ public:
   /** Receives a command and places it on the command queue to be executed. Thread-safe, but if re-entrant will
    * hang. */
   void accept_command(ui::UICommand *cmd) noexcept;
-  TraceeController *on_fork(TraceeController *tc, Pid child_pid) noexcept;
+  TraceeController *new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept;
   void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, Path program,
               std::vector<std::string> prog_args) noexcept;
   bool attach(const AttachArgs &args) noexcept;

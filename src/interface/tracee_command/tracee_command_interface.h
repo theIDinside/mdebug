@@ -233,7 +233,7 @@ using Interface = std::unique_ptr<TraceeCommandInterface>;
 // GdbRemoteCommander is the gdb remote protocol interface
 class TraceeCommandInterface
 {
-private:
+protected:
   TraceeController *tc{nullptr};
 
 public:
@@ -245,6 +245,7 @@ public:
   virtual ~TraceeCommandInterface() noexcept = default;
   virtual ReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
   virtual TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
+  virtual TaskExecuteResponse reverse_continue() noexcept;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse resume_task(TaskInfo &t, RunType run) noexcept = 0;
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead

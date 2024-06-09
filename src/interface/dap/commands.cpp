@@ -108,6 +108,32 @@ Pause::execute() noexcept
 }
 
 std::string
+ReverseContinueResponse::serialize(int seq) const noexcept
+{
+  if (success) {
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
+      seq, request_seq, continue_all);
+  } else {
+    return fmt::format(
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
+      seq, request_seq);
+  }
+}
+
+ReverseContinue::ReverseContinue(u64 seq, int thread_id) noexcept : UICommand(seq), thread_id(thread_id) {}
+
+UIResultPtr
+ReverseContinue::execute() noexcept
+{
+  auto res = new ReverseContinueResponse{true, this};
+  auto target = dap_client->supervisor();
+  auto ok = target->get_interface().reverse_continue();
+  res->success = ok;
+  return res;
+}
+
+std::string
 ContinueResponse::serialize(int seq) const noexcept
 {
 
@@ -538,7 +564,6 @@ Disconnect::execute() noexcept
 {
   const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
   if (ok) {
-    dap_client->post_event(new TerminatedEvent{});
     auto it = std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
                            [&](auto &ptr) { return ptr->dap_client == dap_client; });
 
@@ -564,13 +589,17 @@ InitializeResponse::serialize(int seq) const noexcept
   arrs[2] =
     nlohmann::json::object({{"filter", "catch"}, {"label", "Caught exceptions"}, {"supportsCondition", false}});
 
+  const bool isRRSession =
+    client->session_type == DapClientSession::RR || client->session_type == DapClientSession::RRChildSession;
+
   cfg_body["supportsConfigurationDoneRequest"] = true;
   cfg_body["supportsFunctionBreakpoints"] = true;
   cfg_body["supportsConditionalBreakpoints"] = false;
   cfg_body["supportsHitConditionalBreakpoints"] = true;
   cfg_body["supportsEvaluateForHovers"] = false;
   // cfg_body["exceptionBreakpointFilters"] = std::array<nlohmann::json, 0>{};
-  cfg_body["supportsStepBack"] = false;
+  cfg_body["supportsStepBack"] = isRRSession;
+  cfg_body["supportsSingleThreadExecutionRequests"] = !isRRSession;
   cfg_body["supportsSetVariable"] = false;
   cfg_body["supportsRestartFrame"] = false;
   cfg_body["supportsGotoTargetsRequest"] = false;
@@ -595,14 +624,13 @@ InitializeResponse::serialize(int seq) const noexcept
   cfg_body["supportsTerminateRequest"] = true;
   cfg_body["supportsDataBreakpoints"] = false;
   cfg_body["supportsReadMemoryRequest"] = true;
-  cfg_body["supportsWriteMemoryRequest"] = false;
+  cfg_body["supportsWriteMemoryRequest"] = true;
   cfg_body["supportsDisassembleRequest"] = true;
   cfg_body["supportsCancelRequest"] = false;
   cfg_body["supportsBreakpointLocationsRequest"] = false;
   cfg_body["supportsSteppingGranularity"] = true;
   cfg_body["supportsInstructionBreakpoints"] = true;
   cfg_body["supportsExceptionFilterOptions"] = false;
-  cfg_body["supportsSingleThreadExecutionRequests"] = true;
 
   auto payload = fmt::format(
     R"({{"seq":0,"request_seq":{},"type":"response","success":true,"command":"initialize","body":{}}})",
@@ -691,6 +719,7 @@ Threads::execute() noexcept
 
   response->threads.reserve(target->threads.size());
   auto &it = target->get_interface();
+
   for (const auto &thread : target->threads) {
     response->threads.push_back(Thread{.id = thread.tid, .name = it.get_thread_name(thread.tid)});
   }
@@ -1229,8 +1258,11 @@ parse_command(std::string &&packet) noexcept
     TODO("Command::Restart");
   case CommandType::RestartFrame:
     TODO("Command::RestartFrame");
-  case CommandType::ReverseContinue:
-    TODO("Command::ReverseContinue");
+  case CommandType::ReverseContinue: {
+    IfInvalidArgsReturn(ReverseContinue);
+    int thread_id = args["threadId"];
+    return new ui::dap::ReverseContinue{seq, thread_id};
+  }
   case CommandType::Scopes: {
     IfInvalidArgsReturn(Scopes);
 

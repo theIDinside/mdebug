@@ -167,6 +167,8 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
         break;
       default:
         DBGLOG(core, "[WARNING]: Unexpected Tag in subprorogram die: {}", to_str(die_it->tag));
+        die_it = next(die_it, die_it->sibling());
+        break;
       }
     }
   }
