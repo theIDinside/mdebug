@@ -1105,9 +1105,11 @@ TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
   for (auto &symbol_file : symbol_files) {
     const auto &u = symbol_file->objectFile()->unwinder;
     const auto addr_range = u->addr_range;
-    const auto unrelocated = symbol_file->unrelocate(pc);
-    if (addr_range.contains(unrelocated)) {
-      return sym::UnwinderSymbolFilePair{u.get(), symbol_file.get()};
+    if (pc > symbol_file->baseAddress) {
+      const auto unrelocated = symbol_file->unrelocate(pc);
+      if (addr_range.contains(unrelocated)) {
+        return sym::UnwinderSymbolFilePair{u.get(), symbol_file.get()};
+      }
     }
   }
   return sym::UnwinderSymbolFilePair{null_unwinder, nullptr};
