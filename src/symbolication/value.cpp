@@ -82,6 +82,16 @@ Value::has_visualizer() const noexcept
   return visualizer != nullptr;
 }
 
+bool
+Value::valid_value() const noexcept
+{
+  if (value_object == nullptr) {
+    return false;
+  }
+
+  return !value_object->raw_view().empty();
+}
+
 ValueVisualizer *
 Value::get_visualizer() noexcept
 {
@@ -174,7 +184,7 @@ MemoryContentsObject::read_memory(TraceeController &tc, AddrPtr address, u32 siz
     if (read_bytes != 0) {
       return ReadResult{.info = ReadResultInfo::Partial, .value = std::move(res.take_error().bytes)};
     } else {
-      return ReadResult{.info = ReadResultInfo::Failed, .value = std::move(res.take_error().bytes)};
+      return ReadResult{.info = ReadResultInfo::Failed, .value = nullptr};
     }
   }
 }

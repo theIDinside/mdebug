@@ -64,6 +64,12 @@ ReferenceResolver::get_children(TraceeController &tc, std::optional<u32> start, 
     auto adjusted_address = address.value() + (start.value_or(0) * locked->type()->size());
     const auto requested_length = count.value_or(32);
     auto memory = sym::MemoryContentsObject::read_memory(tc, adjusted_address, requested_length);
+    if (!memory.is_ok()) {
+      auto t = locked->type()->get_layout_type();
+      children.push_back(
+        sym::Value::WithVisualizer<sym::InvalidValueVisualizer>(std::make_shared<sym::Value>(*t, 0, nullptr)));
+      return children;
+    }
     indirect_value_object = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
@@ -416,7 +422,7 @@ PrimitiveVisualizer::dap_format(std::string_view name, int variablesReference) n
   if (!ptr) {
     return std::nullopt;
   }
-
+  ASSERT(name == ptr->name, "variable name {} != provided name {}", ptr->name, name);
   const auto byte_span = ptr->memory_view();
   if (byte_span.empty()) {
     return std::nullopt;
@@ -445,10 +451,31 @@ DefaultStructVisualizer::dap_format(std::string_view name, int variablesReferenc
     return std::nullopt;
   }
 
+  ASSERT(name == ptr->name, "variable name {} != provided name {}", ptr->name, name);
   const auto &t = *ptr->type();
   return fmt::format(
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
     t, t, variablesReference, ptr->address());
+}
+
+InvalidValueVisualizer::InvalidValueVisualizer(std::weak_ptr<Value> provider_with_no_value) noexcept
+    : ValueVisualizer(std::move(provider_with_no_value))
+{
+}
+
+std::optional<std::string>
+InvalidValueVisualizer::format_value() noexcept
+{
+  TODO("InvalidValueVisualizer::format_value() not yet implemented");
+}
+
+std::optional<std::string>
+InvalidValueVisualizer::dap_format(std::string_view name, int variablesReference) noexcept
+{
+  auto ptr = this->data_provider.lock();
+  return fmt::format(
+    R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})", ptr->name,
+    ptr->name, *ptr->type());
 }
 
 ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(provider) {}
