@@ -99,9 +99,12 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
          cu_die.die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
-         to_str(cu_die.die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+  if (!name) {
+    DBGLOG(core, "Expected to find name attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+           to_str(cu_die.die->tag));
+    return;
+  }
+  ASSERT(type_id, "Expected to find type_id attribute for die 0x{:x} ({})", cu_die.die->section_offset,
          to_str(cu_die.die->tag));
 
   auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
