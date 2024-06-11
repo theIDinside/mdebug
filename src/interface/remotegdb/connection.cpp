@@ -639,6 +639,17 @@ struct Core
 } // namespace TArg
 
 void
+RemoteConnection::update_known_threads(std::span<const GdbThread> threads_) noexcept
+{
+  threads.clear();
+  for (const auto gdb_thread : threads_) {
+    // pid.pid == process/task leader of pid.tid(s), but it is a task too, not something special.
+    threads[{gdb_thread.pid, gdb_thread.pid}].push_back(gdb_thread);
+  }
+  threads_known = true;
+}
+
+void
 RemoteConnection::put_pending_notification(std::string_view payload) noexcept
 {
   ASSERT(!pending_notification.has_value(), "Pending notification has not been consumed");
@@ -652,9 +663,23 @@ RemoteConnection::put_pending_notification(std::string_view payload) noexcept
   }
 }
 
+std::vector<GdbThread>
+protocol_parse_threads(std::string_view input) noexcept
+{
+  auto ts = utils::split_string(input, ",");
+  std::vector<GdbThread> threads{};
+  threads.reserve(ts.size());
+  for (auto t : ts) {
+    auto thread = gdb::GdbThread::maybe_parse_thread(t);
+    if (thread) {
+      threads.push_back(*thread);
+    }
+  }
+  return threads;
+}
+
 bool
-RemoteConnection::process_task_received_signal_extended(int signal, std::string_view payload,
-                                                        bool is_session_config) noexcept
+RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept
 {
   auto params = utils::split_string(payload, ";");
   WaitEventParser parser{*this};
@@ -670,6 +695,12 @@ RemoteConnection::process_task_received_signal_extended(int signal, std::string_
     auto val = param_str.substr(pos + 1);
     if (arg == "thread") {
       parser.parse_pid_tid(val);
+    } else if (arg == "threads") {
+      const auto threads = parser.parse_threads_parameter(val);
+      update_known_threads(threads);
+    } else if (arg == "thread-pcs") {
+      auto pcs = utils::split_string(val, ",");
+      DBGLOG(core, "parsing thread-pcs not yet implemented");
     } else if (arg == "core") {
       parser.parse_core(val);
     } else {
@@ -723,7 +754,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       DLOG(logging::Channel::remote, "Failed to parse signal for T packet: '{}'", received_payload);
       return false;
     }
-    process_task_received_signal_extended(signal.value(), parser.parse_data, is_session_config);
+    process_task_stop_reply_t(signal.value(), parser.parse_data, is_session_config);
     break;
   }
   case 'W': {
@@ -959,6 +990,65 @@ static constexpr u32
 string_length(const std::string_view &str) noexcept
 {
   return str.length();
+}
+
+std::span<const GdbThread>
+RemoteConnection::query_target_threads(GdbThread thread) noexcept
+{
+  if (threads_known) {
+    const auto &thrs = threads[thread];
+    return thrs;
+  }
+  const auto threads_result = get_remote_threads();
+  tracee_control_mutex.lock();
+  ScopedDefer fn{[&]() { tracee_control_mutex.unlock(); }};
+
+  update_known_threads(threads_result);
+
+  return threads[thread];
+}
+
+std::vector<GdbThread>
+RemoteConnection::get_remote_threads() noexcept
+{
+  tracee_control_mutex.lock();
+  ScopedDefer fn{[&]() {
+    user_done_sync.arrive_and_wait();
+    tracee_control_mutex.unlock();
+  }};
+
+  request_control();
+
+  std::vector<GdbThread> threads{};
+
+  SocketCommand read_threads{"qfThreadInfo"};
+  if (!execute_command(read_threads, 1000)) {
+    return {};
+  }
+
+  std::string_view thr_result{read_threads.result.value()};
+  thr_result.remove_prefix("$m"sv.size());
+  const auto parsed = protocol_parse_threads(thr_result);
+  for (auto [pid, tid] : parsed) {
+    threads.emplace_back(pid, tid);
+  }
+  for (;;) {
+    SocketCommand continue_read_threads{"qsThreadInfo"};
+    if (!execute_command(continue_read_threads, 1000)) {
+      return {};
+    }
+    std::string_view res{continue_read_threads.result.value()};
+    if (res == "$l") {
+      break;
+    } else {
+      res.remove_prefix("$m"sv.size());
+      const auto parsed = protocol_parse_threads(res);
+      for (auto [pid, tid] : parsed) {
+        threads.emplace_back(pid, tid);
+      }
+    }
+  }
+  return threads;
 }
 
 bool
@@ -1267,6 +1357,12 @@ RemoteConnection::is_connected_to(const std::string &host, int port) noexcept
   return this->host == host && this->port == port;
 }
 
+void
+RemoteConnection::invalidate_known_threads() noexcept
+{
+  threads_known = false;
+}
+
 static std::mutex InitMutex{};
 
 std::optional<ConnInitError>
@@ -1319,6 +1415,76 @@ RemoteConnection::initialize_thread() noexcept
       } // namespace gdb
     };
     is_initialized = true;
+  }
+}
+
+/*static*/
+GdbThread
+GdbThread::parse_thread(std::string_view input) noexcept
+{
+  auto parse = input;
+  if (parse[0] != 'p') {
+    Tid tid;
+    const auto tid_result = std::from_chars(parse.begin(), parse.end(), tid, 16);
+    ASSERT(tid_result.ec == std::errc(), "failed to parse pid from {}", input);
+    return gdb::GdbThread{0, tid};
+  } else {
+    ASSERT(parse[0] == 'p', "Expected multiprocess thread syntax");
+    parse.remove_prefix(1);
+    auto sep = parse.find('.');
+    if (sep == parse.npos) {
+      return {};
+    }
+    auto first = parse.substr(0, sep);
+    parse.remove_prefix(sep + 1);
+
+    Pid pid;
+    Tid tid;
+    const auto pid_result = std::from_chars(first.begin(), first.end(), pid, 16);
+    ASSERT(pid_result.ec == std::errc(), "failed to parse pid from {}", input);
+
+    const auto tid_result = std::from_chars(parse.begin(), parse.end(), tid, 16);
+    ASSERT(tid_result.ec == std::errc(), "failed to parse pid from {}", input);
+
+    return gdb::GdbThread{pid, tid};
+  }
+}
+
+/*static*/
+std::optional<GdbThread>
+GdbThread::maybe_parse_thread(std::string_view input) noexcept
+{
+  auto parse = input;
+  if (parse[0] != 'p') {
+    Tid tid;
+    const auto tid_result = std::from_chars(parse.begin(), parse.end(), tid, 16);
+    if (tid_result.ec != std::errc()) {
+      return {};
+    }
+    return gdb::GdbThread{0, tid};
+  } else {
+    if (parse[0] != 'p') {
+      return {};
+    }
+
+    parse.remove_prefix(1);
+    auto sep = parse.find('.');
+    if (sep == parse.npos) {
+      return {};
+    }
+    auto first = parse.substr(0, sep);
+    parse.remove_prefix(sep + 1);
+
+    Pid pid;
+    Tid tid;
+    const auto pid_result = std::from_chars(first.begin(), first.end(), pid, 16);
+    const auto tid_result = std::from_chars(parse.begin(), parse.end(), tid, 16);
+
+    if (pid_result.ec != std::errc() || tid_result.ec != std::errc()) {
+      return {};
+    }
+
+    return gdb::GdbThread{pid, tid};
   }
 }
 

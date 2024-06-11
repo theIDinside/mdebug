@@ -472,8 +472,11 @@ struct ConfigurationDone final : public ui::UICommand
 struct InitializeResponse final : public ui::UIResult
 {
   CTOR(InitializeResponse);
+  InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept;
   ~InitializeResponse() noexcept override = default;
   std::string serialize(int seq) const noexcept final;
+
+  bool RRSession;
 };
 
 struct Initialize final : public ui::UICommand

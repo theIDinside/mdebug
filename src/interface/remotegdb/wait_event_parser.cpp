@@ -1,6 +1,7 @@
 #include "wait_event_parser.h"
 #include "awaiter.h"
 #include "bp.h"
+#include "interface/remotegdb/connection.h"
 #include "interface/remotegdb/shared.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include <event_queue.h>
@@ -75,7 +76,7 @@ WaitEventParser::is_stop_reason(u32 maybeStopReason) noexcept
 void
 WaitEventParser::parse_pid_tid(std::string_view arg) noexcept
 {
-  const auto [pid, tid] = parse_thread_id(arg);
+  const auto [pid, tid] = gdb::GdbThread::parse_thread(arg);
   set_pid(pid);
   set_tid(tid);
 }
@@ -174,7 +175,7 @@ WaitEventParser::parse_fork(std::string_view data)
 {
   ASSERT(new_pid == 0, "new_pid already set");
   ASSERT(new_tid == 0, "new_tid already set");
-  const auto [pid, tid] = parse_thread_id(data);
+  const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   new_pid = pid;
   new_tid = tid;
 }
@@ -184,7 +185,7 @@ WaitEventParser::parse_vfork(std::string_view data)
 {
   ASSERT(new_pid == 0, "new_pid already set");
   ASSERT(new_tid == 0, "new_tid already set");
-  const auto [pid, tid] = parse_thread_id(data);
+  const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   new_pid = pid;
   new_tid = tid;
 }
@@ -237,7 +238,7 @@ WaitEventParser::parse_clone(std::string_view data) noexcept
 {
   ASSERT(new_pid == 0, "new_pid already set");
   ASSERT(new_tid == 0, "new_pid already set");
-  const auto [pid, tid] = parse_thread_id(data);
+  const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   new_pid = pid;
   new_tid = tid;
 }
@@ -254,6 +255,20 @@ WaitEventParser::set_syscall_entry(int number) noexcept
 {
   ASSERT(syscall_no == 0, "syscall no already set");
   syscall_no = number;
+}
+
+std::vector<GdbThread>
+WaitEventParser::parse_threads_parameter(std::string_view input) noexcept
+{
+  ASSERT(pid != 0, "process id not yet parsed");
+  auto threads = protocol_parse_threads(input);
+
+  for (auto &t : threads) {
+    if (t.pid == 0) {
+      t.pid = pid;
+    }
+  }
+  return threads;
 }
 
 } // namespace gdb

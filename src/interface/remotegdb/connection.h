@@ -19,6 +19,7 @@
 #include <sys/poll.h>
 #include <thread>
 #include <typedefs.h>
+#include <unordered_set>
 #include <utils/expected.h>
 #include <utils/scoped_fd.h>
 using MonotonicResource = std::pmr::monotonic_buffer_resource;
@@ -512,6 +513,35 @@ enum class qXferResponse
   Timeout
 };
 
+struct GdbThread
+{
+  Pid pid;
+  Tid tid;
+
+  constexpr auto operator<=>(const GdbThread &) const noexcept = default;
+
+  static std::optional<GdbThread> maybe_parse_thread(std::string_view input) noexcept;
+  static GdbThread parse_thread(std::string_view input) noexcept;
+};
+
+}; // namespace gdb
+
+template <> struct ::std::hash<gdb::GdbThread>
+{
+  using argument_type = gdb::GdbThread;
+  using result_type = u64;
+
+  result_type
+  operator()(const argument_type &m) const
+  {
+    u64 pid{static_cast<u64>(m.pid)};
+    u64 tid{static_cast<u64>(m.tid)};
+
+    return pid << 32 | tid;
+  }
+};
+
+namespace gdb {
 class RemoteConnection
 {
 public:
@@ -521,6 +551,8 @@ public:
   friend class RemoteSessionConfigurator;
 
 private:
+  std::unordered_map<GdbThread, std::vector<GdbThread>> threads;
+  bool threads_known;
   std::string host;
   int port;
   BufferedSocket socket;
@@ -546,9 +578,9 @@ private:
 
   void consume_poll_events(int fd) noexcept;
   bool process_stop_reply_payload(std::string_view payload, bool is_session_config) noexcept;
-  bool process_task_received_signal_extended(int signal, std::string_view payload,
-                                             bool is_session_config) noexcept;
+  bool process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept;
   void put_pending_notification(std::string_view payload) noexcept;
+  void update_known_threads(std::span<const GdbThread> threads) noexcept;
 
   static std::unordered_map<std::string_view, TraceeStopReason> StopReasonMap;
 
@@ -592,6 +624,8 @@ public:
   // has done the acquire + synchronize dance.
   bool execute_command(SocketCommand &cmd, int timeout) noexcept;
   bool execute_command(qXferCommand &cmd, u32 offset, int timeout) noexcept;
+  std::vector<GdbThread> get_remote_threads() noexcept;
+  std::span<const GdbThread> query_target_threads(GdbThread thread) noexcept;
 
   utils::Expected<std::vector<std::string>, SendError>
   send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
@@ -603,6 +637,9 @@ public:
 
   bool send_qXfer_command_with_response(qXferCommand &cmd, std::optional<int> timeout) noexcept;
   bool is_connected_to(const std::string &host, int port) noexcept;
+  void invalidate_known_threads() noexcept;
 };
+
+std::vector<GdbThread> protocol_parse_threads(std::string_view input) noexcept;
 
 } // namespace gdb

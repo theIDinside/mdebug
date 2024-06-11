@@ -108,6 +108,7 @@ main(int argc, const char **argv)
         }
       }
       spin_lock.unlock();
+      return i;
     }});
   }
 

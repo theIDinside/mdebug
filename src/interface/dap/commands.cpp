@@ -545,7 +545,11 @@ Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
 UIResultPtr
 Initialize::execute() noexcept
 {
-  return new InitializeResponse{true, this};
+  bool RRSession = false;
+  if (args.contains("RRSession")) {
+    RRSession = args.at("RRSession");
+  }
+  return new InitializeResponse{RRSession, true, this};
 }
 
 std::string
@@ -574,6 +578,11 @@ Disconnect::execute() noexcept
   return new DisconnectResponse{ok, this};
 }
 
+InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept
+    : UIResult(ok, cmd), RRSession(rrsession)
+{
+}
+
 std::string
 InitializeResponse::serialize(int seq) const noexcept
 {
@@ -589,17 +598,13 @@ InitializeResponse::serialize(int seq) const noexcept
   arrs[2] =
     nlohmann::json::object({{"filter", "catch"}, {"label", "Caught exceptions"}, {"supportsCondition", false}});
 
-  const bool isRRSession =
-    client->session_type == DapClientSession::RR || client->session_type == DapClientSession::RRChildSession;
-
   cfg_body["supportsConfigurationDoneRequest"] = true;
   cfg_body["supportsFunctionBreakpoints"] = true;
   cfg_body["supportsConditionalBreakpoints"] = false;
   cfg_body["supportsHitConditionalBreakpoints"] = true;
   cfg_body["supportsEvaluateForHovers"] = false;
-  // cfg_body["exceptionBreakpointFilters"] = std::array<nlohmann::json, 0>{};
-  cfg_body["supportsStepBack"] = isRRSession;
-  cfg_body["supportsSingleThreadExecutionRequests"] = !isRRSession;
+  cfg_body["supportsStepBack"] = RRSession;
+  cfg_body["supportsSingleThreadExecutionRequests"] = !RRSession;
   cfg_body["supportsSetVariable"] = false;
   cfg_body["supportsRestartFrame"] = false;
   cfg_body["supportsGotoTargetsRequest"] = false;
@@ -719,6 +724,20 @@ Threads::execute() noexcept
 
   response->threads.reserve(target->threads.size());
   auto &it = target->get_interface();
+
+  if (it.format == TargetFormat::Remote) {
+    auto res = it.remote_connection()->query_target_threads({target->task_leader, target->task_leader});
+    ASSERT(res.front().pid == target->task_leader, "expected pid == task_leader");
+    for (const auto thr : res) {
+      if (std::ranges::none_of(target->threads, [t = thr.tid](const auto &a) { return a.tid == t; })) {
+        target->threads.push_back(TaskInfo::create_stopped(thr.tid, it.format, it.arch_info->type));
+      }
+    }
+    auto start = std::remove_if(target->threads.begin(), target->threads.end(), [&](auto &thread) {
+      return std::none_of(res.begin(), res.end(), [&](const auto pidtid) { return pidtid.tid == thread.tid; });
+    });
+    target->threads.erase(start, target->threads.end());
+  }
 
   for (const auto &thread : target->threads) {
     response->threads.push_back(Thread{.id = thread.tid, .name = it.get_thread_name(thread.tid)});

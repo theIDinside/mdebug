@@ -41,27 +41,6 @@ template <typename T, typename U> using ViewOfParameter = U;
     return std::string_view{Buf.begin(), it};                                                                     \
   }(__VA_ARGS__)
 
-static std::vector<std::pair<Pid, Tid>>
-parse_qfthread_info(std::string_view response) noexcept
-{
-  const auto split = utils::split_string(response, ",");
-  std::vector<std::pair<Pid, Tid>> result{};
-  result.reserve(split.size());
-  for (const auto &lwp : split) {
-    auto parts = utils::split_string(lwp, ".");
-    if (parts.size() == 2) {
-      Pid pid;
-      const auto pidres = std::from_chars(parts[0].begin() + 1, parts[0].end(), pid, 16);
-      ASSERT(pidres.ec == std::errc(), "failed to parse pid");
-      Tid tid;
-      const auto tidres = std::from_chars(parts[1].begin(), parts[1].end(), tid, 16);
-      ASSERT(tidres.ec == std::errc(), "failed to parse tid");
-      result.push_back({pid, tid});
-    }
-  }
-  return result;
-}
-
 template <std::integral Value>
 static std::string_view
 convert_to_target(std::array<char, 16> &outbuf, Value value) noexcept
@@ -90,7 +69,7 @@ parse_threads(std::string_view input) noexcept
   for (const auto &thread : root_element->children) {
     if (const auto lwp = thread->attribute("id"); lwp) {
       std::string_view str = lwp.value();
-      const auto [pid, tid] = gdb::parse_thread_id(str);
+      const auto [pid, tid] = gdb::GdbThread::parse_thread(str);
       result.emplace_back(pid, tid, thread->attribute("name").value_or("None"));
     }
   }
@@ -250,7 +229,7 @@ GdbRemoteCommander::resume_task(TaskInfo &t, RunType type) noexcept
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
   t.set_running(type);
-
+  connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
 
@@ -268,7 +247,7 @@ GdbRemoteCommander::reverse_continue() noexcept
   for (auto &t : tc->threads) {
     t.set_running(tc::RunType::Continue);
   }
-
+  connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
 
@@ -307,6 +286,7 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
   for (auto &t : tc->threads) {
     t.set_running(type);
   }
+  connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
 
@@ -707,7 +687,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
   std::vector<std::tuple<Pid, Tid, std::string>> threads{};
   std::string_view thr_result{read_threads.result.value()};
   thr_result.remove_prefix("$m"sv.size());
-  const auto parsed = parse_qfthread_info(thr_result);
+  const auto parsed = gdb::protocol_parse_threads(thr_result);
   for (auto [pid, tid] : parsed) {
     threads.emplace_back(pid, tid, "");
   }
@@ -719,7 +699,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
       break;
     } else {
       res.remove_prefix("$m"sv.size());
-      const auto parsed = parse_qfthread_info(res);
+      const auto parsed = gdb::protocol_parse_threads(res);
       for (auto [pid, tid] : parsed) {
         threads.emplace_back(pid, tid, "");
       }
@@ -801,6 +781,9 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
   if (result.empty()) {
     return result;
   }
+
+  SocketCommand select_thread_cmd{"QListThreadsInStopReply"};
+  OkOtherwiseErr(select_thread_cmd, "Failed to configure RR to list threads in stop reply");
   conn->initialize_thread();
   return result;
 }
