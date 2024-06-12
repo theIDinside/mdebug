@@ -1,5 +1,6 @@
 #pragma once
 
+#include "interface/attach_args.h"
 #include "interface/remotegdb/target_description.h"
 #include "tracee_command_interface.h"
 #include "utils/expected.h"
@@ -73,7 +74,7 @@ class GdbRemoteCommander final : public TraceeCommandInterface
   std::optional<std::string> exec_file{};
   TPtr<r_debug_extended> tracee_r_debug{nullptr};
   Auxv auxv_data{};
-
+  RemoteType type;
   // TODO(simon): allow for smart caching of thread names, by catching system call `prctl` with the parameters that
   // call the `PR_SET_NAME` request, and on SyscallExit, call qXfer:threads:read:... and update the cache.
   // This way, we don't have to potentially open N files to /proc/<pid>/task/<tid> on every `Threads` request
@@ -83,13 +84,14 @@ class GdbRemoteCommander final : public TraceeCommandInterface
   void inform_supported() noexcept;
 
 public:
-  GdbRemoteCommander(std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id, std::string &&exec_file,
-                     std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept;
+  GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id,
+                     std::string &&exec_file, std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept;
   ~GdbRemoteCommander() noexcept override = default;
 
   ReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
 
+  TaskExecuteResponse reverse_continue() noexcept final;
   TaskExecuteResponse resume_task(TaskInfo &t, RunType type) noexcept final;
   TaskExecuteResponse resume_target(TraceeController *tc, RunType run) noexcept final;
   TaskExecuteResponse stop_task(TaskInfo &t) noexcept final;
@@ -110,7 +112,11 @@ public:
   bool initialize() noexcept final;
 
   bool post_exec() noexcept final;
+  // Called after a fork for the creation of a new process supervisor
+  Interface on_fork(Pid pid) noexcept final;
+
   Tid task_leader() const noexcept final;
+  gdb::GdbThread leader_to_gdb() const noexcept;
   std::optional<Path> execed_file() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept final;
   std::shared_ptr<gdb::RemoteConnection> remote_connection() noexcept final;
@@ -153,5 +159,6 @@ public:
   // First target
   explicit RemoteSessionConfigurator(gdb::RemoteConnection::ShrPtr remote) noexcept;
   utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError> configure_session() noexcept;
+  utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError> configure_rr_session() noexcept;
 };
 } // namespace tc

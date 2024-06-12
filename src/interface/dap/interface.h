@@ -3,6 +3,8 @@
 #include "../../lib/spinlock.h"
 #include "../../notify_pipe.h"
 #include "dap_defs.h"
+#include "utils/immutable.h"
+#include "utils/util.h"
 #include <cstring>
 #include <nlohmann/json.hpp>
 #include <queue>
@@ -10,6 +12,7 @@
 #include <typedefs.h>
 #include <vector>
 class Tracer;
+struct TraceeController;
 /* The different DAP commands/requests */
 
 namespace ui {
@@ -113,12 +116,74 @@ private:
   const size_t buffer_size;
 };
 
+enum class DapClientSession
+{
+  // This is the strange world we live in.
+  None,
+  Launch,
+  Attach,
+  LaunchedChildSession,
+  AttachedChildSession,
+  RR,
+  RRChildSession
+};
+
+DapClientSession child_session(DapClientSession type) noexcept;
+
+class DebugAdapterClient
+{
+  std::filesystem::path socket_path{};
+  int in{};
+  int out{};
+  ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
+  int tty_fd{-1};
+  TraceeController *tc{nullptr};
+
+  DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
+  // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
+  // be.)
+  DebugAdapterClient(DapClientSession session, int standard_in, int standard_out) noexcept;
+
+  std::mutex m{};
+  std::queue<UIResultPtr> ui_output_queue{};
+
+public:
+  DapClientSession session_type;
+  ~DebugAdapterClient() noexcept;
+
+  static DebugAdapterClient *createStandardIOConnection() noexcept;
+  static DebugAdapterClient *createSocketConnection(DebugAdapterClient *client) noexcept;
+  void client_configured(TraceeController *tc) noexcept;
+  void post_event(ui::UIResultPtr event);
+
+  int read_fd() const noexcept;
+  int out_fd() const noexcept;
+
+  bool write(std::string_view output) noexcept;
+  void commands_read() noexcept;
+  void set_tty_out(int fd) noexcept;
+  std::optional<int> tty() const noexcept;
+  TraceeController *supervisor() const noexcept;
+  void set_session_type(DapClientSession type) noexcept;
+};
+
+enum class InterfaceNotificationSource
+{
+  NewClient,
+  DebugAdapterClient,
+  ClientStdout
+};
+
+using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterClient *>;
+
 class DAP
 {
 private:
+  std::vector<utils::OwningPointer<DebugAdapterClient>> clients{};
+  std::vector<NotifSource> sources{};
+
 public:
-  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
-               utils::Notifier::WriteEnd io_write) noexcept;
+  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept;
   ~DAP() = default;
 
   // After setup we call `infinite_poll` that does what the name suggests, polls for messages. We could say that
@@ -128,36 +193,36 @@ public:
   // exceptions.
   void run_ui_loop();
 
-  void post_event(UIResultPtr serializable_event) noexcept;
+  void start_interface() noexcept;
+  void new_client(utils::OwningPointer<DebugAdapterClient> client);
+  u32 notifiers_queue_size() const noexcept;
+  void init_poll(pollfd *fds);
+  void one_poll(u32 notifier_queue_size) noexcept;
+  void add_source(NotifSource source) noexcept;
+
   void notify_new_message() noexcept;
   void clean_up() noexcept;
   void flush_events() noexcept;
 
-  void add_tty(int master_pty_fd) noexcept;
-  std::optional<int> current_tty() noexcept;
+  void configure_tty(int master_pty_fd) noexcept;
+  DebugAdapterClient *main_connection() const noexcept;
 
 private:
   UIResultPtr pop_event() noexcept;
   void write_protocol_message(std::string_view msg) noexcept;
 
-  // all the tty's we have connected.
-  // Note that, we only ever listen/have one active at one time. Interleaving std output from different processes
-  // would be insane.
-  std::vector<int> tty_fds;
-  u64 current_tty_idx;
-
   utils::Notifier::WriteEnd posted_event_notifier;
   utils::Notifier::ReadEnd posted_evt_listener;
+
+  utils::Notifier new_client_notifier;
   Tracer *tracer;
   int tracer_in_fd;
   int tracer_out_fd;
   bool keep_running;
-  char *buffer;
   char *tracee_stdout_buffer;
   SpinLock output_message_lock;
   std::deque<UIResultPtr> events_queue;
   u64 seq;
   bool cleaned_up = false;
-  utils::Notifier::WriteEnd command_notifier;
 };
 }; // namespace ui::dap

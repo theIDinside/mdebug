@@ -1,11 +1,11 @@
 #include "gdb_remote_commander.h"
 #include "common.h"
 #include "fmt/core.h"
+#include "interface/attach_args.h"
 #include "interface/remotegdb/connection.h"
 #include "interface/remotegdb/shared.h"
 #include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-// #include "symbolication/dwarf_binary_reader.h"
 #include "task.h"
 #include "utils/logger.h"
 #include "utils/util.h"
@@ -14,10 +14,24 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <set>
+#include <supervisor.h>
 #include <sys/user.h>
 #include <tracer.h>
 
 namespace tc {
+
+// Commands that only return OK response, uses this
+#define OkOtherwiseErr(cmd, errMsg)                                                                               \
+  if (!conn->execute_command(cmd, 5000) || cmd.result.value_or("") != "$OK") {                                    \
+    return ConnInitError{.msg = errMsg};                                                                          \
+  }
+
+// For use with commands that responds with arbitrary data (i.e. doesn't contain an OK in the string data)
+#define SuccessOtherwiseErr(cmd, errMsg)                                                                          \
+  if (!conn->execute_command(cmd, 5000)) {                                                                        \
+    return ConnInitError{.msg = errMsg};                                                                          \
+  }
 
 template <typename T, typename U> using ViewOfParameter = U;
 
@@ -55,7 +69,7 @@ parse_threads(std::string_view input) noexcept
   for (const auto &thread : root_element->children) {
     if (const auto lwp = thread->attribute("id"); lwp) {
       std::string_view str = lwp.value();
-      const auto [pid, tid] = gdb::parse_thread_id(str);
+      const auto [pid, tid] = gdb::GdbThread::parse_thread(str);
       result.emplace_back(pid, tid, thread->attribute("name").value_or("None"));
     }
   }
@@ -80,11 +94,11 @@ append_checksum(char (&buf)[N], std::string_view payload)
   return std::string_view{buf, buf + 3 + payload.size()};
 }
 
-GdbRemoteCommander::GdbRemoteCommander(std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id,
-                                       std::string &&exec_file,
+GdbRemoteCommander::GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn,
+                                       Pid process_id, std::string &&exec_file,
                                        std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept
     : TraceeCommandInterface(TargetFormat::Remote, std::move(arch)), connection(std::move(conn)),
-      process_id(process_id), exec_file(std::move(exec_file))
+      process_id(process_id), exec_file(std::move(exec_file)), type(type)
 {
 }
 
@@ -119,8 +133,8 @@ GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexc
   }
   std::array<char, 64> buf{};
   const auto cmd = SerializeCommand(buf, "m{:x},{}", address.get(), size);
-
-  const auto res = connection->send_command_with_response(cmd, 1000);
+  const auto pid = task_leader();
+  const auto res = connection->send_command_with_response(gdb::GdbThread{pid, pid}, cmd, 1000);
   if (res.is_error()) {
     return convert_to_read_result(res.error());
   }
@@ -145,10 +159,29 @@ GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexc
 TraceeWriteResult
 GdbRemoteCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 {
-  TODO("Implement");
-  (void)addr;
-  (void)buf;
-  (void)size;
+  static constexpr std::array<char, 16> Table = {'0', '1', '2', '3', '4', '5', '6', '7',
+                                                 '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+  std::string outbuf{};
+  outbuf.reserve(size * 2);
+  for (auto i = 0u; i < size; ++i) {
+    const u8 val = *(buf + i);
+    char hi = Table[((val & 0b1111'0000) >> 4)];
+    char lo = Table[(val & 0b0000'1111)];
+    outbuf.push_back(hi);
+    outbuf.push_back(lo);
+  }
+  auto cmd = fmt::format("M{:x},{}:{}", addr.get(), size, outbuf);
+  const auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+  if (res.is_error()) {
+    return TraceeWriteResult::Error(0);
+  }
+
+  // TODO: gdb just errors out like a moron, if a partial write was successful
+  // how? Who tf knows. The "protocol" sure leaves much to the imagination.
+  if (res.value() == "$OK") {
+    return TraceeWriteResult::Ok(size);
+  }
+  return TraceeWriteResult::Error(0);
 }
 
 void
@@ -156,13 +189,13 @@ GdbRemoteCommander::set_catch_syscalls(bool on) noexcept
 {
   const bool catch_syscall = connection->settings().catch_syscalls;
   if (on && !catch_syscall) {
-    const auto response = connection->send_command_with_response("QCatchSyscalls:1", {});
+    const auto response = connection->send_command_with_response(leader_to_gdb(), "QCatchSyscalls:1", {});
     if (response.is_error()) {
       PANIC("failed to set catch syscalls");
     }
     ASSERT(response.value() == "OK", "Response for command was not 'OK'");
   } else if (!on && catch_syscall) {
-    const auto response = connection->send_command_with_response("QCatchSyscalls:0", {});
+    const auto response = connection->send_command_with_response(leader_to_gdb(), "QCatchSyscalls:0", {});
     if (response.is_error()) {
       PANIC("failed to set catch syscalls");
     }
@@ -196,7 +229,25 @@ GdbRemoteCommander::resume_task(TaskInfo &t, RunType type) noexcept
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
   t.set_running(type);
+  connection->invalidate_known_threads();
+  return TaskExecuteResponse::Ok();
+}
 
+TaskExecuteResponse
+GdbRemoteCommander::reverse_continue() noexcept
+{
+  if (type != RemoteType::RR) {
+    return TaskExecuteResponse::Error(0);
+  }
+
+  constexpr auto reverse = "bc";
+  const auto resume_err = connection->send_vcont_command(reverse, 1000);
+  ASSERT(!resume_err.has_value(), "reverse continue failed");
+
+  for (auto &t : tc->threads) {
+    t.set_running(tc::RunType::Continue);
+  }
+  connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
 
@@ -232,7 +283,10 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
-
+  for (auto &t : tc->threads) {
+    t.set_running(type);
+  }
+  connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
 
@@ -243,7 +297,7 @@ GdbRemoteCommander::stop_task(TaskInfo &t) noexcept
     std::array<char, 64> bytes{};
     const auto pid = task_leader();
     auto cmd = SerializeCommand(bytes, "vCont;t:p{}.{}", pid, t.tid);
-    auto response = connection->send_command_with_response(cmd, 1000);
+    auto response = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
     if (!(response.is_expected() && response.take_value() == "$OK")) {
       PANIC("Failed to unset breakpoint");
     }
@@ -271,7 +325,7 @@ GdbRemoteCommander::disable_breakpoint(BreakpointLocation &location) noexcept
 {
   std::array<char, 32> bytes{};
   auto cmd = SerializeCommand(bytes, "z0,{:x},1", location.address().get());
-  auto response = connection->send_command_with_response(cmd, 1000);
+  auto response = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
   if (!(response.is_expected() && response.take_value() == "$OK")) {
     PANIC("Failed to unset breakpoint");
   }
@@ -284,7 +338,7 @@ GdbRemoteCommander::install_breakpoint(AddrPtr addr) noexcept
   std::array<char, 32> bytes{};
   auto cmd = SerializeCommand(bytes, "Z0,{:x},1", addr.get());
 
-  auto res = connection->send_command_with_response(cmd, 1000);
+  auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
   if (res.is_error()) {
     return TaskExecuteResponse::Error(0);
   }
@@ -297,17 +351,8 @@ GdbRemoteCommander::install_breakpoint(AddrPtr addr) noexcept
 TaskExecuteResponse
 GdbRemoteCommander::read_registers(TaskInfo &t) noexcept
 {
-  std::array<char, 48> bytes{};
-  auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", task_leader(), t.tid);
-  auto set_thread = connection->send_command_with_response(cmd, 1000);
-  if (set_thread.is_error()) {
-    return TaskExecuteResponse::Error(0);
-  }
-  if (set_thread.take_value() != "$OK") {
-    return TaskExecuteResponse::Error(0);
-  }
-
-  auto result = connection->send_command_with_response("g", 1000);
+  const gdb::GdbThread thread{task_leader(), t.tid};
+  auto result = connection->send_command_with_response(thread, "g", 1000);
   if (result.is_error()) {
     return TaskExecuteResponse::Error(0);
   }
@@ -370,24 +415,51 @@ GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
 std::string_view
 GdbRemoteCommander::get_thread_name(Tid tid) noexcept
 {
-  // TODO(Implement name change)
-  if (auto opt = utils::find_if(thread_names, [tid](auto &kvp) { return kvp.first == tid; }); opt) {
-    return (*opt)->second;
+  switch (type) {
+  case RemoteType::RR: {
+    char buf[256];
+    auto end = fmt::format_to(buf, "qThreadExtraInfo,p{:x}.{:x}", task_leader(), tid);
+    std::string_view cmd{buf, end};
+    const auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+    if (res.is_expected()) {
+      auto &name = thread_names[tid];
+      name.clear();
+      std::string_view n{res.value()};
+      n.remove_prefix("$"sv.size());
+      name.reserve(n.size() / 2);
+      for (auto i = 0u; i < n.size(); i += 2) {
+        char ch = utils::fromhex(n[i]) << 4 | utils::fromhex(n[i + 1]);
+        if (ch == 0) {
+          break;
+        }
+        name.push_back(ch);
+      }
+    } else {
+      thread_names[tid] = "Unknown";
+    }
+    return thread_names[tid];
   }
-  // READ ALL THREADS THAT REMOTE IS ATTACHED TO
+  case RemoteType::GDB: {
+    // TODO(Implement name change)
+    if (auto opt = utils::find_if(thread_names, [tid](auto &kvp) { return kvp.first == tid; }); opt) {
+      return (*opt)->second;
+    }
+    // READ ALL THREADS THAT REMOTE IS ATTACHED TO
 
-  gdb::qXferCommand read_threads{"qXfer:threads:read:", 0x8000};
-  const auto ok = connection->send_qXfer_command_with_response(read_threads, 1000);
-  if (!ok) {
-    return "";
-  }
+    gdb::qXferCommand read_threads{"qXfer:threads:read:", 0x8000};
+    const auto ok = connection->send_qXfer_command_with_response(read_threads, 1000);
+    if (!ok) {
+      return "";
+    }
 
-  // DETERMINE WHAT PROCESS SPACES WE ARE ATTACHED TO
-  const auto threads = parse_threads(read_threads.response_buffer);
-  for (auto &&[pid, tid, name] : threads) {
-    thread_names.emplace(tid, std::move(name));
+    // DETERMINE WHAT PROCESS SPACES WE ARE ATTACHED TO
+    const auto threads = parse_threads(read_threads.response_buffer);
+    for (auto &&[pid, tid, name] : threads) {
+      thread_names.emplace(tid, std::move(name));
+    }
+    return thread_names[tid];
   }
-  return thread_names[tid];
+  }
 }
 
 TaskExecuteResponse
@@ -396,14 +468,14 @@ GdbRemoteCommander::disconnect(bool terminate) noexcept
   std::array<char, 64> buf{};
   if (terminate) {
     auto cmd = SerializeCommand(buf, "vKill;{}", task_leader());
-    const auto res = connection->send_command_with_response(cmd, 1000);
+    const auto res = connection->send_command_with_response({}, cmd, 1000);
     if (res.is_expected() && res.value() == "$OK"sv) {
       return TaskExecuteResponse::Ok();
     }
     return TaskExecuteResponse::Error(0);
   } else {
     auto cmd = SerializeCommand(buf, "D;{}", task_leader());
-    const auto res = connection->send_command_with_response(cmd, 1000);
+    const auto res = connection->send_command_with_response({}, cmd, 1000);
     if (res.is_expected() && res.value() == "$OK"sv) {
       return TaskExecuteResponse::Ok();
     }
@@ -439,6 +511,12 @@ GdbRemoteCommander::post_exec() noexcept
   return true;
 }
 
+Interface
+GdbRemoteCommander::on_fork(Pid pid) noexcept
+{
+  TODO("implement GdbRemoteCommander::on_fork() noexcept");
+}
+
 std::optional<Path>
 GdbRemoteCommander::execed_file() noexcept
 {
@@ -462,6 +540,12 @@ Tid
 GdbRemoteCommander::task_leader() const noexcept
 {
   return process_id;
+}
+
+gdb::GdbThread
+GdbRemoteCommander::leader_to_gdb() const noexcept
+{
+  return gdb::GdbThread{process_id, process_id};
 }
 
 std::optional<std::vector<ObjectFileDescriptor>>
@@ -537,7 +621,7 @@ GdbRemoteCommander::read_auxv() noexcept
   } else {
     std::array<char, 64> bytes{};
     auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", task_leader(), task_leader());
-    auto set_thread = connection->send_command_with_response(cmd, 1000);
+    auto set_thread = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
 
     gdb::qXferCommand read_auxv{"qXfer:auxv:read:", 0x1000};
     const auto result = connection->send_qXfer_command_with_response(read_auxv, 1000);
@@ -572,17 +656,134 @@ RemoteSessionConfigurator::RemoteSessionConfigurator(gdb::RemoteConnection::ShrP
 {
 }
 
-// Commands that only return OK response, uses this
-#define OkOtherwiseErr(cmd, errMsg)                                                                               \
-  if (!conn->execute_command(cmd, 5000) || cmd.result.value_or("") != "$OK") {                                    \
-    return ConnInitError{.msg = errMsg};                                                                          \
+utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError>
+RemoteSessionConfigurator::configure_rr_session() noexcept
+{
+  using gdb::ConnInitError, gdb::SocketCommand;
+  // Todo; make response buffers in this scope all tied to one allocation instead of multiple
+
+  sleep(1);
+  if (conn->settings().is_noack) {
+    SocketCommand noack{"QStartNoAckMode"};
+    OkOtherwiseErr(noack, "Failed to configure no ack for connection");
+  }
+  // TURN ON EXTENDED MODE
+  SocketCommand extended{"!"};
+  OkOtherwiseErr(extended, "Failed to configure extended mode");
+
+  // INFORM REMOTE OF OUR CAPABILITIES; IT WILL RESPOND WITH THEIRS
+  SocketCommand qSupported{
+    "qSupported:multiprocess+;swbreak+;hwbreak+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;"
+    "vContSupported+;QThreadEvents+;QThreadOptions+;no-resumed+;memory-tagging+;xmlRegisters=i386;QNonStop+"};
+  SuccessOtherwiseErr(qSupported, "Failed to request supported options");
+  conn->parse_supported(qSupported.result.value());
+
+  // READ ALL THREADS THAT REMOTE IS ATTACHED TO
+  SocketCommand read_threads{"qfThreadInfo"};
+  SuccessOtherwiseErr(read_threads, "Failed to read threads list");
+  std::vector<std::tuple<Pid, Tid, std::string>> threads{};
+  std::string_view thr_result{read_threads.result.value()};
+  thr_result.remove_prefix("$m"sv.size());
+  const auto parsed = gdb::protocol_parse_threads(thr_result);
+  for (auto [pid, tid] : parsed) {
+    threads.emplace_back(pid, tid, "");
+  }
+  for (;;) {
+    SocketCommand continue_read_threads{"qsThreadInfo"};
+    SuccessOtherwiseErr(continue_read_threads, "Failed to continue thread query sequence");
+    std::string_view res{continue_read_threads.result.value()};
+    if (res == "$l") {
+      break;
+    } else {
+      res.remove_prefix("$m"sv.size());
+      const auto parsed = gdb::protocol_parse_threads(res);
+      for (auto [pid, tid] : parsed) {
+        threads.emplace_back(pid, tid, "");
+      }
+    }
   }
 
-// For use with commands that responds with arbitrary data (i.e. doesn't contain an OK in the string data)
-#define SuccessOtherwiseErr(cmd, errMsg)                                                                          \
-  if (!conn->execute_command(cmd, 5000)) {                                                                        \
-    return ConnInitError{.msg = errMsg};                                                                          \
+  std::vector<ProcessInfo> pinfo{};
+
+  for (auto &&[pid, tid, name] : threads) {
+    auto it = std::ranges::find_if(pinfo, [&](const auto &p) { return p.pid == pid; });
+    if (it != std::end(pinfo)) {
+      it->threads.push_back({tid, std::move(name)});
+    } else {
+      char buf[10]{0};
+      auto ptr = gdb::format_value(buf, pid);
+      gdb::qXferCommand execfile{"qXfer:exec-file:read:", 0x1000, std::string_view{buf, ptr}};
+      if (!conn->execute_command(execfile, 0, 1000)) {
+        return ConnInitError{.msg = "Failed to get exec file of process"};
+      }
+
+      // Gdb does this before requesting target.xml - maybe this is yet another retarded thing about this *SO
+      // CALLED* protocol.
+      std::array<char, 32> select_thread{};
+      auto cmd = SerializeCommand(select_thread, "Hgp{:x}.{:x}", pid, tid);
+      SocketCommand select_thread_cmd{cmd};
+      OkOtherwiseErr(select_thread_cmd, "Failed to select thread for operation");
+
+      gdb::qXferCommand request_arch_info{"qXfer:features:read:", 0x1000, "target.xml"};
+      if (!conn->execute_command(request_arch_info, 0, 1000)) {
+        return ConnInitError{.msg = "Failed to get exec file of process"};
+      }
+
+      DBGLOG(core, "Target Architecture Description requested:\n{}", request_arch_info.response_buffer);
+
+      xml::XMLParser parser{request_arch_info.response_buffer};
+      auto root_element = parser.parse();
+      std::vector<gdb::ArchReg> complete_arch{};
+      for (const auto &child : root_element->children) {
+        if (child->name == "xi:include") {
+          const auto include = child->attribute("href");
+          ASSERT(include.has_value(), "Expected xi:include to have href attribute");
+          gdb::qXferCommand included{"qXfer:features:read:", 0x1000, include.value()};
+          if (!conn->execute_command(included, 0, 1000)) {
+            return ConnInitError{.msg = "Failed to get exec file of process"};
+          }
+          xml::XMLParser parser{included.response_buffer};
+          auto include_root_element = parser.parse();
+          auto arch = gdb::read_arch_info(include_root_element);
+          std::copy(arch.begin(), arch.end(), std::back_inserter(complete_arch));
+        }
+      }
+
+      std::sort(complete_arch.begin(), complete_arch.end(), [](auto &a, auto &b) { return a.regnum < b.regnum; });
+
+      // Notice that we do not add the "main thread" to the list of threads. Because meta data for that thread
+      // is created when we spawn the TraceeController supervisor struct (it creates a normal thread meta data
+      // struct for the process)
+      pinfo.push_back(
+        {execfile.response_buffer, pid, {}, std::make_shared<gdb::ArchictectureInfo>(std::move(complete_arch))});
+    }
   }
+
+  // PROCESS STOP REPLIES - THEY WILL GET SENT TO MAIN EVENT LOOP, ESSENTIALLY "STARTING" the session
+  if (!threads.empty()) {
+    if (auto err = conn->init_stop_query(); err) {
+      return err.value();
+    }
+  }
+
+  std::vector<RemoteProcess> result{};
+  result.reserve(pinfo.size());
+
+  for (auto &&proc : pinfo) {
+    result.emplace_back(std::move(proc.threads),
+                        std::make_unique<GdbRemoteCommander>(RemoteType::RR, conn, proc.pid, std::move(proc.exe),
+                                                             std::move(proc.arch)));
+  }
+
+  if (result.empty()) {
+    return result;
+  }
+
+  SocketCommand select_thread_cmd{"QListThreadsInStopReply"};
+  OkOtherwiseErr(select_thread_cmd, "Failed to configure RR to list threads in stop reply");
+  conn->initialize_thread();
+  return result;
+}
 
 utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError>
 RemoteSessionConfigurator::configure_session() noexcept
@@ -675,8 +876,9 @@ RemoteSessionConfigurator::configure_session() noexcept
   result.reserve(pinfo.size());
 
   for (auto &&proc : pinfo) {
-    result.emplace_back(std::move(proc.threads), std::make_unique<GdbRemoteCommander>(
-                                                   conn, proc.pid, std::move(proc.exe), std::move(proc.arch)));
+    result.emplace_back(std::move(proc.threads),
+                        std::make_unique<GdbRemoteCommander>(RemoteType::GDB, conn, proc.pid, std::move(proc.exe),
+                                                             std::move(proc.arch)));
   }
 
   if (result.empty()) {

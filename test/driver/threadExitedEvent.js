@@ -1,5 +1,4 @@
-const { assert } = require('./utils')
-const { getLineOf } = require('./client')
+const { assert, assertLog } = require('./utils')
 /**
  *
  * @param {import("./client").DAClient } DA
@@ -8,6 +7,7 @@ async function see9ThreadExits(DA) {
   await DA.startRunToMain(DA.buildDirFile('threads_shared'))
   const threads = await DA.threads()
   let p = DA.prepareWaitForEventN('thread', 17, 1000)
+  let pexited = DA.prepareWaitForEventN('exited', 1, 1000)
   for (let i = 0; i < 3; i++) {
     const response = await DA.sendReqGetResponse('continue', { threadId: threads[0].id })
     if (i == 0) {
@@ -21,6 +21,8 @@ async function see9ThreadExits(DA) {
     }
   }
   let r = await p
+  let re = (await pexited)[0]
+
   let threads_started = 0
   let threads_exited = 0
 
@@ -28,10 +30,12 @@ async function see9ThreadExits(DA) {
     if (evt.reason == 'exited') threads_exited++
     if (evt.reason == 'started') threads_started++
   }
-  assert(
+  assertLog(
     threads_started == threads_exited - 1,
-    `Expected to see 8 new threads start and 9 threads exit. Started: ${threads_started}. Exited: ${threads_exited}`
+    `Expected to see 8 new threads start and 9 threads exit. `,
+    `Started: ${threads_started}. Exited: ${threads_exited}`
   )
+  assertLog(re.exitCode == 42, `Expected to see exit code 42. `, `Saw ${re.exitCode}`)
 }
 
 const tests = {

@@ -37,7 +37,7 @@ AwaiterThread::start_awaiter_thread(tc::TraceeCommandInterface *tc) noexcept
         continue;
       }
       const auto wait_result = process_status(res, status);
-      push_wait_event(pid, wait_result);
+      push_wait_event(0, wait_result);
     }
     DBGLOG(core, "Exiting awaiter thread {}", pid);
   }};

@@ -4,20 +4,49 @@
 #include "../../utils/logger.h"
 #include "../ui_result.h"
 #include "commands.h"
+#include "common.h"
 #include "events.h"
 #include "lib/lockguard.h"
 #include "parse_buffer.h"
+#include "utils/enumerator.h"
 #include <algorithm>
+#include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <fmt/core.h>
 #include <memory_resource>
 #include <poll.h>
+#include <random>
+#include <supervisor.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
+#include <sys/un.h>
 #include <thread>
+#include <unistd.h>
 #include <utils/signals.h>
 namespace ui::dap {
 using namespace std::string_literals;
+
+DapClientSession
+child_session(DapClientSession type) noexcept
+{
+  switch (type) {
+  case DapClientSession::None:
+    PANIC("No session type has been set.");
+  case DapClientSession::Launch:
+    return DapClientSession::LaunchedChildSession;
+  case DapClientSession::Attach:
+    return DapClientSession::AttachedChildSession;
+  case DapClientSession::RR:
+    return DapClientSession::RRChildSession;
+  case DapClientSession::LaunchedChildSession:
+  case DapClientSession::AttachedChildSession:
+  case DapClientSession::RRChildSession:
+    return type;
+  }
+}
 
 constexpr pollfd
 cfg_write_poll(int fd, int additional_flags) noexcept
@@ -94,16 +123,16 @@ static constexpr std::string_view strings[]{
 
 using json = nlohmann::json;
 
-DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd,
-         utils::Notifier::WriteEnd command_notifier) noexcept
+DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept
     : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), keep_running(true),
-      output_message_lock{}, events_queue{}, seq(0), command_notifier(command_notifier)
+      output_message_lock{}, events_queue{}, seq(0)
 {
   auto [r, w] = utils::Notifier::notify_pipe();
+  new_client_notifier = utils::Notifier::notify_pipe();
   posted_event_notifier = w;
   posted_evt_listener = r;
-  buffer = mmap_buffer<char>(4096);
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
+  sources.push_back({new_client_notifier.read.fd, InterfaceNotificationSource::NewClient, nullptr});
 }
 
 UIResultPtr
@@ -126,96 +155,143 @@ DAP::write_protocol_message(std::string_view msg) noexcept
 }
 
 void
-DAP::run_ui_loop()
+DAP::start_interface() noexcept
 {
   utils::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
-  auto cleanup_times = 5;
-  ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
-  static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
+  new_client({.t = DebugAdapterClient::createStandardIOConnection()});
 
-  // These are stack data. So when we process events, we don't want to be
-  // returning `new`ed memory over and over. Just fill it in our local buffer
-  // and we are done with it at each iteration, reusing the same buffer over and over.
-  std::byte descriptor_buffer[sizeof(ContentDescriptor) * 15];
-  std::byte pmr_buffer[sizeof(pollfd) * 10];
-
-  while (keep_running || cleanup_times > 0) {
-    const auto master_pty = current_tty();
-    std::pmr::monotonic_buffer_resource descriptor_resource{&descriptor_buffer, DESCRIPTOR_STORAGE_SIZE};
-    std::pmr::monotonic_buffer_resource resource{&pmr_buffer, sizeof(pmr_buffer)};
-    std::pmr::vector<pollfd> pfds{&resource};
-    if (master_pty) {
-      pfds.push_back(cfg_read_poll(tracer_in_fd, 0));
-      pfds.push_back(cfg_read_poll(posted_evt_listener, 0));
-      pfds.push_back(cfg_read_poll(*master_pty, 0));
-    } else {
-      pfds.push_back(cfg_read_poll(tracer_in_fd, 0));
-      pfds.push_back(cfg_read_poll(posted_evt_listener, 0));
-    }
-
-    auto ready = poll(pfds.data(), pfds.size(), 1000);
-    VERIFY(ready != -1, "Failed to poll");
-    for (auto i = 0u; i < pfds.size() && ready > 0; i++) {
-
-      if ((pfds[i].revents & POLLIN) || ((pfds[i].revents & POLLOUT))) {
-        // DAP Requests (or parts of) have came in via stdout
-        if (pfds[i].fd == tracer_in_fd) {
-          parse_swapbuffer.expect_read_from_fd(pfds[i].fd);
-          bool no_partials = false;
-          const auto request_headers =
-            parse_headers_from(parse_swapbuffer.take_view(), descriptor_resource, &no_partials);
-          if (no_partials && request_headers.size() > 0) {
-            for (auto &&hdr : request_headers) {
-              const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
-              const auto cmd = parse_command(std::string{cd->payload()});
-              push_command_event(cmd);
-            }
-            // since there's no partials left in the buffer, we reset it
-            parse_swapbuffer.clear();
-          } else {
-            if (request_headers.size() > 1) {
-              for (auto i = 0ull; i < request_headers.size() - 1; i++) {
-                const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
-                const auto cmd = parse_command(std::string{cd->payload()});
-                push_command_event(cmd);
-              }
-
-              auto rd = maybe_unwrap<RemainderData>(request_headers.back());
-              parse_swapbuffer.swap(rd->offset);
-              ASSERT(parse_swapbuffer.current_size() == rd->length,
-                     "Parse Swap Buffer operation failed; expected length {} but got {}", rd->length,
-                     parse_swapbuffer.current_size());
-            }
-          }
-        } else if (pfds[i].fd == posted_evt_listener.fd) {
-          // process new messages (strings) posted on the output queue
-          posted_evt_listener.consume_expected();
-          flush_events();
-        } else if (pfds[i].fd == master_pty && (pfds[i].revents & POLLIN)) {
-          const auto bytes_read = read(*master_pty, tracee_stdout_buffer, 4096 * 3);
-          if (bytes_read == -1) {
-            continue;
-          }
-          std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-          post_event(new ui::dap::OutputEvent{"stdout", std::string{data}});
-        }
-      }
-    }
-    if (!keep_running) {
-      cleanup_times--;
-    }
+  while (keep_running) {
+    one_poll(sources.size());
   }
-  cleaned_up = true;
 }
 
 void
-DAP::post_event(UIResultPtr serializable_event) noexcept
+DAP::init_poll(pollfd *fds)
 {
-  {
-    LockGuard<SpinLock> guard{output_message_lock};
-    events_queue.push_back(serializable_event);
+  auto index = 0;
+  for (const auto [fd, src, client] : sources) {
+    fds[index++] = pollfd{.fd = fd, .events = POLLIN, .revents = 0};
   }
-  notify_new_message();
+}
+
+void
+DAP::add_source(NotifSource source) noexcept
+{
+  sources.push_back(source);
+}
+
+void
+DAP::one_poll(u32 notifier_queue_size) noexcept
+{
+  pollfd fds[notifier_queue_size];
+  for (auto i : fds) {
+  }
+  init_poll(fds);
+  auto ready = poll(fds, notifier_queue_size, 1000);
+  VERIFY(ready != -1, "polling failed: {}", strerror(errno));
+  if (ready == 0) {
+    // no ready events
+    return;
+  }
+  for (auto i = 0u; i < notifier_queue_size; ++i) {
+    if ((fds[i].revents & POLLIN) == POLLIN) {
+      auto [fd, source, client] = sources[i];
+      switch (source) {
+      case InterfaceNotificationSource::NewClient:
+        // do nothing. We just need to be woken up, to start polling it.
+        new_client_notifier.read.consume_expected();
+        break;
+      case InterfaceNotificationSource::DebugAdapterClient:
+        client->commands_read();
+        break;
+      case InterfaceNotificationSource::ClientStdout: {
+        auto tty = client->tty();
+        ASSERT(tty.has_value(), "DAP Client has invalid configuration");
+        const auto bytes_read = read(*tty, tracee_stdout_buffer, 4096 * 3);
+        if (bytes_read == -1) {
+          continue;
+        }
+        std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
+        client->write(ui::dap::OutputEvent{"stdout", std::string{data}}.serialize(0));
+      } break;
+      }
+    }
+  }
+}
+
+void
+DAP::new_client(utils::OwningPointer<DebugAdapterClient> client)
+{
+  clients.push_back(client);
+  add_source({client->read_fd(), InterfaceNotificationSource::DebugAdapterClient, client});
+  new_client_notifier.write.notify();
+}
+
+void
+DebugAdapterClient::commands_read() noexcept
+{
+  static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
+  std::byte descriptor_buffer[sizeof(ContentDescriptor) * 15];
+  std::pmr::monotonic_buffer_resource descriptor_resource{&descriptor_buffer, DESCRIPTOR_STORAGE_SIZE};
+
+  parse_swapbuffer.expect_read_from_fd(in);
+  bool no_partials = false;
+  const auto request_headers = parse_headers_from(parse_swapbuffer.take_view(), descriptor_resource, &no_partials);
+  if (no_partials && request_headers.size() > 0) {
+    for (auto &&hdr : request_headers) {
+      const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
+      const auto cmd = parse_command(std::string{cd->payload()});
+
+      push_command_event(this, cmd);
+    }
+    // since there's no partials left in the buffer, we reset it
+    parse_swapbuffer.clear();
+  } else {
+    if (request_headers.size() > 1) {
+      for (auto i = 0ull; i < request_headers.size() - 1; i++) {
+        const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
+        const auto cmd = parse_command(std::string{cd->payload()});
+        push_command_event(this, cmd);
+      }
+
+      auto rd = maybe_unwrap<RemainderData>(request_headers.back());
+      parse_swapbuffer.swap(rd->offset);
+      ASSERT(parse_swapbuffer.current_size() == rd->length,
+             "Parse Swap Buffer operation failed; expected length {} but got {}", rd->length,
+             parse_swapbuffer.current_size());
+    }
+  }
+}
+
+void
+DebugAdapterClient::set_tty_out(int fd) noexcept
+{
+  ASSERT(tty_fd == -1, "TTY fd was already set!");
+  tty_fd = fd;
+  auto dap = Tracer::Instance->dap;
+  dap->configure_tty(fd);
+  dap->add_source({fd, InterfaceNotificationSource::ClientStdout, this});
+}
+
+std::optional<int>
+DebugAdapterClient::tty() const noexcept
+{
+  if (tty_fd != -1) {
+    return tty_fd;
+  }
+  return {};
+}
+
+TraceeController *
+DebugAdapterClient::supervisor() const noexcept
+{
+  return tc;
+}
+
+void
+DebugAdapterClient::set_session_type(DapClientSession type) noexcept
+{
+  session_type = type;
 }
 
 void
@@ -244,8 +320,14 @@ DAP::clean_up() noexcept
   flush_events();
 }
 
+DebugAdapterClient *
+DAP::main_connection() const noexcept
+{
+  return clients.front();
+}
+
 void
-DAP::add_tty(int master_pty_fd) noexcept
+DAP::configure_tty(int master_pty_fd) noexcept
 {
   // todo(simon): when we add a new pty, what we need to do
   // is somehow find a way to re-route (temporarily) the other pty's to /dev/null, because we don't care for them
@@ -254,17 +336,154 @@ DAP::add_tty(int master_pty_fd) noexcept
   auto flags = fcntl(master_pty_fd, F_GETFL);
   VERIFY(flags != -1, "Failed to get pty flags");
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
-  current_tty_idx = tty_fds.size();
-  tty_fds.push_back(master_pty_fd);
 }
 
-std::optional<int>
-DAP::current_tty() noexcept
+DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
+    : socket_path(std::move(path)), in(socket), out(socket), session_type(type)
 {
-  if (tty_fds.empty()) {
-    return std::nullopt;
+}
+
+DebugAdapterClient::DebugAdapterClient(DapClientSession type, int standard_in, int standard_out) noexcept
+    : in(standard_in), out(standard_out), session_type(type)
+{
+}
+
+DebugAdapterClient::~DebugAdapterClient() noexcept
+{
+  if (fs::exists(socket_path)) {
+    unlink(socket_path.c_str());
+    // means that in and out are of a socket, and not stdio
+    close(in);
+    close(out);
   }
-  return tty_fds[current_tty_idx];
+}
+
+static std::string
+generate_random_alphanumeric_string(size_t length)
+{
+  static constexpr std::string_view characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  std::string random_string;
+  random_string.reserve(length);
+
+  std::random_device rd;  // Seed for the random number engine
+  std::mt19937 gen(rd()); // Standard mersenne_twister_engine
+  std::uniform_int_distribution<> dis(0, characters.size() - 1);
+
+  for (size_t i = 0; i < length; ++i) {
+    random_string.push_back(characters[dis(gen)]);
+  }
+
+  return random_string;
+}
+
+/*static*/
+DebugAdapterClient *
+DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
+{
+  fs::path socket_path = fmt::format("/tmp/midas-{}", generate_random_alphanumeric_string(15));
+  if (fs::exists(socket_path)) {
+    if (unlink(socket_path.c_str()) == -1) {
+      PANIC("Failed to unlink old socket path");
+    }
+  }
+  auto socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  sockaddr_un address;
+  std::memset(&address, 0, sizeof(sockaddr_un));
+  address.sun_family = AF_UNIX;
+  std::strncpy(address.sun_path, socket_path.c_str(), sizeof(address.sun_path) - 1);
+  if (bind(socket_fd, (sockaddr *)&address, sizeof(sockaddr_un)) == -1) {
+    close(socket_fd);
+    return nullptr;
+  }
+
+  if (listen(socket_fd, 1) == -1) {
+    close(socket_fd);
+    return nullptr;
+  }
+
+  auto reverseRequest = fmt::format(
+    R"({{ "seq": 1, "type": "event", "event": "startDebugging", "body": {{ "configuration": {{ "path": "{}" }} }} }})",
+    socket_path.c_str());
+
+  client->write(reverseRequest);
+
+  for (;;) {
+    auto accepted = accept(socket_fd, nullptr, nullptr);
+    if (accepted != -1) {
+      return new DebugAdapterClient{child_session(client->session_type), std::move(socket_path), accepted};
+    }
+  }
+}
+
+DebugAdapterClient *
+DebugAdapterClient::createStandardIOConnection() noexcept
+{
+  return new DebugAdapterClient{DapClientSession::None, STDIN_FILENO, STDOUT_FILENO};
+}
+
+void
+DebugAdapterClient::client_configured(TraceeController *supervisor) noexcept
+{
+  tc = supervisor;
+  tc->configure_dap_client(this);
+}
+
+void
+DebugAdapterClient::post_event(ui::UIResultPtr event)
+{
+  // TODO(simon): I'm split on the idea if we should have one thread for each DebugAdapterClient, or like we do
+  // now, 1 thread for all debug adapter client, that does it's dispatching vie the poll system calls. If we land,
+  // 100% in the idea to keep it this way, we shouldn't really have to `new` and `delete` UIResultPtr's, that
+  // should just be on the stack; but I'm keeping it here for now, in case I want to try out the other way.
+  auto result = event->serialize(0);
+  write(result);
+  delete event;
+}
+
+int
+DebugAdapterClient::read_fd() const noexcept
+{
+  return in;
+}
+int
+DebugAdapterClient::out_fd() const noexcept
+{
+  return out;
+}
+
+static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
+
+bool
+DebugAdapterClient::write(std::string_view output) noexcept
+{
+  char header_buffer[128]{"Content-Length: "};
+  static constexpr auto header_end = "\r\n\r\n"sv;
+
+  auto begin = header_buffer + ContentLengthHeaderLength;
+  auto res = std::to_chars(begin, header_buffer + 128, output.size(), 10);
+  ASSERT(res.ec == std::errc(), "Failed to append message size to content header");
+  std::memcpy(res.ptr, header_end.data(), header_end.size());
+  const auto header_length = static_cast<int>(res.ptr + header_end.size() - header_buffer);
+
+  struct iovec iov[2];
+  iov[0].iov_base = header_buffer;
+  iov[0].iov_len = header_length;
+
+  iov[1].iov_base = (void *)output.data();
+  iov[1].iov_len = output.size();
+
+  const auto header = fmt::format("Content-Length: {}\r\n\r\n", output.size());
+  if constexpr (MDB_DEBUG == 1) {
+    if (tc == nullptr) {
+      CDLOG(MDB_DEBUG == 1, dap, "[Partial DA] WRITING -->{}{}<---", header, output);
+    } else {
+      CDLOG(MDB_DEBUG == 1, dap, "[Process: {}] WRITING -->{}{}<---", tc->task_leader, header, output);
+    }
+  }
+
+  const auto result = ::writev(out, iov, 2);
+  VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", out, output);
+  return result >= static_cast<ssize_t>(output.size());
 }
 
 } // namespace ui::dap

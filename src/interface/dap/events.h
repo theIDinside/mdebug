@@ -67,6 +67,14 @@ struct ContinuedEvent final : public ui::UIResult
   std::string serialize(int seq) const noexcept final;
 };
 
+struct Process final : public ui::UIResult
+{
+  std::string name;
+  bool is_local;
+  Process(std::string name, bool is_local) noexcept;
+  std::string serialize(int seq) const noexcept final;
+};
+
 struct ExitedEvent final : public ui::UIResult
 {
   // exitCode

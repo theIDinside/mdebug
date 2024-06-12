@@ -7,8 +7,13 @@
 #include <vector>
 
 class Tracer;
-
+struct TraceeController;
 namespace ui {
+
+namespace dap {
+class DebugAdapterClient;
+}
+
 struct UIResult;
 using UIResultPtr = const UIResult *;
 
@@ -82,13 +87,21 @@ concept HasValidation = requires(const Json &json) {
 
 struct UICommand
 {
+  dap::DebugAdapterClient *dap_client;
+
 public:
   explicit UICommand(std::uint64_t seq) noexcept : seq(seq) {}
   virtual ~UICommand() = default;
 
+  constexpr void
+  set_target(dap::DebugAdapterClient &da) noexcept
+  {
+    dap_client = &da;
+  }
+
   /* Executes the command. This is always performed in the Tracer thread (where all tracee controller actions are
    * performed. )*/
-  virtual UIResultPtr execute(Tracer *tracer) noexcept = 0;
+  virtual UIResultPtr execute() noexcept = 0;
 
   template <typename Derived, typename JsonArgs>
   static constexpr MissingOrInvalidResult

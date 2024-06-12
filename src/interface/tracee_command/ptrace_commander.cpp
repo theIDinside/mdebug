@@ -52,6 +52,12 @@ PtraceCommander::post_exec() noexcept
   return procfs_memfd.is_open();
 }
 
+Interface
+PtraceCommander::on_fork(Pid pid) noexcept
+{
+  return std::make_unique<PtraceCommander>(pid);
+}
+
 Tid
 PtraceCommander::task_leader() const noexcept
 {
@@ -281,9 +287,9 @@ PtraceCommander::get_thread_name(Tid tid) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::disconnect(bool terminate) noexcept
+PtraceCommander::disconnect(bool kill_target) noexcept
 {
-  if (terminate) {
+  if (kill_target) {
     const auto result = tgkill(process_id, process_id, SIGKILL);
     if (result == -1) {
       return TaskExecuteResponse::Error(errno);
@@ -302,8 +308,6 @@ bool
 PtraceCommander::perform_shutdown() noexcept
 {
   awaiter_thread->init_shutdown();
-  auto tasks = utils::ThreadPool::get_global_pool()->shutdown_tasks();
-
   return true;
 }
 

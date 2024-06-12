@@ -11,6 +11,7 @@ struct TraceeController;
 
 namespace gdb {
 
+struct GdbThread;
 class RemoteConnection;
 
 using RegisterData = std::vector<std::pair<u32, std::vector<u8>>>;
@@ -127,5 +128,7 @@ struct WaitEventParser
   void set_syscall_exit(int number) noexcept;
 
   void set_syscall_entry(int number) noexcept;
+
+  std::vector<GdbThread> parse_threads_parameter(std::string_view input) noexcept;
 };
 } // namespace gdb

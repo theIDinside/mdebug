@@ -99,9 +99,12 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
          cu_die.die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
-         to_str(cu_die.die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+  if (!name) {
+    DBGLOG(core, "Expected to find name attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+           to_str(cu_die.die->tag));
+    return;
+  }
+  ASSERT(type_id, "Expected to find type_id attribute for die 0x{:x} ({})", cu_die.die->section_offset,
          to_str(cu_die.die->tag));
 
   auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
@@ -167,6 +170,8 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
         break;
       default:
         DBGLOG(core, "[WARNING]: Unexpected Tag in subprorogram die: {}", to_str(die_it->tag));
+        die_it = next(die_it, die_it->sibling());
+        break;
       }
     }
   }
@@ -208,6 +213,24 @@ TypeSymbolicationContext::process_inheritance(DieReference cu_die) noexcept
   }
 }
 
+static std::string_view
+name_from_tag(DwarfTag tag) noexcept
+{
+  switch (tag) {
+  case DwarfTag::DW_TAG_class_type:
+    return "class";
+  case DwarfTag::DW_TAG_enumeration_type:
+    return "enum";
+  case DwarfTag::DW_TAG_structure_type:
+    return "structure";
+  case DwarfTag::DW_TAG_union_type:
+    return "union";
+  default:
+    break;
+  }
+  ASSERT(false, "Did not expect that DwarfTag");
+}
+
 void
 TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 {
@@ -216,23 +239,37 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
   const auto name = cu_die.read_attribute(Attribute::DW_AT_name);
   const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
 
-  ASSERT(location, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
-         to_str(cu_die.die->tag));
+  // A member without a location is not a member. It can be a static variable or a constexpr variable.
+  if (!location) {
+    DBGLOG(core, "die 0x{:x} (name={}) is DW_TAG_member but had no location (static/constexpr/static-constexpr?)",
+           cu_die.die->section_offset,
+           name.transform([](auto v) { return v.string(); }).value_or("die had no name"));
+    return;
+  }
+
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}", cu_die.cu->section_offset(),
          cu_die.die->section_offset);
-  ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
-         to_str(cu_die.die->tag));
-  ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.die->section_offset,
+  ASSERT(type_id, "Expected to find type attribute for die 0x{:x} ({})", cu_die.die->section_offset,
          to_str(cu_die.die->tag));
 
-  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
-  ASSERT(containing_cu_die_ref.has_value(),
-         "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
-
-  auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
-  const auto member_offset = location->unsigned_value();
-  this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
+  if (!name) {
+    // means we're likely some anonymous structure of some kind
+    auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+    ASSERT(containing_cu_die_ref.has_value(),
+           "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
+    auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
+    const auto member_offset = location->unsigned_value();
+    auto name = name_from_tag(type->die_tag);
+    this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name});
+  } else {
+    auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+    ASSERT(containing_cu_die_ref.has_value(),
+           "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
+    auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->as_indexed());
+    const auto member_offset = location->unsigned_value();
+    this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
+  }
 }
 
 void

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <iterator>
+#include <memory>
 #include <optional>
 
 // This is a test-subject program for end-user-developers. We run manual debug sessions against this binary.
@@ -107,6 +108,9 @@ enums()
 int
 main(int argc, const char **argv)
 {
+  auto ptr = std::make_unique<int>(1);
+  std::unique_ptr<Person> person = std::make_unique<Person>(1, 36, "John Connor");
+  std::unique_ptr<Person> null = nullptr;
   enums();
   heap_allocated_variant();
   variants();
@@ -117,10 +121,10 @@ main(int argc, const char **argv)
   int personId = 0;
   int age = 42;
   Person p{personId, 42, "John"};
-  age = 42; // LOCALS_BP
+  age = 1337; // LOCALS_BP
+  printf("Hello John. Goodbye John.\n");
   Person p2{1337, age, "Jane"};
   bool pcheck_one = test(p);
   bool pcheck_two = test(p2);
-
   test({1337, age, "Jane"}); // MAIN_END
 }

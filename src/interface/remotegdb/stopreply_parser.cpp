@@ -71,7 +71,7 @@ StopReplyParser::parse_thread_exited() noexcept
     return {};
   }
   parse_data.remove_prefix(1);
-  const auto [pid, tid] = parse_thread_id(parse_data);
+  const auto [pid, tid] = gdb::GdbThread::parse_thread(parse_data);
 
   return std::make_tuple(pid, tid, exit_status.value());
 }

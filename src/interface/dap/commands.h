@@ -176,7 +176,16 @@ template <size_t Size> struct VerifyMap
 
 #define DefineArgTypes(...)                                                                                       \
   static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({__VA_ARGS__});                              \
-  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};
+  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};                                   \
+  template <typename Json>                                                                                        \
+  constexpr static auto ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept                 \
+    -> std::optional<InvalidArg>                                                                                  \
+  {                                                                                                               \
+    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {                                                  \
+      return std::move(err).take();                                                                               \
+    }                                                                                                             \
+    return std::nullopt;                                                                                          \
+  }
 
 struct Message
 {
@@ -198,6 +207,27 @@ struct ErrorResponse final : ui::UIResult
   std::optional<Message> message;
 };
 
+struct ReverseContinueResponse final : ui::UIResult
+{
+  CTOR(ReverseContinueResponse);
+  ~ReverseContinueResponse() noexcept override = default;
+  bool continue_all;
+  std::string serialize(int seq) const noexcept final;
+};
+
+/** ReverseContinue under RR is *always* "continue all"*/
+struct ReverseContinue final : ui::UICommand
+{
+  ReverseContinue(u64 seq, int thread_id) noexcept;
+  ~ReverseContinue() noexcept override = default;
+  int thread_id;
+  UIResultPtr execute() noexcept final;
+
+  DEFINE_NAME("reverseContinue");
+  RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
+};
+
 struct ContinueResponse final : ui::UIResult
 {
   CTOR(ContinueResponse);
@@ -213,21 +243,11 @@ struct Continue final : public ui::UICommand
 
   Continue(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~Continue() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   DEFINE_NAME("continue");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct PauseResponse final : ui::UIResult
@@ -246,22 +266,12 @@ struct Pause final : public ui::UICommand
 
   Pause(u64 seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
   ~Pause() override = default;
-  UIResultPtr execute(Tracer *tc) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   Args pauseArgs;
   DEFINE_NAME("pause");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 enum class SteppingGranularity
@@ -289,20 +299,10 @@ struct Next final : public ui::UICommand
   {
   }
   ~Next() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("next");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct StepInResponse final : ui::UIResult
@@ -324,20 +324,10 @@ struct StepIn final : public ui::UICommand
   }
 
   ~StepIn() noexcept final = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("stepIn");
   RequiredArguments({"threadId"});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct StepOutResponse final : ui::UIResult
@@ -354,20 +344,10 @@ struct StepOut final : public ui::UICommand
 
   StepOut(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("stepOut");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 // This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
@@ -386,7 +366,7 @@ struct SetBreakpoints final : public ui::UICommand
   SetBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("setBreakpoints");
   RequiredArguments({"source"sv});
 };
@@ -395,7 +375,7 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 {
   SetExceptionBreakpoints(u64 sequence, nlohmann::json &&args) noexcept;
   ~SetExceptionBreakpoints() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   Immutable<nlohmann::json> args;
 
@@ -409,7 +389,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   SetInstructionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
@@ -419,9 +399,32 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   SetFunctionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetFunctionBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({"breakpoints"sv});
+};
+
+struct WriteMemoryResponse final : public ui::UIResult
+{
+  CTOR(WriteMemoryResponse);
+  ~WriteMemoryResponse() noexcept override = default;
+  std::string serialize(int seq) const noexcept final;
+  u64 bytes_written;
+};
+
+struct WriteMemory final : public ui::UICommand
+{
+  WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept;
+  ~WriteMemory() override = default;
+  UIResultPtr execute() noexcept final;
+
+  std::optional<AddrPtr> address;
+  int offset;
+  std::vector<u8> bytes;
+
+  DEFINE_NAME("writeMemory");
+  RequiredArguments({"memoryReference"sv, "data"sv});
+  DefineArgTypes({"memoryReference", FieldType::String}, {"data", FieldType::String}, {"offset", FieldType::Int});
 };
 
 struct ReadMemoryResponse final : public ui::UIResult
@@ -438,7 +441,7 @@ struct ReadMemory final : public ui::UICommand
 {
   ReadMemory(u64 seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
   ~ReadMemory() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int offset;
@@ -447,16 +450,6 @@ struct ReadMemory final : public ui::UICommand
   DEFINE_NAME("readMemory");
   RequiredArguments({"memoryReference"sv, "count"sv});
   DefineArgTypes({"memoryReference", FieldType::String}, {"count", FieldType::Int}, {"offset", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct ConfigurationDoneResponse final : public ui::UIResult
@@ -470,7 +463,7 @@ struct ConfigurationDone final : public ui::UICommand
 {
   ConfigurationDone(u64 seq) noexcept : UICommand(seq) {}
   ~ConfigurationDone() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   DEFINE_NAME("configurationDone");
   NoRequiredArgs();
@@ -479,15 +472,18 @@ struct ConfigurationDone final : public ui::UICommand
 struct InitializeResponse final : public ui::UIResult
 {
   CTOR(InitializeResponse);
+  InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept;
   ~InitializeResponse() noexcept override = default;
   std::string serialize(int seq) const noexcept final;
+
+  bool RRSession;
 };
 
 struct Initialize final : public ui::UICommand
 {
   Initialize(u64 seq, nlohmann::json &&arguments) noexcept;
   ~Initialize() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   nlohmann::json args;
   DEFINE_NAME("initialize");
   NoRequiredArgs();
@@ -504,7 +500,7 @@ struct Disconnect final : public UICommand
 {
   Disconnect(u64 seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
   ~Disconnect() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   bool restart, terminate_tracee, suspend_tracee;
   DEFINE_NAME("disconnect");
   NoRequiredArgs();
@@ -521,23 +517,13 @@ struct Launch final : public UICommand
 {
   Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   bool stopOnEntry;
   Path program;
   std::vector<std::string> program_args;
   DEFINE_NAME("launch");
   RequiredArguments({"program"sv});
   DefineArgTypes({"program", FieldType::String});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto &&err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct AttachResponse final : public UIResult
@@ -551,24 +537,14 @@ struct Attach final : public UICommand
 {
   Attach(u64 seq, AttachArgs &&args) noexcept;
   ~Attach() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
   RequiredArguments({"type"});
 
   DefineArgTypes({"port", FieldType::Int}, {"host", FieldType::String}, {"pid", FieldType::Int},
-                 {"type", FieldType::Enumeration, {"ptrace"sv, "gdbremote"sv}});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto &&err = ArgTypes.isOK(arg_contents, arg_name); err) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
+                 {"type", FieldType::Enumeration, {"ptrace"sv, "gdbremote"sv, "rr"}});
 
   // Attach gets a `create` function because in the future, constructing this command will be much more complex
   // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
@@ -588,7 +564,10 @@ struct Attach final : public UICommand
       if (args.contains("allstop") && args.at("allstop").is_boolean()) {
         allstop = args.at("allstop");
       }
-      return new Attach{seq, GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop}};
+      RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
+
+      return new Attach{seq,
+                        GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop, .type = remote_type}};
     };
   }
 };
@@ -604,7 +583,7 @@ struct Terminate final : public UICommand
 {
   Terminate(u64 seq) noexcept : UICommand(seq) {}
   ~Terminate() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("terminate");
   NoRequiredArgs();
 };
@@ -621,7 +600,7 @@ struct Threads final : public UICommand
 {
   Threads(u64 seq) noexcept : UICommand(seq) {}
   ~Threads() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   DEFINE_NAME("threads");
   NoRequiredArgs();
 };
@@ -631,7 +610,7 @@ struct StackTrace final : public UICommand
   StackTrace(u64 seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   int threadId;
   std::optional<int> startFrame;
   std::optional<int> levels;
@@ -639,16 +618,6 @@ struct StackTrace final : public UICommand
   DEFINE_NAME("stackTrace");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct StackTraceResponse final : public UIResult
@@ -664,21 +633,11 @@ struct Scopes final : public UICommand
 {
   Scopes(u64 seq, int frameId) noexcept;
   ~Scopes() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   int frameId;
   DEFINE_NAME("scopes");
   RequiredArguments({"frameId"sv});
   DefineArgTypes({"frameId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct ScopesResponse final : public UIResult
@@ -704,7 +663,7 @@ struct Evaluate final : public UICommand
   Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
            std::optional<EvaluationContext> context) noexcept;
   ~Evaluate() noexcept final = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   Immutable<std::string> expr;
   Immutable<std::optional<int>> frameId;
@@ -713,16 +672,6 @@ struct Evaluate final : public UICommand
   DEFINE_NAME("evaluate");
   RequiredArguments({"expression"sv});
   DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 
   static std::optional<EvaluationContext> parse_context(std::string_view input) noexcept;
 };
@@ -744,7 +693,7 @@ struct Variables final : public UICommand
 {
   Variables(u64 seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
   int var_ref;
   std::optional<u32> start;
@@ -752,16 +701,6 @@ struct Variables final : public UICommand
   DEFINE_NAME("variables");
   RequiredArguments({"variablesReference"sv});
   DefineArgTypes({"variablesReference", FieldType::Int}, {"start", FieldType::Int}, {"count", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct VariablesResponse final : public UIResult
@@ -786,7 +725,7 @@ struct Disassemble final : public UICommand
   Disassemble(u64 seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
   ~Disassemble() override = default;
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int byte_offset;
@@ -797,16 +736,6 @@ struct Disassemble final : public UICommand
   RequiredArguments({"memoryReference", "instructionCount"});
   DefineArgTypes({"memoryReference", FieldType::String}, {"instructionCount", FieldType::Int},
                  {"instructionOffset", FieldType::Int}, {"offset", FieldType::Int});
-
-  template <typename Json>
-  constexpr static auto
-  ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept -> std::optional<InvalidArg>
-  {
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name)) {
-      return std::move(err).take();
-    }
-    return std::nullopt;
-  }
 };
 
 struct InvalidArgsResponse final : public UIResult
@@ -830,7 +759,7 @@ struct InvalidArgs final : public UICommand
   InvalidArgs(u64 seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgs() override = default;
 
-  UIResultPtr execute(Tracer *tracer) noexcept final;
+  UIResultPtr execute() noexcept final;
 
   ArgumentErrorKind kind;
   std::string_view command;

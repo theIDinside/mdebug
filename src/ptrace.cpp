@@ -4,6 +4,7 @@
 #include <source_location>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
+#include <tracer.h>
 #include <utility>
 
 std::string_view
@@ -99,7 +100,9 @@ request_name(__ptrace_request req)
 void
 new_target_set_options(pid_t pid)
 {
-  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD;
+  const auto options =
+    PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXIT;
+  Tracer::Instance->TraceExitConfigured = (options & PTRACE_O_TRACEEXIT) != 0;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;
     if (-1 == waitpid(pid, &stat, 0)) {
@@ -192,8 +195,8 @@ from_register(u64 syscall_number)
   return WaitStatusKind::Stopped;
 }
 
-static TaskWaitResult
-wait_result_stopped(Tid tid, int status)
+TaskWaitResult
+wait_result_stopped(Tid tid, int status) noexcept
 {
   WaitStatusKind kind = WaitStatusKind::NotKnown;
   TaskWaitResult wait{.tid = tid, .ws = {.ws = WaitStatusKind::NotKnown, .exit_code = 0}};
@@ -236,7 +239,8 @@ wait_result_stopped(Tid tid, int status)
 static TaskWaitResult
 wait_result_exited(Tid tid, int status)
 {
-  return TaskWaitResult{.tid = tid, .ws = {.ws = WaitStatusKind::Exited, .exit_code = WEXITSTATUS(status)}};
+  int exit_code = WEXITSTATUS(status);
+  return TaskWaitResult{.tid = tid, .ws = {.ws = WaitStatusKind::Exited, .exit_code = exit_code}};
 }
 
 static TaskWaitResult

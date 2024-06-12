@@ -464,6 +464,32 @@ UserBreakpoints::new_id() noexcept
 }
 
 void
+UserBreakpoints::on_exit() noexcept
+{
+  for (auto &user : all_users()) {
+    if (user->bp) {
+      // to prevent assertion. UserBreakpoints is the only type allowed to touch ->installed (via
+      // friend-mechanism).
+      user->bp->installed = false;
+      user->bp->users.clear();
+      user->bp.reset();
+    }
+  }
+  user_breakpoints.clear();
+  bps_at_loc.clear();
+  source_breakpoints.clear();
+  fn_breakpoints.clear();
+  instruction_breakpoints.clear();
+}
+
+void
+UserBreakpoints::on_exec() noexcept
+{
+  // we do the same as on exit here - at least I think we should.
+  on_exit();
+}
+
+void
 UserBreakpoints::add_bp_location(const UserBreakpoint &updated_bp) noexcept
 {
   bps_at_loc[updated_bp.address().value()].push_back(updated_bp.id);

@@ -37,7 +37,8 @@ namespace ui {
 struct UICommand;
 namespace dap {
 class VariablesReference;
-};
+class DebugAdapterClient;
+}; // namespace dap
 }; // namespace ui
 
 using Address = std::uintptr_t;
@@ -81,6 +82,8 @@ struct TraceeController
   Publisher<SymbolFile *> new_objectfile{};
   TPtr<r_debug_extended> tracee_r_debug{nullptr};
   InterfaceType interface_type;
+  ui::dap::DebugAdapterClient *dap_client{nullptr};
+  std::optional<Pid> parent{};
 
 private:
   int next_var_ref = 0;
@@ -92,6 +95,15 @@ private:
   sym::Unwinder *null_unwinder;
   std::unique_ptr<tc::TraceeCommandInterface> tracee_interface;
   tc::Auxv auxiliary_vector{};
+  bool on_entry{false};
+  bool reaped{false};
+
+  // FORK constructor
+  TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
+
+  // Granting friend status to std::make_unique
+  friend std::unique_ptr<TraceeController> std::make_unique<TraceeController>(TraceeController &parent,
+                                                                              tc::Interface &&interface);
 
 public:
   // Constructors
@@ -100,6 +112,9 @@ public:
 
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
+
+  void configure_dap_client(ui::dap::DebugAdapterClient *client) noexcept;
+  std::unique_ptr<TraceeController> fork(tc::Interface &&interface) noexcept;
 
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
 
@@ -124,7 +139,7 @@ public:
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
   /* Create new task meta data for `tid` */
-  void new_task(Tid tid) noexcept;
+  void new_task(Tid tid, bool running) noexcept;
   bool has_task(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
   void resume_target(tc::RunType type) noexcept;
@@ -132,9 +147,6 @@ public:
   void resume_task(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void stop_all(TaskInfo *requesting_task) noexcept;
-  /* Handle when a task exits or dies, so that we collect relevant meta data about it and also notifies the user
-   * interface of the event */
-  void reap_task(TaskInfo &task) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *register_task_waited(TaskWaitResult wait) noexcept;
@@ -146,6 +158,9 @@ public:
    * address. These are parameters known during the `clone` syscall and we will need them to be able to restore a
    * task, later on.*/
   void set_task_vm_info(Tid tid, TaskVMInfo vm_info) noexcept;
+
+  void set_on_entry(bool setting) noexcept;
+  bool is_on_entry() const noexcept;
 
   void emit_stopped_at_breakpoint(LWP lwp, u32 bp_id, bool all_stopped) noexcept;
   void emit_stepped_stop(LWP lwp) noexcept;
@@ -209,16 +224,6 @@ public:
 
   utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> safe_read(AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr read_to_vector(AddrPtr addr, u64 bytes) noexcept;
-
-  /** We do a lot of std::vector<T> foo; foo.reserve(threads.size()). This does just that. */
-  template <typename T>
-  constexpr std::vector<T>
-  prepare_foreach_thread()
-  {
-    std::vector<T> vec;
-    vec.reserve(threads.size());
-    return vec;
-  }
 
   template <typename T>
   T
@@ -292,6 +297,12 @@ public:
   tc::TraceeCommandInterface &get_interface() noexcept;
   std::optional<AddrPtr> get_interpreter_base() const noexcept;
   std::shared_ptr<SymbolFile> get_main_executable() const noexcept;
+
+  tc::ProcessedStopEvent handle_thread_created(TaskInfo *task, const ThreadCreated &evt,
+                                               const RegisterData &register_data) noexcept;
+  tc::ProcessedStopEvent handle_thread_exited(TaskInfo *task, const ThreadExited &evt) noexcept;
+  tc::ProcessedStopEvent handle_process_exit(const ProcessExited &evt) noexcept;
+  tc::ProcessedStopEvent handle_fork(const Fork &evt) noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

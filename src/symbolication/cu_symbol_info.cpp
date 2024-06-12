@@ -253,9 +253,11 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
       break;
     case Attribute::DW_AT_decl_file: {
       if (!state.lnp_file) {
-        ASSERT(ref.cu == src_file.get_dwarf_unit(), "Cross CU requires another LNP. This will be wrong.");
         state.lnp_file =
           src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+        CDLOG(ref.cu != src_file.get_dwarf_unit(), core,
+              "[dwarf]: Cross CU requires (?) another LNP. ref.cu = 0x{:x}, src file cu=0x{:x}",
+              ref.cu->section_offset(), src_file.get_dwarf_unit()->section_offset());
       }
     } break;
     case Attribute::DW_AT_decl_line:

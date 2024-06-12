@@ -1,7 +1,45 @@
 #include "base64.h"
 #include <cmath>
+#include <iterator>
 
 namespace utils {
+
+consteval std::array<int, 256>
+BaseTable() noexcept
+{
+  std::array<int, 256> result{};
+  for (auto i = 0; i < result.size(); ++i) {
+    result[i] = -1;
+  }
+
+  for (auto i = 0; i < 64; ++i) {
+    result["ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i]] = i;
+  }
+
+  return result;
+}
+
+std::optional<std::vector<std::uint8_t>>
+decode_base64(std::string_view encoded) noexcept
+{
+  static constexpr auto Table = BaseTable();
+  std::vector<std::uint8_t> out;
+  out.reserve(encoded.size() / 4 * 3 + 2);
+
+  int val = 0, valb = -8;
+  for (const auto c : encoded) {
+    if (Table[c] == -1) {
+      break;
+    }
+    val = (val << 6) + Table[c];
+    valb += 6;
+    if (valb >= 0) {
+      out.push_back(char((val >> valb) & 0xFF));
+      valb -= 8;
+    }
+  }
+  return out;
+}
 
 std::string
 encode_base64(std::span<std::uint8_t> data) noexcept

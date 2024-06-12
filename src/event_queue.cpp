@@ -2,6 +2,7 @@
 #include "bp.h"
 #include <chrono>
 #include <condition_variable>
+#include <interface/ui_command.h>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -80,7 +81,8 @@ CoreEvent::ThreadCreated(const EventDataParam &param, tc::ResumeAction resume_ac
 CoreEvent *
 CoreEvent::ThreadExited(const EventDataParam &param, bool process_needs_resuming, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ThreadExited");
+  DBGLOG(core, "[Core Event]: creating event ThreadExited for pid={},tid={}", param.target,
+         param.tid.value_or(-1));
   return new CoreEvent{
     param, ::ThreadExited{{param.tid.value_or(-1)}, param.sig_or_code.value_or(-1), process_needs_resuming},
     CoreEventType::ThreadExited, std::move(reg)};
@@ -137,8 +139,8 @@ CoreEvent *
 CoreEvent::ProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event ProcessExitEvent");
-  return new CoreEvent{pid,       tid,           ProcessExited{{tid}, pid}, CoreEventType::ProcessExited,
-                       exit_code, std::move(reg)};
+  return new CoreEvent{
+    pid, tid, ProcessExited{{tid}, pid, exit_code}, CoreEventType::ProcessExited, exit_code, std::move(reg)};
 }
 
 CoreEvent *
@@ -172,6 +174,14 @@ CoreEvent::DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bo
                        std::move(reg)};
 }
 
+CoreEvent *
+CoreEvent::EntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept
+{
+  DBGLOG(core, "[Core Event]: creating event DeferToSupervisor");
+  return new CoreEvent{param, ::EntryEvent{{param.tid.value()}, should_stop}, CoreEventType::Entry,
+                       std::move(reg)};
+}
+
 static void
 push_event(Event e)
 {
@@ -187,8 +197,9 @@ push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept
 }
 
 void
-push_command_event(ui::UICommand *cmd) noexcept
+push_command_event(ui::dap::DebugAdapterClient *dap, ui::UICommand *cmd) noexcept
 {
+  cmd->set_target(*dap);
   push_event(Event{.type = EventType::Command, .cmd = cmd});
 }
 

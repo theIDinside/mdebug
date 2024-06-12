@@ -14,7 +14,8 @@
 
 TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), call_stack(new sym::CallStack{tid}), loc_stat()
+      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), call_stack(new sym::CallStack{tid}),
+      loc_stat()
 {
   regs = {.arch = arch, .data_format = format, .rip_dirty = true, .cache_dirty = true, .registers = nullptr};
 
@@ -36,9 +37,15 @@ TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType a
 }
 
 TaskInfo
-TaskInfo::create_running(pid_t tid, TargetFormat format, ArchType arch)
+TaskInfo::create_running(pid_t tid, TargetFormat format, ArchType arch) noexcept
 {
   return TaskInfo{tid, false, format, arch};
+}
+
+TaskInfo
+TaskInfo::create_stopped(pid_t tid, TargetFormat format, ArchType arch) noexcept
+{
+  return TaskInfo{tid, true, format, arch};
 }
 
 user_regs_struct *
@@ -128,8 +135,15 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   auto pc = get_pc();
 
   sym::UnwindIterator it{tc, pc};
-  ASSERT(!it.is_null(), "Could not find unwinder for pc {}", AddrPtr{pc});
+  if (it.is_null()) {
+    DBGLOG(core, "[stackframes][warning]: Could not find unwinder for pc {}", AddrPtr{pc});
+    return {};
+  }
   auto uninfo = it.get_info(pc);
+  if (!uninfo) {
+    call_stack->pcs.push_back(pc);
+    return call_stack->pcs;
+  }
   ASSERT(uninfo.has_value(), "unwind info iterator returned null for 0x{:x}", pc);
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, uninfo.value(), pc);
 
@@ -233,8 +247,7 @@ TaskInfo::clear_stop_state() noexcept
   for (const auto ref : variableReferences) {
     Tracer::Instance->destroy_reference(ref);
   }
-  for (auto &[k, v] : valobj_cache) {
-  }
+
   variableReferences.clear();
   valobj_cache.clear();
 }
@@ -296,6 +309,7 @@ TaskInfo::set_running(tc::RunType type) noexcept
   tracer_stopped = false;
   last_resume_command = type;
   set_dirty();
+  clear_stop_state();
 }
 
 void
@@ -307,7 +321,7 @@ TaskInfo::initialize() noexcept
 bool
 TaskInfo::can_continue() noexcept
 {
-  return initialized && (user_stopped || tracer_stopped) && !exited;
+  return initialized && (user_stopped || tracer_stopped) && !reaped;
 }
 
 void

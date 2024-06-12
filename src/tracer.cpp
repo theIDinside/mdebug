@@ -3,6 +3,7 @@
 #include "common.h"
 #include "event_queue.h"
 #include "interface/attach_args.h"
+#include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/dap/interface.h"
 #include "interface/pty.h"
@@ -39,13 +40,48 @@ Tracer *Tracer::Instance = nullptr;
 bool Tracer::KeepAlive = true;
 
 void
-on_sigcld(int)
+on_sigchild_handler(int)
 {
   pid_t pid;
   int stat;
   while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
-    const auto wait_result = process_status(pid, stat);
-    push_wait_event(0, wait_result);
+    if (WIFSTOPPED(stat)) {
+      const auto res = wait_result_stopped(pid, stat);
+      DBGLOG(awaiter, "stop for {}: {}", res.tid, to_str(res.ws.ws));
+      push_wait_event(0, res);
+    } else if (WIFEXITED(stat)) {
+      // We might as well only report this for process-tasks,
+      // as DAP doesn't support reporting an exit code for a thread, only for a process,
+      // because DAP distinguishes between the two in a way that most OS today, doesn't.
+      if (!Tracer::Instance->TraceExitConfigured) {
+        // means this is the only place we're getting informed of thread exits
+        for (const auto &supervisor : Tracer::Instance->targets) {
+          for (const auto &t : supervisor->threads) {
+            if (t.tid == pid) {
+              DBGLOG(awaiter, "exit for {}", pid);
+              push_debugger_event(
+                CoreEvent::ThreadExited({supervisor->task_leader, pid, WEXITSTATUS(stat)}, false, {}));
+              return;
+            }
+          }
+        }
+      } else {
+        for (const auto &supervisor : Tracer::Instance->targets) {
+          if (supervisor->task_leader == pid) {
+            int exit_code = WEXITSTATUS(stat);
+            DBGLOG(awaiter, "exit for {}: {}", pid, exit_code);
+            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->task_leader, pid, exit_code, {}));
+            return;
+          }
+        }
+      }
+    } else if (WIFSIGNALED(stat)) {
+      auto signaled_evt =
+        TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
+      push_wait_event(0, signaled_evt);
+    } else {
+      PANIC("Unknown wait status event");
+    }
   }
 }
 
@@ -90,13 +126,6 @@ Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession 
   new_target_set_options(new_process);
 }
 
-void
-Tracer::thread_exited(LWP lwp, int) noexcept
-{
-  auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, lwp.tid};
-  dap->post_event(evt);
-}
-
 TraceeController *
 Tracer::get_controller(pid_t pid) noexcept
 {
@@ -106,39 +135,33 @@ Tracer::get_controller(pid_t pid) noexcept
   return it->get();
 }
 
-NonNullPtr<TraceeController>
-Tracer::get_current() noexcept
-{
-  ASSERT(current_target != nullptr, "There is no current target.");
-  return NonNull(*current_target);
-}
-
-TraceeController *
-Tracer::maybe_get_current() noexcept
-{
-  return current_target;
-}
-
+static bool WaiterSystemConfigured = false;
 void
-Tracer::config_done() noexcept
+Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
 {
-  auto tc = get_current();
+  auto tc = client->supervisor();
   switch (tc->interface_type) {
   case InterfaceType::Ptrace: {
     switch (config.waitsystem()) {
     case sys::WaitSystem::UseAwaiterThread:
-      get_current()->get_interface().initialize();
+      if (!WaiterSystemConfigured) {
+        // tc->get_interface().initialize();
+        signal(SIGCHLD, on_sigchild_handler);
+      }
       break;
     case sys::WaitSystem::UseSignalHandler:
-      signal(SIGCHLD, on_sigcld);
+      if (!WaiterSystemConfigured) {
+        signal(SIGCHLD, on_sigchild_handler);
+      }
       break;
     }
     break;
   }
   case InterfaceType::GdbRemote:
-    get_current()->get_interface().initialize();
+    tc->get_interface().initialize();
     break;
   }
+  WaiterSystemConfigured = true;
 }
 
 CoreEvent *
@@ -160,9 +183,15 @@ void
 Tracer::handle_command(ui::UICommandPtr cmd) noexcept
 {
   DBGLOG(core, "accepted command {}", cmd->name());
-  auto result = cmd->execute(this);
-  dap->post_event(result);
+  auto result = cmd->execute();
+
+  auto data = result->serialize(0);
+  if (!data.empty()) {
+    cmd->dap_client->write(data);
+  }
+
   delete cmd;
+  delete result;
 }
 
 void
@@ -215,6 +244,13 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   // we _have_ to do this check here, because the event *might* be a ThreadCreated event
   // and *it* happens *slightly* different depending on if it's a Remote or a Native session that sends it.
   // Unfortunately.
+  if (!task) {
+    // rr ends up here.
+    DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->tid);
+    tc.new_task(evt->tid, false);
+    task = tc.get_task(evt->tid);
+    task->initialize();
+  }
   if (task) {
     if (!evt->registers->empty()) {
       ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
@@ -229,7 +265,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   }
   if (tc.session_all_stop_mode()) {
     for (auto &t : tc.threads) {
-      t.collect_stop();
+      t.stop_collected = true;
+      t.tracer_stopped = true;
+      t.user_stopped = true;
     }
   }
   const CoreEvent &r = *evt;
@@ -247,40 +285,8 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         TODO("SyscallEvent");
         return ProcessedStopEvent::ResumeAny();
       },
-      [&](const ThreadCreated &e) -> MatchResult {
-        auto task = tc.get_task(e.thread_id);
-        // means this event was produced by a Remote session. Construct the task now
-        if (!task) {
-          tc.new_task(e.thread_id);
-          task = tc.get_task(e.thread_id);
-          if (!evt->registers->empty()) {
-            ASSERT(*arch != nullptr,
-                   "Passing raw register contents with no architecture description doesn't work.");
-            task->set_registers(evt->registers);
-            for (const auto &p : evt->registers) {
-              if (p.first == 16) {
-                task->rip_dirty = false;
-              }
-            }
-          }
-        }
-        task->initialize();
-        const auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Started, e.thread_id};
-        Tracer::Instance->post_event(evt);
-
-        return ProcessedStopEvent{true, e.resume_action};
-      },
-      [&](const ThreadExited &e) -> MatchResult {
-        auto t = tc.get_task(e.thread_id);
-        tc.reap_task(*t);
-        if (e.process_needs_resuming) {
-          return ProcessedStopEvent{
-            !tc.stop_handler->event_settings.thread_exit_stop && e.process_needs_resuming,
-            tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
-        } else {
-          return ProcessedStopEvent{!tc.stop_handler->event_settings.thread_exit_stop, {}};
-        }
-      },
+      [&](const ThreadCreated &e) -> MatchResult { return tc.handle_thread_created(task, e, evt->registers); },
+      [&](const ThreadExited &e) -> MatchResult { return tc.handle_thread_exited(task, e); },
       [&](const BreakpointHitEvent &e) -> MatchResult {
         // todo(simon): here we should start building upon global event system, like in gdb, where the user can
         // hook into specific events. in this particular case, we could emit a
@@ -294,11 +300,12 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         auto bp_addy = e.address_val
                          ->or_else([&]() {
                            // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
-                           return std::optional{tc.get_caching_pc(*t).get() - 1};
+                           return std::optional{tc.get_caching_pc(*t).get()};
                          })
                          .value();
 
         auto bp_loc = tc.pbps.location_at(bp_addy);
+        ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
         bool should_resume = true;
         for (const auto user_id : users) {
@@ -313,13 +320,9 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         }
         return ProcessedStopEvent{should_resume, {}};
       },
-      [&](const Fork &e) -> MatchResult {
-        (void)e;
-        TODO("Fork");
-        return ProcessedStopEvent{true, {}};
-      },
+      [&](const Fork &e) -> MatchResult { return tc.handle_fork(e); },
       [&](const Clone &e) -> MatchResult {
-        tc.new_task(e.child_tid);
+        tc.new_task(e.child_tid, true);
         if (e.vm_info) {
           tc.set_task_vm_info(e.child_tid, e.vm_info.value());
         }
@@ -327,13 +330,12 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       },
       [&](const Exec &e) -> MatchResult {
         tc.post_exec(e.exec_file);
+        Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
+        tc.set_fn_breakpoints(fns);
+        tc.dap_client->post_event(new ui::dap::Process{e.exec_file, true});
         return ProcessedStopEvent{!tc.stop_handler->event_settings.exec_stop, {}};
       },
-      [&](const ProcessExited &e) -> MatchResult {
-        (void)e;
-        tc.reap_task(*task);
-        return ProcessedStopEvent{false, {}};
-      },
+      [&](const ProcessExited &e) -> MatchResult { return tc.handle_process_exit(e); },
       [&](const LibraryEvent &e) -> MatchResult {
         (void)e;
         TODO("LibraryEvent");
@@ -372,6 +374,17 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
           return ProcessedStopEvent{resume, e.resume_when_done};
         }
       },
+      [&](const EntryEvent &e) noexcept -> MatchResult {
+        tc.set_on_entry(false);
+        // apply session breakpoints to new process space
+        if (e.should_stop) {
+          // emit stop event
+          tc.emit_stopped(e.thread_id, ui::dap::StoppedReason::Entry, "forked", true, {});
+        } else {
+          // say "thread created / started"
+        }
+        return ProcessedStopEvent{!e.should_stop, {}};
+      },
       [&](const DeferToSupervisor &e) -> MatchResult {
         // And if there is no Proceed action installed, default action is taken (RESUME)
         return ProcessedStopEvent{true && !e.attached, {}};
@@ -393,12 +406,6 @@ Tracer::kill_ui() noexcept
 }
 
 void
-Tracer::post_event(ui::UIResultPtr obj) noexcept
-{
-  dap->post_event(obj);
-}
-
-void
 Tracer::accept_command(ui::UICommand *cmd) noexcept
 {
   {
@@ -406,26 +413,6 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
     command_queue.push(cmd);
   }
   DBGLOG(core, "accepted command {}", cmd->name());
-}
-
-void
-Tracer::execute_pending_commands() noexcept
-{
-  ui::UICommandPtr pending_command = nullptr;
-  while (!command_queue.empty()) {
-    // keep the lock as minimum of a time span as possible
-    {
-      LockGuard<SpinLock> lock{command_queue_lock};
-      pending_command = command_queue.front();
-      command_queue.pop();
-    }
-    ASSERT(pending_command != nullptr, "Expected a command but got null");
-    DBGLOG(core, "Executing {}", pending_command->name());
-    auto result = pending_command->execute(this);
-    dap->post_event(result);
-    delete pending_command;
-    pending_command = nullptr;
-  }
 }
 
 static int
@@ -448,51 +435,99 @@ Tracer::attach(const AttachArgs &args) noexcept
 {
   using MatchResult = bool;
 
-  return std::visit(Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
-                            auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-                            targets.push_back(std::make_unique<TraceeController>(
-                              TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
-                            current_target = targets.back().get();
-                            if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
-                              const auto new_process = current_target->get_interface().task_leader();
-                              load_and_process_objfile(new_process, *exe_file);
-                            }
-                            return true;
-                          },
-                          [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
-                            DBGLOG(core, "Initializing remote protocol interface...");
-                            // Since we may connect to a remote that is not connected to nuthin,
-                            // we need an extra step here (via the RemoteSessionConfiguirator), before
-                            // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
-                            // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
-                            // 1 process, that's it. But the remote target might actually be attached to many, and
-                            // we want our design to be consistent (1 commander / process. Otherwise we turn into
-                            // gdb hell hole.)
-                            auto remote_init = tc::RemoteSessionConfigurator{
-                              Tracer::Instance->connectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
-                            auto result = remote_init.configure_session();
-                            if (result.is_expected()) {
-                              auto &&ifs = result.take_value();
-                              for (auto &&interface : ifs) {
-                                targets.push_back(std::make_unique<TraceeController>(
-                                  TargetSession::Attached, std::move(interface.tc), InterfaceType::GdbRemote));
-                                Tracer::Instance->set_current_to_latest_target();
-                                auto &ti = current_target->get_interface();
-                                ti.post_exec();
-                                auto newtarget = get_current();
-                                for (const auto &t : interface.threads) {
-                                  newtarget->new_task(t.tid);
-                                }
-                              }
-                              return true;
-                            }
-                            return false;
-                          }},
-                    args);
+  return std::visit(
+    Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
+            auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
+            targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(interface),
+                                                                 InterfaceType::Ptrace));
+            current_target = targets.back().get();
+            if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
+              const auto new_process = current_target->get_interface().task_leader();
+              load_and_process_objfile(new_process, *exe_file);
+            }
+            return true;
+          },
+          [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
+            DBGLOG(core, "Initializing remote protocol interface...");
+            // Since we may connect to a remote that is not connected to nuthin,
+            // we need an extra step here (via the RemoteSessionConfiguirator), before
+            // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
+            // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
+            // 1 process, that's it. But the remote target might actually be attached to many, and
+            // we want our design to be consistent (1 commander / process. Otherwise we turn into
+            // gdb hell hole.)
+            auto remote_init = tc::RemoteSessionConfigurator{
+              Tracer::Instance->connectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
+
+            std::vector<tc::RemoteProcess> res;
+
+            switch (gdb.type) {
+            case RemoteType::RR: {
+              auto result = remote_init.configure_rr_session();
+              if (result.is_expected()) {
+                res = std::move(result.take_value());
+              } else {
+                PANIC("Failed to configure session");
+              }
+            } break;
+            case RemoteType::GDB: {
+              auto result = remote_init.configure_session();
+              if (result.is_expected()) {
+                res = std::move(result.take_value());
+              } else {
+                PANIC("Failed to configure session");
+              }
+            } break;
+            }
+
+            auto it = res.begin();
+            const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
+              targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(tc),
+                                                                   InterfaceType::GdbRemote));
+              Tracer::Instance->set_current_to_latest_target();
+              auto &ti = current_target->get_interface();
+              client->client_configured(current_target);
+              ti.post_exec();
+              for (const auto &t : it->threads) {
+                current_target->new_task(t.tid, false);
+              }
+              for (auto &t : current_target->threads) {
+                t.user_stopped = true;
+                t.tracer_stopped = true;
+              }
+              client->post_event(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
+                                                           "attached",
+                                                           client->supervisor()->task_leader,
+                                                           {},
+                                                           "Attached to session",
+                                                           true});
+            };
+
+            auto main_connection = dap->main_connection();
+            hookupDapWithRemote(std::move(it->tc), main_connection);
+
+            ++it;
+            for (; it != std::end(res); ++it) {
+              hookupDapWithRemote(std::move(it->tc),
+                                  ui::dap::DebugAdapterClient::createSocketConnection(main_connection));
+            }
+            return true;
+          }},
+    args);
+}
+
+TraceeController *
+Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
+{
+  targets.push_back(std::move(tc));
+  current_target = targets.back().get();
+  current_target->set_on_entry(true);
+  return current_target;
 }
 
 void
-Tracer::launch(bool stopOnEntry, Path program, std::vector<std::string> prog_args) noexcept
+Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path program,
+               std::vector<std::string> prog_args) noexcept
 {
   termios original_tty;
   winsize ws;
@@ -513,6 +548,18 @@ Tracer::launch(bool stopOnEntry, Path program, std::vector<std::string> prog_arg
     if (personality(ADDR_NO_RANDOMIZE) == -1) {
       PANIC("Failed to set ADDR_NO_RANDOMIZE!");
     }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL; // Set handler to default action
+
+    // Loop over all signals from 1 to 31
+    for (int i = 1; i <= 31; ++i) {
+      // Avoid resetting signals that can't be caught or ignored
+      if (i == SIGKILL || i == SIGSTOP) {
+        continue;
+      }
+      VERIFY(sigaction(i, &sa, nullptr) == 0, "Expected to succeed to reset signal handler for signal {}", i);
+    }
     if (Tracer::use_traceme) {
       PTRACE_OR_PANIC(PTRACE_TRACEME, 0, 0, 0);
     } else {
@@ -529,14 +576,16 @@ Tracer::launch(bool stopOnEntry, Path program, std::vector<std::string> prog_arg
     const auto res = get<PtyParentResult>(fork_result);
     const auto leader = res.pid;
     add_target_set_current(tc::PtraceCfg{leader}, TargetSession::Launched);
+    client->client_configured(targets.back().get());
+    client->set_session_type(ui::dap::DapClientSession::Launch);
     if (Tracer::use_traceme) {
       TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
-      auto task = get_current()->register_task_waited(twr);
+      auto task = client->supervisor()->register_task_waited(twr);
       if (task == nullptr) {
         PANIC("Expected a task but could not find one for that wait status");
       }
-      get_current()->post_exec(program);
-      dap->add_tty(res.fd);
+
+      client->supervisor()->post_exec(program);
     } else {
       for (;;) {
         if (const auto ws = waitpid_block(res.pid); ws) {
@@ -546,12 +595,12 @@ Tracer::launch(bool stopOnEntry, Path program, std::vector<std::string> prog_arg
             twr.ws.ws = WaitStatusKind::Execed;
             twr.tid = leader;
             DBGLOG(core, "Waited pid after exec! {}, previous: {}", twr.tid, res.pid);
-            auto task = get_current()->register_task_waited(twr);
+
+            auto task = client->supervisor()->register_task_waited(twr);
             if (task == nullptr) {
               PANIC("Got no task from registered task wait");
             }
-            get_current()->post_exec(program);
-            dap->add_tty(res.fd);
+            client->supervisor()->post_exec(program);
             break;
           }
           VERIFY(ptrace(PTRACE_CONT, res.pid, 0, 0) != -1, "Failed to continue passed our exec boundary: {}",
@@ -559,13 +608,12 @@ Tracer::launch(bool stopOnEntry, Path program, std::vector<std::string> prog_arg
         }
       }
     }
-
+    client->set_tty_out(res.fd);
     if (stopOnEntry) {
       Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
       // fns.insert({"main", {}, false});
-      get_current()->set_fn_breakpoints(fns);
+      client->supervisor()->set_fn_breakpoints(fns);
     }
-    break;
   }
   }
 }
@@ -575,22 +623,6 @@ Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on
 {
   // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
   target->get_interface().disconnect(!resume_on_detach);
-}
-
-bool
-Tracer::disconnect(bool terminate) noexcept
-{
-  while (!targets.empty()) {
-    if (!targets.back()->get_interface().do_disconnect(terminate)) {
-      return false;
-    }
-    targets.pop_back();
-  }
-
-  Tracer::Instance->post_event(new ui::dap::TerminatedEvent{});
-
-  Tracer::KeepAlive = false;
-  return true;
 }
 
 std::shared_ptr<SymbolFile>
@@ -688,4 +720,43 @@ Tracer::clone_from_var_context(const VariableContext &ctx) noexcept
   const auto key = new_key();
   refContext.emplace(key, VariableContext::subcontext(key, ctx));
   return key;
+}
+
+bool
+VariableContext::valid_context() const noexcept
+{
+  return tc != nullptr && t != nullptr;
+}
+
+std::optional<std::array<ui::dap::Scope, 3>>
+VariableContext::scopes_reference(VarRefKey frameKey) const noexcept
+{
+  auto frame = t->get_callstack().get_frame(frameKey);
+  if (!frame) {
+    return {};
+  } else {
+    return frame->scopes();
+  }
+}
+
+std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
+sym::Frame *
+VariableContext::get_frame(VarRefKey ref) noexcept
+{
+  switch (type) {
+  case ContextType::Frame:
+    return t->get_callstack().get_frame(ref);
+  case ContextType::Scope:
+  case ContextType::Variable:
+    return t->get_callstack().get_frame(frame_id);
+  case ContextType::Global:
+    PANIC("Global variables not yet supported");
+    break;
+  }
+}
+
+SharedPtr<sym::Value>
+VariableContext::get_maybe_value() const noexcept
+{
+  return t->get_maybe_value(id);
 }

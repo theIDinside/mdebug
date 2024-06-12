@@ -30,7 +30,7 @@ baz(int a, int b, int times)
   if (!equals(res_a, res_b)) {
     printf("values are not equal: a=%d, b=%d", res_a, res_b);
   }
-  return a * b;
+  return a * b; // #BAZ_RET_BP
 }
 
 void
@@ -57,4 +57,5 @@ main(int argc, const char **argv)
 {
   foo();
   Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2};
+  return -15;
 }

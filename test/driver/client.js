@@ -246,7 +246,6 @@ class Thread {
     const response = await this.#client.sendReqGetResponse('stackTrace', { threadId: this.id }, timeout)
     checkResponse(response, 'stackTrace', true, this.stackTrace)
     return response.body.stackFrames.map((frame) => {
-      console.log(`STACKFRAME`)
       return new StackFrame(
         this.#client,
         frame.id,
@@ -260,37 +259,38 @@ class Thread {
   }
 }
 
-class Variable {
-  id
-  name
-  value
-  type
-  evaluateName
-  namedVariables
-  indexedVariables
-  memoryReference
+/**
+ * @typedef { { variablesReference: number, name: string, value: string, type: string , evaluateName:string, namedVariables: number, indexedVariables: number, memoryReference: string } } DAPVariable
+ */
 
+class Variable {
   /** @type {DAClient} */
   #client
+  /** @type { DAPVariable } */
+  dap
 
-  constructor(client, id, name, value, type, evaluateName, namedVariables, indexedVariables, memoryReference) {
+  /** @type { Variable[] } */
+  cache = null
+
+  /**
+   * @param {DAClient} client
+   * @param {DAPVariable} dap
+   */
+  constructor(client, dap) {
     this.#client = client
-    this.id = id
-    this.name = name
-    this.value = value
-    this.type = type
-    this.evaluateName = evaluateName
-    this.namedVariables = namedVariables
-    this.indexedVariables = indexedVariables
-    this.memoryReference = memoryReference
+    this.dap = dap
+    this.cache = null
   }
 
   /**
-   * @returns { Promise<Variable[]>}
+   * @returns { Promise<Variable[]> }
    */
   async variables(timeout = 1000) {
-    if (this.id == 0) {
-      throw new Error("This variable has id == 0 it can't make any requests!")
+    if (this.dap.variablesReference == 0) {
+      throw new Error(`This variable has id == 0 it can't make any requests! DAP Object: ${JSON.stringify(this.dap)}`)
+    }
+    if (this.cache != null) {
+      return this.cache
     }
     const {
       success,
@@ -298,19 +298,34 @@ class Variable {
     } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.id }, timeout)
     assertLog(success, 'expected success from variables request')
 
-    return variables.map((el) => {
-      return new Variable(
-        this.#client,
-        el.variablesReference,
-        el.name,
-        el.value,
-        el.type,
-        el?.evaluateName,
-        el?.namedVariables,
-        el?.indexedVariables,
-        el?.memoryReference
-      )
+    this.cache = variables.map((el) => {
+      return new Variable(this.#client, el)
     })
+    return this.cache
+  }
+
+  get memoryReference() {
+    return this.dap.memoryReference
+  }
+
+  get value() {
+    return this.dap.value
+  }
+
+  get name() {
+    return this.dap.name
+  }
+
+  get type() {
+    return this.dap.type
+  }
+
+  get id() {
+    return this.dap.variablesReference
+  }
+
+  get variablesReference() {
+    return this.dap.variablesReference
   }
 }
 const ScopeNames = ['Arguments', 'Locals', 'Registers']
@@ -359,20 +374,14 @@ class StackFrame {
     assertLog(success, 'expected success from variables request')
 
     return variables.map((v) => {
-      return new Variable(
-        this.#client,
-        v.variablesReference,
-        v.name,
-        v.value,
-        v.type,
-        v.evaluateName,
-        v.namedVariables,
-        v.indexedVariables,
-        v.memoryReference
-      )
+      return new Variable(this.#client, v)
     })
   }
 
+  /**
+   * @param {number} timeout
+   * @returns { Promise<Variable[]> }
+   */
   async args(timeout) {
     await this.get_scopes()
     const {
@@ -382,17 +391,7 @@ class StackFrame {
     assertLog(success, 'expected success from variables request')
 
     return variables.map((v) => {
-      return new Variable(
-        this.#client,
-        v.variablesReference,
-        v.name,
-        v.value,
-        v.type,
-        v.evaluateName,
-        v.namedVariables,
-        v.indexedVariables,
-        v.memoryReference
-      )
+      return new Variable(this.#client, v)
     })
   }
 
@@ -501,14 +500,7 @@ class DAClient {
     // Emit processed DAP Events to this event handler
     this.events.on('event', async (evt) => {
       const { event, body } = evt
-      switch (event) {
-        case 'exited':
-          this.mdb.stdin.write(this.serializeRequest('disconnect'))
-          break
-        default:
-          this.events.emit(event, body)
-          break
-      }
+      this.events.emit(event, body)
     })
 
     // Emit processed DAP Responses to this event handler
@@ -563,6 +555,7 @@ class DAClient {
       success,
       body: { breakpoints },
     } = res
+    assertLog(success, `expected bp request of ${JSON.stringify(bp_lines)} to succeed`, `. It failed`)
     assertLog(
       breakpoints.length == lines.length,
       `Expected ${lines.length} breakpoints`,
@@ -641,11 +634,7 @@ class DAClient {
       const listener = (body) => {
         eventCount++
         evts.push(body)
-        console.log(
-          `stopped for ${evt}: ${body.reason}: ${JSON.stringify(body)} (of n=${n} and evts.length=${evts.length})`
-        )
         if (evts.length == n) {
-          console.log(`we hit ${evt} n=${n} times`)
           this.events.removeListener(evt, listener)
           res(evts)
         }

@@ -3,6 +3,7 @@
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
+#include <algorithm>
 #include <common.h>
 #include <filesystem>
 
@@ -54,6 +55,18 @@ SharedObject::has_debug_info() const noexcept
   return objfile->elf->get_section(".debug_info") != nullptr;
 }
 
+SharedObject
+SharedObject::clone() const noexcept
+{
+  auto path_copy = path;
+  SharedObject clone{so_id, tracee_location, elf_vma_addr_diff, std::move(path_copy)};
+  clone.addr_range = addr_range;
+  clone.objfile = objfile;
+  clone.symbol_info = clone.symbol_info;
+
+  return clone;
+}
+
 Path
 interpreter_path(const Elf *elf, const ElfSection *interp) noexcept
 {
@@ -62,6 +75,18 @@ interpreter_path(const Elf *elf, const ElfSection *interp) noexcept
   const auto path = reader.read_string();
   DBGLOG(core, "Path to system interpreter: {}", path);
   return path;
+}
+
+SharedObjectMap
+SharedObjectMap::clone() const noexcept
+{
+  SharedObjectMap clone{};
+  clone.shared_objects.reserve(shared_objects.size());
+  for (const auto &so : shared_objects) {
+    clone.shared_objects.push_back(so.clone());
+  }
+
+  return clone;
 }
 
 std::optional<SharedObject::SoId>

@@ -11,6 +11,39 @@
 #include <vector>
 
 namespace utils {
+
+// Just a type that signals that who ever holds this one, should call `delete` on t
+template <typename T> struct OwningPointer
+{
+  T *t;
+
+  constexpr T *
+  operator->() noexcept
+  {
+    return t;
+  }
+
+  constexpr const T *
+  operator->() const noexcept
+  {
+    return t;
+  }
+
+  constexpr
+  operator T *() noexcept
+  {
+    return t;
+  }
+  constexpr
+  operator T *() const noexcept
+  {
+    return t;
+  }
+
+  constexpr operator const T *() noexcept { return t; }
+  constexpr operator const T *() const noexcept { return t; }
+};
+
 constexpr std::vector<std::string_view>
 split_string(std::string_view str, std::string_view delim) noexcept
 {

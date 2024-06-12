@@ -73,6 +73,7 @@ struct TaskInfo
       bool cache_dirty : 1;    // register is dirty and requires refetching
       bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
       bool exited : 1;         // task has exited
+      bool reaped : 1;         // task has been reaped after exit
     };
   };
 
@@ -96,7 +97,8 @@ public:
   TaskInfo &operator=(TaskInfo &t) noexcept = delete;
   TaskInfo &operator=(const TaskInfo &o) = delete;
 
-  static TaskInfo create_running(pid_t tid, TargetFormat format, ArchType arch);
+  static TaskInfo create_running(pid_t tid, TargetFormat format, ArchType arch) noexcept;
+  static TaskInfo create_stopped(pid_t tid, TargetFormat format, ArchType arch) noexcept;
 
   user_regs_struct *native_registers() const noexcept;
   RegisterBlock<ArchType::X86_64> *remote_x86_registers() const noexcept;

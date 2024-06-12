@@ -381,13 +381,23 @@ Type::get_layout_type() noexcept
   if (modifier == Modifier::None) {
     return this;
   }
-  auto it = type_chain;
-  while (it != nullptr) {
-    if (it->modifier == Modifier::None) {
-      return it;
+
+  if (auto t = resolve_alias(); t->is_reference()) {
+    t = t == this ? t->type_chain : t;
+    while (!t->is_reference() && t->modifier != Modifier::None) {
+      t = t->type_chain->resolve_alias();
     }
-    it = it->type_chain;
+    return t;
+  } else {
+    auto it = type_chain;
+    while (it != nullptr) {
+      if (it->modifier == Modifier::None) {
+        return it;
+      }
+      it = it->type_chain;
+    }
   }
+
   return nullptr;
 }
 

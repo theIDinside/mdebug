@@ -132,6 +132,15 @@ public:
   std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
 };
 
+class InvalidValueVisualizer final : public ValueVisualizer
+{
+public:
+  explicit InvalidValueVisualizer(std::weak_ptr<Value>) noexcept;
+  ~InvalidValueVisualizer() noexcept override = default;
+  std::optional<std::string> format_value() noexcept override;
+  std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
+};
+
 class ArrayVisualizer final : public ValueVisualizer
 {
 

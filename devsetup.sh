@@ -51,3 +51,4 @@ tag_filenames() {
 	done
 }
 
+alias testrr='reset && ninja -C build/ && /home/cx/.config/Code/User/globalStorage/farrese.midas/rr-5.8.0/bin/rr replay threads_shared-0 -s 12345 -h 127.0.0.1'

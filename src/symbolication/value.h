@@ -96,6 +96,7 @@ public:
   ValueResolver *get_resolver() noexcept;
   bool has_visualizer() const noexcept;
   ValueVisualizer *get_visualizer() noexcept;
+  bool valid_value() const noexcept;
 
   Immutable<std::string> name;
   Immutable<u32> mem_contents_offset;
@@ -128,6 +129,12 @@ public:
     ReadResultInfo info;
     std::optional<int> errno;
     MemoryContentBytes value;
+
+    bool
+    is_ok() const noexcept
+    {
+      return info == ReadResultInfo::Success && value != nullptr;
+    }
   };
   Immutable<AddrPtr> start;
   Immutable<AddrPtr> end;
