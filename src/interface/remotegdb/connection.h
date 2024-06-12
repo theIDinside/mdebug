@@ -561,6 +561,7 @@ private:
   bool is_initialized{false};
   bool remote_configured{false};
   bool run{true};
+  gdb::GdbThread selected_thread{0, 0};
   std::recursive_mutex tracee_control_mutex{};
   // Architectures controlled via this remote connection
   std::unordered_map<Pid, std::shared_ptr<gdb::ArchictectureInfo>> archs{};
@@ -581,6 +582,7 @@ private:
   bool process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept;
   void put_pending_notification(std::string_view payload) noexcept;
   void update_known_threads(std::span<const GdbThread> threads) noexcept;
+  void set_query_thread(gdb::GdbThread thread) noexcept;
 
   static std::unordered_map<std::string_view, TraceeStopReason> StopReasonMap;
 
@@ -612,7 +614,8 @@ public:
   std::optional<std::pmr::string> read_command_response(MonotonicResource &arena, int timeout) noexcept;
 
   // Blocking call for `timeout` ms
-  utils::Expected<std::string, SendError> send_command_with_response(std::string_view command,
+  utils::Expected<std::string, SendError> send_command_with_response(std::optional<gdb::GdbThread> thread,
+                                                                     std::string_view command,
                                                                      std::optional<int> timeout) noexcept;
 
   void send_interrupt_byte() noexcept;

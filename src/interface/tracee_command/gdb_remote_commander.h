@@ -116,6 +116,7 @@ public:
   Interface on_fork(Pid pid) noexcept final;
 
   Tid task_leader() const noexcept final;
+  gdb::GdbThread leader_to_gdb() const noexcept;
   std::optional<Path> execed_file() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept final;
   std::shared_ptr<gdb::RemoteConnection> remote_connection() noexcept final;

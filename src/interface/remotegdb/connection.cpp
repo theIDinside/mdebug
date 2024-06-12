@@ -650,6 +650,21 @@ RemoteConnection::update_known_threads(std::span<const GdbThread> threads_) noex
 }
 
 void
+RemoteConnection::set_query_thread(gdb::GdbThread thread) noexcept
+{
+  if (selected_thread != thread) {
+    selected_thread = thread;
+    char buf[64];
+    auto end = fmt::format_to(buf, "Hgp{:x}.{:x}", thread.pid, thread.tid);
+
+    SocketCommand cmd{{buf, end}, false, false, false, {}};
+    if (!execute_command(cmd, 100)) {
+      TODO_FMT("Failed to configure controlling query thread to p{:x}.{:x}", thread.tid, thread.pid);
+    }
+  }
+}
+
+void
 RemoteConnection::put_pending_notification(std::string_view payload) noexcept
 {
   ASSERT(!pending_notification.has_value(), "Pending notification has not been consumed");
@@ -1256,7 +1271,8 @@ RemoteConnection::send_interrupt_byte() noexcept
 }
 
 utils::Expected<std::string, SendError>
-RemoteConnection::send_command_with_response(std::string_view command, std::optional<int> timeout) noexcept
+RemoteConnection::send_command_with_response(std::optional<gdb::GdbThread> thread, std::string_view command,
+                                             std::optional<int> timeout) noexcept
 {
   // the actual dance of requesting and receiving control, also needs mutually exclusive access.
   // because otherwise, two "control threads", might actually arrive here, and hit the barrier's arrive_and_wait
@@ -1270,6 +1286,9 @@ RemoteConnection::send_command_with_response(std::string_view command, std::opti
   }};
 
   request_control();
+  if (thread) {
+    set_query_thread(*thread);
+  }
   for (auto retries = 10;; --retries) {
     const auto res = socket.write_cmd(command);
     if (res.is_ok()) {
