@@ -250,7 +250,7 @@ UnitReader::read_by_idx_from_str_table(u64 str_index, std::optional<u64> str_off
   ASSERT(elf->debug_str_offsets->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
   const auto str_table_offset = str_offsets_base.value_or(0) + str_index * compilation_unit->header().format();
   const auto ptr = (elf->debug_str_offsets->m_section_ptr + str_table_offset);
-  if (compilation_unit->header().addr_size() == 4) {
+  if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
     return std::string_view{(const char *)(elf->debug_str->m_section_ptr + value)};
   } else {
@@ -449,6 +449,9 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     const auto base = utils::castenum(AttributeForm::DW_FORM_strx1) - 1;
     const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto idx = reader.read_n_bytes(bytes_to_read);
+    DieReference{}.read_attribute(Attribute::DW_AT_str_offsets_base).transform([](auto v) {
+      return v.unsigned_value();
+    });
     return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_strx: {
