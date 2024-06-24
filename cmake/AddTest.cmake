@@ -15,7 +15,7 @@ function(BuildTestSubject)
   if(USE_DWARF5)
     target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
   else()
-    target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3)
+    target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3 -gdwarf-4)
   endif()
 endfunction()
 
