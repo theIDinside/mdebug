@@ -109,6 +109,7 @@ IndexingTask::execute_task() noexcept
 
   std::vector<sym::CompilationUnit> initialized_cus{};
   std::vector<sym::dw::UnitData *> followed_references{};
+  std::vector<sym::dw::UnitData *> type_units{};
 
   ScopedDefer clear_metadata{[&]() {
     for (auto &comp_unit : cus_to_index) {
@@ -130,6 +131,9 @@ IndexingTask::execute_task() noexcept
     } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
       sym::PartialCompilationUnitSymbolInfo partial_cu_file =
         initialize_partial_compilation_unit(comp_unit, dies.front());
+    } else if (dies.front().tag == DwarfTag::DW_TAG_type_unit) {
+      DBGLOG(core, "DWARF Unit is a type unit: 0x{:x}", comp_unit->section_offset());
+      type_units.push_back(comp_unit);
     }
 
     UnitReader reader{comp_unit};
@@ -169,32 +173,38 @@ IndexingTask::execute_task() noexcept
       auto has_loc = false;
       reader.seek_die(die);
       for (auto value : abb.attributes) {
-        auto attr = read_attribute_value(reader, value, abb.implicit_consts);
+
         switch (value.name) {
         // register name
-        case Attribute::DW_AT_name:
+        case Attribute::DW_AT_name: {
+          auto attr = read_attribute_value(reader, value, abb.implicit_consts);
           name = attr.string();
-          break;
-        case Attribute::DW_AT_linkage_name:
+        } break;
+        case Attribute::DW_AT_linkage_name: {
+          auto attr = read_attribute_value(reader, value, abb.implicit_consts);
           mangled_name = attr.string();
-          break;
+        } break;
         // is address-representable?
         case Attribute::DW_AT_low_pc:
         case Attribute::DW_AT_high_pc:
         case Attribute::DW_AT_ranges:
         case Attribute::DW_AT_entry_pc:
           addr_representable = true;
+          reader.skip_attribute(value);
           break;
         // is global or static value?
         case Attribute::DW_AT_location:
         case Attribute::DW_AT_const_value:
           has_loc = true;
           is_super_scope_var = die.is_super_scope_variable();
+          reader.skip_attribute(value);
           break;
         case Attribute::DW_AT_declaration:
           is_decl = true;
+          reader.skip_attribute(value);
           break;
         default:
+          reader.skip_attribute(value);
           break;
         }
       }
@@ -271,17 +281,21 @@ IndexingTask::execute_task() noexcept
   if (!initialized_cus.empty()) {
     obj->add_initialized_cus(initialized_cus);
   }
+
+  if (!type_units.empty()) {
+    obj->add_type_units(type_units);
+  }
 }
 
 static void
-process_cu_boundary(u64 ranges_offset, sym::CompilationUnit &src) noexcept
+process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &src) noexcept
 {
   auto cu = src.get_dwarf_unit();
   const auto version = cu->header().version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
   auto elf = cu->get_objfile()->elf;
   if (version == DwarfVersion::D4) {
-    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset));
+    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset.address()));
     auto lowest = UINTMAX_MAX;
     auto highest = 0ul;
     auto start = 0ul;
@@ -310,10 +324,22 @@ process_cu_boundary(u64 ranges_offset, sym::CompilationUnit &src) noexcept
       src.set_address_boundary(lowest, highest);
     }
   } else if (version == DwarfVersion::D5) {
-    ASSERT(elf->debug_aranges != nullptr,
+    ASSERT(elf->debug_rnglists != nullptr,
            "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
-    auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset);
-    src.set_address_boundary(addr_range.start_pc(), addr_range.end_pc());
+    if (ranges_offset.form == AttributeForm::DW_FORM_sec_offset) {
+      auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.unsigned_value());
+      src.set_address_boundary(addr_range.start_pc(), addr_range.end_pc());
+    } else {
+      auto ranges =
+        sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.unsigned_value()));
+      AddrPtr lowpc = static_cast<u64>(-1);
+      AddrPtr highpc = nullptr;
+      for (const auto [low, high] : ranges) {
+        lowpc = std::min(low, lowpc);
+        highpc = std::max(high, highpc);
+      }
+      src.set_address_boundary(lowpc, highpc);
+    }
   }
 }
 
@@ -329,33 +355,38 @@ IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_di
   std::optional<AddrPtr> high;
 
   for (const auto &abbr : abbrs.attributes) {
-    auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-    switch (attr.name) {
+    switch (abbr.name) {
     case Attribute::DW_AT_stmt_list: {
+      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
       const auto offset = attr.address();
       new_cu.process_source_code_files(offset);
       break;
     }
     case Attribute::DW_AT_name: {
-      auto name = attr.string();
+      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
+      const auto name = attr.string();
       new_cu.set_name(name);
       break;
     }
     case Attribute::DW_AT_ranges: {
-      process_cu_boundary(attr.address(), new_cu);
+      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
+      process_cu_boundary(attr, new_cu);
     } break;
     case Attribute::DW_AT_low_pc: {
+      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
       if (!low) {
         low = attr.address();
       }
     } break;
     case Attribute::DW_AT_high_pc: {
+      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
       high = attr.address();
     } break;
     case Attribute::DW_AT_import:
-      break;
+      [[fallthrough]];
     default:
-      continue;
+      reader.skip_attribute(abbr);
+      break;
     }
   }
 

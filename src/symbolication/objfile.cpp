@@ -254,6 +254,42 @@ ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcep
   addr_cu_map.add_cus(new_cus);
 }
 
+void
+ObjectFile::add_type_units(std::span<sym::dw::UnitData *> tus) noexcept
+{
+  for (const auto tu : tus) {
+    ASSERT(tu->header().get_unit_type() == DwarfUnitType::DW_UT_type, "Expected DWARF Unit Type but got {}",
+           to_str(tu->header().get_unit_type()));
+    type_units[tu->header().type_signature()] = tu;
+  }
+}
+
+sym::dw::UnitData *
+ObjectFile::get_type_unit(u64 type_signature) noexcept
+{
+  if (auto it = type_units.find(type_signature); it != std::end(type_units)) {
+    return it->second;
+  } else {
+    return nullptr;
+  }
+}
+
+sym::dw::DieReference
+ObjectFile::get_type_unit_type_die(u64 type_signature) noexcept
+{
+  auto typeunit = get_type_unit(type_signature);
+  ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
+  const auto type_die_cu_offset = typeunit->header().get_type_offset();
+  const auto type_die_section_offset = typeunit->section_offset() + type_die_cu_offset;
+  const auto &dies = typeunit->get_dies();
+  for (const auto &d : dies) {
+    if (d.section_offset == type_die_section_offset) {
+      return sym::dw::DieReference{.cu = typeunit, .die = &d};
+    }
+  }
+  return {};
+}
+
 std::vector<sym::CompilationUnit> &
 ObjectFile::source_units() noexcept
 {

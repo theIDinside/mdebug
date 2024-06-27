@@ -184,8 +184,6 @@ void
 DAP::one_poll(u32 notifier_queue_size) noexcept
 {
   pollfd fds[notifier_queue_size];
-  for (auto i : fds) {
-  }
   init_poll(fds);
   auto ready = poll(fds, notifier_queue_size, 1000);
   VERIFY(ready != -1, "polling failed: {}", strerror(errno));

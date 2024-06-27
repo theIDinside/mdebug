@@ -4,8 +4,16 @@
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_defs.h"
 #include <symbolication/block.h>
+#include <symbolication/dwarf/die.h>
 #include <symbolication/elf.h>
+#include <symbolication/objfile.h>
 namespace sym::dw {
+
+/*static*/ ResolvedRangeListOffset
+ResolvedRangeListOffset::make(sym::dw::UnitData &cu, u64 unresolved_offset) noexcept
+{
+  return ResolvedRangeListOffset{cu.rng_list_base() + unresolved_offset};
+}
 
 u32
 RangeListHeader::first_entry_offset() const noexcept
@@ -35,12 +43,8 @@ struct OffsetPair
 static const u8 *
 read_offset_pair(const u8 *ptr, OffsetPair &out) noexcept
 {
-  u64 *cast = (u64 *)ptr;
-  out.start = *cast;
-  ++cast;
-  out.end = *cast;
-  ++cast;
-  return (const u8 *)cast;
+  ptr = decode_uleb128(ptr, out.start);
+  return decode_uleb128(ptr, out.end);
 }
 
 RangeListHeader
@@ -55,6 +59,71 @@ read_header(ElfSection *rnglists, u64 offset)
   ptr = read_segment_selector_size(ptr, header.segment_selector_size);
   ptr = read_offset_entry_count(ptr, header.offset_entry_count);
   return header;
+}
+
+std::vector<AddressRange>
+read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
+{
+  std::vector<AddressRange> result{};
+  const auto elf = cu.get_objfile()->elf;
+  auto ptr = elf->debug_rnglists->offset(resolved.offset);
+  RangeListEntry entry{};
+  AddrPtr base = nullptr;
+  ptr = read_entry_type(ptr, entry);
+  const auto read_address = [&]() {
+    u64 addr = *(u64 *)ptr;
+    ptr += 8;
+    return addr;
+  };
+  while (entry != RangeListEntry::DW_RLE_end_of_list) {
+    switch (entry) {
+    case RangeListEntry::DW_RLE_base_addressx: {
+      u64 addr_index = 0;
+      ptr = decode_uleb128(ptr, addr_index);
+      const auto addr_ptr = elf->debug_addr->offset(cu.addr_base() + addr_index * 8);
+      u64 start_addr = 0;
+      std::memcpy(&start_addr, addr_ptr, 8);
+      base = start_addr;
+      break;
+    }
+    case RangeListEntry::DW_RLE_startx_endx:
+    case RangeListEntry::DW_RLE_startx_length: {
+      u64 addr_index = 0;
+      ptr = decode_uleb128(ptr, addr_index);
+      u64 range_length = 0;
+      ptr = decode_uleb128(ptr, range_length);
+      const auto addr_ptr = elf->debug_addr->offset(cu.addr_base() + (addr_index * 8));
+      u64 start_addr = 0;
+      std::memcpy(&start_addr, addr_ptr, 8);
+      result.push_back({start_addr, start_addr + range_length});
+      break;
+    }
+    case RangeListEntry::DW_RLE_start_end:
+      TODO("RLE type not yet implemented");
+      break;
+    case RangeListEntry::DW_RLE_offset_pair: {
+      OffsetPair pair{};
+      ptr = read_offset_pair(ptr, pair);
+      result.push_back({base + pair.start, base + pair.end});
+      break;
+    }
+    case RangeListEntry::DW_RLE_base_address: {
+      base = read_address();
+    } break;
+    case RangeListEntry::DW_RLE_start_length: {
+      AddrPtr start = read_address();
+      u64 len;
+      ptr = decode_uleb128(ptr, len);
+      result.push_back({start, start + len});
+      break;
+    }
+    case RangeListEntry::DW_RLE_end_of_list:
+      base = nullptr;
+      break;
+    }
+    ptr = read_entry_type(ptr, entry);
+  }
+  return result;
 }
 
 AddressRange
@@ -75,7 +144,13 @@ read_boundaries(const ElfSection *rnglists, const u64 offset) noexcept
     switch (entry) {
     case RangeListEntry::DW_RLE_base_addressx:
     case RangeListEntry::DW_RLE_startx_endx:
-    case RangeListEntry::DW_RLE_startx_length:
+    case RangeListEntry::DW_RLE_startx_length: {
+      u64 addr_index = 0;
+      ptr = decode_uleb128(ptr, addr_index);
+      u64 range_length = 0;
+      ptr = decode_uleb128(ptr, range_length);
+      break;
+    }
     case RangeListEntry::DW_RLE_start_end:
       TODO("RLE type not yet implemented");
       break;

@@ -1,8 +1,15 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <symbolication/dwarf_defs.h>
 #include <typedefs.h>
+#include <vector>
 
+namespace sym::dw {
+class UnitData;
+}
+
+class Elf;
 struct ElfSection;
 struct AddressRange;
 
@@ -21,6 +28,13 @@ struct RangeListHeader
   u32 next_header_offset() const noexcept;
 };
 
+struct ResolvedRangeListOffset
+{
+  u64 offset;
+  static ResolvedRangeListOffset make(sym::dw::UnitData &cu, u64 unresolved_offset) noexcept;
+};
+
 AddressRange read_boundaries(const ElfSection *rnglists, const RangeListHeader &header) noexcept;
 AddressRange read_boundaries(const ElfSection *rnglists, const u64 offset) noexcept;
+std::vector<AddressRange> read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset offset) noexcept;
 } // namespace sym::dw

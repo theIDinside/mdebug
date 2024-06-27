@@ -1,5 +1,6 @@
 #include "die.h"
 #include "debug_info_reader.h"
+#include "typedefs.h"
 #include "utils/util.h"
 #include <string_view>
 #include <symbolication/dwarf_binary_reader.h>
@@ -219,6 +220,45 @@ UnitData::take_reference() noexcept
   explicit_references += 1;
 }
 
+u32
+UnitData::addr_base() noexcept
+{
+  if (addr_offset) {
+    return addr_offset.value();
+  }
+  DieReference ref{this, &get_dies()[0]};
+  auto base = ref.read_attribute(Attribute::DW_AT_addr_base);
+  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: 0x{:x}", section_offset());
+  addr_offset = base.transform([](auto v) { return v.unsigned_value(); });
+  return addr_offset.value();
+}
+
+u32
+UnitData::rng_list_base() noexcept
+{
+  if (rng_list_offset) {
+    return rng_list_offset.value();
+  }
+  DieReference ref{this, &get_dies()[0]};
+  auto base = ref.read_attribute(Attribute::DW_AT_rnglists_base);
+  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: 0x{:x}", section_offset());
+  rng_list_offset = base.transform([](auto v) { return v.unsigned_value(); });
+  return rng_list_offset.value();
+}
+
+std::optional<u32>
+UnitData::str_offsets_base() noexcept
+{
+  if (str_offset) {
+    return str_offset;
+  }
+  DieReference ref{this, &get_dies()[0]};
+  auto base = ref.read_attribute(Attribute::DW_AT_str_offsets_base);
+  ASSERT(base, "Could not find Attribute::DW_AT_str_offsets_base for this cu: 0x{:x}", section_offset());
+  str_offset = base.transform([](auto v) { return v.unsigned_value(); });
+  return str_offset;
+}
+
 void
 UnitData::release_reference() noexcept
 {
@@ -395,18 +435,45 @@ read_unit_headers(ObjectFile *obj) noexcept
     if (version < 5) {
       addr_size = reader.read_value<u8>();
     }
-    const auto header_len = reader.pop_bookmark();
-    const auto die_data_len = unit_len - header_len;
-    UnitHeader h{SymbolInfoId{unit_index},
-                 sec_offset,
-                 total_unit_size,
-                 reader.get_span(die_data_len),
-                 abb_offs,
-                 addr_size,
-                 format,
-                 (DwarfVersion)version,
-                 unit_type};
-    result.push_back(h);
+
+    switch (unit_type) {
+    case DwarfUnitType::DW_UT_type: {
+      const auto type_sig = reader.read_value<u64>();
+      const u64 type_offset = format == 4 ? reader.read_value<u32>() : reader.read_value<u64>();
+      const auto header_len = reader.pop_bookmark();
+      const auto die_data_len = unit_len - header_len;
+      ASSERT(header_len == 20 || header_len == 28, "Unexpected header length: {}", header_len);
+      UnitHeader header{{unit_index}, sec_offset, total_unit_size, reader.get_span(die_data_len),
+                        abb_offs,     addr_size,  format,          type_sig,
+                        type_offset};
+      result.push_back(header);
+    } break;
+    case DwarfUnitType::DW_UT_compile:
+      [[fallthrough]];
+    case DwarfUnitType::DW_UT_partial: {
+      const auto header_len = reader.pop_bookmark();
+      if (version == 4) {
+        ASSERT((header_len == 7 || header_len == 11), "Unexpected compilation unit header size: {}", header_len);
+      } else {
+        ASSERT(version == 5 && (header_len == 8 || header_len == 12),
+               "Unexpected compilation unit header size: {}", header_len);
+      }
+      const auto die_data_len = unit_len - header_len;
+      UnitHeader h{SymbolInfoId{unit_index},
+                   sec_offset,
+                   total_unit_size,
+                   reader.get_span(die_data_len),
+                   abb_offs,
+                   addr_size,
+                   format,
+                   (DwarfVersion)version,
+                   unit_type};
+      result.push_back(h);
+    } break;
+    default:
+      ASSERT(false, "Unit type {} not supported yet", to_str(unit_type));
+      break;
+    }
     ++unit_index;
     ASSERT(reader.bytes_read() == sec_offset + unit_len + init_len,
            "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,

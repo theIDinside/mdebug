@@ -58,6 +58,12 @@ struct AttributeValue
     return value.i;
   }
 
+  static std::string_view
+  as_string(const AttributeValue &v) noexcept
+  {
+    return v.string();
+  }
+
   // std::uintptr_t address() const noexcept;
   // std::string_view string() const noexcept;
   // DataBlock block() const noexcept;

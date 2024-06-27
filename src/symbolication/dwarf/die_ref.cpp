@@ -28,10 +28,14 @@ DieReference::read_attribute(Attribute attr) const noexcept
   UnitReader reader{cu};
   const auto &attrs = cu->get_abbreviation(die->abbreviation_code);
   reader.seek_die(*die);
+  auto i = 0u;
   for (auto attribute : attrs.attributes) {
-    const auto value = read_attribute_value(reader, attribute, attrs.implicit_consts);
-    if (value.name == attr) {
+    if (attribute.name == attr) {
+      reader.skip_attributes(std::span{attrs.attributes.begin(), attrs.attributes.begin() + i});
+      const auto value = read_attribute_value(reader, attribute, attrs.implicit_consts);
       return value;
+    } else {
+      ++i;
     }
   }
   return std::nullopt;

@@ -4,6 +4,7 @@
 #include "dwarf_defs.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf_expressions.h"
 #include "utils/byte_buffer.h"
 #include "utils/enumerator.h"
@@ -137,6 +138,7 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
 {
   const sym::dw::DieReference this_ref{.cu = die_ref.cu, .die = die_ref.get_die()};
   const auto type_id = this_ref.die->section_offset;
+
   if (types.contains(type_id)) {
     auto t = types[type_id];
     return t;
@@ -169,15 +171,31 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     types[this_ref.die->section_offset] = type;
     return type;
   } else {
-    // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
-    // Like come on dog. Give it a bogus name, whatever really. But nothing?
-    const auto name = this_ref.read_attribute(Attribute::DW_AT_name)
-                        .transform([](auto v) { return v.string(); })
-                        .value_or("lambda");
-    const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
-    auto type = new sym::Type{this_ref.die->tag, die_ref, sz, name};
-    types[this_ref.die->section_offset] = type;
-    return type;
+    if (const auto &attr_val = this_ref.read_attribute(Attribute::DW_AT_signature); attr_val) {
+      // DWARF5 support; we might run into type units, therefore we have to resolve the *actual* die we want here
+      // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
+      // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
+      // just means mulitple keys can reach the value, which is a pointer to the actual type.
+      auto tu_die_ref = this_ref.cu->get_objfile()->get_type_unit_type_die(attr_val->unsigned_value());
+      ASSERT(tu_die_ref.valid(), "expected die reference to type unit to be valid");
+      const u32 sz = tu_die_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
+      const auto name = tu_die_ref.read_attribute(Attribute::DW_AT_name)
+                          .transform(AttributeValue::as_string)
+                          .value_or("<no name>");
+      auto type = new sym::Type{this_ref.die->tag, tu_die_ref.as_indexed(), sz, name};
+      types[this_ref.die->section_offset] = type;
+      return type;
+    } else {
+      // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
+      // Like come on dog. Give it a bogus name, whatever really. But nothing?
+      const auto name = this_ref.read_attribute(Attribute::DW_AT_name)
+                          .transform([](auto v) { return v.string(); })
+                          .value_or("lambda");
+      const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
+      auto type = new sym::Type{this_ref.die->tag, die_ref, sz, name};
+      types[this_ref.die->section_offset] = type;
+      return type;
+    }
   }
 }
 

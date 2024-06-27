@@ -13,6 +13,111 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
 }
 
 void
+UnitReader::skip_attribute(const Abbreviation &abbreviation) noexcept
+{
+  auto is_indirect = false;
+  auto form = abbreviation.form;
+  do {
+    is_indirect = false;
+    // clang-format off
+      switch (form) {
+      case AttributeForm::DW_FORM_strp: [[fallthrough]];
+      case AttributeForm::DW_FORM_sec_offset: [[fallthrough]];
+      case AttributeForm::DW_FORM_line_strp: [[fallthrough]];
+      case AttributeForm::DW_FORM_ref_addr:
+        current_ptr += compilation_unit->header().format();
+        break;
+      case AttributeForm::DW_FORM_addr:
+        current_ptr += compilation_unit->header().addr_size();
+        break;
+      case AttributeForm::Reserved: PANIC("Can't handle RESERVED");
+      case AttributeForm::DW_FORM_block2:
+        current_ptr += read_integral<u16>();
+        break;
+      case AttributeForm::DW_FORM_block4:
+        current_ptr += read_integral<u32>();
+        break;
+
+      case AttributeForm::DW_FORM_data16:
+        current_ptr += 16;
+        break;
+      case AttributeForm::DW_FORM_string:
+        read_string();
+        break;
+      case AttributeForm::DW_FORM_exprloc: [[fallthrough]];
+      case AttributeForm::DW_FORM_block:
+        current_ptr += uleb128();
+        break;
+      case AttributeForm::DW_FORM_block1:
+        current_ptr += read_integral<u8>();
+        break;
+
+      case AttributeForm::DW_FORM_strx1: [[fallthrough]];
+      case AttributeForm::DW_FORM_ref1: [[fallthrough]];
+      case AttributeForm::DW_FORM_addrx1: [[fallthrough]];
+      case AttributeForm::DW_FORM_data1: [[fallthrough]];
+      case AttributeForm::DW_FORM_flag:
+        current_ptr += 1;
+        break;
+
+      case AttributeForm::DW_FORM_addrx2: [[fallthrough]];
+      case AttributeForm::DW_FORM_strx2: [[fallthrough]];
+      case AttributeForm::DW_FORM_ref2: [[fallthrough]];
+      case AttributeForm::DW_FORM_data2:
+      current_ptr += 2;
+        break;
+
+      case AttributeForm::DW_FORM_addrx3: [[fallthrough]];
+      case AttributeForm::DW_FORM_strx3:
+        current_ptr += 3;
+        break;
+
+      case AttributeForm::DW_FORM_addrx4: [[fallthrough]];
+      case AttributeForm::DW_FORM_strx4: [[fallthrough]];
+      case AttributeForm::DW_FORM_ref4: [[fallthrough]];
+      case AttributeForm::DW_FORM_data4:
+        current_ptr += 4;
+        break;
+
+      case AttributeForm::DW_FORM_ref8: [[fallthrough]];
+      case AttributeForm::DW_FORM_data8:
+        current_ptr += 8;
+        break;
+
+      case AttributeForm::DW_FORM_sdata:
+        leb128();
+        break;
+      case AttributeForm::DW_FORM_rnglistx: [[fallthrough]];
+      case AttributeForm::DW_FORM_loclistx: [[fallthrough]];
+      case AttributeForm::DW_FORM_addrx: [[fallthrough]];
+      case AttributeForm::DW_FORM_strx: [[fallthrough]];
+      case AttributeForm::DW_FORM_udata: [[fallthrough]];
+      case AttributeForm::DW_FORM_ref_udata:
+        uleb128();
+        break;
+      case AttributeForm::DW_FORM_indirect:
+        is_indirect = true;
+        form = (AttributeForm)uleb128();
+        break;
+      case AttributeForm::DW_FORM_flag_present:
+        break;
+      case AttributeForm::DW_FORM_ref_sup4: PANIC("Unsupported attribute form DW_FORM_ref_sup4");
+      case AttributeForm::DW_FORM_strp_sup: PANIC("Unsupported attribute form DW_FORM_strp_sup");
+      case AttributeForm::DW_FORM_ref_sig8: {
+        current_ptr += 8;
+        break;
+      }
+      case AttributeForm::DW_FORM_ref_sup8: PANIC("Unsupported attribute form DW_FORM_ref_sup8");
+      case AttributeForm::DW_FORM_implicit_const:
+        break;
+      default:
+        PANIC("Unknown Attribute Form");
+      }
+    } while (is_indirect);
+  // clang-format on
+}
+
+void
 UnitReader::skip_attributes(const std::span<const Abbreviation> &attributes) noexcept
 {
   for (auto [name, form, consts] : attributes) {
@@ -103,7 +208,10 @@ UnitReader::skip_attributes(const std::span<const Abbreviation> &attributes) noe
         break;
       case AttributeForm::DW_FORM_ref_sup4: PANIC("Unsupported attribute form DW_FORM_ref_sup4");
       case AttributeForm::DW_FORM_strp_sup: PANIC("Unsupported attribute form DW_FORM_strp_sup");
-      case AttributeForm::DW_FORM_ref_sig8: PANIC("Unsupported attribute form DW_FORM_ref_sig8");
+      case AttributeForm::DW_FORM_ref_sig8: {
+        current_ptr += 8;
+        break;
+      }
       case AttributeForm::DW_FORM_ref_sup8: PANIC("Unsupported attribute form DW_FORM_ref_sup8");
       case AttributeForm::DW_FORM_implicit_const:
         break;
@@ -227,12 +335,12 @@ UnitReader::read_n_bytes(u8 n_bytes) noexcept
 }
 
 AddrPtr
-UnitReader::read_by_idx_from_addr_table(u64 address_index, std::optional<u64> addr_table_base) const noexcept
+UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 {
   auto obj = compilation_unit->get_objfile();
   const auto header = compilation_unit->header();
   ASSERT(obj->elf->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
-  const auto addr_table_offset = addr_table_base.value_or(0) + address_index * header.format();
+  const auto addr_table_offset = compilation_unit->addr_base() + address_index * header.addr_size();
   const auto ptr = (obj->elf->debug_addr->m_section_ptr + addr_table_offset);
   if (header.addr_size() == 4) {
     const auto value = *(u32 *)ptr;
@@ -244,11 +352,12 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index, std::optional<u64> ad
 }
 
 std::string_view
-UnitReader::read_by_idx_from_str_table(u64 str_index, std::optional<u64> str_offsets_base) const noexcept
+UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 {
   const auto elf = compilation_unit->get_objfile()->elf;
   ASSERT(elf->debug_str_offsets->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
-  const auto str_table_offset = str_offsets_base.value_or(0) + str_index * compilation_unit->header().format();
+  const auto str_base = compilation_unit->str_offsets_base();
+  const auto str_table_offset = str_base.value() + str_index * compilation_unit->header().format();
   const auto ptr = (elf->debug_str_offsets->m_section_ptr + str_table_offset);
   if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
@@ -260,14 +369,14 @@ UnitReader::read_by_idx_from_str_table(u64 str_index, std::optional<u64> str_off
 }
 
 u64
-UnitReader::read_by_idx_from_rnglist(u64 range_index, std::optional<u64> rng_list_base) const noexcept
+UnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
 {
   const auto elf = compilation_unit->get_objfile()->elf;
   ASSERT(elf->debug_rnglists->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
-
-  const auto rnglist_offset = rng_list_base.value_or(0) + range_index * compilation_unit->header().format();
+  const auto rnglist_offset =
+    compilation_unit->rng_list_base() + range_index * compilation_unit->header().format();
   const auto ptr = (elf->debug_rnglists->m_section_ptr + rnglist_offset);
-  if (compilation_unit->header().addr_size() == 4) {
+  if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
     return value;
   } else {
@@ -278,12 +387,13 @@ UnitReader::read_by_idx_from_rnglist(u64 range_index, std::optional<u64> rng_lis
 u64
 UnitReader::read_loclist_index(u64 range_index, std::optional<u64> loc_list_base) const noexcept
 {
+  PANIC("read_loclist_index is not yet implemented. see other indirect + base calculations");
   const auto elf = compilation_unit->get_objfile()->elf;
   ASSERT(elf->debug_loclist->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
 
   const auto rnglist_offset = loc_list_base.value_or(0) + range_index * compilation_unit->header().format();
   const auto ptr = (elf->debug_loclist->m_section_ptr + rnglist_offset);
-  if (compilation_unit->header().addr_size() == 4) {
+  if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
     return value;
   } else {
@@ -449,14 +559,11 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     const auto base = utils::castenum(AttributeForm::DW_FORM_strx1) - 1;
     const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto idx = reader.read_n_bytes(bytes_to_read);
-    DieReference{}.read_attribute(Attribute::DW_AT_str_offsets_base).transform([](auto v) {
-      return v.unsigned_value();
-    });
-    return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
+    return AttributeValue{reader.read_by_idx_from_str_table(idx), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_strx: {
     const auto idx = reader.uleb128();
-    return AttributeValue{reader.read_by_idx_from_str_table(idx, {}), abbr.form, abbr.name};
+    return AttributeValue{reader.read_by_idx_from_str_table(idx), abbr.form, abbr.name};
   }
 
   // fall through. Nasty attribute forms; beware
@@ -472,20 +579,22 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     const auto base = utils::castenum(AttributeForm::DW_FORM_addrx1) - 1;
     const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto addr_index = reader.read_n_bytes(bytes_to_read);
-    return AttributeValue{reader.read_by_idx_from_addr_table(addr_index, {}), abbr.form, abbr.name};
+    return AttributeValue{reader.read_by_idx_from_addr_table(addr_index), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_addrx: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
            reader.objfile()->path->c_str());
     const auto addr_table_index = reader.uleb128();
-    return AttributeValue{reader.read_by_idx_from_addr_table(addr_table_index, {}), abbr.form, abbr.name};
+    return AttributeValue{reader.read_by_idx_from_addr_table(addr_table_index), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_ref_sup4:
     PANIC("Unsupported attribute form DW_FORM_ref_sup4");
   case AttributeForm::DW_FORM_strp_sup:
     PANIC("Unsupported attribute form DW_FORM_strp_sup");
-  case AttributeForm::DW_FORM_ref_sig8:
-    PANIC("Unsupported attribute form DW_FORM_ref_sig8");
+  case AttributeForm::DW_FORM_ref_sig8: {
+    const auto offset = reader.read_integral<u64>();
+    return AttributeValue{offset, abbr.form, abbr.name};
+  }
   case AttributeForm::DW_FORM_implicit_const:
     ASSERT(abbr.IMPLICIT_CONST_INDEX != UINT8_MAX, "Invalid implicit const index");
     return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], abbr.form, abbr.name};
@@ -500,7 +609,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     ASSERT(elf->debug_rnglists != nullptr, ".debug_rnglists not read in or found in objfile {}",
            reader.objfile()->path->c_str());
     const auto addr_table_index = reader.uleb128();
-    return AttributeValue{reader.read_by_idx_from_rnglist(addr_table_index, {}), abbr.form, abbr.name};
+    return AttributeValue{reader.read_by_idx_from_rnglist(addr_table_index), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_ref_sup8:
     PANIC("Unsupported attribute form DW_FORM_ref_sup8");

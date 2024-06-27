@@ -38,8 +38,8 @@ struct AbbreviationInfo
   // The abbreviation code
   u32 code;
   DwarfTag tag;
-  bool has_children;
-  bool is_declaration;
+  bool has_children : 1;
+  bool is_declaration : 1;
   std::vector<Abbreviation> attributes;
   std::vector<i64> implicit_consts;
   // TODO(simon): implement. These will be needed/useful when we resolve indirect/inter-DIE references. Ugh. DWARF.
@@ -129,6 +129,9 @@ public:
   DieReference get_cu_die_ref(u64 offset) noexcept;
   DieReference get_cu_die_ref(Index offset) noexcept;
   void take_reference() noexcept;
+  std::optional<u32> str_offsets_base() noexcept;
+  u32 rng_list_base() noexcept;
+  u32 addr_base() noexcept;
 
 private:
   void load_dies() noexcept;
@@ -145,6 +148,9 @@ private:
   u32 loaded_die_count;
   AbbreviationInfo::Table abbreviations;
   i32 explicit_references;
+  std::optional<u32> str_offset{};
+  std::optional<u32> rng_list_offset{};
+  std::optional<u32> addr_offset{};
   mutable std::mutex load_dies_mutex;
 };
 

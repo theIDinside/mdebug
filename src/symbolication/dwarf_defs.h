@@ -230,6 +230,18 @@ enum class DwarfOp : std::uint8_t
     return #Name;
 
 constexpr std::string_view
+to_str(DwarfUnitType unit_type)
+{
+#define DW_DWARF_UNIT_TYPE
+  using enum DwarfUnitType;
+  switch (unit_type) {
+#include "../defs/dwarf.defs"
+  }
+#undef DW_DWARF_UNIT_TYPE
+  MIDAS_UNREACHABLE
+}
+
+constexpr std::string_view
 to_str(BaseTypeEncoding enc)
 {
 #define DW_BASETYPE_ENCODING

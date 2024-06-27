@@ -5,6 +5,7 @@
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
 #include "mdb_config.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tracer.h"
 #include <common.h>
@@ -113,6 +114,9 @@ struct ObjectFile
   auto init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers) -> void;
   auto get_plte(u64 offset) noexcept -> sym::dw::ParsedLineTableEntries &;
   auto add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept -> void;
+  auto add_type_units(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
+  auto get_type_unit(u64 type_signature) noexcept -> sym::dw::UnitData *;
+  auto get_type_unit_type_die(u64 type_signature) noexcept -> sym::dw::DieReference;
 
   auto get_source_file(const std::filesystem::path &fullpath) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
   auto source_code_files() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
@@ -152,6 +156,7 @@ private:
 
   std::mutex cu_write_lock;
   std::vector<sym::CompilationUnit> comp_units;
+  std::unordered_map<u64, sym::dw::UnitData *> type_units{};
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
   //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable

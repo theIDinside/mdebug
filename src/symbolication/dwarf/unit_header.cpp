@@ -3,11 +3,21 @@
 #include <symbolication/elf.h>
 
 namespace sym::dw {
+// Partial/Compile Unit-header constructor
 UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
                        u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
                        DwarfUnitType unit_type) noexcept
     : sec_offset(sec_offset), unit_size(unit_size), die_data(die_data), abbreviation_sec_offset(abbrev_offset),
       address_size(addr_size), dwarf_format(format), dw_version(version), unit_type(unit_type), id(id)
+{
+}
+
+// Type Unit-Header constructor
+UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
+                       u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept
+    : sec_offset(sec_offset), unit_size(unit_size), die_data(die_data), abbreviation_sec_offset(abbrev_offset),
+      address_size(addr_size), dwarf_format(format), dw_version(DwarfVersion::D5),
+      unit_type(DwarfUnitType::DW_UT_type), id(id), type_sig(type_signature), type_offset(type_offset)
 {
 }
 
@@ -58,14 +68,19 @@ UnitHeader::format() const noexcept
 u8
 UnitHeader::header_len() const noexcept
 {
-  // if we're DWARF64, init length is 8 + 4 + 8, whereas DWARF32 contains 4 + 0 + 4
-  switch (format()) {
-  case 4:
-    return (4 * 2) + 2 + 1 + (dw_version == DwarfVersion::D5 ? 1 : 0);
-  case 8:
-    return (8 * 2 + 4) + 2 + 1 + (dw_version == DwarfVersion::D5 ? 1 : 0);
+  const auto fmt = format();
+  ASSERT(fmt == 4 || fmt == 8, "Unknown format");
+  switch (unit_type) {
+  case DwarfUnitType::DW_UT_type:
+    return fmt == 4 ? (4 * 6) : (4 * 10);
+  case DwarfUnitType::DW_UT_compile:
+    [[fallthrough]];
+  case DwarfUnitType::DW_UT_partial: {
+    return 4 * (3 * (fmt / 4)) - (dw_version == DwarfVersion::D4 ? 1 : 0);
+  }
   default:
-    PANIC("Invalid Dwarf Format (32-bit / 64-bit)");
+    ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at 0x{:x}", to_str(unit_type), sec_offset);
+    break;
   }
 }
 
@@ -103,5 +118,17 @@ u64
 UnitHeader::cu_size() const noexcept
 {
   return unit_size;
+}
+
+u64
+UnitHeader::type_signature() const noexcept
+{
+  return type_sig;
+}
+
+u64
+UnitHeader::get_type_offset() const noexcept
+{
+  return type_offset;
 }
 } // namespace sym::dw

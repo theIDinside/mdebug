@@ -1,5 +1,6 @@
 #pragma once
 #include "../dwarf_defs.h"
+#include "die.h"
 #include <common.h>
 #include <typedefs.h>
 
@@ -19,6 +20,7 @@ class UnitReader
 public:
   UnitReader(UnitData *data) noexcept;
   void skip_attributes(const std::span<const Abbreviation> &attributes) noexcept;
+  void skip_attribute(const Abbreviation &abbreviation) noexcept;
   AddrPtr read_address() noexcept;
   std::string_view read_string() noexcept;
   DataBlock read_block(u64 block_size) noexcept;
@@ -32,9 +34,9 @@ public:
   u64 read_offset() noexcept;
   u64 read_section_offset(u64 offset) const noexcept;
   u64 read_n_bytes(u8 n_bytes) noexcept;
-  AddrPtr read_by_idx_from_addr_table(u64 address_index, std::optional<u64> addr_table_base) const noexcept;
-  std::string_view read_by_idx_from_str_table(u64 str_index, std::optional<u64> str_offsets_base) const noexcept;
-  u64 read_by_idx_from_rnglist(u64 range_index, std::optional<u64> rng_list_base) const noexcept;
+  AddrPtr read_by_idx_from_addr_table(u64 address_index) const noexcept;
+  std::string_view read_by_idx_from_str_table(u64 str_index) const noexcept;
+  u64 read_by_idx_from_rnglist(u64 range_index) const noexcept;
   u64 read_loclist_index(u64 range_index, std::optional<u64> loc_list_base) const noexcept;
   u64 sec_offset() const noexcept;
   bool has_more() const noexcept;
@@ -69,5 +71,14 @@ private:
 
 AttributeValue read_attribute_value(UnitReader &reader, Abbreviation abbr,
                                     const std::vector<i64> &implicit_consts) noexcept;
+
+class DieAttributeReader
+{
+  DieReference die;
+  const AbbreviationInfo &info;
+
+public:
+  DieAttributeReader(DieReference die, const AbbreviationInfo &info) noexcept;
+};
 
 } // namespace sym::dw

@@ -466,7 +466,7 @@ LNPHeader::file_entry_index(const std::filesystem::path &p) const noexcept
     fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
     const auto file_path = std::filesystem::path{path_buf}.lexically_normal();
     if (p == file_path) {
-      return file_index + 1;
+      return this->version == DwarfVersion::D4 ? file_index + 1 : file_index;
     }
     ++file_index;
   }

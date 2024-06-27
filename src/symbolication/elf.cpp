@@ -84,6 +84,7 @@ Elf::Elf(Elf64Header *header, ElfSectionData sections, ObjectFile &obj_file) noe
   debug_abbrev = get_section(ElfSec::DebugAbbrev);
   debug_str = get_section(ElfSec::DebugStr);
   debug_line = get_section(ElfSec::DebugLine);
+  debug_addr = get_section(ElfSec::DebugAddr);
   debug_ranges = get_section(ElfSec::DebugRanges);
   debug_line_str = get_section(ElfSec::DebugLineStr);
   debug_str_offsets = get_section(ElfSec::DebugStrOffsets);
