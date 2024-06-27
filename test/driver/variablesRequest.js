@@ -2,10 +2,8 @@
 
 const {
   launchToGetFramesAndScopes,
-  repoDirFile,
   allBreakpointIdentifiers,
   SubjectSourceFiles: { include, subjects },
-  SetBreakpoints,
 } = require('./client')
 const { todo, assert, assertLog, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
 const stdAssert = require('assert')
@@ -85,7 +83,7 @@ async function scopeLocalsTest(debugAdapter) {
         assertEqAInB(expected[v.name], v)
         if (v.name == 'structure') {
           const expected = {
-            name: newVarObject('name', '0x4012c8', 'const char *'),
+            name: newVarObject('name', '0x200688', 'const char *'),
             count: newVarObject('count', '1', 'int', 0),
             fraction: newVarObject('fraction', '1.25', 'float', 0),
           }
@@ -255,7 +253,6 @@ async function testArrayResolverCaching(DA) {
       )}. Result: ${prettyJson(variables)}`
   )
   const asserter = (index, variables) => {
-    console.log(`testing ${prettyJson(variables)}`)
     let expected = {
       a: newVarObject('a', `${index}`, 'int', 0),
       b: newVarObject('b', `${index + index / 100}`, 'float', 0),
@@ -267,13 +264,12 @@ async function testArrayResolverCaching(DA) {
   const count = 5
   const arrayId = variables[0].variablesReference
   for (let i = 55; i >= 5; i -= 5) {
-    console.log(`VARIABLES REQUEST FOR START=${i}`)
     const five = await DA.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assert(five.body.variables.length == 5, `Expected result to be of length: ${count}`)
+    assertLog(five.body.variables.length == 5, `Expected result to be of length: ${count}`)
     let index = i
     for (const v of five.body.variables) {
       const arrTypeVariable = await DA.sendReqGetResponse('variables', {
@@ -285,12 +281,13 @@ async function testArrayResolverCaching(DA) {
   }
   // Array resolver should have cached all 60 elements now.
   for (let i = 0; i < 60; ++i) {
+    const count = 1
     const one = await DA.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
-      count: 1,
+      count: count,
     })
-    assert(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
+    assertLog(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
     for (const v of one.body.variables) {
       const arrTypeVariable = await DA.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
@@ -301,12 +298,13 @@ async function testArrayResolverCaching(DA) {
 
   // Let's try it backwards
   for (let i = 59; i >= 0; --i) {
+    const count = 1
     const one = await DA.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
-      count: 1,
+      count: count,
     })
-    assert(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
+    assertLog(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
     for (const v of one.body.variables) {
       const arrTypeVariable = await DA.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
@@ -425,7 +423,6 @@ async function readArrayTypes(DA) {
   )
   console.log(prettyJson(variables))
   const asserter = (index, variables) => {
-    console.log(`testing ${prettyJson(variables)}`)
     let expected = {
       a: newVarObject('a', `${index}`, 'int', 0),
       b: newVarObject('b', `${index + index / 100}`, 'float', 0),

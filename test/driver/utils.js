@@ -205,6 +205,50 @@ function objdump(file) {
   return spawnSync('objdump', ['-d', file]).stdout.toString()
 }
 
+/** Find routine with name `fnName` */
+
+const ObjectDumpRoutineRegex = /[0-9a-f]*\s<[_0-9A-Za-z]*>:/
+function findDisasmFunction(fnName, file) {
+  const disassemblyOf = () => {
+    const objdumped = objdump(file).split('\n')
+    let objdumpOutputLine = 0
+    let start = 0
+    for (const line of objdumped) {
+      const cmp = ObjectDumpRoutineRegex.test(line)
+      if (start == 0 && cmp) {
+        if (line.includes(fnName)) {
+          start = objdumpOutputLine + 1
+        }
+      } else if (start > 0 && cmp) {
+        return objdumped.slice(start, objdumpOutputLine)
+      }
+      objdumpOutputLine += 1
+    }
+  }
+  const disasm = disassemblyOf()
+  assert(disasm.length > 0, `Could not find disassembly for ${fnName} in ${file}`)
+
+  const getOnlyAddress = (line) => {
+    let addr = line.indexOf(':')
+    if (addr == -1) {
+      return null
+    }
+    return line.substr(0, addr).trim()
+  }
+  let addresses = []
+  for (const instruction of disasm) {
+    const addr = getOnlyAddress(instruction)
+    if (addr) {
+      addresses.push(`0x${addr}`)
+    }
+    if (instruction.includes('ret')) {
+      // ignore whatever safety stuff (or garbage data) compilers emit after a ret. We can't do nothin with it.
+      return addresses
+    }
+  }
+  return addresses
+}
+
 function hexStrAddressesEquals(a, b) {
   let addr_a = Number.parseInt(a, 16)
   let addr_b = Number.parseInt(b, 16)
@@ -340,6 +384,7 @@ function getPrintfPlt(DA, executable) {
 }
 
 module.exports = {
+  findDisasmFunction,
   objdump,
   getTextSection,
   processObjdumpLines,

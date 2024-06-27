@@ -48,7 +48,6 @@ function compareDisassembly(pc, objdump, mdbResult) {
       }. Serial data: ${JSON.stringify(mdbResult, null, 2)}. Expected data ${JSON.stringify(objdump, null, 2)}`
     )
   }
-  console.log(`MDB Instruction Output: ${mdbResult.length} == objdump Instruction Output: ${objdump.length}`)
   for (let i = 0; i < objdump.length; ++i) {
     const resAddr = mdbResult[i].address
     const dumpAddr = objdump[i].addr
@@ -85,7 +84,6 @@ async function disasm_verify(objdump, client, pc, insOffset, insCount) {
     resolveSymbols: false,
   })
   compareDisassembly(pc, objdumpSpan, disassembly.body.instructions)
-  console.log(`[offset: ${insOffset}, pc: ${pc}, count: ${insCount}]\n\t - MDB output == objdump output!`)
 }
 
 async function backAndForward(DA) {

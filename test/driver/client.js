@@ -674,7 +674,7 @@ class DAClient {
    * @param { number } failureTimeout - The maximum time (in milliseconds) that we should wait for response. If the request takes longer, the test will fail.
    * @returns { Promise<Response> } - Returns a promise that resolves to the response to the `req` command.
    */
-  async sendReqGetResponse(req, args, failureTimeout = seconds(2), fn = this.sendReqGetResponse) {
+  async sendReqGetResponse(req, args, failureTimeout = seconds(1), fn = this.sendReqGetResponse) {
     const ctrl = new AbortController()
     const signal = ctrl.signal
     const req_promise = this._sendReqGetResponseImpl(req, args)

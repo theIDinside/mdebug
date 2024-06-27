@@ -1,5 +1,5 @@
 const { checkResponse, getLineOf, readFileContents, repoDirFile, launchToGetFramesAndScopes } = require('./client')
-const { assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
+const { findDisasmFunction, assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
 
 const bpRequest = 'setBreakpoints'
 
@@ -40,7 +40,8 @@ async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
 async function setInstructionBreakpoint(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
-  const instructionAddress = '0x40088c'
+  const mainFnAddresses = findDisasmFunction('main', debugAdapter.buildDirFile('stackframes'))
+  const instructionAddress = mainFnAddresses[1]
   await debugAdapter
     .sendReqGetResponse('setInstructionBreakpoints', {
       breakpoints: [{ instructionReference: instructionAddress }],
@@ -122,9 +123,7 @@ async function set2InDifferentCompUnit(debugAdapter) {
 
 /** @param {import("./client").DAClient } debugAdapter */
 async function setFunctionBreakpoint(debugAdapter) {
-  console.log(`init launch to main...`)
   await initLaunchToMain(debugAdapter, 'functionBreakpoints')
-  console.log(`done initializing debugger (and possibly remote)`)
   const functions = ['Person', 'sayHello'].map((n) => ({ name: n }))
 
   const fnBreakpointResponse = await debugAdapter.sendReqGetResponse('setFunctionBreakpoints', {
@@ -155,7 +154,7 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
     'Expected 3 breakpoints',
     ` but saw ${response.body.breakpoints.length}`
   )
-  let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 5000)
+  let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 1000)
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
   console.log(prettyJson(res))
@@ -166,7 +165,7 @@ async function setBreakpointsThatArePending(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
   const printf_plt_addr = getPrintfPlt(debugAdapter, 'stackframes')
-  const invalidAddressess = ['0x300000', '0x200000', '0x9800000', printf_plt_addr].map((v) => ({
+  const invalidAddressess = ['0x300000', '0x100000', '0x9800000', printf_plt_addr].map((v) => ({
     instructionReference: v,
   }))
   await debugAdapter
