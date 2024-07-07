@@ -98,6 +98,12 @@ BuildTestSubject(
   ${CMAKE_CURRENT_SOURCE_DIR}/fork.cpp
 )
 
+BuildTestSubject(
+  NAME avx-subject
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/avx-subject.cpp
+)
+
 set(VariablesRequestSubjects arrayOf3 pointer struct)
 set(MultiProcessSubjects parent childprogram)
 
