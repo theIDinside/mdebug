@@ -1,8 +1,7 @@
-dependencies/**
 src/defs/syscalls.def
-src/symbolication_reference
-build-gcc/
+dependencies/**
 build-*/**
 *.log
 DriverTests.cmake
 compile_commands.json
+build*/**

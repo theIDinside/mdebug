@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug symbols" OFF)
+option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
 
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
@@ -171,33 +172,19 @@ set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__ -march=native -mavx -mav
 set(MIDAS_DEBUG_FLAGS "-g3 -O0 -Wall -Wextra -fpermissive")
 set(MIDAS_TEST_FLAGS "${MIDAS_DEBUG_FLAGS}")
 
+if(USE_DWARF5)
+  set(MIDAS_DEBUG_FLAGS "${MIDAS_DEBUG_FLAGS} -gdwarf-5 -fdebug-types-section")
+  message("Configuring compiler to emit DWARF version 5 debug symbols")
+else()
+  message("Configuring compiler to emit DWARF version 4 debug symbols")
+  set(MIDAS_DEBUG_FLAGS "${MIDAS_DEBUG_FLAGS} -gdwarf-4")
+endif()
+
 set(CMAKE_CXX_FLAGS_DEBUG "${COMMON_FLAGS} ${MIDAS_DEBUG_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
 message("Build type for project: ${CMAKE_BUILD_TYPE}")
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dependencies/googletest)
-add_subdirectory(test)
-enable_testing()
-# Unit Testing (using googletest)
-include(cmake/AddTest.cmake)
-
-AddTest(NAME base64_encoding
-  SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC}
-  LIBS fmt::fmt mdb_spinlock
-)
-
-AddTest(NAME test_utils
-  SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp
-  LIBS fmt::fmt mdb_spinlock)
-
-AddTest(NAME expected_tests
-  SOURCES test/unittest/expected_tests.cpp
-  LIBS fmt::fmt)
-
-AddTest(NAME xml_tests
-SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
-LIBS fmt::fmt)
 
 # Add the fantastic libfmt library
 add_subdirectory(dependencies/fmt)
@@ -213,20 +200,45 @@ target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zyd
 target_include_directories(mdb PUBLIC ./dependencies)
 target_include_directories(mdb PUBLIC ./src)
 
-find_program(NODEJS "node")
+message("Test & building test subjects has been configured to ${BUILD_MDB_TESTS}")
+if(BUILD_MDB_TESTS)
+  message("Testing enabled...")
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dependencies/googletest)
+  add_subdirectory(test)
+  enable_testing()
+  # Unit Testing (using googletest)
+  include(cmake/AddTest.cmake)
+  AddTest(NAME base64_encoding
+    SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC}
+    LIBS fmt::fmt mdb_spinlock
+  )
 
-# The Driver Test Suite
-if(NODEJS)
-  message("Exporting tests using MDB test exporter: ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js")
-  execute_process(COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js
-   RESULT_VARIABLE GENERATOR_EXIT_CODE
-   ERROR_VARIABLE GENERATOR_ERROR
-   OUTPUT_VARIABLE GENERATOR_OUTPUT)
-  if(GENERATOR_EXIT_CODE EQUAL 0)
-    message(STATUS "CTest suites generated successfully: ${GENERATOR_OUTPUT}")
-    include(${CMAKE_CURRENT_SOURCE_DIR}/test/driver/DriverTests.cmake)
-  else()
-    message(WARNING "Could not generate test suite configuration. Error message:\n${GENERATOR_OUTPUT}\nGenerator exited with code ${GENERATOR_EXIT_CODE}")
+  AddTest(NAME test_utils
+    SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp
+    LIBS fmt::fmt mdb_spinlock)
+
+  AddTest(NAME expected_tests
+    SOURCES test/unittest/expected_tests.cpp
+    LIBS fmt::fmt)
+
+  AddTest(NAME xml_tests
+    SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
+    LIBS fmt::fmt)
+
+  # The Driver Test Suite
+  find_program(NODEJS "node")
+  if(NODEJS)
+    message("Exporting tests using MDB test exporter: ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js")
+    execute_process(COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js
+    RESULT_VARIABLE GENERATOR_EXIT_CODE
+    ERROR_VARIABLE GENERATOR_ERROR
+    OUTPUT_VARIABLE GENERATOR_OUTPUT)
+    if(GENERATOR_EXIT_CODE EQUAL 0)
+      message(STATUS "CTest suites generated successfully: ${GENERATOR_OUTPUT}")
+      include(${CMAKE_CURRENT_SOURCE_DIR}/test/driver/DriverTests.cmake)
+    else()
+      message(WARNING "Could not generate test suite configuration. Error message:\n${GENERATOR_OUTPUT}\nGenerator exited with code ${GENERATOR_EXIT_CODE}")
+    endif()
   endif()
 endif()
 
@@ -247,16 +259,7 @@ if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   # clang using GNU's stdlib ranges, is.... iffy at the moment.
   target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
-  message("Compiler is clang - no special options required.")
   set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
 else ()
   message("Unknown compiler")
 endif ()
-
-if(USE_DWARF5)
-  set(___OLD_FLAGS "${MIDAS_DEBUG_FLAGS}")
-  set(MIDAS_DEBUG_FLAGS "${MIDAS_DEBUG_FLAGS} -gdwarf-5 -fdebug-types-section")
-  message("Re-configured midas debug flags from:\n${___OLD_FLAGS} \nto\n${MIDAS_DEBUG_FLAGS}")
-else()
-  message("Using default DWARF output from compiler.")
-endif()
