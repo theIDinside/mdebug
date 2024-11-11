@@ -12,7 +12,7 @@ namespace tc {
 class TraceeCommandInterface;
 }
 
-struct TraceeController;
+class TraceeController;
 class AwaiterThread
 {
 public:

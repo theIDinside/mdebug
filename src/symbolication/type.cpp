@@ -2,13 +2,10 @@
 #include "common.h"
 #include "dwarf.h"
 #include "dwarf_defs.h"
+#include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
 #include "symbolication/dwarf/die_ref.h"
-#include "symbolication/dwarf_expressions.h"
-#include "utils/byte_buffer.h"
-#include "utils/enumerator.h"
-#include "utils/expected.h"
 #include "utils/immutable.h"
 #include <optional>
 #include <supervisor.h>
@@ -58,6 +55,7 @@ sym::is_reference_like(sym::Modifier modifier) noexcept
   case Modifier::Volatile:
     return false;
   }
+  NEVER("Unknown modifier");
 }
 
 sym::Modifier
@@ -120,14 +118,25 @@ TypeStorage::get_unit_type() noexcept
 static u32
 resolve_array_bounds(sym::dw::DieReference array_die) noexcept
 {
-  ASSERT(array_die.die->has_children, "expected die {} to have children", array_die);
+  ASSERT(array_die.GetDie()->has_children, "expected die {} to have children", array_die);
 
-  for (const auto child : sym::dw::IterateSiblings{array_die.cu, array_die.die->children()}) {
+  for (const auto child : sym::dw::IterateSiblings{array_die.GetUnitData(), array_die.GetDie()->children()}) {
     if (child.tag == DwarfTag::DW_TAG_subrange_type) {
-      const sym::dw::DieReference ref{.cu = array_die.cu, .die = &child};
-      auto bounds = ref.read_attribute(Attribute::DW_AT_count);
-      ASSERT(bounds, "{}: Could not determine array type 'subrange count'", ref);
-      return bounds->unsigned_value();
+      const sym::dw::DieReference ref{array_die.GetUnitData(), &child};
+      u64 count{};
+      sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader& reader, sym::dw::Abbreviation& attr, const auto& info) {
+        switch(attr.name) {
+          case Attribute::DW_AT_count: [[fallthrough]];
+            count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value();
+            return sym::dw::DieAttributeRead::Done;
+          case Attribute::DW_AT_upper_bound:
+            count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() + 1;
+            return sym::dw::DieAttributeRead::Done;
+          default:
+            return sym::dw::DieAttributeRead::Continue;
+        }
+      });
+      return count;
     }
   }
   return 0;
@@ -136,28 +145,28 @@ resolve_array_bounds(sym::dw::DieReference array_die) noexcept
 sym::Type *
 TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexcept
 {
-  const sym::dw::DieReference this_ref{.cu = die_ref.cu, .die = die_ref.get_die()};
-  const auto type_id = this_ref.die->section_offset;
+  const sym::dw::DieReference this_ref{die_ref.GetUnitData(), die_ref.GetDie()};
+  const auto type_id = this_ref.GetDie()->section_offset;
 
   if (types.contains(type_id)) {
     auto t = types[type_id];
     return t;
   }
 
-  if (is_not_complete_type_die(this_ref.die)) {
+  if (is_not_complete_type_die(this_ref.GetDie())) {
     const auto attr = this_ref.read_attribute(Attribute::DW_AT_type);
     auto base_type =
       attr.transform([](auto v) { return v.unsigned_value(); })
-        .and_then([&](auto offset) { return die_ref.cu->get_objfile()->get_die_reference(offset); })
-        .transform([this](auto other_cu_die) { return get_or_prepare_new_type(other_cu_die.as_indexed()); })
+        .and_then([&](auto offset) { return die_ref.GetUnitData()->get_objfile()->get_die_reference(offset); })
+        .transform([this](auto other_cu_die) { return get_or_prepare_new_type(other_cu_die.AsIndexed()); })
         .or_else([this]() -> std::optional<sym::Type *> { return get_unit_type(); })
         .value();
     auto size = 0u;
     auto array_bounds = 0u;
     // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
     // are 8 bytes large
-    if (sym::is_reference_like(this_ref.die) || base_type->is_reference()) {
-      if (this_ref.die->tag == DwarfTag::DW_TAG_array_type) {
+    if (sym::is_reference_like(this_ref.GetDie()) || base_type->is_reference()) {
+      if (this_ref.GetDie()->tag == DwarfTag::DW_TAG_array_type) {
         array_bounds = resolve_array_bounds(this_ref);
       }
       size = REFERENCE_SIZE;
@@ -166,9 +175,9 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     }
 
     auto type =
-      new sym::Type{this_ref.die->tag, die_ref, size, base_type, this_ref.die->tag == DwarfTag::DW_TAG_typedef};
+      new sym::Type{this_ref.GetDie()->tag, die_ref, size, base_type, this_ref.GetDie()->tag == DwarfTag::DW_TAG_typedef};
     type->set_array_bounds(array_bounds);
-    types[this_ref.die->section_offset] = type;
+    types[this_ref.GetDie()->section_offset] = type;
     return type;
   } else {
     if (const auto &attr_val = this_ref.read_attribute(Attribute::DW_AT_signature); attr_val) {
@@ -176,14 +185,14 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
       // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
       // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
       // just means mulitple keys can reach the value, which is a pointer to the actual type.
-      auto tu_die_ref = this_ref.cu->get_objfile()->get_type_unit_type_die(attr_val->unsigned_value());
-      ASSERT(tu_die_ref.valid(), "expected die reference to type unit to be valid");
+      auto tu_die_ref = this_ref.GetUnitData()->get_objfile()->get_type_unit_type_die(attr_val->unsigned_value());
+      ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
       const u32 sz = tu_die_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
       const auto name = tu_die_ref.read_attribute(Attribute::DW_AT_name)
                           .transform(AttributeValue::as_string)
                           .value_or("<no name>");
-      auto type = new sym::Type{this_ref.die->tag, tu_die_ref.as_indexed(), sz, name};
-      types[this_ref.die->section_offset] = type;
+      auto type = new sym::Type{this_ref.GetDie()->tag, tu_die_ref.AsIndexed(), sz, name};
+      types[this_ref.GetDie()->section_offset] = type;
       return type;
     } else {
       // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
@@ -192,8 +201,8 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
                           .transform([](auto v) { return v.string(); })
                           .value_or("lambda");
       const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
-      auto type = new sym::Type{this_ref.die->tag, die_ref, sz, name};
-      types[this_ref.die->section_offset] = type;
+      auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, sz, name};
+      types[this_ref.GetDie()->section_offset] = type;
       return type;
     }
   }
@@ -213,14 +222,14 @@ TypeStorage::emplace_type(DwarfTag tag, Offset type_id, sym::dw::IndexedDieRefer
 namespace sym {
 
 Type::Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept
-    : name(target->name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
+    : name(target->name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.GetDie()->tag)},
       is_typedef(is_typedef), resolved(false), processing(false), size_of(size_of), type_chain(target), fields(),
       base_type(), die_tag(die_tag)
 {
 }
 
 Type::Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept
-    : name(name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.get_die()->tag)},
+    : name(name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.GetDie()->tag)},
       is_typedef(false), resolved(false), processing(false), size_of(size_of), type_chain(nullptr), fields(),
       base_type(), die_tag(die_tag)
 {
@@ -255,7 +264,7 @@ Type::resolve_alias() noexcept
 void
 Type::add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept
 {
-  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offset_of, ref.cu->section_offset());
+  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offset_of, ref.GetUnitData()->section_offset());
   // fields.emplace_back(name, offset_of, Immutable<Offset>{ref.die->section_offset});
 }
 

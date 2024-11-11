@@ -526,7 +526,7 @@ struct GdbThread
 
 }; // namespace gdb
 
-template <> struct ::std::hash<gdb::GdbThread>
+template <> struct std::hash<gdb::GdbThread>
 {
   using argument_type = gdb::GdbThread;
   using result_type = u64;

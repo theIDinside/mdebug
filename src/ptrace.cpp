@@ -93,6 +93,10 @@ request_name(__ptrace_request req)
     return "PTRACE_GET_SYSCALL_INFO";
   case PTRACE_GET_RSEQ_CONFIGURATION:
     return "PTRACE_GET_RSEQ_CONFIGURATION";
+  case PTRACE_SET_SYSCALL_USER_DISPATCH_CONFIG:
+    return "PTRACE_SET_SYSCALL_USER_DISPATCH_CONFIG";
+  case PTRACE_GET_SYSCALL_USER_DISPATCH_CONFIG:
+    return "PTRACE_GET_SYSCALL_USER_DISPATCH_CONFIG";
   }
   PANIC(fmt::format("Unknown PTRACE request {}", std::to_underlying(req)));
 }

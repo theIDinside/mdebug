@@ -17,6 +17,20 @@ async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
     allstop: false,
   }
 
+  const server_spawn = { ok: false, msg: '', server: null }
+  try {
+    server_spawn.server = await createRemoteService(
+      'gdbserver',
+      attachArgs.host,
+      attachArgs.port,
+      debugAdapter.buildDirFile('next')
+    )
+    server_spawn.ok = true
+  } catch (ex) {
+    server_spawn.ok = false
+    server_spawn.msg = `${ex}`
+    console.log(`ERROR: ${ex}`)
+  }
   assertLog(server_spawn.ok, 'Spawn gdbserver for MDB to attach to', server_spawn.msg)
 
   let init_res = await debugAdapter.sendReqGetResponse('initialize', {}, 1000)

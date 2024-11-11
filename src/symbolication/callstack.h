@@ -12,6 +12,8 @@ struct Scope;
 }
 
 namespace sym {
+class CFAStateMachine;
+
 enum class FrameType : u8
 {
   Full,
@@ -167,6 +169,7 @@ public:
       return BlockSymbolIterator::Begin(frame.full_symbol_info().get_frame_locals());
       break;
     }
+    NEVER("Unknown frame variables kind");
   }
 
   BlockSymbolIterator
@@ -180,6 +183,7 @@ public:
       return BlockSymbolIterator::End(frame.full_symbol_info().get_frame_locals());
       break;
     }
+    NEVER("Unknown frame variables kind");
   }
 
 private:
@@ -193,27 +197,70 @@ resume_address(const Frame &f) noexcept
   return f.rip;
 }
 
-struct CallStack
+class FrameUnwindState
 {
+  u64 mCanonicalFrameAddress;
+  std::vector<u64> mFrameRegisters;
+public:
+  void SetCanonicalFrameAddress(u64 addr) noexcept;
+  u64 CanonicalFrameAddress() const noexcept;
+  void Reserve(u32 count) noexcept;
+  u64 RegisterCount() const noexcept;
+  void Set(u32 number, u64 value) noexcept;
+  void Reset() noexcept;
+  AddrPtr GetPc() const noexcept;
+  AddrPtr GetRegister(u64 registerNumber) const noexcept;
+
+private:
+  static constexpr auto X86_64_RIP_REGISTER = 16;
+};
+
+class CallStack
+{
+public:
   NO_COPY(CallStack);
-  explicit CallStack(Tid tid) noexcept;
+  explicit CallStack(TraceeController* supervisor, TaskInfo* task) noexcept;
   ~CallStack() = default;
 
   Frame *get_frame(int frame_id) noexcept;
+  Frame* GetFrameAtLevel(u32 level) noexcept;
   u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
 
-  inline void
-  clear() noexcept
-  {
-    frames.clear();
-    pcs.clear();
+  bool IsDirty() const noexcept;
+  void SetDirty() noexcept;
+  void Initialize() noexcept;
+  void Reset() noexcept;
+  void Reserve(u32 count) noexcept;
+
+  u32 FramesCount() const noexcept;
+  std::span<Frame> GetFrames() noexcept;
+  std::optional<Frame> FindFrame(const Frame& frame) const noexcept;
+  void Unwind(CallStackRequest req);
+  FrameUnwindState* GetUnwindState(u32 level) noexcept;
+
+  template <class Self>
+  std::span<const AddrPtr> ReturnAddresses(this Self&& self) noexcept {
+    return self.mFrameProgramCounters;
   }
 
-  Tid tid; // the task associated with this call stack
+  template <typename ...Args>
+  void PushFrame(Args&&... args) {
+    frames.push_back(sym::Frame{args...});
+  }
+
+private:
+  void ClearFrames() noexcept;
+  void ClearProgramCounters() noexcept;
+  void ClearUnwoundRegisters() noexcept;
+  AddrPtr GetTopMostPc() const noexcept;
+  bool ResolveNewFrameRegisters(CFAStateMachine& stateMachine) noexcept;
+
+  TaskInfo* mTask; // the task associated with this call stack
+  TraceeController* mSupervisor;
   bool dirty;
-  std::vector<Frame> frames; // the call stack
-  std::vector<AddrPtr> pcs;
-  std::vector<std::array<u64, 17>> reg_unwind_buffer;
+  std::vector<Frame> frames{}; // the call stack
+  std::vector<AddrPtr> mFrameProgramCounters{};
+  std::vector<FrameUnwindState> mUnwoundRegister{};
 };
 } // namespace sym
 
@@ -229,9 +276,8 @@ template <> struct formatter<sym::Frame>
 
   template <typename FormatContext>
   auto
-  format(const sym::Frame &frame, FormatContext &ctx)
+  format(const sym::Frame &frame, FormatContext &ctx) const
   {
-
     return fmt::format_to(ctx.out(), "{{ pc: {}, level: {}, fn: {} }}", frame.pc(), frame.level(),
                           frame.function_name().value_or("Unknown"));
   }

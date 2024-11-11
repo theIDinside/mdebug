@@ -4,12 +4,9 @@
 #include "utils/util.h"
 #include <charconv>
 #include <getopt.h>
-#include <string>
 #include <string_view>
 #include <thread>
 #include <unistd.h>
-#include <unordered_set>
-#include <variant>
 
 namespace sys {
 static constexpr auto OptArgRequired = 1;

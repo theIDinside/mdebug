@@ -5,8 +5,10 @@
 #include <common.h>
 
 class Elf;
+struct ObjectFile;
 
 namespace sym::dw {
+class UnitData;
 struct DirEntry
 {
   std::string_view path;
@@ -35,24 +37,32 @@ struct FileEntry
   std::optional<u64> last_modified;
 };
 
+struct LNPFilePath
+{
+  Immutable<Path> mCanonicalPath;
+  Immutable<u32> mIndex;
+  explicit LNPFilePath(Path&& path, u32 index);
+};
+
 /**
  * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
  */
 struct LNPHeader
 {
+  using FileEntryContainer = std::unordered_map<std::string, std::vector<u32>>;
   NO_COPY_DEFAULTED_MOVE(LNPHeader);
   using shr_ptr = std::shared_ptr<LNPHeader>;
   using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;
   using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
   using FileNameEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
-  LNPHeader(u64 section_offset, u64 initial_length, const u8 *data, const u8 *data_end, DwarfVersion version,
+  LNPHeader(ObjectFile* object, u64 section_offset, u64 initial_length, const u8 *data, const u8 *data_end, DwarfVersion version,
             u8 addr_size, u8 min_len, u8 max_ops, bool default_is_stmt, i8 line_base, u8 line_range,
             u8 opcode_base, OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
             std::vector<FileEntry> &&file_names) noexcept;
 
-  std::vector<std::filesystem::path> files() const noexcept;
   std::optional<Path> file(u32 index) const noexcept;
-  std::optional<u32> file_entry_index(const std::filesystem::path &p) const noexcept;
+  std::optional<std::span<const u32>> file_entry_index(const std::filesystem::path &p) noexcept;
+  const FileEntryContainer& FileEntries();
 
   u64 sec_offset;
   u64 initial_length;
@@ -66,9 +76,16 @@ struct LNPHeader
   i8 line_base;
   u8 line_range;
   u8 opcode_base;
+  ObjectFile* mObjectFile;
   std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> std_opcode_lengths;
   std::vector<DirEntry> directories;
-  std::vector<FileEntry> file_names;
+  std::vector<FileEntry> mFileEntries;
+
+private:
+  void CacheLNPFilePaths() noexcept;
+  Path CompileDirectoryJoin(const Path& p) const noexcept;
+  std::vector<LNPFilePath> mFilePaths;
+  std::unordered_map<std::string, std::vector<u32>> mFileToFileIndex;
 };
 
 struct LineTableEntry

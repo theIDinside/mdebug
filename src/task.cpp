@@ -1,21 +1,23 @@
 #include "task.h"
 #include "arch.h"
 #include "bp.h"
+#include "fmt/ranges.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
+#include "utils/debug_value.h"
 #include "utils/util.h"
 #include <sys/user.h>
 #include <tracee/util.h>
 #include <tracer.h>
 #include <utility>
 
-TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept
+TaskInfo::TaskInfo(TraceeController *supervisor, pid_t tid, bool user_stopped, TargetFormat format,
+                   ArchType arch) noexcept
     : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), call_stack(new sym::CallStack{tid}),
-      loc_stat()
+      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), loc_stat()
 {
   regs = {.arch = arch, .data_format = format, .rip_dirty = true, .cache_dirty = true, .registers = nullptr};
 
@@ -34,18 +36,19 @@ TaskInfo::TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType a
     }
     break;
   }
+  call_stack = std::make_unique<sym::CallStack>(supervisor, this);
 }
 
-TaskInfo
-TaskInfo::create_running(pid_t tid, TargetFormat format, ArchType arch) noexcept
+std::shared_ptr<TaskInfo>
+TaskInfo::create_running(TraceeController *supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept
 {
-  return TaskInfo{tid, false, format, arch};
+  return std::make_shared<TaskInfo>(supervisor, tid, false, format, arch);
 }
 
-TaskInfo
-TaskInfo::create_stopped(pid_t tid, TargetFormat format, ArchType arch) noexcept
+std::shared_ptr<TaskInfo>
+TaskInfo::create_stopped(TraceeController *supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept
 {
-  return TaskInfo{tid, true, format, arch};
+  return std::make_shared<TaskInfo>(supervisor, tid, true, format, arch);
 }
 
 user_regs_struct *
@@ -81,6 +84,7 @@ TaskInfo::get_register(u64 reg_num) noexcept
     return regs.x86_block->get_64bit_reg(reg_num);
     break;
   }
+  NEVER("Unknown target format");
 }
 
 u64
@@ -101,78 +105,40 @@ decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state)
   // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
-  DwarfBinaryReader reader{nullptr, info.info->cie->instructions.data(), info.info->cie->instructions.size()};
-
-  sym::decode(reader, state, info.info);
-  DwarfBinaryReader fde{nullptr, info.info->fde_insts.data(), info.info->fde_insts.size()};
+  DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
+  const utils::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.info);
+  DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
+  DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
   sym::decode(fde, state, info.info);
 }
 
-std::span<AddrPtr>
+#define RETURN_RET_ADDR_IF(cond)                                                                                  \
+  if ((cond))                                                                                                     \
+    return call_stack->ReturnAddresses();
+
+#define RETURN_RET_ADDR_LOG(cond, ...)                                                                            \
+  if ((cond)) {                                                                                                   \
+    DBGLOG(core, __VA_ARGS__);                                                                                    \
+    return call_stack->ReturnAddresses();                                                                         \
+  }
+
+std::span<const AddrPtr>
 TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
-  static constexpr auto X86_64_RIP_REGISTER = 16;
-
-  if (!call_stack->dirty) {
-    return call_stack->pcs;
-  }
+  RETURN_RET_ADDR_IF(!call_stack->IsDirty());
 
   tc->cache_registers(*this);
-  call_stack->pcs.clear();
   // initialize bottom frame's registers with actual live register contents
+  // this is then used to execute the dwarf binary code
+  call_stack->Initialize();
+  call_stack->Unwind(req);
+  return call_stack->ReturnAddresses();
+}
 
-  auto &buf = call_stack->reg_unwind_buffer;
-  buf.clear();
-  buf.reserve(call_stack->pcs.capacity());
-  buf.push_back({});
-  {
-    auto &init = buf.back();
-    for (auto i = 0; i <= 16; ++i) {
-      init[i] = get_register(i);
-    }
-  }
-
-  auto pc = get_pc();
-
-  sym::UnwindIterator it{tc, pc};
-  if (it.is_null()) {
-    DBGLOG(core, "[stackframes][warning]: Could not find unwinder for pc {}", AddrPtr{pc});
-    return {};
-  }
-  auto uninfo = it.get_info(pc);
-  if (!uninfo) {
-    call_stack->pcs.push_back(pc);
-    return call_stack->pcs;
-  }
-  ASSERT(uninfo.has_value(), "unwind info iterator returned null for 0x{:x}", pc);
-  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*tc, *this, uninfo.value(), pc);
-
-  const auto get_current_pc = [&fr = buf]() noexcept { return fr.back()[X86_64_RIP_REGISTER]; };
-  switch (req.req) {
-  case CallStackRequest::Type::Full: {
-    for (auto uinf = uninfo; uinf.has_value(); uinf = it.get_info(get_current_pc())) {
-      const auto pc = get_current_pc();
-      cfa_state.reset(uinf.value(), buf.back(), pc);
-      call_stack->pcs.push_back(pc);
-      decode_eh_insts(uinf.value(), cfa_state);
-      buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
-    }
-    call_stack->dirty = false;
-    break;
-  }
-  case CallStackRequest::Type::Partial: {
-    for (auto uinf = uninfo; uinf.has_value() && req.count != 0; uinf = it.get_info(get_current_pc())) {
-      const auto pc = get_current_pc();
-      cfa_state.reset(uinf.value(), buf.back(), pc);
-      call_stack->pcs.push_back(pc);
-      decode_eh_insts(uinf.value(), cfa_state);
-      buf.push_back(cfa_state.resolve_frame_regs(buf.back()));
-      --req.count;
-    }
-    break;
-  }
-  }
-  return call_stack->pcs;
+sym::FrameUnwindState *
+TaskInfo::GetUnwindState(int frameLevel) noexcept
+{
+  return call_stack->GetUnwindState(static_cast<u32>(frameLevel));
 }
 
 void
@@ -198,6 +164,7 @@ TaskInfo::get_rbp() const noexcept
     static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
     return regs.x86_block->get_rbp();
   }
+  NEVER("Unknown target format");
 }
 
 std::uintptr_t
@@ -210,6 +177,7 @@ TaskInfo::get_pc() const noexcept
     static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
     return regs.x86_block->get_pc();
   }
+  NEVER("Unknown target format");
 }
 
 std::uintptr_t
@@ -222,6 +190,7 @@ TaskInfo::get_rsp() const noexcept
     static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
     return regs.x86_block->get_rsp();
   }
+  NEVER("Unknown target format");
 }
 
 std::uintptr_t
@@ -233,6 +202,7 @@ TaskInfo::get_orig_rax() const noexcept
   case TargetFormat::Remote:
     return regs.x86_block->get_64bit_reg(57);
   }
+  NEVER("Unknown target format");
 }
 
 sym::CallStack &
@@ -278,7 +248,8 @@ void
 TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept
 {
   ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
-  auto loc = tc->pbps.location_at(loc_stat->loc);
+
+  auto loc = tc->user_breakpoints().location_at(loc_stat->loc);
   auto user_ids = loc->loc_users();
   DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
 
@@ -329,7 +300,7 @@ TaskInfo::set_dirty() noexcept
 {
   cache_dirty = true;
   rip_dirty = true;
-  call_stack->dirty = true;
+  call_stack->SetDirty();
 }
 
 void

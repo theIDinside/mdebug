@@ -6,7 +6,7 @@
 #include <typedefs.h>
 #include <vector>
 
-struct TraceeController;
+class TraceeController;
 class SymbolFile;
 
 namespace sym {

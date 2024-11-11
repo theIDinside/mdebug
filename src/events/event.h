@@ -10,7 +10,7 @@
 #include <utils/algorithm.h>
 #include <vector>
 
-struct TraceeController;
+class TraceeController;
 
 class StopEventNotification
 {

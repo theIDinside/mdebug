@@ -10,7 +10,7 @@
 #include <typedefs.h>
 
 using namespace std::string_view_literals;
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 class SymbolFile;
 

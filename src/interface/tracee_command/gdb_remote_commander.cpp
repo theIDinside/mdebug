@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <chrono>
 #include <set>
 #include <supervisor.h>
 #include <sys/user.h>
@@ -244,8 +243,8 @@ GdbRemoteCommander::reverse_continue() noexcept
   const auto resume_err = connection->send_vcont_command(reverse, 1000);
   ASSERT(!resume_err.has_value(), "reverse continue failed");
 
-  for (auto &t : tc->threads) {
-    t.set_running(tc::RunType::Continue);
+  for (auto &t : tc->get_threads()) {
+    t->set_running(tc::RunType::Continue);
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
@@ -256,9 +255,9 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 {
   set_catch_syscalls(type == RunType::SyscallContinue);
 
-  for (auto &t : tc->threads) {
-    if (t.loc_stat) {
-      t.step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
+  for (auto &t : tc->get_threads()) {
+    if (t->loc_stat) {
+      t->step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
       if (!connection->settings().is_non_stop) {
         return TaskExecuteResponse::Ok();
       }
@@ -283,8 +282,8 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
-  for (auto &t : tc->threads) {
-    t.set_running(type);
+  for (auto &t : tc->get_threads()) {
+    t->set_running(type);
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
@@ -460,6 +459,7 @@ GdbRemoteCommander::get_thread_name(Tid tid) noexcept
     return thread_names[tid];
   }
   }
+  NEVER("Unknown remote type");
 }
 
 TaskExecuteResponse
@@ -512,7 +512,7 @@ GdbRemoteCommander::post_exec() noexcept
 }
 
 Interface
-GdbRemoteCommander::on_fork(Pid pid) noexcept
+GdbRemoteCommander::on_fork(Pid) noexcept
 {
   TODO("implement GdbRemoteCommander::on_fork() noexcept");
 }

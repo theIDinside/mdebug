@@ -3,15 +3,10 @@
 #include "awaiter.h"
 #include "common.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "symbolication/elf.h"
-#include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
 #include "utils/logger.h"
 #include "utils/scoped_fd.h"
-#include "utils/thread_pool.h"
-#include <cstdint>
 #include <fcntl.h>
-#include <filesystem>
 #include <supervisor.h>
 #include <sys/ptrace.h>
 #include <unistd.h>
@@ -30,7 +25,7 @@ bool
 PtraceCommander::post_exec() noexcept
 {
   auto tc = supervisor();
-  process_id = tc->task_leader;
+  process_id = tc->get_task_leader();
   DBGLOG(core, "Post Exec routine for {}", process_id);
   procfs_memfd = {};
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", process_id, process_id);
@@ -155,9 +150,9 @@ PtraceCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 TaskExecuteResponse
 PtraceCommander::resume_target(TraceeController *tc, RunType run) noexcept
 {
-  for (auto &t : tc->threads) {
-    if (t.can_continue()) {
-      tc->resume_task(t, {run, tc::ResumeTarget::Task});
+  for (auto &t : tc->get_threads()) {
+    if (t->can_continue()) {
+      tc->resume_task(*t, {run, tc::ResumeTarget::Task});
     }
   }
   return TaskExecuteResponse::Ok();

@@ -3,7 +3,6 @@
 #include "bp.h"
 #include "common.h"
 #include "interface/dap/types.h"
-#include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
 #include <arch.h>
@@ -11,11 +10,12 @@
 #include <sys/user.h>
 
 using namespace std::string_view_literals;
-struct TraceeController;
+class TraceeController;
 
 namespace sym {
 class Frame;
-struct CallStack;
+class CallStack;
+class FrameUnwindState;
 } // namespace sym
 
 struct CallStackRequest
@@ -50,7 +50,7 @@ struct TaskRegisters
 
 struct TaskInfo
 {
-  friend struct TraceeController;
+  friend class TraceeController;
   pid_t tid;
   WaitStatus wait_status;
   TargetFormat session;
@@ -79,7 +79,7 @@ struct TaskInfo
 
 private:
   TaskRegisters regs;
-  sym::CallStack *call_stack;
+  std::unique_ptr<sym::CallStack> call_stack;
   std::vector<u32> variableReferences{};
   std::unordered_map<u32, SharedPtr<sym::Value>> valobj_cache{};
 
@@ -88,7 +88,7 @@ public:
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
-  TaskInfo(pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept;
+  TaskInfo(TraceeController* supervisor, pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept;
   TaskInfo(TaskInfo &&o) noexcept = default;
   TaskInfo &operator=(TaskInfo &&) noexcept = default;
   // Delete copy constructors. These are unique values.
@@ -97,8 +97,8 @@ public:
   TaskInfo &operator=(TaskInfo &t) noexcept = delete;
   TaskInfo &operator=(const TaskInfo &o) = delete;
 
-  static TaskInfo create_running(pid_t tid, TargetFormat format, ArchType arch) noexcept;
-  static TaskInfo create_stopped(pid_t tid, TargetFormat format, ArchType arch) noexcept;
+  static std::shared_ptr<TaskInfo> create_running(TraceeController* supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept;
+  static std::shared_ptr<TaskInfo> create_stopped(TraceeController* supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept;
 
   user_regs_struct *native_registers() const noexcept;
   RegisterBlock<ArchType::X86_64> *remote_x86_registers() const noexcept;
@@ -107,7 +107,8 @@ public:
   u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
   void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
-  std::span<AddrPtr> return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
+  std::span<const AddrPtr> return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
+  sym::FrameUnwindState* GetUnwindState(int frameLevel) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
 
   void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;

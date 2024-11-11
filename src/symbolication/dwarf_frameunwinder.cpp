@@ -9,7 +9,6 @@
 #include "objfile.h"
 #include <array>
 #include <cstdint>
-#include <memory_resource>
 #include <span>
 
 namespace sym {
@@ -69,6 +68,25 @@ CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const Reg
 }
 
 void
+CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters,
+                       AddrPtr pc) noexcept
+{
+  fde_pc = cfi.start();
+  end_pc = pc;
+  cfa = {.is_expr = false, .reg = {0, 0}};
+  auto i = 0;
+  for (auto &r : rule_table) {
+    r.rule = RegisterRule::Undefined;
+    r.value = belowFrameRegisters.GetRegister(i);
+    i++;
+  }
+}
+
+void CFAStateMachine::SetNoKnownResumeAddress() noexcept {
+  mResumeAddressUndefined = true;
+}
+
+void
 CFAStateMachine::reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame_below, AddrPtr pc) noexcept
 {
   fde_pc = cfi.start();
@@ -105,17 +123,57 @@ CFAStateMachine::compute_expression(std::span<const u8> bytes) noexcept
   return intepreter.run();
 }
 
+void CFAStateMachine::SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept {
+  mCanonicalFrameAddressValue = canonicalFrameAddress;
+}
+
+u64
+CFAStateMachine::ResolveRegisterContents(u64 reg_number, const FrameUnwindState &belowFrame) noexcept
+{
+  auto &reg = rule_table[reg_number];
+  switch (reg.rule) {
+  case sym::RegisterRule::Undefined:
+  case sym::RegisterRule::SameValue:
+    return reg.value;
+  case sym::RegisterRule::Offset: {
+    const AddrPtr cfa_record = mCanonicalFrameAddressValue + reg.offset;
+    const auto res = tc.read_type(cfa_record.as<u64>());
+    return res;
+  }
+  case sym::RegisterRule::ValueOffset: {
+    const auto cfa = mCanonicalFrameAddressValue;
+    const auto res = cfa + reg.offset;
+    return res;
+  }
+  case sym::RegisterRule::Register: {
+    return belowFrame.GetRegister(reg.value);
+  }
+  case sym::RegisterRule::Expression: {
+    const auto saved_at_addr = TPtr<u64>(compute_expression(reg.expr));
+    const auto res = tc.read_type(saved_at_addr);
+    return res;
+  }
+  case sym::RegisterRule::ValueExpression: {
+    const auto value = compute_expression(reg.expr);
+    return value;
+  }
+  case sym::RegisterRule::ArchSpecific:
+    break;
+  }
+  PANIC("resolve_reg_contents fell off");
+}
+
 RegisterValues
 CFAStateMachine::resolve_frame_regs(const RegisterValues &frame_live_registers) noexcept
 {
   RegisterValues nxt_frame_regs{};
 
   if (cfa.is_expr) {
-    cfa_value = compute_expression(cfa.expr);
+    mCanonicalFrameAddressValue = compute_expression(cfa.expr);
   } else {
     const auto res = static_cast<i64>(frame_live_registers[cfa.reg.number]) + cfa.reg.offset;
-    cfa_value = static_cast<u64>(res);
-    DBGLOG(eh, "CFA=0x{:x} set from reg {} with value 0x{:x}", cfa_value, cfa.reg.number,
+    mCanonicalFrameAddressValue = static_cast<u64>(res);
+    DBGLOG(eh, "CFA=0x{:x} set from reg {} with value 0x{:x}", mCanonicalFrameAddressValue, cfa.reg.number,
            frame_live_registers[cfa.reg.number]);
   }
 
@@ -123,7 +181,7 @@ CFAStateMachine::resolve_frame_regs(const RegisterValues &frame_live_registers) 
     nxt_frame_regs[i] = resolve_reg_contents(i, frame_live_registers);
   }
 
-  nxt_frame_regs[7] = cfa_value;
+  nxt_frame_regs[7] = mCanonicalFrameAddressValue;
   return nxt_frame_regs;
 }
 
@@ -136,12 +194,12 @@ CFAStateMachine::resolve_reg_contents(u64 reg_number, const RegisterValues &regs
   case sym::RegisterRule::SameValue:
     return reg.value;
   case sym::RegisterRule::Offset: {
-    const AddrPtr cfa_record = cfa_value + reg.offset;
+    const AddrPtr cfa_record = mCanonicalFrameAddressValue + reg.offset;
     const auto res = tc.read_type(cfa_record.as<u64>());
     return res;
   }
   case sym::RegisterRule::ValueOffset: {
-    const auto cfa = cfa_value;
+    const auto cfa = mCanonicalFrameAddressValue;
     const auto res = cfa + reg.offset;
     return res;
   }
@@ -262,6 +320,9 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       case 0x07: { // I::DW_CFA_undefined
         const auto reg = reader.read_uleb128<u64>();
         state.rule_table[reg].rule = RegisterRule::Undefined;
+        if (reg == 16) {
+          state.SetNoKnownResumeAddress();
+        }
       } break;
       case 0x08: { // I::DW_CFA_same_value
         const auto reg = reader.read_uleb128<u64>();
@@ -765,6 +826,23 @@ AddrPtr
 UnwindInfoSymbolFilePair::end() const noexcept
 {
   return info->end + sf->baseAddress;
+}
+
+std::span<const u8>
+UnwindInfoSymbolFilePair::GetCommonInformationEntryData() const
+{
+  if (!info || !info->cie) {
+    return {};
+  }
+  return info->cie->instructions;
+}
+std::span<const u8>
+UnwindInfoSymbolFilePair::GetFrameDescriptionEntryData() const
+{
+  if (!info) {
+    return {};
+  }
+  return info->fde_insts;
 }
 
 } // namespace sym

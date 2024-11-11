@@ -7,7 +7,7 @@
 #include <vector>
 
 class Tracer;
-struct TraceeController;
+class TraceeController;
 namespace ui {
 
 namespace dap {
@@ -67,12 +67,13 @@ using InvalidArg = std::pair<ArgumentError, std::string>;
 using MissingOrInvalidArgs = std::vector<InvalidArg>;
 using MissingOrInvalidResult = std::optional<MissingOrInvalidArgs>;
 
-// #if defined(MDB_DEBUG) and MDB_DEBUG == 1
-// #define DEFINE_NAME(Type) \
-//   constexpr std::string_view name() noexcept override final { return #Type; }
-// #else
-// #define DEFINE_NAME(Type)
-// #endif
+/* #if defined(MDB_DEBUG) and MDB_DEBUG == 1
+ * #define DEFINE_NAME(Type) \
+ *   constexpr std::string_view name() noexcept override final { return #Type; }
+ * #else
+ * #define DEFINE_NAME(Type)
+ * #endif
+ */
 
 #define DEFINE_NAME(Name)                                                                                         \
   static constexpr std::string_view Request{Name};                                                                \
@@ -80,9 +81,7 @@ using MissingOrInvalidResult = std::optional<MissingOrInvalidArgs>;
 
 template <typename DerivedCommand, typename Json>
 concept HasValidation = requires(const Json &json) {
-  {
-    DerivedCommand::ValidateArg(std::string_view{}, json)
-  } -> std::convertible_to<std::optional<InvalidArg>>;
+  { DerivedCommand::ValidateArg(std::string_view{}, json) } -> std::convertible_to<std::optional<InvalidArg>>;
 };
 
 struct UICommand
@@ -128,8 +127,8 @@ public:
 
   template <typename JsonArgs, typename CommandArg>
   static auto
-  check_arg_contains(const JsonArgs &args, const CommandArg &cmd_arg)
-    -> std::optional<std::pair<ArgumentError, std::string>>
+  check_arg_contains(const JsonArgs &args,
+                     const CommandArg &cmd_arg) -> std::optional<std::pair<ArgumentError, std::string>>
   {
     if (!args.contains(cmd_arg)) {
       return std::make_pair<ArgumentError, std::string>(

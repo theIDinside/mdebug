@@ -438,7 +438,7 @@ template <> struct formatter<AttributeForm>
 
   template <typename FormatContext>
   auto
-  format(AttributeForm const &form, FormatContext &ctx)
+  format(AttributeForm form, FormatContext &ctx)
   {
     return fmt::format_to(ctx.out(), "{}", to_str(form));
   }

@@ -177,6 +177,10 @@ public:
   {
     return !(r.data == l);
   }
+
+  const T& as_t() const noexcept {
+    return data;
+  }
 };
 
 template <> class Immutable<std::string>
@@ -197,6 +201,8 @@ public:
 
   constexpr operator const std::string_view() const & { return data; }
   constexpr operator const std::optional<std::string_view>() const & { return data; }
+
+  constexpr std::string_view string_view() const noexcept { return data; }
 
   constexpr const std::string_view
   operator*() const & noexcept

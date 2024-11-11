@@ -16,10 +16,12 @@
 #include "tasks/lnp.h"
 #include "type.h"
 #include "utils/enumerator.h"
+#include "utils/logger.h"
 #include "utils/worker_task.h"
 #include "value.h"
 #include <algorithm>
 #include <iterator>
+#include <regex>
 #include <symbolication/dwarf/typeread.h>
 #include <task.h>
 #include <tracer.h>
@@ -144,6 +146,19 @@ ObjectFile::get_die_reference(u64 offset) noexcept
   return sym::dw::DieReference{cu, die};
 }
 
+sym::dw::DieReference ObjectFile::GetDieReference(u64 offset) noexcept {
+  auto cu = get_cu_from_offset(offset);
+  if (cu == nullptr) {
+    return sym::dw::DieReference{nullptr, nullptr};
+  }
+  auto die = cu->get_die(offset);
+  if (die == nullptr) {
+    return sym::dw::DieReference{nullptr, nullptr};
+  }
+
+  return sym::dw::DieReference{cu, die};
+}
+
 sym::dw::ObjectFileNameIndex *
 ObjectFile::name_index() noexcept
 {
@@ -165,25 +180,20 @@ void
 ObjectFile::read_lnp_headers() noexcept
 {
   lnp_headers = sym::dw::read_lnp_headers(elf);
-
   std::string path_buf{};
-  path_buf.reserve(1024);
   for (auto &hdr : *lnp_headers) {
-    for (const auto &f : hdr.file_names) {
-      path_buf.clear();
-      const auto index = sym::dw::lnp_index(f.dir_index, hdr.version);
-      // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
-      // and we have not made copies.
-      fmt::format_to(std::back_inserter(path_buf), "{}/{}", hdr.directories[index].path, f.file_name);
-      const auto canonical = std::filesystem::path{path_buf}.lexically_normal();
-      auto it = lnp_source_code_files.find(canonical);
+    ASSERT(!hdr.directories.empty(), "Directories for the LNP header must *NOT* be empty!");
+    const auto build_path = std::filesystem::path{hdr.directories[0].path};
+    for (const auto &[fullPath, _] : hdr.FileEntries()) {
+      auto it = lnp_source_code_files.find(fullPath);
       if (it != std::end(lnp_source_code_files)) {
         it->second->add_header(&hdr);
       } else {
         std::vector<sym::dw::LNPHeader *> src_headers{};
         src_headers.push_back(&hdr);
+        DBGLOG(core, "Adding source code file {}", fullPath);
         lnp_source_code_files.emplace(
-          canonical, std::make_shared<sym::dw::SourceCodeFile>(elf, canonical, std::move(src_headers)));
+          fullPath, std::make_shared<sym::dw::SourceCodeFile>(elf, fullPath, std::move(src_headers)));
       }
     }
   }
@@ -284,10 +294,10 @@ ObjectFile::get_type_unit_type_die(u64 type_signature) noexcept
   const auto &dies = typeunit->get_dies();
   for (const auto &d : dies) {
     if (d.section_offset == type_die_section_offset) {
-      return sym::dw::DieReference{.cu = typeunit, .die = &d};
+      return sym::dw::DieReference{typeunit, &d};
     }
   }
-  return {};
+  return {nullptr, nullptr};
 }
 
 std::vector<sym::CompilationUnit> &
@@ -297,9 +307,10 @@ ObjectFile::source_units() noexcept
 }
 
 SharedPtr<sym::dw::SourceCodeFile>
-ObjectFile::get_source_file(const std::filesystem::path &fullpath) noexcept
+ObjectFile::get_source_file(std::string_view fullpath) noexcept
 {
-  auto it = lnp_source_code_files.find(fullpath);
+  std::string key{fullpath};
+  auto it = lnp_source_code_files.find(key);
   if (it != std::end(lnp_source_code_files)) {
     return it->second;
   }
@@ -330,8 +341,8 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
 }
 
 auto
-ObjectFile::relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
-  -> std::vector<sym::dw::RelocatedSourceCodeFile>
+ObjectFile::relocated_get_source_code_files(AddrPtr base,
+                                            AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
   std::vector<sym::dw::RelocatedSourceCodeFile> result{};
   auto cus = get_source_infos(pc);
@@ -340,6 +351,7 @@ ObjectFile::relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
   };
   for (auto cu : cus) {
     for (auto src : cu->sources()) {
+      ASSERT(src != nullptr, "source code file should not be null!");
       if (src->address_bounds().contains(pc) && is_unique(src.get())) {
         result.emplace_back(base, src.get());
       }
@@ -442,6 +454,21 @@ ObjectFile::regex_search(const std::string &regex_pattern) const noexcept -> std
   return results;
 }
 
+auto
+ObjectFile::SetBuildDirectory(u64 statementListOffset, const char *buildDirectory) noexcept -> void
+{
+  mLnpToBuildDirMapping.mMap[statementListOffset] = buildDirectory;
+}
+
+auto
+ObjectFile::GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char *
+{
+  if (auto it = mLnpToBuildDirMapping.mMap.find(statementListOffset); it != std::end(mLnpToBuildDirMapping.mMap)) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 ObjectFile *
 mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
 {
@@ -452,7 +479,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-    new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
+    new ObjectFile{fmt::format("{}:{}", tc.get_task_leader(), path.c_str()), path, fd.file_size(), addr};
 
   return objfile;
 }
@@ -466,8 +493,8 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
-  const auto objfile =
-    std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->task_leader, path.c_str()), path, fd.file_size(), addr);
+  const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->get_task_leader(), path.c_str()),
+                                                    path, fd.file_size(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
@@ -532,7 +559,7 @@ SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, Add
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
-  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->task_leader, binary->path->c_str()),
+  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->get_task_leader(), binary->path->c_str()),
                                       std::move(binary), relocated_base);
 }
 
@@ -613,8 +640,8 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
 }
 
 auto
-SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-  -> std::vector<ui::dap::Variable>
+SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame,
+                         sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
   if (!frame.full_symbol_info().is_resolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->objectFile(), frame};
@@ -648,8 +675,8 @@ SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::Relo
 }
 
 auto
-SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
-  -> std::vector<ui::dap::Variable>
+SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
+                    std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
 {
   auto value = ctx.get_maybe_value();
   if (value == nullptr) {
@@ -788,7 +815,7 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
         const auto addr = low_pc->address();
         matching_symbols.emplace_back(n, addr, 0);
         DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
-               die_ref.cu->section_offset(), die_ref.die->section_offset, n, addr);
+               die_ref.GetUnitData()->section_offset(), die_ref.GetDie()->section_offset, n, addr);
       }
     });
   }
@@ -835,6 +862,7 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     result.reserve(frame.frame_locals_count());
     break;
   }
+
   for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
     const auto ref = symbol.type->is_primitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.type->is_resolved()) {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <common.h>
-#include <optional>
 #include <symbolication/dwarf_defs.h>
 
 template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
@@ -30,6 +29,25 @@ struct AttributeValue
   constexpr AttributeValue(T value, AttributeForm form, Attribute name) noexcept
       : form{form}, name{name}, value{value}
   {
+  }
+
+  constexpr AttributeValue(const AttributeValue& other) : form(other.form), name(other.name), value(other.value) {}
+  constexpr AttributeValue& operator=(const AttributeValue& other) {
+    if(this != &other) {
+      std::memcpy(this, &other, sizeof(AttributeValue));
+    }
+    return *this;
+  }
+
+  constexpr AttributeValue(AttributeValue&& other) noexcept : form(other.form), name(other.name), value(other.value) {}
+  constexpr AttributeValue& operator=(AttributeValue&& other) noexcept {
+    if (this == &other) {
+      return *this;
+    }
+    form = other.form;
+    name = other.name;
+    value = other.value;
+    return *this;
   }
 
   std::uintptr_t
@@ -80,6 +98,17 @@ private:
     constexpr _value(u64 u) noexcept : u(u) {}
     constexpr _value(i64 i) noexcept : i(i) {}
     constexpr _value(AddrPtr ptr) noexcept : addr(ptr) {}
+    constexpr _value(const _value& other) {
+      if(this == &other) { return; }
+      std::memcpy(this, &other, sizeof(_value));
+    }
+
+    constexpr _value& operator=(const _value& other) {
+      if(this != &other) {
+        std::memcpy(this, &other, sizeof(_value));
+      }
+      return *this;
+    }
 
     DataBlock block;
     // StrSlice str;

@@ -1,4 +1,5 @@
 #include "value.h"
+#include "symbolication/dwarf_expressions.h"
 #include "type.h"
 #include "value_visualizer.h"
 #include <supervisor.h>
@@ -50,6 +51,8 @@ Value::type() const noexcept
     return value_origin.field->type;
   case ValueDescriptor::Kind::AbsoluteAddress:
     return value_origin.type;
+  default:
+    PANIC("Unknown valueDescriptor kind");
   }
 }
 
@@ -198,7 +201,14 @@ MemoryContentsObject::create_frame_variable(TraceeController &tc, NonNullPtr<Tas
 
   switch (symbol.location->kind) {
   case LocKind::DwarfExpression: {
-    auto interp = ExprByteCodeInterpreter{frame->level(), tc, task, symbol.location->dwarf_expr};
+    auto *fnSymbol = frame->maybe_get_full_symbols();
+    if (!fnSymbol) {
+      DBGLOG(core, "could not find function symbol for frame. Required to construct live variables.");
+      TODO("Add support for situations where we can't actually construct the value");
+      return nullptr;
+    }
+    auto interp =
+      ExprByteCodeInterpreter{frame->level(), tc, task, symbol.location->dwarf_expr, fnSymbol->frame_base()};
     const auto address = interp.run();
     if (lazy) {
       auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);

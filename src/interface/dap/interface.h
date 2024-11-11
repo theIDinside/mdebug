@@ -12,7 +12,7 @@
 #include <typedefs.h>
 #include <vector>
 class Tracer;
-struct TraceeController;
+class TraceeController;
 /* The different DAP commands/requests */
 
 namespace ui {

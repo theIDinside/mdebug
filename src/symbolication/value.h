@@ -9,7 +9,7 @@
 using Bytes = std::span<const u8>;
 using MemoryContentBytes = utils::ByteBuffer::OwnPtr;
 
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 
 namespace sym {

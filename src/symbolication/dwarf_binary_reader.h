@@ -110,6 +110,8 @@ public:
   {
   }
 
+  explicit DwarfBinaryReader(std::span<const u8> data) noexcept;
+
   template <typename T>
     requires(!std::is_pointer_v<T>)
   constexpr T

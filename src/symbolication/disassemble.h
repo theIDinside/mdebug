@@ -2,7 +2,7 @@
 #include <common.h>
 #include <typedefs.h>
 
-struct TraceeController;
+class TraceeController;
 struct ElfSection;
 struct LineTableEntry;
 

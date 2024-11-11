@@ -18,7 +18,11 @@ struct DieMetaData;
 class UnitReader
 {
 public:
-  UnitReader(UnitData *data) noexcept;
+  explicit UnitReader(UnitData *data) noexcept;
+  UnitReader(UnitData *data, const DieMetaData &entry) noexcept;
+  UnitReader(const UnitReader& o);
+  UnitReader& operator=(const UnitReader& reader);
+
   void skip_attributes(const std::span<const Abbreviation> &attributes) noexcept;
   void skip_attribute(const Abbreviation &abbreviation) noexcept;
   AddrPtr read_address() noexcept;

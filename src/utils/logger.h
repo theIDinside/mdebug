@@ -98,7 +98,9 @@ Logger::LogChannel *get_log_channel(Channel id) noexcept;
     channel->log_message(SOURCE_LOC__, fmt::format(__VA_ARGS__));                                                 \
   }}
 #else
-#define DLOG(channel, ...)
+#define DLOG(...)
+#define DBGLOG(...)
+#define CDLOG(...)
 #endif
 
 #define LOG(channel, ...) logging::get_logging()->log(logging::Channel::channel, fmt::format(__VA_ARGS__));

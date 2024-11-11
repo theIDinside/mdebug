@@ -4,7 +4,7 @@
 #include "dwarf_defs.h"
 #include "utils/immutable.h"
 
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 
 namespace sym {
@@ -78,12 +78,46 @@ struct DwarfStack
   std::array<u64, 1028> stack;
 };
 
+// Describes the DWARF expression kind. A Frame variable will have 2 code segments,
+// one for the subprogram die and one for the variable die (probably?)
+enum class DwarfProgramKind : u8
+{
+  FrameVariable,
+};
+
+struct FrameVariableProgram
+{
+  u64 mCanonicalFrameAddress;
+};
+
+class DwarfProgram
+{
+  using Code = std::vector<std::span<const u8>>;
+  std::vector<std::span<const u8>> mCodeSegments;
+  DwarfProgramKind mKind;
+  union {
+    FrameVariableProgram frameVariable;
+  };
+public:
+
+  static
+  DwarfProgram FrameVariableProgram(Code&& code, FrameVariableProgram p) {
+    auto program = DwarfProgram{};
+    program.mKind = DwarfProgramKind::FrameVariable;
+    program.mCodeSegments = std::move(code);
+    program.frameVariable = p;
+    return program;
+  }
+};
+
 // The byte code interpreter needs all state set up, so that any possibly data it reference during execution, is
 // already "there".
 struct ExprByteCodeInterpreter
 {
   explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
                                    std::span<const u8> byte_stream) noexcept;
+  explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
+                                   std::span<const u8> byte_stream, std::span<const u8> frameBaseCode) noexcept;
   AddrPtr request_frame_base() noexcept;
   u64 run() noexcept;
 
@@ -93,6 +127,7 @@ struct ExprByteCodeInterpreter
   TraceeController &tc;
   TaskInfo &task;
   std::span<const u8> byte_stream;
+  std::span<const u8> mFrameBaseProgram;
   DwarfBinaryReader reader;
 };
 

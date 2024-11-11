@@ -321,7 +321,7 @@ PrimitiveVisualizer::format_value() noexcept
   auto target_type = type->target_type();
   if (target_type->tag() == DwarfTag::DW_TAG_enumeration_type) {
     if (!target_type->is_resolved()) {
-      dw::TypeSymbolicationContext ctx{*target_type->cu_die_ref->cu->get_objfile(), *target_type.ptr};
+      dw::TypeSymbolicationContext ctx{*target_type->cu_die_ref->GetUnitData()->get_objfile(), *target_type.ptr};
       ctx.resolve_type();
     }
 
@@ -470,7 +470,7 @@ InvalidValueVisualizer::format_value() noexcept
 }
 
 std::optional<std::string>
-InvalidValueVisualizer::dap_format(std::string_view name, int variablesReference) noexcept
+InvalidValueVisualizer::dap_format(std::string_view, int) noexcept
 {
   auto ptr = this->data_provider.lock();
   return fmt::format(

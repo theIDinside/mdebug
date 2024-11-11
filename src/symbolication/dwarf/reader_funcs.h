@@ -1,8 +1,6 @@
 #pragma once
 #include "symbolication/dwarf_defs.h"
 #include <common.h>
-#include <concepts>
-#include <cstdint>
 
 namespace sym::dw {
 

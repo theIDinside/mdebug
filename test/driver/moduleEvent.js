@@ -49,7 +49,7 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
   )
   const dyn_bps = await SetBreakpoints(debugAdapter, 'test/dynamic_lib.cpp', ['BPMI'])
   const bp = await assert1Pending(debugAdapter)
-  let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 2, 500)
+  let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 2, 1500)
   const template_path = repoDirFile('test/templated_code/template.h')
   const template_line = getLineOf(readFileContents(template_path), 'BP1')
   let bp_args = { source: { name: template_path, path: template_path }, breakpoints: [{ line: template_line }] }

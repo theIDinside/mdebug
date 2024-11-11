@@ -4,8 +4,8 @@
 namespace sym::dw {
 class UnitData;
 struct DieMetaData;
-struct DieReference;
-struct IndexedDieReference;
+class DieReference;
+class IndexedDieReference;
 
 class DieSiblingIterator
 {

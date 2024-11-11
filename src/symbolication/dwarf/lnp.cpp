@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <set>
 #include <symbolication/block.h>
+#include <symbolication/dwarf/die.h>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
@@ -16,9 +17,9 @@ class SourceCodeFileLNPResolver
 {
 public:
   SourceCodeFileLNPResolver(LNPHeader *header, std::set<LineTableEntry> &table,
-                            std::optional<AddressRange> valid_bounds, u32 file_index) noexcept
+                            std::optional<AddressRange> valid_bounds, const std::span<const u32>& filesToRecord) noexcept
       : header{header}, table(table), is_stmt(header->default_is_stmt), bounds(valid_bounds),
-        file_index(file_index)
+        mFilesToRecord(filesToRecord)
   {
   }
 
@@ -158,7 +159,7 @@ public:
   constexpr void
   define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
   {
-    header->file_names.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
+    header->mFileEntries.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
   }
 
   constexpr void
@@ -189,7 +190,7 @@ private:
   bool
   should_record_lines() const noexcept
   {
-    return file == file_index;
+    return std::ranges::contains(mFilesToRecord, file);
   }
 
   LNPHeader *header;
@@ -208,7 +209,7 @@ private:
   u8 isa{0};
   u32 discriminator{0};
   std::optional<AddressRange> bounds;
-  u32 file_index;
+  std::span<const u32> mFilesToRecord;
 };
 
 class LNPStateMachine
@@ -360,7 +361,7 @@ public:
   constexpr void
   define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
   {
-    header->file_names.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
+    header->mFileEntries.push_back(FileEntry{filename, dir_index, file_size, {}, last_modified});
   }
 
   constexpr void
@@ -406,44 +407,32 @@ private:
   bool should_record_lines = true;
 };
 
-LNPHeader::LNPHeader(u64 section_offset, u64 initial_length, const u8 *data, const u8 *data_end,
-                     DwarfVersion version, u8 addr_size, u8 min_len, u8 max_ops, bool default_is_stmt,
-                     i8 line_base, u8 line_range, u8 opcode_base, OpCodeLengths opcode_lengths,
-                     std::vector<DirEntry> &&directories, std::vector<FileEntry> &&file_names) noexcept
+LNPHeader::LNPHeader(ObjectFile *object, u64 section_offset, u64 initial_length, const u8 *data,
+                     const u8 *data_end, DwarfVersion version, u8 addr_size, u8 min_len, u8 max_ops,
+                     bool default_is_stmt, i8 line_base, u8 line_range, u8 opcode_base,
+                     OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
+                     std::vector<FileEntry> &&file_names) noexcept
     : sec_offset(section_offset), initial_length(initial_length), data(data), data_end(data_end), version(version),
       addr_size(addr_size), min_len(min_len), max_ops(max_ops), default_is_stmt(default_is_stmt),
-      line_base(line_base), line_range(line_range), opcode_base(opcode_base), std_opcode_lengths(opcode_lengths),
-      directories(std::move(directories)), file_names(std::move(file_names))
+      line_base(line_base), line_range(line_range), opcode_base(opcode_base), mObjectFile(object),
+      std_opcode_lengths(opcode_lengths), directories(std::move(directories)), mFileEntries(std::move(file_names))
 {
 }
 
-std::vector<std::filesystem::path>
-LNPHeader::files() const noexcept
+LNPFilePath::LNPFilePath(Path &&path, u32 index)
+    : mCanonicalPath(path.is_relative() ? path.lexically_normal() : std::move(path)), mIndex(index)
 {
-  std::vector<std::filesystem::path> files{};
-  files.reserve(file_names.size());
-  std::string path_buf{};
-  path_buf.reserve(1024);
-  for (const auto &f : file_names) {
-    path_buf.clear();
-    const auto index = lnp_index(f.dir_index, version);
-    // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
-    // and we have not made copies.
-    fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
-    files.emplace_back(std::filesystem::path{path_buf}.lexically_normal());
-  }
-  return files;
 }
 
 std::optional<Path>
 LNPHeader::file(u32 f_index) const noexcept
 {
   const auto adjusted_index = version == DwarfVersion::D4 ? (f_index == 0 ? 0 : f_index - 1) : f_index;
-  if (adjusted_index >= file_names.size()) {
+  if (adjusted_index >= mFileEntries.size()) {
     return {};
   }
 
-  for (const auto &[i, f] : utils::EnumerateView(file_names)) {
+  for (const auto &[i, f] : utils::EnumerateView(mFileEntries)) {
     if (i == adjusted_index) {
       const auto dir_index = lnp_index(f.dir_index, version);
       return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
@@ -454,21 +443,58 @@ LNPHeader::file(u32 f_index) const noexcept
   return std::nullopt;
 }
 
-std::optional<u32>
-LNPHeader::file_entry_index(const std::filesystem::path &p) const noexcept
+Path
+LNPHeader::CompileDirectoryJoin(const Path &p) const noexcept
 {
+  if (version == DwarfVersion::D5) {
+    return (directories[0].path / p).lexically_normal();
+  }
+  const auto *buildDirectory = mObjectFile->GetBuildDirForLineNumberProgram(sec_offset);
+  ASSERT(buildDirectory, "Expected build directory to not be null!");
+  return (buildDirectory / p).lexically_normal();
+}
+
+void
+LNPHeader::CacheLNPFilePaths() noexcept
+{
+  if (!mFileToFileIndex.empty()) {
+    return;
+  }
+  mFileToFileIndex.reserve(mFileEntries.size());
   std::string path_buf{};
   path_buf.reserve(1024);
-  auto file_index = 0;
-  for (const auto &f : file_names) {
+  auto fileIndex = version == DwarfVersion::D4 ? 1 : 0;
+
+  for (const auto &f : mFileEntries) {
     path_buf.clear();
     const auto index = lnp_index(f.dir_index, version);
+    // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
+    // and we have not made copies.
     fmt::format_to(std::back_inserter(path_buf), "{}/{}", directories[index].path, f.file_name);
-    const auto file_path = std::filesystem::path{path_buf}.lexically_normal();
-    if (p == file_path) {
-      return this->version == DwarfVersion::D4 ? file_index + 1 : file_index;
+    auto p = std::filesystem::path{path_buf}.lexically_normal();
+    if (p.is_relative()) {
+      p = CompileDirectoryJoin(p);
     }
-    ++file_index;
+    mFileToFileIndex[p].push_back(fileIndex);
+    fileIndex++;
+  }
+}
+
+const LNPHeader::FileEntryContainer&
+LNPHeader::FileEntries()
+{
+  ASSERT(!mFileEntries.empty(), "No file entries has been loaded");
+  CacheLNPFilePaths();
+  return mFileToFileIndex;
+}
+
+std::optional<std::span<const u32>>
+LNPHeader::file_entry_index(const std::filesystem::path &p) noexcept
+{
+  for (const auto &[k, ids] : FileEntries()) {
+    if (k == p) {
+      return std::span{ids};
+    }
   }
   return std::nullopt;
 }
@@ -537,10 +563,10 @@ LineTable::file(u64 file_index) const noexcept
 {
   const auto adjusted = lnp_index(file_index, line_header->version);
   ASSERT(line_header, "Line table doesn't have a line number program header");
-  ASSERT(adjusted < line_header->file_names.size(), "file_index={} not found in {} files", adjusted,
-         line_header->file_names.size());
+  ASSERT(adjusted < line_header->mFileEntries.size(), "file_index={} not found in {} files", adjusted,
+         line_header->mFileEntries.size());
 
-  return line_header->file_names[adjusted];
+  return line_header->mFileEntries[adjusted];
 }
 
 RelocatedLteIterator
@@ -863,9 +889,9 @@ read_lnp_headers(const Elf *elf) noexcept
         entry.file_size = reader.read_uleb128<u64>();
         files.push_back(entry);
       }
-      headers->emplace_back(sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version, addr_size,
-                            min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range, opcode_base,
-                            opcode_lengths, std::move(dirs), std::move(files));
+      headers->emplace_back(&elf->obj_file, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
+                            addr_size, min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range,
+                            opcode_base, opcode_lengths, std::move(dirs), std::move(files));
       reader.skip(init_len - reader.pop_bookmark());
     } else {
       const u8 directory_entry_format_count = reader.read_value<u8>();
@@ -924,9 +950,9 @@ read_lnp_headers(const Elf *elf) noexcept
         }
         files.push_back(entry);
       }
-      headers->emplace_back(sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version, addr_size,
-                            min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range, opcode_base,
-                            opcode_lengths, std::move(dirs), std::move(files));
+      headers->emplace_back(&elf->obj_file, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
+                            addr_size, min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range,
+                            opcode_base, opcode_lengths, std::move(dirs), std::move(files));
       reader.skip(init_len - reader.pop_bookmark());
     }
   }
@@ -960,8 +986,8 @@ SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector
 }
 
 auto
-SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line, std::optional<u32> column)
-  -> std::optional<LineTableEntry>
+SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line,
+                                      std::optional<u32> column) -> std::optional<LineTableEntry>
 {
   auto lte_it = std::find_if(begin(relocatedBase), end(relocatedBase), [&](const auto &lte) {
     return line == lte.line && lte.column == column.value_or(lte.column);
@@ -1028,14 +1054,13 @@ SourceCodeFile::compute_line_tables() const noexcept
 
   std::set<LineTableEntry> unique_ltes{};
   for (auto header : headers) {
-    auto file_entry_index = header->file_entry_index(full_path);
-    ASSERT(file_entry_index, "Expected a file entry index but did not find one");
-
+    auto fileIndices = header->file_entry_index(full_path);
+    ASSERT(fileIndices, "Expected a file entry index but did not find one for {}", full_path->c_str());
     DBGLOG(dwarf, "[lnp]: computing lnp at 0x{:x}", header->sec_offset);
     using OpCode = LineNumberProgramOpCode;
     DwarfBinaryReader reader{elf, header->data, static_cast<u64>(header->data_end - header->data)};
     while (reader.has_more()) {
-      SourceCodeFileLNPResolver state{header, unique_ltes, std::nullopt, file_entry_index.value()};
+      SourceCodeFileLNPResolver state{header, unique_ltes, std::nullopt, fileIndices.value()};
       while (reader.has_more() && !state.sequence_ended()) {
         const auto opcode = reader.read_value<OpCode>();
         if (const auto spec_op = std::to_underlying(opcode); spec_op >= header->opcode_base) {

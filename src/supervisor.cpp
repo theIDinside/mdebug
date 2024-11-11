@@ -10,9 +10,6 @@
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "lib/lockguard.h"
-#include "lib/spinlock.h"
-#include "notify_pipe.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
@@ -36,16 +33,13 @@
 #include "utils/expected.h"
 #include "utils/immutable.h"
 #include "utils/logger.h"
-#include "utils/worker_task.h"
+#include "utils/macros.h"
 #include <algorithm>
-#include <chrono>
 #include <elf.h>
 #include <fcntl.h>
 #include <filesystem>
 #include <link.h>
-#include <memory_resource>
 #include <optional>
-#include <ratio>
 #include <set>
 #include <span>
 #include <string_view>
@@ -53,7 +47,6 @@
 #include <sys/ptrace.h>
 #include <unistd.h>
 #include <utility>
-#include <variant>
 
 using sym::dw::SourceCodeFile;
 
@@ -68,9 +61,9 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
 {
   threads.reserve(256);
 
-  threads.push_back(TaskInfo::create_running(tracee_interface->task_leader(), tracee_interface->format,
+  threads.push_back(TaskInfo::create_running(this, tracee_interface->task_leader(), tracee_interface->format,
                                              tracee_interface->arch_info->type));
-  threads.back().initialize();
+  threads.back()->initialize();
   tracee_interface->set_target(this);
 
   new_objectfile.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
@@ -88,15 +81,22 @@ TraceeController::TraceeController(TargetSession target_session, tc::Interface &
 {
   threads.reserve(256);
 
-  threads.push_back(TaskInfo::create_running(tracee_interface->task_leader(), tracee_interface->format,
+  threads.push_back(TaskInfo::create_running(this, tracee_interface->task_leader(), tracee_interface->format,
                                              tracee_interface->arch_info->type));
-  threads.back().initialize();
+  threads.back()->initialize();
 
   new_objectfile.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     dap_client->post_event(new ui::dap::ModuleEvent{"new", *sf});
     return true;
   });
   tracee_interface->set_target(this);
+}
+
+/*static*/
+std::unique_ptr<TraceeController>
+TraceeController::create(TargetSession session, tc::Interface &&interface, InterfaceType type)
+{
+  return std::unique_ptr<TraceeController>(new TraceeController{session, std::move(interface), type});
 }
 
 void
@@ -108,7 +108,7 @@ TraceeController::configure_dap_client(ui::dap::DebugAdapterClient *client) noex
 std::unique_ptr<TraceeController>
 TraceeController::fork(tc::Interface &&interface) noexcept
 {
-  auto child = std::make_unique<TraceeController>(*this, std::move(interface));
+  auto child = std::unique_ptr<TraceeController>(new TraceeController{*this, std::move(interface)});
   child->parent = task_leader;
   return child;
 }
@@ -256,15 +256,48 @@ TraceeController::independent_task_resume_control() noexcept
   return false;
 }
 
+void
+TraceeController::AddTask(std::shared_ptr<TaskInfo> &&task) noexcept
+{
+  threads.push_back(std::move(task));
+}
+
+u32
+TraceeController::RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)>&& predicate)
+{
+  auto count = threads.size();
+  auto removeIterator = std::remove_if(threads.begin(), threads.end(), predicate);
+  threads.erase(removeIterator, threads.end());
+  return count - threads.size();
+}
+
+std::span<std::shared_ptr<TaskInfo>>
+TraceeController::get_threads() noexcept
+{
+  return threads;
+}
+
+Tid
+TraceeController::get_task_leader() const noexcept
+{
+  return task_leader;
+}
+
 TaskInfo *
 TraceeController::get_task(pid_t tid) noexcept
 {
   for (auto &t : threads) {
-    if (t.tid == tid) {
-      return &t;
+    if (t->tid == tid) {
+      return t.get();
     }
   }
   return nullptr;
+}
+
+UserBreakpoints &
+TraceeController::user_breakpoints() noexcept
+{
+  return pbps;
 }
 
 std::optional<TaskWaitResult>
@@ -279,9 +312,11 @@ TraceeController::new_task(Tid tid, bool running) noexcept
 {
   ASSERT(tid != 0 && !has_task(tid), "Task {} has already been created!", tid);
   if (running) {
-    threads.push_back(TaskInfo::create_running(tid, tracee_interface->format, tracee_interface->arch_info->type));
+    threads.push_back(
+      TaskInfo::create_running(this, tid, tracee_interface->format, tracee_interface->arch_info->type));
   } else {
-    threads.push_back(TaskInfo::create_stopped(tid, tracee_interface->format, tracee_interface->arch_info->type));
+    threads.push_back(
+      TaskInfo::create_stopped(this, tid, tracee_interface->format, tracee_interface->arch_info->type));
   }
 }
 
@@ -289,7 +324,7 @@ bool
 TraceeController::has_task(Tid tid) noexcept
 {
   for (const auto &task : threads) {
-    if (task.tid == tid) {
+    if (task->tid == tid) {
       return true;
     }
   }
@@ -335,7 +370,8 @@ TraceeController::stop_all(TaskInfo *requesting_task) noexcept
 {
   DBGLOG(core, "Stopping all threads")
   stop_all_requested = true;
-  for (auto &t : threads) {
+  for (auto &task : threads) {
+    auto &t = *task;
     if (!t.user_stopped && !t.tracer_stopped) {
       DBGLOG(core, "Stopping {}", t.tid);
       const auto response = tracee_interface->stop_task(t);
@@ -380,6 +416,7 @@ TraceeController::get_caching_pc(TaskInfo &t) noexcept
   case TargetFormat::Remote:
     return t.regs.x86_block->get_pc();
   }
+  NEVER("Unknown target format type");
 }
 
 void
@@ -460,7 +497,7 @@ TraceeController::emit_breakpoint_event(std::string_view reason, const UserBreak
 }
 
 tc::ProcessedStopEvent
-TraceeController::process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept
+TraceeController::process_deferred_stopevent(TaskInfo &, DeferToSupervisor &) noexcept
 {
   TODO("implement TraceeController::process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept");
 }
@@ -682,7 +719,8 @@ TraceeController::update_source_bps(const std::filesystem::path &source_filepath
   for (auto symbol_file : symbol_files) {
     auto obj = symbol_file->objectFile();
 
-    if (SourceCodeFile::ShrPtr source_code_file = obj->get_source_file(source_filepath); source_code_file) {
+    if (SourceCodeFile::ShrPtr source_code_file = obj->get_source_file(source_filepath.c_str());
+        source_code_file) {
       for (const auto &src_bp : add) {
         if (auto lte =
               source_code_file->first_linetable_entry(symbol_file->baseAddress, src_bp.line, src_bp.column);
@@ -898,9 +936,9 @@ TraceeController::execution_not_ended() const noexcept
 bool
 TraceeController::is_running() const noexcept
 {
-  return std::any_of(threads.cbegin(), threads.cend(), [](const TaskInfo &t) {
-    DBGLOG(core, "Thread {} stopped={}", t.tid, t.is_stopped());
-    return !t.is_stopped();
+  return std::any_of(threads.cbegin(), threads.cend(), [](const std::shared_ptr<TaskInfo> &t) {
+    DBGLOG(core, "Thread {} stopped={}", t->tid, t->is_stopped());
+    return !t->is_stopped();
   });
 }
 
@@ -1148,12 +1186,12 @@ sym::CallStack &
 TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) noexcept
 {
   DBGLOG(core, "stacktrace for {}", task.tid);
-  if (!task.call_stack->dirty) {
+  if (!task.call_stack->IsDirty()) {
     return *task.call_stack;
   }
   cache_registers(task);
   auto &cs_ref = *task.call_stack;
-  cs_ref.frames.clear();
+  cs_ref.Reset();
 
   auto frame_pcs = task.return_addresses(this, req);
   for (const auto &[depth, i] : utils::EnumerateView{frame_pcs}) {
@@ -1171,19 +1209,18 @@ TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) no
                                                       .id = static_cast<u16>(id),
                                                       .type = ContextType::Frame});
     if (symbol) {
-      cs_ref.frames.push_back(sym::Frame{obj, task, depth, id, i.as_void(), symbol});
+      cs_ref.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {
       auto obj = find_obj_by_pc(frame_pc);
       auto min_sym = obj->searchMinSymFnInfo(frame_pc);
       if (min_sym) {
-        cs_ref.frames.push_back(sym::Frame{obj, task, depth, id, i.as_void(), min_sym});
+        cs_ref.PushFrame(obj, task, depth, id, i.as_void(), min_sym);
       } else {
         DBGLOG(core, "[stackframe]: WARNING, no frame info for pc {}", i.as_void());
-        cs_ref.frames.push_back(sym::Frame{obj, task, depth, id, i.as_void(), nullptr});
+        cs_ref.PushFrame(obj, task, depth, id, i.as_void(), nullptr);
       }
     }
   }
-  cs_ref.dirty = false;
   return cs_ref;
 }
 
@@ -1242,6 +1279,16 @@ TraceeController::install_software_bp_loc(AddrPtr addr) noexcept
   return static_cast<u8>(res.data);
 }
 
+Publisher<void> &
+TraceeController::observer(ObserverType type) noexcept
+{
+  switch (type) {
+  case ObserverType::AllStop:
+    return all_stop;
+  }
+  MIDAS_UNREACHABLE
+}
+
 void
 TraceeController::notify_all_stopped() noexcept
 {
@@ -1254,7 +1301,7 @@ bool
 TraceeController::all_stopped() const noexcept
 {
   for (const auto &task : threads) {
-    if (!task.stop_processed()) {
+    if (!task->stop_processed()) {
       return false;
     }
   }
@@ -1270,6 +1317,7 @@ TraceeController::session_all_stop_mode() const noexcept
   case InterfaceType::GdbRemote:
     return !static_cast<tc::GdbRemoteCommander *>(tracee_interface.get())->remote_settings().is_non_stop;
   }
+  NEVER("Unknown target interface type");
 }
 
 TaskInfo *
@@ -1311,7 +1359,7 @@ TraceeController::handle_thread_created(TaskInfo *task, const ThreadCreated &e,
 }
 
 tc::ProcessedStopEvent
-TraceeController::handle_thread_exited(TaskInfo *task, const ThreadExited &evt) noexcept
+TraceeController::handle_thread_exited(TaskInfo *task, const ThreadExited &) noexcept
 {
   if (!task->exited) {
     dap_client->post_event(new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, task->tid});
@@ -1368,4 +1416,10 @@ TraceeController::handle_fork(const Fork &evt) noexcept
     }
   }
   return tc::ProcessedStopEvent{true, {}};
+}
+
+ui::dap::DebugAdapterClient *
+TraceeController::get_dap_client() const noexcept
+{
+  return dap_client;
 }

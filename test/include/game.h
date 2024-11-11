@@ -42,19 +42,19 @@ struct NPC
     Boss boss;
   } payload;
 
-  static NPC
-  Boss(const char *t, const char *n, int health, int dmg, int id, int spells)
+  static constexpr NPC
+  MakeBoss(const char *t, const char *n, int health, int dmg, int id, int spells)
   {
     return NPC{.kind = NPCKind::Boss, .payload = {.boss = {t, n, health, dmg, id, spells}}}; // BOSS_BP
   }
 
-  static NPC
-  Friend(const char *n, int h)
+  static constexpr NPC
+  MakeFriend(const char *n, int h)
   {
     return NPC{.kind = NPCKind::Friend, .payload = {.buddy = {n, h}}}; // FRIEND_BP
   }
-  static NPC
-  Minion(const char *t, int h, int dmg, int id)
+  static constexpr NPC
+  MakeMinion(const char *t, int h, int dmg, int id)
   {
     return NPC{.kind = NPCKind::Minion, .payload = {.critter = {t, h, dmg, id}}}; // MINION_BP
   }

@@ -66,6 +66,11 @@ DwarfBinaryReader::current_ptr() const noexcept
   return head;
 }
 
+DwarfBinaryReader::DwarfBinaryReader(std::span<const u8> data) noexcept
+    : DwarfBinaryReader(nullptr, data.data(), data.size())
+{
+}
+
 DwarfBinaryReader::DwarfBinaryReader(const Elf *elf, const u8 *buffer, u64 size) noexcept
     : buffer(buffer), head(buffer), end(buffer + size), size(size), bookmarks(), elf(elf)
 {
@@ -136,7 +141,7 @@ DwarfBinaryReader::read_content_index(AttributeForm form) noexcept
   case DW_FORM_data2:
     return read_value<u16>();
   default:
-    PANIC(fmt::format("Unsupported form for dir index {}", form));
+    PANIC(fmt::format("Unsupported form for dir index {}", to_str(form)));
   }
 }
 
@@ -161,7 +166,7 @@ DwarfBinaryReader::read_content_str(AttributeForm form) noexcept
   case DW_FORM_strx3:
   case DW_FORM_strx4:
   default:
-    PANIC(fmt::format("Reading string of form {} not yet supported", form));
+    PANIC(fmt::format("Reading string of form {} not yet supported", to_str(form)));
   }
 }
 
@@ -177,7 +182,7 @@ DwarfBinaryReader::read_content_datablock(AttributeForm form) noexcept
     return read_block(sz);
   }
   default:
-    PANIC(fmt::format("Unsupported block form {}", form));
+    PANIC(fmt::format("Unsupported block form {}", to_str(form)));
   }
 }
 
@@ -212,7 +217,7 @@ DwarfBinaryReader::read_content(AttributeForm form) noexcept
     return read_block(sz);
   }
   default:
-    PANIC(fmt::format("Unacceptable form {} while reading LNP content description", form));
+    PANIC(fmt::format("Unacceptable form {} while reading LNP content description", to_str(form)));
   }
 }
 

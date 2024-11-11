@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/macros.h"
 #include <common.h>
 #include <elf.h>
 #include <string_view>
@@ -36,6 +37,7 @@ sec_name(ElfSec ident) noexcept
     return "ERROR_SECTION";
     break;
   }
+  NEVER("Unknown elf section identifier");
 }
 
 struct ElfSection

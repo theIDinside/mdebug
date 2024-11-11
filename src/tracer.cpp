@@ -16,24 +16,16 @@
 #include "notify_pipe.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
-#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf_frameunwinder.h"
-#include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include "task.h"
-#include "tasks/dwarf_unit_data.h"
-#include "tasks/index_die_names.h"
-#include "tasks/lnp.h"
 #include "utils/scope_defer.h"
 #include "utils/scoped_fd.h"
 #include "utils/thread_pool.h"
-#include "utils/worker_task.h"
 #include <fcntl.h>
 #include <fmt/format.h>
 #include <sys/personality.h>
 #include <sys/stat.h>
-#include <thread>
-#include <type_traits>
 #include <unistd.h>
 
 Tracer *Tracer::Instance = nullptr;
@@ -56,21 +48,21 @@ on_sigchild_handler(int)
       if (!Tracer::Instance->TraceExitConfigured) {
         // means this is the only place we're getting informed of thread exits
         for (const auto &supervisor : Tracer::Instance->targets) {
-          for (const auto &t : supervisor->threads) {
-            if (t.tid == pid) {
+          for (const auto &t : supervisor->get_threads()) {
+            if (t->tid == pid) {
               DBGLOG(awaiter, "exit for {}", pid);
               push_debugger_event(
-                CoreEvent::ThreadExited({supervisor->task_leader, pid, WEXITSTATUS(stat)}, false, {}));
+                CoreEvent::ThreadExited({supervisor->get_task_leader(), pid, WEXITSTATUS(stat)}, false, {}));
               return;
             }
           }
         }
       } else {
         for (const auto &supervisor : Tracer::Instance->targets) {
-          if (supervisor->task_leader == pid) {
+          if (supervisor->get_task_leader() == pid) {
             int exit_code = WEXITSTATUS(stat);
             DBGLOG(awaiter, "exit for {}: {}", pid, exit_code);
-            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->task_leader, pid, exit_code, {}));
+            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->get_task_leader(), pid, exit_code, {}));
             return;
           }
         }
@@ -115,8 +107,8 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 void
 Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession session) noexcept
 {
-  targets.push_back(std::make_unique<TraceeController>(
-    session, tc::TraceeCommandInterface::createCommandInterface(config), InterfaceType::Ptrace));
+  targets.push_back(TraceeController::create(session, tc::TraceeCommandInterface::createCommandInterface(config),
+                                             InterfaceType::Ptrace));
   current_target = targets.back().get();
   const auto new_process = current_target->get_interface().task_leader();
 
@@ -169,7 +161,7 @@ Tracer::process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) no
 {
   if (process_group == 0) {
     for (const auto &tgt : targets) {
-      if (std::ranges::any_of(tgt->threads, [&](const auto &t) { return t.tid == wait_res.tid; })) {
+      if (std::ranges::any_of(tgt->get_threads(), [&](const auto &t) { return t->tid == wait_res.tid; })) {
         process_group = tgt->task_leader;
       }
     }
@@ -265,9 +257,8 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   }
   if (tc.session_all_stop_mode()) {
     for (auto &t : tc.threads) {
-      t.stop_collected = true;
-      t.tracer_stopped = true;
-      t.user_stopped = true;
+      t->set_stop();
+      t->stop_collected = true;
     }
   }
   const CoreEvent &r = *evt;
@@ -304,16 +295,16 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
                          })
                          .value();
 
-        auto bp_loc = tc.pbps.location_at(bp_addy);
+        auto bp_loc = tc.user_breakpoints().location_at(bp_addy);
         ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
         bool should_resume = true;
         for (const auto user_id : users) {
-          auto user = tc.pbps.get_user(user_id);
+          auto user = tc.user_breakpoints().get_user(user_id);
           auto on_hit = user->on_hit(tc, *t);
           should_resume = should_resume && !on_hit.stop;
           if (on_hit.retire_bp) {
-            tc.pbps.remove_bp(user->id);
+            tc.user_breakpoints().remove_bp(user->id);
           } else {
             t->add_bpstat(user->address().value());
           }
@@ -346,10 +337,11 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         auto t = tc.get_task(e.thread_id);
         tc.stop_all(t);
         if (evt->signal == SIGINT) {
-          tc.all_stop.once(
-            [t = t->tid, &tc = tc]() { tc.emit_stopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {}); });
+          tc.observer(ObserverType::AllStop).once([t = t->tid, &tc = tc]() {
+            tc.emit_stopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {});
+          });
         } else {
-          tc.all_stop.once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
+          tc.observer(ObserverType::AllStop).once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
             tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
           });
         }
@@ -358,7 +350,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       [&](const Stepped &e) -> MatchResult {
         if (e.loc_stat) {
           ASSERT(e.loc_stat->stepped_over, "how did we end up here if we did not step over a breakpoint?");
-          auto bp_loc = tc.pbps.location_at(e.loc_stat->loc);
+          auto bp_loc = tc.user_breakpoints().location_at(e.loc_stat->loc);
           if (e.loc_stat->re_enable_bp) {
             bp_loc->enable(tc.get_interface());
           }
@@ -438,8 +430,8 @@ Tracer::attach(const AttachArgs &args) noexcept
   return std::visit(
     Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
             auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-            targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(interface),
-                                                                 InterfaceType::Ptrace));
+            targets.push_back(
+              TraceeController::create(TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
             current_target = targets.back().get();
             if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
               const auto new_process = current_target->get_interface().task_leader();
@@ -482,8 +474,8 @@ Tracer::attach(const AttachArgs &args) noexcept
 
             auto it = res.begin();
             const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
-              targets.push_back(std::make_unique<TraceeController>(TargetSession::Attached, std::move(tc),
-                                                                   InterfaceType::GdbRemote));
+              targets.push_back(
+                TraceeController::create(TargetSession::Attached, std::move(tc), InterfaceType::GdbRemote));
               Tracer::Instance->set_current_to_latest_target();
               auto &ti = current_target->get_interface();
               client->client_configured(current_target);
@@ -491,9 +483,8 @@ Tracer::attach(const AttachArgs &args) noexcept
               for (const auto &t : it->threads) {
                 current_target->new_task(t.tid, false);
               }
-              for (auto &t : current_target->threads) {
-                t.user_stopped = true;
-                t.tracer_stopped = true;
+              for (auto &t : current_target->get_threads()) {
+                t->set_stop();
               }
               client->post_event(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
                                                            "attached",
@@ -707,6 +698,13 @@ Tracer::destroy_reference(VarRefKey key) noexcept
   refContext.erase(key);
 }
 
+std::vector<std::unique_ptr<TraceeController>>::iterator
+Tracer::find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept
+{
+  return std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
+                      [client](auto &ptr) { return ptr->get_dap_client() == client; });
+}
+
 void
 Tracer::set_var_context(VariableContext ctx) noexcept
 {
@@ -739,7 +737,6 @@ VariableContext::scopes_reference(VarRefKey frameKey) const noexcept
   }
 }
 
-std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
 sym::Frame *
 VariableContext::get_frame(VarRefKey ref) noexcept
 {
@@ -753,6 +750,7 @@ VariableContext::get_frame(VarRefKey ref) noexcept
     PANIC("Global variables not yet supported");
     break;
   }
+  NEVER("Unknown context type");
 }
 
 SharedPtr<sym::Value>

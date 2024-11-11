@@ -5,9 +5,7 @@
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
 #include "task.h"
-#include <exception>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -113,6 +111,7 @@ template <> struct formatter<CoreEventType>
     case CoreEventType::Entry:
       return fmt::format_to(ctx.out(), "CoreEventType::Entry");
     }
+    NEVER("Unknown Core event type");
   }
 };
 

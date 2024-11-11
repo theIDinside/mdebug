@@ -4,6 +4,7 @@
 #include <span>
 // NOLINTNEXTLINE
 #include "bp.h"
+#include "fmt/ranges.h"
 #include "types.h"
 #include <interface/attach_args.h>
 #include <nlohmann/json.hpp>

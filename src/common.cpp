@@ -63,6 +63,11 @@ panic_exit()
   }
 }
 
+SourceCoordinate::SourceCoordinate(std::string path, u32 line, u32 col) noexcept
+    : path(std::move(path)), line(line), column(col)
+{
+}
+
 void
 panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
 {

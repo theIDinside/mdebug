@@ -1,10 +1,17 @@
 #include "xml.h"
 #include "common.h"
+#include "fmt/base.h"
 #include "utils/util.h"
 #include <algorithm>
 #include <bits/ranges_algo.h>
 #include <bits/ranges_util.h>
 #include <cctype>
+
+#define PANIC_LOG(cond, str, ...)                                                                                 \
+  if (cond) {                                                                                                     \
+    fmt::println(str __VA_OPT__(, ) __VA_ARGS__);                                                                 \
+    exit(-1);                                                                                                     \
+  }
 
 namespace xml {
 
@@ -79,7 +86,8 @@ XMLParser::parse_element() noexcept
 
   // Consume the closing '>'
   const auto closing_bracket = eat_char();
-  ASSERT(closing_bracket == '>', "Expected a closing '>'");
+  PANIC_LOG(closing_bracket != '>', "Expected a closing '>' but saw '{}' ({}:{})", closing_bracket, __FILE__,
+            __LINE__);
 
   // Parse content or child elements
   auto start = pbuf.front() != '<' ? pbuf.data() : nullptr;
@@ -130,7 +138,7 @@ XMLParser::parse_attributes() noexcept
 
     skip_whitespace();
     const auto eq_sign = eat_char();
-    ASSERT(eq_sign == '=', "Expected an equals sign");
+    PANIC_LOG(eq_sign != '=', "Expected an equals sign");
     skip_whitespace();
     std::string_view value = parse_attr_value();
     attributes.insert(name, value);
@@ -142,7 +150,7 @@ std::string_view
 XMLParser::parse_attr_value() noexcept
 {
   const char quote = eat_char();
-  ASSERT(quote == '"', "Expected quote but saw {}", quote);
+  PANIC_LOG(quote != '"', "Expected quote but saw {}", quote);
   auto pos = pbuf.find('"');
   if (pos == std::string_view::npos) {
     const auto res = pbuf;

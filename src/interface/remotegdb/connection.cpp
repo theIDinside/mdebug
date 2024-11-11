@@ -914,6 +914,7 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
         socket.consume_n(packet_end.value() + 3);
         return done ? qXferResponse::Done : qXferResponse::HasMore;
       }
+      NEVER("Should not reach");
     }
     case MessageData::AsyncHeader: {
       const auto packet_end = socket.find_timeout('#', timeout);
@@ -923,6 +924,7 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
       const auto packet = std::string_view{socket.cbegin(), socket.cbegin() + packet_end.value()};
       put_pending_notification(packet);
       socket.consume_n(packet_end.value() + 3);
+      break;
     }
     case MessageData::Ack:
       socket.consume_n(start->pos + 1);
@@ -935,6 +937,8 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
       break;
     }
   }
+
+  NEVER("Should never reach RemoteConnection::append_read_qXfer_response");
 }
 
 std::optional<std::string>
@@ -974,6 +978,7 @@ RemoteConnection::read_command_response(int timeout, bool expectingStopReply) no
       const auto packet = std::string_view{socket.cbegin(), socket.cbegin() + packet_end.value()};
       put_pending_notification(packet);
       socket.consume_n(packet_end.value() + 3);
+      break;
     }
     case MessageData::Ack:
       socket.consume_n(start->pos + 1);

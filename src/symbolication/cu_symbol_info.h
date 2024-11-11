@@ -1,12 +1,8 @@
 #pragma once
 #include "./dwarf/lnp.h"
-#include "block.h"
-#include "dwarf/common.h"
-#include "dwarf_defs.h"
 #include "fnsymbol.h"
 #include "utils/interval_map.h"
 #include <common.h>
-#include <iterator>
 #include <optional>
 
 using StringOpt = std::optional<std::string_view>;

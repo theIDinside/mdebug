@@ -2,6 +2,7 @@
 #include "bp.h"
 #include "common.h"
 #include "events/event.h"
+#include "fmt/ranges.h"
 #include "interface/attach_args.h"
 #include "interface/dap/events.h"
 #include "interface/tracee_command/tracee_command_interface.h"
@@ -156,9 +157,9 @@ Continue::execute() noexcept
   auto target = dap_client->supervisor();
   if (continue_all && target->is_running()) {
     std::vector<Tid> running_tasks{};
-    for (const auto &t : target->threads) {
-      if (!t.is_stopped() || t.tracer_stopped) {
-        running_tasks.push_back(t.tid);
+    for (const auto &t : target->get_threads()) {
+      if (!t->is_stopped() || t->tracer_stopped) {
+        running_tasks.push_back(t->tid);
       }
     }
     DBGLOG(core, "Denying continue request, target is running ([{}])", fmt::join(running_tasks, ", "));
@@ -282,7 +283,8 @@ StepOut::execute() noexcept
   if (!loc.is_expected()) {
     return new StepOutResponse{false, this};
   }
-  auto user = target->pbps.create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->tid, task->tid);
+  auto user =
+    target->user_breakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->tid, task->tid);
   target->install_thread_proceed<ptracestop::FinishFunction>(*task, user, false);
   return new StepOutResponse{true, this};
 }
@@ -356,9 +358,9 @@ SetBreakpoints::execute() noexcept
 
   using BP = ui::dap::Breakpoint;
 
-  for (const auto &[bp, ids] : target->pbps.bps_for_source(file)) {
+  for (const auto &[bp, ids] : target->user_breakpoints().bps_for_source(file)) {
     for (const auto id : ids) {
-      const auto user = target->pbps.get_user(id);
+      const auto user = target->user_breakpoints().get_user(id);
       res->breakpoints.push_back(BP::from_user_bp(user));
     }
   }
@@ -403,10 +405,10 @@ SetInstructionBreakpoints::execute() noexcept
   target->set_instruction_breakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
-  res->breakpoints.reserve(target->pbps.instruction_breakpoints.size());
+  res->breakpoints.reserve(target->user_breakpoints().instruction_breakpoints.size());
 
-  for (const auto &[k, id] : target->pbps.instruction_breakpoints) {
-    res->breakpoints.push_back(BP::from_user_bp(target->pbps.get_user(id)));
+  for (const auto &[k, id] : target->user_breakpoints().instruction_breakpoints) {
+    res->breakpoints.push_back(BP::from_user_bp(target->user_breakpoints().get_user(id)));
   }
 
   res->success = true;
@@ -442,7 +444,7 @@ SetFunctionBreakpoints::execute() noexcept
   auto target = dap_client->supervisor();
 
   target->set_fn_breakpoints(bkpts);
-  for (const auto &user : target->pbps.all_users()) {
+  for (const auto &user : target->user_breakpoints().all_users()) {
     if (user->kind == LocationUserKind::Function) {
       res->breakpoints.push_back(BP::from_user_bp(user));
     }
@@ -455,8 +457,8 @@ std::string
 WriteMemoryResponse::serialize(int seq) const noexcept
 {
   return fmt::format(
-    R"({{"seq":0,"request_seq":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
-    request_seq, success, bytes_written);
+    R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
+    seq, request_seq, success, bytes_written);
 }
 
 WriteMemory::WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept
@@ -568,10 +570,7 @@ Disconnect::execute() noexcept
 {
   const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
   if (ok) {
-    auto it = std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
-                           [&](auto &ptr) { return ptr->dap_client == dap_client; });
-
-    Tracer::Instance->targets.erase(it);
+    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->get_dap_client() == dap_client; });
     Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
   }
 
@@ -584,7 +583,7 @@ InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd
 }
 
 std::string
-InitializeResponse::serialize(int seq) const noexcept
+InitializeResponse::serialize(int) const noexcept
 {
   // "this _must_ be 1, the first response"
 
@@ -695,10 +694,7 @@ Terminate::execute() noexcept
   const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
   if (ok) {
     dap_client->post_event(new TerminatedEvent{});
-    auto it = std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
-                           [&](auto &ptr) { return ptr->dap_client == dap_client; });
-
-    Tracer::Instance->targets.erase(it);
+    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->get_dap_client() == dap_client; });
     Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
   }
   return new TerminateResponse{ok, this};
@@ -722,25 +718,27 @@ Threads::execute() noexcept
 
   auto target = dap_client->supervisor();
 
-  response->threads.reserve(target->threads.size());
+  response->threads.reserve(target->get_threads().size());
   auto &it = target->get_interface();
 
   if (it.format == TargetFormat::Remote) {
-    auto res = it.remote_connection()->query_target_threads({target->task_leader, target->task_leader});
-    ASSERT(res.front().pid == target->task_leader, "expected pid == task_leader");
+    auto res =
+      it.remote_connection()->query_target_threads({target->get_task_leader(), target->get_task_leader()});
+    ASSERT(res.front().pid == target->get_task_leader(), "expected pid == task_leader");
     for (const auto thr : res) {
-      if (std::ranges::none_of(target->threads, [t = thr.tid](const auto &a) { return a.tid == t; })) {
-        target->threads.push_back(TaskInfo::create_stopped(thr.tid, it.format, it.arch_info->type));
+      if (std::ranges::none_of(target->get_threads(), [t = thr.tid](const auto &a) { return a->tid == t; })) {
+        target->AddTask(TaskInfo::create_stopped(target, thr.tid, it.format, it.arch_info->type));
       }
     }
-    auto start = std::remove_if(target->threads.begin(), target->threads.end(), [&](auto &thread) {
-      return std::none_of(res.begin(), res.end(), [&](const auto pidtid) { return pidtid.tid == thread.tid; });
+
+    target->RemoveTaskIf([&](const auto &thread) {
+      return std::none_of(res.begin(), res.end(), [&](const auto pidtid) { return pidtid.tid == thread->tid; });
     });
-    target->threads.erase(start, target->threads.end());
   }
 
-  for (const auto &thread : target->threads) {
-    response->threads.push_back(Thread{.id = thread.tid, .name = it.get_thread_name(thread.tid)});
+  for (const auto &thread : target->get_threads()) {
+    const auto tid = thread->tid;
+    response->threads.push_back(Thread{.id = tid, .name = it.get_thread_name(tid)});
   }
   return response;
 }
@@ -787,8 +785,8 @@ StackTrace::execute() noexcept
   auto &cfs = target->build_callframe_stack(*task, CallStackRequest::full());
 
   std::vector<StackFrame> stack_frames{};
-  stack_frames.reserve(cfs.frames.size());
-  for (const auto &frame : cfs.frames) {
+  stack_frames.reserve(cfs.FramesCount());
+  for (const auto &frame : cfs.GetFrames()) {
     if (frame.frame_type() == sym::FrameType::Full) {
       const auto lt = frame.cu_line_table().value_or(sym::dw::LineTable{});
 
@@ -1052,10 +1050,11 @@ VariablesResponse::serialize(int seq) const noexcept
       auto span = v.variable_value->memory_view();
       const std::uintptr_t ptr = sym::bit_copy<std::uintptr_t>(span);
       auto ptr_str = fmt::format("0x{:x}", ptr);
+      const std::string_view name = v.variable_value->name.string_view();
       it = fmt::format_to(
         it,
         R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }},)",
-        v.variable_value->name, ptr_str, *v.variable_value->type(), v.ref, v.variable_value->address());
+        name, ptr_str, *v.variable_value->type(), v.ref, v.variable_value->address());
     }
   }
 

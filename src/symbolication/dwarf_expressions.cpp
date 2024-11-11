@@ -51,6 +51,13 @@ ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frame_level, TraceeControll
 {
 }
 
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
+                                                 std::span<const u8> byte_stream,
+                                                 std::span<const u8> frameBaseCode) noexcept
+    : frame_level(frame_level), stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)), mFrameBaseProgram(std::move(frameBaseCode)), reader(this->byte_stream)
+{
+}
+
 void
 ub(ExprByteCodeInterpreter &i) noexcept
 {
@@ -439,8 +446,8 @@ void
 op_fbreg(ExprByteCodeInterpreter &i) noexcept
 {
   const i64 offset = i.reader.read_leb128<i64>();
-  const auto frame_base = i.request_frame_base();
-  i.stack.push<u64>(frame_base + offset);
+  const auto frameBase = i.request_frame_base();
+  i.stack.push<u64>(frameBase + offset);
 }
 void
 op_bregx(ExprByteCodeInterpreter &i) noexcept
@@ -480,10 +487,11 @@ op_call_ref(ExprByteCodeInterpreter &i) noexcept
 }
 
 void
-op_call_frame_cfa(ExprByteCodeInterpreter &) noexcept
+op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 {
-  // ??
-  TODO("op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept");
+  auto* unwindState = i.task.GetUnwindState(i.frame_level);
+  ASSERT(unwindState, "The interpreter can not know the CFA value.");
+  i.stack.push(unwindState->CanonicalFrameAddress());
 }
 
 void
@@ -678,9 +686,9 @@ static Op ops[0xff] = {
 };
 
 AddrPtr ExprByteCodeInterpreter::request_frame_base() noexcept {
-  ASSERT(frame_level != -1, "Did not expect to use FRAME_LEVEL for this DWARF expression computation.");
-  ASSERT(task.unwind_buffer_register(0, 6) == task.get_register(6), "Expected first level to be equal, but it wasn't.");
-  return task.unwind_buffer_register(frame_level, 6);
+  ASSERT(frame_level != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
+  ExprByteCodeInterpreter frameBaseReader{frame_level, tc, task, mFrameBaseProgram};
+  return frameBaseReader.run();
 }
 
 u64

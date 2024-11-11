@@ -193,7 +193,7 @@ push_event(Event e)
 void
 push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept
 {
-  push_event(Event{.type = EventType::WaitStatus, .wait = {.process_group = process_group, .wait = wait_result}});
+  push_event(Event{.type = EventType::WaitStatus, .wait = {.process_group = process_group, .wait = wait_result, .core = 0}});
 }
 
 void

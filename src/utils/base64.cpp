@@ -8,7 +8,7 @@ consteval std::array<int, 256>
 BaseTable() noexcept
 {
   std::array<int, 256> result{};
-  for (auto i = 0; i < result.size(); ++i) {
+  for (auto i = 0u; i < result.size(); ++i) {
     result[i] = -1;
   }
 

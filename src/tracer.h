@@ -19,7 +19,7 @@
 
 struct ObjectFile;
 class SymbolFile;
-struct TraceeController;
+class TraceeController;
 
 using Pid = pid_t;
 using Tid = pid_t;
@@ -86,7 +86,6 @@ struct VariableContext
 
   bool valid_context() const noexcept;
   std::optional<std::array<ui::dap::Scope, 3>> scopes_reference(VarRefKey frameKey) const noexcept;
-  std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
   sym::Frame *get_frame(VarRefKey ref) noexcept;
   SharedPtr<sym::Value> get_maybe_value() const noexcept;
 };
@@ -144,6 +143,21 @@ public:
   void set_var_context(VariableContext ctx) noexcept;
   u32 clone_from_var_context(const VariableContext &ctx) noexcept;
   void destroy_reference(VarRefKey key) noexcept;
+  std::vector<std::unique_ptr<TraceeController>>::iterator
+  find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept;
+
+  template <typename Predicate>
+  bool
+  erase_target(Predicate &&fn)
+  {
+    auto it = std::find_if(targets.begin(), targets.end(), std::move(fn));
+    const bool erased = it != std::end(targets);
+#ifdef MDB_DEBUG
+    DBGLOG(core, "found tracer to delete: {}", erased);
+#endif
+    targets.erase(it);
+    return erased;
+  }
 
   std::vector<std::unique_ptr<TraceeController>> targets;
   ui::dap::DAP *dap;

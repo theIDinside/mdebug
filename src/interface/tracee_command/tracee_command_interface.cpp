@@ -48,8 +48,8 @@ TraceeCommandInterface::reverse_continue() noexcept
 TaskExecuteResponse
 TraceeCommandInterface::do_disconnect(bool terminate) noexcept
 {
-  for (auto &user : tc->pbps.all_users()) {
-    tc->pbps.remove_bp(user->id);
+  for (auto &user : tc->user_breakpoints().all_users()) {
+    tc->user_breakpoints().remove_bp(user->id);
   }
   disconnect(terminate);
   return TaskExecuteResponse::Ok();

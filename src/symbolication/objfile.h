@@ -9,14 +9,13 @@
 #include "symbolication/dwarf/lnp.h"
 #include "tracer.h"
 #include <common.h>
-#include <regex>
 #include <string_view>
 #include <sys/mman.h>
 
 using VariablesReference = int;
 template <typename T> using Set = std::unordered_set<T>;
 
-struct TraceeController;
+class TraceeController;
 
 class NonExecutableCompilationUnitFile;
 
@@ -35,7 +34,7 @@ namespace dw {
 struct LNPHeader;
 class UnitData;
 class LineTable;
-struct DieReference;
+class DieReference;
 struct ObjectFileNameIndex;
 } // namespace dw
 } // namespace sym
@@ -103,6 +102,7 @@ struct ObjectFile
   auto compilation_units() noexcept -> std::vector<sym::dw::UnitData *> &;
   auto get_cu_from_offset(u64 offset) noexcept -> sym::dw::UnitData *;
   auto get_die_reference(u64 offset) noexcept -> std::optional<sym::dw::DieReference>;
+  auto GetDieReference(u64 offset) noexcept -> sym::dw::DieReference;
   auto name_index() noexcept -> sym::dw::ObjectFileNameIndex *;
 
   auto get_lnp_header(u64 offset) noexcept -> sym::dw::LNPHeader *;
@@ -118,7 +118,7 @@ struct ObjectFile
   auto get_type_unit(u64 type_signature) noexcept -> sym::dw::UnitData *;
   auto get_type_unit_type_die(u64 type_signature) noexcept -> sym::dw::DieReference;
 
-  auto get_source_file(const std::filesystem::path &fullpath) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
+  auto get_source_file(std::string_view full_path) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
   auto source_code_files() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
   auto source_units() noexcept -> std::vector<sym::CompilationUnit> &;
 
@@ -132,6 +132,9 @@ struct ObjectFile
   auto find_custom_resolver(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueResolver>;
   auto init_visualizer(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto regex_search(const std::string &regex_pattern) const noexcept -> std::vector<std::string>;
+
+  auto SetBuildDirectory(u64 statementListOffset, const char* buildDirectory) noexcept -> void;
+  auto GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char*;
 
 private:
   auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
@@ -154,13 +157,17 @@ private:
   std::shared_ptr<std::vector<sym::dw::LNPHeader>> lnp_headers;
   std::shared_ptr<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>> parsed_ltes;
 
+  struct StatementListBuildDirectoryMappings {
+    std::unordered_map<u64, const char*> mMap;
+  } mLnpToBuildDirMapping;
+
   std::mutex cu_write_lock;
   std::vector<sym::CompilationUnit> comp_units;
   std::unordered_map<u64, sym::dw::UnitData *> type_units{};
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
   //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable
-  std::unordered_map<std::filesystem::path, std::shared_ptr<sym::dw::SourceCodeFile>> lnp_source_code_files;
+  std::unordered_map<std::string, std::shared_ptr<sym::dw::SourceCodeFile>> lnp_source_code_files;
 
   sym::AddressToCompilationUnitMap addr_cu_map;
   std::unordered_map<int, SharedPtr<sym::Value>> valobj_cache;

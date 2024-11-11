@@ -3,6 +3,7 @@
 #include "die_ref.h"
 #include "symbolication/dwarf_defs.h"
 #include "unit_header.h"
+#include <limits>
 #include <symbolication/block.h>
 #include <symbolication/dwarf.h>
 #include <utils/indexing.h>
@@ -13,6 +14,8 @@ struct ElfSection;
 void SetDwarfLogConfig(bool value) noexcept;
 
 namespace sym::dw {
+
+bool IsCompileUnit(DwarfUnitType type);
 
 // Represents an index value that points to nothing.
 static constexpr auto NONE_INDEX = 0;
@@ -104,12 +107,22 @@ class ResolvedAbbreviationSet
 public:
 };
 
-struct DieReference;
+class DieReference;
 
 class UnitData
 {
 public:
   UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept;
+
+  /**
+   * Construct UnitData object and initialize it. Initialization involves reading the unit die
+   * and (possibly) reading build directory and unit name, if the unit is of COMPILE_TYPE or PARTIAL_TYPE (i.e. a
+   * compilation unit of some sort.)
+   */
+  static UnitData *CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
+                                      AbbreviationInfo::Table && abbreviations) noexcept;
+  bool IsCompilationUnitLike() const noexcept;
+
   void set_abbreviations(AbbreviationInfo::Table &&table) noexcept;
 
   bool has_loaded_dies() const noexcept;
@@ -133,6 +146,9 @@ public:
   u32 rng_list_base() noexcept;
   u32 addr_base() noexcept;
 
+  constexpr bool LineNumberOffsetKnown() const noexcept { return mStatementListOffset != std::numeric_limits<u64>::max(); }
+  constexpr bool HasBuildDirectory() const noexcept { return mBuildDirectory != nullptr; }
+
 private:
   void load_dies() noexcept;
   // Users don't call release explicitly. They request a `clear_die_metadata` instead.
@@ -152,6 +168,8 @@ private:
   std::optional<u32> rng_list_offset{};
   std::optional<u32> addr_offset{};
   mutable std::mutex load_dies_mutex;
+  const char* mBuildDirectory{nullptr};
+  u64 mStatementListOffset{std::numeric_limits<u64>::max()};
 };
 
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
@@ -193,12 +211,14 @@ template <> struct formatter<sym::dw::DieReference>
   auto
   format(const sym::dw::DieReference &ref, FormatContext &ctx) const
   {
-    if (ref.cu && ref.die) {
-      if (ref.cu->has_loaded_dies()) {
-        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", ref.cu->section_offset(),
-                              ref.die->section_offset, to_str(ref.die->tag));
+    if (auto cu = ref.GetUnitData(); cu != nullptr) {
+      if (ref.GetUnitData()->has_loaded_dies()) {
+        auto die = ref.GetDie();
+        ASSERT(die, "die was null!");
+        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", cu->section_offset(),
+                              die->section_offset, to_str(die->tag));
       } else {
-        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", ref.cu->section_offset());
+        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", cu->section_offset());
       }
     }
     return fmt::format_to(ctx.out(), "DieRef {{ ??? }}");
@@ -219,9 +239,9 @@ template <> struct formatter<sym::dw::IndexedDieReference>
   auto
   format(const sym::dw::IndexedDieReference &ref, FormatContext &ctx) const
   {
-    if (ref.cu) {
-      return fmt::format_to(ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}", ref.cu->section_offset(),
-                            ref.die_index);
+    if (ref.GetUnitData()) {
+      return fmt::format_to(ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}",
+                            ref.GetUnitData()->section_offset(), ref.Index());
     }
     return fmt::format_to(ctx.out(), "IndexedDieRef {{ ??? }}");
   }

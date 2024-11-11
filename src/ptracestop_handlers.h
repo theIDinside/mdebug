@@ -9,7 +9,7 @@
 #include <task.h>
 #include <unordered_map>
 
-struct TraceeController;
+class TraceeController;
 struct BpStat;
 
 struct CoreEvent;

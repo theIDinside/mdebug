@@ -7,7 +7,7 @@
 #include <typedefs.h>
 #include <variant>
 
-struct TraceeController;
+class TraceeController;
 
 namespace eval {
 

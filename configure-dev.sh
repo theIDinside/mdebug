@@ -1,6 +1,6 @@
 #!/bin/bash
 
-fmt_version="10.0.0"
+fmt_version="11.0.0"
 json_version="v3.11.2"
 gtest_version="03597a01ee50ed33e9dfd640b249b4be3799d395"
 zydis_version="v4.0.0"
