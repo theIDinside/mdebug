@@ -10,6 +10,20 @@ buildType:
       long: Optimized build with no debug symbols
       buildType: Release
 
+tidy:
+  default: NoClangTidy
+  choices:
+    NoClangTidy:
+      short: clang-tidy off
+      long: Don't run clang tidy checks during build time
+      settings:
+        CLANG_TIDY_CHECK: OFF
+    RunClangTidy:
+      short: clang-tidy on
+      long: Run clang-tidy checks during build phase of MDB
+      settings:
+        CLANG_TIDY_CHECK: ON
+
 dwarfstandard:
   default: dwarf4
   choices:

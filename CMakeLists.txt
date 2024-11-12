@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug symbols" OFF)
 option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
+option(CLANG_TIDY_CHECK "Configure clang-tidy to run during build" OFF)
 
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
@@ -263,3 +264,16 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
 else ()
   message("Unknown compiler")
 endif ()
+
+set(CMAKE_CXX_CLANG_TIDY
+  clang-tidy;
+  -header-filter=.*;
+  -checks=*,modernize-*;)
+
+if(CLANG_TIDY_CHECK)
+  find_program(CLANG_TIDY_EXE NAMES "clang-tidy" REQUIRED)
+  set(CLANG_TIDY_COMMAND "${CMAKE_CXX_CLANG_TIDY}" "-checks=-*")
+
+  # set CXX_CLANG_TIDY property after defining the target
+  set_target_properties(mdb PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
+endif()
