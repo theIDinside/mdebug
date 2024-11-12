@@ -1,5 +1,6 @@
 #include "mdb_config.h"
 #include "fmt/core.h"
+#include "fmt/ranges.h"
 #include "utils/logger.h"
 #include "utils/util.h"
 #include <charconv>
@@ -73,10 +74,10 @@ parse_cli(int argc, const char **argv) noexcept
 {
   auto init = DebuggerConfiguration::Default();
   int option_index = 0;
-  int opt;
+  int opt; // NOLINT
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:p", LongOptions.data(),
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:p", LongOptions.data(), // NOLINT
                             &option_index)) != -1) {
     switch (opt) {
     case 0:
@@ -116,7 +117,7 @@ parse_cli(int argc, const char **argv) noexcept
       DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
       return utils::unexpected(
         CLIError{.info = CLIErrorInfo::UnknownArgs,
-                 .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])});
+                 .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])}); // NOLINT
       break;
     default:
       continue;

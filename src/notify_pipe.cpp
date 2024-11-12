@@ -2,7 +2,7 @@
 #include <fcntl.h>
 
 struct pollfd;
-
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay, cppcoreguidelines-init-variables, cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-pro-type-vararg)
 namespace utils {
 
 /*static*/ Notifier
@@ -10,9 +10,10 @@ Notifier::notify_pipe() noexcept
 {
   int notify_pipe[2];
   VERIFY(pipe(notify_pipe) != -1, "Failed to set up notifier pipe {}", strerror(errno));
-  auto flags = fcntl(notify_pipe[0], F_GETFL);
+  auto flags = fcntl(notify_pipe[0], F_GETFL); // NOLINT
   VERIFY(flags != -1, "Failed to get flags for read-end of pipe");
-  VERIFY(-1 != fcntl(notify_pipe[0], F_SETFL, flags | O_NONBLOCK), "Failed to set non-blocking for pipe");
+  VERIFY(-1 != fcntl(notify_pipe[0], F_SETFL, flags | O_NONBLOCK),
+         "Failed to set non-blocking for pipe"); // NOLINT
   return Notifier{.read = ReadEnd{notify_pipe[0]}, .write = WriteEnd{notify_pipe[1]}};
 }
 
@@ -27,7 +28,7 @@ void
 NotifyManager::add_notifier(Notifier::ReadEnd notifier, std::string name, Tid task_leader) noexcept
 {
   notifiers.push_back(notifier);
-  notifier_names.push_back(name);
+  notifier_names.push_back(std::move(name));
   pollfds.push_back({.fd = notifier.fd, .events = POLLIN, .revents = 0});
   fd_to_target[notifier.fd] = task_leader;
 }
@@ -44,7 +45,7 @@ NotifyManager::has_io_ready() noexcept
 {
   const auto ok = (pollfds[0].revents & POLLIN) == POLLIN;
   if (ok) {
-    char c;
+    char c; // NOLINT
     if (::read(pollfds[0].fd, &c, 1) != -1 && errno != EAGAIN) {
       PANIC("Attempting to read from pipe when it would block");
     }
@@ -64,7 +65,7 @@ NotifyManager::has_wait_ready(std::vector<NotifyResult> &result, bool flush)
     if (ok) {
       result.push_back(NotifyResult{.pid = fd_to_target[pollfds[i].fd]});
       if (flush) {
-        char c;
+        char c; // NOLINT
         ::read(pollfds[i].fd, &c, 1);
       }
     }
@@ -76,7 +77,7 @@ NotifyManager::has_wait_ready(std::vector<NotifyResult> &result, bool flush)
 [[maybe_unused]] bool
 Notifier::ReadEnd::consume_expected() noexcept
 {
-  char ch;
+  char ch; // NOLINT
   [[maybe_unused]] const auto res = ::read(fd, &ch, 1);
   ASSERT(res != -1, "Failed to consume posted event token due to error {}", strerror(errno));
   return true;
@@ -89,3 +90,5 @@ Notifier::WriteEnd::notify() const noexcept
 }
 
 } // namespace utils
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay, cppcoreguidelines-init-variables, cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-pro-type-vararg)

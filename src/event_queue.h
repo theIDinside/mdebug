@@ -9,7 +9,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
+// NOLINTBEGIN(cppcoreguidelines-owning-memory)
 namespace ui {
 struct UICommand;
 namespace dap {
@@ -55,8 +55,8 @@ enum class CoreEventType
   Entry
 };
 
-#define EventType(Type) static constexpr CoreEventType EvtType = CoreEventType::Type
-#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event] ({}): {}", EventObject.event_type, Msg)
+#define EventType(Type) static constexpr CoreEventType EvtType = CoreEventType::Type // NOLINT
+#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event] ({}): {}", EventObject.event_type, Msg) // NOLINT
 
 namespace fmt {
 
@@ -322,3 +322,5 @@ void push_debugger_event(CoreEvent *event) noexcept;
 void push_init_event(CoreEvent *event) noexcept;
 
 Event poll_event();
+
+// NOLINTEND(cppcoreguidelines-owning-memory)
