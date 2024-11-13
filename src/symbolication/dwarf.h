@@ -31,16 +31,23 @@ struct AttributeValue
   {
   }
 
-  constexpr AttributeValue(const AttributeValue& other) : form(other.form), name(other.name), value(other.value) {}
-  constexpr AttributeValue& operator=(const AttributeValue& other) {
-    if(this != &other) {
+  constexpr AttributeValue(const AttributeValue &other) : form(other.form), name(other.name), value(other.value) {}
+  constexpr AttributeValue &
+  operator=(const AttributeValue &other)
+  {
+    if (this != &other) {
       std::memcpy(this, &other, sizeof(AttributeValue));
     }
     return *this;
   }
 
-  constexpr AttributeValue(AttributeValue&& other) noexcept : form(other.form), name(other.name), value(other.value) {}
-  constexpr AttributeValue& operator=(AttributeValue&& other) noexcept {
+  constexpr AttributeValue(AttributeValue &&other) noexcept
+      : form(other.form), name(other.name), value(other.value)
+  {
+  }
+  constexpr AttributeValue &
+  operator=(AttributeValue &&other) noexcept
+  {
     if (this == &other) {
       return *this;
     }
@@ -91,6 +98,10 @@ struct AttributeValue
   Attribute name;
 
 private:
+#if defined(COMPILERUSED_GCC)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
+#endif
   union _value
   { // Size = 16 bytes
     constexpr _value(std::string_view str) noexcept : str{str} {}
@@ -98,13 +109,18 @@ private:
     constexpr _value(u64 u) noexcept : u(u) {}
     constexpr _value(i64 i) noexcept : i(i) {}
     constexpr _value(AddrPtr ptr) noexcept : addr(ptr) {}
-    constexpr _value(const _value& other) {
-      if(this == &other) { return; }
+    constexpr _value(const _value &other)
+    {
+      if (this == &other) {
+        return;
+      }
       std::memcpy(this, &other, sizeof(_value));
     }
 
-    constexpr _value& operator=(const _value& other) {
-      if(this != &other) {
+    constexpr _value &
+    operator=(const _value &other)
+    {
+      if (this != &other) {
         std::memcpy(this, &other, sizeof(_value));
       }
       return *this;
@@ -117,4 +133,7 @@ private:
     i64 i;
     AddrPtr addr;
   } value;
+#if defined(COMPILERUSED_GCC)
+#pragma GCC diagnostic pop
+#endif
 };

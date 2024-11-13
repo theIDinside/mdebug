@@ -84,7 +84,7 @@ checksum(std::string_view payload) noexcept
 
 RemoteConnection::RemoteConnection(std::string &&host, int port, utils::ScopedFd &&socket,
                                    RemoteSettings settings) noexcept
-    : host(std::move(host)), port(port), socket(std::move(socket)), remote_settings(settings)
+    : host(std::move(host)), socket(std::move(socket)), port(port), remote_settings(settings)
 {
   auto r = ::pipe(request_command_fd);
   if (r == -1) {

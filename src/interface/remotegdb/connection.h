@@ -544,19 +544,17 @@ public:
 
 private:
   std::unordered_map<GdbThread, std::vector<GdbThread>> threads;
-  bool threads_known;
   std::string host;
-  int port;
   BufferedSocket socket;
   std::thread stop_reply_and_event_listener;
+  u16 port;
   RemoteSettings remote_settings;
-  bool is_initialized{false};
-  bool remote_configured{false};
-  bool run{true};
+  bool threads_known : 1 {false};
+  bool is_initialized : 1 {false};
+  bool remote_configured : 1 {false};
+  bool run : 1 {true};
   gdb::GdbThread selected_thread{0, 0};
   std::recursive_mutex tracee_control_mutex{};
-  // Architectures controlled via this remote connection
-  std::unordered_map<Pid, std::shared_ptr<gdb::ArchictectureInfo>> archs{};
 
   // When debugger (core) wants control, it will acquire this lock
   // but it will already be in use, whereby we unlock it on the dispatcher thread
