@@ -5,6 +5,11 @@
 
 template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
 
+#if defined(__GNUC__) || defined(__GNUG__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
+#endif
+
 struct StrSlice
 {
   const char *ptr;
@@ -98,10 +103,6 @@ struct AttributeValue
   Attribute name;
 
 private:
-#if defined(COMPILERUSED_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-#endif
   union _value
   { // Size = 16 bytes
     constexpr _value(std::string_view str) noexcept : str{str} {}
@@ -133,7 +134,8 @@ private:
     i64 i;
     AddrPtr addr;
   } value;
+};
+
 #if defined(COMPILERUSED_GCC)
 #pragma GCC diagnostic pop
 #endif
-};

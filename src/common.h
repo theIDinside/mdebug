@@ -559,5 +559,5 @@ template <class... Ts> Match(Ts...) -> Match<Ts...>;
 #if defined(__clang__)
 #define COMPILERUSED clang
 #elif defined(__GNUC__) || defined(__GNUG__)
-#define COMPILERUSED GCC
+#define COMPILERUSED_GCC
 #endif
