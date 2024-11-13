@@ -69,7 +69,7 @@ async function createRemoteService(gdbserver, host, port, binary, args) {
     if (args == undefined || args == null) {
       args = []
     }
-    // '/home/cx/dev/cx/binutils-gdb/build-release/gdbserver/gdbserver',
+    console.log(`spawning gdbserver...`);
     let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary, ...args], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -1,19 +1,14 @@
 const {
   checkResponse,
-  getLineOf,
-  readFileContents,
-  repoDirFile,
-  SetBreakpoints,
-  RemoteService,
   createRemoteService,
 } = require('./client')
-const { assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
+const { findAvailablePort, assertLog, todo } = require('./utils')
 
 async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
   const attachArgs = {
     type: 'INVALID TYPE FOR SURE',
     host: 'localhost',
-    port: 12345,
+    port: await findAvailablePort(),
     allstop: false,
   }
 
@@ -49,10 +44,11 @@ async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
  * @param {import("./client").DAClient} debugAdapter
  */
 async function attachInit(debugAdapter) {
+
   const attachArgs = {
     type: 'gdbremote',
     host: 'localhost',
-    port: 12345,
+    port: await findAvailablePort(),
     allstop: false,
   }
 

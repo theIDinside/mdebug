@@ -1,6 +1,7 @@
 const path = require('path')
 const fs = require('fs')
 const { spawnSync } = require('child_process')
+const net = require('net');
 
 function prettyJson(obj) {
   return JSON.stringify(obj, null, 2)
@@ -14,6 +15,29 @@ function findFirstOfAny(string, searchItems) {
     }
   }
   return -1;
+}
+
+function findAvailablePort(min = 10000, max = 65000) {
+  return new Promise((resolve, reject) => {
+    const port = Math.floor(Math.random() * (max - min + 1)) + min;
+    const server = net.createServer();
+
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(findAvailablePort(min, max));
+      } else {
+        reject(err);
+      }
+    });
+
+    server.once('listening', () => {
+      server.close(() => {
+        resolve(port); // Port is available
+      });
+    });
+
+    server.listen(port);
+  });
 }
 
 const RecognizedArgsConfig = [
@@ -413,4 +437,5 @@ module.exports = {
   assertAllVariableReferencesUnique,
   parseTestConfiguration,
   TestArgs,
+  findAvailablePort
 }
