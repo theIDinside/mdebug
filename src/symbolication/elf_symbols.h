@@ -1,6 +1,5 @@
 #pragma once
 #include "../common.h"
-#include "symbolication/addr_sorter.h"
 #include <string_view>
 #include <typedefs.h>
 
@@ -13,7 +12,6 @@
 
 struct MinSymbol
 {
-
   std::string_view name;
   AddrPtr address;
   u64 maybe_size;

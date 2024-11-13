@@ -1,4 +1,4 @@
-Checks: 'clang-diagnostic-*,clang-analyzer-*,-readability-identifier-naming,modernize-use-default-member-init,modernize-use-equals-default,modernize-use-override,performance-*,cppcoreguidelines-*'
+Checks: 'clang-diagnostic-*,clang-analyzer-*,-readability-identifier-naming,modernize-use-default-member-init,modernize-use-equals-default,modernize-use-override,performance-*'
 HeaderFileExtensions:         ['h']
 ImplementationFileExtensions: ['cpp']
 CheckOptions:

@@ -4,9 +4,6 @@
 #include <cmath>
 #include <cstring>
 #include <immintrin.h>
-#include <sys/mman.h>
-#include <type_traits>
-#include <utility>
 
 namespace utils {
 
@@ -94,17 +91,22 @@ public:
     return Size();
   }
 
-  constexpr auto Add(const T& t) {
+  constexpr auto
+  Add(const T &t)
+  {
     ASSERT(Size() < Capacity(), "No more room in StackArray");
     mArray[Size()] = t;
     ++mSize;
     return Size();
   }
 
-  constexpr auto Add(T&& t) noexcept {
-    static_assert(std::is_move_assignable_v<T> || std::is_move_constructible_v<T>, "T has no move constructor opportunities");
+  constexpr auto
+  Add(T &&t) noexcept
+  {
+    static_assert(std::is_move_assignable_v<T> || std::is_move_constructible_v<T>,
+                  "T has no move constructor opportunities");
     ASSERT(Size() < Capacity(), "No more room in StackArray");
-    if constexpr(!std::is_move_assignable_v<T>) {
+    if constexpr (!std::is_move_assignable_v<T>) {
       new (mArray + Size()) T{std::move(t)};
     } else {
       mArray[Size()] = std::move(t);
@@ -114,13 +116,13 @@ public:
   }
 
   constexpr auto
-  begin() const -> T*
+  begin() const -> T *
   {
     return mArray;
   }
 
   constexpr auto
-  end() const -> T*
+  end() const -> T *
   {
     return mArray + Size();
   }
@@ -187,11 +189,12 @@ public:
   }
 
   std::filesystem::path
-  NormalizedPath() const noexcept {
-    if(IsRelativePath()) {
-      return std::filesystem::path{mArray, mArray+Size()}.lexically_normal();
+  NormalizedPath() const noexcept
+  {
+    if (IsRelativePath()) {
+      return std::filesystem::path{mArray, mArray + Size()}.lexically_normal();
     }
-    return std::filesystem::path{mArray, mArray+Size()};
+    return std::filesystem::path{mArray, mArray + Size()};
   }
 
   void

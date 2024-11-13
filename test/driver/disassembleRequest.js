@@ -18,6 +18,7 @@ function getTextSection(objdumpOutput) {
       if (regex.test(lines[i])) res.push(lines[i].trimStart().trimEnd())
     }
   }
+  return res;
 }
 
 function processObjdumpLines(insts) {

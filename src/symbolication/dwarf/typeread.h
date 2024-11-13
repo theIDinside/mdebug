@@ -25,8 +25,9 @@ class FunctionSymbolicationContext
   std::vector<SymbolBlock> lexicalBlockStack;
   u32 frame_locals_count{0};
 
-  // Process the variable DIE referenced by `variableDebugInfoEntry` and store it (if successful) in `processedSymbolStack`
-  bool ProcessVariableDie(DieReference variableDebugInfoEntry, std::vector<Symbol>& processedSymbolStack) noexcept;
+  // Process the variable DIE referenced by `variableDebugInfoEntry` and store it (if successful) in
+  // `processedSymbolStack`
+  bool ProcessVariableDie(DieReference variableDebugInfoEntry, std::vector<Symbol> &processedSymbolStack) noexcept;
   void ProcessVariable(DieReference dieRef) noexcept;
   void ProcessFormalParameter(DieReference cu_die) noexcept;
 

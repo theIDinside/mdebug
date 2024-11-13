@@ -1,6 +1,5 @@
 #pragma once
-#include "utils/immutable.h"
-#include <cstdint>
+#include "common.h"
 #include <memory>
 #include <optional>
 #include <typedefs.h>

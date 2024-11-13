@@ -1,4 +1,5 @@
 #pragma once
+#include "interface/dap/types.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
@@ -6,7 +7,8 @@
 #include <symbolication/fnsymbol.h>
 
 class SymbolFile;
-
+struct CallStackRequest;
+struct TaskInfo;
 namespace ui::dap {
 struct Scope;
 }
@@ -201,6 +203,7 @@ class FrameUnwindState
 {
   u64 mCanonicalFrameAddress;
   std::vector<u64> mFrameRegisters;
+
 public:
   void SetCanonicalFrameAddress(u64 addr) noexcept;
   u64 CanonicalFrameAddress() const noexcept;
@@ -219,11 +222,11 @@ class CallStack
 {
 public:
   NO_COPY(CallStack);
-  explicit CallStack(TraceeController* supervisor, TaskInfo* task) noexcept;
+  explicit CallStack(TraceeController *supervisor, TaskInfo *task) noexcept;
   ~CallStack() = default;
 
   Frame *get_frame(int frame_id) noexcept;
-  Frame* GetFrameAtLevel(u32 level) noexcept;
+  Frame *GetFrameAtLevel(u32 level) noexcept;
   u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
 
   bool IsDirty() const noexcept;
@@ -234,17 +237,21 @@ public:
 
   u32 FramesCount() const noexcept;
   std::span<Frame> GetFrames() noexcept;
-  std::optional<Frame> FindFrame(const Frame& frame) const noexcept;
-  void Unwind(CallStackRequest req);
-  FrameUnwindState* GetUnwindState(u32 level) noexcept;
+  std::optional<Frame> FindFrame(const Frame &frame) const noexcept;
+  void Unwind(const CallStackRequest &req);
+  FrameUnwindState *GetUnwindState(u32 level) noexcept;
 
   template <class Self>
-  std::span<const AddrPtr> ReturnAddresses(this Self&& self) noexcept {
+  std::span<const AddrPtr>
+  ReturnAddresses(this Self &&self) noexcept
+  {
     return self.mFrameProgramCounters;
   }
 
-  template <typename ...Args>
-  void PushFrame(Args&&... args) {
+  template <typename... Args>
+  void
+  PushFrame(Args &&...args)
+  {
     frames.push_back(sym::Frame{args...});
   }
 
@@ -253,10 +260,10 @@ private:
   void ClearProgramCounters() noexcept;
   void ClearUnwoundRegisters() noexcept;
   AddrPtr GetTopMostPc() const noexcept;
-  bool ResolveNewFrameRegisters(CFAStateMachine& stateMachine) noexcept;
+  bool ResolveNewFrameRegisters(CFAStateMachine &stateMachine) noexcept;
 
-  TaskInfo* mTask; // the task associated with this call stack
-  TraceeController* mSupervisor;
+  TaskInfo *mTask; // the task associated with this call stack
+  TraceeController *mSupervisor;
   bool dirty;
   std::vector<Frame> frames{}; // the call stack
   std::vector<AddrPtr> mFrameProgramCounters{};

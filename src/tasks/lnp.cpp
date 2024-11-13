@@ -1,5 +1,4 @@
 #include "lnp.h"
-#include <symbolication/dwarf/lnp.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>

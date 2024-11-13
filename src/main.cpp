@@ -5,25 +5,19 @@
 #include "interface/dap/interface.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
-#include "symbolication/dwarf/die.h"
 #include "tracer.h"
 #include "utils/thread_pool.h"
-#include "utils/worker_task.h"
-#include <array>
 #include <asm-generic/errno-base.h>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
 #include <fcntl.h>
-#include <filesystem>
 #include <fmt/core.h>
 #include <linux/sched.h>
 #include <mutex>
 #include <poll.h>
 #include <sched.h>
-#include <signal.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
@@ -36,7 +30,6 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 #include <utils/expected.h>
 
 std::mutex m;

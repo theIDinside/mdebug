@@ -1,7 +1,6 @@
 #include "util.h"
 #include "common.h"
 #include <cstddef>
-#include <filesystem>
 #include <string_view>
 #include <sys/ptrace.h>
 #include <sys/types.h>

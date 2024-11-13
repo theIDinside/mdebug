@@ -1,15 +1,10 @@
 #include "awaiter.h"
-#include "common.h"
 #include "event_queue.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "supervisor.h"
-#include <bits/chrono.h>
-#include <bits/types/idtype_t.h>
-#include <chrono>
 #include <sys/wait.h>
 
 AwaiterThread::AwaiterThread(Tid task_leader) noexcept
-    : thread(), keep_going(true), process_group_id(task_leader){};
+    : thread(), keep_going(true), process_group_id(task_leader) {};
 
 AwaiterThread::~AwaiterThread() noexcept
 {

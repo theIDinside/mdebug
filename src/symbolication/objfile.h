@@ -1,10 +1,10 @@
 #pragma once
 #include "block.h"
-#include "cu_symbol_info.h"
 #include "elf.h"
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
 #include "mdb_config.h"
+#include "symbolication/cu_symbol_info.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tracer.h"
@@ -133,16 +133,16 @@ struct ObjectFile
   auto init_visualizer(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto regex_search(const std::string &regex_pattern) const noexcept -> std::vector<std::string>;
 
-  auto SetBuildDirectory(u64 statementListOffset, const char* buildDirectory) noexcept -> void;
-  auto GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char*;
+  auto SetBuildDirectory(u64 statementListOffset, const char *buildDirectory) noexcept -> void;
+  auto GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char *;
 
 private:
   auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
-  auto relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
-    -> std::vector<sym::dw::RelocatedSourceCodeFile>;
+  auto relocated_get_source_code_files(AddrPtr base,
+                                       AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
 
   std::unordered_map<std::string_view, Index> minimal_fn_symbols;
   std::vector<MinSymbol> min_fn_symbols_sorted;
@@ -157,8 +157,9 @@ private:
   std::shared_ptr<std::vector<sym::dw::LNPHeader>> lnp_headers;
   std::shared_ptr<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>> parsed_ltes;
 
-  struct StatementListBuildDirectoryMappings {
-    std::unordered_map<u64, const char*> mMap;
+  struct StatementListBuildDirectoryMappings
+  {
+    std::unordered_map<u64, const char *> mMap;
   } mLnpToBuildDirMapping;
 
   std::mutex cu_write_lock;
@@ -187,7 +188,8 @@ public:
   SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
              AddrPtr relocated_base) noexcept;
 
-  static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept;
+  static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary,
+                        AddrPtr relocated_base) noexcept;
   auto copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
 
@@ -202,12 +204,12 @@ public:
   // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
   // user will have created something that holds a reference to the value it will now become the sole owner.
   auto registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
-  auto getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-    -> std::vector<ui::dap::Variable>;
+  auto getVariables(TraceeController &tc, sym::Frame &frame,
+                    sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>;
   auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
-  auto resolve(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
-    -> std::vector<ui::dap::Variable>;
+  auto resolve(const VariableContext &ctx, std::optional<u32> start,
+               std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>;
   // auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept ->
   // std::vector<ui::dap::Variable>;
 

@@ -1,10 +1,7 @@
 #include "so_loading.h"
-#include "symbolication/block.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
-#include <algorithm>
-#include <common.h>
 #include <filesystem>
 
 SharedObject::SharedObject(int so_id, TPtr<link_map> tloc, AddrPtr addr, Path &&path) noexcept

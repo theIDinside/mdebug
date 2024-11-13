@@ -8,7 +8,6 @@
 #include "../symbolication/objfile.h"
 #include "../utils/enumerator.h"
 #include "../utils/thread_pool.h"
-#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/rnglists.h"
 #include "symbolication/dwarf_binary_reader.h"

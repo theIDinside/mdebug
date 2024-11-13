@@ -204,7 +204,6 @@ Next::execute() noexcept
 
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    DBGLOG(core, "Stepping task {} 1 instruction, starting at {:x}", thread_id, task->get_pc());
     target->install_thread_proceed<ptracestop::InstructionStep>(*task, 1);
     break;
   case SteppingGranularity::Line:
@@ -727,7 +726,7 @@ Threads::execute() noexcept
     ASSERT(res.front().pid == target->get_task_leader(), "expected pid == task_leader");
     for (const auto thr : res) {
       if (std::ranges::none_of(target->get_threads(), [t = thr.tid](const auto &a) { return a->tid == t; })) {
-        target->AddTask(TaskInfo::create_stopped(target, thr.tid, it.format, it.arch_info->type));
+        target->AddTask(TaskInfo::CreateTask(target->get_interface(), thr.tid, false));
       }
     }
 

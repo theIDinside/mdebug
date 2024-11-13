@@ -3,10 +3,8 @@
 #include "./dwarf/name_index.h"
 #include "dwarf.h"
 #include "dwarf/die.h"
-#include "dwarf/lnp.h"
 #include "supervisor.h"
 #include "symbolication/block.h"
-#include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf_defs.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf_symbols.h"
@@ -146,7 +144,9 @@ ObjectFile::get_die_reference(u64 offset) noexcept
   return sym::dw::DieReference{cu, die};
 }
 
-sym::dw::DieReference ObjectFile::GetDieReference(u64 offset) noexcept {
+sym::dw::DieReference
+ObjectFile::GetDieReference(u64 offset) noexcept
+{
   auto cu = get_cu_from_offset(offset);
   if (cu == nullptr) {
     return sym::dw::DieReference{nullptr, nullptr};
@@ -555,7 +555,7 @@ SymbolFile::SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr
 }
 
 SymbolFile::shr_ptr
-SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
+SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
@@ -566,7 +566,8 @@ SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, Add
 auto
 SymbolFile::copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
-  return SymbolFile::Create(&tc, binary_object, relocated_base);
+  auto obj = binary_object;
+  return SymbolFile::Create(&tc, std::move(obj), relocated_base);
 }
 
 auto

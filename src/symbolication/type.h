@@ -1,15 +1,9 @@
 #pragma once
-#include "../common.h"
-#include "dwarf_defs.h"
-#include "fmt/core.h"
-// #include "symbolication/dwarf/die.h"
-#include "task.h"
-#include "utils/byte_buffer.h"
-#include "utils/expected.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "utils/immutable.h"
 #include "utils/indexing.h"
-#include "utils/macros.h"
-#include <symbolication/dwarf/die_ref.h>
+
+using namespace std::string_view_literals;
 
 class TraceeController;
 struct ObjectFile;

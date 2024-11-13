@@ -1,12 +1,8 @@
 #include "type.h"
-#include "common.h"
 #include "dwarf.h"
-#include "dwarf_defs.h"
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
-#include "symbolication/dwarf/die_ref.h"
-#include "utils/immutable.h"
 #include <optional>
 #include <supervisor.h>
 #include <symbolication/dwarf/debug_info_reader.h>
@@ -124,16 +120,17 @@ resolve_array_bounds(sym::dw::DieReference array_die) noexcept
     if (child.tag == DwarfTag::DW_TAG_subrange_type) {
       const sym::dw::DieReference ref{array_die.GetUnitData(), &child};
       u64 count{};
-      sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader& reader, sym::dw::Abbreviation& attr, const auto& info) {
-        switch(attr.name) {
-          case Attribute::DW_AT_count: [[fallthrough]];
-            count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value();
-            return sym::dw::DieAttributeRead::Done;
-          case Attribute::DW_AT_upper_bound:
-            count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() + 1;
-            return sym::dw::DieAttributeRead::Done;
-          default:
-            return sym::dw::DieAttributeRead::Continue;
+      sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader &reader, sym::dw::Abbreviation &attr, const auto &info) {
+        switch (attr.name) {
+        case Attribute::DW_AT_count:
+          [[fallthrough]];
+          count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value();
+          return sym::dw::DieAttributeRead::Done;
+        case Attribute::DW_AT_upper_bound:
+          count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() + 1;
+          return sym::dw::DieAttributeRead::Done;
+        default:
+          return sym::dw::DieAttributeRead::Continue;
         }
       });
       return count;
@@ -174,8 +171,8 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
       size = base_type->size();
     }
 
-    auto type =
-      new sym::Type{this_ref.GetDie()->tag, die_ref, size, base_type, this_ref.GetDie()->tag == DwarfTag::DW_TAG_typedef};
+    auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, size, base_type,
+                              this_ref.GetDie()->tag == DwarfTag::DW_TAG_typedef};
     type->set_array_bounds(array_bounds);
     types[this_ref.GetDie()->section_offset] = type;
     return type;
@@ -264,7 +261,8 @@ Type::resolve_alias() noexcept
 void
 Type::add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept
 {
-  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offset_of, ref.GetUnitData()->section_offset());
+  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offset_of,
+           ref.GetUnitData()->section_offset());
   // fields.emplace_back(name, offset_of, Immutable<Offset>{ref.die->section_offset});
 }
 

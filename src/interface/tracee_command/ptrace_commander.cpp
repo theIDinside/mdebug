@@ -1,8 +1,8 @@
 #include "ptrace_commander.h"
-#include "arch.h"
 #include "awaiter.h"
 #include "common.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "register_description.h"
 #include "symbolication/objfile.h"
 #include "utils/logger.h"
 #include "utils/scoped_fd.h"
@@ -14,7 +14,7 @@
 namespace tc {
 
 PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
-    : TraceeCommandInterface(TargetFormat::Native, std::make_shared<gdb::ArchictectureInfo>()), procfs_memfd(),
+    : TraceeCommandInterface(TargetFormat::Native, nullptr), procfs_memfd(),
       awaiter_thread(std::make_unique<AwaiterThread>(process_space_id)), process_id(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);

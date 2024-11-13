@@ -1,5 +1,4 @@
 #include "event_queue.h"
-#include "bp.h"
 #include <chrono>
 #include <condition_variable>
 #include <interface/ui_command.h>

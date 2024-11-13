@@ -6,6 +6,16 @@ function prettyJson(obj) {
   return JSON.stringify(obj, null, 2)
 }
 
+function findFirstOfAny(string, searchItems) {
+  for(const s of searchItems) {
+    const r = string.indexOf(s);
+    if(r != -1) {
+      return r;
+    }
+  }
+  return -1;
+}
+
 const RecognizedArgsConfig = [
   { short: 's', long: 'session', values: ['remote', 'native'] },
   { short: 'b', long: 'build-dir', values: null },
@@ -371,16 +381,18 @@ function assertAllVariableReferencesUnique(varRefs) {
   )
 }
 
+
+
 function getPrintfPlt(DA, executable) {
   const objdumped = objdump(DA.buildDirFile(executable)).split('\n')
   for (const line of objdumped) {
-    let i = line.indexOf('<printf@plt>:')
+    const i = findFirstOfAny(line, ['<printf@plt>:', '<printf$plt>:'])
     if (i != -1) {
       const addr = line.substring(0, i).trim()
       return `0x${addr}`
     }
   }
-  throw new Error('Could not find prologue and epilogue of bar')
+  throw new Error(`Could not find prologue and epilogue of bar in ${DA.buildDirFile(executable)}`);
 }
 
 module.exports = {

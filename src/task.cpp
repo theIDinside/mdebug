@@ -1,90 +1,104 @@
 #include "task.h"
-#include "arch.h"
-#include "bp.h"
 #include "fmt/ranges.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "ptrace.h"
+#include "register_description.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
-#include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
-#include "utils/debug_value.h"
 #include "utils/util.h"
 #include <sys/user.h>
 #include <tracee/util.h>
 #include <tracer.h>
 #include <utility>
 
-TaskInfo::TaskInfo(TraceeController *supervisor, pid_t tid, bool user_stopped, TargetFormat format,
-                   ArchType arch) noexcept
-    : tid(tid), wait_status(), user_stopped(user_stopped), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), loc_stat()
+TaskRegisters::TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo) : mRegisterFormat(format)
 {
-  regs = {.arch = arch, .data_format = format, .rip_dirty = true, .cache_dirty = true, .registers = nullptr};
-
-  switch (format) {
+  switch (mRegisterFormat) {
   case TargetFormat::Native:
-    regs.registers = new user_regs_struct{};
+    registers = new user_regs_struct{};
     break;
   case TargetFormat::Remote:
-    switch (arch) {
-    case ArchType::X86_64:
-      regs.x86_block = new RegisterBlock<ArchType::X86_64>{};
-      break;
-    case ArchType::COUNT:
-      std::unreachable();
-      break;
-    }
+    ASSERT(archInfo, "Architecture info must be present for remote targets!");
+    registerFile = new RegisterDescription{archInfo};
     break;
   }
-  call_stack = std::make_unique<sym::CallStack>(supervisor, this);
 }
 
-std::shared_ptr<TaskInfo>
-TaskInfo::create_running(TraceeController *supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept
+AddrPtr
+TaskRegisters::GetPc() const noexcept
 {
-  return std::make_shared<TaskInfo>(supervisor, tid, false, format, arch);
+  switch (mRegisterFormat) {
+  case TargetFormat::Native:
+    return registers->rip;
+  case TargetFormat::Remote:
+    return registerFile->GetPc();
+  }
+  NEVER("Unknown register format");
 }
 
-std::shared_ptr<TaskInfo>
-TaskInfo::create_stopped(TraceeController *supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept
+u64
+TaskRegisters::GetRegister(u32 regNumber) const noexcept
 {
-  return std::make_shared<TaskInfo>(supervisor, tid, true, format, arch);
+  switch (mRegisterFormat) {
+  case TargetFormat::Native:
+    return ::get_register(registers, regNumber);
+  case TargetFormat::Remote:
+    static_assert(utils::castenum(ArchType::COUNT) == 1, "Supported architectures have increased");
+    return registerFile->GetRegister(regNumber);
+    break;
+  }
+  NEVER("Unknown target format");
+}
+
+TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
+    : tid(newTaskTid), wait_status(), user_stopped(isUserStopped), tracer_stopped(true), initialized(false),
+      cache_dirty(true), rip_dirty(true), exited(false), reaped(false),
+      regs(supervisor.format, supervisor.arch_info.as_t().get()), loc_stat()
+{
+  call_stack = std::make_unique<sym::CallStack>(supervisor.supervisor(), this);
+}
+
+/*static*/
+std::shared_ptr<TaskInfo>
+TaskInfo::CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept
+{
+  return std::make_shared<TaskInfo>(supervisor, newTaskTid, !isRunning);
 }
 
 user_regs_struct *
 TaskInfo::native_registers() const noexcept
 {
-  ASSERT(regs.data_format == TargetFormat::Native, "Used in the wrong context");
+  ASSERT(regs.mRegisterFormat == TargetFormat::Native, "Used in the wrong context");
   return regs.registers;
 }
 
-RegisterBlock<ArchType::X86_64> *
+RegisterDescription *
 TaskInfo::remote_x86_registers() const noexcept
 {
-  ASSERT(regs.data_format == TargetFormat::Remote, "Used in the wrong context");
-  return regs.x86_block;
+  ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Used in the wrong context");
+  return regs.registerFile;
 }
 
 void
 TaskInfo::remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept
 {
-  ASSERT(regs.data_format == TargetFormat::Remote, "Expected remote format");
-  regs.x86_block->from_hexdigit_encoding(hex_encoded);
+  ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Expected remote format");
+
+  regs.registerFile->FillFromHexEncodedString(hex_encoded);
   set_updated();
+}
+
+const TaskRegisters &
+TaskInfo::GetRegisterCache() const
+{
+  return regs;
 }
 
 u64
 TaskInfo::get_register(u64 reg_num) noexcept
 {
-  switch (regs.data_format) {
-  case TargetFormat::Native:
-    return ::get_register(regs.registers, reg_num);
-  case TargetFormat::Remote:
-    static_assert(utils::castenum(ArchType::COUNT) == 1, "Supported architectures have increased");
-    return regs.x86_block->get_64bit_reg(reg_num);
-    break;
-  }
-  NEVER("Unknown target format");
+  return regs.GetRegister(reg_num);
 }
 
 u64
@@ -94,22 +108,9 @@ TaskInfo::unwind_buffer_register(u8 level, u16 register_number) const noexcept
 }
 
 void
-TaskInfo::set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept
+TaskInfo::StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept
 {
-  regs.x86_block->set_registers(data);
-}
-
-static void
-decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state) noexcept
-{
-  // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
-  // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
-  // actually know how to read DWARF binary data here.
-  DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
-  const utils::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.info);
-  DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
-  DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
-  sym::decode(fde, state, info.info);
+  regs.registerFile->Store(data);
 }
 
 #define RETURN_RET_ADDR_IF(cond)                                                                                  \
@@ -152,57 +153,6 @@ TaskInfo::pending_wait_status() const noexcept
 {
   ASSERT(wait_status.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", tid);
   return wait_status;
-}
-
-std::uintptr_t
-TaskInfo::get_rbp() const noexcept
-{
-  switch (regs.data_format) {
-  case TargetFormat::Native:
-    return regs.registers->rbp;
-  case TargetFormat::Remote:
-    static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
-    return regs.x86_block->get_rbp();
-  }
-  NEVER("Unknown target format");
-}
-
-std::uintptr_t
-TaskInfo::get_pc() const noexcept
-{
-  switch (regs.data_format) {
-  case TargetFormat::Native:
-    return regs.registers->rip;
-  case TargetFormat::Remote:
-    static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
-    return regs.x86_block->get_pc();
-  }
-  NEVER("Unknown target format");
-}
-
-std::uintptr_t
-TaskInfo::get_rsp() const noexcept
-{
-  switch (regs.data_format) {
-  case TargetFormat::Native:
-    return regs.registers->rsp;
-  case TargetFormat::Remote:
-    static_assert(utils::castenum(ArchType::COUNT) == 1, "new architecture types have been added");
-    return regs.x86_block->get_rsp();
-  }
-  NEVER("Unknown target format");
-}
-
-std::uintptr_t
-TaskInfo::get_orig_rax() const noexcept
-{
-  switch (regs.data_format) {
-  case TargetFormat::Native:
-    return regs.registers->orig_rax;
-  case TargetFormat::Remote:
-    return regs.x86_block->get_64bit_reg(57);
-  }
-  NEVER("Unknown target format");
 }
 
 sym::CallStack &

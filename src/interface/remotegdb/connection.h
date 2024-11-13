@@ -1,25 +1,17 @@
 #pragma once
 #include "interface/remotegdb/target_description.h"
-#include "utils/macros.h"
 #include "wait_event_parser.h"
 #include <barrier>
-#include <bit>
-#include <charconv>
-#include <condition_variable>
-#include <filesystem>
 #include <fmt/core.h>
 #include <functional>
-#include <list>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
-#include <queue>
 #include <string>
 #include <string_view>
 #include <sys/poll.h>
 #include <thread>
 #include <typedefs.h>
-#include <unordered_set>
 #include <utils/expected.h>
 #include <utils/scoped_fd.h>
 using MonotonicResource = std::pmr::monotonic_buffer_resource;

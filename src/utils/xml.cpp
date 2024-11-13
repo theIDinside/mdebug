@@ -1,10 +1,7 @@
 #include "xml.h"
-#include "common.h"
 #include "fmt/base.h"
 #include "utils/util.h"
 #include <algorithm>
-#include <bits/ranges_algo.h>
-#include <bits/ranges_util.h>
 #include <cctype>
 
 #define PANIC_LOG(cond, str, ...)                                                                                 \

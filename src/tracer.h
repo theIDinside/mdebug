@@ -7,7 +7,6 @@
 #include "interface/dap/interface.h"
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "interface/ui_result.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
 #include "ptrace.h"
@@ -111,7 +110,7 @@ public:
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   void config_done(ui::dap::DebugAdapterClient *client) noexcept;
   CoreEvent *process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept;
-  void handle_command(ui::UICommandPtr cmd) noexcept;
+  void handle_command(ui::UICommand *cmd) noexcept;
   void handle_core_event(const CoreEvent *evt) noexcept;
   void handle_init_event(const CoreEvent *evt) noexcept;
 

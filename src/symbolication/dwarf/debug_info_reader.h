@@ -20,8 +20,8 @@ class UnitReader
 public:
   explicit UnitReader(UnitData *data) noexcept;
   UnitReader(UnitData *data, const DieMetaData &entry) noexcept;
-  UnitReader(const UnitReader& o);
-  UnitReader& operator=(const UnitReader& reader);
+  UnitReader(const UnitReader &o);
+  UnitReader &operator=(const UnitReader &reader);
 
   void skip_attributes(const std::span<const Abbreviation> &attributes) noexcept;
   void skip_attribute(const Abbreviation &abbreviation) noexcept;

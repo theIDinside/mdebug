@@ -5,7 +5,6 @@
 #include "typedefs.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"
-#include "utils/scope_defer.h"
 #include <functional>
 
 class TraceeController;

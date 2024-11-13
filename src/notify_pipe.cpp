@@ -2,7 +2,9 @@
 #include <fcntl.h>
 
 struct pollfd;
+// clang-format off
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay, cppcoreguidelines-init-variables, cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-pro-type-vararg)
+// clang-format on
 namespace utils {
 
 /*static*/ Notifier
@@ -91,4 +93,6 @@ Notifier::WriteEnd::notify() const noexcept
 
 } // namespace utils
 
+// clang-format off
 // NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay, cppcoreguidelines-init-variables, cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-pro-type-vararg)
+// clang-format on

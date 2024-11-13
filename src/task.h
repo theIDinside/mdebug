@@ -5,12 +5,12 @@
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
-#include <arch.h>
 #include <linux/sched.h>
 #include <sys/user.h>
 
 using namespace std::string_view_literals;
 class TraceeController;
+class RegisterDescription;
 
 namespace sym {
 class Frame;
@@ -36,16 +36,20 @@ struct CallStackRequest
 struct TaskRegisters
 {
   Immutable<ArchType> arch;
-  Immutable<TargetFormat> data_format;
+  Immutable<TargetFormat> mRegisterFormat;
   bool rip_dirty : 1 {true};
   bool cache_dirty : 1 {true};
+
+  TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo);
+
   union
   {
     user_regs_struct *registers;
-    RegisterBlock<ArchType::X86_64> *x86_block;
+    RegisterDescription *registerFile;
   };
 
-  void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
+  AddrPtr GetPc() const noexcept;
+  u64 GetRegister(u32 regNumber) const noexcept;
 };
 
 struct TaskInfo
@@ -88,7 +92,9 @@ public:
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
-  TaskInfo(TraceeController* supervisor, pid_t tid, bool user_stopped, TargetFormat format, ArchType arch) noexcept;
+  TaskInfo(TraceeController *supervisor, pid_t tid, bool user_stopped, TargetFormat format,
+           ArchType arch) noexcept;
+  TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
   TaskInfo(TaskInfo &&o) noexcept = default;
   TaskInfo &operator=(TaskInfo &&) noexcept = default;
   // Delete copy constructors. These are unique values.
@@ -97,18 +103,21 @@ public:
   TaskInfo &operator=(TaskInfo &t) noexcept = delete;
   TaskInfo &operator=(const TaskInfo &o) = delete;
 
-  static std::shared_ptr<TaskInfo> create_running(TraceeController* supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept;
-  static std::shared_ptr<TaskInfo> create_stopped(TraceeController* supervisor, pid_t tid, TargetFormat format, ArchType arch) noexcept;
+  ~TaskInfo() noexcept = default;
+
+  static std::shared_ptr<TaskInfo> CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid,
+                                              bool isRunning) noexcept;
 
   user_regs_struct *native_registers() const noexcept;
-  RegisterBlock<ArchType::X86_64> *remote_x86_registers() const noexcept;
+  RegisterDescription *remote_x86_registers() const noexcept;
   void remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept;
+  const TaskRegisters &GetRegisterCache() const;
   u64 get_register(u64 reg_num) noexcept;
   u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
-  void set_registers(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
+  void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
   std::span<const AddrPtr> return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
-  sym::FrameUnwindState* GetUnwindState(int frameLevel) noexcept;
+  sym::FrameUnwindState *GetUnwindState(int frameLevel) noexcept;
   void set_taskwait(TaskWaitResult wait) noexcept;
 
   void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
@@ -128,11 +137,6 @@ public:
   bool stop_processed() const noexcept;
   void collect_stop() noexcept;
   WaitStatus pending_wait_status() const noexcept;
-
-  std::uintptr_t get_rbp() const noexcept;
-  std::uintptr_t get_pc() const noexcept;
-  std::uintptr_t get_rsp() const noexcept;
-  std::uintptr_t get_orig_rax() const noexcept;
 
   sym::CallStack &get_callstack() noexcept;
   void clear_stop_state() noexcept;

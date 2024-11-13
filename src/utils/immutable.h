@@ -1,6 +1,5 @@
 #pragma once
 #include "common.h"
-#include <cstddef>
 #include <type_traits>
 #include <utility>
 
@@ -24,7 +23,11 @@ public:
 
   template <typename... Args> Immutable(Args... args) noexcept : data(std::forward<Args>(args)...) {}
 
-  constexpr operator const T &() const & { return data; }
+  constexpr
+  operator const T &() const &
+  {
+    return data;
+  }
 
   constexpr T
   clone() const noexcept
@@ -38,7 +41,11 @@ public:
     return data;
   }
 
-  constexpr operator std::optional<T>() const { return std::optional<T>{data}; }
+  constexpr
+  operator std::optional<T>() const
+  {
+    return std::optional<T>{data};
+  }
 
   constexpr const T *
   operator->() const noexcept
@@ -178,7 +185,9 @@ public:
     return !(r.data == l);
   }
 
-  const T& as_t() const noexcept {
+  constexpr const T &
+  as_t() const noexcept
+  {
     return data;
   }
 };
@@ -199,10 +208,22 @@ public:
 
   template <typename... Args> Immutable(Args... args) noexcept : data(std::forward<Args>(args)...) {}
 
-  constexpr operator const std::string_view() const & { return data; }
-  constexpr operator const std::optional<std::string_view>() const & { return data; }
+  constexpr
+  operator const std::string_view() const &
+  {
+    return data;
+  }
+  constexpr
+  operator const std::optional<std::string_view>() const &
+  {
+    return data;
+  }
 
-  constexpr std::string_view string_view() const noexcept { return data; }
+  constexpr std::string_view
+  string_view() const noexcept
+  {
+    return data;
+  }
 
   constexpr const std::string_view
   operator*() const & noexcept
@@ -253,7 +274,11 @@ public:
   {
   }
 
-  constexpr operator const T &() const & { return *data; }
+  constexpr
+  operator const T &() const &
+  {
+    return *data;
+  }
 
   constexpr const T &
   operator*() const & noexcept
@@ -362,11 +387,7 @@ template <typename T> struct NonNullPtr
     return *ptr;
   }
 
-  [[gnu::returns_nonnull]]
-  operator T *() noexcept
-  {
-    return ptr;
-  }
+  [[gnu::returns_nonnull]] operator T *() noexcept { return ptr; }
 
   [[gnu::returns_nonnull]] operator const T *() const noexcept { return ptr; }
 };

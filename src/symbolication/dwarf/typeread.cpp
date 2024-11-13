@@ -1,11 +1,7 @@
 #include "typeread.h"
 #include "symbolication/dwarf.h"
 #include "symbolication/dwarf/attribute_read.h"
-#include "symbolication/dwarf/debug_info_reader.h"
-#include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
-#include "symbolication/dwarf/die_ref.h"
-#include "symbolication/dwarf_defs.h"
 #include "utils/logger.h"
 #include <symbolication/callstack.h>
 #include <symbolication/objfile.h>
@@ -83,7 +79,10 @@ struct ParseState
   }
 };
 
-bool FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef, std::vector<Symbol>& processedSymbolStack) noexcept {
+bool
+FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
+                                                 std::vector<Symbol> &processedSymbolStack) noexcept
+{
   ParseState state;
   const auto originDie = dieRef;
   for (;;) {
@@ -140,7 +139,9 @@ FunctionSymbolicationContext::ProcessVariable(DieReference dieRef) noexcept
   ProcessVariableDie(dieRef, lexicalBlockStack.back().symbols);
 }
 
-void FunctionSymbolicationContext::ProcessFormalParameter(DieReference dieRef) noexcept {
+void
+FunctionSymbolicationContext::ProcessFormalParameter(DieReference dieRef) noexcept
+{
   ProcessVariableDie(dieRef, params.symbols);
 }
 

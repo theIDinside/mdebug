@@ -1,11 +1,9 @@
 #include "value_visualizer.h"
-#include "common.h"
 #include "symbolication/dwarf/typeread.h"
 #include "type.h"
 #include "utils/enumerator.h"
 #include "value.h"
 #include <algorithm>
-#include <bits/ranges_util.h>
 #include <iterator>
 #include <supervisor.h>
 #include <symbolication/dwarf/die.h>

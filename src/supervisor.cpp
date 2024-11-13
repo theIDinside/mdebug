@@ -1,5 +1,4 @@
 #include "supervisor.h"
-#include "arch.h"
 #include "bp.h"
 #include "common.h"
 #include "fmt/core.h"
@@ -59,12 +58,11 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
       session{parent.session}, stop_handler{new ptracestop::StopHandler{*this}},
       null_unwinder{parent.null_unwinder}, tracee_interface{std::move(interface)}
 {
-  threads.reserve(256);
-
-  threads.push_back(TaskInfo::create_running(this, tracee_interface->task_leader(), tracee_interface->format,
-                                             tracee_interface->arch_info->type));
-  threads.back()->initialize();
+  // Must be set first.
   tracee_interface->set_target(this);
+  threads.reserve(64);
+  threads.push_back(TaskInfo::CreateTask(*tracee_interface, tracee_interface->task_leader(), true));
+  threads.back()->initialize();
 
   new_objectfile.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     dap_client->post_event(new ui::dap::ModuleEvent{"new", *sf});
@@ -79,17 +77,16 @@ TraceeController::TraceeController(TargetSession target_session, tc::Interface &
       interpreter_base{}, entry{}, session{target_session}, stop_handler{new ptracestop::StopHandler{*this}},
       null_unwinder{new sym::Unwinder{nullptr}}, tracee_interface(std::move(interface))
 {
-  threads.reserve(256);
-
-  threads.push_back(TaskInfo::create_running(this, tracee_interface->task_leader(), tracee_interface->format,
-                                             tracee_interface->arch_info->type));
+  // Must be set first.
+  tracee_interface->set_target(this);
+  threads.reserve(64);
+  threads.push_back(TaskInfo::CreateTask(*tracee_interface, tracee_interface->task_leader(), true));
   threads.back()->initialize();
 
   new_objectfile.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     dap_client->post_event(new ui::dap::ModuleEvent{"new", *sf});
     return true;
   });
-  tracee_interface->set_target(this);
 }
 
 /*static*/
@@ -186,7 +183,7 @@ createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<
   } else {
     auto obj = CreateObjectFile(&tc, path);
     if (obj != nullptr) {
-      return SymbolFile::Create(&tc, obj, addr);
+      return SymbolFile::Create(&tc, std::move(obj), addr);
     }
   }
   return nullptr;
@@ -263,7 +260,7 @@ TraceeController::AddTask(std::shared_ptr<TaskInfo> &&task) noexcept
 }
 
 u32
-TraceeController::RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)>&& predicate)
+TraceeController::RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate)
 {
   auto count = threads.size();
   auto removeIterator = std::remove_if(threads.begin(), threads.end(), predicate);
@@ -311,13 +308,7 @@ void
 TraceeController::new_task(Tid tid, bool running) noexcept
 {
   ASSERT(tid != 0 && !has_task(tid), "Task {} has already been created!", tid);
-  if (running) {
-    threads.push_back(
-      TaskInfo::create_running(this, tid, tracee_interface->format, tracee_interface->arch_info->type));
-  } else {
-    threads.push_back(
-      TaskInfo::create_stopped(this, tid, tracee_interface->format, tracee_interface->arch_info->type));
-  }
+  threads.push_back(TaskInfo::CreateTask(*tracee_interface, tid, running));
 }
 
 bool
@@ -410,13 +401,7 @@ TraceeController::get_caching_pc(TaskInfo &t) noexcept
   if (t.rip_dirty) {
     cache_registers(t);
   }
-  switch (t.regs.data_format) {
-  case TargetFormat::Native:
-    return t.regs.registers->rip;
-  case TargetFormat::Remote:
-    return t.regs.x86_block->get_pc();
-  }
-  NEVER("Unknown target format type");
+  return t.regs.GetPc();
 }
 
 void
@@ -972,11 +957,11 @@ TraceeController::register_symbol_file(std::shared_ptr<SymbolFile> symbolFile, b
 
 // Debug Symbols Related Logic
 void
-TraceeController::register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> obj,
+TraceeController::register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> &&obj,
                                        bool is_main_executable, AddrPtr relocated_base) noexcept
 {
   ASSERT(obj != nullptr, "Object file is null");
-  register_symbol_file(SymbolFile::Create(tc, obj, relocated_base), is_main_executable);
+  register_symbol_file(SymbolFile::Create(tc, std::move(obj), relocated_base), is_main_executable);
 }
 
 struct AuxvPair
@@ -1343,7 +1328,7 @@ TraceeController::handle_thread_created(TaskInfo *task, const ThreadCreated &e,
     if (!register_data.empty()) {
       ASSERT(*get_interface().arch_info != nullptr,
              "Passing raw register contents with no architecture description doesn't work.");
-      task->set_registers(register_data);
+      task->StoreToRegisterCache(register_data);
       for (const auto &p : register_data) {
         if (p.first == 16) {
           task->rip_dirty = false;

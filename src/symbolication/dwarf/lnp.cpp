@@ -1,10 +1,7 @@
 #include "lnp.h"
-#include "common.h"
-#include "symbolication/dwarf_defs.h"
 #include "utils/enumerator.h"
 #include <algorithm>
 #include <set>
-#include <symbolication/block.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
@@ -17,7 +14,8 @@ class SourceCodeFileLNPResolver
 {
 public:
   SourceCodeFileLNPResolver(LNPHeader *header, std::set<LineTableEntry> &table,
-                            std::optional<AddressRange> valid_bounds, const std::span<const u32>& filesToRecord) noexcept
+                            std::optional<AddressRange> valid_bounds,
+                            const std::span<const u32> &filesToRecord) noexcept
       : header{header}, table(table), is_stmt(header->default_is_stmt), bounds(valid_bounds),
         mFilesToRecord(filesToRecord)
   {
@@ -480,7 +478,7 @@ LNPHeader::CacheLNPFilePaths() noexcept
   }
 }
 
-const LNPHeader::FileEntryContainer&
+const LNPHeader::FileEntryContainer &
 LNPHeader::FileEntries()
 {
   ASSERT(!mFileEntries.empty(), "No file entries has been loaded");

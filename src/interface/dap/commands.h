@@ -63,7 +63,11 @@ struct VerifyResult
     return std::move(arg_err);
   }
 
-  constexpr operator bool() noexcept { return arg_err->has_value(); }
+  constexpr
+  operator bool() noexcept
+  {
+    return arg_err->has_value();
+  }
 };
 
 struct VerifyField
@@ -179,8 +183,8 @@ template <size_t Size> struct VerifyMap
   static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({__VA_ARGS__});                              \
   static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};                                   \
   template <typename Json>                                                                                        \
-  constexpr static auto ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept                 \
-    -> std::optional<InvalidArg>                                                                                  \
+  constexpr static auto ValidateArg(std::string_view arg_name,                                                    \
+                                    const Json &arg_contents) noexcept -> std::optional<InvalidArg>               \
   {                                                                                                               \
     if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {                                                  \
       return std::move(err).take();                                                                               \
@@ -750,9 +754,7 @@ struct InvalidArgsResponse final : public UIResult
 
 template <typename T>
 concept HasName = requires(T t) {
-  {
-    T::Request
-  } -> std::convertible_to<std::string_view>;
+  { T::Request } -> std::convertible_to<std::string_view>;
 };
 
 struct InvalidArgs final : public UICommand

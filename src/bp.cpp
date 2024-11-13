@@ -1,17 +1,11 @@
 #include "bp.h"
-#include "common.h"
-#include "events/event.h"
 #include "ptrace.h"
-#include "symbolication/dwarf/die.h"
-#include "symbolication/dwarf/name_index.h"
 #include "utils/expected.h"
 #include <algorithm>
-#include <optional>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
 #include <tracer.h>
 #include <type_traits>
-#include <variant>
 
 BreakpointLocation::BreakpointLocation(AddrPtr addr, u8 original) noexcept
     : addr(addr), source_info(), original_byte(original)

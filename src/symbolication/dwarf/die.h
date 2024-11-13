@@ -1,7 +1,5 @@
 #pragma once
-#include "common.h"
 #include "die_ref.h"
-#include "symbolication/dwarf_defs.h"
 #include "unit_header.h"
 #include <limits>
 #include <symbolication/block.h>
@@ -120,7 +118,7 @@ public:
    * compilation unit of some sort.)
    */
   static UnitData *CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
-                                      AbbreviationInfo::Table && abbreviations) noexcept;
+                                      AbbreviationInfo::Table &&abbreviations) noexcept;
   bool IsCompilationUnitLike() const noexcept;
 
   void set_abbreviations(AbbreviationInfo::Table &&table) noexcept;
@@ -146,8 +144,16 @@ public:
   u32 rng_list_base() noexcept;
   u32 addr_base() noexcept;
 
-  constexpr bool LineNumberOffsetKnown() const noexcept { return mStatementListOffset != std::numeric_limits<u64>::max(); }
-  constexpr bool HasBuildDirectory() const noexcept { return mBuildDirectory != nullptr; }
+  constexpr bool
+  LineNumberOffsetKnown() const noexcept
+  {
+    return mStatementListOffset != std::numeric_limits<u64>::max();
+  }
+  constexpr bool
+  HasBuildDirectory() const noexcept
+  {
+    return mBuildDirectory != nullptr;
+  }
 
 private:
   void load_dies() noexcept;
@@ -168,7 +174,7 @@ private:
   std::optional<u32> rng_list_offset{};
   std::optional<u32> addr_offset{};
   mutable std::mutex load_dies_mutex;
-  const char* mBuildDirectory{nullptr};
+  const char *mBuildDirectory{nullptr};
   u64 mStatementListOffset{std::numeric_limits<u64>::max()};
 };
 

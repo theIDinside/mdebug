@@ -7,6 +7,7 @@
 #include "utils/macros.h"
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
+#include <task.h>
 
 namespace sym {
 
@@ -272,8 +273,10 @@ CallStack::Initialize() noexcept
   mUnwoundRegister.push_back({});
   mUnwoundRegister[0].Reset();
   mUnwoundRegister[0].Reserve(17);
-  for (auto i = 0; i <= 16; ++i) {
-    mUnwoundRegister[0].Set(i, mTask->get_register(i));
+
+  const auto &cache = mTask->GetRegisterCache();
+  for (auto i = 0u; i <= 16; ++i) {
+    mUnwoundRegister[0].Set(i, cache.GetRegister(i));
   }
 }
 
@@ -394,7 +397,7 @@ CallStack::GetUnwindState(u32 level) noexcept
 }
 
 void
-CallStack::Unwind(CallStackRequest req)
+CallStack::Unwind(const CallStackRequest &req)
 {
   const auto pc = mUnwoundRegister.back().GetPc();
   sym::UnwindIterator it{mSupervisor, pc};
@@ -407,7 +410,9 @@ CallStack::Unwind(CallStackRequest req)
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*mSupervisor, *mTask, uninfo.value(), pc);
   mFrameProgramCounters.push_back(GetTopMostPc());
 
-  switch (req.req) {
+  auto [request, count, _] = req;
+
+  switch (request) {
   case CallStackRequest::Type::Full: {
     for (auto uinf = uninfo; uinf.has_value(); uinf = it.get_info(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
@@ -422,12 +427,12 @@ CallStack::Unwind(CallStackRequest req)
     break;
   }
   case CallStackRequest::Type::Partial: {
-    for (auto uinf = uninfo; uinf.has_value() && req.count != 0; uinf = it.get_info(GetTopMostPc())) {
+    for (auto uinf = uninfo; uinf.has_value() && count != 0; uinf = it.get_info(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
       cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
       decode_eh_insts(uinf.value(), cfa_state);
       const auto keepUnwinding = ResolveNewFrameRegisters(cfa_state);
-      --req.count;
+      --count;
       if (!keepUnwinding) {
         break;
       }

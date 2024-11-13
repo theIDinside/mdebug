@@ -1,16 +1,9 @@
 #include "tracer.h"
-#include "bp.h"
-#include "common.h"
-#include "event_queue.h"
-#include "interface/attach_args.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
-#include "interface/dap/interface.h"
 #include "interface/pty.h"
 #include "interface/remotegdb/connection.h"
-#include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
-#include "interface/tracee_command/tracee_command_interface.h"
 #include "lib/lockguard.h"
 #include "lib/spinlock.h"
 #include "notify_pipe.h"
@@ -98,7 +91,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   auto target = get_controller(target_pid);
   if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
     auto obj = CreateObjectFile(target, objfile_path);
-    target->register_object_file(target, obj, true, nullptr);
+    target->register_object_file(target, std::move(obj), true, nullptr);
   } else {
     target->register_symbol_file(symbol_obj, true);
   }
@@ -172,7 +165,7 @@ Tracer::process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) no
 }
 
 void
-Tracer::handle_command(ui::UICommandPtr cmd) noexcept
+Tracer::handle_command(ui::UICommand *cmd) noexcept
 {
   DBGLOG(core, "accepted command {}", cmd->name());
   auto result = cmd->execute();
@@ -246,7 +239,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   if (task) {
     if (!evt->registers->empty()) {
       ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
-      task->set_registers(evt->registers);
+      task->StoreToRegisterCache(evt->registers);
       for (const auto &p : evt->registers) {
         if (p.first == 16) {
           task->rip_dirty = false;

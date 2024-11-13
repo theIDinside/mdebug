@@ -3,6 +3,7 @@
 #include "fmt/ranges.h"
 #include "utils/logger.h"
 #include "utils/util.h"
+#include "utils/worker_task.h"
 #include <charconv>
 #include <getopt.h>
 #include <string_view>

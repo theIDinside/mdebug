@@ -32,6 +32,8 @@ set(MIDAS_SOURCES
   src/ptrace.h
   src/ptracestop_handlers.cpp
   src/ptracestop_handlers.h
+  src/register_description.cpp
+  src/register_description.h
   src/so_loading.cpp
   src/so_loading.h
   src/supervisor.cpp

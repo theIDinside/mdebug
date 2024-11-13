@@ -4,7 +4,6 @@
 #include "fmt/format.h"
 #include <array>
 #include <fstream>
-#include <memory>
 #include <source_location>
 #include <string>
 #include <typedefs.h>

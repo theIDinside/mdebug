@@ -1,9 +1,7 @@
 #include "dwarf_frameunwinder.h"
 #include "../supervisor.h"
 #include "../task.h"
-#include "block.h"
 #include "dwarf_binary_reader.h"
-#include "dwarf_defs.h"
 #include "dwarf_expressions.h"
 #include "elf.h"
 #include "objfile.h"
@@ -82,7 +80,9 @@ CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &bel
   }
 }
 
-void CFAStateMachine::SetNoKnownResumeAddress() noexcept {
+void
+CFAStateMachine::SetNoKnownResumeAddress() noexcept
+{
   mResumeAddressUndefined = true;
 }
 
@@ -108,9 +108,10 @@ CFAStateMachine
 CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
 {
   auto cfa_sm = CFAStateMachine{tc, task, cfi, pc};
+  const auto &cache = task.GetRegisterCache();
   for (auto i = 0; i <= 16; i++) {
     cfa_sm.rule_table[i].rule = RegisterRule::Undefined;
-    cfa_sm.rule_table[i].value = task.get_register(i);
+    cfa_sm.rule_table[i].value = cache.GetRegister(i);
   }
   return cfa_sm;
 }
@@ -123,7 +124,9 @@ CFAStateMachine::compute_expression(std::span<const u8> bytes) noexcept
   return intepreter.run();
 }
 
-void CFAStateMachine::SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept {
+void
+CFAStateMachine::SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept
+{
   mCanonicalFrameAddressValue = canonicalFrameAddress;
 }
 

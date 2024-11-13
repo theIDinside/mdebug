@@ -7,7 +7,6 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "lib/spinlock.h"
 #include "ptrace.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
@@ -18,7 +17,6 @@
 #include "utils/byte_buffer.h"
 #include "utils/expected.h"
 #include <optional>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utils/scoped_fd.h>
@@ -108,8 +106,8 @@ class TraceeController
   TraceeController(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
 
 public:
-
-  static std::unique_ptr<TraceeController> create(TargetSession session, tc::Interface &&interface, InterfaceType type);
+  static std::unique_ptr<TraceeController> create(TargetSession session, tc::Interface &&interface,
+                                                  InterfaceType type);
   ~TraceeController() noexcept;
 
   TraceeController(const TraceeController &) = delete;
@@ -139,12 +137,12 @@ public:
   void process_dwarf(std::vector<SharedObject::SoId> sos) noexcept;
 
   std::span<std::shared_ptr<TaskInfo>> get_threads() noexcept;
-  void AddTask(std::shared_ptr<TaskInfo>&& task) noexcept;
-  u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo>&)>&& predicate);
+  void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
+  u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate);
 
   Tid get_task_leader() const noexcept;
   TaskInfo *get_task(pid_t pid) noexcept;
-  UserBreakpoints& user_breakpoints() noexcept;
+  UserBreakpoints &user_breakpoints() noexcept;
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
   /* Create new task meta data for `tid` */
@@ -218,7 +216,7 @@ public:
   bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
-  void register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> obj, bool is_main_executable,
+  void register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> &&obj, bool is_main_executable,
                             AddrPtr relocated_base) noexcept;
 
   void register_symbol_file(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept;
@@ -297,7 +295,7 @@ public:
   const ElfSection *get_text_section(AddrPtr addr) noexcept;
   std::optional<ui::dap::VariablesReference> var_ref(int variables_reference) noexcept;
 
-  Publisher<void>& observer(ObserverType type) noexcept;
+  Publisher<void> &observer(ObserverType type) noexcept;
   void notify_all_stopped() noexcept;
   bool all_stopped() const noexcept;
   bool session_all_stop_mode() const noexcept;
@@ -314,7 +312,7 @@ public:
   tc::ProcessedStopEvent handle_process_exit(const ProcessExited &evt) noexcept;
   tc::ProcessedStopEvent handle_fork(const Fork &evt) noexcept;
 
-  ui::dap::DebugAdapterClient* get_dap_client() const noexcept;
+  ui::dap::DebugAdapterClient *get_dap_client() const noexcept;
 
 private:
   // Writes breakpoint point and returns the original value found at that address

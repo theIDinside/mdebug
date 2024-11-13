@@ -3,8 +3,6 @@
 #include "block.h"
 #include "dwarf_defs.h"
 #include "symbolication/callstack.h"
-#include "utils/immutable.h"
-#include <cstdint>
 
 struct ElfSection;
 struct ObjectFile;
@@ -108,9 +106,13 @@ public:
   const Registers &get_regs() const noexcept;
   const Reg &ret_reg() const noexcept;
   void reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame_below, AddrPtr pc) noexcept;
-  void Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState& belowFrameRegisters, AddrPtr pc) noexcept;
+  void Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters, AddrPtr pc) noexcept;
   void SetNoKnownResumeAddress() noexcept;
-  constexpr bool KnowsResumeAddress() { return !mResumeAddressUndefined; }
+  constexpr bool
+  KnowsResumeAddress()
+  {
+    return !mResumeAddressUndefined;
+  }
 
 private:
   TraceeController &tc;

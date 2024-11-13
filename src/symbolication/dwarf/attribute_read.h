@@ -54,14 +54,15 @@ ProcessDie(DieReference dieRef, Fn &&fn) noexcept
   const auto &attrs = unit->get_abbreviation(die->abbreviation_code);
   reader.seek_die(*die);
   for (auto attribute : attrs.attributes) {
-    switch(fn(reader, attribute, attrs)) {
-      case DieAttributeRead::Continue:
-        break;;
-      case DieAttributeRead::Skipped:
-        reader.skip_attribute(attribute);
-        break;
-      case DieAttributeRead::Done:
-        return;
+    switch (fn(reader, attribute, attrs)) {
+    case DieAttributeRead::Continue:
+      break;
+      ;
+    case DieAttributeRead::Skipped:
+      reader.skip_attribute(attribute);
+      break;
+    case DieAttributeRead::Done:
+      return;
     }
   }
 }

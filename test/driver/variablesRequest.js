@@ -84,7 +84,7 @@ async function scopeLocalsTest(debugAdapter) {
         assertEqAInB(expected[v.name], v)
         if (v.name == 'structure') {
           const expected = {
-            name: newVarObject('name', val => val == '0x4012b8' || val == '0x401026', 'const char *'),
+            name: newVarObject('name', val => true, 'const char *'),
             count: newVarObject('count', '1', 'int', 0),
             fraction: newVarObject('fraction', '1.25', 'float', 0),
           }

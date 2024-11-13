@@ -7,7 +7,6 @@
 #include "utils/scoped_fd.h"
 #include <interface/remotegdb/connection.h>
 #include <link.h>
-#include <mutex>
 
 namespace tc {
 

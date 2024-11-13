@@ -1,5 +1,4 @@
 #pragma once
-#include <cstdint>
 #include <span>
 #include <symbolication/dwarf/common.h>
 #include <symbolication/dwarf_defs.h>
