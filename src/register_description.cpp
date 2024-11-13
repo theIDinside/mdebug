@@ -78,6 +78,7 @@ RegisterDescription::GetRegister(u32 regNumber) const noexcept
     return res;
   } break;
   default:
+    break;
   }
   NEVER("Internal debugger API invariant broken; this should only be used for 32-bit and 64-bit registers");
 }
