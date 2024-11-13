@@ -30,7 +30,9 @@ enum class RegisterRule : u8
   Register,        // Previous value of register, is stored in another register
   Expression,      // DWARF Expression that points to an address where the register value is located
   ValueExpression, // DWARF Expression that produces the value of the register
-  ArchSpecific
+  IsCFARegister,   // For all I know the "CFA" is always the "previous frame's stack pointer (rsp)". As such,
+  // when a CFA is computed for a frame, it automatically provides the stackpointer value for the previous frame
+  // (the "caller" frame, or the one above), because in that frame, the stack pointer is this' frame CFA
 };
 
 struct Reg
@@ -95,10 +97,6 @@ public:
   static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
                               AddrPtr pc) noexcept;
   u64 compute_expression(std::span<const u8> bytes) noexcept;
-  // Reads the register rule of `reg_number` and resolves it's saved (or live, if it hasn't been modified / stored
-  // somewhere in memory) contents
-  u64 resolve_reg_contents(u64 reg_number, const RegisterValues &reg) noexcept;
-  RegisterValues resolve_frame_regs(const RegisterValues &reg) noexcept;
   u64 ResolveRegisterContents(u64 reg_number, const FrameUnwindState &belowFrame) noexcept;
   void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
 

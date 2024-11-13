@@ -78,6 +78,9 @@ CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &bel
     r.value = belowFrameRegisters.GetRegister(i);
     i++;
   }
+  // TODO: Perhaps in the future, we may want to support systems where RSP is not register 7
+  static constexpr auto CFA_REGISTER = 7;
+  rule_table[CFA_REGISTER].rule = RegisterRule::IsCFARegister;
 }
 
 void
@@ -160,66 +163,9 @@ CFAStateMachine::ResolveRegisterContents(u64 reg_number, const FrameUnwindState 
     const auto value = compute_expression(reg.expr);
     return value;
   }
-  case sym::RegisterRule::ArchSpecific:
-    break;
+  case sym::RegisterRule::IsCFARegister: {
+    return mCanonicalFrameAddressValue;
   }
-  PANIC("resolve_reg_contents fell off");
-}
-
-RegisterValues
-CFAStateMachine::resolve_frame_regs(const RegisterValues &frame_live_registers) noexcept
-{
-  RegisterValues nxt_frame_regs{};
-
-  if (cfa.is_expr) {
-    mCanonicalFrameAddressValue = compute_expression(cfa.expr);
-  } else {
-    const auto res = static_cast<i64>(frame_live_registers[cfa.reg.number]) + cfa.reg.offset;
-    mCanonicalFrameAddressValue = static_cast<u64>(res);
-    DBGLOG(eh, "CFA=0x{:x} set from reg {} with value 0x{:x}", mCanonicalFrameAddressValue, cfa.reg.number,
-           frame_live_registers[cfa.reg.number]);
-  }
-
-  for (auto i = 0u; i < nxt_frame_regs.size(); ++i) {
-    nxt_frame_regs[i] = resolve_reg_contents(i, frame_live_registers);
-  }
-
-  nxt_frame_regs[7] = mCanonicalFrameAddressValue;
-  return nxt_frame_regs;
-}
-
-u64
-CFAStateMachine::resolve_reg_contents(u64 reg_number, const RegisterValues &regs) noexcept
-{
-  auto &reg = rule_table[reg_number];
-  switch (reg.rule) {
-  case sym::RegisterRule::Undefined:
-  case sym::RegisterRule::SameValue:
-    return reg.value;
-  case sym::RegisterRule::Offset: {
-    const AddrPtr cfa_record = mCanonicalFrameAddressValue + reg.offset;
-    const auto res = tc.read_type(cfa_record.as<u64>());
-    return res;
-  }
-  case sym::RegisterRule::ValueOffset: {
-    const auto cfa = mCanonicalFrameAddressValue;
-    const auto res = cfa + reg.offset;
-    return res;
-  }
-  case sym::RegisterRule::Register: {
-    return regs[reg.value];
-  }
-  case sym::RegisterRule::Expression: {
-    const auto saved_at_addr = TPtr<u64>(compute_expression(reg.expr));
-    const auto res = tc.read_type(saved_at_addr);
-    return res;
-  }
-  case sym::RegisterRule::ValueExpression: {
-    const auto value = compute_expression(reg.expr);
-    return value;
-  }
-  case sym::RegisterRule::ArchSpecific:
-    break;
   }
   PANIC("resolve_reg_contents fell off");
 }

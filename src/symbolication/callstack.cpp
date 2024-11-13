@@ -369,6 +369,8 @@ CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
     newAboveFrame.Set(i, stateMachine.ResolveRegisterContents(i, baseFrame));
   }
 
+  newAboveFrame.Set(7, canonicalFrameAddr);
+
   // When a frame description entry for instance has a DWARF expression that computes to RIP being undefined
   // we don't want to continue, because we have no known resume address
   return stateMachine.KnowsResumeAddress();
