@@ -212,7 +212,7 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
   const auto &dies = fn_ctx->origin_dies();
   for (const auto indexedDie : dies) {
     auto cu = indexedDie.GetUnitData();
-    auto die_index = indexedDie.Index();
+    auto die_index = indexedDie.GetIndex();
     auto cu_die_ref = cu->get_cu_die_ref(die_index);
     ASSERT(cu_die_ref.GetDie()->tag == DwarfTag::DW_TAG_subprogram,
            "Origin die for a fn wasn't subprogram! It was: {}", to_str(cu_die_ref.GetDie()->tag));

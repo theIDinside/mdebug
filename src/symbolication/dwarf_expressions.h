@@ -78,38 +78,6 @@ struct DwarfStack
   std::array<u64, 1028> stack;
 };
 
-// Describes the DWARF expression kind. A Frame variable will have 2 code segments,
-// one for the subprogram die and one for the variable die (probably?)
-enum class DwarfProgramKind : u8
-{
-  FrameVariable,
-};
-
-struct FrameVariableProgram
-{
-  u64 mCanonicalFrameAddress;
-};
-
-class DwarfProgram
-{
-  using Code = std::vector<std::span<const u8>>;
-  std::vector<std::span<const u8>> mCodeSegments;
-  DwarfProgramKind mKind;
-  union {
-    FrameVariableProgram frameVariable;
-  };
-public:
-
-  static
-  DwarfProgram FrameVariableProgram(Code&& code, FrameVariableProgram p) {
-    auto program = DwarfProgram{};
-    program.mKind = DwarfProgramKind::FrameVariable;
-    program.mCodeSegments = std::move(code);
-    program.frameVariable = p;
-    return program;
-  }
-};
-
 // The byte code interpreter needs all state set up, so that any possibly data it reference during execution, is
 // already "there".
 struct ExprByteCodeInterpreter

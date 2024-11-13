@@ -52,7 +52,7 @@ public:
 
   bool IsValid() const noexcept;
   UnitData *GetUnitData() const noexcept;
-  Index Index() const noexcept;
+  Index GetIndex() const noexcept;
   const DieMetaData *GetDie() noexcept;
 
   friend constexpr auto

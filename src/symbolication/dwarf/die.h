@@ -247,7 +247,7 @@ template <> struct formatter<sym::dw::IndexedDieReference>
   {
     if (ref.GetUnitData()) {
       return fmt::format_to(ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}",
-                            ref.GetUnitData()->section_offset(), ref.Index());
+                            ref.GetUnitData()->section_offset(), ref.GetIndex());
     }
     return fmt::format_to(ctx.out(), "IndexedDieRef {{ ??? }}");
   }

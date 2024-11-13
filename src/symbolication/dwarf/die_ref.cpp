@@ -142,7 +142,7 @@ IndexedDieReference::GetUnitData() const noexcept
 }
 
 Index
-IndexedDieReference::Index() const noexcept
+IndexedDieReference::GetIndex() const noexcept
 {
   return mDieIndex;
 }
