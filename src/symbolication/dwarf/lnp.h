@@ -114,7 +114,8 @@ struct ParsedLineTableEntries
 
 struct RelocatedLteIterator
 {
-  using Iter = std::vector<LineTableEntry>::const_iterator;
+  // using Iter = std::vector<LineTableEntry>::const_iterator;
+  using Iter = LineTableEntry*;
 
 private:
   Iter it;

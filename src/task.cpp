@@ -131,7 +131,6 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
   tc->cache_registers(*this);
   // initialize bottom frame's registers with actual live register contents
   // this is then used to execute the dwarf binary code
-  call_stack->Initialize();
   call_stack->Unwind(req);
   return call_stack->ReturnAddresses();
 }

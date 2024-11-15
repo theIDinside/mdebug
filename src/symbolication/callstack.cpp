@@ -1,15 +1,21 @@
 #include "callstack.h"
 #include "common.h"
+#include "supervisor.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
+#include "symbolication/value.h"
 #include "tracer.h"
 #include "utils/debug_value.h"
 #include "utils/macros.h"
+#include <algorithm>
+#include <iterator>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
 #include <task.h>
 
 namespace sym {
+
+static constexpr auto X86_64_RIP_REGISTER = 16;
 
 InsideRange
 Frame::inside(TPtr<void> addr) const noexcept
@@ -347,6 +353,16 @@ CallStack::GetTopMostPc() const noexcept
   return mUnwoundRegister.back().GetPc();
 }
 
+std::pair<FrameUnwindState *, FrameUnwindState *>
+CallStack::GetCurrent() noexcept
+{
+  if (mUnwoundRegister.size() < 2) {
+    return {nullptr, nullptr};
+  }
+  auto span = std::span{mUnwoundRegister}.subspan(mUnwoundRegister.size() - 2, 2);
+  return {&span[0], &span[1]};
+}
+
 bool
 CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
 {
@@ -401,12 +417,37 @@ CallStack::GetUnwindState(u32 level) noexcept
 void
 CallStack::Unwind(const CallStackRequest &req)
 {
-  const auto pc = mUnwoundRegister.back().GetPc();
+  // TODO: Implement frame unwind caching.
+  const auto pc = mTask->GetRegisterCache().GetPc();
   sym::UnwindIterator it{mSupervisor, pc};
   auto uninfo = it.get_info(pc);
-
+  bool initialized = false;
   if (!uninfo) {
-    return;
+    constexpr auto STACK_POINTER_NUMBER = 7;
+    // we may be in a plt entry. Try sniffing out this frame before throwing away the entire call stack
+    // a call instruction automatically pushes rip onto the stack at $rsp
+    const auto resumeAddress = mSupervisor->read_type(TPtr<u64>{mTask->get_register(STACK_POINTER_NUMBER)});
+    uninfo = it.get_info(resumeAddress);
+    if (uninfo) {
+      Initialize();
+      mFrameProgramCounters.push_back(GetTopMostPc());
+      initialized = true;
+      mUnwoundRegister.push_back({});
+      auto [newest, older] = GetCurrent();
+      const auto regs = newest->RegisterCount();
+      mUnwoundRegister.back().Reserve(regs);
+      const auto &cloneFrom = *(mUnwoundRegister.rbegin() + 1);
+      for (auto i = 0u; i < regs; ++i) {
+        mUnwoundRegister.back().Set(i, cloneFrom.GetRegister(i));
+      }
+      mUnwoundRegister.back().Set(X86_64_RIP_REGISTER, resumeAddress);
+    } else {
+      return;
+    }
+  }
+
+  if (!initialized) {
+    Initialize();
   }
 
   sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*mSupervisor, *mTask, uninfo.value(), pc);

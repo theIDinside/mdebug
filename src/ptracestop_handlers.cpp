@@ -236,7 +236,7 @@ StopHandler::get_proceed_action(const TaskInfo &t) noexcept
 }
 
 void
-StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent& stop) noexcept
+StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) noexcept
 {
   static_assert(sizeof(tc::ProcessedStopEvent) < 8, "Pass by value so long as it's register-sized");
 

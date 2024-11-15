@@ -511,13 +511,13 @@ LineTable::is_valid() const noexcept
 RelocatedLteIterator
 LineTable::begin() const noexcept
 {
-  return RelocatedLteIterator(ltes->table.cbegin(), relocated_base);
+  return RelocatedLteIterator(ltes->table.data(), relocated_base);
 }
 
 RelocatedLteIterator
 LineTable::end() const noexcept
 {
-  return RelocatedLteIterator(ltes->table.cend(), relocated_base);
+  return RelocatedLteIterator(ltes->table.data() + ltes->table.size(), relocated_base);
 }
 
 LineTableEntry
@@ -593,7 +593,7 @@ LineTable::size() const noexcept
 LineTable::LineTable() noexcept : relocated_base(nullptr), line_header(nullptr), ltes(nullptr) {}
 
 LineTable::LineTable(LNPHeader *header, ParsedLineTableEntries *ltes, AddrPtr relocated_base) noexcept
-    : relocated_base(relocated_base), line_header(std::move(header)), ltes(ltes)
+    : relocated_base(relocated_base), line_header(header), ltes(ltes)
 {
 }
 
@@ -966,15 +966,15 @@ SourceCodeFile::begin(AddrPtr relocatedBase) const noexcept
 {
   // Rust would call this "interior" mutability. So kindly go fuck yourself.
   if (!is_computed()) {
-    this->compute_line_tables();
+    compute_line_tables();
   }
-  return RelocatedLteIterator(line_table->begin(), relocatedBase);
+  return RelocatedLteIterator(line_table->data(), relocatedBase);
 }
 
 RelocatedLteIterator
 SourceCodeFile::end(AddrPtr relocatedBase) const noexcept
 {
-  return RelocatedLteIterator(line_table->end(), relocatedBase);
+  return RelocatedLteIterator(line_table->data() + line_table->size(), relocatedBase);
 }
 
 SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept

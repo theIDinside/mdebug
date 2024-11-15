@@ -3,6 +3,7 @@
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
+#include <algorithm>
 #include <optional>
 #include <supervisor.h>
 #include <symbolication/dwarf/debug_info_reader.h>
@@ -122,12 +123,10 @@ resolve_array_bounds(sym::dw::DieReference array_die) noexcept
       u64 count{};
       sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader &reader, sym::dw::Abbreviation &attr, const auto &info) {
         switch (attr.name) {
+        case Attribute::DW_AT_upper_bound: [[fallthrough]];
         case Attribute::DW_AT_count:
-          [[fallthrough]];
-          count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value();
-          return sym::dw::DieAttributeRead::Done;
-        case Attribute::DW_AT_upper_bound:
-          count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() + 1;
+          count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() +
+                  1u * std::clamp(u32(attr.name == Attribute::DW_AT_upper_bound), 0u, 1u);
           return sym::dw::DieAttributeRead::Done;
         default:
           return sym::dw::DieAttributeRead::Continue;

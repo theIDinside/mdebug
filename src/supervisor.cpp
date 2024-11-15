@@ -1176,7 +1176,6 @@ TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) no
   }
   cache_registers(task);
   auto &cs_ref = *task.call_stack;
-  cs_ref.Reset();
 
   auto frame_pcs = task.return_addresses(this, req);
   for (const auto &[depth, i] : utils::EnumerateView{frame_pcs}) {

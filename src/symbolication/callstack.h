@@ -213,9 +213,7 @@ public:
   void Reset() noexcept;
   AddrPtr GetPc() const noexcept;
   AddrPtr GetRegister(u64 registerNumber) const noexcept;
-
-private:
-  static constexpr auto X86_64_RIP_REGISTER = 16;
+  FrameUnwindState Clone() const noexcept;
 };
 
 class CallStack
@@ -261,6 +259,9 @@ private:
   void ClearUnwoundRegisters() noexcept;
   AddrPtr GetTopMostPc() const noexcept;
   bool ResolveNewFrameRegisters(CFAStateMachine &stateMachine) noexcept;
+  // Any unwind operation consists of the new set of registers for a frame, that are derived from the newer set of
+  // registers from a newer frame. As such, for an unwind operation for a frame, 2 frames are always important.
+  std::pair<FrameUnwindState *, FrameUnwindState *> GetCurrent() noexcept;
 
   TaskInfo *mTask; // the task associated with this call stack
   TraceeController *mSupervisor;
