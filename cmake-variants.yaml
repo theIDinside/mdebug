@@ -59,14 +59,14 @@ linker:
       short: LLVM linker
       long: Use the LLVM linker lld
       settings:
-        CMAKE_LINKER: lld
+        CMAKE_LINKER_TYPE: LLD
     gnu:
       short: GNU linker
       long: Use the GNU linker ld GOLD
       settings:
-        CMAKE_LINKER: ld
+        CMAKE_LINKER_TYPE: LD
     mold:
       short: MOLD linker
       long: Use the mold linker
       settings:
-        CMAKE_LINKER: mold
+        CMAKE_LINKER_TYPE: MOLD
