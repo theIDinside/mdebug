@@ -1,22 +1,31 @@
 const {
   checkResponse,
-  getLineOf,
-  readFileContents,
-  repoDirFile,
-  SetBreakpoints,
-  RemoteService,
   createRemoteService,
 } = require('./client')
-const { assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
+const { findAvailablePort, assertLog, todo } = require('./utils')
 
 async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
   const attachArgs = {
     type: 'INVALID TYPE FOR SURE',
     host: 'localhost',
-    port: 12345,
+    port: await findAvailablePort(),
     allstop: false,
   }
 
+  const server_spawn = { ok: false, msg: '', server: null }
+  try {
+    server_spawn.server = await createRemoteService(
+      'gdbserver',
+      attachArgs.host,
+      attachArgs.port,
+      debugAdapter.buildDirFile('next')
+    )
+    server_spawn.ok = true
+  } catch (ex) {
+    server_spawn.ok = false
+    server_spawn.msg = `${ex}`
+    console.log(`ERROR: ${ex}`)
+  }
   assertLog(server_spawn.ok, 'Spawn gdbserver for MDB to attach to', server_spawn.msg)
 
   let init_res = await debugAdapter.sendReqGetResponse('initialize', {}, 1000)
@@ -35,10 +44,11 @@ async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
  * @param {import("./client").DAClient} debugAdapter
  */
 async function attachInit(debugAdapter) {
+
   const attachArgs = {
     type: 'gdbremote',
     host: 'localhost',
-    port: 12345,
+    port: await findAvailablePort(),
     allstop: false,
   }
 

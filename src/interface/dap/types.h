@@ -1,5 +1,6 @@
 #pragma once
 #include "utils/immutable.h"
+#include "utils/macros.h"
 #include <fmt/format.h>
 #include <string_view>
 #include <typedefs.h>
@@ -81,19 +82,6 @@ enum class ScopeType : u8
   Registers
 };
 
-static inline constexpr std::string_view
-to_presentation_hint(ScopeType type) noexcept
-{
-  switch (type) {
-  case ScopeType::Arguments:
-    return "arguments";
-  case ScopeType::Locals:
-    return "locals";
-  case ScopeType::Registers:
-    return "registers";
-  }
-}
-
 struct Scope
 {
   ScopeType type{};
@@ -109,7 +97,10 @@ struct Scope
       return "Locals";
     case ScopeType::Registers:
       return "Registers";
+    default:
+      PANIC("Unhandled scope type");
     }
+    MIDAS_UNREACHABLE
   }
 
   constexpr std::string_view
@@ -122,7 +113,10 @@ struct Scope
       return "locals";
     case ScopeType::Registers:
       return "registers";
+    default:
+      PANIC("Unhandled presentation hint to-string");
     }
+    MIDAS_UNREACHABLE
   }
 };
 

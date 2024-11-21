@@ -5,7 +5,6 @@
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
-#include <vector>
 
 namespace utils {
 class ScopedBlockedSignals

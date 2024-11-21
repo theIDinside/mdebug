@@ -1,8 +1,5 @@
 #pragma once
-#include "arch.h"
-#include <map>
-#include <optional>
-#include <string>
+#include "utils/immutable.h"
 #include <typedefs.h>
 #include <vector>
 
@@ -21,12 +18,41 @@ struct ArchReg
   u16 regnum;
 };
 
+struct DebuggerContextRegisters
+{
+  Immutable<u16> mRIPOffset;
+  Immutable<u8> mRIPNumber;
+  Immutable<u16> mRSPOffset;
+  Immutable<u8> mRSPNumber;
+  Immutable<u16> mRBPOffset;
+  Immutable<u8> mRBPNumber;
+};
+
+struct RegisterName
+{
+  std::string_view name;
+  std::string_view type;
+};
+
+struct RegisterMetadata
+{
+  u16 bit_size;
+  u16 mOffset;
+};
+
+struct RegisterInfo
+{
+  Immutable<std::vector<RegisterMetadata>> mRegisterMetaData;
+  Immutable<std::vector<RegisterName>> mRegisterNames;
+};
+
 struct ArchictectureInfo
 {
-  std::vector<ArchReg> registers{};
-  ArchType type{ArchType::X86_64};
-  u32 register_block_size{816};
-  u32 pc_number{16};
+  Immutable<RegisterInfo> mRegisters;
+  Immutable<DebuggerContextRegisters> mDebugContextRegisters;
+
+  ArchictectureInfo(RegisterInfo &&registers, const DebuggerContextRegisters &debugRegisters) noexcept;
+  static std::shared_ptr<ArchictectureInfo> CreateArchInfo(const std::vector<ArchReg> &registers);
   u32 register_bytes() const noexcept;
 };
 

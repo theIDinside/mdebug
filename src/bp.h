@@ -5,10 +5,9 @@
 #include "typedefs.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"
-#include "utils/scope_defer.h"
 #include <functional>
 
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 struct ObjectFile;
 class SymbolFile;
@@ -368,7 +367,6 @@ struct RequiredUserParameters
   u16 id;
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> loc_or_err;
   std::optional<u32> times_to_hit;
-  bool stop_all;
   TraceeController &tc;
 };
 

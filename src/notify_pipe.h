@@ -1,6 +1,5 @@
 #pragma once
 #include "common.h"
-#include <algorithm>
 #include <string>
 #include <sys/epoll.h>
 #include <sys/poll.h>

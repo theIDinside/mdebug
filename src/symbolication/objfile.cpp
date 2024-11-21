@@ -3,10 +3,8 @@
 #include "./dwarf/name_index.h"
 #include "dwarf.h"
 #include "dwarf/die.h"
-#include "dwarf/lnp.h"
 #include "supervisor.h"
 #include "symbolication/block.h"
-#include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf_defs.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf_symbols.h"
@@ -16,10 +14,12 @@
 #include "tasks/lnp.h"
 #include "type.h"
 #include "utils/enumerator.h"
+#include "utils/logger.h"
 #include "utils/worker_task.h"
 #include "value.h"
 #include <algorithm>
 #include <iterator>
+#include <regex>
 #include <symbolication/dwarf/typeread.h>
 #include <task.h>
 #include <tracer.h>
@@ -31,9 +31,7 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
       types(std::make_unique<TypeStorage>(*this)), minimal_fn_symbols{}, min_fn_symbols_sorted(),
       minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>(this)), parsed_lte_write_lock(),
-      line_table(), lnp_headers(nullptr),
-      parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), addr_cu_map()
+      lnp_headers(nullptr), cu_write_lock(), comp_units(), addr_cu_map()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -144,6 +142,21 @@ ObjectFile::get_die_reference(u64 offset) noexcept
   return sym::dw::DieReference{cu, die};
 }
 
+sym::dw::DieReference
+ObjectFile::GetDieReference(u64 offset) noexcept
+{
+  auto cu = get_cu_from_offset(offset);
+  if (cu == nullptr) {
+    return sym::dw::DieReference{nullptr, nullptr};
+  }
+  auto die = cu->get_die(offset);
+  if (die == nullptr) {
+    return sym::dw::DieReference{nullptr, nullptr};
+  }
+
+  return sym::dw::DieReference{cu, die};
+}
+
 sym::dw::ObjectFileNameIndex *
 ObjectFile::name_index() noexcept
 {
@@ -165,29 +178,23 @@ void
 ObjectFile::read_lnp_headers() noexcept
 {
   lnp_headers = sym::dw::read_lnp_headers(elf);
-
   std::string path_buf{};
-  path_buf.reserve(1024);
   for (auto &hdr : *lnp_headers) {
-    for (const auto &f : hdr.file_names) {
-      path_buf.clear();
-      const auto index = sym::dw::lnp_index(f.dir_index, hdr.version);
-      // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
-      // and we have not made copies.
-      fmt::format_to(std::back_inserter(path_buf), "{}/{}", hdr.directories[index].path, f.file_name);
-      const auto canonical = std::filesystem::path{path_buf}.lexically_normal();
-      auto it = lnp_source_code_files.find(canonical);
+    ASSERT(!hdr.directories.empty(), "Directories for the LNP header must *NOT* be empty!");
+    const auto build_path = std::filesystem::path{hdr.directories[0].path};
+    for (const auto &[fullPath, _] : hdr.FileEntries()) {
+      auto it = lnp_source_code_files.find(fullPath);
       if (it != std::end(lnp_source_code_files)) {
         it->second->add_header(&hdr);
       } else {
         std::vector<sym::dw::LNPHeader *> src_headers{};
         src_headers.push_back(&hdr);
+        DBGLOG(core, "Adding source code file {}", fullPath);
         lnp_source_code_files.emplace(
-          canonical, std::make_shared<sym::dw::SourceCodeFile>(elf, canonical, std::move(src_headers)));
+          fullPath, std::make_shared<sym::dw::SourceCodeFile>(elf, fullPath, std::move(src_headers)));
       }
     }
   }
-  init_lnp_storage(*lnp_headers);
 }
 
 // No synchronization needed, parsed 1, in 1 thread
@@ -200,37 +207,6 @@ ObjectFile::get_lnp_headers() noexcept
     read_lnp_headers();
     return std::span{*lnp_headers};
   }
-}
-
-// Synchronization needed - parsed by multiple threads and results registered asynchronously + in parallel
-void
-ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
-                            std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes) noexcept
-{
-  std::lock_guard lock(parsed_lte_write_lock);
-  ASSERT(headers.size() == parsed_ltes.size(), "headers != parsed_lte count!");
-  auto h = headers.begin();
-  auto p = std::make_move_iterator(parsed_ltes.begin());
-  auto &stored = *this->parsed_ltes;
-  for (; h != std::end(headers); h++, p++) {
-    stored.emplace(h->sec_offset, std::move(*p));
-  }
-}
-
-void
-ObjectFile::init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers)
-{
-  std::lock_guard lock(parsed_lte_write_lock);
-  parsed_ltes->reserve(headers.size());
-  for (const auto &header : headers) {
-    parsed_ltes->emplace(header.sec_offset, sym::dw::ParsedLineTableEntries{});
-  }
-}
-
-sym::dw::ParsedLineTableEntries &
-ObjectFile::get_plte(u64 offset) noexcept
-{
-  return (*parsed_ltes)[offset];
 }
 
 void
@@ -284,10 +260,10 @@ ObjectFile::get_type_unit_type_die(u64 type_signature) noexcept
   const auto &dies = typeunit->get_dies();
   for (const auto &d : dies) {
     if (d.section_offset == type_die_section_offset) {
-      return sym::dw::DieReference{.cu = typeunit, .die = &d};
+      return sym::dw::DieReference{typeunit, &d};
     }
   }
-  return {};
+  return {nullptr, nullptr};
 }
 
 std::vector<sym::CompilationUnit> &
@@ -297,9 +273,10 @@ ObjectFile::source_units() noexcept
 }
 
 SharedPtr<sym::dw::SourceCodeFile>
-ObjectFile::get_source_file(const std::filesystem::path &fullpath) noexcept
+ObjectFile::get_source_file(std::string_view fullpath) noexcept
 {
-  auto it = lnp_source_code_files.find(fullpath);
+  std::string key{fullpath};
+  auto it = lnp_source_code_files.find(key);
   if (it != std::end(lnp_source_code_files)) {
     return it->second;
   }
@@ -330,8 +307,8 @@ ObjectFile::get_source_infos(AddrPtr pc) noexcept
 }
 
 auto
-ObjectFile::relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
-  -> std::vector<sym::dw::RelocatedSourceCodeFile>
+ObjectFile::relocated_get_source_code_files(AddrPtr base,
+                                            AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
   std::vector<sym::dw::RelocatedSourceCodeFile> result{};
   auto cus = get_source_infos(pc);
@@ -340,6 +317,7 @@ ObjectFile::relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
   };
   for (auto cu : cus) {
     for (auto src : cu->sources()) {
+      ASSERT(src != nullptr, "source code file should not be null!");
       if (src->address_bounds().contains(pc) && is_unique(src.get())) {
         result.emplace_back(base, src.get());
       }
@@ -442,6 +420,21 @@ ObjectFile::regex_search(const std::string &regex_pattern) const noexcept -> std
   return results;
 }
 
+auto
+ObjectFile::SetBuildDirectory(u64 statementListOffset, const char *buildDirectory) noexcept -> void
+{
+  mLnpToBuildDirMapping.mMap[statementListOffset] = buildDirectory;
+}
+
+auto
+ObjectFile::GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char *
+{
+  if (auto it = mLnpToBuildDirMapping.mMap.find(statementListOffset); it != std::end(mLnpToBuildDirMapping.mMap)) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 ObjectFile *
 mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
 {
@@ -452,7 +445,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-    new ObjectFile{fmt::format("{}:{}", tc.task_leader, path.c_str()), path, fd.file_size(), addr};
+    new ObjectFile{fmt::format("{}:{}", tc.get_task_leader(), path.c_str()), path, fd.file_size(), addr};
 
   return objfile;
 }
@@ -466,8 +459,8 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
-  const auto objfile =
-    std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->task_leader, path.c_str()), path, fd.file_size(), addr);
+  const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->get_task_leader(), path.c_str()),
+                                                    path, fd.file_size(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
@@ -528,18 +521,19 @@ SymbolFile::SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr
 }
 
 SymbolFile::shr_ptr
-SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept
+SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
-  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->task_leader, binary->path->c_str()),
+  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->get_task_leader(), binary->path->c_str()),
                                       std::move(binary), relocated_base);
 }
 
 auto
 SymbolFile::copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
-  return SymbolFile::Create(&tc, binary_object, relocated_base);
+  auto obj = binary_object;
+  return SymbolFile::Create(&tc, std::move(obj), relocated_base);
 }
 
 auto
@@ -613,8 +607,8 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
 }
 
 auto
-SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-  -> std::vector<ui::dap::Variable>
+SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame,
+                         sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
   if (!frame.full_symbol_info().is_resolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->objectFile(), frame};
@@ -648,8 +642,8 @@ SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::Relo
 }
 
 auto
-SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
-  -> std::vector<ui::dap::Variable>
+SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
+                    std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
 {
   auto value = ctx.get_maybe_value();
   if (value == nullptr) {
@@ -729,25 +723,6 @@ SymbolFile::getMinimalSymbol(std::string_view name) noexcept -> std::optional<Mi
 }
 
 auto
-SymbolFile::getLineTable(u64 offset) noexcept -> sym::dw::LineTable
-{
-  auto &headers = *objectFile()->lnp_headers;
-  auto header = std::find_if(headers.begin(), headers.end(),
-                             [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
-  ASSERT(header != std::end(headers), "Failed to find LNP Header with offset 0x{:x}", offset);
-
-  auto kvp = std::find_if(objectFile()->parsed_ltes->begin(), objectFile()->parsed_ltes->end(),
-                          [offset](const auto &kvp) { return kvp.first == offset; });
-  if (kvp == std::end(*objectFile()->parsed_ltes)) {
-    PANIC(fmt::format("Failed to find parsed LineTable Entries for offset 0x{:x}", offset));
-  }
-  if (kvp->second.table.empty()) {
-    sym::dw::compute_line_number_program(kvp->second, objectFile()->elf, &*header);
-  }
-  return sym::dw::LineTable{&(*header), &kvp->second, baseAddress};
-}
-
-auto
 SymbolFile::path() const noexcept -> Path
 {
   return binary_object->path;
@@ -788,7 +763,7 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
         const auto addr = low_pc->address();
         matching_symbols.emplace_back(n, addr, 0);
         DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
-               die_ref.cu->section_offset(), die_ref.die->section_offset, n, addr);
+               die_ref.GetUnitData()->section_offset(), die_ref.GetDie()->section_offset, n, addr);
       }
     });
   }
@@ -835,6 +810,7 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     result.reserve(frame.frame_locals_count());
     break;
   }
+
   for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
     const auto ref = symbol.type->is_primitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.type->is_resolved()) {
@@ -848,9 +824,8 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     registerResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.get_symbol_file(),
-                                         static_cast<u32>(frame.id()), static_cast<u16>(ref),
-                                         ContextType::Variable});
+      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.id()),
+                                         static_cast<u16>(ref), ContextType::Variable});
       frame.task.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});

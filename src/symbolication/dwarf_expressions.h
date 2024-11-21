@@ -4,7 +4,7 @@
 #include "dwarf_defs.h"
 #include "utils/immutable.h"
 
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 
 namespace sym {
@@ -84,6 +84,8 @@ struct ExprByteCodeInterpreter
 {
   explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
                                    std::span<const u8> byte_stream) noexcept;
+  explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
+                                   std::span<const u8> byte_stream, std::span<const u8> frameBaseCode) noexcept;
   AddrPtr request_frame_base() noexcept;
   u64 run() noexcept;
 
@@ -93,6 +95,7 @@ struct ExprByteCodeInterpreter
   TraceeController &tc;
   TaskInfo &task;
   std::span<const u8> byte_stream;
+  std::span<const u8> mFrameBaseProgram;
   DwarfBinaryReader reader;
 };
 

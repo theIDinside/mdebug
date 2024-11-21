@@ -3,11 +3,10 @@
 #include "dwarf/debug_info_reader.h"
 #include "dwarf/die.h"
 #include "dwarf/lnp.h"
-#include "fmt/format.h"
 #include "fnsymbol.h"
 #include "objfile.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf_defs.h"
-#include "symbolication/dwarf_expressions.h"
 #include <array>
 #include <list>
 #include <utils/filter.h>
@@ -15,13 +14,12 @@
 namespace sym {
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(dw::UnitData *data) noexcept
-    : unit_data(data), line_table(), fns(), imported_units()
+    : unit_data(data), fns(), imported_units()
 {
 }
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(PartialCompilationUnitSymbolInfo &&o) noexcept
-    : unit_data(o.unit_data), line_table(o.line_table), fns(std::move(o.fns)),
-      imported_units(std::move(o.imported_units))
+    : unit_data(o.unit_data), fns(std::move(o.fns)), imported_units(std::move(o.imported_units))
 {
 }
 
@@ -32,7 +30,6 @@ PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&r
     return *this;
   }
   unit_data = rhs.unit_data;
-  line_table = rhs.line_table;
   fns = std::move(rhs.fns);
   imported_units = std::move(rhs.imported_units);
   return *this;
@@ -62,9 +59,11 @@ CompilationUnit::process_source_code_files(u64 table) noexcept
   line_table = table;
   auto obj = unit_data->get_objfile();
   auto header = unit_data->get_objfile()->get_lnp_header(line_table);
-  for (auto &&file : header->files()) {
-    std::string_view path{file.c_str()};
-    auto source_code_file = obj->get_source_file(path);
+  DBGLOG(dwarf, "retrieving files from line number program @ {} for cu=0x{:x} '{}'", header->sec_offset,
+         unit_data->section_offset(), cu_name);
+
+  for (const auto &[fullPath, v] : header->FileEntries()) {
+    auto source_code_file = obj->get_source_file(fullPath);
     add_source_file(std::move(source_code_file));
   }
 }
@@ -75,8 +74,8 @@ CompilationUnit::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file)
   source_code_files.emplace_back(std::move(src_file));
 }
 
-std::span<std::shared_ptr<dw::SourceCodeFile>>
-CompilationUnit::sources() noexcept
+std::span<const std::shared_ptr<dw::SourceCodeFile>>
+CompilationUnit::sources() const noexcept
 {
   return source_code_files;
 }
@@ -138,12 +137,6 @@ CompilationUnit::get_dwarf_unit() const noexcept
   return unit_data;
 }
 
-std::optional<dw::LineTable>
-CompilationUnit::get_linetable(SymbolFile *sf) noexcept
-{
-  return sf->getLineTable(line_table);
-}
-
 std::optional<Path>
 CompilationUnit::get_lnp_file(u32 index) noexcept
 {
@@ -192,8 +185,8 @@ struct ResolveFnSymbolState
   sym::FunctionSymbol
   complete()
   {
-    std::optional<SourceCoordinate> source = lnp_file.transform(
-      [&](auto &&path) { return SourceCoordinate{.path = std::move(path), .line = this->line.value_or(0)}; });
+    std::optional<SourceCoordinate> source =
+      lnp_file.transform([&](auto &&path) { return SourceCoordinate{std::move(path), line.value_or(0), 0}; });
     if (lnp_file) {
       ASSERT(lnp_file.value().empty(), "Should have moved std string!");
     }
@@ -205,7 +198,7 @@ struct ResolveFnSymbolState
                                ret_type,
                                maybe_origin_dies,
                                *symtab,
-                               dw::FrameBaseExpression::Take(frame_base_description),
+                               frame_base_description.value_or(std::span<const u8>{}),
                                std::move(source)};
   }
 
@@ -223,17 +216,16 @@ static std::optional<dw::DieReference>
 follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::DieReference ref) noexcept
 {
   std::optional<dw::DieReference> additional_die_reference = std::optional<dw::DieReference>{};
-  dw::UnitReader reader{ref.cu};
-  reader.seek_die(*ref.die);
-  const auto &abbreviation = ref.cu->get_abbreviation(ref.die->abbreviation_code);
+  dw::UnitReader reader = ref.GetReader();
+  const auto &abbreviation = ref.GetUnitData()->get_abbreviation(ref.GetDie()->abbreviation_code);
   if (!abbreviation.is_declaration) {
-    state.add_maybe_origin({.cu = ref.cu, .die_index = ref.cu->index_of(ref.die)});
+    state.add_maybe_origin(ref.AsIndexed());
   }
 
-  if (const auto parent = ref.die->parent();
+  if (const auto parent = ref.GetDie()->parent();
       maybe_null_any_of<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
-    dw::DieReference parent_ref{.cu = ref.cu, .die = parent};
-    if (auto class_name = parent_ref.read_attribute(Attribute::DW_AT_name); class_name) {
+    dw::DieReference parentReference{ref.GetUnitData(), parent};
+    if (auto class_name = parentReference.read_attribute(Attribute::DW_AT_name); class_name) {
       state.namespace_ish = class_name->string();
     }
   }
@@ -255,9 +247,9 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
       if (!state.lnp_file) {
         state.lnp_file =
           src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
-        CDLOG(ref.cu != src_file.get_dwarf_unit(), core,
+        CDLOG(ref.GetUnitData() != src_file.get_dwarf_unit(), core,
               "[dwarf]: Cross CU requires (?) another LNP. ref.cu = 0x{:x}, src file cu=0x{:x}",
-              ref.cu->section_offset(), src_file.get_dwarf_unit()->section_offset());
+              ref.GetUnitData()->section_offset(), src_file.get_dwarf_unit()->section_offset());
       }
     } break;
     case Attribute::DW_AT_decl_line:
@@ -275,7 +267,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
       const auto declaring_die_offset = value.unsigned_value();
-      additional_die_reference = ref.cu->get_objfile()->get_die_reference(declaring_die_offset);
+      additional_die_reference = ref.GetUnitData()->get_objfile()->get_die_reference(declaring_die_offset);
     } break;
     default:
       break;
@@ -358,7 +350,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
         const auto type_id = value.unsigned_value();
         auto obj = unit_data->get_objfile();
         const auto ref = obj->get_die_reference(type_id);
-        state.ret_type = obj->types->get_or_prepare_new_type(ref->as_indexed());
+        state.ret_type = obj->types->get_or_prepare_new_type(ref->AsIndexed());
         break;
       }
       default:

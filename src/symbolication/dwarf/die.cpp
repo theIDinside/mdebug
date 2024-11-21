@@ -1,5 +1,7 @@
 #include "die.h"
+#include "common.h"
 #include "debug_info_reader.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "typedefs.h"
 #include "utils/util.h"
 #include <string_view>
@@ -17,6 +19,31 @@ SetDwarfLogConfig(bool value) noexcept
 }
 
 namespace sym::dw {
+
+bool
+IsCompileUnit(DwarfUnitType type)
+{
+  switch (type) {
+  case DwarfUnitType::DW_UT_compile:
+  case DwarfUnitType::DW_UT_partial:
+    return true;
+  case DwarfUnitType::UNSUPPORTED:
+  case DwarfUnitType::DW_UT_skeleton:
+    [[fallthrough]];
+  case DwarfUnitType::DW_UT_split_compile:
+    [[fallthrough]];
+  case DwarfUnitType::DW_UT_split_type:
+    [[fallthrough]];
+  case DwarfUnitType::DW_UT_lo_user:
+    [[fallthrough]];
+  case DwarfUnitType::DW_UT_hi_user:
+    TODO_FMT("Unhandled unit type: {}", to_str(type));
+  case DwarfUnitType::DW_UT_type:
+    break;
+  }
+  return false;
+}
+
 const DieMetaData *
 DieMetaData::parent() const noexcept
 {
@@ -92,6 +119,53 @@ DieMetaData::create_die(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent
                      .has_children = abbr.has_children,
                      .abbreviation_code = static_cast<u16>(abbr.code),
                      .tag = abbr.tag};
+}
+
+/* static */
+UnitData *
+UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
+                             AbbreviationInfo::Table &&abbreviations) noexcept
+{
+  auto dwarfUnit = new UnitData{owningObject, header};
+  dwarfUnit->set_abbreviations(std::move(abbreviations));
+
+  // No further init needed. If it's not a compilation unit, we don't need build directory or name
+  // if it is, but it's of version 5, the Line Number Program headers will actually contain the build directory
+  // in it's header (which is *MUCH* better). That way we don't need to parse the unit die. However, version 4
+  // does not include that in the LNP Header, so we need to parse build directory in order to create
+  // `SourceCodeFile` with a full path, by joining the build directory with the relative directory and the file
+  // names. In this regard, DWARF5 is infinitely better, although this cost is just paid 1, up front for our Dwarf4
+  // implementation.
+  if (!dwarfUnit->IsCompilationUnitLike() || dwarfUnit->header().version() == DwarfVersion::D5) {
+    return dwarfUnit;
+  }
+
+  UnitReader reader{dwarfUnit};
+
+  const auto die_sec_offset = reader.sec_offset();
+  const auto [abbr_code, uleb_sz] = reader.read_uleb128();
+
+  ASSERT(abbr_code <= dwarfUnit->abbreviations.size() && abbr_code != 0,
+         "[cu=0x{:x}]: Unit DIE abbreviation code {} is invalid, max={}", dwarfUnit->section_offset(), abbr_code,
+         dwarfUnit->abbreviations.size());
+  auto &abbreviation = dwarfUnit->abbreviations[abbr_code - 1];
+  const auto unitDie = DieMetaData::create_die(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
+  auto [lineNumberProgramOffset, buildDirectory] = PrepareCompileUnitDwarf4(dwarfUnit, unitDie);
+  dwarfUnit->mBuildDirectory = buildDirectory;
+  dwarfUnit->mStatementListOffset = lineNumberProgramOffset;
+
+  owningObject->SetBuildDirectory(lineNumberProgramOffset, buildDirectory);
+
+  DBGLOG(dwarf, "[cu=0x{:x}] build directory='{}' with stmt_list offset=0x{:x}", dwarfUnit->section_offset(),
+         dwarfUnit->mBuildDirectory ? dwarfUnit->mBuildDirectory : "could not find build directory",
+         dwarfUnit->mStatementListOffset);
+  return dwarfUnit;
+}
+
+bool
+UnitData::IsCompilationUnitLike() const noexcept
+{
+  return IsCompileUnit(unit_header.get_unit_type());
 }
 
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
@@ -359,6 +433,29 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
     info.has_children = *abbr_ptr;
     abbr_ptr++;
 
+    const auto restore_to = abbr_ptr;
+    // count declarations, because I'm guessing that what takes longest is actually the re-allocation from
+    // std::vector
+    auto count = 1u;
+    for (;; ++count) {
+      Abbreviation abbr;
+      abbr_ptr = decode_uleb128(abbr_ptr, abbr.name);
+      abbr_ptr = decode_uleb128(abbr_ptr, abbr.form);
+      if (abbr.form == AttributeForm::DW_FORM_implicit_const) {
+        ASSERT((u8)info.implicit_consts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
+        abbr.IMPLICIT_CONST_INDEX = info.implicit_consts.size();
+        i64 value = 0;
+        abbr_ptr = decode_leb128(abbr_ptr, value);
+      } else {
+        abbr.IMPLICIT_CONST_INDEX = -1;
+      }
+      if (utils::castenum(abbr.name) == 0) {
+        break;
+      }
+    }
+    info.attributes.reserve(count);
+    abbr_ptr = restore_to;
+
     // read declarations
     for (;;) {
       Abbreviation abbr;
@@ -385,10 +482,8 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
     }
     result.push_back(info);
   }
-  auto dwarf_unit_data = new UnitData{obj, header};
-  dwarf_unit_data->set_abbreviations(std::move(result));
 
-  return dwarf_unit_data;
+  return UnitData::CreateInitUnitData(obj, header, std::move(result));
 }
 
 std::vector<UnitHeader>

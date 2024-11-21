@@ -7,7 +7,7 @@
 #include <typedefs.h>
 
 struct CoreEvent;
-struct TraceeController;
+class TraceeController;
 
 namespace gdb {
 

@@ -1,17 +1,11 @@
 #include "bp.h"
-#include "common.h"
-#include "events/event.h"
 #include "ptrace.h"
-#include "symbolication/dwarf/die.h"
-#include "symbolication/dwarf/name_index.h"
 #include "utils/expected.h"
 #include <algorithm>
-#include <optional>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
 #include <tracer.h>
 #include <type_traits>
-#include <variant>
 
 BreakpointLocation::BreakpointLocation(AddrPtr addr, u8 original) noexcept
     : addr(addr), source_info(), original_byte(original)
@@ -342,7 +336,9 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
       tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, true);
     } else {
       tc.stop_all(&t);
-      tc.all_stop.once([&]() { tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, true); });
+      tc.observer(ObserverType::AllStop).once([&]() {
+        tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, true);
+      });
     }
   } else {
     tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, false);
@@ -391,11 +387,11 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
   if (all_stopped) {
-    tc.emit_stepped_stop({tc.task_leader, tid}, "Finished function", true);
+    tc.emit_stepped_stop({tc.get_task_leader(), tid}, "Finished function", true);
   } else {
     tc.stop_all(&t);
-    tc.all_stop.once([&tc, tid = tid]() {
-      tc.emit_stepped_stop({tc.task_leader, tid}, "Finished function", true);
+    tc.observer(ObserverType::AllStop).once([&tc, tid = tid]() {
+      tc.emit_stepped_stop({tc.get_task_leader(), tid}, "Finished function", true);
     });
   }
   return bp_hit::stop_retire_bp();

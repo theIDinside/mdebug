@@ -26,9 +26,7 @@
 #include <barrier>
 #include <cctype>
 #include <charconv>
-#include <chrono>
 #include <cstdint>
-#include <functional>
 #include <iterator>
 #include <netinet/in.h>
 #include <numeric>
@@ -86,7 +84,7 @@ checksum(std::string_view payload) noexcept
 
 RemoteConnection::RemoteConnection(std::string &&host, int port, utils::ScopedFd &&socket,
                                    RemoteSettings settings) noexcept
-    : host(std::move(host)), port(port), socket(std::move(socket)), remote_settings(settings)
+    : host(std::move(host)), socket(std::move(socket)), port(port), remote_settings(settings)
 {
   auto r = ::pipe(request_command_fd);
   if (r == -1) {
@@ -914,6 +912,7 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
         socket.consume_n(packet_end.value() + 3);
         return done ? qXferResponse::Done : qXferResponse::HasMore;
       }
+      NEVER("Should not reach");
     }
     case MessageData::AsyncHeader: {
       const auto packet_end = socket.find_timeout('#', timeout);
@@ -923,6 +922,7 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
       const auto packet = std::string_view{socket.cbegin(), socket.cbegin() + packet_end.value()};
       put_pending_notification(packet);
       socket.consume_n(packet_end.value() + 3);
+      break;
     }
     case MessageData::Ack:
       socket.consume_n(start->pos + 1);
@@ -935,6 +935,8 @@ RemoteConnection::append_read_qXfer_response(int timeout, std::string &output) n
       break;
     }
   }
+
+  NEVER("Should never reach RemoteConnection::append_read_qXfer_response");
 }
 
 std::optional<std::string>
@@ -974,6 +976,7 @@ RemoteConnection::read_command_response(int timeout, bool expectingStopReply) no
       const auto packet = std::string_view{socket.cbegin(), socket.cbegin() + packet_end.value()};
       put_pending_notification(packet);
       socket.consume_n(packet_end.value() + 3);
+      break;
     }
     case MessageData::Ack:
       socket.consume_n(start->pos + 1);
@@ -1044,6 +1047,7 @@ RemoteConnection::get_remote_threads() noexcept
   std::string_view thr_result{read_threads.result.value()};
   thr_result.remove_prefix("$m"sv.size());
   const auto parsed = protocol_parse_threads(thr_result);
+  threads.reserve(parsed.size());
   for (auto [pid, tid] : parsed) {
     threads.emplace_back(pid, tid);
   }
@@ -1240,7 +1244,7 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
       socket.consume_n(ack->first + 1);
     }
 
-    const auto response = read_command_response(timeout.value_or(-1), false);
+    std::optional<std::string> response = read_command_response(timeout.value_or(-1), false);
     if (!response) {
       if (socket.size() > 0) {
         return NAck{};
@@ -1248,7 +1252,7 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
         return Timeout{.msg = "Timed out waiting for response to command"};
       }
     }
-    result.push_back(std::move(*response));
+    result.emplace_back(std::move(response).value());
   }
   return result;
 }

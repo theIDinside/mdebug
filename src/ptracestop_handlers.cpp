@@ -84,7 +84,8 @@ InstructionStep::~InstructionStep()
 {
   if (!cancelled) {
     DBGLOG(core, "[inst step]: instruction step for {} ended", task.tid);
-    tc.emit_stepped_stop(LWP{.pid = tc.task_leader, .tid = task.tid}, "Instruction stepping finished", false);
+    tc.emit_stepped_stop(LWP{.pid = tc.get_task_leader(), .tid = task.tid}, "Instruction stepping finished",
+                         false);
   }
 }
 
@@ -93,7 +94,8 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
       resumed_to_resume_addr(false), start_frame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr}, entry()
 {
   auto &callstack = tc.build_callframe_stack(task, CallStackRequest::partial(1));
-  start_frame = callstack.frames[0];
+  // First/bottommost/last/current frame always exists.
+  start_frame = *callstack.GetFrameAtLevel(0);
   const auto fpc = start_frame.pc();
   SymbolFile *symbol_file = tc.find_obj_by_pc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
@@ -137,8 +139,8 @@ LineStep::~LineStep() noexcept
 {
   if (!cancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", task.tid);
-    push_debugger_event(CoreEvent::SteppingDone({.target = tc.task_leader, .tid = task.tid, .sig_or_code = 0},
-                                                "Line stepping finished", {}));
+    push_debugger_event(CoreEvent::SteppingDone(
+      {.target = tc.get_task_leader(), .tid = task.tid, .sig_or_code = 0}, "Line stepping finished", {}));
   } else {
     if (resume_bp) {
       tc.remove_breakpoint(resume_bp->id);
@@ -170,41 +172,24 @@ LineStep::update_stepped() noexcept
 {
   const auto frame = tc.current_frame(task);
   // if we're in the same frame, we single step
+
   if (frame.frame_type() == sym::FrameType::Full && same_symbol(frame, start_frame)) {
-    auto lt = frame.cu_line_table();
-    if (!lt) {
-      is_done = true;
-      return;
-    }
-    const auto fpc = frame.pc();
-    auto lte = lt->find_by_pc(fpc);
-    if (lte == lt->end()) {
-      is_done = true;
-    }
-    if (fpc < lte.get().pc && fpc > (lte - 1).get().pc) {
-      return;
-    }
-    if ((*lte).line != entry.line) {
-      is_done = true;
-    }
+    ASSERT(frame.level() == start_frame.level(),
+           "We haven't implemented support where recursion actually creates multiple frames that look the same.");
+    auto [src, lte] = frame.GetLineTableEntry();
+    is_done = (!lte || lte->line != entry.line);
   } else {
     auto &callstack = tc.build_callframe_stack(task, CallStackRequest::full());
-    const auto ret_addr = map<AddrPtr>(
-      callstack.frames,
-      [sf = start_frame](const auto &f) {
-        if (f.has_symbol_info()) {
-          return f.name() == sf.name();
-        }
-        return same_symbol(f, sf);
-      },
-      sym::resume_address);
-    if (ret_addr) {
-      resume_bp = tc.pbps.create_loc_user<ResumeToBreakpoint>(
-        tc, tc.get_or_create_bp_location(ret_addr->as_void(), false), task.tid, task.tid);
+    const auto resumeAddress =
+      callstack.FindFrame(start_frame).transform([](const auto &f) -> AddrPtr { return f.pc(); });
+    if (resumeAddress) {
+      resume_bp = tc.user_breakpoints().create_loc_user<ResumeToBreakpoint>(
+        tc, tc.get_or_create_bp_location(resumeAddress->as_void(), false), task.tid, task.tid);
     } else {
-      DBG(DBGLOG(core, "COULD NOT DETERMINE RESUME ADDRESS? Orignal frame: {} REALLY?: CALLSTACK:", start_frame);
-          for (const auto &frame
-               : callstack.frames) { DBGLOG(core, "{}", frame); })
+      TODO_FMT("Could not determine resume address using start frame {}; haven't implemented line step in "
+               "recursive functions or in the case where some function below does a longjmp and possible entirely "
+               "invalidates the callstack.",
+               start_frame);
     }
   }
 }
@@ -237,7 +222,7 @@ StopHandler::get_proceed_action(const TaskInfo &t) noexcept
 }
 
 void
-StopHandler::handle_proceed(TaskInfo &info, tc::ProcessedStopEvent stop) noexcept
+StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) noexcept
 {
   static_assert(sizeof(tc::ProcessedStopEvent) < 8, "Pass by value so long as it's register-sized");
 
@@ -275,8 +260,8 @@ StopHandler::handle_proceed(TaskInfo &info, tc::ProcessedStopEvent stop) noexcep
     }
 
     if (resumed && tc.session_all_stop_mode()) {
-      for (auto &t : tc.threads) {
-        t.set_running(kind.type);
+      for (auto &t : tc.get_threads()) {
+        t->set_running(kind.type);
       }
     }
   }
@@ -301,13 +286,14 @@ native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
     np = tc.read_type(child_tid);
 
     ASSERT(!tc.has_task(np), "Tracee controller already has task {} !", np);
-    return CoreEvent::CloneEvent({tc.task_leader, cloning_task.tid, 5},
+    return CoreEvent::CloneEvent({tc.get_task_leader(), cloning_task.tid, 5},
                                  TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls}, np, {});
   } else if (orig_rax == SYS_clone3) {
     const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*regs);
     const auto res = tc.read_type(ptr);
     np = tc.read_type(TPtr<pid_t>{res.parent_tid});
-    return CoreEvent::CloneEvent({tc.task_leader, cloning_task.tid, 5}, TaskVMInfo::from_clone_args(res), np, {});
+    return CoreEvent::CloneEvent({tc.get_task_leader(), cloning_task.tid, 5}, TaskVMInfo::from_clone_args(res), np,
+                                 {});
   } else {
     PANIC("Unknown clone syscall!");
   }
@@ -319,19 +305,20 @@ StopHandler::native_core_evt_from_stopped(TaskInfo &t) noexcept
   AddrPtr stepped_over_bp_id{nullptr};
   if (t.loc_stat) {
     const auto locstat = t.clear_bpstat();
-    return CoreEvent::Stepped({tc.task_leader, t.tid, {}}, !locstat->should_resume, locstat,
+    return CoreEvent::Stepped({tc.get_task_leader(), t.tid, {}}, !locstat->should_resume, locstat,
                               std::move(t.next_resume_action), {});
   }
   const auto pc = tc.get_caching_pc(t);
   const auto prev_pc_byte = offset(pc, -1);
-  auto bp_loc = tc.pbps.location_at(prev_pc_byte);
+  auto bp_loc = tc.user_breakpoints().location_at(prev_pc_byte);
   if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
     tc.set_pc(t, prev_pc_byte);
-    return CoreEvent::SoftwareBreakpointHit({.target = tc.task_leader, .tid = t.tid, .sig_or_code = {}},
+    return CoreEvent::SoftwareBreakpointHit({.target = tc.get_task_leader(), .tid = t.tid, .sig_or_code = {}},
                                             prev_pc_byte, {});
   }
 
-  return CoreEvent::DeferToSupervisor({.target = tc.task_leader, .tid = t.tid, .sig_or_code = {}}, {}, false);
+  return CoreEvent::DeferToSupervisor({.target = tc.get_task_leader(), .tid = t.tid, .sig_or_code = {}}, {},
+                                      false);
 }
 
 CoreEvent *
@@ -343,30 +330,30 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
   switch (ws.ws) {
   case WaitStatusKind::Stopped: {
     if (!info.initialized) {
-      return CoreEvent::ThreadCreated({tc.task_leader, info.tid, 5},
+      return CoreEvent::ThreadCreated({tc.get_task_leader(), info.tid, 5},
                                       {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
     }
     if (tc.is_on_entry()) {
-      return CoreEvent::EntryEvent({tc.task_leader, info.tid, 5}, {}, true);
+      return CoreEvent::EntryEvent({tc.get_task_leader(), info.tid, 5}, {}, true);
     }
     return native_core_evt_from_stopped(info);
   }
   case WaitStatusKind::Execed: {
-    return CoreEvent::ExecEvent({.target = tc.task_leader, .tid = info.tid, .sig_or_code = 5},
+    return CoreEvent::ExecEvent({.target = tc.get_task_leader(), .tid = info.tid, .sig_or_code = 5},
                                 process_exe_path(info.tid), {});
   }
   case WaitStatusKind::Exited: {
     // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
     // other threads
     const bool process_needs_resuming = Tracer::Instance->TraceExitConfigured;
-    return CoreEvent::ThreadExited({tc.task_leader, info.tid, ws.exit_code}, process_needs_resuming, {});
+    return CoreEvent::ThreadExited({tc.get_task_leader(), info.tid, ws.exit_code}, process_needs_resuming, {});
   }
   case WaitStatusKind::Forked: {
     Tid new_child = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.tid, nullptr, &new_child);
     ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
     DBGLOG(core, "[fork]: new process after fork {}", new_child);
-    return CoreEvent::ForkEvent({tc.task_leader, info.tid, 5}, new_child, {});
+    return CoreEvent::ForkEvent({tc.get_task_leader(), info.tid, 5}, new_child, {});
   }
   case WaitStatusKind::VForked:
     TODO("WaitStatusKind::VForked");
@@ -378,7 +365,7 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
     return native_create_clone_event(tc, info);
   } break;
   case WaitStatusKind::Signalled:
-    return CoreEvent::Signal({tc.task_leader, info.tid, info.wait_status.signal}, {});
+    return CoreEvent::Signal({tc.get_task_leader(), info.tid, info.wait_status.signal}, {});
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
     break;
@@ -471,8 +458,8 @@ StepInto::StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_fram
 StepInto::~StepInto() noexcept
 {
   if (!cancelled) {
-    push_debugger_event(
-      CoreEvent::SteppingDone({.target = tc.task_leader, .tid = task.tid, .sig_or_code = 0}, "Step in done", {}));
+    push_debugger_event(CoreEvent::SteppingDone(
+      {.target = tc.get_task_leader(), .tid = task.tid, .sig_or_code = 0}, "Step in done", {}));
   }
 }
 
@@ -506,24 +493,11 @@ StepInto::update_stepped() noexcept
   const auto frame = tc.current_frame(task);
   // if we're in the same frame, we single step
   if (inside_origin_frame(frame)) {
-    auto lt = frame.cu_line_table();
-    if (!lt) {
+    auto [src, lte] = frame.GetLineTableEntry();
+    if (!lte) {
       is_done = true;
-      return;
-    }
-    const auto fpc = frame.pc();
-    auto lte = lt->find_by_pc(fpc);
-    // we could no longer find LTE; which probably means we've left our origin line.
-    if (lte == lt->end()) {
+    } else if (!is_origin_line(lte->line)) {
       is_done = true;
-      return;
-    }
-    if (fpc < lte.get().pc && fpc > (lte - 1).get().pc) {
-      return;
-    }
-    if (!is_origin_line(lte.get().line)) {
-      is_done = true;
-      return;
     }
   } else {
     // means we've left the original frame
@@ -535,7 +509,7 @@ StepInto *
 StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
 {
   auto &callstack = ctrl.build_callframe_stack(task, CallStackRequest::partial(1));
-  const auto start_frame = callstack.frames[0];
+  const auto start_frame = *callstack.GetFrameAtLevel(0);
   const auto fpc = start_frame.pc();
   SymbolFile *symbol_file = ctrl.find_obj_by_pc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);

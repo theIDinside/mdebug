@@ -1,5 +1,4 @@
 #include "unit_header.h"
-#include "common.h"
 #include <symbolication/elf.h>
 
 namespace sym::dw {

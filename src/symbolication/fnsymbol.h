@@ -1,7 +1,6 @@
 #pragma once
 #include "../common.h"
 #include "addr_sorter.h"
-#include "symbolication/dwarf_expressions.h"
 #include "symbolication/type.h"
 #include "utils/immutable.h"
 
@@ -41,13 +40,13 @@ private:
   SymbolBlock formal_parameters;
   std::vector<SymbolBlock> function_body_variables;
   Immutable<std::array<dw::IndexedDieReference, 3>> maybe_origin_dies;
-  dw::FrameBaseExpression framebase_expr;
+  std::span<const u8> framebase_expr;
   sym::Type *return_type;
 
   // Private member functions
   FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
                  sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                 CompilationUnit &decl_file, dw::FrameBaseExpression fb_expr,
+                 CompilationUnit &decl_file, std::span<const u8> fb_expr,
                  std::optional<SourceCoordinate> &&source_coord) noexcept;
 
 public:
@@ -66,11 +65,11 @@ public:
   std::string build_full_name() const noexcept;
   AddrPtr start_pc() const noexcept;
   AddrPtr end_pc() const noexcept;
-  CompilationUnit *symbol_info() noexcept;
+  CompilationUnit *GetCompilationUnit() noexcept;
   const CompilationUnit *symbol_info() const noexcept;
   std::span<const dw::IndexedDieReference> origin_dies() const noexcept;
   bool is_resolved() const noexcept;
-  dw::FrameBaseExpression frame_base() const noexcept;
+  std::span<const u8> frame_base() const noexcept;
 
   const SymbolBlock &get_args() const noexcept;
   const std::vector<SymbolBlock> &get_frame_locals() const noexcept;

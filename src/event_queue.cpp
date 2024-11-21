@@ -1,9 +1,7 @@
 #include "event_queue.h"
-#include "bp.h"
 #include <chrono>
 #include <condition_variable>
 #include <interface/ui_command.h>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -16,6 +14,7 @@ static std::mutex event_queue_wait_mutex{};
 static std::condition_variable cv{};
 static std::queue<Event> events{};
 
+// NOLINTBEGIN(cppcoreguidelines-owning-memory)
 CoreEvent::CoreEvent(Pid target, Tid tid, CoreEventVariant &&p, CoreEventType type, int sig_code,
                      RegisterData &&reg) noexcept
     : target(target), tid(tid), event(std::move(p)), event_type(type), signal(sig_code), registers(std::move(reg))
@@ -40,6 +39,7 @@ CoreEvent *
 CoreEvent::SoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
                                  RegisterData &&reg) noexcept
 {
+
   DBGLOG(core, "[Core Event]: creating event SoftwareBreakpointHit");
   return new CoreEvent{
     param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Software, addr},
@@ -193,7 +193,8 @@ push_event(Event e)
 void
 push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept
 {
-  push_event(Event{.type = EventType::WaitStatus, .wait = {.process_group = process_group, .wait = wait_result}});
+  push_event(Event{.type = EventType::WaitStatus,
+                   .wait = {.process_group = process_group, .wait = wait_result, .core = 0}});
 }
 
 void
@@ -218,17 +219,16 @@ push_init_event(CoreEvent *event) noexcept
 Event
 poll_event()
 {
+  constexpr static auto SLEEP_CYCLE = 10;
   while (events.empty()) {
     std::unique_lock lock(event_queue_wait_mutex);
-    cv.wait_for(lock, std::chrono::milliseconds{10});
+    cv.wait_for(lock, std::chrono::milliseconds{SLEEP_CYCLE});
   }
 
-  Event evt;
-  {
-    std::lock_guard lock(event_queue_mutex);
-    // Todo: implement own queue, that instead of this atrocity, has a pop(), that also returns the value
-    evt = events.front();
-    events.pop();
-  }
+  std::lock_guard lock(event_queue_mutex);
+  // Todo: implement own queue, that instead of this atrocity, has a pop(), that also returns the value
+  Event evt = events.front();
+  events.pop();
   return evt;
 }
+// NOLINTEND(cppcoreguidelines-owning-memory)

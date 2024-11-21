@@ -91,22 +91,22 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
     const auto die_ref = cu->get_cu_die_ref(idx);
-    const auto this_die = die_ref.die;
+    const auto this_die = die_ref.GetDie();
     if (this_die->tag == DwarfTag::DW_TAG_typedef || this_die->tag == DwarfTag::DW_TAG_array_type) {
       continue;
     }
-    const auto offs = Offset{die_ref.die->section_offset};
+    const auto offs = Offset{die_ref.GetDie()->section_offset};
     const auto possible_size = die_ref.read_attribute(Attribute::DW_AT_byte_size);
     ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
-           cu->section_offset(), die_ref.die->section_offset);
+           cu->section_offset(), die_ref.GetDie()->section_offset);
     auto type = obj->types->emplace_type(this_die->tag, offs, IndexedDieReference{cu, idx},
                                          possible_size->unsigned_value(), name);
-    if (die_ref.die->tag == DwarfTag::DW_TAG_base_type) {
+    if (die_ref.GetDie()->tag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{cu};
-      reader.seek_die(*die_ref.die);
+      reader.seek_die(*die_ref.GetDie());
       auto attr = die_ref.read_attribute(Attribute::DW_AT_encoding);
       ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
-             die_ref.die->section_offset);
+             die_ref.GetDie()->section_offset);
       auto encoding =
         attr.and_then([](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.unsigned_value())}; });
       type->set_base_type_encoding(encoding.value());

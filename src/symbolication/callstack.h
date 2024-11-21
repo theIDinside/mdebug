@@ -1,4 +1,5 @@
 #pragma once
+#include "interface/dap/types.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
@@ -6,12 +7,15 @@
 #include <symbolication/fnsymbol.h>
 
 class SymbolFile;
-
+struct CallStackRequest;
+struct TaskInfo;
 namespace ui::dap {
 struct Scope;
 }
 
 namespace sym {
+class CFAStateMachine;
+
 enum class FrameType : u8
 {
   Full,
@@ -98,7 +102,7 @@ public:
   int id() const noexcept;
   int level() const noexcept;
   AddrPtr pc() const noexcept;
-  SymbolFile *get_symbol_file() noexcept;
+  SymbolFile *GetSymbolFile() const noexcept;
 
   const sym::FunctionSymbol &full_symbol_info() const noexcept;
 
@@ -141,12 +145,8 @@ public:
     return false;
   }
 
+  std::pair<dw::SourceCodeFile*, const dw::LineTableEntry*> GetLineTableEntry() const noexcept;
   std::optional<std::string_view> function_name() const noexcept;
-
-  /**
-   * Return the line table for the compilation unit where this Frame exists in.
-   */
-  std::optional<dw::LineTable> cu_line_table() const noexcept;
   std::array<ui::dap::Scope, 3> scopes() noexcept;
   std::optional<ui::dap::Scope> scope(u32 var_ref) noexcept;
 };
@@ -167,6 +167,7 @@ public:
       return BlockSymbolIterator::Begin(frame.full_symbol_info().get_frame_locals());
       break;
     }
+    NEVER("Unknown frame variables kind");
   }
 
   BlockSymbolIterator
@@ -180,6 +181,7 @@ public:
       return BlockSymbolIterator::End(frame.full_symbol_info().get_frame_locals());
       break;
     }
+    NEVER("Unknown frame variables kind");
   }
 
 private:
@@ -193,27 +195,76 @@ resume_address(const Frame &f) noexcept
   return f.rip;
 }
 
-struct CallStack
+class FrameUnwindState
 {
+  u64 mCanonicalFrameAddress;
+  std::vector<u64> mFrameRegisters;
+
+public:
+  void SetCanonicalFrameAddress(u64 addr) noexcept;
+  u64 CanonicalFrameAddress() const noexcept;
+  void Reserve(u32 count) noexcept;
+  u64 RegisterCount() const noexcept;
+  void Set(u32 number, u64 value) noexcept;
+  void Reset() noexcept;
+  AddrPtr GetPc() const noexcept;
+  AddrPtr GetRegister(u64 registerNumber) const noexcept;
+  FrameUnwindState Clone() const noexcept;
+};
+
+class CallStack
+{
+public:
   NO_COPY(CallStack);
-  explicit CallStack(Tid tid) noexcept;
+  explicit CallStack(TraceeController *supervisor, TaskInfo *task) noexcept;
   ~CallStack() = default;
 
   Frame *get_frame(int frame_id) noexcept;
+  Frame *GetFrameAtLevel(u32 level) noexcept;
   u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
 
-  inline void
-  clear() noexcept
+  bool IsDirty() const noexcept;
+  void SetDirty() noexcept;
+  void Initialize() noexcept;
+  void Reset() noexcept;
+  void Reserve(u32 count) noexcept;
+
+  u32 FramesCount() const noexcept;
+  std::span<Frame> GetFrames() noexcept;
+  std::optional<Frame> FindFrame(const Frame &frame) const noexcept;
+  void Unwind(const CallStackRequest &req);
+  FrameUnwindState *GetUnwindState(u32 level) noexcept;
+
+  template <class Self>
+  std::span<const AddrPtr>
+  ReturnAddresses(this Self &&self) noexcept
   {
-    frames.clear();
-    pcs.clear();
+    return self.mFrameProgramCounters;
   }
 
-  Tid tid; // the task associated with this call stack
+  template <typename... Args>
+  void
+  PushFrame(Args &&...args)
+  {
+    frames.push_back(sym::Frame{args...});
+  }
+
+private:
+  void ClearFrames() noexcept;
+  void ClearProgramCounters() noexcept;
+  void ClearUnwoundRegisters() noexcept;
+  AddrPtr GetTopMostPc() const noexcept;
+  bool ResolveNewFrameRegisters(CFAStateMachine &stateMachine) noexcept;
+  // Any unwind operation consists of the new set of registers for a frame, that are derived from the newer set of
+  // registers from a newer frame. As such, for an unwind operation for a frame, 2 frames are always important.
+  std::pair<FrameUnwindState *, FrameUnwindState *> GetCurrent() noexcept;
+
+  TaskInfo *mTask; // the task associated with this call stack
+  TraceeController *mSupervisor;
   bool dirty;
-  std::vector<Frame> frames; // the call stack
-  std::vector<AddrPtr> pcs;
-  std::vector<std::array<u64, 17>> reg_unwind_buffer;
+  std::vector<Frame> frames{}; // the call stack
+  std::vector<AddrPtr> mFrameProgramCounters{};
+  std::vector<FrameUnwindState> mUnwoundRegister{};
 };
 } // namespace sym
 
@@ -229,9 +280,8 @@ template <> struct formatter<sym::Frame>
 
   template <typename FormatContext>
   auto
-  format(const sym::Frame &frame, FormatContext &ctx)
+  format(const sym::Frame &frame, FormatContext &ctx) const
   {
-
     return fmt::format_to(ctx.out(), "{{ pc: {}, level: {}, fn: {} }}", frame.pc(), frame.level(),
                           frame.function_name().value_or("Unknown"));
   }

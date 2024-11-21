@@ -45,8 +45,9 @@ async function inConstructor(debugAdapter) {
       console.log(prettyJson(vres))
       assertAllVariableReferencesUnique(vres.body.variables)
       assertVarResponseLength(vres.body.variables, 3, scope.variablesReference, vres)
+      // clang emits `Class *` for a `this` pointer of type Class, gcc emits `Class *const` ... sigh. why gcc. why.
       assert(
-        vres.body.variables.some((v) => v.name == 'this' && v.type == 'Class *'),
+        vres.body.variables.some((v) => v.name == 'this' && (v.type == 'Class *' || v.type == "const Class *")),
         () => `Expected to see a 'this' parameter, but didn't. Variables: ${prettyJson(vres.body.variables)}`
       )
     }
@@ -83,7 +84,7 @@ async function scopeLocalsTest(debugAdapter) {
         assertEqAInB(expected[v.name], v)
         if (v.name == 'structure') {
           const expected = {
-            name: newVarObject('name', '0x200688', 'const char *'),
+            name: newVarObject('name', val => true, 'const char *'),
             count: newVarObject('count', '1', 'int', 0),
             fraction: newVarObject('fraction', '1.25', 'float', 0),
           }

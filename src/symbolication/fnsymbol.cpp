@@ -1,5 +1,4 @@
 #include "fnsymbol.h"
-#include "symbolication/dwarf_expressions.h"
 namespace sym {
 
 ReturnValueClass
@@ -13,7 +12,7 @@ determine_ret_class(sym::Type *type) noexcept
 
 FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
                                sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                               CompilationUnit &decl_file, dw::FrameBaseExpression fb_expr,
+                               CompilationUnit &decl_file, std::span<const u8> fb_expr,
                                std::optional<SourceCoordinate> &&source) noexcept
     : decl_file(NonNull(decl_file)), formal_parameters(start, end, {}), function_body_variables(),
       maybe_origin_dies(maybe_origin), framebase_expr(fb_expr), return_type(return_type), pc_start(start),
@@ -58,7 +57,7 @@ FunctionSymbol::symbol_info() const noexcept
 }
 
 CompilationUnit *
-FunctionSymbol::symbol_info() noexcept
+FunctionSymbol::GetCompilationUnit() noexcept
 {
   return decl_file;
 }
@@ -68,7 +67,7 @@ FunctionSymbol::origin_dies() const noexcept
 {
   auto &dies = *maybe_origin_dies;
   for (auto i = 0u; i < dies.size(); ++i) {
-    if (!dies[i].valid()) {
+    if (!dies[i].IsValid()) {
       return std::span{dies.begin(), dies.begin() + i};
     }
   }
@@ -81,7 +80,7 @@ FunctionSymbol::is_resolved() const noexcept
   return fully_parsed;
 }
 
-dw::FrameBaseExpression
+std::span<const u8>
 FunctionSymbol::frame_base() const noexcept
 {
   return framebase_expr;

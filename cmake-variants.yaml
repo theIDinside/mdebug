@@ -1,0 +1,72 @@
+buildType:
+  default: debug
+  choices:
+    debug:
+      short: Debug
+      long: Build with debug symbols
+      buildType: Debug
+    release:
+      short: Release
+      long: Optimized build with no debug symbols
+      buildType: Release
+
+tidy:
+  default: NoClangTidy
+  choices:
+    NoClangTidy:
+      short: clang-tidy off
+      long: Don't run clang tidy checks during build time
+      settings:
+        CLANG_TIDY_CHECK: OFF
+    RunClangTidy:
+      short: clang-tidy on
+      long: Run clang-tidy checks during build phase of MDB
+      settings:
+        CLANG_TIDY_CHECK: ON
+
+dwarfstandard:
+  default: dwarf4
+  choices:
+    dwarf4:
+      short: DWARF4
+      long: Build test cases with dwarf4 only symbols
+      settings:
+        USE_DWARF5: OFF
+    dwarf5:
+      short: DWARF5
+      long: Build test cases with dwarf4 and dwarf5 symbols
+      settings:
+        USE_DWARF5: ON
+
+tests:
+  default: buildtests
+  choices:
+    buildtests:
+      short: Build tests
+      long: Build tests to be used with test suite
+      settings:
+        BUILD_MDB_TESTS: ON
+    notests:
+      short: Don't build tests
+      long: Don't build tests to be used with test suite
+      settings:
+        BUILD_MDB_TESTS: OFF
+
+linker:
+  default: lld
+  choices:
+    lld:
+      short: LLVM linker
+      long: Use the LLVM linker lld
+      settings:
+        CMAKE_LINKER_TYPE: LLD
+    gnu:
+      short: GNU linker
+      long: Use the GNU linker ld GOLD
+      settings:
+        CMAKE_LINKER_TYPE: LD
+    mold:
+      short: MOLD linker
+      long: Use the mold linker
+      settings:
+        CMAKE_LINKER_TYPE: MOLD

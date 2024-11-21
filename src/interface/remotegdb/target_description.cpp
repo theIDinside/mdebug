@@ -29,15 +29,62 @@ read_arch_info(const xml::XMLElementView &root) noexcept
         ASSERT(res.ec == std::errc(), "Failed to parse reg num from target description for register");
       }
     }
+
+    // Debugger-Context Registers. I like my own name for these registers. Because they're the debug context; the
+    // stack, the pc and the current stack frame (if available)
   }
   utils::sort(result, [](const auto &a, const auto &b) { return a.regnum < b.regnum; });
   return result;
 }
 
+/*static*/
+std::shared_ptr<ArchictectureInfo>
+ArchictectureInfo::CreateArchInfo(const std::vector<ArchReg> &registers)
+{
+  std::vector<RegisterMetadata> metaData;
+  std::vector<RegisterName> regNames;
+  u16 byteOffset = 0u;
+
+  u16 mRIPOffset;
+  u8 mRIPNumber;
+  u16 mRSPOffset;
+  u8 mRSPNumber;
+  u16 mRBPOffset;
+  u8 mRBPNumber;
+
+  auto registerNumber = 0u;
+  for (const auto &r : registers) {
+    metaData.push_back({r.bit_size, byteOffset});
+    if (r.name == "rip") {
+      mRIPOffset = byteOffset;
+      mRIPNumber = registerNumber;
+    } else if (r.name == "rsp") {
+      mRSPOffset = byteOffset;
+      mRSPNumber = registerNumber;
+    } else if (r.name == "rbp") {
+      mRBPOffset = byteOffset;
+      mRBPNumber = registerNumber;
+    }
+    regNames.push_back({r.name, r.type});
+    byteOffset += (r.bit_size / 8);
+    registerNumber += 1;
+  }
+  return std::make_shared<ArchictectureInfo>(
+    RegisterInfo{std::move(metaData), std::move(regNames)},
+    DebuggerContextRegisters{mRIPOffset, mRIPNumber, mRSPOffset, mRSPNumber, mRBPOffset, mRBPNumber});
+}
+
+ArchictectureInfo::ArchictectureInfo(RegisterInfo &&registers,
+                                     const DebuggerContextRegisters &debugRegisters) noexcept
+    : mRegisters(std::move(registers)), mDebugContextRegisters(debugRegisters)
+{
+}
+
 u32
 ArchictectureInfo::register_bytes() const noexcept
 {
-  return utils::accumulate(registers, [](u32 acc, auto &reg) -> u32 { return acc + (reg.bit_size / 8); });
+  return utils::accumulate(mRegisters->mRegisterMetaData,
+                           [](u32 acc, auto &reg) -> u32 { return acc + (reg.bit_size / 8); });
 }
 
 } // namespace gdb

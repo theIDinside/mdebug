@@ -1,6 +1,5 @@
 #include "tracee_command_interface.h"
 #include "common.h"
-#include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
 #include <supervisor.h>
 #include <tracer.h>
@@ -48,8 +47,8 @@ TraceeCommandInterface::reverse_continue() noexcept
 TaskExecuteResponse
 TraceeCommandInterface::do_disconnect(bool terminate) noexcept
 {
-  for (auto &user : tc->pbps.all_users()) {
-    tc->pbps.remove_bp(user->id);
+  for (auto &user : tc->user_breakpoints().all_users()) {
+    tc->user_breakpoints().remove_bp(user->id);
   }
   disconnect(terminate);
   return TaskExecuteResponse::Ok();

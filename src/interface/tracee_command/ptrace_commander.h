@@ -6,7 +6,7 @@
 #include <link.h>
 #include <utils/scoped_fd.h>
 
-struct TraceeController;
+class TraceeController;
 
 namespace tc {
 

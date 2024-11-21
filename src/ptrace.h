@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/macros.h"
 #include <optional>
 #include <source_location>
 #include <string_view>
@@ -29,6 +30,7 @@ to_str(WaitStatusKind ws)
 #include "./defs/waitstatus.def"
 #undef ITEM
   }
+  MIDAS_UNREACHABLE
 }
 
 struct WaitStatus

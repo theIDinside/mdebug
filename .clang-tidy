@@ -1,5 +1,6 @@
-Checks: 'clang-diagnostic-*,clang-analyzer-*,-readability-identifier-naming,modernize-use-default-member-init,modernize-use-equals-default,modernize-use-override'
-AnalyzeTemporaryDtors: false
+Checks: 'clang-diagnostic-*,clang-analyzer-*,-readability-identifier-naming,modernize-use-default-member-init,modernize-use-equals-default,modernize-use-override,performance-*'
+HeaderFileExtensions:         ['h']
+ImplementationFileExtensions: ['cpp']
 CheckOptions:
   modernize-loop-convert.MinConfidence: reasonable
   modernize-replace-auto-ptr.IncludeStyle: llvm

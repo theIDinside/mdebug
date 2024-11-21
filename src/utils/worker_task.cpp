@@ -1,5 +1,6 @@
 #include "worker_task.h"
 #include "../common.h"
+#include "fmt/ranges.h"
 #include "thread_pool.h"
 #include <chrono>
 

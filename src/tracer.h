@@ -7,7 +7,6 @@
 #include "interface/dap/interface.h"
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "interface/ui_result.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
 #include "ptrace.h"
@@ -19,7 +18,7 @@
 
 struct ObjectFile;
 class SymbolFile;
-struct TraceeController;
+class TraceeController;
 
 using Pid = pid_t;
 using Tid = pid_t;
@@ -86,7 +85,6 @@ struct VariableContext
 
   bool valid_context() const noexcept;
   std::optional<std::array<ui::dap::Scope, 3>> scopes_reference(VarRefKey frameKey) const noexcept;
-  std::optional<VariableObject> varobj(VarRefKey ref) noexcept;
   sym::Frame *get_frame(VarRefKey ref) noexcept;
   SharedPtr<sym::Value> get_maybe_value() const noexcept;
 };
@@ -112,7 +110,7 @@ public:
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   void config_done(ui::dap::DebugAdapterClient *client) noexcept;
   CoreEvent *process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept;
-  void handle_command(ui::UICommandPtr cmd) noexcept;
+  void handle_command(ui::UICommand *cmd) noexcept;
   void handle_core_event(const CoreEvent *evt) noexcept;
   void handle_init_event(const CoreEvent *evt) noexcept;
 
@@ -144,6 +142,21 @@ public:
   void set_var_context(VariableContext ctx) noexcept;
   u32 clone_from_var_context(const VariableContext &ctx) noexcept;
   void destroy_reference(VarRefKey key) noexcept;
+  std::vector<std::unique_ptr<TraceeController>>::iterator
+  find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept;
+
+  template <typename Predicate>
+  bool
+  erase_target(Predicate &&fn)
+  {
+    auto it = std::find_if(targets.begin(), targets.end(), std::move(fn));
+    const bool erased = it != std::end(targets);
+#ifdef MDB_DEBUG
+    DBGLOG(core, "found tracer to delete: {}", erased);
+#endif
+    targets.erase(it);
+    return erased;
+  }
 
   std::vector<std::unique_ptr<TraceeController>> targets;
   ui::dap::DAP *dap;

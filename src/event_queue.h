@@ -1,17 +1,13 @@
 #pragma once
 
-#include "bp.h"
 #include "event_queue_event_param.h"
-#include "interface/tracee_command/tracee_command_interface.h"
 #include "ptrace.h"
 #include "task.h"
-#include <exception>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
-
+// NOLINTBEGIN(cppcoreguidelines-owning-memory)
 namespace ui {
 struct UICommand;
 namespace dap {
@@ -57,8 +53,8 @@ enum class CoreEventType
   Entry
 };
 
-#define EventType(Type) static constexpr CoreEventType EvtType = CoreEventType::Type
-#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event] ({}): {}", EventObject.event_type, Msg)
+#define EventType(Type) static constexpr CoreEventType EvtType = CoreEventType::Type // NOLINT
+#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event] ({}): {}", EventObject.event_type, Msg) // NOLINT
 
 namespace fmt {
 
@@ -113,6 +109,7 @@ template <> struct formatter<CoreEventType>
     case CoreEventType::Entry:
       return fmt::format_to(ctx.out(), "CoreEventType::Entry");
     }
+    NEVER("Unknown Core event type");
   }
 };
 
@@ -323,3 +320,5 @@ void push_debugger_event(CoreEvent *event) noexcept;
 void push_init_event(CoreEvent *event) noexcept;
 
 Event poll_event();
+
+// NOLINTEND(cppcoreguidelines-owning-memory)

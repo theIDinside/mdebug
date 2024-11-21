@@ -1,18 +1,20 @@
 #pragma once
 
-#include "bp.h"
 #include "common.h"
 #include "interface/dap/dap_defs.h"
-#include "interface/tracee_command/tracee_command_interface.h"
 #include <symbolication/callstack.h>
-#include <symbolication/dwarf/lnp.h>
-#include <task.h>
 #include <unordered_map>
 
-struct TraceeController;
+class TraceeController;
 struct BpStat;
+struct TaskInfo;
 
 struct CoreEvent;
+
+namespace tc {
+class TraceeCommandInterface;
+struct ProcessedStopEvent;
+} // namespace tc
 
 namespace ptracestop {
 
@@ -128,7 +130,7 @@ public:
   ThreadProceedAction *get_proceed_action(const TaskInfo &t) noexcept;
   void remove_action(const TaskInfo &t) noexcept;
 
-  void handle_proceed(TaskInfo &info, tc::ProcessedStopEvent should_resume) noexcept;
+  void handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &should_resume) noexcept;
 
   CoreEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
   void set_stop_all() noexcept;

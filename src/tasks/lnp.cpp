@@ -1,5 +1,4 @@
 #include "lnp.h"
-#include <symbolication/dwarf/lnp.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
@@ -30,7 +29,7 @@ void
 LineNumberProgramTask::execute_task() noexcept
 {
   for (auto &header : lnp_headers) {
-    sym::dw::compute_line_number_program(obj->get_plte(header.sec_offset), obj->elf, &header);
+    TODO("(Re)Implement aggressive line number program execution");
   }
 }
 } // namespace sym::dw

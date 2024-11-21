@@ -8,7 +8,7 @@
 #include "../symbolication/objfile.h"
 #include "../utils/enumerator.h"
 #include "../utils/thread_pool.h"
-#include "symbolication/dwarf/die.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/rnglists.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_defs.h"
@@ -56,8 +56,8 @@ read_values(UnitData &cu, const DieMetaData &die) noexcept
 }
 
 static auto
-is_member_fn(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu, const DieMetaData &die) noexcept
-  -> std::tuple<bool, std::optional<std::string_view>>
+IsMemberFunction(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu,
+             const DieMetaData &die) noexcept -> std::tuple<bool, std::optional<std::string_view>>
 {
   ASSERT((maybe_null_any_of<DwarfTag::DW_TAG_subprogram, DwarfTag::DW_TAG_inlined_subroutine>(&die)),
          "Asking if die is a member function die when it's not a subprogram die doesn't make sense. "
@@ -71,27 +71,22 @@ is_member_fn(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu
   auto parent_die = die.parent();
   using enum DwarfTag;
   const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(parent_die);
-  const auto attrs = read_values<Attribute::DW_AT_abstract_origin, Attribute::DW_AT_specification>(cu, die);
-  if (!attrs.empty()) {
-    for (const auto &value : attrs) {
-      const auto offset = value.unsigned_value();
-      auto that_ref = cu.get_objfile()->get_die_reference(offset).value();
+  const auto not_already_added = [id = cu.section_offset()](auto cu) {
+    return cu->section_offset() != id;
+  };
+  for (auto ref = DieReference(&cu, &die).MaybeResolveReference(); ref.IsValid();
+       ref = ref.MaybeResolveReference()) {
 
-      const auto not_already_added = [id = that_ref.cu->section_offset()](auto cu) {
-        return cu->section_offset() != id;
-      };
+    if (ref.GetUnitData() != &cu && std::ranges::all_of(followed_references, not_already_added)) {
+      ref.GetUnitData()->take_reference();
+      followed_references.push_back(ref.GetUnitData());
+    }
 
-      if (that_ref.cu != &cu && std::ranges::all_of(followed_references, not_already_added)) {
-        that_ref.cu->take_reference();
-        followed_references.push_back(that_ref.cu);
-      }
-      const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(that_ref.die->parent());
-      const auto name =
-        that_ref.read_attribute(Attribute::DW_AT_name).transform([](auto attr) { return attr.string(); });
-      if (result) {
-        const auto result = std::make_tuple(true, name);
-        return result;
-      }
+    const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(ref.GetDie()->parent());
+    const auto name = ref.read_attribute(Attribute::DW_AT_name).transform([](auto attr) { return attr.string(); });
+    if (result) {
+      const auto result = std::make_tuple(true, name);
+      return result;
     }
   }
   return std::make_tuple(result, std::nullopt);
@@ -243,7 +238,7 @@ IndexingTask::execute_task() noexcept
           break;
         }
 
-        const auto &[is_mem_fn, resolved_name] = is_member_fn(followed_references, *comp_unit, die);
+        const auto &[is_mem_fn, resolved_name] = IsMemberFunction(followed_references, *comp_unit, die);
         if (!name.empty() || resolved_name.has_value()) {
           if (is_mem_fn) {
             methods.push_back({resolved_name.value_or(name), die_index, comp_unit});

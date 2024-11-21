@@ -192,7 +192,7 @@ async function normalTest(DA) {
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
   if (bp_lines.length != 4) throw new Error(`Expected to find 4 breakpoint locations but found ${bp_lines.length}`)
-  await DA.sendReqGetResponse('setBreakpoints', {
+  const bpResponse = await DA.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/stackframes.cpp'),
       path: repoDirFile('test/stackframes.cpp'),

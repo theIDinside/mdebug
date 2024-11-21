@@ -1,6 +1,5 @@
 #pragma once
 #include "common.h"
-#include <deque>
 #include <memory>
 #include <optional>
 #include <type_traits>

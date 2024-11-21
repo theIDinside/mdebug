@@ -1,6 +1,4 @@
 #pragma once
-#include <cstdint>
-#include <optional>
 #include <symbolication/dwarf_defs.h>
 #include <typedefs.h>
 #include <vector>

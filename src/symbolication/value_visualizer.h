@@ -1,12 +1,11 @@
 #pragma once
-#include "utils/immutable.h"
-#include <cstdint>
+#include "common.h"
 #include <memory>
 #include <optional>
 #include <typedefs.h>
 #include <vector>
 
-struct TraceeController;
+class TraceeController;
 class SymbolFile;
 
 namespace sym {

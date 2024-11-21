@@ -1,9 +1,6 @@
 #include "rnglists.h"
-#include "common.h"
 #include "symbolication/dwarf/reader_funcs.h"
 #include "symbolication/dwarf_binary_reader.h"
-#include "symbolication/dwarf_defs.h"
-#include <symbolication/block.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>

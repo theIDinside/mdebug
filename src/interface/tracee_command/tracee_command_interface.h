@@ -1,16 +1,12 @@
 #pragma once
-#include "arch.h"
 #include "interface/remotegdb/target_description.h"
+#include "register_description.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
-#include <cstring>
-#include <memory>
-#include <sys/user.h>
-#include <typedefs.h>
 
 using namespace std::string_view_literals;
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 class SymbolFile;
 
@@ -187,7 +183,11 @@ struct TaskExecuteResponse
     return kind == TaskExecuteResult::Ok;
   }
 
-  constexpr operator bool() const noexcept { return is_ok(); }
+  constexpr
+  operator bool() const noexcept
+  {
+    return is_ok();
+  }
 };
 
 std::string_view to_str(RunType type) noexcept;

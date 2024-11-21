@@ -1,5 +1,4 @@
 #include "scoped_fd.h"
-#include "utils/expected.h"
 #include "utils/scope_defer.h"
 #include <fcntl.h>
 #include <netdb.h>

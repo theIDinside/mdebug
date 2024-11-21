@@ -15,9 +15,9 @@
 void
 variants()
 {
-  const auto boss = NPC::Boss("Dragon", "Rat King", 10000, 2748, 999, 42);
-  const auto friend_ = NPC::Friend("Nobby Nobbs", 10);
-  const auto critter = NPC::Minion("rat", 5, 3, 22);
+  const auto boss = NPC::MakeBoss("Dragon", "Rat King", 10000, 2748, 999, 42);
+  const auto friend_ = NPC::MakeFriend("Nobby Nobbs", 10);
+  const auto critter = NPC::MakeMinion("rat", 5, 3, 22);
 
   printf("Can we print these using just DAP requests (particularly when using The Midas Debugger\n"); // VARIANT_BP
 }

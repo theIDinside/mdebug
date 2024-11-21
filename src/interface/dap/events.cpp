@@ -1,6 +1,7 @@
 #include "events.h"
 #include "fmt/core.h"
 #include "fmt/format.h"
+#include "fmt/ranges.h"
 #include "interface/dap/types.h"
 #include "nlohmann/json.hpp"
 #include <so_loading.h>
@@ -9,7 +10,7 @@
 namespace ui::dap {
 
 std::string
-InitializedEvent::serialize(int seq) const noexcept
+InitializedEvent::serialize(int) const noexcept
 {
   return fmt::format(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
 }

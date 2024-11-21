@@ -1,6 +1,7 @@
 #include "debug_info_reader.h"
 #include "../objfile.h"
 #include "symbolication/dwarf/die.h"
+#include "symbolication/dwarf_binary_reader.h"
 #include "utils/util.h"
 
 namespace sym::dw {
@@ -10,6 +11,21 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
   const auto &header = compilation_unit->header();
   current_ptr =
     compilation_unit->get_objfile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
+}
+
+UnitReader::UnitReader(UnitData *data, const DieMetaData &entry) noexcept : UnitReader(data) { seek_die(entry); }
+
+UnitReader::UnitReader(const UnitReader &o) : compilation_unit(o.compilation_unit), current_ptr(o.current_ptr) {}
+
+UnitReader &
+UnitReader::operator=(const UnitReader &reader)
+{
+  if (this == &reader) {
+    return *this;
+  }
+  compilation_unit = reader.compilation_unit;
+  current_ptr = reader.current_ptr;
+  return *this;
 }
 
 void

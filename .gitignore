@@ -5,3 +5,4 @@ build-*/**
 DriverTests.cmake
 compile_commands.json
 build*/**
+*build*/**

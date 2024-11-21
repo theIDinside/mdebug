@@ -2,13 +2,12 @@
 #include "../common.h"
 #include "block.h"
 #include "dwarf_defs.h"
-#include "utils/immutable.h"
-#include <cstdint>
+#include "symbolication/callstack.h"
 
 struct ElfSection;
 struct ObjectFile;
 class SymbolFile;
-struct TraceeController;
+class TraceeController;
 struct TaskInfo;
 class DwarfBinaryReader;
 class Elf;
@@ -31,7 +30,9 @@ enum class RegisterRule : u8
   Register,        // Previous value of register, is stored in another register
   Expression,      // DWARF Expression that points to an address where the register value is located
   ValueExpression, // DWARF Expression that produces the value of the register
-  ArchSpecific
+  IsCFARegister,   // For all I know the "CFA" is always the "previous frame's stack pointer (rsp)". As such,
+  // when a CFA is computed for a frame, it automatically provides the stackpointer value for the previous frame
+  // (the "caller" frame, or the one above), because in that frame, the stack pointer is this' frame CFA
 };
 
 struct Reg
@@ -96,14 +97,20 @@ public:
   static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
                               AddrPtr pc) noexcept;
   u64 compute_expression(std::span<const u8> bytes) noexcept;
-  // Reads the register rule of `reg_number` and resolves it's saved (or live, if it hasn't been modified / stored
-  // somewhere in memory) contents
-  u64 resolve_reg_contents(u64 reg_number, const RegisterValues &reg) noexcept;
-  RegisterValues resolve_frame_regs(const RegisterValues &reg) noexcept;
+  u64 ResolveRegisterContents(u64 reg_number, const FrameUnwindState &belowFrame) noexcept;
+  void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
+
   const CFA &get_cfa() const noexcept;
   const Registers &get_regs() const noexcept;
   const Reg &ret_reg() const noexcept;
   void reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame_below, AddrPtr pc) noexcept;
+  void Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters, AddrPtr pc) noexcept;
+  void SetNoKnownResumeAddress() noexcept;
+  constexpr bool
+  KnowsResumeAddress()
+  {
+    return !mResumeAddressUndefined;
+  }
 
 private:
   TraceeController &tc;
@@ -112,7 +119,8 @@ private:
   AddrPtr end_pc;
   CFA cfa;
   Registers rule_table;
-  u64 cfa_value;
+  u64 mCanonicalFrameAddressValue;
+  bool mResumeAddressUndefined{false};
 };
 
 struct ByteCodeInterpreter
@@ -208,6 +216,11 @@ struct UnwindInfoSymbolFilePair
 
   AddrPtr start() const noexcept;
   AddrPtr end() const noexcept;
+
+  // The actual DWARF binary code we use when we run our interpreter
+  // If no data is found/can be retrieved, this just returns an empty span/span of size 0
+  std::span<const u8> GetCommonInformationEntryData() const;
+  std::span<const u8> GetFrameDescriptionEntryData() const;
 };
 
 struct UnwinderSymbolFilePair

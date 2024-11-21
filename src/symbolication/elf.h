@@ -1,9 +1,9 @@
 #pragma once
+#include "utils/macros.h"
 #include <common.h>
 #include <elf.h>
 #include <string_view>
 #include <typedefs.h>
-#include <unordered_map>
 
 constexpr static u8 ELF_MAGIC[4]{0x7F, 0x45, 0x4C, 0x46};
 constexpr static u8 ELF_MAGIC_[4]{EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3};
@@ -36,6 +36,7 @@ sec_name(ElfSec ident) noexcept
     return "ERROR_SECTION";
     break;
   }
+  NEVER("Unknown elf section identifier");
 }
 
 struct ElfSection

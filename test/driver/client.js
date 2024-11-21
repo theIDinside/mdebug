@@ -69,7 +69,7 @@ async function createRemoteService(gdbserver, host, port, binary, args) {
     if (args == undefined || args == null) {
       args = []
     }
-    // '/home/cx/dev/cx/binutils-gdb/build-release/gdbserver/gdbserver',
+    console.log(`spawning gdbserver...`);
     let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary, ...args], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1123,7 +1123,9 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
 async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
   await DA.startRunToMain(DA.buildDirFile(exeFile), [], 5000)
   const bpres = await SetBreakpoints(DA, filePath, bpIdentifiers)
+  console.log(`bpres: ${JSON.stringify(bpres)}`);
   const threads = await DA.threads()
+  console.log(`threads: ${JSON.stringify(threads)}`)
   await DA.contNextStop(threads[0].id)
   const fres = await DA.stackTrace(threads[0].id, 1000)
   const frames = fres.body.stackFrames

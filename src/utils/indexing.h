@@ -1,5 +1,4 @@
 #pragma once
-#include <cstdint>
 #include <typedefs.h>
 
 // TODO(simon): Re-name & refactor this to mean "section offset"?

@@ -71,6 +71,7 @@ struct SourceCoordinate
   std::string path;
   std::uint32_t line;
   std::uint32_t column;
+  SourceCoordinate(std::string path, u32 line, u32 col=0) noexcept;
 };
 
 struct SourceCoordinateRef
@@ -554,3 +555,9 @@ template <typename... Ts> struct Match : Ts...
   using Ts::operator()...;
 };
 template <class... Ts> Match(Ts...) -> Match<Ts...>;
+
+#if defined(__clang__)
+#define COMPILERUSED clang
+#elif defined(__GNUC__) || defined(__GNUG__)
+#define COMPILERUSED_GCC
+#endif

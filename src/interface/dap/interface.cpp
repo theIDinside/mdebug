@@ -8,8 +8,6 @@
 #include "events.h"
 #include "lib/lockguard.h"
 #include "parse_buffer.h"
-#include "utils/enumerator.h"
-#include <algorithm>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
@@ -23,7 +21,6 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
-#include <thread>
 #include <unistd.h>
 #include <utils/signals.h>
 namespace ui::dap {
@@ -46,6 +43,7 @@ child_session(DapClientSession type) noexcept
   case DapClientSession::RRChildSession:
     return type;
   }
+  NEVER("Unknown DapClientSession type");
 }
 
 constexpr pollfd
@@ -169,7 +167,7 @@ void
 DAP::init_poll(pollfd *fds)
 {
   auto index = 0;
-  for (const auto [fd, src, client] : sources) {
+  for (const auto &[fd, src, client] : sources) {
     fds[index++] = pollfd{.fd = fd, .events = POLLIN, .revents = 0};
   }
 }
@@ -183,7 +181,10 @@ DAP::add_source(NotifSource source) noexcept
 void
 DAP::one_poll(u32 notifier_queue_size) noexcept
 {
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wvla-cxx-extension"
   pollfd fds[notifier_queue_size];
+  #pragma clang diagnostic pop
   init_poll(fds);
   auto ready = poll(fds, notifier_queue_size, 1000);
   VERIFY(ready != -1, "polling failed: {}", strerror(errno));
@@ -475,7 +476,7 @@ DebugAdapterClient::write(std::string_view output) noexcept
     if (tc == nullptr) {
       CDLOG(MDB_DEBUG == 1, dap, "[Partial DA] WRITING -->{}{}<---", header, output);
     } else {
-      CDLOG(MDB_DEBUG == 1, dap, "[Process: {}] WRITING -->{}{}<---", tc->task_leader, header, output);
+      CDLOG(MDB_DEBUG == 1, dap, "[Process: {}] WRITING -->{}{}<---", tc->get_task_leader(), header, output);
     }
   }
 

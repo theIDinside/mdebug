@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <chrono>
 #include <set>
 #include <supervisor.h>
 #include <sys/user.h>
@@ -244,8 +243,8 @@ GdbRemoteCommander::reverse_continue() noexcept
   const auto resume_err = connection->send_vcont_command(reverse, 1000);
   ASSERT(!resume_err.has_value(), "reverse continue failed");
 
-  for (auto &t : tc->threads) {
-    t.set_running(tc::RunType::Continue);
+  for (auto &t : tc->get_threads()) {
+    t->set_running(tc::RunType::Continue);
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
@@ -256,9 +255,9 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 {
   set_catch_syscalls(type == RunType::SyscallContinue);
 
-  for (auto &t : tc->threads) {
-    if (t.loc_stat) {
-      t.step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
+  for (auto &t : tc->get_threads()) {
+    if (t->loc_stat) {
+      t->step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
       if (!connection->settings().is_non_stop) {
         return TaskExecuteResponse::Ok();
       }
@@ -283,8 +282,8 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
-  for (auto &t : tc->threads) {
-    t.set_running(type);
+  for (auto &t : tc->get_threads()) {
+    t->set_running(type);
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
@@ -365,15 +364,7 @@ GdbRemoteCommander::read_registers(TaskInfo &t) noexcept
   ASSERT(payload.front() == '$', "Expected OK response");
   payload.remove_prefix(1);
 
-  switch (arch_info->type) {
-  case ArchType::X86_64: {
-    t.remote_from_hexdigit_encoding(payload);
-    break;
-  }
-  case ArchType::COUNT:
-    PANIC("ArchType::COUNT not a valid variant");
-    break;
-  }
+  t.remote_from_hexdigit_encoding(payload);
 
   return TaskExecuteResponse::Ok(register_contents.size());
 }
@@ -391,8 +382,10 @@ GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
   std::array<char, 64> set_pc_bytes{};
   std::array<char, 16> register_contents{};
   auto register_value = convert_to_target(register_contents, addr.get());
-  auto cmds = std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", task_leader(), t.tid),
-                             SerializeCommand(set_pc_bytes, "P{:x}={}", arch_info->pc_number, register_value)});
+  auto cmds =
+    std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", task_leader(), t.tid),
+                   SerializeCommand(set_pc_bytes, "P{:x}={}", arch_info->mDebugContextRegisters->mRIPNumber.as_t(),
+                                    register_value)});
   auto response = connection->send_inorder_command_chain(cmds, 1000);
   if (response.is_error()) {
     DBGLOG(remote, "Failed to set pc");
@@ -407,8 +400,7 @@ GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
     }
     ++i;
   }
-
-  t.remote_x86_registers()->set_pc(addr);
+  t.remote_x86_registers()->SetPc(addr);
   return TaskExecuteResponse::Ok(0);
 }
 
@@ -460,6 +452,7 @@ GdbRemoteCommander::get_thread_name(Tid tid) noexcept
     return thread_names[tid];
   }
   }
+  NEVER("Unknown remote type");
 }
 
 TaskExecuteResponse
@@ -512,7 +505,7 @@ GdbRemoteCommander::post_exec() noexcept
 }
 
 Interface
-GdbRemoteCommander::on_fork(Pid pid) noexcept
+GdbRemoteCommander::on_fork(Pid) noexcept
 {
   TODO("implement GdbRemoteCommander::on_fork() noexcept");
 }
@@ -754,8 +747,8 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
       // Notice that we do not add the "main thread" to the list of threads. Because meta data for that thread
       // is created when we spawn the TraceeController supervisor struct (it creates a normal thread meta data
       // struct for the process)
-      pinfo.push_back(
-        {execfile.response_buffer, pid, {}, std::make_shared<gdb::ArchictectureInfo>(std::move(complete_arch))});
+      ;
+      pinfo.push_back({execfile.response_buffer, pid, {}, gdb::ArchictectureInfo::CreateArchInfo(complete_arch)});
     }
   }
 
@@ -860,8 +853,8 @@ RemoteSessionConfigurator::configure_session() noexcept
       // Notice that we do not add the "main thread" to the list of threads. Because meta data for that thread
       // is created when we spawn the TraceeController supervisor struct (it creates a normal thread meta data
       // struct for the process)
-      pinfo.push_back(
-        {execfile.response_buffer, pid, {}, std::make_shared<gdb::ArchictectureInfo>(std::move(arch))});
+
+      pinfo.push_back({execfile.response_buffer, pid, {}, gdb::ArchictectureInfo::CreateArchInfo(arch)});
     }
   }
 

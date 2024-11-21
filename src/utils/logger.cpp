@@ -1,9 +1,8 @@
 #include "logger.h"
 #include "../common.h"
 #include "../lib/lockguard.h"
+#include "utils/macros.h"
 #include <filesystem>
-#include <source_location>
-#include <utility>
 
 using namespace std::string_view_literals;
 
@@ -29,6 +28,7 @@ to_str(Channel id) noexcept
     PANIC("Count not a valid Id");
     break;
   }
+  MIDAS_UNREACHABLE
 }
 
 logging::Logger *logging::Logger::logger_instance = new logging::Logger{};

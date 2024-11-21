@@ -7,6 +7,8 @@
 #define MIDAS_UNREACHABLE __builtin_unreachable();
 #endif
 
+#define NEVER(msg) PANIC(msg); MIDAS_UNREACHABLE
+
 #ifndef USING_SMART_PTRS
 #define USING_SMART_PTRS(CLASS)                                                                                   \
   using OwnPtr = std::unique_ptr<CLASS>;                                                                          \

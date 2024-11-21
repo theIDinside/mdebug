@@ -29,18 +29,10 @@ concept AddressType = requires(AddrType addr) {
   std::numeric_limits<AddrType>::min();
   std::numeric_limits<AddrType>::max();
   // require that it can be compared
-  {
-    addr < addr
-  } -> std::convertible_to<bool>;
-  {
-    addr > addr
-  } -> std::convertible_to<bool>;
-  {
-    addr <= addr
-  } -> std::convertible_to<bool>;
-  {
-    addr == addr
-  } -> std::convertible_to<bool>;
+  { addr < addr } -> std::convertible_to<bool>;
+  { addr > addr } -> std::convertible_to<bool>;
+  { addr <= addr } -> std::convertible_to<bool>;
+  { addr == addr } -> std::convertible_to<bool>;
 };
 
 template <typename Datum, AddressType A> struct IntervalNode

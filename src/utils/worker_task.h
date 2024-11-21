@@ -1,7 +1,6 @@
 #pragma once
 #include <chrono>
 #include <future>
-#include <thread>
 #include <vector>
 
 void SetTaskGroupLog(bool value) noexcept;

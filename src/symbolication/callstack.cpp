@@ -1,13 +1,22 @@
 #include "callstack.h"
 #include "common.h"
-#include "symbolication/block.h"
-#include "symbolication/dwarf/debug_info_reader.h"
+#include "supervisor.h"
+#include "symbolication/dwarf/lnp.h"
+#include "symbolication/dwarf_binary_reader.h"
+#include "symbolication/dwarf_frameunwinder.h"
+#include "symbolication/value.h"
 #include "tracer.h"
+#include "utils/debug_value.h"
 #include "utils/macros.h"
+#include <algorithm>
+#include <iterator>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
+#include <task.h>
 
 namespace sym {
+
+static constexpr auto X86_64_RIP_REGISTER = 16;
 
 InsideRange
 Frame::inside(TPtr<void> addr) const noexcept
@@ -64,7 +73,7 @@ Frame::pc() const noexcept
 }
 
 SymbolFile *
-Frame::get_symbol_file() noexcept
+Frame::GetSymbolFile() const noexcept
 {
   return symbol_file;
 }
@@ -79,16 +88,16 @@ Frame::full_symbol_info() const noexcept
   return *ptr;
 }
 
-std::optional<dw::LineTable>
-Frame::cu_line_table() const noexcept
+std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
+Frame::GetLineTableEntry() const noexcept
 {
-  if (type != FrameType::Full) {
-    return std::nullopt;
+  const CompilationUnit *cu = full_symbol_info().symbol_info();
+  for (const auto &sourceCodeFile : cu->sources()) {
+    if (auto lte = sourceCodeFile->GetProgramCounterUsingBase(symbol_file->baseAddress, pc()); lte) {
+      return {sourceCodeFile.get(), lte};
+    }
   }
-  const auto symbol_info = symbol.full_symbol->symbol_info();
-  ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
-
-  return symbol_info->get_linetable(symbol_file);
+  return std::pair{nullptr, nullptr};
 }
 
 std::optional<ui::dap::Scope>
@@ -170,7 +179,60 @@ Frame::function_name() const noexcept
   MIDAS_UNREACHABLE
 }
 
-CallStack::CallStack(Tid tid) noexcept : tid(tid), dirty(true), frames(), pcs() {}
+void
+FrameUnwindState::SetCanonicalFrameAddress(u64 addr) noexcept
+{
+  mCanonicalFrameAddress = addr;
+}
+
+u64
+FrameUnwindState::CanonicalFrameAddress() const noexcept
+{
+  return mCanonicalFrameAddress;
+}
+
+u64
+FrameUnwindState::RegisterCount() const noexcept
+{
+  return mFrameRegisters.size();
+}
+
+void
+FrameUnwindState::Reserve(u32 count) noexcept
+{
+  mFrameRegisters.reserve(count);
+  std::fill_n(std::back_inserter(mFrameRegisters), count, 0u);
+}
+
+void
+FrameUnwindState::Set(u32 number, u64 value) noexcept
+{
+  mFrameRegisters[number] = value;
+}
+
+void
+FrameUnwindState::Reset() noexcept
+{
+  mCanonicalFrameAddress = 0;
+  mFrameRegisters.clear();
+}
+
+AddrPtr
+FrameUnwindState::GetPc() const noexcept
+{
+  return mFrameRegisters[X86_64_RIP_REGISTER];
+}
+
+AddrPtr
+FrameUnwindState::GetRegister(u64 registerNumber) const noexcept
+{
+  return mFrameRegisters[registerNumber];
+}
+
+CallStack::CallStack(TraceeController *supervisor, TaskInfo *task) noexcept
+    : mTask(task), mSupervisor(supervisor), dirty(true)
+{
+}
 
 Frame *
 CallStack::get_frame(int frame_id) noexcept
@@ -183,11 +245,248 @@ CallStack::get_frame(int frame_id) noexcept
   return nullptr;
 }
 
+Frame *
+CallStack::GetFrameAtLevel(u32 level) noexcept
+{
+  if (level >= frames.size()) {
+    return nullptr;
+  }
+  return &frames[0];
+}
+
 u64
 CallStack::unwind_buffer_register(u8 level, u16 register_number) noexcept
 {
-  ASSERT(level < reg_unwind_buffer.size(), "out of bounds");
-  return reg_unwind_buffer[level][register_number];
+  ASSERT(level < mUnwoundRegister.size(), "out of bounds");
+  return mUnwoundRegister[level].GetRegister(register_number);
+}
+
+bool
+CallStack::IsDirty() const noexcept
+{
+  return dirty;
+}
+
+void
+CallStack::SetDirty() noexcept
+{
+  dirty = true;
+}
+
+void
+CallStack::Initialize() noexcept
+{
+  Reset();
+  mUnwoundRegister.push_back({});
+  mUnwoundRegister[0].Reset();
+  mUnwoundRegister[0].Reserve(17);
+
+  const auto &cache = mTask->GetRegisterCache();
+  for (auto i = 0u; i <= 16; ++i) {
+    mUnwoundRegister[0].Set(i, cache.GetRegister(i));
+  }
+}
+
+void
+CallStack::Reset() noexcept
+{
+  ClearFrames();
+  ClearProgramCounters();
+  ClearUnwoundRegisters();
+}
+
+void
+CallStack::ClearFrames() noexcept
+{
+  frames.clear();
+}
+
+void
+CallStack::ClearProgramCounters() noexcept
+{
+  mFrameProgramCounters.clear();
+}
+
+void
+CallStack::ClearUnwoundRegisters() noexcept
+{
+  mUnwoundRegister.clear();
+}
+
+void
+CallStack::Reserve(u32 count) noexcept
+{
+  frames.reserve(count);
+  mFrameProgramCounters.reserve(count);
+  mUnwoundRegister.reserve(count);
+}
+
+u32
+CallStack::FramesCount() const noexcept
+{
+  return frames.size();
+}
+
+std::span<Frame>
+CallStack::GetFrames() noexcept
+{
+  return frames;
+}
+
+std::optional<Frame>
+CallStack::FindFrame(const Frame &frame) const noexcept
+{
+  for (const auto &f : frames) {
+    if (f.has_symbol_info() && f.name() == frame.name()) {
+      return f;
+    }
+    if (same_symbol(f, frame)) {
+      return f;
+    }
+  }
+  return std::nullopt;
+}
+
+AddrPtr
+CallStack::GetTopMostPc() const noexcept
+{
+  ASSERT(!mUnwoundRegister.empty(), "No unwound registers!");
+  return mUnwoundRegister.back().GetPc();
+}
+
+std::pair<FrameUnwindState *, FrameUnwindState *>
+CallStack::GetCurrent() noexcept
+{
+  if (mUnwoundRegister.size() < 2) {
+    return {nullptr, nullptr};
+  }
+  auto span = std::span{mUnwoundRegister}.subspan(mUnwoundRegister.size() - 2, 2);
+  return {&span[0], &span[1]};
+}
+
+bool
+CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
+{
+  auto &cfa = stateMachine.get_cfa();
+
+  const u64 canonicalFrameAddr =
+    stateMachine.get_cfa().is_expr
+      ? stateMachine.compute_expression(cfa.expr)
+      : static_cast<u64>(static_cast<i64>(mUnwoundRegister.back().GetRegister(cfa.reg.number)) + cfa.reg.offset);
+  DBGLOG(core, "[eh]: canonical frame address computed: 0x{:x}", canonicalFrameAddr);
+  stateMachine.SetCanonicalFrameAddress(canonicalFrameAddr);
+
+  mUnwoundRegister.push_back({});
+  auto &newAboveFrame = mUnwoundRegister.back();
+  auto &baseFrame = mUnwoundRegister[mUnwoundRegister.size() - 2];
+  newAboveFrame.Reserve(baseFrame.RegisterCount());
+  baseFrame.SetCanonicalFrameAddress(canonicalFrameAddr);
+
+  for (auto i = 0u; i < mUnwoundRegister[mUnwoundRegister.size() - 2].RegisterCount(); ++i) {
+    newAboveFrame.Set(i, stateMachine.ResolveRegisterContents(i, baseFrame));
+  }
+
+  newAboveFrame.Set(7, canonicalFrameAddr);
+
+  // When a frame description entry for instance has a DWARF expression that computes to RIP being undefined
+  // we don't want to continue, because we have no known resume address
+  return stateMachine.KnowsResumeAddress();
+}
+
+static void
+decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state) noexcept
+{
+  // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
+  // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
+  // actually know how to read DWARF binary data here.
+  DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
+  const utils::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.info);
+  DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
+  DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
+  sym::decode(fde, state, info.info);
+}
+
+FrameUnwindState *
+CallStack::GetUnwindState(u32 level) noexcept
+{
+  if (level >= mUnwoundRegister.size()) {
+    return nullptr;
+  }
+  return &mUnwoundRegister[level];
+}
+
+void
+CallStack::Unwind(const CallStackRequest &req)
+{
+  // TODO: Implement frame unwind caching.
+  const auto pc = mTask->GetRegisterCache().GetPc();
+  sym::UnwindIterator it{mSupervisor, pc};
+  auto uninfo = it.get_info(pc);
+  bool initialized = false;
+  if (!uninfo) {
+    constexpr auto STACK_POINTER_NUMBER = 7;
+    // we may be in a plt entry. Try sniffing out this frame before throwing away the entire call stack
+    // a call instruction automatically pushes rip onto the stack at $rsp
+    const auto resumeAddress = mSupervisor->read_type(TPtr<u64>{mTask->get_register(STACK_POINTER_NUMBER)});
+    uninfo = it.get_info(resumeAddress);
+    if (uninfo) {
+      Initialize();
+      mFrameProgramCounters.push_back(GetTopMostPc());
+      initialized = true;
+      mUnwoundRegister.push_back({});
+      auto [newest, older] = GetCurrent();
+      const auto regs = newest->RegisterCount();
+      mUnwoundRegister.back().Reserve(regs);
+      const auto &cloneFrom = *(mUnwoundRegister.rbegin() + 1);
+      for (auto i = 0u; i < regs; ++i) {
+        mUnwoundRegister.back().Set(i, cloneFrom.GetRegister(i));
+      }
+      mUnwoundRegister.back().Set(X86_64_RIP_REGISTER, resumeAddress);
+    } else {
+      return;
+    }
+  }
+
+  if (!initialized) {
+    Initialize();
+  }
+
+  sym::CFAStateMachine cfa_state = sym::CFAStateMachine::Init(*mSupervisor, *mTask, uninfo.value(), pc);
+  mFrameProgramCounters.push_back(GetTopMostPc());
+
+  auto [request, count, _] = req;
+
+  switch (request) {
+  case CallStackRequest::Type::Full: {
+    for (auto uinf = uninfo; uinf.has_value(); uinf = it.get_info(GetTopMostPc())) {
+      const auto pc = GetTopMostPc();
+      cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
+      decode_eh_insts(uinf.value(), cfa_state);
+      const auto keepUnwinding = ResolveNewFrameRegisters(cfa_state);
+      if (!keepUnwinding) {
+        break;
+      }
+      mFrameProgramCounters.push_back(GetTopMostPc());
+    }
+    break;
+  }
+  case CallStackRequest::Type::Partial: {
+    for (auto uinf = uninfo; uinf.has_value() && count != 0; uinf = it.get_info(GetTopMostPc())) {
+      const auto pc = GetTopMostPc();
+      cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
+      decode_eh_insts(uinf.value(), cfa_state);
+      const auto keepUnwinding = ResolveNewFrameRegisters(cfa_state);
+      --count;
+      if (!keepUnwinding) {
+        break;
+      }
+      mFrameProgramCounters.push_back(GetTopMostPc());
+    }
+    break;
+  }
+  }
+
+  dirty = false;
 }
 
 } // namespace sym

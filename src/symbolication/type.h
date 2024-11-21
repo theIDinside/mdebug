@@ -1,18 +1,11 @@
 #pragma once
-#include "../common.h"
-#include "dwarf_defs.h"
-#include "fmt/core.h"
-// #include "symbolication/dwarf/die.h"
-#include "task.h"
-#include "utils/byte_buffer.h"
-#include "utils/expected.h"
+#include "symbolication/dwarf/die_ref.h"
 #include "utils/immutable.h"
 #include "utils/indexing.h"
-#include "utils/macros.h"
-#include <symbolication/dwarf/die_ref.h>
 
-struct DebugInfoEntry;
-struct TraceeController;
+using namespace std::string_view_literals;
+
+class TraceeController;
 struct ObjectFile;
 
 namespace sym {
@@ -169,6 +162,7 @@ ModifierToString(Modifier mod)
   case Modifier::Shared:
     return "shared";
   }
+  NEVER("Unknown modifier");
 }
 
 union EnumeratorConstValue
@@ -446,7 +440,7 @@ template <> struct formatter<sym::Type>
           out = fmt::format_to(out, "{}]", t->array_bounds);
         }
       } else {
-        out = fmt::format_to(out, "{}", t->name);
+        out = fmt::format_to(out, "{}", t->name.as_t());
       }
       if (++index != type_span.size()) {
         out = fmt::format_to(out, " ");

@@ -1,22 +1,21 @@
 #pragma once
 #include "block.h"
-#include "cu_symbol_info.h"
 #include "elf.h"
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
 #include "mdb_config.h"
+#include "symbolication/cu_symbol_info.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tracer.h"
 #include <common.h>
-#include <regex>
 #include <string_view>
 #include <sys/mman.h>
 
 using VariablesReference = int;
 template <typename T> using Set = std::unordered_set<T>;
 
-struct TraceeController;
+class TraceeController;
 
 class NonExecutableCompilationUnitFile;
 
@@ -35,7 +34,7 @@ namespace dw {
 struct LNPHeader;
 class UnitData;
 class LineTable;
-struct DieReference;
+class DieReference;
 struct ObjectFileNameIndex;
 } // namespace dw
 } // namespace sym
@@ -103,22 +102,19 @@ struct ObjectFile
   auto compilation_units() noexcept -> std::vector<sym::dw::UnitData *> &;
   auto get_cu_from_offset(u64 offset) noexcept -> sym::dw::UnitData *;
   auto get_die_reference(u64 offset) noexcept -> std::optional<sym::dw::DieReference>;
+  auto GetDieReference(u64 offset) noexcept -> sym::dw::DieReference;
   auto name_index() noexcept -> sym::dw::ObjectFileNameIndex *;
 
   auto get_lnp_header(u64 offset) noexcept -> sym::dw::LNPHeader *;
   auto read_lnp_headers() noexcept -> void;
   auto get_lnp_headers() noexcept -> std::span<sym::dw::LNPHeader>;
-  auto add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
-                       std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes) noexcept -> void;
 
-  auto init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers) -> void;
-  auto get_plte(u64 offset) noexcept -> sym::dw::ParsedLineTableEntries &;
   auto add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept -> void;
   auto add_type_units(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
   auto get_type_unit(u64 type_signature) noexcept -> sym::dw::UnitData *;
   auto get_type_unit_type_die(u64 type_signature) noexcept -> sym::dw::DieReference;
 
-  auto get_source_file(const std::filesystem::path &fullpath) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
+  auto get_source_file(std::string_view full_path) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
   auto source_code_files() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
   auto source_units() noexcept -> std::vector<sym::CompilationUnit> &;
 
@@ -133,13 +129,16 @@ struct ObjectFile
   auto init_visualizer(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto regex_search(const std::string &regex_pattern) const noexcept -> std::vector<std::string>;
 
+  auto SetBuildDirectory(u64 statementListOffset, const char *buildDirectory) noexcept -> void;
+  auto GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char *;
+
 private:
   auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
-  auto relocated_get_source_code_files(AddrPtr base, AddrPtr pc) noexcept
-    -> std::vector<sym::dw::RelocatedSourceCodeFile>;
+  auto relocated_get_source_code_files(AddrPtr base,
+                                       AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
 
   std::unordered_map<std::string_view, Index> minimal_fn_symbols;
   std::vector<MinSymbol> min_fn_symbols_sorted;
@@ -150,9 +149,12 @@ private:
   std::unique_ptr<sym::dw::ObjectFileNameIndex> name_to_die_index;
 
   std::mutex parsed_lte_write_lock;
-  std::vector<sym::dw::LineTable> line_table;
   std::shared_ptr<std::vector<sym::dw::LNPHeader>> lnp_headers;
-  std::shared_ptr<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>> parsed_ltes;
+
+  struct StatementListBuildDirectoryMappings
+  {
+    std::unordered_map<u64, const char *> mMap;
+  } mLnpToBuildDirMapping;
 
   std::mutex cu_write_lock;
   std::vector<sym::CompilationUnit> comp_units;
@@ -160,7 +162,7 @@ private:
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
   //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable
-  std::unordered_map<std::filesystem::path, std::shared_ptr<sym::dw::SourceCodeFile>> lnp_source_code_files;
+  std::unordered_map<std::string, std::shared_ptr<sym::dw::SourceCodeFile>> lnp_source_code_files;
 
   sym::AddressToCompilationUnitMap addr_cu_map;
   std::unordered_map<int, SharedPtr<sym::Value>> valobj_cache;
@@ -180,7 +182,8 @@ public:
   SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
              AddrPtr relocated_base) noexcept;
 
-  static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> binary, AddrPtr relocated_base) noexcept;
+  static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary,
+                        AddrPtr relocated_base) noexcept;
   auto copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
 
@@ -195,12 +198,12 @@ public:
   // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
   // user will have created something that holds a reference to the value it will now become the sole owner.
   auto registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
-  auto getVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
-    -> std::vector<ui::dap::Variable>;
+  auto getVariables(TraceeController &tc, sym::Frame &frame,
+                    sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>;
   auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
-  auto resolve(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
-    -> std::vector<ui::dap::Variable>;
+  auto resolve(const VariableContext &ctx, std::optional<u32> start,
+               std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>;
   // auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept ->
   // std::vector<ui::dap::Variable>;
 
@@ -210,7 +213,6 @@ public:
   auto getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *;
   auto getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
-  auto getLineTable(u64 offset) noexcept -> sym::dw::LineTable;
   auto path() const noexcept -> Path;
 
   auto lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
