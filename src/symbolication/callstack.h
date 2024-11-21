@@ -102,7 +102,7 @@ public:
   int id() const noexcept;
   int level() const noexcept;
   AddrPtr pc() const noexcept;
-  SymbolFile *get_symbol_file() noexcept;
+  SymbolFile *GetSymbolFile() const noexcept;
 
   const sym::FunctionSymbol &full_symbol_info() const noexcept;
 
@@ -145,12 +145,8 @@ public:
     return false;
   }
 
+  std::pair<dw::SourceCodeFile*, const dw::LineTableEntry*> GetLineTableEntry() const noexcept;
   std::optional<std::string_view> function_name() const noexcept;
-
-  /**
-   * Return the line table for the compilation unit where this Frame exists in.
-   */
-  std::optional<dw::LineTable> cu_line_table() const noexcept;
   std::array<ui::dap::Scope, 3> scopes() noexcept;
   std::optional<ui::dap::Scope> scope(u32 var_ref) noexcept;
 };

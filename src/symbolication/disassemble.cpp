@@ -12,23 +12,32 @@
 
 namespace sym {
 
-std::optional<std::tuple<dw::RelocatedLteIterator, dw::RelocatedLteIterator, dw::LineTable>>
-get_lte_range(SymbolFile *obj, std::vector<sym::CompilationUnit *> symtabs, AddrPtr addr)
+struct SourceInfo
 {
-  for (auto st : symtabs) {
-    if (auto lt_opt = st->get_linetable(obj); lt_opt) {
-      auto lt = lt_opt.value();
-      auto lte_it = lt.find_by_pc(addr);
-      if (lte_it != std::end(lt)) {
-        if (lte_it.get().pc > addr && (lte_it - 1).get().pc <= addr) {
-          return std::optional{std::tuple{lte_it - 1, lte_it, lt}};
-        } else if (lte_it.get().pc <= addr && (lte_it + 1).get().pc > addr) {
-          return std::optional{std::tuple{lte_it, lte_it + 1, lt}};
+  dw::SourceCodeFile *mSource;
+  const dw::LineTableEntry *mEntry;
+
+  explicit constexpr
+  operator bool() const noexcept
+  {
+    return mSource && mEntry;
+  }
+};
+
+SourceInfo
+GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compilationUnits, AddrPtr addr)
+{
+  for (auto cu : compilationUnits) {
+    for (const auto &src : cu->sources()) {
+      if (src->address_bounds().contains(addr)) {
+        const auto *lte = src->GetProgramCounterUsingBase(obj->baseAddress, addr);
+        if (lte) {
+          return {src.get(), lte};
         }
       }
     }
   }
-  return std::nullopt;
+  return {nullptr, nullptr};
 }
 
 static sym::Disassembly
@@ -45,19 +54,15 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
   auto obj = target->find_obj_by_pc(vm_address);
   auto cus = obj->getSourceInfos(vm_address);
   if (!cus.empty()) {
-    auto lte_range_opt = get_lte_range(obj, cus, vm_address);
-    if (lte_range_opt) {
-      const auto [begin_rel, end_rel, lt] = lte_range_opt.value();
-      const auto begin = begin_rel.get();
-      ASSERT(vm_address >= begin.pc && vm_address <= end_rel.get().pc,
-             "Address {} does not land inside LTE range {} .. {}", vm_address, begin.pc, end_rel.get().pc);
+    SourceInfo sourceInfo = GetSourceInfo(obj, cus, vm_address);
+    if (sourceInfo) {
       return sym::Disassembly{.address = vm_address,
                               .opcode = std::move(machine_code),
                               .instruction = ins.text,
-                              .source_name = lt.file(begin.file)->file_name,
-                              .source_path = lt.file(begin.file)->file_name,
-                              .line = begin.line,
-                              .column = begin.column};
+                              .source_name = sourceInfo.mSource->full_path->c_str(),
+                              .source_path = sourceInfo.mSource->full_path->c_str(),
+                              .line = sourceInfo.mEntry->line,
+                              .column = sourceInfo.mEntry->column};
     } else {
       return sym::Disassembly{.address = vm_address,
                               .opcode = std::move(machine_code),

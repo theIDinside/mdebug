@@ -57,7 +57,7 @@ FunctionSymbol::symbol_info() const noexcept
 }
 
 CompilationUnit *
-FunctionSymbol::symbol_info() noexcept
+FunctionSymbol::GetCompilationUnit() noexcept
 {
   return decl_file;
 }

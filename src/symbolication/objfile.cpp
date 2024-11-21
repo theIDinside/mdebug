@@ -31,9 +31,7 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
       types(std::make_unique<TypeStorage>(*this)), minimal_fn_symbols{}, min_fn_symbols_sorted(),
       minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
       name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>(this)), parsed_lte_write_lock(),
-      line_table(), lnp_headers(nullptr),
-      parsed_ltes(std::make_shared<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>>()), cu_write_lock(),
-      comp_units(), addr_cu_map()
+      lnp_headers(nullptr), cu_write_lock(), comp_units(), addr_cu_map()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -197,7 +195,6 @@ ObjectFile::read_lnp_headers() noexcept
       }
     }
   }
-  init_lnp_storage(*lnp_headers);
 }
 
 // No synchronization needed, parsed 1, in 1 thread
@@ -210,37 +207,6 @@ ObjectFile::get_lnp_headers() noexcept
     read_lnp_headers();
     return std::span{*lnp_headers};
   }
-}
-
-// Synchronization needed - parsed by multiple threads and results registered asynchronously + in parallel
-void
-ObjectFile::add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
-                            std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes) noexcept
-{
-  std::lock_guard lock(parsed_lte_write_lock);
-  ASSERT(headers.size() == parsed_ltes.size(), "headers != parsed_lte count!");
-  auto h = headers.begin();
-  auto p = std::make_move_iterator(parsed_ltes.begin());
-  auto &stored = *this->parsed_ltes;
-  for (; h != std::end(headers); h++, p++) {
-    stored.emplace(h->sec_offset, std::move(*p));
-  }
-}
-
-void
-ObjectFile::init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers)
-{
-  std::lock_guard lock(parsed_lte_write_lock);
-  parsed_ltes->reserve(headers.size());
-  for (const auto &header : headers) {
-    parsed_ltes->emplace(header.sec_offset, sym::dw::ParsedLineTableEntries{});
-  }
-}
-
-sym::dw::ParsedLineTableEntries &
-ObjectFile::get_plte(u64 offset) noexcept
-{
-  return (*parsed_ltes)[offset];
 }
 
 void
@@ -757,25 +723,6 @@ SymbolFile::getMinimalSymbol(std::string_view name) noexcept -> std::optional<Mi
 }
 
 auto
-SymbolFile::getLineTable(u64 offset) noexcept -> sym::dw::LineTable
-{
-  auto &headers = *objectFile()->lnp_headers;
-  auto header = std::find_if(headers.begin(), headers.end(),
-                             [o = offset](const sym::dw::LNPHeader &header) { return header.sec_offset == o; });
-  ASSERT(header != std::end(headers), "Failed to find LNP Header with offset 0x{:x}", offset);
-
-  auto kvp = std::find_if(objectFile()->parsed_ltes->begin(), objectFile()->parsed_ltes->end(),
-                          [offset](const auto &kvp) { return kvp.first == offset; });
-  if (kvp == std::end(*objectFile()->parsed_ltes)) {
-    PANIC(fmt::format("Failed to find parsed LineTable Entries for offset 0x{:x}", offset));
-  }
-  if (kvp->second.table.empty()) {
-    sym::dw::compute_line_number_program(kvp->second, objectFile()->elf, &*header);
-  }
-  return sym::dw::LineTable{&(*header), &kvp->second, baseAddress};
-}
-
-auto
 SymbolFile::path() const noexcept -> Path
 {
   return binary_object->path;
@@ -877,9 +824,8 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
     registerResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.get_symbol_file(),
-                                         static_cast<u32>(frame.id()), static_cast<u16>(ref),
-                                         ContextType::Variable});
+      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.id()),
+                                         static_cast<u16>(ref), ContextType::Variable});
       frame.task.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});

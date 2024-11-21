@@ -18,7 +18,6 @@ class UnitData;
 class PartialCompilationUnitSymbolInfo
 {
   dw::UnitData *unit_data;
-  dw::LineTable line_table;
   std::vector<sym::FunctionSymbol> fns;
   std::vector<u32> imported_units;
 
@@ -50,7 +49,7 @@ public:
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
   void process_source_code_files(u64 line_table) noexcept;
   void add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept;
-  std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
+  std::span<const std::shared_ptr<dw::SourceCodeFile>> sources() const noexcept;
 
   bool known_address_boundary() const noexcept;
   AddrPtr start_pc() const noexcept;
@@ -59,7 +58,6 @@ public:
   bool function_symbols_resolved() const noexcept;
   sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;
   dw::UnitData *get_dwarf_unit() const noexcept;
-  std::optional<dw::LineTable> get_linetable(SymbolFile *sf) noexcept;
   std::optional<Path> get_lnp_file(u32 index) noexcept;
   static constexpr auto
   Sorter() noexcept

@@ -14,13 +14,12 @@
 namespace sym {
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(dw::UnitData *data) noexcept
-    : unit_data(data), line_table(), fns(), imported_units()
+    : unit_data(data), fns(), imported_units()
 {
 }
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(PartialCompilationUnitSymbolInfo &&o) noexcept
-    : unit_data(o.unit_data), line_table(o.line_table), fns(std::move(o.fns)),
-      imported_units(std::move(o.imported_units))
+    : unit_data(o.unit_data), fns(std::move(o.fns)), imported_units(std::move(o.imported_units))
 {
 }
 
@@ -31,7 +30,6 @@ PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&r
     return *this;
   }
   unit_data = rhs.unit_data;
-  line_table = rhs.line_table;
   fns = std::move(rhs.fns);
   imported_units = std::move(rhs.imported_units);
   return *this;
@@ -76,8 +74,8 @@ CompilationUnit::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file)
   source_code_files.emplace_back(std::move(src_file));
 }
 
-std::span<std::shared_ptr<dw::SourceCodeFile>>
-CompilationUnit::sources() noexcept
+std::span<const std::shared_ptr<dw::SourceCodeFile>>
+CompilationUnit::sources() const noexcept
 {
   return source_code_files;
 }
@@ -137,12 +135,6 @@ dw::UnitData *
 CompilationUnit::get_dwarf_unit() const noexcept
 {
   return unit_data;
-}
-
-std::optional<dw::LineTable>
-CompilationUnit::get_linetable(SymbolFile *sf) noexcept
-{
-  return sf->getLineTable(line_table);
 }
 
 std::optional<Path>

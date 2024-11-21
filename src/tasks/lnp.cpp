@@ -29,7 +29,7 @@ void
 LineNumberProgramTask::execute_task() noexcept
 {
   for (auto &header : lnp_headers) {
-    sym::dw::compute_line_number_program(obj->get_plte(header.sec_offset), obj->elf, &header);
+    TODO("(Re)Implement aggressive line number program execution");
   }
 }
 } // namespace sym::dw

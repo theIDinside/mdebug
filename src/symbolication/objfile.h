@@ -108,11 +108,7 @@ struct ObjectFile
   auto get_lnp_header(u64 offset) noexcept -> sym::dw::LNPHeader *;
   auto read_lnp_headers() noexcept -> void;
   auto get_lnp_headers() noexcept -> std::span<sym::dw::LNPHeader>;
-  auto add_parsed_ltes(const std::span<sym::dw::LNPHeader> &headers,
-                       std::vector<sym::dw::ParsedLineTableEntries> &&parsed_ltes) noexcept -> void;
 
-  auto init_lnp_storage(const std::span<sym::dw::LNPHeader> &headers) -> void;
-  auto get_plte(u64 offset) noexcept -> sym::dw::ParsedLineTableEntries &;
   auto add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept -> void;
   auto add_type_units(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
   auto get_type_unit(u64 type_signature) noexcept -> sym::dw::UnitData *;
@@ -153,9 +149,7 @@ private:
   std::unique_ptr<sym::dw::ObjectFileNameIndex> name_to_die_index;
 
   std::mutex parsed_lte_write_lock;
-  std::vector<sym::dw::LineTable> line_table;
   std::shared_ptr<std::vector<sym::dw::LNPHeader>> lnp_headers;
-  std::shared_ptr<std::unordered_map<u64, sym::dw::ParsedLineTableEntries>> parsed_ltes;
 
   struct StatementListBuildDirectoryMappings
   {
@@ -219,7 +213,6 @@ public:
   auto getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *;
   auto getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
-  auto getLineTable(u64 offset) noexcept -> sym::dw::LineTable;
   auto path() const noexcept -> Path;
 
   auto lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;

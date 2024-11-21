@@ -1,6 +1,7 @@
 #include "callstack.h"
 #include "common.h"
 #include "supervisor.h"
+#include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/value.h"
@@ -72,7 +73,7 @@ Frame::pc() const noexcept
 }
 
 SymbolFile *
-Frame::get_symbol_file() noexcept
+Frame::GetSymbolFile() const noexcept
 {
   return symbol_file;
 }
@@ -87,16 +88,16 @@ Frame::full_symbol_info() const noexcept
   return *ptr;
 }
 
-std::optional<dw::LineTable>
-Frame::cu_line_table() const noexcept
+std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
+Frame::GetLineTableEntry() const noexcept
 {
-  if (type != FrameType::Full) {
-    return std::nullopt;
+  const CompilationUnit *cu = full_symbol_info().symbol_info();
+  for (const auto &sourceCodeFile : cu->sources()) {
+    if (auto lte = sourceCodeFile->GetProgramCounterUsingBase(symbol_file->baseAddress, pc()); lte) {
+      return {sourceCodeFile.get(), lte};
+    }
   }
-  const auto symbol_info = symbol.full_symbol->symbol_info();
-  ASSERT(symbol_info != nullptr, "Expected symbol info for this frame to not be null");
-
-  return symbol_info->get_linetable(symbol_file);
+  return std::pair{nullptr, nullptr};
 }
 
 std::optional<ui::dap::Scope>

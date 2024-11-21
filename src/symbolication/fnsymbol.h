@@ -65,7 +65,7 @@ public:
   std::string build_full_name() const noexcept;
   AddrPtr start_pc() const noexcept;
   AddrPtr end_pc() const noexcept;
-  CompilationUnit *symbol_info() noexcept;
+  CompilationUnit *GetCompilationUnit() noexcept;
   const CompilationUnit *symbol_info() const noexcept;
   std::span<const dw::IndexedDieReference> origin_dies() const noexcept;
   bool is_resolved() const noexcept;

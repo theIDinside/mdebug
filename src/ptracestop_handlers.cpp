@@ -176,22 +176,8 @@ LineStep::update_stepped() noexcept
   if (frame.frame_type() == sym::FrameType::Full && same_symbol(frame, start_frame)) {
     ASSERT(frame.level() == start_frame.level(),
            "We haven't implemented support where recursion actually creates multiple frames that look the same.");
-    auto lt = frame.cu_line_table();
-    if (!lt) {
-      is_done = true;
-      return;
-    }
-    const auto fpc = frame.pc();
-    auto lte = lt->find_by_pc(fpc);
-    if (lte == lt->end()) {
-      is_done = true;
-    }
-    if (fpc < lte.get().pc && fpc > (lte - 1).get().pc) {
-      return;
-    }
-    if ((*lte).line != entry.line) {
-      is_done = true;
-    }
+    auto [src, lte] = frame.GetLineTableEntry();
+    is_done = (!lte || lte->line != entry.line);
   } else {
     auto &callstack = tc.build_callframe_stack(task, CallStackRequest::full());
     const auto resumeAddress =
@@ -507,24 +493,11 @@ StepInto::update_stepped() noexcept
   const auto frame = tc.current_frame(task);
   // if we're in the same frame, we single step
   if (inside_origin_frame(frame)) {
-    auto lt = frame.cu_line_table();
-    if (!lt) {
+    auto [src, lte] = frame.GetLineTableEntry();
+    if (!lte) {
       is_done = true;
-      return;
-    }
-    const auto fpc = frame.pc();
-    auto lte = lt->find_by_pc(fpc);
-    // we could no longer find LTE; which probably means we've left our origin line.
-    if (lte == lt->end()) {
+    } else if (!is_origin_line(lte->line)) {
       is_done = true;
-      return;
-    }
-    if (fpc < lte.get().pc && fpc > (lte - 1).get().pc) {
-      return;
-    }
-    if (!is_origin_line(lte.get().line)) {
-      is_done = true;
-      return;
     }
   } else {
     // means we've left the original frame

@@ -104,12 +104,8 @@ struct LineTableEntry
   {
     return l.pc.get() <=> r.pc.get();
   }
-};
 
-struct ParsedLineTableEntries
-{
-  using shr_ptr = std::shared_ptr<ParsedLineTableEntries>;
-  std::vector<LineTableEntry> table;
+  AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
 };
 
 struct RelocatedLteIterator
@@ -151,40 +147,6 @@ public:
   friend bool operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r);
 };
 
-/**
- * LineTable is a light weight "handle" class and owns no data of it's own. It connects a line number program
- * header with the parsed line table entries from that line number program. This is, so that when we finally get to
- * multi process debugging two processes with the same object file(s) can share that parsed data and only alter the
- * small/cheap bits (like base address, or what we call relocated_base).
- */
-class LineTable
-{
-public:
-  LineTable() noexcept;
-  LineTable(LNPHeader *header, ParsedLineTableEntries *ltes, AddrPtr relocated_base) noexcept;
-
-  bool is_valid() const noexcept;
-
-  RelocatedLteIterator begin() const noexcept;
-  RelocatedLteIterator end() const noexcept;
-
-  LineTableEntry front() const noexcept;
-  LineTableEntry back() const noexcept;
-
-  bool no_entries() const noexcept;
-  u64 table_id() const noexcept;
-
-  std::optional<sym::dw::DirEntry> directory(u64 dir_index) const noexcept;
-  std::optional<sym::dw::FileEntry> file(u64 file_index) const noexcept;
-  RelocatedLteIterator find_by_pc(AddrPtr addr) noexcept;
-  u64 size() const noexcept;
-
-private:
-  AddrPtr relocated_base;
-  LNPHeader *line_header;
-  ParsedLineTableEntries *ltes;
-};
-
 class RelocatedSourceCodeFile;
 
 // A source code file is a file that's either represented (and thus realized, when parsed) in the Line Number
@@ -205,19 +167,22 @@ public:
 private:
   std::vector<LNPHeader *> headers;
   // Resolved lazily when needed, by walking `line_table`
-  mutable SharedPtr<std::vector<LineTableEntry>> line_table;
+  mutable std::vector<LineTableEntry> line_table;
+  mutable std::vector<AddressRange> mLineTableRanges;
   mutable AddrPtr low;
   mutable AddrPtr high;
   mutable std::mutex m;
   mutable bool computed;
   Elf *elf;
   bool is_computed() const noexcept;
-  void compute_line_tables() const noexcept;
+  void ComputeLineTableForThis() const noexcept;
 
 public:
   SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept;
   Immutable<std::filesystem::path> full_path;
 
+  std::span<const LineTableEntry> GetLineTable() const noexcept;
+  const LineTableEntry* GetProgramCounterUsingBase(AddrPtr relocatedBase, AddrPtr pc) noexcept;
   auto begin(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
   auto end(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
 
@@ -271,5 +236,4 @@ public:
 };
 
 std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;
-void compute_line_number_program(ParsedLineTableEntries &output, const Elf *elf, LNPHeader *header);
 } // namespace sym::dw

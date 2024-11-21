@@ -787,31 +787,16 @@ StackTrace::execute() noexcept
   stack_frames.reserve(cfs.FramesCount());
   for (const auto &frame : cfs.GetFrames()) {
     if (frame.frame_type() == sym::FrameType::Full) {
-      const auto lt = frame.cu_line_table().value_or(sym::dw::LineTable{});
+      const auto [src, lte] = frame.GetLineTableEntry();
+      ASSERT(src && lte, "Expected source code file and line table entry to be not null");
+      stack_frames.push_back(
+        StackFrame{.id = frame.id(),
+                   .name = frame.name().value_or("unknown"),
+                   .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
+                   .line = static_cast<int>(lte->line),
+                   .column = static_cast<int>(lte->column),
+                   .rip = fmt::format("{}", frame.pc())});
 
-      auto line = 0;
-      auto col = 0;
-      if (lt.is_valid()) {
-        // todo(simon): linear search is horrid. But binary search is so fragile instead. So for now, we do the
-        // absolute worst, so long it works.
-        const auto fpc = frame.pc();
-        const auto end = std::end(lt);
-        for (auto ita = std::begin(lt), itb = ita + 1; ita != end && itb != end; ++ita, ++itb) {
-          if ((*ita).pc <= fpc && (*itb).pc > fpc) {
-            line = (*ita).line;
-            col = (*ita).column;
-            break;
-          }
-        }
-        // todo(simon): Source {name, path} should consist of what it says, {name, path}, not {path, path}
-        const auto src = frame.full_symbol_info().symbol_info()->name();
-        stack_frames.push_back(StackFrame{.id = frame.id(),
-                                          .name = frame.name().value_or("unknown"),
-                                          .source = Source{.name = src, .path = src},
-                                          .line = line,
-                                          .column = col,
-                                          .rip = fmt::format("{}", fpc)});
-      }
     } else {
       stack_frames.push_back(StackFrame{.id = frame.id(),
                                         .name = frame.name().value_or("unknown"),
