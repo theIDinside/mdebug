@@ -1,5 +1,6 @@
 #pragma once
 #include "utils/expected.h"
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -89,10 +90,12 @@ class DebuggerConfiguration
   std::optional<int> worker_thread_pool_size{std::nullopt};
   DwarfParseConfiguration dwarf_parsing{false};
   LogConfig log{};
+  Path mLogDirectory;
 
 public:
   friend utils::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
-  static constexpr auto
+
+  static auto
   Default() noexcept
   {
     auto res = DebuggerConfiguration{};
@@ -103,6 +106,7 @@ public:
   int thread_pool_size() const noexcept;
   DwarfParseConfiguration dwarf_config() const noexcept;
   LogConfig log_config() const noexcept;
+  const Path &LogDirectory() const noexcept;
 };
 
 utils::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;

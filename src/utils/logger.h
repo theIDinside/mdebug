@@ -3,6 +3,7 @@
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include <array>
+#include <filesystem>
 #include <fstream>
 #include <source_location>
 #include <string>
@@ -59,7 +60,7 @@ public:
   Logger() noexcept = default;
   ~Logger() noexcept;
   void setup_channel(std::string_view name) noexcept;
-  void setup_channel(Channel id) noexcept;
+  void setup_channel(const std::filesystem::path& logDirectory, Channel id) noexcept;
   void log(std::string_view log_name, std::string_view log_msg) noexcept;
   void log(Channel id, std::string_view log_msg) noexcept;
   static Logger *get_logger() noexcept;

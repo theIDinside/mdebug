@@ -5,8 +5,10 @@
 #include "utils/util.h"
 #include "utils/worker_task.h"
 #include <charconv>
+#include <filesystem>
 #include <getopt.h>
 #include <string_view>
+#include <sys/user.h>
 #include <thread>
 #include <unistd.h>
 
@@ -61,15 +63,29 @@ DebuggerConfiguration::log_config() const noexcept
   return log;
 }
 
+const Path &
+DebuggerConfiguration::LogDirectory() const noexcept
+{
+  if (mLogDirectory.empty()) {
+    static Path currentDir = std::filesystem::current_path();
+    return currentDir;
+  }
+  return mLogDirectory;
+}
+
 static constexpr auto LongOptions = std::to_array<option>({{"rr", OptNoArgument, 0, 'r'},
                                                            {"eager-lnp-parse", OptNoArgument, 0, 'e'},
                                                            // parameters
                                                            {"thread-pool-size", OptArgRequired, 0, 't'},
                                                            {"log", OptArgRequired, 0, 'l'},
-                                                           {"perf", OptNoArgument, 0, 'p'}});
+                                                           {"perf", OptNoArgument, 0, 'p'},
+                                                           {"log-directory", OptArgRequired, 0, 'd'}});
 
 static constexpr auto USAGE_STR =
-  "Usage: mdb <communication path> [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]";
+  "Usage: mdb <communication path> [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]\n"
+  "\n"
+  "-d <directory>\n"
+  "\t The directory where log files should be saved.";
 utils::Expected<DebuggerConfiguration, CLIError>
 parse_cli(int argc, const char **argv) noexcept
 {
@@ -78,11 +94,24 @@ parse_cli(int argc, const char **argv) noexcept
   int opt; // NOLINT
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:p", LongOptions.data(), // NOLINT
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:d:p", LongOptions.data(), // NOLINT
                             &option_index)) != -1) {
     switch (opt) {
     case 0:
       break;
+    case 'd': {
+      if (optarg) {
+        std::string_view args{optarg};
+        Path pathArg = Path{args}.lexically_normal();
+        if (pathArg.is_relative()) {
+          init.mLogDirectory = (std::filesystem::current_path() / pathArg).lexically_normal();
+        } else {
+          init.mLogDirectory = std::move(pathArg);
+        }
+      } else {
+        return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
+      }
+    } break;
     case 'l':
       if (optarg) {
         std::string_view args{optarg};

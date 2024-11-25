@@ -47,13 +47,6 @@ utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool
 int
 main(int argc, const char **argv)
 {
-  {
-    using enum logging::Channel;
-    for (const auto id : logging::DefaultChannels()) {
-      logging::Logger::get_logger()->setup_channel(id);
-    }
-  }
-
   auto res = sys::parse_cli(argc, argv);
   if (!res.is_expected()) {
     auto &&err = res.error();
@@ -68,6 +61,14 @@ main(int argc, const char **argv)
     exit(-1);
   }
 
+  const sys::DebuggerConfiguration &config = res.value();
+  {
+    using enum logging::Channel;
+    for (const auto id : logging::DefaultChannels()) {
+      logging::Logger::get_logger()->setup_channel(config.LogDirectory(), id);
+    }
+  }
+
   std::span<const char *> args(argv, argc);
   DBGLOG(core, "MDB CLI Arguments");
   for (const auto arg : args.subspan(1)) {
@@ -76,7 +77,6 @@ main(int argc, const char **argv)
 
   auto [io_read, io_write] = utils::Notifier::notify_pipe();
 
-  auto config = res.value();
   auto log = config.log_config();
   log.configure_logging(true);
   CDLOG(log.awaiter, core, "Setting awaiter log on");

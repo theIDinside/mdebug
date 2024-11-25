@@ -66,10 +66,10 @@ Logger::setup_channel(std::string_view name) noexcept
 }
 
 void
-Logger::setup_channel(Channel id) noexcept
+Logger::setup_channel(const Path& logDirectory, Channel id) noexcept
 {
   ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
-  Path p = std::filesystem::current_path() / fmt::format("{}.log", to_str(id));
+  Path p = logDirectory / fmt::format("{}.log", to_str(id));
   auto channel =
     new LogChannel{.spin_lock = SpinLock{},
                    .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
