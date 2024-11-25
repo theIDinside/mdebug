@@ -133,6 +133,23 @@ CFAStateMachine::SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept
   mCanonicalFrameAddressValue = canonicalFrameAddress;
 }
 
+void
+CFAStateMachine::RememberState() noexcept
+{
+  mRememberedState.push_back(rule_table);
+  mRememberedCFA.push_back({});
+  std::memcpy(&mRememberedCFA.back(), &cfa, sizeof(cfa));
+}
+
+void
+CFAStateMachine::RestoreState() noexcept
+{
+  rule_table = mRememberedState.back();
+  mRememberedState.pop_back();
+  std::memcpy(&cfa, &mRememberedCFA.back(), sizeof(cfa));
+  mRememberedCFA.pop_back();
+}
+
 u64
 CFAStateMachine::ResolveRegisterContents(u64 reg_number, const FrameUnwindState &belowFrame) noexcept
 {
@@ -283,10 +300,10 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         state.rule_table[reg1].set_register(reg2);
       } break;
       case 0x0a: { // I::DW_CFA_remember_state
-        TODO("I::DW_CFA_remember_state")
+        state.RememberState();
       } break;
       case 0x0b: { // I::DW_CFA_restore_state
-        TODO("I::DW_CFA_restore_state");
+        state.RestoreState();
       } break;
       case 0x0c: { // I::DW_CFA_def_cfa
         const auto reg = reader.read_uleb128<u64>();

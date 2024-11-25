@@ -99,6 +99,8 @@ public:
   u64 compute_expression(std::span<const u8> bytes) noexcept;
   u64 ResolveRegisterContents(u64 reg_number, const FrameUnwindState &belowFrame) noexcept;
   void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
+  void RememberState() noexcept;
+  void RestoreState() noexcept;
 
   const CFA &get_cfa() const noexcept;
   const Registers &get_regs() const noexcept;
@@ -121,6 +123,8 @@ private:
   Registers rule_table;
   u64 mCanonicalFrameAddressValue;
   bool mResumeAddressUndefined{false};
+  std::vector<Registers> mRememberedState;
+  std::vector<CFA> mRememberedCFA;
 };
 
 struct ByteCodeInterpreter
