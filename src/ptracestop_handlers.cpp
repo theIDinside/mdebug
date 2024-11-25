@@ -168,6 +168,14 @@ LineStep::proceed() noexcept
 }
 
 void
+LineStep::InstallBreakpoint(AddrPtr address) noexcept
+{
+  resume_bp = tc.user_breakpoints().create_loc_user<ResumeToBreakpoint>(
+    tc, tc.get_or_create_bp_location(address.as_void(), false), task.tid, task.tid);
+  resumed_to_resume_addr = false;
+}
+
+void
 LineStep::update_stepped() noexcept
 {
   const auto frame = tc.current_frame(task);
@@ -183,8 +191,7 @@ LineStep::update_stepped() noexcept
     const auto resumeAddress =
       callstack.FindFrame(start_frame).transform([](const auto &f) -> AddrPtr { return f.pc(); });
     if (resumeAddress) {
-      resume_bp = tc.user_breakpoints().create_loc_user<ResumeToBreakpoint>(
-        tc, tc.get_or_create_bp_location(resumeAddress->as_void(), false), task.tid, task.tid);
+      InstallBreakpoint(resumeAddress.value());
     } else {
       TODO_FMT("Could not determine resume address using start frame {}; haven't implemented line step in "
                "recursive functions or in the case where some function below does a longjmp and possible entirely "

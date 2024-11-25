@@ -471,7 +471,7 @@ CallStack::Unwind(const CallStackRequest &req)
     break;
   }
   case CallStackRequest::Type::Partial: {
-    for (auto uinf = uninfo; uinf.has_value() && count != 0; uinf = it.get_info(GetTopMostPc())) {
+    for (auto uinf = uninfo; uinf.has_value() && count > 0; uinf = it.get_info(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
       cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
       decode_eh_insts(uinf.value(), cfa_state);

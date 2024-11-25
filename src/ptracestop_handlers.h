@@ -79,6 +79,9 @@ public:
   void update_stepped() noexcept override;
 
 private:
+  // Installs resume-to breakpoint at `address`
+  void InstallBreakpoint(AddrPtr address) noexcept;
+
   int lines_requested;
   int lines_stepped;
   bool is_done;

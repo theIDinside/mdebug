@@ -1182,7 +1182,8 @@ TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) no
     auto frame_pc = i.as_void();
     auto result = find_fn_by_pc(frame_pc);
     if (!result) {
-      PANIC("No object file related to pc - that should be impossible.");
+      DBGLOG(core, "No object file related to pc; abort call frame state building.");
+      break;
     }
     auto &[symbol, obj] = result.value();
     const auto id = Tracer::Instance->new_key();
