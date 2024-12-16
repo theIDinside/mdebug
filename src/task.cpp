@@ -306,7 +306,7 @@ TaskVMInfo::from_clone_args(const clone_args &cl_args) noexcept
 }
 
 /*static*/ CallStackRequest
-CallStackRequest::partial(u8 count) noexcept
+CallStackRequest::partial(int count) noexcept
 {
   return CallStackRequest{.req = Type::Partial, .count = count};
 }

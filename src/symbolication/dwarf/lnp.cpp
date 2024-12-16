@@ -32,7 +32,9 @@ public:
   constexpr void
   StampEntry() noexcept
   {
-    if (ShouldRecord()) {
+    // usually lines with value = 0, probably can be given the same value as the previous entry into the table
+    // but why even bother? It can't be recorded with 0, because it produces weird behaviors.
+    if (ShouldRecord() && mLine != 0) {
       mTable.insert(LineTableEntry{.pc = mAddress,
                                    .line = mLine,
                                    .column = mColumn,
@@ -602,33 +604,34 @@ read_lnp_headers(const Elf *elf) noexcept
 std::span<const LineTableEntry>
 SourceCodeFile::GetLineTable() const noexcept
 {
-  return line_table;
+  return mLineTable;
 }
 
 const LineTableEntry *
 SourceCodeFile::GetProgramCounterUsingBase(AddrPtr relocatedBase, AddrPtr pc) noexcept
 {
-  if (computed && line_table.size() <= 2) {
+  if (computed && mLineTable.size() <= 2) {
     return nullptr;
   }
   ASSERT(computed, "This source code file needs decoding first.");
-  auto first = line_table.front();
-  auto last = line_table.back();
-  const bool rangeContainsPc =
-    first.RelocateProgramCounter(relocatedBase) <= pc && pc <= last.RelocateProgramCounter(relocatedBase);
-  AddrPtr unreloc = pc - relocatedBase;
+  const AddrPtr searchPc = pc - relocatedBase;
+
+  const bool rangeContainsPc = mLineTable.front().pc <= pc && pc <= mLineTable.back().pc;
+
   if (!rangeContainsPc) {
     return nullptr;
   }
-  if (!std::ranges::any_of(mLineTableRanges, [unreloc](const auto &range) { return range.contains(unreloc); })) {
+  if (!std::ranges::any_of(mLineTableRanges, [searchPc](const auto &range) { return range.contains(searchPc); })) {
     return nullptr;
   }
 
-  AddrPtr searchPc = pc - relocatedBase;
-  auto it = std::lower_bound(line_table.data(), line_table.data() + line_table.size(), searchPc,
-                             [](const auto &lte, AddrPtr pc) { return lte.pc <= pc; });
+  auto it = std::lower_bound(mLineTable.data(), mLineTable.data() + mLineTable.size(), searchPc,
+                             [](const auto &lte, AddrPtr pc) { return lte.pc < pc; });
 
-  if (it != line_table.data() + line_table.size()) {
+  if (it != mLineTable.data() + mLineTable.size()) {
+    if (searchPc < it->pc) {
+      return it == mLineTable.data() ? nullptr : it - 1;
+    }
     return it;
   }
   return nullptr;
@@ -641,17 +644,17 @@ SourceCodeFile::begin(AddrPtr relocatedBase) const noexcept
   if (!is_computed()) {
     ComputeLineTableForThis();
   }
-  return RelocatedLteIterator(line_table.data(), relocatedBase);
+  return RelocatedLteIterator(mLineTable.data(), relocatedBase);
 }
 
 RelocatedLteIterator
 SourceCodeFile::end(AddrPtr relocatedBase) const noexcept
 {
-  return RelocatedLteIterator(line_table.data() + line_table.size(), relocatedBase);
+  return RelocatedLteIterator(mLineTable.data() + mLineTable.size(), relocatedBase);
 }
 
 SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept
-    : headers(std::move(headers)), line_table(), low(nullptr), high(nullptr), m(), computed(false), elf(elf),
+    : headers(std::move(headers)), mLineTable(), low(nullptr), high(nullptr), m(), computed(false), elf(elf),
       full_path(std::move(path))
 {
 }
@@ -673,13 +676,13 @@ SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line,
 auto
 SourceCodeFile::find_by_pc(AddrPtr base, AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
 {
-  auto start = begin(base);
-  // might be a source code file with no line number info. e.g. include/stdio.h
-  if (start == end(base)) {
+  if(mLineTable.empty()) {
     return std::nullopt;
   }
-  if ((*start).pc == addr) {
-    return start;
+
+  const auto relocated = addr - base;
+  if(mLineTable.front().pc > relocated || mLineTable.back().pc < relocated) {
+    return std::nullopt;
   }
 
   auto it = std::lower_bound(begin(base), end(base), addr,
@@ -707,6 +710,14 @@ SourceCodeFile::address_bounds() noexcept
   }
   ComputeLineTableForThis();
   return AddressRange{low, high};
+}
+
+bool
+SourceCodeFile::HasAddressRange() noexcept
+{
+  auto range = address_bounds();
+
+  return range.is_valid();
 }
 
 bool
@@ -821,13 +832,13 @@ SourceCodeFile::ComputeLineTableForThis() const noexcept
     }
   }
 
-  line_table.reserve(unique_ltes.size());
-  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(line_table));
-  ASSERT(std::is_sorted(line_table.begin(), line_table.end(), [](auto &a, auto &b) { return a.pc < b.pc; }),
+  mLineTable.reserve(unique_ltes.size());
+  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(mLineTable));
+  ASSERT(std::is_sorted(mLineTable.begin(), mLineTable.end(), [](auto &a, auto &b) { return a.pc < b.pc; }),
          "Line Table was not sorted by Program Counter!");
-  if (line_table.size() > 2) {
-    low = line_table.front().pc;
-    high = line_table.back().pc;
+  if (mLineTable.size() > 2) {
+    low = mLineTable.front().pc;
+    high = mLineTable.back().pc;
   }
   computed = true;
 }

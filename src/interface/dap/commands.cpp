@@ -607,7 +607,7 @@ InitializeResponse::serialize(int) const noexcept
   cfg_body["supportsRestartFrame"] = false;
   cfg_body["supportsGotoTargetsRequest"] = false;
   cfg_body["supportsStepInTargetsRequest"] = false;
-  cfg_body["supportsCompletionsRequest"] = true;
+  cfg_body["supportsCompletionsRequest"] = false;
   cfg_body["completionTriggerCharacters"] = {".", "["};
   cfg_body["supportsModulesRequest"] = false;
   cfg_body["additionalModuleColumns"] = false;
@@ -895,6 +895,11 @@ DisassembleResponse::serialize(int seq) const noexcept
     seq, request_seq, fmt::join(instructions, ","));
 }
 
+#define IfInvalidArgsReturn(type)                                                                                 \
+  if (const auto missing = Validate<type>(seq, args); missing) {                                                  \
+    return missing;                                                                                               \
+  }
+
 Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
                    std::optional<EvaluationContext> context) noexcept
     : UICommand(seq), expr(std::move(expression)), frameId(frameId),
@@ -905,10 +910,21 @@ Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId
 UIResultPtr
 Evaluate::execute() noexcept
 {
-  return new ErrorResponse{Request, this, {}, Message{.format = "could not evaluate"}};
+  switch (context) {
+  case EvaluationContext::Watch:
+    [[fallthrough]];
+  case EvaluationContext::Repl:
+    [[fallthrough]];
+  case EvaluationContext::Hover:
+    [[fallthrough]];
+  case EvaluationContext::Clipboard:
+    [[fallthrough]];
+  case EvaluationContext::Variables:
+    return new ErrorResponse{Request, this, {}, Message{.format = "could not evaluate"}};
+  }
 }
 
-std::optional<EvaluationContext>
+EvaluationContext
 Evaluate::parse_context(std::string_view input) noexcept
 {
 
@@ -922,7 +938,26 @@ Evaluate::parse_context(std::string_view input) noexcept
       return v;
     }
   }
-  return {};
+
+  return EvaluationContext::Repl;
+}
+
+/*static*/
+UICommand *
+Evaluate::PrepareEvaluateCommand(u64 seq, const nlohmann::json &args)
+{
+  IfInvalidArgsReturn(Evaluate);
+
+  std::string expr = args.at("expression");
+  std::optional<int> frameId{};
+  EvaluationContext ctx{};
+  frameId = args.at("frameId");
+
+  std::string_view context;
+  args.at("context").get_to(context);
+  ctx = Evaluate::parse_context(context);
+
+  return new ui::dap::Evaluate{seq, std::move(expr), frameId, ctx};
 }
 
 EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference,
@@ -1107,13 +1142,8 @@ InvalidArgsResponse::serialize(int seq) const noexcept
     request_seq, command, msg);
 }
 
-#define IfInvalidArgsReturn(type)                                                                                 \
-  if (const auto missing = Validate<type>(seq, args); missing) {                                                  \
-    return missing;                                                                                               \
-  }
-
 ui::UICommand *
-parse_command(std::string &&packet) noexcept
+ParseDebugAdapterCommand(std::string &&packet) noexcept
 {
   using namespace ui::dap;
 
@@ -1177,29 +1207,7 @@ parse_command(std::string &&packet) noexcept
     return new Disconnect{seq, restart, terminate_debuggee, suspend_debuggee};
   }
   case CommandType::Evaluate: {
-    IfInvalidArgsReturn(Evaluate);
-
-    std::string expr = args.at("expression");
-    std::optional<int> frameId{};
-    std::optional<EvaluationContext> ctx{};
-
-    if (args.contains("frameId")) {
-      const auto &ref = args.at("frameId");
-      if (ref.is_number()) {
-        frameId = args.at("frameId");
-      }
-    }
-
-    if (args.contains("context")) {
-      const auto &ref = args.at("context");
-      if (ref.is_string()) {
-        std::string_view context;
-        ref.get_to(context);
-        ctx = Evaluate::parse_context(context);
-      }
-    }
-
-    return new ui::dap::Evaluate{seq, std::move(expr), frameId, ctx};
+    return Evaluate::PrepareEvaluateCommand(seq, args);
   }
   case CommandType::ExceptionInfo:
     TODO("Command::ExceptionInfo");

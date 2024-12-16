@@ -675,10 +675,11 @@ struct Evaluate final : public UICommand
   Immutable<EvaluationContext> context;
 
   DEFINE_NAME("evaluate");
-  RequiredArguments({"expression"sv});
-  DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int});
+  RequiredArguments({"expression"sv, "context"sv});
+  DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int}, {"context", FieldType::String});
 
-  static std::optional<EvaluationContext> parse_context(std::string_view input) noexcept;
+  static EvaluationContext parse_context(std::string_view input) noexcept;
+  static UICommand *PrepareEvaluateCommand(u64 seq, const nlohmann::json &args);
 };
 
 struct EvaluateResponse final : public UIResult
@@ -771,7 +772,7 @@ struct InvalidArgs final : public UICommand
   DEFINE_NAME("disassemble");
 };
 
-ui::UICommand *parse_command(std::string &&packet) noexcept;
+ui::UICommand *ParseDebugAdapterCommand(std::string &&packet) noexcept;
 
 template <typename Derived, typename JsonArgs>
 static constexpr auto

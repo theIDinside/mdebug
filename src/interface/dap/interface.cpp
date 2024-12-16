@@ -239,7 +239,7 @@ DebugAdapterClient::commands_read() noexcept
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
       const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
-      const auto cmd = parse_command(std::string{cd->payload()});
+      const auto cmd = ParseDebugAdapterCommand(std::string{cd->payload()});
 
       push_command_event(this, cmd);
     }
@@ -249,7 +249,7 @@ DebugAdapterClient::commands_read() noexcept
     if (request_headers.size() > 1) {
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
         const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
-        const auto cmd = parse_command(std::string{cd->payload()});
+        const auto cmd = ParseDebugAdapterCommand(std::string{cd->payload()});
         push_command_event(this, cmd);
       }
 

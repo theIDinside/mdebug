@@ -108,6 +108,40 @@ struct LineTableEntry
   AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
 };
 
+struct LineTableEntryAddress {
+  AddrPtr pc;
+};
+
+struct LineTableEntryInfo {
+  u32 line;
+  u32 column : 17;
+  u16 file : 10;
+  bool is_stmt : 1;
+  bool prologue_end : 1;
+  bool basic_block : 1;
+  bool epilogue_begin : 1;
+};
+
+class ComponentLineTable {
+  std::vector<LineTableEntryAddress> mEntryAddress;
+  std::vector<LineTableEntryInfo> mEntryInfo;
+public:
+  LineTableEntryInfo* Info(LineTableEntryAddress* entry) noexcept {
+    size_t index = entry - mEntryAddress.data();
+    return &mEntryInfo[index];
+  }
+
+  void Reserve(u32 size) noexcept {
+    mEntryAddress.reserve(size);
+    mEntryInfo.reserve(size);
+  }
+
+  void Push(const LineTableEntry& lte) {
+    mEntryAddress.push_back({ lte.pc });
+    mEntryInfo.push_back({});
+  }
+};
+
 struct RelocatedLteIterator
 {
   // using Iter = std::vector<LineTableEntry>::const_iterator;
@@ -167,7 +201,7 @@ public:
 private:
   std::vector<LNPHeader *> headers;
   // Resolved lazily when needed, by walking `line_table`
-  mutable std::vector<LineTableEntry> line_table;
+  mutable std::vector<LineTableEntry> mLineTable;
   mutable std::vector<AddressRange> mLineTableRanges;
   mutable AddrPtr low;
   mutable AddrPtr high;
@@ -192,6 +226,7 @@ public:
   auto find_by_pc(AddrPtr base, AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
   auto add_header(LNPHeader *header) noexcept -> void;
   auto address_bounds() noexcept -> AddressRange;
+  bool HasAddressRange() noexcept;
 };
 
 // RelocatedFoo types are "thin" wrappers around the "raw" debug symbol info data types. This is so that we can

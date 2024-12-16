@@ -25,11 +25,11 @@ struct CallStackRequest
     Full,
     Partial
   } req;
-  u8 count;
+  int count;
 
   bool create_frame_ref_ids{true};
 
-  static CallStackRequest partial(u8 count) noexcept;
+  static CallStackRequest partial(int count) noexcept;
   static CallStackRequest full() noexcept;
 };
 
