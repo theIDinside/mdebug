@@ -25,7 +25,7 @@ IndexingTask::IndexingTask(ObjectFile *obj, std::span<UnitData *> cus_to_index) 
 /*static*/ std::vector<IndexingTask *>
 IndexingTask::create_jobs_for(ObjectFile *obj)
 {
-  const auto cus = std::span{obj->compilation_units()};
+  const auto cus = std::span{obj->GetAllCompileUnits()};
   const auto work = utils::ThreadPool::calculate_job_sizes(cus);
   std::vector<IndexingTask *> result;
   result.reserve(work.size());
@@ -266,7 +266,7 @@ IndexingTask::execute_task() noexcept
       }
     }
   }
-  auto idx = obj->name_index();
+  auto idx = obj->GetNameIndex();
   idx->namespaces.merge(namespaces);
   idx->free_functions.merge(free_functions);
   idx->global_variables.merge(global_variables);
@@ -274,11 +274,11 @@ IndexingTask::execute_task() noexcept
   idx->types.merge_types(obj, types);
 
   if (!initialized_cus.empty()) {
-    obj->add_initialized_cus(initialized_cus);
+    obj->AddInitializedCompileUnits(initialized_cus);
   }
 
   if (!type_units.empty()) {
-    obj->add_type_units(type_units);
+    obj->AddTypeUnits(type_units);
   }
 }
 
@@ -288,7 +288,7 @@ process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &s
   auto cu = src.get_dwarf_unit();
   const auto version = cu->header().version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
-  auto elf = cu->GetObjectFile()->elf;
+  auto elf = cu->GetObjectFile()->GetElf();
   if (version == DwarfVersion::D4) {
     auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset.address()));
     auto lowest = UINTMAX_MAX;

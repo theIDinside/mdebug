@@ -7,7 +7,7 @@ class FunctionSymbol;
 class Frame;
 } // namespace sym
 
-struct ObjectFile;
+class ObjectFile;
 
 namespace sym::dw {
 

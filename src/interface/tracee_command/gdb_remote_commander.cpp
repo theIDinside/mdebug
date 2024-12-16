@@ -501,8 +501,8 @@ GdbRemoteCommander::OnExec() noexcept
   supervisor()->ParseAuxiliaryVectorInfo(std::move(auxv.take_value()));
 
   if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(*exec_file); symbol_obj == nullptr) {
-    auto obj = CreateObjectFile(tc, *exec_file);
-    if (obj->elf->AddressesNeedsRelocation()) {
+    auto obj = ObjectFile::CreateObjectFile(tc, *exec_file);
+    if (obj->GetElf()->AddressesNeedsRelocation()) {
       tc->RegisterObjectFile(tc, std::move(obj), true, tc->EntryAddress());
     } else {
       tc->RegisterObjectFile(tc, std::move(obj), true, nullptr);

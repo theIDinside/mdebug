@@ -90,7 +90,7 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   //  we should check if the object file from `objfile_path` has already been loaded into memory
   auto target = get_controller(target_pid);
   if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
-    auto obj = CreateObjectFile(target, objfile_path);
+    auto obj = ObjectFile::CreateObjectFile(target, objfile_path);
     target->RegisterObjectFile(target, std::move(obj), true, nullptr);
   } else {
     target->RegisterSymbolFile(symbol_obj, true);

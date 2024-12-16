@@ -6,7 +6,7 @@
 using namespace std::string_view_literals;
 
 class TraceeController;
-struct ObjectFile;
+class ObjectFile;
 
 namespace sym {
 class Type;

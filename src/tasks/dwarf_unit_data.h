@@ -3,7 +3,7 @@
 #include <symbolication/dwarf/unit_header.h>
 #include <utils/worker_task.h>
 
-struct ObjectFile;
+class ObjectFile;
 
 namespace sym::dw {
 

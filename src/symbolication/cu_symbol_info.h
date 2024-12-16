@@ -8,7 +8,7 @@
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;
 
-struct ObjectFile;
+class ObjectFile;
 class SymbolFile;
 namespace sym {
 namespace dw {

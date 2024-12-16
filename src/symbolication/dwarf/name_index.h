@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <utils/indexing.h>
 
-struct ObjectFile;
+class ObjectFile;
 namespace sym::dw {
 
 class UnitData;
@@ -89,7 +89,6 @@ private:
 struct ObjectFileNameIndex
 {
   // backlink to the object file owning this name index
-  ObjectFile *back_pointer;
   NameIndex free_functions{"free functions"};
   NameIndex methods{"methods"};
   NameIndex types{"types"};

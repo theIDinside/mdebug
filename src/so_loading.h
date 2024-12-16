@@ -5,7 +5,7 @@
 #include "utils/macros.h"
 #include <array>
 
-struct ObjectFile;
+class ObjectFile;
 struct ElfSection;
 class Elf;
 

@@ -5,7 +5,7 @@
 #include "symbolication/callstack.h"
 
 struct ElfSection;
-struct ObjectFile;
+class ObjectFile;
 class SymbolFile;
 class TraceeController;
 struct TaskInfo;

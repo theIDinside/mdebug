@@ -2,7 +2,7 @@
 #include "../symbolication/dwarf/die.h"
 #include "../utils/worker_task.h"
 
-struct ObjectFile;
+class ObjectFile;
 
 namespace sym {
 class CompilationUnit;

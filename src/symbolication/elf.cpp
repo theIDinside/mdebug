@@ -122,7 +122,7 @@ const ElfSection *
 Elf::get_section_or_panic(std::string_view name) const noexcept
 {
   auto sec = get_section(name);
-  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, obj_file.path->c_str());
+  ASSERT(sec != nullptr, "Expected {} not to be null in {}", name, obj_file.GetPathString());
   return sec;
 }
 
@@ -168,8 +168,8 @@ Elf::parse_min_symbols() const noexcept
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
     const auto cmp = [](const auto &a, const auto &b) -> bool { return a.address < b.address; };
     std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
-    obj_file.add_elf_symbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
+    obj_file.AddMinimalElfSymbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
-    LOG(core, "[warning]: No .symtab for {}", obj_file.path->c_str());
+    LOG(core, "[warning]: No .symtab for {}", obj_file.GetPathString());
   }
 }

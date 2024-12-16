@@ -48,8 +48,7 @@ SharedObject::has_debug_info() const noexcept
   if (objfile == nullptr) {
     return false;
   }
-
-  return objfile->elf->get_section(".debug_info") != nullptr;
+  return objfile->GetElf()->get_section(".debug_info") != nullptr;
 }
 
 SharedObject

@@ -6,7 +6,7 @@
 #include <symbolication/dwarf.h>
 #include <utils/indexing.h>
 
-struct ObjectFile;
+class ObjectFile;
 struct ElfSection;
 
 void SetDwarfLogConfig(bool value) noexcept;

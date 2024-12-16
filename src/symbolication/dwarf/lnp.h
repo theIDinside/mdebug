@@ -5,7 +5,7 @@
 #include <common.h>
 
 class Elf;
-struct ObjectFile;
+class ObjectFile;
 
 namespace sym::dw {
 class UnitData;

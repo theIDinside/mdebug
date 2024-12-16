@@ -12,7 +12,7 @@ LineNumberProgramTask::LineNumberProgramTask(ObjectFile *obj, std::span<LNPHeade
 /*static*/ std::vector<LineNumberProgramTask *>
 LineNumberProgramTask::create_jobs_for(ObjectFile *obj)
 {
-  auto lnp_headers = obj->get_lnp_headers();
+  auto lnp_headers = obj->GetLineNumberProgramHeaders();
   std::vector<LineNumberProgramTask *> result;
   result.reserve(utils::ThreadPool::get_global_pool()->worker_count());
   auto work_sizes = utils::ThreadPool::calculate_job_sizes(lnp_headers);

@@ -17,7 +17,7 @@ UnitDataTask::execute_task() noexcept
     auto unit_data = prepare_unit_data(obj, header);
     result.push_back(unit_data);
   }
-  obj->set_unit_data(result);
+  obj->SetCompileUnitData(result);
 }
 
 void

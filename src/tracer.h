@@ -16,7 +16,7 @@
 #include <termios.h>
 #include <unordered_map>
 
-struct ObjectFile;
+class ObjectFile;
 class SymbolFile;
 class TraceeController;
 

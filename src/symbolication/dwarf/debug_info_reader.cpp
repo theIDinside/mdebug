@@ -10,7 +10,7 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
 {
   const auto &header = compilation_unit->header();
   current_ptr =
-    compilation_unit->GetObjectFile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
+    compilation_unit->GetObjectFile()->GetElf()->debug_info->offset(header.header_len() + header.debug_info_offset());
 }
 
 UnitReader::UnitReader(UnitData *data, const DieMetaData &entry) noexcept : UnitReader(data) { seek_die(entry); }
@@ -355,9 +355,9 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 {
   auto obj = compilation_unit->GetObjectFile();
   const auto header = compilation_unit->header();
-  ASSERT(obj->elf->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
+  ASSERT(obj->GetElf()->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
   const auto addr_table_offset = compilation_unit->addr_base() + address_index * header.addr_size();
-  const auto ptr = (obj->elf->debug_addr->m_section_ptr + addr_table_offset);
+  const auto ptr = (obj->GetElf()->debug_addr->m_section_ptr + addr_table_offset);
   if (header.addr_size() == 4) {
     const auto value = *(u32 *)ptr;
     return AddrPtr{value};
@@ -370,7 +370,7 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 std::string_view
 UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 {
-  const auto elf = compilation_unit->GetObjectFile()->elf;
+  const auto elf = compilation_unit->GetObjectFile()->GetElf();
   ASSERT(elf->debug_str_offsets->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
   const auto str_base = compilation_unit->str_offsets_base();
   const auto str_table_offset = str_base.value() + str_index * compilation_unit->header().format();
@@ -387,7 +387,7 @@ UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 u64
 UnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
 {
-  const auto elf = compilation_unit->GetObjectFile()->elf;
+  const auto elf = compilation_unit->GetObjectFile()->GetElf();
   ASSERT(elf->debug_rnglists->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
   const auto rnglist_offset =
     compilation_unit->rng_list_base() + range_index * compilation_unit->header().format();
@@ -404,7 +404,7 @@ u64
 UnitReader::read_loclist_index(u64 range_index, std::optional<u64> loc_list_base) const noexcept
 {
   PANIC("read_loclist_index is not yet implemented. see other indirect + base calculations");
-  const auto elf = compilation_unit->GetObjectFile()->elf;
+  const auto elf = compilation_unit->GetObjectFile()->GetElf();
   ASSERT(elf->debug_loclist->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
 
   const auto rnglist_offset = loc_list_base.value_or(0) + range_index * compilation_unit->header().format();
@@ -436,13 +436,13 @@ void
 UnitReader::seek_die(const DieMetaData &entry) noexcept
 {
   current_ptr =
-    compilation_unit->GetObjectFile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
+    compilation_unit->GetObjectFile()->GetElf()->debug_info->begin() + entry.section_offset + entry.die_data_offset;
 }
 
-Elf *
+const Elf *
 UnitReader::elf() const noexcept
 {
-  return compilation_unit->GetObjectFile()->elf;
+  return compilation_unit->GetObjectFile()->GetElf();
 }
 
 const u8 *
@@ -591,7 +591,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     [[fallthrough]];
   case AttributeForm::DW_FORM_addrx4: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
-           reader.objfile()->path->c_str());
+           reader.objfile()->GetPathString());
     const auto base = utils::castenum(AttributeForm::DW_FORM_addrx1) - 1;
     const auto bytes_to_read = utils::castenum(abbr.form) - base;
     const auto addr_index = reader.read_n_bytes(bytes_to_read);
@@ -599,7 +599,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   }
   case AttributeForm::DW_FORM_addrx: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
-           reader.objfile()->path->c_str());
+           reader.objfile()->GetPathString());
     const auto addr_table_index = reader.uleb128();
     return AttributeValue{reader.read_by_idx_from_addr_table(addr_table_index), abbr.form, abbr.name};
   }
@@ -616,14 +616,14 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     return AttributeValue{implicit_consts[abbr.IMPLICIT_CONST_INDEX], abbr.form, abbr.name};
   case AttributeForm::DW_FORM_loclistx: {
     ASSERT(elf->debug_loclist != nullptr, ".debug_rnglists not read in or found in objfile {}",
-           reader.objfile()->path->c_str());
+           reader.objfile()->GetPathString());
     const auto idx = reader.uleb128();
     return AttributeValue{reader.read_loclist_index(idx, {}), abbr.form, abbr.name};
   }
 
   case AttributeForm::DW_FORM_rnglistx: {
     ASSERT(elf->debug_rnglists != nullptr, ".debug_rnglists not read in or found in objfile {}",
-           reader.objfile()->path->c_str());
+           reader.objfile()->GetPathString());
     const auto addr_table_index = reader.uleb128();
     return AttributeValue{reader.read_by_idx_from_rnglist(addr_table_index), abbr.form, abbr.name};
   }

@@ -30,16 +30,16 @@ ModuleEvent::ModuleEvent(std::string_view id, std::string_view reason, std::stri
 }
 
 ModuleEvent::ModuleEvent(std::string_view reason, const SharedObject &so) noexcept
-    : objfile_id(so.objfile->objfile_id), reason(reason), name(so.name()), path(so.path),
+    : objfile_id(so.objfile->GetObjectFileId()), reason(reason), name(so.name()), path(so.path),
       addr_range(so.relocated_addr_range()), sym_info(so.symbol_info), symbol_file_path(so.symbol_file_path()),
       version(so.version())
 {
 }
 
 ModuleEvent::ModuleEvent(std::string_view reason, const ObjectFile &object_file) noexcept
-    : objfile_id(object_file.objfile_id), reason(reason), name(object_file.path->filename()),
-      path(object_file.path), addr_range(object_file.unrelocated_address_bounds),
-      sym_info(SharedObjectSymbols::None), symbol_file_path(object_file.path->c_str()), version()
+    : objfile_id(object_file.GetObjectFileId()), reason(reason), name(object_file.GetFilePath().filename()),
+      path(object_file.GetFilePath()), addr_range(object_file.GetAddressRange()),
+      sym_info(SharedObjectSymbols::None), symbol_file_path(object_file.GetFilePath()), version()
 {
 }
 

@@ -19,7 +19,7 @@ FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym:
 NonNullPtr<Type>
 FunctionSymbolicationContext::process_type(DieReference cu_die) noexcept
 {
-  auto t = obj.types->get_or_prepare_new_type(cu_die.AsIndexed());
+  auto t = obj.GetTypeStorage()->get_or_prepare_new_type(cu_die.AsIndexed());
   if (t == nullptr) {
     PANIC("Failed to get or prepare new type to be realized");
   }
@@ -103,7 +103,7 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
         case Attribute::DW_AT_specification: {
           auto refereeValue = read_attribute_value(reader, abbreviation, info.implicit_consts);
           const auto declaring_die_offset = refereeValue.unsigned_value();
-          state.mReferedDie = dieRef.GetUnitData()->GetObjectFile()->get_die_reference(declaring_die_offset);
+          state.mReferedDie = dieRef.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
           return DieAttributeRead::Continue;
         }
         default:
@@ -122,7 +122,7 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
       state.mReferedDie.reset();
     }
   }
-  auto variableTypeDie = obj.get_die_reference(state.mTypeId->unsigned_value());
+  auto variableTypeDie = obj.GetDebugInfoEntryReference(state.mTypeId->unsigned_value());
   ASSERT(variableTypeDie.has_value(), "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
          state.mTypeId->unsigned_value());
 
@@ -161,7 +161,7 @@ FunctionSymbolicationContext::process_variable(DieReference cu_die) noexcept
          to_str(cu_die.GetDie()->tag));
   ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.GetDie()->section_offset,
          to_str(cu_die.GetDie()->tag));
-  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+  auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
   ASSERT(containing_cu_die_ref.has_value(), "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
          type_id->unsigned_value());
 
@@ -192,7 +192,7 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
   ASSERT(type_id, "Expected to find type_id attribute for die 0x{:x} ({})", cu_die.GetDie()->section_offset,
          to_str(cu_die.GetDie()->tag));
 
-  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+  auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
   ASSERT(containing_cu_die_ref.has_value(), "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
          type_id->unsigned_value());
 
@@ -287,8 +287,8 @@ TypeSymbolicationContext::process_inheritance(DieReference cu_die) noexcept
   const auto location = cu_die.read_attribute(Attribute::DW_AT_data_member_location);
   const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
 
-  auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
-  auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+  auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
+  auto type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
   auto ctx = TypeSymbolicationContext::continueWith(*this, type);
   ctx.resolve_type();
 
@@ -342,18 +342,18 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 
   if (!name) {
     // means we're likely some anonymous structure of some kind
-    auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+    auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
     ASSERT(containing_cu_die_ref.has_value(),
            "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
-    auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+    auto type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
     const auto member_offset = location->unsigned_value();
     auto name = name_from_tag(type->die_tag);
     this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name});
   } else {
-    auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
+    auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
     ASSERT(containing_cu_die_ref.has_value(),
            "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
-    auto type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+    auto type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
     const auto member_offset = location->unsigned_value();
     this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
   }
@@ -395,8 +395,8 @@ TypeSymbolicationContext::resolve_type() noexcept
     if (die->tag == DwarfTag::DW_TAG_enumeration_type) {
       const auto type_id = typedie.read_attribute(Attribute::DW_AT_type);
       if (type_id) {
-        auto containing_cu_die_ref = obj.get_die_reference(type_id->unsigned_value());
-        enumeration_type = obj.types->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+        auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
+        enumeration_type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
       }
     }
 

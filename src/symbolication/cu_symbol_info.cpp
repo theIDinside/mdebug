@@ -66,7 +66,7 @@ CompilationUnit::ProcessSourceCodeFiles(u64 table) noexcept
          unit_data->section_offset(), cu_name);
 
   for (const auto &[fullPath, v] : header->FileEntries()) {
-    auto source_code_file = obj->get_source_file(fullPath);
+    auto source_code_file = obj->GetSourceCodeFile(fullPath);
     add_source_file(std::move(source_code_file));
   }
 }
@@ -270,7 +270,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
       const auto declaring_die_offset = value.unsigned_value();
-      additional_die_reference = ref.GetUnitData()->GetObjectFile()->get_die_reference(declaring_die_offset);
+      additional_die_reference = ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
     } break;
     default:
       break;
@@ -342,7 +342,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
         const auto declaring_die_offset = value.unsigned_value();
-        if (auto die_ref = unit_data->GetObjectFile()->get_die_reference(declaring_die_offset); die_ref) {
+        if (auto die_ref = unit_data->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset); die_ref) {
           die_refs.push_back(*die_ref);
         } else {
           DBGLOG(core, "Could not find die reference");
@@ -352,8 +352,8 @@ CompilationUnit::resolve_fn_symbols() noexcept
       case Attribute::DW_AT_type: {
         const auto type_id = value.unsigned_value();
         auto obj = unit_data->GetObjectFile();
-        const auto ref = obj->get_die_reference(type_id);
-        state.ret_type = obj->types->get_or_prepare_new_type(ref->AsIndexed());
+        const auto ref = obj->GetDebugInfoEntryReference(type_id);
+        state.ret_type = obj->GetTypeStorage()->get_or_prepare_new_type(ref->AsIndexed());
         break;
       }
       default:

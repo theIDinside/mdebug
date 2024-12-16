@@ -5,7 +5,7 @@
 #include <typedefs.h>
 
 class Elf;
-struct ObjectFile;
+class ObjectFile;
 
 struct AttributeValue;
 
@@ -48,7 +48,7 @@ public:
   /* Set UnitReader to start reading the data for `entry` */
   void seek_die(const DieMetaData &entry) noexcept;
   ObjectFile *objfile() const noexcept;
-  Elf *elf() const noexcept;
+  const Elf *elf() const noexcept;
   const u8 *ptr() const noexcept;
 
   /// Needs to be auto, otherwise we are not widening the value

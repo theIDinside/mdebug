@@ -40,7 +40,7 @@ class DebugAdapterClient;
 }; // namespace ui
 
 using Address = std::uintptr_t;
-struct ObjectFile;
+class ObjectFile;
 class SymbolFile;
 
 class StopObserver;

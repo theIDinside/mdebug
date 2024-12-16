@@ -55,11 +55,11 @@ ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
 }
 
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
-    : path(std::move(p)), objfile_id(std::move(objfile_id)), size(size), loaded_binary(loaded_binary),
-      types(std::make_unique<TypeStorage>(*this)), minimal_fn_symbols{}, min_fn_symbols_sorted(),
-      minimal_obj_symbols{}, unit_data_write_lock(), dwarf_units(),
-      name_to_die_index(std::make_unique<sym::dw::ObjectFileNameIndex>(this)), parsed_lte_write_lock(),
-      lnp_headers(nullptr), cu_write_lock(), comp_units(), addr_cu_map()
+    : mObjectFilePath(std::move(p)), mObjectFileId(std::move(objfile_id)), mSize(size),
+      mLoadedBinary(loaded_binary), mTypeStorage(std::make_unique<TypeStorage>(*this)), mMinimalFunctionSymbols{},
+      mMinimalFunctionSymbolsSorted(), mMinimalObjectSymbols{}, mUnitDataWriteLock(), mCompileUnits(),
+      mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), lnp_headers(nullptr),
+      mCompileUnitWriteLock(), mCompilationUnits(), mAddressToCompileUnitMapping()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -67,31 +67,57 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
 ObjectFile::~ObjectFile() noexcept
 {
   delete elf;
-  munmap((void *)loaded_binary, size);
+  munmap((void *)mLoadedBinary, mSize);
 }
 
-u64
-ObjectFile::get_offset(u8 *ptr) const noexcept
+const char *
+ObjectFile::GetPathString() const noexcept
 {
-  ASSERT(ptr > loaded_binary, "Attempted to take address before {:p} with {:p}", (void *)loaded_binary,
-         (void *)ptr);
-  ASSERT((u64)(ptr - loaded_binary) < size, "Pointer is outside of bounds of 0x{:x} .. {:x}",
-         (std::uintptr_t)loaded_binary, (std::uintptr_t)(loaded_binary + *size))
-  return ptr - loaded_binary;
+  return mObjectFilePath.c_str();
 }
 
-AddrPtr
-ObjectFile::text_section_offset() const noexcept
+const Elf *
+ObjectFile::GetElf() noexcept
 {
-  return elf->get_section(".text")->address;
+  return elf;
+}
+
+sym::Unwinder *
+ObjectFile::GetUnwinder() noexcept
+{
+  return unwinder.get();
+}
+
+std::string_view
+ObjectFile::GetObjectFileId() const noexcept
+{
+  return mObjectFileId;
+}
+
+const Path &
+ObjectFile::GetFilePath() const noexcept
+{
+  return mObjectFilePath;
+}
+
+AddressRange
+ObjectFile::GetAddressRange() const noexcept
+{
+  return mUnrelocatedAddressBounds;
+}
+
+NonNullPtr<TypeStorage>
+ObjectFile::GetTypeStorage() noexcept
+{
+  return NonNull(*mTypeStorage);
 }
 
 std::optional<MinSymbol>
-ObjectFile::get_min_fn_sym(std::string_view name) noexcept
+ObjectFile::FindMinimalFunctionSymbol(std::string_view name) noexcept
 {
-  if (minimal_fn_symbols.contains(name)) {
-    auto &index = minimal_fn_symbols[name];
-    if (const auto symbol = min_fn_symbols_sorted[index]; symbol.maybe_size > 0) {
+  if (mMinimalFunctionSymbols.contains(name)) {
+    auto &index = mMinimalFunctionSymbols[name];
+    if (const auto symbol = mMinimalFunctionSymbolsSorted[index]; symbol.maybe_size > 0) {
       return symbol;
     }
   }
@@ -99,15 +125,15 @@ ObjectFile::get_min_fn_sym(std::string_view name) noexcept
 }
 
 const MinSymbol *
-ObjectFile::search_minsym_fn_info(AddrPtr pc) noexcept
+ObjectFile::SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept
 {
-  auto it = std::lower_bound(min_fn_symbols_sorted.begin(), min_fn_symbols_sorted.end(), pc,
+  auto it = std::lower_bound(mMinimalFunctionSymbolsSorted.begin(), mMinimalFunctionSymbolsSorted.end(), pc,
                              [](auto &sym, AddrPtr addr) { return sym.start_pc() < addr; });
-  if (it == std::end(min_fn_symbols_sorted)) {
+  if (it == std::end(mMinimalFunctionSymbolsSorted)) {
     return nullptr;
   }
 
-  auto prev = (it == std::begin(min_fn_symbols_sorted)) ? it : it - 1;
+  auto prev = (it == std::begin(mMinimalFunctionSymbolsSorted)) ? it : it - 1;
   if (prev->start_pc() <= pc && prev->end_pc() >= pc) {
     return prev.base();
   } else {
@@ -116,39 +142,39 @@ ObjectFile::search_minsym_fn_info(AddrPtr pc) noexcept
 }
 
 std::optional<MinSymbol>
-ObjectFile::get_min_obj_sym(std::string_view name) noexcept
+ObjectFile::FindMinimalObjectSymbol(std::string_view name) noexcept
 {
-  if (minimal_obj_symbols.contains(name)) {
-    return minimal_obj_symbols[name];
+  if (mMinimalObjectSymbols.contains(name)) {
+    return mMinimalObjectSymbols[name];
   } else {
     return std::nullopt;
   }
 }
 
 void
-ObjectFile::set_unit_data(const std::vector<sym::dw::UnitData *> &unit_data) noexcept
+ObjectFile::SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data) noexcept
 {
   ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
-  std::lock_guard lock(unit_data_write_lock);
+  std::lock_guard lock(mUnitDataWriteLock);
   auto first_id = unit_data.front()->section_offset();
   const auto it =
-    std::lower_bound(dwarf_units.begin(), dwarf_units.end(), first_id,
+    std::lower_bound(mCompileUnits.begin(), mCompileUnits.end(), first_id,
                      [](const sym::dw::UnitData *ptr, u64 id) { return ptr->section_offset() < id; });
-  dwarf_units.insert(it, unit_data.begin(), unit_data.end());
+  mCompileUnits.insert(it, unit_data.begin(), unit_data.end());
 }
 
 std::vector<sym::dw::UnitData *> &
-ObjectFile::compilation_units() noexcept
+ObjectFile::GetAllCompileUnits() noexcept
 {
-  return dwarf_units;
+  return mCompileUnits;
 }
 
 sym::dw::UnitData *
-ObjectFile::get_cu_from_offset(u64 offset) noexcept
+ObjectFile::GetCompileUnitFromOffset(u64 offset) noexcept
 {
-  auto it = std::find_if(dwarf_units.begin(), dwarf_units.end(),
+  auto it = std::find_if(mCompileUnits.begin(), mCompileUnits.end(),
                          [&](sym::dw::UnitData *cu) { return cu->spans_across(offset); });
-  if (it != std::end(dwarf_units)) {
+  if (it != std::end(mCompileUnits)) {
     return *it;
   } else {
     return nullptr;
@@ -156,9 +182,9 @@ ObjectFile::get_cu_from_offset(u64 offset) noexcept
 }
 
 std::optional<sym::dw::DieReference>
-ObjectFile::get_die_reference(u64 offset) noexcept
+ObjectFile::GetDebugInfoEntryReference(u64 offset) noexcept
 {
-  auto cu = get_cu_from_offset(offset);
+  auto cu = GetCompileUnitFromOffset(offset);
   if (cu == nullptr) {
     return {};
   }
@@ -173,7 +199,7 @@ ObjectFile::get_die_reference(u64 offset) noexcept
 sym::dw::DieReference
 ObjectFile::GetDieReference(u64 offset) noexcept
 {
-  auto cu = get_cu_from_offset(offset);
+  auto cu = GetCompileUnitFromOffset(offset);
   if (cu == nullptr) {
     return sym::dw::DieReference{nullptr, nullptr};
   }
@@ -186,9 +212,9 @@ ObjectFile::GetDieReference(u64 offset) noexcept
 }
 
 sym::dw::ObjectFileNameIndex *
-ObjectFile::name_index() noexcept
+ObjectFile::GetNameIndex() noexcept
 {
-  return name_to_die_index.get();
+  return mNameToDieIndex.get();
 }
 
 sym::dw::LNPHeader *
@@ -204,7 +230,7 @@ ObjectFile::GetLineNumberProgramHeader(u64 offset) noexcept
 }
 
 void
-ObjectFile::read_lnp_headers() noexcept
+ObjectFile::ReadLineNumberProgramHeaders() noexcept
 {
   lnp_headers = sym::dw::read_lnp_headers(elf);
   std::string path_buf{};
@@ -212,8 +238,8 @@ ObjectFile::read_lnp_headers() noexcept
     ASSERT(!hdr.directories.empty(), "Directories for the LNP header must *NOT* be empty!");
     const auto build_path = std::filesystem::path{hdr.directories[0].path};
     for (const auto &[fullPath, _] : hdr.FileEntries()) {
-      auto it = lnp_source_code_files.find(fullPath);
-      if (it != std::end(lnp_source_code_files)) {
+      auto it = mSourceCodeFiles.find(fullPath);
+      if (it != std::end(mSourceCodeFiles)) {
         it->second->AddNewLineNumberProgramHeader(&hdr);
       } else {
         std::vector<sym::dw::LNPHeader *> src_headers{};
@@ -221,7 +247,7 @@ ObjectFile::read_lnp_headers() noexcept
         DBGLOG(core, "Adding source code file {}", fullPath);
         auto sourceCodeFile = std::make_shared<sym::dw::SourceCodeFile>(elf, fullPath);
         sourceCodeFile->AddNewLineNumberProgramHeader(&hdr);
-        lnp_source_code_files.emplace(fullPath, std::move(sourceCodeFile));
+        mSourceCodeFiles.emplace(fullPath, std::move(sourceCodeFile));
       }
     }
   }
@@ -229,51 +255,51 @@ ObjectFile::read_lnp_headers() noexcept
 
 // No synchronization needed, parsed 1, in 1 thread
 std::span<sym::dw::LNPHeader>
-ObjectFile::get_lnp_headers() noexcept
+ObjectFile::GetLineNumberProgramHeaders() noexcept
 {
   if (lnp_headers) {
     return std::span{*lnp_headers};
   } else {
-    read_lnp_headers();
+    ReadLineNumberProgramHeaders();
     return std::span{*lnp_headers};
   }
 }
 
 void
-ObjectFile::add_initialized_cus(std::span<sym::CompilationUnit> new_cus) noexcept
+ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit> new_cus) noexcept
 {
   // TODO(simon): We do stupid sorting. implement something better optimized
-  std::lock_guard lock(cu_write_lock);
-  comp_units.insert(comp_units.end(), std::make_move_iterator(new_cus.begin()),
-                    std::make_move_iterator(new_cus.end()));
-  std::sort(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter());
+  std::lock_guard lock(mCompileUnitWriteLock);
+  mCompilationUnits.insert(mCompilationUnits.end(), std::make_move_iterator(new_cus.begin()),
+                           std::make_move_iterator(new_cus.end()));
+  std::sort(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter());
 
   DBG({
-    if (!std::is_sorted(comp_units.begin(), comp_units.end(), sym::CompilationUnit::Sorter())) {
-      for (const auto &cu : comp_units) {
+    if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
+      for (const auto &cu : mCompilationUnits) {
         DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
                cu.start_pc(), cu.end_pc());
       }
       PANIC("Dumped CU contents");
     }
   })
-  addr_cu_map.add_cus(new_cus);
+  mAddressToCompileUnitMapping.add_cus(new_cus);
 }
 
 void
-ObjectFile::add_type_units(std::span<sym::dw::UnitData *> tus) noexcept
+ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
 {
   for (const auto tu : tus) {
     ASSERT(tu->header().get_unit_type() == DwarfUnitType::DW_UT_type, "Expected DWARF Unit Type but got {}",
            to_str(tu->header().get_unit_type()));
-    type_units[tu->header().type_signature()] = tu;
+    mTypeToUnitDataMap[tu->header().type_signature()] = tu;
   }
 }
 
 sym::dw::UnitData *
-ObjectFile::get_type_unit(u64 type_signature) noexcept
+ObjectFile::GetTypeUnit(u64 type_signature) noexcept
 {
-  if (auto it = type_units.find(type_signature); it != std::end(type_units)) {
+  if (auto it = mTypeToUnitDataMap.find(type_signature); it != std::end(mTypeToUnitDataMap)) {
     return it->second;
   } else {
     return nullptr;
@@ -281,9 +307,9 @@ ObjectFile::get_type_unit(u64 type_signature) noexcept
 }
 
 sym::dw::DieReference
-ObjectFile::get_type_unit_type_die(u64 type_signature) noexcept
+ObjectFile::GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept
 {
-  auto typeunit = get_type_unit(type_signature);
+  auto typeunit = GetTypeUnit(type_signature);
   ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
   const auto type_die_cu_offset = typeunit->header().get_type_offset();
   const auto type_die_section_offset = typeunit->section_offset() + type_die_cu_offset;
@@ -297,26 +323,26 @@ ObjectFile::get_type_unit_type_die(u64 type_signature) noexcept
 }
 
 std::vector<sym::CompilationUnit> &
-ObjectFile::source_units() noexcept
+ObjectFile::GetCompilationUnits() noexcept
 {
-  return comp_units;
+  return mCompilationUnits;
 }
 
 SharedPtr<sym::dw::SourceCodeFile>
-ObjectFile::get_source_file(std::string_view fullpath) noexcept
+ObjectFile::GetSourceCodeFile(std::string_view fullpath) noexcept
 {
   std::string key{fullpath};
-  auto it = lnp_source_code_files.find(key);
-  if (it != std::end(lnp_source_code_files)) {
+  auto it = mSourceCodeFiles.find(key);
+  if (it != std::end(mSourceCodeFiles)) {
     return it->second;
   }
   return nullptr;
 }
 
 std::vector<sym::dw::UnitData *>
-ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
+ObjectFile::GetProbableCompilationUnits(AddrPtr programCounter) noexcept
 {
-  return addr_cu_map.find_by_pc(pc);
+  return mAddressToCompileUnitMapping.find_by_pc(programCounter);
 }
 
 // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
@@ -325,8 +351,8 @@ std::vector<sym::CompilationUnit *>
 ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept
 {
   std::vector<sym::CompilationUnit *> result;
-  auto unit_datas = addr_cu_map.find_by_pc(pc);
-  for (auto &src : source_units()) {
+  auto unit_datas = mAddressToCompileUnitMapping.find_by_pc(pc);
+  for (auto &src : GetCompilationUnits()) {
     for (auto *unit : unit_datas) {
       if (src.get_dwarf_unit() == unit) {
         result.push_back(&src);
@@ -337,8 +363,8 @@ ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept
 }
 
 auto
-ObjectFile::relocated_get_source_code_files(AddrPtr base,
-                                            AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
+ObjectFile::GetRelocatedSourceCodeFiles(AddrPtr base,
+                                        AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
   std::vector<sym::dw::RelocatedSourceCodeFile> result{};
   auto cus = GetCompilationUnitsSpanningPC(pc);
@@ -357,14 +383,14 @@ ObjectFile::relocated_get_source_code_files(AddrPtr base,
 }
 
 void
-ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noexcept
+ObjectFile::InitializeDebugSymbolInfo(const sys::DwarfParseConfiguration &config) noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
   utils::TaskGroup cu_taskgroup("Compilation Unit Data");
   auto cu_work = sym::dw::UnitDataTask::create_jobs_for(this);
   cu_taskgroup.add_tasks(std::span{cu_work});
   cu_taskgroup.schedule_work().wait();
-  read_lnp_headers();
+  ReadLineNumberProgramHeaders();
 
   if (config.eager_lnp_parse) {
     utils::TaskGroup lnp_tg("Line number programs");
@@ -380,43 +406,43 @@ ObjectFile::initial_dwarf_setup(const sys::DwarfParseConfiguration &config) noex
 }
 
 void
-ObjectFile::add_elf_symbols(std::vector<MinSymbol> &&fn_symbols,
-                            std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept
+ObjectFile::AddMinimalElfSymbols(std::vector<MinSymbol> &&fn_symbols,
+                                 std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept
 {
-  min_fn_symbols_sorted = std::move(fn_symbols);
-  minimal_obj_symbols = std::move(obj_symbols);
-  init_minsym_name_lookup();
+  mMinimalFunctionSymbolsSorted = std::move(fn_symbols);
+  mMinimalObjectSymbols = std::move(obj_symbols);
+  InitializeMinimalSymbolLookup();
 }
 
 void
-ObjectFile::init_minsym_name_lookup() noexcept
+ObjectFile::InitializeMinimalSymbolLookup() noexcept
 {
-  for (const auto &[index, sym] : utils::EnumerateView(min_fn_symbols_sorted)) {
-    minimal_fn_symbols[sym.name] = Index{static_cast<u32>(index)};
+  for (const auto &[index, sym] : utils::EnumerateView(mMinimalFunctionSymbolsSorted)) {
+    mMinimalFunctionSymbols[sym.name] = Index{static_cast<u32>(index)};
   }
 }
 
 std::unique_ptr<sym::ValueVisualizer>
-ObjectFile::find_custom_visualizer(sym::Type &) noexcept
+ObjectFile::FindCustomDataVisualizerFor(sym::Type &) noexcept
 {
   return nullptr;
 }
 
 std::unique_ptr<sym::ValueResolver>
-ObjectFile::find_custom_resolver(sym::Type &) noexcept
+ObjectFile::FindCustomDataResolverFor(sym::Type &) noexcept
 {
   return nullptr;
 }
 
 void
-ObjectFile::init_visualizer(std::shared_ptr<sym::Value> &value) noexcept
+ObjectFile::InitializeDataVisualizer(std::shared_ptr<sym::Value> &value) noexcept
 {
   if (value->has_visualizer()) {
     return;
   }
 
   sym::Type &type = *value->type()->resolve_alias();
-  if (auto custom_visualiser = find_custom_visualizer(type); custom_visualiser != nullptr) {
+  if (auto custom_visualiser = FindCustomDataVisualizerFor(type); custom_visualiser != nullptr) {
     return;
   }
 
@@ -430,11 +456,11 @@ ObjectFile::init_visualizer(std::shared_ptr<sym::Value> &value) noexcept
 }
 
 auto
-ObjectFile::regex_search(const std::string &regex_pattern) const noexcept -> std::vector<std::string>
+ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcept -> std::vector<std::string>
 {
   // TODO(simon): Optimize. Regexing .debug_str in for instance libxul.so, takes 15 seconds (on O3, on -O0; it
   // takes 180 seconds)
-  std::regex re{regex_pattern};
+  std::regex re{regex};
   if (elf->debug_str == nullptr) {
     return {};
   }
@@ -480,8 +506,9 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
   return objfile;
 }
 
+/* static */
 std::shared_ptr<ObjectFile>
-CreateObjectFile(TraceeController *tc, const Path &path) noexcept
+ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -492,7 +519,7 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->TaskLeaderTid(), path.c_str()), path,
                                                     fd.file_size(), addr);
 
-  DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
+  DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
   ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
@@ -514,7 +541,7 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
     }
   }
 
-  objfile->unrelocated_address_bounds = AddressRange{.low = min, .high = max};
+  objfile->mUnrelocatedAddressBounds = AddressRange{.low = min, .high = max};
   auto sec_hdrs_offset = header->e_shoff;
   // parse sections
   for (auto i = 0; i < data.count; i++) {
@@ -533,11 +560,11 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->get_section(".eh_frame"));
   if (const auto section = objfile->elf->get_section(".debug_frame"); section) {
     DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
-    sym::parse_dwarf_eh(objfile->elf, objfile->unwinder.get(), section);
+    sym::parse_dwarf_eh(objfile->GetElf(), objfile->unwinder.get(), section);
   }
 
   if (objfile->elf->has_dwarf()) {
-    objfile->initial_dwarf_setup(Tracer::Instance->getConfig().dwarf_config());
+    objfile->InitializeDebugSymbolInfo(Tracer::Instance->getConfig().dwarf_config());
   }
 
   return objfile;
@@ -546,7 +573,7 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 SymbolFile::SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
                        AddrPtr relocated_base) noexcept
     : binary_object(std::move(binary)), tc(tc), obj_id(std::move(obj_id)), baseAddress(relocated_base),
-      pc_bounds(AddressRange::relocate(binary_object->unrelocated_address_bounds, relocated_base))
+      pc_bounds(AddressRange::relocate(binary_object->mUnrelocatedAddressBounds, relocated_base))
 {
 }
 
@@ -555,7 +582,7 @@ SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, A
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
-  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->TaskLeaderTid(), binary->path->c_str()),
+  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->TaskLeaderTid(), binary->GetPathString()),
                                       std::move(binary), relocated_base);
 }
 
@@ -569,7 +596,7 @@ SymbolFile::copy(TraceeController &tc, AddrPtr relocated_base) const noexcept ->
 auto
 SymbolFile::getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
 {
-  return objectFile()->get_cus_from_pc(pc - baseAddress->get());
+  return objectFile()->GetProbableCompilationUnits(pc - baseAddress->get());
 }
 
 auto
@@ -606,7 +633,7 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
   //   values and how to display them, which *is* the issue with GDB's pretty printers
   auto type = value->type()->resolve_alias();
 
-  if (auto resolver = objectFile()->find_custom_resolver(*type); resolver != nullptr) {
+  if (auto resolver = objectFile()->FindCustomDataResolverFor(*type); resolver != nullptr) {
     value->set_resolver(std::move(resolver));
     return;
   }
@@ -668,7 +695,7 @@ SymbolFile::getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationU
 auto
 SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
-  return binary_object->relocated_get_source_code_files(baseAddress, pc);
+  return binary_object->GetRelocatedSourceCodeFiles(baseAddress, pc);
 }
 
 auto
@@ -692,7 +719,7 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
     std::vector<ui::dap::Variable> result{};
 
     for (auto &var : variables) {
-      objectFile()->init_visualizer(var);
+      objectFile()->InitializeDataVisualizer(var);
       registerResolver(var);
       const auto new_ref = var->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
@@ -709,7 +736,7 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
     for (auto &mem : type->member_variables()) {
       auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
                                                        value->mem_contents_offset, value->take_memory_reference());
-      objectFile()->init_visualizer(member_value);
+      objectFile()->InitializeDataVisualizer(member_value);
       registerResolver(member_value);
       const auto new_ref =
         member_value->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
@@ -725,37 +752,37 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
 auto
 SymbolFile::low_pc() noexcept -> AddrPtr
 {
-  return baseAddress + objectFile()->unrelocated_address_bounds.low;
+  return baseAddress + objectFile()->mUnrelocatedAddressBounds.low;
 }
 
 auto
 SymbolFile::high_pc() noexcept -> AddrPtr
 {
-  return baseAddress + objectFile()->unrelocated_address_bounds.high;
+  return baseAddress + objectFile()->mUnrelocatedAddressBounds.high;
 }
 
 auto
 SymbolFile::getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
 {
-  return binary_object->get_min_fn_sym(name);
+  return binary_object->FindMinimalFunctionSymbol(name);
 }
 
 auto
 SymbolFile::searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *
 {
-  return objectFile()->search_minsym_fn_info(pc - *baseAddress);
+  return objectFile()->SearchMinimalSymbolFunctionInfo(pc - *baseAddress);
 }
 
 auto
 SymbolFile::getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
 {
-  return binary_object->get_min_obj_sym(name);
+  return binary_object->FindMinimalObjectSymbol(name);
 }
 
 auto
 SymbolFile::path() const noexcept -> Path
 {
-  return binary_object->path;
+  return binary_object->mObjectFilePath;
 }
 
 auto
@@ -775,24 +802,24 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
   std::vector<std::string> search_for{};
   if (spec.is_regex) {
     const auto start = std::chrono::high_resolution_clock::now();
-    search_for = obj->regex_search(spec.name);
+    search_for = obj->SearchDebugSymbolStringTable(spec.name);
     const auto elapsed =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
         .count();
-    DBGLOG(core, "regex searched {} in {}us", obj->path->c_str(), elapsed);
+    DBGLOG(core, "regex searched {} in {}us", obj->GetPathString(), elapsed);
   } else {
     search_for = {spec.name};
   }
 
   for (const auto &n : search_for) {
-    auto ni = obj->name_index();
+    auto ni = obj->GetNameIndex();
     ni->for_each_fn(n, [&](const sym::dw::DieNameReference &ref) {
       auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
       auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
       if (low_pc) {
         const auto addr = low_pc->address();
         matching_symbols.emplace_back(n, addr, 0);
-        DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->path->c_str(),
+        DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->GetPathString(),
                die_ref.GetUnitData()->section_offset(), die_ref.GetDie()->section_offset, n, addr);
       }
     });
@@ -805,7 +832,8 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
       auto srcs = getSourceCodeFiles(sym.address);
       for (auto src : srcs) {
         if (src.address_bounds().contains(relocatedAddress)) {
-          if (const auto lte = src.FindLineTableEntry(relocatedAddress); lte && !bps_set.contains(relocatedAddress)) {
+          if (const auto lte = src.FindLineTableEntry(relocatedAddress);
+              lte && !bps_set.contains(relocatedAddress)) {
             result.emplace_back(relocatedAddress, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});
             bps_set.insert(sym.address);
           }
@@ -815,7 +843,8 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
   }
 
   for (const auto &n : search_for) {
-    if (auto s = obj->get_min_fn_sym(n).transform([&](const auto &sym) { return sym.address + baseAddress; });
+    if (auto s =
+          obj->FindMinimalFunctionSymbol(n).transform([&](const auto &sym) { return sym.address + baseAddress; });
         s.has_value() && !bps_set.contains(s.value())) {
       result.emplace_back(s.value(), std::nullopt);
       bps_set.insert(s.value());
@@ -848,7 +877,7 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
 
     auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
                                                                          const_cast<sym::Symbol &>(symbol), true);
-    objectFile()->init_visualizer(value_object);
+    objectFile()->InitializeDataVisualizer(value_object);
     registerResolver(value_object);
 
     if (ref > 0) {

@@ -9,7 +9,7 @@
 
 class TraceeController;
 struct TaskInfo;
-struct ObjectFile;
+class ObjectFile;
 class SymbolFile;
 
 namespace tc {
