@@ -26,6 +26,34 @@
 #include <utility>
 #include <utils/scoped_fd.h>
 
+ParsedAuxiliaryVector
+ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
+{
+  ParsedAuxiliaryVector result;
+  for (const auto [id, value] : aux.vector) {
+    switch (id) {
+    case AT_PHDR:
+      result.mProgramHeaderPointer = value;
+      break;
+    case AT_PHENT:
+      result.mProgramHeaderEntrySize = value;
+      break;
+    case AT_PHNUM:
+      result.mProgramHeaderCount = value;
+      break;
+    case AT_BASE:
+      result.mInterpreterBaseAddress = value;
+      break;
+    case AT_ENTRY:
+      result.mEntry = value;
+      break;
+    }
+  }
+  DBGLOG(core, "Auxiliary Vector: {{ interpreter: {}, program entry: {}, program headers: {} }}",
+         result.mInterpreterBaseAddress, result.mEntry, result.mProgramHeaderPointer);
+  return result;
+}
+
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
     : path(std::move(p)), objfile_id(std::move(objfile_id)), size(size), loaded_binary(loaded_binary),
       types(std::make_unique<TypeStorage>(*this)), minimal_fn_symbols{}, min_fn_symbols_sorted(),
@@ -164,14 +192,15 @@ ObjectFile::name_index() noexcept
 }
 
 sym::dw::LNPHeader *
-ObjectFile::get_lnp_header(u64 offset) noexcept
+ObjectFile::GetLineNumberProgramHeader(u64 offset) noexcept
 {
   for (auto &header : *lnp_headers) {
     if (header.sec_offset == offset) {
       return &header;
     }
   }
-  TODO_FMT("handle requests of line table headers that aren't yet parsed (offset={})", offset);
+  DBGLOG(core, "WARNING no LNP Header with id = 0x{:x}", offset);
+  return nullptr;
 }
 
 void
@@ -185,13 +214,14 @@ ObjectFile::read_lnp_headers() noexcept
     for (const auto &[fullPath, _] : hdr.FileEntries()) {
       auto it = lnp_source_code_files.find(fullPath);
       if (it != std::end(lnp_source_code_files)) {
-        it->second->add_header(&hdr);
+        it->second->AddNewLineNumberProgramHeader(&hdr);
       } else {
         std::vector<sym::dw::LNPHeader *> src_headers{};
         src_headers.push_back(&hdr);
         DBGLOG(core, "Adding source code file {}", fullPath);
-        lnp_source_code_files.emplace(
-          fullPath, std::make_shared<sym::dw::SourceCodeFile>(elf, fullPath, std::move(src_headers)));
+        auto sourceCodeFile = std::make_shared<sym::dw::SourceCodeFile>(elf, fullPath);
+        sourceCodeFile->AddNewLineNumberProgramHeader(&hdr);
+        lnp_source_code_files.emplace(fullPath, std::move(sourceCodeFile));
       }
     }
   }
@@ -292,7 +322,7 @@ ObjectFile::get_cus_from_pc(AddrPtr pc) noexcept
 // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
 // uninteresting for now and not really important, as it can be fixed at any point in time.
 std::vector<sym::CompilationUnit *>
-ObjectFile::get_source_infos(AddrPtr pc) noexcept
+ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept
 {
   std::vector<sym::CompilationUnit *> result;
   auto unit_datas = addr_cu_map.find_by_pc(pc);
@@ -311,12 +341,12 @@ ObjectFile::relocated_get_source_code_files(AddrPtr base,
                                             AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
   std::vector<sym::dw::RelocatedSourceCodeFile> result{};
-  auto cus = get_source_infos(pc);
+  auto cus = GetCompilationUnitsSpanningPC(pc);
   const auto is_unique = [&](auto ptr) noexcept {
     return std::none_of(result.begin(), result.end(), [ptr](auto cmp) { return ptr->full_path == cmp.path(); });
   };
   for (auto cu : cus) {
-    for (auto src : cu->sources()) {
+    for (auto &src : cu->sources()) {
       ASSERT(src != nullptr, "source code file should not be null!");
       if (src->address_bounds().contains(pc) && is_unique(src.get())) {
         result.emplace_back(base, src.get());
@@ -445,7 +475,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
   const auto objfile =
-    new ObjectFile{fmt::format("{}:{}", tc.get_task_leader(), path.c_str()), path, fd.file_size(), addr};
+    new ObjectFile{fmt::format("{}:{}", tc.TaskLeaderTid(), path.c_str()), path, fd.file_size(), addr};
 
   return objfile;
 }
@@ -459,8 +489,8 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 
   auto fd = utils::ScopedFd::open_read_only(path);
   const auto addr = fd.mmap_file<u8>({}, true);
-  const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->get_task_leader(), path.c_str()),
-                                                    path, fd.file_size(), addr);
+  const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->TaskLeaderTid(), path.c_str()), path,
+                                                    fd.file_size(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->path->c_str());
   const auto header = objfile->get_at_offset<Elf64Header>(0);
@@ -503,7 +533,7 @@ CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->get_section(".eh_frame"));
   if (const auto section = objfile->elf->get_section(".debug_frame"); section) {
     DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
-    sym::parse_dwarf_eh(objfile->elf, objfile->unwinder.get(), section, -1);
+    sym::parse_dwarf_eh(objfile->elf, objfile->unwinder.get(), section);
   }
 
   if (objfile->elf->has_dwarf()) {
@@ -525,7 +555,7 @@ SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, A
 {
   ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
-  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->get_task_leader(), binary->path->c_str()),
+  return std::make_shared<SymbolFile>(tc, fmt::format("{}:{}", tc->TaskLeaderTid(), binary->path->c_str()),
                                       std::move(binary), relocated_base);
 }
 
@@ -632,7 +662,7 @@ SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame,
 auto
 SymbolFile::getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
-  return binary_object->get_source_infos(pc - *baseAddress);
+  return binary_object->GetCompilationUnitsSpanningPC(pc - *baseAddress);
 }
 
 auto
@@ -770,15 +800,13 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
 
   Set<AddrPtr> bps_set{};
   for (const auto &sym : matching_symbols) {
-    const auto unrelocated = sym.address;
-    const auto adjusted_address = sym.address + baseAddress;
-    if (!bps_set.contains(unrelocated)) {
-      auto srcs = getSourceCodeFiles(unrelocated);
+    const auto relocatedAddress = sym.address + baseAddress;
+    if (!bps_set.contains(relocatedAddress)) {
+      auto srcs = getSourceCodeFiles(sym.address);
       for (auto src : srcs) {
-        if (src.address_bounds().contains(adjusted_address)) {
-          if (auto lte = src.find_lte_by_pc(unrelocated).transform([](auto v) { return v.get(); });
-              lte && !bps_set.contains(unrelocated)) {
-            result.emplace_back(adjusted_address, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});
+        if (src.address_bounds().contains(relocatedAddress)) {
+          if (const auto lte = src.FindLineTableEntry(relocatedAddress); lte && !bps_set.contains(relocatedAddress)) {
+            result.emplace_back(relocatedAddress, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});
             bps_set.insert(sym.address);
           }
         }

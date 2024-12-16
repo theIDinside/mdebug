@@ -132,6 +132,12 @@ Elf::has_dwarf() const noexcept
   return debug_info != nullptr;
 }
 
+bool
+Elf::AddressesNeedsRelocation() const noexcept
+{
+  return header->e_type == ET_DYN;
+}
+
 void
 Elf::parse_min_symbols() const noexcept
 {

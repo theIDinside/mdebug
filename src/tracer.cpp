@@ -45,17 +45,17 @@ on_sigchild_handler(int)
             if (t->tid == pid) {
               DBGLOG(awaiter, "exit for {}", pid);
               push_debugger_event(
-                CoreEvent::ThreadExited({supervisor->get_task_leader(), pid, WEXITSTATUS(stat)}, false, {}));
+                CoreEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {}));
               return;
             }
           }
         }
       } else {
         for (const auto &supervisor : Tracer::Instance->targets) {
-          if (supervisor->get_task_leader() == pid) {
+          if (supervisor->TaskLeaderTid() == pid) {
             int exit_code = WEXITSTATUS(stat);
             DBGLOG(awaiter, "exit for {}: {}", pid, exit_code);
-            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->get_task_leader(), pid, exit_code, {}));
+            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {}));
             return;
           }
         }
@@ -91,9 +91,9 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
   auto target = get_controller(target_pid);
   if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
     auto obj = CreateObjectFile(target, objfile_path);
-    target->register_object_file(target, std::move(obj), true, nullptr);
+    target->RegisterObjectFile(target, std::move(obj), true, nullptr);
   } else {
-    target->register_symbol_file(symbol_obj, true);
+    target->RegisterSymbolFile(symbol_obj, true);
   }
 }
 
@@ -103,7 +103,7 @@ Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession 
   targets.push_back(TraceeController::create(session, tc::TraceeCommandInterface::createCommandInterface(config),
                                              InterfaceType::Ptrace));
   current_target = targets.back().get();
-  const auto new_process = current_target->get_interface().task_leader();
+  const auto new_process = current_target->get_interface().TaskLeaderTid();
 
   if (!Tracer::use_traceme) {
     PTRACE_OR_PANIC(PTRACE_ATTACH, new_process, 0, 0);
@@ -143,7 +143,7 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
     break;
   }
   case InterfaceType::GdbRemote:
-    tc->get_interface().initialize();
+    tc->get_interface().Initialize();
     break;
   }
   WaiterSystemConfigured = true;
@@ -209,7 +209,7 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
       tc->notify_all_stopped();
     }
   } else {
-    auto task = tc->get_task(evt->tid);
+    auto task = tc->GetTaskByTid(evt->tid);
     tc->stop_handler->handle_proceed(*task, result);
   }
 }
@@ -225,7 +225,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   using MatchResult = ProcessedStopEvent;
 
   const auto arch = tc.get_interface().arch_info;
-  auto task = tc.get_task(evt->tid);
+  auto task = tc.GetTaskByTid(evt->tid);
   // we _have_ to do this check here, because the event *might* be a ThreadCreated event
   // and *it* happens *slightly* different depending on if it's a Remote or a Native session that sends it.
   // Unfortunately.
@@ -233,7 +233,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
     // rr ends up here.
     DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->tid);
     tc.new_task(evt->tid, false);
-    task = tc.get_task(evt->tid);
+    task = tc.GetTaskByTid(evt->tid);
     task->initialize();
   }
   if (task) {
@@ -279,7 +279,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         // might want to delete the breakpoint _before_ a user wants to use it. Adding this lookup by key
         // feature makes that possible, it also makes the implementation and reasoning about life times
         // *SUBSTANTIALLY* easier.
-        auto t = tc.get_task(e.thread_id);
+        auto t = tc.GetTaskByTid(e.thread_id);
 
         auto bp_addy = e.address_val
                          ->or_else([&]() {
@@ -327,7 +327,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       },
       [&](const Signal &e) -> MatchResult {
         // TODO: Allow signals through / stop process / etc. Allow for configurability here.
-        auto t = tc.get_task(e.thread_id);
+        auto t = tc.GetTaskByTid(e.thread_id);
         tc.stop_all(t);
         if (evt->signal == SIGINT) {
           tc.observer(ObserverType::AllStop).once([t = t->tid, &tc = tc]() {
@@ -401,7 +401,7 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
 }
 
 static int
-exec(const Path &program, const std::vector<std::string> &prog_args)
+exec(const Path &program, std::span<const std::string> prog_args)
 {
   const auto arg_size = prog_args.size() + 2;
   const char *args[arg_size];
@@ -426,8 +426,8 @@ Tracer::attach(const AttachArgs &args) noexcept
             targets.push_back(
               TraceeController::create(TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
             current_target = targets.back().get();
-            if (const auto exe_file = current_target->get_interface().execed_file(); exe_file) {
-              const auto new_process = current_target->get_interface().task_leader();
+            if (const auto exe_file = current_target->get_interface().ExecedFile(); exe_file) {
+              const auto new_process = current_target->get_interface().TaskLeaderTid();
               load_and_process_objfile(new_process, *exe_file);
             }
             return true;
@@ -472,7 +472,7 @@ Tracer::attach(const AttachArgs &args) noexcept
               Tracer::Instance->set_current_to_latest_target();
               auto &ti = current_target->get_interface();
               client->client_configured(current_target);
-              ti.post_exec();
+              ti.OnExec();
               for (const auto &t : it->threads) {
                 current_target->new_task(t.tid, false);
               }
@@ -511,7 +511,7 @@ Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
 
 void
 Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path program,
-               std::vector<std::string> prog_args) noexcept
+               std::span<const std::string> prog_args) noexcept
 {
   termios original_tty;
   winsize ws;
@@ -606,7 +606,7 @@ void
 Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept
 {
   // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
-  target->get_interface().disconnect(!resume_on_detach);
+  target->get_interface().Disconnect(!resume_on_detach);
 }
 
 std::shared_ptr<SymbolFile>
@@ -637,7 +637,7 @@ Tracer::connectToRemoteGdb(const tc::GdbRemoteCfg &config,
                            const std::optional<gdb::RemoteSettings> &settings) noexcept
 {
   for (auto &t : targets) {
-    if (auto conn = t->get_interface().remote_connection();
+    if (auto conn = t->get_interface().RemoteConnection();
         conn && conn->is_connected_to(config.host, config.port)) {
       return conn;
     }

@@ -122,7 +122,7 @@ public:
   void accept_command(ui::UICommand *cmd) noexcept;
   TraceeController *new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept;
   void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, Path program,
-              std::vector<std::string> prog_args) noexcept;
+              std::span<const std::string> prog_args) noexcept;
   bool attach(const AttachArgs &args) noexcept;
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
   void detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept;

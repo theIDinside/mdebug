@@ -4,6 +4,7 @@
 #include "utils/expected.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
+#include <link.h>
 
 using namespace std::string_view_literals;
 class TraceeController;
@@ -228,6 +229,12 @@ struct Error
 class TraceeCommandInterface;
 using Interface = std::unique_ptr<TraceeCommandInterface>;
 
+enum class TraceeInterfaceType
+{
+  Ptrace,
+  GdbRemote
+};
+
 // Abstract base class & interface for controlling and querying tracees
 // PtraceCommander is the native interface
 // GdbRemoteCommander is the gdb remote protocol interface
@@ -239,50 +246,52 @@ protected:
 public:
   Immutable<TargetFormat> format;
   Immutable<std::shared_ptr<gdb::ArchictectureInfo>> arch_info;
+  TraceeInterfaceType mType;
+  TPtr<r_debug_extended> tracee_r_debug{nullptr};
 
   NO_COPY(TraceeCommandInterface);
-  TraceeCommandInterface(TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info) noexcept;
+  TraceeCommandInterface(TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info, TraceeInterfaceType type) noexcept;
   virtual ~TraceeCommandInterface() noexcept = default;
-  virtual ReadResult read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
-  virtual TraceeWriteResult write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
+  virtual ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
+  virtual TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
   virtual TaskExecuteResponse reverse_continue() noexcept;
   // Can (possibly) modify state in `t`
-  virtual TaskExecuteResponse resume_task(TaskInfo &t, RunType run) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTask(TaskInfo &t, RunType run) noexcept = 0;
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
-  virtual TaskExecuteResponse resume_target(TraceeController *tc, RunType run) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTarget(TraceeController *tc, RunType run) noexcept = 0;
   // Can (possibly) modify state in `t`
-  virtual TaskExecuteResponse stop_task(TaskInfo &t) noexcept = 0;
+  virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
 
-  virtual TaskExecuteResponse enable_breakpoint(BreakpointLocation &location) noexcept = 0;
-  virtual TaskExecuteResponse disable_breakpoint(BreakpointLocation &location) noexcept = 0;
+  virtual TaskExecuteResponse EnableBreakpoint(BreakpointLocation &location) noexcept = 0;
+  virtual TaskExecuteResponse DisableBreakpoint(BreakpointLocation &location) noexcept = 0;
 
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)
-  virtual TaskExecuteResponse install_breakpoint(AddrPtr addr) noexcept = 0;
+  virtual TaskExecuteResponse InstallBreakpoint(AddrPtr addr) noexcept = 0;
 
-  virtual TaskExecuteResponse read_registers(TaskInfo &t) noexcept = 0;
-  virtual TaskExecuteResponse write_registers(const user_regs_struct &input) noexcept = 0;
-  virtual TaskExecuteResponse set_pc(const TaskInfo &t, AddrPtr addr) noexcept = 0;
-  virtual TaskExecuteResponse disconnect(bool terminate) noexcept = 0;
+  virtual TaskExecuteResponse ReadRegisters(TaskInfo &t) noexcept = 0;
+  virtual TaskExecuteResponse WriteRegisters(const user_regs_struct &input) noexcept = 0;
+  virtual TaskExecuteResponse SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept = 0;
+  virtual TaskExecuteResponse Disconnect(bool terminate) noexcept = 0;
 
-  virtual bool perform_shutdown() noexcept = 0;
-  virtual bool initialize() noexcept = 0;
+  virtual bool PerformShutdown() noexcept = 0;
+  virtual bool Initialize() noexcept = 0;
 
-  virtual std::string_view get_thread_name(Tid tid) noexcept = 0;
+  virtual std::string_view GetThreadName(Tid tid) noexcept = 0;
 
   /// Called after we've processed an exec, which during a native debug session, we need to acquire some proc fs
   /// files, for instance
-  virtual bool post_exec() noexcept = 0;
+  virtual bool OnExec() noexcept = 0;
 
   // Called after a fork for the creation of a new process supervisor
-  virtual Interface on_fork(Pid pid) noexcept = 0;
+  virtual Interface OnFork(Pid pid) noexcept = 0;
 
-  virtual Tid task_leader() const noexcept = 0;
-  virtual std::optional<Path> execed_file() noexcept = 0;
-  virtual std::optional<std::vector<ObjectFileDescriptor>> read_libraries() noexcept = 0;
+  virtual Tid TaskLeaderTid() const noexcept = 0;
+  virtual std::optional<Path> ExecedFile() noexcept = 0;
+  virtual std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept = 0;
 
-  virtual std::shared_ptr<gdb::RemoteConnection> remote_connection() noexcept = 0;
-  virtual utils::Expected<Auxv, Error> read_auxv() noexcept = 0;
+  virtual std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept = 0;
+  virtual utils::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept = 0;
 
   virtual bool target_manages_breakpoints() noexcept;
   TaskExecuteResponse do_disconnect(bool terminate) noexcept;
@@ -301,7 +310,7 @@ public:
     constexpr auto sz = TPtr<T>::type_size();
     u8 *ptr = static_cast<u8 *>((void *)std::addressof(t_result));
     while (total_read < sz) {
-      auto read_result = read_bytes(address.as_void(), sz - total_read, ptr + total_read);
+      auto read_result = ReadBytes(address.as_void(), sz - total_read, ptr + total_read);
       switch (read_result.op_result) {
       case ReadResultType::SystemError:
         return utils::unexpected<std::string_view>(strerror(read_result.sys_errno));
@@ -330,7 +339,7 @@ public:
     const u8 *ptr = static_cast<u8 *>(std::addressof(value));
 
     while (total_written < sz) {
-      const auto written = write_bytes(address + total_written, ptr + total_written, sz - total_written);
+      const auto written = WriteBytes(address + total_written, ptr + total_written, sz - total_written);
       if (written.success) {
         total_written += written.bytes_written;
       } else {

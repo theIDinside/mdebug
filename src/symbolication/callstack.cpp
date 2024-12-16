@@ -92,8 +92,9 @@ std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
 Frame::GetLineTableEntry() const noexcept
 {
   const CompilationUnit *cu = full_symbol_info().symbol_info();
-  for (const auto &sourceCodeFile : cu->sources()) {
-    if (auto lte = sourceCodeFile->GetProgramCounterUsingBase(symbol_file->baseAddress, pc()); lte) {
+  const auto& cuSources = cu->sources();
+  for (const auto &sourceCodeFile : cuSources) {
+    if (auto lte = sourceCodeFile->GetLineTableEntryFor(symbol_file->baseAddress, pc()); lte) {
       return {sourceCodeFile.get(), lte};
     }
   }

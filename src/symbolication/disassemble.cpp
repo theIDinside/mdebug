@@ -30,7 +30,7 @@ GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compil
   for (auto cu : compilationUnits) {
     for (const auto &src : cu->sources()) {
       if (src->address_bounds().contains(addr)) {
-        const auto *lte = src->GetProgramCounterUsingBase(obj->baseAddress, addr);
+        const auto *lte = src->GetLineTableEntryFor(obj->baseAddress, addr);
         if (lte) {
           return {src.get(), lte};
         }

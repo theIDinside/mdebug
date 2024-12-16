@@ -71,7 +71,7 @@ struct SourceCoordinate
   std::string path;
   std::uint32_t line;
   std::uint32_t column;
-  SourceCoordinate(std::string path, u32 line, u32 col=0) noexcept;
+  SourceCoordinate(std::string path, u32 line, u32 col = 0) noexcept;
 };
 
 struct SourceCoordinateRef
@@ -144,15 +144,12 @@ std::string_view syscall_name(unsigned long long syscall_number);
     MIDAS_UNREACHABLE                                                                                             \
   }
 
+// clang-format off
 // Identical to ASSERT, but doesn't care about build type
-#define VERIFY(cond, msg, ...)                                                                                    \
-  {                                                                                                               \
-    std::source_location loc = std::source_location::current();                                                   \
-    if (!(cond)) {                                                                                                \
-      panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);             \
-    }                                                                                                             \
+#define VERIFY(cond, msg, ...) if (!(cond)) [[unlikely]] { std::source_location loc = std::source_location::current(); \
+    panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);               \
   }
-
+// clang-format on
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
 #define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 /* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
@@ -177,7 +174,11 @@ public:
   constexpr TraceePointer &operator=(const TraceePointer &) = default;
   constexpr TraceePointer(const TraceePointer &) = default;
   constexpr TraceePointer(TraceePointer &&) = default;
-  constexpr operator std::uintptr_t() const { return get(); }
+  constexpr
+  operator std::uintptr_t() const
+  {
+    return get();
+  }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : remote_addr(addr) {}
   constexpr TraceePointer(T *t) noexcept : remote_addr(reinterpret_cast<std::uintptr_t>(t)) {}
   constexpr ~TraceePointer() = default;

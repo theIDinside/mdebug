@@ -153,7 +153,7 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     const auto attr = this_ref.read_attribute(Attribute::DW_AT_type);
     auto base_type =
       attr.transform([](auto v) { return v.unsigned_value(); })
-        .and_then([&](auto offset) { return die_ref.GetUnitData()->get_objfile()->get_die_reference(offset); })
+        .and_then([&](auto offset) { return die_ref.GetUnitData()->GetObjectFile()->get_die_reference(offset); })
         .transform([this](auto other_cu_die) { return get_or_prepare_new_type(other_cu_die.AsIndexed()); })
         .or_else([this]() -> std::optional<sym::Type *> { return get_unit_type(); })
         .value();
@@ -181,7 +181,7 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
       // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
       // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
       // just means mulitple keys can reach the value, which is a pointer to the actual type.
-      auto tu_die_ref = this_ref.GetUnitData()->get_objfile()->get_type_unit_type_die(attr_val->unsigned_value());
+      auto tu_die_ref = this_ref.GetUnitData()->GetObjectFile()->get_type_unit_type_die(attr_val->unsigned_value());
       ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
       const u32 sz = tu_die_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
       const auto name = tu_die_ref.read_attribute(Attribute::DW_AT_name)

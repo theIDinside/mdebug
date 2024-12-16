@@ -127,7 +127,7 @@ public:
   const std::vector<DieMetaData> &get_dies() noexcept;
   void clear_die_metadata() noexcept;
   const AbbreviationInfo &get_abbreviation(u32 abbreviation_code) const noexcept;
-  ObjectFile *get_objfile() const noexcept;
+  ObjectFile *GetObjectFile() const noexcept;
   /* TODO(simon): Resolve abbreviations which contains indirections to other abbreviations.*/
   ResolvedAbbreviationSet get_resolved_attributes(u64 abbreviation) noexcept;
   const UnitHeader &header() const noexcept;

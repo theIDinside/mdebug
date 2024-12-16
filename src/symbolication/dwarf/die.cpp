@@ -217,7 +217,7 @@ UnitData::clear_die_metadata() noexcept
 }
 
 ObjectFile *
-UnitData::get_objfile() const noexcept
+UnitData::GetObjectFile() const noexcept
 {
   return objfile;
 }

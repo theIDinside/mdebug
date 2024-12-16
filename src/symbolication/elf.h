@@ -82,6 +82,7 @@ public:
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
   void parse_min_symbols() const noexcept;
+  bool AddressesNeedsRelocation() const noexcept;
 
   Elf64Header *header;
   ElfSectionData m_sections;

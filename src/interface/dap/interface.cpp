@@ -476,7 +476,7 @@ DebugAdapterClient::write(std::string_view output) noexcept
     if (tc == nullptr) {
       CDLOG(MDB_DEBUG == 1, dap, "[Partial DA] WRITING -->{}{}<---", header, output);
     } else {
-      CDLOG(MDB_DEBUG == 1, dap, "[Process: {}] WRITING -->{}{}<---", tc->get_task_leader(), header, output);
+      CDLOG(MDB_DEBUG == 1, dap, "[Process: {}] WRITING -->{}{}<---", tc->TaskLeaderTid(), header, output);
     }
   }
 

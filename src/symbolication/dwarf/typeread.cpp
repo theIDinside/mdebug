@@ -103,7 +103,7 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
         case Attribute::DW_AT_specification: {
           auto refereeValue = read_attribute_value(reader, abbreviation, info.implicit_consts);
           const auto declaring_die_offset = refereeValue.unsigned_value();
-          state.mReferedDie = dieRef.GetUnitData()->get_objfile()->get_die_reference(declaring_die_offset);
+          state.mReferedDie = dieRef.GetUnitData()->GetObjectFile()->get_die_reference(declaring_die_offset);
           return DieAttributeRead::Continue;
         }
         default:

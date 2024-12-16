@@ -8,8 +8,8 @@
 namespace tc {
 
 TraceeCommandInterface::TraceeCommandInterface(TargetFormat format,
-                                               std::shared_ptr<gdb::ArchictectureInfo> &&arch_info) noexcept
-    : format(format), arch_info(std::move(arch_info))
+                                               std::shared_ptr<gdb::ArchictectureInfo> &&arch_info, TraceeInterfaceType type) noexcept
+    : format(format), arch_info(std::move(arch_info)), mType(type)
 {
 }
 
@@ -50,7 +50,7 @@ TraceeCommandInterface::do_disconnect(bool terminate) noexcept
   for (auto &user : tc->user_breakpoints().all_users()) {
     tc->user_breakpoints().remove_bp(user->id);
   }
-  disconnect(terminate);
+  Disconnect(terminate);
   return TaskExecuteResponse::Ok();
 }
 
@@ -62,7 +62,7 @@ TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, 
     return std::nullopt;
   }
   u8 buf[buffer_size];
-  auto res = read_bytes(address.as<void>(), buffer_size, buf);
+  auto res = ReadBytes(address.as<void>(), buffer_size, buf);
   while (res.success()) {
     for (auto i = 0u; i < res.bytes_read; ++i) {
       if (buf[i] == 0) {
@@ -70,7 +70,7 @@ TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, 
       }
       result.push_back(buf[i]);
     }
-    res = read_bytes(address.as<void>(), 128, buf);
+    res = ReadBytes(address.as<void>(), 128, buf);
   }
 
   if (result.empty()) {

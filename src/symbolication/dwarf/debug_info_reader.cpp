@@ -10,7 +10,7 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
 {
   const auto &header = compilation_unit->header();
   current_ptr =
-    compilation_unit->get_objfile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
+    compilation_unit->GetObjectFile()->elf->debug_info->offset(header.header_len() + header.debug_info_offset());
 }
 
 UnitReader::UnitReader(UnitData *data, const DieMetaData &entry) noexcept : UnitReader(data) { seek_die(entry); }
@@ -353,7 +353,7 @@ UnitReader::read_n_bytes(u8 n_bytes) noexcept
 AddrPtr
 UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 {
-  auto obj = compilation_unit->get_objfile();
+  auto obj = compilation_unit->GetObjectFile();
   const auto header = compilation_unit->header();
   ASSERT(obj->elf->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
   const auto addr_table_offset = compilation_unit->addr_base() + address_index * header.addr_size();
@@ -370,7 +370,7 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 std::string_view
 UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 {
-  const auto elf = compilation_unit->get_objfile()->elf;
+  const auto elf = compilation_unit->GetObjectFile()->elf;
   ASSERT(elf->debug_str_offsets->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
   const auto str_base = compilation_unit->str_offsets_base();
   const auto str_table_offset = str_base.value() + str_index * compilation_unit->header().format();
@@ -387,7 +387,7 @@ UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 u64
 UnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
 {
-  const auto elf = compilation_unit->get_objfile()->elf;
+  const auto elf = compilation_unit->GetObjectFile()->elf;
   ASSERT(elf->debug_rnglists->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
   const auto rnglist_offset =
     compilation_unit->rng_list_base() + range_index * compilation_unit->header().format();
@@ -404,7 +404,7 @@ u64
 UnitReader::read_loclist_index(u64 range_index, std::optional<u64> loc_list_base) const noexcept
 {
   PANIC("read_loclist_index is not yet implemented. see other indirect + base calculations");
-  const auto elf = compilation_unit->get_objfile()->elf;
+  const auto elf = compilation_unit->GetObjectFile()->elf;
   ASSERT(elf->debug_loclist->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
 
   const auto rnglist_offset = loc_list_base.value_or(0) + range_index * compilation_unit->header().format();
@@ -436,13 +436,13 @@ void
 UnitReader::seek_die(const DieMetaData &entry) noexcept
 {
   current_ptr =
-    compilation_unit->get_objfile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
+    compilation_unit->GetObjectFile()->elf->debug_info->begin() + entry.section_offset + entry.die_data_offset;
 }
 
 Elf *
 UnitReader::elf() const noexcept
 {
-  return compilation_unit->get_objfile()->elf;
+  return compilation_unit->GetObjectFile()->elf;
 }
 
 const u8 *
@@ -454,7 +454,7 @@ UnitReader::ptr() const noexcept
 ObjectFile *
 UnitReader::objfile() const noexcept
 {
-  return compilation_unit->get_objfile();
+  return compilation_unit->GetObjectFile();
 }
 
 AttributeValue

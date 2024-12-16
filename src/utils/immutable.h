@@ -398,3 +398,6 @@ NonNull(U &ref) noexcept
 {
   return NonNullPtr<U>{.ptr = &ref};
 }
+
+template <typename T>
+using ImmutablePtr = Immutable<NonNullPtr<T>>;

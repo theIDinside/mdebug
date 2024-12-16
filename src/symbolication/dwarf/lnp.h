@@ -93,11 +93,12 @@ struct LineTableEntry
   AddrPtr pc;
   u32 line;
   u32 column : 17;
-  u16 file : 10;
+  u16 file : 9;
   bool is_stmt : 1;
   bool prologue_end : 1;
   bool basic_block : 1;
   bool epilogue_begin : 1;
+  bool IsEndOfSequence : 1 {false};
 
   friend auto
   operator<=>(const LineTableEntry &l, const LineTableEntry &r) noexcept
@@ -108,11 +109,13 @@ struct LineTableEntry
   AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
 };
 
-struct LineTableEntryAddress {
+struct LineTableEntryAddress
+{
   AddrPtr pc;
 };
 
-struct LineTableEntryInfo {
+struct LineTableEntryInfo
+{
   u32 line;
   u32 column : 17;
   u16 file : 10;
@@ -122,22 +125,30 @@ struct LineTableEntryInfo {
   bool epilogue_begin : 1;
 };
 
-class ComponentLineTable {
+class ComponentLineTable
+{
   std::vector<LineTableEntryAddress> mEntryAddress;
   std::vector<LineTableEntryInfo> mEntryInfo;
+
 public:
-  LineTableEntryInfo* Info(LineTableEntryAddress* entry) noexcept {
+  LineTableEntryInfo *
+  Info(LineTableEntryAddress *entry) noexcept
+  {
     size_t index = entry - mEntryAddress.data();
     return &mEntryInfo[index];
   }
 
-  void Reserve(u32 size) noexcept {
+  void
+  Reserve(u32 size) noexcept
+  {
     mEntryAddress.reserve(size);
     mEntryInfo.reserve(size);
   }
 
-  void Push(const LineTableEntry& lte) {
-    mEntryAddress.push_back({ lte.pc });
+  void
+  Push(const LineTableEntry &lte)
+  {
+    mEntryAddress.push_back({lte.pc});
     mEntryInfo.push_back({});
   }
 };
@@ -145,7 +156,7 @@ public:
 struct RelocatedLteIterator
 {
   // using Iter = std::vector<LineTableEntry>::const_iterator;
-  using Iter = LineTableEntry*;
+  using Iter = const LineTableEntry *;
 
 private:
   Iter it;
@@ -192,6 +203,24 @@ class RelocatedSourceCodeFile;
 // debug info metadata that responsibility is left to a `SourceFileSymbolInfo`. I guess, GDB also makes a sort of
 // similar distinction with it's "symtabs" and "psymtabs" - I guess?
 
+struct PerCompilationUnitLineTable
+{
+  LNPHeader *mHeader;
+  // Resolved lazily when needed, by walking `line_table`
+  std::vector<LineTableEntry> mLineTable;
+
+  constexpr bool
+  ContainsPc(AddrPtr unrelocatedPc) const noexcept
+  {
+    return !mLineTable.empty() && (mLineTable.front().pc <= unrelocatedPc && unrelocatedPc < mLineTable.back().pc);
+  }
+};
+
+template <typename Container, typename T>
+concept AppendableContainer = requires(Container c) { c.Append(T{}); } || requires(Container c) {
+  c.PushBack(T{});
+} || requires(Container c) { c.push_back(T{}); };
+
 class SourceCodeFile
 {
 public:
@@ -199,34 +228,62 @@ public:
   friend RelocatedSourceCodeFile;
 
 private:
-  std::vector<LNPHeader *> headers;
-  // Resolved lazily when needed, by walking `line_table`
-  mutable std::vector<LineTableEntry> mLineTable;
-  mutable std::vector<AddressRange> mLineTableRanges;
-  mutable AddrPtr low;
-  mutable AddrPtr high;
+  std::vector<PerCompilationUnitLineTable> mLineTables;
+  std::vector<AddressRange> mLineTableRanges;
+  AddressRange mSpan;
   mutable std::mutex m;
   mutable bool computed;
   Elf *elf;
-  bool is_computed() const noexcept;
-  void ComputeLineTableForThis() const noexcept;
+  bool IsComputed() const noexcept;
+  void ComputeLineTableForThis() noexcept;
 
 public:
-  SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept;
+  SourceCodeFile(Elf *elf, std::filesystem::path path) noexcept;
   Immutable<std::filesystem::path> full_path;
 
-  std::span<const LineTableEntry> GetLineTable() const noexcept;
-  const LineTableEntry* GetProgramCounterUsingBase(AddrPtr relocatedBase, AddrPtr pc) noexcept;
-  auto begin(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
-  auto end(AddrPtr relocatedBase) const noexcept -> RelocatedLteIterator;
+  const LineTableEntry *GetLineTableEntryFor(AddrPtr relocatedBase, AddrPtr pc) noexcept;
 
-  auto first_linetable_entry(AddrPtr relocatedBase, u32 line,
-                             std::optional<u32> column) -> std::optional<LineTableEntry>;
+  template <AppendableContainer<const LineTableEntry *> Container>
+  auto
+  FindLineTableEntryByLine(u32 line, std::optional<u32> column, Container &outResult) noexcept -> bool
+  {
+    if (!IsComputed()) {
+      ComputeLineTableForThis();
+    }
 
-  auto find_by_pc(AddrPtr base, AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
-  auto add_header(LNPHeader *header) noexcept -> void;
+    const auto sz = outResult.size();
+    for (const auto &table : mLineTables) {
+      for (const auto &entry : table.mLineTable) {
+        if (entry.line == line) {
+          if(!column) {
+            // Get only first entry with line == line
+            outResult.push_back(&entry);
+            break;
+          } else if(entry.column == column) {
+            outResult.push_back(&entry);
+          }
+        }
+      }
+    }
+    return outResult.size() != sz;
+  }
+
+  auto FindRelocatedLineTableEntry(AddrPtr relocationBase,
+                                   AddrPtr relocatedAddress) noexcept -> const LineTableEntry *;
+  auto AddNewLineNumberProgramHeader(LNPHeader *header) noexcept -> void;
   auto address_bounds() noexcept -> AddressRange;
   bool HasAddressRange() noexcept;
+
+  constexpr AddrPtr
+  StartAddress() const noexcept
+  {
+    return mSpan.start_pc();
+  }
+  constexpr AddrPtr
+  EndAddress() const noexcept
+  {
+    return mSpan.end_pc();
+  }
 };
 
 // RelocatedFoo types are "thin" wrappers around the "raw" debug symbol info data types. This is so that we can
@@ -235,14 +292,14 @@ public:
 // possibility to duplicate work (when multi-process debugging)
 class RelocatedSourceCodeFile
 {
-  Immutable<AddrPtr> baseAddr;
   SourceCodeFile &file;
 
 public:
-  RelocatedSourceCodeFile(AddrPtr base_addr, std::shared_ptr<SourceCodeFile> file) noexcept;
+  Immutable<AddrPtr> baseAddr;
+  RelocatedSourceCodeFile(AddrPtr base_addr, const std::shared_ptr<SourceCodeFile> &file) noexcept;
   RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *file) noexcept;
 
-  auto find_lte_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>;
+  auto FindLineTableEntry(AddrPtr relocatedProgramCounter) const noexcept -> const LineTableEntry *;
   auto address_bounds() noexcept -> AddressRange;
 
   auto

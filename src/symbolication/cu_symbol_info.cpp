@@ -54,11 +54,14 @@ CompilationUnit::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noe
 // by storing them by name in `ObjectFile` in a map and then add the references to them
 // to the newly minted compilation unit handle (process_source_code_files)
 void
-CompilationUnit::process_source_code_files(u64 table) noexcept
+CompilationUnit::ProcessSourceCodeFiles(u64 table) noexcept
 {
   line_table = table;
-  auto obj = unit_data->get_objfile();
-  auto header = unit_data->get_objfile()->get_lnp_header(line_table);
+  auto obj = unit_data->GetObjectFile();
+  auto header = unit_data->GetObjectFile()->GetLineNumberProgramHeader(line_table);
+  if (!header) {
+    return;
+  }
   DBGLOG(dwarf, "retrieving files from line number program @ {} for cu=0x{:x} '{}'", header->sec_offset,
          unit_data->section_offset(), cu_name);
 
@@ -142,7 +145,7 @@ CompilationUnit::get_lnp_file(u32 index) noexcept
 {
   // TODO(simon): we really should store a pointer to the line number program table (or header) in either UnitData
   // or SourceFileSymbolInfo directly.
-  return unit_data->get_objfile()->get_lnp_header(line_table)->file(index);
+  return unit_data->GetObjectFile()->GetLineNumberProgramHeader(line_table)->file(index);
 }
 
 using DieOffset = u64;
@@ -267,7 +270,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
       const auto declaring_die_offset = value.unsigned_value();
-      additional_die_reference = ref.GetUnitData()->get_objfile()->get_die_reference(declaring_die_offset);
+      additional_die_reference = ref.GetUnitData()->GetObjectFile()->get_die_reference(declaring_die_offset);
     } break;
     default:
       break;
@@ -339,7 +342,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
         const auto declaring_die_offset = value.unsigned_value();
-        if (auto die_ref = unit_data->get_objfile()->get_die_reference(declaring_die_offset); die_ref) {
+        if (auto die_ref = unit_data->GetObjectFile()->get_die_reference(declaring_die_offset); die_ref) {
           die_refs.push_back(*die_ref);
         } else {
           DBGLOG(core, "Could not find die reference");
@@ -348,7 +351,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
       }
       case Attribute::DW_AT_type: {
         const auto type_id = value.unsigned_value();
-        auto obj = unit_data->get_objfile();
+        auto obj = unit_data->GetObjectFile();
         const auto ref = obj->get_die_reference(type_id);
         state.ret_type = obj->types->get_or_prepare_new_type(ref->AsIndexed());
         break;

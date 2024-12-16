@@ -66,7 +66,7 @@ Logger::setup_channel(std::string_view name) noexcept
 }
 
 void
-Logger::setup_channel(const Path& logDirectory, Channel id) noexcept
+Logger::setup_channel(const Path &logDirectory, Channel id) noexcept
 {
   ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
   Path p = logDirectory / fmt::format("{}.log", to_str(id));
@@ -91,6 +91,16 @@ Logger *
 Logger::get_logger() noexcept
 {
   return Logger::logger_instance;
+}
+
+void
+Logger::OnAbort() noexcept
+{
+  for (const auto &[name, channel] : log_files) {
+    channel->fstream << "\n aborted \n";
+    channel->fstream.flush();
+    channel->fstream.close();
+  }
 }
 
 void

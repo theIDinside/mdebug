@@ -26,7 +26,6 @@
 #include <symbolication/value.h>
 #include <symbolication/value_visualizer.h>
 #include <tracer.h>
-#include <unordered_set>
 #include <utils/base64.h>
 
 namespace ui::dap {
@@ -100,7 +99,7 @@ UIResultPtr
 Pause::execute() noexcept
 {
   auto target = dap_client->supervisor();
-  auto task = target->get_task(pauseArgs.threadId);
+  auto task = target->GetTaskByTid(pauseArgs.threadId);
   if (task->is_stopped()) {
     return new PauseResponse{false, this};
   }
@@ -171,7 +170,7 @@ Continue::execute() noexcept
       target->resume_target(tc::RunType::Continue);
     } else {
       DBGLOG(core, "continue single thread: {}", thread_id);
-      auto t = target->get_task(thread_id);
+      auto t = target->GetTaskByTid(thread_id);
       target->resume_task(*t, {tc::RunType::Continue, tc::ResumeTarget::Task});
     }
   }
@@ -196,7 +195,7 @@ UIResultPtr
 Next::execute() noexcept
 {
   auto target = dap_client->supervisor();
-  auto task = target->get_task(thread_id);
+  auto task = target->GetTaskByTid(thread_id);
 
   if (!task->is_stopped()) {
     return new NextResponse{false, this};
@@ -233,7 +232,7 @@ UIResultPtr
 StepIn::execute() noexcept
 {
   auto target = dap_client->supervisor();
-  auto task = target->get_task(thread_id);
+  auto task = target->GetTaskByTid(thread_id);
 
   if (!task->is_stopped()) {
     return new StepInResponse{false, this};
@@ -269,7 +268,7 @@ UIResultPtr
 StepOut::execute() noexcept
 {
   auto target = dap_client->supervisor();
-  auto task = target->get_task(thread_id);
+  auto task = target->GetTaskByTid(thread_id);
 
   if (!task->is_stopped()) {
     return new StepOutResponse{false, this};
@@ -472,7 +471,7 @@ WriteMemory::execute() noexcept
   auto response = new WriteMemoryResponse{false, this};
   response->bytes_written = 0;
   if (address) {
-    const auto result = supervisor->get_interface().write_bytes(address.value(), bytes.data(), bytes.size());
+    const auto result = supervisor->get_interface().WriteBytes(address.value(), bytes.data(), bytes.size());
     response->success = result.success;
     if (result.success) {
       response->bytes_written = result.bytes_written;
@@ -722,8 +721,8 @@ Threads::execute() noexcept
 
   if (it.format == TargetFormat::Remote) {
     auto res =
-      it.remote_connection()->query_target_threads({target->get_task_leader(), target->get_task_leader()});
-    ASSERT(res.front().pid == target->get_task_leader(), "expected pid == task_leader");
+      it.RemoteConnection()->query_target_threads({target->TaskLeaderTid(), target->TaskLeaderTid()});
+    ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
     for (const auto thr : res) {
       if (std::ranges::none_of(target->get_threads(), [t = thr.tid](const auto &a) { return a->tid == t; })) {
         target->AddTask(TaskInfo::CreateTask(target->get_interface(), thr.tid, false));
@@ -737,7 +736,7 @@ Threads::execute() noexcept
 
   for (const auto &thread : target->get_threads()) {
     const auto tid = thread->tid;
-    response->threads.push_back(Thread{.id = tid, .name = it.get_thread_name(tid)});
+    response->threads.push_back(Thread{.id = tid, .name = it.GetThreadName(tid)});
   }
   return response;
 }
@@ -777,7 +776,7 @@ StackTrace::execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto target = dap_client->supervisor();
-  auto task = target->get_task(threadId);
+  auto task = target->GetTaskByTid(threadId);
   if (task == nullptr) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
   }

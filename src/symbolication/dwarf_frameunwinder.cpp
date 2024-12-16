@@ -487,6 +487,15 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
   PANIC("reading lsda failed");
 }
 
+template <u32 CIEMask>
+struct FrameUnwindEntryIdentifier {
+  u32 mId;
+  constexpr bool IsCommonInfoEntry() const noexcept { return mId == CIEMask; }
+};
+
+using EHIdentifier = FrameUnwindEntryIdentifier<0x00'00'00'00>;
+using DebugFrameIdentifier = FrameUnwindEntryIdentifier<0xFF'FF'FF'FF>;
+
 std::unique_ptr<Unwinder>
 parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
 {
@@ -521,12 +530,12 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
     }
 
     reader.bookmark();
-    auto cie_ptr = reader.read_value<u32>();
-    if (cie_ptr == 0) { // this is a CIE
+    const auto cieId = reader.read_value<EHIdentifier>();
+    if (cieId.IsCommonInfoEntry()) { // this is a CIE
       unwinder_db->elf_eh_cies.push_back(read_cie(entry_length, eh_offset, reader));
       cies[current_offset - len_field_len] = unwinder_db->elf_eh_cies.size() - 1;
     } else {
-      auto cie_idx = cies[current_offset - cie_ptr];
+      auto cie_idx = cies[current_offset - cieId.mId];
       auto &cie = unwinder_db->elf_eh_cies[cie_idx];
       auto initial_loc = reader.read_value<i32>();
       if (initial_loc > 0) {
@@ -536,11 +545,12 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
       AddrPtr end = begin + reader.read_value<u32>();
       u8 aug_data_length = 0u;
       AddrPtr lsda{nullptr};
-      if (cie.augmentation_string->contains("z")) {
+      auto augment = cie.GetAugmentation();
+      if (augment.HasAugmentDataField) {
         // it's *going* to be less than 255 bytes. So we cast it here
         aug_data_length = static_cast<u8>(reader.read_uleb128<u64>());
       }
-      if (cie.augmentation_string->contains("L")) {
+      if (augment.HasLanguageSpecificDataArea) {
         lsda = read_lsda(&cie, begin, reader);
       }
       const auto bytes_remaining = entry_length - reader.pop_bookmark();
@@ -569,7 +579,7 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
 }
 
 void
-parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_count) noexcept
+parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame) noexcept
 {
   DwarfBinaryReader reader{elf, debug_frame->m_section_ptr, debug_frame->size()};
 
@@ -582,7 +592,7 @@ parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_fr
   unwinder_db->dwarf_unwind_infos.reserve(unwinder_db->elf_eh_unwind_infos.size() + fdes_count);
   AddrPtr low{std::uintptr_t{UINTMAX_MAX}};
   AddrPtr high{nullptr};
-  for (; fde_count != 0; --fde_count) {
+  while(reader.has_more()) {
     constexpr auto len_field_len = 4;
     const auto eh_offset = reader.bytes_read();
     const auto entry_length = reader.read_value<u32>();
@@ -595,15 +605,14 @@ parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_fr
     }
 
     reader.bookmark();
-    auto cie_ptr = reader.read_value<u32>();
-    if (cie_ptr == 0xff'ff'ff'ff) { // this is a CIE
+    auto cieId = reader.read_value<DebugFrameIdentifier>();
+    if (cieId.IsCommonInfoEntry()) { // this is a CIE
       unwinder_db->dwarf_debug_cies.push_back(read_cie(entry_length, eh_offset, reader));
       cies[current_offset - len_field_len] = unwinder_db->dwarf_debug_cies.size() - 1;
     } else {
-      auto cie_idx = cies[current_offset - cie_ptr];
+      auto cie_idx = cies[current_offset - cieId.mId];
       auto &cie = unwinder_db->dwarf_debug_cies[cie_idx];
       auto initial_loc = reader.read_value<i32>();
-      ASSERT(initial_loc < 0, "Expected initial loc to be negative offset");
       AddrPtr begin = (debug_frame->address + reader.bytes_read() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.read_value<u32>();
       u8 aug_data_length = 0u;
@@ -612,7 +621,8 @@ parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_fr
         aug_data_length = static_cast<u8>(reader.read_uleb128<u64>());
       }
       AddrPtr lsda{nullptr};
-      if (cie.augmentation_string->contains("L")) {
+      auto augment = cie.GetAugmentation();
+      if (augment.HasLanguageSpecificDataArea) {
         lsda = read_lsda(&cie, begin, reader);
       }
       const auto bytes_remaining = entry_length - reader.pop_bookmark();

@@ -49,6 +49,17 @@ struct BreakpointLookup
   std::optional<LocationSourceInfo> loc_src_info;
 };
 
+struct ParsedAuxiliaryVector
+{
+  AddrPtr mProgramHeaderPointer{nullptr};
+  u32 mProgramHeaderEntrySize{0};
+  u32 mProgramHeaderCount{0};
+  AddrPtr mEntry{nullptr};
+  AddrPtr mInterpreterBaseAddress{nullptr};
+};
+
+ParsedAuxiliaryVector ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept;
+
 /**
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
  * to outlive them all, so it's safe to take raw pointers into `loaded_binary`.
@@ -105,7 +116,7 @@ struct ObjectFile
   auto GetDieReference(u64 offset) noexcept -> sym::dw::DieReference;
   auto name_index() noexcept -> sym::dw::ObjectFileNameIndex *;
 
-  auto get_lnp_header(u64 offset) noexcept -> sym::dw::LNPHeader *;
+  auto GetLineNumberProgramHeader(u64 offset) noexcept -> sym::dw::LNPHeader *;
   auto read_lnp_headers() noexcept -> void;
   auto get_lnp_headers() noexcept -> std::span<sym::dw::LNPHeader>;
 
@@ -136,7 +147,7 @@ private:
   auto get_cus_from_pc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
-  auto get_source_infos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
+  auto GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   auto relocated_get_source_code_files(AddrPtr base,
                                        AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
 

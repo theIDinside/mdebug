@@ -62,7 +62,7 @@ std::vector<AddressRange>
 read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
 {
   std::vector<AddressRange> result{};
-  const auto elf = cu.get_objfile()->elf;
+  const auto elf = cu.GetObjectFile()->elf;
   auto ptr = elf->debug_rnglists->offset(resolved.offset);
   RangeListEntry entry{};
   AddrPtr base = nullptr;

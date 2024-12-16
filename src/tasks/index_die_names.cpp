@@ -288,7 +288,7 @@ process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &s
   auto cu = src.get_dwarf_unit();
   const auto version = cu->header().version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
-  auto elf = cu->get_objfile()->elf;
+  auto elf = cu->GetObjectFile()->elf;
   if (version == DwarfVersion::D4) {
     auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset.address()));
     auto lowest = UINTMAX_MAX;
@@ -354,7 +354,7 @@ IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_di
     case Attribute::DW_AT_stmt_list: {
       const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
       const auto offset = attr.address();
-      new_cu.process_source_code_files(offset);
+      new_cu.ProcessSourceCodeFiles(offset);
       break;
     }
     case Attribute::DW_AT_name: {

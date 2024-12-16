@@ -1,6 +1,7 @@
 #pragma once
 #include "../common.h"
 #include "dwarf_defs.h"
+#include <type_traits>
 #include <typedefs.h>
 
 class Elf;
@@ -162,7 +163,11 @@ public:
   T
   peek_value() noexcept
   {
-    return *(T *)head;
+    static_assert(!std::is_reference<T>::value, "reference types not allowed");
+    // Previous version did *(T*)head - which technically works on Linux, but it is U.B. in C++ actually :(
+    alignas(T) T result;
+    std::memcpy(&result, head, sizeof(T));
+    return result;
   }
 
   template <InitLengthRead InitReadAction>

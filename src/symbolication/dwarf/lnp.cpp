@@ -490,7 +490,31 @@ read_lnp_headers(const Elf *elf) noexcept
     const auto init_len = reader.read_initial_length<DwarfBinaryReader::Ignore>();
     const auto ptr = reader.current_ptr();
     reader.bookmark();
-    const auto version = reader.read_value<u16>();
+    const auto version = reader.peek_value<u16>();
+    switch (version) {
+    case 1:
+      [[fallthrough]];
+    case 2:
+      [[fallthrough]];
+    case 3:
+      [[fallthrough]];
+    case 6:
+      DBGLOG(core, "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}", version,
+             reader.bytes_read())
+      reader.skip(init_len);
+      continue;
+    case 4:
+      [[fallthrough]];
+    case 5:
+      reader.skip_value<u16>();
+      break;
+    default:
+      ASSERT(version >= 1 && version <= 6, "Invalid DWARF version value encountered: {} at offset 0x{:x}", version,
+             reader.bytes_read());
+    }
+
+    // TODO(simon): introduce release-build logging & warnings; this should not fail, but should log a
+    // warning/error message on all builds
     ASSERT(version == 4 || version == 5, "Unsupported line number program version: {}", version);
     if (version == 5) {
       addr_size = reader.read_value<u8>();
@@ -601,115 +625,117 @@ read_lnp_headers(const Elf *elf) noexcept
   return headers;
 }
 
-std::span<const LineTableEntry>
-SourceCodeFile::GetLineTable() const noexcept
+static bool
+LineTableEmpty(std::span<const PerCompilationUnitLineTable> lineTables) noexcept
 {
-  return mLineTable;
+  for (const auto &lt : lineTables) {
+    if (!lt.mLineTable.empty()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool
+LineTableContainsPc(std::span<const PerCompilationUnitLineTable> lineTables, AddrPtr unrelocatedPc,
+                    u32 *outIndex) noexcept
+{
+  for (const auto &[idx, lt] : utils::EnumerateView{lineTables}) {
+    if (lt.ContainsPc(unrelocatedPc)) {
+      if (outIndex) {
+        *outIndex = idx;
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 const LineTableEntry *
-SourceCodeFile::GetProgramCounterUsingBase(AddrPtr relocatedBase, AddrPtr pc) noexcept
+SourceCodeFile::GetLineTableEntryFor(AddrPtr relocatedBase, AddrPtr pc) noexcept
 {
-  if (computed && mLineTable.size() <= 2) {
+  if (!IsComputed()) {
+    ComputeLineTableForThis();
+  }
+
+  if (LineTableEmpty(mLineTables)) {
     return nullptr;
   }
-  ASSERT(computed, "This source code file needs decoding first.");
+
   const AddrPtr searchPc = pc - relocatedBase;
 
-  const bool rangeContainsPc = mLineTable.front().pc <= pc && pc <= mLineTable.back().pc;
+  u32 table = 0;
+  const bool rangeContainsPc = LineTableContainsPc(mLineTables, searchPc, &table);
 
   if (!rangeContainsPc) {
     return nullptr;
   }
+
   if (!std::ranges::any_of(mLineTableRanges, [searchPc](const auto &range) { return range.contains(searchPc); })) {
     return nullptr;
   }
 
-  auto it = std::lower_bound(mLineTable.data(), mLineTable.data() + mLineTable.size(), searchPc,
+  const auto &lineTable = mLineTables[table].mLineTable;
+
+  auto it = std::lower_bound(lineTable.data(), lineTable.data() + lineTable.size(), searchPc,
                              [](const auto &lte, AddrPtr pc) { return lte.pc < pc; });
 
-  if (it != mLineTable.data() + mLineTable.size()) {
+  if (it != lineTable.data() + lineTable.size()) {
     if (searchPc < it->pc) {
-      return it == mLineTable.data() ? nullptr : it - 1;
+      return it == lineTable.data() ? nullptr : it - 1;
     }
     return it;
   }
   return nullptr;
 }
 
-RelocatedLteIterator
-SourceCodeFile::begin(AddrPtr relocatedBase) const noexcept
-{
-  // Rust would call this "interior" mutability. So kindly go fuck yourself.
-  if (!is_computed()) {
-    ComputeLineTableForThis();
-  }
-  return RelocatedLteIterator(mLineTable.data(), relocatedBase);
-}
-
-RelocatedLteIterator
-SourceCodeFile::end(AddrPtr relocatedBase) const noexcept
-{
-  return RelocatedLteIterator(mLineTable.data() + mLineTable.size(), relocatedBase);
-}
-
-SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path, std::vector<LNPHeader *> &&headers) noexcept
-    : headers(std::move(headers)), mLineTable(), low(nullptr), high(nullptr), m(), computed(false), elf(elf),
+SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path) noexcept
+    : mLineTables(), mSpan(nullptr, nullptr), m(), computed(false), elf(elf),
       full_path(std::move(path))
 {
 }
 
-auto
-SourceCodeFile::first_linetable_entry(AddrPtr relocatedBase, u32 line,
-                                      std::optional<u32> column) -> std::optional<LineTableEntry>
+const LineTableEntry *
+SourceCodeFile::FindRelocatedLineTableEntry(AddrPtr relocationBase, AddrPtr relocatedAddress) noexcept
 {
-  auto lte_it = std::find_if(begin(relocatedBase), end(relocatedBase), [&](const auto &lte) {
-    return line == lte.line && lte.column == column.value_or(lte.column);
-  });
-  if (lte_it != end(relocatedBase)) {
-    return lte_it.get();
-  } else {
-    return std::nullopt;
-  }
-}
-
-auto
-SourceCodeFile::find_by_pc(AddrPtr base, AddrPtr addr) const noexcept -> std::optional<RelocatedLteIterator>
-{
-  if(mLineTable.empty()) {
-    return std::nullopt;
+  if (LineTableEmpty(mLineTables)) {
+    return nullptr;
   }
 
-  const auto relocated = addr - base;
-  if(mLineTable.front().pc > relocated || mLineTable.back().pc < relocated) {
-    return std::nullopt;
+  const auto unrelocatedAddress = relocatedAddress - relocationBase;
+  u32 tableIndex = 0;
+
+  if (!LineTableContainsPc(mLineTables, unrelocatedAddress, &tableIndex)) {
+    return nullptr;
   }
 
-  auto it = std::lower_bound(begin(base), end(base), addr,
-                             [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
-  if (it == end(base)) {
-    return std::nullopt;
+  const auto &compUnitLineTable = mLineTables[tableIndex].mLineTable;
+
+  auto it = std::lower_bound(compUnitLineTable.data(), compUnitLineTable.data() + compUnitLineTable.size(),
+                             unrelocatedAddress, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  if (it == compUnitLineTable.data() + compUnitLineTable.size()) {
+    return nullptr;
   }
 
   return it;
 }
 
 void
-SourceCodeFile::add_header(LNPHeader *header) noexcept
+SourceCodeFile::AddNewLineNumberProgramHeader(LNPHeader *header) noexcept
 {
-  if (std::ranges::none_of(headers, [header](auto h) { return h == header; })) {
-    headers.push_back(header);
-  }
+  ASSERT(!std::ranges::any_of(mLineTables, [header](const auto &t) { return t.mHeader == header; }),
+         "Duplicate addition of header");
+  mLineTables.push_back({.mHeader = header, .mLineTable = {}});
 }
 
 AddressRange
 SourceCodeFile::address_bounds() noexcept
 {
-  if (computed) {
-    return AddressRange{low, high};
+  if (IsComputed()) {
+    return mSpan;
   }
   ComputeLineTableForThis();
-  return AddressRange{low, high};
+  return mSpan;
 }
 
 bool
@@ -721,30 +747,32 @@ SourceCodeFile::HasAddressRange() noexcept
 }
 
 bool
-SourceCodeFile::is_computed() const noexcept
+SourceCodeFile::IsComputed() const noexcept
 {
   return computed;
 }
 
 void
-SourceCodeFile::ComputeLineTableForThis() const noexcept
+SourceCodeFile::ComputeLineTableForThis() noexcept
 {
   std::lock_guard lock(m);
-  if (computed) {
+  if (IsComputed()) {
     return;
   }
 
   std::set<LineTableEntry> unique_ltes{};
-  for (auto header : headers) {
-    auto fileIndices = header->file_entry_index(full_path);
+
+  for (auto &table : mLineTables) {
+    auto fileIndices = table.mHeader->file_entry_index(full_path);
     ASSERT(fileIndices, "Expected a file entry index but did not find one for {}", full_path->c_str());
-    DBGLOG(dwarf, "[lnp]: computing lnp at 0x{:x}", header->sec_offset);
+    DBGLOG(dwarf, "[lnp]: computing lnp at 0x{:x}", table.mHeader->sec_offset);
     using OpCode = LineNumberProgramOpCode;
-    DwarfBinaryReader reader{elf, header->data, static_cast<u64>(header->data_end - header->data)};
-    SourceCodeFileLNPResolver state{header, unique_ltes, mLineTableRanges, fileIndices.value()};
+    DwarfBinaryReader reader{elf, table.mHeader->data,
+                             static_cast<u64>(table.mHeader->data_end - table.mHeader->data)};
+    SourceCodeFileLNPResolver state{table.mHeader, unique_ltes, mLineTableRanges, fileIndices.value()};
     while (reader.has_more()) {
       const auto opcode = reader.read_value<OpCode>();
-      if (const auto spec_op = std::to_underlying(opcode); spec_op >= header->opcode_base) {
+      if (const auto spec_op = std::to_underlying(opcode); spec_op >= table.mHeader->opcode_base) {
         state.execute_special_opcode(spec_op);
         continue;
       }
@@ -758,7 +786,7 @@ SourceCodeFile::ComputeLineTableForThis() const noexcept
           state.SetSequenceEnded();
           break;
         case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
-          if (header->addr_size == 4) {
+          if (table.mHeader->addr_size == 4) {
             const auto addr = reader.read_value<u32>();
             state.SetAddress(addr);
           } else {
@@ -767,7 +795,7 @@ SourceCodeFile::ComputeLineTableForThis() const noexcept
           }
           break;
         case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
-          if (header->version == DwarfVersion::D4) {
+          if (table.mHeader->version == DwarfVersion::D4) {
             // https://dwarfstd.org/doc/DWARF4.pdf#page=136
             const auto filename = reader.read_string();
             const auto dir_index = reader.read_uleb128<u64>();
@@ -830,34 +858,35 @@ SourceCodeFile::ComputeLineTableForThis() const noexcept
         break;
       }
     }
-  }
 
-  mLineTable.reserve(unique_ltes.size());
-  std::copy(std::begin(unique_ltes), std::end(unique_ltes), std::back_inserter(mLineTable));
-  ASSERT(std::is_sorted(mLineTable.begin(), mLineTable.end(), [](auto &a, auto &b) { return a.pc < b.pc; }),
-         "Line Table was not sorted by Program Counter!");
-  if (mLineTable.size() > 2) {
-    low = mLineTable.front().pc;
-    high = mLineTable.back().pc;
+    table.mLineTable.reserve(unique_ltes.size());
+    std::ranges::copy(unique_ltes, std::back_inserter(table.mLineTable));
+    ASSERT(std::ranges::is_sorted(table.mLineTable, [](auto &a, auto &b) { return a.pc < b.pc; }),
+           "Line Table was not sorted by Program Counter!");
+    if (table.mLineTable.size() > 2) {
+      mSpan.low = std::min(mSpan.low, table.mLineTable.front().pc);
+      mSpan.high = std::max(mSpan.high, table.mLineTable.back().pc);
+    }
   }
   computed = true;
 }
 
 RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr,
-                                                 std::shared_ptr<SourceCodeFile> src_file) noexcept
-    : baseAddr(base_addr), file(*src_file)
+                                                 const std::shared_ptr<SourceCodeFile>& src_file) noexcept
+    : file(*src_file), baseAddr(base_addr)
 {
 }
 
 RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *src_file) noexcept
-    : baseAddr(base_addr), file(*src_file)
+    : file(*src_file), baseAddr(base_addr)
 {
 }
 
 auto
-RelocatedSourceCodeFile::find_lte_by_pc(AddrPtr pc) const noexcept -> std::optional<RelocatedLteIterator>
+RelocatedSourceCodeFile::FindLineTableEntry(AddrPtr relocatedProgramCounter) const noexcept
+  -> const LineTableEntry *
 {
-  return file.find_by_pc(baseAddr, pc);
+  return file.FindRelocatedLineTableEntry(baseAddr, relocatedProgramCounter);
 }
 
 AddressRange

@@ -143,6 +143,14 @@ struct Enc
   DwarfExceptionHeaderEncoding value_fmt;
 };
 
+struct Augmentation {
+  bool HasAugmentDataField : 1;
+  bool HasEHDataField : 1;
+  bool HasLanguageSpecificDataArea: 1;
+  bool HasPersonalityRoutinePointer : 1;
+  bool HasFDEPointerEncoding : 1;
+};
+
 struct CommonInformationEntry
 {
   u64 length;
@@ -161,6 +169,46 @@ struct CommonInformationEntry
   u64 retaddr_register;
   std::span<const u8> instructions;
   u64 offset;
+
+  constexpr Augmentation GetAugmentation() const noexcept {
+    if(!augmentation_string) {
+      return Augmentation{false, false, false, false, false};
+    }
+
+    Augmentation aug{false, false, false, false, false};
+
+    auto& view = augmentation_string.value();
+    const auto sz = view.size();
+
+    for(auto i = 0u; i < sz; ++i) {
+      const char ch = view[i];
+      switch(ch) {
+        case 'z':
+          aug.HasAugmentDataField = true;
+          break;
+        case 'e':
+          ASSERT(view[i+1] == 'h', "Expected augmentation to be 'eh' but wasn't.");
+          aug.HasEHDataField = true;
+          ++i;
+          break;
+        case 'L':
+          aug.HasLanguageSpecificDataArea = true;
+          break;
+        case 'P':
+          aug.HasPersonalityRoutinePointer = true;
+          break;
+        case 'R':
+          aug.HasFDEPointerEncoding = true;
+          break;
+        case 'S':
+          // found in /lib64/ld-linux-x86-64.so.2, but I don't know what it does.
+          break;
+        [[unlikely]] default:
+          ASSERT(false, "Unknown augmentation specifier");
+      }
+    }
+    return aug;
+  }
 };
 
 using CIE = CommonInformationEntry;
@@ -250,7 +298,7 @@ std::pair<u64, u64> elf_eh_calculate_entries_count(DwarfBinaryReader reader) noe
 std::pair<u64, u64> dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
 CommonInformationEntry read_cie(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
 std::unique_ptr<Unwinder> parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept;
-void parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame, int fde_count) noexcept;
+void parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame) noexcept;
 
 FrameDescriptionEntry read_fde(DwarfBinaryReader &reader);
 

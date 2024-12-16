@@ -47,7 +47,7 @@ public:
 
   void set_name(std::string_view name) noexcept;
   void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
-  void process_source_code_files(u64 line_table) noexcept;
+  void ProcessSourceCodeFiles(u64 line_table) noexcept;
   void add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept;
   std::span<const std::shared_ptr<dw::SourceCodeFile>> sources() const noexcept;
 

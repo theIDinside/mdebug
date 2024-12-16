@@ -67,7 +67,7 @@ DieReference DieReference::MaybeResolveReference() const noexcept {
     case Attribute::DW_AT_specification: {
       const auto value = read_attribute_value(reader, abbreviation, {});
       auto offset = value.unsigned_value();
-      return mUnitData->get_objfile()->GetDieReference(offset);
+      return mUnitData->GetObjectFile()->GetDieReference(offset);
     }
     default:
       reader.skip_attribute(abbreviation);

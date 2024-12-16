@@ -85,7 +85,7 @@ void
 BreakpointLocation::enable(tc::TraceeCommandInterface &tc) noexcept
 {
   if (!installed) {
-    const auto res = tc.enable_breakpoint(*this);
+    const auto res = tc.EnableBreakpoint(*this);
     switch (res.kind) {
     case tc::TaskExecuteResult::Ok:
       installed = true;
@@ -101,7 +101,7 @@ void
 BreakpointLocation::disable(tc::TraceeCommandInterface &tc) noexcept
 {
   if (installed) {
-    const auto result = tc.disable_breakpoint(*this);
+    const auto result = tc.DisableBreakpoint(*this);
     switch (result.kind) {
     case tc::TaskExecuteResult::Ok:
       installed = false;
@@ -387,11 +387,11 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
   if (all_stopped) {
-    tc.emit_stepped_stop({tc.get_task_leader(), tid}, "Finished function", true);
+    tc.emit_stepped_stop({tc.TaskLeaderTid(), tid}, "Finished function", true);
   } else {
     tc.stop_all(&t);
     tc.observer(ObserverType::AllStop).once([&tc, tid = tid]() {
-      tc.emit_stepped_stop({tc.get_task_leader(), tid}, "Finished function", true);
+      tc.emit_stepped_stop({tc.TaskLeaderTid(), tid}, "Finished function", true);
     });
   }
   return bp_hit::stop_retire_bp();

@@ -143,12 +143,12 @@ parse_cli(int argc, const char **argv) noexcept
     case 'e':
       init.dwarf_parsing.eager_lnp_parse = true;
       break;
-    case '?':
+    case '?': {
       DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
+      auto cliErrorMessage = fmt::format("Unknown argument: {}\n\n{}", argv[optind], USAGE_STR);
       return utils::unexpected(
-        CLIError{.info = CLIErrorInfo::UnknownArgs,
-                 .msg = fmt::format("{}\n\nUnknown argument: {}", USAGE_STR, argv[optind])}); // NOLINT
-      break;
+        CLIError{.info = CLIErrorInfo::UnknownArgs, .msg = std::move(cliErrorMessage)}); // NOLINT
+    }
     default:
       continue;
     }

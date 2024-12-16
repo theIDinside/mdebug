@@ -429,6 +429,7 @@ public:
 
 class Breakpoint : public UserBreakpoint
 {
+protected:
   std::optional<Tid> stop_only;
   bool stop_all_threads_when_hit;
   std::unique_ptr<UserBpSpec> bp_spec;

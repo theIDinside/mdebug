@@ -14,7 +14,7 @@
 namespace tc {
 
 PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
-    : TraceeCommandInterface(TargetFormat::Native, nullptr), procfs_memfd(),
+    : TraceeCommandInterface(TargetFormat::Native, nullptr, TraceeInterfaceType::Ptrace), procfs_memfd(),
       awaiter_thread(std::make_unique<AwaiterThread>(process_space_id)), process_id(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
@@ -22,51 +22,39 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
 }
 
 bool
-PtraceCommander::post_exec() noexcept
+PtraceCommander::OnExec() noexcept
 {
   auto tc = supervisor();
-  process_id = tc->get_task_leader();
+  process_id = tc->TaskLeaderTid();
   DBGLOG(core, "Post Exec routine for {}", process_id);
   procfs_memfd = {};
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", process_id, process_id);
   procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
   ASSERT(procfs_memfd.is_open(), "Failed to open proc mem fs for {}", process_id);
 
-  auto t = tc->get_task(process_id);
-  tc->cache_registers(*t);
-  // Read auxv to find out, e.g. interpreter_base value
-  auto auxv_result = read_auxv();
-  if (auxv_result.is_error()) {
-    PANIC("Failed to read auxv");
-    tc->read_auxv(*t);
-  } else {
-    tc->read_auxv_info(std::move(auxv_result.take_value()));
-  }
-
-  tracee_r_debug = tc->install_loader_breakpoints();
   return procfs_memfd.is_open();
 }
 
 Interface
-PtraceCommander::on_fork(Pid pid) noexcept
+PtraceCommander::OnFork(Pid pid) noexcept
 {
   return std::make_unique<PtraceCommander>(pid);
 }
 
 Tid
-PtraceCommander::task_leader() const noexcept
+PtraceCommander::TaskLeaderTid() const noexcept
 {
   return process_id;
 }
 
 std::optional<Path>
-PtraceCommander::execed_file() noexcept
+PtraceCommander::ExecedFile() noexcept
 {
   TODO("Implement PtraceCommander::execed_file() noexcept");
 }
 
 std::optional<std::vector<ObjectFileDescriptor>>
-PtraceCommander::read_libraries() noexcept
+PtraceCommander::ReadLibraries() noexcept
 {
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
   auto rdebug_ext_res = read_type(tracee_r_debug);
@@ -124,7 +112,7 @@ PtraceCommander::read_libraries() noexcept
 }
 
 ReadResult
-PtraceCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
+PtraceCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 {
   auto read_bytes = pread64(procfs_memfd.get(), read_buffer, size, address.get());
   if (read_bytes > 0) {
@@ -137,7 +125,7 @@ PtraceCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 }
 
 TraceeWriteResult
-PtraceCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
+PtraceCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 {
   const auto result = pwrite64(procfs_memfd.get(), buf, size, addr.get());
   if (result > 0) {
@@ -148,7 +136,7 @@ PtraceCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::resume_target(TraceeController *tc, RunType run) noexcept
+PtraceCommander::ResumeTarget(TraceeController *tc, RunType run) noexcept
 {
   for (auto &t : tc->get_threads()) {
     if (t->can_continue()) {
@@ -159,7 +147,7 @@ PtraceCommander::resume_target(TraceeController *tc, RunType run) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
+PtraceCommander::ResumeTask(TaskInfo &t, RunType type) noexcept
 {
   ASSERT(t.user_stopped || t.tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})",
          bool{t.user_stopped}, bool{t.tracer_stopped});
@@ -175,7 +163,7 @@ PtraceCommander::resume_task(TaskInfo &t, RunType type) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::stop_task(TaskInfo &t) noexcept
+PtraceCommander::StopTask(TaskInfo &t) noexcept
 {
   const auto result = tgkill(process_id, t.tid, SIGSTOP);
   if (result == -1) {
@@ -185,13 +173,13 @@ PtraceCommander::stop_task(TaskInfo &t) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::enable_breakpoint(BreakpointLocation &location) noexcept
+PtraceCommander::EnableBreakpoint(BreakpointLocation &location) noexcept
 {
-  return install_breakpoint(location.address());
+  return InstallBreakpoint(location.address());
 }
 
 TaskExecuteResponse
-PtraceCommander::disable_breakpoint(BreakpointLocation &location) noexcept
+PtraceCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
 {
   DBGLOG(core, "[bkpt]: disabling breakpoint at {}", location.address());
   const auto addr = location.address().get();
@@ -211,7 +199,7 @@ PtraceCommander::disable_breakpoint(BreakpointLocation &location) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::install_breakpoint(AddrPtr address) noexcept
+PtraceCommander::InstallBreakpoint(AddrPtr address) noexcept
 {
   constexpr u64 bkpt = 0xcc;
   const auto addr = address.get();
@@ -227,7 +215,7 @@ PtraceCommander::install_breakpoint(AddrPtr address) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::read_registers(TaskInfo &t) noexcept
+PtraceCommander::ReadRegisters(TaskInfo &t) noexcept
 {
   if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.tid, nullptr, t.native_registers());
       ptrace_result == -1) {
@@ -238,13 +226,13 @@ PtraceCommander::read_registers(TaskInfo &t) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::write_registers(const user_regs_struct &) noexcept
+PtraceCommander::WriteRegisters(const user_regs_struct &) noexcept
 {
   TODO("PtraceCommander::write_registers");
 }
 
 TaskExecuteResponse
-PtraceCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
+PtraceCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
 {
   constexpr auto rip_offset = offsetof(user_regs_struct, rip);
   const auto ptrace_result = ptrace(PTRACE_POKEUSER, t.tid, rip_offset, addr.get());
@@ -256,11 +244,11 @@ PtraceCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
 }
 
 std::string_view
-PtraceCommander::get_thread_name(Tid tid) noexcept
+PtraceCommander::GetThreadName(Tid tid) noexcept
 {
 
   std::array<char, 256> pathbuf{};
-  auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", task_leader(), tid);
+  auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
   std::string_view path{pathbuf.data(), it};
   auto file = utils::ScopedFd::open_read_only(path);
   char namebuf[16]{0};
@@ -282,7 +270,7 @@ PtraceCommander::get_thread_name(Tid tid) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::disconnect(bool kill_target) noexcept
+PtraceCommander::Disconnect(bool kill_target) noexcept
 {
   if (kill_target) {
     const auto result = tgkill(process_id, process_id, SIGKILL);
@@ -295,35 +283,35 @@ PtraceCommander::disconnect(bool kill_target) noexcept
       return TaskExecuteResponse::Error(errno);
     }
   }
-  perform_shutdown();
+  PerformShutdown();
   return TaskExecuteResponse::Ok();
 }
 
 bool
-PtraceCommander::perform_shutdown() noexcept
+PtraceCommander::PerformShutdown() noexcept
 {
   awaiter_thread->init_shutdown();
   return true;
 }
 
 bool
-PtraceCommander::initialize() noexcept
+PtraceCommander::Initialize() noexcept
 {
   awaiter_thread->start_awaiter_thread(this);
   return true;
 }
 
 std::shared_ptr<gdb::RemoteConnection>
-PtraceCommander::remote_connection() noexcept
+PtraceCommander::RemoteConnection() noexcept
 {
   return nullptr;
 }
 
 utils::Expected<Auxv, Error>
-PtraceCommander::read_auxv() noexcept
+PtraceCommander::ReadAuxiliaryVector() noexcept
 {
-  auto path = fmt::format("/proc/{}/auxv", task_leader());
-  DBGLOG(core, "Reading auxv for {} at {}", task_leader(), path);
+  auto path = fmt::format("/proc/{}/auxv", TaskLeaderTid());
+  DBGLOG(core, "Reading auxv for {} at {}", TaskLeaderTid(), path);
   utils::ScopedFd procfile = utils::ScopedFd::open_read_only(path);
   // we can read 256 elements at a time (id + value = u64 * 2)
   static constexpr auto Count = 512;

@@ -78,7 +78,7 @@ async function set4InSameCompUnit(debugAdapter) {
   })
 
   checkResponse(res, bpRequest, true)
-  assert_eq(res.body.breakpoints.length, 4, `Expected bkpts 3 but got ${res.body.breakpoints.length}`)
+  assert_eq(res.body.breakpoints.length, 4, `Expected bkpts 4 but got ${res.body.breakpoints.length}`)
   const found_all = [false, false, false]
   for (let i = 0; i < bp_lines.length; i++) {
     for (let bp of res.body.breakpoints) {
@@ -154,6 +154,7 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
     'Expected 3 breakpoints',
     ` but saw ${response.body.breakpoints.length}`
   )
+  console.log(`now wait for 1 breakpoint event`);
   let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 1000)
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events

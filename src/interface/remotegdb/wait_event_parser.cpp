@@ -153,7 +153,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
 
   if (!init) {
     auto tc = Tracer::Instance->get_controller(pid);
-    auto t = tc != nullptr ? tc->get_task(tid) : nullptr;
+    auto t = tc != nullptr ? tc->GetTaskByTid(tid) : nullptr;
 
     if (t && t->loc_stat) {
       const auto locstat = t->clear_bpstat();

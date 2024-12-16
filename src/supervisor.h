@@ -83,7 +83,6 @@ class TraceeController
   bool stop_all_requested;
   Publisher<void> all_stop{};
   Publisher<SymbolFile *> new_objectfile{};
-  TPtr<r_debug_extended> tracee_r_debug{nullptr};
   InterfaceType interface_type;
   ui::dap::DebugAdapterClient *dap_client{nullptr};
   std::optional<Pid> parent{};
@@ -118,11 +117,12 @@ public:
 
   std::shared_ptr<SymbolFile> lookup_symbol_file(const Path &path) noexcept;
 
+  AddrPtr EntryAddress() const noexcept;
+
   /** Install breakpoints in the loader (ld.so). Used to determine what shared libraries tracee consists of. */
-  TPtr<r_debug_extended> install_loader_breakpoints() noexcept;
+  TPtr<r_debug_extended> InstallDynamicLoaderBreakpoints() noexcept;
   void on_so_event() noexcept;
-  std::optional<std::shared_ptr<BreakpointLocation>> reassess_bploc_for_symfile(SymbolFile &symbol_file,
-                                                                                UserBreakpoint &user_bp) noexcept;
+  bool reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakpoint &user_bp, std::vector<std::shared_ptr<BreakpointLocation>>& locs) noexcept;
   void do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>> &&new_symbol_files) noexcept;
 
   bool is_null_unwinder(sym::Unwinder *unwinder) const noexcept;
@@ -140,8 +140,8 @@ public:
   void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
   u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate);
 
-  Tid get_task_leader() const noexcept;
-  TaskInfo *get_task(pid_t pid) noexcept;
+  Tid TaskLeaderTid() const noexcept;
+  TaskInfo *GetTaskByTid(pid_t pid) noexcept;
   UserBreakpoints &user_breakpoints() noexcept;
   /* wait on `task` or the entire target if `task` is nullptr */
   std::optional<TaskWaitResult> wait_pid(TaskInfo *task) noexcept;
@@ -182,7 +182,7 @@ public:
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   get_or_create_bp_location(AddrPtr addr, bool attempt_src_resolve) noexcept;
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  get_or_create_bp_location(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
+  GetOrCreateBreakpointLocation(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   get_or_create_bp_location(AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
@@ -216,16 +216,16 @@ public:
   bool is_running() const noexcept;
 
   // Debug Symbols Related Logic
-  void register_object_file(TraceeController *tc, std::shared_ptr<ObjectFile> &&obj, bool is_main_executable,
+  void RegisterObjectFile(TraceeController *tc, std::shared_ptr<ObjectFile> &&obj, bool is_main_executable,
                             AddrPtr relocated_base) noexcept;
 
-  void register_symbol_file(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept;
+  void RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept;
 
   // we pass TaskWaitResult here, because want to be able to ASSERT that we just exec'ed.
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
   void read_auxv(TaskInfo &task);
-  void read_auxv_info(tc::Auxv &&aux) noexcept;
+  void ParseAuxiliaryVectorInfo(tc::Auxv &&aux) noexcept;
 
   TargetSession session_type() const noexcept;
 
@@ -242,7 +242,7 @@ public:
     constexpr auto sz = TPtr<T>::type_size();
     while (total_read < sz) {
       const auto read_address = address.as_void() += total_read;
-      const auto read_result = tracee_interface->read_bytes(read_address, sz - total_read, ptr + total_read);
+      const auto read_result = tracee_interface->ReadBytes(read_address, sz - total_read, ptr + total_read);
       if (!read_result.success()) {
         PANIC(fmt::format("Failed to proc_fs read from {:p} because {}", (void *)address.get(), strerror(errno)));
       }
@@ -261,7 +261,7 @@ public:
     constexpr auto sz = TPtr<T>::type_size();
     while (total_read < sz) {
       const auto read_address = addr.as_void() += total_read;
-      const auto read_result = tracee_interface->read_bytes(read_address, sz - total_read, ptr + total_read);
+      const auto read_result = tracee_interface->ReadBytes(read_address, sz - total_read, ptr + total_read);
       if (!read_result.success()) {
         return std::nullopt;
       }
@@ -301,9 +301,8 @@ public:
   bool session_all_stop_mode() const noexcept;
   TaskInfo *set_pending_waitstatus(TaskWaitResult wait_result) noexcept;
 
-  void cache_registers(TaskInfo &t) noexcept;
+  void CacheRegistersFor(TaskInfo &t) noexcept;
   tc::TraceeCommandInterface &get_interface() noexcept;
-  std::optional<AddrPtr> get_interpreter_base() const noexcept;
   std::shared_ptr<SymbolFile> get_main_executable() const noexcept;
 
   tc::ProcessedStopEvent handle_thread_created(TaskInfo *task, const ThreadCreated &evt,

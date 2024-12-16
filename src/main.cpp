@@ -1,4 +1,4 @@
-/** COPYRIGHT TEMPLATE */
+7/** COPYRIGHT TEMPLATE */
 #include "./utils/logger.h"
 #include "common.h"
 #include "event_queue.h"

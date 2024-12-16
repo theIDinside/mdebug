@@ -6,6 +6,7 @@
 #include "interface/remotegdb/shared.h"
 #include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "symbolication/objfile.h"
 #include "task.h"
 #include "utils/logger.h"
 #include "utils/util.h"
@@ -96,7 +97,7 @@ append_checksum(char (&buf)[N], std::string_view payload)
 GdbRemoteCommander::GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn,
                                        Pid process_id, std::string &&exec_file,
                                        std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept
-    : TraceeCommandInterface(TargetFormat::Remote, std::move(arch)), connection(std::move(conn)),
+    : TraceeCommandInterface(TargetFormat::Remote, std::move(arch), TraceeInterfaceType::GdbRemote), connection(std::move(conn)),
       process_id(process_id), exec_file(std::move(exec_file)), type(type)
 {
 }
@@ -123,7 +124,7 @@ convert_to_read_result(const gdb::SendError &err) noexcept
 }
 
 ReadResult
-GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
+GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 {
   const auto &settings = connection->settings();
   if (settings.is_non_stop) {
@@ -132,7 +133,7 @@ GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexc
   }
   std::array<char, 64> buf{};
   const auto cmd = SerializeCommand(buf, "m{:x},{}", address.get(), size);
-  const auto pid = task_leader();
+  const auto pid = TaskLeaderTid();
   const auto res = connection->send_command_with_response(gdb::GdbThread{pid, pid}, cmd, 1000);
   if (res.is_error()) {
     return convert_to_read_result(res.error());
@@ -156,7 +157,7 @@ GdbRemoteCommander::read_bytes(AddrPtr address, u32 size, u8 *read_buffer) noexc
   return ReadResult::Ok(ptr - read_buffer);
 }
 TraceeWriteResult
-GdbRemoteCommander::write_bytes(AddrPtr addr, u8 *buf, u32 size) noexcept
+GdbRemoteCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 {
   static constexpr std::array<char, 16> Table = {'0', '1', '2', '3', '4', '5', '6', '7',
                                                  '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
@@ -205,11 +206,11 @@ GdbRemoteCommander::set_catch_syscalls(bool on) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::resume_task(TaskInfo &t, RunType type) noexcept
+GdbRemoteCommander::ResumeTask(TaskInfo &t, RunType type) noexcept
 {
   set_catch_syscalls(type == RunType::SyscallContinue);
 
-  const auto pid = task_leader();
+  const auto pid = TaskLeaderTid();
   std::array<char, 128> buf{};
   std::string_view resume_command;
   switch (type) {
@@ -251,7 +252,7 @@ GdbRemoteCommander::reverse_continue() noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
+GdbRemoteCommander::ResumeTarget(TraceeController *tc, RunType type) noexcept
 {
   set_catch_syscalls(type == RunType::SyscallContinue);
 
@@ -264,7 +265,7 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
     }
   }
 
-  const auto pid = task_leader();
+  const auto pid = TaskLeaderTid();
   std::array<char, 128> buf{};
   std::string_view resume_command;
   switch (type) {
@@ -290,11 +291,11 @@ GdbRemoteCommander::resume_target(TraceeController *tc, RunType type) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::stop_task(TaskInfo &t) noexcept
+GdbRemoteCommander::StopTask(TaskInfo &t) noexcept
 {
   if (remote_settings().is_non_stop) {
     std::array<char, 64> bytes{};
-    const auto pid = task_leader();
+    const auto pid = TaskLeaderTid();
     auto cmd = SerializeCommand(bytes, "vCont;t:p{}.{}", pid, t.tid);
     auto response = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
     if (!(response.is_expected() && response.take_value() == "$OK")) {
@@ -314,13 +315,13 @@ GdbRemoteCommander::stop_task(TaskInfo &t) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::enable_breakpoint(BreakpointLocation &location) noexcept
+GdbRemoteCommander::EnableBreakpoint(BreakpointLocation &location) noexcept
 {
-  return install_breakpoint(location.address());
+  return InstallBreakpoint(location.address());
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::disable_breakpoint(BreakpointLocation &location) noexcept
+GdbRemoteCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
 {
   std::array<char, 32> bytes{};
   auto cmd = SerializeCommand(bytes, "z0,{:x},1", location.address().get());
@@ -332,7 +333,7 @@ GdbRemoteCommander::disable_breakpoint(BreakpointLocation &location) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::install_breakpoint(AddrPtr addr) noexcept
+GdbRemoteCommander::InstallBreakpoint(AddrPtr addr) noexcept
 {
   std::array<char, 32> bytes{};
   auto cmd = SerializeCommand(bytes, "Z0,{:x},1", addr.get());
@@ -348,9 +349,9 @@ GdbRemoteCommander::install_breakpoint(AddrPtr addr) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::read_registers(TaskInfo &t) noexcept
+GdbRemoteCommander::ReadRegisters(TaskInfo &t) noexcept
 {
-  const gdb::GdbThread thread{task_leader(), t.tid};
+  const gdb::GdbThread thread{TaskLeaderTid(), t.tid};
   auto result = connection->send_command_with_response(thread, "g", 1000);
   if (result.is_error()) {
     return TaskExecuteResponse::Error(0);
@@ -369,21 +370,21 @@ GdbRemoteCommander::read_registers(TaskInfo &t) noexcept
   return TaskExecuteResponse::Ok(register_contents.size());
 }
 TaskExecuteResponse
-GdbRemoteCommander::write_registers(const user_regs_struct &input) noexcept
+GdbRemoteCommander::WriteRegisters(const user_regs_struct &input) noexcept
 {
   (void)input;
   TODO("Implement");
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
+GdbRemoteCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
 {
   std::array<char, 64> thr_set_bytes{};
   std::array<char, 64> set_pc_bytes{};
   std::array<char, 16> register_contents{};
   auto register_value = convert_to_target(register_contents, addr.get());
   auto cmds =
-    std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", task_leader(), t.tid),
+    std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), t.tid),
                    SerializeCommand(set_pc_bytes, "P{:x}={}", arch_info->mDebugContextRegisters->mRIPNumber.as_t(),
                                     register_value)});
   auto response = connection->send_inorder_command_chain(cmds, 1000);
@@ -405,12 +406,12 @@ GdbRemoteCommander::set_pc(const TaskInfo &t, AddrPtr addr) noexcept
 }
 
 std::string_view
-GdbRemoteCommander::get_thread_name(Tid tid) noexcept
+GdbRemoteCommander::GetThreadName(Tid tid) noexcept
 {
   switch (type) {
   case RemoteType::RR: {
     char buf[256];
-    auto end = fmt::format_to(buf, "qThreadExtraInfo,p{:x}.{:x}", task_leader(), tid);
+    auto end = fmt::format_to(buf, "qThreadExtraInfo,p{:x}.{:x}", TaskLeaderTid(), tid);
     std::string_view cmd{buf, end};
     const auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
     if (res.is_expected()) {
@@ -456,18 +457,18 @@ GdbRemoteCommander::get_thread_name(Tid tid) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::disconnect(bool terminate) noexcept
+GdbRemoteCommander::Disconnect(bool terminate) noexcept
 {
   std::array<char, 64> buf{};
   if (terminate) {
-    auto cmd = SerializeCommand(buf, "vKill;{}", task_leader());
+    auto cmd = SerializeCommand(buf, "vKill;{}", TaskLeaderTid());
     const auto res = connection->send_command_with_response({}, cmd, 1000);
     if (res.is_expected() && res.value() == "$OK"sv) {
       return TaskExecuteResponse::Ok();
     }
     return TaskExecuteResponse::Error(0);
   } else {
-    auto cmd = SerializeCommand(buf, "D;{}", task_leader());
+    auto cmd = SerializeCommand(buf, "D;{}", TaskLeaderTid());
     const auto res = connection->send_command_with_response({}, cmd, 1000);
     if (res.is_expected() && res.value() == "$OK"sv) {
       return TaskExecuteResponse::Ok();
@@ -476,14 +477,14 @@ GdbRemoteCommander::disconnect(bool terminate) noexcept
   }
 }
 bool
-GdbRemoteCommander::perform_shutdown() noexcept
+GdbRemoteCommander::PerformShutdown() noexcept
 {
   DBGLOG(core, "Perform shut down for GdbRemote Commander - not sure anything's really needed here?");
   return true;
 }
 
 bool
-GdbRemoteCommander::initialize() noexcept
+GdbRemoteCommander::Initialize() noexcept
 {
   // TODO(simon): possibly have args to the attach config, where we do some work here, depending on that arg -
   // however, we can *not* wait until now
@@ -493,25 +494,35 @@ GdbRemoteCommander::initialize() noexcept
 }
 
 bool
-GdbRemoteCommander::post_exec() noexcept
+GdbRemoteCommander::OnExec() noexcept
 {
-  Tracer::Instance->load_and_process_objfile(task_leader(), *exec_file);
-  if (auto auxv = read_auxv(); auxv.is_expected()) {
-    supervisor()->read_auxv_info(std::move(auxv.take_value()));
-    tracee_r_debug = supervisor()->install_loader_breakpoints();
+  auto auxv = ReadAuxiliaryVector();
+  ASSERT(auxv.is_expected(), "Failed to read auxiliary vector");
+  supervisor()->ParseAuxiliaryVectorInfo(std::move(auxv.take_value()));
+
+  if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(*exec_file); symbol_obj == nullptr) {
+    auto obj = CreateObjectFile(tc, *exec_file);
+    if (obj->elf->AddressesNeedsRelocation()) {
+      tc->RegisterObjectFile(tc, std::move(obj), true, tc->EntryAddress());
+    } else {
+      tc->RegisterObjectFile(tc, std::move(obj), true, nullptr);
+    }
+  } else {
+    tc->RegisterSymbolFile(symbol_obj, true);
   }
 
+  tracee_r_debug = supervisor()->InstallDynamicLoaderBreakpoints();
   return true;
 }
 
 Interface
-GdbRemoteCommander::on_fork(Pid) noexcept
+GdbRemoteCommander::OnFork(Pid) noexcept
 {
   TODO("implement GdbRemoteCommander::on_fork() noexcept");
 }
 
 std::optional<Path>
-GdbRemoteCommander::execed_file() noexcept
+GdbRemoteCommander::ExecedFile() noexcept
 {
   if (exec_file) {
     return exec_file.transform([](auto &p) { return Path{p}; });
@@ -530,7 +541,7 @@ GdbRemoteCommander::execed_file() noexcept
 }
 
 Tid
-GdbRemoteCommander::task_leader() const noexcept
+GdbRemoteCommander::TaskLeaderTid() const noexcept
 {
   return process_id;
 }
@@ -542,7 +553,7 @@ GdbRemoteCommander::leader_to_gdb() const noexcept
 }
 
 std::optional<std::vector<ObjectFileDescriptor>>
-GdbRemoteCommander::read_libraries() noexcept
+GdbRemoteCommander::ReadLibraries() noexcept
 {
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
   auto rdebug_ext_res = read_type(tracee_r_debug);
@@ -600,20 +611,20 @@ GdbRemoteCommander::read_libraries() noexcept
 }
 
 std::shared_ptr<gdb::RemoteConnection>
-GdbRemoteCommander::remote_connection() noexcept
+GdbRemoteCommander::RemoteConnection() noexcept
 {
   return connection;
 }
 
 utils::Expected<Auxv, Error>
-GdbRemoteCommander::read_auxv() noexcept
+GdbRemoteCommander::ReadAuxiliaryVector() noexcept
 {
   static constexpr auto BufSize = PAGE_SIZE;
   if (!auxv_data.vector.empty()) {
     return auxv_data;
   } else {
     std::array<char, 64> bytes{};
-    auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", task_leader(), task_leader());
+    auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), TaskLeaderTid());
     auto set_thread = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
 
     gdb::qXferCommand read_auxv{"qXfer:auxv:read:", 0x1000};

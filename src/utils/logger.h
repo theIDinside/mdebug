@@ -65,6 +65,7 @@ public:
   void log(Channel id, std::string_view log_msg) noexcept;
   static Logger *get_logger() noexcept;
   void on_abort() noexcept;
+  void OnAbort() noexcept;
   LogChannel *channel(std::string_view name);
   LogChannel *channel(Channel id);
 

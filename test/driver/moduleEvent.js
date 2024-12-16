@@ -60,6 +60,8 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
     `Bp Args: ${prettyJson(bp_args)}.\n Response ${prettyJson(templateBpRes)}`
   )
 
+  console.log(`breakpoints: ${prettyJson(templateBpRes.body.breakpoints)}`);
+
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
   assertLog(

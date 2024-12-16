@@ -128,7 +128,7 @@ TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
   RETURN_RET_ADDR_IF(!call_stack->IsDirty());
 
-  tc->cache_registers(*this);
+  tc->CacheRegistersFor(*this);
   // initialize bottom frame's registers with actual live register contents
   // this is then used to execute the dwarf binary code
   call_stack->Unwind(req);
@@ -210,7 +210,7 @@ TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_act
 
   next_resume_action = resume_action;
 
-  const auto result = control.resume_task(*this, tc::RunType::Step);
+  const auto result = control.ResumeTask(*this, tc::RunType::Step);
   ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 

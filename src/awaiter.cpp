@@ -17,7 +17,7 @@ AwaiterThread::~AwaiterThread() noexcept
 void
 AwaiterThread::start_awaiter_thread(tc::TraceeCommandInterface *tc) noexcept
 {
-  thread = std::thread{[pid = tc->task_leader(), &keep_going = keep_going]() {
+  thread = std::thread{[pid = tc->TaskLeaderTid(), &keep_going = keep_going]() {
     int error_tries = 0;
     const auto pgid = -(pid);
     while (keep_going) {
