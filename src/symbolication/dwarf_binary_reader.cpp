@@ -76,6 +76,11 @@ DwarfBinaryReader::DwarfBinaryReader(const Elf *elf, const u8 *buffer, u64 size)
 {
 }
 
+DwarfBinaryReader::DwarfBinaryReader(const Elf *elf, std::span<const u8> data) noexcept
+    : buffer(data.data()), head(data.data()), end(buffer + data.size()), bookmarks(), elf(elf)
+{
+}
+
 DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
     : buffer(reader.buffer), head(reader.head), end(reader.end), size(reader.size), bookmarks(reader.bookmarks),
       elf(reader.elf)
@@ -155,10 +160,10 @@ DwarfBinaryReader::read_content_str(AttributeForm form) noexcept
     return read_string();
   case DW_FORM_line_strp:
     ASSERT(elf->debug_line_str != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
-    return std::string_view{(const char *)elf->debug_line_str->offset(read_offset())};
+    return elf->debug_line_str->GetNullTerminatedStringAt(read_offset());
   case DW_FORM_strp:
     ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
-    return std::string_view{(const char *)elf->debug_str->offset(read_offset())};
+    return elf->debug_str->GetNullTerminatedStringAt(read_offset());
   case DW_FORM_strp_sup:
   case DW_FORM_strx:
   case DW_FORM_strx1:

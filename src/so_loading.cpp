@@ -48,7 +48,7 @@ SharedObject::has_debug_info() const noexcept
   if (objfile == nullptr) {
     return false;
   }
-  return objfile->GetElf()->get_section(".debug_info") != nullptr;
+  return objfile->GetElf()->GetSection(".debug_info") != nullptr;
 }
 
 SharedObject
@@ -66,8 +66,8 @@ SharedObject::clone() const noexcept
 Path
 interpreter_path(const Elf *elf, const ElfSection *interp) noexcept
 {
-  ASSERT(interp->get_name() == ".interp", "Section is not .interp: {}", interp->get_name());
-  DwarfBinaryReader reader{elf, interp};
+  ASSERT(interp->mName == ".interp", "Section is not .interp: {}", interp->mName);
+  DwarfBinaryReader reader{elf, interp->mSectionData};
   const auto path = reader.read_string();
   DBGLOG(core, "Path to system interpreter: {}", path);
   return path;

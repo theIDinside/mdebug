@@ -487,10 +487,14 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
   PANIC("reading lsda failed");
 }
 
-template <u32 CIEMask>
-struct FrameUnwindEntryIdentifier {
+template <u32 CIEMask> struct FrameUnwindEntryIdentifier
+{
   u32 mId;
-  constexpr bool IsCommonInfoEntry() const noexcept { return mId == CIEMask; }
+  constexpr bool
+  IsCommonInfoEntry() const noexcept
+  {
+    return mId == CIEMask;
+  }
 };
 
 using EHIdentifier = FrameUnwindEntryIdentifier<0x00'00'00'00>;
@@ -500,9 +504,9 @@ std::unique_ptr<Unwinder>
 parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
 {
   ASSERT(eh_frame != nullptr, "Expected a .eh_frame section!");
-  DwarfBinaryReader reader{objfile->GetElf(), eh_frame->m_section_ptr, eh_frame->size()};
+  DwarfBinaryReader reader{objfile->GetElf(), eh_frame->mSectionData};
   DBGLOG(eh, "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->GetPathString(),
-         reader.remaining_size(), eh_frame->file_offset);
+         reader.remaining_size(), eh_frame->file_offset.as_t());
   auto unwinder_db = std::make_unique<Unwinder>(objfile);
 
   using CieId = u64;
@@ -581,7 +585,7 @@ parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept
 void
 parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame) noexcept
 {
-  DwarfBinaryReader reader{elf, debug_frame->m_section_ptr, debug_frame->size()};
+  DwarfBinaryReader reader{elf, debug_frame->mSectionData};
 
   using CieId = u64;
   using CieIdx = u64;
@@ -592,7 +596,7 @@ parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_fr
   unwinder_db->dwarf_unwind_infos.reserve(unwinder_db->elf_eh_unwind_infos.size() + fdes_count);
   AddrPtr low{std::uintptr_t{UINTMAX_MAX}};
   AddrPtr high{nullptr};
-  while(reader.has_more()) {
+  while (reader.has_more()) {
     constexpr auto len_field_len = 4;
     const auto eh_offset = reader.bytes_read();
     const auto entry_length = reader.read_value<u32>();

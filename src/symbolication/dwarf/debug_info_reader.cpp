@@ -10,7 +10,7 @@ UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), curren
 {
   const auto &header = compilation_unit->header();
   current_ptr =
-    compilation_unit->GetObjectFile()->GetElf()->debug_info->offset(header.header_len() + header.debug_info_offset());
+    compilation_unit->GetObjectFile()->GetElf()->debug_info->GetPointer(header.header_len() + header.debug_info_offset());
 }
 
 UnitReader::UnitReader(UnitData *data, const DieMetaData &entry) noexcept : UnitReader(data) { seek_die(entry); }
@@ -355,9 +355,9 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
 {
   auto obj = compilation_unit->GetObjectFile();
   const auto header = compilation_unit->header();
-  ASSERT(obj->GetElf()->debug_addr->m_section_ptr != nullptr, ".debug_addr expected not to be nullptr");
+  ASSERT(!obj->GetElf()->debug_addr->mSectionData->empty(), ".debug_addr expected not to be nullptr");
   const auto addr_table_offset = compilation_unit->addr_base() + address_index * header.addr_size();
-  const auto ptr = (obj->GetElf()->debug_addr->m_section_ptr + addr_table_offset);
+  const auto ptr = (obj->GetElf()->debug_addr->mSectionData->data() + addr_table_offset);
   if (header.addr_size() == 4) {
     const auto value = *(u32 *)ptr;
     return AddrPtr{value};
@@ -371,16 +371,16 @@ std::string_view
 UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 {
   const auto elf = compilation_unit->GetObjectFile()->GetElf();
-  ASSERT(elf->debug_str_offsets->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
+  ASSERT(!elf->debug_str_offsets->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
   const auto str_base = compilation_unit->str_offsets_base();
   const auto str_table_offset = str_base.value() + str_index * compilation_unit->header().format();
-  const auto ptr = (elf->debug_str_offsets->m_section_ptr + str_table_offset);
+  const auto ptr = (elf->debug_str_offsets->mSectionData->data() + str_table_offset);
   if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
-    return std::string_view{(const char *)(elf->debug_str->m_section_ptr + value)};
+    return elf->debug_str->GetNullTerminatedStringAt(value);
   } else {
     const auto value = *(u64 *)ptr;
-    return std::string_view{(const char *)(elf->debug_str->m_section_ptr + value)};
+    return elf->debug_str->GetNullTerminatedStringAt(value);
   }
 }
 
@@ -388,10 +388,10 @@ u64
 UnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
 {
   const auto elf = compilation_unit->GetObjectFile()->GetElf();
-  ASSERT(elf->debug_rnglists->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
+  ASSERT(!elf->debug_rnglists->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
   const auto rnglist_offset =
     compilation_unit->rng_list_base() + range_index * compilation_unit->header().format();
-  const auto ptr = (elf->debug_rnglists->m_section_ptr + rnglist_offset);
+  const auto ptr = (elf->debug_rnglists->mSectionData->data() + rnglist_offset);
   if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
     return value;
@@ -405,10 +405,10 @@ UnitReader::read_loclist_index(u64 range_index, std::optional<u64> loc_list_base
 {
   PANIC("read_loclist_index is not yet implemented. see other indirect + base calculations");
   const auto elf = compilation_unit->GetObjectFile()->GetElf();
-  ASSERT(elf->debug_loclist->m_section_ptr != nullptr, ".debug_str_offsets expected not to be nullptr");
+  ASSERT(!elf->debug_loclist->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
 
   const auto rnglist_offset = loc_list_base.value_or(0) + range_index * compilation_unit->header().format();
-  const auto ptr = (elf->debug_loclist->m_section_ptr + rnglist_offset);
+  const auto ptr = (elf->debug_loclist->mSectionData->data() + rnglist_offset);
   if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
     return value;

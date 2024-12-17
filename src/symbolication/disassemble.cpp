@@ -7,7 +7,6 @@
 #include "symbolication/fnsymbol.h"
 #include "zydis/Zydis.h"
 #include <algorithm>
-#include <optional>
 #include <set>
 
 namespace sym {
@@ -88,7 +87,7 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
   const auto objfile = target->find_obj_by_pc(addr);
-  const auto text = objfile->GetObjectFile()->GetElf()->get_section(".text");
+  const auto text = objfile->GetObjectFile()->GetElf()->GetSection(".text");
   ZydisDisassembledInstruction instruction;
 
   // This hurts my soul and is so hacky.
@@ -100,10 +99,10 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
   for (auto src : srcs) {
     if (static_cast<int>(output.size()) <= ins_offset) {
       auto add = src->start_pc();
-      auto exec_data_ptr = text->into(add);
+      auto exec_data_ptr = text->Into(add);
       std::vector<sym::Disassembly> result;
       while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
-                                              text->remaining_bytes(exec_data_ptr), &instruction)) &&
+                                              text->RemainingBytes(exec_data_ptr), &instruction)) &&
              add <= addr) {
         if (!disassembled_addresses.contains(add)) {
           result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
@@ -121,12 +120,12 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
 
   // Disassemble instructions that aren't referenced by DWARF debug info
   if (static_cast<int>(output.size()) <= ins_offset) {
-    auto add = text->address;
-    auto exec_data_ptr = text->into(text->address);
+    auto add = *text->address;
+    auto exec_data_ptr = text->Into(text->address);
     std::vector<sym::Disassembly> result;
     DBGLOG(core, "Disassembling non-DWARF referenced instructions");
     while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
-                                            text->remaining_bytes(exec_data_ptr), &instruction)) &&
+                                            text->RemainingBytes(exec_data_ptr), &instruction)) &&
            add <= addr) {
       if (!disassembled_addresses.contains(add)) {
         result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
@@ -154,14 +153,14 @@ zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
              std::vector<sym::Disassembly> &output) noexcept
 {
   const ElfSection *text = target->get_text_section(addr);
-  const auto start_exec_data = text->into(addr);
+  const auto start_exec_data = text->Into(addr);
   auto exec_data_ptr = start_exec_data;
   ZydisDisassembledInstruction instruction;
   auto vm_address = addr;
 
   if (ins_offset > 0) {
     while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, vm_address, exec_data_ptr,
-                                            text->remaining_bytes(exec_data_ptr), &instruction)) &&
+                                            text->RemainingBytes(exec_data_ptr), &instruction)) &&
            ins_offset != 0) {
       vm_address = offset(vm_address, instruction.info.length);
       exec_data_ptr += instruction.info.length;
@@ -170,7 +169,7 @@ zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
   }
 
   while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, vm_address, exec_data_ptr,
-                                          text->remaining_bytes(exec_data_ptr), &instruction)) &&
+                                          text->RemainingBytes(exec_data_ptr), &instruction)) &&
          total != 0) {
     output.push_back(create_disasm_entry(target, vm_address, instruction, exec_data_ptr));
     vm_address = offset(vm_address, instruction.info.length);

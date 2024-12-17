@@ -83,6 +83,7 @@ public:
   using enum InitLengthRead;
 
   DwarfBinaryReader(const Elf *elf, const u8 *buffer, u64 size) noexcept;
+  DwarfBinaryReader(const Elf *elf, std::span<const u8> buffer) noexcept;
   DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept;
 
   template <ByteContainer BC>

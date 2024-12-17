@@ -77,7 +77,7 @@ ObjectFile::GetPathString() const noexcept
 }
 
 const Elf *
-ObjectFile::GetElf() noexcept
+ObjectFile::GetElf() const noexcept
 {
   return elf;
 }
@@ -232,7 +232,7 @@ ObjectFile::GetLineNumberProgramHeader(u64 offset) noexcept
 void
 ObjectFile::ReadLineNumberProgramHeaders() noexcept
 {
-  lnp_headers = sym::dw::read_lnp_headers(elf);
+  lnp_headers = sym::dw::read_lnp_headers(this);
   std::string path_buf{};
   for (auto &hdr : *lnp_headers) {
     ASSERT(!hdr.directories.empty(), "Directories for the LNP header must *NOT* be empty!");
@@ -464,7 +464,8 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
   if (elf->debug_str == nullptr) {
     return {};
   }
-  std::string_view dbg_str{(const char *)elf->debug_str->begin(), elf->debug_str->size()};
+
+  std::string_view dbg_str{elf->debug_str->GetDataAs<const char>()};
 
   auto it = std::regex_iterator<std::string_view::iterator>{dbg_str.cbegin(), dbg_str.cend(), re};
   std::vector<std::string> results{};
@@ -520,19 +521,21 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
                                                     fd.file_size(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
-  const auto header = objfile->get_at_offset<Elf64Header>(0);
+  const auto header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
   ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0, "ELF Magic not correct, expected {} got {}",
          *(u32 *)(ELF_MAGIC), *(u32 *)(header->e_ident));
-  ElfSectionData data = {.sections = new ElfSection[header->e_shnum], .count = header->e_shnum};
+  std::vector<ElfSection> sectionData;
+  sectionData.reserve(header->e_shnum);
+
   const auto sec_names_offset_hdr =
-    objfile->get_at_offset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
+    objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
 
   u64 min = UINTMAX_MAX;
   u64 max = 0;
 
   // good enough heuristic to determine mapped in ranges.
   for (auto i = 0; i < header->e_phnum; ++i) {
-    auto phdr = objfile->get_at_offset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
+    auto phdr = objfile->AlignedRequiredGetAtOffset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
     if (phdr->p_type == PT_LOAD) {
       min = std::min(phdr->p_vaddr, min);
       const auto end = u64{phdr->p_vaddr + phdr->p_memsz};
@@ -544,26 +547,26 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   objfile->mUnrelocatedAddressBounds = AddressRange{.low = min, .high = max};
   auto sec_hdrs_offset = header->e_shoff;
   // parse sections
-  for (auto i = 0; i < data.count; i++) {
-    const auto sec_hdr = objfile->get_at_offset<Elf64_Shdr>(sec_hdrs_offset);
+  for (auto i = 0; i < header->e_shnum; i++) {
+    const auto sec_hdr = objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(sec_hdrs_offset);
     sec_hdrs_offset += header->e_shentsize;
-    data.sections[i].m_section_ptr = objfile->get_at_offset<u8>(sec_hdr->sh_offset);
-    data.sections[i].m_section_size = sec_hdr->sh_size;
-    data.sections[i].m_name =
-      objfile->get_at_offset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name);
-    data.sections[i].file_offset = sec_hdr->sh_offset;
-    data.sections[i].address = sec_hdr->sh_addr;
+    sectionData.push_back(ElfSection{
+      .mSectionData = std::span{objfile->AlignedRequiredGetAtOffset<u8>(sec_hdr->sh_offset), sec_hdr->sh_size},
+      .mName = objfile->AlignedRequiredGetAtOffset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name),
+      .file_offset = sec_hdr->sh_offset,
+      .address = sec_hdr->sh_addr,
+    });
   }
   // ObjectFile is the owner of `Elf`
-  objfile->elf = new Elf{header, data, *objfile};
-  objfile->elf->parse_min_symbols();
-  objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->get_section(".eh_frame"));
-  if (const auto section = objfile->elf->get_section(".debug_frame"); section) {
+  objfile->elf = new Elf{header, std::move(sectionData)};
+  Elf::ParseMinimalSymbol(objfile->elf, *objfile);
+  objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->GetSection(".eh_frame"));
+  if (const auto section = objfile->elf->GetSection(".debug_frame"); section) {
     DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
     sym::parse_dwarf_eh(objfile->GetElf(), objfile->unwinder.get(), section);
   }
 
-  if (objfile->elf->has_dwarf()) {
+  if (objfile->elf->HasDWARF()) {
     objfile->InitializeDebugSymbolInfo(Tracer::Instance->getConfig().dwarf_config());
   }
 
@@ -572,7 +575,8 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 
 SymbolFile::SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
                        AddrPtr relocated_base) noexcept
-    : mObjectFile(std::move(binary)), mTraceeController(tc), mSymbolObjectFileId(std::move(obj_id)), mBaseAddress(relocated_base),
+    : mObjectFile(std::move(binary)), mTraceeController(tc), mSymbolObjectFileId(std::move(obj_id)),
+      mBaseAddress(relocated_base),
       mPcBounds(AddressRange::relocate(mObjectFile->mUnrelocatedAddressBounds, relocated_base))
 {
 }
@@ -694,7 +698,7 @@ SymbolFile::GetSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::Relo
 
 auto
 SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
-                    std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
+                            std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
 {
   auto value = ctx.get_maybe_value();
   if (value == nullptr) {
@@ -850,7 +854,7 @@ SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept 
 
 auto
 SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                             sym::Frame &frame) noexcept -> std::vector<ui::dap::Variable>
+                         sym::Frame &frame) noexcept -> std::vector<ui::dap::Variable>
 {
   std::vector<ui::dap::Variable> result{};
   switch (variables_kind) {

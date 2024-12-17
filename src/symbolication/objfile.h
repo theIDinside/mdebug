@@ -11,6 +11,7 @@
 #include <common.h>
 #include <string_view>
 #include <sys/mman.h>
+#include <type_traits>
 
 using VariablesReference = int;
 template <typename T> using Set = std::unordered_set<T>;
@@ -112,8 +113,10 @@ public:
 
   template <typename T>
   auto
-  get_at_offset(u64 offset) -> T *
+  AlignedRequiredGetAtOffset(u64 offset) -> T *
   {
+    ASSERT(offset < mSize, "offset out of bounds");
+    ASSERT((offset % std::alignment_of<T>::value) == 0, "Alignment failure!");
     return (T *)(mLoadedBinary + offset);
   }
 
@@ -122,7 +125,7 @@ public:
   }
 
   auto GetPathString() const noexcept -> const char*;
-  const Elf* GetElf() noexcept;
+  const Elf* GetElf() const noexcept;
   auto GetUnwinder() noexcept -> sym::Unwinder*;
   auto GetObjectFileId() const noexcept -> std::string_view;
   auto GetFilePath() const noexcept -> const Path&;

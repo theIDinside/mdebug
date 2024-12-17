@@ -492,7 +492,7 @@ read_unit_headers(ObjectFile *obj) noexcept
   CDLOG(DwarfLog, dwarf, "Reading {} obfile compilation unit headers", obj->GetPathString());
   const auto dbg_info = obj->GetElf()->debug_info;
   std::vector<UnitHeader> result{};
-  DwarfBinaryReader reader{obj->GetElf(), dbg_info};
+  DwarfBinaryReader reader{obj->GetElf(), dbg_info->mSectionData};
   auto unit_index = 0u;
   while (reader.has_more()) {
     const auto sec_offset = reader.bytes_read();

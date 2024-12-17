@@ -143,7 +143,7 @@ std::vector<ProbeInfo>
 parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
 {
   std::vector<ProbeInfo> probes;
-  DwarfBinaryReader reader{elf, section};
+  DwarfBinaryReader reader{elf, section->mSectionData};
   std::set<std::string_view> required_probes{{"map_complete", "reloc_complete", "unmap_complete"}};
   // stapsdt, location 8 bytes, base 8 bytes, semaphore 8 bytes, desc=string of N bytes, then more bytes we don't
   // care for
@@ -174,7 +174,7 @@ parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
     }
     if (required_probes.contains(probe_name)) {
       probes.push_back(ProbeInfo{.address = ptr, .name = std::string{probe_name}});
-      required_probes.erase(std::find(required_probes.begin(), required_probes.end(), probe_name));
+      required_probes.erase(required_probes.find(probe_name));
     }
   }
   return probes;
@@ -209,10 +209,10 @@ TraceeController::InstallDynamicLoaderBreakpoints() noexcept
 {
   ASSERT(main_executable != nullptr, "No main executable for this target");
   const auto mainExecutableElf = main_executable->GetObjectFile()->GetElf();
-  auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->get_section(".interp"));
+  auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
   auto tmp_objfile = ObjectFile::CreateObjectFile(this, int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
-  const auto system_tap_sec = tmp_objfile->GetElf()->get_section(".note.stapsdt");
+  const auto system_tap_sec = tmp_objfile->GetElf()->GetSection(".note.stapsdt");
   const auto probes = parse_stapsdt_note(tmp_objfile->GetElf(), system_tap_sec);
 
   tracee_interface->tracee_r_debug = *interpreter_base + get_rdebug_state(tmp_objfile.get());
@@ -631,15 +631,6 @@ TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakp
 
   // No new breakpoint location could be found in symbol file.
   return locs.size() != sz;
-}
-
-static std::span<int>
-ChangeVectorSomehow(bool someParam, bool someFlag, int someNum, std::vector<int> &outResult) noexcept
-{
-  // bla bla
-  auto current = outResult.size();
-  // do stuff, add results to outResult
-  return std::span{outResult.begin() + current, outResult.end()};
 }
 
 void
@@ -1312,7 +1303,7 @@ TraceeController::get_text_section(AddrPtr addr) noexcept
 {
   const auto obj = find_obj_by_pc(addr);
   if (obj) {
-    const auto text = obj->GetObjectFile()->GetElf()->get_section(".text");
+    const auto text = obj->GetObjectFile()->GetElf()->GetSection(".text");
     return text;
   }
   return nullptr;

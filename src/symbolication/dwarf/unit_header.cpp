@@ -35,9 +35,9 @@ UnitHeader::addr_size() const noexcept
 const u8 *
 UnitHeader::abbreviation_data(const ElfSection *abbrev_sec) const noexcept
 {
-  ASSERT(abbrev_sec->get_name() == ".debug_abbrev",
-         "Wrong ELF section was used, expected .debug_abbrev but received {}", abbrev_sec->get_name());
-  return abbrev_sec->offset(abbreviation_sec_offset);
+  ASSERT(abbrev_sec->GetName() == ".debug_abbrev",
+         "Wrong ELF section was used, expected .debug_abbrev but received {}", abbrev_sec->GetName());
+  return abbrev_sec->GetPointer(abbreviation_sec_offset);
 }
 
 const u8 *

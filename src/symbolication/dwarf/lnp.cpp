@@ -464,15 +464,16 @@ operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r)
 }
 
 std::shared_ptr<std::vector<LNPHeader>>
-read_lnp_headers(const Elf *elf) noexcept
+read_lnp_headers(ObjectFile* objectFile) noexcept
 {
+  auto elf = objectFile->GetElf();
   ASSERT(elf != nullptr, "ELF must be parsed first");
   auto debug_line = elf->debug_line;
-  ASSERT(debug_line != nullptr && debug_line->get_name() == ".debug_line", "Must pass .debug_line ELF section");
+  ASSERT(debug_line != nullptr && debug_line->GetName() == ".debug_line", "Must pass .debug_line ELF section");
   auto header_count = 0u;
   // determine header count
   {
-    DwarfBinaryReader reader{elf, debug_line};
+    DwarfBinaryReader reader{elf, debug_line->mSectionData};
     while (reader.has_more()) {
       header_count++;
       const auto init_len = reader.read_initial_length<DwarfBinaryReader::Ignore>();
@@ -482,7 +483,7 @@ read_lnp_headers(const Elf *elf) noexcept
 
   std::shared_ptr<std::vector<LNPHeader>> headers = std::make_shared<std::vector<LNPHeader>>();
   headers->reserve(header_count);
-  DwarfBinaryReader reader{elf, debug_line};
+  DwarfBinaryReader reader{elf, debug_line->mSectionData};
 
   u8 addr_size = 8u;
   for (auto i = 0u; i < header_count; ++i) {
@@ -551,7 +552,7 @@ read_lnp_headers(const Elf *elf) noexcept
         entry.file_size = reader.read_uleb128<u64>();
         files.push_back(entry);
       }
-      headers->emplace_back(&elf->obj_file, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
+      headers->emplace_back(objectFile, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
                             addr_size, min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range,
                             opcode_base, opcode_lengths, std::move(dirs), std::move(files));
       reader.skip(init_len - reader.pop_bookmark());
@@ -612,7 +613,7 @@ read_lnp_headers(const Elf *elf) noexcept
         }
         files.push_back(entry);
       }
-      headers->emplace_back(&elf->obj_file, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
+      headers->emplace_back(objectFile, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
                             addr_size, min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range,
                             opcode_base, opcode_lengths, std::move(dirs), std::move(files));
       reader.skip(init_len - reader.pop_bookmark());

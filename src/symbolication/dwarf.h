@@ -5,7 +5,7 @@
 
 template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
 
-#if defined(__GNUC__) || defined(__GNUG__)
+#if defined(COMPILERUSED_GCC)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
 #endif

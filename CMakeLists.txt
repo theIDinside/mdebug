@@ -259,12 +259,13 @@ target_link_options(mdb PRIVATE "-fuse-ld=lld")
 if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
   message("Compiler is GNU, and it gives false positives on dangling references for libfmt, making release builds impossible. Therefore gcc uses -Wno-error=dangling-reference")
   set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
+  target_compile_definitions(mdb PRIVATE COMPILERUSED_GCC)
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   # clang using GNU's stdlib ranges, is.... iffy at the moment.
   target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
   set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
 else ()
-  message("Unknown compiler")
+  error("Unknown compiler")
 endif ()
 
 set(CMAKE_CXX_CLANG_TIDY

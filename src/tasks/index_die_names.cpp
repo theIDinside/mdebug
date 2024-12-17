@@ -290,7 +290,7 @@ process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &s
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
   auto elf = cu->GetObjectFile()->GetElf();
   if (version == DwarfVersion::D4) {
-    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->offset(ranges_offset.address()));
+    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->GetPointer(ranges_offset.address()));
     auto lowest = UINTMAX_MAX;
     auto highest = 0ul;
     auto start = 0ul;

@@ -47,9 +47,9 @@ read_offset_pair(const u8 *ptr, OffsetPair &out) noexcept
 RangeListHeader
 read_header(ElfSection *rnglists, u64 offset)
 {
-  auto ptr = rnglists->offset(offset);
+  auto ptr = rnglists->GetPointer(offset);
   RangeListHeader header{};
-  header.sec_offset = ptr - rnglists->offset(0);
+  header.sec_offset = ptr - rnglists->GetPointer(0);
   ptr = read_initial_length(ptr, header.init_len, header.init_len_len);
   ptr = read_version(ptr, header.version);
   ptr = read_address_size(ptr, header.addr_size);
@@ -63,7 +63,7 @@ read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcep
 {
   std::vector<AddressRange> result{};
   const auto elf = cu.GetObjectFile()->GetElf();
-  auto ptr = elf->debug_rnglists->offset(resolved.offset);
+  auto ptr = elf->debug_rnglists->GetPointer(resolved.offset);
   RangeListEntry entry{};
   AddrPtr base = nullptr;
   ptr = read_entry_type(ptr, entry);
@@ -77,7 +77,7 @@ read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcep
     case RangeListEntry::DW_RLE_base_addressx: {
       u64 addr_index = 0;
       ptr = decode_uleb128(ptr, addr_index);
-      const auto addr_ptr = elf->debug_addr->offset(cu.addr_base() + addr_index * 8);
+      const auto addr_ptr = elf->debug_addr->GetPointer(cu.addr_base() + addr_index * 8);
       u64 start_addr = 0;
       std::memcpy(&start_addr, addr_ptr, 8);
       base = start_addr;
@@ -89,7 +89,7 @@ read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcep
       ptr = decode_uleb128(ptr, addr_index);
       u64 range_length = 0;
       ptr = decode_uleb128(ptr, range_length);
-      const auto addr_ptr = elf->debug_addr->offset(cu.addr_base() + (addr_index * 8));
+      const auto addr_ptr = elf->debug_addr->GetPointer(cu.addr_base() + (addr_index * 8));
       u64 start_addr = 0;
       std::memcpy(&start_addr, addr_ptr, 8);
       result.push_back({start_addr, start_addr + range_length});
@@ -128,7 +128,7 @@ read_boundaries(const ElfSection *rnglists, const u64 offset) noexcept
 {
   BoundaryBuilder builder{};
   AddrPtr base = nullptr;
-  auto ptr = rnglists->offset(offset);
+  auto ptr = rnglists->GetPointer(offset);
   const auto read_address = [&]() {
     u64 addr = *(u64 *)ptr;
     ptr += 8;
@@ -182,8 +182,8 @@ read_boundaries(const ElfSection *rnglists, const RangeListHeader &header) noexc
 {
   BoundaryBuilder builder{};
   AddrPtr base = nullptr;
-  auto ptr = rnglists->offset(header.first_entry_offset());
-  auto end = rnglists->offset(header.next_header_offset());
+  auto ptr = rnglists->GetPointer(header.first_entry_offset());
+  auto end = rnglists->GetPointer(header.next_header_offset());
   const auto read_address = [&]() {
     u64 addr = *(u64 *)ptr;
     ptr += 8;

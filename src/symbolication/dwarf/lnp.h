@@ -327,5 +327,5 @@ public:
   }
 };
 
-std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(const Elf *elf) noexcept;
+std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(ObjectFile *objectFile) noexcept;
 } // namespace sym::dw
