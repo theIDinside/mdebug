@@ -50,7 +50,7 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
     fmt::format_to(mc_b, "{:02x}", *(exec_data_ptr + i));
     mc_b += 3;
   }
-  auto obj = target->find_obj_by_pc(vm_address);
+  auto obj = target->FindObjectByPc(vm_address);
   auto cus = obj->GetCompilationUnits(vm_address);
   if (!cus.empty()) {
     SourceInfo sourceInfo = GetSourceInfo(obj, cus, vm_address);
@@ -86,7 +86,7 @@ void
 zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
-  const auto objfile = target->find_obj_by_pc(addr);
+  const auto objfile = target->FindObjectByPc(addr);
   const auto text = objfile->GetObjectFile()->GetElf()->GetSection(".text");
   ZydisDisassembledInstruction instruction;
 
@@ -152,7 +152,8 @@ void
 zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
              std::vector<sym::Disassembly> &output) noexcept
 {
-  const ElfSection *text = target->get_text_section(addr);
+  auto obj = target->FindObjectByPc(addr);
+  const ElfSection *text = obj->GetTextSection();
   const auto start_exec_data = text->Into(addr);
   auto exec_data_ptr = start_exec_data;
   ZydisDisassembledInstruction instruction;

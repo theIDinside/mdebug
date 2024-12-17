@@ -8,13 +8,14 @@
 namespace tc {
 
 TraceeCommandInterface::TraceeCommandInterface(TargetFormat format,
-                                               std::shared_ptr<gdb::ArchictectureInfo> &&arch_info, TraceeInterfaceType type) noexcept
+                                               std::shared_ptr<gdb::ArchictectureInfo> &&arch_info,
+                                               TraceeInterfaceType type) noexcept
     : format(format), arch_info(std::move(arch_info)), mType(type)
 {
 }
 
 /*static*/ Interface
-TraceeCommandInterface::createCommandInterface(const InterfaceConfig &config) noexcept
+TraceeCommandInterface::CreateCommandInterface(const InterfaceConfig &config) noexcept
 {
   Interface result = std::visit(
     [](const auto &config) -> Interface {
@@ -33,29 +34,29 @@ TraceeCommandInterface::createCommandInterface(const InterfaceConfig &config) no
 }
 
 bool
-TraceeCommandInterface::target_manages_breakpoints() noexcept
+TraceeCommandInterface::TargetManagesBreakpoints() noexcept
 {
   return false;
 }
 
 TaskExecuteResponse
-TraceeCommandInterface::reverse_continue() noexcept
+TraceeCommandInterface::ReverseContinue() noexcept
 {
   return TaskExecuteResponse::Error(0);
 }
 
 TaskExecuteResponse
-TraceeCommandInterface::do_disconnect(bool terminate) noexcept
+TraceeCommandInterface::DoDisconnect(bool terminate) noexcept
 {
-  for (auto &user : tc->user_breakpoints().all_users()) {
-    tc->user_breakpoints().remove_bp(user->id);
+  for (auto &user : tc->GetUserBreakpoints().all_users()) {
+    tc->GetUserBreakpoints().remove_bp(user->id);
   }
   Disconnect(terminate);
   return TaskExecuteResponse::Ok();
 }
 
 std::optional<std::string>
-TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, u32 buffer_size) noexcept
+TraceeCommandInterface::ReadNullTerminatedString(TraceePointer<char> address, u32 buffer_size) noexcept
 {
   std::string result{};
   if (address == nullptr) {
@@ -80,7 +81,7 @@ TraceeCommandInterface::read_nullterminated_string(TraceePointer<char> address, 
 }
 
 void
-TraceeCommandInterface::set_target(TraceeController *supervisor) noexcept
+TraceeCommandInterface::SetTarget(TraceeController *supervisor) noexcept
 {
   ASSERT(tc == nullptr, "Target already configured with this interface!");
   tc = supervisor;

@@ -89,7 +89,7 @@ public:
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
 
-  TaskExecuteResponse reverse_continue() noexcept final;
+  TaskExecuteResponse ReverseContinue() noexcept final;
   TaskExecuteResponse ResumeTask(TaskInfo &t, RunType type) noexcept final;
   TaskExecuteResponse ResumeTarget(TraceeController *tc, RunType run) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;

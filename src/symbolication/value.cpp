@@ -149,7 +149,7 @@ void
 LazyMemoryContentsObject::cache_memory() noexcept
 {
   DBGLOG(core, "[lazy transfer]: {} .. {}", start, end);
-  if (auto res = supervisor.safe_read(start, end->get() - start->get()); res.is_expected()) {
+  if (auto res = supervisor.SafeRead(start, end->get() - start->get()); res.is_expected()) {
     bytes = std::move(res.take_value());
   } else {
     bytes = std::move(res.take_error().bytes);
@@ -180,7 +180,7 @@ LazyMemoryContentsObject::view(u32 offset, u32 size) noexcept
 MemoryContentsObject::ReadResult
 MemoryContentsObject::read_memory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept
 {
-  if (auto res = tc.safe_read(address, size_of); res.is_expected()) {
+  if (auto res = tc.SafeRead(address, size_of); res.is_expected()) {
     return ReadResult{.info = ReadResultInfo::Success, .value = res.take_value()};
   } else {
     const auto read_bytes = size_of - res.error().unread_bytes;
@@ -214,7 +214,7 @@ MemoryContentsObject::create_frame_variable(TraceeController &tc, NonNullPtr<Tas
       auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
       return std::make_shared<Value>(symbol.name, symbol, 0, std::move(memory_object));
     } else {
-      auto res = tc.safe_read(address, requested_byte_size);
+      auto res = tc.SafeRead(address, requested_byte_size);
       if (!res.is_expected()) {
         PANIC("Expected read to succeed");
       }

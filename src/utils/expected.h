@@ -80,12 +80,6 @@ public:
 
   ~Expected() noexcept = default;
 
-  template <typename ConvertResult>
-  static Expected<ConvertResult, Err>
-  convert()
-  {
-  }
-
   constexpr bool
   is_expected() const noexcept
   {
@@ -110,6 +104,13 @@ public:
   {
     ASSERT(has_value, "Expected did not have a value");
     return *std::get_if<T>(&val_or_err);
+  }
+
+  T&& expected(std::string_view errorMessage) && {
+    if(is_error()) {
+      PANIC(errorMessage);
+    }
+    return std::move(value());
   }
 
   T &

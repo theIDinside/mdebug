@@ -790,6 +790,12 @@ SymbolFile::GetSupervisor() noexcept -> TraceeController *
 }
 
 auto
+SymbolFile::GetTextSection() const noexcept -> const ElfSection *
+{
+  return mObjectFile->elf->GetSection(".text");
+}
+
+auto
 SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>
 {
 
@@ -879,8 +885,9 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     RegisterValueResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.FrameId()),
-                                         static_cast<u16>(ref), ContextType::Variable});
+      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(),
+                                         static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
+                                         ContextType::Variable});
       frame.task.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});

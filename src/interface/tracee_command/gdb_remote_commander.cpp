@@ -234,7 +234,7 @@ GdbRemoteCommander::ResumeTask(TaskInfo &t, RunType type) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::reverse_continue() noexcept
+GdbRemoteCommander::ReverseContinue() noexcept
 {
   if (type != RemoteType::RR) {
     return TaskExecuteResponse::Error(0);
@@ -244,7 +244,7 @@ GdbRemoteCommander::reverse_continue() noexcept
   const auto resume_err = connection->send_vcont_command(reverse, 1000);
   ASSERT(!resume_err.has_value(), "reverse continue failed");
 
-  for (auto &t : tc->get_threads()) {
+  for (auto &t : tc->GetThreads()) {
     t->set_running(tc::RunType::Continue);
   }
   connection->invalidate_known_threads();
@@ -256,7 +256,7 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, RunType type) noexcept
 {
   set_catch_syscalls(type == RunType::SyscallContinue);
 
-  for (auto &t : tc->get_threads()) {
+  for (auto &t : tc->GetThreads()) {
     if (t->loc_stat) {
       t->step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
       if (!connection->settings().is_non_stop) {
@@ -283,7 +283,7 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, RunType type) noexcept
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
-  for (auto &t : tc->get_threads()) {
+  for (auto &t : tc->GetThreads()) {
     t->set_running(type);
   }
   connection->invalidate_known_threads();
@@ -498,7 +498,7 @@ GdbRemoteCommander::OnExec() noexcept
 {
   auto auxv = ReadAuxiliaryVector();
   ASSERT(auxv.is_expected(), "Failed to read auxiliary vector");
-  supervisor()->ParseAuxiliaryVectorInfo(std::move(auxv.take_value()));
+  GetSupervisor()->ParseAuxiliaryVectorInfo(std::move(auxv.take_value()));
 
   if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(*exec_file); symbol_obj == nullptr) {
     auto obj = ObjectFile::CreateObjectFile(tc, *exec_file);
@@ -511,7 +511,7 @@ GdbRemoteCommander::OnExec() noexcept
     tc->RegisterSymbolFile(symbol_obj, true);
   }
 
-  tracee_r_debug = supervisor()->InstallDynamicLoaderBreakpoints();
+  tracee_r_debug = GetSupervisor()->InstallDynamicLoaderBreakpoints();
   return true;
 }
 
@@ -556,7 +556,7 @@ std::optional<std::vector<ObjectFileDescriptor>>
 GdbRemoteCommander::ReadLibraries() noexcept
 {
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
-  auto rdebug_ext_res = read_type(tracee_r_debug);
+  auto rdebug_ext_res = ReadType(tracee_r_debug);
   if (rdebug_ext_res.is_error()) {
     DBGLOG(core, "Could not read rdebug_extended");
     return {};
@@ -579,14 +579,14 @@ GdbRemoteCommander::ReadLibraries() noexcept
     }
     auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
     while (linkmap != nullptr) {
-      auto map_res = read_type(linkmap);
+      auto map_res = ReadType(linkmap);
       if (!map_res.is_expected()) {
         DBGLOG(core, "Failed to read linkmap");
         return {};
       }
       auto map = map_res.take_value();
       auto name_ptr = TPtr<char>{map.l_name};
-      const auto path = read_nullterminated_string(name_ptr);
+      const auto path = ReadNullTerminatedString(name_ptr);
       if (!path) {
         DBGLOG(core, "Failed to read null-terminated string from tracee at {}", name_ptr);
       } else {
@@ -596,7 +596,7 @@ GdbRemoteCommander::ReadLibraries() noexcept
     }
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
-      const auto next_rdebug = read_type(next);
+      const auto next_rdebug = ReadType(next);
       if (next_rdebug.is_error()) {
         break;
       } else {

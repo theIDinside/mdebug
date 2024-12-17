@@ -56,7 +56,7 @@ TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, boo
       cache_dirty(true), rip_dirty(true), exited(false), reaped(false),
       regs(supervisor.format, supervisor.arch_info.as_t().get()), loc_stat()
 {
-  call_stack = std::make_unique<sym::CallStack>(supervisor.supervisor(), this);
+  call_stack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
 }
 
 /*static*/
@@ -198,11 +198,11 @@ TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_act
 {
   ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
 
-  auto loc = tc->user_breakpoints().location_at(loc_stat->loc);
+  auto loc = tc->GetUserBreakpoints().location_at(loc_stat->loc);
   auto user_ids = loc->loc_users();
   DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
 
-  auto &control = tc->get_interface();
+  auto &control = tc->GetInterface();
   loc->disable(control);
   loc_stat->stepped_over = true;
   loc_stat->re_enable_bp = true;

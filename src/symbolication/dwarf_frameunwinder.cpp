@@ -160,7 +160,7 @@ CFAStateMachine::ResolveRegisterContents(u64 reg_number, const FrameUnwindState 
     return reg.value;
   case sym::RegisterRule::Offset: {
     const AddrPtr cfa_record = mCanonicalFrameAddressValue + reg.offset;
-    const auto res = tc.read_type(cfa_record.as<u64>());
+    const auto res = tc.ReadType(cfa_record.as<u64>());
     return res;
   }
   case sym::RegisterRule::ValueOffset: {
@@ -173,7 +173,7 @@ CFAStateMachine::ResolveRegisterContents(u64 reg_number, const FrameUnwindState 
   }
   case sym::RegisterRule::Expression: {
     const auto saved_at_addr = TPtr<u64>(compute_expression(reg.expr));
-    const auto res = tc.read_type(saved_at_addr);
+    const auto res = tc.ReadType(saved_at_addr);
     return res;
   }
   case sym::RegisterRule::ValueExpression: {
@@ -760,7 +760,7 @@ Unwinder::get_unwind_info(AddrPtr pc) const noexcept
 Unwinder::Unwinder(ObjectFile *objfile) noexcept : objfile(objfile), addr_range(AddressRange::MaxMin()) {}
 
 UnwindIterator::UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept
-    : tc(tc), current(tc->get_unwinder_from_pc(first_pc))
+    : tc(tc), current(tc->GetUnwinderUsingPc(first_pc))
 {
 }
 
@@ -785,7 +785,7 @@ UnwindIterator::get_info(AddrPtr pc) noexcept
   if (inf) {
     return inf;
   } else {
-    current = tc->get_unwinder_from_pc(pc);
+    current = tc->GetUnwinderUsingPc(pc);
     return current.get_unwinder_info(pc);
   }
 }
@@ -793,7 +793,7 @@ UnwindIterator::get_info(AddrPtr pc) noexcept
 bool
 UnwindIterator::is_null() const noexcept
 {
-  return tc->is_null_unwinder(current.unwinder);
+  return tc->IsNullUnwinder(current.unwinder);
 }
 
 AddrPtr

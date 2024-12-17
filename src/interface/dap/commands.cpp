@@ -103,7 +103,7 @@ Pause::execute() noexcept
   if (task->is_stopped()) {
     return new PauseResponse{false, this};
   }
-  target->install_thread_proceed<ptracestop::StopImmediately>(*task, StoppedReason::Pause);
+  target->InstallStopActionHandler<ptracestop::StopImmediately>(*task, StoppedReason::Pause);
   return new PauseResponse{true, this};
 }
 
@@ -128,7 +128,7 @@ ReverseContinue::execute() noexcept
 {
   auto res = new ReverseContinueResponse{true, this};
   auto target = dap_client->supervisor();
-  auto ok = target->get_interface().reverse_continue();
+  auto ok = target->GetInterface().ReverseContinue();
   res->success = ok;
   return res;
 }
@@ -154,9 +154,9 @@ Continue::execute() noexcept
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
   auto target = dap_client->supervisor();
-  if (continue_all && target->is_running()) {
+  if (continue_all && target->IsRunning()) {
     std::vector<Tid> running_tasks{};
-    for (const auto &t : target->get_threads()) {
+    for (const auto &t : target->GetThreads()) {
       if (!t->is_stopped() || t->tracer_stopped) {
         running_tasks.push_back(t->tid);
       }
@@ -167,11 +167,11 @@ Continue::execute() noexcept
     res->success = true;
     if (continue_all) {
       DBGLOG(core, "continue all");
-      target->resume_target(tc::RunType::Continue);
+      target->ResumeTask(tc::RunType::Continue);
     } else {
       DBGLOG(core, "continue single thread: {}", thread_id);
       auto t = target->GetTaskByTid(thread_id);
-      target->resume_task(*t, {tc::RunType::Continue, tc::ResumeTarget::Task});
+      target->ResumeTask(*t, {tc::RunType::Continue, tc::ResumeTarget::Task});
     }
   }
 
@@ -203,10 +203,10 @@ Next::execute() noexcept
 
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    target->install_thread_proceed<ptracestop::InstructionStep>(*task, 1);
+    target->InstallStopActionHandler<ptracestop::InstructionStep>(*task, 1);
     break;
   case SteppingGranularity::Line:
-    target->install_thread_proceed<ptracestop::LineStep>(*task, 1);
+    target->InstallStopActionHandler<ptracestop::LineStep>(*task, 1);
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -247,7 +247,7 @@ StepIn::execute() noexcept
       std::nullopt};
   }
 
-  target->set_and_run_action(task->tid, proceeder);
+  target->SetAndCallRunAction(task->tid, proceeder);
   return new StepInResponse{true, this};
 }
 
@@ -275,15 +275,15 @@ StepOut::execute() noexcept
   }
   const auto req = CallStackRequest::partial(2);
   auto resume_addrs = task->return_addresses(target, req);
-  ASSERT(resume_addrs.size() >= req.count, "Could not find frame info");
+  ASSERT(resume_addrs.size() >= static_cast<std::size_t>(req.count), "Could not find frame info");
   const auto rip = resume_addrs[1];
-  auto loc = target->get_or_create_bp_location(rip, false);
+  auto loc = target->GetOrCreateBreakpointLocation(rip, false);
   if (!loc.is_expected()) {
     return new StepOutResponse{false, this};
   }
   auto user =
-    target->user_breakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->tid, task->tid);
-  target->install_thread_proceed<ptracestop::FinishFunction>(*task, user, false);
+    target->GetUserBreakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->tid, task->tid);
+  target->InstallStopActionHandler<ptracestop::FinishFunction>(*task, user, false);
   return new StepOutResponse{true, this};
 }
 
@@ -352,13 +352,13 @@ SetBreakpoints::execute() noexcept
                                         get<std::string>(src_bp, "logMessage")});
   }
 
-  target->set_source_breakpoints(file, src_bps);
+  target->SetSourceBreakpoints(file, src_bps);
 
   using BP = ui::dap::Breakpoint;
 
-  for (const auto &[bp, ids] : target->user_breakpoints().bps_for_source(file)) {
+  for (const auto &[bp, ids] : target->GetUserBreakpoints().bps_for_source(file)) {
     for (const auto id : ids) {
-      const auto user = target->user_breakpoints().get_user(id);
+      const auto user = target->GetUserBreakpoints().get_user(id);
       res->breakpoints.push_back(BP::from_user_bp(user));
     }
   }
@@ -400,13 +400,13 @@ SetInstructionBreakpoints::execute() noexcept
     bps.insert(InstructionBreakpointSpec{.instructionReference = std::string{addr_str}, .condition = {}});
   }
   auto target = dap_client->supervisor();
-  target->set_instruction_breakpoints(bps);
+  target->SetInstructionBreakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
-  res->breakpoints.reserve(target->user_breakpoints().instruction_breakpoints.size());
+  res->breakpoints.reserve(target->GetUserBreakpoints().instruction_breakpoints.size());
 
-  for (const auto &[k, id] : target->user_breakpoints().instruction_breakpoints) {
-    res->breakpoints.push_back(BP::from_user_bp(target->user_breakpoints().get_user(id)));
+  for (const auto &[k, id] : target->GetUserBreakpoints().instruction_breakpoints) {
+    res->breakpoints.push_back(BP::from_user_bp(target->GetUserBreakpoints().get_user(id)));
   }
 
   res->success = true;
@@ -441,8 +441,8 @@ SetFunctionBreakpoints::execute() noexcept
   }
   auto target = dap_client->supervisor();
 
-  target->set_fn_breakpoints(bkpts);
-  for (const auto &user : target->user_breakpoints().all_users()) {
+  target->SetFunctionBreakpoints(bkpts);
+  for (const auto &user : target->GetUserBreakpoints().all_users()) {
     if (user->kind == LocationUserKind::Function) {
       res->breakpoints.push_back(BP::from_user_bp(user));
     }
@@ -471,7 +471,7 @@ WriteMemory::execute() noexcept
   auto response = new WriteMemoryResponse{false, this};
   response->bytes_written = 0;
   if (address) {
-    const auto result = supervisor->get_interface().WriteBytes(address.value(), bytes.data(), bytes.size());
+    const auto result = supervisor->GetInterface().WriteBytes(address.value(), bytes.data(), bytes.size());
     response->success = result.success;
     if (result.success) {
       response->bytes_written = result.bytes_written;
@@ -502,7 +502,7 @@ UIResultPtr
 ReadMemory::execute() noexcept
 {
   if (address) {
-    auto sv = dap_client->supervisor()->read_to_vector(*address, bytes);
+    auto sv = dap_client->supervisor()->ReadToVector(*address, bytes);
     auto res = new ReadMemoryResponse{true, this};
     res->data_base64 = utils::encode_base64(sv->span());
     res->first_readable_address = *address;
@@ -526,9 +526,9 @@ UIResultPtr
 ConfigurationDone::execute() noexcept
 {
   Tracer::Instance->config_done(dap_client);
-  switch (dap_client->supervisor()->session_type()) {
+  switch (dap_client->supervisor()->GetSessionType()) {
   case TargetSession::Launched:
-    dap_client->supervisor()->resume_target(tc::RunType::Continue);
+    dap_client->supervisor()->ResumeTask(tc::RunType::Continue);
     break;
   case TargetSession::Attached:
     break;
@@ -566,9 +566,9 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 UIResultPtr
 Disconnect::execute() noexcept
 {
-  const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
+  const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
-    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->get_dap_client() == dap_client; });
+    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
     Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
   }
 
@@ -689,10 +689,10 @@ TerminateResponse::serialize(int seq) const noexcept
 UIResultPtr
 Terminate::execute() noexcept
 {
-  const auto ok = dap_client->supervisor()->get_interface().do_disconnect(true);
+  const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
     dap_client->post_event(new TerminatedEvent{});
-    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->get_dap_client() == dap_client; });
+    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
     Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
   }
   return new TerminateResponse{ok, this};
@@ -716,16 +716,15 @@ Threads::execute() noexcept
 
   auto target = dap_client->supervisor();
 
-  response->threads.reserve(target->get_threads().size());
-  auto &it = target->get_interface();
+  response->threads.reserve(target->GetThreads().size());
+  auto &it = target->GetInterface();
 
   if (it.format == TargetFormat::Remote) {
-    auto res =
-      it.RemoteConnection()->query_target_threads({target->TaskLeaderTid(), target->TaskLeaderTid()});
+    auto res = it.RemoteConnection()->query_target_threads({target->TaskLeaderTid(), target->TaskLeaderTid()});
     ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
     for (const auto thr : res) {
-      if (std::ranges::none_of(target->get_threads(), [t = thr.tid](const auto &a) { return a->tid == t; })) {
-        target->AddTask(TaskInfo::CreateTask(target->get_interface(), thr.tid, false));
+      if (std::ranges::none_of(target->GetThreads(), [t = thr.tid](const auto &a) { return a->tid == t; })) {
+        target->AddTask(TaskInfo::CreateTask(target->GetInterface(), thr.tid, false));
       }
     }
 
@@ -734,7 +733,7 @@ Threads::execute() noexcept
     });
   }
 
-  for (const auto &thread : target->get_threads()) {
+  for (const auto &thread : target->GetThreads()) {
     const auto tid = thread->tid;
     response->threads.push_back(Thread{.id = tid, .name = it.GetThreadName(tid)});
   }
@@ -780,7 +779,7 @@ StackTrace::execute() noexcept
   if (task == nullptr) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
   }
-  auto &cfs = target->build_callframe_stack(*task, CallStackRequest::full());
+  auto &cfs = target->BuildCallFrameStack(*task, CallStackRequest::full());
 
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.FramesCount());

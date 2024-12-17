@@ -160,7 +160,7 @@ struct ThreadExited : public ThreadEvent
   bool process_needs_resuming;
 };
 
-struct Fork : public ThreadEvent
+struct ForkEvent : public ThreadEvent
 {
   EventType(Fork);
   Pid child_pid;
@@ -241,7 +241,7 @@ class RegisterSpec;
 using RegisterData = std::vector<std::pair<u32, std::vector<u8>>>;
 
 using CoreEventVariant =
-  std::variant<WatchpointEvent, SyscallEvent, ThreadCreated, ThreadExited, BreakpointHitEvent, Fork, Clone, Exec,
+  std::variant<WatchpointEvent, SyscallEvent, ThreadCreated, ThreadExited, BreakpointHitEvent, ForkEvent, Clone, Exec,
                ProcessExited, LibraryEvent, Signal, Stepped, DeferToSupervisor, EntryEvent>;
 
 /**
@@ -289,7 +289,7 @@ struct CoreEvent
   static CoreEvent *ReadWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
   static CoreEvent *AccessWatchpoint(const EventDataParam &param, std::uintptr_t addr,
                                      RegisterData &&reg) noexcept;
-  static CoreEvent *ForkEvent(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
+  static CoreEvent *ForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
   static CoreEvent *CloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> vm_info, Tid new_tid,
                                RegisterData &&reg) noexcept;
   static CoreEvent *ExecEvent(const EventDataParam &param, std::string_view exec_file,

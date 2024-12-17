@@ -250,11 +250,12 @@ public:
   TPtr<r_debug_extended> tracee_r_debug{nullptr};
 
   NO_COPY(TraceeCommandInterface);
-  TraceeCommandInterface(TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info, TraceeInterfaceType type) noexcept;
+  TraceeCommandInterface(TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info,
+                         TraceeInterfaceType type) noexcept;
   virtual ~TraceeCommandInterface() noexcept = default;
   virtual ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
   virtual TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
-  virtual TaskExecuteResponse reverse_continue() noexcept;
+  virtual TaskExecuteResponse ReverseContinue() noexcept;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse ResumeTask(TaskInfo &t, RunType run) noexcept = 0;
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
@@ -293,17 +294,16 @@ public:
   virtual std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept = 0;
   virtual utils::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept = 0;
 
-  virtual bool target_manages_breakpoints() noexcept;
-  TaskExecuteResponse do_disconnect(bool terminate) noexcept;
+  virtual bool TargetManagesBreakpoints() noexcept;
+  TaskExecuteResponse DoDisconnect(bool terminate) noexcept;
 
-  static Interface createCommandInterface(const InterfaceConfig &config) noexcept;
-  std::optional<std::string> read_nullterminated_string(TraceePointer<char> address,
-                                                        u32 buffer_size = 128) noexcept;
-  void set_target(TraceeController *tc) noexcept;
+  static Interface CreateCommandInterface(const InterfaceConfig &config) noexcept;
+  std::optional<std::string> ReadNullTerminatedString(TraceePointer<char> address, u32 buffer_size = 128) noexcept;
+  void SetTarget(TraceeController *tc) noexcept;
 
   template <typename T>
   utils::Expected<T, std::string_view>
-  read_type(TraceePointer<T> address) noexcept
+  ReadType(TraceePointer<T> address) noexcept
   {
     typename TPtr<T>::Type t_result;
     auto total_read = 0ull;
@@ -332,7 +332,7 @@ public:
 
   template <typename T>
   utils::Expected<u32, WriteError>
-  write(TraceePointer<T> address, const T &value)
+  Write(TraceePointer<T> address, const T &value)
   {
     auto total_written = 0ull;
     auto sz = address.type_size();
@@ -350,8 +350,9 @@ public:
     }
     return {total_written};
   }
+
   inline constexpr TraceeController *
-  supervisor() noexcept
+  GetSupervisor() noexcept
   {
     return tc;
   }

@@ -424,7 +424,7 @@ void
 DebugAdapterClient::client_configured(TraceeController *supervisor) noexcept
 {
   tc = supervisor;
-  tc->configure_dap_client(this);
+  tc->ConfigureDapClient(this);
 }
 
 void

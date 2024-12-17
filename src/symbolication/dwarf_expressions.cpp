@@ -103,7 +103,7 @@ op_deref(ExprByteCodeInterpreter &i) noexcept
 {
   const auto v = i.stack.pop();
   const TPtr<std::uintptr_t> addr{v};
-  const auto deref = i.tc.read_type(addr);
+  const auto deref = i.tc.ReadType(addr);
   i.stack.push(deref);
 }
 
@@ -116,22 +116,22 @@ op_deref_size(ExprByteCodeInterpreter &i) noexcept
   switch (bytes) {
   case 1: {
     const TPtr<u8> addr{v};
-    const auto deref = i.tc.read_type(addr);
+    const auto deref = i.tc.ReadType(addr);
     i.stack.push<u64>(deref);
   } break;
   case 2: {
     const TPtr<u16> addr{v};
-    const auto deref = i.tc.read_type(addr);
+    const auto deref = i.tc.ReadType(addr);
     i.stack.push<u64>(deref);
   } break;
   case 4: {
     const TPtr<u32> addr{v};
-    const auto deref = i.tc.read_type(addr);
+    const auto deref = i.tc.ReadType(addr);
     i.stack.push<u64>(deref);
   } break;
   case 8: {
     const TPtr<u64> addr{v};
-    const auto deref = i.tc.read_type(addr);
+    const auto deref = i.tc.ReadType(addr);
     i.stack.push<u64>(deref);
   } break;
   }

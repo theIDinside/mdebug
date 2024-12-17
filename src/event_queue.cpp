@@ -114,10 +114,10 @@ CoreEvent::AccessWatchpoint(const EventDataParam &param, std::uintptr_t addr, Re
 }
 
 CoreEvent *
-CoreEvent::ForkEvent(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
+CoreEvent::ForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event ForkEvent");
-  return new CoreEvent{param, Fork{{param.target}, new_pid}, CoreEventType::Fork, std::move(reg)};
+  return new CoreEvent{param, ForkEvent{{param.target}, new_pid}, CoreEventType::Fork, std::move(reg)};
 }
 
 CoreEvent *

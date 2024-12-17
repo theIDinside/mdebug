@@ -237,6 +237,7 @@ public:
 
   auto LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
   auto GetSupervisor() noexcept -> TraceeController *;
+  auto GetTextSection() const noexcept -> const ElfSection*;
 
 private:
   std::vector<ui::dap::Variable> GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,

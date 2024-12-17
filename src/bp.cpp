@@ -147,7 +147,7 @@ UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind ki
   }
 
   if (bp != nullptr) {
-    bp->add_user(param.tc.get_interface(), *this);
+    bp->add_user(param.tc.GetInterface(), *this);
   }
 }
 
@@ -331,17 +331,17 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
   DBGLOG(core, "Hit breakpoint {}", id);
   increment_count();
   if (stop_all_threads_when_hit) {
-    const auto all_stopped = tc.all_stopped();
+    const auto all_stopped = tc.IsAllStopped();
     if (all_stopped) {
-      tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, true);
+      tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.tid}, id, true);
     } else {
-      tc.stop_all(&t);
-      tc.observer(ObserverType::AllStop).once([&]() {
-        tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, true);
+      tc.StopAllTasks(&t);
+      tc.GetPublisher(ObserverType::AllStop).once([&]() {
+        tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.tid}, id, true);
       });
     }
   } else {
-    tc.emit_stopped_at_breakpoint({.pid = 0, .tid = t.tid}, id, false);
+    tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.tid}, id, false);
   }
   return bp_hit::normal_stop();
 }
@@ -383,15 +383,15 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
     return bp_hit::noop();
   }
   DBGLOG(core, "Hit finish_bp_t {}", id);
-  const auto all_stopped = tc.all_stopped();
+  const auto all_stopped = tc.IsAllStopped();
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
   if (all_stopped) {
-    tc.emit_stepped_stop({tc.TaskLeaderTid(), tid}, "Finished function", true);
+    tc.EmitSteppedStop({tc.TaskLeaderTid(), tid}, "Finished function", true);
   } else {
-    tc.stop_all(&t);
-    tc.observer(ObserverType::AllStop).once([&tc, tid = tid]() {
-      tc.emit_stepped_stop({tc.TaskLeaderTid(), tid}, "Finished function", true);
+    tc.StopAllTasks(&t);
+    tc.GetPublisher(ObserverType::AllStop).once([&tc, tid = tid]() {
+      tc.EmitSteppedStop({tc.TaskLeaderTid(), tid}, "Finished function", true);
     });
   }
   return bp_hit::stop_retire_bp();
@@ -446,7 +446,7 @@ bp_hit
 SOLoadingBreakpoint::on_hit(TraceeController &tc, TaskInfo &) noexcept
 {
   increment_count();
-  tc.on_so_event();
+  tc.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints
   return bp_hit::noop();
 }
@@ -508,7 +508,7 @@ UserBreakpoints::remove_bp(u32 id) noexcept
     return;
   }
 
-  bp->second->pre_destruction(tc.get_interface());
+  bp->second->pre_destruction(tc.GetInterface());
   user_breakpoints.erase(bp);
 }
 

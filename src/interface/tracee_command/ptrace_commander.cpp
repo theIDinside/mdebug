@@ -24,7 +24,7 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
 bool
 PtraceCommander::OnExec() noexcept
 {
-  auto tc = supervisor();
+  auto tc = GetSupervisor();
   process_id = tc->TaskLeaderTid();
   DBGLOG(core, "Post Exec routine for {}", process_id);
   procfs_memfd = {};
@@ -57,7 +57,7 @@ std::optional<std::vector<ObjectFileDescriptor>>
 PtraceCommander::ReadLibraries() noexcept
 {
   // tracee_r_debug: TPtr<r_debug> points to tracee memory where r_debug lives
-  auto rdebug_ext_res = read_type(tracee_r_debug);
+  auto rdebug_ext_res = ReadType(tracee_r_debug);
   if (rdebug_ext_res.is_error()) {
     DBGLOG(core, "Could not read rdebug_extended");
     return {};
@@ -80,14 +80,14 @@ PtraceCommander::ReadLibraries() noexcept
     }
     auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
     while (linkmap != nullptr) {
-      auto map_res = read_type(linkmap);
+      auto map_res = ReadType(linkmap);
       if (!map_res.is_expected()) {
         DBGLOG(core, "Failed to read linkmap");
         return {};
       }
       auto map = map_res.take_value();
       auto name_ptr = TPtr<char>{map.l_name};
-      const auto path = read_nullterminated_string(name_ptr);
+      const auto path = ReadNullTerminatedString(name_ptr);
       if (!path) {
         DBGLOG(core, "Failed to read null-terminated string from tracee at {}", name_ptr);
         return {};
@@ -97,7 +97,7 @@ PtraceCommander::ReadLibraries() noexcept
     }
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
     if (next != nullptr) {
-      const auto next_rdebug = read_type(next);
+      const auto next_rdebug = ReadType(next);
       if (next_rdebug.is_error()) {
         break;
       } else {
@@ -138,9 +138,9 @@ PtraceCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 TaskExecuteResponse
 PtraceCommander::ResumeTarget(TraceeController *tc, RunType run) noexcept
 {
-  for (auto &t : tc->get_threads()) {
+  for (auto &t : tc->GetThreads()) {
     if (t->can_continue()) {
-      tc->resume_task(*t, {run, tc::ResumeTarget::Task});
+      tc->ResumeTask(*t, {run, tc::ResumeTarget::Task});
     }
   }
   return TaskExecuteResponse::Ok();

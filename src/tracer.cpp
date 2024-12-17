@@ -41,7 +41,7 @@ on_sigchild_handler(int)
       if (!Tracer::Instance->TraceExitConfigured) {
         // means this is the only place we're getting informed of thread exits
         for (const auto &supervisor : Tracer::Instance->targets) {
-          for (const auto &t : supervisor->get_threads()) {
+          for (const auto &t : supervisor->GetThreads()) {
             if (t->tid == pid) {
               DBGLOG(awaiter, "exit for {}", pid);
               push_debugger_event(
@@ -100,10 +100,10 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 void
 Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession session) noexcept
 {
-  targets.push_back(TraceeController::create(session, tc::TraceeCommandInterface::createCommandInterface(config),
+  targets.push_back(TraceeController::create(session, tc::TraceeCommandInterface::CreateCommandInterface(config),
                                              InterfaceType::Ptrace));
   current_target = targets.back().get();
-  const auto new_process = current_target->get_interface().TaskLeaderTid();
+  const auto new_process = current_target->GetInterface().TaskLeaderTid();
 
   if (!Tracer::use_traceme) {
     PTRACE_OR_PANIC(PTRACE_ATTACH, new_process, 0, 0);
@@ -114,7 +114,7 @@ Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession 
 TraceeController *
 Tracer::get_controller(pid_t pid) noexcept
 {
-  auto it = std::ranges::find_if(targets, [&pid](auto &t) { return t->task_leader == pid; });
+  auto it = std::ranges::find_if(targets, [&pid](auto &t) { return t->mTaskLeader == pid; });
   ASSERT(it != std::end(targets), "Could not find target {} pid", pid);
 
   return it->get();
@@ -125,7 +125,7 @@ void
 Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
 {
   auto tc = client->supervisor();
-  switch (tc->interface_type) {
+  switch (tc->mInterfaceType) {
   case InterfaceType::Ptrace: {
     switch (config.waitsystem()) {
     case sys::WaitSystem::UseAwaiterThread:
@@ -143,7 +143,7 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
     break;
   }
   case InterfaceType::GdbRemote:
-    tc->get_interface().Initialize();
+    tc->GetInterface().Initialize();
     break;
   }
   WaiterSystemConfigured = true;
@@ -154,14 +154,14 @@ Tracer::process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) no
 {
   if (process_group == 0) {
     for (const auto &tgt : targets) {
-      if (std::ranges::any_of(tgt->get_threads(), [&](const auto &t) { return t->tid == wait_res.tid; })) {
-        process_group = tgt->task_leader;
+      if (std::ranges::any_of(tgt->GetThreads(), [&](const auto &t) { return t->tid == wait_res.tid; })) {
+        process_group = tgt->mTaskLeader;
       }
     }
   }
   auto tc = get_controller(process_group);
-  auto task = tc->set_pending_waitstatus(wait_res);
-  return tc->stop_handler->prepare_core_from_waitstat(*task);
+  auto task = tc->SetPendingWaitstatus(wait_res);
+  return tc->mStopHandler->prepare_core_from_waitstat(*task);
 }
 
 void
@@ -186,7 +186,7 @@ Tracer::handle_init_event(const CoreEvent *evt) noexcept
   auto tc = get_controller(evt->target);
   ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
   process_core_event(*tc, evt);
-  tc->emit_stopped(evt->tid, ui::dap::StoppedReason::Entry, "attached", true, {});
+  tc->EmitStopped(evt->tid, ui::dap::StoppedReason::Entry, "attached", true, {});
 }
 
 void
@@ -204,13 +204,13 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
   // and since in all-stop, the other stops are implicit, we won't actually hit this function again, for the other
   // threads, therefore this particular event *has* to have special attention here.
 
-  if (tc->stop_all_requested) {
-    if (tc->all_stopped()) {
-      tc->notify_all_stopped();
+  if (tc->mStopAllTasksRequested) {
+    if (tc->IsAllStopped()) {
+      tc->EmitAllStopped();
     }
   } else {
     auto task = tc->GetTaskByTid(evt->tid);
-    tc->stop_handler->handle_proceed(*task, result);
+    tc->mStopHandler->handle_proceed(*task, result);
   }
 }
 template <typename... T> using M2 = Match<T...>;
@@ -224,7 +224,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   using tc::ProcessedStopEvent;
   using MatchResult = ProcessedStopEvent;
 
-  const auto arch = tc.get_interface().arch_info;
+  const auto arch = tc.GetInterface().arch_info;
   auto task = tc.GetTaskByTid(evt->tid);
   // we _have_ to do this check here, because the event *might* be a ThreadCreated event
   // and *it* happens *slightly* different depending on if it's a Remote or a Native session that sends it.
@@ -232,7 +232,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
   if (!task) {
     // rr ends up here.
     DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->tid);
-    tc.new_task(evt->tid, false);
+    tc.CreateNewTask(evt->tid, false);
     task = tc.GetTaskByTid(evt->tid);
     task->initialize();
   }
@@ -248,8 +248,8 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
     }
     task->collect_stop();
   }
-  if (tc.session_all_stop_mode()) {
-    for (auto &t : tc.threads) {
+  if (tc.IsSessionAllStopMode()) {
+    for (auto &t : tc.mThreads) {
       t->set_stop();
       t->stop_collected = true;
     }
@@ -269,8 +269,8 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         TODO("SyscallEvent");
         return ProcessedStopEvent::ResumeAny();
       },
-      [&](const ThreadCreated &e) -> MatchResult { return tc.handle_thread_created(task, e, evt->registers); },
-      [&](const ThreadExited &e) -> MatchResult { return tc.handle_thread_exited(task, e); },
+      [&](const ThreadCreated &e) -> MatchResult { return tc.HandleThreadCreated(task, e, evt->registers); },
+      [&](const ThreadExited &e) -> MatchResult { return tc.HandleThreadExited(task, e); },
       [&](const BreakpointHitEvent &e) -> MatchResult {
         // todo(simon): here we should start building upon global event system, like in gdb, where the user can
         // hook into specific events. in this particular case, we could emit a
@@ -284,42 +284,42 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         auto bp_addy = e.address_val
                          ->or_else([&]() {
                            // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
-                           return std::optional{tc.get_caching_pc(*t).get()};
+                           return std::optional{tc.CacheAndGetPcFor(*t).get()};
                          })
                          .value();
 
-        auto bp_loc = tc.user_breakpoints().location_at(bp_addy);
+        auto bp_loc = tc.GetUserBreakpoints().location_at(bp_addy);
         ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
         bool should_resume = true;
         for (const auto user_id : users) {
-          auto user = tc.user_breakpoints().get_user(user_id);
+          auto user = tc.GetUserBreakpoints().get_user(user_id);
           auto on_hit = user->on_hit(tc, *t);
           should_resume = should_resume && !on_hit.stop;
           if (on_hit.retire_bp) {
-            tc.user_breakpoints().remove_bp(user->id);
+            tc.GetUserBreakpoints().remove_bp(user->id);
           } else {
             t->add_bpstat(user->address().value());
           }
         }
         return ProcessedStopEvent{should_resume, {}};
       },
-      [&](const Fork &e) -> MatchResult { return tc.handle_fork(e); },
+      [&](const ForkEvent &e) -> MatchResult { return tc.HandleFork(e); },
       [&](const Clone &e) -> MatchResult {
-        tc.new_task(e.child_tid, true);
+        tc.CreateNewTask(e.child_tid, true);
         if (e.vm_info) {
-          tc.set_task_vm_info(e.child_tid, e.vm_info.value());
+          tc.SetTaskVmInfo(e.child_tid, e.vm_info.value());
         }
-        return ProcessedStopEvent{!tc.stop_handler->event_settings.clone_stop, {}};
+        return ProcessedStopEvent{!tc.mStopHandler->event_settings.clone_stop, {}};
       },
       [&](const Exec &e) -> MatchResult {
-        tc.post_exec(e.exec_file);
+        tc.PostExec(e.exec_file);
         Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
-        tc.set_fn_breakpoints(fns);
-        tc.dap_client->post_event(new ui::dap::Process{e.exec_file, true});
-        return ProcessedStopEvent{!tc.stop_handler->event_settings.exec_stop, {}};
+        tc.SetFunctionBreakpoints(fns);
+        tc.mDebugAdapterClient->post_event(new ui::dap::Process{e.exec_file, true});
+        return ProcessedStopEvent{!tc.mStopHandler->event_settings.exec_stop, {}};
       },
-      [&](const ProcessExited &e) -> MatchResult { return tc.handle_process_exit(e); },
+      [&](const ProcessExited &e) -> MatchResult { return tc.HandleProcessExit(e); },
       [&](const LibraryEvent &e) -> MatchResult {
         (void)e;
         TODO("LibraryEvent");
@@ -328,14 +328,14 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       [&](const Signal &e) -> MatchResult {
         // TODO: Allow signals through / stop process / etc. Allow for configurability here.
         auto t = tc.GetTaskByTid(e.thread_id);
-        tc.stop_all(t);
+        tc.StopAllTasks(t);
         if (evt->signal == SIGINT) {
-          tc.observer(ObserverType::AllStop).once([t = t->tid, &tc = tc]() {
-            tc.emit_stopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {});
+          tc.GetPublisher(ObserverType::AllStop).once([t = t->tid, &tc = tc]() {
+            tc.EmitStopped(t, ui::dap::StoppedReason::Pause, "Paused", true, {});
           });
         } else {
-          tc.observer(ObserverType::AllStop).once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
-            tc.emit_signal_event({.pid = tc.task_leader, .tid = t}, s);
+          tc.GetPublisher(ObserverType::AllStop).once([s = t->wait_status.signal, t = t->tid, &tc = tc]() {
+            tc.EmitSignalEvent({.pid = tc.mTaskLeader, .tid = t}, s);
           });
         }
         return ProcessedStopEvent{false, {}};
@@ -343,15 +343,15 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       [&](const Stepped &e) -> MatchResult {
         if (e.loc_stat) {
           ASSERT(e.loc_stat->stepped_over, "how did we end up here if we did not step over a breakpoint?");
-          auto bp_loc = tc.user_breakpoints().location_at(e.loc_stat->loc);
+          auto bp_loc = tc.GetUserBreakpoints().location_at(e.loc_stat->loc);
           if (e.loc_stat->re_enable_bp) {
-            bp_loc->enable(tc.get_interface());
+            bp_loc->enable(tc.GetInterface());
           }
         }
 
         if (e.stop) {
           task->user_stopped = true;
-          tc.emit_stepped_stop({.pid = tc.task_leader, .tid = task->tid});
+          tc.EmitSteppedStop({.pid = tc.mTaskLeader, .tid = task->tid});
           return ProcessedStopEvent{false, {}};
         } else {
           const auto resume =
@@ -360,11 +360,11 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         }
       },
       [&](const EntryEvent &e) noexcept -> MatchResult {
-        tc.set_on_entry(false);
+        tc.SetIsOnEntry(false);
         // apply session breakpoints to new process space
         if (e.should_stop) {
           // emit stop event
-          tc.emit_stopped(e.thread_id, ui::dap::StoppedReason::Entry, "forked", true, {});
+          tc.EmitStopped(e.thread_id, ui::dap::StoppedReason::Entry, "forked", true, {});
         } else {
           // say "thread created / started"
         }
@@ -426,8 +426,8 @@ Tracer::attach(const AttachArgs &args) noexcept
             targets.push_back(
               TraceeController::create(TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
             current_target = targets.back().get();
-            if (const auto exe_file = current_target->get_interface().ExecedFile(); exe_file) {
-              const auto new_process = current_target->get_interface().TaskLeaderTid();
+            if (const auto exe_file = current_target->GetInterface().ExecedFile(); exe_file) {
+              const auto new_process = current_target->GetInterface().TaskLeaderTid();
               load_and_process_objfile(new_process, *exe_file);
             }
             return true;
@@ -470,18 +470,18 @@ Tracer::attach(const AttachArgs &args) noexcept
               targets.push_back(
                 TraceeController::create(TargetSession::Attached, std::move(tc), InterfaceType::GdbRemote));
               Tracer::Instance->set_current_to_latest_target();
-              auto &ti = current_target->get_interface();
+              auto &ti = current_target->GetInterface();
               client->client_configured(current_target);
               ti.OnExec();
               for (const auto &t : it->threads) {
-                current_target->new_task(t.tid, false);
+                current_target->CreateNewTask(t.tid, false);
               }
-              for (auto &t : current_target->get_threads()) {
+              for (auto &t : current_target->GetThreads()) {
                 t->set_stop();
               }
               client->post_event(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
                                                            "attached",
-                                                           client->supervisor()->task_leader,
+                                                           client->supervisor()->mTaskLeader,
                                                            {},
                                                            "Attached to session",
                                                            true});
@@ -505,7 +505,7 @@ Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
 {
   targets.push_back(std::move(tc));
   current_target = targets.back().get();
-  current_target->set_on_entry(true);
+  current_target->SetIsOnEntry(true);
   return current_target;
 }
 
@@ -564,12 +564,12 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path progr
     client->set_session_type(ui::dap::DapClientSession::Launch);
     if (Tracer::use_traceme) {
       TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
-      auto task = client->supervisor()->register_task_waited(twr);
+      auto task = client->supervisor()->RegisterTaskWaited(twr);
       if (task == nullptr) {
         PANIC("Expected a task but could not find one for that wait status");
       }
 
-      client->supervisor()->post_exec(program);
+      client->supervisor()->PostExec(program);
     } else {
       for (;;) {
         if (const auto ws = waitpid_block(res.pid); ws) {
@@ -580,11 +580,11 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path progr
             twr.tid = leader;
             DBGLOG(core, "Waited pid after exec! {}, previous: {}", twr.tid, res.pid);
 
-            auto task = client->supervisor()->register_task_waited(twr);
+            auto task = client->supervisor()->RegisterTaskWaited(twr);
             if (task == nullptr) {
               PANIC("Got no task from registered task wait");
             }
-            client->supervisor()->post_exec(program);
+            client->supervisor()->PostExec(program);
             break;
           }
           VERIFY(ptrace(PTRACE_CONT, res.pid, 0, 0) != -1, "Failed to continue passed our exec boundary: {}",
@@ -596,7 +596,7 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path progr
     if (stopOnEntry) {
       Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
       // fns.insert({"main", {}, false});
-      client->supervisor()->set_fn_breakpoints(fns);
+      client->supervisor()->SetFunctionBreakpoints(fns);
     }
   }
   }
@@ -606,14 +606,14 @@ void
 Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept
 {
   // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
-  target->get_interface().Disconnect(!resume_on_detach);
+  target->GetInterface().Disconnect(!resume_on_detach);
 }
 
 std::shared_ptr<SymbolFile>
 Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
 {
   for (const auto &t : targets) {
-    if (std::shared_ptr<SymbolFile> sym = t->lookup_symbol_file(path); sym) {
+    if (std::shared_ptr<SymbolFile> sym = t->LookupSymbolFile(path); sym) {
       return sym;
     }
   }
@@ -637,7 +637,7 @@ Tracer::connectToRemoteGdb(const tc::GdbRemoteCfg &config,
                            const std::optional<gdb::RemoteSettings> &settings) noexcept
 {
   for (auto &t : targets) {
-    if (auto conn = t->get_interface().RemoteConnection();
+    if (auto conn = t->GetInterface().RemoteConnection();
         conn && conn->is_connected_to(config.host, config.port)) {
       return conn;
     }
@@ -695,7 +695,7 @@ std::vector<std::unique_ptr<TraceeController>>::iterator
 Tracer::find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept
 {
   return std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
-                      [client](auto &ptr) { return ptr->get_dap_client() == client; });
+                      [client](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == client; });
 }
 
 void
