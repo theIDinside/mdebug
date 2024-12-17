@@ -28,7 +28,7 @@ LineNumberProgramTask::create_jobs_for(ObjectFile *obj)
 void
 LineNumberProgramTask::execute_task() noexcept
 {
-  for (auto &header : lnp_headers) {
+  for (auto &_ : lnp_headers) {
     TODO("(Re)Implement aggressive line number program execution");
   }
 }

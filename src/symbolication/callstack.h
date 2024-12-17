@@ -136,7 +136,7 @@ public:
 
     switch (l.type) {
     case FrameType::Full:
-      return sym::is_same(l.symbol.full_symbol, r.symbol.full_symbol);
+      return sym::IsSame(l.symbol.full_symbol, r.symbol.full_symbol);
     case FrameType::ElfSymbol:
       return l.symbol.min_symbol == r.symbol.min_symbol;
     case FrameType::Unknown:
@@ -161,10 +161,10 @@ public:
   {
     switch (type) {
     case FrameVariableKind::Arguments:
-      return BlockSymbolIterator::Begin(&frame.full_symbol_info().get_args(), 1);
+      return BlockSymbolIterator::Begin(&frame.full_symbol_info().GetFunctionArguments(), 1);
       break;
     case FrameVariableKind::Locals:
-      return BlockSymbolIterator::Begin(frame.full_symbol_info().get_frame_locals());
+      return BlockSymbolIterator::Begin(frame.full_symbol_info().GetFrameLocalVariableBlocks());
       break;
     }
     NEVER("Unknown frame variables kind");
@@ -175,10 +175,10 @@ public:
   {
     switch (type) {
     case FrameVariableKind::Arguments:
-      return BlockSymbolIterator::End(&frame.full_symbol_info().get_args(), 1);
+      return BlockSymbolIterator::End(&frame.full_symbol_info().GetFunctionArguments(), 1);
       break;
     case FrameVariableKind::Locals:
-      return BlockSymbolIterator::End(frame.full_symbol_info().get_frame_locals());
+      return BlockSymbolIterator::End(frame.full_symbol_info().GetFrameLocalVariableBlocks());
       break;
     }
     NEVER("Unknown frame variables kind");

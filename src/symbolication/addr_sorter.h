@@ -4,8 +4,8 @@
 template <typename AddressContainingType>
 concept Addressable = requires(AddressContainingType t) {
   // clang-format off
-  { t.start_pc() } -> std::convertible_to<AddrPtr>;
-  { t.end_pc() } -> std::convertible_to<AddrPtr>;
+  { t.StartPc() } -> std::convertible_to<AddrPtr>;
+  { t.EndPc() } -> std::convertible_to<AddrPtr>;
   // clang-format on
 };
 
@@ -16,16 +16,16 @@ public:
   operator()(const T &a, const T &b) const noexcept
   {
     if constexpr (ByDecreasingEnd) {
-      if (a.start_pc() == b.start_pc()) {
-        return b.end_pc() > a.end_pc();
+      if (a.StartPc() == b.StartPc()) {
+        return b.EndPc() > a.EndPc();
       } else {
-        return a.start_pc() < b.start_pc();
+        return a.StartPc() < b.StartPc();
       }
     } else {
-      if (a.start_pc() == b.start_pc()) {
-        return b.end_pc() < a.end_pc();
+      if (a.StartPc() == b.StartPc()) {
+        return b.EndPc() < a.EndPc();
       } else {
-        return a.start_pc() < b.start_pc();
+        return a.StartPc() < b.StartPc();
       }
     }
   }
@@ -43,7 +43,7 @@ public:
   constexpr bool
   operator()(const T &a, const T &b) const noexcept
   {
-    return a.start_pc() < b.start_pc();
+    return a.StartPc() < b.StartPc();
   }
 
   constexpr bool
@@ -59,5 +59,5 @@ template <Addressable T>
 constexpr auto
 contained_in(const T &t, AddrPtr pc) noexcept -> bool
 {
-  return t.start_pc() <= pc && t.end_pc() >= pc;
+  return t.StartPc() <= pc && t.EndPc() >= pc;
 }

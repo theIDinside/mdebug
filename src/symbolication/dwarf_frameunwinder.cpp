@@ -767,7 +767,7 @@ UnwindIterator::UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept
 std::optional<UnwindInfoSymbolFilePair>
 UnwinderSymbolFilePair::get_unwinder_info(AddrPtr pc) noexcept
 {
-  if (sf && !sf->mPcBounds->contains(pc)) {
+  if (sf && !sf->mPcBounds->Contains(pc)) {
     return std::nullopt;
   }
 

@@ -277,12 +277,12 @@ public:
   constexpr AddrPtr
   StartAddress() const noexcept
   {
-    return mSpan.start_pc();
+    return mSpan.StartPc();
   }
   constexpr AddrPtr
   EndAddress() const noexcept
   {
-    return mSpan.end_pc();
+    return mSpan.EndPc();
   }
 };
 

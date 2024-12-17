@@ -1,31 +1,31 @@
 #include "block.h"
 
 bool
-AddressRange::contains(AddressRange &block) const noexcept
+AddressRange::Contains(AddressRange &block) const noexcept
 {
   return block.low >= low && block.high <= high;
 }
 
 bool
-AddressRange::contains(AddrPtr ptr) const noexcept
+AddressRange::Contains(AddrPtr ptr) const noexcept
 {
   return ptr >= low && ptr < high;
 }
 
 bool
-AddressRange::is_valid() const noexcept
+AddressRange::IsValid() const noexcept
 {
   return low != TPtr<void>{nullptr} && high != TPtr<void>{nullptr};
 }
 
 AddrPtr
-AddressRange::start_pc() const noexcept
+AddressRange::StartPc() const noexcept
 {
   return low;
 }
 
 AddrPtr
-AddressRange::end_pc() const noexcept
+AddressRange::EndPc() const noexcept
 {
   return high;
 }
@@ -37,25 +37,25 @@ AddressRange::relocate(AddressRange range, AddrPtr addr) noexcept
 }
 
 void
-BoundaryBuilder::compare_swap_low(AddrPtr pc) noexcept
+BoundaryBuilder::CompareSwapLow(AddrPtr pc) noexcept
 {
   low = std::min(low, pc);
 }
 void
-BoundaryBuilder::compare_swap_high(AddrPtr pc) noexcept
+BoundaryBuilder::CompareSwapHigh(AddrPtr pc) noexcept
 {
   high = std::max(high, pc);
 }
 
 void
-BoundaryBuilder::compare_boundary(AddrPtr low, AddrPtr high) noexcept
+BoundaryBuilder::CompareBoundary(AddrPtr low, AddrPtr high) noexcept
 {
-  compare_swap_low(low);
-  compare_swap_high(high);
+  CompareSwapLow(low);
+  CompareSwapHigh(high);
 }
 
 AddressRange
-BoundaryBuilder::build() const noexcept
+BoundaryBuilder::Build() const noexcept
 {
   return AddressRange{low, high};
 }

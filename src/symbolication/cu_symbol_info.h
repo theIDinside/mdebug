@@ -52,8 +52,8 @@ public:
   std::span<const std::shared_ptr<dw::SourceCodeFile>> sources() const noexcept;
 
   bool known_address_boundary() const noexcept;
-  AddrPtr start_pc() const noexcept;
-  AddrPtr end_pc() const noexcept;
+  AddrPtr StartPc() const noexcept;
+  AddrPtr EndPc() const noexcept;
   std::string_view name() const noexcept;
   bool function_symbols_resolved() const noexcept;
   sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;

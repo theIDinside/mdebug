@@ -672,7 +672,7 @@ SourceCodeFile::GetLineTableEntryFor(AddrPtr relocatedBase, AddrPtr pc) noexcept
     return nullptr;
   }
 
-  if (!std::ranges::any_of(mLineTableRanges, [searchPc](const auto &range) { return range.contains(searchPc); })) {
+  if (!std::ranges::any_of(mLineTableRanges, [searchPc](const auto &range) { return range.Contains(searchPc); })) {
     return nullptr;
   }
 
@@ -744,7 +744,7 @@ SourceCodeFile::HasAddressRange() noexcept
 {
   auto range = address_bounds();
 
-  return range.is_valid();
+  return range.IsValid();
 }
 
 bool

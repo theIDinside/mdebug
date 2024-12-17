@@ -96,13 +96,13 @@ CompilationUnit::known_address_boundary() const noexcept
 }
 
 AddrPtr
-CompilationUnit::start_pc() const noexcept
+CompilationUnit::StartPc() const noexcept
 {
   return pc_start;
 }
 
 AddrPtr
-CompilationUnit::end_pc() const noexcept
+CompilationUnit::EndPc() const noexcept
 {
   return pc_end_exclusive;
 }
@@ -127,7 +127,7 @@ CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
   }
 
   auto iter = std::find_if(fns.begin(), fns.end(),
-                           [pc](sym::FunctionSymbol &fn) { return fn.start_pc() <= pc && pc < fn.end_pc(); });
+                           [pc](sym::FunctionSymbol &fn) { return fn.StartPc() <= pc && pc < fn.EndPc(); });
   if (iter != std::end(fns)) {
     return iter.base();
   }
@@ -402,7 +402,7 @@ AddressToCompilationUnitMap::add_cus(const std::span<CompilationUnit> &cus) noex
 {
   std::lock_guard lock(mutex);
   for (const auto &src_sym_info : cus) {
-    add_cu(src_sym_info.start_pc(), src_sym_info.end_pc(), src_sym_info.get_dwarf_unit());
+    add_cu(src_sym_info.StartPc(), src_sym_info.EndPc(), src_sym_info.get_dwarf_unit());
   }
 }
 

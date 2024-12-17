@@ -9,8 +9,8 @@
 namespace sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
-    : obj(obj), fn_ctx(frame.maybe_get_full_symbols()),
-      params{.entry_pc = fn_ctx->start_pc(), .end_pc = fn_ctx->end_pc(), .symbols = {}},
+    : obj(obj), mFunctionSymbol(frame.maybe_get_full_symbols()),
+      params{.entry_pc = mFunctionSymbol->StartPc(), .end_pc = mFunctionSymbol->EndPc(), .symbols = {}},
       lexicalBlockStack({params})
 {
   ASSERT(lexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", lexicalBlockStack.size());
@@ -103,7 +103,8 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
         case Attribute::DW_AT_specification: {
           auto refereeValue = read_attribute_value(reader, abbreviation, info.implicit_consts);
           const auto declaring_die_offset = refereeValue.unsigned_value();
-          state.mReferedDie = dieRef.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
+          state.mReferedDie =
+            dieRef.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
           return DieAttributeRead::Continue;
         }
         default:
@@ -205,12 +206,11 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
 void
 FunctionSymbolicationContext::process_symbol_information() noexcept
 {
-  if (fn_ctx->is_resolved()) {
+  if (mFunctionSymbol->IsResolved()) {
     return;
   }
 
-  const auto &dies = fn_ctx->origin_dies();
-  for (const auto indexedDie : dies) {
+  for (const auto indexedDie : mFunctionSymbol->OriginDebugInfoEntries()) {
     auto cu = indexedDie.GetUnitData();
     auto die_index = indexedDie.GetIndex();
     auto cu_die_ref = cu->get_cu_die_ref(die_index);
@@ -262,10 +262,10 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
       }
     }
   }
-  std::swap(fn_ctx->formal_parameters, params);
-  std::swap(fn_ctx->function_body_variables, lexicalBlockStack);
-  fn_ctx->frame_locals_count = frame_locals_count;
-  fn_ctx->fully_parsed = true;
+  std::swap(mFunctionSymbol->mFormalParametersBlock, params);
+  std::swap(mFunctionSymbol->mFunctionSymbolBlocks, lexicalBlockStack);
+  mFunctionSymbol->mFrameLocalVariableCount = frame_locals_count;
+  mFunctionSymbol->mFullyParsed = true;
 }
 
 TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept

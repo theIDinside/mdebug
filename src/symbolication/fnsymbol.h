@@ -20,7 +20,7 @@ enum class ReturnValueClass
   Unknown
 };
 
-ReturnValueClass determine_ret_class(sym::Type *type) noexcept;
+ReturnValueClass DetermineArchitectureReturnClass(sym::Type *type) noexcept;
 
 class FunctionSymbol
 {
@@ -33,15 +33,15 @@ private:
   friend sym::dw::FunctionSymbolicationContext;
 
   // Private members
-  NonNullPtr<CompilationUnit> decl_file;
-  bool fully_parsed{false};
-  bool is_member_fn{false};
-  u32 frame_locals_count{0};
-  SymbolBlock formal_parameters;
-  std::vector<SymbolBlock> function_body_variables;
-  Immutable<std::array<dw::IndexedDieReference, 3>> maybe_origin_dies;
-  std::span<const u8> framebase_expr;
-  sym::Type *return_type;
+  NonNullPtr<CompilationUnit> mDeclaringCompilationUnit;
+  bool mFullyParsed{false};
+  bool mIsMethod{false};
+  u32 mFrameLocalVariableCount{0};
+  SymbolBlock mFormalParametersBlock;
+  std::vector<SymbolBlock> mFunctionSymbolBlocks;
+  Immutable<std::array<dw::IndexedDieReference, 3>> mMaybeOriginDies;
+  std::span<const u8> mFrameBaseDwarfExpression;
+  sym::Type *mFunctionReturnType;
 
   // Private member functions
   FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
@@ -62,21 +62,20 @@ public:
   Immutable<std::string_view> name;
   Immutable<std::optional<SourceCoordinate>> source;
 
-  std::string build_full_name() const noexcept;
-  AddrPtr start_pc() const noexcept;
-  AddrPtr end_pc() const noexcept;
+  AddrPtr StartPc() const noexcept;
+  AddrPtr EndPc() const noexcept;
   CompilationUnit *GetCompilationUnit() noexcept;
-  const CompilationUnit *symbol_info() const noexcept;
-  std::span<const dw::IndexedDieReference> origin_dies() const noexcept;
-  bool is_resolved() const noexcept;
-  std::span<const u8> frame_base() const noexcept;
+  const CompilationUnit *GetCompilationUnit() const noexcept;
+  std::span<const dw::IndexedDieReference> OriginDebugInfoEntries() const noexcept;
+  bool IsResolved() const noexcept;
+  std::span<const u8> GetFrameBaseDwarfExpression() const noexcept;
 
-  const SymbolBlock &get_args() const noexcept;
-  const std::vector<SymbolBlock> &get_frame_locals() const noexcept;
-  u32 local_variable_count() const noexcept;
+  const SymbolBlock &GetFunctionArguments() const noexcept;
+  const std::vector<SymbolBlock> &GetFrameLocalVariableBlocks() const noexcept;
+  u32 FrameVariablesCount() const noexcept;
 
-  friend bool is_same(const FunctionSymbol &l, const FunctionSymbol &r) noexcept;
-  friend bool is_same(const FunctionSymbol *l, const FunctionSymbol *r) noexcept;
+  friend bool IsSame(const FunctionSymbol &l, const FunctionSymbol &r) noexcept;
+  friend bool IsSame(const FunctionSymbol *l, const FunctionSymbol *r) noexcept;
   static constexpr auto
   Sorter() noexcept
   {
@@ -107,8 +106,8 @@ struct FunctionSymbolSearchResult
 private:
   FunctionSymbol *fn;
 };
-bool is_same(const FunctionSymbol &l, const FunctionSymbol &r) noexcept;
-bool is_same(const FunctionSymbol *l, const FunctionSymbol *r) noexcept;
+bool IsSame(const FunctionSymbol &l, const FunctionSymbol &r) noexcept;
+bool IsSame(const FunctionSymbol *l, const FunctionSymbol *r) noexcept;
 } // namespace sym
 
 namespace fmt {
@@ -126,7 +125,7 @@ template <> struct formatter<sym::FunctionSymbol>
   auto
   format(const sym::FunctionSymbol &var, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "fn={}, [{} .. {}]", var.name, var.start_pc(), var.end_pc());
+    return fmt::format_to(ctx.out(), "fn={}, [{} .. {}]", var.name, var.StartPc(), var.EndPc());
   }
 };
 } // namespace fmt

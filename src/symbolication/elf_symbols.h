@@ -17,13 +17,13 @@ struct MinSymbol
   u64 maybe_size;
 
   constexpr AddrPtr
-  start_pc() const noexcept
+  StartPc() const noexcept
   {
     return address;
   }
 
   constexpr AddrPtr
-  end_pc() const noexcept
+  EndPc() const noexcept
   {
     return address + ((maybe_size > 0) ? maybe_size : 1);
   }

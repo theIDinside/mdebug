@@ -513,7 +513,7 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, bool attempt_src_resol
     auto obj = find_obj_by_pc(addr);
     auto srcs = obj->GetSourceCodeFiles(addr);
     for (auto src : srcs) {
-      if (src.address_bounds().contains(addr)) {
+      if (src.address_bounds().Contains(addr)) {
         if (auto lte = src.FindLineTableEntry(addr); lte) {
           return BreakpointLocation::CreateLocationWithSource(
             addr, original_byte, std::make_unique<LocationSourceInfo>(src.path(), lte->line, u32{lte->column}));
@@ -617,7 +617,7 @@ TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakp
       const auto addr = addr_opt.value();
       auto srcs = symbol_file.GetSourceCodeFiles(addr);
       for (auto src : srcs) {
-        if (src.address_bounds().contains(addr)) {
+        if (src.address_bounds().Contains(addr)) {
           if (auto iter = src.FindLineTableEntry(addr); iter) {
             if (auto res = get_or_create_bp_location(addr, false); res.is_expected()) {
               locs.push_back(res.take_value());
@@ -810,7 +810,7 @@ TraceeController::set_instruction_breakpoints(const Set<InstructionBreakpointSpe
                                        : std::vector<sym::dw::RelocatedSourceCodeFile>{};
     bool was_not_set = true;
     for (auto src : srcs) {
-      if (src.address_bounds().contains(addr)) {
+      if (src.address_bounds().Contains(addr)) {
         if (auto entry = src.FindLineTableEntry(addr); entry) {
           const auto user = pbps.create_loc_user<Breakpoint>(
             *this, GetOrCreateBreakpointLocation(addr, symbol_file->mBaseAddress, src.get()), task_leader,
@@ -1192,7 +1192,7 @@ TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
     const auto addr_range = u->addr_range;
     if (pc > symbol_file->mBaseAddress) {
       const auto unrelocated = symbol_file->UnrelocateAddress(pc);
-      if (addr_range.contains(unrelocated)) {
+      if (addr_range.Contains(unrelocated)) {
         return sym::UnwinderSymbolFilePair{u, symbol_file.get()};
       }
     }

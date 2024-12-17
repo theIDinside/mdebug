@@ -323,7 +323,7 @@ process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &s
            "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
     if (ranges_offset.form == AttributeForm::DW_FORM_sec_offset) {
       auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.unsigned_value());
-      src.set_address_boundary(addr_range.start_pc(), addr_range.end_pc());
+      src.set_address_boundary(addr_range.StartPc(), addr_range.EndPc());
     } else {
       auto ranges =
         sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.unsigned_value()));

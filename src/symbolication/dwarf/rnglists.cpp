@@ -154,18 +154,18 @@ read_boundaries(const ElfSection *rnglists, const u64 offset) noexcept
     case RangeListEntry::DW_RLE_offset_pair: {
       OffsetPair pair{};
       ptr = read_offset_pair(ptr, pair);
-      builder.compare_swap_high(base + pair.end);
+      builder.CompareSwapHigh(base + pair.end);
       break;
     }
     case RangeListEntry::DW_RLE_base_address: {
       base = read_address();
-      builder.compare_swap_low(base);
+      builder.CompareSwapLow(base);
     } break;
     case RangeListEntry::DW_RLE_start_length: {
       AddrPtr start = read_address();
       u64 len;
       ptr = decode_uleb128(ptr, len);
-      builder.compare_boundary(start, start + len);
+      builder.CompareBoundary(start, start + len);
       break;
     }
     case RangeListEntry::DW_RLE_end_of_list:
@@ -174,7 +174,7 @@ read_boundaries(const ElfSection *rnglists, const u64 offset) noexcept
     }
     ptr = read_entry_type(ptr, entry);
   }
-  return builder.build();
+  return builder.Build();
 }
 
 AddressRange
@@ -202,18 +202,18 @@ read_boundaries(const ElfSection *rnglists, const RangeListHeader &header) noexc
     case RangeListEntry::DW_RLE_offset_pair: {
       OffsetPair pair{};
       ptr = read_offset_pair(ptr, pair);
-      builder.compare_swap_high(base + pair.end);
+      builder.CompareSwapHigh(base + pair.end);
       break;
     }
     case RangeListEntry::DW_RLE_base_address: {
       base = read_address();
-      builder.compare_swap_low(base);
+      builder.CompareSwapLow(base);
     } break;
     case RangeListEntry::DW_RLE_start_length: {
       AddrPtr start = read_address();
       u64 len;
       ptr = decode_uleb128(ptr, len);
-      builder.compare_boundary(start, start + len);
+      builder.CompareBoundary(start, start + len);
       break;
     }
     case RangeListEntry::DW_RLE_end_of_list:
@@ -221,6 +221,6 @@ read_boundaries(const ElfSection *rnglists, const RangeListHeader &header) noexc
       break;
     }
   }
-  return builder.build();
+  return builder.Build();
 }
 } // namespace sym::dw

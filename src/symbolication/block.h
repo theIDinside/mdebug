@@ -16,11 +16,11 @@ struct AddressRange
   {
     return AddressRange{AddrPtr::Max(), AddrPtr::Min()};
   }
-  bool contains(AddressRange &range) const noexcept;
-  bool contains(AddrPtr ptr) const noexcept;
-  bool is_valid() const noexcept;
-  AddrPtr start_pc() const noexcept;
-  AddrPtr end_pc() const noexcept;
+  bool Contains(AddressRange &range) const noexcept;
+  bool Contains(AddrPtr ptr) const noexcept;
+  bool IsValid() const noexcept;
+  AddrPtr StartPc() const noexcept;
+  AddrPtr EndPc() const noexcept;
 
   static AddressRange relocate(AddressRange range, AddrPtr addr) noexcept;
 
@@ -43,8 +43,8 @@ class BoundaryBuilder
   AddrPtr low{std::numeric_limits<u64>::max()};
 
 public:
-  void compare_swap_low(AddrPtr pc) noexcept;
-  void compare_swap_high(AddrPtr pc) noexcept;
-  void compare_boundary(AddrPtr low, AddrPtr high) noexcept;
-  AddressRange build() const noexcept;
+  void CompareSwapLow(AddrPtr pc) noexcept;
+  void CompareSwapHigh(AddrPtr pc) noexcept;
+  void CompareBoundary(AddrPtr low, AddrPtr high) noexcept;
+  AddressRange Build() const noexcept;
 };

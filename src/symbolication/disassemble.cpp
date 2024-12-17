@@ -28,7 +28,7 @@ GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compil
 {
   for (auto cu : compilationUnits) {
     for (const auto &src : cu->sources()) {
-      if (src->address_bounds().contains(addr)) {
+      if (src->address_bounds().Contains(addr)) {
         const auto *lte = src->GetLineTableEntryFor(obj->mBaseAddress, addr);
         if (lte) {
           return {src.get(), lte};
@@ -94,11 +94,11 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
   std::set<AddrPtr> disassembled_addresses{};
   auto srcs = objfile->GetCompilationUnits(addr);
 
-  std::sort(srcs.begin(), srcs.end(), [](auto a, auto b) { return a->start_pc() >= b->start_pc(); });
+  std::sort(srcs.begin(), srcs.end(), [](auto a, auto b) { return a->StartPc() >= b->StartPc(); });
 
   for (auto src : srcs) {
     if (static_cast<int>(output.size()) <= ins_offset) {
-      auto add = src->start_pc();
+      auto add = src->StartPc();
       auto exec_data_ptr = text->Into(add);
       std::vector<sym::Disassembly> result;
       while (ZYAN_SUCCESS(ZydisDisassembleATT(ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr,
@@ -111,7 +111,7 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
         add = offset(add, instruction.info.length);
         exec_data_ptr += instruction.info.length;
       }
-      addr = src->start_pc();
+      addr = src->StartPc();
       for (auto i = result.rbegin(); i != result.rend(); i++) {
         output.insert(output.begin(), *i);
       }

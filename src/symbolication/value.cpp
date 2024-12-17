@@ -208,7 +208,7 @@ MemoryContentsObject::create_frame_variable(TraceeController &tc, NonNullPtr<Tas
       return nullptr;
     }
     auto interp =
-      ExprByteCodeInterpreter{frame->level(), tc, task, symbol.location->dwarf_expr, fnSymbol->frame_base()};
+      ExprByteCodeInterpreter{frame->level(), tc, task, symbol.location->dwarf_expr, fnSymbol->GetFrameBaseDwarfExpression()};
     const auto address = interp.run();
     if (lazy) {
       auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);

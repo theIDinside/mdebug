@@ -128,13 +128,13 @@ const MinSymbol *
 ObjectFile::SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept
 {
   auto it = std::lower_bound(mMinimalFunctionSymbolsSorted.begin(), mMinimalFunctionSymbolsSorted.end(), pc,
-                             [](auto &sym, AddrPtr addr) { return sym.start_pc() < addr; });
+                             [](auto &sym, AddrPtr addr) { return sym.StartPc() < addr; });
   if (it == std::end(mMinimalFunctionSymbolsSorted)) {
     return nullptr;
   }
 
   auto prev = (it == std::begin(mMinimalFunctionSymbolsSorted)) ? it : it - 1;
-  if (prev->start_pc() <= pc && prev->end_pc() >= pc) {
+  if (prev->StartPc() <= pc && prev->EndPc() >= pc) {
     return prev.base();
   } else {
     return nullptr;
@@ -278,7 +278,7 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit> new_cus) 
     if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
       for (const auto &cu : mCompilationUnits) {
         DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
-               cu.start_pc(), cu.end_pc());
+               cu.StartPc(), cu.EndPc());
       }
       PANIC("Dumped CU contents");
     }
@@ -374,7 +374,7 @@ ObjectFile::GetRelocatedSourceCodeFiles(AddrPtr base,
   for (auto cu : cus) {
     for (auto &src : cu->sources()) {
       ASSERT(src != nullptr, "source code file should not be null!");
-      if (src->address_bounds().contains(pc) && is_unique(src.get())) {
+      if (src->address_bounds().Contains(pc) && is_unique(src.get())) {
         result.emplace_back(base, src.get());
       }
     }
@@ -612,7 +612,7 @@ SymbolFile::GetObjectFile() const noexcept -> ObjectFile *
 auto
 SymbolFile::ContainsProgramCounter(AddrPtr pc) const noexcept -> bool
 {
-  return mPcBounds->contains(pc);
+  return mPcBounds->Contains(pc);
 }
 
 auto
@@ -665,7 +665,7 @@ auto
 SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
                          sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
-  if (!frame.full_symbol_info().is_resolved()) {
+  if (!frame.full_symbol_info().IsResolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->GetObjectFile(), frame};
     sym_ctx.process_symbol_information();
   }
@@ -829,7 +829,7 @@ SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept 
     if (!bps_set.contains(relocatedAddress)) {
       auto srcs = GetSourceCodeFiles(sym.address);
       for (auto src : srcs) {
-        if (src.address_bounds().contains(relocatedAddress)) {
+        if (src.address_bounds().Contains(relocatedAddress)) {
           if (const auto lte = src.FindLineTableEntry(relocatedAddress);
               lte && !bps_set.contains(relocatedAddress)) {
             result.emplace_back(relocatedAddress, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});

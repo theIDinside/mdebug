@@ -20,7 +20,7 @@ namespace sym::dw {
 class FunctionSymbolicationContext
 {
   ObjectFile &obj;
-  sym::FunctionSymbol *fn_ctx;
+  sym::FunctionSymbol *mFunctionSymbol;
   SymbolBlock params;
   std::vector<SymbolBlock> lexicalBlockStack;
   u32 frame_locals_count{0};

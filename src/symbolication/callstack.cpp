@@ -23,10 +23,10 @@ Frame::inside(TPtr<void> addr) const noexcept
 {
   switch (type) {
   case FrameType::Full:
-    return addr >= symbol.full_symbol->start_pc() && addr <= symbol.full_symbol->end_pc() ? InsideRange::Yes
+    return addr >= symbol.full_symbol->StartPc() && addr <= symbol.full_symbol->EndPc() ? InsideRange::Yes
                                                                                           : InsideRange::No;
   case FrameType::ElfSymbol:
-    return addr >= symbol.min_symbol->start_pc() && addr <= symbol.full_symbol->end_pc() ? InsideRange::Yes
+    return addr >= symbol.min_symbol->StartPc() && addr <= symbol.full_symbol->EndPc() ? InsideRange::Yes
                                                                                          : InsideRange::No;
   case FrameType::Unknown:
     return InsideRange::Unknown;
@@ -91,7 +91,7 @@ Frame::full_symbol_info() const noexcept
 std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
 Frame::GetLineTableEntry() const noexcept
 {
-  const CompilationUnit *cu = full_symbol_info().symbol_info();
+  const CompilationUnit *cu = full_symbol_info().GetCompilationUnit();
   const auto& cuSources = cu->sources();
   for (const auto &sourceCodeFile : cuSources) {
     if (auto lte = sourceCodeFile->GetLineTableEntryFor(symbol_file->mBaseAddress, pc()); lte) {
@@ -151,13 +151,13 @@ Frame::block_symbol_iterator(FrameVariableKind variables_kind) noexcept
 u32
 Frame::frame_locals_count() const noexcept
 {
-  return full_symbol_info().local_variable_count();
+  return full_symbol_info().FrameVariablesCount();
 }
 
 u32
 Frame::frame_args_count() const noexcept
 {
-  return full_symbol_info().get_args().symbols.size();
+  return full_symbol_info().GetFunctionArguments().symbols.size();
 }
 
 std::optional<std::string_view>
