@@ -49,41 +49,41 @@ class IterateFrameSymbols;
 class Frame
 {
 private:
-  AddrPtr rip = nullptr;
+  AddrPtr mFramePc = nullptr;
   union
   {
     sym::FunctionSymbol *full_symbol;
     const MinSymbol *min_symbol;
     std::nullptr_t null;
-  } symbol = {nullptr};
+  } mSymbolUnion = {nullptr};
 
-  u32 lvl = -1;
-  FrameType type = FrameType::Unknown;
-  u32 frame_id = -1;
-  SymbolFile *symbol_file;
-  std::array<ui::dap::Scope, 3> cached_scopes{};
+  u32 mFrameLevel = -1;
+  FrameType mFrameType = FrameType::Unknown;
+  u32 mFrameId = -1;
+  SymbolFile *mOwningSymbolFile;
+  std::array<ui::dap::Scope, 3> mFrameScopes{};
 
 public:
   Immutable<NonNullPtr<TaskInfo>> task;
 
   template <typename T>
   explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, u32 frame_id, AddrPtr pc, T sym_info) noexcept
-      : rip(pc), lvl(level), frame_id(frame_id), symbol_file(symbol_file), task(NonNull(task))
+      : mFramePc(pc), mFrameLevel(level), mFrameId(frame_id), mOwningSymbolFile(symbol_file), task(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
     static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::nullptr_t>,
                   "Frame expects either FunctionSymbol or MinSymbol pointers (or a nullptr)");
     if constexpr (std::is_same_v<Type, sym::FunctionSymbol> || std::is_same_v<Type, const sym::FunctionSymbol>) {
-      type = FrameType::Full;
-      symbol.full_symbol = sym_info;
-      ASSERT(symbol.full_symbol != nullptr, "Setting to nullptr when expecting full symbol information to exist.");
+      mFrameType = FrameType::Full;
+      mSymbolUnion.full_symbol = sym_info;
+      ASSERT(mSymbolUnion.full_symbol != nullptr, "Setting to nullptr when expecting full symbol information to exist.");
     } else if constexpr (std::is_same_v<Type, MinSymbol> || std::is_same_v<Type, const MinSymbol>) {
-      type = FrameType::ElfSymbol;
-      symbol.min_symbol = sym_info;
-      ASSERT(symbol.min_symbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
+      mFrameType = FrameType::ElfSymbol;
+      mSymbolUnion.min_symbol = sym_info;
+      ASSERT(mSymbolUnion.min_symbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
     } else if constexpr (std::is_null_pointer_v<T>) {
-      type = FrameType::Unknown;
-      symbol.null = std::nullptr_t{};
+      mFrameType = FrameType::Unknown;
+      mSymbolUnion.null = std::nullptr_t{};
     } else {
       static_assert(always_false<T>, "Could not determine symbol type!");
     }
@@ -94,51 +94,51 @@ public:
   Frame(Frame &&) = default;
   Frame &operator=(Frame &&) = default;
 
-  InsideRange inside(TPtr<void> addr) const noexcept;
-  std::optional<std::string_view> name() const noexcept;
+  InsideRange IsInside(TPtr<void> addr) const noexcept;
+  std::optional<std::string_view> Name() const noexcept;
   // checks if this Frame has symbol info, whether that be of type Full or Elf
-  bool has_symbol_info() const noexcept;
-  FrameType frame_type() const noexcept;
-  int id() const noexcept;
-  int level() const noexcept;
-  AddrPtr pc() const noexcept;
+  bool HasSymbolInfo() const noexcept;
+  FrameType GetFrameType() const noexcept;
+  int FrameId() const noexcept;
+  int FrameLevel() const noexcept;
+  AddrPtr FramePc() const noexcept;
   SymbolFile *GetSymbolFile() const noexcept;
 
-  const sym::FunctionSymbol &full_symbol_info() const noexcept;
+  const sym::FunctionSymbol &FullSymbolInfo() const noexcept;
 
-  sym::FunctionSymbol *maybe_get_full_symbols() const noexcept;
-  const MinSymbol *maybe_get_min_symbols() const noexcept;
+  sym::FunctionSymbol *MaybeGetFullSymbolInfo() const noexcept;
+  const MinSymbol *MaybeGetMinimalSymbol() const noexcept;
 
-  IterateFrameSymbols block_symbol_iterator(FrameVariableKind variable_set) noexcept;
-  u32 frame_locals_count() const noexcept;
-  u32 frame_args_count() const noexcept;
+  IterateFrameSymbols BlockSymbolIterator(FrameVariableKind variable_set) noexcept;
+  u32 FrameLocalVariablesCount() const noexcept;
+  u32 FrameParameterCounts() const noexcept;
 
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept
   {
-    return compare_eq(l, r);
+    return CompareEquals(l, r);
   }
 
   friend constexpr bool
-  same_symbol(const Frame &l, const Frame &r) noexcept
+  SameSymbol(const Frame &l, const Frame &r) noexcept
   {
     return l == r;
   }
 
-  friend constexpr AddrPtr resume_address(const Frame &f) noexcept;
+  friend constexpr AddrPtr ResumeAddress(const Frame &f) noexcept;
 
   friend constexpr bool
-  compare_eq(const Frame &l, const Frame &r) noexcept
+  CompareEquals(const Frame &l, const Frame &r) noexcept
   {
-    if (l.type != r.type) {
+    if (l.mFrameType != r.mFrameType) {
       return false;
     }
 
-    switch (l.type) {
+    switch (l.mFrameType) {
     case FrameType::Full:
-      return sym::IsSame(l.symbol.full_symbol, r.symbol.full_symbol);
+      return sym::IsSame(l.mSymbolUnion.full_symbol, r.mSymbolUnion.full_symbol);
     case FrameType::ElfSymbol:
-      return l.symbol.min_symbol == r.symbol.min_symbol;
+      return l.mSymbolUnion.min_symbol == r.mSymbolUnion.min_symbol;
     case FrameType::Unknown:
       return false;
     }
@@ -146,9 +146,9 @@ public:
   }
 
   std::pair<dw::SourceCodeFile*, const dw::LineTableEntry*> GetLineTableEntry() const noexcept;
-  std::optional<std::string_view> function_name() const noexcept;
-  std::array<ui::dap::Scope, 3> scopes() noexcept;
-  std::optional<ui::dap::Scope> scope(u32 var_ref) noexcept;
+  std::optional<std::string_view> GetFunctionName() const noexcept;
+  std::array<ui::dap::Scope, 3> Scopes() noexcept;
+  std::optional<ui::dap::Scope> Scope(u32 var_ref) noexcept;
 };
 
 class IterateFrameSymbols
@@ -161,10 +161,10 @@ public:
   {
     switch (type) {
     case FrameVariableKind::Arguments:
-      return BlockSymbolIterator::Begin(&frame.full_symbol_info().GetFunctionArguments(), 1);
+      return BlockSymbolIterator::Begin(&frame.FullSymbolInfo().GetFunctionArguments(), 1);
       break;
     case FrameVariableKind::Locals:
-      return BlockSymbolIterator::Begin(frame.full_symbol_info().GetFrameLocalVariableBlocks());
+      return BlockSymbolIterator::Begin(frame.FullSymbolInfo().GetFrameLocalVariableBlocks());
       break;
     }
     NEVER("Unknown frame variables kind");
@@ -175,10 +175,10 @@ public:
   {
     switch (type) {
     case FrameVariableKind::Arguments:
-      return BlockSymbolIterator::End(&frame.full_symbol_info().GetFunctionArguments(), 1);
+      return BlockSymbolIterator::End(&frame.FullSymbolInfo().GetFunctionArguments(), 1);
       break;
     case FrameVariableKind::Locals:
-      return BlockSymbolIterator::End(frame.full_symbol_info().GetFrameLocalVariableBlocks());
+      return BlockSymbolIterator::End(frame.FullSymbolInfo().GetFrameLocalVariableBlocks());
       break;
     }
     NEVER("Unknown frame variables kind");
@@ -190,9 +190,9 @@ private:
 };
 
 constexpr AddrPtr
-resume_address(const Frame &f) noexcept
+ResumeAddress(const Frame &f) noexcept
 {
-  return f.rip;
+  return f.mFramePc;
 }
 
 class FrameUnwindState
@@ -219,9 +219,9 @@ public:
   explicit CallStack(TraceeController *supervisor, TaskInfo *task) noexcept;
   ~CallStack() = default;
 
-  Frame *get_frame(int frame_id) noexcept;
+  Frame *GetFrame(int frame_id) noexcept;
   Frame *GetFrameAtLevel(u32 level) noexcept;
-  u64 unwind_buffer_register(u8 level, u16 register_number) noexcept;
+  u64 UnwindRegister(u8 level, u16 register_number) noexcept;
 
   bool IsDirty() const noexcept;
   void SetDirty() noexcept;
@@ -246,7 +246,7 @@ public:
   void
   PushFrame(Args &&...args)
   {
-    frames.push_back(sym::Frame{args...});
+    mStackFrames.push_back(sym::Frame{args...});
   }
 
 private:
@@ -261,8 +261,8 @@ private:
 
   TaskInfo *mTask; // the task associated with this call stack
   TraceeController *mSupervisor;
-  bool dirty;
-  std::vector<Frame> frames{}; // the call stack
+  bool mCallstackIsDirty;
+  std::vector<Frame> mStackFrames{}; // the call stack
   std::vector<AddrPtr> mFrameProgramCounters{};
   std::vector<FrameUnwindState> mUnwoundRegister{};
 };
@@ -282,8 +282,8 @@ template <> struct formatter<sym::Frame>
   auto
   format(const sym::Frame &frame, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "{{ pc: {}, level: {}, fn: {} }}", frame.pc(), frame.level(),
-                          frame.function_name().value_or("Unknown"));
+    return fmt::format_to(ctx.out(), "{{ pc: {}, level: {}, fn: {} }}", frame.FramePc(), frame.FrameLevel(),
+                          frame.GetFunctionName().value_or("Unknown"));
   }
 };
 } // namespace fmt

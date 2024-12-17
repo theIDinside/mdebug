@@ -9,7 +9,7 @@
 namespace sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
-    : obj(obj), mFunctionSymbol(frame.maybe_get_full_symbols()),
+    : obj(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
       params{.entry_pc = mFunctionSymbol->StartPc(), .end_pc = mFunctionSymbol->EndPc(), .symbols = {}},
       lexicalBlockStack({params})
 {

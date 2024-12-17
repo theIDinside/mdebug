@@ -785,24 +785,24 @@ StackTrace::execute() noexcept
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.FramesCount());
   for (const auto &frame : cfs.GetFrames()) {
-    if (frame.frame_type() == sym::FrameType::Full) {
+    if (frame.GetFrameType() == sym::FrameType::Full) {
       const auto [src, lte] = frame.GetLineTableEntry();
       ASSERT(src && lte, "Expected source code file and line table entry to be not null");
       stack_frames.push_back(
-        StackFrame{.id = frame.id(),
-                   .name = frame.name().value_or("unknown"),
+        StackFrame{.id = frame.FrameId(),
+                   .name = frame.Name().value_or("unknown"),
                    .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
                    .line = static_cast<int>(lte->line),
                    .column = static_cast<int>(lte->column),
-                   .rip = fmt::format("{}", frame.pc())});
+                   .rip = fmt::format("{}", frame.FramePc())});
 
     } else {
-      stack_frames.push_back(StackFrame{.id = frame.id(),
-                                        .name = frame.name().value_or("unknown"),
+      stack_frames.push_back(StackFrame{.id = frame.FrameId(),
+                                        .name = frame.Name().value_or("unknown"),
                                         .source = std::nullopt,
                                         .line = 0,
                                         .column = 0,
-                                        .rip = fmt::format("{}", frame.pc())});
+                                        .rip = fmt::format("{}", frame.FramePc())});
     }
   }
   return new StackTraceResponse{true, this, std::move(stack_frames)};
@@ -834,7 +834,7 @@ Scopes::execute() noexcept
   if (!frame) {
     return new ScopesResponse{false, this, {}};
   }
-  const auto scopes = frame->scopes();
+  const auto scopes = frame->Scopes();
   return new ScopesResponse{true, this, scopes};
 }
 
@@ -1009,7 +1009,7 @@ Variables::execute() noexcept
   case ContextType::Frame:
     return error(fmt::format("Sent a variables request using a reference for a frame is an error.", var_ref));
   case ContextType::Scope: {
-    auto scope = frame->scope(var_ref);
+    auto scope = frame->Scope(var_ref);
     switch (scope->type) {
     case ScopeType::Arguments: {
       auto vars = context.symbol_file->GetVariables(*context.tc, *frame, sym::VariableSet::Arguments);

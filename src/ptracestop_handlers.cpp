@@ -95,7 +95,7 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
   auto &callstack = tc.build_callframe_stack(task, CallStackRequest::partial(1));
   // First/bottommost/last/current frame always exists.
   start_frame = *callstack.GetFrameAtLevel(0);
-  const auto fpc = start_frame.pc();
+  const auto fpc = start_frame.FramePc();
   SymbolFile *symbol_file = tc.find_obj_by_pc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
 
@@ -116,7 +116,7 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
 
   for (auto &&file : files_of_interest) {
     if (const auto lte = file.FindLineTableEntry(fpc); lte) {
-      if (start_frame.inside(lte->RelocateProgramCounter(symbol_file->mBaseAddress).as_void()) ==
+      if (start_frame.IsInside(lte->RelocateProgramCounter(symbol_file->mBaseAddress).as_void()) ==
           sym::InsideRange::Yes) {
         if (lte->pc == fpc) {
           found = true;
@@ -180,15 +180,15 @@ LineStep::update_stepped() noexcept
   const auto frame = tc.current_frame(task);
   // if we're in the same frame, we single step
 
-  if (frame.frame_type() == sym::FrameType::Full && same_symbol(frame, start_frame)) {
-    ASSERT(frame.level() == start_frame.level(),
+  if (frame.GetFrameType() == sym::FrameType::Full && SameSymbol(frame, start_frame)) {
+    ASSERT(frame.FrameLevel() == start_frame.FrameLevel(),
            "We haven't implemented support where recursion actually creates multiple frames that look the same.");
     auto [src, lte] = frame.GetLineTableEntry();
     is_done = (!lte || lte->line != entry.line);
   } else {
     auto &callstack = tc.build_callframe_stack(task, CallStackRequest::full());
     const auto resumeAddress =
-      callstack.FindFrame(start_frame).transform([](const auto &f) -> AddrPtr { return f.pc(); });
+      callstack.FindFrame(start_frame).transform([](const auto &f) -> AddrPtr { return f.FramePc(); });
     if (resumeAddress) {
       InstallBreakpoint(resumeAddress.value());
     } else {
@@ -489,7 +489,7 @@ StepInto::is_origin_line(u32 line) const noexcept
 bool
 StepInto::inside_origin_frame(const sym::Frame &f) const noexcept
 {
-  return f.frame_type() == sym::FrameType::Full && same_symbol(f, start_frame);
+  return f.GetFrameType() == sym::FrameType::Full && SameSymbol(f, start_frame);
 }
 
 void
@@ -515,7 +515,7 @@ StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
 {
   auto &callstack = ctrl.build_callframe_stack(task, CallStackRequest::partial(1));
   const auto start_frame = *callstack.GetFrameAtLevel(0);
-  const auto fpc = start_frame.pc();
+  const auto fpc = start_frame.FramePc();
   SymbolFile *symbol_file = ctrl.find_obj_by_pc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
 
@@ -536,7 +536,7 @@ StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
   for (auto &&file : files_of_interest) {
     if (const auto lte = file.FindLineTableEntry(fpc); lte) {
       auto relocPc = lte->RelocateProgramCounter(symbol_file->mBaseAddress);
-      if (start_frame.inside(relocPc) == sym::InsideRange::Yes) {
+      if (start_frame.IsInside(relocPc) == sym::InsideRange::Yes) {
         if (relocPc == fpc) {
           return new StepInto{ctrl, task, start_frame, *lte};
         } else {

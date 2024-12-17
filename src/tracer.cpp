@@ -722,11 +722,11 @@ VariableContext::valid_context() const noexcept
 std::optional<std::array<ui::dap::Scope, 3>>
 VariableContext::scopes_reference(VarRefKey frameKey) const noexcept
 {
-  auto frame = t->get_callstack().get_frame(frameKey);
+  auto frame = t->get_callstack().GetFrame(frameKey);
   if (!frame) {
     return {};
   } else {
-    return frame->scopes();
+    return frame->Scopes();
   }
 }
 
@@ -735,10 +735,10 @@ VariableContext::get_frame(VarRefKey ref) noexcept
 {
   switch (type) {
   case ContextType::Frame:
-    return t->get_callstack().get_frame(ref);
+    return t->get_callstack().GetFrame(ref);
   case ContextType::Scope:
   case ContextType::Variable:
-    return t->get_callstack().get_frame(frame_id);
+    return t->get_callstack().GetFrame(frame_id);
   case ContextType::Global:
     PANIC("Global variables not yet supported");
     break;

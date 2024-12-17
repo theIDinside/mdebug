@@ -201,14 +201,14 @@ MemoryContentsObject::create_frame_variable(TraceeController &tc, NonNullPtr<Tas
 
   switch (symbol.location->kind) {
   case LocKind::DwarfExpression: {
-    auto *fnSymbol = frame->maybe_get_full_symbols();
+    auto *fnSymbol = frame->MaybeGetFullSymbolInfo();
     if (!fnSymbol) {
       DBGLOG(core, "could not find function symbol for frame. Required to construct live variables.");
       TODO("Add support for situations where we can't actually construct the value");
       return nullptr;
     }
     auto interp =
-      ExprByteCodeInterpreter{frame->level(), tc, task, symbol.location->dwarf_expr, fnSymbol->GetFrameBaseDwarfExpression()};
+      ExprByteCodeInterpreter{frame->FrameLevel(), tc, task, symbol.location->dwarf_expr, fnSymbol->GetFrameBaseDwarfExpression()};
     const auto address = interp.run();
     if (lazy) {
       auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);

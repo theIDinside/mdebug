@@ -665,7 +665,7 @@ auto
 SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
                          sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
-  if (!frame.full_symbol_info().IsResolved()) {
+  if (!frame.FullSymbolInfo().IsResolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->GetObjectFile(), frame};
     sym_ctx.process_symbol_information();
   }
@@ -859,14 +859,14 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   std::vector<ui::dap::Variable> result{};
   switch (variables_kind) {
   case sym::FrameVariableKind::Arguments:
-    result.reserve(frame.frame_args_count());
+    result.reserve(frame.FrameParameterCounts());
     break;
   case sym::FrameVariableKind::Locals:
-    result.reserve(frame.frame_locals_count());
+    result.reserve(frame.FrameLocalVariablesCount());
     break;
   }
 
-  for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
+  for (auto &symbol : frame.BlockSymbolIterator(variables_kind)) {
     const auto ref = symbol.type->is_primitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.type->is_resolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.type};
@@ -879,7 +879,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     RegisterValueResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.id()),
+      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.FrameId()),
                                          static_cast<u16>(ref), ContextType::Variable});
       frame.task.mut()->cache_object(ref, value_object);
     }

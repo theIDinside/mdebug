@@ -104,7 +104,7 @@ TaskInfo::get_register(u64 reg_num) noexcept
 u64
 TaskInfo::unwind_buffer_register(u8 level, u16 register_number) const noexcept
 {
-  return call_stack->unwind_buffer_register(level, register_number);
+  return call_stack->UnwindRegister(level, register_number);
 }
 
 void

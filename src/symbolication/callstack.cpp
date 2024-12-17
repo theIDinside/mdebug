@@ -19,14 +19,14 @@ namespace sym {
 static constexpr auto X86_64_RIP_REGISTER = 16;
 
 InsideRange
-Frame::inside(TPtr<void> addr) const noexcept
+Frame::IsInside(TPtr<void> addr) const noexcept
 {
-  switch (type) {
+  switch (mFrameType) {
   case FrameType::Full:
-    return addr >= symbol.full_symbol->StartPc() && addr <= symbol.full_symbol->EndPc() ? InsideRange::Yes
+    return addr >= mSymbolUnion.full_symbol->StartPc() && addr <= mSymbolUnion.full_symbol->EndPc() ? InsideRange::Yes
                                                                                           : InsideRange::No;
   case FrameType::ElfSymbol:
-    return addr >= symbol.min_symbol->StartPc() && addr <= symbol.full_symbol->EndPc() ? InsideRange::Yes
+    return addr >= mSymbolUnion.min_symbol->StartPc() && addr <= mSymbolUnion.full_symbol->EndPc() ? InsideRange::Yes
                                                                                          : InsideRange::No;
   case FrameType::Unknown:
     return InsideRange::Unknown;
@@ -35,13 +35,13 @@ Frame::inside(TPtr<void> addr) const noexcept
 }
 
 bool
-Frame::has_symbol_info() const noexcept
+Frame::HasSymbolInfo() const noexcept
 {
-  switch (type) {
+  switch (mFrameType) {
   case FrameType::Full:
-    return symbol.full_symbol != nullptr;
+    return mSymbolUnion.full_symbol != nullptr;
   case FrameType::ElfSymbol:
-    return symbol.min_symbol != nullptr;
+    return mSymbolUnion.min_symbol != nullptr;
   case FrameType::Unknown:
     return false;
   }
@@ -49,39 +49,39 @@ Frame::has_symbol_info() const noexcept
 }
 
 FrameType
-Frame::frame_type() const noexcept
+Frame::GetFrameType() const noexcept
 {
-  return type;
+  return mFrameType;
 }
 
 int
-Frame::id() const noexcept
+Frame::FrameId() const noexcept
 {
-  return frame_id;
+  return mFrameId;
 }
 
 int
-Frame::level() const noexcept
+Frame::FrameLevel() const noexcept
 {
-  return lvl;
+  return mFrameLevel;
 }
 
 AddrPtr
-Frame::pc() const noexcept
+Frame::FramePc() const noexcept
 {
-  return rip;
+  return mFramePc;
 }
 
 SymbolFile *
 Frame::GetSymbolFile() const noexcept
 {
-  return symbol_file;
+  return mOwningSymbolFile;
 }
 
 const sym::FunctionSymbol &
-Frame::full_symbol_info() const noexcept
+Frame::FullSymbolInfo() const noexcept
 {
-  auto ptr = maybe_get_full_symbols();
+  auto ptr = MaybeGetFullSymbolInfo();
   if (ptr == nullptr) {
     PANIC("No symbol information for frame, but expected there to be one");
   }
@@ -91,10 +91,10 @@ Frame::full_symbol_info() const noexcept
 std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
 Frame::GetLineTableEntry() const noexcept
 {
-  const CompilationUnit *cu = full_symbol_info().GetCompilationUnit();
+  const CompilationUnit *cu = FullSymbolInfo().GetCompilationUnit();
   const auto& cuSources = cu->sources();
   for (const auto &sourceCodeFile : cuSources) {
-    if (auto lte = sourceCodeFile->GetLineTableEntryFor(symbol_file->mBaseAddress, pc()); lte) {
+    if (auto lte = sourceCodeFile->GetLineTableEntryFor(mOwningSymbolFile->mBaseAddress, FramePc()); lte) {
       return {sourceCodeFile.get(), lte};
     }
   }
@@ -102,9 +102,9 @@ Frame::GetLineTableEntry() const noexcept
 }
 
 std::optional<ui::dap::Scope>
-Frame::scope(u32 var_ref) noexcept
+Frame::Scope(u32 var_ref) noexcept
 {
-  for (const auto scope : cached_scopes) {
+  for (const auto scope : mFrameScopes) {
     if (scope.variables_reference == var_ref) {
       return scope;
     }
@@ -113,67 +113,67 @@ Frame::scope(u32 var_ref) noexcept
 }
 
 std::array<ui::dap::Scope, 3>
-Frame::scopes() noexcept
+Frame::Scopes() noexcept
 {
   // Variable reference can't be 0, so a zero here, means we haven't created the scopes yet
-  if (cached_scopes[0].variables_reference == 0) {
+  if (mFrameScopes[0].variables_reference == 0) {
     for (auto i = 0u; i < 3; ++i) {
-      cached_scopes[i].type = static_cast<ui::dap::ScopeType>(i);
+      mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::Instance->new_key();
-      Tracer::Instance->set_var_context({symbol_file->GetSupervisor(), task->ptr, symbol_file, static_cast<u32>(id()),
+      Tracer::Instance->set_var_context({mOwningSymbolFile->GetSupervisor(), task->ptr, mOwningSymbolFile, static_cast<u32>(FrameId()),
                                          static_cast<u16>(key), ContextType::Scope});
-      cached_scopes[i].variables_reference = key;
+      mFrameScopes[i].variables_reference = key;
     }
   }
-  return cached_scopes;
+  return mFrameScopes;
 }
 
 sym::FunctionSymbol *
-Frame::maybe_get_full_symbols() const noexcept
+Frame::MaybeGetFullSymbolInfo() const noexcept
 {
-  ASSERT(type == FrameType::Full, "Frame has no full symbol info");
-  return symbol.full_symbol;
+  ASSERT(mFrameType == FrameType::Full, "Frame has no full symbol info");
+  return mSymbolUnion.full_symbol;
 }
 
 const MinSymbol *
-Frame::maybe_get_min_symbols() const noexcept
+Frame::MaybeGetMinimalSymbol() const noexcept
 {
-  ASSERT(type == FrameType::ElfSymbol, "Frame has no ELF symbol info");
-  return symbol.min_symbol;
+  ASSERT(mFrameType == FrameType::ElfSymbol, "Frame has no ELF symbol info");
+  return mSymbolUnion.min_symbol;
 }
 
 IterateFrameSymbols
-Frame::block_symbol_iterator(FrameVariableKind variables_kind) noexcept
+Frame::BlockSymbolIterator(FrameVariableKind variables_kind) noexcept
 {
   return IterateFrameSymbols{*this, variables_kind};
 }
 
 u32
-Frame::frame_locals_count() const noexcept
+Frame::FrameLocalVariablesCount() const noexcept
 {
-  return full_symbol_info().FrameVariablesCount();
+  return FullSymbolInfo().FrameVariablesCount();
 }
 
 u32
-Frame::frame_args_count() const noexcept
+Frame::FrameParameterCounts() const noexcept
 {
-  return full_symbol_info().GetFunctionArguments().symbols.size();
+  return FullSymbolInfo().GetFunctionArguments().symbols.size();
 }
 
 std::optional<std::string_view>
-Frame::name() const noexcept
+Frame::Name() const noexcept
 {
-  return function_name();
+  return GetFunctionName();
 }
 
 std::optional<std::string_view>
-Frame::function_name() const noexcept
+Frame::GetFunctionName() const noexcept
 {
-  switch (type) {
+  switch (mFrameType) {
   case FrameType::Full:
-    return symbol.full_symbol->name;
+    return mSymbolUnion.full_symbol->name;
   case FrameType::ElfSymbol:
-    return symbol.min_symbol->name;
+    return mSymbolUnion.min_symbol->name;
   case FrameType::Unknown:
     return std::nullopt;
   }
@@ -231,15 +231,15 @@ FrameUnwindState::GetRegister(u64 registerNumber) const noexcept
 }
 
 CallStack::CallStack(TraceeController *supervisor, TaskInfo *task) noexcept
-    : mTask(task), mSupervisor(supervisor), dirty(true)
+    : mTask(task), mSupervisor(supervisor), mCallstackIsDirty(true)
 {
 }
 
 Frame *
-CallStack::get_frame(int frame_id) noexcept
+CallStack::GetFrame(int frame_id) noexcept
 {
-  for (auto &f : frames) {
-    if (f.id() == frame_id) {
+  for (auto &f : mStackFrames) {
+    if (f.FrameId() == frame_id) {
       return &f;
     }
   }
@@ -249,14 +249,14 @@ CallStack::get_frame(int frame_id) noexcept
 Frame *
 CallStack::GetFrameAtLevel(u32 level) noexcept
 {
-  if (level >= frames.size()) {
+  if (level >= mStackFrames.size()) {
     return nullptr;
   }
-  return &frames[0];
+  return &mStackFrames[0];
 }
 
 u64
-CallStack::unwind_buffer_register(u8 level, u16 register_number) noexcept
+CallStack::UnwindRegister(u8 level, u16 register_number) noexcept
 {
   ASSERT(level < mUnwoundRegister.size(), "out of bounds");
   return mUnwoundRegister[level].GetRegister(register_number);
@@ -265,13 +265,13 @@ CallStack::unwind_buffer_register(u8 level, u16 register_number) noexcept
 bool
 CallStack::IsDirty() const noexcept
 {
-  return dirty;
+  return mCallstackIsDirty;
 }
 
 void
 CallStack::SetDirty() noexcept
 {
-  dirty = true;
+  mCallstackIsDirty = true;
 }
 
 void
@@ -299,7 +299,7 @@ CallStack::Reset() noexcept
 void
 CallStack::ClearFrames() noexcept
 {
-  frames.clear();
+  mStackFrames.clear();
 }
 
 void
@@ -317,7 +317,7 @@ CallStack::ClearUnwoundRegisters() noexcept
 void
 CallStack::Reserve(u32 count) noexcept
 {
-  frames.reserve(count);
+  mStackFrames.reserve(count);
   mFrameProgramCounters.reserve(count);
   mUnwoundRegister.reserve(count);
 }
@@ -325,23 +325,23 @@ CallStack::Reserve(u32 count) noexcept
 u32
 CallStack::FramesCount() const noexcept
 {
-  return frames.size();
+  return mStackFrames.size();
 }
 
 std::span<Frame>
 CallStack::GetFrames() noexcept
 {
-  return frames;
+  return mStackFrames;
 }
 
 std::optional<Frame>
 CallStack::FindFrame(const Frame &frame) const noexcept
 {
-  for (const auto &f : frames) {
-    if (f.has_symbol_info() && f.name() == frame.name()) {
+  for (const auto &f : mStackFrames) {
+    if (f.HasSymbolInfo() && f.Name() == frame.Name()) {
       return f;
     }
-    if (same_symbol(f, frame)) {
+    if (SameSymbol(f, frame)) {
       return f;
     }
   }
@@ -487,7 +487,7 @@ CallStack::Unwind(const CallStackRequest &req)
   }
   }
 
-  dirty = false;
+  mCallstackIsDirty = false;
 }
 
 } // namespace sym
