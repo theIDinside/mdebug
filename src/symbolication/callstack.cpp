@@ -94,7 +94,7 @@ Frame::GetLineTableEntry() const noexcept
   const CompilationUnit *cu = full_symbol_info().symbol_info();
   const auto& cuSources = cu->sources();
   for (const auto &sourceCodeFile : cuSources) {
-    if (auto lte = sourceCodeFile->GetLineTableEntryFor(symbol_file->baseAddress, pc()); lte) {
+    if (auto lte = sourceCodeFile->GetLineTableEntryFor(symbol_file->mBaseAddress, pc()); lte) {
       return {sourceCodeFile.get(), lte};
     }
   }
@@ -120,7 +120,7 @@ Frame::scopes() noexcept
     for (auto i = 0u; i < 3; ++i) {
       cached_scopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::Instance->new_key();
-      Tracer::Instance->set_var_context({symbol_file->supervisor(), task->ptr, symbol_file, static_cast<u32>(id()),
+      Tracer::Instance->set_var_context({symbol_file->GetSupervisor(), task->ptr, symbol_file, static_cast<u32>(id()),
                                          static_cast<u16>(key), ContextType::Scope});
       cached_scopes[i].variables_reference = key;
     }

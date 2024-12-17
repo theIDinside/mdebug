@@ -30,7 +30,7 @@ GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compil
   for (auto cu : compilationUnits) {
     for (const auto &src : cu->sources()) {
       if (src->address_bounds().contains(addr)) {
-        const auto *lte = src->GetLineTableEntryFor(obj->baseAddress, addr);
+        const auto *lte = src->GetLineTableEntryFor(obj->mBaseAddress, addr);
         if (lte) {
           return {src.get(), lte};
         }
@@ -52,7 +52,7 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
     mc_b += 3;
   }
   auto obj = target->find_obj_by_pc(vm_address);
-  auto cus = obj->getSourceInfos(vm_address);
+  auto cus = obj->GetCompilationUnits(vm_address);
   if (!cus.empty()) {
     SourceInfo sourceInfo = GetSourceInfo(obj, cus, vm_address);
     if (sourceInfo) {
@@ -88,12 +88,12 @@ zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offset,
                        std::vector<sym::Disassembly> &output) noexcept
 {
   const auto objfile = target->find_obj_by_pc(addr);
-  const auto text = objfile->objectFile()->GetElf()->get_section(".text");
+  const auto text = objfile->GetObjectFile()->GetElf()->get_section(".text");
   ZydisDisassembledInstruction instruction;
 
   // This hurts my soul and is so hacky.
   std::set<AddrPtr> disassembled_addresses{};
-  auto srcs = objfile->getSourceInfos(addr);
+  auto srcs = objfile->GetCompilationUnits(addr);
 
   std::sort(srcs.begin(), srcs.end(), [](auto a, auto b) { return a->start_pc() >= b->start_pc(); });
 

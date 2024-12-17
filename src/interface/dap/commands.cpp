@@ -1012,11 +1012,11 @@ Variables::execute() noexcept
     auto scope = frame->scope(var_ref);
     switch (scope->type) {
     case ScopeType::Arguments: {
-      auto vars = context.symbol_file->getVariables(*context.tc, *frame, sym::VariableSet::Arguments);
+      auto vars = context.symbol_file->GetVariables(*context.tc, *frame, sym::VariableSet::Arguments);
       return new VariablesResponse{true, this, std::move(vars)};
     }
     case ScopeType::Locals: {
-      auto vars = context.symbol_file->getVariables(*context.tc, *frame, sym::VariableSet::Locals);
+      auto vars = context.symbol_file->GetVariables(*context.tc, *frame, sym::VariableSet::Locals);
       return new VariablesResponse{true, this, std::move(vars)};
     }
     case ScopeType::Registers: {
@@ -1025,7 +1025,7 @@ Variables::execute() noexcept
     }
   } break;
   case ContextType::Variable:
-    return new VariablesResponse{true, this, context.symbol_file->resolve(context, start, count)};
+    return new VariablesResponse{true, this, context.symbol_file->ResolveVariable(context, start, count)};
   case ContextType::Global:
     TODO("Global variables not yet implemented support for");
     break;

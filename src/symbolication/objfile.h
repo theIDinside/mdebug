@@ -190,56 +190,53 @@ private:
 
 class SymbolFile
 {
-  std::shared_ptr<ObjectFile> binary_object;
-  TraceeController *tc{nullptr};
+  std::shared_ptr<ObjectFile> mObjectFile;
+  TraceeController *mTraceeController{nullptr};
 
 public:
   using shr_ptr = std::shared_ptr<SymbolFile>;
-  Immutable<std::string> obj_id;
-  Immutable<AddrPtr> baseAddress;
-  Immutable<AddressRange> pc_bounds;
+  Immutable<std::string> mSymbolObjectFileId;
+  Immutable<AddrPtr> mBaseAddress;
+  Immutable<AddressRange> mPcBounds;
 
   SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
              AddrPtr relocated_base) noexcept;
 
   static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary,
                         AddrPtr relocated_base) noexcept;
-  auto copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
-  auto getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
+  auto Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
+  auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
 
-  auto objectFile() const noexcept -> ObjectFile *;
-  auto symbolFileId() const noexcept -> std::string_view;
-  auto contains(AddrPtr pc) const noexcept -> bool;
-  auto unrelocate(AddrPtr pc) const noexcept -> AddrPtr;
+  auto GetObjectFile() const noexcept -> ObjectFile *;
+  auto ContainsProgramCounter(AddrPtr pc) const noexcept -> bool;
+  auto UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr;
 
   // Clears the variablesReference cache - not that this doesn't necessarily mean the objects will die; it only
   // mean that from a Variables Reference standpoint, they're no longer reachable. For instance, in the future, we
   // might open for extending the debugger so that the user can do scripts etc, and they might want to hold on to
   // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
   // user will have created something that holds a reference to the value it will now become the sole owner.
-  auto registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
-  auto getVariables(TraceeController &tc, sym::Frame &frame,
+  auto RegisterValueResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
+  auto GetVariables(TraceeController &tc, sym::Frame &frame,
                     sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>;
-  auto getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
-  auto getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
-  auto resolve(const VariableContext &ctx, std::optional<u32> start,
+  auto GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
+  auto GetSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
+  auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
                std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>;
-  // auto resolve(TraceeController &tc, int ref, std::optional<u32> start, std::optional<u32> count) noexcept ->
-  // std::vector<ui::dap::Variable>;
 
-  auto low_pc() noexcept -> AddrPtr;
-  auto high_pc() noexcept -> AddrPtr;
+  auto LowProgramCounter() noexcept -> AddrPtr;
+  auto HighProgramCounter() noexcept -> AddrPtr;
 
-  auto getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
-  auto searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *;
-  auto getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
-  auto path() const noexcept -> Path;
+  auto GetMinimalFunctionSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
+  auto SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *;
+  auto GetMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
+  auto GetObjectFilePath() const noexcept -> Path;
 
-  auto lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
-  auto supervisor() noexcept -> TraceeController *;
+  auto LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
+  auto GetSupervisor() noexcept -> TraceeController *;
 
 private:
-  std::vector<ui::dap::Variable> getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeController &tc,
+  std::vector<ui::dap::Variable> GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
                                                   sym::Frame &frame) noexcept;
 };
 

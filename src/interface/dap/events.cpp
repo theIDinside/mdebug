@@ -44,9 +44,9 @@ ModuleEvent::ModuleEvent(std::string_view reason, const ObjectFile &object_file)
 }
 
 ModuleEvent::ModuleEvent(std::string_view reason, const SymbolFile &symbol_file) noexcept
-    : objfile_id(symbol_file.symbolFileId()), reason(reason), name(symbol_file.path().filename()),
-      path(symbol_file.path()), addr_range(symbol_file.pc_bounds), sym_info(SharedObjectSymbols::Full),
-      symbol_file_path(symbol_file.path().c_str()), version()
+    : objfile_id(symbol_file.mSymbolObjectFileId), reason(reason), name(symbol_file.GetObjectFilePath().filename()),
+      path(symbol_file.GetObjectFilePath()), addr_range(symbol_file.mPcBounds), sym_info(SharedObjectSymbols::Full),
+      symbol_file_path(symbol_file.GetObjectFilePath().c_str()), version()
 {
 }
 

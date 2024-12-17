@@ -763,11 +763,11 @@ UnwindIterator::UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept
 std::optional<UnwindInfoSymbolFilePair>
 UnwinderSymbolFilePair::get_unwinder_info(AddrPtr pc) noexcept
 {
-  if (sf && !sf->pc_bounds->contains(pc)) {
+  if (sf && !sf->mPcBounds->contains(pc)) {
     return std::nullopt;
   }
 
-  const auto info = unwinder->get_unwind_info(sf != nullptr ? sf->unrelocate(pc) : pc);
+  const auto info = unwinder->get_unwind_info(sf != nullptr ? sf->UnrelocateAddress(pc) : pc);
   if (!info) {
     return std::nullopt;
   }
@@ -795,13 +795,13 @@ UnwindIterator::is_null() const noexcept
 AddrPtr
 UnwindInfoSymbolFilePair::start() const noexcept
 {
-  return info->start + sf->baseAddress;
+  return info->start + sf->mBaseAddress;
 }
 
 AddrPtr
 UnwindInfoSymbolFilePair::end() const noexcept
 {
-  return info->end + sf->baseAddress;
+  return info->end + sf->mBaseAddress;
 }
 
 std::span<const u8>

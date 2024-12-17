@@ -99,7 +99,7 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
   SymbolFile *symbol_file = tc.find_obj_by_pc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
 
-  auto src_infos = symbol_file->getSourceInfos(fpc);
+  auto src_infos = symbol_file->GetCompilationUnits(fpc);
   bool found = false;
 
   // the std::unordered_set here is just for de-duplication.
@@ -109,14 +109,14 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
 
     for (const auto &f : files) {
       if (utils::none_of(files_of_interest, [&f](auto &file) { return f->full_path == file.path(); })) {
-        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->baseAddress, f});
+        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->mBaseAddress, f});
       }
     }
   }
 
   for (auto &&file : files_of_interest) {
     if (const auto lte = file.FindLineTableEntry(fpc); lte) {
-      if (start_frame.inside(lte->RelocateProgramCounter(symbol_file->baseAddress).as_void()) ==
+      if (start_frame.inside(lte->RelocateProgramCounter(symbol_file->mBaseAddress).as_void()) ==
           sym::InsideRange::Yes) {
         if (lte->pc == fpc) {
           found = true;
@@ -519,7 +519,7 @@ StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
   SymbolFile *symbol_file = ctrl.find_obj_by_pc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
 
-  auto src_infos = symbol_file->getSourceInfos(fpc);
+  auto src_infos = symbol_file->GetCompilationUnits(fpc);
 
   // the std::unordered_set here is just for de-duplication.
   std::vector<sym::dw::RelocatedSourceCodeFile> files_of_interest{};
@@ -528,14 +528,14 @@ StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
 
     for (const auto &f : files) {
       if (utils::none_of(files_of_interest, [&f](auto &file) { return f->full_path == file.path(); })) {
-        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->baseAddress, f});
+        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->mBaseAddress, f});
       }
     }
   }
 
   for (auto &&file : files_of_interest) {
     if (const auto lte = file.FindLineTableEntry(fpc); lte) {
-      auto relocPc = lte->RelocateProgramCounter(symbol_file->baseAddress);
+      auto relocPc = lte->RelocateProgramCounter(symbol_file->mBaseAddress);
       if (start_frame.inside(relocPc) == sym::InsideRange::Yes) {
         if (relocPc == fpc) {
           return new StepInto{ctrl, task, start_frame, *lte};

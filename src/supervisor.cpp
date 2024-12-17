@@ -132,7 +132,7 @@ std::shared_ptr<SymbolFile>
 TraceeController::lookup_symbol_file(const Path &path) noexcept
 {
   for (const auto &s : symbol_files) {
-    if (s->objectFile()->IsFile(path)) {
+    if (s->GetObjectFile()->IsFile(path)) {
       return s;
     }
   }
@@ -186,7 +186,7 @@ createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<
   auto existing_obj = Tracer::Instance->LookupSymbolfile(path);
   if (existing_obj) {
     // if baseAddr == addr; unique = false, return null, because we've already registered it
-    return existing_obj->baseAddress != addr ? existing_obj->copy(tc, addr) : nullptr;
+    return existing_obj->mBaseAddress != addr ? existing_obj->Copy(tc, addr) : nullptr;
   } else {
     auto obj = ObjectFile::CreateObjectFile(&tc, path);
     if (obj != nullptr) {
@@ -208,7 +208,7 @@ TPtr<r_debug_extended>
 TraceeController::InstallDynamicLoaderBreakpoints() noexcept
 {
   ASSERT(main_executable != nullptr, "No main executable for this target");
-  const auto mainExecutableElf = main_executable->objectFile()->GetElf();
+  const auto mainExecutableElf = main_executable->GetObjectFile()->GetElf();
   auto int_path = interpreter_path(mainExecutableElf, mainExecutableElf->get_section(".interp"));
   auto tmp_objfile = ObjectFile::CreateObjectFile(this, int_path);
   ASSERT(tmp_objfile != nullptr, "Failed to mmap the loader binary");
@@ -511,7 +511,7 @@ TraceeController::get_or_create_bp_location(AddrPtr addr, bool attempt_src_resol
 
   if (attempt_src_resolve) {
     auto obj = find_obj_by_pc(addr);
-    auto srcs = obj->getSourceCodeFiles(addr);
+    auto srcs = obj->GetSourceCodeFiles(addr);
     for (auto src : srcs) {
       if (src.address_bounds().contains(addr)) {
         if (auto lte = src.FindLineTableEntry(addr); lte) {
@@ -574,7 +574,7 @@ TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakp
 {
   const auto sz = locs.size();
   if (auto specPtr = user.user_spec(); specPtr != nullptr) {
-    auto objfile = symbol_file.objectFile();
+    auto objfile = symbol_file.GetObjectFile();
     switch (specPtr->index()) {
     case UserBreakpoint::SOURCE_BREAKPOINT: {
       const auto &spec = std::get<std::pair<std::string, SourceBreakpointSpec>>(*specPtr);
@@ -582,8 +582,8 @@ TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakp
         std::vector<const sym::dw::LineTableEntry *> entries;
         if (source_code_file->FindLineTableEntryByLine(spec.second.line, spec.second.column, entries)) {
           for (auto e : entries) {
-            const auto pc = e->pc + symbol_file.baseAddress;
-            if (auto res = GetOrCreateBreakpointLocation(pc, symbol_file.baseAddress, *source_code_file);
+            const auto pc = e->pc + symbol_file.mBaseAddress;
+            if (auto res = GetOrCreateBreakpointLocation(pc, symbol_file.mBaseAddress, *source_code_file);
                 res.is_expected()) {
               locs.push_back(res.take_value());
             }
@@ -593,7 +593,7 @@ TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakp
     } break;
     case UserBreakpoint::FUNCTION_BREAKPOINT: {
       const auto &spec = std::get<FunctionBreakpointSpec>(*specPtr);
-      auto result = symbol_file.lookup_by_spec(spec);
+      auto result = symbol_file.LookupBreakpointBySpec(spec);
 
       if (auto it =
             std::find_if(result.begin(), result.end(), [](const auto &it) { return it.loc_src_info.has_value(); });
@@ -615,7 +615,7 @@ TraceeController::reassess_bploc_for_symfile(SymbolFile &symbol_file, UserBreakp
       auto addr_opt = to_addr(spec.instructionReference);
       ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
       const auto addr = addr_opt.value();
-      auto srcs = symbol_file.getSourceCodeFiles(addr);
+      auto srcs = symbol_file.GetSourceCodeFiles(addr);
       for (auto src : srcs) {
         if (src.address_bounds().contains(addr)) {
           if (auto iter = src.FindLineTableEntry(addr); iter) {
@@ -670,7 +670,7 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
 
   // Create new breakpoints, based on source specification or fn name spec, if they exist in new object files
   for (auto &&sym : new_symbol_files) {
-    auto obj = sym->objectFile();
+    auto obj = sym->GetObjectFile();
     for (const auto &source_file : pbps.sources_with_bpspecs()) {
       auto &file_bp_map = pbps.bps_for_source(source_file);
       if (auto source_code_file = obj->GetSourceCodeFile(source_file); source_code_file) {
@@ -679,7 +679,7 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
           entries.clear();
           if (source_code_file->FindLineTableEntryByLine(desc.line, desc.column, entries)) {
             for (auto e : entries) {
-              const auto pc = AddrPtr{e->pc + sym->baseAddress};
+              const auto pc = AddrPtr{e->pc + sym->mBaseAddress};
               bool same_src_loc_different_pc = false;
               for (const auto id : user_ids) {
                 auto user = pbps.get_user(id);
@@ -691,7 +691,7 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
                 std::unique_ptr<UserBpSpec> spec =
                   std::make_unique<UserBpSpec>(std::make_pair(std::string{source_file}, desc));
                 auto user = pbps.create_loc_user<Breakpoint>(
-                  *this, GetOrCreateBreakpointLocation(pc, sym->baseAddress, *source_code_file), task_leader,
+                  *this, GetOrCreateBreakpointLocation(pc, sym->mBaseAddress, *source_code_file), task_leader,
                   LocationUserKind::Source, std::nullopt, std::nullopt, !independent_task_resume_control(),
                   std::move(spec));
                 dap_client->post_event(new ui::dap::BreakpointEvent{"new", {}, user.get()});
@@ -705,7 +705,7 @@ TraceeController::do_breakpoints_update(std::vector<std::shared_ptr<SymbolFile>>
     }
 
     for (auto &[fn, ids] : pbps.fn_breakpoints) {
-      auto result = sym->lookup_by_spec(fn);
+      auto result = sym->LookupBreakpointBySpec(fn);
       for (auto &&lookup : result) {
         auto user = pbps.create_loc_user<Breakpoint>(
           *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info)), task_leader,
@@ -728,7 +728,7 @@ TraceeController::update_source_bps(const std::filesystem::path &source_filepath
   Set<SourceBreakpointSpec> not_set{add.begin(), add.end()};
 
   for (const auto &symbol_file : symbol_files) {
-    auto obj = symbol_file->objectFile();
+    auto obj = symbol_file->GetObjectFile();
 
     if (SourceCodeFile::ShrPtr source_code_file = obj->GetSourceCodeFile(source_filepath.c_str());
         source_code_file) {
@@ -737,9 +737,9 @@ TraceeController::update_source_bps(const std::filesystem::path &source_filepath
         foundEntries.clear();
         if (source_code_file->FindLineTableEntryByLine(src_bp.line, src_bp.column, foundEntries)) {
           for (const auto e : foundEntries) {
-            const auto pc = e->pc + symbol_file->baseAddress;
+            const auto pc = e->pc + symbol_file->mBaseAddress;
             auto user = pbps.create_loc_user<Breakpoint>(
-              *this, GetOrCreateBreakpointLocation(pc, symbol_file->baseAddress, *source_code_file), task_leader,
+              *this, GetOrCreateBreakpointLocation(pc, symbol_file->mBaseAddress, *source_code_file), task_leader,
               LocationUserKind::Source, std::nullopt, std::nullopt, !independent_task_resume_control(),
               std::make_unique<UserBpSpec>(std::make_pair(source_filepath.string(), src_bp)));
             map[src_bp].push_back(user->id);
@@ -815,14 +815,14 @@ TraceeController::set_instruction_breakpoints(const Set<InstructionBreakpointSpe
   for (const auto &bp : add) {
     auto addr = to_addr(bp.instructionReference).value();
     auto symbol_file = find_obj_by_pc(addr);
-    auto srcs = symbol_file != nullptr ? symbol_file->getSourceCodeFiles(addr)
+    auto srcs = symbol_file != nullptr ? symbol_file->GetSourceCodeFiles(addr)
                                        : std::vector<sym::dw::RelocatedSourceCodeFile>{};
     bool was_not_set = true;
     for (auto src : srcs) {
       if (src.address_bounds().contains(addr)) {
         if (auto entry = src.FindLineTableEntry(addr); entry) {
           const auto user = pbps.create_loc_user<Breakpoint>(
-            *this, GetOrCreateBreakpointLocation(addr, symbol_file->baseAddress, src.get()), task_leader,
+            *this, GetOrCreateBreakpointLocation(addr, symbol_file->mBaseAddress, src.get()), task_leader,
             LocationUserKind::Address, std::nullopt, std::nullopt, !independent_task_resume_control(),
             std::make_unique<UserBpSpec>(bp));
           pbps.instruction_breakpoints[bp] = user->id;
@@ -874,7 +874,7 @@ TraceeController::set_fn_breakpoints(const Set<FunctionBreakpointSpec> &bps) noe
 
   for (auto &sym : symbol_files) {
     for (auto &fn : specsToAdd) {
-      auto result = sym->lookup_by_spec(fn.mSpec);
+      auto result = sym->LookupBreakpointBySpec(fn.mSpec);
       for (auto &&lookup : result) {
         auto user = pbps.create_loc_user<Breakpoint>(
           *this, get_or_create_bp_location(lookup.address, std::move(lookup.loc_src_info)), task_leader,
@@ -1002,12 +1002,12 @@ void
 TraceeController::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept
 {
   const auto it = std::find_if(symbol_files.begin(), symbol_files.end(),
-                               [&symbolFile](auto &s) { return symbolFile->path() == s->path(); });
+                               [&symbolFile](auto &s) { return symbolFile->GetObjectFilePath() == s->GetObjectFilePath(); });
   if (it != std::end(symbol_files)) {
-    const auto same_bounds = symbolFile->pc_bounds == (*it)->pc_bounds;
+    const auto same_bounds = symbolFile->mPcBounds == (*it)->mPcBounds;
     DBGLOG(core, "[symbol file]: Already added {} at {} .. {}; new is at {}..{} - Same range?: {}",
-           symbolFile->path().c_str(), (*it)->low_pc(), (*it)->high_pc(), symbolFile->low_pc(),
-           symbolFile->high_pc(), same_bounds)
+           symbolFile->GetObjectFilePath().c_str(), (*it)->LowProgramCounter(), (*it)->HighProgramCounter(), symbolFile->LowProgramCounter(),
+           symbolFile->HighProgramCounter(), same_bounds)
     return;
   }
   symbol_files.emplace_back(symbolFile);
@@ -1018,10 +1018,10 @@ TraceeController::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, boo
 
   // todo(simon): optimization possible; insert in a sorted fashion instead.
   std::sort(symbol_files.begin(), symbol_files.end(), [&symbolFile](auto &&a, auto &&b) {
-    ASSERT(a->low_pc() != b->low_pc(),
+    ASSERT(a->LowProgramCounter() != b->LowProgramCounter(),
            "[{}]: Added object files with identical address ranges. We screwed something up, for sure\na={}\nb={}",
-           symbolFile->path().c_str(), a->path().c_str(), b->path().c_str());
-    return a->low_pc() < b->low_pc() && a->high_pc() < b->high_pc();
+           symbolFile->GetObjectFilePath().c_str(), a->GetObjectFilePath().c_str(), b->GetObjectFilePath().c_str());
+    return a->LowProgramCounter() < b->LowProgramCounter() && a->HighProgramCounter() < b->HighProgramCounter();
   });
   new_objectfile.emit(symbolFile.get());
 }
@@ -1172,21 +1172,21 @@ TraceeController::current_frame(TaskInfo &task) noexcept
   if (obj == nullptr) {
     return sym::Frame{nullptr, task, 0, 0, pc, nullptr};
   }
-  auto cus_matching_addr = obj->getCusFromPc(pc);
+  auto cus_matching_addr = obj->GetUnitDataFromProgramCounter(pc);
 
   // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
   //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
   for (auto cu : cus_matching_addr) {
-    for (auto &src : obj->objectFile()->GetCompilationUnits()) {
+    for (auto &src : obj->GetObjectFile()->GetCompilationUnits()) {
       if (cu == src.get_dwarf_unit()) {
-        if (auto fn = src.get_fn_by_pc(obj->unrelocate(pc)); fn) {
+        if (auto fn = src.get_fn_by_pc(obj->UnrelocateAddress(pc)); fn) {
           return sym::Frame{obj, task, 0, 0, pc, fn};
         }
       }
     }
   }
 
-  if (auto min_sym = obj->searchMinSymFnInfo(pc); min_sym != nullptr) {
+  if (auto min_sym = obj->SearchMinimalSymbolFunctionInfo(pc); min_sym != nullptr) {
     return sym::Frame{obj, task, 0, 0, pc, min_sym};
   } else {
     return sym::Frame{obj, task, 0, 0, pc, nullptr};
@@ -1197,10 +1197,10 @@ sym::UnwinderSymbolFilePair
 TraceeController::get_unwinder_from_pc(AddrPtr pc) noexcept
 {
   for (auto &symbol_file : symbol_files) {
-    const auto u = symbol_file->objectFile()->GetUnwinder();
+    const auto u = symbol_file->GetObjectFile()->GetUnwinder();
     const auto addr_range = u->addr_range;
-    if (pc > symbol_file->baseAddress) {
-      const auto unrelocated = symbol_file->unrelocate(pc);
+    if (pc > symbol_file->mBaseAddress) {
+      const auto unrelocated = symbol_file->UnrelocateAddress(pc);
       if (addr_range.contains(unrelocated)) {
         return sym::UnwinderSymbolFilePair{u, symbol_file.get()};
       }
@@ -1262,7 +1262,7 @@ TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) no
       cs_ref.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {
       auto obj = find_obj_by_pc(frame_pc);
-      auto min_sym = obj->searchMinSymFnInfo(frame_pc);
+      auto min_sym = obj->SearchMinimalSymbolFunctionInfo(frame_pc);
       if (min_sym) {
         cs_ref.PushFrame(obj, task, depth, id, i.as_void(), min_sym);
       } else {
@@ -1277,7 +1277,7 @@ TraceeController::build_callframe_stack(TaskInfo &task, CallStackRequest req) no
 SymbolFile *
 TraceeController::find_obj_by_pc(AddrPtr addr) noexcept
 {
-  return utils::find_if(symbol_files, [addr](auto &symbol_file) { return symbol_file->contains(addr); })
+  return utils::find_if(symbol_files, [addr](auto &symbol_file) { return symbol_file->ContainsProgramCounter(addr); })
     .transform([](auto iterator) { return iterator->get(); })
     .value_or(nullptr);
 }
@@ -1290,14 +1290,14 @@ TraceeController::find_fn_by_pc(AddrPtr addr) noexcept
     return std::nullopt;
   }
 
-  auto cus_matching_addr = obj->getCusFromPc(addr);
+  auto cus_matching_addr = obj->GetUnitDataFromProgramCounter(addr);
 
   // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
   //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
   for (auto cu : cus_matching_addr) {
-    for (auto &src : obj->objectFile()->GetCompilationUnits()) {
+    for (auto &src : obj->GetObjectFile()->GetCompilationUnits()) {
       if (cu == src.get_dwarf_unit()) {
-        if (auto fn = src.get_fn_by_pc(obj->unrelocate(addr)); fn) {
+        if (auto fn = src.get_fn_by_pc(obj->UnrelocateAddress(addr)); fn) {
           return std::make_pair(fn, NonNull(*obj));
         }
       }
@@ -1312,7 +1312,7 @@ TraceeController::get_text_section(AddrPtr addr) noexcept
 {
   const auto obj = find_obj_by_pc(addr);
   if (obj) {
-    const auto text = obj->objectFile()->GetElf()->get_section(".text");
+    const auto text = obj->GetObjectFile()->GetElf()->get_section(".text");
     return text;
   }
   return nullptr;

@@ -572,8 +572,8 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 
 SymbolFile::SymbolFile(TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary,
                        AddrPtr relocated_base) noexcept
-    : binary_object(std::move(binary)), tc(tc), obj_id(std::move(obj_id)), baseAddress(relocated_base),
-      pc_bounds(AddressRange::relocate(binary_object->mUnrelocatedAddressBounds, relocated_base))
+    : mObjectFile(std::move(binary)), mTraceeController(tc), mSymbolObjectFileId(std::move(obj_id)), mBaseAddress(relocated_base),
+      mPcBounds(AddressRange::relocate(mObjectFile->mUnrelocatedAddressBounds, relocated_base))
 {
 }
 
@@ -587,45 +587,39 @@ SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, A
 }
 
 auto
-SymbolFile::copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
+SymbolFile::Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
-  auto obj = binary_object;
+  auto obj = mObjectFile;
   return SymbolFile::Create(&tc, std::move(obj), relocated_base);
 }
 
 auto
-SymbolFile::getCusFromPc(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
+SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
 {
-  return objectFile()->GetProbableCompilationUnits(pc - baseAddress->get());
-}
-
-auto
-SymbolFile::symbolFileId() const noexcept -> std::string_view
-{
-  return obj_id;
+  return GetObjectFile()->GetProbableCompilationUnits(pc - mBaseAddress->get());
 }
 
 inline auto
-SymbolFile::objectFile() const noexcept -> ObjectFile *
+SymbolFile::GetObjectFile() const noexcept -> ObjectFile *
 {
-  return binary_object.get();
+  return mObjectFile.get();
 }
 
 auto
-SymbolFile::contains(AddrPtr pc) const noexcept -> bool
+SymbolFile::ContainsProgramCounter(AddrPtr pc) const noexcept -> bool
 {
-  return pc_bounds->contains(pc);
+  return mPcBounds->contains(pc);
 }
 
 auto
-SymbolFile::unrelocate(AddrPtr pc) const noexcept -> AddrPtr
+SymbolFile::UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr
 {
-  ASSERT(pc > baseAddress, "PC={} is below base address {}.", pc, baseAddress);
-  return pc - baseAddress;
+  ASSERT(pc > mBaseAddress, "PC={} is below base address {}.", pc, mBaseAddress);
+  return pc - mBaseAddress;
 }
 
 auto
-SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> void
+SymbolFile::RegisterValueResolver(std::shared_ptr<sym::Value> &value) noexcept -> void
 {
   // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
@@ -633,7 +627,7 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
   //   values and how to display them, which *is* the issue with GDB's pretty printers
   auto type = value->type()->resolve_alias();
 
-  if (auto resolver = objectFile()->FindCustomDataResolverFor(*type); resolver != nullptr) {
+  if (auto resolver = GetObjectFile()->FindCustomDataResolverFor(*type); resolver != nullptr) {
     value->set_resolver(std::move(resolver));
     return;
   }
@@ -664,20 +658,20 @@ SymbolFile::registerResolver(std::shared_ptr<sym::Value> &value) noexcept -> voi
 }
 
 auto
-SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame,
+SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
                          sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
   if (!frame.full_symbol_info().is_resolved()) {
-    sym::dw::FunctionSymbolicationContext sym_ctx{*this->objectFile(), frame};
+    sym::dw::FunctionSymbolicationContext sym_ctx{*this->GetObjectFile(), frame};
     sym_ctx.process_symbol_information();
   }
 
   switch (set) {
   case sym::VariableSet::Arguments: {
-    return getVariablesImpl(sym::FrameVariableKind::Arguments, tc, frame);
+    return GetVariables(sym::FrameVariableKind::Arguments, tc, frame);
   }
   case sym::VariableSet::Locals: {
-    return getVariablesImpl(sym::FrameVariableKind::Locals, tc, frame);
+    return GetVariables(sym::FrameVariableKind::Locals, tc, frame);
   }
   case sym::VariableSet::Static:
   case sym::VariableSet::Global:
@@ -687,19 +681,19 @@ SymbolFile::getVariables(TraceeController &tc, sym::Frame &frame,
   return {};
 }
 auto
-SymbolFile::getSourceInfos(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
+SymbolFile::GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
-  return binary_object->GetCompilationUnitsSpanningPC(pc - *baseAddress);
+  return mObjectFile->GetCompilationUnitsSpanningPC(pc - *mBaseAddress);
 }
 
 auto
-SymbolFile::getSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
+SymbolFile::GetSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
 {
-  return binary_object->GetRelocatedSourceCodeFiles(baseAddress, pc);
+  return mObjectFile->GetRelocatedSourceCodeFiles(mBaseAddress, pc);
 }
 
 auto
-SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
+SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
                     std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
 {
   auto value = ctx.get_maybe_value();
@@ -709,7 +703,7 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
   }
   auto type = value->type();
   if (!type->is_resolved()) {
-    sym::dw::TypeSymbolicationContext ts_ctx{*objectFile(), *type};
+    sym::dw::TypeSymbolicationContext ts_ctx{*GetObjectFile(), *type};
     ts_ctx.resolve_type();
   }
 
@@ -719,8 +713,8 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
     std::vector<ui::dap::Variable> result{};
 
     for (auto &var : variables) {
-      objectFile()->InitializeDataVisualizer(var);
-      registerResolver(var);
+      GetObjectFile()->InitializeDataVisualizer(var);
+      RegisterValueResolver(var);
       const auto new_ref = var->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, var);
@@ -736,8 +730,8 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
     for (auto &mem : type->member_variables()) {
       auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
                                                        value->mem_contents_offset, value->take_memory_reference());
-      objectFile()->InitializeDataVisualizer(member_value);
-      registerResolver(member_value);
+      GetObjectFile()->InitializeDataVisualizer(member_value);
+      RegisterValueResolver(member_value);
       const auto new_ref =
         member_value->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
@@ -750,55 +744,55 @@ SymbolFile::resolve(const VariableContext &ctx, std::optional<u32> start,
 }
 
 auto
-SymbolFile::low_pc() noexcept -> AddrPtr
+SymbolFile::LowProgramCounter() noexcept -> AddrPtr
 {
-  return baseAddress + objectFile()->mUnrelocatedAddressBounds.low;
+  return mBaseAddress + GetObjectFile()->mUnrelocatedAddressBounds.low;
 }
 
 auto
-SymbolFile::high_pc() noexcept -> AddrPtr
+SymbolFile::HighProgramCounter() noexcept -> AddrPtr
 {
-  return baseAddress + objectFile()->mUnrelocatedAddressBounds.high;
+  return mBaseAddress + GetObjectFile()->mUnrelocatedAddressBounds.high;
 }
 
 auto
-SymbolFile::getMinimalFnSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
+SymbolFile::GetMinimalFunctionSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
 {
-  return binary_object->FindMinimalFunctionSymbol(name);
+  return mObjectFile->FindMinimalFunctionSymbol(name);
 }
 
 auto
-SymbolFile::searchMinSymFnInfo(AddrPtr pc) noexcept -> const MinSymbol *
+SymbolFile::SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *
 {
-  return objectFile()->SearchMinimalSymbolFunctionInfo(pc - *baseAddress);
+  return GetObjectFile()->SearchMinimalSymbolFunctionInfo(pc - *mBaseAddress);
 }
 
 auto
-SymbolFile::getMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
+SymbolFile::GetMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>
 {
-  return binary_object->FindMinimalObjectSymbol(name);
+  return mObjectFile->FindMinimalObjectSymbol(name);
 }
 
 auto
-SymbolFile::path() const noexcept -> Path
+SymbolFile::GetObjectFilePath() const noexcept -> Path
 {
-  return binary_object->mObjectFilePath;
+  return mObjectFile->mObjectFilePath;
 }
 
 auto
-SymbolFile::supervisor() noexcept -> TraceeController *
+SymbolFile::GetSupervisor() noexcept -> TraceeController *
 {
-  return tc;
+  return mTraceeController;
 }
 
 auto
-SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>
+SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>
 {
 
   std::vector<MinSymbol> matching_symbols;
   std::vector<BreakpointLookup> result{};
 
-  auto obj = objectFile();
+  auto obj = GetObjectFile();
   std::vector<std::string> search_for{};
   if (spec.is_regex) {
     const auto start = std::chrono::high_resolution_clock::now();
@@ -827,9 +821,9 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
 
   Set<AddrPtr> bps_set{};
   for (const auto &sym : matching_symbols) {
-    const auto relocatedAddress = sym.address + baseAddress;
+    const auto relocatedAddress = sym.address + mBaseAddress;
     if (!bps_set.contains(relocatedAddress)) {
-      auto srcs = getSourceCodeFiles(sym.address);
+      auto srcs = GetSourceCodeFiles(sym.address);
       for (auto src : srcs) {
         if (src.address_bounds().contains(relocatedAddress)) {
           if (const auto lte = src.FindLineTableEntry(relocatedAddress);
@@ -844,7 +838,7 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
 
   for (const auto &n : search_for) {
     if (auto s =
-          obj->FindMinimalFunctionSymbol(n).transform([&](const auto &sym) { return sym.address + baseAddress; });
+          obj->FindMinimalFunctionSymbol(n).transform([&](const auto &sym) { return sym.address + mBaseAddress; });
         s.has_value() && !bps_set.contains(s.value())) {
       result.emplace_back(s.value(), std::nullopt);
       bps_set.insert(s.value());
@@ -855,7 +849,7 @@ SymbolFile::lookup_by_spec(const FunctionBreakpointSpec &spec) noexcept -> std::
 }
 
 auto
-SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeController &tc,
+SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
                              sym::Frame &frame) noexcept -> std::vector<ui::dap::Variable>
 {
   std::vector<ui::dap::Variable> result{};
@@ -871,14 +865,14 @@ SymbolFile::getVariablesImpl(sym::FrameVariableKind variables_kind, TraceeContro
   for (auto &symbol : frame.block_symbol_iterator(variables_kind)) {
     const auto ref = symbol.type->is_primitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.type->is_resolved()) {
-      sym::dw::TypeSymbolicationContext ts_ctx{*this->objectFile(), symbol.type};
+      sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.type};
       ts_ctx.resolve_type();
     }
 
     auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
                                                                          const_cast<sym::Symbol &>(symbol), true);
-    objectFile()->InitializeDataVisualizer(value_object);
-    registerResolver(value_object);
+    GetObjectFile()->InitializeDataVisualizer(value_object);
+    RegisterValueResolver(value_object);
 
     if (ref > 0) {
       Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.id()),
