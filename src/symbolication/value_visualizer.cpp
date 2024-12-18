@@ -105,7 +105,7 @@ CStringResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std
 
   if (const auto address = locked->ToRemotePointer(); address.is_expected()) {
     auto adjusted_address = address.value() + (start.value_or(0) * locked->GetType()->Size());
-    const auto requested_length = count.value_or(32);
+    const auto requested_length = count.value_or(256);
     auto memory = sym::MemoryContentsObject::ReadMemory(tc, adjusted_address, requested_length);
     mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));

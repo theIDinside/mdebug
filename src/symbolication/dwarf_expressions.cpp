@@ -688,7 +688,7 @@ static Op ops[0xff] = {
 
 AddrPtr ExprByteCodeInterpreter::ComputeFrameBase() noexcept {
   ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
-  ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mTraceeController, task, mFrameBaseProgram};
+  ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mTraceeController, mTask, mFrameBaseProgram};
   return frameBaseReader.Run();
 }
 
