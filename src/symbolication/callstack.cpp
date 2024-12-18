@@ -368,12 +368,12 @@ CallStack::GetCurrent() noexcept
 bool
 CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
 {
-  auto &cfa = stateMachine.get_cfa();
+  auto &cfa = stateMachine.GetCanonicalFrameAddressData();
 
   const u64 canonicalFrameAddr =
-    stateMachine.get_cfa().is_expr
-      ? stateMachine.compute_expression(cfa.expr)
-      : static_cast<u64>(static_cast<i64>(mUnwoundRegister.back().GetRegister(cfa.reg.number)) + cfa.reg.offset);
+    stateMachine.GetCanonicalFrameAddressData().mIsExpression
+      ? stateMachine.ComputeExpression(cfa.uExpression)
+      : static_cast<u64>(static_cast<i64>(mUnwoundRegister.back().GetRegister(cfa.reg.uNumber)) + cfa.reg.uOffset);
   DBGLOG(core, "[eh]: canonical frame address computed: 0x{:x}", canonicalFrameAddr);
   stateMachine.SetCanonicalFrameAddress(canonicalFrameAddr);
 
@@ -401,10 +401,10 @@ decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state)
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
   DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
-  const utils::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.info);
+  const utils::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.mInfo);
   DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
   DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
-  sym::decode(fde, state, info.info);
+  sym::decode(fde, state, info.mInfo);
 }
 
 FrameUnwindState *
@@ -422,14 +422,14 @@ CallStack::Unwind(const CallStackRequest &req)
   // TODO: Implement frame unwind caching.
   const auto pc = mTask->GetRegisterCache().GetPc();
   sym::UnwindIterator it{mSupervisor, pc};
-  auto uninfo = it.get_info(pc);
+  auto uninfo = it.GetInfo(pc);
   bool initialized = false;
   if (!uninfo) {
     constexpr auto STACK_POINTER_NUMBER = 7;
     // we may be in a plt entry. Try sniffing out this frame before throwing away the entire call stack
     // a call instruction automatically pushes rip onto the stack at $rsp
     const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{mTask->get_register(STACK_POINTER_NUMBER)});
-    uninfo = it.get_info(resumeAddress);
+    uninfo = it.GetInfo(resumeAddress);
     if (uninfo) {
       Initialize();
       mFrameProgramCounters.push_back(GetTopMostPc());
@@ -459,7 +459,7 @@ CallStack::Unwind(const CallStackRequest &req)
 
   switch (request) {
   case CallStackRequest::Type::Full: {
-    for (auto uinf = uninfo; uinf.has_value(); uinf = it.get_info(GetTopMostPc())) {
+    for (auto uinf = uninfo; uinf.has_value(); uinf = it.GetInfo(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
       cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
       decode_eh_insts(uinf.value(), cfa_state);
@@ -472,7 +472,7 @@ CallStack::Unwind(const CallStackRequest &req)
     break;
   }
   case CallStackRequest::Type::Partial: {
-    for (auto uinf = uninfo; uinf.has_value() && count > 0; uinf = it.get_info(GetTopMostPc())) {
+    for (auto uinf = uninfo; uinf.has_value() && count > 0; uinf = it.GetInfo(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
       cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
       decode_eh_insts(uinf.value(), cfa_state);

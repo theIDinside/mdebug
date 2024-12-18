@@ -40,35 +40,35 @@ struct Reg
   Reg() noexcept;
   union
   {
-    u64 value;
-    i64 offset;
-    std::span<const u8> expr;
+    u64 uValue;
+    i64 uOffset;
+    std::span<const u8> uExpression;
   };
-  void set_expression(std::span<const u8> expr) noexcept;
-  void set_val_expression(std::span<const u8> expr) noexcept;
-  void set_offset(i64 offset) noexcept;
-  void set_value_offset(i64 val_offset) noexcept;
-  void set_register(u64 reg) noexcept;
-  RegisterRule rule;
+  void SetExpression(std::span<const u8> expr) noexcept;
+  void SetValueExpression(std::span<const u8> expr) noexcept;
+  void SetOffset(i64 offset) noexcept;
+  void SetValueOffset(i64 val_offset) noexcept;
+  void SetRegister(u64 reg) noexcept;
+  RegisterRule mRule;
 };
 
 struct CFA
 {
-  bool is_expr;
+  bool mIsExpression;
   union
   {
     struct
     {
-      u64 number;
-      i64 offset;
+      u64 uNumber;
+      i64 uOffset;
     } reg;
-    std::span<const u8> expr;
+    std::span<const u8> uExpression;
   };
 
-  void set_register(u64 number, i64 offset) noexcept;
-  void set_register(u64 number) noexcept;
-  void set_offset(i64 offset) noexcept;
-  void set_expression(std::span<const u8> expr) noexcept;
+  void SetRegister(u64 number, i64 offset) noexcept;
+  void SetRegister(u64 number) noexcept;
+  void SetOffset(i64 offset) noexcept;
+  void SetExpression(std::span<const u8> expr) noexcept;
 };
 
 template <size_t RegCount> struct FrameRegisters
@@ -96,16 +96,16 @@ public:
    * registers. */
   static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
                               AddrPtr pc) noexcept;
-  u64 compute_expression(std::span<const u8> bytes) noexcept;
-  u64 ResolveRegisterContents(u64 reg_number, const FrameUnwindState &belowFrame) noexcept;
+  u64 ComputeExpression(std::span<const u8> bytes) noexcept;
+  u64 ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame) noexcept;
   void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
   void RememberState() noexcept;
   void RestoreState() noexcept;
 
-  const CFA &get_cfa() const noexcept;
-  const Registers &get_regs() const noexcept;
-  const Reg &ret_reg() const noexcept;
-  void reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame_below, AddrPtr pc) noexcept;
+  const CFA &GetCanonicalFrameAddressData() const noexcept;
+  const Registers &GetRegisters() const noexcept;
+  const Reg &GetProgramCounterRegister() const noexcept;
+  void Reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frameBelow, AddrPtr pc) noexcept;
   void Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters, AddrPtr pc) noexcept;
   void SetNoKnownResumeAddress() noexcept;
   constexpr bool
@@ -115,96 +115,91 @@ public:
   }
 
 private:
-  TraceeController &tc;
-  TaskInfo &task;
-  AddrPtr fde_pc;
-  AddrPtr end_pc;
-  CFA cfa;
-  Registers rule_table;
+  TraceeController &mTraceeController;
+  TaskInfo &mTask;
+  AddrPtr mFrameDescriptionEntryPc;
+  AddrPtr mEndPc;
+  CFA mCanonicalFrameAddressData;
+  Registers mRuleTable;
   u64 mCanonicalFrameAddressValue;
   bool mResumeAddressUndefined{false};
   std::vector<Registers> mRememberedState;
   std::vector<CFA> mRememberedCFA;
 };
 
-struct ByteCodeInterpreter
-{
-  ByteCodeInterpreter(std::span<const u8> stream) noexcept;
-  std::vector<DwarfCallFrame> debug_parse();
-
-  void advance_loc(u64 delta) noexcept;
-
-  std::span<const u8> byte_stream;
-};
-
 struct Enc
 {
-  DwarfExceptionHeaderApplication loc_fmt;
-  DwarfExceptionHeaderEncoding value_fmt;
+  DwarfExceptionHeaderApplication mLocationFormat;
+  DwarfExceptionHeaderEncoding mValueFormat;
 };
 
-struct Augmentation {
+struct Augmentation
+{
   bool HasAugmentDataField : 1;
   bool HasEHDataField : 1;
-  bool HasLanguageSpecificDataArea: 1;
+  bool HasLanguageSpecificDataArea : 1;
   bool HasPersonalityRoutinePointer : 1;
   bool HasFDEPointerEncoding : 1;
 };
 
 struct CommonInformationEntry
 {
-  u64 length;
-  DwFormat fmt;
-  Enc fde_encoding;
-  u8 addr_size;
-  u8 segment_size;
-  u8 version;
-  u64 id;
-  std::optional<std::string_view> augmentation_string;
-  AddrPtr personality_address;
-  Enc lsda_encoding;
-  DwarfExceptionHeaderApplication p_application;
-  u64 code_alignment_factor;
-  i64 data_alignment_factor;
-  u64 retaddr_register;
-  std::span<const u8> instructions;
-  u64 offset;
+  u64 mLength;
+  DwFormat mDwarfFormat;
+  Enc mFrameDescriptionEntryEncoding;
+  u8 mAddrSize;
+  u8 mSegmentSize;
+  u8 mVersion;
+  u64 mId;
+  std::optional<std::string_view> mAugmentationString;
+  // The address of the function (?) that can run this exception frame code. Maybe?
+  AddrPtr mPersonalityAddress;
+  Enc mLanguageSpecificDataAreaEncoding;
+  DwarfExceptionHeaderApplication mExceptionHeaderApplication;
+  u64 mCodeAlignFactor;
+  i64 mDataAlignFactor;
+  u64 mReturnAddressRegister;
+  std::span<const u8> mInstructionByteStream;
+  // The offset into .debug_frame or .eh_frame where this CIE can be found.
+  u64 mSectionOffset;
 
-  constexpr Augmentation GetAugmentation() const noexcept {
-    if(!augmentation_string) {
+  constexpr Augmentation
+  GetAugmentation() const noexcept
+  {
+    if (!mAugmentationString) {
       return Augmentation{false, false, false, false, false};
     }
 
     Augmentation aug{false, false, false, false, false};
 
-    auto& view = augmentation_string.value();
+    auto &view = mAugmentationString.value();
     const auto sz = view.size();
 
-    for(auto i = 0u; i < sz; ++i) {
+    for (auto i = 0u; i < sz; ++i) {
       const char ch = view[i];
-      switch(ch) {
-        case 'z':
-          aug.HasAugmentDataField = true;
-          break;
-        case 'e':
-          ASSERT(view[i+1] == 'h', "Expected augmentation to be 'eh' but wasn't.");
-          aug.HasEHDataField = true;
-          ++i;
-          break;
-        case 'L':
-          aug.HasLanguageSpecificDataArea = true;
-          break;
-        case 'P':
-          aug.HasPersonalityRoutinePointer = true;
-          break;
-        case 'R':
-          aug.HasFDEPointerEncoding = true;
-          break;
-        case 'S':
-          // found in /lib64/ld-linux-x86-64.so.2, but I don't know what it does.
-          break;
-        [[unlikely]] default:
-          ASSERT(false, "Unknown augmentation specifier");
+      switch (ch) {
+      case 'z':
+        aug.HasAugmentDataField = true;
+        break;
+      case 'e':
+        ASSERT(view[i + 1] == 'h', "Expected augmentation to be 'eh' but wasn't.");
+        aug.HasEHDataField = true;
+        ++i;
+        break;
+      case 'L':
+        aug.HasLanguageSpecificDataArea = true;
+        break;
+      case 'P':
+        aug.HasPersonalityRoutinePointer = true;
+        break;
+      case 'R':
+        aug.HasFDEPointerEncoding = true;
+        break;
+      case 'S':
+        // found in /lib64/ld-linux-x86-64.so.2, but I don't know what it does.
+        break;
+      [[unlikely]] default:
+        ASSERT(false, "Unknown augmentation specifier");
       }
     }
     return aug;
@@ -215,56 +210,56 @@ using CIE = CommonInformationEntry;
 
 struct FrameDescriptionEntry
 {
-  u64 length;
-  u64 cie_offset;
-  u64 address_range;
-  std::span<u8> instructions;
-  u16 padding;
+  u64 mLength;
+  u64 mCommonInfoEntryOffset;
+  u64 mAddressRange;
+  std::span<u8> mInstructionByteStream;
+  u16 mPadding;
 };
 using FDE = FrameDescriptionEntry;
 
 /** Structure describing where to find unwind info */
 struct UnwindInfo
 {
-  AddrPtr start;
-  AddrPtr end;
-  u8 code_align;
-  i8 data_align;
-  u8 aug_data_len;
-  AddrPtr lsda;
-  CIE *cie;
-  std::span<const u8> fde_insts{};
+  AddrPtr mStart;
+  AddrPtr mEnd;
+  u8 mCodeAlignFactor;
+  i8 mDataAlignFactor;
+  u8 mAugmentationDataLength;
+  AddrPtr mLanguageSpecificDataAreaAddress;
+  CIE *mPointerToCommonInfoEntry;
+  std::span<const u8> mInstructionByteStreamFde{};
 };
 
 class Unwinder
 {
 public:
   Unwinder(ObjectFile *objfile) noexcept;
-  u64 total_cies() const noexcept;
-  u64 total_fdes() const noexcept;
+  u64 CommonInfoEntryCount() const noexcept;
+  u64 FrameDescriptionEntryCount() const noexcept;
 
   // Sets `low` to `ptr` _iff_ ptr is lower than current low.
-  void set_low(AddrPtr ptr) noexcept;
+  void SetLowAddress(AddrPtr ptr) noexcept;
   // Sets `high` to `ptr` _iff_ ptr is higher than current high.
-  void set_high(AddrPtr ptr) noexcept;
-  const UnwindInfo *get_unwind_info(AddrPtr pc) const noexcept;
+  void SetHighAddress(AddrPtr ptr) noexcept;
+  const UnwindInfo *GetUnwindInformation(AddrPtr pc) const noexcept;
 
   // Objfile
-  ObjectFile *objfile;
-  AddressRange addr_range;
+  ObjectFile *mObjectFile;
+  AddressRange mAddressRange;
   // .debug_frame
-  std::vector<CIE> dwarf_debug_cies;
-  std::vector<UnwindInfo> dwarf_unwind_infos;
+  std::vector<CIE> mDwarfDebugCies;
+  std::vector<UnwindInfo> mDwarfUnwindInfos;
 
   // .eh_frame
-  std::vector<CIE> elf_eh_cies;
-  std::vector<UnwindInfo> elf_eh_unwind_infos;
+  std::vector<CIE> mElfEhCies;
+  std::vector<UnwindInfo> mElfEhUnwindInfos;
 };
 
 struct UnwindInfoSymbolFilePair
 {
-  const UnwindInfo *info;
-  const SymbolFile *sf;
+  const UnwindInfo *mInfo;
+  const SymbolFile *mSymbolFile;
 
   AddrPtr start() const noexcept;
   AddrPtr end() const noexcept;
@@ -277,30 +272,32 @@ struct UnwindInfoSymbolFilePair
 
 struct UnwinderSymbolFilePair
 {
-  Unwinder *unwinder;
-  SymbolFile *sf;
-  std::optional<UnwindInfoSymbolFilePair> get_unwinder_info(AddrPtr pc) noexcept;
+  Unwinder *mUnwinder;
+  SymbolFile *mSymbolFile;
+  std::optional<UnwindInfoSymbolFilePair> GetUnwinderInfo(AddrPtr pc) noexcept;
 };
 
 class UnwindIterator
 {
 public:
-  UnwindIterator(TraceeController *tc, AddrPtr first_pc) noexcept;
-  std::optional<UnwindInfoSymbolFilePair> get_info(AddrPtr pc) noexcept;
-  bool is_null() const noexcept;
+  UnwindIterator(TraceeController *tc, AddrPtr firstPc) noexcept;
+  std::optional<UnwindInfoSymbolFilePair> GetInfo(AddrPtr pc) noexcept;
+  bool IsNull() const noexcept;
 
 private:
-  TraceeController *tc;
-  UnwinderSymbolFilePair current;
+  TraceeController *mTraceeController;
+  UnwinderSymbolFilePair mCurrent;
 };
+using CommonInfoEntryCount = u64;
+using FrameDescriptionEntryCount = u64;
 
-std::pair<u64, u64> elf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
-std::pair<u64, u64> dwarf_eh_calculate_entries_count(DwarfBinaryReader reader) noexcept;
-CommonInformationEntry read_cie(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
-std::unique_ptr<Unwinder> parse_eh(ObjectFile *objfile, const ElfSection *eh_frame) noexcept;
-void parse_dwarf_eh(const Elf *elf, Unwinder *unwinder_db, const ElfSection *debug_frame) noexcept;
+std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount> CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept;
+std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount> CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept;
+CommonInformationEntry ReadCommonInformationEntry(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
+std::unique_ptr<Unwinder> ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSection) noexcept;
+void ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *debugFrame) noexcept;
 
-FrameDescriptionEntry read_fde(DwarfBinaryReader &reader);
+FrameDescriptionEntry ReadFrameDescriptionEntry(DwarfBinaryReader &reader);
 
 int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 

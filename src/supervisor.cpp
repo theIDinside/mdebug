@@ -1180,7 +1180,7 @@ TraceeController::GetUnwinderUsingPc(AddrPtr pc) noexcept
 {
   for (auto &symbol_file : mSymbolFiles) {
     const auto u = symbol_file->GetObjectFile()->GetUnwinder();
-    const auto addr_range = u->addr_range;
+    const auto addr_range = u->mAddressRange;
     if (pc > symbol_file->mBaseAddress) {
       const auto unrelocated = symbol_file->UnrelocateAddress(pc);
       if (addr_range.Contains(unrelocated)) {

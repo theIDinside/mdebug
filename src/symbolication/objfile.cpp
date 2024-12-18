@@ -560,10 +560,10 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   // ObjectFile is the owner of `Elf`
   objfile->elf = new Elf{header, std::move(sectionData)};
   Elf::ParseMinimalSymbol(objfile->elf, *objfile);
-  objfile->unwinder = sym::parse_eh(objfile.get(), objfile->elf->GetSection(".eh_frame"));
+  objfile->unwinder = sym::ParseExceptionHeaderSection(objfile.get(), objfile->elf->GetSection(".eh_frame"));
   if (const auto section = objfile->elf->GetSection(".debug_frame"); section) {
     DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
-    sym::parse_dwarf_eh(objfile->GetElf(), objfile->unwinder.get(), section);
+    sym::ParseDwarfDebugFrame(objfile->GetElf(), objfile->unwinder.get(), section);
   }
 
   if (objfile->elf->HasDWARF()) {
