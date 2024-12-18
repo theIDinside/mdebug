@@ -1049,29 +1049,29 @@ VariablesResponse::serialize(int seq) const noexcept
   std::string variables_contents{};
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : variables) {
-    if (auto datvis = v.variable_value->get_visualizer(); datvis != nullptr) {
-      auto opt = datvis->dap_format(v.variable_value->name, v.ref);
+    if (auto datvis = v.variable_value->GetVisualizer(); datvis != nullptr) {
+      auto opt = datvis->DapFormat(v.variable_value->mName, v.ref);
       if (opt) {
         it = fmt::format_to(it, "{},", *opt);
       } else {
         return fmt::format(
           R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
-          seq, request_seq, v.variable_value->name);
+          seq, request_seq, v.variable_value->mName);
       }
     } else {
-      ASSERT(v.variable_value->type()->is_reference(), "Add visualizer & resolver for T* types. It will look more "
+      ASSERT(v.variable_value->GetType()->IsReference(), "Add visualizer & resolver for T* types. It will look more "
                                                        "or less identical to CStringResolver & ArrayResolver");
       // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we
       // do individual type checking again.
       //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
-      auto span = v.variable_value->memory_view();
+      auto span = v.variable_value->MemoryView();
       const std::uintptr_t ptr = sym::bit_copy<std::uintptr_t>(span);
       auto ptr_str = fmt::format("0x{:x}", ptr);
-      const std::string_view name = v.variable_value->name.string_view();
+      const std::string_view name = v.variable_value->mName.string_view();
       it = fmt::format_to(
         it,
         R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }},)",
-        name, ptr_str, *v.variable_value->type(), v.ref, v.variable_value->address());
+        name, ptr_str, *v.variable_value->GetType(), v.ref, v.variable_value->Address());
     }
   }
 

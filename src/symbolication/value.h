@@ -65,16 +65,16 @@ public:
   using ShrPtr = std::shared_ptr<Value>;
   // contructor for `Values` that represent a block symbol (so a frame argument, stack variable, static / global
   // variable)
-  Value(std::string_view name, Symbol &kind, u32 mem_contents_offset,
-        std::shared_ptr<MemoryContentsObject> &&value_object) noexcept;
+  Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
+        std::shared_ptr<MemoryContentsObject> &&valueObject) noexcept;
 
   // constructor for `Value`s that represent a member variable (possibly of some other `Value`)
-  Value(std::string_view member_name, Field &kind, u32 mem_contents_offset,
-        std::shared_ptr<MemoryContentsObject> value_object) noexcept;
+  Value(std::string_view memberName, Field &kind, u32 memContentsOffset,
+        std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
 
-  Value(Type &type, u32 mem_contents_offset, std::shared_ptr<MemoryContentsObject> value_object) noexcept;
-  Value(std::string &&name, Type &type, u32 mem_contents_offset,
-        std::shared_ptr<MemoryContentsObject> value_object) noexcept;
+  Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
+  Value(std::string &&name, Type &type, u32 memContentsOffset,
+        std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
 
   ~Value() noexcept;
 
@@ -82,34 +82,34 @@ public:
   static std::shared_ptr<Value>
   WithVisualizer(std::shared_ptr<Value> &&value, Args... args) noexcept
   {
-    value->visualizer = std::make_unique<Vis>(value, args...);
+    value->mVisualizer = std::make_unique<Vis>(value, args...);
     return value;
   }
 
-  AddrPtr address() const noexcept;
-  Type *type() const noexcept;
-  std::span<const u8> memory_view() const noexcept;
-  std::span<const u8> full_memory_view() const noexcept;
-  SharedPtr<MemoryContentsObject> take_memory_reference() noexcept;
-  utils::Expected<AddrPtr, ValueError> to_remote_pointer() noexcept;
-  void set_resolver(std::unique_ptr<ValueResolver> &&vis) noexcept;
-  ValueResolver *get_resolver() noexcept;
-  bool has_visualizer() const noexcept;
-  ValueVisualizer *get_visualizer() noexcept;
-  bool valid_value() const noexcept;
+  AddrPtr Address() const noexcept;
+  Type *GetType() const noexcept;
+  std::span<const u8> MemoryView() const noexcept;
+  std::span<const u8> FullMemoryView() const noexcept;
+  SharedPtr<MemoryContentsObject> TakeMemoryReference() noexcept;
+  utils::Expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
+  void SetResolver(std::unique_ptr<ValueResolver> &&vis) noexcept;
+  ValueResolver *GetResolver() noexcept;
+  bool HasVisualizer() const noexcept;
+  ValueVisualizer *GetVisualizer() noexcept;
+  bool IsValidValue() const noexcept;
 
-  Immutable<std::string> name;
-  Immutable<u32> mem_contents_offset;
+  Immutable<std::string> mName;
+  Immutable<u32> mMemoryContentsOffsets;
 
 private:
   // This value is either a block symbol (e.g. a variable on the stack) or a member of some block symbol (a field)
-  ValueDescriptor value_origin;
+  ValueDescriptor mValueOrigin;
   // The actual backing storage for this value. For instance, we may want to create multiple values out of a single
   // range of bytes in the target which is the case for struct Foo { int a; int b; } foo_val; we may want a Value
   // for a and b. The `MemoryContentsObject` is the storage for foo_val
-  std::shared_ptr<MemoryContentsObject> value_object;
-  std::unique_ptr<ValueResolver> resolver{nullptr};
-  std::unique_ptr<ValueVisualizer> visualizer{nullptr};
+  std::shared_ptr<MemoryContentsObject> mValueObject;
+  std::unique_ptr<ValueResolver> mResolver{nullptr};
+  std::unique_ptr<ValueVisualizer> mVisualizer{nullptr};
 };
 
 enum class ReadResultInfo
@@ -142,8 +142,8 @@ public:
   MemoryContentsObject(AddrPtr start, AddrPtr end) noexcept;
   virtual ~MemoryContentsObject() noexcept = default;
 
-  virtual std::span<const u8> raw_view() noexcept = 0;
-  virtual std::span<const u8> view(u32 offset, u32 size) noexcept = 0;
+  virtual std::span<const u8> RawView() noexcept = 0;
+  virtual std::span<const u8> View(u32 offset, u32 size) noexcept = 0;
 
   // constructs a Value, essentially the "master value"; which represents the full MemoryContentsObject
   // Then we can chop that up into more sub values, all referring back to this MemoryContentsObject
@@ -157,33 +157,33 @@ public:
   // shit in computer time - reading the entire chunk is faster than managing sub parts here and there. Just pull
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
-  static std::shared_ptr<Value> create_frame_variable(TraceeController &tc, NonNullPtr<TaskInfo> task,
-                                                      NonNullPtr<sym::Frame> frame, Symbol &symbol,
-                                                      bool lazy) noexcept;
+  static std::shared_ptr<Value> CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskInfo> task,
+                                                    NonNullPtr<sym::Frame> frame, Symbol &symbol,
+                                                    bool lazy) noexcept;
 
-  static ReadResult read_memory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
+  static ReadResult ReadMemory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
 };
 
 class EagerMemoryContentsObject final : public MemoryContentsObject
 {
-  MemoryContentBytes bytes;
+  MemoryContentBytes mContents;
 
 public:
   EagerMemoryContentsObject(AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept;
 
-  std::span<const u8> raw_view() noexcept final;
-  std::span<const u8> view(u32 offset, u32 size) noexcept final;
+  std::span<const u8> RawView() noexcept final;
+  std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };
 
 class LazyMemoryContentsObject final : public MemoryContentsObject
 {
-  TraceeController &supervisor;
-  MemoryContentBytes bytes{nullptr};
-  void cache_memory() noexcept;
+  TraceeController &mSupervisor;
+  MemoryContentBytes mContents{nullptr};
+  void CacheMemory() noexcept;
 
 public:
   LazyMemoryContentsObject(TraceeController &supervisor, AddrPtr start, AddrPtr end) noexcept;
-  std::span<const u8> raw_view() noexcept final;
-  std::span<const u8> view(u32 offset, u32 size) noexcept final;
+  std::span<const u8> RawView() noexcept final;
+  std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };
 } // namespace sym

@@ -126,7 +126,7 @@ CFAStateMachine::ComputeExpression(std::span<const u8> bytes) noexcept
 {
   DBGLOG(eh, "compute_expression of dwarf expression of {} bytes", bytes.size());
   auto intepreter = ExprByteCodeInterpreter{-1, mTraceeController, mTask, bytes};
-  return intepreter.run();
+  return intepreter.Run();
 }
 
 void

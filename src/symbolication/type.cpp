@@ -28,13 +28,13 @@ is_not_complete_type_die(const sym::dw::DieMetaData *die)
 }
 
 bool
-sym::is_reference_like(const dw::DieMetaData *die) noexcept
+sym::IsReferenceLike(const dw::DieMetaData *die) noexcept
 {
-  return is_reference_like(to_type_modifier_will_panic(die->tag));
+  return IsReferenceLike(ToTypeModifierWillPanic(die->tag));
 }
 
 bool
-sym::is_reference_like(sym::Modifier modifier) noexcept
+sym::IsReferenceLike(sym::Modifier modifier) noexcept
 {
   switch (modifier) {
   case Modifier::Pointer:
@@ -56,7 +56,7 @@ sym::is_reference_like(sym::Modifier modifier) noexcept
 }
 
 sym::Modifier
-sym::to_type_modifier_will_panic(DwarfTag tag) noexcept
+sym::ToTypeModifierWillPanic(DwarfTag tag) noexcept
 {
   switch (tag) {
   case DwarfTag::DW_TAG_array_type:
@@ -94,12 +94,18 @@ sym::to_type_modifier_will_panic(DwarfTag tag) noexcept
   PANIC(fmt::format("DwarfTag not convertable to Type::Modifier: {}", to_str(tag)));
 }
 
-TypeStorage::TypeStorage(ObjectFile &obj) noexcept : m(), types(), obj(obj) { types[0] = new sym::Type{"void"}; }
+/* static */
+std::unique_ptr<TypeStorage>
+TypeStorage::Create() noexcept
+{
+  auto storage = std::make_unique<TypeStorage>();
+  storage->mTypeStorage[0] = new sym::Type{"void"};
+  return storage;
+}
 
 TypeStorage::~TypeStorage() noexcept
 {
-  DBGLOG(core, "Destroying type storage for {}", obj.GetPathString());
-  for (const auto [k, ptr] : types) {
+  for (const auto [k, ptr] : mTypeStorage) {
     delete ptr;
   }
 }
@@ -107,9 +113,9 @@ TypeStorage::~TypeStorage() noexcept
 static constexpr auto REFERENCE_SIZE = 8u;
 
 sym::Type *
-TypeStorage::get_unit_type() noexcept
+TypeStorage::GetUnitType() noexcept
 {
-  return types[0];
+  return mTypeStorage[0];
 }
 
 static u32
@@ -123,7 +129,8 @@ resolve_array_bounds(sym::dw::DieReference array_die) noexcept
       u64 count{};
       sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader &reader, sym::dw::Abbreviation &attr, const auto &info) {
         switch (attr.name) {
-        case Attribute::DW_AT_upper_bound: [[fallthrough]];
+        case Attribute::DW_AT_upper_bound:
+          [[fallthrough]];
         case Attribute::DW_AT_count:
           count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() +
                   1u * std::clamp(u32(attr.name == Attribute::DW_AT_upper_bound), 0u, 1u);
@@ -139,13 +146,13 @@ resolve_array_bounds(sym::dw::DieReference array_die) noexcept
 }
 
 sym::Type *
-TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexcept
+TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
 {
   const sym::dw::DieReference this_ref{die_ref.GetUnitData(), die_ref.GetDie()};
   const auto type_id = this_ref.GetDie()->section_offset;
 
-  if (types.contains(type_id)) {
-    auto t = types[type_id];
+  if (mTypeStorage.contains(type_id)) {
+    auto t = mTypeStorage[type_id];
     return t;
   }
 
@@ -153,27 +160,28 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
     const auto attr = this_ref.read_attribute(Attribute::DW_AT_type);
     auto base_type =
       attr.transform([](auto v) { return v.unsigned_value(); })
-        .and_then([&](auto offset) { return die_ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(offset); })
-        .transform([this](auto other_cu_die) { return get_or_prepare_new_type(other_cu_die.AsIndexed()); })
-        .or_else([this]() -> std::optional<sym::Type *> { return get_unit_type(); })
+        .and_then(
+          [&](auto offset) { return die_ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(offset); })
+        .transform([this](auto other_cu_die) { return GetOrCreateNewType(other_cu_die.AsIndexed()); })
+        .or_else([this]() -> std::optional<sym::Type *> { return GetUnitType(); })
         .value();
     auto size = 0u;
     auto array_bounds = 0u;
     // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
     // are 8 bytes large
-    if (sym::is_reference_like(this_ref.GetDie()) || base_type->is_reference()) {
+    if (sym::IsReferenceLike(this_ref.GetDie()) || base_type->IsReference()) {
       if (this_ref.GetDie()->tag == DwarfTag::DW_TAG_array_type) {
         array_bounds = resolve_array_bounds(this_ref);
       }
       size = REFERENCE_SIZE;
     } else {
-      size = base_type->size();
+      size = base_type->Size();
     }
 
     auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, size, base_type,
                               this_ref.GetDie()->tag == DwarfTag::DW_TAG_typedef};
-    type->set_array_bounds(array_bounds);
-    types[this_ref.GetDie()->section_offset] = type;
+    type->SetArrayBounds(array_bounds);
+    mTypeStorage[this_ref.GetDie()->section_offset] = type;
     return type;
   } else {
     if (const auto &attr_val = this_ref.read_attribute(Attribute::DW_AT_signature); attr_val) {
@@ -181,14 +189,15 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
       // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
       // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
       // just means mulitple keys can reach the value, which is a pointer to the actual type.
-      auto tu_die_ref = this_ref.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(attr_val->unsigned_value());
+      auto tu_die_ref =
+        this_ref.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(attr_val->unsigned_value());
       ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
       const u32 sz = tu_die_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
       const auto name = tu_die_ref.read_attribute(Attribute::DW_AT_name)
                           .transform(AttributeValue::as_string)
                           .value_or("<no name>");
       auto type = new sym::Type{this_ref.GetDie()->tag, tu_die_ref.AsIndexed(), sz, name};
-      types[this_ref.GetDie()->section_offset] = type;
+      mTypeStorage[this_ref.GetDie()->section_offset] = type;
       return type;
     } else {
       // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
@@ -198,17 +207,17 @@ TypeStorage::get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexc
                           .value_or("lambda");
       const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
       auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, sz, name};
-      types[this_ref.GetDie()->section_offset] = type;
+      mTypeStorage[this_ref.GetDie()->section_offset] = type;
       return type;
     }
   }
 }
 
 sym::Type *
-TypeStorage::emplace_type(DwarfTag tag, Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
-                          std::string_view name) noexcept
+TypeStorage::CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference,
+                           u32 typeSize, std::string_view name) noexcept
 {
-  auto pair = types.emplace(type_id, new sym::Type{tag, die_ref, type_size, name});
+  auto pair = mTypeStorage.emplace(typeDieOffset, new sym::Type{tag, dieReference, typeSize, name});
   if (pair.second) {
     return pair.first->second;
   }
@@ -217,148 +226,153 @@ TypeStorage::emplace_type(DwarfTag tag, Offset type_id, sym::dw::IndexedDieRefer
 
 namespace sym {
 
-Type::Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept
-    : name(target->name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.GetDie()->tag)},
-      is_typedef(is_typedef), resolved(false), processing(false), size_of(size_of), type_chain(target), fields(),
-      base_type(), die_tag(die_tag)
+Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target,
+           bool isTypedef) noexcept
+    : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
+      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->tag)}, mIsTypedef(isTypedef),
+      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target), mFields(), mBaseTypes(),
+      mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
 
-Type::Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept
-    : name(name), cu_die_ref(die_ref), modifier{to_type_modifier_will_panic(die_ref.GetDie()->tag)},
-      is_typedef(false), resolved(false), processing(false), size_of(size_of), type_chain(nullptr), fields(),
-      base_type(), die_tag(die_tag)
+Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf,
+           std::string_view name) noexcept
+    : mName(name), mCompUnitDieReference(debugInfoEntryReference),
+      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->tag)}, mIsTypedef(false),
+      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes(),
+      mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
 
 Type::Type(std::string_view name) noexcept
-    : name(name), cu_die_ref(), modifier(Modifier::None), is_typedef(false), resolved(true), processing(false),
-      size_of(0), type_chain(nullptr), fields(), base_type()
+    : mName(name), mCompUnitDieReference(), mModifier(Modifier::None), mIsTypedef(false), size_of(0),
+      mIsResolved(true), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes()
 {
 }
 
 Type::Type(Type &&o) noexcept
-    : name(o.name), cu_die_ref(o.cu_die_ref), modifier(o.modifier), resolved(o.resolved), processing(o.processing),
-      size_of(o.size_of), type_chain(o.type_chain), fields(std::move(o.fields)), base_type(o.base_type)
+    : mName(o.mName), mCompUnitDieReference(o.mCompUnitDieReference), mModifier(o.mModifier),
+      size_of(o.size_of), mIsResolved(o.mIsResolved), mIsProcessing(o.mIsProcessing), mTypeChain(o.mTypeChain),
+      mFields(std::move(o.mFields)), mBaseTypes(o.mBaseTypes)
 {
-  ASSERT(!processing, "Moving a type that's being processed is guaranteed to have undefined behavior");
+  ASSERT(!mIsProcessing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }
 
 Type *
-Type::resolve_alias() noexcept
+Type::ResolveAlias() noexcept
 {
-  if (!is_typedef) {
+  if (!mIsTypedef) {
     return this;
   }
-  auto t = type_chain;
-  while (t && t->is_typedef) {
-    t = t->type_chain;
+  auto t = mTypeChain;
+  while (t && t->mIsTypedef) {
+    t = t->mTypeChain;
   }
   return t;
 }
 
 void
-Type::add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept
+Type::AddField(std::string_view name, u64 offsetOf, dw::DieReference debugInfoEntryReference) noexcept
 {
-  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offset_of,
-           ref.GetUnitData()->section_offset());
+  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offsetOf,
+           debugInfoEntryReference.GetUnitData()->section_offset());
   // fields.emplace_back(name, offset_of, Immutable<Offset>{ref.die->section_offset});
 }
 
 void
-Type::set_base_type_encoding(BaseTypeEncoding enc) noexcept
+Type::SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept
 {
-  base_type = enc;
+  mBaseTypes = enc;
 }
 
 NonNullPtr<Type>
-Type::target_type() noexcept
+Type::GetTargetType() noexcept
 {
-  if (type_chain == nullptr) {
+  if (mTypeChain == nullptr) {
     return NonNull(*this);
   }
-  auto t = type_chain;
-  while (t->type_chain) {
-    t = t->type_chain;
+  auto t = mTypeChain;
+  while (t->mTypeChain) {
+    t = t->mTypeChain;
   }
   return NonNull<Type>(*t);
 }
 
 bool
-Type::is_reference() const noexcept
+Type::IsReference() const noexcept
 {
-  auto mod = std::to_underlying(*modifier);
+  auto mod = std::to_underlying(*mModifier);
   constexpr auto ReferenceEnd = std::to_underlying(Modifier::Atomic);
   constexpr auto ReferenceStart = std::to_underlying(Modifier::None);
   if (mod < ReferenceEnd && mod > ReferenceStart) {
     return true;
   }
-  if (type_chain == nullptr) {
+  if (mTypeChain == nullptr) {
     return false;
   }
-  auto t = type_chain;
+  auto t = mTypeChain;
   while (t) {
-    const auto mod = std::to_underlying(*t->modifier);
+    const auto mod = std::to_underlying(*t->mModifier);
     if (mod < ReferenceEnd && mod > ReferenceStart) {
       return true;
     }
-    t = t->type_chain;
+    t = t->mTypeChain;
   }
   return false;
 }
 
 bool
-Type::is_resolved() const noexcept
+Type::IsResolved() const noexcept
 {
-  if (is_typedef) {
-    return type_chain->resolved;
+  if (mIsTypedef) {
+    return mTypeChain->mIsResolved;
   }
-  return resolved;
+  return mIsResolved;
 }
 
 u32
-Type::size() noexcept
+Type::Size() noexcept
 {
   return size_of;
 }
 
 u32
-Type::size_bytes() noexcept
+Type::SizeBytes() noexcept
 {
-  if (modifier == Modifier::Array) {
-    auto bounds = size();
-    auto layout_type_size = get_layout_type()->size();
+  if (mModifier == Modifier::Array) {
+    auto bounds = Size();
+    auto layout_type_size = TypeDescribingLayoutOfThis()->Size();
     return bounds * layout_type_size;
   } else {
-    return size();
+    return Size();
   }
 }
 
 bool
-Type::is_primitive() const noexcept
+Type::IsPrimitive() const noexcept
 {
-  if (base_type.has_value() || die_tag == DwarfTag::DW_TAG_enumeration_type) {
+  if (mBaseTypes.has_value() || mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
     return true;
   }
 
-  if (is_reference()) {
+  if (IsReference()) {
     return false;
   }
 
-  auto it = type_chain;
+  auto it = mTypeChain;
   while (it != nullptr) {
-    if (it->base_type.has_value() || it->die_tag == DwarfTag::DW_TAG_enumeration_type) {
+    if (it->mBaseTypes.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
       return true;
     }
-    it = it->type_chain;
+    it = it->mTypeChain;
   }
   return false;
 }
 
 bool
-Type::is_char_type() const noexcept
+Type::IsCharType() const noexcept
 {
-  return base_type
+  return mBaseTypes
     .transform([](auto v) {
       switch (v) {
       case BaseTypeEncoding::DW_ATE_signed_char:
@@ -372,53 +386,53 @@ Type::is_char_type() const noexcept
 }
 
 bool
-Type::is_array_type() const noexcept
+Type::IsArrayType() const noexcept
 {
-  if (!is_typedef) {
-    return this->modifier == Modifier::Array;
+  if (!mIsTypedef) {
+    return this->mModifier == Modifier::Array;
   }
-  auto t = type_chain;
-  while (t->is_typedef) {
-    t = t->type_chain;
+  auto t = mTypeChain;
+  while (t->mIsTypedef) {
+    t = t->mTypeChain;
   }
-  return t->modifier == Modifier::Array;
+  return t->mModifier == Modifier::Array;
 }
 
 u32
-Type::members_count() noexcept
+Type::MembersCount() noexcept
 {
-  ASSERT(resolved, "Type is not fully resolved!");
-  return target_type()->fields.size();
+  ASSERT(mIsResolved, "Type is not fully resolved!");
+  return GetTargetType()->mFields.size();
 }
 
 const std::vector<Field> &
-Type::member_variables() noexcept
+Type::MemberFields() noexcept
 {
-  ASSERT(resolved, "Type is not fully resolved!");
-  auto t = target_type();
-  return t->fields;
+  ASSERT(mIsResolved, "Type is not fully resolved!");
+  auto t = GetTargetType();
+  return t->mFields;
 }
 
 Type *
-Type::get_layout_type() noexcept
+Type::TypeDescribingLayoutOfThis() noexcept
 {
-  if (modifier == Modifier::None) {
+  if (mModifier == Modifier::None) {
     return this;
   }
 
-  if (auto t = resolve_alias(); t->is_reference()) {
-    t = t == this ? t->type_chain : t;
-    while (!t->is_reference() && t->modifier != Modifier::None) {
-      t = t->type_chain->resolve_alias();
+  if (auto t = ResolveAlias(); t->IsReference()) {
+    t = t == this ? t->mTypeChain : t;
+    while (!t->IsReference() && t->mModifier != Modifier::None) {
+      t = t->mTypeChain->ResolveAlias();
     }
     return t;
   } else {
-    auto it = type_chain;
+    auto it = mTypeChain;
     while (it != nullptr) {
-      if (it->modifier == Modifier::None) {
+      if (it->mModifier == Modifier::None) {
         return it;
       }
-      it = it->type_chain;
+      it = it->mTypeChain;
     }
   }
 
@@ -426,9 +440,9 @@ Type::get_layout_type() noexcept
 }
 
 void
-Type::set_array_bounds(u32 bounds) noexcept
+Type::SetArrayBounds(u32 bounds) noexcept
 {
-  array_bounds = bounds;
+  mArrayBounds = bounds;
 }
 
 } // namespace sym

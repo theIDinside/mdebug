@@ -11,15 +11,15 @@
 
 namespace sym {
 
-ValueResolver::ValueResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
-    : type(type), obj(object_file), value_ptr(std::move(val)), children()
+ValueResolver::ValueResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
+    : mType(type), mSymbolFile(objectFile), mValuePointer(std::move(val)), mChildren()
 {
 }
 
 Value *
-ValueResolver::value() noexcept
+ValueResolver::GetValue() noexcept
 {
-  if (auto locked = value_ptr.lock(); locked) {
+  if (auto locked = mValuePointer.lock(); locked) {
     return locked.get();
   } else {
     return nullptr;
@@ -27,22 +27,22 @@ ValueResolver::value() noexcept
 }
 
 std::optional<Children>
-ValueResolver::has_cached(std::optional<u32>, std::optional<u32>) noexcept
+ValueResolver::HasCached(std::optional<u32>, std::optional<u32>) noexcept
 {
-  if (cached) {
-    return children;
+  if (mIsCached) {
+    return mChildren;
   }
   return std::nullopt;
 }
 
 Children
-ValueResolver::resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
+ValueResolver::Resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
 {
-  if (const auto res = has_cached(start, count); res) {
+  if (const auto res = HasCached(start, count); res) {
     return res.value();
   }
 
-  return get_children(tc, start, count);
+  return GetChildren(tc, start, count);
 }
 
 ReferenceResolver::ReferenceResolver(SymbolFile *obj, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
@@ -51,87 +51,87 @@ ReferenceResolver::ReferenceResolver(SymbolFile *obj, std::weak_ptr<sym::Value> 
 }
 
 Children
-ReferenceResolver::get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
+ReferenceResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
 {
-  auto locked = value_ptr.lock();
+  auto locked = mValuePointer.lock();
   if (!locked) {
-    children.clear();
-    return children;
+    mChildren.clear();
+    return mChildren;
   }
-  if (const auto address = locked->to_remote_pointer(); address.is_expected()) {
-    auto adjusted_address = address.value() + (start.value_or(0) * locked->type()->size());
+  if (const auto address = locked->ToRemotePointer(); address.is_expected()) {
+    auto adjusted_address = address.value() + (start.value_or(0) * locked->GetType()->Size());
     const auto requested_length = count.value_or(32);
-    auto memory = sym::MemoryContentsObject::read_memory(tc, adjusted_address, requested_length);
+    auto memory = sym::MemoryContentsObject::ReadMemory(tc, adjusted_address, requested_length);
     if (!memory.is_ok()) {
-      auto t = locked->type()->get_layout_type();
-      children.push_back(
+      auto t = locked->GetType()->TypeDescribingLayoutOfThis();
+      mChildren.push_back(
         sym::Value::WithVisualizer<sym::InvalidValueVisualizer>(std::make_shared<sym::Value>(*t, 0, nullptr)));
-      return children;
+      return mChildren;
     }
-    indirect_value_object = std::make_shared<EagerMemoryContentsObject>(
+    mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
     // actual `T` type behind the reference
-    auto layout_type = locked->type()->get_layout_type();
+    auto layout_type = locked->GetType()->TypeDescribingLayoutOfThis();
 
-    if (layout_type->is_array_type()) {
-      children.push_back(sym::Value::WithVisualizer<sym::ArrayVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object)));
-    } else if (layout_type->is_primitive() || layout_type->is_reference()) {
-      children.push_back(sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object)));
+    if (layout_type->IsArrayType()) {
+      mChildren.push_back(sym::Value::WithVisualizer<sym::ArrayVisualizer>(
+        std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject)));
+    } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
+      mChildren.push_back(sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(
+        std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject)));
     } else {
-      children.push_back(sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object)));
+      mChildren.push_back(sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(
+        std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject)));
     }
   }
-  cached = true;
-  return children;
+  mIsCached = true;
+  return mChildren;
 }
 
-CStringResolver::CStringResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
-    : ValueResolver(object_file, std::move(val), type)
+CStringResolver::CStringResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
+    : ValueResolver(objectFile, std::move(val), type)
 {
 }
 
 Children
-CStringResolver::get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
+CStringResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
 {
-  auto locked = value_ptr.lock();
+  auto locked = mValuePointer.lock();
   if (!locked) {
-    children.clear();
-    return children;
+    mChildren.clear();
+    return mChildren;
   }
 
-  if (const auto address = locked->to_remote_pointer(); address.is_expected()) {
-    auto adjusted_address = address.value() + (start.value_or(0) * locked->type()->size());
+  if (const auto address = locked->ToRemotePointer(); address.is_expected()) {
+    auto adjusted_address = address.value() + (start.value_or(0) * locked->GetType()->Size());
     const auto requested_length = count.value_or(32);
-    auto memory = sym::MemoryContentsObject::read_memory(tc, adjusted_address, requested_length);
-    indirect_value_object = std::make_shared<EagerMemoryContentsObject>(
+    auto memory = sym::MemoryContentsObject::ReadMemory(tc, adjusted_address, requested_length);
+    mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
-    auto span = indirect_value_object->view(0, requested_length);
+    auto span = mIndirectValueObject->View(0, requested_length);
     for (const auto [index, ch] : utils::EnumerateView(span)) {
       if (ch == 0) {
-        null_terminator = index.i;
+        mNullTerminatorPosition = index.i;
         break;
       }
     }
     // actual `char` type
-    auto layout_type = locked->type()->get_layout_type();
+    auto layout_type = locked->GetType()->TypeDescribingLayoutOfThis();
     auto string_value = Value::WithVisualizer<CStringVisualizer>(
-      std::make_shared<sym::Value>(*layout_type, 0, indirect_value_object), null_terminator);
+      std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject), mNullTerminatorPosition);
 
-    children.push_back(string_value);
+    mChildren.push_back(string_value);
   }
-  cached = true;
-  return children;
+  mIsCached = true;
+  return mChildren;
 }
 
-ArrayResolver::ArrayResolver(SymbolFile *object_file, TypePtr type, u32 array_size,
-                             AddrPtr remote_base_addr) noexcept
-    : ValueResolver(object_file, {}, type), base_addr(remote_base_addr), element_count(array_size),
-      layout_type(type->get_layout_type())
+ArrayResolver::ArrayResolver(SymbolFile *objectFile, TypePtr type, u32 arraySize,
+                             AddrPtr remoteBaseAddress) noexcept
+    : ValueResolver(objectFile, {}, type), mBaseAddress(remoteBaseAddress), mElementCount(arraySize),
+      mLayoutType(type->TypeDescribingLayoutOfThis())
 {
 }
 
@@ -139,110 +139,110 @@ Children
 ArrayResolver::get_all(TraceeController &) noexcept
 {
   TODO("ArrayResolver::get_all not implemented");
-  return children;
+  return mChildren;
 }
 
 std::optional<Children>
-ArrayResolver::has_cached(std::optional<u32> start, std::optional<u32> count) noexcept
+ArrayResolver::HasCached(std::optional<u32> start, std::optional<u32> count) noexcept
 {
   if (!start) {
-    return (children.size() == element_count) ? std::optional{std::span{children}} : std::nullopt;
+    return (mChildren.size() == mElementCount) ? std::optional{std::span{mChildren}} : std::nullopt;
   }
 
   const auto start_index = start.value();
-  const auto addr_base = address_of(start_index);
+  const auto addr_base = AddressOf(start_index);
   auto iter =
-    std::find_if(children.begin(), children.end(), [&](const auto &v) { return v->address() == addr_base; });
+    std::find_if(mChildren.begin(), mChildren.end(), [&](const auto &v) { return v->Address() == addr_base; });
 
-  if (iter == std::end(children)) {
+  if (iter == std::end(mChildren)) {
     return std::nullopt;
   }
 
-  const u32 iter_index = std::distance(children.begin(), iter);
-  if (children.size() - iter_index < count.value()) {
+  const u32 iter_index = std::distance(mChildren.begin(), iter);
+  if (mChildren.size() - iter_index < count.value()) {
     return std::nullopt;
   }
   const auto e = count.value() + iter_index;
   for (auto i = iter_index + 1; i < e; ++i) {
-    auto this_addr = address_of(i);
-    if (children[i]->address() != this_addr) {
+    auto this_addr = AddressOf(i);
+    if (mChildren[i]->Address() != this_addr) {
       return std::nullopt;
     }
   }
 
-  return std::span{children}.subspan(iter_index, count.value());
+  return std::span{mChildren}.subspan(iter_index, count.value());
 }
 
 AddrPtr
-ArrayResolver::address_of(u32 index) noexcept
+ArrayResolver::AddressOf(u32 index) noexcept
 {
-  return base_addr + (index * layout_type->size());
+  return mBaseAddress + (index * mLayoutType->Size());
 }
 
 Children
-ArrayResolver::get_children(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
+ArrayResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
 {
   if (!start) {
     return get_all(tc);
   }
 
-  if (start.value() + count.value_or(0) > element_count) {
+  if (start.value() + count.value_or(0) > mElementCount) {
     return {};
   }
 
   const u32 s = start.value();
-  const u32 e = s + std::min(count.value_or(100), element_count);
+  const u32 e = s + std::min(count.value_or(100), mElementCount);
 
-  auto addr_base = base_addr + (s * layout_type->size());
+  auto addr_base = mBaseAddress + (s * mLayoutType->Size());
 
-  auto start_insert_at = std::find_if(children.begin(), children.end(), [&](auto &v) {
-    const auto cmp = v->address();
+  auto start_insert_at = std::find_if(mChildren.begin(), mChildren.end(), [&](auto &v) {
+    const auto cmp = v->Address();
     if (cmp == addr_base) {
       return true;
     }
     return cmp > addr_base;
   });
 
-  if (start_insert_at == end(children)) {
-    const auto idx = children.size();
-    const u32 type_sz = layout_type->size_of;
+  if (start_insert_at == end(mChildren)) {
+    const auto idx = mChildren.size();
+    const u32 type_sz = mLayoutType->size_of;
     for (auto i = 0u; i < (e - s); ++i) {
       const auto current_address = addr_base + (type_sz * i);
       auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, current_address, current_address + type_sz);
-      children.emplace_back(std::make_shared<Value>(std::to_string(s + i), *layout_type, 0, lazy));
+      mChildren.emplace_back(std::make_shared<Value>(std::to_string(s + i), *mLayoutType, 0, lazy));
     }
 
-    return std::span{children.begin() + idx, children.end()};
+    return std::span{mChildren.begin() + idx, mChildren.end()};
   } else {
-    const u32 idx = std::distance(children.begin(), start_insert_at);
+    const u32 idx = std::distance(mChildren.begin(), start_insert_at);
     u32 i = 0u;
-    const u32 total = std::min(count.value_or(100), element_count - idx);
+    const u32 total = std::min(count.value_or(100), mElementCount - idx);
     auto iter = start_insert_at;
-    const u32 type_sz = layout_type->size_of;
+    const u32 type_sz = mLayoutType->size_of;
     while (i < total) {
       auto current_address = addr_base + (type_sz * i);
-      if (iter == std::end(children)) {
+      if (iter == std::end(mChildren)) {
         auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, current_address, current_address + type_sz);
-        iter = children.insert(iter, std::make_shared<Value>(std::to_string(s + i), *layout_type, 0, lazy));
-      } else if ((*iter)->address() != current_address) {
+        iter = mChildren.insert(iter, std::make_shared<Value>(std::to_string(s + i), *mLayoutType, 0, lazy));
+      } else if ((*iter)->Address() != current_address) {
         auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, current_address, current_address + type_sz);
-        iter = children.insert(iter, std::make_shared<Value>(std::to_string(s + i), *layout_type, 0, lazy));
+        iter = mChildren.insert(iter, std::make_shared<Value>(std::to_string(s + i), *mLayoutType, 0, lazy));
       }
       ++iter;
       ++i;
     }
-    const auto span_start = children.begin() + idx;
+    const auto span_start = mChildren.begin() + idx;
     const auto span_end = span_start + total;
     return std::span{span_start, span_end};
   }
 }
 
-ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : data_provider(provider) {}
+ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : data_provider(std::move(provider)) {}
 
 std::optional<std::string>
-PrimitiveVisualizer::format_enum(Type &t, std::span<const u8> span) noexcept
+PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span) noexcept
 {
-  auto &enums = t.enumerations();
+  auto &enums = t.GetEnumerations();
   EnumeratorConstValue value;
   if (enums.is_signed) {
     switch (t.size_of) {
@@ -276,57 +276,57 @@ PrimitiveVisualizer::format_enum(Type &t, std::span<const u8> span) noexcept
     }
   }
 
-  const auto &fields = t.member_variables();
+  const auto &fields = t.MemberFields();
   if (enums.is_signed) {
     for (auto i = 0u; i < fields.size(); ++i) {
       if (enums.e_values[i].i == value.i) {
-        return fmt::format("{}::{}", t.name, fields[i].name);
+        return fmt::format("{}::{}", t.mName, fields[i].name);
       }
     }
-    return fmt::format("{}::(invalid){}", t.name, value.i);
+    return fmt::format("{}::(invalid){}", t.mName, value.i);
   } else {
     for (auto i = 0u; i < fields.size(); ++i) {
       if (enums.e_values[i].u == value.u) {
-        return fmt::format("{}::{}", t.name, fields[i].name);
+        return fmt::format("{}::{}", t.mName, fields[i].name);
       }
     }
-    return fmt::format("{}::(invalid){}", t.name, value.u);
+    return fmt::format("{}::(invalid){}", t.mName, value.u);
   }
 }
 
-PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(provider) {}
+PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(std::move(provider)) {}
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::string>
-PrimitiveVisualizer::format_value() noexcept
+PrimitiveVisualizer::FormatValue() noexcept
 {
   auto ptr = data_provider.lock();
   if (!ptr) {
     return std::nullopt;
   }
 
-  const auto span = ptr->memory_view();
+  const auto span = ptr->MemoryView();
   if (span.empty()) {
     return std::nullopt;
   }
-  auto type = ptr->type();
+  auto type = ptr->GetType();
   const auto size_of = type->size_of;
 
-  if (type->is_reference()) {
+  if (type->IsReference()) {
     const std::uintptr_t ptr = bit_copy<std::uintptr_t>(span);
     return fmt::format("0x{:x}", ptr);
   }
 
-  auto target_type = type->target_type();
-  if (target_type->tag() == DwarfTag::DW_TAG_enumeration_type) {
-    if (!target_type->is_resolved()) {
-      dw::TypeSymbolicationContext ctx{*target_type->cu_die_ref->GetUnitData()->GetObjectFile(), *target_type.ptr};
+  auto target_type = type->GetTargetType();
+  if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
+    if (!target_type->IsResolved()) {
+      dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *target_type.ptr};
       ctx.resolve_type();
     }
 
-    return format_enum(*target_type, span);
+    return FormatEnum(*target_type, span);
   }
 
-  switch (type->get_base_type().value()) {
+  switch (type->GetBaseType().value()) {
   case BaseTypeEncoding::DW_ATE_address: {
     std::uintptr_t value = bit_copy<std::uintptr_t>(span);
     return fmt::format("0x{}", value);
@@ -403,7 +403,7 @@ PrimitiveVisualizer::format_value() noexcept
   case BaseTypeEncoding::DW_ATE_complex_float:
 
   case BaseTypeEncoding::DW_ATE_UCS: {
-    TODO_FMT("Currently not implemented base type encoding: {}", to_str(type->get_base_type().value()));
+    TODO_FMT("Currently not implemented base type encoding: {}", to_str(type->GetBaseType().value()));
     break;
   }
   case BaseTypeEncoding::DW_ATE_lo_user:
@@ -414,104 +414,105 @@ PrimitiveVisualizer::format_value() noexcept
 }
 
 std::optional<std::string>
-PrimitiveVisualizer::dap_format(std::string_view name, int variablesReference) noexcept
+PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference) noexcept
 {
   auto ptr = data_provider.lock();
   if (!ptr) {
     return std::nullopt;
   }
-  ASSERT(name == ptr->name, "variable name {} != provided name {}", ptr->name, name);
-  const auto byte_span = ptr->memory_view();
+  ASSERT(name == ptr->mName, "variable name {} != provided name {}", ptr->mName, name);
+  const auto byte_span = ptr->MemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
 
-  auto value_field = format_value().value_or("could not serialize value");
+  auto value_field = FormatValue().value_or("could not serialize value");
 
   return fmt::format(
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
-    value_field, (*ptr->type()), variablesReference, ptr->address());
+    value_field, (*ptr->GetType()), variablesReference, ptr->Address());
 }
 
-DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept : ValueVisualizer(value) {}
+DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept : ValueVisualizer(std::move(value)) {}
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::string>
-DefaultStructVisualizer::format_value() noexcept
+DefaultStructVisualizer::FormatValue() noexcept
 {
   TODO("not done");
 }
 
 std::optional<std::string>
-DefaultStructVisualizer::dap_format(std::string_view name, int variablesReference) noexcept
+DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference) noexcept
 {
   auto ptr = data_provider.lock();
   if (!ptr) {
     return std::nullopt;
   }
 
-  ASSERT(name == ptr->name, "variable name {} != provided name {}", ptr->name, name);
-  const auto &t = *ptr->type();
+  ASSERT(name == ptr->mName, "variable name {} != provided name {}", ptr->mName, name);
+  const auto &t = *ptr->GetType();
   return fmt::format(
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
-    t, t, variablesReference, ptr->address());
+    t, t, variablesReference, ptr->Address());
 }
 
-InvalidValueVisualizer::InvalidValueVisualizer(std::weak_ptr<Value> provider_with_no_value) noexcept
-    : ValueVisualizer(std::move(provider_with_no_value))
+InvalidValueVisualizer::InvalidValueVisualizer(std::weak_ptr<Value> providerWithNoValue) noexcept
+    : ValueVisualizer(std::move(providerWithNoValue))
 {
 }
 
 std::optional<std::string>
-InvalidValueVisualizer::format_value() noexcept
+InvalidValueVisualizer::FormatValue() noexcept
 {
   TODO("InvalidValueVisualizer::format_value() not yet implemented");
 }
 
 std::optional<std::string>
-InvalidValueVisualizer::dap_format(std::string_view, int) noexcept
+InvalidValueVisualizer::DapFormat(std::string_view, int) noexcept
 {
   auto ptr = this->data_provider.lock();
   return fmt::format(
-    R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})", ptr->name,
-    ptr->name, *ptr->type());
+    R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})", ptr->mName,
+    ptr->mName, *ptr->GetType());
 }
 
-ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(provider) {}
+ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(std::move(provider)) {}
 
 std::optional<std::string>
-ArrayVisualizer::format_value() noexcept
+ArrayVisualizer::FormatValue() noexcept
 {
   TODO("not impl");
 }
+
 std::optional<std::string>
-ArrayVisualizer::dap_format(std::string_view, int variablesReference) noexcept
+ArrayVisualizer::DapFormat(std::string_view, int variablesReference) noexcept
 {
   auto ptr = this->data_provider.lock();
   if (!ptr) {
     return std::nullopt;
   }
 
-  auto &t = *ptr->type();
-  const auto no_alias = t.resolve_alias();
+  auto &t = *ptr->GetType();
+  const auto no_alias = t.ResolveAlias();
   return fmt::format(
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-    ptr->name, t, t, variablesReference, ptr->address(), no_alias->array_size());
+    ptr->mName, t, t, variablesReference, ptr->Address(), no_alias->ArraySize());
 }
 
-CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> data_provider,
-                                     std::optional<u32> null_terminator) noexcept
-    : ValueVisualizer(data_provider), null_terminator(null_terminator)
+CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider,
+                                     std::optional<u32> nullTerminatorPosition) noexcept
+    : ValueVisualizer(std::move(dataProvider)), null_terminator(nullTerminatorPosition)
 {
 }
 
 std::optional<std::string>
-CStringVisualizer::format_value() noexcept
+CStringVisualizer::FormatValue() noexcept
 {
   auto ptr = this->data_provider.lock();
   if (!ptr) {
     return std::nullopt;
   }
-  const auto byte_span = ptr->full_memory_view();
+  const auto byte_span = ptr->FullMemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
@@ -520,13 +521,13 @@ CStringVisualizer::format_value() noexcept
 }
 
 std::optional<std::string>
-CStringVisualizer::dap_format(std::string_view name, int) noexcept
+CStringVisualizer::DapFormat(std::string_view name, int) noexcept
 {
   auto ptr = this->data_provider.lock();
   if (!ptr) {
     return std::nullopt;
   }
-  const auto byte_span = ptr->full_memory_view();
+  const auto byte_span = ptr->FullMemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
@@ -535,6 +536,6 @@ CStringVisualizer::dap_format(std::string_view name, int) noexcept
 
   return fmt::format(
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-    name, cast, 0, ptr->address());
+    name, cast, 0, ptr->Address());
 }
 } // namespace sym

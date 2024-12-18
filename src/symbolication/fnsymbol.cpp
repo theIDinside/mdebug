@@ -4,7 +4,7 @@ namespace sym {
 ReturnValueClass
 DetermineArchitectureReturnClass(sym::Type *type) noexcept
 {
-  if (type->size() > 16) {
+  if (type->Size() > 16) {
     return ReturnValueClass::ImplicitPointerToMemory;
   }
   return ReturnValueClass::Unknown;

@@ -26,71 +26,68 @@ using VariablesReference = int;
 class ValueResolver
 {
 protected:
-  bool cached{false};
-  TypePtr type;
-  SymbolFile *obj;
-  ValuePtr value_ptr;
-  ChildStorage children;
+  bool mIsCached{false};
+  TypePtr mType;
+  SymbolFile *mSymbolFile;
+  ValuePtr mValuePointer;
+  ChildStorage mChildren;
 
 public:
-  ValueResolver(SymbolFile *object_file, ValuePtr val, TypePtr type) noexcept;
+  ValueResolver(SymbolFile *objectFile, ValuePtr val, TypePtr type) noexcept;
   virtual ~ValueResolver() noexcept = default;
 
-  Children resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept;
-  Value *value() noexcept;
+  Children Resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept;
+  Value *GetValue() noexcept;
 
-  virtual std::optional<Children> has_cached(std::optional<u32> start, std::optional<u32> count) noexcept;
+  virtual std::optional<Children> HasCached(std::optional<u32> start, std::optional<u32> count) noexcept;
 
 private:
-  virtual Children get_children(TraceeController &tc, std::optional<u32> start,
-                                std::optional<u32> count) noexcept = 0;
+  virtual Children GetChildren(TraceeController &tc, std::optional<u32> start,
+                               std::optional<u32> count) noexcept = 0;
 };
 
 class ReferenceResolver final : public ValueResolver
 {
-  std::shared_ptr<MemoryContentsObject> indirect_value_object{nullptr};
+  std::shared_ptr<MemoryContentsObject> mIndirectValueObject{nullptr};
 
-  Children get_children(TraceeController &tc, std::optional<u32> start,
-                        std::optional<u32> count) noexcept override;
+  Children GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept override;
 
 public:
-  ReferenceResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
+  ReferenceResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
   ~ReferenceResolver() noexcept override = default;
 };
 
 class CStringResolver final : public ValueResolver
 {
-  std::optional<u32> null_terminator{};
-  std::shared_ptr<MemoryContentsObject> indirect_value_object{nullptr};
+  std::optional<u32> mNullTerminatorPosition{};
+  std::shared_ptr<MemoryContentsObject> mIndirectValueObject{nullptr};
 
 public:
-  CStringResolver(SymbolFile *object_file, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
+  CStringResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept;
   ~CStringResolver() noexcept override = default;
 
 private:
-  Children get_children(TraceeController &tc, std::optional<u32> start,
-                        std::optional<u32> count) noexcept override;
+  Children GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept override;
 };
 
 class ArrayResolver final : public ValueResolver
 {
   // The base address of the array (1st byte)
-  AddrPtr base_addr;
-  u32 element_count;
-  TypePtr layout_type;
+  AddrPtr mBaseAddress;
+  u32 mElementCount;
+  TypePtr mLayoutType;
 
   Children get_all(TraceeController &tc) noexcept;
 
 public:
-  ArrayResolver(SymbolFile *object_file, TypePtr layout_type, u32 array_size, AddrPtr remote_base_addr) noexcept;
+  ArrayResolver(SymbolFile *objectFile, TypePtr layoutType, u32 arraySize, AddrPtr remoteBaseAddress) noexcept;
   ~ArrayResolver() noexcept override = default;
 
-  std::optional<Children> has_cached(std::optional<u32> start, std::optional<u32> count) noexcept final;
+  std::optional<Children> HasCached(std::optional<u32> start, std::optional<u32> count) noexcept final;
 
 private:
-  AddrPtr address_of(u32 index) noexcept;
-  Children get_children(TraceeController &tc, std::optional<u32> start,
-                        std::optional<u32> count) noexcept override;
+  AddrPtr AddressOf(u32 index) noexcept;
+  Children GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept override;
 };
 
 // The `value` visualizer - it formats a `Value` so that it can be displayed in the `value` field of a Variable
@@ -104,8 +101,8 @@ public:
   explicit ValueVisualizer(std::weak_ptr<Value>) noexcept;
   virtual ~ValueVisualizer() noexcept = default;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  virtual std::optional<std::string> format_value() noexcept = 0;
-  virtual std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept = 0;
+  virtual std::optional<std::string> FormatValue() noexcept = 0;
+  virtual std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept = 0;
 };
 
 class PrimitiveVisualizer final : public ValueVisualizer
@@ -115,9 +112,9 @@ public:
 
   explicit PrimitiveVisualizer(std::weak_ptr<Value>) noexcept;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  std::optional<std::string> format_value() noexcept final;
-  std::optional<std::string> format_enum(Type &t, std::span<const u8> span) noexcept;
-  std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
+  std::optional<std::string> FormatValue() noexcept final;
+  std::optional<std::string> FormatEnum(Type &t, std::span<const u8> span) noexcept;
+  std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept final;
 };
 
 class DefaultStructVisualizer final : public ValueVisualizer
@@ -127,8 +124,8 @@ public:
 
   explicit DefaultStructVisualizer(std::weak_ptr<Value>) noexcept;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  std::optional<std::string> format_value() noexcept final;
-  std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
+  std::optional<std::string> FormatValue() noexcept final;
+  std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept final;
 };
 
 class InvalidValueVisualizer final : public ValueVisualizer
@@ -136,8 +133,8 @@ class InvalidValueVisualizer final : public ValueVisualizer
 public:
   explicit InvalidValueVisualizer(std::weak_ptr<Value>) noexcept;
   ~InvalidValueVisualizer() noexcept override = default;
-  std::optional<std::string> format_value() noexcept override;
-  std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
+  std::optional<std::string> FormatValue() noexcept override;
+  std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept final;
 };
 
 class ArrayVisualizer final : public ValueVisualizer
@@ -146,8 +143,8 @@ class ArrayVisualizer final : public ValueVisualizer
 public:
   ~ArrayVisualizer() noexcept override = default;
   explicit ArrayVisualizer(std::weak_ptr<Value> provider) noexcept;
-  std::optional<std::string> format_value() noexcept override;
-  std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
+  std::optional<std::string> FormatValue() noexcept override;
+  std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept final;
 };
 
 class CStringVisualizer final : public ValueVisualizer
@@ -155,10 +152,10 @@ class CStringVisualizer final : public ValueVisualizer
   std::optional<u32> null_terminator;
 
 public:
-  explicit CStringVisualizer(std::weak_ptr<Value> provider, std::optional<u32> null_terminator) noexcept;
+  explicit CStringVisualizer(std::weak_ptr<Value> provider, std::optional<u32> nullTerminatorPosition) noexcept;
   ~CStringVisualizer() noexcept override = default;
-  std::optional<std::string> format_value() noexcept final;
-  std::optional<std::string> dap_format(std::string_view name, int variablesReference) noexcept final;
+  std::optional<std::string> FormatValue() noexcept final;
+  std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept final;
 };
 
 } // namespace sym

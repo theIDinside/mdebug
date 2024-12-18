@@ -24,12 +24,11 @@ struct DieMetaData;
 
 class TypeStorage
 {
-  std::mutex m;
-  std::unordered_map<u64, sym::Type *> types;
-  ObjectFile &obj;
+  std::mutex mWriteMutex;
+  std::unordered_map<u64, sym::Type *> mTypeStorage;
 
 public:
-  TypeStorage(ObjectFile &obj) noexcept;
+  static std::unique_ptr<TypeStorage> Create() noexcept;
   ~TypeStorage() noexcept;
 
   /** Search for a type that has type_id with the section offset specified by die_ref (indirectly, one must
@@ -38,9 +37,9 @@ public:
    * and they all have an additional level of indirection, pointing to the "Foo" class type/struct type die.
    * This has multiple problems, first of all, when we run into a Foo*, we must make sure that Foo also exist
    * before we return Foo* here, because the target type will be defined by Foo. */
-  sym::Type *get_or_prepare_new_type(sym::dw::IndexedDieReference die_ref) noexcept;
-  sym::Type *get_unit_type() noexcept;
-  sym::Type *emplace_type(DwarfTag tag, Offset type_id, sym::dw::IndexedDieReference die_ref, u32 type_size,
+  sym::Type *GetOrCreateNewType(sym::dw::IndexedDieReference dieReference) noexcept;
+  sym::Type *GetUnitType() noexcept;
+  sym::Type *CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference, u32 typeSize,
                           std::string_view name) noexcept;
 };
 
@@ -185,117 +184,115 @@ class Type
   friend fmt::formatter<sym::Type>;
 
 public:
-  Immutable<std::string_view> name;
-  Immutable<dw::IndexedDieReference> cu_die_ref;
-  Immutable<Modifier> modifier;
-  Immutable<bool> is_typedef;
-
-private:
-  // Flags used when constructing and "realizing" a type from the debug info data.
-  bool resolved;
-  bool processing;
-
-public:
+  Immutable<std::string_view> mName;
+  Immutable<dw::IndexedDieReference> mCompUnitDieReference;
+  Immutable<Modifier> mModifier;
+  Immutable<bool> mIsTypedef;
   Immutable<u32> size_of;
 
 private:
+  // Flags used when constructing and "realizing" a type from the debug info data.
+  bool mIsResolved;
+  bool mIsProcessing;
+
   friend class TypeSymbolicationContext;
-  Type *type_chain;
-  std::vector<Field> fields;
+  Type *mTypeChain;
+  std::vector<Field> mFields;
 
   // A disengaged optional, means this type does *not* represent one of the primitives (what DWARF calls "base
   // types").
-  std::optional<BaseTypeEncoding> base_type;
-  u32 array_bounds{0};
-  EnumeratorValues enum_values{};
-  DwarfTag die_tag;
+  std::optional<BaseTypeEncoding> mBaseTypes;
+  u32 mArrayBounds{0};
+  EnumeratorValues mEnumValues{};
+  DwarfTag mDebugInfoEntryTag;
 
 public:
   // Qualified, i.e. some variant of cvref-types or type defs
-  Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, Type *target, bool is_typedef) noexcept;
+  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target, bool isTypedef) noexcept;
 
   // "Normal" type constructor
-  Type(DwarfTag die_tag, dw::IndexedDieReference die_ref, u32 size_of, std::string_view name) noexcept;
+  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, std::string_view name) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
   Type(std::string_view name) noexcept;
   Type(Type &&o) noexcept;
 
-  Type *resolve_alias() noexcept;
-  void add_field(std::string_view name, u64 offset_of, dw::DieReference ref) noexcept;
-  void set_base_type_encoding(BaseTypeEncoding enc) noexcept;
-  bool set_processing() noexcept;
-  NonNullPtr<Type> target_type() noexcept;
+  // Resolves the alias that this type def/using decl actually is, if it is one. If it's a concrete type, return itself.
+  Type *ResolveAlias() noexcept;
+  void AddField(std::string_view name, u64 offsetOf, dw::DieReference debugInfoEntryReference) noexcept;
+  void SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept;
+  bool SetProcessing() noexcept;
+  NonNullPtr<Type> GetTargetType() noexcept;
   // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
   // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,
   // Foo). We do different than gdb though. We say all references are the same thing: an address value
-  bool is_reference() const noexcept;
-  bool is_resolved() const noexcept;
-  bool is_primitive() const noexcept;
-  bool is_char_type() const noexcept;
-  bool is_array_type() const noexcept;
+  bool IsReference() const noexcept;
+  bool IsResolved() const noexcept;
+  bool IsPrimitive() const noexcept;
+  bool IsCharType() const noexcept;
+  bool IsArrayType() const noexcept;
+
   DwarfTag
-  tag() const noexcept
+  GetDwarfTag() const noexcept
   {
-    return die_tag;
+    return mDebugInfoEntryTag;
   }
 
   const EnumeratorValues &
-  enumerations() const noexcept
+  GetEnumerations() const noexcept
   {
-    return enum_values;
+    return mEnumValues;
   }
 
-  u32 size() noexcept;
-  u32 size_bytes() noexcept;
+  u32 Size() noexcept;
+  u32 SizeBytes() noexcept;
 
-  u32 members_count() noexcept;
-  const std::vector<Field> &member_variables() noexcept;
+  u32 MembersCount() noexcept;
+  const std::vector<Field> &MemberFields() noexcept;
 
-  Type *get_layout_type() noexcept;
-  Type *get_referenced_type() noexcept;
+  Type *TypeDescribingLayoutOfThis() noexcept;
   // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
-  void set_array_bounds(u32 bounds) noexcept;
+  void SetArrayBounds(u32 bounds) noexcept;
 
   /** Walks the type chain for this type, looking for a base type encoding (if it's a primitive of some sort). */
   constexpr std::optional<BaseTypeEncoding>
-  get_base_type() const noexcept
+  GetBaseType() const noexcept
   {
     auto it = this;
     while (it != nullptr) {
-      if (it->base_type) {
-        return it->base_type;
+      if (it->mBaseTypes) {
+        return it->mBaseTypes;
       }
-      it = it->type_chain;
+      it = it->mTypeChain;
     }
     return std::nullopt;
   }
 
   constexpr u32
-  array_size() const noexcept
+  ArraySize() const noexcept
   {
-    return array_bounds;
+    return mArrayBounds;
   }
 };
 
-Modifier to_type_modifier_will_panic(DwarfTag tag) noexcept;
+Modifier ToTypeModifierWillPanic(DwarfTag tag) noexcept;
 // A type that is reference like, is a type with inherent indirection. Pointers, references, r-value references,
 // ranges, arrays.
-bool is_reference_like(Modifier modifier) noexcept;
-bool is_reference_like(const dw::DieMetaData *die) noexcept;
+bool IsReferenceLike(Modifier modifier) noexcept;
+bool IsReferenceLike(const dw::DieMetaData *die) noexcept;
 
 struct Symbol
 {
-  NonNullPtr<Type> type;
-  Immutable<SymbolLocation> location;
-  Immutable<std::string_view> name;
+  NonNullPtr<Type> mType;
+  Immutable<SymbolLocation> mLocation;
+  Immutable<std::string_view> mName;
 };
 
 struct SymbolBlock
 {
-  AddrPtr entry_pc;
-  AddrPtr end_pc;
-  std::vector<Symbol> symbols;
+  AddrPtr mEntryPc;
+  AddrPtr mEndPc;
+  std::vector<Symbol> mSymbols;
 };
 
 struct BlockSymbolIterator
@@ -305,45 +302,45 @@ struct BlockSymbolIterator
   Begin(const std::vector<SymbolBlock> &blocks) noexcept
   {
     return BlockSymbolIterator{.blocks_data = blocks.data(),
-                               .block_count = static_cast<u32>(blocks.size()),
-                               .current_block_index = 0,
-                               .symbol_index = 0};
+                               .mBlockCount = static_cast<u32>(blocks.size()),
+                               .mCurrentBlockIndex = 0,
+                               .mSymbolIndex = 0};
   }
 
   static BlockSymbolIterator
   End(const std::vector<SymbolBlock> &blocks) noexcept
   {
     return BlockSymbolIterator{.blocks_data = blocks.data(),
-                               .block_count = static_cast<u32>(blocks.size()),
-                               .current_block_index = static_cast<u32>(blocks.size()),
-                               .symbol_index = 0};
+                               .mBlockCount = static_cast<u32>(blocks.size()),
+                               .mCurrentBlockIndex = static_cast<u32>(blocks.size()),
+                               .mSymbolIndex = 0};
   }
 
   static BlockSymbolIterator
   Begin(const SymbolBlock *blocks, u32 count) noexcept
   {
     return BlockSymbolIterator{
-      .blocks_data = blocks, .block_count = count, .current_block_index = 0, .symbol_index = 0};
+      .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = 0, .mSymbolIndex = 0};
   }
 
   static BlockSymbolIterator
   End(const SymbolBlock *blocks, u32 count) noexcept
   {
-    if (count == 1 && blocks[0].symbols.empty()) {
+    if (count == 1 && blocks[0].mSymbols.empty()) {
       return BlockSymbolIterator{
-        .blocks_data = blocks, .block_count = count, .current_block_index = 0, .symbol_index = 0};
+        .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = 0, .mSymbolIndex = 0};
     } else {
       return BlockSymbolIterator{
-        .blocks_data = blocks, .block_count = count, .current_block_index = count, .symbol_index = 0};
+        .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = count, .mSymbolIndex = 0};
     }
   }
 
   friend bool
   operator==(const BlockSymbolIterator &l, const BlockSymbolIterator &r) noexcept
   {
-    ASSERT(l.blocks_data == r.blocks_data && l.block_count == r.block_count,
+    ASSERT(l.blocks_data == r.blocks_data && l.mBlockCount == r.mBlockCount,
            "Expected iterators to be built from the same underlying data. If not, you're a moron.");
-    return l.current_block_index == r.current_block_index && l.symbol_index == r.symbol_index;
+    return l.mCurrentBlockIndex == r.mCurrentBlockIndex && l.mSymbolIndex == r.mSymbolIndex;
   }
 
   BlockSymbolIterator &
@@ -364,40 +361,40 @@ struct BlockSymbolIterator
   const Symbol *
   operator->() noexcept
   {
-    return &blocks_data[current_block_index].symbols[symbol_index];
+    return &blocks_data[mCurrentBlockIndex].mSymbols[mSymbolIndex];
   }
 
   const Symbol *
   operator->() const noexcept
   {
-    return &blocks_data[current_block_index].symbols[symbol_index];
+    return &blocks_data[mCurrentBlockIndex].mSymbols[mSymbolIndex];
   }
 
   const Symbol &
   operator*() noexcept
   {
-    return blocks_data[current_block_index].symbols[symbol_index];
+    return blocks_data[mCurrentBlockIndex].mSymbols[mSymbolIndex];
   }
 
   const Symbol &
   operator*() const noexcept
   {
-    return blocks_data[current_block_index].symbols[symbol_index];
+    return blocks_data[mCurrentBlockIndex].mSymbols[mSymbolIndex];
   }
 
   void
   advance() noexcept
   {
-    ++symbol_index;
-    if (symbol_index == blocks_data[current_block_index].symbols.size()) {
-      ++current_block_index;
-      symbol_index = 0;
+    ++mSymbolIndex;
+    if (mSymbolIndex == blocks_data[mCurrentBlockIndex].mSymbols.size()) {
+      ++mCurrentBlockIndex;
+      mSymbolIndex = 0;
     }
   }
   const SymbolBlock *blocks_data;
-  u32 block_count;
-  u32 current_block_index;
-  u32 symbol_index;
+  u32 mBlockCount;
+  u32 mCurrentBlockIndex;
+  u32 mSymbolIndex;
 };
 
 } // namespace sym
@@ -418,29 +415,29 @@ template <> struct formatter<sym::Type>
   {
     std::array<const sym::Type *, 10> types{};
     i8 idx = 0;
-    auto it = type.type_chain;
+    auto it = type.mTypeChain;
     types[idx++] = &type;
     while (it != nullptr) {
-      if (!it->is_typedef) {
+      if (!it->mIsTypedef) {
         types[idx++] = it;
       }
-      it = it->type_chain;
+      it = it->mTypeChain;
     }
     std::sort(types.begin(), types.begin() + idx, [](const auto ptra, const auto ptrb) noexcept {
-      return std::to_underlying(*ptra->modifier) < std::to_underlying(*ptrb->modifier);
+      return std::to_underlying(*ptra->mModifier) < std::to_underlying(*ptrb->mModifier);
     });
 
     auto index = 0u;
     auto out = ctx.out();
     auto type_span = std::span{types.begin(), types.begin() + idx};
     for (const auto t : type_span) {
-      if (t->modifier != sym::Modifier::None) {
-        out = fmt::format_to(out, "{}", ModifierToString(t->modifier));
-        if (t->modifier == sym::Modifier::Array) {
-          out = fmt::format_to(out, "{}]", t->array_bounds);
+      if (t->mModifier != sym::Modifier::None) {
+        out = fmt::format_to(out, "{}", ModifierToString(t->mModifier));
+        if (t->mModifier == sym::Modifier::Array) {
+          out = fmt::format_to(out, "{}]", t->mArrayBounds);
         }
       } else {
-        out = fmt::format_to(out, "{}", t->name.as_t());
+        out = fmt::format_to(out, "{}", t->mName.as_t());
       }
       if (++index != type_span.size()) {
         out = fmt::format_to(out, " ");

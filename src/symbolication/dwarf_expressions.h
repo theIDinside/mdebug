@@ -15,7 +15,7 @@ class FrameBaseExpression
   Immutable<std::span<const u8>> bytecode;
 
 public:
-  constexpr explicit FrameBaseExpression(std::span<const u8> expr_bytecode) noexcept : bytecode(expr_bytecode) {}
+  constexpr explicit FrameBaseExpression(std::span<const u8> byteCode) noexcept : bytecode(byteCode) {}
 
   static constexpr FrameBaseExpression
   Empty() noexcept
@@ -24,19 +24,19 @@ public:
   }
 
   static constexpr FrameBaseExpression
-  Take(std::optional<std::span<const u8>> maybe_expr_bytecode) noexcept
+  Take(std::optional<std::span<const u8>> byteCode) noexcept
   {
-    return FrameBaseExpression{maybe_expr_bytecode.value_or(std::span<const u8>{})};
+    return FrameBaseExpression{byteCode.value_or(std::span<const u8>{})};
   }
 
   std::span<const u8>
-  get_expression() const noexcept
+  GetExpression() const noexcept
   {
     return bytecode;
   }
 
   constexpr bool
-  has_expression() const noexcept
+  HasExpression() const noexcept
   {
     return !bytecode->empty();
   }
@@ -62,41 +62,41 @@ struct DwarfStack
 
   template <std::integral T>
   void
-  push(T t) noexcept
+  Push(T t) noexcept
   {
-    ASSERT(size < stack.size(), "Attempting to push value to stack when it's full");
-    stack[size] = static_cast<u64>(t);
-    ++size;
+    ASSERT(mStackSize < mStack.size(), "Attempting to push value to stack when it's full");
+    mStack[mStackSize] = static_cast<u64>(t);
+    ++mStackSize;
   }
-  u64 pop() noexcept;
-  void dup() noexcept;
-  void rotate() noexcept;
-  void copy(u8 index) noexcept;
-  void swap() noexcept;
+  u64 Pop() noexcept;
+  void Dup() noexcept;
+  void Rotate() noexcept;
+  void Copy(u8 index) noexcept;
+  void Swap() noexcept;
 
-  u16 size;
-  std::array<u64, 1028> stack;
+  u16 mStackSize;
+  std::array<u64, 1028> mStack;
 };
 
 // The byte code interpreter needs all state set up, so that any possibly data it reference during execution, is
 // already "there".
 struct ExprByteCodeInterpreter
 {
-  explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
-                                   std::span<const u8> byte_stream) noexcept;
-  explicit ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
-                                   std::span<const u8> byte_stream, std::span<const u8> frameBaseCode) noexcept;
-  AddrPtr request_frame_base() noexcept;
-  u64 run() noexcept;
+  explicit ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
+                                   std::span<const u8> byteStream) noexcept;
+  explicit ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
+                                   std::span<const u8> byteStream, std::span<const u8> frameBaseCode) noexcept;
+  AddrPtr ComputeFrameBase() noexcept;
+  u64 Run() noexcept;
 
-  int frame_level;
-  DwarfStack stack;
-  DwarfOp latest_decoded;
-  TraceeController &tc;
-  TaskInfo &task;
-  std::span<const u8> byte_stream;
+  int mFrameLevel;
+  DwarfStack mStack;
+  DwarfOp mLatestDecoded;
+  TraceeController &mTraceeController;
+  TaskInfo &mTask;
+  std::span<const u8> mByteStream;
   std::span<const u8> mFrameBaseProgram;
-  DwarfBinaryReader reader;
+  DwarfBinaryReader mReader;
 };
 
 using Op = void (*)(ExprByteCodeInterpreter &);

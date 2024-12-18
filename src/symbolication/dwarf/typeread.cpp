@@ -10,7 +10,7 @@ namespace sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : obj(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
-      params{.entry_pc = mFunctionSymbol->StartPc(), .end_pc = mFunctionSymbol->EndPc(), .symbols = {}},
+      params{.mEntryPc = mFunctionSymbol->StartPc(), .mEndPc = mFunctionSymbol->EndPc(), .mSymbols = {}},
       lexicalBlockStack({params})
 {
   ASSERT(lexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", lexicalBlockStack.size());
@@ -19,7 +19,7 @@ FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym:
 NonNullPtr<Type>
 FunctionSymbolicationContext::process_type(DieReference cu_die) noexcept
 {
-  auto t = obj.GetTypeStorage()->get_or_prepare_new_type(cu_die.AsIndexed());
+  auto t = obj.GetTypeStorage()->GetOrCreateNewType(cu_die.AsIndexed());
   if (t == nullptr) {
     PANIC("Failed to get or prepare new type to be realized");
   }
@@ -137,13 +137,13 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
 void
 FunctionSymbolicationContext::ProcessVariable(DieReference dieRef) noexcept
 {
-  ProcessVariableDie(dieRef, lexicalBlockStack.back().symbols);
+  ProcessVariableDie(dieRef, lexicalBlockStack.back().mSymbols);
 }
 
 void
 FunctionSymbolicationContext::ProcessFormalParameter(DieReference dieRef) noexcept
 {
-  ProcessVariableDie(dieRef, params.symbols);
+  ProcessVariableDie(dieRef, params.mSymbols);
 }
 
 void
@@ -169,7 +169,7 @@ FunctionSymbolicationContext::process_variable(DieReference cu_die) noexcept
   auto type = process_type(containing_cu_die_ref.value());
   DataBlock dwarf_expr_block = location->block();
   std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
-  lexicalBlockStack.back().symbols.emplace_back(type, SymbolLocation::Expression(expr), name->string());
+  lexicalBlockStack.back().mSymbols.emplace_back(type, SymbolLocation::Expression(expr), name->string());
 }
 
 void
@@ -200,7 +200,7 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
   auto type = process_type(containing_cu_die_ref.value());
   DataBlock dwarf_expr_block = location->block();
   std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
-  params.symbols.emplace_back(type, SymbolLocation::Expression(expr), name->string());
+  params.mSymbols.emplace_back(type, SymbolLocation::Expression(expr), name->string());
 }
 
 void
@@ -288,13 +288,13 @@ TypeSymbolicationContext::process_inheritance(DieReference cu_die) noexcept
   const auto type_id = cu_die.read_attribute(Attribute::DW_AT_type);
 
   auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
-  auto type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+  auto type = obj.GetTypeStorage()->GetOrCreateNewType(containing_cu_die_ref->AsIndexed());
   auto ctx = TypeSymbolicationContext::continueWith(*this, type);
   ctx.resolve_type();
 
-  if (!type->fields.empty()) {
+  if (!type->mFields.empty()) {
     const auto member_offset = location->unsigned_value();
-    for (auto t : type->fields) {
+    for (auto t : type->mFields) {
       type_fields.push_back(Field{.type = t.type, .offset_of = *t.offset_of + member_offset, .name = t.name});
     }
   }
@@ -345,15 +345,15 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
     auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
     ASSERT(containing_cu_die_ref.has_value(),
            "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
-    auto type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+    auto type = obj.GetTypeStorage()->GetOrCreateNewType(containing_cu_die_ref->AsIndexed());
     const auto member_offset = location->unsigned_value();
-    auto name = name_from_tag(type->die_tag);
+    auto name = name_from_tag(type->mDebugInfoEntryTag);
     this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name});
   } else {
     auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
     ASSERT(containing_cu_die_ref.has_value(),
            "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", type_id->unsigned_value());
-    auto type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+    auto type = obj.GetTypeStorage()->GetOrCreateNewType(containing_cu_die_ref->AsIndexed());
     const auto member_offset = location->unsigned_value();
     this->type_fields.push_back(Field{.type = NonNull(*type), .offset_of = member_offset, .name = name->string()});
   }
@@ -385,18 +385,18 @@ TypeSymbolicationContext::resolve_type() noexcept
 {
   auto type_iter = current_type;
   while (type_iter != nullptr) {
-    if (type_iter->resolved) {
-      type_iter = type_iter->type_chain;
+    if (type_iter->mIsResolved) {
+      type_iter = type_iter->mTypeChain;
       continue;
     }
-    auto cu = type_iter->cu_die_ref->GetUnitData();
-    auto die = type_iter->cu_die_ref.mut().GetDie();
+    auto cu = type_iter->mCompUnitDieReference->GetUnitData();
+    auto die = type_iter->mCompUnitDieReference.mut().GetDie();
     auto typedie = DieReference{cu, die};
     if (die->tag == DwarfTag::DW_TAG_enumeration_type) {
       const auto type_id = typedie.read_attribute(Attribute::DW_AT_type);
       if (type_id) {
         auto containing_cu_die_ref = obj.GetDebugInfoEntryReference(type_id->unsigned_value());
-        enumeration_type = obj.GetTypeStorage()->get_or_prepare_new_type(containing_cu_die_ref->AsIndexed());
+        enumeration_type = obj.GetTypeStorage()->GetOrCreateNewType(containing_cu_die_ref->AsIndexed());
       }
     }
 
@@ -418,16 +418,16 @@ TypeSymbolicationContext::resolve_type() noexcept
     }
 
     if (typedie.GetDie()->tag == DwarfTag::DW_TAG_enumeration_type) {
-      type_iter->enum_values = {.is_signed = enum_is_signed,
+      type_iter->mEnumValues = {.is_signed = enum_is_signed,
                                 .e_values = std::make_unique<EnumeratorConstValue[]>(type_fields.size())};
-      std::copy(const_values.begin(), const_values.end(), type_iter->enum_values.e_values.get());
+      std::copy(const_values.begin(), const_values.end(), type_iter->mEnumValues.e_values.get());
     }
 
     if (!type_fields.empty()) {
-      std::swap(type_iter->fields, this->type_fields);
+      std::swap(type_iter->mFields, this->type_fields);
     }
-    type_iter->resolved = true;
-    type_iter = type_iter->type_chain;
+    type_iter->mIsResolved = true;
+    type_iter = type_iter->mTypeChain;
   }
 }
 

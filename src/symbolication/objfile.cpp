@@ -56,7 +56,7 @@ ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
 
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
     : mObjectFilePath(std::move(p)), mObjectFileId(std::move(objfile_id)), mSize(size),
-      mLoadedBinary(loaded_binary), mTypeStorage(std::make_unique<TypeStorage>(*this)), mMinimalFunctionSymbols{},
+      mLoadedBinary(loaded_binary), mTypeStorage(std::make_unique<TypeStorage>()), mMinimalFunctionSymbols{},
       mMinimalFunctionSymbolsSorted(), mMinimalObjectSymbols{}, mUnitDataWriteLock(), mCompileUnits(),
       mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), lnp_headers(nullptr),
       mCompileUnitWriteLock(), mCompilationUnits(), mAddressToCompileUnitMapping()
@@ -437,18 +437,18 @@ ObjectFile::FindCustomDataResolverFor(sym::Type &) noexcept
 void
 ObjectFile::InitializeDataVisualizer(std::shared_ptr<sym::Value> &value) noexcept
 {
-  if (value->has_visualizer()) {
+  if (value->HasVisualizer()) {
     return;
   }
 
-  sym::Type &type = *value->type()->resolve_alias();
+  sym::Type &type = *value->GetType()->ResolveAlias();
   if (auto custom_visualiser = FindCustomDataVisualizerFor(type); custom_visualiser != nullptr) {
     return;
   }
 
-  if (type.is_array_type()) {
+  if (type.IsArrayType()) {
     value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
-  } else if (type.is_primitive() || type.is_reference()) {
+  } else if (type.IsPrimitive() || type.IsReference()) {
     value = sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(std::move(value));
   } else {
     value = sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(std::move(value));
@@ -629,23 +629,23 @@ SymbolFile::RegisterValueResolver(std::shared_ptr<sym::Value> &value) noexcept -
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
   //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
   //   values and how to display them, which *is* the issue with GDB's pretty printers
-  auto type = value->type()->resolve_alias();
+  auto type = value->GetType()->ResolveAlias();
 
   if (auto resolver = GetObjectFile()->FindCustomDataResolverFor(*type); resolver != nullptr) {
-    value->set_resolver(std::move(resolver));
+    value->SetResolver(std::move(resolver));
     return;
   }
-  auto layout_type = type->get_layout_type();
+  auto layout_type = type->TypeDescribingLayoutOfThis();
 
-  const auto array_type = type->is_array_type();
-  if (type->is_reference() && !array_type) {
-    if (layout_type->is_char_type()) {
+  const auto array_type = type->IsArrayType();
+  if (type->IsReference() && !array_type) {
+    if (layout_type->IsCharType()) {
       DBGLOG(core, "[datviz]: setting cstring resolver for value");
-      auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->type());
-      value->set_resolver(std::move(ptr));
+      auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->GetType());
+      value->SetResolver(std::move(ptr));
     } else {
       DBGLOG(core, "[datviz]: setting pointer resolver for value");
-      value->set_resolver(std::make_unique<sym::ReferenceResolver>(this, value, value->type()));
+      value->SetResolver(std::make_unique<sym::ReferenceResolver>(this, value, value->GetType()));
     }
     return;
   }
@@ -653,9 +653,9 @@ SymbolFile::RegisterValueResolver(std::shared_ptr<sym::Value> &value) noexcept -
   // todo: again, this is hardcoded, which is counter to the whole idea here.
   if (array_type) {
     DBGLOG(core, "[datviz]: setting array resolver for value");
-    auto layout_type = type->get_layout_type();
-    auto ptr = std::make_unique<sym::ArrayResolver>(this, layout_type, type->array_size(), value->address());
-    value->set_resolver(std::move(ptr));
+    auto layout_type = type->TypeDescribingLayoutOfThis();
+    auto ptr = std::make_unique<sym::ArrayResolver>(this, layout_type, type->ArraySize(), value->Address());
+    value->SetResolver(std::move(ptr));
     value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
     return;
   }
@@ -705,21 +705,21 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ctx.id);
     return {};
   }
-  auto type = value->type();
-  if (!type->is_resolved()) {
+  auto type = value->GetType();
+  if (!type->IsResolved()) {
     sym::dw::TypeSymbolicationContext ts_ctx{*GetObjectFile(), *type};
     ts_ctx.resolve_type();
   }
 
-  auto value_resolver = value->get_resolver();
+  auto value_resolver = value->GetResolver();
   if (value_resolver != nullptr) {
-    auto variables = value_resolver->resolve(*ctx.tc, start, count);
+    auto variables = value_resolver->Resolve(*ctx.tc, start, count);
     std::vector<ui::dap::Variable> result{};
 
     for (auto &var : variables) {
       GetObjectFile()->InitializeDataVisualizer(var);
       RegisterValueResolver(var);
-      const auto new_ref = var->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
+      const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, var);
       }
@@ -729,15 +729,15 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     return result;
   } else {
     std::vector<ui::dap::Variable> result{};
-    result.reserve(type->member_variables().size());
+    result.reserve(type->MemberFields().size());
 
-    for (auto &mem : type->member_variables()) {
+    for (auto &mem : type->MemberFields()) {
       auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-                                                       value->mem_contents_offset, value->take_memory_reference());
+                                                       value->mMemoryContentsOffsets, value->TakeMemoryReference());
       GetObjectFile()->InitializeDataVisualizer(member_value);
       RegisterValueResolver(member_value);
       const auto new_ref =
-        member_value->type()->is_primitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
+        member_value->GetType()->IsPrimitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, member_value);
       }
@@ -873,13 +873,13 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   }
 
   for (auto &symbol : frame.BlockSymbolIterator(variables_kind)) {
-    const auto ref = symbol.type->is_primitive() ? 0 : Tracer::Instance->new_key();
-    if (ref == 0 && !symbol.type->is_resolved()) {
-      sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.type};
+    const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Instance->new_key();
+    if (ref == 0 && !symbol.mType->IsResolved()) {
+      sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
       ts_ctx.resolve_type();
     }
 
-    auto value_object = sym::MemoryContentsObject::create_frame_variable(tc, frame.task, NonNull(frame),
+    auto value_object = sym::MemoryContentsObject::CreateFrameVariable(tc, frame.task, NonNull(frame),
                                                                          const_cast<sym::Symbol &>(symbol), true);
     GetObjectFile()->InitializeDataVisualizer(value_object);
     RegisterValueResolver(value_object);

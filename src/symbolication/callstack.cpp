@@ -157,7 +157,7 @@ Frame::FrameLocalVariablesCount() const noexcept
 u32
 Frame::FrameParameterCounts() const noexcept
 {
-  return FullSymbolInfo().GetFunctionArguments().symbols.size();
+  return FullSymbolInfo().GetFunctionArguments().mSymbols.size();
 }
 
 std::optional<std::string_view>

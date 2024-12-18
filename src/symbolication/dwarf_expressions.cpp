@@ -9,130 +9,131 @@
 namespace sym {
 
 u64
-DwarfStack::pop() noexcept
+DwarfStack::Pop() noexcept
 {
-  ASSERT(size > 0, "Attempting to pop stack with no elements");
-  return stack[--size];
+  ASSERT(mStackSize > 0, "Attempting to pop stack with no elements");
+  return mStack[--mStackSize];
 }
 
 void
-DwarfStack::dup() noexcept
+DwarfStack::Dup() noexcept
 {
-  stack[size] = stack[size - 1];
-  ++size;
+  mStack[mStackSize] = mStack[mStackSize - 1];
+  ++mStackSize;
 }
 
 void
-DwarfStack::rotate() noexcept
+DwarfStack::Rotate() noexcept
 {
-  std::swap(stack[size - 1], stack[size - 2]);
-  std::swap(stack[size - 2], stack[size - 3]);
+  std::swap(mStack[mStackSize - 1], mStack[mStackSize - 2]);
+  std::swap(mStack[mStackSize - 2], mStack[mStackSize - 3]);
 }
 
 void
-DwarfStack::copy(u8 index) noexcept
+DwarfStack::Copy(u8 index) noexcept
 {
-  stack[size] = stack[index];
-  ++size;
+  mStack[mStackSize] = mStack[index];
+  ++mStackSize;
 }
 
 void
-DwarfStack::swap() noexcept
+DwarfStack::Swap() noexcept
 {
-  const auto tmp = stack[size - 1];
-  stack[size - 1] = stack[size - 2];
-  stack[size - 2] = tmp;
+  const auto tmp = mStack[mStackSize - 1];
+  mStack[mStackSize - 1] = mStack[mStackSize - 2];
+  mStack[mStackSize - 2] = tmp;
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
-                                                 std::span<const u8> byte_stream) noexcept
-    : frame_level(frame_level), stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)),
-      reader(nullptr, byte_stream.data(), byte_stream.size())
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
+                                                 std::span<const u8> byteStream) noexcept
+    : mFrameLevel(frameLevel), mStack(), mTraceeController(tc), mTask(t), mByteStream(byteStream),
+      mReader(nullptr, byteStream.data(), byteStream.size())
 {
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frame_level, TraceeController &tc, TaskInfo &t,
-                                                 std::span<const u8> byte_stream,
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
+                                                 std::span<const u8> byteStream,
                                                  std::span<const u8> frameBaseCode) noexcept
-    : frame_level(frame_level), stack(), tc(tc), task(t), byte_stream(std::move(byte_stream)), mFrameBaseProgram(std::move(frameBaseCode)), reader(this->byte_stream)
+    : mFrameLevel(frameLevel), mStack(), mTraceeController(tc), mTask(t), mByteStream(byteStream),
+      mFrameBaseProgram(frameBaseCode), mReader(this->mByteStream)
 {
 }
 
 void
 ub(ExprByteCodeInterpreter &i) noexcept
 {
-  PANIC(fmt::format("UNDEFINED OPCODE 0x{:x}", std::to_underlying(i.latest_decoded)));
+  PANIC(fmt::format("UNDEFINED OPCODE 0x{:x}", std::to_underlying(i.mLatestDecoded)));
 }
 
 void
 op_addr(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<u64>());
+  i.mStack.Push(i.mReader.read_value<u64>());
 }
 
 void
 op_literal(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(std::to_underlying(i.latest_decoded) - std::to_underlying(DwarfOp::DW_OP_lit0));
+  i.mStack.Push(std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_lit0));
 }
 
 void
 op_reg(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto bytecode = std::to_underlying(i.latest_decoded);
+  const auto bytecode = std::to_underlying(i.mLatestDecoded);
   ASSERT(bytecode >= std::to_underlying(DwarfOp::DW_OP_reg0) &&
            bytecode <= std::to_underlying(DwarfOp::DW_OP_reg31),
          "Byte code for DW_OP_reg<n> out of range");
-  const auto reg_no = std::to_underlying(i.latest_decoded) - std::to_underlying(DwarfOp::DW_OP_reg0);
-  const auto reg_contents = i.task.get_register(reg_no);
-  i.stack.push<u64>(reg_contents);
+  const auto reg_no = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_reg0);
+  const auto reg_contents = i.mTask.get_register(reg_no);
+  i.mStack.Push<u64>(reg_contents);
 }
 
 void
 op_breg(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto offset = i.reader.read_leb128<i64>();
-  const auto reg_num = std::to_underlying(i.latest_decoded) - std::to_underlying(DwarfOp::DW_OP_breg0);
-  const auto reg_contents = i.task.get_register(reg_num);
+  const auto offset = i.mReader.read_leb128<i64>();
+  const auto reg_num = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_breg0);
+  const auto reg_contents = i.mTask.get_register(reg_num);
   const auto result = reg_contents + offset;
-  i.stack.push<u64>(result);
+  i.mStack.Push<u64>(result);
 }
 
 void
 op_deref(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto v = i.stack.pop();
+  const auto v = i.mStack.Pop();
   const TPtr<std::uintptr_t> addr{v};
-  const auto deref = i.tc.ReadType(addr);
-  i.stack.push(deref);
+  const auto deref = i.mTraceeController.ReadType(addr);
+  i.mStack.Push(deref);
 }
 
 void
 op_deref_size(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto v = i.stack.pop();
+  const auto v = i.mStack.Pop();
 
-  const auto bytes = i.reader.read_value<u8>();
+  const auto bytes = i.mReader.read_value<u8>();
   switch (bytes) {
   case 1: {
     const TPtr<u8> addr{v};
-    const auto deref = i.tc.ReadType(addr);
-    i.stack.push<u64>(deref);
+    const auto deref = i.mTraceeController.ReadType(addr);
+    i.mStack.Push<u64>(deref);
   } break;
   case 2: {
     const TPtr<u16> addr{v};
-    const auto deref = i.tc.ReadType(addr);
-    i.stack.push<u64>(deref);
+    const auto deref = i.mTraceeController.ReadType(addr);
+    i.mStack.Push<u64>(deref);
   } break;
   case 4: {
     const TPtr<u32> addr{v};
-    const auto deref = i.tc.ReadType(addr);
-    i.stack.push<u64>(deref);
+    const auto deref = i.mTraceeController.ReadType(addr);
+    i.mStack.Push<u64>(deref);
   } break;
   case 8: {
     const TPtr<u64> addr{v};
-    const auto deref = i.tc.ReadType(addr);
-    i.stack.push<u64>(deref);
+    const auto deref = i.mTraceeController.ReadType(addr);
+    i.mStack.Push<u64>(deref);
   } break;
   }
 }
@@ -163,306 +164,306 @@ op_form_tls_address(ExprByteCodeInterpreter &) noexcept
 void
 op_const1u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<u8>());
+  i.mStack.Push(i.mReader.read_value<u8>());
 }
 void
 op_const1s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<i8>());
+  i.mStack.Push(i.mReader.read_value<i8>());
 }
 void
 op_const2u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<u16>());
+  i.mStack.Push(i.mReader.read_value<u16>());
 }
 void
 op_const2s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<i16>());
+  i.mStack.Push(i.mReader.read_value<i16>());
 }
 void
 op_const4u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<u32>());
+  i.mStack.Push(i.mReader.read_value<u32>());
 }
 void
 op_const4s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<i32>());
+  i.mStack.Push(i.mReader.read_value<i32>());
 }
 void
 op_const8u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<u64>());
+  i.mStack.Push(i.mReader.read_value<u64>());
 }
 void
 op_const8s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_value<i64>());
+  i.mStack.Push(i.mReader.read_value<i64>());
 }
 void
 op_constu(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_uleb128<u64>());
+  i.mStack.Push(i.mReader.read_uleb128<u64>());
 }
 void
 op_consts(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.push(i.reader.read_leb128<i64>());
+  i.mStack.Push(i.mReader.read_leb128<i64>());
 }
 
 void
 op_dup(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.dup();
+  i.mStack.Dup();
 }
 
 void
 op_drop(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.pop();
+  i.mStack.Pop();
 }
 
 void
 op_over(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.copy(1);
+  i.mStack.Copy(1);
 }
 void
 op_pick(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto idx = i.reader.read_value<u8>();
-  i.stack.copy(idx);
+  const auto idx = i.mReader.read_value<u8>();
+  i.mStack.Copy(idx);
 }
 
 void
 op_swap(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.swap();
+  i.mStack.Swap();
 }
 
 void
 op_rot(ExprByteCodeInterpreter &i) noexcept
 {
-  i.stack.rotate();
+  i.mStack.Rotate();
 }
 
 void
 op_abs(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto v = i.stack.pop();
+  const auto v = i.mStack.Pop();
   const auto iv = static_cast<i64>(v);
   const auto abs = std::abs(iv);
-  i.stack.push(abs);
+  i.mStack.Push(abs);
 }
 void
 op_and(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto result = a & b;
-  i.stack.push(result);
+  i.mStack.Push(result);
 }
 void
 op_div(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto ia = static_cast<i64>(a);
   const auto ib = static_cast<i64>(b);
   const auto res = ib / ia;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 
 void
 op_minus(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b - a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_mod(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b % a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_mul(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b * a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_neg(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
+  const auto a = i.mStack.Pop();
   const auto sa = -static_cast<i64>(a);
-  i.stack.push(sa);
+  i.mStack.Push(sa);
 }
 void
 op_not(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
+  const auto a = i.mStack.Pop();
   const auto res = ~a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_or(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b | a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_plus(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b + a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 
 void
 op_plus_uconst(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.reader.read_uleb128<u64>();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mReader.read_uleb128<u64>();
   const auto res = b + a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 
 void
 op_shl(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b << a;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_shr(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = a >> b;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_shra(ExprByteCodeInterpreter &i) noexcept
 {
   TODO("op_shra???");
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = static_cast<int>(a) >> static_cast<int>(b);
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_xor(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = a xor b;
-  i.stack.push(res);
+  i.mStack.Push(res);
 }
 void
 op_skip(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto skip = i.reader.read_value<i16>();
-  i.reader.skip(skip);
+  const auto skip = i.mReader.read_value<i16>();
+  i.mReader.skip(skip);
 }
 void
 op_bra(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto skip = i.reader.read_value<i16>();
-  auto value = i.stack.pop();
+  const auto skip = i.mReader.read_value<i16>();
+  auto value = i.mStack.Pop();
   if (value != 0) {
-    i.reader.skip(skip);
+    i.mReader.skip(skip);
   }
 }
 void
 op_eq(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = a == b;
-  i.stack.push(res ? 1 : 0);
+  i.mStack.Push(res ? 1 : 0);
 }
 void
 op_ge(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b >= a;
-  i.stack.push(res ? 1 : 0);
+  i.mStack.Push(res ? 1 : 0);
 }
 void
 op_gt(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b > a;
-  i.stack.push(res ? 1 : 0);
+  i.mStack.Push(res ? 1 : 0);
 }
 void
 op_le(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b <= a;
-  i.stack.push(res ? 1 : 0);
+  i.mStack.Push(res ? 1 : 0);
 }
 void
 op_lt(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b < a;
-  i.stack.push(res ? 1 : 0);
+  i.mStack.Push(res ? 1 : 0);
 }
 void
 op_ne(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto a = i.stack.pop();
-  const auto b = i.stack.pop();
+  const auto a = i.mStack.Pop();
+  const auto b = i.mStack.Pop();
   const auto res = b != a;
-  i.stack.push(res ? 1 : 0);
+  i.mStack.Push(res ? 1 : 0);
 }
 
 void
 op_regx(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto reg_no = i.reader.read_uleb128<u64>();
-  i.stack.push(reg_no);
+  const auto reg_no = i.mReader.read_uleb128<u64>();
+  i.mStack.Push(reg_no);
 }
 
 void
 op_fbreg(ExprByteCodeInterpreter &i) noexcept
 {
-  const i64 offset = i.reader.read_leb128<i64>();
-  const auto frameBase = i.request_frame_base();
-  i.stack.push<u64>(frameBase + offset);
+  const i64 offset = i.mReader.read_leb128<i64>();
+  const auto frameBase = i.ComputeFrameBase();
+  i.mStack.Push<u64>(frameBase + offset);
 }
 void
 op_bregx(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto reg_num = i.reader.read_uleb128<u64>();
-  const auto offset = i.reader.read_leb128<i64>();
-  const auto reg_contents = i.task.get_register(reg_num);
+  const auto reg_num = i.mReader.read_uleb128<u64>();
+  const auto offset = i.mReader.read_leb128<i64>();
+  const auto reg_contents = i.mTask.get_register(reg_num);
   const auto result = reg_contents + offset;
-  i.stack.push<u64>(result);
+  i.mStack.Push<u64>(result);
   TODO("op_bregx")
 }
 void
 op_piece(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_piece {}", i.stack.size));
+  TODO(fmt::format("op_piece {}", i.mStack.mStackSize));
 }
 
 void
@@ -473,25 +474,25 @@ op_nop(ExprByteCodeInterpreter &) noexcept
 void
 op_call2(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_call2 {}", i.stack.size));
+  TODO(fmt::format("op_call2 {}", i.mStack.mStackSize));
 }
 void
 op_call4(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_call4 {}", i.stack.size));
+  TODO(fmt::format("op_call4 {}", i.mStack.mStackSize));
 }
 void
 op_call_ref(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_call_ref {}", i.stack.size));
+  TODO(fmt::format("op_call_ref {}", i.mStack.mStackSize));
 }
 
 void
 op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 {
-  auto* unwindState = i.task.GetUnwindState(i.frame_level);
+  auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel);
   ASSERT(unwindState, "The interpreter can not know the CFA value.");
-  i.stack.push(unwindState->CanonicalFrameAddress());
+  i.mStack.Push(unwindState->CanonicalFrameAddress());
 }
 
 void
@@ -685,21 +686,21 @@ static Op ops[0xff] = {
     // clang-format-on
 };
 
-AddrPtr ExprByteCodeInterpreter::request_frame_base() noexcept {
-  ASSERT(frame_level != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
-  ExprByteCodeInterpreter frameBaseReader{frame_level, tc, task, mFrameBaseProgram};
-  return frameBaseReader.run();
+AddrPtr ExprByteCodeInterpreter::ComputeFrameBase() noexcept {
+  ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
+  ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mTraceeController, task, mFrameBaseProgram};
+  return frameBaseReader.Run();
 }
 
 u64
-ExprByteCodeInterpreter::run() noexcept
+ExprByteCodeInterpreter::Run() noexcept
 {
-  while (reader.has_more()) {
-    const auto op = reader.read_byte<DwarfOp>();
-    this->latest_decoded = op;
+  while (mReader.has_more()) {
+    const auto op = mReader.read_byte<DwarfOp>();
+    this->mLatestDecoded = op;
     const auto idx = std::to_underlying(op);
     ops[idx](*this);
   }
-  return stack.stack[0];
+  return mStack.mStack[0];
 }
 } // namespace sym

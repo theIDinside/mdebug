@@ -353,7 +353,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
         const auto type_id = value.unsigned_value();
         auto obj = unit_data->GetObjectFile();
         const auto ref = obj->GetDebugInfoEntryReference(type_id);
-        state.ret_type = obj->GetTypeStorage()->get_or_prepare_new_type(ref->AsIndexed());
+        state.ret_type = obj->GetTypeStorage()->GetOrCreateNewType(ref->AsIndexed());
         break;
       }
       default:
