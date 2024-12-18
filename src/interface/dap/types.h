@@ -1,4 +1,5 @@
 #pragma once
+#include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
 #include <fmt/format.h>
@@ -28,7 +29,7 @@ struct Breakpoint
   // verified
   bool verified;
   // instructionReference
-  TPtr<void> addr;
+  AddrPtr addr;
 
   std::optional<u32> line;
   std::optional<u32> col;

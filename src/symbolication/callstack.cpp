@@ -7,6 +7,7 @@
 #include "symbolication/value.h"
 #include "tracer.h"
 #include "utils/debug_value.h"
+#include "utils/immutable.h"
 #include "utils/macros.h"
 #include <algorithm>
 #include <iterator>
@@ -23,11 +24,13 @@ Frame::IsInside(TPtr<void> addr) const noexcept
 {
   switch (mFrameType) {
   case FrameType::Full:
-    return addr >= mSymbolUnion.full_symbol->StartPc() && addr <= mSymbolUnion.full_symbol->EndPc() ? InsideRange::Yes
-                                                                                          : InsideRange::No;
+    return addr >= mSymbolUnion.uFullSymbol->StartPc() && addr <= mSymbolUnion.uFullSymbol->EndPc()
+             ? InsideRange::Yes
+             : InsideRange::No;
   case FrameType::ElfSymbol:
-    return addr >= mSymbolUnion.min_symbol->StartPc() && addr <= mSymbolUnion.full_symbol->EndPc() ? InsideRange::Yes
-                                                                                         : InsideRange::No;
+    return addr >= mSymbolUnion.uMinSymbol->StartPc() && addr <= mSymbolUnion.uFullSymbol->EndPc()
+             ? InsideRange::Yes
+             : InsideRange::No;
   case FrameType::Unknown:
     return InsideRange::Unknown;
   }
@@ -39,9 +42,9 @@ Frame::HasSymbolInfo() const noexcept
 {
   switch (mFrameType) {
   case FrameType::Full:
-    return mSymbolUnion.full_symbol != nullptr;
+    return mSymbolUnion.uFullSymbol != nullptr;
   case FrameType::ElfSymbol:
-    return mSymbolUnion.min_symbol != nullptr;
+    return mSymbolUnion.uMinSymbol != nullptr;
   case FrameType::Unknown:
     return false;
   }
@@ -92,7 +95,7 @@ std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
 Frame::GetLineTableEntry() const noexcept
 {
   const CompilationUnit *cu = FullSymbolInfo().GetCompilationUnit();
-  const auto& cuSources = cu->sources();
+  const auto &cuSources = cu->sources();
   for (const auto &sourceCodeFile : cuSources) {
     if (auto lte = sourceCodeFile->GetLineTableEntryFor(mOwningSymbolFile->mBaseAddress, FramePc()); lte) {
       return {sourceCodeFile.get(), lte};
@@ -120,8 +123,8 @@ Frame::Scopes() noexcept
     for (auto i = 0u; i < 3; ++i) {
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::Instance->new_key();
-      Tracer::Instance->set_var_context({mOwningSymbolFile->GetSupervisor(), task->ptr, mOwningSymbolFile, static_cast<u32>(FrameId()),
-                                         static_cast<u16>(key), ContextType::Scope});
+      Tracer::Instance->set_var_context({mOwningSymbolFile->GetSupervisor(), mTask->ptr, mOwningSymbolFile,
+                                         static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
       mFrameScopes[i].variables_reference = key;
     }
   }
@@ -132,20 +135,48 @@ sym::FunctionSymbol *
 Frame::MaybeGetFullSymbolInfo() const noexcept
 {
   ASSERT(mFrameType == FrameType::Full, "Frame has no full symbol info");
-  return mSymbolUnion.full_symbol;
+  return mSymbolUnion.uFullSymbol;
 }
 
 const MinSymbol *
 Frame::MaybeGetMinimalSymbol() const noexcept
 {
   ASSERT(mFrameType == FrameType::ElfSymbol, "Frame has no ELF symbol info");
-  return mSymbolUnion.min_symbol;
+  return mSymbolUnion.uMinSymbol;
 }
 
 IterateFrameSymbols
 Frame::BlockSymbolIterator(FrameVariableKind variables_kind) noexcept
 {
   return IterateFrameSymbols{*this, variables_kind};
+}
+
+u32
+Frame::GetInitializedVariables(FrameVariableKind variableSet,
+                               std::vector<NonNullPtr<const sym::Symbol>> &outVector) const noexcept
+{
+  switch (variableSet) {
+  case FrameVariableKind::Arguments: {
+    // TODO: implement this also for arguments; because the args may not be initialized even if we're in the
+    // function this is what's done inside a function prologue; therefore we should add functionality that check if
+    // we've actually performed the prologue.
+    const auto &args = FullSymbolInfo().GetFunctionArguments().mSymbols;
+    for (const auto &s : args) {
+      outVector.push_back(NonNull(s));
+    }
+    return args.size();
+  }
+  case FrameVariableKind::Locals: {
+    for (const auto &block : FullSymbolInfo().GetFrameLocalVariableBlocks()) {
+      if (block.mProgramCounterRange.Contains(mFramePc)) {
+        for (const auto &sym : block.mSymbols) {
+          outVector.push_back(NonNull(sym));
+        }
+      }
+    }
+    return outVector.size();
+  }
+  }
 }
 
 u32
@@ -171,9 +202,9 @@ Frame::GetFunctionName() const noexcept
 {
   switch (mFrameType) {
   case FrameType::Full:
-    return mSymbolUnion.full_symbol->name;
+    return mSymbolUnion.uFullSymbol->name;
   case FrameType::ElfSymbol:
-    return mSymbolUnion.min_symbol->name;
+    return mSymbolUnion.uMinSymbol->name;
   case FrameType::Unknown:
     return std::nullopt;
   }

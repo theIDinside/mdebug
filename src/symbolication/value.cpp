@@ -32,7 +32,7 @@ Value::Value(std::string &&name, Type &type, u32 memContentsOffset,
 {
 }
 
-Value::~Value() noexcept { DBGLOG(core, "Destroying value {}", mName); }
+Value::~Value() noexcept { DBGLOG(dap, "Destroying value {}", mName); }
 
 AddrPtr
 Value::Address() const noexcept
@@ -148,7 +148,7 @@ EagerMemoryContentsObject::View(u32 offset, u32 size) noexcept
 void
 LazyMemoryContentsObject::CacheMemory() noexcept
 {
-  DBGLOG(core, "[lazy transfer]: {} .. {}", start, end);
+  DBGLOG(dap, "[lazy transfer]: {} .. {}", start, end);
   if (auto res = mSupervisor.SafeRead(start, end->get() - start->get()); res.is_expected()) {
     mContents = std::move(res.take_value());
   } else {
@@ -203,7 +203,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskI
   case LocKind::DwarfExpression: {
     auto *fnSymbol = frame->MaybeGetFullSymbolInfo();
     if (!fnSymbol) {
-      DBGLOG(core, "could not find function symbol for frame. Required to construct live variables.");
+      DBGLOG(dap, "could not find function symbol for frame. Required to construct live variables.");
       TODO("Add support for situations where we can't actually construct the value");
       return nullptr;
     }
@@ -218,6 +218,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskI
       if (!res.is_expected()) {
         PANIC("Expected read to succeed");
       }
+      DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
       auto memory_object =
         std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
       return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));

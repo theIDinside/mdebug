@@ -104,13 +104,19 @@ CStringResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std
   }
 
   if (const auto address = locked->ToRemotePointer(); address.is_expected()) {
-    auto adjusted_address = address.value() + (start.value_or(0) * locked->GetType()->Size());
-    const auto requested_length = count.value_or(256);
-    auto memory = sym::MemoryContentsObject::ReadMemory(tc, adjusted_address, requested_length);
+    auto adjustedAddress = address.value() + (start.value_or(0) * locked->GetType()->Size());
+    const auto requestedLength = count.value_or(256);
+    auto referencedMemory = sym::MemoryContentsObject::ReadMemory(tc, adjustedAddress, requestedLength);
+    if (!referencedMemory.is_ok()) {
+      auto layoutType = locked->GetType()->TypeDescribingLayoutOfThis();
+      mChildren.push_back(
+        Value::WithVisualizer<InvalidValueVisualizer>(std::make_shared<sym::Value>(*layoutType, 0, nullptr)));
+      return mChildren;
+    }
     mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
-      adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
+      adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
 
-    auto span = mIndirectValueObject->View(0, requested_length);
+    auto span = mIndirectValueObject->View(0, requestedLength);
     for (const auto [index, ch] : utils::EnumerateView(span)) {
       if (ch == 0) {
         mNullTerminatorPosition = index.i;
@@ -237,7 +243,7 @@ ArrayResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::
   }
 }
 
-ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : data_provider(std::move(provider)) {}
+ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : mDataProvider(std::move(provider)) {}
 
 std::optional<std::string>
 PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span) noexcept
@@ -294,12 +300,15 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span) noexcept
   }
 }
 
-PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(std::move(provider)) {}
+PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept
+    : ValueVisualizer(std::move(provider))
+{
+}
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::string>
 PrimitiveVisualizer::FormatValue() noexcept
 {
-  auto ptr = data_provider.lock();
+  auto ptr = mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -319,7 +328,8 @@ PrimitiveVisualizer::FormatValue() noexcept
   auto target_type = type->GetTargetType();
   if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
     if (!target_type->IsResolved()) {
-      dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *target_type.ptr};
+      dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+                                       *target_type.ptr};
       ctx.resolve_type();
     }
 
@@ -416,7 +426,7 @@ PrimitiveVisualizer::FormatValue() noexcept
 std::optional<std::string>
 PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference) noexcept
 {
-  auto ptr = data_provider.lock();
+  auto ptr = mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -433,7 +443,10 @@ PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference) no
     value_field, (*ptr->GetType()), variablesReference, ptr->Address());
 }
 
-DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept : ValueVisualizer(std::move(value)) {}
+DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept
+    : ValueVisualizer(std::move(value))
+{
+}
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::string>
 DefaultStructVisualizer::FormatValue() noexcept
@@ -444,7 +457,7 @@ DefaultStructVisualizer::FormatValue() noexcept
 std::optional<std::string>
 DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference) noexcept
 {
-  auto ptr = data_provider.lock();
+  auto ptr = mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -470,7 +483,7 @@ InvalidValueVisualizer::FormatValue() noexcept
 std::optional<std::string>
 InvalidValueVisualizer::DapFormat(std::string_view, int) noexcept
 {
-  auto ptr = this->data_provider.lock();
+  auto ptr = mDataProvider.lock();
   return fmt::format(
     R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})", ptr->mName,
     ptr->mName, *ptr->GetType());
@@ -487,7 +500,7 @@ ArrayVisualizer::FormatValue() noexcept
 std::optional<std::string>
 ArrayVisualizer::DapFormat(std::string_view, int variablesReference) noexcept
 {
-  auto ptr = this->data_provider.lock();
+  auto ptr = this->mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -508,7 +521,7 @@ CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider,
 std::optional<std::string>
 CStringVisualizer::FormatValue() noexcept
 {
-  auto ptr = this->data_provider.lock();
+  auto ptr = this->mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -523,7 +536,7 @@ CStringVisualizer::FormatValue() noexcept
 std::optional<std::string>
 CStringVisualizer::DapFormat(std::string_view name, int) noexcept
 {
-  auto ptr = this->data_provider.lock();
+  auto ptr = this->mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }

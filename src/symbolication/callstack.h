@@ -1,8 +1,9 @@
 #pragma once
 #include "interface/dap/types.h"
-#include "symbolication/dwarf/lnp.h"
+// #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
+#include "utils/immutable.h"
 #include <common.h>
 #include <symbolication/fnsymbol.h>
 
@@ -14,6 +15,11 @@ struct Scope;
 }
 
 namespace sym {
+namespace dw {
+  class SourceCodeFile;
+  struct LineTableEntry;
+}
+
 class CFAStateMachine;
 
 enum class FrameType : u8
@@ -52,9 +58,9 @@ private:
   AddrPtr mFramePc = nullptr;
   union
   {
-    sym::FunctionSymbol *full_symbol;
-    const MinSymbol *min_symbol;
-    std::nullptr_t null;
+    sym::FunctionSymbol *uFullSymbol;
+    const MinSymbol *uMinSymbol;
+    std::nullptr_t uNull;
   } mSymbolUnion = {nullptr};
 
   u32 mFrameLevel = -1;
@@ -64,26 +70,28 @@ private:
   std::array<ui::dap::Scope, 3> mFrameScopes{};
 
 public:
-  Immutable<NonNullPtr<TaskInfo>> task;
+  Immutable<NonNullPtr<TaskInfo>> mTask;
 
   template <typename T>
   explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, u32 frame_id, AddrPtr pc, T sym_info) noexcept
-      : mFramePc(pc), mFrameLevel(level), mFrameId(frame_id), mOwningSymbolFile(symbol_file), task(NonNull(task))
+      : mFramePc(pc), mFrameLevel(level), mFrameId(frame_id), mOwningSymbolFile(symbol_file), mTask(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
     static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::nullptr_t>,
                   "Frame expects either FunctionSymbol or MinSymbol pointers (or a nullptr)");
     if constexpr (std::is_same_v<Type, sym::FunctionSymbol> || std::is_same_v<Type, const sym::FunctionSymbol>) {
       mFrameType = FrameType::Full;
-      mSymbolUnion.full_symbol = sym_info;
-      ASSERT(mSymbolUnion.full_symbol != nullptr, "Setting to nullptr when expecting full symbol information to exist.");
+      mSymbolUnion.uFullSymbol = sym_info;
+      ASSERT(mSymbolUnion.uFullSymbol != nullptr,
+             "Setting to nullptr when expecting full symbol information to exist.");
     } else if constexpr (std::is_same_v<Type, MinSymbol> || std::is_same_v<Type, const MinSymbol>) {
       mFrameType = FrameType::ElfSymbol;
-      mSymbolUnion.min_symbol = sym_info;
-      ASSERT(mSymbolUnion.min_symbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
+      mSymbolUnion.uMinSymbol = sym_info;
+      ASSERT(mSymbolUnion.uMinSymbol != nullptr,
+             "Setting to nullptr when expecting ELF symbol information to exist.");
     } else if constexpr (std::is_null_pointer_v<T>) {
       mFrameType = FrameType::Unknown;
-      mSymbolUnion.null = std::nullptr_t{};
+      mSymbolUnion.uNull = std::nullptr_t{};
     } else {
       static_assert(always_false<T>, "Could not determine symbol type!");
     }
@@ -110,6 +118,10 @@ public:
   const MinSymbol *MaybeGetMinimalSymbol() const noexcept;
 
   IterateFrameSymbols BlockSymbolIterator(FrameVariableKind variable_set) noexcept;
+
+  u32 GetInitializedVariables(FrameVariableKind variableSet,
+                              std::vector<NonNullPtr<const sym::Symbol>> &outVector) const noexcept;
+
   u32 FrameLocalVariablesCount() const noexcept;
   u32 FrameParameterCounts() const noexcept;
 
@@ -136,16 +148,16 @@ public:
 
     switch (l.mFrameType) {
     case FrameType::Full:
-      return sym::IsSame(l.mSymbolUnion.full_symbol, r.mSymbolUnion.full_symbol);
+      return sym::IsSame(l.mSymbolUnion.uFullSymbol, r.mSymbolUnion.uFullSymbol);
     case FrameType::ElfSymbol:
-      return l.mSymbolUnion.min_symbol == r.mSymbolUnion.min_symbol;
+      return l.mSymbolUnion.uMinSymbol == r.mSymbolUnion.uMinSymbol;
     case FrameType::Unknown:
       return false;
     }
     return false;
   }
 
-  std::pair<dw::SourceCodeFile*, const dw::LineTableEntry*> GetLineTableEntry() const noexcept;
+  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *> GetLineTableEntry() const noexcept;
   std::optional<std::string_view> GetFunctionName() const noexcept;
   std::array<ui::dap::Scope, 3> Scopes() noexcept;
   std::optional<ui::dap::Scope> Scope(u32 var_ref) noexcept;

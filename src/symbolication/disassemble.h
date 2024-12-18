@@ -1,4 +1,5 @@
 #pragma once
+#include "tracee_pointer.h"
 #include <common.h>
 #include <typedefs.h>
 

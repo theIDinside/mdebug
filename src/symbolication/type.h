@@ -1,4 +1,5 @@
 #pragma once
+#include "symbolication/block.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "utils/immutable.h"
 #include "utils/indexing.h"
@@ -290,8 +291,7 @@ struct Symbol
 
 struct SymbolBlock
 {
-  AddrPtr mEntryPc;
-  AddrPtr mEndPc;
+  AddressRange mProgramCounterRange;
   std::vector<Symbol> mSymbols;
 };
 

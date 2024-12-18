@@ -92,7 +92,7 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
     std::string_view view{strings[j]};
     if (const auto p = view.find_first_of("_Z"); p != std::string_view::npos) {
       view.remove_prefix(p);
-      view.remove_suffix(view.size() - view.find_first_of("+"));
+      view.remove_suffix(view.size() - view.find_first_of('+'));
       std::string copy{view};
       if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
         std::string copy{res};
@@ -117,20 +117,4 @@ ifbacktrace_failed:
   delete logging::get_logging();
   panic_exit();
 #undef PLOG
-}
-
-Option<AddrPtr>
-to_addr(std::string_view s) noexcept
-{
-  if (s.starts_with("0x")) {
-    s.remove_prefix(2);
-  }
-
-  u64 value;
-  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value, 16);
-  if (ec == std::errc() && ptr == s.data() + s.size()) {
-    return AddrPtr{value};
-  } else {
-    return std::nullopt;
-  }
 }

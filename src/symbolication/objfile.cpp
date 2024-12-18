@@ -872,23 +872,26 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     break;
   }
 
-  for (auto &symbol : frame.BlockSymbolIterator(variables_kind)) {
+  std::vector<NonNullPtr<const sym::Symbol>> relevantSymbols;
+  frame.GetInitializedVariables(variables_kind, relevantSymbols);
+
+  for(const sym::Symbol& symbol : relevantSymbols) {
     const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.mType->IsResolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
       ts_ctx.resolve_type();
     }
 
-    auto value_object = sym::MemoryContentsObject::CreateFrameVariable(tc, frame.task, NonNull(frame),
+    auto value_object = sym::MemoryContentsObject::CreateFrameVariable(tc, frame.mTask, NonNull(frame),
                                                                          const_cast<sym::Symbol &>(symbol), true);
     GetObjectFile()->InitializeDataVisualizer(value_object);
     RegisterValueResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Instance->set_var_context({&tc, frame.task->ptr, frame.GetSymbolFile(),
+      Tracer::Instance->set_var_context({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
                                          static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
                                          ContextType::Variable});
-      frame.task.mut()->cache_object(ref, value_object);
+      frame.mTask.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});
   }

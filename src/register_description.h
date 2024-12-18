@@ -1,6 +1,7 @@
 #pragma once
 #include "common.h"
 #include "interface/remotegdb/target_description.h"
+#include "tracee_pointer.h"
 #include "utils/macros.h"
 #include <typedefs.h>
 

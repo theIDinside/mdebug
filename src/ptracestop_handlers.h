@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common.h"
 #include "interface/dap/dap_defs.h"
+#include "symbolication/dwarf/lnp.h"
 #include <symbolication/callstack.h>
 #include <unordered_map>
 

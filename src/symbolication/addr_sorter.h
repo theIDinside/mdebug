@@ -1,5 +1,7 @@
 #pragma once
-#include <common.h>
+
+#include "tracee_pointer.h"
+#include <concepts>
 
 template <typename AddressContainingType>
 concept Addressable = requires(AddressContainingType t) {

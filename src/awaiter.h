@@ -1,5 +1,4 @@
 #pragma once
-#include "common.h"
 #include "notify_pipe.h"
 #include "utils/macros.h"
 #include <memory>

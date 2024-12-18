@@ -1,5 +1,5 @@
 #pragma once
-#include "common.h"
+#include "tracee_pointer.h"
 #include <memory>
 #include <optional>
 #include <typedefs.h>
@@ -95,7 +95,7 @@ private:
 class ValueVisualizer
 {
 protected:
-  std::weak_ptr<Value> data_provider;
+  std::weak_ptr<Value> mDataProvider;
 
 public:
   explicit ValueVisualizer(std::weak_ptr<Value>) noexcept;
@@ -131,7 +131,7 @@ public:
 class InvalidValueVisualizer final : public ValueVisualizer
 {
 public:
-  explicit InvalidValueVisualizer(std::weak_ptr<Value>) noexcept;
+  explicit InvalidValueVisualizer(std::weak_ptr<Value> provider) noexcept;
   ~InvalidValueVisualizer() noexcept override = default;
   std::optional<std::string> FormatValue() noexcept override;
   std::optional<std::string> DapFormat(std::string_view name, int variablesReference) noexcept final;

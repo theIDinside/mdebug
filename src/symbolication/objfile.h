@@ -8,7 +8,6 @@
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/lnp.h"
 #include "tracer.h"
-#include <common.h>
 #include <string_view>
 #include <sys/mman.h>
 #include <type_traits>

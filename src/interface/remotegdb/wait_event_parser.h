@@ -1,6 +1,7 @@
 #pragma once
 #include "./shared.h"
-#include "common.h"
+#include "tracee_pointer.h"
+#include <algorithm>
 #include <event_queue_event_param.h>
 #include <optional>
 #include <string_view>

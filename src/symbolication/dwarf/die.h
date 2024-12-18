@@ -1,7 +1,9 @@
 #pragma once
+#include <common.h>
 #include "die_ref.h"
 #include "unit_header.h"
 #include <limits>
+#include <mutex>
 #include <symbolication/block.h>
 #include <symbolication/dwarf.h>
 #include <utils/indexing.h>

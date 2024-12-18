@@ -14,7 +14,7 @@ FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name
                                sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
                                CompilationUnit &decl_file, std::span<const u8> fb_expr,
                                std::optional<SourceCoordinate> &&source) noexcept
-    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock(start, end, {}), mFunctionSymbolBlocks(),
+    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock({start, end}, {}), mFunctionSymbolBlocks(),
       mMaybeOriginDies(maybe_origin), mFrameBaseDwarfExpression(fb_expr), mFunctionReturnType(return_type), pc_start(start),
       pc_end_exclusive(end), member_of(member_of), name(name), source(std::move(source))
 {

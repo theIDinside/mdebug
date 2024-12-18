@@ -1,6 +1,6 @@
 #pragma once
 
-#include <common.h>
+#include "tracee_pointer.h"
 #include <symbolication/dwarf_defs.h>
 
 template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;

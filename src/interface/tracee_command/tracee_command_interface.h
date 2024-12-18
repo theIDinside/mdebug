@@ -1,6 +1,7 @@
 #pragma once
 #include "interface/remotegdb/target_description.h"
 #include "register_description.h"
+#include "tracee_pointer.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"

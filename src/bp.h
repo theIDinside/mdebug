@@ -1,7 +1,7 @@
 #pragma once
-#include "common.h"
 #include "eval/eval.h"
 #include "events/event.h"
+#include "tracee_pointer.h"
 #include "typedefs.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"

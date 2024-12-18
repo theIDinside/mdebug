@@ -1,4 +1,5 @@
 #include "typeread.h"
+#include "symbolication/block.h"
 #include "symbolication/dwarf.h"
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die_iterator.h"
@@ -10,7 +11,7 @@ namespace sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : obj(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
-      params{.mEntryPc = mFunctionSymbol->StartPc(), .mEndPc = mFunctionSymbol->EndPc(), .mSymbols = {}},
+      params{{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}, {}},
       lexicalBlockStack({params})
 {
   ASSERT(lexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", lexicalBlockStack.size());
@@ -47,7 +48,7 @@ FunctionSymbolicationContext::process_lexical_block(DieReference cu_die) noexcep
       break;
     }
   }
-  lexicalBlockStack.emplace_back(low, low + hi, std::vector<Symbol>{});
+  lexicalBlockStack.emplace_back(AddressRange{low, low + hi}, std::vector<Symbol>{});
 }
 
 void

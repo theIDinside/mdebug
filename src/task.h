@@ -183,8 +183,8 @@ template <> struct formatter<TaskVMInfo>
   auto
   format(TaskVMInfo const &vm_info, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low.to_string(),
-                          vm_info.stack_size, vm_info.tls.to_string());
+    return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low,
+                          vm_info.stack_size, vm_info.tls);
   }
 };
 // CallStackRequest

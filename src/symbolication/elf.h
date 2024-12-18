@@ -1,4 +1,5 @@
 #pragma once
+#include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
 #include <common.h>

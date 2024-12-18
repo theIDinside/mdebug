@@ -1,4 +1,5 @@
 #include "shared.h"
+#include <common.h>
 
 namespace gdb {
 
