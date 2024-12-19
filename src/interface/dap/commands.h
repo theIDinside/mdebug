@@ -772,7 +772,7 @@ struct InvalidArgs final : public UICommand
   DEFINE_NAME("disassemble");
 };
 
-ui::UICommand *ParseDebugAdapterCommand(std::string &&packet) noexcept;
+ui::UICommand *ParseDebugAdapterCommand(std::string packet) noexcept;
 
 template <typename Derived, typename JsonArgs>
 static constexpr auto

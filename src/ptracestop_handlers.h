@@ -28,9 +28,9 @@ public:
 
   // Abstract Interface
   virtual ~ThreadProceedAction() noexcept = default;
-  virtual bool has_completed(bool was_stopped) const noexcept = 0;
-  virtual void proceed() noexcept = 0;
-  virtual void update_stepped() noexcept = 0;
+  virtual bool HasCompleted(bool was_stopped) const noexcept = 0;
+  virtual void Proceed() noexcept = 0;
+  virtual void UpdateStepped() noexcept = 0;
 
 protected:
   tc::TraceeCommandInterface &ctrl;
@@ -46,9 +46,9 @@ class StopImmediately : public ThreadProceedAction
 public:
   StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
   ~StopImmediately() noexcept override;
-  bool has_completed(bool was_stopped) const noexcept override;
-  void proceed() noexcept override;
-  void update_stepped() noexcept override;
+  bool HasCompleted(bool was_stopped) const noexcept override;
+  void Proceed() noexcept override;
+  void UpdateStepped() noexcept override;
 
 private:
   void notify_stopped() noexcept;
@@ -60,9 +60,9 @@ class InstructionStep : public ThreadProceedAction
 public:
   InstructionStep(TraceeController &ctrl, TaskInfo &task, int steps) noexcept;
   ~InstructionStep() override;
-  bool has_completed(bool was_stopped) const noexcept override;
-  void proceed() noexcept override;
-  void update_stepped() noexcept override;
+  bool HasCompleted(bool was_stopped) const noexcept override;
+  void Proceed() noexcept override;
+  void UpdateStepped() noexcept override;
 
 private:
   int steps_requested;
@@ -74,17 +74,18 @@ class LineStep : public ThreadProceedAction
 public:
   LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept;
   ~LineStep() noexcept override;
-  bool has_completed(bool was_stopped) const noexcept override;
-  void proceed() noexcept override;
-  void update_stepped() noexcept override;
+  bool HasCompleted(bool was_stopped) const noexcept override;
+  void Proceed() noexcept override;
+  void UpdateStepped() noexcept override;
 
 private:
   // Installs resume-to breakpoint at `address`
   void InstallBreakpoint(AddrPtr address) noexcept;
+  void MaybeSetDone(bool isDone) noexcept;
 
   int lines_requested;
   int lines_stepped;
-  bool is_done;
+  bool mIsDone;
   bool resumed_to_resume_addr;
   sym::Frame start_frame;
   sym::dw::LineTableEntry entry;
@@ -97,9 +98,9 @@ public:
   FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_ptr<UserBreakpoint> bp,
                  bool should_clean_up) noexcept;
   ~FinishFunction() noexcept override;
-  bool has_completed(bool was_stopped) const noexcept override;
-  void proceed() noexcept override;
-  void update_stepped() noexcept override;
+  bool HasCompleted(bool was_stopped) const noexcept override;
+  void Proceed() noexcept override;
+  void UpdateStepped() noexcept override;
 
 private:
   std::shared_ptr<UserBreakpoint> bp;
@@ -175,9 +176,9 @@ class StepInto final : public ThreadProceedAction
 public:
   StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame, sym::dw::LineTableEntry entry) noexcept;
   ~StepInto() noexcept final;
-  bool has_completed(bool was_stopped) const noexcept final;
-  void proceed() noexcept final;
-  void update_stepped() noexcept final;
+  bool HasCompleted(bool was_stopped) const noexcept final;
+  void Proceed() noexcept final;
+  void UpdateStepped() noexcept final;
   bool inside_origin_frame(const sym::Frame &f) const noexcept;
   bool is_origin_line(u32 line) const noexcept;
 

@@ -1144,7 +1144,7 @@ InvalidArgsResponse::serialize(int seq) const noexcept
 }
 
 ui::UICommand *
-ParseDebugAdapterCommand(std::string &&packet) noexcept
+ParseDebugAdapterCommand(std::string packet) noexcept
 {
   using namespace ui::dap;
 

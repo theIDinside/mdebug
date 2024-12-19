@@ -11,6 +11,29 @@ struct Bar
   int bar_value;
 };
 
+int fib(int n);
+
+int fib2(int n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+int fib(int n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib2(n - 1) + fib2(n - 2);
+}
+
+int fibonacci(int n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
 static int
 quux(int acc, int a)
 {
@@ -25,8 +48,12 @@ baz(int a, int b, int times)
   while (times > 0) {
     res_a = quux(res_a, a);
     res_b = quux(res_b, b);
+    int fibOfTimes = fibonacci(times);
+    int test = fib(times);
+    printf("fibonacci of %d=%d", times, fibOfTimes);
     --times;
   }
+
   if (!equals(res_a, res_b)) {
     printf("values are not equal: a=%d, b=%d", res_a, res_b);
   }

@@ -38,20 +38,20 @@ FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_
 FinishFunction::~FinishFunction() noexcept { tc.RemoveBreakpoint(bp->id); }
 
 bool
-FinishFunction::has_completed(bool stopped_by_user) const noexcept
+FinishFunction::HasCompleted(bool stopped_by_user) const noexcept
 {
 
   return tc.CacheAndGetPcFor(task) == bp->address() || stopped_by_user;
 }
 
 void
-FinishFunction::proceed() noexcept
+FinishFunction::Proceed() noexcept
 {
   tc.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task});
 }
 
 void
-FinishFunction::update_stepped() noexcept
+FinishFunction::UpdateStepped() noexcept
 {
   // essentially no-op.
 }
@@ -62,20 +62,20 @@ InstructionStep::InstructionStep(TraceeController &ctrl, TaskInfo &thread, int s
 }
 
 bool
-InstructionStep::has_completed(bool stopped_by_user) const noexcept
+InstructionStep::HasCompleted(bool stopped_by_user) const noexcept
 {
   return steps_taken == steps_requested || stopped_by_user;
 }
 
 void
-InstructionStep::proceed() noexcept
+InstructionStep::Proceed() noexcept
 {
   DBGLOG(core, "[InstructionStep] stepping 1 instruction for {}", task.tid);
   tc.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task});
 }
 
 void
-InstructionStep::update_stepped() noexcept
+InstructionStep::UpdateStepped() noexcept
 {
   ++steps_taken;
 }
@@ -89,7 +89,7 @@ InstructionStep::~InstructionStep()
 }
 
 LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
-    : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), is_done(false),
+    : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), mIsDone(false),
       resumed_to_resume_addr(false), start_frame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr}, entry()
 {
   auto &callstack = tc.BuildCallFrameStack(task, CallStackRequest::partial(1));
@@ -148,13 +148,13 @@ LineStep::~LineStep() noexcept
 }
 
 bool
-LineStep::has_completed(bool stopped_by_user) const noexcept
+LineStep::HasCompleted(bool stopped_by_user) const noexcept
 {
-  return is_done || stopped_by_user;
+  return mIsDone || stopped_by_user;
 }
 
 void
-LineStep::proceed() noexcept
+LineStep::Proceed() noexcept
 {
   if (resume_bp && !resumed_to_resume_addr) {
     DBGLOG(core, "[line step]: continuing sub frame for {}", task.tid);
@@ -174,8 +174,12 @@ LineStep::InstallBreakpoint(AddrPtr address) noexcept
   resumed_to_resume_addr = false;
 }
 
+void LineStep::MaybeSetDone(bool isDone) noexcept {
+  mIsDone = isDone;
+}
+
 void
-LineStep::update_stepped() noexcept
+LineStep::UpdateStepped() noexcept
 {
   const auto frame = tc.GetCurrentFrame(task);
   // if we're in the same frame, we single step
@@ -184,7 +188,7 @@ LineStep::update_stepped() noexcept
     ASSERT(frame.FrameLevel() == start_frame.FrameLevel(),
            "We haven't implemented support where recursion actually creates multiple frames that look the same.");
     auto [src, lte] = frame.GetLineTableEntry();
-    is_done = (!lte || lte->line != entry.line);
+    MaybeSetDone((!lte || lte->line != entry.line));
   } else {
     auto &callstack = tc.BuildCallFrameStack(task, CallStackRequest::full());
     const auto resumeAddress =
@@ -192,10 +196,7 @@ LineStep::update_stepped() noexcept
     if (resumeAddress) {
       InstallBreakpoint(resumeAddress.value());
     } else {
-      TODO_FMT("Could not determine resume address using start frame {}; haven't implemented line step in "
-               "recursive functions or in the case where some function below does a longjmp and possible entirely "
-               "invalidates the callstack.",
-               start_frame);
+      MaybeSetDone(true);
     }
   }
 }
@@ -234,12 +235,12 @@ StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) 
 
   auto proceed_action = get_proceed_action(info);
   if (proceed_action) {
-    proceed_action->update_stepped();
+    proceed_action->UpdateStepped();
     const auto stopped_by_user = !stop.should_resume;
-    if (proceed_action->has_completed(stopped_by_user)) {
+    if (proceed_action->HasCompleted(stopped_by_user)) {
       remove_action(info);
     } else {
-      proceed_action->proceed();
+      proceed_action->Proceed();
     }
   } else {
     DBGLOG(core, "[action]: {} will resume (should_resume={}) => {}", info.tid, stop.should_resume,
@@ -413,7 +414,7 @@ StopHandler::set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept
   ASSERT(proceed_actions[tid] == nullptr,
          "Attempted to set new thread proceed action, without performing cleanup of old");
   proceed_actions[tid] = action;
-  action->proceed();
+  action->Proceed();
 }
 
 StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept
@@ -435,13 +436,13 @@ StopImmediately::notify_stopped() noexcept
 }
 
 bool
-StopImmediately::has_completed(bool) const noexcept
+StopImmediately::HasCompleted(bool) const noexcept
 {
   return true;
 }
 
 void
-StopImmediately::proceed() noexcept
+StopImmediately::Proceed() noexcept
 {
   const auto res = ctrl.StopTask(task);
   if (!res.is_ok()) {
@@ -450,7 +451,7 @@ StopImmediately::proceed() noexcept
 }
 
 void
-StopImmediately::update_stepped() noexcept
+StopImmediately::UpdateStepped() noexcept
 {
 }
 
@@ -469,13 +470,13 @@ StepInto::~StepInto() noexcept
 }
 
 bool
-StepInto::has_completed(bool stopped_by_user) const noexcept
+StepInto::HasCompleted(bool stopped_by_user) const noexcept
 {
   return is_done || stopped_by_user;
 }
 
 void
-StepInto::proceed() noexcept
+StepInto::Proceed() noexcept
 {
   tc.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task});
 }
@@ -493,7 +494,7 @@ StepInto::inside_origin_frame(const sym::Frame &f) const noexcept
 }
 
 void
-StepInto::update_stepped() noexcept
+StepInto::UpdateStepped() noexcept
 {
   const auto frame = tc.GetCurrentFrame(task);
   // if we're in the same frame, we single step
