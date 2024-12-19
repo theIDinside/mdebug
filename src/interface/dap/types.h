@@ -38,7 +38,7 @@ struct Breakpoint
 
   std::string serialize() const noexcept;
   static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
-  static Breakpoint from_user_bp(const std::shared_ptr<UserBreakpoint>& user_bp) noexcept;
+  static Breakpoint from_user_bp(const UserBreakpoint& user_bp) noexcept;
 };
 
 struct DataBreakpoint

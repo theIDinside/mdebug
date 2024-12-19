@@ -359,7 +359,7 @@ SetBreakpoints::execute() noexcept
   for (const auto &[bp, ids] : target->GetUserBreakpoints().bps_for_source(file)) {
     for (const auto id : ids) {
       const auto user = target->GetUserBreakpoints().get_user(id);
-      res->breakpoints.push_back(BP::from_user_bp(user));
+      res->breakpoints.push_back(BP::from_user_bp(*user));
     }
   }
 
@@ -406,7 +406,7 @@ SetInstructionBreakpoints::execute() noexcept
   res->breakpoints.reserve(target->GetUserBreakpoints().instruction_breakpoints.size());
 
   for (const auto &[k, id] : target->GetUserBreakpoints().instruction_breakpoints) {
-    res->breakpoints.push_back(BP::from_user_bp(target->GetUserBreakpoints().get_user(id)));
+    res->breakpoints.push_back(BP::from_user_bp(*target->GetUserBreakpoints().get_user(id)));
   }
 
   res->success = true;
@@ -444,7 +444,7 @@ SetFunctionBreakpoints::execute() noexcept
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().all_users()) {
     if (user->kind == LocationUserKind::Function) {
-      res->breakpoints.push_back(BP::from_user_bp(user));
+      res->breakpoints.push_back(BP::from_user_bp(*user));
     }
   }
   res->success = true;
@@ -568,7 +568,8 @@ Disconnect::execute() noexcept
 {
   const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
-    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
+    Tracer::Instance->erase_target(
+      [this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
     Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
   }
 
@@ -692,7 +693,8 @@ Terminate::execute() noexcept
   const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
     dap_client->post_event(new TerminatedEvent{});
-    Tracer::Instance->erase_target([this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
+    Tracer::Instance->erase_target(
+      [this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
     Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
   }
   return new TerminateResponse{ok, this};
@@ -1059,8 +1061,9 @@ VariablesResponse::serialize(int seq) const noexcept
           seq, request_seq, v.variable_value->mName);
       }
     } else {
-      ASSERT(v.variable_value->GetType()->IsReference(), "Add visualizer & resolver for T* types. It will look more "
-                                                       "or less identical to CStringResolver & ArrayResolver");
+      ASSERT(v.variable_value->GetType()->IsReference(),
+             "Add visualizer & resolver for T* types. It will look more "
+             "or less identical to CStringResolver & ArrayResolver");
       // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we
       // do individual type checking again.
       //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
