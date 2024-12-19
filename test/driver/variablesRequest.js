@@ -69,7 +69,7 @@ async function scopeLocalsTest(debugAdapter) {
       const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: scope.variablesReference })
       const variables = vres?.body?.variables
       assertLog(variables != null, 'variables', `Request failed. Response: ${JSON.stringify(vres)}`)
-      let expectedCount = 8
+      const expectedCount = 7
       assertAllVariableReferencesUnique(variables)
       assertVarResponseLength(variables, expectedCount, scope.variablesReference, vres)
 
@@ -157,7 +157,7 @@ async function membersOfVariableTest(debugAdapter) {
     if (scope.name == 'Locals') {
       const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: scope.variablesReference })
       const variables = vres.body.variables
-      let expectedCount = 8
+      const expectedCount = 7
       assertAllVariableReferencesUnique(variables)
 
       if (variables.length != expectedCount)

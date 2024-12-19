@@ -50,7 +50,7 @@ Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
 }
 
 Breakpoint
-Breakpoint::from_user_bp(std::shared_ptr<UserBreakpoint> user_bp) noexcept
+Breakpoint::from_user_bp(const std::shared_ptr<UserBreakpoint>& user_bp) noexcept
 {
   ASSERT(user_bp != nullptr, "Function requires a non-null UserBreakpoint");
   if (const auto addr = user_bp->address(); addr) {

@@ -5,6 +5,11 @@
 
 namespace utils {
 
+template <typename T>
+concept Comparable = requires(const T& t) {
+  { t == t } -> std::convertible_to<bool>;
+};
+
 template <typename Iterator> struct SpanResult
 {
   using ref = decltype(*Iterator{});
@@ -106,6 +111,27 @@ constexpr auto
 none_of(const Container &c, Fn &&fn) noexcept
 {
   return std::none_of(c.begin(), c.end(), std::move(fn));
+}
+
+
+template <typename Container, Comparable T>
+constexpr auto
+any_of(const Container &c, const T& value) noexcept
+{
+  for(const auto& v : c) {
+    if(v == value) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+template <typename Container, Comparable T>
+constexpr auto
+none_of(const Container &c, const T& value) noexcept
+{
+  return !any_of(c, value);
 }
 
 } // namespace utils

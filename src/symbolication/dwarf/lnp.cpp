@@ -17,8 +17,8 @@ public:
   SourceCodeFileLNPResolver(LNPHeader *header, std::set<LineTableEntry> &table,
                             std::vector<AddressRange> &sequences,
                             const std::span<const u32> &filesToRecord) noexcept
-      : header{header}, mTable(table), mSequences(sequences), mIsStatement(header->default_is_stmt),
-        mFilesToRecord(filesToRecord)
+      : header{header}, mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()), mTable(table),
+        mSequences(sequences), mIsStatement(header->default_is_stmt), mFilesToRecord(filesToRecord)
   {
   }
 
@@ -223,10 +223,25 @@ private:
   bool
   ShouldRecord() const noexcept
   {
-    return std::ranges::contains(mFilesToRecord, mFile);
+    return std::ranges::contains(mFilesToRecord, mFile) && AddressInsideVirtualMemoryMappingForObject();
+  }
+
+  /// Line Number Program data, unfortunately, very sadly, very... much the f****ry of dwarves, can contain garbled
+  /// garbage data In the case of a file template.h, that's included in different files, it may produce LNP data
+  /// for two different compilation units but may in the case of one of them, produce address values for the
+  /// entries in ranges 0 ... some other low address. This is not the fault of DWARF to be honest though,
+  /// apparently it has something to do with the Linker garbage collecting sections that it's removed (because it's
+  /// duplicate, for instance). Unfortunately, the DWARF data remains behind, but with garbage data. I wonder if a
+  /// bug can be filed here, or if this really is intended behavior? Anyway; we check if the address lands within
+  /// the (unrelocated) executable address of this object file, if it's not, we discard it.
+  constexpr bool
+  AddressInsideVirtualMemoryMappingForObject() const noexcept
+  {
+    return mCurrentObjectFileAddressRange.Contains(mAddress);
   }
 
   LNPHeader *header;
+  AddressRange mCurrentObjectFileAddressRange;
   std::set<LineTableEntry> &mTable;
   std::vector<AddressRange> &mSequences;
   // State machine register
@@ -464,7 +479,7 @@ operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r)
 }
 
 std::shared_ptr<std::vector<LNPHeader>>
-read_lnp_headers(ObjectFile* objectFile) noexcept
+read_lnp_headers(ObjectFile *objectFile) noexcept
 {
   auto elf = objectFile->GetElf();
   ASSERT(elf != nullptr, "ELF must be parsed first");
@@ -691,8 +706,7 @@ SourceCodeFile::GetLineTableEntryFor(AddrPtr relocatedBase, AddrPtr pc) noexcept
 }
 
 SourceCodeFile::SourceCodeFile(Elf *elf, std::filesystem::path path) noexcept
-    : mLineTables(), mSpan(nullptr, nullptr), m(), computed(false), elf(elf),
-      full_path(std::move(path))
+    : mLineTables(), mSpan(nullptr, nullptr), m(), computed(false), elf(elf), full_path(std::move(path))
 {
 }
 
@@ -712,8 +726,9 @@ SourceCodeFile::FindRelocatedLineTableEntry(AddrPtr relocationBase, AddrPtr relo
 
   const auto &compUnitLineTable = mLineTables[tableIndex].mLineTable;
 
-  auto it = std::lower_bound(compUnitLineTable.data(), compUnitLineTable.data() + compUnitLineTable.size(),
-                             unrelocatedAddress, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  auto it =
+    std::lower_bound(compUnitLineTable.data(), compUnitLineTable.data() + compUnitLineTable.size(),
+                     unrelocatedAddress, [](const LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
   if (it == compUnitLineTable.data() + compUnitLineTable.size()) {
     return nullptr;
   }
@@ -764,6 +779,7 @@ SourceCodeFile::ComputeLineTableForThis() noexcept
   std::set<LineTableEntry> unique_ltes{};
 
   for (auto &table : mLineTables) {
+    unique_ltes.clear();
     auto fileIndices = table.mHeader->file_entry_index(full_path);
     ASSERT(fileIndices, "Expected a file entry index but did not find one for {}", full_path->c_str());
     DBGLOG(dwarf, "[lnp]: computing lnp at 0x{:x}", table.mHeader->sec_offset);
@@ -873,7 +889,7 @@ SourceCodeFile::ComputeLineTableForThis() noexcept
 }
 
 RelocatedSourceCodeFile::RelocatedSourceCodeFile(AddrPtr base_addr,
-                                                 const std::shared_ptr<SourceCodeFile>& src_file) noexcept
+                                                 const std::shared_ptr<SourceCodeFile> &src_file) noexcept
     : file(*src_file), baseAddr(base_addr)
 {
 }

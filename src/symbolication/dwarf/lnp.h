@@ -1,8 +1,11 @@
 #pragma once
 #include "../dwarf_defs.h"
+#include "events/event.h"
 #include "symbolication/block.h"
 #include "utils/immutable.h"
+#include <algorithm>
 #include <common.h>
+#include <ranges>
 
 class Elf;
 class ObjectFile;
@@ -252,16 +255,27 @@ public:
     }
 
     const auto sz = outResult.size();
+
+    // recorded addressess are essentially a ring buffer
+    // it will record over previously recorded addresses if we seen 32 unique addressess. This is fine. We don't
+    // care *that* much.
+    size_t recCount = 0;
+    AddrPtr recorded[32];
+    const auto IsLine = [line](const LineTableEntry &entry) noexcept -> bool { return entry.line == line; };
+    const auto NotAlreadyRecorded = [&recorded, &recCount](const LineTableEntry &entry) noexcept -> bool {
+      return utils::none_of(std::span{recorded}.subspan(0, std::min(std::size(recorded), recCount)), entry.pc);
+    };
+
     for (const auto &table : mLineTables) {
-      for (const auto &entry : table.mLineTable) {
-        if (entry.line == line) {
-          if(!column) {
-            // Get only first entry with line == line
-            outResult.push_back(&entry);
-            break;
-          } else if(entry.column == column) {
-            outResult.push_back(&entry);
-          }
+      for (const auto &entry :
+           table.mLineTable | std::views::filter(IsLine) | std::views::filter(NotAlreadyRecorded)) {
+        // Get only first entry with line == line
+        recorded[recCount & (32 - 1)] = entry.pc;
+        // We don't care if we go beyond 32. Just wrap around. We can live with duplicates at that point.
+        recCount++;
+        outResult.push_back(&entry);
+        if (!column) {
+          break;
         }
       }
     }
