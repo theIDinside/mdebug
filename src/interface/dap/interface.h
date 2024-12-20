@@ -15,6 +15,8 @@ class Tracer;
 class TraceeController;
 /* The different DAP commands/requests */
 
+class ArenaAllocator;
+
 namespace ui {
 struct UIResult;
 using UIResultPtr = const UIResult *;
@@ -138,6 +140,10 @@ class DebugAdapterClient
   ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
   int tty_fd{-1};
   TraceeController *tc{nullptr};
+  // The allocator that can be used by commands during execution of them, for temporary objects etc
+  // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
+  // away.
+  std::unique_ptr<ArenaAllocator> mCommandsAllocator;
 
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
@@ -151,6 +157,7 @@ public:
   DapClientSession session_type;
   ~DebugAdapterClient() noexcept;
 
+  ArenaAllocator& GetCommandArenaAllocator() noexcept;
   static DebugAdapterClient *createStandardIOConnection() noexcept;
   static DebugAdapterClient *createSocketConnection(DebugAdapterClient *client) noexcept;
   void client_configured(TraceeController *tc) noexcept;

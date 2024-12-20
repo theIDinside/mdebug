@@ -47,6 +47,8 @@ set(MIDAS_SOURCES
   src/events/event.h
   # lib
   src/lib/lockguard.h
+  src/lib/arena_allocator.cpp
+  src/lib/arena_allocator.h
   # symbolication
   src/symbolication/block.cpp
   src/symbolication/block.h

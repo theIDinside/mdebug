@@ -6,6 +6,7 @@
 #include "commands.h"
 #include "common.h"
 #include "events.h"
+#include "lib/arena_allocator.h"
 #include "lib/lockguard.h"
 #include "parse_buffer.h"
 #include <cstring>
@@ -322,6 +323,8 @@ DAP::configure_tty(int master_pty_fd) noexcept
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
     : socket_path(std::move(path)), in(socket), out(socket), session_type(type)
 {
+  // Create a 1 megabyte arena allocator.
+  mCommandsAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(256), nullptr);
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, int standard_in, int standard_out) noexcept
@@ -394,6 +397,12 @@ DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
       return new DebugAdapterClient{child_session(client->session_type), std::move(socket_path), accepted};
     }
   }
+}
+
+ArenaAllocator &
+DebugAdapterClient::GetCommandArenaAllocator() noexcept
+{
+  return *mCommandsAllocator;
 }
 
 DebugAdapterClient *
