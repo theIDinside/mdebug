@@ -30,8 +30,6 @@ ArenaAllocator::CreateShared(size_t allocSize, std::pmr::memory_resource *upstre
 void *
 ArenaAllocator::do_allocate(std::size_t bytes, std::size_t alignment)
 {
-  // (0b101 + 0b100 - 0b1) & ~(0b100 - 0b1 => 0b11)
-  //
   const std::size_t possiblyAdjustedOffset = (mAllocated + alignment - 1) & ~(alignment - 1);
   MUST_HOLD((possiblyAdjustedOffset + bytes) < mArenaCapacity,
             "Dynamic arena allocator not yet implemented. For now we crash.");

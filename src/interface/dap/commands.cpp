@@ -62,7 +62,7 @@ ErrorResponse::ErrorResponse(std::string_view command, ui::UICommandPtr cmd,
 }
 
 std::string
-ErrorResponse::serialize(int seq) const noexcept
+ErrorResponse::Serialize(int seq) const noexcept
 {
   if (short_message && message) {
     return fmt::format(
@@ -83,7 +83,7 @@ ErrorResponse::serialize(int seq) const noexcept
 }
 
 std::string
-PauseResponse::serialize(int seq) const noexcept
+PauseResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"pause"}})", seq,
@@ -96,7 +96,7 @@ PauseResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Pause::execute() noexcept
+Pause::Execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->GetTaskByTid(pauseArgs.threadId);
@@ -108,7 +108,7 @@ Pause::execute() noexcept
 }
 
 std::string
-ReverseContinueResponse::serialize(int seq) const noexcept
+ReverseContinueResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
@@ -124,7 +124,7 @@ ReverseContinueResponse::serialize(int seq) const noexcept
 ReverseContinue::ReverseContinue(u64 seq, int thread_id) noexcept : UICommand(seq), thread_id(thread_id) {}
 
 UIResultPtr
-ReverseContinue::execute() noexcept
+ReverseContinue::Execute() noexcept
 {
   auto res = new ReverseContinueResponse{true, this};
   auto target = dap_client->supervisor();
@@ -134,7 +134,7 @@ ReverseContinue::execute() noexcept
 }
 
 std::string
-ContinueResponse::serialize(int seq) const noexcept
+ContinueResponse::Serialize(int seq) const noexcept
 {
 
   if (success) {
@@ -149,7 +149,7 @@ ContinueResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Continue::execute() noexcept
+Continue::Execute() noexcept
 {
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
@@ -179,7 +179,7 @@ Continue::execute() noexcept
 }
 
 std::string
-NextResponse::serialize(int seq) const noexcept
+NextResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"next"}})", seq,
@@ -192,7 +192,7 @@ NextResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Next::execute() noexcept
+Next::Execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->GetTaskByTid(thread_id);
@@ -216,7 +216,7 @@ Next::execute() noexcept
 }
 
 std::string
-StepInResponse::serialize(int seq) const noexcept
+StepInResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepIn"}})", seq,
@@ -229,7 +229,7 @@ StepInResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-StepIn::execute() noexcept
+StepIn::Execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->GetTaskByTid(thread_id);
@@ -252,7 +252,7 @@ StepIn::execute() noexcept
 }
 
 std::string
-StepOutResponse::serialize(int seq) const noexcept
+StepOutResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepOut"}})",
@@ -265,7 +265,7 @@ StepOutResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-StepOut::execute() noexcept
+StepOut::Execute() noexcept
 {
   auto target = dap_client->supervisor();
   auto task = target->GetTaskByTid(thread_id);
@@ -294,7 +294,7 @@ SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cm
 }
 
 std::string
-SetBreakpointsResponse::serialize(int seq) const noexcept
+SetBreakpointsResponse::Serialize(int seq) const noexcept
 {
   std::vector<std::string> serialized_bkpts{};
   serialized_bkpts.reserve(breakpoints.size());
@@ -333,7 +333,7 @@ SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) no
 }
 
 UIResultPtr
-SetBreakpoints::execute() noexcept
+SetBreakpoints::Execute() noexcept
 {
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
   auto target = dap_client->supervisor();
@@ -372,7 +372,7 @@ SetExceptionBreakpoints::SetExceptionBreakpoints(std::uint64_t sequence, nlohman
 }
 
 UIResultPtr
-SetExceptionBreakpoints::execute() noexcept
+SetExceptionBreakpoints::Execute() noexcept
 {
   DBGLOG(core, "exception breakpoints not yet implemented");
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::exception};
@@ -387,7 +387,7 @@ SetInstructionBreakpoints::SetInstructionBreakpoints(std::uint64_t seq, nlohmann
 }
 
 UIResultPtr
-SetInstructionBreakpoints::execute() noexcept
+SetInstructionBreakpoints::Execute() noexcept
 {
   using BP = ui::dap::Breakpoint;
   Set<InstructionBreakpointSpec> bps{};
@@ -422,7 +422,7 @@ SetFunctionBreakpoints::SetFunctionBreakpoints(std::uint64_t seq, nlohmann::json
 }
 
 UIResultPtr
-SetFunctionBreakpoints::execute() noexcept
+SetFunctionBreakpoints::Execute() noexcept
 {
   using BP = ui::dap::Breakpoint;
   Set<FunctionBreakpointSpec> bkpts{};
@@ -452,7 +452,7 @@ SetFunctionBreakpoints::execute() noexcept
 }
 
 std::string
-WriteMemoryResponse::serialize(int seq) const noexcept
+WriteMemoryResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
@@ -465,7 +465,7 @@ WriteMemory::WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, st
 }
 
 UIResultPtr
-WriteMemory::execute() noexcept
+WriteMemory::Execute() noexcept
 {
   auto supervisor = dap_client->supervisor();
   auto response = new WriteMemoryResponse{false, this};
@@ -482,7 +482,7 @@ WriteMemory::execute() noexcept
 }
 
 std::string
-ReadMemoryResponse::serialize(int seq) const noexcept
+ReadMemoryResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
@@ -499,7 +499,7 @@ ReadMemory::ReadMemory(std::uint64_t seq, std::optional<AddrPtr> address, int of
 }
 
 UIResultPtr
-ReadMemory::execute() noexcept
+ReadMemory::Execute() noexcept
 {
   if (address) {
     auto sv = dap_client->supervisor()->ReadToVector(*address, bytes);
@@ -515,7 +515,7 @@ ReadMemory::execute() noexcept
 }
 
 std::string
-ConfigurationDoneResponse::serialize(int seq) const noexcept
+ConfigurationDoneResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"configurationDone"}})", seq,
@@ -523,7 +523,7 @@ ConfigurationDoneResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-ConfigurationDone::execute() noexcept
+ConfigurationDone::Execute() noexcept
 {
   Tracer::Instance->config_done(dap_client);
   switch (dap_client->supervisor()->GetSessionType()) {
@@ -543,7 +543,7 @@ Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
 }
 
 UIResultPtr
-Initialize::execute() noexcept
+Initialize::Execute() noexcept
 {
   bool RRSession = false;
   if (args.contains("RRSession")) {
@@ -553,7 +553,7 @@ Initialize::execute() noexcept
 }
 
 std::string
-DisconnectResponse::serialize(int seq) const noexcept
+DisconnectResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disconnect"}})",
                      seq, request_seq);
@@ -564,7 +564,7 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
 {
 }
 UIResultPtr
-Disconnect::execute() noexcept
+Disconnect::Execute() noexcept
 {
   const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
@@ -582,7 +582,7 @@ InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd
 }
 
 std::string
-InitializeResponse::serialize(int) const noexcept
+InitializeResponse::Serialize(int) const noexcept
 {
   // "this _must_ be 1, the first response"
 
@@ -640,12 +640,12 @@ InitializeResponse::serialize(int) const noexcept
     request_seq, cfg_body.dump());
 
   client->write(payload);
-  client->write(InitializedEvent{}.serialize(0));
+  client->write(InitializedEvent{}.Serialize(0));
   return "";
 }
 
 std::string
-LaunchResponse::serialize(int seq) const noexcept
+LaunchResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"launch"}})", seq,
                      request_seq);
@@ -658,14 +658,14 @@ Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
 }
 
 UIResultPtr
-Launch::execute() noexcept
+Launch::Execute() noexcept
 {
   Tracer::Instance->launch(dap_client, stopOnEntry, std::move(program), std::move(program_args));
   return new LaunchResponse{true, this};
 }
 
 std::string
-AttachResponse::serialize(int seq) const noexcept
+AttachResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"attach"}})", seq,
                      request_seq);
@@ -674,21 +674,21 @@ AttachResponse::serialize(int seq) const noexcept
 Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), attachArgs(std::move(args)) {}
 
 UIResultPtr
-Attach::execute() noexcept
+Attach::Execute() noexcept
 {
   const auto res = Tracer::Instance->attach(attachArgs);
   return new AttachResponse{res, this};
 }
 
 std::string
-TerminateResponse::serialize(int seq) const noexcept
+TerminateResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"terminate"}})",
                      seq, request_seq);
 }
 
 UIResultPtr
-Terminate::execute() noexcept
+Terminate::Execute() noexcept
 {
   const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
@@ -701,7 +701,7 @@ Terminate::execute() noexcept
 }
 
 std::string
-ThreadsResponse::serialize(int seq) const noexcept
+ThreadsResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
@@ -709,7 +709,7 @@ ThreadsResponse::serialize(int seq) const noexcept
 }
 
 UIResultPtr
-Threads::execute() noexcept
+Threads::Execute() noexcept
 {
   // todo(simon): right now, we only support 1 process, but theoretically the current design
   // allows for more; it would require some work to get the DAP protocol to play nicely though.
@@ -755,7 +755,7 @@ StackTraceResponse::StackTraceResponse(bool success, StackTrace *cmd,
 }
 
 std::string
-StackTraceResponse::serialize(int seq) const noexcept
+StackTraceResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
@@ -773,7 +773,7 @@ is_debug_build()
 }
 
 UIResultPtr
-StackTrace::execute() noexcept
+StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto target = dap_client->supervisor();
@@ -812,7 +812,7 @@ StackTrace::execute() noexcept
 Scopes::Scopes(std::uint64_t seq, int frameId) noexcept : UICommand(seq), frameId(frameId) {}
 
 std::string
-ScopesResponse::serialize(int seq) const noexcept
+ScopesResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
@@ -825,7 +825,7 @@ ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> s
 }
 
 UIResultPtr
-Scopes::execute() noexcept
+Scopes::Execute() noexcept
 {
   auto ctx = Tracer::Instance->var_context(frameId);
   if (!ctx.valid_context() || ctx.type != ContextType::Frame) {
@@ -847,7 +847,7 @@ Disassemble::Disassemble(std::uint64_t seq, std::optional<AddrPtr> address, int 
 }
 
 UIResultPtr
-Disassemble::execute() noexcept
+Disassemble::Execute() noexcept
 {
   if (address) {
     auto res = new DisassembleResponse{true, this};
@@ -888,7 +888,7 @@ Disassemble::execute() noexcept
 }
 
 std::string
-DisassembleResponse::serialize(int seq) const noexcept
+DisassembleResponse::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[{}]}}}})",
@@ -908,7 +908,7 @@ Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId
 }
 
 UIResultPtr
-Evaluate::execute() noexcept
+Evaluate::Execute() noexcept
 {
   switch (context) {
   case EvaluationContext::Watch:
@@ -969,7 +969,7 @@ EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<in
 }
 
 std::string
-EvaluateResponse::serialize(int seq) const noexcept
+EvaluateResponse::Serialize(int seq) const noexcept
 {
   if (success) {
     return fmt::format(
@@ -995,7 +995,7 @@ Variables::error(std::string &&msg) noexcept
 }
 
 UIResultPtr
-Variables::execute() noexcept
+Variables::Execute() noexcept
 {
   auto context = Tracer::Instance->var_context(var_ref);
   if (!context.valid_context()) {
@@ -1041,7 +1041,7 @@ VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<V
 }
 
 std::string
-VariablesResponse::serialize(int seq) const noexcept
+VariablesResponse::Serialize(int seq) const noexcept
 {
   if (variables.empty()) {
     return fmt::format(
@@ -1090,7 +1090,7 @@ InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrI
 }
 
 UIResultPtr
-InvalidArgs::execute() noexcept
+InvalidArgs::Execute() noexcept
 {
   return new InvalidArgsResponse{command, std::move(missing_arguments)};
 }
@@ -1101,7 +1101,7 @@ InvalidArgsResponse::InvalidArgsResponse(std::string_view command, MissingOrInva
 }
 
 std::string
-InvalidArgsResponse::serialize(int seq) const noexcept
+InvalidArgsResponse::Serialize(int seq) const noexcept
 {
   std::vector<std::string_view> missing{};
   std::vector<const InvalidArg *> parsed_and_invalid{};

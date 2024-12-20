@@ -168,9 +168,9 @@ void
 Tracer::handle_command(ui::UICommand *cmd) noexcept
 {
   DBGLOG(core, "accepted command {}", cmd->name());
-  auto result = cmd->execute();
+  auto result = cmd->Execute();
 
-  auto data = result->serialize(0);
+  auto data = result->Serialize(0);
   if (!data.empty()) {
     cmd->dap_client->write(data);
   }

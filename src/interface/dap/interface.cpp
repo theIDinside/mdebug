@@ -194,7 +194,7 @@ DAP::one_poll(u32 notifier_queue_size) noexcept
           continue;
         }
         std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-        client->write(ui::dap::OutputEvent{"stdout", std::string{data}}.serialize(0));
+        client->write(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(0));
       } break;
       }
     }
@@ -288,7 +288,7 @@ DAP::flush_events() noexcept
 {
   while (!events_queue.empty()) {
     auto evt = pop_event();
-    const auto protocol_msg = evt->serialize(0);
+    const auto protocol_msg = evt->Serialize(0);
     write_protocol_message(protocol_msg);
     delete evt;
   }
@@ -425,7 +425,7 @@ DebugAdapterClient::post_event(ui::UIResultPtr event)
   // now, 1 thread for all debug adapter client, that does it's dispatching vie the poll system calls. If we land,
   // 100% in the idea to keep it this way, we shouldn't really have to `new` and `delete` UIResultPtr's, that
   // should just be on the stack; but I'm keeping it here for now, in case I want to try out the other way.
-  auto result = event->serialize(0);
+  auto result = event->Serialize(0);
   write(result);
   delete event;
 }

@@ -10,13 +10,13 @@
 namespace ui::dap {
 
 std::string
-InitializedEvent::serialize(int) const noexcept
+InitializedEvent::Serialize(int) const noexcept
 {
   return fmt::format(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
 }
 
 std::string
-TerminatedEvent::serialize(int seq) const noexcept
+TerminatedEvent::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{}, "type":"event", "event":"terminated" }})", seq);
 }
@@ -62,7 +62,7 @@ format_optional(const std::optional<T> &opt, bool with_quotes) noexcept -> std::
 }
 
 std::string
-ModuleEvent::serialize(int seq) const noexcept
+ModuleEvent::Serialize(int seq) const noexcept
 {
   auto out = fmt::memory_buffer();
   constexpr auto bi = [](auto &out) { return std::back_inserter(out); };
@@ -91,7 +91,7 @@ ContinuedEvent::ContinuedEvent(Tid tid, bool all_threads) noexcept
 }
 
 std::string
-ContinuedEvent::serialize(int seq) const noexcept
+ContinuedEvent::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{}, "type":"event", "event":"continued", "body":{{"threadId":{}, "allThreadsContinued":{}}}}})",
@@ -101,7 +101,7 @@ ContinuedEvent::serialize(int seq) const noexcept
 Process::Process(std::string name, bool is_local) noexcept : name(std::move(name)), is_local(is_local) {}
 
 std::string
-Process::serialize(int seq) const noexcept
+Process::Serialize(int seq) const noexcept
 {
   return fmt::format(
     R"({{"seq":{}, "type":"event", "event":"process", "body":{{"name":"{}", "isLocalProcess": true, "startMethod": "attach" }}}})",
@@ -110,7 +110,7 @@ Process::serialize(int seq) const noexcept
 
 ExitedEvent::ExitedEvent(int exit_code) noexcept : exit_code(exit_code) {}
 std::string
-ExitedEvent::serialize(int seq) const noexcept
+ExitedEvent::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{}, "type":"event", "event":"exited", "body":{{"exitCode":{}}}}})", seq,
                      exit_code);
@@ -119,7 +119,7 @@ ExitedEvent::serialize(int seq) const noexcept
 ThreadEvent::ThreadEvent(ThreadReason reason, Tid tid) noexcept : reason(reason), tid(tid) {}
 
 std::string
-ThreadEvent::serialize(int seq) const noexcept
+ThreadEvent::Serialize(int seq) const noexcept
 {
   return fmt::format(R"({{"seq":{}, "type":"event", "event":"thread", "body":{{"reason":"{}", "threadId":{}}}}})",
                      seq, to_str(reason), tid);
@@ -132,7 +132,7 @@ StoppedEvent::StoppedEvent(StoppedReason reason, std::string_view description, T
 }
 
 std::string
-StoppedEvent::serialize(int seq) const noexcept
+StoppedEvent::Serialize(int seq) const noexcept
 {
   nlohmann::json ensure_desc_utf8 = description;
   const auto description_utf8 = ensure_desc_utf8.dump();
@@ -167,7 +167,7 @@ zip(Fn &&fn, Optionals... opts) noexcept
 }
 
 std::string
-BreakpointEvent::serialize(int seq) const noexcept
+BreakpointEvent::Serialize(int seq) const noexcept
 {
 
   std::string result{};
@@ -204,7 +204,7 @@ OutputEvent::OutputEvent(std::string_view category, std::string &&output) noexce
 }
 
 std::string
-OutputEvent::serialize(int seq) const noexcept
+OutputEvent::Serialize(int seq) const noexcept
 {
   nlohmann::json escape_hack;
   escape_hack = output;

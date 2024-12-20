@@ -12,7 +12,7 @@ struct UIResult
   {
   }
   virtual ~UIResult() = default;
-  virtual std::string serialize(int monotonic_id) const noexcept = 0;
+  virtual std::string Serialize(int monotonic_id) const noexcept = 0;
 
   bool success;
   std::uint64_t request_seq;

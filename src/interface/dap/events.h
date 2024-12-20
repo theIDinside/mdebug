@@ -24,14 +24,14 @@ struct InitializedEvent final : public ui::UIResult
 {
   InitializedEvent() noexcept = default;
   ~InitializedEvent() noexcept final = default;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct TerminatedEvent final : public ui::UIResult
 {
   TerminatedEvent() noexcept = default;
   ~TerminatedEvent() noexcept final = default;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 static constexpr std::string_view reasons[3]{"new", "changed", "removed"};
@@ -54,7 +54,7 @@ struct ModuleEvent final : public ui::UIResult
   std::optional<std::string> symbol_file_path;
   std::optional<std::string> version;
 
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct ContinuedEvent final : public ui::UIResult
@@ -64,7 +64,7 @@ struct ContinuedEvent final : public ui::UIResult
   // allThreadsContinued
   bool all_threads_continued;
   ContinuedEvent(Tid tid, bool all_threads) noexcept;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct Process final : public ui::UIResult
@@ -72,7 +72,7 @@ struct Process final : public ui::UIResult
   std::string name;
   bool is_local;
   Process(std::string name, bool is_local) noexcept;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct ExitedEvent final : public ui::UIResult
@@ -80,14 +80,14 @@ struct ExitedEvent final : public ui::UIResult
   // exitCode
   int exit_code;
   ExitedEvent(int exit_code) noexcept;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct ThreadEvent final : public ui::UIResult
 {
   ThreadEvent(ThreadReason reason, Tid tid) noexcept;
   ~ThreadEvent() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
   ThreadReason reason;
   Tid tid;
 };
@@ -105,7 +105,7 @@ struct StoppedEvent final : public ui::UIResult
   // static additional information, name of exception for instance
   std::string_view text;
   bool all_threads_stopped;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct BreakpointEvent final : public ui::UIResult
@@ -116,7 +116,7 @@ struct BreakpointEvent final : public ui::UIResult
   BreakpointEvent(std::string_view reason, std::optional<std::string> message,
                   const UserBreakpoint *breakpoint) noexcept;
   ~BreakpointEvent() override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 struct OutputEvent final : public ui::UIResult
@@ -126,7 +126,7 @@ struct OutputEvent final : public ui::UIResult
 
   std::string_view category; // static category strings exist, we always pass literals to this
   std::string output;
-  std::string serialize(int seq) const noexcept final;
+  std::string Serialize(int seq) const noexcept final;
 };
 
 }; // namespace ui::dap
