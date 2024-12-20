@@ -3,12 +3,12 @@
 #include "../../lib/spinlock.h"
 #include "../../notify_pipe.h"
 #include "dap_defs.h"
-#include "utils/immutable.h"
 #include "utils/util.h"
 #include <cstring>
 #include <nlohmann/json.hpp>
 #include <queue>
 #include <string_view>
+#include <tracee/util.h>
 #include <typedefs.h>
 #include <vector>
 class Tracer;

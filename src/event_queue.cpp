@@ -200,7 +200,7 @@ push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept
 void
 push_command_event(ui::dap::DebugAdapterClient *dap, ui::UICommand *cmd) noexcept
 {
-  cmd->set_target(*dap);
+  cmd->SetDebugAdapterClient(*dap);
   push_event(Event{.type = EventType::Command, .cmd = cmd});
 }
 

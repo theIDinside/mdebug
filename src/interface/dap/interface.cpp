@@ -46,24 +46,6 @@ child_session(DapClientSession type) noexcept
   NEVER("Unknown DapClientSession type");
 }
 
-constexpr pollfd
-cfg_write_poll(int fd, int additional_flags) noexcept
-{
-  pollfd pfd{0, 0, 0};
-  pfd.events = POLLOUT | additional_flags;
-  pfd.fd = fd;
-  return pfd;
-}
-
-constexpr pollfd
-cfg_read_poll(int fd, int additional_flags) noexcept
-{
-  pollfd pfd{0, 0, 0};
-  pfd.events = POLLIN | additional_flags;
-  pfd.fd = fd;
-  return pfd;
-}
-
 std::string_view
 ContentDescriptor::payload() const noexcept
 {
@@ -181,10 +163,10 @@ DAP::add_source(NotifSource source) noexcept
 void
 DAP::one_poll(u32 notifier_queue_size) noexcept
 {
-  #pragma clang diagnostic push
-  #pragma clang diagnostic ignored "-Wvla-cxx-extension"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wvla-cxx-extension"
   pollfd fds[notifier_queue_size];
-  #pragma clang diagnostic pop
+#pragma clang diagnostic pop
   init_poll(fds);
   auto ready = poll(fds, notifier_queue_size, 1000);
   VERIFY(ready != -1, "polling failed: {}", strerror(errno));

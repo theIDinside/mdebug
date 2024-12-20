@@ -204,4 +204,10 @@ deserialize_hex_encoded(std::string_view hex, std::array<u8, N> &out) noexcept
          static_cast<u64>(p - (out.data() + out.size())));
 }
 
+constexpr auto
+SystemPagesInBytes(int pageCount) noexcept -> size_t
+{
+  return pageCount * PAGE_SIZE;
+}
+
 } // namespace utils

@@ -104,6 +104,8 @@ template <typename T> using ActualType = std::remove_cvref_t<T>;
 
 template <class... T> constexpr bool always_false = false;
 
+[[noreturn]] void panic(std::string_view err_msg, const char *functionName, const char *file, int line,
+                        int strip_levels = 0);
 [[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
 
 /**
@@ -143,6 +145,13 @@ std::string_view syscall_name(unsigned long long syscall_number);
     MIDAS_UNREACHABLE                                                                                             \
   }
 
+#define MUST_HOLD(cond, msg)                                                                                      \
+  if (!(cond)) [[unlikely]] {                                                                                     \
+    const std::source_location loc = std::source_location::current();                                             \
+    panic(fmt::format("{}: assertion failed: {}", msg, #cond), loc.function_name(), loc.file_name(),              \
+          loc.line() - 2, 3);                                                                                     \
+  }
+
 // clang-format off
 // Identical to ASSERT, but doesn't care about build type
 #define VERIFY(cond, msg, ...) if (!(cond)) [[unlikely]] { std::source_location loc = std::source_location::current(); \
@@ -163,7 +172,6 @@ std::string_view syscall_name(unsigned long long syscall_number);
 #else
 #define DBG(x)
 #endif
-
 
 template <typename T, typename... Args>
 constexpr const T *

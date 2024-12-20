@@ -778,7 +778,7 @@ template <typename Derived, typename JsonArgs>
 static constexpr auto
 Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
 {
-  if (auto &&missing = UICommand::check_args<Derived>(args); missing) {
+  if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {
     return new ui::dap::InvalidArgs{seq, Derived::Request, std::move(missing.value())};
   } else {
     return nullptr;

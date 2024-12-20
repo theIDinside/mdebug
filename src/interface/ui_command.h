@@ -1,5 +1,4 @@
 #pragma once
-#include "nlohmann/json_fwd.hpp"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -93,7 +92,7 @@ public:
   virtual ~UICommand() = default;
 
   constexpr void
-  set_target(dap::DebugAdapterClient &da) noexcept
+  SetDebugAdapterClient(dap::DebugAdapterClient &da) noexcept
   {
     dap_client = &da;
   }
@@ -104,12 +103,12 @@ public:
 
   template <typename Derived, typename JsonArgs>
   static constexpr MissingOrInvalidResult
-  check_args(const JsonArgs &args)
+  CheckArguments(const JsonArgs &args)
   {
     constexpr auto expectedCommandArgs = Derived::Arguments();
     MissingOrInvalidArgs faulty_args;
     for (const auto &arg : expectedCommandArgs) {
-      if (auto r = check_arg_contains(args, arg); r) {
+      if (auto r = CheckArgumentContains(args, arg); r) {
         faulty_args.push_back(r.value());
       } else if constexpr (HasValidation<Derived, decltype(args[arg])>) {
         if (auto processed = Derived::ValidateArg(arg, args[arg]); processed) {
@@ -127,7 +126,7 @@ public:
 
   template <typename JsonArgs, typename CommandArg>
   static auto
-  check_arg_contains(const JsonArgs &args,
+  CheckArgumentContains(const JsonArgs &args,
                      const CommandArg &cmd_arg) -> std::optional<std::pair<ArgumentError, std::string>>
   {
     if (!args.contains(cmd_arg)) {

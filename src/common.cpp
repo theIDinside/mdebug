@@ -63,8 +63,8 @@ SourceCoordinate::SourceCoordinate(std::string path, u32 line, u32 col) noexcept
 {
 }
 
-void
-panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
+[[noreturn]] void
+panic(std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels)
 {
   using enum logging::Channel;
 #define PLOG(msg) logging::get_logging()->log(core, msg)
@@ -111,10 +111,16 @@ ifbacktrace_failed:
   const auto strerr = strerror(errno);
   const auto message =
     fmt::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
-                loc.file_name(), loc.line(), loc.function_name(), err_msg, errno, strerr);
+                file, line, functionName, err_msg, errno, strerr);
   PLOG(message);
   fmt::println("{}", message);
   delete logging::get_logging();
   panic_exit();
 #undef PLOG
+}
+
+void
+panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
+{
+  panic(err_msg, loc.function_name(), loc.file_name(), loc.line(), strip_levels);
 }
