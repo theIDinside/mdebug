@@ -85,8 +85,9 @@ op_reg(ExprByteCodeInterpreter &i) noexcept
            bytecode <= std::to_underlying(DwarfOp::DW_OP_reg31),
          "Byte code for DW_OP_reg<n> out of range");
   const auto reg_no = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_reg0);
-  const auto reg_contents = i.mTask.get_register(reg_no);
-  i.mStack.Push<u64>(reg_contents);
+  const auto reg_contents = i.GetRegister(reg_no);
+  MUST_HOLD(reg_contents.has_value(), "Could not get register value");
+  i.mStack.Push<u64>(reg_contents.value());
 }
 
 void
@@ -94,9 +95,9 @@ op_breg(ExprByteCodeInterpreter &i) noexcept
 {
   const auto offset = i.mReader.read_leb128<i64>();
   const auto reg_num = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_breg0);
-  const auto reg_contents = i.mTask.get_register(reg_num);
-  const auto result = reg_contents + offset;
-  i.mStack.Push<u64>(result);
+  const auto result = i.GetRegister(reg_num).transform([&](auto v) { return v + offset; });
+  MUST_HOLD(result.has_value(), "Could not get register contents");
+  i.mStack.Push<u64>(result.value());
 }
 
 void
@@ -455,9 +456,9 @@ op_bregx(ExprByteCodeInterpreter &i) noexcept
 {
   const auto reg_num = i.mReader.read_uleb128<u64>();
   const auto offset = i.mReader.read_leb128<i64>();
-  const auto reg_contents = i.mTask.get_register(reg_num);
-  const auto result = reg_contents + offset;
-  i.mStack.Push<u64>(result);
+  const auto result = i.GetRegister(reg_num).transform([&](auto v) { return v + offset; });
+  MUST_HOLD(result.has_value(), "could not get register contents");
+  i.mStack.Push<u64>(result.value());
   TODO("op_bregx")
 }
 void
@@ -690,6 +691,15 @@ AddrPtr ExprByteCodeInterpreter::ComputeFrameBase() noexcept {
   ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
   ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mTraceeController, mTask, mFrameBaseProgram};
   return frameBaseReader.Run();
+}
+
+std::optional<u64> ExprByteCodeInterpreter::GetRegister(u64 number)
+{
+  auto unwindState = mTask.GetUnwindState(mFrameLevel);
+  if(!unwindState) {
+    return {};
+  }
+  return unwindState->GetRegister(number);
 }
 
 u64
