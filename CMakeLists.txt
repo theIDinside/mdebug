@@ -174,7 +174,7 @@ target_include_directories(zydis PRIVATE ./dependencies/zydis)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__ -march=native -mavx -mavx2")
-set(MIDAS_DEBUG_FLAGS "-g3 -O0 -Wall -Wextra -fpermissive")
+set(MIDAS_DEBUG_FLAGS "-g3 -O0 -fpermissive")
 set(MIDAS_TEST_FLAGS "${MIDAS_DEBUG_FLAGS}")
 
 if(USE_DWARF5)
