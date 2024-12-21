@@ -7,30 +7,31 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
-u32 SystemVectorExtensionSize() noexcept {
+u32
+SystemVectorExtensionSize() noexcept
+{
 #if defined(__GNUC__) || defined(__clang__)
-    if (__builtin_cpu_supports("avx512f")) {
-        return 64; // AVX-512: 512 bits = 64 bytes
-    }
-    if (__builtin_cpu_supports("avx2")) {
-        return 32; // AVX2: 256 bits = 32 bytes
-    }
-    if (__builtin_cpu_supports("avx")) {
-        return 16; // AVX/SSE: 128 bits = 16 bytes
-    }
+  if (__builtin_cpu_supports("avx512f")) {
+    return 64; // AVX-512: 512 bits = 64 bytes
+  }
+  if (__builtin_cpu_supports("avx2")) {
+    return 32; // AVX2: 256 bits = 32 bytes
+  }
+  if (__builtin_cpu_supports("avx")) {
+    return 16; // AVX/SSE: 128 bits = 16 bytes
+  }
 #elif defined(_MSC_VER)
-    int cpuInfo[4] = {};
-    __cpuid(cpuInfo, 1); // Get processor info
-    if (cpuInfo[1] & (1 << 16)) { // Check AVX
-        if (cpuInfo[1] & (1 << 28)) { // Check AVX2
-            // For AVX-512, further checks may be needed for individual features
-            return 64; // Assume AVX-512 support
-        }
-        return 32; // AVX2 supported
+  int cpuInfo[4] = {};
+  __cpuid(cpuInfo, 1);            // Get processor info
+  if (cpuInfo[1] & (1 << 16)) {   // Check AVX
+    if (cpuInfo[1] & (1 << 28)) { // Check AVX2
+      return 64; // Assume AVX-512 support
     }
-    return 16; // Default to AVX/SSE/MMX
+    return 32; // AVX2 supported
+  }
+  return 16; // Default to AVX/SSE/MMX
 #endif
-    return 16; // Fallback: Assume 128 bits = 16 bytes
+  return 16; // Fallback: Assume 128 bits = 16 bytes
 }
 
 static constexpr std::string_view reg_names[17] = {"rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp", "r8",
@@ -80,4 +81,13 @@ process_exe_path(Pid pid) noexcept
   }
 
   return std::string{resolved};
+}
+
+// N.B. Currently does nothing. In the future will be used to be able to assert in debug mode that specific
+// functionality is sure to be executed only by the main thread.
+std::thread::id
+GetMainThreadId() noexcept
+{
+  static std::thread::id gMainThreadId = std::this_thread::get_id();
+  return gMainThreadId;
 }

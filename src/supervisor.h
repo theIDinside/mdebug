@@ -218,7 +218,8 @@ public:
   GetOrCreateBreakpointLocation(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
+  GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
+                                             std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void SetSourceBreakpoints(const std::filesystem::path &source_filepath,
                             const Set<SourceBreakpointSpec> &bps) noexcept;
   void UpdateSourceBreakpoints(const std::filesystem::path &source_filepath,
@@ -264,6 +265,8 @@ public:
   TargetSession GetSessionType() const noexcept;
 
   utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> SafeRead(AddrPtr addr, u64 bytes) noexcept;
+  utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> SafeRead(std::pmr::memory_resource *allocator,
+                                                                            AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr ReadToVector(AddrPtr addr, u64 bytes) noexcept;
 
   template <typename T>

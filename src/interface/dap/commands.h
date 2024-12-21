@@ -1,12 +1,15 @@
 #pragma once
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
+#include <memory_resource>
 #include <span>
 // NOLINTNEXTLINE
 #include "bp.h"
 #include "fmt/ranges.h"
+#include "interface/dap/interface.h"
 #include "types.h"
 #include <interface/attach_args.h>
+#include <lib/arena_allocator.h>
 #include <nlohmann/json.hpp>
 #include <symbolication/disassemble.h>
 #include <typedefs.h>
@@ -205,7 +208,7 @@ struct ErrorResponse final : ui::UIResult
   ErrorResponse(std::string_view command, ui::UICommandPtr cmd, std::optional<std::string> &&short_message,
                 std::optional<Message> &&message) noexcept;
   ~ErrorResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 
   std::string_view command;
   std::optional<std::string> short_message;
@@ -217,7 +220,7 @@ struct ReverseContinueResponse final : ui::UIResult
   CTOR(ReverseContinueResponse);
   ~ReverseContinueResponse() noexcept override = default;
   bool continue_all;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 /** ReverseContinue under RR is *always* "continue all"*/
@@ -238,7 +241,7 @@ struct ContinueResponse final : ui::UIResult
   CTOR(ContinueResponse);
   ~ContinueResponse() noexcept override = default;
   bool continue_all;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Continue final : public ui::UICommand
@@ -259,7 +262,7 @@ struct PauseResponse final : ui::UIResult
 {
   CTOR(PauseResponse);
   ~PauseResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Pause final : public ui::UICommand
@@ -290,7 +293,7 @@ struct NextResponse final : ui::UIResult
 {
   CTOR(NextResponse);
   ~NextResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Next final : public ui::UICommand
@@ -314,7 +317,7 @@ struct StepInResponse final : ui::UIResult
 {
   CTOR(StepInResponse);
   ~StepInResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct StepIn final : public ui::UICommand
@@ -339,7 +342,7 @@ struct StepOutResponse final : ui::UIResult
 {
   CTOR(StepOutResponse);
   ~StepOutResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct StepOut final : public ui::UICommand
@@ -363,7 +366,7 @@ struct SetBreakpointsResponse final : ui::UIResult
   BreakpointRequestKind type;
   std::vector<ui::dap::Breakpoint> breakpoints;
   ~SetBreakpointsResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct SetBreakpoints final : public ui::UICommand
@@ -413,7 +416,7 @@ struct WriteMemoryResponse final : public ui::UIResult
 {
   CTOR(WriteMemoryResponse);
   ~WriteMemoryResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   u64 bytes_written;
 };
 
@@ -436,7 +439,7 @@ struct ReadMemoryResponse final : public ui::UIResult
 {
   CTOR(ReadMemoryResponse);
   ~ReadMemoryResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   AddrPtr first_readable_address;
   u64 unreadable_bytes;
   std::string data_base64;
@@ -461,7 +464,7 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 {
   CTOR(ConfigurationDoneResponse);
   ~ConfigurationDoneResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct ConfigurationDone final : public ui::UICommand
@@ -479,7 +482,7 @@ struct InitializeResponse final : public ui::UIResult
   CTOR(InitializeResponse);
   InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept;
   ~InitializeResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 
   bool RRSession;
 };
@@ -498,7 +501,7 @@ struct DisconnectResponse final : public UIResult
 {
   CTOR(DisconnectResponse);
   ~DisconnectResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Disconnect final : public UICommand
@@ -515,7 +518,7 @@ struct LaunchResponse final : public UIResult
 {
   CTOR(LaunchResponse);
   ~LaunchResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Launch final : public UICommand
@@ -535,7 +538,7 @@ struct AttachResponse final : public UIResult
 {
   CTOR(AttachResponse);
   ~AttachResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Attach final : public UICommand
@@ -581,7 +584,7 @@ struct TerminateResponse final : public UIResult
 {
   CTOR(TerminateResponse);
   ~TerminateResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Terminate final : public UICommand
@@ -597,7 +600,7 @@ struct ThreadsResponse final : public UIResult
 {
   CTOR(ThreadsResponse);
   ~ThreadsResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::vector<Thread> threads;
 };
 
@@ -630,7 +633,7 @@ struct StackTraceResponse final : public UIResult
   CTOR(StackTraceResponse);
   StackTraceResponse(bool success, StackTrace *cmd, std::vector<StackFrame> &&stack_frames) noexcept;
   ~StackTraceResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::vector<StackFrame> stack_frames;
 };
 
@@ -649,7 +652,7 @@ struct ScopesResponse final : public UIResult
 {
   ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> scopes) noexcept;
   ~ScopesResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   // For now, we only have 3 scopes, Args, Locals, Registers
   std::array<Scope, 3> scopes;
 };
@@ -687,7 +690,7 @@ struct EvaluateResponse final : public UIResult
   EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::string &&result,
                    std::optional<std::string> &&type, std::optional<std::string> &&memoryReference) noexcept;
   ~EvaluateResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 
   std::string result;
   std::optional<std::string> type;
@@ -713,7 +716,7 @@ struct VariablesResponse final : public UIResult
 {
   VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept;
   ~VariablesResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   int requested_reference;
   std::vector<Variable> variables;
 };
@@ -722,7 +725,7 @@ struct DisassembleResponse final : public UIResult
 {
   CTOR(DisassembleResponse);
   ~DisassembleResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::vector<sym::Disassembly> instructions;
 };
 
@@ -748,7 +751,7 @@ struct InvalidArgsResponse final : public UIResult
 {
   InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgsResponse() noexcept override = default;
-  std::string Serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::string_view command;
   MissingOrInvalidArgs missing_or_invalid;
 };
@@ -785,44 +788,3 @@ Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
   }
 }
 }; // namespace ui::dap
-
-namespace fmt {
-
-template <> struct formatter<ui::dap::Message>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const ui::dap::Message &msg, FormatContext &ctx) const
-  {
-
-    if (msg.variables.empty()) {
-      return fmt::format_to(ctx.out(), R"({{"id":{},"format":"{}","showUser":{}}})", msg.id.value_or(-1),
-                            msg.format, msg.show_user);
-    } else {
-      std::vector<char> buf{0};
-      buf.reserve(256);
-      auto sz = 1u;
-      auto max = msg.variables.size();
-      for (const auto &[k, v] : msg.variables) {
-        if (sz < max) {
-          fmt::format_to(std::back_inserter(buf), R"("{}":"{}", )", k, v);
-        } else {
-          fmt::format_to(std::back_inserter(buf), R"("{}":"{}")", k, v);
-        }
-        ++sz;
-      }
-      buf.push_back(0);
-      return fmt::format_to(ctx.out(), R"({{ "id": {}, "format": "{}", "variables":{{ {} }}, "showUser":{}}})",
-                            msg.id.value_or(-1), msg.format, fmt::join(buf, ""), msg.show_user);
-    }
-  }
-};
-
-} // namespace fmt

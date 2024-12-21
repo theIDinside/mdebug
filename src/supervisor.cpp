@@ -74,9 +74,10 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
 TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&interface,
                                    InterfaceType type) noexcept
     : mTaskLeader{interface != nullptr ? interface->TaskLeaderTid() : 0}, mMainExecutable{nullptr}, mThreads{},
-      mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mStopAllTasksRequested{false}, mInterfaceType(type),
-      mInterpreterBase{}, mEntry{}, mSessionKind{targetSession}, mStopHandler{new ptracestop::StopHandler{*this}},
-      mNullUnwinder{new sym::Unwinder{nullptr}}, mTraceeInterface(std::move(interface))
+      mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mStopAllTasksRequested{false},
+      mInterfaceType(type), mInterpreterBase{}, mEntry{}, mSessionKind{targetSession},
+      mStopHandler{new ptracestop::StopHandler{*this}}, mNullUnwinder{new sym::Unwinder{nullptr}},
+      mTraceeInterface(std::move(interface))
 {
   // Must be set first.
   mTraceeInterface->SetTarget(this);
@@ -220,7 +221,8 @@ TraceeController::InstallDynamicLoaderBreakpoints() noexcept
     if (auto symbol = tmp_objfile->FindMinimalFunctionSymbol(symbol_name); symbol) {
       const auto addr = *mInterpreterBase + symbol->address;
       DBGLOG(core, "Setting ld breakpoint at 0x{:x}", addr);
-      mUserBreakpoints.create_loc_user<SOLoadingBreakpoint>(*this, GetOrCreateBreakpointLocation(addr, false), mTaskLeader);
+      mUserBreakpoints.create_loc_user<SOLoadingBreakpoint>(*this, GetOrCreateBreakpointLocation(addr, false),
+                                                            mTaskLeader);
     }
   }
 
@@ -469,16 +471,17 @@ TraceeController::EmitSignalEvent(LWP lwp, int signal) noexcept
 
 void
 TraceeController::EmitStopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool allStopped,
-                               std::vector<int> bps_hit) noexcept
+                              std::vector<int> bps_hit) noexcept
 {
-  mDebugAdapterClient->post_event(new ui::dap::StoppedEvent{reason, message, tid, bps_hit, message, allStopped});
+  mDebugAdapterClient->post_event(
+    new ui::dap::StoppedEvent{reason, message, tid, std::move(bps_hit), message, allStopped});
 }
 
 void
 TraceeController::EmitBreakpointEvent(std::string_view reason, const UserBreakpoint &bp,
-                                        std::optional<std::string> message) noexcept
+                                      std::optional<std::string> message) noexcept
 {
-  mDebugAdapterClient->post_event(new ui::dap::BreakpointEvent{reason, message, &bp});
+  mDebugAdapterClient->post_event(new ui::dap::BreakpointEvent{reason, std::move(message), &bp});
 }
 
 tc::ProcessedStopEvent
@@ -538,8 +541,8 @@ TraceeController::GetOrCreateBreakpointLocation(AddrPtr addr, AddrPtr base,
 }
 
 utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-TraceeController::GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
-                                            std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept
+TraceeController::GetOrCreateBreakpointLocationWithSourceLoc(
+  AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept
 {
   if (auto loc = mUserBreakpoints.location_at(addr); loc) {
     return loc;
@@ -559,8 +562,8 @@ TraceeController::GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
 }
 
 bool
-TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, UserBreakpoint &user,
-                                             std::vector<std::shared_ptr<BreakpointLocation>> &locs) noexcept
+TraceeController::CheckBreakpointLocationsForSymbolFile(
+  SymbolFile &symbolFile, UserBreakpoint &user, std::vector<std::shared_ptr<BreakpointLocation>> &locs) noexcept
 {
   const auto sz = locs.size();
   if (auto specPtr = user.user_spec(); specPtr != nullptr) {
@@ -588,7 +591,8 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, 
       if (auto it =
             std::find_if(result.begin(), result.end(), [](const auto &it) { return it.loc_src_info.has_value(); });
           it != end(result)) {
-        if (auto res = GetOrCreateBreakpointLocationWithSourceLoc(it->address, std::move(it->loc_src_info.value()));
+        if (auto res =
+              GetOrCreateBreakpointLocationWithSourceLoc(it->address, std::move(it->loc_src_info.value()));
             res.is_expected()) {
           locs.push_back(res.take_value());
         }
@@ -689,9 +693,9 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
       auto result = sym->LookupBreakpointBySpec(fn);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-          *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)), mTaskLeader,
-          LocationUserKind::Function, std::nullopt, std::nullopt, !IsIndividualTaskControlConfigured(),
-          std::make_unique<UserBpSpec>(fn));
+          *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
+          mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt,
+          !IsIndividualTaskControlConfigured(), std::make_unique<UserBpSpec>(fn));
         mDebugAdapterClient->post_event(new ui::dap::BreakpointEvent{"new", {}, user.get()});
         ids.push_back(user->id);
       }
@@ -701,8 +705,8 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
 
 void
 TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-                                    std::vector<SourceBreakpointSpec> &&add,
-                                    const std::vector<SourceBreakpointSpec> &remove) noexcept
+                                          std::vector<SourceBreakpointSpec> &&add,
+                                          const std::vector<SourceBreakpointSpec> &remove) noexcept
 {
   UserBreakpoints::SourceFileBreakpointMap &map = mUserBreakpoints.bps_for_source(sourceFilePath.string());
 
@@ -738,9 +742,9 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
   // set User Breakpoints without breakpoint location; i.e. "pending" breakpoints, in GDB nomenclature
   for (auto &&srcbp : not_set) {
     auto spec = std::make_unique<UserBpSpec>(std::make_pair(sourceFilePath.string(), srcbp));
-    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader,
-                                                 LocationUserKind::Source, std::nullopt, std::nullopt,
-                                                 !IsIndividualTaskControlConfigured(), std::move(spec));
+    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
+      *this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader, LocationUserKind::Source, std::nullopt,
+      std::nullopt, !IsIndividualTaskControlConfigured(), std::move(spec));
     map[srcbp].push_back(user->id);
   }
 
@@ -755,7 +759,7 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
 
 void
 TraceeController::SetSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-                                         const Set<SourceBreakpointSpec> &bps) noexcept
+                                       const Set<SourceBreakpointSpec> &bps) noexcept
 {
   const UserBreakpoints::SourceFileBreakpointMap &map = mUserBreakpoints.bps_for_source(sourceFilePath.string());
   std::vector<SourceBreakpointSpec> remove{};
@@ -858,9 +862,9 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
       auto result = sym->LookupBreakpointBySpec(fn.mSpec);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-          *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)), mTaskLeader,
-          LocationUserKind::Function, std::nullopt, std::nullopt, !IsIndividualTaskControlConfigured(),
-          std::make_unique<UserBpSpec>(fn.mSpec));
+          *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
+          mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt,
+          !IsIndividualTaskControlConfigured(), std::make_unique<UserBpSpec>(fn.mSpec));
         mUserBreakpoints.fn_breakpoints[fn.mSpec].push_back(user->id);
         fn.mWasSet = true;
         mDebugAdapterClient->post_event(new ui::dap::BreakpointEvent{"new", "Breakpoint was created", user.get()});
@@ -871,9 +875,9 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
   for (auto &&[spec, specHash, wasSet] : specsToAdd) {
     if (!wasSet) {
       auto spec_ptr = std::make_unique<UserBpSpec>(std::move(spec));
-      auto user = mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec_ptr.get()}}, mTaskLeader,
-                                                   LocationUserKind::Function, std::nullopt, std::nullopt,
-                                                   !IsIndividualTaskControlConfigured(), std::move(spec_ptr));
+      auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
+        *this, BpErr{ResolveError{.spec = spec_ptr.get()}}, mTaskLeader, LocationUserKind::Function, std::nullopt,
+        std::nullopt, !IsIndividualTaskControlConfigured(), std::move(spec_ptr));
     }
   }
 
@@ -1095,6 +1099,23 @@ utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>
 TraceeController::SafeRead(AddrPtr addr, u64 bytes) noexcept
 {
   auto buffer = utils::ByteBuffer::create(bytes);
+
+  auto total_read = 0ull;
+  while (total_read < bytes) {
+    auto res = mTraceeInterface->ReadBytes(addr, bytes - total_read, buffer->next());
+    if (!res.success()) {
+      return utils::unexpected(NonFullRead{std::move(buffer), static_cast<u32>(bytes - total_read), errno});
+    }
+    buffer->wrote_bytes(res.bytes_read);
+    total_read += res.bytes_read;
+  }
+  return utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>{std::move(buffer)};
+}
+
+utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead>
+TraceeController::SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr, u64 bytes) noexcept
+{
+  auto buffer = utils::ByteBuffer::create(allocator, bytes);
 
   auto total_read = 0ull;
   while (total_read < bytes) {
@@ -1350,7 +1371,7 @@ TraceeController::SetPendingWaitstatus(TaskWaitResult wait_result) noexcept
 
 tc::ProcessedStopEvent
 TraceeController::HandleThreadCreated(TaskInfo *task, const ThreadCreated &e,
-                                        const RegisterData &register_data) noexcept
+                                      const RegisterData &register_data) noexcept
 {
   // means this event was produced by a Remote session. Construct the task now
   if (!task) {

@@ -9,6 +9,7 @@
 #include "lib/arena_allocator.h"
 #include "lib/lockguard.h"
 #include "parse_buffer.h"
+#include "utils/scope_defer.h"
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
@@ -114,7 +115,10 @@ DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
   sources.push_back({new_client_notifier.read.fd, InterfaceNotificationSource::NewClient, nullptr});
+  mTemporaryArena = ArenaAllocator::Create(utils::SystemPagesInBytes(16), nullptr);
 }
+
+DAP::~DAP() noexcept {}
 
 UIResultPtr
 DAP::pop_event() noexcept
@@ -194,7 +198,8 @@ DAP::one_poll(u32 notifier_queue_size) noexcept
           continue;
         }
         std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-        client->write(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(0));
+        client->write(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(
+          0, mTemporaryArena->ScopeAllocation().GetAllocator()));
       } break;
       }
     }
@@ -286,9 +291,10 @@ DAP::notify_new_message() noexcept
 void
 DAP::flush_events() noexcept
 {
+  auto tempAlloc = mTemporaryArena.get();
   while (!events_queue.empty()) {
     auto evt = pop_event();
-    const auto protocol_msg = evt->Serialize(0);
+    const auto protocol_msg = evt->Serialize(0, tempAlloc);
     write_protocol_message(protocol_msg);
     delete evt;
   }
@@ -320,16 +326,25 @@ DAP::configure_tty(int master_pty_fd) noexcept
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
+void
+DebugAdapterClient::InitAllocators() noexcept
+{
+  // Create a 1 megabyte arena allocator.
+  mCommandsAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(16), nullptr);
+  mCommandResponseAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(8), nullptr);
+  mEventsAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(16), nullptr);
+}
+
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
     : socket_path(std::move(path)), in(socket), out(socket), session_type(type)
 {
-  // Create a 1 megabyte arena allocator.
-  mCommandsAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(256), nullptr);
+  InitAllocators();
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, int standard_in, int standard_out) noexcept
     : in(standard_in), out(standard_out), session_type(type)
 {
+  InitAllocators();
 }
 
 DebugAdapterClient::~DebugAdapterClient() noexcept
@@ -399,10 +414,16 @@ DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
   }
 }
 
-ArenaAllocator &
+ArenaAllocator *
 DebugAdapterClient::GetCommandArenaAllocator() noexcept
 {
-  return *mCommandsAllocator;
+  return mCommandsAllocator.get();
+}
+
+ArenaAllocator *
+DebugAdapterClient::GetResponseArenaAllocator() noexcept
+{
+  return mCommandResponseAllocator.get();
 }
 
 DebugAdapterClient *
@@ -425,7 +446,9 @@ DebugAdapterClient::post_event(ui::UIResultPtr event)
   // now, 1 thread for all debug adapter client, that does it's dispatching vie the poll system calls. If we land,
   // 100% in the idea to keep it this way, we shouldn't really have to `new` and `delete` UIResultPtr's, that
   // should just be on the stack; but I'm keeping it here for now, in case I want to try out the other way.
-  auto result = event->Serialize(0);
+
+  auto allocator = mEventsAllocator.get()->ScopeAllocation();
+  auto result = event->Serialize(0, allocator);
   write(result);
   delete event;
 }

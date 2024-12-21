@@ -4,6 +4,26 @@
 #include <cstdlib>
 #include <memory_resource>
 
+ScopedArenaAllocator::ScopedArenaAllocator(ArenaAllocator *allocator) noexcept : mAllocator(allocator) {}
+
+ScopedArenaAllocator::~ScopedArenaAllocator() noexcept
+{
+  if (mAllocator) {
+    mAllocator->Reset();
+  }
+}
+
+ScopedArenaAllocator::ScopedArenaAllocator(ScopedArenaAllocator &&move) noexcept : mAllocator(nullptr)
+{
+  std::swap(mAllocator, move.mAllocator);
+}
+
+ArenaAllocator *
+ScopedArenaAllocator::GetAllocator() const noexcept
+{
+  return mAllocator;
+}
+
 ArenaAllocator::ArenaAllocator(std::size_t allocBlockSize, std::pmr::memory_resource *upstreamResource) noexcept
     : mResource(upstreamResource), mAllocated(0), mArenaCapacity(allocBlockSize)
 {
@@ -27,6 +47,18 @@ ArenaAllocator::CreateShared(size_t allocSize, std::pmr::memory_resource *upstre
   return std::shared_ptr<ArenaAllocator>(new ArenaAllocator{allocSize, upstreamResource});
 }
 
+void
+ArenaAllocator::Reset() noexcept
+{
+  mAllocated = 0;
+}
+
+ScopedArenaAllocator
+ArenaAllocator::ScopeAllocation() noexcept
+{
+  return ScopedArenaAllocator{this};
+}
+
 void *
 ArenaAllocator::do_allocate(std::size_t bytes, std::size_t alignment)
 {
@@ -39,7 +71,7 @@ ArenaAllocator::do_allocate(std::size_t bytes, std::size_t alignment)
 }
 
 void
-ArenaAllocator::do_deallocate(void *p, std::size_t bytes, std::size_t alignment)
+ArenaAllocator::do_deallocate(void *p, std::size_t, std::size_t)
 {
   MUST_HOLD(p < (mAllocatedBuffer + mArenaCapacity),
             "The arena allocator doesn't support dynamic allocations when memory runs out, yet");

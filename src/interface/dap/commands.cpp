@@ -10,13 +10,15 @@
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
 #include "types.h"
-#include "utils/expected.h"
 #include "utils/logger.h"
+#include "utils/util.h"
 #include <algorithm>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <interface/dap/interface.h>
-#include <memory>
+#include <iterator>
+#include <lib/arena_allocator.h>
+#include <memory_resource>
 #include <optional>
 #include <ptracestop_handlers.h>
 #include <string>
@@ -27,6 +29,47 @@
 #include <symbolication/value_visualizer.h>
 #include <tracer.h>
 #include <utils/base64.h>
+
+namespace fmt {
+
+template <> struct formatter<ui::dap::Message>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const ui::dap::Message &msg, FormatContext &ctx) const
+  {
+
+    if (msg.variables.empty()) {
+      return fmt::format_to(ctx.out(), R"({{"id":{},"format":"{}","showUser":{}}})", msg.id.value_or(-1),
+                            msg.format, msg.show_user);
+    } else {
+      std::vector<char> buf{0};
+      buf.reserve(256);
+      auto sz = 1u;
+      auto max = msg.variables.size();
+      for (const auto &[k, v] : msg.variables) {
+        if (sz < max) {
+          fmt::format_to(std::back_inserter(buf), R"("{}":"{}", )", k, v);
+        } else {
+          fmt::format_to(std::back_inserter(buf), R"("{}":"{}")", k, v);
+        }
+        ++sz;
+      }
+      buf.push_back(0);
+      return fmt::format_to(ctx.out(), R"({{ "id": {}, "format": "{}", "variables":{{ {} }}, "showUser":{}}})",
+                            msg.id.value_or(-1), msg.format, fmt::join(buf, ""), msg.show_user);
+    }
+  }
+};
+
+} // namespace fmt
 
 namespace ui::dap {
 
@@ -61,38 +104,48 @@ ErrorResponse::ErrorResponse(std::string_view command, ui::UICommandPtr cmd,
 {
 }
 
-std::string
-ErrorResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ErrorResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  auto outIt = std::back_inserter(result);
   if (short_message && message) {
-    return fmt::format(
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{ "error":{}}}}})",
-      seq, request_seq, command, *short_message, *message);
+    const Message &m = message.value();
+    fmt::format_to(
+      outIt,
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{"error":{}}}}})",
+      seq, request_seq, command, *short_message, m);
   } else if (short_message && !message) {
-    return fmt::format(
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})", seq,
-      request_seq, command, *short_message);
+    fmt::format_to(
+      outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
+      seq, request_seq, command, *short_message);
   } else if (!short_message && message) {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
       seq, request_seq, command, *message);
   } else {
-    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}"}})", seq,
-                       request_seq, command);
+    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}"}})", seq,
+                   request_seq, command);
   }
+  return result;
 }
 
-std::string
-PauseResponse::Serialize(int seq) const noexcept
+std::pmr::string
+PauseResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"pause"}})", seq,
-                       request_seq);
+    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"pause"}})",
+                   seq, request_seq);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
       seq, request_seq);
   }
+  return result;
 }
 
 UIResultPtr
@@ -107,18 +160,23 @@ Pause::Execute() noexcept
   return new PauseResponse{true, this};
 }
 
-std::string
-ReverseContinueResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ReverseContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
       seq, request_seq, continue_all);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
       seq, request_seq);
   }
+  return result;
 }
 
 ReverseContinue::ReverseContinue(u64 seq, int thread_id) noexcept : UICommand(seq), thread_id(thread_id) {}
@@ -133,19 +191,23 @@ ReverseContinue::Execute() noexcept
   return res;
 }
 
-std::string
-ContinueResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-
+  std::pmr::string result{arenaAllocator};
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
       seq, request_seq, continue_all);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
       seq, request_seq);
   }
+  return result;
 }
 
 UIResultPtr
@@ -178,17 +240,21 @@ Continue::Execute() noexcept
   return res;
 }
 
-std::string
-NextResponse::Serialize(int seq) const noexcept
+std::pmr::string
+NextResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"next"}})", seq,
-                       request_seq);
+    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"next"}})",
+                   seq, request_seq);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
       seq, request_seq);
   }
+  return result;
 }
 
 UIResultPtr
@@ -215,17 +281,22 @@ Next::Execute() noexcept
   return new NextResponse{true, this};
 }
 
-std::string
-StepInResponse::Serialize(int seq) const noexcept
+std::pmr::string
+StepInResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepIn"}})", seq,
-                       request_seq);
+    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepIn"}})",
+                   seq, request_seq);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
       seq, request_seq);
   }
+  return result;
 }
 
 UIResultPtr
@@ -251,17 +322,22 @@ StepIn::Execute() noexcept
   return new StepInResponse{true, this};
 }
 
-std::string
-StepOutResponse::Serialize(int seq) const noexcept
+std::pmr::string
+StepOutResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepOut"}})",
-                       seq, request_seq);
+    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepOut"}})",
+                   seq, request_seq);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
       seq, request_seq);
   }
+  return result;
 }
 
 UIResultPtr
@@ -293,36 +369,46 @@ SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cm
 {
 }
 
-std::string
-SetBreakpointsResponse::Serialize(int seq) const noexcept
+std::pmr::string
+SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  std::vector<std::string> serialized_bkpts{};
+  std::pmr::string result{arenaAllocator};
+  result.reserve(utils::SystemPagesInBytes(1) / 2);
+  auto outIt = std::back_inserter(result);
+  std::pmr::vector<std::pmr::string> serialized_bkpts{arenaAllocator};
   serialized_bkpts.reserve(breakpoints.size());
   for (auto &bp : breakpoints) {
-    serialized_bkpts.push_back(bp.serialize());
+    serialized_bkpts.push_back(bp.serialize(arenaAllocator));
   }
   switch (this->type) {
   case BreakpointRequestKind::source:
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
       seq, request_seq, fmt::join(serialized_bkpts, ","));
+    break;
   case BreakpointRequestKind::function:
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
       seq, request_seq, fmt::join(serialized_bkpts, ","));
+    break;
   case BreakpointRequestKind::instruction:
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
       seq, request_seq, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::exception:
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
       seq, request_seq, success, fmt::join(serialized_bkpts, ","));
     break;
   default:
     PANIC("DAP doesn't expect Tracer breakpoints");
   }
+  return result;
 }
 
 SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
@@ -451,12 +537,17 @@ SetFunctionBreakpoints::Execute() noexcept
   return res;
 }
 
-std::string
-WriteMemoryResponse::Serialize(int seq) const noexcept
+std::pmr::string
+WriteMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(
+    outIt,
     R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
     seq, request_seq, success, bytes_written);
+  return result;
 }
 
 WriteMemory::WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept
@@ -481,16 +572,21 @@ WriteMemory::Execute() noexcept
   return response;
 }
 
-std::string
-ReadMemoryResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ReadMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256 + data_base64.size());
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
       seq, request_seq, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
   }
+  return result;
 }
 
 ReadMemory::ReadMemory(std::uint64_t seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept
@@ -514,12 +610,16 @@ ReadMemory::Execute() noexcept
   }
 }
 
-std::string
-ConfigurationDoneResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ConfigurationDoneResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"configurationDone"}})", seq,
-    request_seq);
+  std::pmr::string result{arenaAllocator};
+  auto outIt = std::back_inserter(result);
+  result.reserve(256);
+  fmt::format_to(outIt,
+                 R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"configurationDone"}})",
+                 seq, request_seq);
+  return result;
 }
 
 UIResultPtr
@@ -552,11 +652,15 @@ Initialize::Execute() noexcept
   return new InitializeResponse{RRSession, true, this};
 }
 
-std::string
-DisconnectResponse::Serialize(int seq) const noexcept
+std::pmr::string
+DisconnectResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disconnect"}})",
-                     seq, request_seq);
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disconnect"}})",
+                 seq, request_seq);
+  return result;
 }
 
 Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
@@ -581,8 +685,8 @@ InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd
 {
 }
 
-std::string
-InitializeResponse::Serialize(int) const noexcept
+std::pmr::string
+InitializeResponse::Serialize(int, std::pmr::memory_resource* arenaAllocator) const noexcept
 {
   // "this _must_ be 1, the first response"
 
@@ -640,15 +744,19 @@ InitializeResponse::Serialize(int) const noexcept
     request_seq, cfg_body.dump());
 
   client->write(payload);
-  client->write(InitializedEvent{}.Serialize(0));
-  return "";
+  client->write(InitializedEvent{}.Serialize(0, arenaAllocator));
+  return std::pmr::string{arenaAllocator};
 }
 
-std::string
-LaunchResponse::Serialize(int seq) const noexcept
+std::pmr::string
+LaunchResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"launch"}})", seq,
-                     request_seq);
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"launch"}})",
+                 seq, request_seq);
+  return result;
 }
 
 Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
@@ -664,11 +772,15 @@ Launch::Execute() noexcept
   return new LaunchResponse{true, this};
 }
 
-std::string
-AttachResponse::Serialize(int seq) const noexcept
+std::pmr::string
+AttachResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"attach"}})", seq,
-                     request_seq);
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"attach"}})",
+                 seq, request_seq);
+  return result;
 }
 
 Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), attachArgs(std::move(args)) {}
@@ -680,11 +792,15 @@ Attach::Execute() noexcept
   return new AttachResponse{res, this};
 }
 
-std::string
-TerminateResponse::Serialize(int seq) const noexcept
+std::pmr::string
+TerminateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"terminate"}})",
-                     seq, request_seq);
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"terminate"}})",
+                 seq, request_seq);
+  return result;
 }
 
 UIResultPtr
@@ -700,12 +816,17 @@ Terminate::Execute() noexcept
   return new TerminateResponse{ok, this};
 }
 
-std::string
-ThreadsResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ThreadsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256 + (threads.size() * 64));
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(
+    outIt,
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
     seq, request_seq, fmt::join(threads, ","));
+  return result;
 }
 
 UIResultPtr
@@ -754,12 +875,19 @@ StackTraceResponse::StackTraceResponse(bool success, StackTrace *cmd,
 {
 }
 
-std::string
-StackTraceResponse::Serialize(int seq) const noexcept
+std::pmr::string
+StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  std::pmr::string result{arenaAllocator};
+  // Estimated size per stack frame; 105 for the formatting string, 18 for the address, 2+2 for line:col, 256 for name and path
+  // + format string for response with some additional spill.
+  result.reserve(256 + ((105 + 18 + 2 + 2 + 256) * stack_frames.size()));
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(
+    outIt,
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
     seq, request_seq, fmt::join(stack_frames, ","));
+  return result;
 }
 
 constexpr bool
@@ -811,12 +939,17 @@ StackTrace::Execute() noexcept
 
 Scopes::Scopes(std::uint64_t seq, int frameId) noexcept : UICommand(seq), frameId(frameId) {}
 
-std::string
-ScopesResponse::Serialize(int seq) const noexcept
+std::pmr::string
+ScopesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256 + (256 * scopes.size()));
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(
+    outIt,
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
     seq, request_seq, fmt::join(scopes, ","));
+  return result;
 }
 
 ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> scopes) noexcept
@@ -887,12 +1020,17 @@ Disassemble::Execute() noexcept
   }
 }
 
-std::string
-DisassembleResponse::Serialize(int seq) const noexcept
+std::pmr::string
+DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256 + (256 * instructions.size()));
+  auto outIt = std::back_inserter(result);
+  fmt::format_to(
+    outIt,
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[{}]}}}})",
     seq, request_seq, fmt::join(instructions, ","));
+  return result;
 }
 
 #define IfInvalidArgsReturn(type)                                                                                 \
@@ -968,18 +1106,24 @@ EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<in
 {
 }
 
-std::string
-EvaluateResponse::Serialize(int seq) const noexcept
+std::pmr::string
+EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  result.reserve(1024);
+  auto outIt = std::back_inserter(result);
   if (success) {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
       seq, request_seq, success, result, variablesReference);
   } else {
-    return fmt::format(
+    fmt::format_to(
+      outIt,
       R"({{"seq":0,"request_seq":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
       request_seq, success, result);
   }
+  return result;
 }
 
 Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
@@ -1040,25 +1184,32 @@ VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<V
 {
 }
 
-std::string
-VariablesResponse::Serialize(int seq) const noexcept
+std::pmr::string
+VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256 + (256 * variables.size()));
   if (variables.empty()) {
-    return fmt::format(
+    fmt::format_to(
+      std::back_inserter(result),
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
       seq, request_seq);
+    return result;
   }
-  std::string variables_contents{};
+  std::pmr::string variables_contents{arenaAllocator};
+  variables_contents.reserve(256 * variables_contents.size());
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : variables) {
     if (auto datvis = v.variable_value->GetVisualizer(); datvis != nullptr) {
-      auto opt = datvis->DapFormat(v.variable_value->mName, v.ref);
+      auto opt = datvis->DapFormat(v.variable_value->mName, v.ref, arenaAllocator);
       if (opt) {
         it = fmt::format_to(it, "{},", *opt);
       } else {
-        return fmt::format(
+        fmt::format_to(
+          std::back_inserter(result),
           R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
           seq, request_seq, v.variable_value->mName);
+        return result;
       }
     } else {
       ASSERT(v.variable_value->GetType()->IsReference(),
@@ -1079,9 +1230,12 @@ VariablesResponse::Serialize(int seq) const noexcept
   }
 
   variables_contents.pop_back();
-  return fmt::format(
+
+  fmt::format_to(
+    std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
     seq, request_seq, variables_contents);
+  return result;
 }
 
 InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
@@ -1100,11 +1254,11 @@ InvalidArgsResponse::InvalidArgsResponse(std::string_view command, MissingOrInva
 {
 }
 
-std::string
-InvalidArgsResponse::Serialize(int seq) const noexcept
+std::pmr::string
+InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  std::vector<std::string_view> missing{};
-  std::vector<const InvalidArg *> parsed_and_invalid{};
+  std::pmr::vector<std::string_view> missing{arenaAllocator};
+  std::pmr::vector<const InvalidArg *> parsed_and_invalid{arenaAllocator};
   missing.reserve(missing_or_invalid.size());
   for (const auto &pair : missing_or_invalid) {
     const auto &[k, v] = pair;
@@ -1138,9 +1292,13 @@ InvalidArgsResponse::Serialize(int seq) const noexcept
   *it = 0;
   std::string_view msg{message.begin(), message.begin() + std::distance(message.begin(), it)};
 
-  return fmt::format(
+  std::pmr::string result{arenaAllocator};
+  fmt::format_to(
+    std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})", seq,
     request_seq, command, msg);
+
+  return result;
 }
 
 ui::UICommand *

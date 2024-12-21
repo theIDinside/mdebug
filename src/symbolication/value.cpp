@@ -1,4 +1,5 @@
 #include "value.h"
+#include "common.h"
 #include "symbolication/dwarf_expressions.h"
 #include "type.h"
 #include "value_visualizer.h"
@@ -193,9 +194,17 @@ MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 size
 }
 
 /*static*/
+MemoryContentsObject::ReadResult
+MemoryContentsObject::ReadMemory(std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address,
+                                 u32 size_of) noexcept
+{
+  TODO("implement MemoryContentsObject that uses custom allocation strategies.");
+}
+
+/*static*/
 SharedPtr<Value>
 MemoryContentsObject::CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskInfo> task,
-                                            NonNullPtr<sym::Frame> frame, Symbol &symbol, bool lazy) noexcept
+                                          NonNullPtr<sym::Frame> frame, Symbol &symbol, bool lazy) noexcept
 {
   const auto requested_byte_size = symbol.mType->Size();
 
@@ -207,8 +216,8 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskI
       TODO("Add support for situations where we can't actually construct the value");
       return nullptr;
     }
-    auto interp =
-      ExprByteCodeInterpreter{frame->FrameLevel(), tc, task, symbol.mLocation->dwarf_expr, fnSymbol->GetFrameBaseDwarfExpression()};
+    auto interp = ExprByteCodeInterpreter{frame->FrameLevel(), tc, task, symbol.mLocation->dwarf_expr,
+                                          fnSymbol->GetFrameBaseDwarfExpression()};
     const auto address = interp.Run();
     if (lazy) {
       auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
@@ -236,4 +245,13 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskI
   return nullptr;
 }
 
+/*static*/
+Value *
+MemoryContentsObject::CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,
+                                          NonNullPtr<TaskInfo> task, NonNullPtr<sym::Frame> frame, Symbol &symbol,
+                                          bool lazy) noexcept
+{
+  TODO_IGNORE_WARN("Unimplemented", allocator, tc, task, frame, symbol, lazy);
+  return nullptr;
+}
 } // namespace sym

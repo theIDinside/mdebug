@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <typedefs.h>
+#include <thread>
 
 struct user_regs_struct;
 
@@ -10,3 +11,5 @@ u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
 std::string process_exe_path(Pid pid) noexcept;
 
 u32 SystemVectorExtensionSize() noexcept;
+
+std::thread::id GetMainThreadId() noexcept;

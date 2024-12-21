@@ -47,6 +47,9 @@ utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool
 int
 main(int argc, const char **argv)
 {
+  // Sets main thread id. It's static so subsequent calls from other threads should be fine.
+  GetMainThreadId();
+
   auto res = sys::parse_cli(argc, argv);
   if (!res.is_expected()) {
     auto &&err = res.error();

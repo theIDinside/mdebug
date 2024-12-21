@@ -7,7 +7,9 @@
 #define MIDAS_UNREACHABLE __builtin_unreachable();
 #endif
 
-#define NEVER(msg) PANIC(msg); MIDAS_UNREACHABLE
+#define NEVER(msg)                                                                                                \
+  PANIC(msg);                                                                                                     \
+  MIDAS_UNREACHABLE
 
 #ifndef USING_SMART_PTRS
 #define USING_SMART_PTRS(CLASS)                                                                                   \
@@ -24,6 +26,14 @@
   CLASS &operator=(CLASS &) = delete;                                                                             \
   CLASS &operator=(const CLASS &) = delete;                                                                       \
   USING_SMART_PTRS(CLASS)
+#endif
+
+#ifndef MOVE_ONLY
+#define MOVE_ONLY(CLASS)                                                                                          \
+  CLASS(const CLASS &) = delete;                                                                                  \
+  CLASS(CLASS &) = delete;                                                                                        \
+  CLASS &operator=(CLASS &) = delete;                                                                             \
+  CLASS &operator=(const CLASS &) = delete;
 #endif
 
 #ifndef NO_NON_EXPLICIT_CTORS

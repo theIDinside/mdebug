@@ -2,6 +2,7 @@
 #include "macros.h"
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <span>
 #include <typedefs.h>
 
@@ -20,14 +21,18 @@ private:
   u8 *buffer;
   u32 value_size;
   u32 capacity;
+  std::pmr::memory_resource* mAllocator;
 
 public:
+  constexpr ByteBuffer(std::pmr::memory_resource* allocator, u32 cap) noexcept;
   constexpr ByteBuffer(std::uint8_t *buffer, u32 cap) noexcept;
 
   constexpr ~ByteBuffer() noexcept
   {
-    if (buffer) {
+    if (buffer && !mAllocator) {
       delete[] buffer;
+    } else {
+      mAllocator->deallocate(buffer, capacity);
     }
   }
 
@@ -37,5 +42,6 @@ public:
   u8 *next() noexcept;
   std::span<u8> span() const noexcept;
   static ByteBuffer::OwnPtr create(u64 size) noexcept;
+  static ByteBuffer::OwnPtr create(std::pmr::memory_resource* allocator, u64 size) noexcept;
 };
 } // namespace utils

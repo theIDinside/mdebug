@@ -1,14 +1,14 @@
 #include "types.h"
-#include "common.h"
 #include <iterator>
+#include <memory_resource>
 #include <supervisor.h>
 
 namespace ui::dap {
 
-std::string
-Breakpoint::serialize() const noexcept
+std::pmr::string
+Breakpoint::serialize(std::pmr::memory_resource* memoryResource) const noexcept
 {
-  std::string buf{};
+  std::pmr::string buf{memoryResource};
   // TODO(simon): Here we really should be using some form of arena allocation for the DAP interpreter
   // communication
   //  so that all these allocations can be "blinked" out of existence, i.e. all serialized command results, will be

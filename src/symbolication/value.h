@@ -3,6 +3,7 @@
 #include "utils/immutable.h"
 #include <common.h>
 #include <fmt/core.h>
+#include <memory_resource>
 #include <span>
 #include <utils/byte_buffer.h>
 #include <utils/expected.h>
@@ -108,6 +109,13 @@ private:
   // The actual backing storage for this value. For instance, we may want to create multiple values out of a single
   // range of bytes in the target which is the case for struct Foo { int a; int b; } foo_val; we may want a Value
   // for a and b. The `MemoryContentsObject` is the storage for foo_val
+
+  // TODO: Eventually, these types (ValueResolver and MemoryContentsObjects) will also take a memory allocator
+  //  pointer as a member
+  //  this is so that we don't have copy (potential) raw bytes read from the tracee -> the local arena allocated
+  //  std::pmr::string types for instance
+  //  and instead have both the raw data read from the tracee as well as the UI results, managed by a local arena
+  //  allocator. PMR galore!
   std::shared_ptr<MemoryContentsObject> mValueObject;
   std::unique_ptr<ValueResolver> mResolver{nullptr};
   std::unique_ptr<ValueVisualizer> mVisualizer{nullptr};
@@ -162,7 +170,13 @@ public:
                                                     NonNullPtr<sym::Frame> frame, Symbol &symbol,
                                                     bool lazy) noexcept;
 
+  static Value *CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,
+                                    NonNullPtr<TaskInfo> task, NonNullPtr<sym::Frame> frame, Symbol &symbol,
+                                    bool lazy) noexcept;
+
   static ReadResult ReadMemory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
+  static ReadResult ReadMemory(std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address,
+                               u32 size_of) noexcept;
 };
 
 class EagerMemoryContentsObject final : public MemoryContentsObject

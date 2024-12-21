@@ -3,8 +3,15 @@
 
 namespace utils {
 
+constexpr ByteBuffer::ByteBuffer(std::pmr::memory_resource *allocator, u32 cap) noexcept
+    : capacity(cap), mAllocator(allocator)
+{
+  buffer = (u8 *)mAllocator->allocate(cap, 32);
+  value_size = 0;
+}
+
 constexpr ByteBuffer::ByteBuffer(std::uint8_t *buffer, u32 cap) noexcept
-    : buffer(buffer), value_size(0), capacity(cap)
+    : buffer(buffer), value_size(0), capacity(cap), mAllocator(nullptr)
 {
 }
 
@@ -47,4 +54,12 @@ ByteBuffer::create(u64 size) noexcept
   auto ptr = new u8[size];
   return std::make_unique<ByteBuffer>(ptr, size);
 }
+
+/*static*/
+std::unique_ptr<ByteBuffer>
+ByteBuffer::create(std::pmr::memory_resource *allocator, u64 size) noexcept
+{
+  return std::make_unique<ByteBuffer>(allocator, size);
+}
+
 } // namespace utils

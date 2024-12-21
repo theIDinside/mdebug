@@ -8,17 +8,21 @@
 #include <symbolication/objfile.h>
 
 namespace ui::dap {
-
-std::string
-InitializedEvent::Serialize(int) const noexcept
+#define ReturnFormatted(formatString, ...)                                                                        \
+  std::pmr::string result{arenaAllocator};                                                                        \
+  fmt::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
+  return result
+// std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource* allocator=nullptr) const noexcept final;
+std::pmr::string
+InitializedEvent::Serialize(int, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
+  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
 }
 
-std::string
-TerminatedEvent::Serialize(int seq) const noexcept
+std::pmr::string
+TerminatedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{}, "type":"event", "event":"terminated" }})", seq);
+  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"terminated" }})", seq);
 }
 
 ModuleEvent::ModuleEvent(std::string_view id, std::string_view reason, std::string &&name, Path &&path,
@@ -44,8 +48,9 @@ ModuleEvent::ModuleEvent(std::string_view reason, const ObjectFile &object_file)
 }
 
 ModuleEvent::ModuleEvent(std::string_view reason, const SymbolFile &symbol_file) noexcept
-    : objfile_id(symbol_file.mSymbolObjectFileId), reason(reason), name(symbol_file.GetObjectFilePath().filename()),
-      path(symbol_file.GetObjectFilePath()), addr_range(symbol_file.mPcBounds), sym_info(SharedObjectSymbols::Full),
+    : objfile_id(symbol_file.mSymbolObjectFileId), reason(reason),
+      name(symbol_file.GetObjectFilePath().filename()), path(symbol_file.GetObjectFilePath()),
+      addr_range(symbol_file.mPcBounds), sym_info(SharedObjectSymbols::Full),
       symbol_file_path(symbol_file.GetObjectFilePath().c_str()), version()
 {
 }
@@ -61,28 +66,29 @@ format_optional(const std::optional<T> &opt, bool with_quotes) noexcept -> std::
   }
 }
 
-std::string
-ModuleEvent::Serialize(int seq) const noexcept
+std::pmr::string
+ModuleEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   auto out = fmt::memory_buffer();
-  constexpr auto bi = [](auto &out) { return std::back_inserter(out); };
-  fmt::format_to(
-    bi(out),
+  std::pmr::string result{arenaAllocator};
+
+  auto it = fmt::format_to(
+    std::back_inserter(result),
     R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
     seq, reason, objfile_id, name, path.c_str());
 
   if (version) {
-    fmt::format_to(bi(out), R"(,"version":"{}")", *version);
+    it = fmt::format_to(it, R"(,"version":"{}")", *version);
   }
-  fmt::format_to(bi(out), R"(,"symbolStatus":"{}")", so_sym_info_description(sym_info));
+  it = fmt::format_to(it, R"(,"symbolStatus":"{}")", so_sym_info_description(sym_info));
 
   if (symbol_file_path) {
-    fmt::format_to(bi(out), R"(,"symbolFilePath":"{}")", *symbol_file_path);
+    it = fmt::format_to(it, R"(,"symbolFilePath":"{}")", *symbol_file_path);
   }
 
-  fmt::format_to(bi(out), R"(,"addressRange":"{}:{}"}}}}}})", addr_range.low, addr_range.high);
+  it = fmt::format_to(it, R"(,"addressRange":"{}:{}"}}}}}})", addr_range.low, addr_range.high);
 
-  return fmt::to_string(out);
+  return result;
 }
 
 ContinuedEvent::ContinuedEvent(Tid tid, bool all_threads) noexcept
@@ -90,39 +96,38 @@ ContinuedEvent::ContinuedEvent(Tid tid, bool all_threads) noexcept
 {
 }
 
-std::string
-ContinuedEvent::Serialize(int seq) const noexcept
+std::pmr::string
+ContinuedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  ReturnFormatted(
     R"({{"seq":{}, "type":"event", "event":"continued", "body":{{"threadId":{}, "allThreadsContinued":{}}}}})",
     seq, thread_id, all_threads_continued);
 }
 
 Process::Process(std::string name, bool is_local) noexcept : name(std::move(name)), is_local(is_local) {}
 
-std::string
-Process::Serialize(int seq) const noexcept
+std::pmr::string
+Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(
+  ReturnFormatted(
     R"({{"seq":{}, "type":"event", "event":"process", "body":{{"name":"{}", "isLocalProcess": true, "startMethod": "attach" }}}})",
     seq, name);
 }
 
 ExitedEvent::ExitedEvent(int exit_code) noexcept : exit_code(exit_code) {}
-std::string
-ExitedEvent::Serialize(int seq) const noexcept
+std::pmr::string
+ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{}, "type":"event", "event":"exited", "body":{{"exitCode":{}}}}})", seq,
-                     exit_code);
+  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"exited", "body":{{"exitCode":{}}}}})", seq, exit_code);
 }
 
 ThreadEvent::ThreadEvent(ThreadReason reason, Tid tid) noexcept : reason(reason), tid(tid) {}
 
-std::string
-ThreadEvent::Serialize(int seq) const noexcept
+std::pmr::string
+ThreadEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  return fmt::format(R"({{"seq":{}, "type":"event", "event":"thread", "body":{{"reason":"{}", "threadId":{}}}}})",
-                     seq, to_str(reason), tid);
+  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"thread", "body":{{"reason":"{}", "threadId":{}}}}})",
+                  seq, to_str(reason), tid);
 }
 
 StoppedEvent::StoppedEvent(StoppedReason reason, std::string_view description, Tid tid, std::vector<int> bps,
@@ -131,19 +136,19 @@ StoppedEvent::StoppedEvent(StoppedReason reason, std::string_view description, T
 {
 }
 
-std::string
-StoppedEvent::Serialize(int seq) const noexcept
+std::pmr::string
+StoppedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   nlohmann::json ensure_desc_utf8 = description;
   const auto description_utf8 = ensure_desc_utf8.dump();
   if (text.empty()) {
-    return fmt::format(
+    ReturnFormatted(
       R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": "", "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
       seq, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
   } else {
     const nlohmann::json ensure_utf8 = text;
     const auto utf8text = ensure_utf8.dump();
-    return fmt::format(
+    ReturnFormatted(
       R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": {}, "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
       seq, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
   }
@@ -166,12 +171,11 @@ zip(Fn &&fn, Optionals... opts) noexcept
   }
 }
 
-std::string
-BreakpointEvent::Serialize(int seq) const noexcept
+std::pmr::string
+BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-
-  std::string result{};
-  result.reserve(256);
+  std::pmr::string result{arenaAllocator};
+  result.reserve(1024);
   auto it = std::back_inserter(result);
   it = fmt::format_to(
     it,
@@ -203,13 +207,18 @@ OutputEvent::OutputEvent(std::string_view category, std::string &&output) noexce
 {
 }
 
-std::string
-OutputEvent::Serialize(int seq) const noexcept
+std::pmr::string
+OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   nlohmann::json escape_hack;
   escape_hack = output;
   const auto body = escape_hack.dump();
-  return fmt::format(R"({{"seq":{}, "type":"event", "event":"output", "body":{{"category":"{}", "output":{}}}}})",
-                     seq, category, body);
+  std::pmr::string result{arenaAllocator};
+  fmt::format_to(std::back_inserter(result),
+                 R"({{"seq":{}, "type":"event", "event":"output", "body":{{"category":"{}", "output":{}}}}})", seq,
+                 category, body);
+  return result;
 }
 } // namespace ui::dap
+
+#undef ReturnFormatted

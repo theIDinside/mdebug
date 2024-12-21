@@ -121,7 +121,7 @@ public:
    * hang. */
   void accept_command(ui::UICommand *cmd) noexcept;
   TraceeController *new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept;
-  void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, Path program,
+  void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path& program,
               std::span<const std::string> prog_args) noexcept;
   bool attach(const AttachArgs &args) noexcept;
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
