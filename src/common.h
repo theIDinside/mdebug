@@ -130,6 +130,18 @@ std::string_view syscall_name(unsigned long long syscall_number);
     MIDAS_UNREACHABLE                                                                                             \
   }
 
+#define IGNORE_WARN(...) (void)sizeof...(__VA_ARGS__);
+
+template <typename... Args>
+void
+IgnoreArgs(const Args&...)
+{
+}
+
+#define TODO_IGNORE_WARN(message, ...)                                                                            \
+  IgnoreArgs(__VA_ARGS__);                                                                                        \
+  TODO(message);
+
 #define TODO_FMT(fmt_str, ...)                                                                                    \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
