@@ -31,7 +31,7 @@ ThreadProceedAction::cancel() noexcept
 
 FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_ptr<UserBreakpoint> bp,
                                bool should_clean_up) noexcept
-    : ThreadProceedAction(ctrl, t), bp(bp), should_cleanup(should_clean_up)
+    : ThreadProceedAction(ctrl, t), bp(std::move(bp)), should_cleanup(should_clean_up)
 {
 }
 
@@ -313,7 +313,7 @@ StopHandler::native_core_evt_from_stopped(TaskInfo &t) noexcept
   if (t.loc_stat) {
     const auto locstat = t.clear_bpstat();
     return CoreEvent::Stepped({tc.TaskLeaderTid(), t.tid, {}}, !locstat->should_resume, locstat,
-                              std::move(t.next_resume_action), {});
+                              t.next_resume_action, {});
   }
   const auto pc = tc.CacheAndGetPcFor(t);
   const auto prev_pc_byte = offset(pc, -1);
