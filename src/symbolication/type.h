@@ -215,7 +215,7 @@ public:
   Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, std::string_view name) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
-  Type(std::string_view name) noexcept;
+  Type(std::string_view name, size_t size=0) noexcept;
   Type(Type &&o) noexcept;
 
   // Resolves the alias that this type def/using decl actually is, if it is one. If it's a concrete type, return itself.
