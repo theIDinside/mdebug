@@ -56,7 +56,7 @@ ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
 
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
     : mObjectFilePath(std::move(p)), mObjectFileId(std::move(objfile_id)), mSize(size),
-      mLoadedBinary(loaded_binary), mTypeStorage(std::make_unique<TypeStorage>()), mMinimalFunctionSymbols{},
+      mLoadedBinary(loaded_binary), mTypeStorage(TypeStorage::Create()), mMinimalFunctionSymbols{},
       mMinimalFunctionSymbolsSorted(), mMinimalObjectSymbols{}, mUnitDataWriteLock(), mCompileUnits(),
       mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), lnp_headers(nullptr),
       mCompileUnitWriteLock(), mCompilationUnits(), mAddressToCompileUnitMapping()
@@ -665,7 +665,11 @@ auto
 SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
                          sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
-  if (!frame.FullSymbolInfo().IsResolved()) {
+  auto symbolInformation = frame.MaybeGetFullSymbolInfo();
+  if(!symbolInformation) {
+    return {};
+  }
+  if (!symbolInformation->IsResolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->GetObjectFile(), frame};
     sym_ctx.process_symbol_information();
   }
