@@ -35,7 +35,13 @@ FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_
 {
 }
 
-FinishFunction::~FinishFunction() noexcept { tc.RemoveBreakpoint(bp->id); }
+FinishFunction::~FinishFunction() noexcept
+{
+  if (!cancelled) {
+    task.set_stop();
+  }
+  tc.RemoveBreakpoint(bp->id);
+}
 
 bool
 FinishFunction::HasCompleted(bool stopped_by_user) const noexcept
@@ -174,7 +180,9 @@ LineStep::InstallBreakpoint(AddrPtr address) noexcept
   resumed_to_resume_addr = false;
 }
 
-void LineStep::MaybeSetDone(bool isDone) noexcept {
+void
+LineStep::MaybeSetDone(bool isDone) noexcept
+{
   mIsDone = isDone;
 }
 
@@ -432,6 +440,7 @@ StopImmediately::~StopImmediately() noexcept
 void
 StopImmediately::notify_stopped() noexcept
 {
+  task.set_stop();
   tc.EmitStopped(task.tid, reason, "stopped", false, {});
 }
 

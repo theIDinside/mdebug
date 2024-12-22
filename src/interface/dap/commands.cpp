@@ -686,7 +686,7 @@ InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd
 }
 
 std::pmr::string
-InitializeResponse::Serialize(int, std::pmr::memory_resource* arenaAllocator) const noexcept
+InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   // "this _must_ be 1, the first response"
 
@@ -879,7 +879,8 @@ std::pmr::string
 StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   std::pmr::string result{arenaAllocator};
-  // Estimated size per stack frame; 105 for the formatting string, 18 for the address, 2+2 for line:col, 256 for name and path
+  // Estimated size per stack frame; 105 for the formatting string, 18 for the address, 2+2 for line:col, 256 for
+  // name and path
   // + format string for response with some additional spill.
   result.reserve(256 + ((105 + 18 + 2 + 2 + 256) * stack_frames.size()));
   auto outIt = std::back_inserter(result);
@@ -1384,7 +1385,12 @@ ParseDebugAdapterCommand(std::string packet) noexcept
     if (args.contains("args")) {
       prog_args = args.at("args");
     }
-    const bool stopOnEntry = args.contains("stopOnEntry");
+
+    bool stopOnEntry = false;
+    if (args.contains("stopOnEntry")) {
+      stopOnEntry = args["stopOnEntry"];
+    }
+
     return new Launch{seq, stopOnEntry, std::move(path), std::move(prog_args)};
   }
   case CommandType::LoadedSources:

@@ -2,6 +2,8 @@
 #include <iostream>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <format>
+
 
 int
 main(int argc, char *argv[])
@@ -10,6 +12,8 @@ main(int argc, char *argv[])
     std::cerr << "Usage: " << argv[0] << " <directory_path>" << std::endl;
     return 1;
   }
+
+  std::print(std::cout, "file: {}", argv[0]);
 
   std::string directoryPath = argv[1];
   pid_t pid = fork();

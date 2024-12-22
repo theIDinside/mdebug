@@ -57,7 +57,7 @@ read_values(UnitData &cu, const DieMetaData &die) noexcept
 
 static auto
 IsMemberFunction(std::vector<sym::dw::UnitData *> &followed_references, UnitData &cu,
-             const DieMetaData &die) noexcept -> std::tuple<bool, std::optional<std::string_view>>
+                 const DieMetaData &die) noexcept -> std::tuple<bool, std::optional<std::string_view>>
 {
   ASSERT((maybe_null_any_of<DwarfTag::DW_TAG_subprogram, DwarfTag::DW_TAG_inlined_subroutine>(&die)),
          "Asking if die is a member function die when it's not a subprogram die doesn't make sense. "
@@ -71,9 +71,7 @@ IsMemberFunction(std::vector<sym::dw::UnitData *> &followed_references, UnitData
   auto parent_die = die.parent();
   using enum DwarfTag;
   const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(parent_die);
-  const auto not_already_added = [id = cu.section_offset()](auto cu) {
-    return cu->section_offset() != id;
-  };
+  const auto not_already_added = [id = cu.section_offset()](auto cu) { return cu->section_offset() != id; };
   for (auto ref = DieReference(&cu, &die).MaybeResolveReference(); ref.IsValid();
        ref = ref.MaybeResolveReference()) {
 
@@ -83,7 +81,10 @@ IsMemberFunction(std::vector<sym::dw::UnitData *> &followed_references, UnitData
     }
 
     const auto result = maybe_null_any_of<DW_TAG_class_type, DW_TAG_structure_type>(ref.GetDie()->parent());
-    const auto name = ref.read_attribute(Attribute::DW_AT_name).transform([](auto attr) { return attr.string(); });
+    const auto name =
+      ref.read_attribute(Attribute::DW_AT_name).transform([](const auto &attr) noexcept -> std::string_view {
+        return attr.string();
+      });
     if (result) {
       const auto result = std::make_tuple(true, name);
       return result;
