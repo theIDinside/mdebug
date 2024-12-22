@@ -134,8 +134,10 @@ Frame::Scopes() noexcept
 sym::FunctionSymbol *
 Frame::MaybeGetFullSymbolInfo() const noexcept
 {
-  ASSERT(mFrameType == FrameType::Full, "Frame has no full symbol info");
-  return mSymbolUnion.uFullSymbol;
+  if(mFrameType == FrameType::Full) {
+    return mSymbolUnion.uFullSymbol;
+  }
+  return nullptr;
 }
 
 const MinSymbol *

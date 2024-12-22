@@ -1,12 +1,15 @@
 #pragma once
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
+#include <memory_resource>
 #include <span>
 // NOLINTNEXTLINE
 #include "bp.h"
 #include "fmt/ranges.h"
+#include "interface/dap/interface.h"
 #include "types.h"
 #include <interface/attach_args.h>
+#include <lib/arena_allocator.h>
 #include <nlohmann/json.hpp>
 #include <symbolication/disassemble.h>
 #include <typedefs.h>
@@ -205,7 +208,7 @@ struct ErrorResponse final : ui::UIResult
   ErrorResponse(std::string_view command, ui::UICommandPtr cmd, std::optional<std::string> &&short_message,
                 std::optional<Message> &&message) noexcept;
   ~ErrorResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 
   std::string_view command;
   std::optional<std::string> short_message;
@@ -217,7 +220,7 @@ struct ReverseContinueResponse final : ui::UIResult
   CTOR(ReverseContinueResponse);
   ~ReverseContinueResponse() noexcept override = default;
   bool continue_all;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 /** ReverseContinue under RR is *always* "continue all"*/
@@ -226,7 +229,7 @@ struct ReverseContinue final : ui::UICommand
   ReverseContinue(u64 seq, int thread_id) noexcept;
   ~ReverseContinue() noexcept override = default;
   int thread_id;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   DEFINE_NAME("reverseContinue");
   RequiredArguments({"threadId"sv});
@@ -238,7 +241,7 @@ struct ContinueResponse final : ui::UIResult
   CTOR(ContinueResponse);
   ~ContinueResponse() noexcept override = default;
   bool continue_all;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Continue final : public ui::UICommand
@@ -248,7 +251,7 @@ struct Continue final : public ui::UICommand
 
   Continue(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~Continue() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   DEFINE_NAME("continue");
   RequiredArguments({"threadId"sv});
@@ -259,7 +262,7 @@ struct PauseResponse final : ui::UIResult
 {
   CTOR(PauseResponse);
   ~PauseResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Pause final : public ui::UICommand
@@ -271,7 +274,7 @@ struct Pause final : public ui::UICommand
 
   Pause(u64 seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
   ~Pause() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   Args pauseArgs;
   DEFINE_NAME("pause");
@@ -290,7 +293,7 @@ struct NextResponse final : ui::UIResult
 {
   CTOR(NextResponse);
   ~NextResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Next final : public ui::UICommand
@@ -304,7 +307,7 @@ struct Next final : public ui::UICommand
   {
   }
   ~Next() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("next");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -314,7 +317,7 @@ struct StepInResponse final : ui::UIResult
 {
   CTOR(StepInResponse);
   ~StepInResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct StepIn final : public ui::UICommand
@@ -329,7 +332,7 @@ struct StepIn final : public ui::UICommand
   }
 
   ~StepIn() noexcept final = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepIn");
   RequiredArguments({"threadId"});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -339,7 +342,7 @@ struct StepOutResponse final : ui::UIResult
 {
   CTOR(StepOutResponse);
   ~StepOutResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct StepOut final : public ui::UICommand
@@ -349,7 +352,7 @@ struct StepOut final : public ui::UICommand
 
   StepOut(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepOut");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -363,7 +366,7 @@ struct SetBreakpointsResponse final : ui::UIResult
   BreakpointRequestKind type;
   std::vector<ui::dap::Breakpoint> breakpoints;
   ~SetBreakpointsResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct SetBreakpoints final : public ui::UICommand
@@ -371,7 +374,7 @@ struct SetBreakpoints final : public ui::UICommand
   SetBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setBreakpoints");
   RequiredArguments({"source"sv});
 };
@@ -380,7 +383,7 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 {
   SetExceptionBreakpoints(u64 sequence, nlohmann::json &&args) noexcept;
   ~SetExceptionBreakpoints() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   Immutable<nlohmann::json> args;
 
@@ -394,7 +397,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   SetInstructionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
@@ -404,7 +407,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   SetFunctionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
   ~SetFunctionBreakpoints() override = default;
   nlohmann::json args;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({"breakpoints"sv});
 };
@@ -413,7 +416,7 @@ struct WriteMemoryResponse final : public ui::UIResult
 {
   CTOR(WriteMemoryResponse);
   ~WriteMemoryResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   u64 bytes_written;
 };
 
@@ -421,7 +424,7 @@ struct WriteMemory final : public ui::UICommand
 {
   WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept;
   ~WriteMemory() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int offset;
@@ -436,7 +439,7 @@ struct ReadMemoryResponse final : public ui::UIResult
 {
   CTOR(ReadMemoryResponse);
   ~ReadMemoryResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   AddrPtr first_readable_address;
   u64 unreadable_bytes;
   std::string data_base64;
@@ -446,7 +449,7 @@ struct ReadMemory final : public ui::UICommand
 {
   ReadMemory(u64 seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
   ~ReadMemory() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int offset;
@@ -461,14 +464,14 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 {
   CTOR(ConfigurationDoneResponse);
   ~ConfigurationDoneResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct ConfigurationDone final : public ui::UICommand
 {
   ConfigurationDone(u64 seq) noexcept : UICommand(seq) {}
   ~ConfigurationDone() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   DEFINE_NAME("configurationDone");
   NoRequiredArgs();
@@ -479,7 +482,7 @@ struct InitializeResponse final : public ui::UIResult
   CTOR(InitializeResponse);
   InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept;
   ~InitializeResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 
   bool RRSession;
 };
@@ -488,7 +491,7 @@ struct Initialize final : public ui::UICommand
 {
   Initialize(u64 seq, nlohmann::json &&arguments) noexcept;
   ~Initialize() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   nlohmann::json args;
   DEFINE_NAME("initialize");
   NoRequiredArgs();
@@ -498,14 +501,14 @@ struct DisconnectResponse final : public UIResult
 {
   CTOR(DisconnectResponse);
   ~DisconnectResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Disconnect final : public UICommand
 {
   Disconnect(u64 seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
   ~Disconnect() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   bool restart, terminate_tracee, suspend_tracee;
   DEFINE_NAME("disconnect");
   NoRequiredArgs();
@@ -515,14 +518,14 @@ struct LaunchResponse final : public UIResult
 {
   CTOR(LaunchResponse);
   ~LaunchResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Launch final : public UICommand
 {
   Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
   ~Launch() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   bool stopOnEntry;
   Path program;
   std::vector<std::string> program_args;
@@ -535,14 +538,14 @@ struct AttachResponse final : public UIResult
 {
   CTOR(AttachResponse);
   ~AttachResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Attach final : public UICommand
 {
   Attach(u64 seq, AttachArgs &&args) noexcept;
   ~Attach() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
@@ -581,14 +584,14 @@ struct TerminateResponse final : public UIResult
 {
   CTOR(TerminateResponse);
   ~TerminateResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 };
 
 struct Terminate final : public UICommand
 {
   Terminate(u64 seq) noexcept : UICommand(seq) {}
   ~Terminate() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("terminate");
   NoRequiredArgs();
 };
@@ -597,7 +600,7 @@ struct ThreadsResponse final : public UIResult
 {
   CTOR(ThreadsResponse);
   ~ThreadsResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::vector<Thread> threads;
 };
 
@@ -605,7 +608,7 @@ struct Threads final : public UICommand
 {
   Threads(u64 seq) noexcept : UICommand(seq) {}
   ~Threads() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   DEFINE_NAME("threads");
   NoRequiredArgs();
 };
@@ -615,7 +618,7 @@ struct StackTrace final : public UICommand
   StackTrace(u64 seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   int threadId;
   std::optional<int> startFrame;
   std::optional<int> levels;
@@ -630,7 +633,7 @@ struct StackTraceResponse final : public UIResult
   CTOR(StackTraceResponse);
   StackTraceResponse(bool success, StackTrace *cmd, std::vector<StackFrame> &&stack_frames) noexcept;
   ~StackTraceResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::vector<StackFrame> stack_frames;
 };
 
@@ -638,7 +641,7 @@ struct Scopes final : public UICommand
 {
   Scopes(u64 seq, int frameId) noexcept;
   ~Scopes() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   int frameId;
   DEFINE_NAME("scopes");
   RequiredArguments({"frameId"sv});
@@ -649,7 +652,7 @@ struct ScopesResponse final : public UIResult
 {
   ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> scopes) noexcept;
   ~ScopesResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   // For now, we only have 3 scopes, Args, Locals, Registers
   std::array<Scope, 3> scopes;
 };
@@ -668,7 +671,7 @@ struct Evaluate final : public UICommand
   Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
            std::optional<EvaluationContext> context) noexcept;
   ~Evaluate() noexcept final = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   Immutable<std::string> expr;
   Immutable<std::optional<int>> frameId;
@@ -687,7 +690,7 @@ struct EvaluateResponse final : public UIResult
   EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::string &&result,
                    std::optional<std::string> &&type, std::optional<std::string> &&memoryReference) noexcept;
   ~EvaluateResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
 
   std::string result;
   std::optional<std::string> type;
@@ -699,7 +702,7 @@ struct Variables final : public UICommand
 {
   Variables(u64 seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
   int var_ref;
   std::optional<u32> start;
@@ -713,7 +716,7 @@ struct VariablesResponse final : public UIResult
 {
   VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept;
   ~VariablesResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   int requested_reference;
   std::vector<Variable> variables;
 };
@@ -722,7 +725,7 @@ struct DisassembleResponse final : public UIResult
 {
   CTOR(DisassembleResponse);
   ~DisassembleResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::vector<sym::Disassembly> instructions;
 };
 
@@ -731,7 +734,7 @@ struct Disassemble final : public UICommand
   Disassemble(u64 seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
   ~Disassemble() override = default;
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   std::optional<AddrPtr> address;
   int byte_offset;
@@ -748,7 +751,7 @@ struct InvalidArgsResponse final : public UIResult
 {
   InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgsResponse() noexcept override = default;
-  std::string serialize(int seq) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource* arenaAllocator) const noexcept final;
   std::string_view command;
   MissingOrInvalidArgs missing_or_invalid;
 };
@@ -763,7 +766,7 @@ struct InvalidArgs final : public UICommand
   InvalidArgs(u64 seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgs() override = default;
 
-  UIResultPtr execute() noexcept final;
+  UIResultPtr Execute() noexcept final;
 
   ArgumentErrorKind kind;
   std::string_view command;
@@ -785,44 +788,3 @@ Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
   }
 }
 }; // namespace ui::dap
-
-namespace fmt {
-
-template <> struct formatter<ui::dap::Message>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const ui::dap::Message &msg, FormatContext &ctx) const
-  {
-
-    if (msg.variables.empty()) {
-      return fmt::format_to(ctx.out(), R"({{"id":{},"format":"{}","showUser":{}}})", msg.id.value_or(-1),
-                            msg.format, msg.show_user);
-    } else {
-      std::vector<char> buf{0};
-      buf.reserve(256);
-      auto sz = 1u;
-      auto max = msg.variables.size();
-      for (const auto &[k, v] : msg.variables) {
-        if (sz < max) {
-          fmt::format_to(std::back_inserter(buf), R"("{}":"{}", )", k, v);
-        } else {
-          fmt::format_to(std::back_inserter(buf), R"("{}":"{}")", k, v);
-        }
-        ++sz;
-      }
-      buf.push_back(0);
-      return fmt::format_to(ctx.out(), R"({{ "id": {}, "format": "{}", "variables":{{ {} }}, "showUser":{}}})",
-                            msg.id.value_or(-1), msg.format, fmt::join(buf, ""), msg.show_user);
-    }
-  }
-};
-
-} // namespace fmt

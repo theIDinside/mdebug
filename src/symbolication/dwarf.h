@@ -82,6 +82,13 @@ struct AttributeValue
   {
     return value.u;
   }
+
+  static inline u64
+  as_unsigned(const AttributeValue &v)
+  {
+    return v.unsigned_value();
+  }
+
   i64
   signed_value() const noexcept
   {

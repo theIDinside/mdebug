@@ -37,16 +37,16 @@ int fibonacci(int n) {
 static int
 quux(int acc, int a)
 {
-  return acc * a; // BP4
+  return acc * a; // BP4 D1
 }
 
 static int
 baz(int a, int b, int times)
 {
   int res_a = 1; // BPLine1
-  int res_b = 1; // BP3
+  int res_b = 1; // BP3 C1
   while (times > 0) {
-    res_a = quux(res_a, a);
+    res_a = quux(res_a, a); // D2
     res_b = quux(res_b, b);
     int fibOfTimes = fibonacci(times);
     int test = fib(times);
@@ -70,19 +70,19 @@ raise_after_baz(int a, int b)
 static void
 bar(int a, int b)
 {
-  baz(a, b, 4); // BP2
-}
+  baz(a, b, 4); // BP2 B1
+} // C2 D3
 
 static void
 foo()
 {
-  bar(1, 2); // BP1
-}
+  bar(1, 2); // BP1 A1
+} // B2 C3 D4
 
 int
 main(int argc, const char **argv)
 {
   foo();
-  Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2};
+  Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2}; // A2 B3 C4 D5
   return -15;
 }

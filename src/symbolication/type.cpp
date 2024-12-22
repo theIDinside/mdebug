@@ -3,6 +3,7 @@
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"
+#include "symbolication/dwarf_defs.h"
 #include <algorithm>
 #include <optional>
 #include <supervisor.h>
@@ -87,6 +88,7 @@ sym::ToTypeModifierWillPanic(DwarfTag tag) noexcept
   case DwarfTag::DW_TAG_enumeration_type:
   case DwarfTag::DW_TAG_union_type:
   case DwarfTag::DW_TAG_typedef:
+  case DwarfTag::DW_TAG_subroutine_type:
     return sym::Modifier::None;
   default:
     break;
@@ -99,7 +101,8 @@ std::unique_ptr<TypeStorage>
 TypeStorage::Create() noexcept
 {
   auto storage = std::make_unique<TypeStorage>();
-  storage->mTypeStorage[0] = new sym::Type{"void"};
+  // TODO(simon): Technically there exists a world where a pointer is 4 bytes. I don't live in that world.
+  storage->mTypeStorage[0] = new sym::Type{"void", 8};
   return storage;
 }
 
@@ -205,7 +208,8 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
       const auto name = this_ref.read_attribute(Attribute::DW_AT_name)
                           .transform([](auto v) { return v.string(); })
                           .value_or("lambda");
-      const u32 sz = this_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
+      const u32 sz =
+        this_ref.read_attribute(Attribute::DW_AT_byte_size).transform(AttributeValue::as_unsigned).value_or(0);
       auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, sz, name};
       mTypeStorage[this_ref.GetDie()->section_offset] = type;
       return type;
@@ -244,15 +248,15 @@ Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryRef
 {
 }
 
-Type::Type(std::string_view name) noexcept
-    : mName(name), mCompUnitDieReference(), mModifier(Modifier::None), mIsTypedef(false), size_of(0),
+Type::Type(std::string_view name, size_t size) noexcept
+    : mName(name), mCompUnitDieReference(), mModifier(Modifier::None), mIsTypedef(false), size_of(size),
       mIsResolved(true), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes()
 {
 }
 
 Type::Type(Type &&o) noexcept
-    : mName(o.mName), mCompUnitDieReference(o.mCompUnitDieReference), mModifier(o.mModifier),
-      size_of(o.size_of), mIsResolved(o.mIsResolved), mIsProcessing(o.mIsProcessing), mTypeChain(o.mTypeChain),
+    : mName(o.mName), mCompUnitDieReference(o.mCompUnitDieReference), mModifier(o.mModifier), size_of(o.size_of),
+      mIsResolved(o.mIsResolved), mIsProcessing(o.mIsProcessing), mTypeChain(o.mTypeChain),
       mFields(std::move(o.mFields)), mBaseTypes(o.mBaseTypes)
 {
   ASSERT(!mIsProcessing, "Moving a type that's being processed is guaranteed to have undefined behavior");

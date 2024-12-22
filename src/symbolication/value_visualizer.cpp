@@ -5,11 +5,17 @@
 #include "value.h"
 #include <algorithm>
 #include <iterator>
+#include <memory_resource>
+#include <string>
 #include <supervisor.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
 
 namespace sym {
+
+#define FormatAndReturn(result, formatString, ...)                                                                \
+  fmt::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
+  return result
 
 ValueResolver::ValueResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
     : mType(type), mSymbolFile(objectFile), mValuePointer(std::move(val)), mChildren()
@@ -243,10 +249,13 @@ ArrayResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::
   }
 }
 
-ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : mDataProvider(std::move(provider)) {}
+ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept
+    : mDataProvider(std::move(provider))
+{
+}
 
-std::optional<std::string>
-PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span) noexcept
+std::optional<std::pmr::string>
+PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource* allocator) noexcept
 {
   auto &enums = t.GetEnumerations();
   EnumeratorConstValue value;
@@ -286,17 +295,21 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span) noexcept
   if (enums.is_signed) {
     for (auto i = 0u; i < fields.size(); ++i) {
       if (enums.e_values[i].i == value.i) {
-        return fmt::format("{}::{}", t.mName, fields[i].name);
+        std::pmr::string result{allocator};
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
       }
     }
-    return fmt::format("{}::(invalid){}", t.mName, value.i);
+    std::pmr::string result{allocator};
+    FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
   } else {
     for (auto i = 0u; i < fields.size(); ++i) {
       if (enums.e_values[i].u == value.u) {
-        return fmt::format("{}::{}", t.mName, fields[i].name);
+        std::pmr::string result{allocator};
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
       }
     }
-    return fmt::format("{}::(invalid){}", t.mName, value.u);
+    std::pmr::string result{allocator};
+    FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
   }
 }
 
@@ -305,8 +318,8 @@ PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept
 {
 }
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
-std::optional<std::string>
-PrimitiveVisualizer::FormatValue() noexcept
+std::optional<std::pmr::string>
+PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -320,9 +333,11 @@ PrimitiveVisualizer::FormatValue() noexcept
   auto type = ptr->GetType();
   const auto size_of = type->size_of;
 
+  std::pmr::string result{allocator};
+
   if (type->IsReference()) {
     const std::uintptr_t ptr = bit_copy<std::uintptr_t>(span);
-    return fmt::format("0x{:x}", ptr);
+    FormatAndReturn(result, "0x{:x}", ptr);
   }
 
   auto target_type = type->GetTargetType();
@@ -333,25 +348,25 @@ PrimitiveVisualizer::FormatValue() noexcept
       ctx.resolve_type();
     }
 
-    return FormatEnum(*target_type, span);
+    return FormatEnum(*target_type, span, allocator);
   }
 
   switch (type->GetBaseType().value()) {
   case BaseTypeEncoding::DW_ATE_address: {
     std::uintptr_t value = bit_copy<std::uintptr_t>(span);
-    return fmt::format("0x{}", value);
+    FormatAndReturn(result, "0x{}", value);
   }
   case BaseTypeEncoding::DW_ATE_boolean: {
     bool value = bit_copy<bool>(span);
-    return fmt::format("{}", value);
+    FormatAndReturn(result, "{}", value);
   }
   case BaseTypeEncoding::DW_ATE_float: {
     if (size_of == 4u) {
       float value = bit_copy<float>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     } else if (size_of == 8u) {
       double value = bit_copy<double>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     } else {
       PANIC("Expected byte size of a floating point to be 4 or 8");
     }
@@ -361,19 +376,19 @@ PrimitiveVisualizer::FormatValue() noexcept
     switch (size_of) {
     case 1: {
       signed char value = bit_copy<signed char>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     case 2: {
       signed short value = bit_copy<signed short>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     case 4: {
       int value = bit_copy<int>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     case 8: {
       signed long long value = bit_copy<signed long long>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     }
     break;
@@ -382,25 +397,25 @@ PrimitiveVisualizer::FormatValue() noexcept
     switch (size_of) {
     case 1: {
       u8 value = bit_copy<unsigned char>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     case 2: {
       u16 value = bit_copy<unsigned short>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     case 4: {
       u32 value = bit_copy<u32>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     case 8: {
       u64 value = bit_copy<u64>(span);
-      return fmt::format("{}", value);
+      FormatAndReturn(result, "{}", value);
     }
     }
     break;
   case BaseTypeEncoding::DW_ATE_UTF: {
     u32 value = bit_copy<u32>(span);
-    return fmt::format("{}", value);
+    FormatAndReturn(result, "{}", value);
   } break;
   case BaseTypeEncoding::DW_ATE_ASCII:
   case BaseTypeEncoding::DW_ATE_edited:
@@ -423,8 +438,8 @@ PrimitiveVisualizer::FormatValue() noexcept
   PANIC("unknown base type encoding");
 }
 
-std::optional<std::string>
-PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference) noexcept
+std::optional<std::pmr::string>
+PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -436,9 +451,11 @@ PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference) no
     return std::nullopt;
   }
 
-  auto value_field = FormatValue().value_or("could not serialize value");
+  auto value_field = FormatValue(allocator).value_or(std::pmr::string{"could not serialize value", allocator});
+  std::pmr::string result{allocator};
 
-  return fmt::format(
+  FormatAndReturn(
+    result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
     value_field, (*ptr->GetType()), variablesReference, ptr->Address());
 }
@@ -448,14 +465,14 @@ DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noe
 {
 }
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
-std::optional<std::string>
-DefaultStructVisualizer::FormatValue() noexcept
+std::optional<std::pmr::string>
+DefaultStructVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
 {
   TODO("not done");
 }
 
-std::optional<std::string>
-DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference) noexcept
+std::optional<std::pmr::string>
+DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -464,7 +481,9 @@ DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference
 
   ASSERT(name == ptr->mName, "variable name {} != provided name {}", ptr->mName, name);
   const auto &t = *ptr->GetType();
-  return fmt::format(
+  std::pmr::string result{allocator};
+  FormatAndReturn(
+    result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
     t, t, variablesReference, ptr->Address());
 }
@@ -474,54 +493,59 @@ InvalidValueVisualizer::InvalidValueVisualizer(std::weak_ptr<Value> providerWith
 {
 }
 
-std::optional<std::string>
-InvalidValueVisualizer::FormatValue() noexcept
+std::optional<std::pmr::string>
+InvalidValueVisualizer::FormatValue(std::pmr::memory_resource*) noexcept
 {
   TODO("InvalidValueVisualizer::format_value() not yet implemented");
 }
 
-std::optional<std::string>
-InvalidValueVisualizer::DapFormat(std::string_view, int) noexcept
+std::optional<std::pmr::string>
+InvalidValueVisualizer::DapFormat(std::string_view, int, std::pmr::memory_resource* allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
-  return fmt::format(
-    R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})", ptr->mName,
-    ptr->mName, *ptr->GetType());
+  std::pmr::string result{allocator};
+  FormatAndReturn(result,
+                  R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})",
+                  ptr->mName, ptr->mName, *ptr->GetType());
 }
 
-ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(std::move(provider)) {}
+ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept
+    : ValueVisualizer(std::move(provider))
+{
+}
 
-std::optional<std::string>
-ArrayVisualizer::FormatValue() noexcept
+std::optional<std::pmr::string>
+ArrayVisualizer::FormatValue(std::pmr::memory_resource*) noexcept
 {
   TODO("not impl");
 }
 
-std::optional<std::string>
-ArrayVisualizer::DapFormat(std::string_view, int variablesReference) noexcept
+std::optional<std::pmr::string>
+ArrayVisualizer::DapFormat(std::string_view, int variablesReference, std::pmr::memory_resource* allocator) noexcept
 {
-  auto ptr = this->mDataProvider.lock();
+  auto ptr = mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
 
   auto &t = *ptr->GetType();
   const auto no_alias = t.ResolveAlias();
-  return fmt::format(
+  std::pmr::string result{allocator};
+  FormatAndReturn(
+    result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
     ptr->mName, t, t, variablesReference, ptr->Address(), no_alias->ArraySize());
 }
 
-CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider,
-                                     std::optional<u32> nullTerminatorPosition) noexcept
+CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider, std::optional<u32> nullTerminatorPosition) noexcept
     : ValueVisualizer(std::move(dataProvider)), null_terminator(nullTerminatorPosition)
 {
 }
 
-std::optional<std::string>
-CStringVisualizer::FormatValue() noexcept
+std::optional<std::pmr::string>
+CStringVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
 {
-  auto ptr = this->mDataProvider.lock();
+  auto ptr = mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -530,13 +554,14 @@ CStringVisualizer::FormatValue() noexcept
     return std::nullopt;
   }
   std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
-  return fmt::format("{}", cast);
+  std::pmr::string result{allocator};
+  FormatAndReturn(result, "{}", cast);
 }
 
-std::optional<std::string>
-CStringVisualizer::DapFormat(std::string_view name, int) noexcept
+std::optional<std::pmr::string>
+CStringVisualizer::DapFormat(std::string_view name, int, std::pmr::memory_resource* allocator) noexcept
 {
-  auto ptr = this->mDataProvider.lock();
+  auto ptr = mDataProvider.lock();
   if (!ptr) {
     return std::nullopt;
   }
@@ -546,9 +571,12 @@ CStringVisualizer::DapFormat(std::string_view name, int) noexcept
   }
 
   std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
-
-  return fmt::format(
+  std::pmr::string result{allocator};
+  FormatAndReturn(
+    result,
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
     name, cast, 0, ptr->Address());
 }
+
+#undef FormatAndReturn
 } // namespace sym

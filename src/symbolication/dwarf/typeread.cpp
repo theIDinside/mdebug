@@ -15,6 +15,7 @@ FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym:
       lexicalBlockStack({params})
 {
   ASSERT(lexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", lexicalBlockStack.size());
+  MUST_HOLD(mFunctionSymbol != nullptr, "To parse symbol information for a function, there must exist symbol information to parse.");
 }
 
 NonNullPtr<Type>

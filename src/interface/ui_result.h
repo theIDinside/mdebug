@@ -1,5 +1,6 @@
 #pragma once
 #include "ui_command.h"
+#include <memory_resource>
 #include <string>
 
 namespace ui {
@@ -12,7 +13,7 @@ struct UIResult
   {
   }
   virtual ~UIResult() = default;
-  virtual std::string serialize(int monotonic_id) const noexcept = 0;
+  virtual std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource* allocator) const noexcept = 0;
 
   bool success;
   std::uint64_t request_seq;

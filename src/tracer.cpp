@@ -1,6 +1,7 @@
 #include "tracer.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
+#include <lib/arena_allocator.h>
 #include "interface/pty.h"
 #include "interface/remotegdb/connection.h"
 #include "interface/tracee_command/ptrace_commander.h"
@@ -168,9 +169,11 @@ void
 Tracer::handle_command(ui::UICommand *cmd) noexcept
 {
   DBGLOG(core, "accepted command {}", cmd->name());
-  auto result = cmd->execute();
+  auto result = cmd->Execute();
 
-  auto data = result->serialize(0);
+  auto scoped = cmd->dap_client->GetResponseArenaAllocator()->ScopeAllocation();
+  ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
+  auto data = result->Serialize(0, scoped.GetAllocator());
   if (!data.empty()) {
     cmd->dap_client->write(data);
   }
@@ -510,7 +513,7 @@ Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
 }
 
 void
-Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, Path program,
+Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path& program,
                std::span<const std::string> prog_args) noexcept
 {
   termios original_tty;

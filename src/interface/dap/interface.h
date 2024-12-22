@@ -15,6 +15,8 @@ class Tracer;
 class TraceeController;
 /* The different DAP commands/requests */
 
+class ArenaAllocator;
+
 namespace ui {
 struct UIResult;
 using UIResultPtr = const UIResult *;
@@ -138,6 +140,12 @@ class DebugAdapterClient
   ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
   int tty_fd{-1};
   TraceeController *tc{nullptr};
+  // The allocator that can be used by commands during execution of them, for temporary objects etc
+  // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
+  // away.
+  std::unique_ptr<ArenaAllocator> mCommandsAllocator;
+  std::unique_ptr<ArenaAllocator> mCommandResponseAllocator;
+  std::unique_ptr<ArenaAllocator> mEventsAllocator;
 
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
@@ -147,10 +155,14 @@ class DebugAdapterClient
   std::mutex m{};
   std::queue<UIResultPtr> ui_output_queue{};
 
+  void InitAllocators() noexcept;
+
 public:
   DapClientSession session_type;
   ~DebugAdapterClient() noexcept;
 
+  ArenaAllocator* GetCommandArenaAllocator() noexcept;
+  ArenaAllocator* GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *createStandardIOConnection() noexcept;
   static DebugAdapterClient *createSocketConnection(DebugAdapterClient *client) noexcept;
   void client_configured(TraceeController *tc) noexcept;
@@ -181,10 +193,11 @@ class DAP
 private:
   std::vector<utils::OwningPointer<DebugAdapterClient>> clients{};
   std::vector<NotifSource> sources{};
+  std::unique_ptr<ArenaAllocator> mTemporaryArena;
 
 public:
   explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept;
-  ~DAP() = default;
+  ~DAP() noexcept;
 
   // After setup we call `infinite_poll` that does what the name suggests, polls for messages. We could say that
   // this function never returns, but that might not necessarily be the case. In a normal execution it will,

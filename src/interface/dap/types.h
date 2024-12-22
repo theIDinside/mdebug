@@ -3,6 +3,7 @@
 #include "utils/immutable.h"
 #include "utils/macros.h"
 #include <fmt/format.h>
+#include <memory_resource>
 #include <string_view>
 #include <typedefs.h>
 
@@ -36,7 +37,7 @@ struct Breakpoint
   std::optional<std::string_view> source_path;
   std::optional<std::string> error_message;
 
-  std::string serialize() const noexcept;
+  std::pmr::string serialize(std::pmr::memory_resource* memoryResource) const noexcept;
   static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
   static Breakpoint from_user_bp(const UserBreakpoint& user_bp) noexcept;
 };
