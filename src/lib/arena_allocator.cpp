@@ -96,10 +96,7 @@ void *
 ArenaAllocator::do_allocate(std::size_t bytes, std::size_t alignment)
 {
   const std::size_t possiblyAdjustedOffset = (mAllocated + alignment - 1) & ~(alignment - 1);
-  if(possiblyAdjustedOffset + bytes >= mArenaCapacity) {
-    bool success = ExtendAllocation(Page{16});
-    MUST_HOLD(success, "Failed to extend allocation!");
-  }
+  MUST_HOLD(possiblyAdjustedOffset + bytes < mArenaCapacity, "Extending Arena Allocator size not yet implemented/supported fully. ArenaAllocator::ExtendAllocation is what needs additional work.");
   void *p = mAllocatedBuffer + possiblyAdjustedOffset;
   mAllocated = possiblyAdjustedOffset + bytes;
   return p;
