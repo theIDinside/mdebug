@@ -81,6 +81,11 @@ BuildTestSubject(
 )
 
 BuildTestSubject(
+  NAME pmr
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/pmr.cpp
+)
+
+BuildTestSubject(
   NAME functionBreakpoints
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/functionBreakpoints.cpp
 )

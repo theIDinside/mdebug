@@ -230,6 +230,48 @@ TypeStorage::CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedD
 
 namespace sym {
 
+bool
+Symbol::Computed() noexcept
+{
+  switch (mLocation->mKind) {
+  case LocKind::DwarfExpression:
+  case LocKind::LocationList:
+    return true;
+  case LocKind::UnreadLocationList:
+    return false;
+  }
+}
+
+std::span<const u8>
+Symbol::GetDwarfExpression(AddrPtr programCounter) noexcept
+{
+  ASSERT(Computed(), "Symbol information not read in yet");
+  switch (mLocation->mKind) {
+  case LocKind::UnreadLocationList:
+    break;
+  case LocKind::DwarfExpression:
+    return mLocation->uDwarfExpression;
+  case LocKind::LocationList: {
+    auto span = mLocation->uLocationList->Get();
+    auto it = std::ranges::find_if(
+      span, [programCounter](auto &r) { return r.mStart <= programCounter && programCounter <= r.mEnd; });
+    ASSERT(it != std::end(span), "Failed to find relevant location list dwarf expression!");
+    return it->mDwarfExpression;
+  }
+  }
+  return {};
+}
+
+LocationList::LocationList(std::vector<LocationListEntry> &&entries) noexcept : mLocationList(std::move(entries))
+{
+}
+
+std::span<const LocationListEntry>
+LocationList::Get() noexcept
+{
+  return std::span{mLocationList};
+}
+
 Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target,
            bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
@@ -279,7 +321,7 @@ void
 Type::AddField(std::string_view name, u64 offsetOf, dw::DieReference debugInfoEntryReference) noexcept
 {
   TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offsetOf,
-           debugInfoEntryReference.GetUnitData()->section_offset());
+           debugInfoEntryReference.GetUnitData()->SectionOffset());
   // fields.emplace_back(name, offset_of, Immutable<Offset>{ref.die->section_offset});
 }
 
@@ -448,5 +490,4 @@ Type::SetArrayBounds(u32 bounds) noexcept
 {
   mArrayBounds = bounds;
 }
-
 } // namespace sym

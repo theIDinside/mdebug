@@ -71,6 +71,18 @@ template <> struct formatter<ui::dap::Message>
 
 } // namespace fmt
 
+ui::UIResultPtr
+ui::UICommand::LogExecute() noexcept
+{
+  auto start = std::chrono::high_resolution_clock::now();
+  auto result = Execute();
+  const auto duration_us =
+    std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+      .count();
+  DBGLOG(perf, "[command]: {} executed in {} us", name(), duration_us);
+  return result;
+}
+
 namespace ui::dap {
 
 template <typename Res, typename JsonObj>
@@ -911,7 +923,6 @@ StackTrace::Execute() noexcept
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
   }
   auto &cfs = target->BuildCallFrameStack(*task, CallStackRequest::full());
-
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.FramesCount());
   for (const auto &frame : cfs.GetFrames()) {
@@ -1381,6 +1392,7 @@ ParseDebugAdapterCommand(std::string packet) noexcept
     IfInvalidArgsReturn(Launch);
 
     Path path = args.at("program");
+    Path cwd;
     std::vector<std::string> prog_args;
     if (args.contains("args")) {
       prog_args = args.at("args");
@@ -1389,6 +1401,12 @@ ParseDebugAdapterCommand(std::string packet) noexcept
     bool stopOnEntry = false;
     if (args.contains("stopOnEntry")) {
       stopOnEntry = args["stopOnEntry"];
+    }
+
+    if (args.contains("env")) {
+    }
+
+    if (args.contains("cwd")) {
     }
 
     return new Launch{seq, stopOnEntry, std::move(path), std::move(prog_args)};

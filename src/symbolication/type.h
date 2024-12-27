@@ -1,8 +1,11 @@
 #pragma once
+#include "common.h"
 #include "symbolication/block.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "utils/immutable.h"
 #include "utils/indexing.h"
+#include "utils/macros.h"
+#include "utils/util.h"
 
 using namespace std::string_view_literals;
 
@@ -40,8 +43,8 @@ public:
    * before we return Foo* here, because the target type will be defined by Foo. */
   sym::Type *GetOrCreateNewType(sym::dw::IndexedDieReference dieReference) noexcept;
   sym::Type *GetUnitType() noexcept;
-  sym::Type *CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference, u32 typeSize,
-                          std::string_view name) noexcept;
+  sym::Type *CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference,
+                           u32 typeSize, std::string_view name) noexcept;
 };
 
 namespace sym {
@@ -49,37 +52,109 @@ namespace sym {
 enum class LocKind : u8
 {
   DwarfExpression,
-  AbsoluteAddress,
-  OffsetOf
+  UnreadLocationList,
+  LocationList,
 };
 
-struct SymbolLocation
+struct LocationListEntry
 {
-  LocKind kind;
+  AddrPtr mStart, mEnd;
+  std::span<const u8> mDwarfExpression;
+};
+
+class LocationList
+{
+  std::vector<LocationListEntry> mLocationList;
+
+public:
+  LocationList(std::vector<LocationListEntry> &&entries) noexcept;
+  std::span<const LocationListEntry> Get() noexcept;
+};
+
+class SymbolLocation
+{
+  friend class Symbol;
+
+  LocKind mKind;
   union
   {
-    std::span<const u8> dwarf_expr;
-    AddrPtr remote_target;
-    u32 offset_of;
+    std::span<const u8> uDwarfExpression;
+    u32 uLocListOffset;
+    LocationList *uLocationList;
   };
+
+public:
+  MOVE_ONLY(SymbolLocation);
+
+  template <typename T> constexpr SymbolLocation(T &&t)
+  {
+    using utils::IsSame;
+    if constexpr (IsSame<std::span<const u8>, T>()) {
+      mKind = LocKind::DwarfExpression;
+      uDwarfExpression = t;
+    } else if constexpr (IsSame<u32, T>()) {
+      mKind = LocKind::UnreadLocationList;
+      uLocListOffset = t;
+    } else if constexpr (IsSame<LocationList *, T>()) {
+      mKind = LocKind::LocationList;
+      uLocationList = t;
+    } else {
+      static_assert(always_false<T>, "Unhandled type");
+    }
+  }
+
+  SymbolLocation &
+  operator=(SymbolLocation &&rhs) noexcept
+  {
+    if (this != &rhs) {
+      std::memcpy(this, &rhs, sizeof(SymbolLocation));
+    }
+    if (rhs.mKind == LocKind::LocationList) {
+      rhs.uLocationList = nullptr;
+    }
+    return *this;
+  }
+
+  SymbolLocation(SymbolLocation &&o) noexcept
+  {
+    std::memcpy(this, &o, sizeof(SymbolLocation));
+    if (o.mKind == LocKind::LocationList) {
+      o.uLocationList = nullptr;
+    }
+  }
+
+  static constexpr auto
+  UnreadLocationList(u32 value)
+  {
+    return SymbolLocation{value};
+  }
+
+  static auto
+  CreateLocationList(std::vector<LocationListEntry> &&entries)
+  {
+    return SymbolLocation{new LocationList{std::move(entries)}};
+  }
 
   static constexpr auto
   Expression(std::span<const u8> expr) noexcept
   {
-    return SymbolLocation{.kind = LocKind::DwarfExpression, .dwarf_expr = expr};
+    return SymbolLocation{expr};
   }
 
-  static constexpr auto
-  AbsoluteAddress(AddrPtr addr)
+  constexpr ~SymbolLocation() noexcept
   {
-    return SymbolLocation{.kind = LocKind::AbsoluteAddress, .remote_target = addr};
+    if (mKind == LocKind::LocationList && uLocationList) {
+      delete uLocationList;
+    }
   }
 
-  static constexpr auto
-  OffsetOf(u32 offset_of)
+  LocKind
+  GetKind() const noexcept
   {
-    return SymbolLocation{.kind = LocKind::OffsetOf, .offset_of = offset_of};
+    return mKind;
   }
+
+  u32 LocListOffset() const noexcept { return uLocListOffset; }
 };
 
 // Fields are: member variables, member functions, etc
@@ -209,16 +284,19 @@ private:
 
 public:
   // Qualified, i.e. some variant of cvref-types or type defs
-  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target, bool isTypedef) noexcept;
+  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target,
+       bool isTypedef) noexcept;
 
   // "Normal" type constructor
-  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, std::string_view name) noexcept;
+  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf,
+       std::string_view name) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
-  Type(std::string_view name, size_t size=0) noexcept;
+  Type(std::string_view name, size_t size = 0) noexcept;
   Type(Type &&o) noexcept;
 
-  // Resolves the alias that this type def/using decl actually is, if it is one. If it's a concrete type, return itself.
+  // Resolves the alias that this type def/using decl actually is, if it is one. If it's a concrete type, return
+  // itself.
   Type *ResolveAlias() noexcept;
   void AddField(std::string_view name, u64 offsetOf, dw::DieReference debugInfoEntryReference) noexcept;
   void SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept;
@@ -287,6 +365,8 @@ struct Symbol
   NonNullPtr<Type> mType;
   Immutable<SymbolLocation> mLocation;
   Immutable<std::string_view> mName;
+  std::span<const u8> GetDwarfExpression(AddrPtr programCounter) noexcept;
+  bool Computed() noexcept;
 };
 
 struct SymbolBlock

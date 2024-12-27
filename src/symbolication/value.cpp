@@ -1,9 +1,12 @@
 #include "value.h"
 #include "common.h"
+#include "lib/arena_allocator.h"
 #include "symbolication/dwarf_expressions.h"
 #include "type.h"
 #include "value_visualizer.h"
+#include <memory_resource>
 #include <supervisor.h>
+#include <symbolication/objfile.h>
 
 namespace sym {
 Value::Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
@@ -201,46 +204,106 @@ MemoryContentsObject::ReadMemory(std::pmr::memory_resource *allocator, TraceeCon
   TODO("implement MemoryContentsObject that uses custom allocation strategies.");
 }
 
+static void
+ReadInLocationList(Symbol &symbol, alloc::ArenaAllocator *allocator, const ElfSection &locList) noexcept
+{
+  uint64_t base;
+  uint64_t start;
+  uint64_t end;
+
+  std::span<const u8> loclist = locList.GetDataAs<const u8>().subspan(symbol.mLocation->LocListOffset());
+
+  struct span
+  {
+    const u8 *ptr;
+    u64 size;
+
+    constexpr void
+    Move(u32 offset)
+    {
+      ptr += offset;
+      size -= offset;
+    }
+
+    inline void
+    CopyTo(uint64_t &value) noexcept
+    {
+      std::memcpy(&value, ptr, 8);
+      Move(8);
+    }
+
+    inline void
+    CopyTo(uint16_t &value) noexcept
+    {
+      std::memcpy(&value, ptr, 2);
+      Move(2);
+    }
+  };
+
+  span s{.ptr = loclist.data(), .size = loclist.size()};
+
+  auto arena = allocator->ScopeAllocation();
+  std::pmr::vector<LocationListEntry> parsed{arena.GetAllocator()};
+  parsed.reserve(512);
+  std::vector<LocationListEntry> result;
+
+  while (s.size >= 16u) {
+    s.CopyTo(start);
+    if (start == 0xFFFFFFFF'FFFFFFFF) {
+      s.CopyTo(base);
+      continue;
+    }
+    s.CopyTo(end);
+    if (start == 0 && end == 0) {
+      break;
+    }
+    u16 dwarfExpressionLength;
+    s.CopyTo(dwarfExpressionLength);
+    parsed.push_back(LocationListEntry{
+      .mStart = start + base, .mEnd = end + base, .mDwarfExpression = {s.ptr, dwarfExpressionLength}});
+    s.Move(dwarfExpressionLength);
+  }
+  result.reserve(parsed.size());
+  std::copy(std::begin(parsed), std::end(parsed), std::back_inserter(result));
+
+  symbol.mLocation = SymbolLocation::CreateLocationList(std::move(result));
+}
+
 /*static*/
 SharedPtr<Value>
-MemoryContentsObject::CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskInfo> task,
-                                          NonNullPtr<sym::Frame> frame, Symbol &symbol, bool lazy) noexcept
+MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
+                                          bool lazy) noexcept
 {
   const auto requested_byte_size = symbol.mType->Size();
 
-  switch (symbol.mLocation->kind) {
-  case LocKind::DwarfExpression: {
-    auto *fnSymbol = frame->MaybeGetFullSymbolInfo();
-    if (!fnSymbol) {
-      DBGLOG(dap, "could not find function symbol for frame. Required to construct live variables.");
-      TODO("Add support for situations where we can't actually construct the value");
-      return nullptr;
-    }
-    auto interp = ExprByteCodeInterpreter{frame->FrameLevel(), tc, task, symbol.mLocation->dwarf_expr,
-                                          fnSymbol->GetFrameBaseDwarfExpression()};
-    const auto address = interp.Run();
-    if (lazy) {
-      auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
-      return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));
-    } else {
-      auto res = tc.SafeRead(address, requested_byte_size);
-      if (!res.is_expected()) {
-        PANIC("Expected read to succeed");
-      }
-      DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
-      auto memory_object =
-        std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
-      return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));
-    }
+  auto *fnSymbol = frame.MaybeGetFullSymbolInfo();
+  if (!fnSymbol) {
+    DBGLOG(dap, "could not find function symbol for frame. Required to construct live variables.");
+    TODO("Add support for situations where we can't actually construct the value");
+    return nullptr;
   }
-  case LocKind::AbsoluteAddress:
-    TODO("Is LocKind::AbsoluteAddress really going to be a thing? Absolute address is only really useful "
-         "together "
-         "with sym::Type, not Symbol.");
-    break;
-  case LocKind::OffsetOf:
-    PANIC("creating a frame variable with LocKind == OffsetOf not allowed");
-    break;
+
+  if (!symbol.Computed()) {
+    ReadInLocationList(symbol, tc.GetDebugAdapterProtocolClient()->GetCommandArenaAllocator(),
+                       *frame.GetSymbolFile()->GetObjectFile()->GetElf()->debug_loclist);
+  }
+  auto interp =
+    ExprByteCodeInterpreter{frame.FrameLevel(), tc, *frame.mTask,
+                            symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc())),
+                            fnSymbol->GetFrameBaseDwarfExpression()};
+  const auto address = interp.Run();
+  if (lazy) {
+    auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
+    return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));
+  } else {
+    auto res = tc.SafeRead(address, requested_byte_size);
+    if (!res.is_expected()) {
+      PANIC("Expected read to succeed");
+    }
+    DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
+    auto memory_object =
+      std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
+    return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));
   }
   return nullptr;
 }

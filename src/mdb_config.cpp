@@ -1,6 +1,7 @@
 #include "mdb_config.h"
 #include "fmt/core.h"
 #include "fmt/ranges.h"
+#include "log.h"
 #include "utils/logger.h"
 #include "utils/util.h"
 #include "utils/worker_task.h"
@@ -32,7 +33,7 @@ parse_int(std::string_view str)
 void
 LogConfig::configure_logging(bool taskgroup_log) noexcept
 {
-  SetTaskGroupLog(taskgroup_log);
+  mdb::log::Config::SetLogTaskGroup(taskgroup_log);
 }
 
 WaitSystem

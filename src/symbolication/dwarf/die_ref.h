@@ -9,6 +9,7 @@ namespace sym::dw {
 class UnitData;
 struct DieMetaData;
 class UnitReader;
+class AbbreviationInfo;
 
 /**
  * Reads the following data from the unit die for the compilation unit `compilationUnit`:
@@ -26,13 +27,15 @@ class DieReference
 protected:
   UnitData *mUnitData;
   const DieMetaData *mDebugInfoEntry;
-
 public:
+  DieReference() noexcept = default;
   DieReference(UnitData *compilationUnit, const DieMetaData *die) noexcept;
   UnitData *GetUnitData() const noexcept;
   const DieMetaData *GetDie() const noexcept;
   DieReference MaybeResolveReference() const noexcept;
-  Index IndexOfDie() const noexcept;
+  u64 IndexOfDie() const noexcept;
+
+  const AbbreviationInfo & GetAbbreviation() const noexcept;
 
   bool IsValid() const noexcept;
   IndexedDieReference AsIndexed() const noexcept;
@@ -43,16 +46,16 @@ public:
 class IndexedDieReference
 {
   UnitData *mUnitData;
-  Index mDieIndex;
+  u64 mDieIndex;
 
 public:
   IndexedDieReference() = default;
   explicit IndexedDieReference(const DieReference &reference) noexcept;
-  IndexedDieReference(UnitData *compilationUnit, Index index) noexcept;
+  IndexedDieReference(UnitData *compilationUnit, u64 index) noexcept;
 
   bool IsValid() const noexcept;
   UnitData *GetUnitData() const noexcept;
-  Index GetIndex() const noexcept;
+  u64 GetIndex() const noexcept;
   const DieMetaData *GetDie() noexcept;
 
   friend constexpr auto

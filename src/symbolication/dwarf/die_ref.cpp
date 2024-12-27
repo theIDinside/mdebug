@@ -12,11 +12,11 @@ PrepareCompileUnitDwarf4(UnitData *cu, const DieMetaData &unitDie)
 {
   ASSERT(cu && cu->header().version() == DwarfVersion::D4, "Expected compillation to not be null and version 4");
   UnitReader reader{cu};
-  reader.seek_die(unitDie);
+  reader.SeekDie(unitDie);
   const auto &attrs = cu->get_abbreviation(unitDie.abbreviation_code);
 
   u64 offset = std::numeric_limits<u64>::max();
-  const char* directory = nullptr;
+  const char *directory = nullptr;
 
   for (auto attribute : attrs.attributes) {
     switch (attribute.name) {
@@ -26,7 +26,7 @@ PrepareCompileUnitDwarf4(UnitData *cu, const DieMetaData &unitDie)
     } break;
     case Attribute::DW_AT_comp_dir: {
       const auto val = read_attribute_value(reader, attribute, attrs.implicit_consts);
-      directory = val.string().data();
+      directory = val.string();
     } break;
     default:
       reader.skip_attribute(attribute);
@@ -53,14 +53,15 @@ DieReference::GetDie() const noexcept
   return mDebugInfoEntry;
 }
 
-DieReference DieReference::MaybeResolveReference() const noexcept {
+DieReference
+DieReference::MaybeResolveReference() const noexcept
+{
   if (!mUnitData || !mDebugInfoEntry) {
     return DieReference{nullptr, nullptr};
   }
   UnitReader reader{mUnitData};
   const auto &attrs = mUnitData->get_abbreviation(mDebugInfoEntry->abbreviation_code);
-  reader.seek_die(*mDebugInfoEntry);
-  std::vector<AttributeValue> attribute_values{};
+  reader.SeekDie(*mDebugInfoEntry);
   for (auto abbreviation : attrs.attributes) {
     switch (abbreviation.name) {
     case Attribute::DW_AT_abstract_origin:
@@ -76,10 +77,16 @@ DieReference DieReference::MaybeResolveReference() const noexcept {
   return DieReference{nullptr, nullptr};
 }
 
-Index
+u64
 DieReference::IndexOfDie() const noexcept
 {
   return mUnitData->index_of(mDebugInfoEntry);
+}
+
+const AbbreviationInfo &
+DieReference::GetAbbreviation() const noexcept
+{
+  return mUnitData->get_abbreviation(mDebugInfoEntry->abbreviation_code);
 }
 
 bool
@@ -94,7 +101,7 @@ IndexedDieReference::IndexedDieReference(const DieReference &reference) noexcept
   mDieIndex = reference.IndexOfDie();
 }
 
-IndexedDieReference::IndexedDieReference(UnitData *compilationUnit, struct Index index) noexcept
+IndexedDieReference::IndexedDieReference(UnitData *compilationUnit, u64 index) noexcept
     : mUnitData(compilationUnit), mDieIndex(index)
 {
 }
@@ -122,7 +129,7 @@ DieReference::read_attribute(Attribute attr) const noexcept
 {
   UnitReader reader{mUnitData};
   const auto &attrs = mUnitData->get_abbreviation(mDebugInfoEntry->abbreviation_code);
-  reader.seek_die(*mDebugInfoEntry);
+  reader.SeekDie(*mDebugInfoEntry);
   auto i = 0u;
   for (auto attribute : attrs.attributes) {
     if (attribute.name == attr) {
@@ -141,7 +148,7 @@ IndexedDieReference::GetUnitData() const noexcept
   return mUnitData;
 }
 
-Index
+u64
 IndexedDieReference::GetIndex() const noexcept
 {
   return mDieIndex;
@@ -150,6 +157,6 @@ IndexedDieReference::GetIndex() const noexcept
 const DieMetaData *
 IndexedDieReference::GetDie() noexcept
 {
-  return &mUnitData->get_dies()[mDieIndex.value()];
+  return &mUnitData->get_dies()[mDieIndex];
 }
 } // namespace sym::dw

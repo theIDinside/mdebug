@@ -3,13 +3,17 @@
 #include "tracee/util.h"
 #include <cstdlib>
 #include <memory_resource>
-
-ScopedArenaAllocator::ScopedArenaAllocator(ArenaAllocator *allocator) noexcept : mAllocator(allocator) {}
+#include <sys/mman.h>
+namespace alloc {
+ScopedArenaAllocator::ScopedArenaAllocator(ArenaAllocator *allocator) noexcept : mAllocator(allocator)
+{
+  mStartOffset = mAllocator->CurrentlyAllocated();
+}
 
 ScopedArenaAllocator::~ScopedArenaAllocator() noexcept
 {
   if (mAllocator) {
-    mAllocator->Reset();
+    mAllocator->Reset(mStartOffset);
   }
 }
 
@@ -27,30 +31,59 @@ ScopedArenaAllocator::GetAllocator() const noexcept
 ArenaAllocator::ArenaAllocator(std::size_t allocBlockSize, std::pmr::memory_resource *upstreamResource) noexcept
     : mResource(upstreamResource), mAllocated(0), mArenaCapacity(allocBlockSize)
 {
-  int allocResult = posix_memalign((void **)&mAllocatedBuffer, SystemVectorExtensionSize(), allocBlockSize);
-  MUST_HOLD(allocResult == 0, "posix_memalign failed");
+  auto result = mmap(nullptr, allocBlockSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  MUST_HOLD(result != MAP_FAILED, "posix_memalign failed");
+  mAllocatedBuffer = (u8 *)result;
 }
 
 ArenaAllocator::~ArenaAllocator() noexcept { free(mAllocatedBuffer); }
 
+bool
+ArenaAllocator::ExtendAllocation(Page pageCount) noexcept
+{
+  auto address = mAllocatedBuffer + mArenaCapacity;
+  auto result = mmap(address, pageCount.SizeBytes(), PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+  if (result == MAP_FAILED) {
+    return false;
+  }
+
+  // we don't have to do anything more, we've succeeded, and we no the mapping is consecutive because we manage it.
+  mArenaCapacity += pageCount.SizeBytes();
+  return true;
+}
+
 /*static*/
 ArenaAllocator::UniquePtr
-ArenaAllocator::Create(size_t allocSize, std::pmr::memory_resource *upstreamResource) noexcept
+ArenaAllocator::Create(Page pagesToAllocate, std::pmr::memory_resource *upstreamResource) noexcept
 {
-  return std::unique_ptr<ArenaAllocator>(new ArenaAllocator{allocSize, upstreamResource});
+  return std::unique_ptr<ArenaAllocator>(new ArenaAllocator{pagesToAllocate.SizeBytes(), upstreamResource});
 }
 
 /*static*/
 ArenaAllocator::SharedPtr
-ArenaAllocator::CreateShared(size_t allocSize, std::pmr::memory_resource *upstreamResource) noexcept
+ArenaAllocator::CreateShared(Page pagesToAllocate, std::pmr::memory_resource *upstreamResource) noexcept
 {
-  return std::shared_ptr<ArenaAllocator>(new ArenaAllocator{allocSize, upstreamResource});
+  return std::shared_ptr<ArenaAllocator>(new ArenaAllocator{pagesToAllocate.SizeBytes(), upstreamResource});
+}
+
+u64
+ArenaAllocator::CurrentlyAllocated() const noexcept
+{
+  return mAllocated;
 }
 
 void
 ArenaAllocator::Reset() noexcept
 {
   mAllocated = 0;
+}
+
+void
+ArenaAllocator::Reset(u64 previousOffset) noexcept
+{
+  ASSERT(previousOffset <= mAllocated, "Previous offset is not less than or equal to current alloc offset");
+  mAllocated = previousOffset;
 }
 
 ScopedArenaAllocator
@@ -63,8 +96,10 @@ void *
 ArenaAllocator::do_allocate(std::size_t bytes, std::size_t alignment)
 {
   const std::size_t possiblyAdjustedOffset = (mAllocated + alignment - 1) & ~(alignment - 1);
-  MUST_HOLD((possiblyAdjustedOffset + bytes) < mArenaCapacity,
-            "Dynamic arena allocator not yet implemented. For now we crash.");
+  if(possiblyAdjustedOffset + bytes >= mArenaCapacity) {
+    bool success = ExtendAllocation(Page{16});
+    MUST_HOLD(success, "Failed to extend allocation!");
+  }
   void *p = mAllocatedBuffer + possiblyAdjustedOffset;
   mAllocated = possiblyAdjustedOffset + bytes;
   return p;
@@ -96,3 +131,4 @@ StackAllocator<N>::Allocator() noexcept
 {
   return mUsingStackAllocator;
 }
+} // namespace alloc

@@ -6,19 +6,23 @@
 
 namespace sym::dw {
 
-UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), current_ptr(nullptr)
+UnitReader::UnitReader(UnitData *data) noexcept : compilation_unit(data), current_ptr(nullptr), mFormat(data->header().format())
 {
   const auto &header = compilation_unit->header();
-  current_ptr =
-    compilation_unit->GetObjectFile()->GetElf()->debug_info->GetPointer(header.header_len() + header.debug_info_offset());
+  current_ptr = compilation_unit->GetObjectFile()->GetElf()->debug_info->GetPointer(header.header_len() +
+                                                                                    header.debug_info_offset());
 }
 
-UnitReader::UnitReader(UnitData *data, const DieMetaData &entry) noexcept : UnitReader(data) { seek_die(entry); }
+UnitReader::UnitReader(UnitData *data, const DieMetaData &entry) noexcept : UnitReader(data) { SeekDie(entry); }
 
-UnitReader::UnitReader(const UnitReader &o) : compilation_unit(o.compilation_unit), current_ptr(o.current_ptr) {}
+UnitReader::UnitReader(UnitData *data, u64 offset) noexcept : compilation_unit(data), mFormat(data->header().format()) {
+  SetOffset(offset);
+}
+
+UnitReader::UnitReader(const UnitReader &o) noexcept = default;
 
 UnitReader &
-UnitReader::operator=(const UnitReader &reader)
+UnitReader::operator=(const UnitReader &reader) noexcept
 {
   if (this == &reader) {
     return *this;
@@ -41,10 +45,10 @@ UnitReader::skip_attribute(const Abbreviation &abbreviation) noexcept
       case AttributeForm::DW_FORM_sec_offset: [[fallthrough]];
       case AttributeForm::DW_FORM_line_strp: [[fallthrough]];
       case AttributeForm::DW_FORM_ref_addr:
-        current_ptr += compilation_unit->header().format();
+        current_ptr += mFormat;
         break;
       case AttributeForm::DW_FORM_addr:
-        current_ptr += compilation_unit->header().addr_size();
+        current_ptr += AddressSize();
         break;
       case AttributeForm::Reserved: PANIC("Can't handle RESERVED");
       case AttributeForm::DW_FORM_block2:
@@ -58,7 +62,7 @@ UnitReader::skip_attribute(const Abbreviation &abbreviation) noexcept
         current_ptr += 16;
         break;
       case AttributeForm::DW_FORM_string:
-        read_string();
+        ReadCString();
         break;
       case AttributeForm::DW_FORM_exprloc: [[fallthrough]];
       case AttributeForm::DW_FORM_block:
@@ -146,7 +150,7 @@ UnitReader::skip_attributes(const std::span<const Abbreviation> &attributes) noe
       case AttributeForm::DW_FORM_sec_offset: [[fallthrough]];
       case AttributeForm::DW_FORM_line_strp: [[fallthrough]];
       case AttributeForm::DW_FORM_ref_addr:
-        current_ptr += compilation_unit->header().format();
+        current_ptr += mFormat;
         break;
       case AttributeForm::DW_FORM_addr:
         current_ptr += compilation_unit->header().addr_size();
@@ -163,7 +167,7 @@ UnitReader::skip_attributes(const std::span<const Abbreviation> &attributes) noe
         current_ptr += 16;
         break;
       case AttributeForm::DW_FORM_string:
-        read_string();
+        ReadCString();
         break;
       case AttributeForm::DW_FORM_exprloc: [[fallthrough]];
       case AttributeForm::DW_FORM_block:
@@ -269,6 +273,17 @@ UnitReader::read_string() noexcept
   return str;
 }
 
+const char *
+UnitReader::ReadCString() noexcept
+{
+  const char* start = (const char*)current_ptr;
+  while(*current_ptr != 0) {
+    ++current_ptr;
+  }
+  ++current_ptr;
+  return start;
+}
+
 DataBlock
 UnitReader::read_block(u64 block_size) noexcept
 {
@@ -356,7 +371,7 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
   auto obj = compilation_unit->GetObjectFile();
   const auto header = compilation_unit->header();
   ASSERT(!obj->GetElf()->debug_addr->mSectionData->empty(), ".debug_addr expected not to be nullptr");
-  const auto addr_table_offset = compilation_unit->addr_base() + address_index * header.addr_size();
+  const auto addr_table_offset = compilation_unit->AddressBase() + address_index * header.addr_size();
   const auto ptr = (obj->GetElf()->debug_addr->mSectionData->data() + addr_table_offset);
   if (header.addr_size() == 4) {
     const auto value = *(u32 *)ptr;
@@ -367,20 +382,20 @@ UnitReader::read_by_idx_from_addr_table(u64 address_index) const noexcept
   }
 }
 
-std::string_view
+const char*
 UnitReader::read_by_idx_from_str_table(u64 str_index) const noexcept
 {
   const auto elf = compilation_unit->GetObjectFile()->GetElf();
   ASSERT(!elf->debug_str_offsets->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
-  const auto str_base = compilation_unit->str_offsets_base();
+  const auto str_base = compilation_unit->StrOffsetBase();
   const auto str_table_offset = str_base.value() + str_index * compilation_unit->header().format();
   const auto ptr = (elf->debug_str_offsets->mSectionData->data() + str_table_offset);
   if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
-    return elf->debug_str->GetNullTerminatedStringAt(value);
+    return elf->debug_str->GetCString(value);
   } else {
     const auto value = *(u64 *)ptr;
-    return elf->debug_str->GetNullTerminatedStringAt(value);
+    return elf->debug_str->GetCString(value);
   }
 }
 
@@ -390,7 +405,7 @@ UnitReader::read_by_idx_from_rnglist(u64 range_index) const noexcept
   const auto elf = compilation_unit->GetObjectFile()->GetElf();
   ASSERT(!elf->debug_rnglists->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
   const auto rnglist_offset =
-    compilation_unit->rng_list_base() + range_index * compilation_unit->header().format();
+    compilation_unit->RangeListBase() + range_index * compilation_unit->header().format();
   const auto ptr = (elf->debug_rnglists->mSectionData->data() + rnglist_offset);
   if (compilation_unit->header().format() == 4) {
     const auto value = *(u32 *)ptr;
@@ -433,10 +448,14 @@ UnitReader::has_more() const noexcept
 }
 
 void
-UnitReader::seek_die(const DieMetaData &entry) noexcept
+UnitReader::SeekDie(const DieMetaData &entry) noexcept
 {
-  current_ptr =
-    compilation_unit->GetObjectFile()->GetElf()->debug_info->begin() + entry.section_offset + entry.die_data_offset;
+  current_ptr = compilation_unit->GetObjectFile()->GetElf()->debug_info->begin() + entry.section_offset +
+                entry.die_data_offset;
+}
+
+void UnitReader::SetOffset(u64 offset) noexcept {
+  current_ptr = compilation_unit->GetObjectFile()->GetElf()->debug_info->GetPointer(offset);
 }
 
 const Elf *
@@ -491,7 +510,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
   case AttributeForm::DW_FORM_data16:
     return AttributeValue{reader.read_block(16), abbr.form, abbr.name};
   case AttributeForm::DW_FORM_string:
-    return AttributeValue{reader.read_string(), abbr.form, abbr.name};
+    return AttributeValue{reader.ReadCString(), abbr.form, abbr.name};
   case AttributeForm::DW_FORM_exprloc:
     [[fallthrough]];
   case AttributeForm::DW_FORM_block: {
@@ -511,17 +530,15 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     ASSERT(elf->debug_str != nullptr, ".debug_str expected to be not null");
     if (!IS_DWZ) {
       const auto offset = reader.read_offset();
-      std::string_view indirect_str{(const char *)elf->debug_str->begin() + offset};
-      return AttributeValue{indirect_str, abbr.form, abbr.name};
+      return AttributeValue{(const char *)elf->debug_str->begin() + offset, abbr.form, abbr.name};
     }
   }
   case AttributeForm::DW_FORM_line_strp: {
     ASSERT(elf->debug_line_str != nullptr, ".debug_line expected to be not null");
     if (!IS_DWZ) {
       const auto offset = reader.read_offset();
-      const auto ptr = elf->debug_line_str->begin() + offset;
-      const std::string_view indirect_str{(const char *)ptr};
-      return AttributeValue{indirect_str, abbr.form, abbr.name};
+      const auto ptr = (const char*)elf->debug_line_str->begin() + offset;
+      return AttributeValue{ptr, abbr.form, abbr.name};
     }
   }
   case AttributeForm::DW_FORM_udata:
@@ -547,6 +564,7 @@ read_attribute_value(UnitReader &reader, Abbreviation abbr, const std::vector<i6
     return AttributeValue{reader.read_section_offset(offset), abbr.form, abbr.name};
   }
   case AttributeForm::DW_FORM_indirect: {
+    PANIC("Support for indirect not implemented");
     const auto new_form = (AttributeForm)reader.uleb128();
     Abbreviation new_abbr{.name = abbr.name, .form = new_form, .IMPLICIT_CONST_INDEX = UINT8_MAX};
     if (new_form == AttributeForm::DW_FORM_implicit_const) {

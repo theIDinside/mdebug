@@ -1,7 +1,8 @@
 #pragma once
-#include <common.h>
 #include "die_ref.h"
+#include "symbolication/cu_symbol_info.h"
 #include "unit_header.h"
+#include <common.h>
 #include <limits>
 #include <mutex>
 #include <symbolication/block.h>
@@ -41,8 +42,16 @@ struct AbbreviationInfo
   // The abbreviation code
   u32 code;
   DwarfTag tag;
-  bool has_children : 1;
-  bool is_declaration : 1;
+  bool HasChildren : 1;
+  bool IsDeclaration : 1;
+  // Whether or not this abbreviation represents an addressable Debug Information Entry
+  // One may wonder why it's not sufficient to check if tag == DW_TAG_subprogram etc; well, thanks to referenceing
+  // DIE's we're f'ed. Not all subprogram dies have address. They are instead often found on DIE's that reference
+  // another subprogram die and have the abstract_origin attribute or specification attribute.
+  // Therefore, when we load the abbreviations, we scan if the abbreviation set contained a "PC-like" attribute, like
+  // DW_AT_low_pc, DW_AT_high_pc, DW_AT_ranges or DW_AT_entry
+  bool IsAddressable : 1;
+  bool AbstractOrigin : 1;
   std::vector<Abbreviation> attributes;
   std::vector<i64> implicit_consts;
   // TODO(simon): implement. These will be needed/useful when we resolve indirect/inter-DIE references. Ugh. DWARF.
@@ -68,6 +77,7 @@ struct DieMetaData
   u64 parent_id : 24;
   u64 die_data_offset : 3;
   u32 next_sibling : 31;
+
   bool has_children : 1;
   u16 abbreviation_code;
   DwarfTag tag;
@@ -99,14 +109,6 @@ maybe_null_any_of(const DieMetaData *die)
   return ((die->tag == tags) || ...);
 }
 
-// TODO(simon): ResolveAbbreviation
-//  some abbreviations unfortunately, due to the infinite wisdom of the DWARF standard, have indirections. Save,
-//  what, a few kb? Great? No. thus we will need a normal abbreviation set and a resolved one.
-class ResolvedAbbreviationSet
-{
-public:
-};
-
 class DieReference;
 
 class UnitData
@@ -127,24 +129,24 @@ public:
 
   bool has_loaded_dies() const noexcept;
   const std::vector<DieMetaData> &get_dies() noexcept;
-  void clear_die_metadata() noexcept;
+  void ClearLoadedCache() noexcept;
   const AbbreviationInfo &get_abbreviation(u32 abbreviation_code) const noexcept;
   ObjectFile *GetObjectFile() const noexcept;
-  /* TODO(simon): Resolve abbreviations which contains indirections to other abbreviations.*/
-  ResolvedAbbreviationSet get_resolved_attributes(u64 abbreviation) noexcept;
   const UnitHeader &header() const noexcept;
-  u64 section_offset() const noexcept;
+  /// The offset from the beginning of the ELF section called .debug_info to this compilation unit.
+  u64 SectionOffset() const noexcept;
+  /// Size (bytes) of this compilation unit in the .debug_info ELF section
+  u64 UnitSize() const noexcept;
   bool spans_across(u64 sec_offset) const noexcept;
-  Index index_of(const DieMetaData *die) noexcept;
+  u64 index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
-  const DieMetaData *get_die(u64 offset) noexcept;
+  const DieMetaData *GetDebugInfoEntry(u64 offset) noexcept;
 
-  DieReference get_cu_die_ref(u64 offset) noexcept;
-  DieReference get_cu_die_ref(Index offset) noexcept;
-  void take_reference() noexcept;
-  std::optional<u32> str_offsets_base() noexcept;
-  u32 rng_list_base() noexcept;
-  u32 addr_base() noexcept;
+  DieReference GetDieReferenceByOffset(u64 offset) noexcept;
+  DieReference GetDieByCacheIndex(u64 index) noexcept;
+  std::optional<u32> StrOffsetBase() noexcept;
+  u32 RangeListBase() noexcept;
+  u32 AddressBase() noexcept;
 
   constexpr bool
   LineNumberOffsetKnown() const noexcept
@@ -158,24 +160,20 @@ public:
   }
 
 private:
-  void load_dies() noexcept;
-  // Users don't call release explicitly. They request a `clear_die_metadata` instead.
-  // TODO(simon): Wrap this functionality in it's own type.
-  void release_reference() noexcept;
-  ObjectFile *objfile;
-  UnitHeader unit_header;
+  void LoadDieMetadata() noexcept;
+  ObjectFile *mObjectFile;
+  UnitHeader mUnitHeader;
   // The Compilation unit die (i.e. the die with DW_TAG_compile_unit; also the first DIE found in `dies` - but as
   // that can be loaded/unloaded, the CU DIe also is a stand-alone die here)
-  DieMetaData unit_die;
-  std::vector<DieMetaData> dies;
-  bool fully_loaded;
-  u32 loaded_die_count;
-  AbbreviationInfo::Table abbreviations;
-  i32 explicit_references;
-  std::optional<u32> str_offset{};
-  std::optional<u32> rng_list_offset{};
-  std::optional<u32> addr_offset{};
-  mutable std::mutex load_dies_mutex;
+  DieMetaData mUnitDie;
+  std::vector<DieMetaData> mDieCollection;
+  bool mFullyLoaded;
+  u32 mLoadedDiesCount;
+  AbbreviationInfo::Table mAbbreviation;
+  std::optional<u32> mStringOffset{};
+  std::optional<u32> mRngListOffset{};
+  std::optional<u32> mAddrOffset{};
+  mutable std::mutex mLoadDiesMutex;
   const char *mBuildDirectory{nullptr};
   u64 mStatementListOffset{std::numeric_limits<u64>::max()};
 };
@@ -201,7 +199,7 @@ template <> struct formatter<sym::dw::UnitData>
   auto
   format(const sym::dw::UnitData &cu, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "CompilationUnit {{ cu=0x{:x} }}", cu.section_offset());
+    return fmt::format_to(ctx.out(), "CompilationUnit {{ cu=0x{:x} }}", cu.SectionOffset());
   }
 };
 
@@ -223,10 +221,10 @@ template <> struct formatter<sym::dw::DieReference>
       if (ref.GetUnitData()->has_loaded_dies()) {
         auto die = ref.GetDie();
         ASSERT(die, "die was null!");
-        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", cu->section_offset(),
+        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", cu->SectionOffset(),
                               die->section_offset, to_str(die->tag));
       } else {
-        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", cu->section_offset());
+        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", cu->SectionOffset());
       }
     }
     return fmt::format_to(ctx.out(), "DieRef {{ ??? }}");
@@ -249,7 +247,7 @@ template <> struct formatter<sym::dw::IndexedDieReference>
   {
     if (ref.GetUnitData()) {
       return fmt::format_to(ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}",
-                            ref.GetUnitData()->section_offset(), ref.GetIndex());
+                            ref.GetUnitData()->SectionOffset(), ref.GetIndex());
     }
     return fmt::format_to(ctx.out(), "IndexedDieRef {{ ??? }}");
   }

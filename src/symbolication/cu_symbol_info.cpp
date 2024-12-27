@@ -7,8 +7,11 @@
 #include "objfile.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf_defs.h"
+#include "utils/scope_defer.h"
 #include <array>
+#include <chrono>
 #include <list>
+#include <memory_resource>
 #include <utils/filter.h>
 
 namespace sym {
@@ -63,7 +66,7 @@ CompilationUnit::ProcessSourceCodeFiles(u64 table) noexcept
     return;
   }
   DBGLOG(dwarf, "retrieving files from line number program @ {} for cu=0x{:x} '{}'", header->sec_offset,
-         unit_data->section_offset(), cu_name);
+         unit_data->SectionOffset(), cu_name);
 
   for (const auto &[fullPath, v] : header->FileEntries()) {
     auto source_code_file = obj->GetSourceCodeFile(fullPath);
@@ -123,7 +126,13 @@ sym::FunctionSymbol *
 CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
 {
   if (!function_symbols_resolved()) {
-    resolve_fn_symbols();
+    ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = unit_data]() {
+      auto us =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+          .count();
+      DBGLOG(perf, "Resolved function symbols for 0x{:x} in {}us", unit_data->SectionOffset(), us);
+    }};
+    PrepareFunctionSymbols();
   }
 
   auto iter = std::find_if(fns.begin(), fns.end(),
@@ -221,7 +230,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
   std::optional<dw::DieReference> additional_die_reference = std::optional<dw::DieReference>{};
   dw::UnitReader reader = ref.GetReader();
   const auto &abbreviation = ref.GetUnitData()->get_abbreviation(ref.GetDie()->abbreviation_code);
-  if (!abbreviation.is_declaration) {
+  if (!abbreviation.IsDeclaration) {
     state.add_maybe_origin(ref.AsIndexed());
   }
 
@@ -252,7 +261,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
           src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
         CDLOG(ref.GetUnitData() != src_file.get_dwarf_unit(), core,
               "[dwarf]: Cross CU requires (?) another LNP. ref.cu = 0x{:x}, src file cu=0x{:x}",
-              ref.GetUnitData()->section_offset(), src_file.get_dwarf_unit()->section_offset());
+              ref.GetUnitData()->SectionOffset(), src_file.get_dwarf_unit()->SectionOffset());
       }
     } break;
     case Attribute::DW_AT_decl_line:
@@ -270,7 +279,8 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
       const auto declaring_die_offset = value.unsigned_value();
-      additional_die_reference = ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
+      additional_die_reference =
+        ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
     } break;
     default:
       break;
@@ -280,33 +290,40 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
 }
 
 void
-CompilationUnit::resolve_fn_symbols() noexcept
+CompilationUnit::PrepareFunctionSymbols() noexcept
 {
   const auto &dies = unit_data->get_dies();
-  constexpr auto program_dies = [](const auto &die) {
-    switch (die.tag) {
-    case DwarfTag::DW_TAG_subprogram:
-    case DwarfTag::DW_TAG_inlined_subroutine:
-      return true;
-    default:
-      return false;
-    }
-  };
 
   dw::UnitReader reader{unit_data};
   // For a function symbol, we want to record a DIE, from which we can reach all it's (possible) references.
   // Unfortunately DWARF doesn't seem to define a "OWNING" die. Which is... unfortunate. So we have to guess. But
   // 2-3 should be enough.
-  for (const auto &die : utils::FilterView(dies, program_dies)) {
-    const auto &abbreviation = unit_data->get_abbreviation(die.abbreviation_code);
-    // Skip declarations - we will visit them if necessary, but on their own they can't tell us anything.
-    if (abbreviation.is_declaration) {
+  std::array<u8, 512> buf;
+  std::pmr::monotonic_buffer_resource rsrc{&buf, std::size(buf), std::pmr::null_memory_resource()};
+  std::pmr::polymorphic_allocator<u8> allocator{&rsrc};
+  for (const auto &die : dies) {
+    switch (die.tag) {
+    case DwarfTag::DW_TAG_subprogram:
+      break;
+    // TODO: implement support for inlined subroutines. They introduce some substantial complexity, so for now
+    // we don't care much for it. The reason is this: multiple inlined subroutine dies may refer to the same
+    // "function symbol" that we will want to create for it, problem is, we have no way of doing so at the moment.
+    case DwarfTag::DW_TAG_inlined_subroutine:
+      [[fallthrough]];
+    default:
       continue;
     }
-    reader.seek_die(die);
-    std::vector<i64> implicit_consts{};
+    const auto &abbreviation = unit_data->get_abbreviation(die.abbreviation_code);
+    // Skip declarations - we will visit them if necessary, but on their own they can't tell us anything.
+    if (abbreviation.IsDeclaration || !abbreviation.IsAddressable) {
+      continue;
+    }
+
+    rsrc.release();
+    reader.SeekDie(die);
     ResolveFnSymbolState state{this};
-    std::list<dw::DieReference> die_refs{};
+
+    std::pmr::list<dw::DieReference> &die_refs = *allocator.new_object<std::pmr::list<dw::DieReference>>();
     for (const auto &attr : abbreviation.attributes) {
       auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
       switch (value.name) {
@@ -332,7 +349,7 @@ CompilationUnit::resolve_fn_symbols() noexcept
       case Attribute::DW_AT_decl_file: {
         ASSERT(!state.lnp_file.has_value(), "lnp file has been set already, to {}, new {}", state.lnp_file.value(),
                value.unsigned_value());
-        state.lnp_file = this->get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+        state.lnp_file = get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
       } break;
       case Attribute::DW_AT_decl_line:
         ASSERT(!state.line.has_value(), "file line number has been set already, to {}, new {}", state.line.value(),

@@ -20,13 +20,15 @@ class UnitReader
 public:
   explicit UnitReader(UnitData *data) noexcept;
   UnitReader(UnitData *data, const DieMetaData &entry) noexcept;
-  UnitReader(const UnitReader &o);
-  UnitReader &operator=(const UnitReader &reader);
+  UnitReader(UnitData *data, u64 offset) noexcept;
+  UnitReader(const UnitReader &o) noexcept;
+  UnitReader &operator=(const UnitReader &reader) noexcept;
 
   void skip_attributes(const std::span<const Abbreviation> &attributes) noexcept;
   void skip_attribute(const Abbreviation &abbreviation) noexcept;
   AddrPtr read_address() noexcept;
   std::string_view read_string() noexcept;
+  const char *ReadCString() noexcept;
   DataBlock read_block(u64 block_size) noexcept;
   u64 bytes_read() const noexcept;
 
@@ -39,14 +41,15 @@ public:
   u64 read_section_offset(u64 offset) const noexcept;
   u64 read_n_bytes(u8 n_bytes) noexcept;
   AddrPtr read_by_idx_from_addr_table(u64 address_index) const noexcept;
-  std::string_view read_by_idx_from_str_table(u64 str_index) const noexcept;
+  const char *read_by_idx_from_str_table(u64 str_index) const noexcept;
   u64 read_by_idx_from_rnglist(u64 range_index) const noexcept;
   u64 read_loclist_index(u64 range_index, std::optional<u64> loc_list_base) const noexcept;
   u64 sec_offset() const noexcept;
   bool has_more() const noexcept;
 
   /* Set UnitReader to start reading the data for `entry` */
-  void seek_die(const DieMetaData &entry) noexcept;
+  void SeekDie(const DieMetaData &entry) noexcept;
+  void SetOffset(u64 offset) noexcept;
   ObjectFile *objfile() const noexcept;
   const Elf *elf() const noexcept;
   const u8 *ptr() const noexcept;
@@ -69,8 +72,21 @@ public:
   }
 
 private:
+  inline constexpr u64
+  Format() const noexcept
+  {
+    return mFormat;
+  }
+
+  inline constexpr u64
+  AddressSize() const noexcept
+  {
+    return 8;
+  }
+
   UnitData *compilation_unit;
   const u8 *current_ptr;
+  u8 mFormat;
 };
 
 AttributeValue read_attribute_value(UnitReader &reader, Abbreviation abbr,

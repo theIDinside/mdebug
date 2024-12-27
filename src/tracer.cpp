@@ -169,7 +169,7 @@ void
 Tracer::handle_command(ui::UICommand *cmd) noexcept
 {
   DBGLOG(core, "accepted command {}", cmd->name());
-  auto result = cmd->Execute();
+  auto result = cmd->LogExecute();
 
   auto scoped = cmd->dap_client->GetResponseArenaAllocator()->ScopeAllocation();
   ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");

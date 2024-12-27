@@ -1,5 +1,6 @@
 #include "dwarf_unit_data.h"
 #include "symbolication/dwarf/die.h"
+#include <chrono>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
 namespace sym::dw {
@@ -14,7 +15,12 @@ UnitDataTask::execute_task() noexcept
 {
   std::vector<UnitData *> result;
   for (const auto &header : cus_to_parse) {
+    const auto start = std::chrono::high_resolution_clock::now();
     auto unit_data = prepare_unit_data(obj, header);
+    const auto time =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+        .count();
+    DBGLOG(perf, "prepared unit data for 0x{:x} in {}us", header.debug_info_offset(), time);
     result.push_back(unit_data);
   }
   obj->SetCompileUnitData(result);
@@ -55,7 +61,7 @@ UnitRefCountDrop::execute_task() noexcept
   DBGLOG(core, "dropping CU ref counts");
   for (auto cu : compilation_units) {
     DBGLOG(core, "{}", *cu);
-    cu->clear_die_metadata();
+    cu->ClearLoadedCache();
   }
 }
 

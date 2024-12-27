@@ -4,6 +4,7 @@
 #include <numeric>
 #include <optional>
 #include <string_view>
+#include <type_traits>
 #include <typedefs.h>
 #include <utility>
 #include <vector>
@@ -210,4 +211,11 @@ SystemPagesInBytes(int pageCount) noexcept -> size_t
   return pageCount * PAGE_SIZE;
 }
 
+template <typename T, typename U>
+constexpr bool IsSame() {
+  if constexpr(std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<U>>) {
+    return true;
+  }
+  return false;
+}
 } // namespace utils
