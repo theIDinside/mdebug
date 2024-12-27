@@ -9,7 +9,7 @@ namespace sym::dw {
 /*static*/ ResolvedRangeListOffset
 ResolvedRangeListOffset::make(sym::dw::UnitData &cu, u64 unresolved_offset) noexcept
 {
-  return ResolvedRangeListOffset{cu.rng_list_base() + unresolved_offset};
+  return ResolvedRangeListOffset{cu.RangeListBase() + unresolved_offset};
 }
 
 u32
@@ -77,7 +77,7 @@ read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcep
     case RangeListEntry::DW_RLE_base_addressx: {
       u64 addr_index = 0;
       ptr = decode_uleb128(ptr, addr_index);
-      const auto addr_ptr = elf->debug_addr->GetPointer(cu.addr_base() + addr_index * 8);
+      const auto addr_ptr = elf->debug_addr->GetPointer(cu.AddressBase() + addr_index * 8);
       u64 start_addr = 0;
       std::memcpy(&start_addr, addr_ptr, 8);
       base = start_addr;
@@ -89,7 +89,7 @@ read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcep
       ptr = decode_uleb128(ptr, addr_index);
       u64 range_length = 0;
       ptr = decode_uleb128(ptr, range_length);
-      const auto addr_ptr = elf->debug_addr->GetPointer(cu.addr_base() + (addr_index * 8));
+      const auto addr_ptr = elf->debug_addr->GetPointer(cu.AddressBase() + (addr_index * 8));
       u64 start_addr = 0;
       std::memcpy(&start_addr, addr_ptr, 8);
       result.push_back({start_addr, start_addr + range_length});

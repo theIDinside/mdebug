@@ -160,10 +160,10 @@ DwarfBinaryReader::read_content_str(AttributeForm form) noexcept
     return read_string();
   case DW_FORM_line_strp:
     ASSERT(elf->debug_line_str != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
-    return elf->debug_line_str->GetNullTerminatedStringAt(read_offset());
+    return elf->debug_line_str->GetCString(read_offset());
   case DW_FORM_strp:
     ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
-    return elf->debug_str->GetNullTerminatedStringAt(read_offset());
+    return elf->debug_str->GetCString(read_offset());
   case DW_FORM_strp_sup:
   case DW_FORM_strx:
   case DW_FORM_strx1:

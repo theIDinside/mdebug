@@ -53,7 +53,7 @@ struct ElfSection
   const u8 *begin() const noexcept;
   const u8 *end() const noexcept;
   const u8 *Into(AddrPtr addr) const noexcept;
-  std::string_view GetNullTerminatedStringAt(u64 offset) const noexcept;
+  const char* GetCString(u64 offset) const noexcept;
 
   /**
    * Determines offset of `inside_ptr` from `m_section_ptr`.

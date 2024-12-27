@@ -9,7 +9,7 @@ bool
 DieNameReference::is_valid() const
 {
   if (cu == nullptr) {
-    return die_index.value() != 0;
+    return die_index != 0;
   }
   return true;
 }
@@ -21,7 +21,7 @@ DieNameReference::is_unique() const noexcept
 }
 
 void
-DieNameReference::set_as_collision_variant(u32 index) noexcept
+DieNameReference::set_as_collision_variant(u64 index) noexcept
 {
   unique = 0xff'ff'ff'ff;
   collision_displacement_index = index;
@@ -35,7 +35,7 @@ DieNameReference::set_not_unique() noexcept
 }
 
 void
-DieNameReference::set_collision_index(u32 index) noexcept
+DieNameReference::set_collision_index(u64 index) noexcept
 {
   collision_displacement_index = index;
 }
@@ -46,7 +46,7 @@ NameIndex::NameIndex(std::string_view name) noexcept
 }
 
 void
-NameIndex::add_name(std::string_view name, Index die_index, UnitData *cu) noexcept
+NameIndex::add_name(const char* name, u64 die_index, UnitData *cu) noexcept
 {
   auto &elem = mapping[name];
   if (elem.is_valid()) {
@@ -58,12 +58,12 @@ NameIndex::add_name(std::string_view name, Index die_index, UnitData *cu) noexce
     }
   } else {
     elem.cu = cu;
-    elem.die_index = Index{die_index};
+    elem.die_index = die_index;
   }
 }
 
 void
-NameIndex::convert_to_collision_variant(DieNameReference &elem, Index die_index, UnitData *cu) noexcept
+NameIndex::convert_to_collision_variant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept
 {
   const auto index = colliding_die_name_refs.size();
   colliding_die_name_refs.push_back({});
@@ -78,8 +78,10 @@ NameIndex::merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_ref
 {
   std::lock_guard lock(mutex);
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
+  auto count = 0;
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
+    count++;
   }
 }
 
@@ -90,7 +92,7 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     add_name(name, idx, cu);
-    const auto die_ref = cu->get_cu_die_ref(idx);
+    const auto die_ref = cu->GetDieByCacheIndex(idx);
     const auto this_die = die_ref.GetDie();
     if (this_die->tag == DwarfTag::DW_TAG_typedef || this_die->tag == DwarfTag::DW_TAG_array_type) {
       continue;
@@ -98,14 +100,14 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
     const auto offs = Offset{die_ref.GetDie()->section_offset};
     const auto possible_size = die_ref.read_attribute(Attribute::DW_AT_byte_size);
     ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
-           cu->section_offset(), die_ref.GetDie()->section_offset);
+           cu->SectionOffset(), die_ref.GetDie()->section_offset);
     auto type = obj->GetTypeStorage()->CreateNewType(this_die->tag, offs, IndexedDieReference{cu, idx},
                                          possible_size->unsigned_value(), name);
     if (die_ref.GetDie()->tag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{cu};
-      reader.seek_die(*die_ref.GetDie());
+      reader.SeekDie(*die_ref.GetDie());
       auto attr = die_ref.read_attribute(Attribute::DW_AT_encoding);
-      ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->section_offset(),
+      ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->SectionOffset(),
              die_ref.GetDie()->section_offset);
       auto encoding =
         attr.and_then([](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.unsigned_value())}; });

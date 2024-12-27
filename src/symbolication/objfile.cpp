@@ -156,10 +156,9 @@ ObjectFile::SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data
 {
   ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
   std::lock_guard lock(mUnitDataWriteLock);
-  auto first_id = unit_data.front()->section_offset();
-  const auto it =
-    std::lower_bound(mCompileUnits.begin(), mCompileUnits.end(), first_id,
-                     [](const sym::dw::UnitData *ptr, u64 id) { return ptr->section_offset() < id; });
+  auto first_id = unit_data.front()->SectionOffset();
+  const auto it = std::lower_bound(mCompileUnits.begin(), mCompileUnits.end(), first_id,
+                                   [](const sym::dw::UnitData *ptr, u64 id) { return ptr->SectionOffset() < id; });
   mCompileUnits.insert(it, unit_data.begin(), unit_data.end());
 }
 
@@ -172,9 +171,14 @@ ObjectFile::GetAllCompileUnits() noexcept
 sym::dw::UnitData *
 ObjectFile::GetCompileUnitFromOffset(u64 offset) noexcept
 {
-  auto it = std::find_if(mCompileUnits.begin(), mCompileUnits.end(),
-                         [&](sym::dw::UnitData *cu) { return cu->spans_across(offset); });
+
+  const auto it = std::lower_bound(mCompileUnits.begin(), mCompileUnits.end(), offset,
+                             [](sym::dw::UnitData *compUnit, u64 offset) {
+                               return compUnit->SectionOffset() + compUnit->UnitSize() < offset;
+                             });
+
   if (it != std::end(mCompileUnits)) {
+    ASSERT((*it)->spans_across(offset), "compilation unit does not span 0x{:x}", offset);
     return *it;
   } else {
     return nullptr;
@@ -188,7 +192,7 @@ ObjectFile::GetDebugInfoEntryReference(u64 offset) noexcept
   if (cu == nullptr) {
     return {};
   }
-  auto die = cu->get_die(offset);
+  auto die = cu->GetDebugInfoEntry(offset);
   if (die == nullptr) {
     return {};
   }
@@ -203,7 +207,7 @@ ObjectFile::GetDieReference(u64 offset) noexcept
   if (cu == nullptr) {
     return sym::dw::DieReference{nullptr, nullptr};
   }
-  auto die = cu->get_die(offset);
+  auto die = cu->GetDebugInfoEntry(offset);
   if (die == nullptr) {
     return sym::dw::DieReference{nullptr, nullptr};
   }
@@ -277,7 +281,7 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit> new_cus) 
   DBG({
     if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
       for (const auto &cu : mCompilationUnits) {
-        DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->section_offset(),
+        DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->SectionOffset(),
                cu.StartPc(), cu.EndPc());
       }
       PANIC("Dumped CU contents");
@@ -312,7 +316,7 @@ ObjectFile::GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept
   auto typeunit = GetTypeUnit(type_signature);
   ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
   const auto type_die_cu_offset = typeunit->header().get_type_offset();
-  const auto type_die_section_offset = typeunit->section_offset() + type_die_cu_offset;
+  const auto type_die_section_offset = typeunit->SectionOffset() + type_die_cu_offset;
   const auto &dies = typeunit->get_dies();
   for (const auto &d : dies) {
     if (d.section_offset == type_die_section_offset) {
@@ -666,7 +670,7 @@ SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
                          sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
   auto symbolInformation = frame.MaybeGetFullSymbolInfo();
-  if(!symbolInformation) {
+  if (!symbolInformation) {
     return {};
   }
   if (!symbolInformation->IsResolved()) {
@@ -736,8 +740,8 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     result.reserve(type->MemberFields().size());
 
     for (auto &mem : type->MemberFields()) {
-      auto member_value = std::make_shared<sym::Value>(mem.name, const_cast<sym::Field &>(mem),
-                                                       value->mMemoryContentsOffsets, value->TakeMemoryReference());
+      auto member_value = std::make_shared<sym::Value>(
+        mem.name, const_cast<sym::Field &>(mem), value->mMemoryContentsOffsets, value->TakeMemoryReference());
       GetObjectFile()->InitializeDataVisualizer(member_value);
       RegisterValueResolver(member_value);
       const auto new_ref =
@@ -822,13 +826,13 @@ SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept 
   for (const auto &n : search_for) {
     auto ni = obj->GetNameIndex();
     ni->for_each_fn(n, [&](const sym::dw::DieNameReference &ref) {
-      auto die_ref = ref.cu->get_cu_die_ref(ref.die_index);
+      auto die_ref = ref.cu->GetDieByCacheIndex(ref.die_index);
       auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
       if (low_pc) {
         const auto addr = low_pc->address();
         matching_symbols.emplace_back(n, addr, 0);
         DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->GetPathString(),
-               die_ref.GetUnitData()->section_offset(), die_ref.GetDie()->section_offset, n, addr);
+               die_ref.GetUnitData()->SectionOffset(), die_ref.GetDie()->section_offset, n, addr);
       }
     });
   }
@@ -879,15 +883,15 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   std::vector<NonNullPtr<const sym::Symbol>> relevantSymbols;
   frame.GetInitializedVariables(variables_kind, relevantSymbols);
 
-  for(const sym::Symbol& symbol : relevantSymbols) {
+  for (const sym::Symbol &symbol : relevantSymbols) {
     const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Instance->new_key();
     if (ref == 0 && !symbol.mType->IsResolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
       ts_ctx.resolve_type();
     }
 
-    auto value_object = sym::MemoryContentsObject::CreateFrameVariable(tc, frame.mTask, NonNull(frame),
-                                                                         const_cast<sym::Symbol &>(symbol), true);
+    auto value_object =
+      sym::MemoryContentsObject::CreateFrameVariable(tc, frame, const_cast<sym::Symbol &>(symbol), true);
     GetObjectFile()->InitializeDataVisualizer(value_object);
     RegisterValueResolver(value_object);
 

@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <chrono>
 
 class Tracer;
 class TraceeController;
@@ -100,6 +101,8 @@ public:
   /* Executes the command. This is always performed in the Tracer thread (where all tracee controller actions are
    * performed. )*/
   virtual UIResultPtr Execute() noexcept = 0;
+
+  UIResultPtr LogExecute() noexcept;
 
   template <typename Derived, typename JsonArgs>
   static constexpr MissingOrInvalidResult

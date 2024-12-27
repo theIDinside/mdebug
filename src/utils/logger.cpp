@@ -24,6 +24,8 @@ to_str(Channel id) noexcept
     return "eh";
   case Channel::remote:
     return "remote";
+  case Channel::perf:
+    return "perf";
   case Channel::COUNT:
     PANIC("Count not a valid Id");
     break;

@@ -34,7 +34,7 @@ class FunctionSymbolicationContext
   void process_formal_param(DieReference cu_die) noexcept;
   void process_variable(DieReference cu_die) noexcept;
   void process_lexical_block(DieReference cu_die) noexcept;
-  void process_inlined(DieReference cu_die) noexcept;
+  void ProcessInlinedSubroutine(DieReference cu_die) noexcept;
   NonNullPtr<Type> process_type(DieReference cu_die) noexcept;
 
 public:

@@ -14,8 +14,10 @@
 class Tracer;
 class TraceeController;
 /* The different DAP commands/requests */
+namespace alloc {
+  class ArenaAllocator;
+}
 
-class ArenaAllocator;
 
 namespace ui {
 struct UIResult;
@@ -143,9 +145,9 @@ class DebugAdapterClient
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
   // away.
-  std::unique_ptr<ArenaAllocator> mCommandsAllocator;
-  std::unique_ptr<ArenaAllocator> mCommandResponseAllocator;
-  std::unique_ptr<ArenaAllocator> mEventsAllocator;
+  std::unique_ptr<alloc::ArenaAllocator> mCommandsAllocator;
+  std::unique_ptr<alloc::ArenaAllocator> mCommandResponseAllocator;
+  std::unique_ptr<alloc::ArenaAllocator> mEventsAllocator;
 
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
@@ -161,8 +163,8 @@ public:
   DapClientSession session_type;
   ~DebugAdapterClient() noexcept;
 
-  ArenaAllocator* GetCommandArenaAllocator() noexcept;
-  ArenaAllocator* GetResponseArenaAllocator() noexcept;
+  alloc::ArenaAllocator* GetCommandArenaAllocator() noexcept;
+  alloc::ArenaAllocator* GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *createStandardIOConnection() noexcept;
   static DebugAdapterClient *createSocketConnection(DebugAdapterClient *client) noexcept;
   void client_configured(TraceeController *tc) noexcept;
@@ -193,7 +195,7 @@ class DAP
 private:
   std::vector<utils::OwningPointer<DebugAdapterClient>> clients{};
   std::vector<NotifSource> sources{};
-  std::unique_ptr<ArenaAllocator> mTemporaryArena;
+  std::unique_ptr<alloc::ArenaAllocator> mTemporaryArena;
 
 public:
   explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept;

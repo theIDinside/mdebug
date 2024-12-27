@@ -1,17 +1,10 @@
 #include "worker_task.h"
 #include "../common.h"
 #include "fmt/ranges.h"
+#include "log.h"
 #include "thread_pool.h"
+#include "utils/logger.h"
 #include <chrono>
-
-static bool LogTaskGroup = false;
-
-void
-SetTaskGroupLog(bool value) noexcept
-{
-  DBGLOG(core, "Setting TaskGroup logging to {}", value);
-  LogTaskGroup = value;
-}
 
 namespace utils {
 
@@ -44,12 +37,12 @@ NoOp::execute_task() noexcept
 
 TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name), m_task_lock(), m_done_tasks()
 {
-  DBGLOG(core, "Created task group {}", name);
+  DBGLOG(perf, "Created task group {}", name);
 }
 
 TaskGroup::~TaskGroup() noexcept
 {
-  CDLOG(LogTaskGroup, core, "Task group {} finished - destroying task group", m_name);
+  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "Task group {} finished - destroying task group", m_name);
 }
 
 void
@@ -63,8 +56,8 @@ TaskGroup::add_task(Task *task) noexcept
 std::future<void>
 TaskGroup::schedule_work() noexcept
 {
-  if (LogTaskGroup) {
-    DBGLOG(core, "[TG: {}] - Scheduling {} tasks", m_name, m_tasks.size());
+  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG: {}] - Scheduling {} tasks", m_name, m_tasks.size());
+  if (mdb::log::Config::LogTaskGroup()) {
     start = std::chrono::high_resolution_clock::now();
   }
   auto fut = m_promise.get_future();
@@ -86,11 +79,12 @@ TaskGroup::task_done(Task *task) noexcept
   }
   m_done_tasks.push_back(task);
   if (m_done_tasks.size() == m_tasks.size()) {
-    if (LogTaskGroup) {
+    if (mdb::log::Config::LogTaskGroup()) {
       auto time =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
           .count();
-      DBGLOG(core, "[TG {}]: done, time={}us", m_name, time);
+
+      CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG {}]: done, time={}us", m_name, time);
     }
     m_promise.set_value();
   }

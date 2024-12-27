@@ -166,8 +166,7 @@ public:
   // shit in computer time - reading the entire chunk is faster than managing sub parts here and there. Just pull
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
-  static std::shared_ptr<Value> CreateFrameVariable(TraceeController &tc, NonNullPtr<TaskInfo> task,
-                                                    NonNullPtr<sym::Frame> frame, Symbol &symbol,
+  static std::shared_ptr<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame& frame, Symbol &symbol,
                                                     bool lazy) noexcept;
 
   static Value *CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,

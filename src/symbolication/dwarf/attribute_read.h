@@ -16,7 +16,7 @@ read_attributes(UnitData *unitData, const DieMetaData &die, std::array<Attribute
   std::array<std::optional<AttributeValue>, N> result;
   UnitReader reader{unitData};
   const auto &attrs = unitData->get_abbreviation(die.abbreviation_code);
-  reader.seek_die(die);
+  reader.SeekDie(die);
 
   for (auto attribute : attrs.attributes) {
     for (auto i = 0; i < attributes.size(); ++i) {
@@ -52,7 +52,7 @@ ProcessDie(DieReference dieRef, Fn &&fn) noexcept
   ASSERT(unit && die, "Compilation Unit required to be not-null");
   UnitReader reader{unit};
   const auto &attrs = unit->get_abbreviation(die->abbreviation_code);
-  reader.seek_die(*die);
+  reader.SeekDie(*die);
   for (auto attribute : attrs.attributes) {
     switch (fn(reader, attribute, attrs)) {
     case DieAttributeRead::Continue:

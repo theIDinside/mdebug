@@ -26,6 +26,8 @@ enum class Channel : u32
   eh,
   // Gdb Remote Protocol
   remote,
+  // Performance timing results
+  perf,
 
   // Keep always last. Always.
   COUNT

@@ -66,7 +66,7 @@ public:
   }
 
 private:
-  void resolve_fn_symbols() noexcept;
+  void PrepareFunctionSymbols() noexcept;
 };
 
 class AddressToCompilationUnitMap

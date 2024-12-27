@@ -115,7 +115,7 @@ DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
   sources.push_back({new_client_notifier.read.fd, InterfaceNotificationSource::NewClient, nullptr});
-  mTemporaryArena = ArenaAllocator::Create(utils::SystemPagesInBytes(16), nullptr);
+  mTemporaryArena = alloc::ArenaAllocator::Create(alloc::Page{16}, nullptr);
 }
 
 DAP::~DAP() noexcept {}
@@ -329,10 +329,13 @@ DAP::configure_tty(int master_pty_fd) noexcept
 void
 DebugAdapterClient::InitAllocators() noexcept
 {
+  using alloc::Page;
+  using alloc::ArenaAllocator;
+
   // Create a 1 megabyte arena allocator.
-  mCommandsAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(16), nullptr);
-  mCommandResponseAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(8), nullptr);
-  mEventsAllocator = ArenaAllocator::Create(utils::SystemPagesInBytes(16), nullptr);
+  mCommandsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
+  mCommandResponseAllocator = ArenaAllocator::Create(Page{8}, nullptr);
+  mEventsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
@@ -414,13 +417,13 @@ DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
   }
 }
 
-ArenaAllocator *
+alloc::ArenaAllocator *
 DebugAdapterClient::GetCommandArenaAllocator() noexcept
 {
   return mCommandsAllocator.get();
 }
 
-ArenaAllocator *
+alloc::ArenaAllocator *
 DebugAdapterClient::GetResponseArenaAllocator() noexcept
 {
   return mCommandResponseAllocator.get();

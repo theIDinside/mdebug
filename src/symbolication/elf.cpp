@@ -30,9 +30,9 @@ ElfSection::Into(AddrPtr vm_addr) const noexcept
   return begin() + offset.get();
 }
 
-std::string_view ElfSection::GetNullTerminatedStringAt(u64 offset) const noexcept
+const char* ElfSection::GetCString(u64 offset) const noexcept
 {
-  return std::string_view{(const char*)mSectionData->data() + offset};
+  return (const char*)mSectionData->data() + offset;
 }
 
 u64
@@ -94,6 +94,9 @@ Elf::Elf(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept
   debug_str_offsets = GetSection(ElfSec::DebugStrOffsets);
   debug_rnglists = GetSection(ElfSec::DebugRngLists);
   debug_loclist = GetSection(ElfSec::DebugLocLists);
+  if (!debug_loclist) {
+    debug_loclist = GetSection(ElfSec::DebugLoc);
+  }
   debug_aranges = GetSection(ElfSec::DebugAranges);
 }
 
@@ -155,11 +158,11 @@ Elf::ParseMinimalSymbol(Elf* elf, ObjectFile& objectFile) noexcept
     auto symbols = sec->GetDataAs<Elf64_Sym>();
     for (auto &symbol : symbols) {
       if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
-        std::string_view name = elf->str_table->GetNullTerminatedStringAt(symbol.st_name);
+        std::string_view name = elf->str_table->GetCString(symbol.st_name);
         const auto res = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
         elf_fn_symbols.push_back(res);
       } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
-        std::string_view name = elf->str_table->GetNullTerminatedStringAt(symbol.st_name);
+        std::string_view name = elf->str_table->GetCString(symbol.st_name);
         elf_object_symbols[name] =
           MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }

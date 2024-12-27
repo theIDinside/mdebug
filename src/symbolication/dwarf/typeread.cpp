@@ -3,6 +3,8 @@
 #include "symbolication/dwarf.h"
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die_iterator.h"
+#include "symbolication/dwarf_defs.h"
+#include "symbolication/type.h"
 #include "utils/logger.h"
 #include <symbolication/callstack.h>
 #include <symbolication/objfile.h>
@@ -11,11 +13,13 @@ namespace sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : obj(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
-      params{{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}, {}},
-      lexicalBlockStack({params})
+      params{{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}, {}}, lexicalBlockStack()
 {
+  lexicalBlockStack.emplace_back(AddressRange{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()},
+                                 std::vector<Symbol>{});
   ASSERT(lexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", lexicalBlockStack.size());
-  MUST_HOLD(mFunctionSymbol != nullptr, "To parse symbol information for a function, there must exist symbol information to parse.");
+  MUST_HOLD(mFunctionSymbol != nullptr,
+            "To parse symbol information for a function, there must exist symbol information to parse.");
 }
 
 NonNullPtr<Type>
@@ -35,7 +39,7 @@ FunctionSymbolicationContext::process_lexical_block(DieReference cu_die) noexcep
   const auto block_seen = [&]() { return low != nullptr && hi != nullptr; };
   auto &attr = cu_die.GetUnitData()->get_abbreviation(cu_die.GetDie()->abbreviation_code);
   UnitReader reader{cu_die.GetUnitData()};
-  reader.seek_die(*cu_die.GetDie());
+  reader.SeekDie(*cu_die.GetDie());
 
   for (const auto abbr : attr.attributes) {
     auto value = read_attribute_value(reader, abbr, attr.implicit_consts);
@@ -53,10 +57,10 @@ FunctionSymbolicationContext::process_lexical_block(DieReference cu_die) noexcep
 }
 
 void
-FunctionSymbolicationContext::process_inlined(DieReference cu_die) noexcept
+FunctionSymbolicationContext::ProcessInlinedSubroutine(DieReference cu_die) noexcept
 {
   DBGLOG(core, "[symbolication]: process_inline not implemented (cu={}, die={})",
-         cu_die.GetUnitData()->section_offset(), cu_die.GetDie()->section_offset);
+         cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->section_offset);
 }
 
 struct ParseState
@@ -130,9 +134,15 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
          state.mTypeId->unsigned_value());
 
   auto type = process_type(variableTypeDie.value());
-  DataBlock dwarf_expr_block = state.mLocation->block();
-  std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
-  processedSymbolStack.emplace_back(type, SymbolLocation::Expression(expr), state.mName->string());
+  if (state.mLocation->form == AttributeForm::DW_FORM_sec_offset) {
+    processedSymbolStack.emplace_back(
+      type, SymbolLocation::UnreadLocationList(static_cast<u32>(state.mLocation->unsigned_value())),
+      state.mName->string());
+  } else {
+    DataBlock dwarf_expr_block = state.mLocation->block();
+    std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
+    processedSymbolStack.emplace_back(type, SymbolLocation::Expression(expr), state.mName->string());
+  }
   return true;
 }
 
@@ -159,7 +169,7 @@ FunctionSymbolicationContext::process_variable(DieReference cu_die) noexcept
          to_str(cu_die.GetDie()->tag));
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}",
-         cu_die.GetUnitData()->section_offset(), cu_die.GetDie()->section_offset);
+         cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->section_offset);
   ASSERT(name, "Expected to find location attribute for die 0x{:x} ({})", cu_die.GetDie()->section_offset,
          to_str(cu_die.GetDie()->tag));
   ASSERT(type_id, "Expected to find location attribute for die 0x{:x} ({})", cu_die.GetDie()->section_offset,
@@ -186,7 +196,7 @@ FunctionSymbolicationContext::process_formal_param(DieReference cu_die) noexcept
          to_str(cu_die.GetDie()->tag));
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}",
-         cu_die.GetUnitData()->section_offset(), cu_die.GetDie()->section_offset);
+         cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->section_offset);
   if (!name) {
     DBGLOG(core, "Expected to find name attribute for die 0x{:x} ({})", cu_die.GetDie()->section_offset,
            to_str(cu_die.GetDie()->tag));
@@ -215,7 +225,7 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
   for (const auto indexedDie : mFunctionSymbol->OriginDebugInfoEntries()) {
     auto cu = indexedDie.GetUnitData();
     auto die_index = indexedDie.GetIndex();
-    auto cu_die_ref = cu->get_cu_die_ref(die_index);
+    auto cu_die_ref = cu->GetDieByCacheIndex(die_index);
     ASSERT(cu_die_ref.GetDie()->tag == DwarfTag::DW_TAG_subprogram,
            "Origin die for a fn wasn't subprogram! It was: {}", to_str(cu_die_ref.GetDie()->tag));
 
@@ -254,8 +264,8 @@ FunctionSymbolicationContext::process_symbol_information() noexcept
         die_it = next(die_it, die_it->children());
         break;
       case DwarfTag::DW_TAG_inlined_subroutine:
-        process_inlined(DieReference{cu_die_ref.GetUnitData(), die_it});
-        die_it = next(die_it, die_it->children());
+        ProcessInlinedSubroutine(DieReference{cu_die_ref.GetUnitData(), die_it});
+        die_it = next(die_it, die_it->sibling());
         break;
       default:
         DBGLOG(core, "[WARNING]: Unexpected Tag in subprorogram die: {}", to_str(die_it->tag));
@@ -338,7 +348,7 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
 
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
          "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}",
-         cu_die.GetUnitData()->section_offset(), cu_die.GetDie()->section_offset);
+         cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->section_offset);
   ASSERT(type_id, "Expected to find type attribute for die 0x{:x} ({})", cu_die.GetDie()->section_offset,
          to_str(cu_die.GetDie()->tag));
 
