@@ -108,6 +108,17 @@ BuildTestSubject(
   ${CMAKE_CURRENT_SOURCE_DIR}/avx-subject.cpp
 )
 
+BuildTestSubject(
+  NAME lnp-test
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/lnp/main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/lnp/a.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/lnp/b.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/lnp/a.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/lnp/b.h
+  INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lnp
+)
+
 set(VariablesRequestSubjects arrayOf3 pointer struct)
 set(MultiProcessSubjects parent childprogram)
 
