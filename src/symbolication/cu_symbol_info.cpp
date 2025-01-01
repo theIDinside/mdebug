@@ -607,7 +607,7 @@ CompilationUnit::function_symbols_resolved() const noexcept
 }
 
 sym::FunctionSymbol *
-CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
+CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
 {
   if (!function_symbols_resolved()) {
     ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData]() {

@@ -81,6 +81,8 @@ class TraceeController
   std::shared_ptr<SymbolFile> mMainExecutable;
   // The tasks that exist in this "process space"
   std::vector<std::shared_ptr<TaskInfo>> mThreads;
+  // Tasks that have exited.
+  std::vector<std::shared_ptr<TaskInfo>> mExitedThreads;
   // More low level information about tasks's. The idea (maybe?) is that at some point we will be able
   // to restore a process space, by doing some manual cloning of tasks, making checkpoint-like debugging possible
   // note: not as powerful as rr, in any sense of the word, but may be neat.
@@ -174,6 +176,7 @@ public:
   // track.
   bool IsIndividualTaskControlConfigured() noexcept;
   std::span<std::shared_ptr<TaskInfo>> GetThreads() noexcept;
+  std::span<std::shared_ptr<TaskInfo>> GetExitedThreads() noexcept;
   void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
   u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate);
   Tid TaskLeaderTid() const noexcept;

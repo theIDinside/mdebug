@@ -104,7 +104,9 @@ TraceeController::TearDown(bool killProcess) noexcept
   mIsExited = true;
 }
 
-bool TraceeController::IsExited() const noexcept {
+bool
+TraceeController::IsExited() const noexcept
+{
   return mIsExited;
 }
 
@@ -291,6 +293,12 @@ std::span<std::shared_ptr<TaskInfo>>
 TraceeController::GetThreads() noexcept
 {
   return mThreads;
+}
+
+std::span<std::shared_ptr<TaskInfo>>
+TraceeController::GetExitedThreads() noexcept
+{
+  return mExitedThreads;
 }
 
 Tid
@@ -1194,7 +1202,7 @@ TraceeController::GetCurrentFrame(TaskInfo &task) noexcept
   for (auto cu : cus_matching_addr) {
     for (auto src : obj->GetObjectFile()->GetCompilationUnits()) {
       if (cu == src->get_dwarf_unit()) {
-        if (auto fn = src->get_fn_by_pc(obj->UnrelocateAddress(pc)); fn) {
+        if (auto fn = src->GetFunctionSymbolByProgramCounter(obj->UnrelocateAddress(pc)); fn) {
           return sym::Frame{obj, task, 0, 0, pc, fn};
         }
       }
@@ -1307,7 +1315,7 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
   for (auto cu : cus_matching_addr) {
     for (auto src : symbolFile->GetObjectFile()->GetCompilationUnits()) {
       if (cu == src->get_dwarf_unit()) {
-        if (auto fn = src->get_fn_by_pc(symbolFile->UnrelocateAddress(addr)); fn) {
+        if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
           return std::make_pair(fn, NonNull(*symbolFile));
         }
       }
@@ -1410,23 +1418,31 @@ TraceeController::HandleThreadCreated(TaskInfo *task, const ThreadCreated &e,
 tc::ProcessedStopEvent
 TraceeController::HandleThreadExited(TaskInfo *task, const ThreadExited &) noexcept
 {
+  auto taskIterator =
+    std::find_if(mThreads.begin(), mThreads.end(), [tid = task->tid](auto &t) { return t->tid == tid; });
+  ASSERT(taskIterator != std::end(mThreads), "Could not find task {} in this process space", task->tid);
+  auto index = std::distance(mThreads.begin(), taskIterator);
+
+  mExitedThreads.push_back(std::move(*taskIterator));
+  mThreads.erase(taskIterator);
+
   if (!task->exited) {
     mDebugAdapterClient->post_event(new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, task->tid});
     task->exited = true;
     task->reaped = !Tracer::Instance->TraceExitConfigured;
     if (Tracer::Instance->TraceExitConfigured) {
-      return tc::ProcessedStopEvent{true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}};
+      return tc::ProcessedStopEvent{true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}, false, true};
     } else {
       return tc::ProcessedStopEvent{
         !mStopHandler->event_settings.thread_exit_stop,
-        tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+        tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}, false, true};
     }
   } else {
     ASSERT(!task->reaped, "Expected task to not have been reaped");
     task->reaped = true;
     return tc::ProcessedStopEvent{
       !mStopHandler->event_settings.thread_exit_stop,
-      tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}};
+      tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess}, false, true};
   }
 }
 

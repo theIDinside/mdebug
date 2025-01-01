@@ -228,6 +228,15 @@ Tracer::handle_core_event(const TraceEvent *evt) noexcept
 
   tc::ProcessedStopEvent result = process_core_event(*tc, evt);
 
+  if(result.mThreadExited) {
+    for(auto& t : tc->GetExitedThreads()) {
+      if(evt->tid == t->tid) {
+        tc->mStopHandler->handle_proceed(*t, result);
+        return;
+      }
+    }
+  }
+
   // N.B. we _HAVE_ to do this check here (stop_all_requested), not anywhere else, due to the existence of what gdb
   // calls "all stop mode" which means that if *any* thread stops, all other threads are stopped (but they are not
   // reported, it's just implicit to the M.O.) because of that, we will hit a stop, which may request to stop_all

@@ -273,7 +273,6 @@ UnitData::GetBuildDirectory() const noexcept
 const DieMetaData *
 UnitData::GetDebugInfoEntry(u64 offset) noexcept
 {
-  DieMetaData d;
   LoadDieMetadata();
 
   auto it = std::lower_bound(mDieCollection.begin(), mDieCollection.end(), offset,

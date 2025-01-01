@@ -67,7 +67,7 @@ public:
   AddrPtr EndPc() const noexcept;
   std::string_view name() const noexcept;
   bool function_symbols_resolved() const noexcept;
-  sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;
+  sym::FunctionSymbol *GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept;
   dw::UnitData *get_dwarf_unit() const noexcept;
   std::optional<Path> get_lnp_file(u32 index) noexcept;
   static constexpr auto

@@ -60,6 +60,8 @@ struct ProcessedStopEvent
   bool should_resume;
   std::optional<tc::ResumeAction> res;
   bool mProcessExited{false};
+  bool mThreadExited{false};
+
   constexpr static auto
   ResumeAny() noexcept
   {
@@ -70,6 +72,10 @@ struct ProcessedStopEvent
   ProcessExited() noexcept
   {
     return ProcessedStopEvent{false, std::nullopt, true};
+  }
+
+  constexpr static auto ThreadExited() noexcept {
+    return ProcessedStopEvent{false, std::nullopt, false, true};
   }
 };
 
