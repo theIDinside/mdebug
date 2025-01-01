@@ -32,7 +32,9 @@
 #include "utils/immutable.h"
 #include "utils/logger.h"
 #include "utils/macros.h"
+#include "utils/scope_defer.h"
 #include <algorithm>
+#include <chrono>
 #include <elf.h>
 #include <fcntl.h>
 #include <filesystem>
@@ -1312,10 +1314,23 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
 
   // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
   //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
+  DBGLOG(perf, "Start fn symbol resolving in {} compilation units in {}", cus_matching_addr.size(),
+         symbolFile->GetObjectFilePath().filename().c_str());
+  const auto start = std::chrono::high_resolution_clock::now();
+  sym::FunctionSymbol *foundFn = nullptr;
+  ScopedDefer defer{[start, symbolFile = symbolFile, &foundFn]() {
+    auto us =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+        .count();
+    DBGLOG(perf, "Parsed symbols & found function symbol {} in {} us ({})",
+           foundFn ? foundFn->name : "<no known name>", us, symbolFile->GetObjectFilePath().filename().c_str());
+  }};
+
   for (auto cu : cus_matching_addr) {
     for (auto src : symbolFile->GetObjectFile()->GetCompilationUnits()) {
       if (cu == src->get_dwarf_unit()) {
         if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
+          foundFn = fn;
           return std::make_pair(fn, NonNull(*symbolFile));
         }
       }
@@ -1431,7 +1446,8 @@ TraceeController::HandleThreadExited(TaskInfo *task, const ThreadExited &) noexc
     task->exited = true;
     task->reaped = !Tracer::Instance->TraceExitConfigured;
     if (Tracer::Instance->TraceExitConfigured) {
-      return tc::ProcessedStopEvent{true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}, false, true};
+      return tc::ProcessedStopEvent{true, tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::Task}, false,
+                                    true};
     } else {
       return tc::ProcessedStopEvent{
         !mStopHandler->event_settings.thread_exit_stop,

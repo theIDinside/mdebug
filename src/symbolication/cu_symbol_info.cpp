@@ -601,7 +601,7 @@ CompilationUnit::name() const noexcept
 }
 
 bool
-CompilationUnit::function_symbols_resolved() const noexcept
+CompilationUnit::IsFunctionSymbolsResolved() const noexcept
 {
   return !mFunctionSymbols.empty();
 }
@@ -609,12 +609,13 @@ CompilationUnit::function_symbols_resolved() const noexcept
 sym::FunctionSymbol *
 CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
 {
-  if (!function_symbols_resolved()) {
+  if (!IsFunctionSymbolsResolved()) {
     ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData]() {
       auto us =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
           .count();
-      DBGLOG(perf, "Resolved function symbols for 0x{:x} in {}us", unit_data->SectionOffset(), us);
+      DBGLOG(perf, "Resolved function symbols for 0x{:x} in {}us ({})", unit_data->SectionOffset(), us,
+             unit_data->GetObjectFile()->GetFilePath().filename().c_str());
     }};
     PrepareFunctionSymbols();
   }

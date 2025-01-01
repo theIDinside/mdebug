@@ -552,7 +552,7 @@ SymbolFile::Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept ->
 auto
 SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
 {
-  return GetObjectFile()->GetProbableCompilationUnits(pc - mBaseAddress->get());
+  return mObjectFile->GetProbableCompilationUnits(pc - mBaseAddress->get());
 }
 
 inline auto
