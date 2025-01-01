@@ -387,7 +387,7 @@ ObjectFile::GetRelocatedSourceCodeFiles(AddrPtr base,
 }
 
 void
-ObjectFile::InitializeDebugSymbolInfo(const sys::DwarfParseConfiguration &config) noexcept
+ObjectFile::InitializeDebugSymbolInfo() noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
   utils::TaskGroup cu_taskgroup("Compilation Unit Data");

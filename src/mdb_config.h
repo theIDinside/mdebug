@@ -29,11 +29,6 @@ enum class WaitSystem
   UseSignalHandler,
 };
 
-struct DwarfParseConfiguration
-{
-  bool eager_lnp_parse;
-};
-
 template <typename ConfigType> struct Setting
 {
   std::string_view setting;
@@ -88,7 +83,6 @@ class DebuggerConfiguration
 
   WaitSystem wait_system{WaitSystem::UseAwaiterThread};
   std::optional<int> worker_thread_pool_size{std::nullopt};
-  DwarfParseConfiguration dwarf_parsing{false};
   LogConfig log{};
   Path mLogDirectory;
 
@@ -104,7 +98,6 @@ public:
 
   WaitSystem waitsystem() const noexcept;
   int thread_pool_size() const noexcept;
-  DwarfParseConfiguration dwarf_config() const noexcept;
   LogConfig log_config() const noexcept;
   const Path &LogDirectory() const noexcept;
 };

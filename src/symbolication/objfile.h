@@ -157,7 +157,7 @@ public:
   auto SourceCodeFiles() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
   auto GetCompilationUnits() noexcept -> std::vector<sym::CompilationUnit> &;
 
-  auto InitializeDebugSymbolInfo(const sys::DwarfParseConfiguration &config) noexcept -> void;
+  auto InitializeDebugSymbolInfo() noexcept -> void;
   auto AddMinimalElfSymbols(std::vector<MinSymbol> &&fn_symbols,
                             std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept -> void;
 
