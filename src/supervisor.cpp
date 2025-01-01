@@ -63,7 +63,6 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
   mTraceeInterface->SetTarget(this);
   mThreads.reserve(64);
   mThreads.push_back(TaskInfo::CreateTask(*mTraceeInterface, mTraceeInterface->TaskLeaderTid(), true));
-  mThreads.back()->initialize();
 
   mNewObjectFilePublisher.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->post_event(new ui::dap::ModuleEvent{"new", *sf});
@@ -83,7 +82,6 @@ TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&
   mTraceeInterface->SetTarget(this);
   mThreads.reserve(64);
   mThreads.push_back(TaskInfo::CreateTask(*mTraceeInterface, mTraceeInterface->TaskLeaderTid(), true));
-  mThreads.back()->initialize();
 
   mNewObjectFilePublisher.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->post_event(new ui::dap::ModuleEvent{"new", *sf});
@@ -1388,7 +1386,7 @@ TraceeController::HandleThreadCreated(TaskInfo *task, const ThreadCreated &e,
       }
     }
   }
-  task->initialize();
+
   const auto evt = new ui::dap::ThreadEvent{ui::dap::ThreadReason::Started, e.thread_id};
   mDebugAdapterClient->post_event(evt);
 
@@ -1452,6 +1450,22 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
     }
   }
   return tc::ProcessedStopEvent{true, {}};
+}
+
+tc::ProcessedStopEvent
+TraceeController::HandleClone(const Clone &evt) noexcept
+{
+  auto task = Tracer::Instance->TakeUninitializedTask(evt.child_tid);
+  DBGLOG(core, "Running clone handler for {}: child created = {}. Already created: {}", evt.thread_id, evt.child_tid, task == nullptr);
+  if (!task) {
+    CreateNewTask(evt.child_tid, true);
+    if (evt.vm_info) {
+      SetTaskVmInfo(evt.child_tid, evt.vm_info.value());
+    }
+  } else {
+    task->InitializeThread(GetInterface(), true);
+  }
+  return tc::ProcessedStopEvent{!mStopHandler->event_settings.clone_stop, {}};
 }
 
 ui::dap::DebugAdapterClient *

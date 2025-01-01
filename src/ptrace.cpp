@@ -102,7 +102,7 @@ void
 new_target_set_options(pid_t pid)
 {
   const auto options =
-    PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXIT;
+    PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXIT | PTRACE_O_TRACEVFORK;
   Tracer::Instance->TraceExitConfigured = (options & PTRACE_O_TRACEEXIT) != 0;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;

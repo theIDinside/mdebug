@@ -1,23 +1,28 @@
 #include "tracer.h"
-#include "interface/dap/dap_defs.h"
-#include "interface/dap/events.h"
-#include <lib/arena_allocator.h>
-#include "interface/pty.h"
-#include "interface/remotegdb/connection.h"
-#include "interface/tracee_command/ptrace_commander.h"
-#include "lib/lockguard.h"
-#include "lib/spinlock.h"
 #include "notify_pipe.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
-#include "symbolication/dwarf_frameunwinder.h"
-#include "symbolication/objfile.h"
 #include "task.h"
-#include "utils/scope_defer.h"
-#include "utils/scoped_fd.h"
-#include "utils/thread_pool.h"
 #include <fcntl.h>
 #include <fmt/format.h>
+
+#include <interface/dap/dap_defs.h>
+#include <interface/dap/events.h>
+#include <interface/pty.h>
+#include <interface/remotegdb/connection.h>
+#include <interface/tracee_command/ptrace_commander.h>
+
+#include <symbolication/dwarf_frameunwinder.h>
+#include <symbolication/objfile.h>
+
+#include <utils/scope_defer.h>
+#include <utils/scoped_fd.h>
+#include <utils/thread_pool.h>
+
+#include <lib/arena_allocator.h>
+#include <lib/lockguard.h>
+#include <lib/spinlock.h>
+
 #include <sys/personality.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -34,7 +39,7 @@ on_sigchild_handler(int)
     if (WIFSTOPPED(stat)) {
       const auto res = wait_result_stopped(pid, stat);
       DBGLOG(awaiter, "stop for {}: {}", res.tid, to_str(res.ws.ws));
-      push_wait_event(0, res);
+      push_wait_event(res);
     } else if (WIFEXITED(stat)) {
       // We might as well only report this for process-tasks,
       // as DAP doesn't support reporting an exit code for a thread, only for a process,
@@ -55,7 +60,7 @@ on_sigchild_handler(int)
         for (const auto &supervisor : Tracer::Instance->targets) {
           if (supervisor->TaskLeaderTid() == pid) {
             int exit_code = WEXITSTATUS(stat);
-            DBGLOG(awaiter, "exit for {}: {}", pid, exit_code);
+            DBGLOG(awaiter, "exit for {}: exit_code={}", pid, exit_code);
             push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {}));
             return;
           }
@@ -64,7 +69,7 @@ on_sigchild_handler(int)
     } else if (WIFSIGNALED(stat)) {
       auto signaled_evt =
         TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
-      push_wait_event(0, signaled_evt);
+      push_wait_event(signaled_evt);
     } else {
       PANIC("Unknown wait status event");
     }
@@ -74,7 +79,7 @@ on_sigchild_handler(int)
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
                sys::DebuggerConfiguration init) noexcept
     : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
-      events_notifier(events_notifier), config(init)
+      events_notifier(events_notifier), config(std::move(init))
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -110,6 +115,17 @@ Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession 
     PTRACE_OR_PANIC(PTRACE_ATTACH, new_process, 0, 0);
   }
   new_target_set_options(new_process);
+}
+
+TraceeController *
+Tracer::GetProcessContainingTid(Tid tid) noexcept
+{
+  for (auto &t : targets) {
+    if (t->GetTaskByTid(tid)) {
+      return t.get();
+    }
+  }
+  return nullptr;
 }
 
 TraceeController *
@@ -150,17 +166,28 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
   WaiterSystemConfigured = true;
 }
 
-CoreEvent *
-Tracer::process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept
+std::shared_ptr<TaskInfo>
+Tracer::TakeUninitializedTask(Tid tid) noexcept
 {
-  if (process_group == 0) {
-    for (const auto &tgt : targets) {
-      if (std::ranges::any_of(tgt->GetThreads(), [&](const auto &t) { return t->tid == wait_res.tid; })) {
-        process_group = tgt->mTaskLeader;
-      }
-    }
+  if (mUnInitializedThreads.contains(tid)) {
+    auto t = std::move(mUnInitializedThreads[tid]);
+    mUnInitializedThreads.erase(tid);
+    return t;
   }
-  auto tc = get_controller(process_group);
+  return nullptr;
+}
+
+CoreEvent *
+Tracer::ConvertWaitEvent(TaskWaitResult wait_res) noexcept
+{
+  auto tc = GetProcessContainingTid(wait_res.tid);
+
+  if (!tc) {
+    DBGLOG(core, "Task {} left unitialized, seen before clone event in parent?", wait_res.tid);
+    mUnInitializedThreads.emplace(wait_res.tid, TaskInfo::CreateUnInitializedTask(wait_res));
+    return nullptr;
+  }
+  ASSERT(tc != nullptr, "Could not find process that task {} belongs to", wait_res.tid);
   auto task = tc->SetPendingWaitstatus(wait_res);
   return tc->mStopHandler->prepare_core_from_waitstat(*task);
 }
@@ -237,7 +264,6 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
     DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->tid);
     tc.CreateNewTask(evt->tid, false);
     task = tc.GetTaskByTid(evt->tid);
-    task->initialize();
   }
   if (task) {
     if (!evt->registers->empty()) {
@@ -308,13 +334,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         return ProcessedStopEvent{should_resume, {}};
       },
       [&](const ForkEvent &e) -> MatchResult { return tc.HandleFork(e); },
-      [&](const Clone &e) -> MatchResult {
-        tc.CreateNewTask(e.child_tid, true);
-        if (e.vm_info) {
-          tc.SetTaskVmInfo(e.child_tid, e.vm_info.value());
-        }
-        return ProcessedStopEvent{!tc.mStopHandler->event_settings.clone_stop, {}};
-      },
+      [&](const Clone &e) -> MatchResult { return tc.HandleClone(e); },
       [&](const Exec &e) -> MatchResult {
         tc.PostExec(e.exec_file);
         Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
@@ -513,7 +533,7 @@ Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
 }
 
 void
-Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path& program,
+Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path &program,
                std::span<const std::string> prog_args) noexcept
 {
   termios original_tty;

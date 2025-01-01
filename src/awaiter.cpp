@@ -31,8 +31,9 @@ AwaiterThread::start_awaiter_thread(tc::TraceeCommandInterface *tc) noexcept
         VERIFY(error_tries <= 10, "Waitpid kept erroring out! {}: {}", errno, strerror(errno));
         continue;
       }
-      const auto wait_result = process_status(res, status);
-      push_wait_event(0, wait_result);
+      const auto waitStatus = process_status(res, status);
+      DBGLOG(awaiter, "stop for {}: {}", waitStatus.tid, to_str(waitStatus.ws.ws));
+      push_wait_event(waitStatus);
     }
     DBGLOG(core, "Exiting awaiter thread {}", pid);
   }};

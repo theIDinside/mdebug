@@ -14,6 +14,10 @@ static std::mutex event_queue_wait_mutex{};
 static std::condition_variable cv{};
 static std::queue<Event> events{};
 
+#define CORE_EVENT_LOG(fmtstring, ...)                                                                            \
+  DBGLOG(core, "[{} event {}:{}]: " fmtstring, __FUNCTION__, param.target,                                        \
+         param.tid.value_or(-1) __VA_OPT__(, ) __VA_ARGS__)
+
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
 CoreEvent::CoreEvent(Pid target, Tid tid, CoreEventVariant &&p, CoreEventType type, int sig_code,
                      RegisterData &&reg) noexcept
@@ -31,7 +35,7 @@ CoreEvent::CoreEvent(const EventDataParam &param, CoreEventVariant &&p, CoreEven
 CoreEvent *
 CoreEvent::LibraryEvent(const EventDataParam &param, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event LibraryEvent");
+  CORE_EVENT_LOG("creating event LibraryEvent");
   return new CoreEvent{param, ::LibraryEvent{param.tid.value_or(param.target)}, CoreEventType::LibraryEvent,
                        std::move(reg)};
 }
@@ -39,8 +43,7 @@ CoreEvent *
 CoreEvent::SoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
                                  RegisterData &&reg) noexcept
 {
-
-  DBGLOG(core, "[Core Event]: creating event SoftwareBreakpointHit");
+  CORE_EVENT_LOG("creating event SoftwareBreakpointHit");
   return new CoreEvent{
     param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Software, addr},
     CoreEventType::BreakpointHitEvent, std::move(reg)};
@@ -50,7 +53,7 @@ CoreEvent *
 CoreEvent::HardwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
                                  RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event HardwareBreakpointHit");
+  CORE_EVENT_LOG("creating event HardwareBreakpointHit");
   return new CoreEvent{
     param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Hardware, addr},
     CoreEventType::BreakpointHitEvent, std::move(reg)};
@@ -59,14 +62,14 @@ CoreEvent::HardwareBreakpointHit(const EventDataParam &param, std::optional<std:
 CoreEvent *
 CoreEvent::SyscallEntry(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event SyscallEntry");
+  CORE_EVENT_LOG("creating event SyscallEntry");
   return new CoreEvent{param, SyscallEvent{{param.tid.value_or(-1)}, SyscallEvent::Boundary::Entry, syscall},
                        CoreEventType::SyscallEvent, std::move(reg)};
 }
 CoreEvent *
 CoreEvent::SyscallExit(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event SyscallExit");
+  CORE_EVENT_LOG("creating event SyscallExit");
   return new CoreEvent{param, SyscallEvent{{param.tid.value_or(-1)}, SyscallEvent::Boundary::Exit, syscall},
                        CoreEventType::SyscallEvent, std::move(reg)};
 }
@@ -74,15 +77,14 @@ CoreEvent::SyscallExit(const EventDataParam &param, int syscall, RegisterData &&
 CoreEvent *
 CoreEvent::ThreadCreated(const EventDataParam &param, tc::ResumeAction resume_action, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ThreadCreated");
+  CORE_EVENT_LOG("creating event ThreadCreated");
   return new CoreEvent{param, ::ThreadCreated{{param.tid.value_or(-1)}, resume_action},
                        CoreEventType::ThreadCreated, std::move(reg)};
 }
 CoreEvent *
 CoreEvent::ThreadExited(const EventDataParam &param, bool process_needs_resuming, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ThreadExited for pid={},tid={}", param.target,
-         param.tid.value_or(-1));
+  CORE_EVENT_LOG("creating event ThreadExited for pid={},tid={}", param.target, param.tid.value_or(-1));
   return new CoreEvent{
     param, ::ThreadExited{{param.tid.value_or(-1)}, param.sig_or_code.value_or(-1), process_needs_resuming},
     CoreEventType::ThreadExited, std::move(reg)};
@@ -91,7 +93,7 @@ CoreEvent::ThreadExited(const EventDataParam &param, bool process_needs_resuming
 CoreEvent *
 CoreEvent::WriteWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event WriteWatchpoint");
+  CORE_EVENT_LOG("creating event WriteWatchpoint");
   return new CoreEvent{
     param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Write, addr},
     CoreEventType::WatchpointEvent, std::move(reg)};
@@ -99,7 +101,7 @@ CoreEvent::WriteWatchpoint(const EventDataParam &param, std::uintptr_t addr, Reg
 CoreEvent *
 CoreEvent::ReadWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ReadWatchpoint");
+  CORE_EVENT_LOG("creating event ReadWatchpoint");
   return new CoreEvent{
     param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Read, addr},
     CoreEventType::WatchpointEvent, std::move(reg)};
@@ -107,7 +109,7 @@ CoreEvent::ReadWatchpoint(const EventDataParam &param, std::uintptr_t addr, Regi
 CoreEvent *
 CoreEvent::AccessWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event AccessWatchpoint");
+  CORE_EVENT_LOG("creating event AccessWatchpoint");
   return new CoreEvent{
     param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Access, addr},
     CoreEventType::WatchpointEvent, std::move(reg)};
@@ -116,29 +118,38 @@ CoreEvent::AccessWatchpoint(const EventDataParam &param, std::uintptr_t addr, Re
 CoreEvent *
 CoreEvent::ForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ForkEvent");
+  CORE_EVENT_LOG("creating event ForkEvent");
   return new CoreEvent{param, ForkEvent{{param.target}, new_pid}, CoreEventType::Fork, std::move(reg)};
+}
+
+/* static */
+CoreEvent *
+CoreEvent::VForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
+{
+  CORE_EVENT_LOG("creating event ForkEvent");
+  return new CoreEvent{param, ForkEvent{{.thread_id = param.target}, new_pid, true}, CoreEventType::VFork,
+                       std::move(reg)};
 }
 
 CoreEvent *
 CoreEvent::CloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> vm_info, Tid new_tid,
                       RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event CloneEvent");
+  CORE_EVENT_LOG("creating event CloneEvent, new task: {}", new_tid);
   return new CoreEvent{param, Clone{{param.target}, new_tid, vm_info}, CoreEventType::Clone, std::move(reg)};
 }
 
 CoreEvent *
 CoreEvent::ExecEvent(const EventDataParam &param, std::string_view exec_file, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ExecEvent");
+  CORE_EVENT_LOG("creating event ExecEvent");
   return new CoreEvent{param, Exec{{param.target}, std::string{exec_file}}, CoreEventType::Exec, std::move(reg)};
 }
 
 CoreEvent *
 CoreEvent::ProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ProcessExitEvent");
+  DBGLOG(core, "[Core Event]: creating event ProcessExitEvent for {}:{}", pid, tid);
   return new CoreEvent{
     pid, tid, ProcessExited{{tid}, pid, exit_code}, CoreEventType::ProcessExited, exit_code, std::move(reg)};
 }
@@ -146,7 +157,7 @@ CoreEvent::ProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg)
 CoreEvent *
 CoreEvent::Signal(const EventDataParam &param, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event Signal");
+  CORE_EVENT_LOG("creating event Signal");
   return new CoreEvent{param, ::Signal{{param.target}}, CoreEventType::Signal, std::move(reg)};
 }
 
@@ -154,7 +165,7 @@ CoreEvent *
 CoreEvent::Stepped(const EventDataParam &param, bool stop, std::optional<LocationStatus> bploc,
                    std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event Stepped");
+  CORE_EVENT_LOG("creating event Stepped");
   return new CoreEvent{param, ::Stepped{{param.tid.value()}, stop, bploc, mayresume}, CoreEventType::Stepped,
                        std::move(reg)};
 }
@@ -169,7 +180,7 @@ CoreEvent::SteppingDone(const EventDataParam &param, std::string_view msg, Regis
 CoreEvent *
 CoreEvent::DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bool attached) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event DeferToSupervisor");
+  CORE_EVENT_LOG("creating event DeferToSupervisor");
   return new CoreEvent{param, ::DeferToSupervisor{{param.tid.value()}, attached}, CoreEventType::DeferToSupervisor,
                        std::move(reg)};
 }
@@ -177,7 +188,7 @@ CoreEvent::DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bo
 CoreEvent *
 CoreEvent::EntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event DeferToSupervisor");
+  CORE_EVENT_LOG("creating event DeferToSupervisor");
   return new CoreEvent{param, ::EntryEvent{{param.tid.value()}, should_stop}, CoreEventType::Entry,
                        std::move(reg)};
 }
@@ -191,10 +202,9 @@ push_event(Event e)
 }
 
 void
-push_wait_event(Tid process_group, TaskWaitResult wait_result) noexcept
+push_wait_event(TaskWaitResult wait_result) noexcept
 {
-  push_event(Event{.type = EventType::WaitStatus,
-                   .wait = {.process_group = process_group, .wait = wait_result, .core = 0}});
+  push_event(Event{.type = EventType::WaitStatus, .wait = {.wait = wait_result, .core = 0}});
 }
 
 void

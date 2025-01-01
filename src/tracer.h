@@ -106,10 +106,12 @@ public:
   void add_target_set_current(const tc::InterfaceConfig &config, TargetSession session) noexcept;
   void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
+  TraceeController* GetProcessContainingTid(Tid tid) noexcept;
   // TODO(simon): This should be removed. When multiprocess becomes a thing _all_ supervisor access must happen via
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   void config_done(ui::dap::DebugAdapterClient *client) noexcept;
-  CoreEvent *process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept;
+  CoreEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
+  std::shared_ptr<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
   void handle_command(ui::UICommand *cmd) noexcept;
   void handle_core_event(const CoreEvent *evt) noexcept;
   void handle_init_event(const CoreEvent *evt) noexcept;
@@ -121,7 +123,7 @@ public:
    * hang. */
   void accept_command(ui::UICommand *cmd) noexcept;
   TraceeController *new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept;
-  void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path& program,
+  void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path &program,
               std::span<const std::string> prog_args) noexcept;
   bool attach(const AttachArgs &args) noexcept;
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
@@ -176,4 +178,12 @@ private:
   bool already_launched;
   utils::NotifyManager *events_notifier;
   sys::DebuggerConfiguration config;
+
+  // Apparently, due to the lovely way of the universe, if a thread clones or forks
+  // we may actually see the wait status of the clone child before we get to see the wait status of the
+  // thread making the clone system call. I guess, this could be tracked, if every single resume operation stopped
+  // on system call boundaries (and therefore checked "ARE WE DOING A CLONE? THAT IS A SPECIAL CASE ONE" for
+  // instance). For now, we will solve this problem by having an "unitialized" thread; these are the ones that show
+  // up before their wait status of their clone parent has been seen. This should work.
+  std::unordered_map<Tid, std::shared_ptr<TaskInfo>> mUnInitializedThreads{};
 };

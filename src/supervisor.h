@@ -11,6 +11,7 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
+#include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
 #include "task.h"
@@ -345,6 +346,7 @@ public:
   tc::ProcessedStopEvent HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
   tc::ProcessedStopEvent HandleProcessExit(const ProcessExited &evt) noexcept;
   tc::ProcessedStopEvent HandleFork(const ForkEvent &evt) noexcept;
+  tc::ProcessedStopEvent HandleClone(const Clone& evt) noexcept;
 
   ui::dap::DebugAdapterClient *GetDebugAdapterProtocolClient() const noexcept;
 

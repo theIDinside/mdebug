@@ -40,7 +40,10 @@ struct TaskRegisters
   bool rip_dirty : 1 {true};
   bool cache_dirty : 1 {true};
 
+  TaskRegisters() noexcept = default;
   TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo);
+  TaskRegisters(TaskRegisters&&) noexcept = default;
+  TaskRegisters& operator=(TaskRegisters&&) noexcept = default;
 
   union
   {
@@ -87,14 +90,16 @@ private:
   std::vector<u32> variableReferences{};
   std::unordered_map<u32, SharedPtr<sym::Value>> valobj_cache{};
 
+  // Unititialized thread constructor
+  TaskInfo(pid_t newTaskTid) noexcept;
 public:
   std::optional<LocationStatus> loc_stat;
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
-  TaskInfo(TraceeController *supervisor, pid_t tid, bool user_stopped, TargetFormat format,
-           ArchType arch) noexcept;
   TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
+
+
   TaskInfo(TaskInfo &&o) noexcept = default;
   TaskInfo &operator=(TaskInfo &&) noexcept = default;
   // Delete copy constructors. These are unique values.
@@ -107,6 +112,8 @@ public:
 
   static std::shared_ptr<TaskInfo> CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid,
                                               bool isRunning) noexcept;
+
+  static std::shared_ptr<TaskInfo> CreateUnInitializedTask(TaskWaitResult wait) noexcept;
 
   user_regs_struct *native_registers() const noexcept;
   RegisterDescription *remote_x86_registers() const noexcept;
@@ -123,7 +130,7 @@ public:
   void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
   void set_stop() noexcept;
   void set_running(tc::RunType type) noexcept;
-  void initialize() noexcept;
+  void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
   bool can_continue() noexcept;
   void set_dirty() noexcept;
   void set_updated() noexcept;

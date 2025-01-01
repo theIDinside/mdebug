@@ -369,9 +369,13 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
     DBGLOG(core, "[fork]: new process after fork {}", new_child);
     return CoreEvent::ForkEvent_({tc.TaskLeaderTid(), info.tid, 5}, new_child, {});
   }
-  case WaitStatusKind::VForked:
-    TODO("WaitStatusKind::VForked");
-    break;
+  case WaitStatusKind::VForked: {
+    Tid new_child = 0;
+    auto result = ptrace(PTRACE_GETEVENTMSG, info.tid, nullptr, &new_child);
+    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    DBGLOG(core, "[vfork]: new process after fork {}", new_child);
+    return CoreEvent::VForkEvent_({tc.TaskLeaderTid(), info.tid, 5}, new_child, {});
+  }
   case WaitStatusKind::VForkDone:
     TODO("WaitStatusKind::VForkDone");
     break;

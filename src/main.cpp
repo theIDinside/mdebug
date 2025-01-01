@@ -1,6 +1,5 @@
 /** COPYRIGHT TEMPLATE */
 #include "./utils/logger.h"
-#include "common.h"
 #include "event_queue.h"
 #include "interface/dap/interface.h"
 #include "mdb_config.h"
@@ -106,7 +105,7 @@ main(int argc, const char **argv)
     const auto evt = poll_event();
     switch (evt.type) {
     case EventType::WaitStatus: {
-      if (const auto dbg_evt = tracer.process_waitevent_to_core(evt.wait.process_group, evt.wait.wait); dbg_evt) {
+      if (const auto dbg_evt = tracer.ConvertWaitEvent(evt.wait.wait); dbg_evt) {
         tracer.handle_core_event(dbg_evt);
       }
     } break;
