@@ -638,6 +638,7 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
       }
       std::vector<std::shared_ptr<BreakpointLocation>> newLocations;
       if (CheckBreakpointLocationsForSymbolFile(*symbol_file, *user, newLocations)) {
+        newLocations.back()->add_user(GetInterface(), *user);
         user->update_location(std::move(newLocations.back()));
         mUserBreakpoints.add_bp_location(*user);
         mDebugAdapterClient->post_event(new ui::dap::BreakpointEvent{"changed", {}, user.get()});
@@ -646,6 +647,7 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
         for (auto &&loc : newLocations) {
           auto newUser = user->CloneBreakpoint(mUserBreakpoints, *this, loc);
           mDebugAdapterClient->post_event(new ui::dap::BreakpointEvent{"new", {}, newUser.get()});
+          ASSERT(!loc->loc_users().empty(), "location has no user!");
         }
         newLocations.clear();
       }

@@ -244,8 +244,8 @@ StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) 
       proceed_action->Proceed();
     }
   } else {
-    DBGLOG(core, "[action]: {} will resume (should_resume={}) => {}", info.tid, stop.should_resume,
-           stop.should_resume && info.can_continue());
+    DBGLOG(core, "[action]: {} will resume (should_resume={}) => {} (pc={})", info.tid, stop.should_resume,
+           stop.should_resume && info.can_continue(), info.GetRegisterCache().GetPc());
     const auto kind =
       stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
     bool resumed = false;

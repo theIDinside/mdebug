@@ -321,6 +321,7 @@ Tracer::process_core_event(TraceeController &tc, const TraceEvent *evt) noexcept
         auto bp_loc = tc.GetUserBreakpoints().location_at(bp_addy);
         ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
+        ASSERT(!bp_loc->loc_users().empty(), "[task={}]: A breakpoint location with no user is a rogue/leaked breakpoint at 0x{:x}", t->tid, bp_addy);
         bool should_resume = true;
         for (const auto user_id : users) {
           auto user = tc.GetUserBreakpoints().get_user(user_id);

@@ -370,6 +370,7 @@ Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController
       .tid = tid, .id = breakpointStorage.new_id(), .loc_or_err = std::move(bp), .times_to_hit = {}, .tc = tc},
     kind, stop_only, std::move(clonedStopCondition), stop_all_threads_when_hit, std::make_unique<UserBpSpec>(*bp_spec));
   breakpointStorage.add_user(breakpoint);
+  ASSERT(!breakpoint->bp_location()->loc_users().empty(), "Breakpoint location should have user now!");
   return breakpoint;
 }
 
