@@ -18,7 +18,7 @@ class AbbreviationInfo;
  * This data is not required in Dwarf 5, since the required data is "inlined" into the line number program header,
  * thankfully.
  */
-std::tuple<u64, const char *> PrepareCompileUnitDwarf4(UnitData *compilationUnit, const DieMetaData &unitDie);
+std::tuple<u64, const char *> PrepareCompileUnitPreDwarf5(UnitData *compilationUnit, const DieMetaData &unitDie);
 
 class IndexedDieReference;
 
