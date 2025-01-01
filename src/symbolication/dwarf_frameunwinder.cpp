@@ -545,9 +545,6 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
       auto cie_idx = cies[current_offset - cieId.mId];
       auto &cie = unwinder_db->mElfEhCies[cie_idx];
       auto initial_loc = reader.read_value<i32>();
-      if (initial_loc > 0) {
-        DBGLOG(core, "[eh]: expected initial loc to be < 0, but was 0x{:x}", initial_loc);
-      }
       AddrPtr begin = (ehFrameSection->address + reader.bytes_read() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.read_value<u32>();
       u8 aug_data_length = 0u;
@@ -636,8 +633,6 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
       auto ins = reader.get_span(bytes_remaining);
       ASSERT(reader.bytes_read() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
              reader.bytes_read() - current_offset, entry_length);
-      DBGLOG(core, "Unwind Info for {} .. {}; CIE instruction count {}; FDE instruction count: {}", begin, end,
-             cie.mInstructionByteStream.size(), ins.size());
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinderDb->mDwarfUnwindInfos.push_back(UnwindInfo{

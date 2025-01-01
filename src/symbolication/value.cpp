@@ -287,10 +287,13 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
     ReadInLocationList(symbol, tc.GetDebugAdapterProtocolClient()->GetCommandArenaAllocator(),
                        *frame.GetSymbolFile()->GetObjectFile()->GetElf()->debug_loclist);
   }
-  auto interp =
-    ExprByteCodeInterpreter{frame.FrameLevel(), tc, *frame.mTask,
-                            symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc())),
-                            fnSymbol->GetFrameBaseDwarfExpression()};
+  auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
+  if (dwarfExpression.empty()) {
+    return std::make_shared<Value>(symbol.mName, symbol, 0, nullptr);
+  }
+  auto interp = ExprByteCodeInterpreter{frame.FrameLevel(), tc, *frame.mTask, dwarfExpression,
+                                        fnSymbol->GetFrameBaseDwarfExpression()};
+
   const auto address = interp.Run();
   if (lazy) {
     auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);

@@ -272,12 +272,12 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
 TaskExecuteResponse
 PtraceCommander::Disconnect(bool kill_target) noexcept
 {
-  if (kill_target) {
+  if (kill_target && !GetSupervisor()->IsExited()) {
     const auto result = tgkill(process_id, process_id, SIGKILL);
     if (result == -1) {
       return TaskExecuteResponse::Error(errno);
     }
-  } else {
+  } else if(!GetSupervisor()->IsExited()) {
     const auto ptrace_result = ptrace(PTRACE_DETACH, process_id, nullptr, nullptr);
     if (ptrace_result == -1) {
       return TaskExecuteResponse::Error(errno);

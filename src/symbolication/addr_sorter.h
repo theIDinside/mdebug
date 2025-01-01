@@ -11,7 +11,7 @@ concept Addressable = requires(AddressContainingType t) {
   // clang-format on
 };
 
-template <Addressable T, bool ByDecreasingEnd> class AddressableSorter
+template <Addressable T, bool ByDecreasingEnd=false> class AddressableSorter
 {
 public:
   constexpr bool

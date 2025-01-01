@@ -40,12 +40,6 @@ FunctionSymbol::EndPc() const noexcept
   return pc_end_exclusive;
 }
 
-const CompilationUnit *
-FunctionSymbol::GetCompilationUnit() const noexcept
-{
-  return mDeclaringCompilationUnit;
-}
-
 CompilationUnit *
 FunctionSymbol::GetCompilationUnit() noexcept
 {

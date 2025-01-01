@@ -372,7 +372,7 @@ struct RequiredUserParameters
 
 class UserBreakpoint
 {
-private:
+protected:
   bool enabled_by_user;
   std::shared_ptr<BreakpointLocation> bp;
   u32 on_hit_count{0};
@@ -414,9 +414,10 @@ public:
   std::optional<u32> column() const noexcept;
   std::optional<std::string_view> source_file() const noexcept;
   std::optional<std::string> error_message() const noexcept;
-  virtual UserBpSpec *user_spec() const noexcept;
   void update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept;
 
+  virtual UserBpSpec *user_spec() const noexcept;
+  virtual std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints& breakpointStorage, TraceeController& tc, std::shared_ptr<BreakpointLocation> bp) noexcept;
   virtual bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept = 0;
 
   template <typename UserBreakpoint, typename... Args>
@@ -425,6 +426,7 @@ public:
   {
     return std::make_shared<UserBreakpoint>(std::move(param), std::move(args)...);
   }
+
 };
 
 class Breakpoint : public UserBreakpoint
@@ -441,6 +443,7 @@ public:
   ~Breakpoint() noexcept override = default;
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept override;
   UserBpSpec *user_spec() const noexcept override;
+  std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints& breakpointStorage, TraceeController& tc, std::shared_ptr<BreakpointLocation> bp) noexcept override;
 };
 
 class TemporaryBreakpoint : public Breakpoint
@@ -542,6 +545,16 @@ public:
     return user;
   }
 
-private:
+  template <typename BreakpointT, typename... UserBpArgs>
+  void
+  CreateAndAddUserBreakpoint(TraceeController &tc, utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> &&loc_or_err,
+                  Tid tid, UserBpArgs &&...args)
+  {
+    auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
+      RequiredUserParameters{
+        .tid = tid, .id = new_id(), .loc_or_err = std::move(loc_or_err), .times_to_hit = {}, .tc = tc},
+      args...);
+    add_user(user);
+  }
   u16 new_id() noexcept;
 };

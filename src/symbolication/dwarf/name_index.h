@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/immutable.h"
 #include <common.h>
 #include <optional>
 #include <string_view>
@@ -6,6 +7,7 @@
 #include <utils/indexing.h>
 
 class ObjectFile;
+class TypeStorage;
 namespace sym::dw {
 
 class UnitData;
@@ -51,6 +53,7 @@ class NameIndex
 {
 public:
   using NameDieTuple = std::tuple<const char*, u64, UnitData *>;
+  using NameTypeDieTuple = std::tuple<const char*, u64, UnitData *, u64>;
   struct FindResult
   {
     DieNameReference *dies;
@@ -72,7 +75,7 @@ public:
   std::optional<std::span<const DieNameReference>> search(std::string_view name) const noexcept;
   FindResult get_dies(std::string_view name) noexcept;
   void merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
-  void merge_types(ObjectFile *objfile, const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
+  void merge_types(NonNullPtr<TypeStorage> objfile, const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept;
 
 private:
   void add_name(const char* name, u64 die_index, UnitData *cu) noexcept;

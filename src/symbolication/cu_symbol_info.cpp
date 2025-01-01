@@ -6,15 +6,302 @@
 #include "fnsymbol.h"
 #include "objfile.h"
 #include "symbolication/dwarf/die_ref.h"
+#include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_defs.h"
+#include "utils/immutable.h"
 #include "utils/scope_defer.h"
 #include <array>
 #include <chrono>
 #include <list>
 #include <memory_resource>
+#include <set>
 #include <utils/filter.h>
 
 namespace sym {
+
+class SourceCodeFileLNPResolver
+{
+public:
+  SourceCodeFileLNPResolver(CompilationUnit *compilationUnit, dw::LNPHeader *header,
+                            std::vector<dw::LineTableEntry> &table, std::vector<AddressRange> &sequences) noexcept
+      : mUnit(compilationUnit), mLineNumberProgramHeader{header},
+        mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()), mTable(table),
+        mSequences(sequences), mIsStatement(header->default_is_stmt)
+  {
+  }
+
+  std::vector<std::vector<std::pair<u32, u32>>>
+  CreateSubFileMappings() const noexcept
+  {
+    std::vector<std::vector<std::pair<u32, u32>>> result;
+    result.reserve(mLineNumberProgramHeader->mFileEntries.size() + 1);
+    result.resize(mLineNumberProgramHeader->mFileEntries.size() + 1);
+
+    auto current_file = 1;
+    auto currentIndex = 0;
+
+    result[current_file].push_back({0, 0});
+
+    for (const auto &lte : mTable) {
+      if (lte.file != current_file) {
+        result[current_file].back().second = currentIndex;
+        if (result[current_file].back().first == result[current_file].back().second) {
+          result[current_file].pop_back();
+        }
+        current_file = lte.file;
+        result[current_file].emplace_back(currentIndex, currentIndex);
+      }
+      ++currentIndex;
+    }
+    // finish the last entry being processed.
+    result[current_file].back().second = currentIndex;
+
+    return result;
+  }
+
+  constexpr bool
+  sequence_ended() const noexcept
+  {
+    return mSequenceEnded;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  StampEntry() noexcept
+  {
+    // usually lines with value = 0, probably can be given the same value as the previous entry into the table
+    // but why even bother? It can't be recorded with 0, because it produces weird behaviors.
+    if (ShouldRecord() && (mLine != 0 || mSequenceEnded)) {
+      mTable.push_back(dw::LineTableEntry{.pc = mAddress,
+                                          .line = mLine,
+                                          .column = mColumn,
+                                          .file = static_cast<u16>(mFile),
+                                          .is_stmt = mIsStatement,
+                                          .prologue_end = mPrologueEnd,
+                                          .epilogue_begin = mEpilogueBegin,
+                                          .IsEndOfSequence = (mSequenceEnded || (mLine == 0))});
+    }
+    mDiscriminator = 0;
+    mBasicBlock = false;
+    mPrologueEnd = false;
+    mEpilogueBegin = false;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  advance_pc(u64 adjust_value) noexcept
+  {
+    const auto address_adjust =
+      ((mOpIndex + adjust_value) / mLineNumberProgramHeader->max_ops) * mLineNumberProgramHeader->min_len;
+    mAddress += address_adjust;
+    mOpIndex = ((mOpIndex + adjust_value) % mLineNumberProgramHeader->max_ops);
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  advance_line(i64 value) noexcept
+  {
+    mLine += value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_file(u64 value) noexcept
+  {
+    mFile = value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_column(u64 value) noexcept
+  {
+    mColumn = value;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  negate_stmt() noexcept
+  {
+    mIsStatement = !mIsStatement;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  set_basic_block() noexcept
+  {
+    mBasicBlock = true;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  const_add_pc() noexcept
+  {
+    special_opindex_advance(255);
+  }
+
+  // DWARF V4 Spec page 120:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  advance_fixed_pc(u64 advance) noexcept
+  {
+    mAddress += advance;
+    mOpIndex = 0;
+  }
+
+  // DWARF V4 Spec page 120:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=134
+  constexpr void
+  set_prologue_end() noexcept
+  {
+    mPrologueEnd = true;
+  }
+
+  // DWARF V4 Spec page 121:
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=135
+  constexpr void
+  set_epilogue_begin() noexcept
+  {
+    mEpilogueBegin = true;
+  }
+
+  constexpr void
+  set_isa(u64 isa) noexcept
+  {
+    this->mISA = isa;
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=130
+  constexpr void
+  execute_special_opcode(u8 opcode) noexcept
+  {
+    special_opindex_advance(opcode);
+    const auto line_inc = mLineNumberProgramHeader->line_base + ((opcode - mLineNumberProgramHeader->opcode_base) %
+                                                                 mLineNumberProgramHeader->line_range);
+    mLine += line_inc;
+    StampEntry();
+  }
+
+  // https://dwarfstd.org/doc/DWARF4.pdf#page=133
+  constexpr void
+  SetSequenceEnded() noexcept
+  {
+    RecordSequence();
+    StampEntry();
+    // When a sequence ends, state is reset
+    mAddress = {0};
+    mLine = {1};
+    mColumn = {0};
+    mOpIndex = {0};
+    mFile = {1};
+    mIsStatement = mLineNumberProgramHeader->default_is_stmt;
+    mBasicBlock = {false};
+    mPrologueEnd = {false};
+    mEpilogueBegin = {false};
+    mSequenceEnded = {false};
+    mISA = {0};
+    mDiscriminator = {0};
+  }
+
+  // Records the [begin, end] addressess of the contigous line table entries that we just parsed
+  // This is used to be able to search if a SourceCodeFile contains any specific address, and the reason for that
+  // is a SourceCodeFile (say foo.h) may contain multiple sequences of line table entries, but where the sequences
+  // may be far apart therefore, setting a low_pc, high_pc for that SourceCodeFile is misleading; as it may not
+  // actually contain a PC between those two addresses. This is where sequences come in, because then we can do a
+  // quick first search on [low,high] and then search the sequence spaces, to actually see if it exists there.
+  void
+  RecordSequence() noexcept
+  {
+    mSequenceEnded = true;
+    mCurrentSequence.high = mAddress;
+    if (ShouldRecord()) {
+      mSequences.push_back(mCurrentSequence);
+    }
+  }
+
+  constexpr void
+  SetAddress(u64 addr) noexcept
+  {
+    if (mSequenceEnded) {
+      mSequenceEnded = false;
+      mCurrentSequence.low = addr;
+    }
+    mAddress = addr;
+    mOpIndex = 0;
+  }
+
+  constexpr void
+  define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
+  {
+    mLineNumberProgramHeader->mFileEntries.push_back(
+      dw::FileEntry{filename, dir_index, file_size, {}, last_modified});
+  }
+
+  constexpr void
+  set_discriminator(u64 value) noexcept
+  {
+    mDiscriminator = value;
+  }
+
+private:
+  constexpr void
+  special_opindex_advance(u8 opcode)
+  {
+    const auto advance = op_advance(opcode);
+    const auto new_address =
+      mAddress + mLineNumberProgramHeader->min_len * ((mOpIndex + advance) / mLineNumberProgramHeader->max_ops);
+    const auto new_op_index = (mOpIndex + advance) % mLineNumberProgramHeader->max_ops;
+    mAddress = new_address;
+    mOpIndex = new_op_index;
+  }
+
+  constexpr u64
+  op_advance(u8 opcode) const noexcept
+  {
+    const auto adjusted_op = opcode - mLineNumberProgramHeader->opcode_base;
+    const auto advance = adjusted_op / mLineNumberProgramHeader->line_range;
+    return advance;
+  }
+
+  bool
+  ShouldRecord() const noexcept
+  {
+    return AddressInsideVirtualMemoryMappingForObject();
+  }
+
+  /// Line Number Program data, unfortunately, very sadly, very... much the f****ry of dwarves, can contain garbled
+  /// garbage data In the case of a file template.h, that's included in different files, it may produce LNP data
+  /// for two different compilation units but may in the case of one of them, produce address values for the
+  /// entries in ranges 0 ... some other low address. This is not the fault of DWARF to be honest though,
+  /// apparently it has something to do with the Linker garbage collecting sections that it's removed (because it's
+  /// duplicate, for instance). Unfortunately, the DWARF data remains behind, but with garbage data. I wonder if a
+  /// bug can be filed here, or if this really is intended behavior? Anyway; we check if the address lands within
+  /// the (unrelocated) executable address of this object file, if it's not, we discard it.
+  constexpr bool
+  AddressInsideVirtualMemoryMappingForObject() const noexcept
+  {
+    return mCurrentObjectFileAddressRange.Contains(mAddress);
+  }
+
+  CompilationUnit *mUnit;
+  dw::LNPHeader *mLineNumberProgramHeader;
+  AddressRange mCurrentObjectFileAddressRange;
+  std::vector<dw::LineTableEntry> &mTable;
+  std::vector<AddressRange> &mSequences;
+  // State machine register
+  u64 mAddress{0};
+  u32 mLine{1};
+  u32 mColumn{0};
+  u16 mOpIndex{0};
+  u32 mFile{1};
+  bool mIsStatement;
+  bool mBasicBlock{false};
+  bool mSequenceEnded{false};
+  bool mPrologueEnd{false};
+  bool mEpilogueBegin{false};
+  u8 mISA{0};
+  u32 mDiscriminator{0};
+  AddressRange mCurrentSequence;
+};
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(dw::UnitData *data) noexcept
     : unit_data(data), fns(), imported_units()
@@ -38,16 +325,154 @@ PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&r
   return *this;
 }
 
-CompilationUnit::CompilationUnit(dw::UnitData *cu_data) noexcept
-    : unit_data(cu_data), pc_start(nullptr), pc_end_exclusive(nullptr), line_table(), cu_name("unknown"), fns()
+CompilationUnit::CompilationUnit(dw::UnitData *unitData) noexcept
+    : mUnitData(unitData), mCompilationUnitName("unknown_cu_name")
 {
 }
 
 void
-CompilationUnit::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
+CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
-  pc_start = lowest;
-  pc_end_exclusive = end_exclusive;
+  mPcStart = lowest;
+  mPcEndExclusive = end_exclusive;
+}
+
+bool
+CompilationUnit::LineTableComputed() noexcept
+{
+  return computed;
+}
+
+std::span<const dw::LineTableEntry>
+CompilationUnit::GetLineTable() const noexcept
+{
+  return mLineTable;
+}
+
+void
+CompilationUnit::ComputeLineTable() noexcept
+{
+  std::lock_guard lock(m);
+  if (LineTableComputed()) {
+    return;
+  }
+
+  std::vector<dw::LineTableEntry> unique_ltes{};
+
+  DBGLOG(dwarf, "[lnp]: computing lnp at 0x{:x}", mLineNumberProgram->sec_offset);
+  using OpCode = LineNumberProgramOpCode;
+  std::vector<AddressRange> sequences;
+  DwarfBinaryReader reader{mUnitData->GetObjectFile()->GetElf(), mLineNumberProgram->data,
+                           static_cast<u64>(mLineNumberProgram->data_end - mLineNumberProgram->data)};
+
+  SourceCodeFileLNPResolver state{this, mLineNumberProgram, unique_ltes, sequences};
+  while (reader.has_more()) {
+    const auto opcode = reader.read_value<OpCode>();
+    if (const auto spec_op = std::to_underlying(opcode); spec_op >= mLineNumberProgram->opcode_base) {
+      state.execute_special_opcode(spec_op);
+      continue;
+    }
+    if (std::to_underlying(opcode) == 0) {
+      // Extended Op Codes
+      const auto len = reader.read_uleb128<u64>();
+      const auto end = reader.current_ptr() + len;
+      auto ext_op = reader.read_value<LineNumberProgramExtendedOpCode>();
+      switch (ext_op) {
+      case LineNumberProgramExtendedOpCode::DW_LNE_end_sequence:
+        state.SetSequenceEnded();
+        break;
+      case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
+        if (mLineNumberProgram->addr_size == 4) {
+          const auto addr = reader.read_value<u32>();
+          state.SetAddress(addr);
+        } else {
+          const auto addr = reader.read_value<u64>();
+          state.SetAddress(addr);
+        }
+        break;
+      case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
+        if (mLineNumberProgram->version == DwarfVersion::D4) {
+          // https://dwarfstd.org/doc/DWARF4.pdf#page=136
+          const auto filename = reader.read_string();
+          const auto dir_index = reader.read_uleb128<u64>();
+          const auto last_modified = reader.read_uleb128<u64>();
+          const auto file_size = reader.read_uleb128<u64>();
+          state.define_file(filename, dir_index, last_modified, file_size);
+        } else {
+          PANIC(fmt::format("DWARF V5 line tables not yet implemented"));
+        }
+        break;
+      }
+      case LineNumberProgramExtendedOpCode::DW_LNE_set_discriminator: {
+        state.set_discriminator(reader.read_uleb128<u64>());
+        break;
+      }
+      default:
+        // Vendor extensions
+        while (reader.current_ptr() < end) {
+          reader.read_value<u8>();
+        }
+        break;
+      }
+    }
+    switch (opcode) {
+    case OpCode::DW_LNS_copy:
+      state.StampEntry();
+      break;
+    case OpCode::DW_LNS_advance_pc:
+      state.advance_pc(reader.read_uleb128<u64>());
+      break;
+    case OpCode::DW_LNS_advance_line:
+      state.advance_line(reader.read_leb128<i64>());
+      break;
+    case OpCode::DW_LNS_set_file:
+      state.set_file(reader.read_uleb128<u64>());
+      break;
+    case OpCode::DW_LNS_set_column:
+      state.set_column(reader.read_uleb128<u64>());
+      break;
+    case OpCode::DW_LNS_negate_stmt:
+      state.negate_stmt();
+      break;
+    case OpCode::DW_LNS_set_basic_block:
+      state.set_basic_block();
+      break;
+    case OpCode::DW_LNS_const_add_pc:
+      state.const_add_pc();
+      break;
+    case OpCode::DW_LNS_fixed_advance_pc:
+      state.advance_fixed_pc(reader.read_value<u16>());
+      break;
+    case OpCode::DW_LNS_set_prologue_end:
+      state.set_prologue_end();
+      break;
+    case OpCode::DW_LNS_set_epilogue_begin:
+      state.set_epilogue_begin();
+      break;
+    case OpCode::DW_LNS_set_isa:
+      state.set_isa(reader.read_value<u64>());
+      break;
+    }
+  }
+
+  mLineTable.reserve(unique_ltes.size());
+
+  std::sort(std::begin(unique_ltes), std::end(unique_ltes), [](auto &a, auto &b) { return a.pc < b.pc; });
+
+  std::ranges::copy(unique_ltes, std::back_inserter(mLineTable));
+  ASSERT(std::ranges::is_sorted(mLineTable, [](auto &a, auto &b) { return a.pc < b.pc; }),
+         "Line Table was not sorted by Program Counter!");
+  if (mLineTable.size() > 2) {
+    mPcStart = std::min(mPcStart, mLineTable.front().pc);
+    mPcEndExclusive = std::max(mPcEndExclusive, mLineTable.back().pc);
+  }
+  computed = true;
+
+  const auto sourceCodeTableMapping = state.CreateSubFileMappings();
+
+  for (auto i = 0; i < sourceCodeTableMapping.size() - 1; ++i) {
+    mSourceCodeFiles[i]->SetLineTableRanges(sourceCodeTableMapping[i + 1]);
+  }
 }
 
 // the line table consists of a list of directory entries and file entries
@@ -57,76 +482,135 @@ CompilationUnit::set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noe
 // by storing them by name in `ObjectFile` in a map and then add the references to them
 // to the newly minted compilation unit handle (process_source_code_files)
 void
-CompilationUnit::ProcessSourceCodeFiles(u64 table) noexcept
+CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
 {
-  line_table = table;
-  auto obj = unit_data->GetObjectFile();
-  auto header = unit_data->GetObjectFile()->GetLineNumberProgramHeader(line_table);
-  if (!header) {
-    return;
-  }
-  DBGLOG(dwarf, "retrieving files from line number program @ {} for cu=0x{:x} '{}'", header->sec_offset,
-         unit_data->SectionOffset(), cu_name);
+  auto objectFile = mUnitData->GetObjectFile();
+  mLineNumberProgram = header;
+  header->SetCompilationUnitBuildDirectory(NonNull(*mUnitData->GetBuildDirectory()));
 
-  for (const auto &[fullPath, v] : header->FileEntries()) {
-    auto source_code_file = obj->GetSourceCodeFile(fullPath);
-    add_source_file(std::move(source_code_file));
+  DBGLOG(dwarf, "read files from lnp=0x{}, comp unit=0x{:x} '{}'", mLineNumberProgram->sec_offset,
+         mUnitData->SectionOffset(), mCompilationUnitName);
+
+  for (const auto &[fullPath, v] : mLineNumberProgram->FileEntries()) {
+    ASSERT(v > 0,
+           "We don't want to duplicate add the compilation unit source code file with the source code file.");
+    mSourceCodeFiles.push_back(dw::SourceCodeFile::Create(this, objectFile->GetElf(), fullPath, v));
   }
+
+  std::sort(mSourceCodeFiles.begin(), mSourceCodeFiles.end(),
+            [](auto &a, auto &b) { return a->GetFileIndex() < b->GetFileIndex(); });
 }
 
-void
-CompilationUnit::add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept
+std::span<std::shared_ptr<dw::SourceCodeFile>>
+CompilationUnit::sources() noexcept
 {
-  source_code_files.emplace_back(std::move(src_file));
-}
-
-std::span<const std::shared_ptr<dw::SourceCodeFile>>
-CompilationUnit::sources() const noexcept
-{
-  return source_code_files;
+  return mSourceCodeFiles;
 }
 
 void
 CompilationUnit::set_name(std::string_view name) noexcept
 {
-  cu_name = name;
+  mCompilationUnitName = name;
 }
 
 bool
-CompilationUnit::known_address_boundary() const noexcept
+CompilationUnit::HasKnownAddressBoundary() const noexcept
 {
-  return pc_start != nullptr && pc_end_exclusive != nullptr;
+  return mPcStart != nullptr && mPcEndExclusive != nullptr;
+}
+
+std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
+CompilationUnit::GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept
+{
+  if (!LineTableComputed()) {
+    ComputeLineTable();
+  }
+
+  if (unrelocatedAddress < mLineTable.front().pc || mLineTable.back().pc < unrelocatedAddress) {
+    return {nullptr, nullptr};
+  }
+
+  auto it = std::lower_bound(std::cbegin(mLineTable), std::cend(mLineTable), unrelocatedAddress,
+                             [](const dw::LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+
+  if (it == std::cend(mLineTable)) {
+    return std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>{nullptr, nullptr};
+  }
+
+  if (it->pc == unrelocatedAddress) {
+    return std::pair{GetFileByLineProgramIndex(it->file), it.base()};
+  } else {
+    --it;
+    // clang-format off
+    // Means we're at an instruction where we have no source information. On linux, we seemingly produce interrupt instructions, as padding
+    // Look at this output from one of the test subjects: stackframes at the function static void bar(int a, int b):
+    // 201d93:       c3                      ret      return instruction in the function
+    // 201d94:       cc                      int3     in the LNP, this is the last entry, with end_sequence = true
+    // 201d95:       cc                      int3     these are not represented in the Line Number Program data
+    // 201d96:       cc                      int3     but go on until a 16-byte boundary.
+    // clang-format on
+
+    // We found no address that is spanned by 2 consecutive LTE's
+    if (it->IsEndOfSequence) {
+      return {GetFileByLineProgramIndex(it->file), nullptr};
+    }
+    ASSERT(it->pc <= unrelocatedAddress && (it + 1)->pc > unrelocatedAddress && !it->IsEndOfSequence,
+           "Line table is not ordered by PC - table in bad state (end of sequence={})", it->IsEndOfSequence);
+
+    return std::pair{GetFileByLineProgramIndex(it->file), it.base()};
+  }
+}
+
+dw::SourceCodeFile *
+CompilationUnit::GetFileByLineProgramIndex(u32 index) noexcept
+{
+  // TODO(simon): do some form of O(1) lookup instead. But there's trickiness here. I don't want it to be
+  // complicated but
+  //  in DWARF5, the line number program header contains the compilation unit name as well as the source code name,
+  //  so foo.cpp, will be 0 and 1 (or some other number) to solve that I just said fuck it, put them in a vector
+  //  and walk the list for now, but it is ugly. I've seen compilation units in libxul.so that has up towards 800
+  //  files, but even that should not be that to walk, really, even if it can be done much much faster. It's not a
+  //  bottle neck right now though.
+
+  auto f = std::lower_bound(mSourceCodeFiles.begin(), mSourceCodeFiles.end(), index,
+                            [](const auto &a, u32 index) -> bool { return a->GetFileIndex() < index; });
+
+  if (f == std::end(mSourceCodeFiles) || (*f)->GetFileIndex() != index) {
+    return nullptr;
+  }
+
+  return (*f).get();
 }
 
 AddrPtr
 CompilationUnit::StartPc() const noexcept
 {
-  return pc_start;
+  return mPcStart;
 }
 
 AddrPtr
 CompilationUnit::EndPc() const noexcept
 {
-  return pc_end_exclusive;
+  return mPcEndExclusive;
 }
 
 std::string_view
 CompilationUnit::name() const noexcept
 {
-  return cu_name;
+  return mCompilationUnitName;
 }
 
 bool
 CompilationUnit::function_symbols_resolved() const noexcept
 {
-  return !fns.empty();
+  return !mFunctionSymbols.empty();
 }
 
 sym::FunctionSymbol *
 CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
 {
   if (!function_symbols_resolved()) {
-    ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = unit_data]() {
+    ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData]() {
       auto us =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
           .count();
@@ -135,9 +619,9 @@ CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
     PrepareFunctionSymbols();
   }
 
-  auto iter = std::find_if(fns.begin(), fns.end(),
+  auto iter = std::find_if(mFunctionSymbols.begin(), mFunctionSymbols.end(),
                            [pc](sym::FunctionSymbol &fn) { return fn.StartPc() <= pc && pc < fn.EndPc(); });
-  if (iter != std::end(fns)) {
+  if (iter != std::end(mFunctionSymbols)) {
     return iter.base();
   }
   return nullptr;
@@ -146,7 +630,7 @@ CompilationUnit::get_fn_by_pc(AddrPtr pc) noexcept
 dw::UnitData *
 CompilationUnit::get_dwarf_unit() const noexcept
 {
-  return unit_data;
+  return mUnitData;
 }
 
 std::optional<Path>
@@ -154,7 +638,7 @@ CompilationUnit::get_lnp_file(u32 index) noexcept
 {
   // TODO(simon): we really should store a pointer to the line number program table (or header) in either UnitData
   // or SourceFileSymbolInfo directly.
-  return unit_data->GetObjectFile()->GetLineNumberProgramHeader(line_table)->file(index);
+  return mLineNumberProgram->file(index);
 }
 
 using DieOffset = u64;
@@ -292,9 +776,9 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
 void
 CompilationUnit::PrepareFunctionSymbols() noexcept
 {
-  const auto &dies = unit_data->get_dies();
+  const auto &dies = mUnitData->get_dies();
 
-  dw::UnitReader reader{unit_data};
+  dw::UnitReader reader{mUnitData};
   // For a function symbol, we want to record a DIE, from which we can reach all it's (possible) references.
   // Unfortunately DWARF doesn't seem to define a "OWNING" die. Which is... unfortunate. So we have to guess. But
   // 2-3 should be enough.
@@ -313,7 +797,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
     default:
       continue;
     }
-    const auto &abbreviation = unit_data->get_abbreviation(die.abbreviation_code);
+    const auto &abbreviation = mUnitData->get_abbreviation(die.abbreviation_code);
     // Skip declarations - we will visit them if necessary, but on their own they can't tell us anything.
     if (abbreviation.IsDeclaration || !abbreviation.IsAddressable) {
       continue;
@@ -359,7 +843,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
         const auto declaring_die_offset = value.unsigned_value();
-        if (auto die_ref = unit_data->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset); die_ref) {
+        if (auto die_ref = mUnitData->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset); die_ref) {
           die_refs.push_back(*die_ref);
         } else {
           DBGLOG(core, "Could not find die reference");
@@ -368,7 +852,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
       }
       case Attribute::DW_AT_type: {
         const auto type_id = value.unsigned_value();
-        auto obj = unit_data->GetObjectFile();
+        auto obj = mUnitData->GetObjectFile();
         const auto ref = obj->GetDebugInfoEntryReference(type_id);
         state.ret_type = obj->GetTypeStorage()->GetOrCreateNewType(ref->AsIndexed());
         break;
@@ -378,9 +862,9 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
       }
     }
 
-    state.add_maybe_origin(dw::IndexedDieReference{unit_data, unit_data->index_of(&die)});
+    state.add_maybe_origin(dw::IndexedDieReference{mUnitData, mUnitData->index_of(&die)});
     if (state.done(die_refs.empty())) {
-      fns.emplace_back(state.complete());
+      mFunctionSymbols.emplace_back(state.complete());
     } else {
       // reset e = end() at each iteration, because we might have extended the list during iteration.
       for (auto it = die_refs.begin(), e = die_refs.end(); it != e; ++it) {
@@ -392,13 +876,13 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
         }
 
         if (state.done(std::distance(++auto{it}, e) == 0)) {
-          fns.emplace_back(state.complete());
+          mFunctionSymbols.emplace_back(state.complete());
           break;
         }
       }
     }
   }
-  std::sort(fns.begin(), fns.end(), FunctionSymbol::Sorter());
+  std::sort(mFunctionSymbols.begin(), mFunctionSymbols.end(), FunctionSymbol::Sorter());
 }
 
 AddressToCompilationUnitMap::AddressToCompilationUnitMap() noexcept : mutex(), mapping() {}
@@ -415,11 +899,11 @@ AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 }
 
 void
-AddressToCompilationUnitMap::add_cus(const std::span<CompilationUnit> &cus) noexcept
+AddressToCompilationUnitMap::add_cus(std::span<CompilationUnit *> cus) noexcept
 {
   std::lock_guard lock(mutex);
   for (const auto &src_sym_info : cus) {
-    add_cu(src_sym_info.StartPc(), src_sym_info.EndPc(), src_sym_info.get_dwarf_unit());
+    add_cu(src_sym_info->StartPc(), src_sym_info->EndPc(), src_sym_info->get_dwarf_unit());
   }
 }
 

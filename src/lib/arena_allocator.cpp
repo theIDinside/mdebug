@@ -1,6 +1,5 @@
 #include "arena_allocator.h"
 #include "common.h"
-#include "tracee/util.h"
 #include <cstdlib>
 #include <memory_resource>
 #include <sys/mman.h>
@@ -36,7 +35,7 @@ ArenaAllocator::ArenaAllocator(std::size_t allocBlockSize, std::pmr::memory_reso
   mAllocatedBuffer = (u8 *)result;
 }
 
-ArenaAllocator::~ArenaAllocator() noexcept { free(mAllocatedBuffer); }
+ArenaAllocator::~ArenaAllocator() noexcept { munmap(mAllocatedBuffer, mArenaCapacity); }
 
 bool
 ArenaAllocator::ExtendAllocation(Page pageCount) noexcept
@@ -96,7 +95,9 @@ void *
 ArenaAllocator::do_allocate(std::size_t bytes, std::size_t alignment)
 {
   const std::size_t possiblyAdjustedOffset = (mAllocated + alignment - 1) & ~(alignment - 1);
-  MUST_HOLD(possiblyAdjustedOffset + bytes < mArenaCapacity, "Extending Arena Allocator size not yet implemented/supported fully. ArenaAllocator::ExtendAllocation is what needs additional work.");
+  MUST_HOLD(possiblyAdjustedOffset + bytes < mArenaCapacity,
+            "Extending Arena Allocator size not yet implemented/supported fully. ArenaAllocator::ExtendAllocation "
+            "is what needs additional work.");
   void *p = mAllocatedBuffer + possiblyAdjustedOffset;
   mAllocated = possiblyAdjustedOffset + bytes;
   return p;

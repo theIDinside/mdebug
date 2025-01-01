@@ -2,6 +2,11 @@
 #include <chrono>
 #include <future>
 #include <vector>
+#include <memory_resource>
+
+namespace alloc {
+  class ArenaAllocator;
+};
 
 void SetTaskGroupLog(bool value) noexcept;
 namespace utils {
@@ -16,7 +21,7 @@ public:
   void execute() noexcept;
 
 protected:
-  virtual void execute_task() noexcept = 0;
+  virtual void execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept = 0;
 
 private:
   bool is_group_job() const noexcept;
@@ -30,7 +35,7 @@ public:
   ~NoOp() noexcept override = default;
 
 protected:
-  void execute_task() noexcept final;
+  void execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept final;
 };
 
 using JobPtr = Task *;
@@ -56,6 +61,8 @@ public:
   std::future<void> schedule_work() noexcept;
   void task_done(Task *task) noexcept;
 
+  alloc::ArenaAllocator* GetTemporaryAllocator() const noexcept;
+
 private:
   std::chrono::high_resolution_clock::time_point start;
   std::promise<void> m_promise;
@@ -63,5 +70,6 @@ private:
   std::mutex m_task_lock;
   std::vector<Task *> m_tasks;
   std::vector<Task *> m_done_tasks;
+  std::unique_ptr<alloc::ArenaAllocator> mGroupTemporaryAllocator;
 };
 } // namespace utils

@@ -255,8 +255,9 @@ Symbol::GetDwarfExpression(AddrPtr programCounter) noexcept
     auto span = mLocation->uLocationList->Get();
     auto it = std::ranges::find_if(
       span, [programCounter](auto &r) { return r.mStart <= programCounter && programCounter <= r.mEnd; });
-    ASSERT(it != std::end(span), "Failed to find relevant location list dwarf expression!");
-    return it->mDwarfExpression;
+    if (it != std::end(span)) {
+      return it->mDwarfExpression;
+    }
   }
   }
   return {};

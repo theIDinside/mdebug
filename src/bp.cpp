@@ -161,12 +161,6 @@ UserBreakpoint::pre_destruction(tc::TraceeCommandInterface &ctrl) noexcept
   }
 }
 
-void
-UserBreakpoint::update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept
-{
-  bp = std::move(bploc);
-}
-
 std::shared_ptr<BreakpointLocation>
 UserBreakpoint::bp_location() noexcept
 {
@@ -302,9 +296,24 @@ UserBreakpoint::error_message() const noexcept
   });
 }
 
+void
+UserBreakpoint::update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept
+{
+  bp = std::move(bploc);
+}
+
+/* virtual */
 UserBpSpec *
 UserBreakpoint::user_spec() const noexcept
 {
+  return nullptr;
+}
+
+/* virtual */
+std::shared_ptr<UserBreakpoint>
+UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc, std::shared_ptr<BreakpointLocation>) noexcept
+{
+  PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
 }
 
@@ -350,6 +359,18 @@ UserBpSpec *
 Breakpoint::user_spec() const noexcept
 {
   return bp_spec.get();
+}
+
+std::shared_ptr<UserBreakpoint>
+Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc, std::shared_ptr<BreakpointLocation> bp) noexcept
+{
+  auto clonedStopCondition = stop_condition;
+  auto breakpoint = std::make_shared<Breakpoint>(
+    RequiredUserParameters{
+      .tid = tid, .id = breakpointStorage.new_id(), .loc_or_err = std::move(bp), .times_to_hit = {}, .tc = tc},
+    kind, stop_only, std::move(clonedStopCondition), stop_all_threads_when_hit, std::make_unique<UserBpSpec>(*bp_spec));
+  breakpointStorage.add_user(breakpoint);
+  return breakpoint;
 }
 
 TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind,
@@ -494,10 +515,10 @@ UserBreakpoints::add_bp_location(const UserBreakpoint &updated_bp) noexcept
 void
 UserBreakpoints::add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept
 {
-  user_breakpoints[user_bp->id] = user_bp;
   if (user_bp->verified()) {
     add_bp_location(*user_bp);
   }
+  user_breakpoints[user_bp->id] = std::move(user_bp);
 }
 
 void

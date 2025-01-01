@@ -112,7 +112,7 @@ main(int argc, const char **argv)
     case EventType::Command: {
       tracer.handle_command(evt.cmd);
     } break;
-    case EventType::DebuggerEvent: {
+    case EventType::TraceeEvent: {
       tracer.handle_core_event(evt.debugger);
     } break;
     case EventType::Initialization:

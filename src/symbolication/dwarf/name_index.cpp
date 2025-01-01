@@ -46,7 +46,7 @@ NameIndex::NameIndex(std::string_view name) noexcept
 }
 
 void
-NameIndex::add_name(const char* name, u64 die_index, UnitData *cu) noexcept
+NameIndex::add_name(const char *name, u64 die_index, UnitData *cu) noexcept
 {
   auto &elem = mapping[name];
   if (elem.is_valid()) {
@@ -86,11 +86,12 @@ NameIndex::merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_ref
 }
 
 void
-NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_die_name_references) noexcept
+NameIndex::merge_types(NonNullPtr<TypeStorage> typeStorage,
+                       const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept
 {
   std::lock_guard lock(mutex);
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
-  for (const auto &[name, idx, cu] : parsed_die_name_references) {
+  for (const auto &[name, idx, cu, hash] : parsed_die_name_references) {
     add_name(name, idx, cu);
     const auto die_ref = cu->GetDieByCacheIndex(idx);
     const auto this_die = die_ref.GetDie();
@@ -101,8 +102,9 @@ NameIndex::merge_types(ObjectFile *obj, const std::vector<NameDieTuple> &parsed_
     const auto possible_size = die_ref.read_attribute(Attribute::DW_AT_byte_size);
     ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
            cu->SectionOffset(), die_ref.GetDie()->section_offset);
-    auto type = obj->GetTypeStorage()->CreateNewType(this_die->tag, offs, IndexedDieReference{cu, idx},
-                                         possible_size->unsigned_value(), name);
+
+    auto type = typeStorage->CreateNewType(this_die->tag, offs, IndexedDieReference{cu, idx},
+                                           possible_size->unsigned_value(), name);
     if (die_ref.GetDie()->tag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{cu};
       reader.SeekDie(*die_ref.GetDie());

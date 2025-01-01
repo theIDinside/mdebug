@@ -131,6 +131,9 @@ class TraceeController
   // Whether this is the very first stop wait status we have seen
   bool mOnEntry{false};
 
+  // Whether or not a process exit has been seen for this process.
+  bool mIsExited{false};
+
   // FORK constructor
   TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
   // Constructors
@@ -144,6 +147,8 @@ public:
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
+  void TearDown(bool killProcess) noexcept;
+  bool IsExited() const noexcept;
   void ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept;
   // Called when a ("this") process forks
   std::unique_ptr<TraceeController> Fork(tc::Interface &&interface) noexcept;
@@ -214,9 +219,9 @@ public:
 
   // Get (&& ||) Create breakpoint locations
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocation(AddrPtr addr, bool attempt_src_resolve) noexcept;
+  GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocation(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
+  GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile, const sym::dw::LineTableEntry& lte) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,

@@ -11,29 +11,57 @@
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/rnglists.h"
 #include "symbolication/dwarf_defs.h"
+#include "utils/interval_map.h"
+#include "utils/scope_defer.h"
 #include <algorithm>
 #include <cstdint>
 
 namespace sym::dw {
 
 IndexingTask::IndexingTask(ObjectFile *obj, std::span<UnitData *> cus_to_index) noexcept
-    : obj(obj), cus_to_index(cus_to_index)
+    : obj(obj), cus_to_index(cus_to_index.begin(), cus_to_index.end())
 {
 }
+
 /*static*/ std::vector<IndexingTask *>
-IndexingTask::create_jobs_for(ObjectFile *obj)
+IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource* taskGroupAllocator)
 {
-  const auto cus = std::span{obj->GetAllCompileUnits()};
-  const auto work = utils::ThreadPool::calculate_job_sizes(cus);
-  std::vector<IndexingTask *> result;
-  result.reserve(work.size());
-  auto offset = 0;
-  for (const auto sz : work) {
-    result.push_back(new IndexingTask{obj, cus.subspan(offset, sz)});
-    offset += sz;
+  std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{taskGroupAllocator};
+
+  std::pmr::vector<sym::dw::UnitData *> sortedBySize{taskGroupAllocator};
+  utils::copy_to(obj->GetAllCompileUnits(), sortedBySize);
+
+  std::sort(sortedBySize.begin(), sortedBySize.end(),
+            [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
+
+  std::vector<IndexingTask *> tasks;
+  std::vector<u64> taskSize;
+
+  const auto workerCount = utils::ThreadPool::get_global_pool()->worker_count();
+  works.resize(workerCount, {});
+  tasks.reserve(workerCount);
+  taskSize.resize(workerCount, 0);
+
+  for (auto unit : sortedBySize) {
+    // Find the subgroup with the smallest current total
+    const u64 minIndex = std::distance(taskSize.begin(), std::min_element(taskSize.begin(), taskSize.end()));
+
+    // Assign the number to this subgroup
+    works[minIndex].push_back(unit);
+    taskSize[minIndex] += unit->UnitSize();
   }
 
-  return result;
+  auto acc = 0u;
+  for (auto &w : works) {
+    if (!w.empty()) {
+      acc += w.size();
+      tasks.push_back(new IndexingTask{obj, w});
+    }
+  }
+
+  ASSERT(acc == sortedBySize.size(), "Work splitting algorithm incorrect");
+
+  return tasks;
 }
 
 template <Attribute... Attrs>
@@ -96,9 +124,11 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 }
 
 void
-IndexingTask::execute_task() noexcept
+IndexingTask::execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept
 {
   using NameSet = std::vector<NameIndex::NameDieTuple>;
+  using NameTypeSet = std::vector<NameIndex::NameTypeDieTuple>;
+
   auto sz = 0;
   for (const auto unit : cus_to_index) {
     sz += unit->header().cu_size();
@@ -106,7 +136,7 @@ IndexingTask::execute_task() noexcept
 
   NameSet free_functions;
   NameSet methods;
-  NameSet types;
+  NameTypeSet types;
   NameSet global_variables;
   NameSet namespaces;
 
@@ -116,7 +146,6 @@ IndexingTask::execute_task() noexcept
   global_variables.reserve(10000);
   namespaces.reserve(1000);
 
-  std::vector<sym::CompilationUnit> initialized_cus{};
   std::vector<sym::dw::UnitData *> followed_references{};
   std::vector<sym::dw::UnitData *> type_units{};
 
@@ -134,13 +163,7 @@ IndexingTask::execute_task() noexcept
     auto start = std::chrono::high_resolution_clock::now();
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->get_dies();
-    if (dies.front().tag == DwarfTag::DW_TAG_compile_unit) {
-      sym::CompilationUnit new_cu_file = initialize_compilation_unit(comp_unit, dies.front());
-      initialized_cus.push_back(std::move(new_cu_file));
-    } else if (dies.front().tag == DwarfTag::DW_TAG_partial_unit) {
-      sym::PartialCompilationUnitSymbolInfo partial_cu_file =
-        initialize_partial_compilation_unit(comp_unit, dies.front());
-    } else if (dies.front().tag == DwarfTag::DW_TAG_type_unit) {
+    if (dies.front().tag == DwarfTag::DW_TAG_type_unit) {
       DBGLOG(core, "DWARF Unit is a type unit: 0x{:x}", comp_unit->SectionOffset());
       type_units.push_back(comp_unit);
     }
@@ -183,9 +206,17 @@ IndexingTask::execute_task() noexcept
       auto is_decl = false;
       auto is_super_scope_var = false;
       auto has_loc = false;
+      auto decl_file = 0u;
+      auto decl_line = 0u;
       reader.SeekDie(die);
       for (const auto &value : abb.attributes) {
         switch (value.name) {
+        case Attribute::DW_AT_decl_file: {
+          decl_file = read_attribute_value(reader, value, abb.implicit_consts).unsigned_value();
+        } break;
+        case Attribute::DW_AT_decl_line: {
+          decl_line = read_attribute_value(reader, value, abb.implicit_consts).unsigned_value();
+        } break;
         // register name
         case Attribute::DW_AT_name: {
           auto attr = read_attribute_value(reader, value, abb.implicit_consts);
@@ -197,9 +228,12 @@ IndexingTask::execute_task() noexcept
         } break;
         // is address-representable?
         case Attribute::DW_AT_low_pc:
+          [[fallthrough]];
         case Attribute::DW_AT_high_pc:
-        case Attribute::DW_AT_ranges:
+          [[fallthrough]];
         case Attribute::DW_AT_entry_pc:
+          [[fallthrough]];
+        case Attribute::DW_AT_ranges:
           addr_representable = true;
           reader.skip_attribute(value);
           break;
@@ -288,14 +322,14 @@ IndexingTask::execute_task() noexcept
       case DwarfTag::DW_TAG_subroutine_type:
       case DwarfTag::DW_TAG_typedef:
       case DwarfTag::DW_TAG_union_type:
-      case DwarfTag::DW_TAG_unspecified_type:
+      case DwarfTag::DW_TAG_unspecified_type: {
         if (name && !is_decl) {
-          types.push_back({name, die_index, comp_unit});
+          types.push_back({name, die_index, comp_unit, 0});
         }
         if (mangled_name && !is_decl) {
-          types.push_back({mangled_name, die_index, comp_unit});
+          types.push_back({mangled_name, die_index, comp_unit, 0});
         }
-        break;
+      } break;
       case DwarfTag::DW_TAG_inlined_subroutine: // 0x1d 0x2e
       case DwarfTag::DW_TAG_subprogram: {
         if (!addr_representable) {
@@ -339,16 +373,11 @@ IndexingTask::execute_task() noexcept
   idx->free_functions.merge(free_functions);
   idx->global_variables.merge(global_variables);
   idx->methods.merge(methods);
-  idx->types.merge_types(obj, types);
-
-  if (!initialized_cus.empty()) {
-    obj->AddInitializedCompileUnits(initialized_cus);
-  }
+  idx->types.merge_types(obj->GetTypeStorage(), types);
 
   if (!type_units.empty()) {
     obj->AddTypeUnits(type_units);
   }
-
 }
 
 static void
@@ -385,14 +414,14 @@ process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &s
       }
     }
     if (found_a_range) {
-      src.set_address_boundary(lowest, highest);
+      src.SetAddressBoundary(lowest, highest);
     }
   } else if (version == DwarfVersion::D5) {
     ASSERT(elf->debug_rnglists != nullptr,
            "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
     if (ranges_offset.form == AttributeForm::DW_FORM_sec_offset) {
       auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.unsigned_value());
-      src.set_address_boundary(addr_range.StartPc(), addr_range.EndPc());
+      src.SetAddressBoundary(addr_range.StartPc(), addr_range.EndPc());
     } else {
       auto ranges =
         sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.unsigned_value()));
@@ -402,64 +431,9 @@ process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &s
         lowpc = std::min(low, lowpc);
         highpc = std::max(high, highpc);
       }
-      src.set_address_boundary(lowpc, highpc);
+      src.SetAddressBoundary(lowpc, highpc);
     }
   }
-}
-
-sym::CompilationUnit
-IndexingTask::initialize_compilation_unit(UnitData *cu, const DieMetaData &cu_die) noexcept
-{
-  const auto &abbrs = cu->get_abbreviation(cu_die.abbreviation_code);
-  UnitReader reader{cu};
-  reader.SeekDie(cu_die);
-  sym::CompilationUnit new_cu{cu};
-
-  std::optional<AddrPtr> low;
-  std::optional<AddrPtr> high;
-
-  for (const auto &abbr : abbrs.attributes) {
-    switch (abbr.name) {
-    case Attribute::DW_AT_stmt_list: {
-      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-      const auto offset = attr.address();
-      new_cu.ProcessSourceCodeFiles(offset);
-      break;
-    }
-    case Attribute::DW_AT_name: {
-      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-      const auto name = attr.string();
-      new_cu.set_name(name);
-      break;
-    }
-    case Attribute::DW_AT_ranges: {
-      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-      process_cu_boundary(attr, new_cu);
-    } break;
-    case Attribute::DW_AT_low_pc: {
-      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-      if (!low) {
-        low = attr.address();
-      }
-    } break;
-    case Attribute::DW_AT_high_pc: {
-      const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-      high = attr.address();
-    } break;
-    case Attribute::DW_AT_import:
-      [[fallthrough]];
-    default:
-      reader.skip_attribute(abbr);
-      break;
-    }
-  }
-
-  const auto boundary_seen = (low.has_value() && high.has_value());
-  if (!new_cu.known_address_boundary() && boundary_seen) {
-    new_cu.set_address_boundary(low.value(), low.value() + high.value());
-  }
-
-  return new_cu;
 }
 
 sym::PartialCompilationUnitSymbolInfo

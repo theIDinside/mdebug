@@ -110,11 +110,11 @@ public:
   // TODO(simon): This should be removed. When multiprocess becomes a thing _all_ supervisor access must happen via
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   void config_done(ui::dap::DebugAdapterClient *client) noexcept;
-  CoreEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
+  TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
   std::shared_ptr<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
   void handle_command(ui::UICommand *cmd) noexcept;
-  void handle_core_event(const CoreEvent *evt) noexcept;
-  void handle_init_event(const CoreEvent *evt) noexcept;
+  void handle_core_event(const TraceEvent *evt) noexcept;
+  void handle_init_event(const TraceEvent *evt) noexcept;
 
   void set_ui(ui::dap::DAP *dap) noexcept;
   void kill_ui() noexcept;
@@ -129,6 +129,7 @@ public:
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
   void detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept;
 
+  void CleanUp(TraceeController* tc) noexcept;
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
   const sys::DebuggerConfiguration &getConfig() noexcept;
 
@@ -151,23 +152,23 @@ public:
   bool
   erase_target(Predicate &&fn)
   {
-    auto it = std::find_if(targets.begin(), targets.end(), std::move(fn));
-    const bool erased = it != std::end(targets);
+    auto it = std::find_if(mTracedProcesses.begin(), mTracedProcesses.end(), std::move(fn));
+    const bool erased = it != std::end(mTracedProcesses);
 #ifdef MDB_DEBUG
     DBGLOG(core, "found tracer to delete: {}", erased);
 #endif
-    targets.erase(it);
+    mTracedProcesses.erase(it);
     return erased;
   }
 
-  std::vector<std::unique_ptr<TraceeController>> targets;
+  std::vector<std::unique_ptr<TraceeController>> mTracedProcesses;
   ui::dap::DAP *dap;
 
   bool TraceExitConfigured{false};
 
 private:
   [[maybe_unused]] tc::ProcessedStopEvent process_core_event(TraceeController &tc,
-                                                             const CoreEvent *event) noexcept;
+                                                             const TraceEvent *event) noexcept;
   TraceeController *current_target{nullptr};
   u32 breakpoint_ids{0};
   VarRefKey id_counter{0};

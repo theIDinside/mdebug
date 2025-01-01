@@ -775,7 +775,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
     if (!exit_code || !target) {
       return false;
     }
-    push_debugger_event(CoreEvent::ProcessExitEvent(target.value(), target.value(), exit_code.value(), {}));
+    push_debugger_event(TraceEvent::ProcessExitEvent(target.value(), target.value(), exit_code.value(), {}));
     break;
   }
   case 'X': {
@@ -784,7 +784,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       return false;
     }
     TODO("Add Terminated event or make ProcessExit have two variants (i like this better)");
-    push_debugger_event(CoreEvent::ProcessExitEvent(target.value(), target.value(), signal.value(), {}));
+    push_debugger_event(TraceEvent::ProcessExitEvent(target.value(), target.value(), signal.value(), {}));
     break;
   }
   case 'w': {
@@ -793,7 +793,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       // If we're not non-stop, this will stop the entire process
       const auto process_needs_resuming = !remote_settings.is_non_stop;
       push_debugger_event(
-        CoreEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
+        TraceEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
       return true;
     } else {
       return false;

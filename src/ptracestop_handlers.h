@@ -9,7 +9,7 @@ class TraceeController;
 struct BpStat;
 struct TaskInfo;
 
-struct CoreEvent;
+struct TraceEvent;
 
 namespace tc {
 class TraceeCommandInterface;
@@ -87,7 +87,7 @@ private:
   int lines_stepped;
   bool mIsDone;
   bool resumed_to_resume_addr;
-  sym::Frame start_frame;
+  sym::Frame startFrame;
   sym::dw::LineTableEntry entry;
   std::shared_ptr<UserBreakpoint> resume_bp{nullptr};
 };
@@ -136,7 +136,7 @@ public:
 
   void handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &should_resume) noexcept;
 
-  CoreEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
+  TraceEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
   void set_stop_all() noexcept;
   constexpr void stop_on_clone() noexcept;
   constexpr void stop_on_exec() noexcept;
@@ -163,7 +163,7 @@ public:
 
 private:
   // native_ because it's generated from a WaitStatus event (and thus comes directly from ptrace, not a remote)
-  CoreEvent *native_core_evt_from_stopped(TaskInfo &t) noexcept;
+  TraceEvent *native_core_evt_from_stopped(TaskInfo &t) noexcept;
   std::unordered_map<Tid, ThreadProceedAction *> proceed_actions;
 };
 

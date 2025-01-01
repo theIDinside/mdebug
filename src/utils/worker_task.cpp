@@ -1,6 +1,7 @@
 #include "worker_task.h"
 #include "../common.h"
 #include "fmt/ranges.h"
+#include "lib/arena_allocator.h"
 #include "log.h"
 #include "thread_pool.h"
 #include "utils/logger.h"
@@ -24,20 +25,22 @@ Task::is_group_job() const noexcept
 void
 Task::execute() noexcept
 {
-  execute_task();
+  ASSERT(owning_group != nullptr, "Task must have owning task group to retrieve allocator");
+  execute_task(owning_group->GetTemporaryAllocator());
   if (is_group_job()) {
     owning_group->task_done(this);
   }
 }
 
 void
-NoOp::execute_task() noexcept
+NoOp::execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept
 {
 }
 
 TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name), m_task_lock(), m_done_tasks()
 {
   DBGLOG(perf, "Created task group {}", name);
+  mGroupTemporaryAllocator = alloc::ArenaAllocator::Create(alloc::Page{10000}, nullptr);
 }
 
 TaskGroup::~TaskGroup() noexcept
@@ -88,6 +91,12 @@ TaskGroup::task_done(Task *task) noexcept
     }
     m_promise.set_value();
   }
+}
+
+alloc::ArenaAllocator *
+TaskGroup::GetTemporaryAllocator() const noexcept
+{
+  return mGroupTemporaryAllocator.get();
 }
 
 } // namespace utils

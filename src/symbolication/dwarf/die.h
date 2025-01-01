@@ -140,8 +140,9 @@ public:
   bool spans_across(u64 sec_offset) const noexcept;
   u64 index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
-  const DieMetaData *GetDebugInfoEntry(u64 offset) noexcept;
 
+  const char* GetBuildDirectory() const noexcept;
+  const DieMetaData *GetDebugInfoEntry(u64 offset) noexcept;
   DieReference GetDieReferenceByOffset(u64 offset) noexcept;
   DieReference GetDieByCacheIndex(u64 index) noexcept;
   std::optional<u32> StrOffsetBase() noexcept;
@@ -180,7 +181,19 @@ private:
 
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
-std::vector<UnitHeader> read_unit_headers(ObjectFile *obj) noexcept;
+
+class UnitHeadersRead {
+  u64 mTotalSize;
+  u64 mMaxUnitSize;
+  std::vector<UnitHeader> mUnitHeaders;
+  void Accumulate(u64 unitSize) noexcept;
+  u64 AverageUnitSize() noexcept;
+  void AddUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept;
+  void AddTypeUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept;
+public:
+  void ReadUnitHeaders(ObjectFile *obj) noexcept;
+  std::span<UnitHeader> Headers() noexcept;
+};
 
 } // namespace sym::dw
 

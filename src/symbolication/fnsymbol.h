@@ -65,7 +65,6 @@ public:
   AddrPtr StartPc() const noexcept;
   AddrPtr EndPc() const noexcept;
   CompilationUnit *GetCompilationUnit() noexcept;
-  const CompilationUnit *GetCompilationUnit() const noexcept;
   std::span<const dw::IndexedDieReference> OriginDebugInfoEntries() const noexcept;
   bool IsResolved() const noexcept;
   std::span<const u8> GetFrameBaseDwarfExpression() const noexcept;

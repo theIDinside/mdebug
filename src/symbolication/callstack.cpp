@@ -81,8 +81,8 @@ Frame::GetSymbolFile() const noexcept
   return mOwningSymbolFile;
 }
 
-const sym::FunctionSymbol &
-Frame::FullSymbolInfo() const noexcept
+sym::FunctionSymbol &
+Frame::FullSymbolInfo() noexcept
 {
   auto ptr = MaybeGetFullSymbolInfo();
   if (ptr == nullptr) {
@@ -92,16 +92,10 @@ Frame::FullSymbolInfo() const noexcept
 }
 
 std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
-Frame::GetLineTableEntry() const noexcept
+Frame::GetLineTableEntry() noexcept
 {
-  const CompilationUnit *cu = FullSymbolInfo().GetCompilationUnit();
-  const auto &cuSources = cu->sources();
-  for (const auto &sourceCodeFile : cuSources) {
-    if (auto lte = sourceCodeFile->GetLineTableEntryFor(mOwningSymbolFile->mBaseAddress, FramePc()); lte) {
-      return {sourceCodeFile.get(), lte};
-    }
-  }
-  return std::pair{nullptr, nullptr};
+  CompilationUnit *cu = FullSymbolInfo().GetCompilationUnit();
+  return cu->GetLineTableEntry(FramePc() - mOwningSymbolFile->mBaseAddress);
 }
 
 std::optional<ui::dap::Scope>
@@ -134,7 +128,7 @@ Frame::Scopes() noexcept
 sym::FunctionSymbol *
 Frame::MaybeGetFullSymbolInfo() const noexcept
 {
-  if(mFrameType == FrameType::Full) {
+  if (mFrameType == FrameType::Full) {
     return mSymbolUnion.uFullSymbol;
   }
   return nullptr;
@@ -155,7 +149,7 @@ Frame::BlockSymbolIterator(FrameVariableKind variables_kind) noexcept
 
 u32
 Frame::GetInitializedVariables(FrameVariableKind variableSet,
-                               std::vector<NonNullPtr<const sym::Symbol>> &outVector) const noexcept
+                               std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept
 {
   switch (variableSet) {
   case FrameVariableKind::Arguments: {
@@ -182,13 +176,13 @@ Frame::GetInitializedVariables(FrameVariableKind variableSet,
 }
 
 u32
-Frame::FrameLocalVariablesCount() const noexcept
+Frame::FrameLocalVariablesCount() noexcept
 {
   return FullSymbolInfo().FrameVariablesCount();
 }
 
 u32
-Frame::FrameParameterCounts() const noexcept
+Frame::FrameParameterCounts() noexcept
 {
   return FullSymbolInfo().GetFunctionArguments().mSymbols.size();
 }

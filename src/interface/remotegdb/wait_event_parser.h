@@ -7,7 +7,7 @@
 #include <string_view>
 #include <typedefs.h>
 
-struct CoreEvent;
+struct TraceEvent;
 class TraceeController;
 
 namespace gdb {
@@ -107,7 +107,7 @@ struct WaitEventParser
   // couldn't parse it)
   std::optional<std::uintptr_t> determine_pc() const noexcept;
 
-  CoreEvent *new_debugger_event(bool init) noexcept;
+  TraceEvent *new_debugger_event(bool init) noexcept;
 
   void parse_fork(std::string_view data);
 
