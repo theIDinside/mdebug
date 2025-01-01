@@ -1,17 +1,21 @@
 #pragma once
 #include "../dwarf_defs.h"
-#include "events/event.h"
 #include "symbolication/block.h"
 #include "utils/immutable.h"
-#include <algorithm>
 #include <common.h>
-#include <ranges>
+#include <compare>
+#include <elf.h>
 
 class Elf;
 class ObjectFile;
 
+namespace sym {
+class CompilationUnit;
+}
+
 namespace sym::dw {
 class UnitData;
+
 struct DirEntry
 {
   std::string_view path;
@@ -21,12 +25,15 @@ struct DirEntry
 constexpr u64
 lnp_index(u64 index, DwarfVersion version) noexcept
 {
-  if (version == DwarfVersion::D4) {
-    if (index == 0) {
-      return index;
-    } else {
-      return index - 1;
-    }
+  switch (version) {
+  case DwarfVersion::D2:
+    [[fallthrough]];
+  case DwarfVersion::D3:
+    [[fallthrough]];
+  case DwarfVersion::D4:
+    return index == 0 ? index : index - 1;
+  case DwarfVersion::D5:
+    break;
   }
   return index;
 }
@@ -52,7 +59,7 @@ struct LNPFilePath
  */
 struct LNPHeader
 {
-  using FileEntryContainer = std::unordered_map<std::string, std::vector<u32>>;
+  using FileEntryContainer = std::unordered_map<std::string, u32>;
   NO_COPY_DEFAULTED_MOVE(LNPHeader);
   using shr_ptr = std::shared_ptr<LNPHeader>;
   using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;
@@ -64,7 +71,6 @@ struct LNPHeader
             std::vector<FileEntry> &&file_names) noexcept;
 
   std::optional<Path> file(u32 index) const noexcept;
-  std::optional<std::span<const u32>> file_entry_index(const std::filesystem::path &p) noexcept;
   const FileEntryContainer &FileEntries();
 
   u64 sec_offset;
@@ -84,11 +90,17 @@ struct LNPHeader
   std::vector<DirEntry> directories;
   std::vector<FileEntry> mFileEntries;
 
+  static LNPHeader *ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffset) noexcept;
+
+  void SetCompilationUnitBuildDirectory(NonNullPtr<const char> string) noexcept;
+
 private:
   void CacheLNPFilePaths() noexcept;
   Path CompileDirectoryJoin(const Path &p) const noexcept;
+  Path FileEntryToPath(const FileEntry& fileEntry) noexcept;
   std::vector<LNPFilePath> mFilePaths;
-  std::unordered_map<std::string, std::vector<u32>> mFileToFileIndex;
+  FileEntryContainer mFileToFileIndex;
+  const char* mCompilationUnitBuildDirectory{nullptr};
 };
 
 struct LineTableEntry
@@ -96,17 +108,16 @@ struct LineTableEntry
   AddrPtr pc;
   u32 line;
   u32 column : 17;
-  u16 file : 9;
+  u16 file : 11;
   bool is_stmt : 1;
   bool prologue_end : 1;
-  bool basic_block : 1;
   bool epilogue_begin : 1;
   bool IsEndOfSequence : 1 {false};
 
   friend auto
   operator<=>(const LineTableEntry &l, const LineTableEntry &r) noexcept
   {
-    return l.pc.get() <=> r.pc.get();
+    const auto res = (l.pc.get() + l.IsEndOfSequence) <=> (r.pc.get() + r.IsEndOfSequence);
   }
 
   AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
@@ -195,8 +206,6 @@ public:
   friend bool operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r);
 };
 
-class RelocatedSourceCodeFile;
-
 // A source code file is a file that's either represented (and thus realized, when parsed) in the Line Number
 // Program or referenced somehow from an actual Compilation Unit/Translation unit; Meaning, DWARF does not
 // represent it as a single, solitary "binary blob" of debug symbol info. Something which generally tend to only be
@@ -224,69 +233,52 @@ concept AppendableContainer = requires(Container c) { c.Append(T{}); } || requir
   c.PushBack(T{});
 } || requires(Container c) { c.push_back(T{}); };
 
+struct LineTableRange
+{
+  u32 mStartIndex;
+  u32 mEndExclusiveIndex;
+
+  constexpr u32
+  Count() const noexcept
+  {
+    return mEndExclusiveIndex - mStartIndex;
+  }
+};
+
 class SourceCodeFile
 {
 public:
   NO_COPY(SourceCodeFile);
-  friend RelocatedSourceCodeFile;
+  using Ref = std::shared_ptr<SourceCodeFile>;
 
 private:
-  std::vector<PerCompilationUnitLineTable> mLineTables;
-  std::vector<AddressRange> mLineTableRanges;
-  AddressRange mSpan;
-  mutable std::mutex m;
-  mutable bool computed;
-  Elf *elf;
+  CompilationUnit *mCompilationUnit;
+  // Resolved lazily when needed, by walking `line_table`
+  // Contains <offset, count> pairs into the complete linetable, which are the ranges that are mapped (have the
+  // file index = this one) to this source code file
+  std::vector<LineTableRange> mLineTableRanges;
+  AddressRange mSpan{nullptr, nullptr};
+  const Elf *elf;
+  u32 mLineInfoFileIndex;
   bool IsComputed() const noexcept;
   void ComputeLineTableForThis() noexcept;
+  SourceCodeFile(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
+                 u32 fileIndex) noexcept;
 
 public:
-  SourceCodeFile(Elf *elf, std::filesystem::path path) noexcept;
   Immutable<std::filesystem::path> full_path;
-
-  const LineTableEntry *GetLineTableEntryFor(AddrPtr relocatedBase, AddrPtr pc) noexcept;
-
-  template <AppendableContainer<const LineTableEntry *> Container>
-  auto
-  FindLineTableEntryByLine(u32 line, std::optional<u32> column, Container &outResult) noexcept -> bool
-  {
-    if (!IsComputed()) {
-      ComputeLineTableForThis();
-    }
-
-    const auto sz = outResult.size();
-
-    // recorded addressess are essentially a ring buffer
-    // it will record over previously recorded addresses if we seen 32 unique addressess. This is fine. We don't
-    // care *that* much.
-    size_t recCount = 0;
-    AddrPtr recorded[32];
-    const auto IsLine = [line](const LineTableEntry &entry) noexcept -> bool { return entry.line == line; };
-    const auto NotAlreadyRecorded = [&recorded, &recCount](const LineTableEntry &entry) noexcept -> bool {
-      return utils::none_of(std::span{recorded}.subspan(0, std::min(std::size(recorded), recCount)), entry.pc);
-    };
-
-    for (const auto &table : mLineTables) {
-      for (const auto &entry :
-           table.mLineTable | std::views::filter(IsLine) | std::views::filter(NotAlreadyRecorded)) {
-        // Get only first entry with line == line
-        recorded[recCount & (32 - 1)] = entry.pc;
-        // We don't care if we go beyond 32. Just wrap around. We can live with duplicates at that point.
-        recCount++;
-        outResult.push_back(&entry);
-        if (!column) {
-          break;
-        }
-      }
-    }
-    return outResult.size() != sz;
-  }
-
-  auto FindRelocatedLineTableEntry(AddrPtr relocationBase,
-                                   AddrPtr relocatedAddress) noexcept -> const LineTableEntry *;
-  auto AddNewLineNumberProgramHeader(LNPHeader *header) noexcept -> void;
+  static SourceCodeFile::Ref Create(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
+                                    u32 lnpFileIndex) noexcept;
+  CompilationUnit *GetOwningCompilationUnit() const noexcept;
   auto address_bounds() noexcept -> AddressRange;
   bool HasAddressRange() noexcept;
+  void ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) noexcept;
+  void SetLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept;
+  u32
+  GetFileIndex() const noexcept
+  {
+    return mLineInfoFileIndex;
+  }
 
   constexpr AddrPtr
   StartAddress() const noexcept
@@ -300,46 +292,5 @@ public:
   }
 };
 
-// RelocatedFoo types are "thin" wrappers around the "raw" debug symbol info data types. This is so that we can
-// potentially reused previously parsed debug data between different processes that we are debugging. I'm not
-// entirely sure, we need this in the year of 2024, but I figured for good measure, let's not even allow for the
-// possibility to duplicate work (when multi-process debugging)
-class RelocatedSourceCodeFile
-{
-  SourceCodeFile &file;
-
-public:
-  Immutable<AddrPtr> baseAddr;
-  RelocatedSourceCodeFile(AddrPtr base_addr, const std::shared_ptr<SourceCodeFile> &file) noexcept;
-  RelocatedSourceCodeFile(AddrPtr base_addr, SourceCodeFile *file) noexcept;
-
-  auto FindLineTableEntry(AddrPtr relocatedProgramCounter) const noexcept -> const LineTableEntry *;
-  auto address_bounds() noexcept -> AddressRange;
-
-  auto
-  path() const noexcept -> Path
-  {
-    return file.full_path;
-  }
-
-  constexpr friend auto
-  operator<=>(const RelocatedSourceCodeFile &l, const RelocatedSourceCodeFile &r) noexcept
-  {
-    return &l.file <=> &r.file;
-  }
-
-  constexpr friend auto
-  operator==(const RelocatedSourceCodeFile &l, const RelocatedSourceCodeFile &r) noexcept
-  {
-    return &l.file == &r.file;
-  }
-
-  SourceCodeFile &
-  get() const noexcept
-  {
-    return file;
-  }
-};
-
-std::shared_ptr<std::vector<LNPHeader>> read_lnp_headers(ObjectFile *objectFile) noexcept;
+std::vector<LNPHeader> read_lnp_headers(ObjectFile *objectFile) noexcept;
 } // namespace sym::dw

@@ -102,8 +102,6 @@ set(MIDAS_SOURCES
   src/tasks/dwarf_unit_data.h
   src/tasks/index_die_names.cpp
   src/tasks/index_die_names.h
-  src/tasks/lnp.cpp
-  src/tasks/lnp.h
   # utils
   src/utils/base64.cpp
   src/utils/base64.h

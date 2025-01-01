@@ -334,7 +334,7 @@ DebugAdapterClient::InitAllocators() noexcept
 
   // Create a 1 megabyte arena allocator.
   mCommandsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
-  mCommandResponseAllocator = ArenaAllocator::Create(Page{8}, nullptr);
+  mCommandResponseAllocator = ArenaAllocator::Create(Page{128}, nullptr);
   mEventsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
 }
 

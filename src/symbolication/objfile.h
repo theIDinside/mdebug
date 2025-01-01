@@ -21,6 +21,10 @@ class NonExecutableCompilationUnitFile;
 
 template <typename T> using Optional = std::optional<T>;
 
+namespace alloc {
+class ArenaAllocator;
+};
+
 namespace sym {
 class Unwinder;
 class Type;
@@ -72,6 +76,7 @@ class ObjectFile
   u64 mSize;
   const u8 *mLoadedBinary;
   Elf *elf{nullptr};
+  alloc::ArenaAllocator *mPrivateAllocator{nullptr};
   std::unique_ptr<sym::Unwinder> unwinder{nullptr};
 
   // Address bounds determined by reading the program segments of the elf binary
@@ -82,24 +87,20 @@ class ObjectFile
   std::vector<MinSymbol> mMinimalFunctionSymbolsSorted;
   std::unordered_map<std::string_view, MinSymbol> mMinimalObjectSymbols;
 
+  std::mutex mLnpHeaderMutex{};
+  std::unordered_map<u64, sym::dw::LNPHeader*> mLineNumberProgramHeaders{};
+
   std::mutex mUnitDataWriteLock;
   std::vector<sym::dw::UnitData *> mCompileUnits;
   std::unique_ptr<sym::dw::ObjectFileNameIndex> mNameToDieIndex;
 
-  std::shared_ptr<std::vector<sym::dw::LNPHeader>> lnp_headers;
-
-  struct StatementListBuildDirectoryMappings
-  {
-    std::unordered_map<u64, const char *> mMap;
-  } mLnpToBuildDirMapping;
-
   std::mutex mCompileUnitWriteLock;
-  std::vector<sym::CompilationUnit> mCompilationUnits;
+  std::vector<sym::CompilationUnit*> mCompilationUnits;
   std::unordered_map<u64, sym::dw::UnitData *> mTypeToUnitDataMap{};
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
   //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable
-  std::unordered_map<std::string, std::shared_ptr<sym::dw::SourceCodeFile>> mSourceCodeFiles;
+  std::unordered_map<std::string, std::vector<std::shared_ptr<sym::dw::SourceCodeFile>>> mSourceCodeFiles;
 
   sym::AddressToCompilationUnitMap mAddressToCompileUnitMapping;
   std::unordered_map<int, SharedPtr<sym::Value>> mValueObjectCache;
@@ -119,16 +120,23 @@ public:
     return (T *)(mLoadedBinary + offset);
   }
 
-  constexpr bool IsFile(const Path& other) noexcept {
+  constexpr bool
+  IsFile(const Path &other) noexcept
+  {
     return other == mObjectFilePath;
   }
 
-  auto GetPathString() const noexcept -> const char*;
-  const Elf* GetElf() const noexcept;
-  auto GetUnwinder() noexcept -> sym::Unwinder*;
+  auto GetPathString() const noexcept -> const char *;
+  const Elf *GetElf() const noexcept;
+  auto GetUnwinder() noexcept -> sym::Unwinder *;
   auto GetObjectFileId() const noexcept -> std::string_view;
-  auto GetFilePath() const noexcept -> const Path&;
+  auto GetFilePath() const noexcept -> const Path &;
   auto GetAddressRange() const noexcept -> AddressRange;
+  auto HasReadLnpHeader(u64 offset) noexcept -> bool;
+  auto GetLnpHeader(u64 offset) noexcept -> sym::dw::LNPHeader *;
+  // This method may fail in inserting `header` - but it only does so because it was raced by another thread and completed faster
+  // the caller must therefore delete `header` upon seeing `false` returned.
+  auto SetLnpHeader(u64 offset, sym::dw::LNPHeader* header) noexcept -> bool;
 
   auto GetTypeStorage() noexcept -> NonNullPtr<TypeStorage>;
   auto GetElfSection(Elf *elf, u32 index) const noexcept -> u8 *;
@@ -137,27 +145,23 @@ public:
   auto FindMinimalObjectSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
 
   auto SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data) noexcept -> void;
-  auto GetAllCompileUnits() noexcept -> std::vector<sym::dw::UnitData *> &;
+  auto GetAllCompileUnits() noexcept -> std::span<sym::dw::UnitData *>;
   auto GetCompileUnitFromOffset(u64 offset) noexcept -> sym::dw::UnitData *;
   auto GetDebugInfoEntryReference(u64 offset) noexcept -> std::optional<sym::dw::DieReference>;
   auto GetDieReference(u64 offset) noexcept -> sym::dw::DieReference;
   auto GetNameIndex() noexcept -> sym::dw::ObjectFileNameIndex *;
 
-  auto GetLineNumberProgramHeader(u64 offset) noexcept -> sym::dw::LNPHeader *;
-  auto ReadLineNumberProgramHeaders() noexcept -> void;
-  auto GetLineNumberProgramHeaders() noexcept -> std::span<sym::dw::LNPHeader>;
-
-  auto AddInitializedCompileUnits(std::span<sym::CompilationUnit> new_cus) noexcept -> void;
+  auto AddInitializedCompileUnits(std::span<sym::CompilationUnit*> new_cus) noexcept -> void;
   auto AddTypeUnits(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
+  auto AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept -> void;
 
   auto GetTypeUnit(u64 type_signature) noexcept -> sym::dw::UnitData *;
   auto GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept -> sym::dw::DieReference;
 
-  auto GetSourceCodeFile(std::string_view full_path) noexcept -> std::shared_ptr<sym::dw::SourceCodeFile>;
-  auto SourceCodeFiles() noexcept -> std::vector<sym::dw::SourceCodeFile> &;
-  auto GetCompilationUnits() noexcept -> std::vector<sym::CompilationUnit> &;
+  auto GetSourceCodeFiles(std::string_view full_path) noexcept -> std::span<std::shared_ptr<sym::dw::SourceCodeFile>>;
+  auto GetCompilationUnits() noexcept -> std::span<sym::CompilationUnit*>;
 
-  auto InitializeDebugSymbolInfo(const sys::DwarfParseConfiguration &config) noexcept -> void;
+  auto InitializeDebugSymbolInfo() noexcept -> void;
   auto AddMinimalElfSymbols(std::vector<MinSymbol> &&fn_symbols,
                             std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept -> void;
 
@@ -172,9 +176,6 @@ public:
    */
   auto SearchDebugSymbolStringTable(const std::string &regex) const noexcept -> std::vector<std::string>;
 
-  auto SetBuildDirectory(u64 statementListOffset, const char *buildDirectory) noexcept -> void;
-  auto GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char *;
-
 private:
   /**
    * Get the compilation units that *probably* span/cover the address of `programCounter`. When an object file
@@ -186,8 +187,6 @@ private:
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   auto GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
-  auto GetRelocatedSourceCodeFiles(AddrPtr base,
-                                       AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
 };
 
 class SymbolFile
@@ -222,9 +221,8 @@ public:
   auto GetVariables(TraceeController &tc, sym::Frame &frame,
                     sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>;
   auto GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
-  auto GetSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>;
   auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
-               std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>;
+                       std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>;
 
   auto LowProgramCounter() noexcept -> AddrPtr;
   auto HighProgramCounter() noexcept -> AddrPtr;
@@ -236,11 +234,11 @@ public:
 
   auto LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
   auto GetSupervisor() noexcept -> TraceeController *;
-  auto GetTextSection() const noexcept -> const ElfSection*;
+  auto GetTextSection() const noexcept -> const ElfSection *;
 
 private:
   std::vector<ui::dap::Variable> GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                                                  sym::Frame &frame) noexcept;
+                                              sym::Frame &frame) noexcept;
 };
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;

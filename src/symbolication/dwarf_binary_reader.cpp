@@ -108,7 +108,7 @@ DwarfBinaryReader::bytes_read() const noexcept
 void
 DwarfBinaryReader::skip(i64 bytes) noexcept
 {
-  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head + bytes > buffer,
+  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head + bytes >= buffer,
          "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, remaining_size());
   head += bytes;
 }

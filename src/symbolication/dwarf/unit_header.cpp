@@ -75,7 +75,7 @@ UnitHeader::header_len() const noexcept
   case DwarfUnitType::DW_UT_compile:
     [[fallthrough]];
   case DwarfUnitType::DW_UT_partial: {
-    return 4 * (3 * (fmt / 4)) - (dw_version == DwarfVersion::D4 ? 1 : 0);
+    return 4 * (3 * (fmt / 4)) - ((std::to_underlying(dw_version) < 5) ? 1 : 0);
   }
   default:
     ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at 0x{:x}", to_str(unit_type), sec_offset);

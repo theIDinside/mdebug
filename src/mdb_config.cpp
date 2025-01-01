@@ -52,12 +52,6 @@ DebuggerConfiguration::thread_pool_size() const noexcept
   return worker_thread_pool_size.value_or(get_default());
 }
 
-DwarfParseConfiguration
-DebuggerConfiguration::dwarf_config() const noexcept
-{
-  return dwarf_parsing;
-}
-
 LogConfig
 DebuggerConfiguration::log_config() const noexcept
 {
@@ -75,7 +69,6 @@ DebuggerConfiguration::LogDirectory() const noexcept
 }
 
 static constexpr auto LongOptions = std::to_array<option>({{"rr", OptNoArgument, 0, 'r'},
-                                                           {"eager-lnp-parse", OptNoArgument, 0, 'e'},
                                                            // parameters
                                                            {"thread-pool-size", OptArgRequired, 0, 't'},
                                                            {"log", OptArgRequired, 0, 'l'},
@@ -83,7 +76,7 @@ static constexpr auto LongOptions = std::to_array<option>({{"rr", OptNoArgument,
                                                            {"log-directory", OptArgRequired, 0, 'd'}});
 
 static constexpr auto USAGE_STR =
-  "Usage: mdb <communication path> [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]\n"
+  "Usage: mdb <communication path> [-r|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]\n"
   "\n"
   "-d <directory>\n"
   "\t The directory where log files should be saved.";
@@ -95,7 +88,7 @@ parse_cli(int argc, const char **argv) noexcept
   int opt; // NOLINT
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "ret:l:d:p", LongOptions.data(), // NOLINT
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "rt:l:d:p", LongOptions.data(), // NOLINT
                             &option_index)) != -1) {
     switch (opt) {
     case 0:
@@ -140,9 +133,6 @@ parse_cli(int argc, const char **argv) noexcept
       if (optarg) {
         init.worker_thread_pool_size = parse_int(std::string_view{optarg});
       }
-      break;
-    case 'e':
-      init.dwarf_parsing.eager_lnp_parse = true;
       break;
     case '?': {
       DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");

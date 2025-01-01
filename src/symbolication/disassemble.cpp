@@ -27,13 +27,9 @@ SourceInfo
 GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compilationUnits, AddrPtr addr)
 {
   for (auto cu : compilationUnits) {
-    for (const auto &src : cu->sources()) {
-      if (src->address_bounds().Contains(addr)) {
-        const auto *lte = src->GetLineTableEntryFor(obj->mBaseAddress, addr);
-        if (lte) {
-          return {src.get(), lte};
-        }
-      }
+    const auto res = cu->GetLineTableEntry(addr);
+    if (res.first) {
+      return {res.first, res.second};
     }
   }
   return {nullptr, nullptr};

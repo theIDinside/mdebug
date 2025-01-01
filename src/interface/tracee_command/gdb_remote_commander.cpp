@@ -689,6 +689,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
   std::string_view thr_result{read_threads.result.value()};
   thr_result.remove_prefix("$m"sv.size());
   const auto parsed = gdb::protocol_parse_threads(thr_result);
+  threads.reserve(parsed.size());
   for (auto [pid, tid] : parsed) {
     threads.emplace_back(pid, tid, "");
   }

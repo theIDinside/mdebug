@@ -11,6 +11,7 @@
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
+#include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
 #include "task.h"
@@ -80,6 +81,8 @@ class TraceeController
   std::shared_ptr<SymbolFile> mMainExecutable;
   // The tasks that exist in this "process space"
   std::vector<std::shared_ptr<TaskInfo>> mThreads;
+  // Tasks that have exited.
+  std::vector<std::shared_ptr<TaskInfo>> mExitedThreads;
   // More low level information about tasks's. The idea (maybe?) is that at some point we will be able
   // to restore a process space, by doing some manual cloning of tasks, making checkpoint-like debugging possible
   // note: not as powerful as rr, in any sense of the word, but may be neat.
@@ -130,6 +133,9 @@ class TraceeController
   // Whether this is the very first stop wait status we have seen
   bool mOnEntry{false};
 
+  // Whether or not a process exit has been seen for this process.
+  bool mIsExited{false};
+
   // FORK constructor
   TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
   // Constructors
@@ -143,6 +149,8 @@ public:
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
+  void TearDown(bool killProcess) noexcept;
+  bool IsExited() const noexcept;
   void ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept;
   // Called when a ("this") process forks
   std::unique_ptr<TraceeController> Fork(tc::Interface &&interface) noexcept;
@@ -168,6 +176,7 @@ public:
   // track.
   bool IsIndividualTaskControlConfigured() noexcept;
   std::span<std::shared_ptr<TaskInfo>> GetThreads() noexcept;
+  std::span<std::shared_ptr<TaskInfo>> GetExitedThreads() noexcept;
   void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
   u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate);
   Tid TaskLeaderTid() const noexcept;
@@ -213,9 +222,9 @@ public:
 
   // Get (&& ||) Create breakpoint locations
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocation(AddrPtr addr, bool attempt_src_resolve) noexcept;
+  GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocation(AddrPtr addr, AddrPtr base, sym::dw::SourceCodeFile &src_code_file) noexcept;
+  GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile, const sym::dw::LineTableEntry& lte) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
@@ -345,6 +354,7 @@ public:
   tc::ProcessedStopEvent HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
   tc::ProcessedStopEvent HandleProcessExit(const ProcessExited &evt) noexcept;
   tc::ProcessedStopEvent HandleFork(const ForkEvent &evt) noexcept;
+  tc::ProcessedStopEvent HandleClone(const Clone& evt) noexcept;
 
   ui::dap::DebugAdapterClient *GetDebugAdapterProtocolClient() const noexcept;
 

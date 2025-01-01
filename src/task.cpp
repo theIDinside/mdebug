@@ -6,6 +6,7 @@
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_frameunwinder.h"
+#include "utils/logger.h"
 #include "utils/util.h"
 #include <sys/user.h>
 #include <tracee/util.h>
@@ -51,12 +52,40 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
   NEVER("Unknown target format");
 }
 
+TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
+    : tid(newTaskTid), wait_status(), user_stopped(true), tracer_stopped(true), initialized(false),
+      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), regs(), loc_stat(), call_stack(nullptr)
+{
+}
+
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
-    : tid(newTaskTid), wait_status(), user_stopped(isUserStopped), tracer_stopped(true), initialized(false),
+    : tid(newTaskTid), wait_status(), user_stopped(isUserStopped), tracer_stopped(true), initialized(true),
       cache_dirty(true), rip_dirty(true), exited(false), reaped(false),
       regs(supervisor.format, supervisor.arch_info.as_t().get()), loc_stat()
 {
   call_stack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
+}
+
+void
+TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcept
+{
+  ASSERT(call_stack == nullptr && initialized == false, "Thread has already been initialized.");
+
+  user_stopped = true;
+  tracer_stopped = true;
+  initialized = true;
+  cache_dirty = true;
+  rip_dirty = true;
+  exited = false;
+  reaped = false;
+  regs = {tc.format, tc.arch_info.as_t().get()};
+  loc_stat = {};
+  call_stack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
+
+  initialized = true;
+  DBGLOG(core, "Deferred initializing of thread {} completed", tid);
+  push_debugger_event(
+    TraceEvent::ThreadCreated({tc.TaskLeaderTid(), tid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
 }
 
 /*static*/
@@ -64,6 +93,15 @@ std::shared_ptr<TaskInfo>
 TaskInfo::CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept
 {
   return std::make_shared<TaskInfo>(supervisor, newTaskTid, !isRunning);
+}
+
+/** static */
+std::shared_ptr<TaskInfo>
+TaskInfo::CreateUnInitializedTask(TaskWaitResult wait) noexcept
+{
+  auto task = std::shared_ptr<TaskInfo>(new TaskInfo{wait.tid});
+  task->wait_status = wait.ws;
+  return task;
 }
 
 user_regs_struct *
@@ -230,12 +268,6 @@ TaskInfo::set_running(tc::RunType type) noexcept
   last_resume_command = type;
   set_dirty();
   clear_stop_state();
-}
-
-void
-TaskInfo::initialize() noexcept
-{
-  initialized = true;
 }
 
 bool

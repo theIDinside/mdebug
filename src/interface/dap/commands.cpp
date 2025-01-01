@@ -365,7 +365,7 @@ StepOut::Execute() noexcept
   auto resume_addrs = task->return_addresses(target, req);
   ASSERT(resume_addrs.size() >= static_cast<std::size_t>(req.count), "Could not find frame info");
   const auto rip = resume_addrs[1];
-  auto loc = target->GetOrCreateBreakpointLocation(rip, false);
+  auto loc = target->GetOrCreateBreakpointLocation(rip);
   if (!loc.is_expected()) {
     return new StepOutResponse{false, this};
   }
@@ -679,6 +679,7 @@ Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee,
     : UICommand(seq), restart(restart), terminate_tracee(terminate_debuggee), suspend_tracee(suspend_debuggee)
 {
 }
+
 UIResultPtr
 Disconnect::Execute() noexcept
 {
@@ -686,7 +687,7 @@ Disconnect::Execute() noexcept
   if (ok) {
     Tracer::Instance->erase_target(
       [this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
-    Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
+    Tracer::Instance->KeepAlive = !Tracer::Instance->mTracedProcesses.empty();
   }
 
   return new DisconnectResponse{ok, this};
@@ -823,7 +824,7 @@ Terminate::Execute() noexcept
     dap_client->post_event(new TerminatedEvent{});
     Tracer::Instance->erase_target(
       [this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
-    Tracer::Instance->KeepAlive = !Tracer::Instance->targets.empty();
+    Tracer::Instance->KeepAlive = !Tracer::Instance->mTracedProcesses.empty();
   }
   return new TerminateResponse{ok, this};
 }
@@ -918,6 +919,9 @@ StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto target = dap_client->supervisor();
+  if(!target || target->IsExited()) {
+    return new ErrorResponse{StackTrace::Request, this, fmt::format("Process has already died: {}", threadId), {}};
+  }
   auto task = target->GetTaskByTid(threadId);
   if (task == nullptr) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
@@ -925,17 +929,33 @@ StackTrace::Execute() noexcept
   auto &cfs = target->BuildCallFrameStack(*task, CallStackRequest::full());
   std::vector<StackFrame> stack_frames{};
   stack_frames.reserve(cfs.FramesCount());
-  for (const auto &frame : cfs.GetFrames()) {
+  for (auto &frame : cfs.GetFrames()) {
     if (frame.GetFrameType() == sym::FrameType::Full) {
       const auto [src, lte] = frame.GetLineTableEntry();
-      ASSERT(src && lte, "Expected source code file and line table entry to be not null");
-      stack_frames.push_back(
-        StackFrame{.id = frame.FrameId(),
-                   .name = frame.Name().value_or("unknown"),
-                   .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
-                   .line = static_cast<int>(lte->line),
-                   .column = static_cast<int>(lte->column),
-                   .rip = fmt::format("{}", frame.FramePc())});
+      if (src && lte) {
+        stack_frames.push_back(
+          StackFrame{.id = frame.FrameId(),
+                     .name = frame.Name().value_or("unknown"),
+                     .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
+                     .line = static_cast<int>(lte->line),
+                     .column = static_cast<int>(lte->column),
+                     .rip = fmt::format("{}", frame.FramePc())});
+      } else if(src) {
+        stack_frames.push_back(
+          StackFrame{.id = frame.FrameId(),
+                     .name = frame.Name().value_or("unknown"),
+                     .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
+                     .line = 0,
+                     .column = 0,
+                     .rip = fmt::format("{}", frame.FramePc())});
+      } else {
+      stack_frames.push_back(StackFrame{.id = frame.FrameId(),
+                                        .name = frame.Name().value_or("unknown"),
+                                        .source = std::nullopt,
+                                        .line = 0,
+                                        .column = 0,
+                                        .rip = fmt::format("{}", frame.FramePc())});
+      }
 
     } else {
       stack_frames.push_back(StackFrame{.id = frame.FrameId(),

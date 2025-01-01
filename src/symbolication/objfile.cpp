@@ -11,7 +11,6 @@
 #include "symbolication/value_visualizer.h"
 #include "tasks/dwarf_unit_data.h"
 #include "tasks/index_die_names.h"
-#include "tasks/lnp.h"
 #include "type.h"
 #include "utils/enumerator.h"
 #include "utils/logger.h"
@@ -25,6 +24,8 @@
 #include <tracer.h>
 #include <utility>
 #include <utils/scoped_fd.h>
+
+#include <lib/arena_allocator.h>
 
 ParsedAuxiliaryVector
 ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
@@ -58,8 +59,8 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
     : mObjectFilePath(std::move(p)), mObjectFileId(std::move(objfile_id)), mSize(size),
       mLoadedBinary(loaded_binary), mTypeStorage(TypeStorage::Create()), mMinimalFunctionSymbols{},
       mMinimalFunctionSymbolsSorted(), mMinimalObjectSymbols{}, mUnitDataWriteLock(), mCompileUnits(),
-      mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), lnp_headers(nullptr),
-      mCompileUnitWriteLock(), mCompilationUnits(), mAddressToCompileUnitMapping()
+      mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), mCompileUnitWriteLock(),
+      mCompilationUnits(), mAddressToCompileUnitMapping()
 {
   ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -104,6 +105,29 @@ AddressRange
 ObjectFile::GetAddressRange() const noexcept
 {
   return mUnrelocatedAddressBounds;
+}
+
+auto
+ObjectFile::HasReadLnpHeader(u64 offset) noexcept -> bool
+{
+  return mLineNumberProgramHeaders.contains(offset);
+}
+
+auto
+ObjectFile::GetLnpHeader(u64 offset) noexcept -> sym::dw::LNPHeader *
+{
+  return mLineNumberProgramHeaders[offset];
+}
+
+auto
+ObjectFile::SetLnpHeader(u64 offset, sym::dw::LNPHeader *header) noexcept -> bool
+{
+  std::lock_guard lock(mLnpHeaderMutex);
+  if (HasReadLnpHeader(offset)) {
+    return false;
+  }
+  mLineNumberProgramHeaders[offset] = header;
+  return true;
 }
 
 NonNullPtr<TypeStorage>
@@ -154,15 +178,15 @@ ObjectFile::FindMinimalObjectSymbol(std::string_view name) noexcept
 void
 ObjectFile::SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data) noexcept
 {
+  using sym::dw::UnitData;
   ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
   std::lock_guard lock(mUnitDataWriteLock);
-  auto first_id = unit_data.front()->SectionOffset();
-  const auto it = std::lower_bound(mCompileUnits.begin(), mCompileUnits.end(), first_id,
-                                   [](const sym::dw::UnitData *ptr, u64 id) { return ptr->SectionOffset() < id; });
-  mCompileUnits.insert(it, unit_data.begin(), unit_data.end());
+  mCompileUnits.insert(mCompileUnits.begin(), unit_data.begin(), unit_data.end());
+  std::sort(mCompileUnits.begin(), mCompileUnits.end(),
+            [](UnitData *a, UnitData *b) { return a->SectionOffset() < b->SectionOffset(); });
 }
 
-std::vector<sym::dw::UnitData *> &
+std::span<sym::dw::UnitData *>
 ObjectFile::GetAllCompileUnits() noexcept
 {
   return mCompileUnits;
@@ -173,9 +197,9 @@ ObjectFile::GetCompileUnitFromOffset(u64 offset) noexcept
 {
 
   const auto it = std::lower_bound(mCompileUnits.begin(), mCompileUnits.end(), offset,
-                             [](sym::dw::UnitData *compUnit, u64 offset) {
-                               return compUnit->SectionOffset() + compUnit->UnitSize() < offset;
-                             });
+                                   [](sym::dw::UnitData *compUnit, u64 offset) {
+                                     return compUnit->SectionOffset() + compUnit->UnitSize() < offset;
+                                   });
 
   if (it != std::end(mCompileUnits)) {
     ASSERT((*it)->spans_across(offset), "compilation unit does not span 0x{:x}", offset);
@@ -221,73 +245,31 @@ ObjectFile::GetNameIndex() noexcept
   return mNameToDieIndex.get();
 }
 
-sym::dw::LNPHeader *
-ObjectFile::GetLineNumberProgramHeader(u64 offset) noexcept
-{
-  for (auto &header : *lnp_headers) {
-    if (header.sec_offset == offset) {
-      return &header;
-    }
-  }
-  DBGLOG(core, "WARNING no LNP Header with id = 0x{:x}", offset);
-  return nullptr;
-}
-
 void
-ObjectFile::ReadLineNumberProgramHeaders() noexcept
-{
-  lnp_headers = sym::dw::read_lnp_headers(this);
-  std::string path_buf{};
-  for (auto &hdr : *lnp_headers) {
-    ASSERT(!hdr.directories.empty(), "Directories for the LNP header must *NOT* be empty!");
-    const auto build_path = std::filesystem::path{hdr.directories[0].path};
-    for (const auto &[fullPath, _] : hdr.FileEntries()) {
-      auto it = mSourceCodeFiles.find(fullPath);
-      if (it != std::end(mSourceCodeFiles)) {
-        it->second->AddNewLineNumberProgramHeader(&hdr);
-      } else {
-        std::vector<sym::dw::LNPHeader *> src_headers{};
-        src_headers.push_back(&hdr);
-        DBGLOG(core, "Adding source code file {}", fullPath);
-        auto sourceCodeFile = std::make_shared<sym::dw::SourceCodeFile>(elf, fullPath);
-        sourceCodeFile->AddNewLineNumberProgramHeader(&hdr);
-        mSourceCodeFiles.emplace(fullPath, std::move(sourceCodeFile));
-      }
-    }
-  }
-}
-
-// No synchronization needed, parsed 1, in 1 thread
-std::span<sym::dw::LNPHeader>
-ObjectFile::GetLineNumberProgramHeaders() noexcept
-{
-  if (lnp_headers) {
-    return std::span{*lnp_headers};
-  } else {
-    ReadLineNumberProgramHeaders();
-    return std::span{*lnp_headers};
-  }
-}
-
-void
-ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit> new_cus) noexcept
+ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newCompileUnits) noexcept
 {
   // TODO(simon): We do stupid sorting. implement something better optimized
   std::lock_guard lock(mCompileUnitWriteLock);
-  mCompilationUnits.insert(mCompilationUnits.end(), std::make_move_iterator(new_cus.begin()),
-                           std::make_move_iterator(new_cus.end()));
+  mCompilationUnits.insert(mCompilationUnits.end(), newCompileUnits.begin(), newCompileUnits.end());
   std::sort(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter());
+
+  for (auto compileUnit : newCompileUnits) {
+    const auto sources = compileUnit->sources();
+    for (const auto &src : sources) {
+      mSourceCodeFiles[src->full_path->c_str()].push_back(src);
+    }
+  }
 
   DBG({
     if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
-      for (const auto &cu : mCompilationUnits) {
-        DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu.get_dwarf_unit()->SectionOffset(),
-               cu.StartPc(), cu.EndPc());
+      for (const auto cu : mCompilationUnits) {
+        DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu->get_dwarf_unit()->SectionOffset(),
+               cu->StartPc(), cu->EndPc());
       }
       PANIC("Dumped CU contents");
     }
   })
-  mAddressToCompileUnitMapping.add_cus(new_cus);
+  mAddressToCompileUnitMapping.add_cus(newCompileUnits);
 }
 
 void
@@ -298,6 +280,12 @@ ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
            to_str(tu->header().get_unit_type()));
     mTypeToUnitDataMap[tu->header().type_signature()] = tu;
   }
+}
+
+void
+ObjectFile::AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept
+{
+  mSourceCodeFiles[file->full_path->c_str()].push_back(std::move(file));
 }
 
 sym::dw::UnitData *
@@ -326,21 +314,21 @@ ObjectFile::GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept
   return {nullptr, nullptr};
 }
 
-std::vector<sym::CompilationUnit> &
+std::span<sym::CompilationUnit *>
 ObjectFile::GetCompilationUnits() noexcept
 {
   return mCompilationUnits;
 }
 
-SharedPtr<sym::dw::SourceCodeFile>
-ObjectFile::GetSourceCodeFile(std::string_view fullpath) noexcept
+std::span<SharedPtr<sym::dw::SourceCodeFile>>
+ObjectFile::GetSourceCodeFiles(std::string_view fullpath) noexcept
 {
   std::string key{fullpath};
   auto it = mSourceCodeFiles.find(key);
   if (it != std::end(mSourceCodeFiles)) {
     return it->second;
   }
-  return nullptr;
+  return {};
 }
 
 std::vector<sym::dw::UnitData *>
@@ -356,30 +344,10 @@ ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept
 {
   std::vector<sym::CompilationUnit *> result;
   auto unit_datas = mAddressToCompileUnitMapping.find_by_pc(pc);
-  for (auto &src : GetCompilationUnits()) {
+  for (auto src : GetCompilationUnits()) {
     for (auto *unit : unit_datas) {
-      if (src.get_dwarf_unit() == unit) {
-        result.push_back(&src);
-      }
-    }
-  }
-  return result;
-}
-
-auto
-ObjectFile::GetRelocatedSourceCodeFiles(AddrPtr base,
-                                        AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
-{
-  std::vector<sym::dw::RelocatedSourceCodeFile> result{};
-  auto cus = GetCompilationUnitsSpanningPC(pc);
-  const auto is_unique = [&](auto ptr) noexcept {
-    return std::none_of(result.begin(), result.end(), [ptr](auto cmp) { return ptr->full_path == cmp.path(); });
-  };
-  for (auto cu : cus) {
-    for (auto &src : cu->sources()) {
-      ASSERT(src != nullptr, "source code file should not be null!");
-      if (src->address_bounds().Contains(pc) && is_unique(src.get())) {
-        result.emplace_back(base, src.get());
+      if (src->get_dwarf_unit() == unit) {
+        result.push_back(src);
       }
     }
   }
@@ -387,24 +355,16 @@ ObjectFile::GetRelocatedSourceCodeFiles(AddrPtr base,
 }
 
 void
-ObjectFile::InitializeDebugSymbolInfo(const sys::DwarfParseConfiguration &config) noexcept
+ObjectFile::InitializeDebugSymbolInfo() noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
   utils::TaskGroup cu_taskgroup("Compilation Unit Data");
-  auto cu_work = sym::dw::UnitDataTask::create_jobs_for(this);
+  auto cu_work = sym::dw::UnitDataTask::CreateParsingJobs(this, cu_taskgroup.GetTemporaryAllocator());
   cu_taskgroup.add_tasks(std::span{cu_work});
   cu_taskgroup.schedule_work().wait();
-  ReadLineNumberProgramHeaders();
-
-  if (config.eager_lnp_parse) {
-    utils::TaskGroup lnp_tg("Line number programs");
-    auto lnp_work = sym::dw::LineNumberProgramTask::create_jobs_for(this);
-    lnp_tg.add_tasks(std::span{lnp_work});
-    lnp_tg.schedule_work().wait();
-  }
 
   utils::TaskGroup name_index_taskgroup("Name Indexing");
-  auto ni_work = sym::dw::IndexingTask::create_jobs_for(this);
+  auto ni_work = sym::dw::IndexingTask::CreateIndexingJobs(this, name_index_taskgroup.GetTemporaryAllocator());
   name_index_taskgroup.add_tasks(std::span{ni_work});
   name_index_taskgroup.schedule_work().wait();
 }
@@ -441,6 +401,9 @@ ObjectFile::FindCustomDataResolverFor(sym::Type &) noexcept
 void
 ObjectFile::InitializeDataVisualizer(std::shared_ptr<sym::Value> &value) noexcept
 {
+  if (!value->IsValidValue()) {
+    value = sym::Value::WithVisualizer<sym::InvalidValueVisualizer>(std::move(value));
+  }
   if (value->HasVisualizer()) {
     return;
   }
@@ -479,21 +442,6 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
   }
 
   return results;
-}
-
-auto
-ObjectFile::SetBuildDirectory(u64 statementListOffset, const char *buildDirectory) noexcept -> void
-{
-  mLnpToBuildDirMapping.mMap[statementListOffset] = buildDirectory;
-}
-
-auto
-ObjectFile::GetBuildDirForLineNumberProgram(u64 statementListOffset) noexcept -> const char *
-{
-  if (auto it = mLnpToBuildDirMapping.mMap.find(statementListOffset); it != std::end(mLnpToBuildDirMapping.mMap)) {
-    return it->second;
-  }
-  return nullptr;
 }
 
 ObjectFile *
@@ -571,7 +519,7 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   }
 
   if (objfile->elf->HasDWARF()) {
-    objfile->InitializeDebugSymbolInfo(Tracer::Instance->getConfig().dwarf_config());
+    objfile->InitializeDebugSymbolInfo();
   }
 
   return objfile;
@@ -604,7 +552,7 @@ SymbolFile::Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept ->
 auto
 SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
 {
-  return GetObjectFile()->GetProbableCompilationUnits(pc - mBaseAddress->get());
+  return mObjectFile->GetProbableCompilationUnits(pc - mBaseAddress->get());
 }
 
 inline auto
@@ -692,16 +640,11 @@ SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
   }
   return {};
 }
+
 auto
 SymbolFile::GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
   return mObjectFile->GetCompilationUnitsSpanningPC(pc - *mBaseAddress);
-}
-
-auto
-SymbolFile::GetSourceCodeFiles(AddrPtr pc) noexcept -> std::vector<sym::dw::RelocatedSourceCodeFile>
-{
-  return mObjectFile->GetRelocatedSourceCodeFiles(mBaseAddress, pc);
 }
 
 auto
@@ -841,14 +784,13 @@ SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept 
   for (const auto &sym : matching_symbols) {
     const auto relocatedAddress = sym.address + mBaseAddress;
     if (!bps_set.contains(relocatedAddress)) {
-      auto srcs = GetSourceCodeFiles(sym.address);
-      for (auto src : srcs) {
-        if (src.address_bounds().Contains(relocatedAddress)) {
-          if (const auto lte = src.FindLineTableEntry(relocatedAddress);
-              lte && !bps_set.contains(relocatedAddress)) {
-            result.emplace_back(relocatedAddress, LocationSourceInfo{src.path(), lte->line, u32{lte->column}});
-            bps_set.insert(sym.address);
-          }
+      for (auto cu : GetCompilationUnits(relocatedAddress)) {
+        const auto [sourceFile, lineEntry] = cu->GetLineTableEntry(sym.address);
+        if (sourceFile && lineEntry) {
+          result.emplace_back(relocatedAddress, LocationSourceInfo{sourceFile->full_path->c_str(), lineEntry->line,
+                                                                   u32{lineEntry->column}});
+          bps_set.insert(relocatedAddress);
+          break;
         }
       }
     }

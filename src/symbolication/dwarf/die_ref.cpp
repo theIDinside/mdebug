@@ -8,9 +8,9 @@
 namespace sym::dw {
 
 std::tuple<u64, const char *>
-PrepareCompileUnitDwarf4(UnitData *cu, const DieMetaData &unitDie)
+PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
 {
-  ASSERT(cu && cu->header().version() == DwarfVersion::D4, "Expected compillation to not be null and version 4");
+  ASSERT(cu && std::to_underlying(cu->header().version()) < 5, "Expected compillation to not be null and version <= 4");
   UnitReader reader{cu};
   reader.SeekDie(unitDie);
   const auto &attrs = cu->get_abbreviation(unitDie.abbreviation_code);

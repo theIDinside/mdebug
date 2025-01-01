@@ -1,7 +1,6 @@
 #pragma once
 #include "typedefs.h"
 #include "utils/macros.h"
-#include "utils/scope_defer.h"
 #include <memory>
 #include <memory_resource>
 #include <sys/user.h>

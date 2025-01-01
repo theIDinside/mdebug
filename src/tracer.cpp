@@ -1,23 +1,28 @@
 #include "tracer.h"
-#include "interface/dap/dap_defs.h"
-#include "interface/dap/events.h"
-#include <lib/arena_allocator.h>
-#include "interface/pty.h"
-#include "interface/remotegdb/connection.h"
-#include "interface/tracee_command/ptrace_commander.h"
-#include "lib/lockguard.h"
-#include "lib/spinlock.h"
 #include "notify_pipe.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
-#include "symbolication/dwarf_frameunwinder.h"
-#include "symbolication/objfile.h"
 #include "task.h"
-#include "utils/scope_defer.h"
-#include "utils/scoped_fd.h"
-#include "utils/thread_pool.h"
 #include <fcntl.h>
 #include <fmt/format.h>
+
+#include <interface/dap/dap_defs.h>
+#include <interface/dap/events.h>
+#include <interface/pty.h>
+#include <interface/remotegdb/connection.h>
+#include <interface/tracee_command/ptrace_commander.h>
+
+#include <symbolication/dwarf_frameunwinder.h>
+#include <symbolication/objfile.h>
+
+#include <utils/scope_defer.h>
+#include <utils/scoped_fd.h>
+#include <utils/thread_pool.h>
+
+#include <lib/arena_allocator.h>
+#include <lib/lockguard.h>
+#include <lib/spinlock.h>
+
 #include <sys/personality.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -34,29 +39,29 @@ on_sigchild_handler(int)
     if (WIFSTOPPED(stat)) {
       const auto res = wait_result_stopped(pid, stat);
       DBGLOG(awaiter, "stop for {}: {}", res.tid, to_str(res.ws.ws));
-      push_wait_event(0, res);
+      push_wait_event(res);
     } else if (WIFEXITED(stat)) {
       // We might as well only report this for process-tasks,
       // as DAP doesn't support reporting an exit code for a thread, only for a process,
       // because DAP distinguishes between the two in a way that most OS today, doesn't.
       if (!Tracer::Instance->TraceExitConfigured) {
         // means this is the only place we're getting informed of thread exits
-        for (const auto &supervisor : Tracer::Instance->targets) {
+        for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
           for (const auto &t : supervisor->GetThreads()) {
             if (t->tid == pid) {
               DBGLOG(awaiter, "exit for {}", pid);
               push_debugger_event(
-                CoreEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {}));
+                TraceEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {}));
               return;
             }
           }
         }
       } else {
-        for (const auto &supervisor : Tracer::Instance->targets) {
+        for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
           if (supervisor->TaskLeaderTid() == pid) {
             int exit_code = WEXITSTATUS(stat);
-            DBGLOG(awaiter, "exit for {}: {}", pid, exit_code);
-            push_debugger_event(CoreEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {}));
+            DBGLOG(awaiter, "exit for {}: exit_code={}", pid, exit_code);
+            push_debugger_event(TraceEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {}));
             return;
           }
         }
@@ -64,7 +69,7 @@ on_sigchild_handler(int)
     } else if (WIFSIGNALED(stat)) {
       auto signaled_evt =
         TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
-      push_wait_event(0, signaled_evt);
+      push_wait_event(signaled_evt);
     } else {
       PANIC("Unknown wait status event");
     }
@@ -73,8 +78,8 @@ on_sigchild_handler(int)
 
 Tracer::Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
                sys::DebuggerConfiguration init) noexcept
-    : targets{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe), already_launched(false),
-      events_notifier(events_notifier), config(init)
+    : mTracedProcesses{}, command_queue_lock(), command_queue(), io_thread_pipe(io_thread_pipe),
+      already_launched(false), events_notifier(events_notifier), config(std::move(init))
 {
   ASSERT(Tracer::Instance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -101,9 +106,9 @@ Tracer::load_and_process_objfile(pid_t target_pid, const Path &objfile_path) noe
 void
 Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession session) noexcept
 {
-  targets.push_back(TraceeController::create(session, tc::TraceeCommandInterface::CreateCommandInterface(config),
-                                             InterfaceType::Ptrace));
-  current_target = targets.back().get();
+  mTracedProcesses.push_back(TraceeController::create(
+    session, tc::TraceeCommandInterface::CreateCommandInterface(config), InterfaceType::Ptrace));
+  current_target = mTracedProcesses.back().get();
   const auto new_process = current_target->GetInterface().TaskLeaderTid();
 
   if (!Tracer::use_traceme) {
@@ -113,10 +118,21 @@ Tracer::add_target_set_current(const tc::InterfaceConfig &config, TargetSession 
 }
 
 TraceeController *
+Tracer::GetProcessContainingTid(Tid tid) noexcept
+{
+  for (auto &t : mTracedProcesses) {
+    if (t->GetTaskByTid(tid)) {
+      return t.get();
+    }
+  }
+  return nullptr;
+}
+
+TraceeController *
 Tracer::get_controller(pid_t pid) noexcept
 {
-  auto it = std::ranges::find_if(targets, [&pid](auto &t) { return t->mTaskLeader == pid; });
-  ASSERT(it != std::end(targets), "Could not find target {} pid", pid);
+  auto it = std::ranges::find_if(mTracedProcesses, [&pid](auto &t) { return t->mTaskLeader == pid; });
+  ASSERT(it != std::end(mTracedProcesses), "Could not find target {} pid", pid);
 
   return it->get();
 }
@@ -150,17 +166,28 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
   WaiterSystemConfigured = true;
 }
 
-CoreEvent *
-Tracer::process_waitevent_to_core(Tid process_group, TaskWaitResult wait_res) noexcept
+std::shared_ptr<TaskInfo>
+Tracer::TakeUninitializedTask(Tid tid) noexcept
 {
-  if (process_group == 0) {
-    for (const auto &tgt : targets) {
-      if (std::ranges::any_of(tgt->GetThreads(), [&](const auto &t) { return t->tid == wait_res.tid; })) {
-        process_group = tgt->mTaskLeader;
-      }
-    }
+  if (mUnInitializedThreads.contains(tid)) {
+    auto t = std::move(mUnInitializedThreads[tid]);
+    mUnInitializedThreads.erase(tid);
+    return t;
   }
-  auto tc = get_controller(process_group);
+  return nullptr;
+}
+
+TraceEvent *
+Tracer::ConvertWaitEvent(TaskWaitResult wait_res) noexcept
+{
+  auto tc = GetProcessContainingTid(wait_res.tid);
+
+  if (!tc) {
+    DBGLOG(core, "Task {} left unitialized, seen before clone event in parent?", wait_res.tid);
+    mUnInitializedThreads.emplace(wait_res.tid, TaskInfo::CreateUnInitializedTask(wait_res));
+    return nullptr;
+  }
+  ASSERT(tc != nullptr, "Could not find process that task {} belongs to", wait_res.tid);
   auto task = tc->SetPendingWaitstatus(wait_res);
   return tc->mStopHandler->prepare_core_from_waitstat(*task);
 }
@@ -183,7 +210,7 @@ Tracer::handle_command(ui::UICommand *cmd) noexcept
 }
 
 void
-Tracer::handle_init_event(const CoreEvent *evt) noexcept
+Tracer::handle_init_event(const TraceEvent *evt) noexcept
 {
   ScopedDefer defer{[&]() { delete evt; }};
   auto tc = get_controller(evt->target);
@@ -193,7 +220,7 @@ Tracer::handle_init_event(const CoreEvent *evt) noexcept
 }
 
 void
-Tracer::handle_core_event(const CoreEvent *evt) noexcept
+Tracer::handle_core_event(const TraceEvent *evt) noexcept
 {
   ScopedDefer defer{[&]() { delete evt; }};
   auto tc = get_controller(evt->target);
@@ -201,13 +228,23 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
 
   tc::ProcessedStopEvent result = process_core_event(*tc, evt);
 
+  if(result.mThreadExited) {
+    for(auto& t : tc->GetExitedThreads()) {
+      if(evt->tid == t->tid) {
+        tc->mStopHandler->handle_proceed(*t, result);
+        return;
+      }
+    }
+  }
+
   // N.B. we _HAVE_ to do this check here (stop_all_requested), not anywhere else, due to the existence of what gdb
   // calls "all stop mode" which means that if *any* thread stops, all other threads are stopped (but they are not
   // reported, it's just implicit to the M.O.) because of that, we will hit a stop, which may request to stop_all
   // and since in all-stop, the other stops are implicit, we won't actually hit this function again, for the other
   // threads, therefore this particular event *has* to have special attention here.
-
-  if (tc->mStopAllTasksRequested) {
+  if (result.mProcessExited) {
+    CleanUp(tc);
+  } else if (tc->mStopAllTasksRequested) {
     if (tc->IsAllStopped()) {
       tc->EmitAllStopped();
     }
@@ -218,7 +255,7 @@ Tracer::handle_core_event(const CoreEvent *evt) noexcept
 }
 template <typename... T> using M2 = Match<T...>;
 tc::ProcessedStopEvent
-Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
+Tracer::process_core_event(TraceeController &tc, const TraceEvent *evt) noexcept
 {
   // todo(simon): open up for design that involves user-subscribed event handlers (once we get scripting up and
   // running) It is in this event handling, where we can (at the very end of each handler) emit additional "user
@@ -237,7 +274,6 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
     DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->tid);
     tc.CreateNewTask(evt->tid, false);
     task = tc.GetTaskByTid(evt->tid);
-    task->initialize();
   }
   if (task) {
     if (!evt->registers->empty()) {
@@ -257,7 +293,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
       t->stop_collected = true;
     }
   }
-  const CoreEvent &r = *evt;
+  const TraceEvent &r = *evt;
   LogEvent(r, "Handling");
 
   return std::visit(
@@ -294,6 +330,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         auto bp_loc = tc.GetUserBreakpoints().location_at(bp_addy);
         ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
+        ASSERT(!bp_loc->loc_users().empty(), "[task={}]: A breakpoint location with no user is a rogue/leaked breakpoint at 0x{:x}", t->tid, bp_addy);
         bool should_resume = true;
         for (const auto user_id : users) {
           auto user = tc.GetUserBreakpoints().get_user(user_id);
@@ -308,13 +345,7 @@ Tracer::process_core_event(TraceeController &tc, const CoreEvent *evt) noexcept
         return ProcessedStopEvent{should_resume, {}};
       },
       [&](const ForkEvent &e) -> MatchResult { return tc.HandleFork(e); },
-      [&](const Clone &e) -> MatchResult {
-        tc.CreateNewTask(e.child_tid, true);
-        if (e.vm_info) {
-          tc.SetTaskVmInfo(e.child_tid, e.vm_info.value());
-        }
-        return ProcessedStopEvent{!tc.mStopHandler->event_settings.clone_stop, {}};
-      },
+      [&](const Clone &e) -> MatchResult { return tc.HandleClone(e); },
       [&](const Exec &e) -> MatchResult {
         tc.PostExec(e.exec_file);
         Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
@@ -426,9 +457,9 @@ Tracer::attach(const AttachArgs &args) noexcept
   return std::visit(
     Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
             auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-            targets.push_back(
+            mTracedProcesses.push_back(
               TraceeController::create(TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
-            current_target = targets.back().get();
+            current_target = mTracedProcesses.back().get();
             if (const auto exe_file = current_target->GetInterface().ExecedFile(); exe_file) {
               const auto new_process = current_target->GetInterface().TaskLeaderTid();
               load_and_process_objfile(new_process, *exe_file);
@@ -470,7 +501,7 @@ Tracer::attach(const AttachArgs &args) noexcept
 
             auto it = res.begin();
             const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
-              targets.push_back(
+              mTracedProcesses.push_back(
                 TraceeController::create(TargetSession::Attached, std::move(tc), InterfaceType::GdbRemote));
               Tracer::Instance->set_current_to_latest_target();
               auto &ti = current_target->GetInterface();
@@ -506,14 +537,14 @@ Tracer::attach(const AttachArgs &args) noexcept
 TraceeController *
 Tracer::new_supervisor(std::unique_ptr<TraceeController> &&tc) noexcept
 {
-  targets.push_back(std::move(tc));
-  current_target = targets.back().get();
+  mTracedProcesses.push_back(std::move(tc));
+  current_target = mTracedProcesses.back().get();
   current_target->SetIsOnEntry(true);
   return current_target;
 }
 
 void
-Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path& program,
+Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path &program,
                std::span<const std::string> prog_args) noexcept
 {
   termios original_tty;
@@ -563,7 +594,7 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
     const auto res = get<PtyParentResult>(fork_result);
     const auto leader = res.pid;
     add_target_set_current(tc::PtraceCfg{leader}, TargetSession::Launched);
-    client->client_configured(targets.back().get());
+    client->client_configured(mTracedProcesses.back().get());
     client->set_session_type(ui::dap::DapClientSession::Launch);
     if (Tracer::use_traceme) {
       TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
@@ -615,12 +646,21 @@ Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on
 std::shared_ptr<SymbolFile>
 Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
 {
-  for (const auto &t : targets) {
+  for (const auto &t : mTracedProcesses) {
     if (std::shared_ptr<SymbolFile> sym = t->LookupSymbolFile(path); sym) {
       return sym;
     }
   }
   return nullptr;
+}
+
+void
+Tracer::CleanUp(TraceeController *tc) noexcept
+{
+  auto it = std::ranges::find_if(mTracedProcesses, [tc](const auto &t) { return t.get() == tc; });
+  if (it != std::end(mTracedProcesses)) {
+    tc->TearDown(false);
+  }
 }
 
 const sys::DebuggerConfiguration &
@@ -639,7 +679,7 @@ std::shared_ptr<gdb::RemoteConnection>
 Tracer::connectToRemoteGdb(const tc::GdbRemoteCfg &config,
                            const std::optional<gdb::RemoteSettings> &settings) noexcept
 {
-  for (auto &t : targets) {
+  for (auto &t : mTracedProcesses) {
     if (auto conn = t->GetInterface().RemoteConnection();
         conn && conn->is_connected_to(config.host, config.port)) {
       return conn;
@@ -656,8 +696,8 @@ Tracer::connectToRemoteGdb(const tc::GdbRemoteCfg &config,
 NonNullPtr<TraceeController>
 Tracer::set_current_to_latest_target() noexcept
 {
-  ASSERT(!targets.empty(), "Debugger core has no targets");
-  current_target = targets.back().get();
+  ASSERT(!mTracedProcesses.empty(), "Debugger core has no targets");
+  current_target = mTracedProcesses.back().get();
   return NonNull(*current_target);
 }
 
@@ -697,7 +737,7 @@ Tracer::destroy_reference(VarRefKey key) noexcept
 std::vector<std::unique_ptr<TraceeController>>::iterator
 Tracer::find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept
 {
-  return std::find_if(Tracer::Instance->targets.begin(), Tracer::Instance->targets.end(),
+  return std::find_if(Tracer::Instance->mTracedProcesses.begin(), Tracer::Instance->mTracedProcesses.end(),
                       [client](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == client; });
 }
 

@@ -112,7 +112,7 @@ public:
   AddrPtr FramePc() const noexcept;
   SymbolFile *GetSymbolFile() const noexcept;
 
-  const sym::FunctionSymbol &FullSymbolInfo() const noexcept;
+  sym::FunctionSymbol &FullSymbolInfo() noexcept;
 
   sym::FunctionSymbol *MaybeGetFullSymbolInfo() const noexcept;
   const MinSymbol *MaybeGetMinimalSymbol() const noexcept;
@@ -120,10 +120,10 @@ public:
   IterateFrameSymbols BlockSymbolIterator(FrameVariableKind variable_set) noexcept;
 
   u32 GetInitializedVariables(FrameVariableKind variableSet,
-                              std::vector<NonNullPtr<const sym::Symbol>> &outVector) const noexcept;
+                              std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept;
 
-  u32 FrameLocalVariablesCount() const noexcept;
-  u32 FrameParameterCounts() const noexcept;
+  u32 FrameLocalVariablesCount() noexcept;
+  u32 FrameParameterCounts() noexcept;
 
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept
@@ -157,7 +157,7 @@ public:
     return false;
   }
 
-  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *> GetLineTableEntry() const noexcept;
+  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *> GetLineTableEntry() noexcept;
   std::optional<std::string_view> GetFunctionName() const noexcept;
   std::array<ui::dap::Scope, 3> Scopes() noexcept;
   std::optional<ui::dap::Scope> Scope(u32 var_ref) noexcept;

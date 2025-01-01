@@ -3,10 +3,11 @@
 
 namespace utils {
 
-template <typename C>
+template <typename CA, typename CB = CA>
 constexpr auto
-copy_to(C &c, C &out)
+copy_to(const CA &c, CB &out)
 {
+  out.reserve(c.size());
   std::copy(c.begin(), c.end(), std::back_inserter(out));
 }
 

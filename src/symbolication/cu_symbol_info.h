@@ -32,31 +32,42 @@ public:
 
 class CompilationUnit
 {
-  dw::UnitData *unit_data;
-  AddrPtr pc_start;
-  AddrPtr pc_end_exclusive;
-  u64 line_table;
-  std::string_view cu_name;
-  std::vector<sym::FunctionSymbol> fns;
+  friend class dw::SourceCodeFile;
+  dw::UnitData *mUnitData;
+  AddrPtr mPcStart{nullptr};
+  AddrPtr mPcEndExclusive{nullptr};
+  dw::LNPHeader* mLineNumberProgram{nullptr};
+  std::vector<dw::LineTableEntry> mLineTable;
+  std::string_view mCompilationUnitName;
+  std::vector<sym::FunctionSymbol> mFunctionSymbols;
   std::vector<u32> imported_units;
-  std::vector<std::shared_ptr<dw::SourceCodeFile>> source_code_files{};
+
+  // Indexed by their definitions in the Line Number Program Header, so no need for a map here.
+  std::vector<std::shared_ptr<dw::SourceCodeFile>> mSourceCodeFiles{};
+  mutable std::mutex m{};
+  mutable bool computed{false};
 
 public:
-  NO_COPY_DEFAULTED_MOVE(CompilationUnit);
-  CompilationUnit(dw::UnitData *cu_data) noexcept;
+  NO_COPY(CompilationUnit);
+  CompilationUnit& operator=(CompilationUnit&&) noexcept = delete;
+  CompilationUnit(CompilationUnit&&) noexcept = delete;
+
+  CompilationUnit(dw::UnitData *unitData) noexcept;
 
   void set_name(std::string_view name) noexcept;
-  void set_address_boundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
-  void ProcessSourceCodeFiles(u64 line_table) noexcept;
-  void add_source_file(std::shared_ptr<dw::SourceCodeFile> &&src_file) noexcept;
-  std::span<const std::shared_ptr<dw::SourceCodeFile>> sources() const noexcept;
+  void SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
+  void ProcessSourceCodeFiles(dw::LNPHeader* header) noexcept;
+  bool LineTableComputed() noexcept;
+  void ComputeLineTable() noexcept;
+  std::span<const dw::LineTableEntry> GetLineTable() const noexcept;
+  std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
 
-  bool known_address_boundary() const noexcept;
+  bool HasKnownAddressBoundary() const noexcept;
   AddrPtr StartPc() const noexcept;
   AddrPtr EndPc() const noexcept;
   std::string_view name() const noexcept;
-  bool function_symbols_resolved() const noexcept;
-  sym::FunctionSymbol *get_fn_by_pc(AddrPtr pc) noexcept;
+  bool IsFunctionSymbolsResolved() const noexcept;
+  sym::FunctionSymbol *GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept;
   dw::UnitData *get_dwarf_unit() const noexcept;
   std::optional<Path> get_lnp_file(u32 index) noexcept;
   static constexpr auto
@@ -64,6 +75,9 @@ public:
   {
     return AddressableSorter<CompilationUnit, false>{};
   }
+
+  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *> GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept;
+  dw::SourceCodeFile* GetFileByLineProgramIndex(u32 index) noexcept;
 
 private:
   void PrepareFunctionSymbols() noexcept;
@@ -74,7 +88,7 @@ class AddressToCompilationUnitMap
 public:
   AddressToCompilationUnitMap() noexcept;
   std::vector<sym::dw::UnitData *> find_by_pc(AddrPtr pc) noexcept;
-  void add_cus(const std::span<CompilationUnit> &cus) noexcept;
+  void add_cus(std::span<CompilationUnit*> cus) noexcept;
 
 private:
   void add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept;

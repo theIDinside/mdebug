@@ -17,6 +17,7 @@
 #include <tracer.h>
 
 namespace ptracestop {
+using sym::dw::LineTableEntry;
 
 ThreadProceedAction::ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept
     : ctrl(ctrl.GetInterface()), tc(ctrl), task(task), cancelled(false)
@@ -96,44 +97,35 @@ InstructionStep::~InstructionStep()
 
 LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
     : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), mIsDone(false),
-      resumed_to_resume_addr(false), start_frame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr}, entry()
+      resumed_to_resume_addr(false), startFrame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr}, entry()
 {
+  using sym::dw::SourceCodeFile;
+
   auto &callstack = tc.BuildCallFrameStack(task, CallStackRequest::partial(1));
   // First/bottommost/last/current frame always exists.
-  start_frame = *callstack.GetFrameAtLevel(0);
-  const auto fpc = start_frame.FramePc();
-  SymbolFile *symbol_file = tc.FindObjectByPc(fpc);
-  ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
+  startFrame = *callstack.GetFrameAtLevel(0);
+  const auto fpc = startFrame.FramePc();
+  SymbolFile *symbolFile = tc.FindObjectByPc(fpc);
+  ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", fpc);
 
-  auto src_infos = symbol_file->GetCompilationUnits(fpc);
+  auto src_infos = symbolFile->GetCompilationUnits(fpc);
   bool found = false;
+  const auto unrelocatedPc = symbolFile->UnrelocateAddress(fpc);
+  for (auto compilationUnit : src_infos) {
 
-  // the std::unordered_set here is just for de-duplication.
-  std::vector<sym::dw::RelocatedSourceCodeFile> files_of_interest{};
-  for (auto src : src_infos) {
-    auto files = src->sources();
+    const auto [sourceCodeFile, lineTableEntry] = compilationUnit->GetLineTableEntry(unrelocatedPc);
 
-    for (const auto &f : files) {
-      if (utils::none_of(files_of_interest, [&f](auto &file) { return f->full_path == file.path(); })) {
-        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->mBaseAddress, f});
+    if (sourceCodeFile && lineTableEntry &&
+        startFrame.IsInside(lineTableEntry->pc.as_void()) == sym::InsideRange::Yes) {
+
+      if (lineTableEntry->RelocateProgramCounter(symbolFile->mBaseAddress) == fpc) {
+        found = true;
+        entry = *lineTableEntry;
+      } else {
+        found = true;
+        entry = *(lineTableEntry - 1);
       }
-    }
-  }
-
-  for (auto &&file : files_of_interest) {
-    if (const auto lte = file.FindLineTableEntry(fpc); lte) {
-      if (start_frame.IsInside(lte->RelocateProgramCounter(symbol_file->mBaseAddress).as_void()) ==
-          sym::InsideRange::Yes) {
-        if (lte->pc == fpc) {
-          found = true;
-          entry = *lte;
-          break;
-        } else {
-          found = true;
-          entry = *(lte - 1);
-          break;
-        }
-      }
+      break;
     }
   }
   VERIFY(found, "Couldn't find Line Table Entry Information needed to navigate source code lines based on pc = {}",
@@ -144,7 +136,7 @@ LineStep::~LineStep() noexcept
 {
   if (!cancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", task.tid);
-    push_debugger_event(CoreEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
+    push_debugger_event(TraceEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
                                                 "Line stepping finished", {}));
   } else {
     if (resume_bp) {
@@ -176,7 +168,7 @@ void
 LineStep::InstallBreakpoint(AddrPtr address) noexcept
 {
   resume_bp = tc.GetUserBreakpoints().create_loc_user<ResumeToBreakpoint>(
-    tc, tc.GetOrCreateBreakpointLocation(address.as_void(), false), task.tid, task.tid);
+    tc, tc.GetOrCreateBreakpointLocation(address.as_void()), task.tid, task.tid);
   resumed_to_resume_addr = false;
 }
 
@@ -189,18 +181,19 @@ LineStep::MaybeSetDone(bool isDone) noexcept
 void
 LineStep::UpdateStepped() noexcept
 {
-  const auto frame = tc.GetCurrentFrame(task);
+  auto frame = tc.GetCurrentFrame(task);
   // if we're in the same frame, we single step
 
-  if (frame.GetFrameType() == sym::FrameType::Full && SameSymbol(frame, start_frame)) {
-    ASSERT(frame.FrameLevel() == start_frame.FrameLevel(),
+  if (frame.GetFrameType() == sym::FrameType::Full && SameSymbol(frame, startFrame)) {
+    ASSERT(frame.FrameLevel() == startFrame.FrameLevel(),
            "We haven't implemented support where recursion actually creates multiple frames that look the same.");
-    auto [src, lte] = frame.GetLineTableEntry();
+    auto result = frame.GetLineTableEntry();
+    const LineTableEntry *lte = result.second;
     MaybeSetDone((!lte || lte->line != entry.line));
   } else {
     auto &callstack = tc.BuildCallFrameStack(task, CallStackRequest::full());
     const auto resumeAddress =
-      callstack.FindFrame(start_frame).transform([](const auto &f) -> AddrPtr { return f.FramePc(); });
+      callstack.FindFrame(startFrame).transform([](const auto &f) -> AddrPtr { return f.FramePc(); });
     if (resumeAddress) {
       InstallBreakpoint(resumeAddress.value());
     } else {
@@ -251,8 +244,8 @@ StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) 
       proceed_action->Proceed();
     }
   } else {
-    DBGLOG(core, "[action]: {} will resume (should_resume={}) => {}", info.tid, stop.should_resume,
-           stop.should_resume && info.can_continue());
+    DBGLOG(core, "[action]: {} will resume (should_resume={}) => {} (pc={})", info.tid, stop.should_resume,
+           stop.should_resume && info.can_continue(), info.GetRegisterCache().GetPc());
     const auto kind =
       stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
     bool resumed = false;
@@ -282,7 +275,7 @@ StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) 
   }
 }
 
-static CoreEvent *
+static TraceEvent *
 native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
 {
   DBGLOG(core, "Processing CLONE for {}", cloning_task.tid);
@@ -301,26 +294,26 @@ native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
     np = tc.ReadType(child_tid);
 
     ASSERT(!tc.HasTask(np), "Tracee controller already has task {} !", np);
-    return CoreEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.tid, 5},
+    return TraceEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.tid, 5},
                                  TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls}, np, {});
   } else if (orig_rax == SYS_clone3) {
     const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*regs);
     const auto res = tc.ReadType(ptr);
     np = tc.ReadType(TPtr<pid_t>{res.parent_tid});
-    return CoreEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.tid, 5}, TaskVMInfo::from_clone_args(res), np,
+    return TraceEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.tid, 5}, TaskVMInfo::from_clone_args(res), np,
                                  {});
   } else {
     PANIC("Unknown clone syscall!");
   }
 }
 
-CoreEvent *
+TraceEvent *
 StopHandler::native_core_evt_from_stopped(TaskInfo &t) noexcept
 {
   AddrPtr stepped_over_bp_id{nullptr};
   if (t.loc_stat) {
     const auto locstat = t.clear_bpstat();
-    return CoreEvent::Stepped({tc.TaskLeaderTid(), t.tid, {}}, !locstat->should_resume, locstat,
+    return TraceEvent::Stepped({tc.TaskLeaderTid(), t.tid, {}}, !locstat->should_resume, locstat,
                               t.next_resume_action, {});
   }
   const auto pc = tc.CacheAndGetPcFor(t);
@@ -328,14 +321,14 @@ StopHandler::native_core_evt_from_stopped(TaskInfo &t) noexcept
   auto bp_loc = tc.GetUserBreakpoints().location_at(prev_pc_byte);
   if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
     tc.SetProgramCounterFor(t, prev_pc_byte);
-    return CoreEvent::SoftwareBreakpointHit({.target = tc.TaskLeaderTid(), .tid = t.tid, .sig_or_code = {}},
+    return TraceEvent::SoftwareBreakpointHit({.target = tc.TaskLeaderTid(), .tid = t.tid, .sig_or_code = {}},
                                             prev_pc_byte, {});
   }
 
-  return CoreEvent::DeferToSupervisor({.target = tc.TaskLeaderTid(), .tid = t.tid, .sig_or_code = {}}, {}, false);
+  return TraceEvent::DeferToSupervisor({.target = tc.TaskLeaderTid(), .tid = t.tid, .sig_or_code = {}}, {}, false);
 }
 
-CoreEvent *
+TraceEvent *
 StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
 {
   info.set_dirty();
@@ -344,34 +337,38 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
   switch (ws.ws) {
   case WaitStatusKind::Stopped: {
     if (!info.initialized) {
-      return CoreEvent::ThreadCreated({tc.TaskLeaderTid(), info.tid, 5},
+      return TraceEvent::ThreadCreated({tc.TaskLeaderTid(), info.tid, 5},
                                       {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
     }
     if (tc.IsOnEntry()) {
-      return CoreEvent::EntryEvent({tc.TaskLeaderTid(), info.tid, 5}, {}, true);
+      return TraceEvent::EntryEvent({tc.TaskLeaderTid(), info.tid, 5}, {}, true);
     }
     return native_core_evt_from_stopped(info);
   }
   case WaitStatusKind::Execed: {
-    return CoreEvent::ExecEvent({.target = tc.TaskLeaderTid(), .tid = info.tid, .sig_or_code = 5},
+    return TraceEvent::ExecEvent({.target = tc.TaskLeaderTid(), .tid = info.tid, .sig_or_code = 5},
                                 process_exe_path(info.tid), {});
   }
   case WaitStatusKind::Exited: {
     // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
     // other threads
     const bool process_needs_resuming = Tracer::Instance->TraceExitConfigured;
-    return CoreEvent::ThreadExited({tc.TaskLeaderTid(), info.tid, ws.exit_code}, process_needs_resuming, {});
+    return TraceEvent::ThreadExited({tc.TaskLeaderTid(), info.tid, ws.exit_code}, process_needs_resuming, {});
   }
   case WaitStatusKind::Forked: {
     Tid new_child = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.tid, nullptr, &new_child);
     ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
     DBGLOG(core, "[fork]: new process after fork {}", new_child);
-    return CoreEvent::ForkEvent_({tc.TaskLeaderTid(), info.tid, 5}, new_child, {});
+    return TraceEvent::ForkEvent_({tc.TaskLeaderTid(), info.tid, 5}, new_child, {});
   }
-  case WaitStatusKind::VForked:
-    TODO("WaitStatusKind::VForked");
-    break;
+  case WaitStatusKind::VForked: {
+    Tid new_child = 0;
+    auto result = ptrace(PTRACE_GETEVENTMSG, info.tid, nullptr, &new_child);
+    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    DBGLOG(core, "[vfork]: new process after fork {}", new_child);
+    return TraceEvent::VForkEvent_({tc.TaskLeaderTid(), info.tid, 5}, new_child, {});
+  }
   case WaitStatusKind::VForkDone:
     TODO("WaitStatusKind::VForkDone");
     break;
@@ -379,7 +376,7 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
     return native_create_clone_event(tc, info);
   } break;
   case WaitStatusKind::Signalled:
-    return CoreEvent::Signal({tc.TaskLeaderTid(), info.tid, info.wait_status.signal}, {});
+    return TraceEvent::Signal({tc.TaskLeaderTid(), info.tid, info.wait_status.signal}, {});
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
     break;
@@ -473,7 +470,7 @@ StepInto::StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_fram
 StepInto::~StepInto() noexcept
 {
   if (!cancelled) {
-    push_debugger_event(CoreEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
+    push_debugger_event(TraceEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
                                                 "Step in done", {}));
   }
 }
@@ -505,10 +502,11 @@ StepInto::inside_origin_frame(const sym::Frame &f) const noexcept
 void
 StepInto::UpdateStepped() noexcept
 {
-  const auto frame = tc.GetCurrentFrame(task);
+  auto frame = tc.GetCurrentFrame(task);
   // if we're in the same frame, we single step
   if (inside_origin_frame(frame)) {
-    auto [src, lte] = frame.GetLineTableEntry();
+    auto result = frame.GetLineTableEntry();
+    const LineTableEntry *lte = result.second;
     if (!lte) {
       is_done = true;
     } else if (!is_origin_line(lte->line)) {
@@ -529,28 +527,18 @@ StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
   SymbolFile *symbol_file = ctrl.FindObjectByPc(fpc);
   ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
 
-  auto src_infos = symbol_file->GetCompilationUnits(fpc);
+  auto compilationUnits = symbol_file->GetCompilationUnits(fpc);
 
-  // the std::unordered_set here is just for de-duplication.
-  std::vector<sym::dw::RelocatedSourceCodeFile> files_of_interest{};
-  for (auto src : src_infos) {
-    auto files = src->sources();
-
-    for (const auto &f : files) {
-      if (utils::none_of(files_of_interest, [&f](auto &file) { return f->full_path == file.path(); })) {
-        files_of_interest.push_back(sym::dw::RelocatedSourceCodeFile{symbol_file->mBaseAddress, f});
-      }
-    }
-  }
-
-  for (auto &&file : files_of_interest) {
-    if (const auto lte = file.FindLineTableEntry(fpc); lte) {
-      auto relocPc = lte->RelocateProgramCounter(symbol_file->mBaseAddress);
+  for (auto compilationUnit : compilationUnits) {
+    const auto [sourceCodeFile, lineTableEntry] =
+      compilationUnit->GetLineTableEntry(symbol_file->UnrelocateAddress(fpc));
+    if (sourceCodeFile && lineTableEntry) {
+      const auto relocPc = lineTableEntry->RelocateProgramCounter(symbol_file->mBaseAddress);
       if (start_frame.IsInside(relocPc) == sym::InsideRange::Yes) {
         if (relocPc == fpc) {
-          return new StepInto{ctrl, task, start_frame, *lte};
+          return new StepInto{ctrl, task, start_frame, *lineTableEntry};
         } else {
-          return new StepInto{ctrl, task, start_frame, *(lte - 1)};
+          return new StepInto{ctrl, task, start_frame, *(lineTableEntry - 1)};
         }
       }
     }

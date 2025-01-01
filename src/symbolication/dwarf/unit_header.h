@@ -18,6 +18,12 @@ public:
   // Type Unit-Header constructor
   UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset,
              u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept;
+
+  UnitHeader(const UnitHeader&) = default;
+  UnitHeader& operator=(const UnitHeader&) = default;
+  UnitHeader(UnitHeader&&) = default;
+  UnitHeader& operator=(UnitHeader&&) = default;
+
   u8 offset_size() const noexcept;
   u8 addr_size() const noexcept;
   const u8 *abbreviation_data(const ElfSection *abbrev_sec) const noexcept;
