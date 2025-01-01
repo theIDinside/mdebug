@@ -1,4 +1,5 @@
 #include "common.h"
+#include <csignal>
 #include <cxxabi.h>
 #include <execinfo.h>
 #include <fcntl.h>
@@ -51,9 +52,10 @@ sanitize(std::string &name)
 panic_exit()
 {
   if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
-    raise(SIGTERM);
+    raise(SIGTRAP);
     exit(-1);
   } else {
+    raise(SIGTRAP);
     exit(-1);
   }
 }
