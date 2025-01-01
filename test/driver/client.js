@@ -222,7 +222,7 @@ function unpackDebuggerArgs() {
     const env = process.env['MDB']
     console.log(`MDB=${env}`)
     const params = env.split(';')
-    return params
+    return params.flatMap(p => p.split(' '))
   } else {
     return []
   }
@@ -460,7 +460,7 @@ class DAClient {
         let config_args = unpackDebuggerArgs()
         // if no thread pool size is configured, set it to 12. MDB will attempt to automatically set it to half available threads otherwise
         if (!config_args.some((v) => v == '-t')) {
-          // config_args.push('-t', 12)
+          config_args.push('-t', 12)
         }
         console.log(`Spawning test with: ${mdb} ${config_args.join(' ')}`)
         this.mdb = spawn(mdb, [...config_args], {
