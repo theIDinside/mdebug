@@ -188,7 +188,7 @@ TraceEvent::DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, b
 TraceEvent *
 TraceEvent::EntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept
 {
-  CORE_EVENT_LOG("creating event DeferToSupervisor");
+  CORE_EVENT_LOG("creating event EntryEvent");
   return new TraceEvent{param, ::EntryEvent{{param.tid.value()}, should_stop}, CoreEventType::Entry,
                        std::move(reg)};
 }
