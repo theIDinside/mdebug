@@ -1,6 +1,7 @@
 #pragma once
 #include "./dwarf/lnp.h"
 #include "fnsymbol.h"
+#include "symbolication/block.h"
 #include "utils/interval_map.h"
 #include <common.h>
 #include <optional>
@@ -41,6 +42,7 @@ class CompilationUnit
   std::string_view mCompilationUnitName;
   std::vector<sym::FunctionSymbol> mFunctionSymbols;
   std::vector<u32> imported_units;
+  std::vector<AddressRange> mAddressRanges;
 
   // Indexed by their definitions in the Line Number Program Header, so no need for a map here.
   std::vector<std::shared_ptr<dw::SourceCodeFile>> mSourceCodeFiles{};
@@ -54,11 +56,13 @@ public:
 
   CompilationUnit(dw::UnitData *unitData) noexcept;
 
-  void set_name(std::string_view name) noexcept;
+  void SetUnitName(std::string_view name) noexcept;
+  void SetAddressRanges(std::vector<AddressRange>&& ranges) noexcept;
   void SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
   void ProcessSourceCodeFiles(dw::LNPHeader* header) noexcept;
   bool LineTableComputed() noexcept;
   void ComputeLineTable() noexcept;
+  std::span<const AddressRange> AddressRanges() const noexcept;
   std::span<const dw::LineTableEntry> GetLineTable() const noexcept;
   std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
 
@@ -87,12 +91,12 @@ class AddressToCompilationUnitMap
 {
 public:
   AddressToCompilationUnitMap() noexcept;
-  std::vector<sym::dw::UnitData *> find_by_pc(AddrPtr pc) noexcept;
+  std::vector<CompilationUnit *> find_by_pc(AddrPtr pc) noexcept;
   void add_cus(std::span<CompilationUnit*> cus) noexcept;
 
 private:
-  void add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept;
+  void add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept;
   std::mutex mutex;
-  utils::IntervalMapping<AddrPtr, sym::dw::UnitData *> mapping;
+  utils::IntervalMapping<AddrPtr, CompilationUnit *> mapping;
 };
 } // namespace sym

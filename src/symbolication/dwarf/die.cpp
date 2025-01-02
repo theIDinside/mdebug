@@ -347,7 +347,7 @@ UnitData::LoadDieMetadata() noexcept
   if (mFullyLoaded) {
     return;
   }
-  CDLOG(true, dwarf, "[0x{:x}] loading dies", SectionOffset())
+
   mFullyLoaded = true;
   UnitReader reader{this};
 

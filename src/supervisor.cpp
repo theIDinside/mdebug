@@ -1199,15 +1199,9 @@ TraceeController::GetCurrentFrame(TaskInfo &task) noexcept
   }
   auto cus_matching_addr = obj->GetUnitDataFromProgramCounter(pc);
 
-  // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
-  //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
-  for (auto cu : cus_matching_addr) {
-    for (auto src : obj->GetObjectFile()->GetCompilationUnits()) {
-      if (cu == src->get_dwarf_unit()) {
-        if (auto fn = src->GetFunctionSymbolByProgramCounter(obj->UnrelocateAddress(pc)); fn) {
-          return sym::Frame{obj, task, 0, 0, pc, fn};
-        }
-      }
+  for (auto src : cus_matching_addr) {
+    if (auto fn = src->GetFunctionSymbolByProgramCounter(obj->UnrelocateAddress(pc)); fn) {
+      return sym::Frame{obj, task, 0, 0, pc, fn};
     }
   }
 
@@ -1314,26 +1308,47 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
 
   // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
   //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
-  DBGLOG(perf, "Start fn symbol resolving in {} compilation units in {}", cus_matching_addr.size(),
-         symbolFile->GetObjectFilePath().filename().c_str());
+  DBGLOG(perf, "Start fn symbol resolving in {} compilation units in {} for unreloc addr: {}",
+         cus_matching_addr.size(), symbolFile->GetObjectFilePath().filename().c_str(),
+         symbolFile->UnrelocateAddress(addr));
   const auto start = std::chrono::high_resolution_clock::now();
   sym::FunctionSymbol *foundFn = nullptr;
-  ScopedDefer defer{[start, symbolFile = symbolFile, &foundFn]() {
+  ScopedDefer defer{[start, symbolFile = symbolFile, &foundFn, addr]() {
     auto us =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
         .count();
-    DBGLOG(perf, "Parsed symbols & found function symbol {} in {} us ({})",
-           foundFn ? foundFn->name : "<no known name>", us, symbolFile->GetObjectFilePath().filename().c_str());
+    DBGLOG(perf, "Parsed symbols & found function symbol {} in {} us ({}), unreloc addr={}",
+           foundFn ? foundFn->name : "<no known name>", us, symbolFile->GetObjectFilePath().filename().c_str(),
+           symbolFile->UnrelocateAddress(addr));
   }};
 
-  for (auto cu : cus_matching_addr) {
-    for (auto src : symbolFile->GetObjectFile()->GetCompilationUnits()) {
-      if (cu == src->get_dwarf_unit()) {
-        if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
-          foundFn = fn;
-          return std::make_pair(fn, NonNull(*symbolFile));
-        }
+  using sym::CompilationUnit;
+
+  std::vector<CompilationUnit *> alreadyParse;
+  std::vector<CompilationUnit *> sortedCompUnits;
+
+  alreadyParse.reserve(cus_matching_addr.size());
+  sortedCompUnits.reserve(cus_matching_addr.size());
+
+  for (auto src : cus_matching_addr) {
+    if (src->IsFunctionSymbolsResolved()) {
+      if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
+        foundFn = fn;
+        return std::make_pair(fn, NonNull(*symbolFile));
       }
+    } else {
+      sortedCompUnits.push_back(src);
+    }
+  }
+
+  std::sort(sortedCompUnits.begin(), sortedCompUnits.end(), [](CompilationUnit *a, CompilationUnit *b) {
+    return a->get_dwarf_unit()->UnitSize() > b->get_dwarf_unit()->UnitSize();
+  });
+
+  for (const auto cu : sortedCompUnits) {
+    if (auto fn = cu->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
+      foundFn = fn;
+      return std::make_pair(fn, NonNull(*symbolFile));
     }
   }
 

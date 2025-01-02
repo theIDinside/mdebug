@@ -333,6 +333,7 @@ CompilationUnit::CompilationUnit(dw::UnitData *unitData) noexcept
 void
 CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
+  DBGLOG(dwarf, "cu=0x{:x} low_pc={} .. {} ({})", mUnitData->SectionOffset(), lowest, end_exclusive, mUnitData->GetObjectFile()->GetFilePath().filename().c_str());
   mPcStart = lowest;
   mPcEndExclusive = end_exclusive;
 }
@@ -347,6 +348,10 @@ std::span<const dw::LineTableEntry>
 CompilationUnit::GetLineTable() const noexcept
 {
   return mLineTable;
+}
+
+std::span<const AddressRange> CompilationUnit::AddressRanges() const noexcept {
+  return mAddressRanges;
 }
 
 void
@@ -508,9 +513,15 @@ CompilationUnit::sources() noexcept
 }
 
 void
-CompilationUnit::set_name(std::string_view name) noexcept
+CompilationUnit::SetUnitName(std::string_view name) noexcept
 {
   mCompilationUnitName = name;
+}
+
+void
+CompilationUnit::SetAddressRanges(std::vector<AddressRange> &&ranges) noexcept
+{
+  mAddressRanges = std::move(ranges);
 }
 
 bool
@@ -610,12 +621,13 @@ sym::FunctionSymbol *
 CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
 {
   if (!IsFunctionSymbolsResolved()) {
-    ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData]() {
+    ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData,
+                              &mFunctionSymbols = mFunctionSymbols]() {
       auto us =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
           .count();
-      DBGLOG(perf, "Resolved function symbols for 0x{:x} in {}us ({})", unit_data->SectionOffset(), us,
-             unit_data->GetObjectFile()->GetFilePath().filename().c_str());
+      DBGLOG(perf, "Resolved {} function symbols for 0x{:x} in {}us ({})", mFunctionSymbols.size(),
+             unit_data->SectionOffset(), us, unit_data->GetObjectFile()->GetFilePath().filename().c_str());
     }};
     PrepareFunctionSymbols();
   }
@@ -888,7 +900,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
 
 AddressToCompilationUnitMap::AddressToCompilationUnitMap() noexcept : mutex(), mapping() {}
 
-std::vector<sym::dw::UnitData *>
+std::vector<CompilationUnit *>
 AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 {
   if (auto res = mapping.find(pc); res) {
@@ -900,16 +912,19 @@ AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 }
 
 void
-AddressToCompilationUnitMap::add_cus(std::span<CompilationUnit *> cus) noexcept
+AddressToCompilationUnitMap::add_cus(std::span<CompilationUnit *> compUnits) noexcept
 {
   std::lock_guard lock(mutex);
-  for (const auto &src_sym_info : cus) {
-    add_cu(src_sym_info->StartPc(), src_sym_info->EndPc(), src_sym_info->get_dwarf_unit());
+  for (CompilationUnit *compilationUnit : compUnits) {
+    for (const auto subRange : compilationUnit->AddressRanges()) {
+      add_cu(subRange.StartPc(), subRange.EndPc(), compilationUnit);
+    }
+    add_cu(compilationUnit->StartPc(), compilationUnit->EndPc(), compilationUnit);
   }
 }
 
 void
-AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, sym::dw::UnitData *cu) noexcept
+AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept
 {
   mapping.add_mapping(start, end, cu);
 }

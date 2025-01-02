@@ -662,13 +662,13 @@ LineTableContainsPc(std::span<const PerCompilationUnitLineTable> lineTables, Add
   return false;
 }
 
-CompilationUnit *
+sym::CompilationUnit *
 SourceCodeFile::GetOwningCompilationUnit() const noexcept
 {
   return mCompilationUnit;
 }
 
-SourceCodeFile::SourceCodeFile(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
+SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
                                u32 fileIndex) noexcept
     : mCompilationUnit(compilationUnit), elf(elf), full_path(std::move(path)), mLineInfoFileIndex(fileIndex)
 {
@@ -676,7 +676,7 @@ SourceCodeFile::SourceCodeFile(CompilationUnit *compilationUnit, const Elf *elf,
 
 /* static */
 SourceCodeFile::Ref
-SourceCodeFile::Create(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
+SourceCodeFile::Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
                        u32 fileIndex) noexcept
 {
   return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{compilationUnit, elf, std::move(path), fileIndex});

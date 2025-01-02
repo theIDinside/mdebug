@@ -5,6 +5,7 @@
 #include "dwarf/die.h"
 #include "supervisor.h"
 #include "symbolication/block.h"
+#include "symbolication/cu_symbol_info.h"
 #include "symbolication/dwarf_defs.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf_symbols.h"
@@ -331,7 +332,7 @@ ObjectFile::GetSourceCodeFiles(std::string_view fullpath) noexcept
   return {};
 }
 
-std::vector<sym::dw::UnitData *>
+std::vector<sym::CompilationUnit *>
 ObjectFile::GetProbableCompilationUnits(AddrPtr programCounter) noexcept
 {
   return mAddressToCompileUnitMapping.find_by_pc(programCounter);
@@ -342,16 +343,7 @@ ObjectFile::GetProbableCompilationUnits(AddrPtr programCounter) noexcept
 std::vector<sym::CompilationUnit *>
 ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept
 {
-  std::vector<sym::CompilationUnit *> result;
-  auto unit_datas = mAddressToCompileUnitMapping.find_by_pc(pc);
-  for (auto src : GetCompilationUnits()) {
-    for (auto *unit : unit_datas) {
-      if (src->get_dwarf_unit() == unit) {
-        result.push_back(src);
-      }
-    }
-  }
-  return result;
+  return mAddressToCompileUnitMapping.find_by_pc(pc);
 }
 
 void
@@ -550,7 +542,7 @@ SymbolFile::Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept ->
 }
 
 auto
-SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>
+SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
   return mObjectFile->GetProbableCompilationUnits(pc - mBaseAddress->get());
 }

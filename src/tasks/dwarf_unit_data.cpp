@@ -22,6 +22,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
   const auto version = cu->header().version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
   auto elf = cu->GetObjectFile()->GetElf();
+
   if (version == DwarfVersion::D4) {
     auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->GetPointer(ranges_offset.address()));
     auto lowest = UINTMAX_MAX;
@@ -43,9 +44,11 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
           continue;
         }
       } else {
-        lowest = std::min(start, lowest);
-        highest = std::max(end, highest);
-        found_a_range = true;
+        if(start != 1 && end != 1) {
+          lowest = std::min(start, lowest);
+          highest = std::max(end, highest);
+          found_a_range = true;
+        }
       }
     }
     if (found_a_range) {
@@ -66,6 +69,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
         lowpc = std::min(low, lowpc);
         highpc = std::max(high, highpc);
       }
+      src.SetAddressRanges(std::move(ranges));
       src.SetAddressBoundary(lowpc, highpc);
     }
   }
@@ -85,7 +89,7 @@ UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) 
     result.push_back(unit_data);
   }
 
-  std::vector<CompilationUnit *> compilationUnits;
+  std::vector<sym::CompilationUnit *> compilationUnits;
 
   for (auto dwarfUnit :
        result | std::views::filter([](UnitData *unit) { return unit->IsCompilationUnitLike(); })) {
@@ -100,7 +104,7 @@ UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) 
     const auto [abbr_code, uleb_sz] = reader.read_uleb128();
     auto &abbrs = dwarfUnit->get_abbreviation(abbr_code);
     const auto unitDie = DieMetaData::create_die(die_sec_offset, abbrs, NONE_INDEX, uleb_sz, NONE_INDEX);
-    sym::CompilationUnit *newCompilationUnit = new CompilationUnit{dwarfUnit};
+    auto *newCompilationUnit = new sym::CompilationUnit{dwarfUnit};
 
     std::optional<AddrPtr> low;
     std::optional<AddrPtr> high;
@@ -117,7 +121,7 @@ UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) 
       case Attribute::DW_AT_name: {
         const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
         const auto name = attr.string();
-        newCompilationUnit->set_name(name);
+        newCompilationUnit->SetUnitName(name);
         break;
       }
       case Attribute::DW_AT_ranges: {

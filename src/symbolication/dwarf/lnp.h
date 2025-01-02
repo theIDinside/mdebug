@@ -252,7 +252,7 @@ public:
   using Ref = std::shared_ptr<SourceCodeFile>;
 
 private:
-  CompilationUnit *mCompilationUnit;
+  sym::CompilationUnit *mCompilationUnit;
   // Resolved lazily when needed, by walking `line_table`
   // Contains <offset, count> pairs into the complete linetable, which are the ranges that are mapped (have the
   // file index = this one) to this source code file
@@ -267,9 +267,9 @@ private:
 
 public:
   Immutable<std::filesystem::path> full_path;
-  static SourceCodeFile::Ref Create(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
+  static SourceCodeFile::Ref Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
                                     u32 lnpFileIndex) noexcept;
-  CompilationUnit *GetOwningCompilationUnit() const noexcept;
+  sym::CompilationUnit *GetOwningCompilationUnit() const noexcept;
   auto address_bounds() noexcept -> AddressRange;
   bool HasAddressRange() noexcept;
   void ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) noexcept;

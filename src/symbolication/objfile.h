@@ -3,7 +3,6 @@
 #include "elf.h"
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
-#include "mdb_config.h"
 #include "symbolication/cu_symbol_info.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf/lnp.h"
@@ -183,7 +182,7 @@ private:
    * units may have their range cover `programCounter`. It's up to the caller to figure out which CU is actually
    * the one they're interested in.
    */
-  auto GetProbableCompilationUnits(AddrPtr programCounter) noexcept -> std::vector<sym::dw::UnitData *>;
+  auto GetProbableCompilationUnits(AddrPtr programCounter) noexcept -> std::vector<sym::CompilationUnit *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
   auto GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
@@ -206,7 +205,7 @@ public:
   static shr_ptr Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary,
                         AddrPtr relocated_base) noexcept;
   auto Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
-  auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::dw::UnitData *>;
+  auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
 
   auto GetObjectFile() const noexcept -> ObjectFile *;
   auto ContainsProgramCounter(AddrPtr pc) const noexcept -> bool;
