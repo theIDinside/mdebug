@@ -401,7 +401,7 @@ Tracer::accept_command(ui::UICommand *cmd) noexcept
 }
 
 static int
-exec(const Path &program, std::span<const std::string> prog_args)
+exec(const Path &program, std::span<const std::string> prog_args, char** env)
 {
   const auto arg_size = prog_args.size() + 2;
   const char *args[arg_size];
@@ -409,10 +409,11 @@ exec(const Path &program, std::span<const std::string> prog_args)
   args[0] = cmd;
   auto idx = 1;
   for (const auto &arg : prog_args) {
-    args[idx] = arg.c_str();
+    args[idx++] = arg.c_str();
   }
+  environ = env;
   args[arg_size - 1] = nullptr;
-  return execv(cmd, (char *const *)args);
+  return execvp(cmd, (char *const *)args);
 }
 
 bool
@@ -521,6 +522,21 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
     VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
   }
 
+  std::vector<std::string> execvpArgs{};
+  execvpArgs.push_back(program.c_str());
+  std::copy(prog_args.begin(), prog_args.end(), std::back_inserter(execvpArgs));
+
+  std::vector<char*> environment;
+  for(auto i = 0; environ[i] != nullptr; ++i) {
+    environment.push_back(environ[i]);
+  }
+
+  environment.push_back(nullptr);
+  for(const auto* env : environment) {
+    if(env != nullptr) {
+      DBGLOG(core, "env={}", env);
+    }
+  }
   const auto fork_result =
     pty_fork(could_set_term_settings ? &original_tty : nullptr, could_set_term_settings ? &ws : nullptr);
   // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process
@@ -550,7 +566,7 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
       raise(SIGSTOP);
     }
 
-    if (exec(program, prog_args) == -1) {
+    if (exec(program, prog_args, environment.data()) == -1) {
       PANIC(fmt::format("EXECV Failed for {}", program.c_str()));
     }
     _exit(0);

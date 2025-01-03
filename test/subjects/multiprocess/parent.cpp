@@ -1,19 +1,23 @@
+#include <cstring>
 #include <filesystem>
+#include <format>
 #include <iostream>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <format>
-
 
 int
 main(int argc, char *argv[])
 {
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <directory_path>" << std::endl;
+  if (argc < 3) {
+    std::cerr << "Usage: <required params> |optional params|\n\t" << argv[0]
+              << " <child program path> <directory_path> <sleep time in milliseconds>" << std::endl;
     return 1;
   }
 
-  std::print(std::cout, "file: {}", argv[0]);
+  std::cout << "file: " << argv[0] << std::endl;
+  std::cout << "child to execute: " <<  argv[1] << std::endl;
+  std::cout << std::format("child 1st param: {}\n", argv[2]);
+  std::cout << std::format("child 2nd param: {}\n", argv[3]);
 
   std::string directoryPath = argv[1];
   pid_t pid = fork();
@@ -28,15 +32,20 @@ main(int argc, char *argv[])
 
     auto current = std::filesystem::current_path();
     std::filesystem::path programpath = directoryPath;
-    programpath = programpath / "childprogram";
+    programpath = current / "build" / "bin" / "childprogram";
 
     std::cout << " exec=" << programpath << " with parameter: " << directoryPath
               << " . cwd=" << std::filesystem::current_path() << std::endl;
 
-    execl(programpath.c_str(), programpath.c_str(), directoryPath.c_str(), nullptr); // #CHILD_EXEC_BP
+    int res;
+    if(argc == 3) {
+      res = execl(argv[1], argv[1], argv[2], nullptr); // #CHILD_EXEC_BP
+    } else {
+      res = execl(argv[1], argv[1], argv[2], argv[3], nullptr);
+    }
 
     // If execl returns, it must have failed
-    std::cerr << "Error: execl failed." << std::endl;
+    std::cerr << "Error: execl failed exit code=" << res << ", error: " << strerror(errno) << std::endl;
     return 1;
   } else {
     // Parent process
