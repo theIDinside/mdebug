@@ -28,8 +28,6 @@ set(MIDAS_SOURCES
   src/mdb_config.h
   src/notify_pipe.cpp
   src/notify_pipe.h
-  src/ptrace.cpp
-  src/ptrace.h
   src/ptracestop_handlers.cpp
   src/ptracestop_handlers.h
   src/register_description.cpp
@@ -42,6 +40,11 @@ set(MIDAS_SOURCES
   src/task.h
   src/tracer.cpp
   src/tracer.h
+
+  #sys
+  src/mdbsys/ptrace.cpp
+  src/mdbsys/ptrace.h
+
   # events
   src/events/event.cpp
   src/events/event.h

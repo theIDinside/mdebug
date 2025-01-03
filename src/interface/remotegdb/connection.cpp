@@ -8,7 +8,7 @@
 #include <event_queue.h>
 #include <initializer_list>
 #include <notify_pipe.h>
-#include <ptrace.h>
+#include <mdbsys/ptrace.h>
 #include <string>
 #include <tracer.h>
 #include <type_traits>

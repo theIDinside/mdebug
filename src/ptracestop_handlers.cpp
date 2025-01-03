@@ -7,12 +7,11 @@
 #include <common.h>
 #include <cstring>
 #include <events/event.h>
-#include <ptrace.h>
+#include <mdbsys/ptrace.h>
 #include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/lnp.h>
 #include <symbolication/objfile.h>
-#include <sys/ptrace.h>
 #include <task.h>
 #include <tracer.h>
 

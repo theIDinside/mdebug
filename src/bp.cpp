@@ -1,5 +1,5 @@
 #include "bp.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include "utils/expected.h"
 #include <algorithm>
 #include <supervisor.h>

@@ -4,7 +4,7 @@
 #include "common.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include <linux/sched.h>
 #include <sys/user.h>
 

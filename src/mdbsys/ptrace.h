@@ -21,7 +21,7 @@ enum class WaitStatusKind : u16
 };
 
 constexpr std::string_view
-to_str(WaitStatusKind ws)
+to_str(const WaitStatusKind ws)
 {
   switch (ws) {
 #define ITEM(IT, Value)                                                                                           \
@@ -258,5 +258,5 @@ IS_TRACE_EVENT(auto stopsig, auto ptrace_event) noexcept -> bool
   return stopsig >> 8 == (SIGTRAP | (ptrace_event << 8));
 }
 
-TaskWaitResult wait_result_stopped(Tid tid, int status) noexcept;
+TaskWaitResult WaitResultToTaskWaitResult(Tid tid, int status) noexcept;
 TaskWaitResult process_status(Tid tid, int status) noexcept;

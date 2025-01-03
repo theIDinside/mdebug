@@ -6,13 +6,11 @@
 #include "interface/dap/events.h"
 #include "interface/dap/interface.h"
 #include "interface/dap/types.h"
-#include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/ptrace_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
-#include "symbolication/block.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf/name_index.h"
@@ -46,7 +44,6 @@
 #include <span>
 #include <string_view>
 #include <sys/mman.h>
-#include <sys/ptrace.h>
 #include <unistd.h>
 #include <utility>
 

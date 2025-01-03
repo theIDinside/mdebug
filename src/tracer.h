@@ -9,7 +9,7 @@
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include "utils/immutable.h"
 #include <queue>
 #include <sys/ioctl.h>

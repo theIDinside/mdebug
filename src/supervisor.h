@@ -7,7 +7,7 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"

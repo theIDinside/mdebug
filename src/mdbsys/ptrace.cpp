@@ -197,7 +197,7 @@ from_register(u64 syscall_number)
 }
 
 TaskWaitResult
-wait_result_stopped(Tid tid, int status) noexcept
+WaitResultToTaskWaitResult(Tid tid, int status) noexcept
 {
   WaitStatusKind kind = WaitStatusKind::NotKnown;
   TaskWaitResult wait{.tid = tid, .ws = {.ws = WaitStatusKind::NotKnown, .exit_code = 0}};
@@ -254,7 +254,7 @@ TaskWaitResult
 process_status(Tid tid, int status) noexcept
 {
   if (WIFSTOPPED(status)) {
-    return wait_result_stopped(tid, status);
+    return WaitResultToTaskWaitResult(tid, status);
   }
 
   if (WIFEXITED(status)) {

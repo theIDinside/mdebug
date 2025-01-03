@@ -1,7 +1,7 @@
 #include "task.h"
 #include "fmt/ranges.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include "register_description.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"

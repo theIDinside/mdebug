@@ -1,7 +1,7 @@
 #pragma once
 
 #include "event_queue_event_param.h"
-#include "ptrace.h"
+#include <mdbsys/ptrace.h>
 #include "task.h"
 #include <string>
 #include <utility>
