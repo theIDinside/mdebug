@@ -29,6 +29,9 @@ enum class Channel : u32
   // Performance timing results
   perf,
 
+  // runtime warnings that may make debugging experience differ from normal execution
+  warning,
+
   // Keep always last. Always.
   COUNT
 };
@@ -52,7 +55,7 @@ class Logger
 public:
   struct LogChannel
   {
-    SpinLock spin_lock;
+    std::mutex mChannelMutex;
     std::fstream fstream;
     void log_message(std::source_location loc, std::string_view msg) noexcept;
     void log_message(std::source_location loc, std::string &&msg) noexcept;
@@ -62,7 +65,7 @@ public:
   Logger() noexcept = default;
   ~Logger() noexcept;
   void setup_channel(std::string_view name) noexcept;
-  void setup_channel(const std::filesystem::path& logDirectory, Channel id) noexcept;
+  void setup_channel(const std::filesystem::path &logDirectory, Channel id) noexcept;
   void log(std::string_view log_name, std::string_view log_msg) noexcept;
   void log(Channel id, std::string_view log_msg) noexcept;
   static Logger *get_logger() noexcept;

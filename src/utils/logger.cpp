@@ -1,6 +1,5 @@
 #include "logger.h"
 #include "../common.h"
-#include "../lib/lockguard.h"
 #include "utils/macros.h"
 #include <filesystem>
 
@@ -26,6 +25,8 @@ to_str(Channel id) noexcept
     return "remote";
   case Channel::perf:
     return "perf";
+  case Channel::warning:
+    return "warning";
   case Channel::COUNT:
     PANIC("Count not a valid Id");
     break;
@@ -59,7 +60,7 @@ Logger::setup_channel(std::string_view name) noexcept
   ASSERT(!log_files.contains(name), "Creating log channel {} twice is not allowed.", name);
   Path p = std::filesystem::current_path() / fmt::format("{}.log", name);
   auto channel =
-    new LogChannel{.spin_lock = SpinLock{},
+    new LogChannel{.mChannelMutex = {},
                    .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
   if (!channel->fstream.is_open()) {
     channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
@@ -73,7 +74,7 @@ Logger::setup_channel(const Path &logDirectory, Channel id) noexcept
   ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
   Path p = logDirectory / fmt::format("{}.log", to_str(id));
   auto channel =
-    new LogChannel{.spin_lock = SpinLock{},
+    new LogChannel{.mChannelMutex = {},
                    .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
   if (!channel->fstream.is_open()) {
     channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
@@ -133,7 +134,7 @@ Logger::channel(Channel id)
 void
 Logger::LogChannel::log_message(std::source_location loc, std::string_view msg) noexcept
 {
-  LockGuard<SpinLock> guard{spin_lock};
+  std::lock_guard guard{mChannelMutex};
   fstream << msg;
   fstream << " [" << loc.file_name() << ":" << loc.line() << ":" << loc.column() << "]: " << std::endl;
 }
@@ -141,7 +142,7 @@ Logger::LogChannel::log_message(std::source_location loc, std::string_view msg) 
 void
 Logger::LogChannel::log_message(std::source_location loc, std::string &&msg) noexcept
 {
-  LockGuard<SpinLock> guard{spin_lock};
+  std::lock_guard guard{mChannelMutex};
   fstream << msg;
   fstream << "\t[" << loc.file_name() << ":" << loc.line() << ":" << loc.column() << "]" << std::endl;
 }
@@ -149,7 +150,7 @@ Logger::LogChannel::log_message(std::source_location loc, std::string &&msg) noe
 void
 Logger::LogChannel::log(std::string_view msg) noexcept
 {
-  LockGuard<SpinLock> guard{spin_lock};
+  std::lock_guard guard{mChannelMutex};
   fstream << msg << std::endl;
 }
 
