@@ -25,8 +25,8 @@ Task::is_group_job() const noexcept
 void
 Task::execute() noexcept
 {
-  ASSERT(owning_group != nullptr, "Task must have owning task group to retrieve allocator");
-  execute_task(owning_group->GetTemporaryAllocator());
+  auto allocator = owning_group ? owning_group->GetTemporaryAllocator() : nullptr;
+  execute_task(allocator);
   if (is_group_job()) {
     owning_group->task_done(this);
   }

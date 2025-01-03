@@ -1,16 +1,13 @@
 #include "parse_buffer.h"
-#include <charconv>
-#include <fstream>
 
 namespace ui::dap {
 
 static const std::regex CONTENT_LENGTH_HEADER = std::regex{R"(Content-Length: (\d+)\r\n\r\n)"};
 
-std::pmr::vector<ContentParse>
-parse_headers_from(const std::string_view buffer_view, std::pmr::monotonic_buffer_resource &mon_rsrc,
-                   bool *all_msgs_ok) noexcept
+std::vector<ContentParse>
+parse_headers_from(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
 {
-  std::pmr::vector<ContentParse> result{&mon_rsrc};
+  std::vector<ContentParse> result;
 
   std::smatch m;
   std::string_view internal_view{buffer_view};

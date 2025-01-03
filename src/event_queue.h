@@ -1,9 +1,10 @@
 #pragma once
 
 #include "event_queue_event_param.h"
-#include <mdbsys/ptrace.h>
 #include "task.h"
+#include <mdbsys/ptrace.h>
 #include <string>
+#include <sys/poll.h>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -270,35 +271,36 @@ struct TraceEvent
   Immutable<RegisterData> registers{};
 
   TraceEvent(Pid target, Tid tid, CoreEventVariant &&p, CoreEventType type, int sig_code,
-            RegisterData &&regs) noexcept;
+             RegisterData &&regs) noexcept;
 
   TraceEvent(const EventDataParam &param, CoreEventVariant &&p, CoreEventType type, RegisterData &&regs) noexcept;
 
   static TraceEvent *LibraryEvent(const EventDataParam &param, RegisterData &&reg) noexcept;
   static TraceEvent *SoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> address,
-                                          RegisterData &&reg) noexcept;
+                                           RegisterData &&reg) noexcept;
   static TraceEvent *HardwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> address,
-                                          RegisterData &&reg) noexcept;
+                                           RegisterData &&reg) noexcept;
   static TraceEvent *SyscallEntry(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
   static TraceEvent *SyscallExit(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
   static TraceEvent *ThreadCreated(const EventDataParam &param, tc::ResumeAction resume_action,
-                                  RegisterData &&reg) noexcept;
+                                   RegisterData &&reg) noexcept;
   static TraceEvent *ThreadExited(const EventDataParam &param, bool process_needs_resuming,
-                                 RegisterData &&reg) noexcept;
-  static TraceEvent *WriteWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
+                                  RegisterData &&reg) noexcept;
+  static TraceEvent *WriteWatchpoint(const EventDataParam &param, std::uintptr_t addr,
+                                     RegisterData &&reg) noexcept;
   static TraceEvent *ReadWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
   static TraceEvent *AccessWatchpoint(const EventDataParam &param, std::uintptr_t addr,
-                                     RegisterData &&reg) noexcept;
+                                      RegisterData &&reg) noexcept;
   static TraceEvent *ForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
   static TraceEvent *VForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
   static TraceEvent *CloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> vm_info, Tid new_tid,
-                               RegisterData &&reg) noexcept;
+                                RegisterData &&reg) noexcept;
   static TraceEvent *ExecEvent(const EventDataParam &param, std::string_view exec_file,
-                              RegisterData &&reg) noexcept;
+                               RegisterData &&reg) noexcept;
   static TraceEvent *ProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept;
   static TraceEvent *Signal(const EventDataParam &param, RegisterData &&reg) noexcept;
   static TraceEvent *Stepped(const EventDataParam &param, bool stop, std::optional<LocationStatus> bploc,
-                            std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept;
+                             std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept;
   static TraceEvent *SteppingDone(const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept;
   static TraceEvent *DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bool attached) noexcept;
   static TraceEvent *EntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept;
@@ -309,17 +311,63 @@ struct Event
   EventType type;
   union
   {
-    WaitEvent wait;
-    TraceEvent *debugger;
-    ui::UICommand *cmd;
+    WaitEvent uWait;
+    TraceEvent *uDebugger;
+    ui::UICommand *uCommand;
   };
+
+  constexpr explicit Event(ui::UICommand *command) noexcept : type(EventType::Command), uCommand(command) {}
+  constexpr explicit Event(TraceEvent *debuggerEvent, bool isInit = false) noexcept
+      : type(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent)
+  {
+  }
+  constexpr explicit Event(WaitEvent waitEvent) noexcept : type(EventType::WaitStatus), uWait(waitEvent) {}
 };
 
-void push_wait_event(TaskWaitResult wait_result) noexcept;
-void push_command_event(ui::dap::DebugAdapterClient *dap_client, ui::UICommand *cmd) noexcept;
-void push_debugger_event(TraceEvent *event) noexcept;
-void push_init_event(TraceEvent *event) noexcept;
+struct WaitResult
+{
+  pid_t pid;
+  int stat;
+};
 
-Event poll_event();
+// TODO: implement a more generic version that dynamically can add sources
+//  where each interface would be a mapping of fileDescriptor => func(vector<Event>& writeTo)
+//  that way we can do some thing like
+//  r = poll(....)
+//  for ( fd in hasEventFilter ( pds ) )
+//  map[fd](res)
+// This also allows for generic serialization from the notification source (see how we send waitstatus over the
+// wire by just serializing it in binary form)
+
+class EventSystem
+{
+  int mWaitStatus[2];
+  int mCommandEvents[2];
+  int mDebuggerEvents[2];
+  int mInitEvents[2];
+  pollfd mPollDescriptors[4];
+
+  std::mutex mCommandsGuard;
+  std::mutex mTraceEventGuard;
+  std::vector<TraceEvent *> mTraceEvents;
+  std::vector<ui::UICommand *> mCommands;
+  std::vector<WaitEvent> mWaitEvents;
+  std::vector<TraceEvent *> mInitEvent;
+  EventSystem(int wait[2], int commands[2], int debugger[2], int init[2]) noexcept;
+
+  static EventSystem *sEventSystem;
+
+  int mPollFailures = 0;
+
+public:
+  static EventSystem *Initialize() noexcept;
+  void PushCommand(ui::dap::DebugAdapterClient *dap_client, ui::UICommand *cmd) noexcept;
+  void PushDebuggerEvent(TraceEvent *event) noexcept;
+  void PushInitEvent(TraceEvent *event) noexcept;
+  void PushWaitResult(WaitResult result) noexcept;
+  bool PollBlocking(std::vector<Event> &write) noexcept;
+
+  static EventSystem &Get() noexcept;
+};
 
 // NOLINTEND(cppcoreguidelines-owning-memory)

@@ -1,4 +1,5 @@
 #include "tracer.h"
+#include "event_queue.h"
 #include "notify_pipe.h"
 #include "ptracestop_handlers.h"
 #include "supervisor.h"
@@ -36,43 +37,7 @@ on_sigchild_handler(int)
   pid_t pid;
   int stat;
   while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
-    if (WIFSTOPPED(stat)) {
-      const auto res = wait_result_stopped(pid, stat);
-      DBGLOG(awaiter, "stop for {}: {}", res.tid, to_str(res.ws.ws));
-      push_wait_event(res);
-    } else if (WIFEXITED(stat)) {
-      // We might as well only report this for process-tasks,
-      // as DAP doesn't support reporting an exit code for a thread, only for a process,
-      // because DAP distinguishes between the two in a way that most OS today, doesn't.
-      if (!Tracer::Instance->TraceExitConfigured) {
-        // means this is the only place we're getting informed of thread exits
-        for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
-          for (const auto &t : supervisor->GetThreads()) {
-            if (t->tid == pid) {
-              DBGLOG(awaiter, "exit for {}", pid);
-              push_debugger_event(
-                TraceEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {}));
-              return;
-            }
-          }
-        }
-      } else {
-        for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
-          if (supervisor->TaskLeaderTid() == pid) {
-            int exit_code = WEXITSTATUS(stat);
-            DBGLOG(awaiter, "exit for {}: exit_code={}", pid, exit_code);
-            push_debugger_event(TraceEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {}));
-            return;
-          }
-        }
-      }
-    } else if (WIFSIGNALED(stat)) {
-      auto signaled_evt =
-        TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
-      push_wait_event(signaled_evt);
-    } else {
-      PANIC("Unknown wait status event");
-    }
+    EventSystem::Get().PushWaitResult(WaitResult{pid, stat});
   }
 }
 
@@ -163,6 +128,7 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
     tc->GetInterface().Initialize();
     break;
   }
+  tc->mConfigurationIsDone = true;
   WaiterSystemConfigured = true;
 }
 
@@ -182,7 +148,7 @@ Tracer::ConvertWaitEvent(TaskWaitResult wait_res) noexcept
 {
   auto tc = GetProcessContainingTid(wait_res.tid);
 
-  if (!tc) {
+  if (!tc || !tc->mConfigurationIsDone) {
     DBGLOG(core, "Task {} left unitialized, seen before clone event in parent?", wait_res.tid);
     mUnInitializedThreads.emplace(wait_res.tid, TaskInfo::CreateUnInitializedTask(wait_res));
     return nullptr;
@@ -228,9 +194,9 @@ Tracer::handle_core_event(const TraceEvent *evt) noexcept
 
   tc::ProcessedStopEvent result = process_core_event(*tc, evt);
 
-  if(result.mThreadExited) {
-    for(auto& t : tc->GetExitedThreads()) {
-      if(evt->tid == t->tid) {
+  if (result.mThreadExited) {
+    for (auto &t : tc->GetExitedThreads()) {
+      if (evt->tid == t->tid) {
         tc->mStopHandler->handle_proceed(*t, result);
         return;
       }
@@ -330,7 +296,9 @@ Tracer::process_core_event(TraceeController &tc, const TraceEvent *evt) noexcept
         auto bp_loc = tc.GetUserBreakpoints().location_at(bp_addy);
         ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
         const auto users = bp_loc->loc_users();
-        ASSERT(!bp_loc->loc_users().empty(), "[task={}]: A breakpoint location with no user is a rogue/leaked breakpoint at 0x{:x}", t->tid, bp_addy);
+        ASSERT(!bp_loc->loc_users().empty(),
+               "[task={}]: A breakpoint location with no user is a rogue/leaked breakpoint at 0x{:x}", t->tid,
+               bp_addy);
         bool should_resume = true;
         for (const auto user_id : users) {
           auto user = tc.GetUserBreakpoints().get_user(user_id);
@@ -348,8 +316,6 @@ Tracer::process_core_event(TraceeController &tc, const TraceEvent *evt) noexcept
       [&](const Clone &e) -> MatchResult { return tc.HandleClone(e); },
       [&](const Exec &e) -> MatchResult {
         tc.PostExec(e.exec_file);
-        Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
-        tc.SetFunctionBreakpoints(fns);
         tc.mDebugAdapterClient->post_event(new ui::dap::Process{e.exec_file, true});
         return ProcessedStopEvent{!tc.mStopHandler->event_settings.exec_stop, {}};
       },
@@ -739,6 +705,12 @@ Tracer::find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept
 {
   return std::find_if(Tracer::Instance->mTracedProcesses.begin(), Tracer::Instance->mTracedProcesses.end(),
                       [client](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == client; });
+}
+
+std::unordered_map<Tid, std::shared_ptr<TaskInfo>> &
+Tracer::UnInitializedTasks() noexcept
+{
+  return mUnInitializedThreads;
 }
 
 void

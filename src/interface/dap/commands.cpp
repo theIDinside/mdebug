@@ -639,10 +639,13 @@ ConfigurationDone::Execute() noexcept
 {
   Tracer::Instance->config_done(dap_client);
   switch (dap_client->supervisor()->GetSessionType()) {
-  case TargetSession::Launched:
+  case TargetSession::Launched: {
+    DBGLOG(core, "configurationDone - resuming target {}", dap_client->supervisor()->TaskLeaderTid());
     dap_client->supervisor()->ResumeTask(tc::RunType::Continue);
     break;
+  }
   case TargetSession::Attached:
+    DBGLOG(core, "configurationDone - doing nothing {}", dap_client->supervisor()->TaskLeaderTid());
     break;
   }
 

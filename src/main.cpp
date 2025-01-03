@@ -100,24 +100,32 @@ main(int argc, const char **argv)
     std::this_thread::sleep_for(std::chrono::milliseconds{1});
   }
 
-  std::vector<utils::NotifyResult> notify_events{};
+  std::vector<Event> readInEvents{};
+  readInEvents.reserve(128);
+
   while (Tracer::Instance->KeepAlive) {
-    const auto evt = poll_event();
-    switch (evt.type) {
-    case EventType::WaitStatus: {
-      if (const auto dbg_evt = tracer.ConvertWaitEvent(evt.wait.wait); dbg_evt) {
-        tracer.handle_core_event(dbg_evt);
+
+    if (system->PollBlocking(readInEvents)) {
+      for (auto evt : readInEvents) {
+        switch (evt.type) {
+        case EventType::WaitStatus: {
+          DBGLOG(awaiter, "stop for {}: {}", evt.uWait.wait.tid, to_str(evt.uWait.wait.ws.ws));
+          if (const auto dbg_evt = tracer.ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
+            tracer.handle_core_event(dbg_evt);
+          }
+        } break;
+        case EventType::Command: {
+          tracer.handle_command(evt.uCommand);
+        } break;
+        case EventType::TraceeEvent: {
+          tracer.handle_core_event(evt.uDebugger);
+        } break;
+        case EventType::Initialization:
+          tracer.handle_init_event(evt.uDebugger);
+          break;
+        }
       }
-    } break;
-    case EventType::Command: {
-      tracer.handle_command(evt.cmd);
-    } break;
-    case EventType::TraceeEvent: {
-      tracer.handle_core_event(evt.debugger);
-    } break;
-    case EventType::Initialization:
-      tracer.handle_init_event(evt.debugger);
-      break;
+      readInEvents.clear();
     }
   }
   utils::ThreadPool::shutdown_global_pool();

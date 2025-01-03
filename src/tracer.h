@@ -7,10 +7,10 @@
 #include "interface/dap/interface.h"
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "mdb_config.h"
-#include "notify_pipe.h"
+#include <mdb_config.h>
+#include <notify_pipe.h>
 #include <mdbsys/ptrace.h>
-#include "utils/immutable.h"
+#include <utils/immutable.h>
 #include <queue>
 #include <sys/ioctl.h>
 #include <termios.h>
@@ -147,6 +147,8 @@ public:
   void destroy_reference(VarRefKey key) noexcept;
   std::vector<std::unique_ptr<TraceeController>>::iterator
   find_controller_by_dap(ui::dap::DebugAdapterClient *client) noexcept;
+
+  std::unordered_map<Tid, std::shared_ptr<TaskInfo>>& UnInitializedTasks() noexcept;
 
   template <typename Predicate>
   bool

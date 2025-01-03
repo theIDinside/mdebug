@@ -84,8 +84,7 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
 
   initialized = true;
   DBGLOG(core, "Deferred initializing of thread {} completed", tid);
-  push_debugger_event(
-    TraceEvent::ThreadCreated({tc.TaskLeaderTid(), tid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
+  EventSystem::Get().PushDebuggerEvent(TraceEvent::ThreadCreated({tc.TaskLeaderTid(), tid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
 }
 
 /*static*/

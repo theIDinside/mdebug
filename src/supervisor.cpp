@@ -1321,12 +1321,12 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
 
   using sym::CompilationUnit;
 
-  std::vector<CompilationUnit *> alreadyParse;
-  std::vector<CompilationUnit *> sortedCompUnits;
+  std::vector<sym::CompilationUnit *> alreadyParse;
+  std::vector<sym::CompilationUnit *> sortedCompUnits;
 
   alreadyParse.reserve(cus_matching_addr.size());
   sortedCompUnits.reserve(cus_matching_addr.size());
-
+  u64 totalSize = 0;
   for (auto src : cus_matching_addr) {
     if (src->IsFunctionSymbolsResolved()) {
       if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
@@ -1334,6 +1334,7 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
         return std::make_pair(fn, NonNull(*symbolFile));
       }
     } else {
+      totalSize += src->get_dwarf_unit()->UnitSize();
       sortedCompUnits.push_back(src);
     }
   }
@@ -1523,6 +1524,7 @@ TraceeController::HandleClone(const Clone &evt) noexcept
     }
   } else {
     task->InitializeThread(GetInterface(), true);
+    mThreads.push_back(task);
   }
   return tc::ProcessedStopEvent{!mStopHandler->event_settings.clone_stop, {}};
 }

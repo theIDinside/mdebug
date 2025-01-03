@@ -135,7 +135,7 @@ LineStep::~LineStep() noexcept
 {
   if (!cancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", task.tid);
-    push_debugger_event(TraceEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
+    EventSystem::Get().PushDebuggerEvent(TraceEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
                                                 "Line stepping finished", {}));
   } else {
     if (resume_bp) {
@@ -339,9 +339,6 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
       return TraceEvent::ThreadCreated({tc.TaskLeaderTid(), info.tid, 5},
                                       {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
     }
-    if (tc.IsOnEntry()) {
-      return TraceEvent::EntryEvent({tc.TaskLeaderTid(), info.tid, 5}, {}, true);
-    }
     return native_core_evt_from_stopped(info);
   }
   case WaitStatusKind::Execed: {
@@ -469,7 +466,7 @@ StepInto::StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_fram
 StepInto::~StepInto() noexcept
 {
   if (!cancelled) {
-    push_debugger_event(TraceEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
+    EventSystem::Get().PushDebuggerEvent(TraceEvent::SteppingDone({.target = tc.TaskLeaderTid(), .tid = task.tid, .sig_or_code = 0},
                                                 "Step in done", {}));
   }
 }

@@ -235,7 +235,7 @@ private:
   int tracer_out_fd;
   bool keep_running;
   char *tracee_stdout_buffer;
-  SpinLock output_message_lock;
+  std::mutex mUIResultLock;
   std::deque<UIResultPtr> events_queue;
   u64 seq;
   bool cleaned_up = false;

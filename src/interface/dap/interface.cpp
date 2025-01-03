@@ -107,7 +107,7 @@ using json = nlohmann::json;
 
 DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept
     : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), keep_running(true),
-      output_message_lock{}, events_queue{}, seq(0)
+      mUIResultLock{}, events_queue{}, seq(0)
 {
   auto [r, w] = utils::Notifier::notify_pipe();
   new_client_notifier = utils::Notifier::notify_pipe();
@@ -124,7 +124,7 @@ UIResultPtr
 DAP::pop_event() noexcept
 {
   VERIFY(!events_queue.empty(), "Can't pop events from an empty list!");
-  LockGuard<SpinLock> lock{output_message_lock};
+  std::lock_guard lock{mUIResultLock};
   UIResultPtr evt = events_queue.front();
   events_queue.pop_front();
   return evt;
@@ -217,19 +217,14 @@ DAP::new_client(utils::OwningPointer<DebugAdapterClient> client)
 void
 DebugAdapterClient::commands_read() noexcept
 {
-  static constexpr auto DESCRIPTOR_STORAGE_SIZE = MDB_PAGE_SIZE;
-  std::byte descriptor_buffer[sizeof(ContentDescriptor) * 15];
-  std::pmr::monotonic_buffer_resource descriptor_resource{&descriptor_buffer, DESCRIPTOR_STORAGE_SIZE};
-
   parse_swapbuffer.expect_read_from_fd(in);
   bool no_partials = false;
-  const auto request_headers = parse_headers_from(parse_swapbuffer.take_view(), descriptor_resource, &no_partials);
+  const auto request_headers = parse_headers_from(parse_swapbuffer.take_view(), &no_partials);
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
       const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
       const auto cmd = ParseDebugAdapterCommand(std::string{cd->payload()});
-
-      push_command_event(this, cmd);
+      EventSystem::Get().PushCommand(this, cmd);
     }
     // since there's no partials left in the buffer, we reset it
     parse_swapbuffer.clear();
@@ -238,7 +233,7 @@ DebugAdapterClient::commands_read() noexcept
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
         const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
         const auto cmd = ParseDebugAdapterCommand(std::string{cd->payload()});
-        push_command_event(this, cmd);
+        EventSystem::Get().PushCommand(this, cmd);
       }
 
       auto rd = maybe_unwrap<RemainderData>(request_headers.back());

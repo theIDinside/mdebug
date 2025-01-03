@@ -1,18 +1,18 @@
 #include "event_queue.h"
-#include <chrono>
-#include <condition_variable>
+#include "common.h"
+#include "supervisor.h"
+#include "tracer.h"
+#include "utils/debug_value.h"
+#include <fcntl.h>
 #include <interface/ui_command.h>
 #include <mutex>
 #include <optional>
-#include <queue>
+#include <ranges>
 
 // todo(simon): Major refactor. This file is just a proto-prototype event queue system, to replace the more hacky
 // system that was before.
 
-static std::mutex event_queue_mutex{};
-static std::mutex event_queue_wait_mutex{};
-static std::condition_variable cv{};
-static std::queue<Event> events{};
+EventSystem * EventSystem::sEventSystem = nullptr;
 
 #define CORE_EVENT_LOG(fmtstring, ...)                                                                            \
   DBGLOG(core, "[{} event {}:{}]: " fmtstring, __FUNCTION__, param.target,                                        \
@@ -20,15 +20,15 @@ static std::queue<Event> events{};
 
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
 TraceEvent::TraceEvent(Pid target, Tid tid, CoreEventVariant &&p, CoreEventType type, int sig_code,
-                     RegisterData &&reg) noexcept
+                       RegisterData &&reg) noexcept
     : target(target), tid(tid), event(std::move(p)), event_type(type), signal(sig_code), registers(std::move(reg))
 {
 }
 
 TraceEvent::TraceEvent(const EventDataParam &param, CoreEventVariant &&p, CoreEventType type,
-                     RegisterData &&regs) noexcept
+                       RegisterData &&regs) noexcept
     : TraceEvent{param.target,   param.tid.value(), std::move(p), type, param.sig_or_code.value_or(0),
-                std::move(regs)}
+                 std::move(regs)}
 {
 }
 
@@ -37,11 +37,11 @@ TraceEvent::LibraryEvent(const EventDataParam &param, RegisterData &&reg) noexce
 {
   CORE_EVENT_LOG("creating event LibraryEvent");
   return new TraceEvent{param, ::LibraryEvent{param.tid.value_or(param.target)}, CoreEventType::LibraryEvent,
-                       std::move(reg)};
+                        std::move(reg)};
 }
 TraceEvent *
 TraceEvent::SoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
-                                 RegisterData &&reg) noexcept
+                                  RegisterData &&reg) noexcept
 {
   CORE_EVENT_LOG("creating event SoftwareBreakpointHit");
   return new TraceEvent{
@@ -51,7 +51,7 @@ TraceEvent::SoftwareBreakpointHit(const EventDataParam &param, std::optional<std
 
 TraceEvent *
 TraceEvent::HardwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
-                                 RegisterData &&reg) noexcept
+                                  RegisterData &&reg) noexcept
 {
   CORE_EVENT_LOG("creating event HardwareBreakpointHit");
   return new TraceEvent{
@@ -64,14 +64,14 @@ TraceEvent::SyscallEntry(const EventDataParam &param, int syscall, RegisterData 
 {
   CORE_EVENT_LOG("creating event SyscallEntry");
   return new TraceEvent{param, SyscallEvent{{param.tid.value_or(-1)}, SyscallEvent::Boundary::Entry, syscall},
-                       CoreEventType::SyscallEvent, std::move(reg)};
+                        CoreEventType::SyscallEvent, std::move(reg)};
 }
 TraceEvent *
 TraceEvent::SyscallExit(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept
 {
   CORE_EVENT_LOG("creating event SyscallExit");
   return new TraceEvent{param, SyscallEvent{{param.tid.value_or(-1)}, SyscallEvent::Boundary::Exit, syscall},
-                       CoreEventType::SyscallEvent, std::move(reg)};
+                        CoreEventType::SyscallEvent, std::move(reg)};
 }
 
 TraceEvent *
@@ -79,7 +79,7 @@ TraceEvent::ThreadCreated(const EventDataParam &param, tc::ResumeAction resume_a
 {
   CORE_EVENT_LOG("creating event ThreadCreated");
   return new TraceEvent{param, ::ThreadCreated{{param.tid.value_or(-1)}, resume_action},
-                       CoreEventType::ThreadCreated, std::move(reg)};
+                        CoreEventType::ThreadCreated, std::move(reg)};
 }
 TraceEvent *
 TraceEvent::ThreadExited(const EventDataParam &param, bool process_needs_resuming, RegisterData &&reg) noexcept
@@ -128,12 +128,12 @@ TraceEvent::VForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &
 {
   CORE_EVENT_LOG("creating event ForkEvent");
   return new TraceEvent{param, ForkEvent{{.thread_id = param.target}, new_pid, true}, CoreEventType::VFork,
-                       std::move(reg)};
+                        std::move(reg)};
 }
 
 TraceEvent *
 TraceEvent::CloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> vm_info, Tid new_tid,
-                      RegisterData &&reg) noexcept
+                       RegisterData &&reg) noexcept
 {
   CORE_EVENT_LOG("creating event CloneEvent, new task: {}", new_tid);
   return new TraceEvent{param, Clone{{param.target}, new_tid, vm_info}, CoreEventType::Clone, std::move(reg)};
@@ -163,26 +163,26 @@ TraceEvent::Signal(const EventDataParam &param, RegisterData &&reg) noexcept
 
 TraceEvent *
 TraceEvent::Stepped(const EventDataParam &param, bool stop, std::optional<LocationStatus> bploc,
-                   std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept
+                    std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept
 {
   CORE_EVENT_LOG("creating event Stepped");
   return new TraceEvent{param, ::Stepped{{param.tid.value()}, stop, bploc, mayresume}, CoreEventType::Stepped,
-                       std::move(reg)};
+                        std::move(reg)};
 }
 
 TraceEvent *
 TraceEvent::SteppingDone(const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept
 {
   return new TraceEvent{param, ::Stepped{{param.tid.value()}, true, {}, {}, msg}, CoreEventType::Stepped,
-                       std::move(reg)};
+                        std::move(reg)};
 }
 
 TraceEvent *
 TraceEvent::DeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bool attached) noexcept
 {
   CORE_EVENT_LOG("creating event DeferToSupervisor");
-  return new TraceEvent{param, ::DeferToSupervisor{{param.tid.value()}, attached}, CoreEventType::DeferToSupervisor,
-                       std::move(reg)};
+  return new TraceEvent{param, ::DeferToSupervisor{{param.tid.value()}, attached},
+                        CoreEventType::DeferToSupervisor, std::move(reg)};
 }
 
 TraceEvent *
@@ -190,55 +190,162 @@ TraceEvent::EntryEvent(const EventDataParam &param, RegisterData &&reg, bool sho
 {
   CORE_EVENT_LOG("creating event EntryEvent");
   return new TraceEvent{param, ::EntryEvent{{param.tid.value()}, should_stop}, CoreEventType::Entry,
-                       std::move(reg)};
+                        std::move(reg)};
 }
 
-static void
-push_event(Event e)
+EventSystem::EventSystem(int wait[2], int commands[2], int debugger[2], int init[2]) noexcept
+    : mWaitStatus(wait[0], wait[1]), mCommandEvents(commands[0], commands[1]),
+      mDebuggerEvents(debugger[0], debugger[1]), mInitEvents(init[0], init[1])
 {
-  std::lock_guard lock(event_queue_mutex);
-  events.push(e);
-  cv.notify_all();
+  mPollDescriptors[0] = {mWaitStatus[0], POLLIN, 0};
+  mPollDescriptors[1] = {mCommandEvents[0], POLLIN, 0};
+  mPollDescriptors[2] = {mDebuggerEvents[0], POLLIN, 0};
+  mPollDescriptors[3] = {mInitEvents[0], POLLIN, 0};
 }
 
-void
-push_wait_event(TaskWaitResult wait_result) noexcept
+/* static */
+EventSystem *
+EventSystem::Initialize() noexcept
 {
-  push_event(Event{.type = EventType::WaitStatus, .wait = {.wait = wait_result, .core = 0}});
-}
+  int wait[2];
+  int commands[2];
+  int dbg[2];
+  int init[2];
 
-void
-push_command_event(ui::dap::DebugAdapterClient *dap, ui::UICommand *cmd) noexcept
-{
-  cmd->SetDebugAdapterClient(*dap);
-  push_event(Event{.type = EventType::Command, .cmd = cmd});
-}
+  ASSERT(pipe(wait) != -1, "Failed to open pipe");
+  ASSERT(pipe(commands) != -1, "Failed to open pipe");
+  ASSERT(pipe(dbg) != -1, "Failed to open pipe");
+  ASSERT(pipe(init) != -1, "Failed to open pipe")
 
-void
-push_debugger_event(TraceEvent *event) noexcept
-{
-  push_event(Event{.type = EventType::TraceeEvent, .debugger = event});
-}
-
-void
-push_init_event(TraceEvent *event) noexcept
-{
-  push_event(Event{.type = EventType::Initialization, .debugger = event});
-}
-
-Event
-poll_event()
-{
-  constexpr static auto SLEEP_CYCLE = 10;
-  while (events.empty()) {
-    std::unique_lock lock(event_queue_wait_mutex);
-    cv.wait_for(lock, std::chrono::milliseconds{SLEEP_CYCLE});
+  for (auto read : {wait[0], commands[0], dbg[0], init[0]}) {
+    ASSERT(fcntl(read, F_SETFL, O_NONBLOCK) != -1, "failed to set read as non-blocking.");
   }
 
-  std::lock_guard lock(event_queue_mutex);
-  // Todo: implement own queue, that instead of this atrocity, has a pop(), that also returns the value
-  Event evt = events.front();
-  events.pop();
-  return evt;
+  EventSystem::sEventSystem = new EventSystem{wait, commands, dbg, init};
+  return EventSystem::sEventSystem;
 }
+
+void
+EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, ui::UICommand *cmd) noexcept
+{
+  std::lock_guard lock(mCommandsGuard);
+  cmd->SetDebugAdapterClient(*debugAdapter);
+  mCommands.push_back(cmd);
+  utils::DebugValue<int> writeValue = write(mCommandEvents[1], "+", 1);
+  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+}
+
+void
+EventSystem::PushDebuggerEvent(TraceEvent *event) noexcept
+{
+  std::lock_guard lock(mTraceEventGuard);
+  mTraceEvents.push_back(event);
+  utils::DebugValue<int> writeValue = write(mDebuggerEvents[1], "+", 1);
+  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+}
+
+void EventSystem::PushInitEvent(TraceEvent *event) noexcept {
+  std::lock_guard lock(mTraceEventGuard);
+  mInitEvent.push_back(event);
+  utils::DebugValue<int> writeValue = write(mInitEvents[1], "+", 1);
+  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+}
+
+void
+EventSystem::PushWaitResult(WaitResult result) noexcept
+{
+  utils::DebugValue<int> writeValue = write(mWaitStatus[1], &result, sizeof(result));
+  ASSERT(writeValue != -1 && writeValue == sizeof(result), "Failed to write notification to pipe");
+}
+
+bool
+EventSystem::PollBlocking(std::vector<Event> &write) noexcept
+{
+  int ret = poll(mPollDescriptors, std::size(mPollDescriptors), -1);
+  mPollFailures++;
+  ASSERT(mPollFailures < 10, "failed to poll event system");
+  if (ret == 0) {
+    return false;
+  }
+  mPollFailures = 0;
+
+  auto sizeBefore = write.size();
+
+  // Check for events
+  constexpr auto HadEventFilter = [](const pollfd &pfd) { return (pfd.revents & POLLIN) == POLLIN; };
+  namespace vw = std::views;
+
+  for (auto &pfd : mPollDescriptors | vw::filter(HadEventFilter)) {
+      char buffer[128];
+    if (pfd.fd == mCommandEvents[0]) {
+      utils::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      std::lock_guard lock(mCommandsGuard);
+      std::ranges::transform(mCommands, std::back_inserter(write), [](ui::UICommand *cmd) { return Event{cmd}; });
+      mCommands.clear();
+    } else if (pfd.fd == mDebuggerEvents[0]) {
+      utils::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      std::lock_guard lock(mTraceEventGuard);
+      std::ranges::transform(mTraceEvents, std::back_inserter(write),
+                             [](TraceEvent *event) { return Event{event}; });
+      mTraceEvents.clear();
+    } else if (pfd.fd == mInitEvents[0]) {
+      utils::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      std::lock_guard lock(mTraceEventGuard);
+      std::ranges::transform(mInitEvent, std::back_inserter(write),
+                             [](TraceEvent *event) { return Event{event, true}; });
+      mInitEvent.clear();
+    } else if (pfd.fd == mWaitStatus[0]) {
+      WaitResult result[8];
+      constexpr auto bufferSize = sizeof(WaitResult) * std::size(result);
+      ssize_t bytesRead = read(pfd.fd, result, bufferSize);
+      ASSERT(bytesRead % 8 == 0, "Did not write 8 byte aligned WaitResult value");
+      const auto count = bytesRead / sizeof(WaitResult);
+      for(auto [pid, stat] : std::span{result, count}) {
+        if (WIFSTOPPED(stat)) {
+          const auto res = WaitResultToTaskWaitResult(pid, stat);
+          write.push_back(Event{WaitEvent{.wait = res, .core = 0}});
+        } else if (WIFEXITED(stat)) {
+          // We might as well only report this for process-tasks,
+          // as DAP doesn't support reporting an exit code for a thread, only for a process,
+          // because DAP distinguishes between the two in a way that most OS today, doesn't.
+          if (!Tracer::Instance->TraceExitConfigured) {
+            // means this is the only place we're getting informed of thread exits
+            for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
+              for (const auto &t : supervisor->GetThreads()) {
+                if (t->tid == pid) {
+                  write.push_back(Event{
+                    TraceEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {})});
+                }
+              }
+            }
+          } else {
+            for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
+              if (supervisor->TaskLeaderTid() == pid) {
+                int exit_code = WEXITSTATUS(stat);
+                write.push_back(
+                  Event{TraceEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {})});
+              }
+            }
+          }
+        } else if (WIFSIGNALED(stat)) {
+          const auto signaled_evt = TaskWaitResult{
+            .tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
+          write.push_back(Event{WaitEvent{signaled_evt, 0}});
+        } else {
+          PANIC("Unknown wait status event");
+        }
+      }
+    }
+  }
+  return write.size() != sizeBefore;
+}
+
+/* static */
+EventSystem& EventSystem::Get() noexcept {
+  return *sEventSystem;
+};
+
 // NOLINTEND(cppcoreguidelines-owning-memory)
