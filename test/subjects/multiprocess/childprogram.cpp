@@ -1,5 +1,6 @@
 #include <charconv>
 #include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -10,15 +11,22 @@ namespace fs = std::filesystem;
 void
 printDirectoryContents(const std::string &path, std::optional<int> sleepPerIteration)
 {
+  auto iter = 0;
   try {
     auto dirEntryItem = 1ull;
     if (fs::exists(path) && fs::is_directory(path)) {
       for (const auto &entry : fs::directory_iterator(path)) {
+
         std::cout << "#" << dirEntryItem << " " << entry.path().string() << std::endl;
         ++dirEntryItem; // #ITERATE_DIR_ENTRY_BP
         if (sleepPerIteration) {
+          // Make sure we handle signals properly.
+          if(iter == 500) {
+            raise(SIGINT);
+          }
           std::this_thread::sleep_for(std::chrono::milliseconds{*sleepPerIteration});
         }
+        ++iter;
       }
     } else {
       std::cerr << "Error: The path does not exist or is not a directory." << std::endl;

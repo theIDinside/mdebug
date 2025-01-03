@@ -69,6 +69,12 @@ BuildTestSubject(
 )
 
 BuildTestSubject(
+  NAME signals
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/signals.cpp
+)
+
+BuildTestSubject(
   NAME templated
   SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/templated_code/template_main.cpp
