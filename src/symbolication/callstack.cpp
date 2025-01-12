@@ -396,10 +396,10 @@ bool
 CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
 {
   auto &cfa = stateMachine.GetCanonicalFrameAddressData();
-
+  int frameLevel = mUnwoundRegister.size()-1;
   const u64 canonicalFrameAddr =
     stateMachine.GetCanonicalFrameAddressData().mIsExpression
-      ? stateMachine.ComputeExpression(cfa.uExpression)
+      ? stateMachine.ComputeExpression(cfa.uExpression, frameLevel)
       : static_cast<u64>(static_cast<i64>(mUnwoundRegister.back().GetRegister(cfa.reg.uNumber)) + cfa.reg.uOffset);
   DBGLOG(core, "[eh]: canonical frame address computed: 0x{:x}", canonicalFrameAddr);
   stateMachine.SetCanonicalFrameAddress(canonicalFrameAddr);
@@ -411,7 +411,7 @@ CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
   baseFrame.SetCanonicalFrameAddress(canonicalFrameAddr);
 
   for (auto i = 0u; i < mUnwoundRegister[mUnwoundRegister.size() - 2].RegisterCount(); ++i) {
-    newAboveFrame.Set(i, stateMachine.ResolveRegisterContents(i, baseFrame));
+    newAboveFrame.Set(i, stateMachine.ResolveRegisterContents(i, baseFrame, frameLevel));
   }
 
   newAboveFrame.Set(7, canonicalFrameAddr);

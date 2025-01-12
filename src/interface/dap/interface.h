@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../../lib/spinlock.h"
 #include "../../notify_pipe.h"
 #include "dap_defs.h"
 #include "utils/util.h"
+#include <chrono>
 #include <cstring>
 #include <nlohmann/json.hpp>
 #include <queue>
@@ -45,17 +45,27 @@ public:
 
   // Expects to be able to read from `fd` - if we don't, we've got a bug and we should *not* silently ignore it or
   // handle it. Fail fast.
-  void
+  bool
   expect_read_from_fd(int fd) noexcept
   {
     VERIFY(current_size() < buffer_size, "Next read would read < 0 bytes!");
+    auto start = std::chrono::high_resolution_clock::now();
     auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
+    const auto duration_ms =
+    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+      .count();
+    ASSERT(duration_ms < 1500, "Read took *way* too long");
+    if(read_bytes == -1) {
+      DBGLOG(core, "command buffer read error: {} for fd {}", strerror(errno), fd);
+      return false;
+    }
     VERIFY(read_bytes >= 0,
            "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: '{}'",
            buffer_size - current_size(), buffer_size, strerror(errno), take_view());
     if (read_bytes >= 0) {
       size[current_buffer_index] += read_bytes;
     }
+    return true;
   }
 
   std::string_view
@@ -155,7 +165,7 @@ class DebugAdapterClient
   DebugAdapterClient(DapClientSession session, int standard_in, int standard_out) noexcept;
 
   std::mutex m{};
-  std::queue<UIResultPtr> ui_output_queue{};
+  std::vector<UIResultPtr> mDelayedEvents{};
 
   void InitAllocators() noexcept;
 
@@ -165,20 +175,23 @@ public:
 
   alloc::ArenaAllocator* GetCommandArenaAllocator() noexcept;
   alloc::ArenaAllocator* GetResponseArenaAllocator() noexcept;
-  static DebugAdapterClient *createStandardIOConnection() noexcept;
-  static DebugAdapterClient *createSocketConnection(DebugAdapterClient *client) noexcept;
-  void client_configured(TraceeController *tc) noexcept;
-  void post_event(ui::UIResultPtr event);
+  static DebugAdapterClient* createStandardIOConnection() noexcept;
+  static DebugAdapterClient* createSocketConnection(const DebugAdapterClient &client) noexcept;
+  void client_configured(TraceeController *tc, std::optional<int> ttyFileDescriptor = {}) noexcept;
+  void PostEvent(ui::UIResultPtr event);
 
   int read_fd() const noexcept;
   int out_fd() const noexcept;
 
-  bool write(std::string_view output) noexcept;
+  bool write(std::string_view output) const noexcept;
   void commands_read() noexcept;
   void set_tty_out(int fd) noexcept;
   std::optional<int> tty() const noexcept;
   TraceeController *supervisor() const noexcept;
   void set_session_type(DapClientSession type) noexcept;
+  void ShutDown() noexcept;
+  void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
+  void FlushEvents() noexcept;
 };
 
 enum class InterfaceNotificationSource
@@ -188,6 +201,7 @@ enum class InterfaceNotificationSource
   ClientStdout
 };
 
+using DAPKey = std::uintptr_t;
 using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterClient *>;
 
 class DAP
@@ -221,7 +235,7 @@ public:
 
   void configure_tty(int master_pty_fd) noexcept;
   DebugAdapterClient *main_connection() const noexcept;
-
+  void RemoveSource(DebugAdapterClient* client) noexcept;
 private:
   UIResultPtr pop_event() noexcept;
   void write_protocol_message(std::string_view msg) noexcept;

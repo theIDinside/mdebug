@@ -1,4 +1,4 @@
-const { assert, assertLog } = require('./utils')
+const { assert, assertLog, prettyJson } = require('./utils')
 /**
  *
  * @param {import("./client").DAClient } DA
@@ -6,7 +6,8 @@ const { assert, assertLog } = require('./utils')
 async function see9ThreadExits(DA) {
   await DA.startRunToMain(DA.buildDirFile('threads_shared'))
   const threads = await DA.threads()
-  let p = DA.prepareWaitForEventN('thread', 17, 1000)
+  const EXPECTED_THREAD_EVENTS = 17;
+  let p = DA.prepareWaitForEventN('thread', EXPECTED_THREAD_EVENTS, 2500)
   let pexited = DA.prepareWaitForEventN('exited', 1, 1000)
   for (let i = 0; i < 3; i++) {
     const response = await DA.sendReqGetResponse('continue', { threadId: threads[0].id })
@@ -21,6 +22,7 @@ async function see9ThreadExits(DA) {
     }
   }
   let r = await p
+  assertLog(r.length == EXPECTED_THREAD_EVENTS, `Expected ${EXPECTED_THREAD_EVENTS} thread events`);
   let re = (await pexited)[0]
 
   let threads_started = 0

@@ -5,9 +5,7 @@
 #include <mdbsys/ptrace.h>
 #include <string>
 #include <sys/poll.h>
-#include <utility>
 #include <variant>
-#include <vector>
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
 namespace ui {
 struct UICommand;
@@ -22,7 +20,8 @@ enum class EventType
   WaitStatus,
   Command,
   TraceeEvent,
-  Initialization
+  Initialization,
+  Internal,
 };
 
 struct WaitEvent
@@ -31,7 +30,7 @@ struct WaitEvent
   int core;
 };
 
-enum class CoreEventType
+enum class TracerEventType : u8
 {
   Stop,
   LibraryEvent,
@@ -53,12 +52,13 @@ enum class CoreEventType
   Entry
 };
 
-#define EventType(Type) static constexpr CoreEventType EvtType = CoreEventType::Type                  // NOLINT
-#define LogEvent(EventObject, Msg) DBGLOG(core, "[Core Event] ({}): {}", EventObject.event_type, Msg) // NOLINT
+#define EventType(Type) static constexpr TracerEventType EvtType = TracerEventType::Type // NOLINT
+#define LogEvent(EventObject, Msg)                                                                                \
+  DBGLOG(core, "[Core Event:{}] ({}): {}", mTaskLeader, EventObject.event_type, Msg) // NOLINT
 
 namespace fmt {
 
-template <> struct formatter<CoreEventType>
+template <> struct formatter<TracerEventType>
 {
   template <typename ParseContext>
   constexpr auto
@@ -69,45 +69,45 @@ template <> struct formatter<CoreEventType>
 
   template <typename FormatContext>
   auto
-  format(const CoreEventType &evt, FormatContext &ctx) const
+  format(const TracerEventType &evt, FormatContext &ctx) const
   {
     switch (evt) {
-    case CoreEventType::Stop:
-      return fmt::format_to(ctx.out(), "CoreEventType::Stop");
-    case CoreEventType::LibraryEvent:
-      return fmt::format_to(ctx.out(), "CoreEventType::LibraryEvent");
-    case CoreEventType::BreakpointHitEvent:
-      return fmt::format_to(ctx.out(), "CoreEventType::BreakpointHitEvent");
-    case CoreEventType::SyscallEvent:
-      return fmt::format_to(ctx.out(), "CoreEventType::SyscallEvent");
-    case CoreEventType::ThreadCreated:
-      return fmt::format_to(ctx.out(), "CoreEventType::ThreadCreated");
-    case CoreEventType::ThreadExited:
-      return fmt::format_to(ctx.out(), "CoreEventType::ThreadExited");
-    case CoreEventType::WatchpointEvent:
-      return fmt::format_to(ctx.out(), "CoreEventType::WatchpointEvent");
-    case CoreEventType::ProcessExited:
-      return fmt::format_to(ctx.out(), "CoreEventType::ProcessExited");
-    case CoreEventType::ProcessTerminated:
-      return fmt::format_to(ctx.out(), "CoreEventType::ProcessTerminated");
-    case CoreEventType::Fork:
-      return fmt::format_to(ctx.out(), "CoreEventType::Fork");
-    case CoreEventType::VFork:
-      return fmt::format_to(ctx.out(), "CoreEventType::VFork");
-    case CoreEventType::VForkDone:
-      return fmt::format_to(ctx.out(), "CoreEventType::VForkDone");
-    case CoreEventType::Exec:
-      return fmt::format_to(ctx.out(), "CoreEventType::Exec");
-    case CoreEventType::Clone:
-      return fmt::format_to(ctx.out(), "CoreEventType::Clone");
-    case CoreEventType::DeferToSupervisor:
-      return fmt::format_to(ctx.out(), "CoreEventType::DeferToProceed");
-    case CoreEventType::Signal:
-      return fmt::format_to(ctx.out(), "CoreEventType::Signal");
-    case CoreEventType::Stepped:
-      return fmt::format_to(ctx.out(), "CoreEventType::Stepped");
-    case CoreEventType::Entry:
-      return fmt::format_to(ctx.out(), "CoreEventType::Entry");
+    case TracerEventType::Stop:
+      return fmt::format_to(ctx.out(), "TracerEventType::Stop");
+    case TracerEventType::LibraryEvent:
+      return fmt::format_to(ctx.out(), "TracerEventType::LibraryEvent");
+    case TracerEventType::BreakpointHitEvent:
+      return fmt::format_to(ctx.out(), "TracerEventType::BreakpointHitEvent");
+    case TracerEventType::SyscallEvent:
+      return fmt::format_to(ctx.out(), "TracerEventType::SyscallEvent");
+    case TracerEventType::ThreadCreated:
+      return fmt::format_to(ctx.out(), "TracerEventType::ThreadCreated");
+    case TracerEventType::ThreadExited:
+      return fmt::format_to(ctx.out(), "TracerEventType::ThreadExited");
+    case TracerEventType::WatchpointEvent:
+      return fmt::format_to(ctx.out(), "TracerEventType::WatchpointEvent");
+    case TracerEventType::ProcessExited:
+      return fmt::format_to(ctx.out(), "TracerEventType::ProcessExited");
+    case TracerEventType::ProcessTerminated:
+      return fmt::format_to(ctx.out(), "TracerEventType::ProcessTerminated");
+    case TracerEventType::Fork:
+      return fmt::format_to(ctx.out(), "TracerEventType::Fork");
+    case TracerEventType::VFork:
+      return fmt::format_to(ctx.out(), "TracerEventType::VFork");
+    case TracerEventType::VForkDone:
+      return fmt::format_to(ctx.out(), "TracerEventType::VForkDone");
+    case TracerEventType::Exec:
+      return fmt::format_to(ctx.out(), "TracerEventType::Exec");
+    case TracerEventType::Clone:
+      return fmt::format_to(ctx.out(), "TracerEventType::Clone");
+    case TracerEventType::DeferToSupervisor:
+      return fmt::format_to(ctx.out(), "TracerEventType::DeferToProceed");
+    case TracerEventType::Signal:
+      return fmt::format_to(ctx.out(), "TracerEventType::Signal");
+    case TracerEventType::Stepped:
+      return fmt::format_to(ctx.out(), "TracerEventType::Stepped");
+    case TracerEventType::Entry:
+      return fmt::format_to(ctx.out(), "TracerEventType::Entry");
     }
     NEVER("Unknown Core event type");
   }
@@ -115,12 +115,12 @@ template <> struct formatter<CoreEventType>
 
 } // namespace fmt
 
-struct ThreadEvent
+struct TaskEvent
 {
   Tid thread_id;
 };
 
-struct WatchpointEvent : public ThreadEvent
+struct WatchpointEvent : public TaskEvent
 {
   EventType(WatchpointEvent);
   enum class WatchpointType
@@ -134,7 +134,7 @@ struct WatchpointEvent : public ThreadEvent
   std::uintptr_t address;
 };
 
-struct SyscallEvent : public ThreadEvent
+struct SyscallEvent : public TaskEvent
 {
   EventType(SyscallEvent);
   enum class Boundary : u8
@@ -147,57 +147,58 @@ struct SyscallEvent : public ThreadEvent
   int syscall_no;
 };
 
-struct ThreadCreated : public ThreadEvent
+struct ThreadCreated : public TaskEvent
 {
   EventType(ThreadCreated);
   tc::ResumeAction resume_action;
 };
 
-struct ThreadExited : public ThreadEvent
+struct ThreadExited : public TaskEvent
 {
   EventType(ThreadExited);
   int code_or_signal;
   bool process_needs_resuming;
 };
 
-struct ForkEvent : public ThreadEvent
+struct ForkEvent : public TaskEvent
 {
   EventType(Fork);
   Pid child_pid;
   bool mIsVFork;
 };
 
-struct Clone : public ThreadEvent
+struct Clone : public TaskEvent
 {
   EventType(Clone);
   Tid child_tid;
   std::optional<TaskVMInfo> vm_info;
 };
 
-struct Exec : public ThreadEvent
+struct Exec : public TaskEvent
 {
   EventType(Exec);
   std::string exec_file;
 };
 
-struct ProcessExited : public ThreadEvent
+struct ProcessExited : public TaskEvent
 {
   EventType(ProcessExited);
   Pid pid;
   int exit_code;
 };
 
-struct LibraryEvent : public ThreadEvent
+struct LibraryEvent : public TaskEvent
 {
   EventType(LibraryEvent);
 };
 
-struct Signal : public ThreadEvent
+struct Signal : public TaskEvent
 {
   EventType(Signal);
+  int mTerminatingSignal;
 };
 
-struct Stepped : public ThreadEvent
+struct Stepped : public TaskEvent
 {
   EventType(Stepped);
   bool stop;
@@ -206,7 +207,7 @@ struct Stepped : public ThreadEvent
   std::string_view msg{};
 };
 
-struct BreakpointHitEvent : public ThreadEvent
+struct BreakpointHitEvent : public TaskEvent
 {
   EventType(BreakpointHitEvent);
   enum class BreakpointType : u8
@@ -221,13 +222,13 @@ struct BreakpointHitEvent : public ThreadEvent
 
 // A never-facing-user event. used to signal that a proceed action is solely responsible for determining the next
 // action of a task
-struct DeferToSupervisor : public ThreadEvent
+struct DeferToSupervisor : public TaskEvent
 {
   EventType(DeferToSupervisor);
   bool attached;
 };
 
-struct EntryEvent : public ThreadEvent
+struct EntryEvent : public TaskEvent
 {
   EventType(Entry);
   bool should_stop;
@@ -259,7 +260,7 @@ struct TraceEvent
   // The payload std::variant, which holds the data and therefore determines what kind of event this is
   Immutable<CoreEventVariant> event;
   // The signal generated (or the exit code returned) by the process that generated the
-  Immutable<CoreEventType> event_type;
+  Immutable<TracerEventType> event_type;
   union
   {
     int signal;
@@ -270,10 +271,11 @@ struct TraceEvent
   // result of the syscall waitpid(...)). If the target is native, this will always be empty.
   Immutable<RegisterData> registers{};
 
-  TraceEvent(Pid target, Tid tid, CoreEventVariant &&p, CoreEventType type, int sig_code,
+  TraceEvent(Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type, int sig_code,
              RegisterData &&regs) noexcept;
 
-  TraceEvent(const EventDataParam &param, CoreEventVariant &&p, CoreEventType type, RegisterData &&regs) noexcept;
+  TraceEvent(const EventDataParam &param, CoreEventVariant &&p, TracerEventType type,
+             RegisterData &&regs) noexcept;
 
   static TraceEvent *LibraryEvent(const EventDataParam &param, RegisterData &&reg) noexcept;
   static TraceEvent *SoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> address,
@@ -306,6 +308,42 @@ struct TraceEvent
   static TraceEvent *EntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept;
 };
 
+enum class InternalEventKind
+{
+  InvalidateSupervisor
+};
+
+// Event sent when a supervisor for a process "dies". Was called "DestroySupervisor" before
+// but seeing as the plan is to integrate with RR at some point, it's better to just call it "invalidate" instead
+// so that it can be potentially lifted back into life, if the user reverse-continues across the boundary of it's normal death.
+struct InvalidateSupervisor
+{
+  Tid mTaskLeader;
+};
+
+#define UnionVariant(TYPE) TYPE u##TYPE
+
+#define UnionVariantConstructor(SUPER_TYPE, VARIANT_TYPE)                                                         \
+  constexpr SUPER_TYPE(VARIANT_TYPE variant) noexcept                                                             \
+      : mType(SUPER_TYPE##Kind::VARIANT_TYPE), u##VARIANT_TYPE(variant)                                           \
+  {                                                                                                               \
+  }
+
+struct InternalEvent
+{
+  InternalEvent() noexcept = delete;
+  InternalEvent(const InternalEvent&) noexcept = default;
+  InternalEvent& operator=(const InternalEvent&) noexcept = default;
+
+  union
+  {
+    InvalidateSupervisor uInvalidateSupervisor;
+  };
+  InternalEventKind mType;
+
+  UnionVariantConstructor(InternalEvent, InvalidateSupervisor)
+};
+
 struct Event
 {
   EventType type;
@@ -314,6 +352,7 @@ struct Event
     WaitEvent uWait;
     TraceEvent *uDebugger;
     ui::UICommand *uCommand;
+    InternalEvent uInternalEvent;
   };
 
   constexpr explicit Event(ui::UICommand *command) noexcept : type(EventType::Command), uCommand(command) {}
@@ -322,8 +361,15 @@ struct Event
   {
   }
   constexpr explicit Event(WaitEvent waitEvent) noexcept : type(EventType::WaitStatus), uWait(waitEvent) {}
+  constexpr explicit Event(InternalEvent internalEvent) noexcept
+      : type(EventType::Internal), uInternalEvent(internalEvent)
+  {
+  }
 };
 
+/// Result from a (successful) waitpid operation.
+/// This type is serialized over a pipe from either signal handler (handling SIGCHLD as a tracer-method), or from
+/// an awaiter thread, that does infinite waitpid(...)
 struct WaitResult
 {
   pid_t pid;
@@ -345,15 +391,19 @@ class EventSystem
   int mCommandEvents[2];
   int mDebuggerEvents[2];
   int mInitEvents[2];
-  pollfd mPollDescriptors[4];
+  int mInternalEvents[2];
 
-  std::mutex mCommandsGuard;
-  std::mutex mTraceEventGuard;
+  pollfd mPollDescriptors[5];
+
+  std::mutex mCommandsGuard{};
+  std::mutex mTraceEventGuard{};
+  std::mutex mInternalEventGuard{};
   std::vector<TraceEvent *> mTraceEvents;
   std::vector<ui::UICommand *> mCommands;
   std::vector<WaitEvent> mWaitEvents;
   std::vector<TraceEvent *> mInitEvent;
-  EventSystem(int wait[2], int commands[2], int debugger[2], int init[2]) noexcept;
+  std::vector<InternalEvent> mInternal;
+  EventSystem(int wait[2], int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
 
   static EventSystem *sEventSystem;
 
@@ -363,8 +413,10 @@ public:
   static EventSystem *Initialize() noexcept;
   void PushCommand(ui::dap::DebugAdapterClient *dap_client, ui::UICommand *cmd) noexcept;
   void PushDebuggerEvent(TraceEvent *event) noexcept;
+  void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
   void PushInitEvent(TraceEvent *event) noexcept;
   void PushWaitResult(WaitResult result) noexcept;
+  void PushInternalEvent(InternalEvent event) noexcept;
   bool PollBlocking(std::vector<Event> &write) noexcept;
 
   static EventSystem &Get() noexcept;

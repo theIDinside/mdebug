@@ -1276,7 +1276,7 @@ RemoteConnection::send_interrupt_byte() noexcept
 }
 
 utils::Expected<std::string, SendError>
-RemoteConnection::send_command_with_response(std::optional<gdb::GdbThread> thread, std::string_view command,
+RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread, std::string_view command,
                                              std::optional<int> timeout) noexcept
 {
   // the actual dance of requesting and receiving control, also needs mutually exclusive access.

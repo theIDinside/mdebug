@@ -1,9 +1,11 @@
 #include "commands.h"
 #include "bp.h"
 #include "common.h"
+#include "event_queue.h"
 #include "events/event.h"
 #include "fmt/ranges.h"
 #include "interface/attach_args.h"
+#include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "interface/ui_command.h"
@@ -168,7 +170,8 @@ Pause::Execute() noexcept
   if (task->is_stopped()) {
     return new PauseResponse{false, this};
   }
-  target->InstallStopActionHandler<ptracestop::StopImmediately>(*task, StoppedReason::Pause);
+  target->SetAndCallRunAction(task->mTid,
+                              std::make_shared<ptracestop::StopImmediately>(*target, *task, StoppedReason::Pause));
   return new PauseResponse{true, this};
 }
 
@@ -228,11 +231,11 @@ Continue::Execute() noexcept
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
   auto target = dap_client->supervisor();
-  if (continue_all && target->IsRunning()) {
+  if (continue_all && !target->SomeTaskCanBeResumed()) {
     std::vector<Tid> running_tasks{};
     for (const auto &t : target->GetThreads()) {
       if (!t->is_stopped() || t->tracer_stopped) {
-        running_tasks.push_back(t->tid);
+        running_tasks.push_back(t->mTid);
       }
     }
     DBGLOG(core, "Denying continue request, target is running ([{}])", fmt::join(running_tasks, ", "));
@@ -241,15 +244,64 @@ Continue::Execute() noexcept
     res->success = true;
     if (continue_all) {
       DBGLOG(core, "continue all");
-      target->ResumeTask(tc::RunType::Continue);
+      const int deliverNonSigtrapSignal = -1;
+      target->ResumeTarget(tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess,
+                                            deliverNonSigtrapSignal});
     } else {
       DBGLOG(core, "continue single thread: {}", thread_id);
       auto t = target->GetTaskByTid(thread_id);
-      target->ResumeTask(*t, {tc::RunType::Continue, tc::ResumeTarget::Task});
+      target->ResumeTask(*t, {tc::RunType::Continue, tc::ResumeTarget::Task, -1});
     }
   }
 
   return res;
+}
+
+UIResultPtr
+ContinueAll::Execute() noexcept
+{
+  auto target = dap_client->supervisor();
+  auto res = new ContinueAllResponse{true, this, target->TaskLeaderTid()};
+  auto result =
+    target->ResumeTarget(tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1});
+  res->success = result;
+  if (result) {
+    dap_client->PushDelayedEvent(new ContinuedEvent{res->mTaskLeader, true});
+  }
+  return res;
+}
+
+std::pmr::string
+ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
+{
+  std::pmr::string result{arenaAllocator};
+  fmt::format_to(
+    std::back_inserter(result),
+    R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"continueAll","body":{{"threadId":{}}}}})",
+    seq, request_seq, success, mTaskLeader);
+  return result;
+}
+
+UIResultPtr
+PauseAll::Execute() noexcept
+{
+  auto target = dap_client->supervisor();
+  auto tid = target->TaskLeaderTid();
+  target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = dap_client, tid]() {
+    client->PostEvent(new StoppedEvent{StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
+  });
+  auto res = new PauseAllResponse{true, this};
+  return res;
+}
+
+std::pmr::string
+PauseAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
+{
+  std::pmr::string result{arenaAllocator};
+  fmt::format_to(std::back_inserter(result),
+                 R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"pauseAll"}})", seq,
+                 request_seq, success);
+  return result;
 }
 
 std::pmr::string
@@ -281,10 +333,10 @@ Next::Execute() noexcept
 
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    target->InstallStopActionHandler<ptracestop::InstructionStep>(*task, 1);
+    target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::InstructionStep>(*target, *task, 1));
     break;
   case SteppingGranularity::Line:
-    target->InstallStopActionHandler<ptracestop::LineStep>(*task, 1);
+    target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::LineStep>(*target, *task, 1));
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -330,7 +382,7 @@ StepIn::Execute() noexcept
       std::nullopt};
   }
 
-  target->SetAndCallRunAction(task->tid, proceeder);
+  target->SetAndCallRunAction(task->mTid, std::move(proceeder));
   return new StepInResponse{true, this};
 }
 
@@ -369,15 +421,16 @@ StepOut::Execute() noexcept
   if (!loc.is_expected()) {
     return new StepOutResponse{false, this};
   }
-  auto user =
-    target->GetUserBreakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->tid, task->tid);
-  target->InstallStopActionHandler<ptracestop::FinishFunction>(*task, user, false);
+  auto user = target->GetUserBreakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->mTid,
+                                                                             task->mTid);
+  target->SetAndCallRunAction(task->mTid,
+                              std::make_shared<ptracestop::FinishFunction>(*target, *task, user, false));
   return new StepOutResponse{true, this};
 }
 
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd,
                                                BreakpointRequestKind type) noexcept
-    : ui::UIResult(success, cmd), type(type), breakpoints()
+    : ui::UIResult(success, cmd), mType(type), breakpoints()
 {
 }
 
@@ -392,7 +445,7 @@ SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAlloc
   for (auto &bp : breakpoints) {
     serialized_bkpts.push_back(bp.serialize(arenaAllocator));
   }
-  switch (this->type) {
+  switch (this->mType) {
   case BreakpointRequestKind::source:
     fmt::format_to(
       outIt,
@@ -641,7 +694,9 @@ ConfigurationDone::Execute() noexcept
   switch (dap_client->supervisor()->GetSessionType()) {
   case TargetSession::Launched: {
     DBGLOG(core, "configurationDone - resuming target {}", dap_client->supervisor()->TaskLeaderTid());
-    dap_client->supervisor()->ResumeTask(tc::RunType::Continue);
+    using namespace tc;
+    dap_client->supervisor()->ResumeTarget(
+      tc::ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
     break;
   }
   case TargetSession::Attached:
@@ -784,7 +839,7 @@ Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
 UIResultPtr
 Launch::Execute() noexcept
 {
-  Tracer::Instance->launch(dap_client, stopOnEntry, std::move(program), std::move(program_args));
+  Tracer::Instance->launch(dap_client, stopOnEntry, program, std::move(program_args));
   return new LaunchResponse{true, this};
 }
 
@@ -824,9 +879,7 @@ Terminate::Execute() noexcept
 {
   const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
   if (ok) {
-    dap_client->post_event(new TerminatedEvent{});
-    Tracer::Instance->erase_target(
-      [this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
+    EventSystem::Get().PushInternalEvent(InvalidateSupervisor{dap_client->supervisor()->TaskLeaderTid()});
     Tracer::Instance->KeepAlive = !Tracer::Instance->mTracedProcesses.empty();
   }
   return new TerminateResponse{ok, this};
@@ -862,18 +915,19 @@ Threads::Execute() noexcept
     auto res = it.RemoteConnection()->query_target_threads({target->TaskLeaderTid(), target->TaskLeaderTid()});
     ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
     for (const auto thr : res) {
-      if (std::ranges::none_of(target->GetThreads(), [t = thr.tid](const auto &a) { return a->tid == t; })) {
+      if (std::ranges::none_of(target->GetThreads(),
+                               [t = thr.tid](const std::shared_ptr<TaskInfo> &task) { return task->mTid == t; })) {
         target->AddTask(TaskInfo::CreateTask(target->GetInterface(), thr.tid, false));
       }
     }
 
     target->RemoveTaskIf([&](const auto &thread) {
-      return std::none_of(res.begin(), res.end(), [&](const auto pidtid) { return pidtid.tid == thread->tid; });
+      return std::none_of(res.begin(), res.end(), [&](const auto pidtid) { return pidtid.tid == thread->mTid; });
     });
   }
 
   for (const auto &thread : target->GetThreads()) {
-    const auto tid = thread->tid;
+    const auto tid = thread->mTid;
     response->threads.push_back(Thread{.id = tid, .name = it.GetThreadName(tid)});
   }
   return response;
@@ -922,7 +976,7 @@ StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto target = dap_client->supervisor();
-  if(!target || target->IsExited()) {
+  if (!target || target->IsExited()) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Process has already died: {}", threadId), {}};
   }
   auto task = target->GetTaskByTid(threadId);
@@ -943,7 +997,7 @@ StackTrace::Execute() noexcept
                      .line = static_cast<int>(lte->line),
                      .column = static_cast<int>(lte->column),
                      .rip = fmt::format("{}", frame.FramePc())});
-      } else if(src) {
+      } else if (src) {
         stack_frames.push_back(
           StackFrame{.id = frame.FrameId(),
                      .name = frame.Name().value_or("unknown"),
@@ -952,12 +1006,12 @@ StackTrace::Execute() noexcept
                      .column = 0,
                      .rip = fmt::format("{}", frame.FramePc())});
       } else {
-      stack_frames.push_back(StackFrame{.id = frame.FrameId(),
-                                        .name = frame.Name().value_or("unknown"),
-                                        .source = std::nullopt,
-                                        .line = 0,
-                                        .column = 0,
-                                        .rip = fmt::format("{}", frame.FramePc())});
+        stack_frames.push_back(StackFrame{.id = frame.FrameId(),
+                                          .name = frame.Name().value_or("unknown"),
+                                          .source = std::nullopt,
+                                          .line = 0,
+                                          .column = 0,
+                                          .rip = fmt::format("{}", frame.FramePc())});
       }
 
     } else {
@@ -1086,8 +1140,11 @@ Evaluate::Execute() noexcept
   switch (context) {
   case EvaluationContext::Watch:
     [[fallthrough]];
-  case EvaluationContext::Repl:
-    [[fallthrough]];
+  case EvaluationContext::Repl: {
+    auto result =
+      Tracer::Instance->EvaluateDebugConsoleExpression(expr, true, dap_client->GetResponseArenaAllocator());
+    return new EvaluateResponse{true, this, {}, std::move(result), {}, {}};
+  }
   case EvaluationContext::Hover:
     [[fallthrough]];
   case EvaluationContext::Clipboard:
@@ -1124,7 +1181,9 @@ Evaluate::PrepareEvaluateCommand(u64 seq, const nlohmann::json &args)
   std::string expr = args.at("expression");
   std::optional<int> frameId{};
   EvaluationContext ctx{};
-  frameId = args.at("frameId");
+  if (args.contains("frameId")) {
+    frameId = args.at("frameId");
+  }
 
   std::string_view context;
   args.at("context").get_to(context);
@@ -1134,9 +1193,9 @@ Evaluate::PrepareEvaluateCommand(u64 seq, const nlohmann::json &args)
 }
 
 EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference,
-                                   std::string &&result, std::optional<std::string> &&type,
+                                   std::pmr::string &&evalResult, std::optional<std::string> &&type,
                                    std::optional<std::string> &&memoryReference) noexcept
-    : UIResult(success, cmd), result(std::move(result)), type(std::move(type)),
+    : UIResult(success, cmd), result(std::move(evalResult)), type(std::move(type)),
       variablesReference(variablesReference.value_or(0)), memoryReference(std::move(memoryReference))
 {
 }
@@ -1144,21 +1203,20 @@ EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<in
 std::pmr::string
 EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  std::pmr::string result{arenaAllocator};
-  result.reserve(1024);
-  auto outIt = std::back_inserter(result);
+  std::pmr::string evalResponseResult{arenaAllocator};
+  evalResponseResult.reserve(1024);
   if (success) {
     fmt::format_to(
-      outIt,
+      std::back_inserter(evalResponseResult),
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
-      seq, request_seq, success, result, variablesReference);
+      seq, request_seq, result, variablesReference);
   } else {
     fmt::format_to(
-      outIt,
+      std::back_inserter(evalResponseResult),
       R"({{"seq":0,"request_seq":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
       request_seq, success, result);
   }
-  return result;
+  return evalResponseResult;
 }
 
 Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
@@ -1336,15 +1394,28 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   return result;
 }
 
+static ui::UICommand *
+ParseCustomRequestCommand(const DebugAdapterClient &client, u64 seq, const std::string &cmd_name,
+                          const nlohmann::basic_json<> &json) noexcept
+{
+  if (cmd_name == "continueAll") {
+    return new ContinueAll{seq};
+  }
+  if (cmd_name == "pauseAll") {
+    return new PauseAll{seq};
+  }
+  return new InvalidArgs{seq, cmd_name, {}};
+}
+
 ui::UICommand *
-ParseDebugAdapterCommand(std::string packet) noexcept
+ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) noexcept
 {
   using namespace ui::dap;
 
   auto obj = nlohmann::json::parse(packet, nullptr, false);
   std::string_view cmd_name;
   const std::string req = obj.dump();
-  DBGLOG(core, "parsed request: {}", req);
+  DBGLOG(core, "[{}]: parsed request: {}", client.supervisor() ? client.supervisor()->TaskLeaderTid() : 0, req);
   obj["command"].get_to(cmd_name);
   ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
   const u64 seq = obj["seq"];
@@ -1365,11 +1436,22 @@ ParseDebugAdapterCommand(std::string packet) noexcept
   case CommandType::Continue: {
     IfInvalidArgsReturn(Continue);
 
-    const auto all_threads = !args.contains("singleThread") ? true : false;
+    bool all_threads = false;
+    if (args.contains("singleThread")) {
+      const bool b = args["singleThread"];
+      all_threads = !b;
+    }
+
     return new Continue{seq, args.at("threadId"), all_threads};
   }
-  case CommandType::CustomRequest:
-    TODO("Command::CustomRequest");
+  case CommandType::CustomRequest: {
+    if (args.contains("command") && args.contains("arguments")) {
+      std::string customCommand;
+      args["command"].get_to(customCommand);
+      return ParseCustomRequestCommand(client, seq, customCommand, args["arguments"]);
+    }
+    return new InvalidArgs{seq, "customRequest", {}};
+  }
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
   case CommandType::Disassemble: {

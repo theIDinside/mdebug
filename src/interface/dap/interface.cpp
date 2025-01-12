@@ -7,14 +7,12 @@
 #include "common.h"
 #include "events.h"
 #include "lib/arena_allocator.h"
-#include "lib/lockguard.h"
 #include "parse_buffer.h"
-#include "utils/scope_defer.h"
+#include "utils/util.h"
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
-#include <memory_resource>
 #include <poll.h>
 #include <random>
 #include <supervisor.h>
@@ -135,8 +133,12 @@ DAP::write_protocol_message(std::string_view msg) noexcept
 {
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
   CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
-  VERIFY(write(tracer_out_fd, header.data(), header.size()) != -1, "Failed to write '{}'", header);
-  VERIFY(write(tracer_out_fd, msg.data(), msg.size()) != -1, "Failed to write '{}'", msg);
+  const auto headerWrite = write(tracer_out_fd, header.data(), header.size());
+  VERIFY(headerWrite != -1 && headerWrite == header.size(),
+         "Did not write entire header or some other error occured: {}", headerWrite);
+  const auto msgWrite = write(tracer_out_fd, msg.data(), msg.size());
+  VERIFY(msgWrite != -1 && msgWrite == msg.size(), "Did not write entire message or some other error occured: {}",
+         msgWrite);
 }
 
 void
@@ -173,7 +175,7 @@ DAP::one_poll(u32 notifier_queue_size) noexcept
   pollfd fds[notifier_queue_size];
 #pragma clang diagnostic pop
   init_poll(fds);
-  auto ready = poll(fds, notifier_queue_size, 1000);
+  auto ready = poll(fds, notifier_queue_size, -1);
   VERIFY(ready != -1, "polling failed: {}", strerror(errno));
   if (ready == 0) {
     // no ready events
@@ -217,13 +219,15 @@ DAP::new_client(utils::OwningPointer<DebugAdapterClient> client)
 void
 DebugAdapterClient::commands_read() noexcept
 {
-  parse_swapbuffer.expect_read_from_fd(in);
+  if (!parse_swapbuffer.expect_read_from_fd(in)) {
+    return;
+  }
   bool no_partials = false;
   const auto request_headers = parse_headers_from(parse_swapbuffer.take_view(), &no_partials);
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
       const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
-      const auto cmd = ParseDebugAdapterCommand(std::string{cd->payload()});
+      const auto cmd = ParseDebugAdapterCommand(*this, std::string{cd->payload()});
       EventSystem::Get().PushCommand(this, cmd);
     }
     // since there's no partials left in the buffer, we reset it
@@ -232,7 +236,7 @@ DebugAdapterClient::commands_read() noexcept
     if (request_headers.size() > 1) {
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
         const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
-        const auto cmd = ParseDebugAdapterCommand(std::string{cd->payload()});
+        const auto cmd = ParseDebugAdapterCommand(*this, std::string{cd->payload()});
         EventSystem::Get().PushCommand(this, cmd);
       }
 
@@ -243,6 +247,20 @@ DebugAdapterClient::commands_read() noexcept
              parse_swapbuffer.current_size());
     }
   }
+}
+
+// Set the file descriptor to non-blocking mode
+static bool
+SetNonBlocking(int fd)
+{
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) {
+    return false;
+  }
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+    return false;
+  }
+  return true;
 }
 
 void
@@ -274,6 +292,59 @@ void
 DebugAdapterClient::set_session_type(DapClientSession type) noexcept
 {
   session_type = type;
+}
+
+void
+DebugAdapterClient::ShutDown() noexcept
+{
+  if (fs::exists(socket_path)) {
+    unlink(socket_path.c_str());
+    // means that in and out are of a socket, and not stdio
+    if (in != -1) {
+      close(in);
+    }
+
+    if (out != -1) {
+      close(out);
+    }
+    in = -1;
+    out = -1;
+  }
+
+  if (tty_fd != -1) {
+    close(tty_fd);
+  }
+  tty_fd = -1;
+}
+
+void
+DebugAdapterClient::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
+{
+  std::lock_guard lock(m);
+  mDelayedEvents.push_back(delayedEvent);
+}
+
+void
+DebugAdapterClient::FlushEvents() noexcept
+{
+  UIResultPtr tmp[32];
+  const auto count = std::min(mDelayedEvents.size(), std::size(tmp));
+  {
+    std::lock_guard lock(m);
+    std::copy(mDelayedEvents.begin(), mDelayedEvents.begin() + count, tmp);
+    if (count == mDelayedEvents.size()) {
+      mDelayedEvents.clear();
+    } else {
+      mDelayedEvents.erase(mDelayedEvents.begin(), mDelayedEvents.begin() + count);
+    }
+  }
+
+  auto allocator = mEventsAllocator.get()->ScopeAllocation();
+  for (auto evt : std::span{tmp, count}) {
+    auto result = evt->Serialize(0, allocator);
+    write(result);
+    delete evt;
+  }
 }
 
 void
@@ -310,6 +381,25 @@ DAP::main_connection() const noexcept
 }
 
 void
+DAP::RemoveSource(DebugAdapterClient *client) noexcept
+{
+  utils::OwningPointer<DebugAdapterClient> ptr{nullptr};
+  for (auto t : clients) {
+    if (t.t == client) {
+      ptr = t;
+    }
+  }
+
+  auto it = std::ranges::find_if(sources, [ptr](const auto &source) {
+    const auto &client = std::get<DebugAdapterClient *>(source);
+    return client == ptr.t;
+  });
+
+  sources.erase(it);
+  delete ptr.t;
+}
+
+void
 DAP::configure_tty(int master_pty_fd) noexcept
 {
   // todo(simon): when we add a new pty, what we need to do
@@ -324,8 +414,8 @@ DAP::configure_tty(int master_pty_fd) noexcept
 void
 DebugAdapterClient::InitAllocators() noexcept
 {
-  using alloc::Page;
   using alloc::ArenaAllocator;
+  using alloc::Page;
 
   // Create a 1 megabyte arena allocator.
   mCommandsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
@@ -375,7 +465,7 @@ generate_random_alphanumeric_string(size_t length)
 
 /*static*/
 DebugAdapterClient *
-DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
+DebugAdapterClient::createSocketConnection(const DebugAdapterClient &client) noexcept
 {
   fs::path socket_path = fmt::format("/tmp/midas-{}", generate_random_alphanumeric_string(15));
   if (fs::exists(socket_path)) {
@@ -399,15 +489,15 @@ DebugAdapterClient::createSocketConnection(DebugAdapterClient *client) noexcept
   }
 
   auto reverseRequest = fmt::format(
-    R"({{ "seq": 1, "type": "event", "event": "startDebugging", "body": {{ "configuration": {{ "path": "{}" }} }} }})",
+    R"({{"seq":1,"type":"event","event":"startDebugging","body":{{"configuration":{{"path":"{}"}}}}}})",
     socket_path.c_str());
 
-  client->write(reverseRequest);
+  client.write(reverseRequest);
 
   for (;;) {
     auto accepted = accept(socket_fd, nullptr, nullptr);
     if (accepted != -1) {
-      return new DebugAdapterClient{child_session(client->session_type), std::move(socket_path), accepted};
+      return new DebugAdapterClient{child_session(client.session_type), std::move(socket_path), accepted};
     }
   }
 }
@@ -427,18 +517,23 @@ DebugAdapterClient::GetResponseArenaAllocator() noexcept
 DebugAdapterClient *
 DebugAdapterClient::createStandardIOConnection() noexcept
 {
+  VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
   return new DebugAdapterClient{DapClientSession::None, STDIN_FILENO, STDOUT_FILENO};
 }
 
 void
-DebugAdapterClient::client_configured(TraceeController *supervisor) noexcept
+DebugAdapterClient::client_configured(TraceeController *supervisor, std::optional<int> ttyFileDescriptor) noexcept
 {
+  Tracer::Instance->dap->new_client({this});
   tc = supervisor;
   tc->ConfigureDapClient(this);
+  if (ttyFileDescriptor) {
+    set_tty_out(*ttyFileDescriptor);
+  }
 }
 
 void
-DebugAdapterClient::post_event(ui::UIResultPtr event)
+DebugAdapterClient::PostEvent(ui::UIResultPtr event)
 {
   // TODO(simon): I'm split on the idea if we should have one thread for each DebugAdapterClient, or like we do
   // now, 1 thread for all debug adapter client, that does it's dispatching vie the poll system calls. If we land,
@@ -465,7 +560,7 @@ DebugAdapterClient::out_fd() const noexcept
 static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
 
 bool
-DebugAdapterClient::write(std::string_view output) noexcept
+DebugAdapterClient::write(std::string_view output) const noexcept
 {
   char header_buffer[128]{"Content-Length: "};
   static constexpr auto header_end = "\r\n\r\n"sv;
@@ -493,6 +588,8 @@ DebugAdapterClient::write(std::string_view output) noexcept
   }
 
   const auto result = ::writev(out, iov, 2);
+  VERIFY(result == (header_length + output.size()), "Required flush-write but wrote partial content: {} out of {}",
+         result, header_length + output.size());
   VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", out, output);
   return result >= static_cast<ssize_t>(output.size());
 }

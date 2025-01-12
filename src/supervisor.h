@@ -7,7 +7,6 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include <mdbsys/ptrace.h>
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
@@ -17,6 +16,7 @@
 #include "task.h"
 #include "utils/byte_buffer.h"
 #include "utils/expected.h"
+#include <mdbsys/ptrace.h>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -68,6 +68,12 @@ enum class ObserverType
   AllStop
 };
 
+enum class SupervisorEventHandlerAction
+{
+  Default,
+  Defer
+};
+
 // Controller for one process
 class TraceeController
 {
@@ -98,6 +104,9 @@ class TraceeController
   Publisher<void> mAllStopPublisher{};
   // Emits "new module/new dynamic library" event to all subscribers
   Publisher<SymbolFile *> mNewObjectFilePublisher{};
+
+  Publisher<void> mOnExecOrExitPublisher{};
+
   // Interface type native|remote
   InterfaceType mInterfaceType;
   // The Debug Adapter Protocol client, by which we communicate with. It handles the communication with the
@@ -119,7 +128,7 @@ class TraceeController
   // Is Attach/Launch session?
   TargetSession mSessionKind;
   // The currently installed Stop handler
-  ptracestop::StopHandler *mStopHandler;
+  std::unique_ptr<ptracestop::StopHandler> mStopHandler;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *mNullUnwinder;
   // The command interface that controls execution of the target. If the target is a "native" one, it means we're
@@ -130,14 +139,22 @@ class TraceeController
   // The auxilliary vector of the application/process being debugged. Contains things like entry, interpreter base,
   // what the executable file was etc.
   tc::Auxv mAuxiliaryVector{};
+
+  bool mConfigurationIsDone{false};
+
   // Whether this is the very first stop wait status we have seen
   bool mOnEntry{false};
 
   // Whether or not a process exit has been seen for this process.
   bool mIsExited{false};
 
+  // If this process was vforked it needs special attention/massaging until it performs an EXEC. It can't do the
+  // normal fork/clone/exec dances, as this would affect the caller of vfork's process space as well. This flag is
+  // set by the comment-labled FORK constructor of TraceeController.
+  bool mIsVForking{false};
+
   // FORK constructor
-  TraceeController(TraceeController &parent, tc::Interface &&interface) noexcept;
+  TraceeController(TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept;
   // Constructors
   TraceeController(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
 
@@ -153,7 +170,7 @@ public:
   bool IsExited() const noexcept;
   void ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept;
   // Called when a ("this") process forks
-  std::unique_ptr<TraceeController> Fork(tc::Interface &&interface) noexcept;
+  std::unique_ptr<TraceeController> Fork(tc::Interface &&interface, bool isVFork) noexcept;
 
   // Look up if the debugger has parsed symbol object file with `path` and return it. Otherwise returns nullptr
   std::shared_ptr<SymbolFile> LookupSymbolFile(const Path &path) noexcept;
@@ -180,17 +197,19 @@ public:
   void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
   u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate);
   Tid TaskLeaderTid() const noexcept;
+  void SetExitSeen() noexcept;
   TaskInfo *GetTaskByTid(pid_t pid) noexcept;
   UserBreakpoints &GetUserBreakpoints() noexcept;
   /* Create new task meta data for `tid` */
   void CreateNewTask(Tid tid, bool running) noexcept;
   bool HasTask(Tid tid) noexcept;
   /* Resumes all tasks in this target. */
-  void ResumeTask(tc::RunType type) noexcept;
+  bool ResumeTarget(tc::ResumeAction type) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
   void ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void StopAllTasks(TaskInfo *requestingTask) noexcept;
+  void StopAllTasks(TaskInfo *requestingTask, std::function<void()>&& callback) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *RegisterTaskWaited(TaskWaitResult wait) noexcept;
@@ -221,10 +240,10 @@ public:
   tc::ProcessedStopEvent ProcessDeferredStopEvent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   // Get (&& ||) Create breakpoint locations
+  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
-  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
-  GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile, const sym::dw::LineTableEntry& lte) noexcept;
+  GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile,
+                                const sym::dw::LineTableEntry &lte) noexcept;
 
   utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
   GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
@@ -243,21 +262,14 @@ public:
   bool TryTerminateGracefully() noexcept;
   bool Detach(bool resume) noexcept;
 
-  void SetAndCallRunAction(Tid tid, ptracestop::ThreadProceedAction *action) noexcept;
-
-  template <typename StopAction, typename... Args>
-  void
-  InstallStopActionHandler(TaskInfo &t, Args... args) noexcept
-  {
-    DBGLOG(core, "[thread proceed]: install action {}", ptracestop::action_name<StopAction>());
-    mStopHandler->set_and_run_action(t.tid, new StopAction{*this, t, args...});
-  }
+  void SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> &&action) noexcept;
 
   void PostExec(const std::string &exe) noexcept;
-
   /* Check if we have any tasks left in the process space. */
   bool ExecutionHasNotEnded() const noexcept;
   bool IsRunning() const noexcept;
+
+  bool SomeTaskCanBeResumed() const noexcept;
 
   // Debug Symbols Related Logic
   void RegisterObjectFile(TraceeController *tc, std::shared_ptr<ObjectFile> &&obj, bool isMainExecutable,
@@ -278,6 +290,16 @@ public:
                                                                             AddrPtr addr, u64 bytes) noexcept;
   utils::StaticVector<u8>::OwnPtr ReadToVector(AddrPtr addr, u64 bytes) noexcept;
 
+  void DeferEvent(Event event) noexcept;
+  void ResumeEventHandling() noexcept;
+  void HandleTracerEvent(TraceEvent *evt) noexcept;
+  void OnTearDown() noexcept;
+
+private:
+  void DefaultHandler(TraceEvent *evt) noexcept;
+  void SetDeferEventHandler() noexcept;
+
+public:
   template <typename T>
   T
   ReadType(TraceePointer<T> address) noexcept
@@ -348,19 +370,28 @@ public:
   void CacheRegistersFor(TaskInfo &t) noexcept;
   tc::TraceeCommandInterface &GetInterface() noexcept;
 
+  void TaskExit(TaskInfo& task, TaskInfo::SupervisorState state, bool notify) noexcept;
+
   // Core event handlers
+  tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;
   tc::ProcessedStopEvent HandleThreadCreated(TaskInfo *task, const ThreadCreated &evt,
                                              const RegisterData &register_data) noexcept;
+  bool OneRemainingTask() noexcept;
   tc::ProcessedStopEvent HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
   tc::ProcessedStopEvent HandleProcessExit(const ProcessExited &evt) noexcept;
   tc::ProcessedStopEvent HandleFork(const ForkEvent &evt) noexcept;
-  tc::ProcessedStopEvent HandleClone(const Clone& evt) noexcept;
+  tc::ProcessedStopEvent HandleClone(const Clone &evt) noexcept;
+  tc::ProcessedStopEvent HandleExec(const Exec &evt) noexcept;
 
   ui::dap::DebugAdapterClient *GetDebugAdapterProtocolClient() const noexcept;
 
 private:
+  void ShutDownDebugAdapterClient() noexcept;
   // Writes breakpoint point and returns the original value found at that address
-  utils::Expected<u8, BpErr> InstallSoftwareBreakpointLocation(AddrPtr addr) noexcept;
+  utils::Expected<u8, BpErr> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
+  SupervisorEventHandlerAction mAction{SupervisorEventHandlerAction::Default};
+  std::vector<TraceEvent *> mDeferredEvents;
+  TraceeController *mVForkedSupervisor{nullptr};
 };
 
 struct ProbeInfo

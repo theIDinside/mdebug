@@ -2,8 +2,10 @@
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
+#include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "nlohmann/json.hpp"
+#include <event_queue.h>
 #include <so_loading.h>
 #include <symbolication/objfile.h>
 
@@ -122,6 +124,7 @@ ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
 }
 
 ThreadEvent::ThreadEvent(ThreadReason reason, Tid tid) noexcept : reason(reason), tid(tid) {}
+ThreadEvent::ThreadEvent(const Clone &event) noexcept : reason(ThreadReason::Started), tid(event.child_tid) {}
 
 std::pmr::string
 ThreadEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept

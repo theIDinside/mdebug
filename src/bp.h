@@ -338,8 +338,8 @@ public:
   ~BreakpointLocation() noexcept;
 
   bool remove_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &bp) noexcept;
-  void enable(tc::TraceeCommandInterface &tc) noexcept;
-  void disable(tc::TraceeCommandInterface &tc) noexcept;
+  void enable(Tid tid, tc::TraceeCommandInterface &tc) noexcept;
+  void disable(Tid tid, tc::TraceeCommandInterface &tc) noexcept;
   bool is_installed() const noexcept;
   void add_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &user) noexcept;
   bool any_user_active() const noexcept;
@@ -518,7 +518,7 @@ public:
   std::unordered_map<InstructionBreakpointSpec, BpId> instruction_breakpoints{};
 
   void on_exec() noexcept;
-  void on_exit() noexcept;
+  void OnProcessExit() noexcept;
   void add_bp_location(const UserBreakpoint &updated_bp) noexcept;
   void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;

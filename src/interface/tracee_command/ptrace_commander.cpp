@@ -6,6 +6,8 @@
 #include "symbolication/objfile.h"
 #include "utils/logger.h"
 #include "utils/scoped_fd.h"
+#include <cerrno>
+#include <charconv>
 #include <fcntl.h>
 #include <supervisor.h>
 #include <sys/ptrace.h>
@@ -19,6 +21,7 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
   procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
+  ASSERT(procfs_memfd.is_open(), "failed to open memfd for {}", process_space_id);
 }
 
 bool
@@ -136,54 +139,68 @@ PtraceCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::ResumeTarget(TraceeController *tc, RunType run) noexcept
+PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcept
 {
   for (auto &t : tc->GetThreads()) {
     if (t->can_continue()) {
-      tc->ResumeTask(*t, {run, tc::ResumeTarget::Task});
+      tc->ResumeTask(*t, action);
+    } else {
+      DBGLOG(core, "[{}:resume:target] {} can_continue=false", tc->TaskLeaderTid(), t->mTid);
     }
   }
   return TaskExecuteResponse::Ok();
 }
 
 TaskExecuteResponse
-PtraceCommander::ResumeTask(TaskInfo &t, RunType type) noexcept
+PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 {
   ASSERT(t.user_stopped || t.tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})",
          bool{t.user_stopped}, bool{t.tracer_stopped});
-  if (t.user_stopped || t.tracer_stopped) {
-    const auto ptrace_result =
-      ptrace(type == RunType::Continue ? PTRACE_CONT : PTRACE_SINGLESTEP, t.tid, nullptr, nullptr);
+  if (t.tracer_stopped) {
+    action.mDeliverSignal = t.mLastWaitStatus.signal == SIGTRAP ? 0 : t.mLastWaitStatus.signal;
+    if (t.bfRequestedStop) {
+      action.mDeliverSignal = 0;
+      t.ClearRequestedStopFlag();
+    }
+
+    DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, action.mDeliverSignal);
+    const auto ptrace_result = ptrace(action, t.mTid, nullptr, action.mDeliverSignal);
     if (ptrace_result == -1) {
       return TaskExecuteResponse::Error(errno);
     }
+  } else {
+    DBGLOG(awaiter, "[{}.{}:resume]: did not resume, not recorded signal delivery stop.",
+           t.GetSupervisor()->TaskLeaderTid(), t.mTid);
   }
-  t.set_running(type);
+  t.SetCurrentResumeAction(action);
   return TaskExecuteResponse::Ok();
 }
 
 TaskExecuteResponse
 PtraceCommander::StopTask(TaskInfo &t) noexcept
 {
-  const auto result = tgkill(process_id, t.tid, SIGSTOP);
+  const auto result = tgkill(process_id, t.mTid, SIGSTOP);
   if (result == -1) {
+    DBGLOG(awaiter, "failed to send SIGSTOP to {}.{}", process_id, t.mTid);
     return TaskExecuteResponse::Error(errno);
   }
+  DBGLOG(awaiter, "sent SIGSTOP to {}.{}", process_id, t.mTid);
+  t.RequestedStop();
   return TaskExecuteResponse::Ok();
 }
 
 TaskExecuteResponse
-PtraceCommander::EnableBreakpoint(BreakpointLocation &location) noexcept
+PtraceCommander::EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  return InstallBreakpoint(location.address());
+  return InstallBreakpoint(tid, location.address());
 }
 
 TaskExecuteResponse
-PtraceCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
+PtraceCommander::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  DBGLOG(core, "[bkpt]: disabling breakpoint at {}", location.address());
+  DBGLOG(core, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.address());
   const auto addr = location.address().get();
-  const auto read_value = ptrace(PTRACE_PEEKDATA, process_id, addr, nullptr);
+  const auto read_value = ptrace(PTRACE_PEEKDATA, tid, addr, nullptr);
   if (read_value == -1) {
     return TaskExecuteResponse::Error(errno);
   }
@@ -191,7 +208,7 @@ PtraceCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
   const u8 original_byte = location.original_byte;
   const u64 restore = ((read_value & ~0xff) | original_byte);
 
-  if (auto res = ptrace(PTRACE_POKEDATA, process_id, addr, restore); res == -1) {
+  if (auto res = ptrace(PTRACE_POKEDATA, tid, addr, restore); res == -1) {
     return TaskExecuteResponse::Error(errno);
   }
 
@@ -199,14 +216,14 @@ PtraceCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::InstallBreakpoint(AddrPtr address) noexcept
+PtraceCommander::InstallBreakpoint(Tid tid, AddrPtr address) noexcept
 {
   constexpr u64 bkpt = 0xcc;
   const auto addr = address.get();
-  const auto read_value = ptrace(PTRACE_PEEKDATA, process_id, addr, nullptr);
+  const auto read_value = ptrace(PTRACE_PEEKDATA, tid, addr, nullptr);
 
   const u64 installed_bp = ((read_value & ~0xff) | bkpt);
-  if (const auto res = ptrace(PTRACE_POKEDATA, process_id, addr, installed_bp); res == -1) {
+  if (const auto res = ptrace(PTRACE_POKEDATA, tid, addr, installed_bp); res == -1) {
     return TaskExecuteResponse::Error(errno);
   }
 
@@ -217,7 +234,7 @@ PtraceCommander::InstallBreakpoint(AddrPtr address) noexcept
 TaskExecuteResponse
 PtraceCommander::ReadRegisters(TaskInfo &t) noexcept
 {
-  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.tid, nullptr, t.native_registers());
+  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.mTid, nullptr, t.native_registers());
       ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   } else {
@@ -235,7 +252,7 @@ TaskExecuteResponse
 PtraceCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
 {
   constexpr auto rip_offset = offsetof(user_regs_struct, rip);
-  const auto ptrace_result = ptrace(PTRACE_POKEUSER, t.tid, rip_offset, addr.get());
+  const auto ptrace_result = ptrace(PTRACE_POKEUSER, t.mTid, rip_offset, addr.get());
   if (ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   }
@@ -246,38 +263,52 @@ PtraceCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
 std::string_view
 PtraceCommander::GetThreadName(Tid tid) noexcept
 {
+  if (thread_names.contains(tid)) {
+    return thread_names[tid];
+  }
 
   std::array<char, 256> pathbuf{};
   auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
   std::string_view path{pathbuf.data(), it};
   auto file = utils::ScopedFd::open_read_only(path);
   char namebuf[16]{0};
-  const auto len = ::read(file, namebuf, 16);
+  auto len = ::read(file, namebuf, 16);
 
   if (len == -1) {
-    return "???";
-  }
-
-  const auto &[nameit, ok] = thread_names.emplace(tid, std::string{namebuf, static_cast<u32>(len)});
-  if (ok) {
-    if (nameit->second.back() == '\n') {
-      nameit->second.pop_back();
+    const auto res = std::to_chars(namebuf, namebuf + 16, tid);
+    if (res.ec != std::errc()) {
+      return "???";
     }
-    return nameit->second;
-  } else {
-    return "???";
+    len = static_cast<u32>(res.ptr - namebuf);
   }
+  std::string_view thrName{namebuf, static_cast<std::string::size_type>(len)};
+  if (thrName.back() == '\n') {
+    thrName.remove_suffix(1);
+  }
+  auto newThreadName = fmt::format("{}: {}", tid, thrName);
+  const auto &[iter, ok] = thread_names.emplace(tid, std::move(newThreadName));
+  return iter->second;
 }
 
 TaskExecuteResponse
-PtraceCommander::Disconnect(bool kill_target) noexcept
+PtraceCommander::Disconnect(bool killTarget) noexcept
 {
-  if (kill_target && !GetSupervisor()->IsExited()) {
-    const auto result = tgkill(process_id, process_id, SIGKILL);
-    if (result == -1) {
-      return TaskExecuteResponse::Error(errno);
+  using SupervisorState = TaskInfo::SupervisorState;
+  if (killTarget && !GetSupervisor()->IsExited()) {
+    for (auto &t : GetSupervisor()->GetThreads()) {
+      // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
+      // here.
+      const auto _ = tgkill(process_id, t->mTid, SIGKILL);
+      GetSupervisor()->TaskExit(*t, SupervisorState::Killed, false);
     }
-  } else if(!GetSupervisor()->IsExited()) {
+  } else if (!GetSupervisor()->IsExited()) {
+    for (auto &t : GetSupervisor()->GetThreads()) {
+      // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
+      // here.
+      ptrace(PTRACE_DETACH, t->mTid, nullptr, nullptr);
+      GetSupervisor()->TaskExit(*t, SupervisorState::Detached, false);
+    }
+
     const auto ptrace_result = ptrace(PTRACE_DETACH, process_id, nullptr, nullptr);
     if (ptrace_result == -1) {
       return TaskExecuteResponse::Error(errno);

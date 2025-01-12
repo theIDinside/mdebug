@@ -97,8 +97,8 @@ append_checksum(char (&buf)[N], std::string_view payload)
 GdbRemoteCommander::GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn,
                                        Pid process_id, std::string &&exec_file,
                                        std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept
-    : TraceeCommandInterface(TargetFormat::Remote, std::move(arch), TraceeInterfaceType::GdbRemote), connection(std::move(conn)),
-      process_id(process_id), exec_file(std::move(exec_file)), type(type)
+    : TraceeCommandInterface(TargetFormat::Remote, std::move(arch), TraceeInterfaceType::GdbRemote),
+      connection(std::move(conn)), process_id(process_id), exec_file(std::move(exec_file)), type(type)
 {
 }
 
@@ -134,7 +134,7 @@ GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexce
   std::array<char, 64> buf{};
   const auto cmd = SerializeCommand(buf, "m{:x},{}", address.get(), size);
   const auto pid = TaskLeaderTid();
-  const auto res = connection->send_command_with_response(gdb::GdbThread{pid, pid}, cmd, 1000);
+  const auto res = connection->SendCommandWaitForResponse(gdb::GdbThread{pid, pid}, cmd, 1000);
   if (res.is_error()) {
     return convert_to_read_result(res.error());
   }
@@ -171,7 +171,7 @@ GdbRemoteCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
     outbuf.push_back(lo);
   }
   auto cmd = fmt::format("M{:x},{}:{}", addr.get(), size, outbuf);
-  const auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+  const auto res = connection->SendCommandWaitForResponse(leader_to_gdb(), cmd, 1000);
   if (res.is_error()) {
     return TraceeWriteResult::Error(0);
   }
@@ -185,17 +185,17 @@ GdbRemoteCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 }
 
 void
-GdbRemoteCommander::set_catch_syscalls(bool on) noexcept
+GdbRemoteCommander::SetCatchSyscalls(bool on) noexcept
 {
   const bool catch_syscall = connection->settings().catch_syscalls;
   if (on && !catch_syscall) {
-    const auto response = connection->send_command_with_response(leader_to_gdb(), "QCatchSyscalls:1", {});
+    const auto response = connection->SendCommandWaitForResponse(leader_to_gdb(), "QCatchSyscalls:1", {});
     if (response.is_error()) {
       PANIC("failed to set catch syscalls");
     }
     ASSERT(response.value() == "OK", "Response for command was not 'OK'");
   } else if (!on && catch_syscall) {
-    const auto response = connection->send_command_with_response(leader_to_gdb(), "QCatchSyscalls:0", {});
+    const auto response = connection->SendCommandWaitForResponse(leader_to_gdb(), "QCatchSyscalls:0", {});
     if (response.is_error()) {
       PANIC("failed to set catch syscalls");
     }
@@ -206,29 +206,40 @@ GdbRemoteCommander::set_catch_syscalls(bool on) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ResumeTask(TaskInfo &t, RunType type) noexcept
+GdbRemoteCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 {
-  set_catch_syscalls(type == RunType::SyscallContinue);
+  SetCatchSyscalls(action.type == RunType::SyscallContinue);
 
   const auto pid = TaskLeaderTid();
   std::array<char, 128> buf{};
   std::string_view resume_command;
-  switch (type) {
+  if (action.mDeliverSignal == -1) {
+    action.mDeliverSignal = t.mLastWaitStatus.signal == SIGTRAP ? 0 : t.mLastWaitStatus.signal;
+  }
+  switch (action.type) {
   case RunType::Step: {
-    resume_command = SerializeCommand(buf, "vCont;s:p{:x}.{:x}", pid, t.tid);
+    if (action.mDeliverSignal == 0) {
+      resume_command = SerializeCommand(buf, "vCont;s:p{:x}.{:x}", pid, t.mTid);
+    } else {
+      resume_command = SerializeCommand(buf, "vCont;S{:02x}:p{:x}.{:x}", action.mDeliverSignal, pid, t.mTid);
+    }
     break;
   }
   case RunType::Continue:
-  case RunType::SyscallContinue:
-  case RunType::UNKNOWN: {
-    resume_command = SerializeCommand(buf, "vCont;c:p{:x}.{:x}", pid, t.tid);
-    break;
-  }
+  case RunType::SyscallContinue: {
+    if (action.mDeliverSignal == 0) {
+      resume_command = SerializeCommand(buf, "vCont;c:p{:x}.{:x}", pid, t.mTid);
+    } else {
+      resume_command = SerializeCommand(buf, "vCont;C{:02x}:p{:x}.{:x}", action.mDeliverSignal, pid, t.mTid);
+    }
+  } break;
+  case RunType::Unknown:
+    PANIC("Unknown resume action");
   }
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
-  t.set_running(type);
+  t.SetCurrentResumeAction(action);
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
@@ -245,20 +256,25 @@ GdbRemoteCommander::ReverseContinue() noexcept
   ASSERT(!resume_err.has_value(), "reverse continue failed");
 
   for (auto &t : tc->GetThreads()) {
-    t->set_running(tc::RunType::Continue);
+    t->SetCurrentResumeAction(
+      {.type = RunType::Continue, .target = ResumeTarget::AllNonRunningInProcess, .mDeliverSignal = 0});
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ResumeTarget(TraceeController *tc, RunType type) noexcept
+GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcept
 {
-  set_catch_syscalls(type == RunType::SyscallContinue);
+  SetCatchSyscalls(action.type == RunType::SyscallContinue);
+
+  if (action.mDeliverSignal == -1) {
+    action.mDeliverSignal = 0;
+  }
 
   for (auto &t : tc->GetThreads()) {
     if (t->loc_stat) {
-      t->step_over_breakpoint(tc, tc::ResumeAction{type, tc::ResumeTarget::AllNonRunningInProcess});
+      t->step_over_breakpoint(tc, action);
       if (!connection->settings().is_non_stop) {
         return TaskExecuteResponse::Ok();
       }
@@ -268,23 +284,31 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, RunType type) noexcept
   const auto pid = TaskLeaderTid();
   std::array<char, 128> buf{};
   std::string_view resume_command;
-  switch (type) {
+  switch (action.type) {
   case RunType::Step: {
-    resume_command = SerializeCommand(buf, "vCont;s:p{:x}.-1", pid);
+    if (action.mDeliverSignal == 0) {
+      resume_command = SerializeCommand(buf, "vCont;s:p{:x}.-1", pid);
+    } else {
+      resume_command = SerializeCommand(buf, "vCont;S{:02x}:p{:x}.-1", action.mDeliverSignal, pid);
+    }
     break;
   }
   case RunType::Continue:
-  case RunType::SyscallContinue:
-  case RunType::UNKNOWN: {
-    resume_command = SerializeCommand(buf, "vCont;c:p{:x}.-1", pid);
-    break;
-  }
+  case RunType::SyscallContinue: {
+    if (action.mDeliverSignal == 0) {
+      resume_command = SerializeCommand(buf, "vCont;c:p{:x}.-1", pid);
+    } else {
+      resume_command = SerializeCommand(buf, "vCont;C{:02x}:p{:x}.-1", action.mDeliverSignal, pid);
+    }
+  } break;
+  case RunType::Unknown:
+    PANIC("unknown resume type");
   }
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
   for (auto &t : tc->GetThreads()) {
-    t->set_running(type);
+    t->SetCurrentResumeAction(action);
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
@@ -296,8 +320,8 @@ GdbRemoteCommander::StopTask(TaskInfo &t) noexcept
   if (remote_settings().is_non_stop) {
     std::array<char, 64> bytes{};
     const auto pid = TaskLeaderTid();
-    auto cmd = SerializeCommand(bytes, "vCont;t:p{}.{}", pid, t.tid);
-    auto response = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+    auto cmd = SerializeCommand(bytes, "vCont;t:p{}.{}", pid, t.mTid);
+    auto response = connection->SendCommandWaitForResponse(leader_to_gdb(), cmd, 1000);
     if (!(response.is_expected() && response.take_value() == "$OK")) {
       PANIC("Failed to unset breakpoint");
     }
@@ -315,17 +339,17 @@ GdbRemoteCommander::StopTask(TaskInfo &t) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::EnableBreakpoint(BreakpointLocation &location) noexcept
+GdbRemoteCommander::EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  return InstallBreakpoint(location.address());
+  return InstallBreakpoint(tid, location.address());
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
+GdbRemoteCommander::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
   std::array<char, 32> bytes{};
   auto cmd = SerializeCommand(bytes, "z0,{:x},1", location.address().get());
-  auto response = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+  auto response = connection->SendCommandWaitForResponse(gdb::GdbThread{process_id, tid}, cmd, 1000);
   if (!(response.is_expected() && response.take_value() == "$OK")) {
     PANIC("Failed to unset breakpoint");
   }
@@ -333,12 +357,12 @@ GdbRemoteCommander::DisableBreakpoint(BreakpointLocation &location) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::InstallBreakpoint(AddrPtr addr) noexcept
+GdbRemoteCommander::InstallBreakpoint(Tid tid, AddrPtr addr) noexcept
 {
   std::array<char, 32> bytes{};
   auto cmd = SerializeCommand(bytes, "Z0,{:x},1", addr.get());
 
-  auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+  auto res = connection->SendCommandWaitForResponse(gdb::GdbThread{process_id, tid}, cmd, 1000);
   if (res.is_error()) {
     return TaskExecuteResponse::Error(0);
   }
@@ -351,14 +375,14 @@ GdbRemoteCommander::InstallBreakpoint(AddrPtr addr) noexcept
 TaskExecuteResponse
 GdbRemoteCommander::ReadRegisters(TaskInfo &t) noexcept
 {
-  const gdb::GdbThread thread{TaskLeaderTid(), t.tid};
-  auto result = connection->send_command_with_response(thread, "g", 1000);
+  const gdb::GdbThread thread{TaskLeaderTid(), t.mTid};
+  auto result = connection->SendCommandWaitForResponse(thread, "g", 1000);
   if (result.is_error()) {
     return TaskExecuteResponse::Error(0);
   }
 
   auto register_contents = result.take_value();
-  DBGLOG(remote, "Read register field for {}: {}", t.tid, register_contents);
+  DBGLOG(remote, "Read register field for {}: {}", t.mTid, register_contents);
 
   std::string_view payload{register_contents};
 
@@ -384,7 +408,7 @@ GdbRemoteCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
   std::array<char, 16> register_contents{};
   auto register_value = convert_to_target(register_contents, addr.get());
   auto cmds =
-    std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), t.tid),
+    std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), t.mTid),
                    SerializeCommand(set_pc_bytes, "P{:x}={}", arch_info->mDebugContextRegisters->mRIPNumber.as_t(),
                                     register_value)});
   auto response = connection->send_inorder_command_chain(cmds, 1000);
@@ -413,7 +437,7 @@ GdbRemoteCommander::GetThreadName(Tid tid) noexcept
     char buf[256];
     auto end = fmt::format_to(buf, "qThreadExtraInfo,p{:x}.{:x}", TaskLeaderTid(), tid);
     std::string_view cmd{buf, end};
-    const auto res = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+    const auto res = connection->SendCommandWaitForResponse(leader_to_gdb(), cmd, 1000);
     if (res.is_expected()) {
       auto &name = thread_names[tid];
       name.clear();
@@ -462,14 +486,14 @@ GdbRemoteCommander::Disconnect(bool terminate) noexcept
   std::array<char, 64> buf{};
   if (terminate) {
     auto cmd = SerializeCommand(buf, "vKill;{}", TaskLeaderTid());
-    const auto res = connection->send_command_with_response({}, cmd, 1000);
+    const auto res = connection->SendCommandWaitForResponse({}, cmd, 1000);
     if (res.is_expected() && res.value() == "$OK"sv) {
       return TaskExecuteResponse::Ok();
     }
     return TaskExecuteResponse::Error(0);
   } else {
     auto cmd = SerializeCommand(buf, "D;{}", TaskLeaderTid());
-    const auto res = connection->send_command_with_response({}, cmd, 1000);
+    const auto res = connection->SendCommandWaitForResponse({}, cmd, 1000);
     if (res.is_expected() && res.value() == "$OK"sv) {
       return TaskExecuteResponse::Ok();
     }
@@ -625,7 +649,7 @@ GdbRemoteCommander::ReadAuxiliaryVector() noexcept
   } else {
     std::array<char, 64> bytes{};
     auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), TaskLeaderTid());
-    auto set_thread = connection->send_command_with_response(leader_to_gdb(), cmd, 1000);
+    auto set_thread = connection->SendCommandWaitForResponse(leader_to_gdb(), cmd, 1000);
 
     gdb::qXferCommand read_auxv{"qXfer:auxv:read:", 0x1000};
     const auto result = connection->send_qXfer_command_with_response(read_auxv, 1000);

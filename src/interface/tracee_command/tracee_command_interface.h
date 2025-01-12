@@ -6,6 +6,7 @@
 #include "utils/immutable.h"
 #include "utils/macros.h"
 #include <link.h>
+#include <sys/ptrace.h>
 
 using namespace std::string_view_literals;
 class TraceeController;
@@ -28,11 +29,11 @@ namespace tc {
 
 enum class RunType : u8
 {
-  Step = 0b0001,
-  Continue = 0b0010,
-  SyscallContinue = 0b0011,
-  UNKNOWN = 0b0000,
-  None = UNKNOWN
+  Unknown = 0b0000,
+  None = Unknown,
+  Step = PTRACE_SINGLESTEP,
+  Continue = PTRACE_CONT,
+  SyscallContinue = PTRACE_SYSCALL,
 };
 
 enum class ResumeTarget : u8
@@ -46,6 +47,14 @@ struct ResumeAction
 {
   RunType type;
   ResumeTarget target;
+  int mDeliverSignal;
+
+  constexpr
+  operator __ptrace_request() const noexcept
+  {
+    ASSERT(type != RunType::Unknown, "Invalid ptrace resume operation");
+    return static_cast<__ptrace_request>(type);
+  }
 };
 
 enum class ShouldProceed
@@ -61,6 +70,13 @@ struct ProcessedStopEvent
   std::optional<tc::ResumeAction> res;
   bool mProcessExited{false};
   bool mThreadExited{false};
+  bool mVForked{false};
+  // TODO: right now, we post stop events a little here and there
+  //  we should try to congregate these notifications to happen in a more stream lined fashion
+  //  it probably won't be possible to have *all* stop events notified from the same place, but we should
+  //  strive to do so, for readability and debuggability. When that refactor should happen, use either this flag,
+  //  or remove it and do something else.
+  bool mNotifyUser{false};
 
   constexpr static auto
   ResumeAny() noexcept
@@ -74,7 +90,9 @@ struct ProcessedStopEvent
     return ProcessedStopEvent{false, std::nullopt, true};
   }
 
-  constexpr static auto ThreadExited() noexcept {
+  constexpr static auto
+  ThreadExited() noexcept
+  {
     return ProcessedStopEvent{false, std::nullopt, false, true};
   }
 };
@@ -271,18 +289,18 @@ public:
   virtual TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
   virtual TaskExecuteResponse ReverseContinue() noexcept;
   // Can (possibly) modify state in `t`
-  virtual TaskExecuteResponse ResumeTask(TaskInfo &t, RunType run) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction run) noexcept = 0;
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
-  virtual TaskExecuteResponse ResumeTarget(TraceeController *tc, RunType run) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
 
-  virtual TaskExecuteResponse EnableBreakpoint(BreakpointLocation &location) noexcept = 0;
-  virtual TaskExecuteResponse DisableBreakpoint(BreakpointLocation &location) noexcept = 0;
+  virtual TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept = 0;
+  virtual TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept = 0;
 
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)
-  virtual TaskExecuteResponse InstallBreakpoint(AddrPtr addr) noexcept = 0;
+  virtual TaskExecuteResponse InstallBreakpoint(Tid tid, AddrPtr addr) noexcept = 0;
 
   virtual TaskExecuteResponse ReadRegisters(TaskInfo &t) noexcept = 0;
   virtual TaskExecuteResponse WriteRegisters(const user_regs_struct &input) noexcept = 0;
@@ -396,7 +414,7 @@ template <> struct formatter<tc::RunType>
       return fmt::format_to(ctx.out(), "RunType::Continue");
     case tc::RunType::SyscallContinue:
       return fmt::format_to(ctx.out(), "RunType::SyscallContinue");
-    case tc::RunType::UNKNOWN:
+    case tc::RunType::Unknown:
       return fmt::format_to(ctx.out(), "RunType::UNKNOWN");
     }
   }

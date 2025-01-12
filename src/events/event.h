@@ -214,7 +214,7 @@ template <> class Publisher<void>
 public:
   template <typename Fn>
   void
-  subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
+  Subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
   {
     ASSERT(utils::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
            "Expected Identity to be a unique value");
@@ -222,7 +222,7 @@ public:
   }
 
   void
-  unsubscribe(SubscriberIdentity identity) noexcept
+  Unsubscribe(SubscriberIdentity identity) noexcept
   {
     auto it = std::find_if(subscribers.begin(), subscribers.end(),
                            [&identity](auto &sub) { return sub.identity == identity; });
@@ -233,13 +233,13 @@ public:
 
   template <typename Fn>
   void
-  once(Fn &&fn) noexcept
+  Once(Fn &&fn) noexcept
   {
     sub_once.push_back(std::move(fn));
   }
 
   void
-  emit() noexcept
+  Emit() noexcept
   {
     for (auto &&fn : sub_once) {
       fn();

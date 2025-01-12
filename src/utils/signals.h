@@ -1,7 +1,9 @@
 #pragma once
 #include "../common.h"
+#include "fmt/ranges.h"
 #include <array>
 #include <csignal>
+#include <cstring>
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
@@ -17,6 +19,14 @@ public:
   ScopedBlockedSignals(std::array<int, N> signals_to_block) noexcept : restore_to(), newly_set()
   {
     sigemptyset(&newly_set);
+    std::string signalNames;
+    for (int signal : signals_to_block) {
+      fmt::format_to(std::back_inserter(signalNames), "{}", strsignal(signal));
+      if (signal != signals_to_block.back()) {
+        signalNames.push_back(',');
+      }
+    }
+    DBGLOG(core, "{} Configuring to block signals: {}", gettid(), signalNames);
     for (const auto sig : signals_to_block) {
       if (-1 == sigaddset(&newly_set, sig)) {
         PANIC(fmt::format("Adding signal {} to set failed", sig));

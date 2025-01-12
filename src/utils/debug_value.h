@@ -39,6 +39,10 @@ public:
     return self.mValue;
   }
 
+  operator T() {
+    return mValue;
+  }
+
 private:
   T mValue;
 #else

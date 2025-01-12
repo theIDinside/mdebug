@@ -109,6 +109,12 @@ BuildTestSubject(
 )
 
 BuildTestSubject(
+  NAME mandelbrot
+  SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/mandelbrot.cpp
+)
+
+BuildTestSubject(
   NAME avx-subject
   SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/avx-subject.cpp
