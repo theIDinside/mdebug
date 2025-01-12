@@ -528,7 +528,7 @@ DebugAdapterClient::client_configured(TraceeController *supervisor, std::optiona
   tc = supervisor;
   tc->ConfigureDapClient(this);
   if (ttyFileDescriptor) {
-    set_tty_out(*ttyFileDescriptor);
+    // set_tty_out(*ttyFileDescriptor);
   }
 }
 

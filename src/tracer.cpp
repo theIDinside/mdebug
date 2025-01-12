@@ -436,11 +436,11 @@ Tracer::attach(const AttachArgs &args) noexcept
                 t->set_stop();
               }
               client->PostEvent(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
-                                                           "attached",
-                                                           client->supervisor()->mTaskLeader,
-                                                           {},
-                                                           "Attached to session",
-                                                           true});
+                                                          "attached",
+                                                          client->supervisor()->mTaskLeader,
+                                                          {},
+                                                          "Attached to session",
+                                                          true});
             };
 
             auto main_connection = dap->main_connection();
@@ -784,6 +784,10 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
                  strerror(errno));
         }
       }
+    }
+
+    if (ttyFd) {
+      client->set_tty_out(*ttyFd);
     }
 
     if (stopOnEntry) {

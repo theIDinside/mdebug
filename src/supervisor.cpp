@@ -741,6 +741,11 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
               DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt at {}, (unreloc={})", mTaskLeader, file_name, pc,
                      sym->UnrelocateAddress(pc));
             }
+            // If the breakpoint spec has no column info, pick the first found line table entry with the desired
+            // line.
+            if (!desc.column) {
+              break;
+            }
           }
         }
       }
@@ -1246,7 +1251,7 @@ TraceeController::GetInterface() noexcept
 }
 
 void
-TraceeController::TaskExit(TaskInfo& task, TaskInfo::SupervisorState state, bool notify) noexcept
+TraceeController::TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool notify) noexcept
 {
   Tid tid = task.mTid;
   task.exited = true;
@@ -1487,9 +1492,9 @@ TraceeController::OneRemainingTask() noexcept
 tc::ProcessedStopEvent
 TraceeController::HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept
 {
-  if(OneRemainingTask()) {
+  if (OneRemainingTask()) {
     TaskExit(*task, TaskInfo::SupervisorState::Exited, true);
-    return HandleProcessExit(ProcessExited{.pid = mTaskLeader, .exit_code = evt.code_or_signal /** USE ACTUAL EXIT CODE */});
+    return HandleProcessExit(ProcessExited{.pid = mTaskLeader, .exit_code = evt.code_or_signal});
   }
 
   TaskExit(*task, TaskInfo::SupervisorState::Exited, true);
