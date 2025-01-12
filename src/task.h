@@ -4,8 +4,8 @@
 #include "common.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include <mdbsys/ptrace.h>
 #include <linux/sched.h>
+#include <mdbsys/ptrace.h>
 #include <sys/user.h>
 
 using namespace std::string_view_literals;
@@ -42,8 +42,8 @@ struct TaskRegisters
 
   TaskRegisters() noexcept = default;
   TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo);
-  TaskRegisters(TaskRegisters&&) noexcept = default;
-  TaskRegisters& operator=(TaskRegisters&&) noexcept = default;
+  TaskRegisters(TaskRegisters &&) noexcept = default;
+  TaskRegisters &operator=(TaskRegisters &&) noexcept = default;
 
   union
   {
@@ -57,12 +57,24 @@ struct TaskRegisters
 
 struct TaskInfo
 {
+
+  enum class SupervisorState
+  {
+    Traced,
+    Exited,
+    Killed = Exited,
+    Detached
+  };
+
   friend class TraceeController;
-  pid_t tid;
-  WaitStatus wait_status;
-  TargetFormat session;
-  tc::RunType last_resume_command{tc::RunType::UNKNOWN};
-  std::optional<tc::ResumeAction> next_resume_action{};
+  pid_t mTid;
+  WaitStatus mLastWaitStatus;
+  TargetFormat mTargetFormat;
+  tc::ResumeAction mLastResumeAction;
+  std::optional<tc::ResumeAction> mNextResumeAction{};
+  bool firstResume{true};
+  SupervisorState mState{SupervisorState::Traced};
+
   union
   {
     u16 bit_set;
@@ -81,6 +93,7 @@ struct TaskInfo
       bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
       bool exited : 1;         // task has exited
       bool reaped : 1;         // task has been reaped after exit
+      bool bfRequestedStop : 1 {false};
     };
   };
 
@@ -89,16 +102,17 @@ private:
   std::unique_ptr<sym::CallStack> call_stack;
   std::vector<u32> variableReferences{};
   std::unordered_map<u32, SharedPtr<sym::Value>> valobj_cache{};
+  TraceeController *mSupervisor;
 
   // Unititialized thread constructor
   TaskInfo(pid_t newTaskTid) noexcept;
+
 public:
   std::optional<LocationStatus> loc_stat;
 
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
   TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
-
 
   TaskInfo(TaskInfo &&o) noexcept = default;
   TaskInfo &operator=(TaskInfo &&) noexcept = default;
@@ -125,11 +139,13 @@ public:
 
   std::span<const AddrPtr> return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
   sym::FrameUnwindState *GetUnwindState(int frameLevel) noexcept;
+  TraceeController *GetSupervisor() const noexcept;
+
   void set_taskwait(TaskWaitResult wait) noexcept;
 
   void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
   void set_stop() noexcept;
-  void set_running(tc::RunType type) noexcept;
+  void SetCurrentResumeAction(tc::ResumeAction type) noexcept;
   void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
   bool can_continue() noexcept;
   void set_dirty() noexcept;
@@ -150,15 +166,9 @@ public:
   void add_reference(u32 id) noexcept;
   void cache_object(u32 ref, SharedPtr<sym::Value> value) noexcept;
   SharedPtr<sym::Value> get_maybe_value(u32 ref) noexcept;
-};
-
-struct TaskStepInfo
-{
-  Tid tid;
-  int steps;
-  bool ignore_bps;
-  AddrPtr rip;
-  void step_taken_to(AddrPtr rip) noexcept;
+  void RequestedStop() noexcept;
+  void ClearRequestedStopFlag() noexcept;
+  void SetTracerState(SupervisorState state) noexcept;
 };
 
 struct TaskVMInfo
@@ -233,11 +243,11 @@ template <> struct formatter<TaskInfo>
   {
 
     std::string_view wait_status = "None";
-    if (task.wait_status.ws != WaitStatusKind::NotKnown) {
-      wait_status = to_str(task.wait_status.ws);
+    if (task.mLastWaitStatus.ws != WaitStatusKind::NotKnown) {
+      wait_status = to_str(task.mLastWaitStatus.ws);
     }
 
-    return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.tid,
+    return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.mTid,
                           task.user_stopped, task.tracer_stopped, wait_status);
   }
 };

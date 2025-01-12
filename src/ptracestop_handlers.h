@@ -33,8 +33,8 @@ public:
   virtual void UpdateStepped() noexcept = 0;
 
 protected:
-  tc::TraceeCommandInterface &ctrl;
-  TraceeController &tc;
+  tc::TraceeCommandInterface &mControlInterface;
+  TraceeController &mSupervisor;
   TaskInfo &task;
   bool cancelled;
 };
@@ -131,9 +131,8 @@ public:
   virtual ~StopHandler() = default;
 
   bool has_action_installed(TaskInfo *t) noexcept;
-  ThreadProceedAction *get_proceed_action(const TaskInfo &t) noexcept;
+  std::shared_ptr<ThreadProceedAction> get_proceed_action(const TaskInfo &t) noexcept;
   void remove_action(const TaskInfo &t) noexcept;
-
   void handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &should_resume) noexcept;
 
   TraceEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
@@ -142,7 +141,7 @@ public:
   constexpr void stop_on_exec() noexcept;
   constexpr void stop_on_thread_exit() noexcept;
 
-  void set_and_run_action(Tid tid, ThreadProceedAction *action) noexcept;
+  void SetAndRunAction(Tid tid, std::shared_ptr<ThreadProceedAction>&& action) noexcept;
 
   TraceeController &tc;
 
@@ -163,8 +162,8 @@ public:
 
 private:
   // native_ because it's generated from a WaitStatus event (and thus comes directly from ptrace, not a remote)
-  TraceEvent *native_core_evt_from_stopped(TaskInfo &t) noexcept;
-  std::unordered_map<Tid, ThreadProceedAction *> proceed_actions;
+  TraceEvent *CreateTraceEventFromStopped(TaskInfo &t) noexcept;
+  std::unordered_map<Tid, std::shared_ptr<ThreadProceedAction>> proceed_actions;
 };
 
 class StepInto final : public ThreadProceedAction
@@ -182,7 +181,7 @@ public:
   bool inside_origin_frame(const sym::Frame &f) const noexcept;
   bool is_origin_line(u32 line) const noexcept;
 
-  static StepInto *create(TraceeController &ctrl, TaskInfo &task) noexcept;
+  static std::shared_ptr<StepInto> create(TraceeController &ctrl, TaskInfo &task) noexcept;
 };
 
 } // namespace ptracestop

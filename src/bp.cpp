@@ -1,7 +1,7 @@
 #include "bp.h"
-#include <mdbsys/ptrace.h>
 #include "utils/expected.h"
 #include <algorithm>
+#include <mdbsys/ptrace.h>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
 #include <tracer.h>
@@ -76,16 +76,16 @@ BreakpointLocation::remove_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint
 
   users.erase(it);
   if (!any_user_active()) {
-    disable(ctrl);
+    disable(ctrl.TaskLeaderTid(), ctrl);
   }
   return true;
 }
 
 void
-BreakpointLocation::enable(tc::TraceeCommandInterface &tc) noexcept
+BreakpointLocation::enable(Tid tid, tc::TraceeCommandInterface &tc) noexcept
 {
   if (!installed) {
-    const auto res = tc.EnableBreakpoint(*this);
+    const auto res = tc.EnableBreakpoint(tid, *this);
     switch (res.kind) {
     case tc::TaskExecuteResult::Ok:
       installed = true;
@@ -98,19 +98,12 @@ BreakpointLocation::enable(tc::TraceeCommandInterface &tc) noexcept
 }
 
 void
-BreakpointLocation::disable(tc::TraceeCommandInterface &tc) noexcept
+BreakpointLocation::disable(Tid tid, tc::TraceeCommandInterface &tc) noexcept
 {
   if (installed) {
-    const auto result = tc.DisableBreakpoint(*this);
-    switch (result.kind) {
-    case tc::TaskExecuteResult::Ok:
-      installed = false;
-      break;
-    case tc::TaskExecuteResult::Error:
-    case tc::TaskExecuteResult::None:
-      PANIC("Failed to disable breakpoint");
-      break;
-    }
+    const auto result = tc.DisableBreakpoint(tid, *this);
+    VERIFY(result.kind == tc::TaskExecuteResult::Ok, "[tracer:{}.{}] Failed to disable breakpoint", tc.TaskLeaderTid(), tid);
+    installed = false;
   }
 }
 
@@ -183,7 +176,7 @@ void
 UserBreakpoint::enable(tc::TraceeCommandInterface &ctrl) noexcept
 {
   if (!enabled_by_user && bp != nullptr) {
-    bp->enable(ctrl);
+    bp->enable(ctrl.TaskLeaderTid(), ctrl);
   }
 
   enabled_by_user = (bp != nullptr);
@@ -195,7 +188,7 @@ UserBreakpoint::disable(tc::TraceeCommandInterface &ctrl) noexcept
   if (enabled_by_user && bp != nullptr) {
     enabled_by_user = false;
     if (bp->any_user_active()) {
-      bp->disable(ctrl);
+      bp->disable(ctrl.TaskLeaderTid(), ctrl);
     }
   }
 }
@@ -311,7 +304,8 @@ UserBreakpoint::user_spec() const noexcept
 
 /* virtual */
 std::shared_ptr<UserBreakpoint>
-UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc, std::shared_ptr<BreakpointLocation>) noexcept
+UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
+                                std::shared_ptr<BreakpointLocation>) noexcept
 {
   PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
@@ -328,7 +322,7 @@ Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std:
 bp_hit
 Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 {
-  if (stop_only.value_or(t.tid) != t.tid) {
+  if (stop_only.value_or(t.mTid) != t.mTid) {
     // This task (`TaskInfo t`) is not supposed to be stopped by this breakpoint
     return bp_hit::noop();
   }
@@ -337,20 +331,20 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
     return bp_hit::noop();
   }
 
-  DBGLOG(core, "Hit breakpoint {}", id);
+  DBGLOG(core, "[{}:bkpt]: bp {} hit", t.mTid, id);
   increment_count();
   if (stop_all_threads_when_hit) {
     const auto all_stopped = tc.IsAllStopped();
     if (all_stopped) {
-      tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.tid}, id, true);
+      tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, id, true);
     } else {
       tc.StopAllTasks(&t);
-      tc.GetPublisher(ObserverType::AllStop).once([&]() {
-        tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.tid}, id, true);
+      tc.GetPublisher(ObserverType::AllStop).Once([&]() {
+        tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, id, true);
       });
     }
   } else {
-    tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.tid}, id, false);
+    tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, id, false);
   }
   return bp_hit::normal_stop();
 }
@@ -362,13 +356,15 @@ Breakpoint::user_spec() const noexcept
 }
 
 std::shared_ptr<UserBreakpoint>
-Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc, std::shared_ptr<BreakpointLocation> bp) noexcept
+Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
+                            std::shared_ptr<BreakpointLocation> bp) noexcept
 {
   auto clonedStopCondition = stop_condition;
   auto breakpoint = std::make_shared<Breakpoint>(
     RequiredUserParameters{
       .tid = tid, .id = breakpointStorage.new_id(), .loc_or_err = std::move(bp), .times_to_hit = {}, .tc = tc},
-    kind, stop_only, std::move(clonedStopCondition), stop_all_threads_when_hit, std::make_unique<UserBpSpec>(*bp_spec));
+    kind, stop_only, std::move(clonedStopCondition), stop_all_threads_when_hit,
+    std::make_unique<UserBpSpec>(*bp_spec));
   breakpointStorage.add_user(breakpoint);
   ASSERT(!breakpoint->bp_location()->loc_users().empty(), "Breakpoint location should have user now!");
   return breakpoint;
@@ -401,7 +397,7 @@ FinishBreakpoint::FinishBreakpoint(RequiredUserParameters param, Tid stop_only) 
 bp_hit
 FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 {
-  if (t.tid != stop_only) {
+  if (t.mTid != stop_only) {
     return bp_hit::noop();
   }
   DBGLOG(core, "Hit finish_bp_t {}", id);
@@ -412,7 +408,7 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
     tc.EmitSteppedStop({tc.TaskLeaderTid(), tid}, "Finished function", true);
   } else {
     tc.StopAllTasks(&t);
-    tc.GetPublisher(ObserverType::AllStop).once([&tc, tid = tid]() {
+    tc.GetPublisher(ObserverType::AllStop).Once([&tc, tid = tid]() {
       tc.EmitSteppedStop({tc.TaskLeaderTid(), tid}, "Finished function", true);
     });
   }
@@ -427,7 +423,7 @@ ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) no
 bp_hit
 ResumeToBreakpoint::on_hit(TraceeController &, TaskInfo &t) noexcept
 {
-  if (t.tid == stop_only) {
+  if (t.mTid == stop_only) {
     DBGLOG(core, "Hit resume_bp_t {}", id);
     return bp_hit::continue_retire_bp();
   } else {
@@ -482,7 +478,7 @@ UserBreakpoints::new_id() noexcept
 }
 
 void
-UserBreakpoints::on_exit() noexcept
+UserBreakpoints::OnProcessExit() noexcept
 {
   for (auto &user : all_users()) {
     if (user->bp) {
@@ -503,8 +499,16 @@ UserBreakpoints::on_exit() noexcept
 void
 UserBreakpoints::on_exec() noexcept
 {
-  // we do the same as on exit here - at least I think we should.
-  on_exit();
+  for (auto &user : all_users()) {
+    if (user->bp) {
+      // to prevent assertion. UserBreakpoints is the only type allowed to touch ->installed (via
+      // friend-mechanism).
+      user->bp->installed = false;
+      user->bp->users.clear();
+      user->bp.reset();
+    }
+  }
+  bps_at_loc.clear();
 }
 
 void

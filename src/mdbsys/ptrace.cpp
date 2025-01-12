@@ -101,8 +101,7 @@ request_name(__ptrace_request req)
 void
 new_target_set_options(pid_t pid)
 {
-  const auto options =
-    PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXIT | PTRACE_O_TRACEVFORK;
+  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEVFORK;  // | PTRACE_O_TRACEEXIT;
   Tracer::Instance->TraceExitConfigured = (options & PTRACE_O_TRACEEXIT) != 0;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;
@@ -200,7 +199,8 @@ TaskWaitResult
 WaitResultToTaskWaitResult(Tid tid, int status) noexcept
 {
   WaitStatusKind kind = WaitStatusKind::NotKnown;
-  TaskWaitResult wait{.tid = tid, .ws = {.ws = WaitStatusKind::NotKnown, .exit_code = 0}};
+  const auto signal = WSTOPSIG(status);
+
   using enum WaitStatusKind;
   if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
     PtraceSyscallInfo info;
@@ -228,13 +228,12 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
   } else if (WSTOPSIG(status) == SIGSTOP) {
     kind = Stopped;
   } else if (WSTOPSIG(status) == SIGTERM) {
-    DBGLOG(core, "SOME OTHER STOP FOR {}. WSTOPSIG: {}", wait.tid, WSTOPSIG(status));
+    DBGLOG(core, "SOME OTHER STOP FOR {}. WSTOPSIG: {}", tid, WSTOPSIG(status));
     kind = Stopped;
   } else {
     kind = Stopped;
   }
-  wait.ws.ws = kind;
-  return wait;
+  return TaskWaitResult{.tid = tid, .ws = {.ws = kind, .signal = signal}};
 }
 
 static TaskWaitResult
@@ -248,25 +247,6 @@ static TaskWaitResult
 wait_result_signalled(Tid tid, int status)
 {
   return TaskWaitResult{.tid = tid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status)}};
-}
-
-TaskWaitResult
-process_status(Tid tid, int status) noexcept
-{
-  if (WIFSTOPPED(status)) {
-    return WaitResultToTaskWaitResult(tid, status);
-  }
-
-  if (WIFEXITED(status)) {
-    return wait_result_exited(tid, status);
-  }
-
-  if (WIFSIGNALED(status)) {
-    return wait_result_signalled(tid, status);
-  }
-
-  VERIFY(false, "Unknown WAIT STATUS event");
-  return {};
 }
 
 std::optional<WaitPid>

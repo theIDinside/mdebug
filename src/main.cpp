@@ -4,7 +4,9 @@
 #include "interface/dap/interface.h"
 #include "mdb_config.h"
 #include "notify_pipe.h"
+#include "supervisor.h"
 #include "tracer.h"
+#include "utils/scope_defer.h"
 #include "utils/thread_pool.h"
 #include <asm-generic/errno-base.h>
 #include <chrono>
@@ -48,6 +50,7 @@ main(int argc, const char **argv)
 {
   // Sets main thread id. It's static so subsequent calls from other threads should be fine.
   GetMainThreadId();
+  auto system = EventSystem::Initialize();
 
   auto res = sys::parse_cli(argc, argv);
   if (!res.is_expected()) {
@@ -62,6 +65,68 @@ main(int argc, const char **argv)
     }
     exit(-1);
   }
+
+#ifdef MDB_DEBUG
+
+  // timeDelta is the last time this function was called. That way
+  // The debug functions can decide if they should run or not.
+  std::vector<std::function<void(std::chrono::milliseconds)>> intervalJobs{
+    [delta = u64{0}](std::chrono::milliseconds timeDelta) mutable noexcept {
+      delta += timeDelta.count();
+      if (delta < 500) {
+        return;
+      }
+      delta = 0;
+      if (const auto &tasks = Tracer::Instance->UnInitializedTasks(); !tasks.empty()) {
+        std::string res;
+        auto iter = std::back_inserter(res);
+        for (const auto &[tid, task] : tasks) {
+          iter = fmt::format_to(iter, "{}{}:{}", res.empty() ? '[' : ',', tid,
+                                task->is_stopped() ? "stopped" : "running");
+        }
+        if (!res.empty()) {
+          res.push_back(']');
+        }
+
+        DBGLOG(warning, "Tasks are still uninitialized, tasks={}", res);
+      }
+    },
+    [events = u64{0}, stallTime = u64{0}, reported = false,
+     writeBuffer = std::string{}](std::chrono::milliseconds interval) mutable noexcept {
+      if (Tracer::Instance->mDebuggerEvents == events) {
+        stallTime += interval.count();
+        if (!reported) {
+          writeBuffer.clear();
+          for (const auto &target : Tracer::Instance->mTracedProcesses) {
+            for (const auto &t : target->GetThreads()) {
+              if (t->can_continue()) {
+                fmt::format_to(std::back_inserter(writeBuffer), "tid={}, stopped={}, wait={}, ?pc?=0x{:x}\n",
+                               t->mTid, t->is_stopped(), to_str(t->mLastWaitStatus.ws), t->get_register(16));
+              }
+            }
+          }
+          DBGLOG(warning, "Debug session task debug state:\n{}\nNo new debugger events processed in {}",
+                 writeBuffer, stallTime);
+        }
+        reported = true;
+        return;
+      }
+      stallTime = 0;
+      events = Tracer::Instance->mDebuggerEvents;
+      reported = false;
+    }};
+
+  std::thread stateDebugThread{[intervalJobs = std::move(intervalJobs)]() {
+    constexpr auto intervalSetting = std::chrono::milliseconds{500};
+    while (Tracer::Instance->KeepAlive) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{intervalSetting});
+      for (auto &f : intervalJobs) {
+        f(intervalSetting);
+      }
+    }
+  }};
+  ScopedDefer JoinThread{[&stateDebugThread]() { stateDebugThread.join(); }};
+#endif
 
   const sys::DebuggerConfiguration &config = res.value();
   {
@@ -107,22 +172,29 @@ main(int argc, const char **argv)
 
     if (system->PollBlocking(readInEvents)) {
       for (auto evt : readInEvents) {
+#ifdef MDB_DEBUG
+        Tracer::Instance->mDebuggerEvents++;
+#endif
         switch (evt.type) {
         case EventType::WaitStatus: {
           DBGLOG(awaiter, "stop for {}: {}", evt.uWait.wait.tid, to_str(evt.uWait.wait.ws.ws));
-          if (const auto dbg_evt = tracer.ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
-            tracer.handle_core_event(dbg_evt);
+          if (auto dbg_evt = tracer.ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
+            tracer.HandleTracerEvent(dbg_evt);
           }
         } break;
         case EventType::Command: {
           tracer.handle_command(evt.uCommand);
         } break;
         case EventType::TraceeEvent: {
-          tracer.handle_core_event(evt.uDebugger);
+          tracer.HandleTracerEvent(evt.uDebugger);
         } break;
         case EventType::Initialization:
-          tracer.handle_init_event(evt.uDebugger);
+          tracer.HandleInitEvent(evt.uDebugger);
           break;
+        case EventType::Internal: {
+          tracer.HandleInternalEvent(evt.uInternalEvent);
+          break;
+        }
         }
       }
       readInEvents.clear();

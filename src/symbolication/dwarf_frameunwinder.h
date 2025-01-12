@@ -96,8 +96,8 @@ public:
    * registers. */
   static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
                               AddrPtr pc) noexcept;
-  u64 ComputeExpression(std::span<const u8> bytes) noexcept;
-  u64 ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame) noexcept;
+  u64 ComputeExpression(std::span<const u8> bytes, int frameLevel=-1) noexcept;
+  u64 ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel=-1) noexcept;
   void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
   void RememberState() noexcept;
   void RestoreState() noexcept;

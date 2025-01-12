@@ -141,6 +141,8 @@ set(MIDAS_SOURCES
   src/interface/dap/parse_buffer.h
   src/interface/dap/types.cpp
   src/interface/dap/types.h
+  src/interface/console_command.cpp
+  src/interface/console_command.h
   src/interface/pty.cpp
   src/interface/pty.h
 

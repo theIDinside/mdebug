@@ -78,7 +78,7 @@ class GdbRemoteCommander final : public TraceeCommandInterface
   // This way, we don't have to potentially open N files to /proc/<pid>/task/<tid> on every `Threads` request
   std::unordered_map<Tid, std::string> thread_names{};
 
-  void set_catch_syscalls(bool on) noexcept;
+  void SetCatchSyscalls(bool on) noexcept;
   void inform_supported() noexcept;
 
 public:
@@ -90,15 +90,15 @@ public:
   TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ReverseContinue() noexcept final;
-  TaskExecuteResponse ResumeTask(TaskInfo &t, RunType type) noexcept final;
-  TaskExecuteResponse ResumeTarget(TraceeController *tc, RunType run) noexcept final;
+  TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction type) noexcept final;
+  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
-  TaskExecuteResponse EnableBreakpoint(BreakpointLocation &location) noexcept final;
-  TaskExecuteResponse DisableBreakpoint(BreakpointLocation &location) noexcept final;
+  TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
+  TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
 
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)
-  TaskExecuteResponse InstallBreakpoint(AddrPtr addr) noexcept final;
+  TaskExecuteResponse InstallBreakpoint(Tid tid, AddrPtr addr) noexcept final;
 
   TaskExecuteResponse ReadRegisters(TaskInfo &t) noexcept final;
   TaskExecuteResponse WriteRegisters(const user_regs_struct &input) noexcept final;

@@ -259,4 +259,3 @@ IS_TRACE_EVENT(auto stopsig, auto ptrace_event) noexcept -> bool
 }
 
 TaskWaitResult WaitResultToTaskWaitResult(Tid tid, int status) noexcept;
-TaskWaitResult process_status(Tid tid, int status) noexcept;

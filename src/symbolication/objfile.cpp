@@ -111,6 +111,7 @@ ObjectFile::GetAddressRange() const noexcept
 auto
 ObjectFile::HasReadLnpHeader(u64 offset) noexcept -> bool
 {
+  std::lock_guard lock(mLnpHeaderMutex);
   return mLineNumberProgramHeaders.contains(offset);
 }
 
@@ -124,7 +125,7 @@ auto
 ObjectFile::SetLnpHeader(u64 offset, sym::dw::LNPHeader *header) noexcept -> bool
 {
   std::lock_guard lock(mLnpHeaderMutex);
-  if (HasReadLnpHeader(offset)) {
+  if (mLineNumberProgramHeaders.contains(offset)) {
     return false;
   }
   mLineNumberProgramHeaders[offset] = header;

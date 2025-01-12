@@ -157,7 +157,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
 
     if (t && t->loc_stat) {
       const auto locstat = t->clear_bpstat();
-      return TraceEvent::Stepped(param(), !locstat->should_resume, locstat, std::move(t->next_resume_action),
+      return TraceEvent::Stepped(param(), !locstat->should_resume, locstat, std::move(t->mNextResumeAction),
                                 std::move(registers));
     }
 

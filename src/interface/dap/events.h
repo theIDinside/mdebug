@@ -11,6 +11,8 @@
 enum class SharedObjectSymbols : u8;
 struct SharedObject;
 
+struct Clone;
+
 namespace ui::dap {
 
 enum ChangeEvent : u8
@@ -86,6 +88,7 @@ struct ExitedEvent final : public ui::UIResult
 struct ThreadEvent final : public ui::UIResult
 {
   ThreadEvent(ThreadReason reason, Tid tid) noexcept;
+  ThreadEvent(const Clone& event) noexcept;
   ~ThreadEvent() noexcept override = default;
   std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource* allocator=nullptr) const noexcept final;
   ThreadReason reason;

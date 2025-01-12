@@ -1,13 +1,13 @@
 #include "task.h"
 #include "fmt/ranges.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include <mdbsys/ptrace.h>
 #include "register_description.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "utils/logger.h"
 #include "utils/util.h"
+#include <mdbsys/ptrace.h>
 #include <sys/user.h>
 #include <tracee/util.h>
 #include <tracer.h>
@@ -53,15 +53,17 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 }
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
-    : tid(newTaskTid), wait_status(), user_stopped(true), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), regs(), loc_stat(), call_stack(nullptr)
+    : mTid(newTaskTid), mLastWaitStatus(), user_stopped(true), tracer_stopped(true), initialized(false),
+      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), regs(), loc_stat(), call_stack(nullptr),
+      mSupervisor(nullptr)
 {
 }
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
-    : tid(newTaskTid), wait_status(), user_stopped(isUserStopped), tracer_stopped(true), initialized(true),
+    : mTid(newTaskTid), mLastWaitStatus(), user_stopped(isUserStopped), tracer_stopped(true), initialized(true),
       cache_dirty(true), rip_dirty(true), exited(false), reaped(false),
-      regs(supervisor.format, supervisor.arch_info.as_t().get()), loc_stat()
+      regs(supervisor.format, supervisor.arch_info.as_t().get()), loc_stat(),
+      mSupervisor(supervisor.GetSupervisor())
 {
   call_stack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
 }
@@ -70,7 +72,6 @@ void
 TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcept
 {
   ASSERT(call_stack == nullptr && initialized == false, "Thread has already been initialized.");
-
   user_stopped = true;
   tracer_stopped = true;
   initialized = true;
@@ -81,16 +82,20 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
   regs = {tc.format, tc.arch_info.as_t().get()};
   loc_stat = {};
   call_stack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
-
-  initialized = true;
-  DBGLOG(core, "Deferred initializing of thread {} completed", tid);
-  EventSystem::Get().PushDebuggerEvent(TraceEvent::ThreadCreated({tc.TaskLeaderTid(), tid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
+  mSupervisor = tc.GetSupervisor();
+  ASSERT(mSupervisor != nullptr, "must have supervisor");
+  DBGLOG(core, "Deferred initializing of thread {} completed", mTid);
+  if (restart) {
+    EventSystem::Get().PushDebuggerEvent(TraceEvent::ThreadCreated(
+      {tc.TaskLeaderTid(), mTid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
+  }
 }
 
 /*static*/
 std::shared_ptr<TaskInfo>
 TaskInfo::CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept
 {
+  DBGLOG(core, "creating task {}.{}: running={}", supervisor.TaskLeaderTid(), newTaskTid, isRunning);
   return std::make_shared<TaskInfo>(supervisor, newTaskTid, !isRunning);
 }
 
@@ -99,7 +104,8 @@ std::shared_ptr<TaskInfo>
 TaskInfo::CreateUnInitializedTask(TaskWaitResult wait) noexcept
 {
   auto task = std::shared_ptr<TaskInfo>(new TaskInfo{wait.tid});
-  task->wait_status = wait.ws;
+  Tracer::Instance->RegisterTracedTask(task);
+  task->mLastWaitStatus = wait.ws;
   return task;
 }
 
@@ -178,17 +184,23 @@ TaskInfo::GetUnwindState(int frameLevel) noexcept
   return call_stack->GetUnwindState(static_cast<u32>(frameLevel));
 }
 
+TraceeController *
+TaskInfo::GetSupervisor() const noexcept
+{
+  return mSupervisor;
+}
+
 void
 TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 {
-  wait_status = wait.ws;
+  mLastWaitStatus = wait.ws;
 }
 
 WaitStatus
 TaskInfo::pending_wait_status() const noexcept
 {
-  ASSERT(wait_status.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", tid);
-  return wait_status;
+  ASSERT(mLastWaitStatus.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", mTid);
+  return mLastWaitStatus;
 }
 
 sym::CallStack &
@@ -231,23 +243,39 @@ TaskInfo::get_maybe_value(u32 ref) noexcept
 }
 
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept
+TaskInfo::RequestedStop() noexcept
+{
+  bfRequestedStop = true;
+}
+
+void
+TaskInfo::ClearRequestedStopFlag() noexcept
+{
+  bfRequestedStop = false;
+}
+
+void TaskInfo::SetTracerState(SupervisorState state) noexcept {
+  mState = state;
+}
+
+void
+TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume) noexcept
 {
   ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
 
   auto loc = tc->GetUserBreakpoints().location_at(loc_stat->loc);
   auto user_ids = loc->loc_users();
-  DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", tid, fmt::join(user_ids, ", "), loc->address());
+  DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", mTid, fmt::join(user_ids, ", "), loc->address());
 
   auto &control = tc->GetInterface();
-  loc->disable(control);
+  loc->disable(mTid, control);
   loc_stat->stepped_over = true;
   loc_stat->re_enable_bp = true;
-  loc_stat->should_resume = resume_action.type != tc::RunType::None;
+  loc_stat->should_resume = resume.type != tc::RunType::None;
 
-  next_resume_action = resume_action;
+  mNextResumeAction = resume;
 
-  const auto result = control.ResumeTask(*this, tc::RunType::Step);
+  const auto result = control.ResumeTask(*this, tc::ResumeAction{tc::RunType::Step, resume.target, 0});
   ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 
@@ -259,12 +287,12 @@ TaskInfo::set_stop() noexcept
 }
 
 void
-TaskInfo::set_running(tc::RunType type) noexcept
+TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
 {
   stop_collected = false;
   user_stopped = false;
   tracer_stopped = false;
-  last_resume_command = type;
+  mLastResumeAction = type;
   set_dirty();
   clear_stop_state();
 }
@@ -302,13 +330,6 @@ TaskInfo::clear_bpstat() noexcept
   const auto copy = loc_stat;
   loc_stat = std::nullopt;
   return copy;
-}
-
-void
-TaskStepInfo::step_taken_to(AddrPtr rip) noexcept
-{
-  this->rip = rip;
-  --steps;
 }
 
 bool

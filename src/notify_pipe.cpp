@@ -79,8 +79,8 @@ NotifyManager::has_wait_ready(std::vector<NotifyResult> &result, bool flush)
 [[maybe_unused]] bool
 Notifier::ReadEnd::consume_expected() noexcept
 {
-  char ch; // NOLINT
-  [[maybe_unused]] const auto res = ::read(fd, &ch, 1);
+  char ch[10]; // NOLINT
+  [[maybe_unused]] const auto res = ::read(fd, &ch, sizeof(ch));
   ASSERT(res != -1, "Failed to consume posted event token due to error {}", strerror(errno));
   return true;
 }

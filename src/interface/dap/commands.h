@@ -261,24 +261,43 @@ struct Continue final : public ui::UICommand
 // Resume all (currently stopped) processes and their tasks
 struct ContinueAll final : public ui::UICommand
 {
-  DEFINE_NAME("continue-all");
+  DEFINE_NAME("continueAll");
   ContinueAll(u64 seq) noexcept : UICommand(seq) {}
-  ~ContinueAll() override = default;
+  ~ContinueAll() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };
 
 struct ContinueAllResponse final : ui::UIResult
 {
-  CTOR(ContinueAllResponse);
   ~ContinueAllResponse() noexcept override = default;
+  std ::pmr ::string Serialize(int seq, std ::pmr ::memory_resource *arenaAllocator) const noexcept final;
+  ContinueAllResponse(bool success, UICommandPtr cmd, Tid taskLeader) noexcept
+      : UIResult(success, cmd), mTaskLeader(taskLeader)
+  {
+  }
+  Tid mTaskLeader;
+};
+
+struct PauseAll final : ui::UICommand
+{
+  DEFINE_NAME("pauseAll");
+  PauseAll(u64 seq) noexcept : UICommand(seq) {}
+  ~PauseAll() noexcept override = default;
+  UIResultPtr Execute() noexcept final;
+};
+
+struct PauseAllResponse final : ui::UIResult
+{
+  ~PauseAllResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+  PauseAllResponse(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
 };
 
 struct PauseResponse final : ui::UIResult
 {
-  CTOR(PauseResponse);
   ~PauseResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+  PauseResponse(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
 };
 
 struct Pause final : public ui::UICommand
@@ -379,8 +398,8 @@ struct StepOut final : public ui::UICommand
 struct SetBreakpointsResponse final : ui::UIResult
 {
   SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointRequestKind type) noexcept;
-  BreakpointRequestKind type;
   std::vector<ui::dap::Breakpoint> breakpoints;
+  BreakpointRequestKind mType;
   ~SetBreakpointsResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 };
@@ -703,12 +722,12 @@ struct Evaluate final : public UICommand
 
 struct EvaluateResponse final : public UIResult
 {
-  EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::string &&result,
+  EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::pmr::string &&result,
                    std::optional<std::string> &&type, std::optional<std::string> &&memoryReference) noexcept;
   ~EvaluateResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 
-  std::string result;
+  std::pmr::string result;
   std::optional<std::string> type;
   int variablesReference;
   std::optional<std::string> memoryReference;
@@ -791,7 +810,7 @@ struct InvalidArgs final : public UICommand
   DEFINE_NAME("disassemble");
 };
 
-ui::UICommand *ParseDebugAdapterCommand(std::string packet) noexcept;
+ui::UICommand *ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) noexcept;
 
 template <typename Derived, typename JsonArgs>
 static constexpr auto

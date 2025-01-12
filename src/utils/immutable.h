@@ -67,6 +67,10 @@ public:
     return std::move(data);
   }
 
+  constexpr operator const T&() & {
+    return data;
+  }
+
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const Immutable<T> &rhs) noexcept
   {
@@ -229,6 +233,10 @@ public:
   operator*() const & noexcept
   {
     return std::string_view{data};
+  }
+
+  constexpr operator const T&() & {
+    return data;
   }
 
   constexpr

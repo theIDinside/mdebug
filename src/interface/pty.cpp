@@ -19,9 +19,18 @@ open_pty_master() noexcept
   return MasterPty{.name = pty_name, .fd = master_fd};
 }
 
-std::variant<pid_t, PtyParentResult>
-pty_fork(const termios *slave_termios, const winsize *slave_winsize)
+std::variant<pid_t, PtyParentResult, ParentResult>
+pty_fork(bool dontDuplicateStdio, const termios *slave_termios, const winsize *slave_winsize)
 {
+  if(dontDuplicateStdio) {
+    auto child_pid = fork();
+
+    if (child_pid != 0) {
+      return ParentResult{.child_pid = child_pid };
+    } else {
+      return 0;
+    }
+  }
   const auto mfd_res = open_pty_master();
   VERIFY(mfd_res.has_value(), "Failed to open Master PTY");
   auto [name, fd] = mfd_res.value();
@@ -43,6 +52,7 @@ pty_fork(const termios *slave_termios, const winsize *slave_winsize)
   if (slave_termios != nullptr) {
     VERIFY(tcsetattr(slave_fd, TCSANOW, slave_termios) != -1, "Failed to set TCSANOW on slave termios");
   }
+
   if (slave_winsize != nullptr) {
     VERIFY(ioctl(slave_fd, TIOCSWINSZ, slave_winsize) != -1, "Failed to ioctl TIOCSWINSZ on slave window size");
   }

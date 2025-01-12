@@ -48,10 +48,16 @@ TraceeCommandInterface::ReverseContinue() noexcept
 TaskExecuteResponse
 TraceeCommandInterface::DoDisconnect(bool terminate) noexcept
 {
+  if (terminate) {
+    Disconnect(true);
+    return TaskExecuteResponse::Ok();
+  }
+
+  Disconnect(false);
   for (auto &user : tc->GetUserBreakpoints().all_users()) {
     tc->GetUserBreakpoints().remove_bp(user->id);
   }
-  Disconnect(terminate);
+
   return TaskExecuteResponse::Ok();
 }
 
@@ -97,7 +103,7 @@ to_str(RunType type) noexcept
     return "RunType::Continue";
   case RunType::SyscallContinue:
     return "RunType::SyscallContinue";
-  case RunType::UNKNOWN:
+  case RunType::Unknown:
     return "RunType::UNKNOWN";
     break;
   }

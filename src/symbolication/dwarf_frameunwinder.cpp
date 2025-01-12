@@ -122,10 +122,10 @@ CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFile
 }
 
 u64
-CFAStateMachine::ComputeExpression(std::span<const u8> bytes) noexcept
+CFAStateMachine::ComputeExpression(std::span<const u8> bytes, int frameLevel) noexcept
 {
   DBGLOG(eh, "compute_expression of dwarf expression of {} bytes", bytes.size());
-  auto intepreter = ExprByteCodeInterpreter{-1, mTraceeController, mTask, bytes};
+  auto intepreter = ExprByteCodeInterpreter{frameLevel, mTraceeController, mTask, bytes};
   return intepreter.Run();
 }
 
@@ -153,7 +153,7 @@ CFAStateMachine::RestoreState() noexcept
 }
 
 u64
-CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame) noexcept
+CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel) noexcept
 {
   auto &reg = mRuleTable[registerNumber];
   switch (reg.mRule) {
@@ -174,7 +174,7 @@ CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindSt
     return belowFrame.GetRegister(reg.uValue);
   }
   case sym::RegisterRule::Expression: {
-    const auto saved_at_addr = TPtr<u64>(ComputeExpression(reg.uExpression));
+    const auto saved_at_addr = TPtr<u64>(ComputeExpression(reg.uExpression, frameLevel));
     const auto res = mTraceeController.ReadType(saved_at_addr);
     return res;
   }
@@ -326,7 +326,6 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         state.mCanonicalFrameAddressData.SetExpression(std::span{block.ptr, block.size});
       } break;
       case 0x10: { // I::DW_CFA_expression
-        TODO("I::DW_CFA_expression");
         const auto reg = reader.read_uleb128<u64>();
         const auto length = reader.read_uleb128<u64>();
         const auto block = reader.read_block(length);

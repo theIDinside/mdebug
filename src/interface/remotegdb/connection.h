@@ -604,7 +604,7 @@ public:
   std::optional<std::pmr::string> read_command_response(MonotonicResource &arena, int timeout) noexcept;
 
   // Blocking call for `timeout` ms
-  utils::Expected<std::string, SendError> send_command_with_response(std::optional<gdb::GdbThread> thread,
+  utils::Expected<std::string, SendError> SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread,
                                                                      std::string_view command,
                                                                      std::optional<int> timeout) noexcept;
 

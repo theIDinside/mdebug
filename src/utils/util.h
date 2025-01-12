@@ -11,6 +11,17 @@
 
 namespace utils {
 
+constexpr std::optional<Pid>
+StrToPid(std::string_view str, bool hex) noexcept
+{
+  Pid p;
+  auto res = std::from_chars(str.begin(), str.end(), p, hex ? 16 : 10);
+  if (res.ec == std::errc()) {
+    return p;
+  }
+  return {};
+}
+
 // Just a type that signals that who ever holds this one, should call `delete` on t
 template <typename T> struct OwningPointer
 {
@@ -212,8 +223,10 @@ SystemPagesInBytes(int pageCount) noexcept -> size_t
 }
 
 template <typename T, typename U>
-constexpr bool IsSame() {
-  if constexpr(std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<U>>) {
+constexpr bool
+IsSame()
+{
+  if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<U>>) {
     return true;
   }
   return false;
