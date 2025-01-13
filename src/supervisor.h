@@ -376,9 +376,12 @@ public:
 
   // Core event handlers
   tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;
+  tc::ProcessedStopEvent HandleStepped(TaskInfo* task, const Stepped& event) noexcept;
+  tc::ProcessedStopEvent HandleEntry(TaskInfo* task, const EntryEvent &e) noexcept;
   tc::ProcessedStopEvent HandleThreadCreated(TaskInfo *task, const ThreadCreated &evt,
                                              const RegisterData &register_data) noexcept;
   bool OneRemainingTask() noexcept;
+  tc::ProcessedStopEvent HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &evt) noexcept;
   tc::ProcessedStopEvent HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
   tc::ProcessedStopEvent HandleProcessExit(const ProcessExited &evt) noexcept;
   tc::ProcessedStopEvent HandleFork(const ForkEvent &evt) noexcept;

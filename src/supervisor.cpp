@@ -1450,10 +1450,47 @@ TraceeController::SetPendingWaitstatus(TaskWaitResult wait_result) noexcept
 tc::ProcessedStopEvent
 TraceeController::HandleTerminatedBySignal(const Signal &evt) noexcept
 {
+  // TODO: Allow signals through / stop process / etc. Allow for configurability here.
   mDebugAdapterClient->PostEvent(new ui::dap::ExitedEvent{evt.mTerminatingSignal});
   ShutDownDebugAdapterClient();
   mIsExited = true;
-  return tc::ProcessedStopEvent{false, {}, true, false, false, true};
+  return tc::ProcessedStopEvent{false, {}};
+}
+
+tc::ProcessedStopEvent
+TraceeController::HandleStepped(TaskInfo *task, const Stepped &event) noexcept
+{
+  if (event.loc_stat) {
+    ASSERT(event.loc_stat->stepped_over, "how did we end up here if we did not step over a breakpoint?");
+    auto bp_loc = GetUserBreakpoints().location_at(event.loc_stat->loc);
+    if (event.loc_stat->re_enable_bp) {
+      bp_loc->enable(task->mTid, GetInterface());
+    }
+  }
+
+  if (event.stop) {
+    task->user_stopped = true;
+    EmitSteppedStop({.pid = mTaskLeader, .tid = task->mTid});
+    return tc::ProcessedStopEvent{false, {}};
+  } else {
+    const auto resume =
+      event.loc_stat.transform([](const auto &loc) { return loc.should_resume; }).value_or(false);
+    return tc::ProcessedStopEvent{resume, event.resume_when_done};
+  }
+}
+
+tc::ProcessedStopEvent
+TraceeController::HandleEntry(TaskInfo *task, const EntryEvent &event) noexcept
+{
+  SetIsOnEntry(false);
+  // apply session breakpoints to new process space
+  if (event.should_stop) {
+    // emit stop event
+    EmitStopped(event.thread_id, ui::dap::StoppedReason::Entry, "forked", true, {});
+  } else {
+    // say "thread created / started"
+  }
+  return tc::ProcessedStopEvent{!event.should_stop, {}};
 }
 
 tc::ProcessedStopEvent
@@ -1488,6 +1525,44 @@ TraceeController::OneRemainingTask() noexcept
   // TODO: This (potentially) needs to check currently uninitialized tasks, if they belong to this process space
   //  otherwise this may return untrue values. Therefore this simple check is lifted into it's own method.
   return mThreads.size() == 1;
+}
+
+tc::ProcessedStopEvent
+TraceeController::HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &event) noexcept
+{
+  // todo(simon): here we should start building upon global event system, like in gdb, where the user can
+  // hook into specific events. in this particular case, we could emit a
+  // BreakpointEvent{user_ids_that_were_hit} and let the user look up the bps, and use them instead of
+  // passing the data along; that way we get to make it asynchronous - because user code or core code
+  // might want to delete the breakpoint _before_ a user wants to use it. Adding this lookup by key
+  // feature makes that possible, it also makes the implementation and reasoning about life times
+  // *SUBSTANTIALLY* easier.
+  auto t = GetTaskByTid(event.thread_id);
+
+  auto bp_addy = event.address_val
+                   ->or_else([&]() {
+                     // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
+                     return std::optional{CacheAndGetPcFor(*t).get()};
+                   })
+                   .value();
+
+  auto bp_loc = GetUserBreakpoints().location_at(bp_addy);
+  ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
+  const auto users = bp_loc->loc_users();
+  ASSERT(!bp_loc->loc_users().empty(),
+         "[task={}]: A breakpoint location with no user is a rogue/leaked breakpoint at 0x{:x}", t->mTid, bp_addy);
+  bool should_resume = true;
+  for (const auto user_id : users) {
+    auto user = GetUserBreakpoints().get_user(user_id);
+    auto on_hit = user->on_hit(*this, *t);
+    should_resume = should_resume && !on_hit.stop;
+    if (on_hit.retire_bp) {
+      GetUserBreakpoints().remove_bp(user->id);
+    } else {
+      t->add_bpstat(user->address().value());
+    }
+  }
+  return tc::ProcessedStopEvent{should_resume, {}};
 }
 
 tc::ProcessedStopEvent
@@ -1633,42 +1708,7 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
       },
       [&](const ThreadCreated &e) -> MatchResult { return HandleThreadCreated(task, e, evt->registers); },
       [&](const ThreadExited &e) -> MatchResult { return HandleThreadExited(task, e); },
-      [&](const BreakpointHitEvent &e) -> MatchResult {
-        // todo(simon): here we should start building upon global event system, like in gdb, where the user can
-        // hook into specific events. in this particular case, we could emit a
-        // BreakpointEvent{user_ids_that_were_hit} and let the user look up the bps, and use them instead of
-        // passing the data along; that way we get to make it asynchronous - because user code or core code
-        // might want to delete the breakpoint _before_ a user wants to use it. Adding this lookup by key
-        // feature makes that possible, it also makes the implementation and reasoning about life times
-        // *SUBSTANTIALLY* easier.
-        auto t = GetTaskByTid(e.thread_id);
-
-        auto bp_addy = e.address_val
-                         ->or_else([&]() {
-                           // Remember: A breakpoint (0xcc) is 1 byte. We need to rewind that 1 byte.
-                           return std::optional{CacheAndGetPcFor(*t).get()};
-                         })
-                         .value();
-
-        auto bp_loc = GetUserBreakpoints().location_at(bp_addy);
-        ASSERT(bp_loc != nullptr, "Expected breakpoint location at 0x{:x}", bp_addy);
-        const auto users = bp_loc->loc_users();
-        ASSERT(!bp_loc->loc_users().empty(),
-               "[task={}]: A breakpoint location with no user is a rogue/leaked breakpoint at 0x{:x}", t->mTid,
-               bp_addy);
-        bool should_resume = true;
-        for (const auto user_id : users) {
-          auto user = GetUserBreakpoints().get_user(user_id);
-          auto on_hit = user->on_hit(*this, *t);
-          should_resume = should_resume && !on_hit.stop;
-          if (on_hit.retire_bp) {
-            GetUserBreakpoints().remove_bp(user->id);
-          } else {
-            t->add_bpstat(user->address().value());
-          }
-        }
-        return ProcessedStopEvent{should_resume, {}};
-      },
+      [&](const BreakpointHitEvent &e) -> MatchResult { return HandleBreakpointHit(task, e); },
       [&](const ForkEvent &e) -> MatchResult { return HandleFork(e); },
       [&](const Clone &e) -> MatchResult { return HandleClone(e); },
       [&](const Exec &e) -> MatchResult { return HandleExec(e); },
@@ -1678,41 +1718,9 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
         TODO("LibraryEvent");
         return ProcessedStopEvent{true, {}};
       },
-      [&](const Signal &e) -> MatchResult {
-        // TODO: Allow signals through / stop process / etc. Allow for configurability here.
-        HandleTerminatedBySignal(e);
-        return ProcessedStopEvent{false, {}};
-      },
-      [&](const Stepped &e) -> MatchResult {
-        if (e.loc_stat) {
-          ASSERT(e.loc_stat->stepped_over, "how did we end up here if we did not step over a breakpoint?");
-          auto bp_loc = GetUserBreakpoints().location_at(e.loc_stat->loc);
-          if (e.loc_stat->re_enable_bp) {
-            bp_loc->enable(task->mTid, GetInterface());
-          }
-        }
-
-        if (e.stop) {
-          task->user_stopped = true;
-          EmitSteppedStop({.pid = mTaskLeader, .tid = task->mTid});
-          return ProcessedStopEvent{false, {}};
-        } else {
-          const auto resume =
-            e.loc_stat.transform([](const auto &loc) { return loc.should_resume; }).value_or(false);
-          return ProcessedStopEvent{resume, e.resume_when_done};
-        }
-      },
-      [&](const EntryEvent &e) noexcept -> MatchResult {
-        SetIsOnEntry(false);
-        // apply session breakpoints to new process space
-        if (e.should_stop) {
-          // emit stop event
-          EmitStopped(e.thread_id, ui::dap::StoppedReason::Entry, "forked", true, {});
-        } else {
-          // say "thread created / started"
-        }
-        return ProcessedStopEvent{!e.should_stop, {}};
-      },
+      [&](const Signal &e) -> MatchResult { return HandleTerminatedBySignal(e); },
+      [&](const Stepped &e) -> MatchResult { return HandleStepped(task, e); },
+      [&](const EntryEvent &e) noexcept -> MatchResult { return HandleEntry(task, e); },
       [&](const DeferToSupervisor &e) -> MatchResult {
         // And if there is no Proceed action installed, default action is taken (RESUME)
         return ProcessedStopEvent{true && !e.attached, {}};
