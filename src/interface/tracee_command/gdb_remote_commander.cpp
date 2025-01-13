@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "gdb_remote_commander.h"
 #include "common.h"
 #include "fmt/core.h"

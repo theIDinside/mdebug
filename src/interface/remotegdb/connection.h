@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "interface/remotegdb/target_description.h"
 #include "wait_event_parser.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "worker_task.h"
 #include <numeric>

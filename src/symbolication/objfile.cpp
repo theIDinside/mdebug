@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"

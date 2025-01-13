@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "spinlock.h"
 #include <ctime>
 

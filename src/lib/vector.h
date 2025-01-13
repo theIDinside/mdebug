@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "lib/arena_allocator.h"
 #include "utils/util.h"

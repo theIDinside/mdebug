@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "../dwarf_defs.h"
 #include "symbolication/block.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "ptrace_commander.h"
 #include "awaiter.h"
 #include "common.h"

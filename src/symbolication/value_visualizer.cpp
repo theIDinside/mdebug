@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "value_visualizer.h"
 #include "symbolication/dwarf/typeread.h"
 #include "type.h"

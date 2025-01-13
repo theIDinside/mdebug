@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "typedefs.h"
 #include "utils/macros.h"

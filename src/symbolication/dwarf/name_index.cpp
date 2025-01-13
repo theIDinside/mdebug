@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "name_index.h"
 #include "die.h"
 #include "symbolication/dwarf/debug_info_reader.h"

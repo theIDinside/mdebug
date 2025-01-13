@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "elf.h"
 #include "elf_symbols.h"
 #include "objfile.h"

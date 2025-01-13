@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "supervisor.h"
 #include "bp.h"
 #include "common.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "die.h"
 #include "common.h"
 #include "debug_info_reader.h"

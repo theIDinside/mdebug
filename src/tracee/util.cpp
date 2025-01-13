@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "util.h"
 #include "common.h"
 #include <charconv>

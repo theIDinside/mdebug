@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "thread_pool.h"
 #include "utils/worker_task.h"
 #include <sys/prctl.h>

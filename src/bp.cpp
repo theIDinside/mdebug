@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "bp.h"
 #include "utils/expected.h"
 #include <algorithm>

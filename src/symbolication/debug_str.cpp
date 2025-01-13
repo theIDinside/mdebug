@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "debug_str.h"
 
 namespace sym {

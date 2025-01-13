@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "base64.h"
 #include <cmath>
 

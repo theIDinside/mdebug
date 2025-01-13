@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "../symbolication/dwarf/die.h"
 #include "../utils/worker_task.h"

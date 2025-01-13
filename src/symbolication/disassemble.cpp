@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "disassemble.h"
 #include "../supervisor.h"
 #include "elf.h"

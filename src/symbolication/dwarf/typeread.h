@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include <symbolication/dwarf/die_ref.h>
 #include <symbolication/type.h>

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "scoped_fd.h"
 #include "utils/scope_defer.h"
 #include <fcntl.h>

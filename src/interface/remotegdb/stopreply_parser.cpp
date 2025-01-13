@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "stopreply_parser.h"
 #include "connection.h"
 

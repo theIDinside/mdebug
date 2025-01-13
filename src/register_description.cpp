@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "register_description.h"
 #include "utils/util.h"
 

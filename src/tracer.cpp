@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "tracer.h"
 #include "event_queue.h"
 #include "interface/console_command.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "event_queue.h"
 #include "common.h"
 #include "supervisor.h"

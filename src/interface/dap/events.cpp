@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "events.h"
 #include "fmt/core.h"
 #include "fmt/format.h"

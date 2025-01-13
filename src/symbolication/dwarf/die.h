@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "die_ref.h"
 #include "symbolication/cu_symbol_info.h"

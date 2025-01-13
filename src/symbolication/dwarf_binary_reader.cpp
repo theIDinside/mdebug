@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "dwarf_binary_reader.h"
 #include "elf.h"
 

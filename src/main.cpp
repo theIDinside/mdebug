@@ -1,4 +1,4 @@
-/** COPYRIGHT TEMPLATE */
+/** LICENSE TEMPLATE */
 #include "./utils/logger.h"
 #include "event_queue.h"
 #include "interface/dap/interface.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 
 #include "../../notify_pipe.h"

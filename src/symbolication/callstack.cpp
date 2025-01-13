@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "callstack.h"
 #include "common.h"
 #include "supervisor.h"

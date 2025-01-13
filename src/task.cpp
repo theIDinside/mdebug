@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "task.h"
 #include "fmt/ranges.h"
 #include "interface/tracee_command/tracee_command_interface.h"

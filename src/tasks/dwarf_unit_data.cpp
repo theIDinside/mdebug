@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "dwarf_unit_data.h"
 #include "lib/arena_allocator.h"
 #include "symbolication/cu_symbol_info.h"

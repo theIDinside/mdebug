@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "ptracestop_handlers.h"
 #include "bp.h"
 #include "event_queue.h"

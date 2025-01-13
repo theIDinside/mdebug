@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "byte_buffer.h"
 #include <common.h>
 

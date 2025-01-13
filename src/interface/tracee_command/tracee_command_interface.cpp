@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "tracee_command_interface.h"
 #include "common.h"
 #include "interface/tracee_command/ptrace_commander.h"

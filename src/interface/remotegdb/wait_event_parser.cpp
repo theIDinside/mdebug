@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "wait_event_parser.h"
 #include "awaiter.h"
 #include "bp.h"

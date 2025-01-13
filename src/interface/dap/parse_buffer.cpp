@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "parse_buffer.h"
 
 namespace ui::dap {

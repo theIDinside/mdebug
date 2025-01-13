@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "logger.h"
 #include "../common.h"
 #include "utils/macros.h"

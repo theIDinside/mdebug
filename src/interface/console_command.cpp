@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "console_command.h"
 #include "fmt/ranges.h"
 #include "utils/util.h"

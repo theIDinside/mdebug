@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 // includes
 #include "connection.h"
 #include "shared.h"

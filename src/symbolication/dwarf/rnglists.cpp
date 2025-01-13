@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "rnglists.h"
 #include "symbolication/dwarf/reader_funcs.h"
 #include "symbolication/dwarf_binary_reader.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "mdb_config.h"
 #include "fmt/core.h"
 #include "fmt/ranges.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "typeread.h"
 #include "symbolication/block.h"
 #include "symbolication/dwarf.h"

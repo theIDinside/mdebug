@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "types.h"
 #include <iterator>
 #include <memory_resource>

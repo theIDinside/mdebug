@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "../lib/spinlock.h"
 #include "fmt/core.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "lnp.h"
 #include "symbolication/block.h"
 #include "utils/enumerator.h"

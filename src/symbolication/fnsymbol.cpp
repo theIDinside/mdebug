@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "fnsymbol.h"
 namespace sym {
 

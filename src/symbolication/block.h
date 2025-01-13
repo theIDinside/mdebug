@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "addr_sorter.h"
 #include <typedefs.h>

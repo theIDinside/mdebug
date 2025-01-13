@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "common.h"
 #include <csignal>
 #include <cxxabi.h>

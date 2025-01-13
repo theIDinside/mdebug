@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "awaiter.h"
 #include "event_queue.h"
 #include "interface/tracee_command/tracee_command_interface.h"

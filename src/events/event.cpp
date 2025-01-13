@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "event.h"
 #include "../supervisor.h"
 #include "../task.h"

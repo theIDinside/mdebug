@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "pty.h"
 #include "../common.h"
 #include <asm-generic/ioctls.h>

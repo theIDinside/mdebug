@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "common.h"
 #include <algorithm>
 #include <optional>

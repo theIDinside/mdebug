@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "utils/byte_buffer.h"
 #include "utils/immutable.h"

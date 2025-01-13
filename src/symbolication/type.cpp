@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "type.h"
 #include "dwarf.h"
 #include "symbolication/dwarf/attribute_read.h"

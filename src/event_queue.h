@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 
 #include "event_queue_event_param.h"

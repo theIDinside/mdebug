@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "ptrace.h"
 #include <cstdlib>
 #include <sys/syscall.h>

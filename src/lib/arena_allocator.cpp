@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "arena_allocator.h"
 #include "common.h"
 #include <cstdlib>

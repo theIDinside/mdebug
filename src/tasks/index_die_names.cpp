@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "index_die_names.h"
 #include "../symbolication/cu_symbol_info.h"
 #include "../symbolication/dwarf.h"

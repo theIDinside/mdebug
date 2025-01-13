@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "debug_info_reader.h"
 #include "../objfile.h"
 #include "symbolication/dwarf/die.h"

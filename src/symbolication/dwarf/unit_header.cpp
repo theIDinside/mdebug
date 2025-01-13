@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "unit_header.h"
 #include <symbolication/elf.h>
 

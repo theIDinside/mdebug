@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "block.h"
 
 bool

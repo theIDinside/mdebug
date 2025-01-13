@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "xml.h"
 #include "fmt/base.h"
 #include "utils/util.h"

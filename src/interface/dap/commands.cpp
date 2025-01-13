@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "commands.h"
 #include "bp.h"
 #include "common.h"

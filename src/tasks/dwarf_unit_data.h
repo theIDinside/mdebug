@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include <memory_resource>
 #include <symbolication/dwarf/lnp.h>

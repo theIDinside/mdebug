@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "cu_symbol_info.h"
 #include "dwarf.h"
 #include "dwarf/debug_info_reader.h"

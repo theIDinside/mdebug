@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "sync_barrier.h"
 #include "common.h"
 #include <cstring>

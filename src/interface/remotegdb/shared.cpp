@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "shared.h"
 #include <common.h>
 

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "interface/dap/types.h"
 // #include "symbolication/dwarf/lnp.h"

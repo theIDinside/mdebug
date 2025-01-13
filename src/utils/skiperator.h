@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include <iterator>
 #include <type_traits>

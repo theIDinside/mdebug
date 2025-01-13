@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 #include "eval/eval.h"
 #include "events/event.h"

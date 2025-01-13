@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "target_description.h"
 #include "utils/util.h"
 #include "utils/xml.h"

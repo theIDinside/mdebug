@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "so_loading.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/elf.h"

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "die_iterator.h"
 #include "die.h"
 

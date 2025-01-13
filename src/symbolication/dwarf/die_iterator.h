@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 
 #include <compare>
