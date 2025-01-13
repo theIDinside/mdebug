@@ -169,6 +169,7 @@ public:
   void RequestedStop() noexcept;
   void ClearRequestedStopFlag() noexcept;
   void SetTracerState(SupervisorState state) noexcept;
+  std::optional<Pid> GetTaskLeaderTid() const noexcept;
 };
 
 struct TaskVMInfo

@@ -1,5 +1,6 @@
 #include "util.h"
 #include "common.h"
+#include <charconv>
 #include <cstddef>
 #include <string_view>
 #include <sys/ptrace.h>
@@ -25,7 +26,7 @@ SystemVectorExtensionSize() noexcept
   __cpuid(cpuInfo, 1);            // Get processor info
   if (cpuInfo[1] & (1 << 16)) {   // Check AVX
     if (cpuInfo[1] & (1 << 28)) { // Check AVX2
-      return 64; // Assume AVX-512 support
+      return 64;                  // Assume AVX-512 support
     }
     return 32; // AVX2 supported
   }
@@ -69,7 +70,7 @@ get_register(user_regs_struct *regs, int reg_number) noexcept
 }
 
 std::string
-process_exe_path(Pid pid) noexcept
+ProcessExecPath(Pid pid) noexcept
 {
   char buf[128];
   char resolved[PATH_MAX];
@@ -90,4 +91,41 @@ GetMainThreadId() noexcept
 {
   static std::thread::id gMainThreadId = std::this_thread::get_id();
   return gMainThreadId;
+}
+
+std::optional<pid_t>
+ParseProcessId(std::string_view input, bool hex) noexcept
+{
+  if (input.empty()) {
+    return {};
+  }
+  pid_t tid;
+  const auto format = hex ? 16 : 10;
+  const auto pid_result = std::from_chars(input.begin(), input.end(), tid, format);
+  if (pid_result.ec != std::errc()) {
+    return {};
+  }
+  return tid;
+}
+
+PidTid
+ParsePidTid(std::string_view input, bool formatIsHex) noexcept
+{
+  auto sep = input.find('.');
+  const auto format = formatIsHex ? 16 : 10;
+  if (sep == input.npos) {
+    return PidTid{.mPid = ParseProcessId(input, formatIsHex), .mTid = {}};
+  }
+  auto first = input.substr(0, sep);
+  input.remove_prefix(sep + 1);
+
+  auto pid = ParseProcessId(first, formatIsHex);
+  if (pid) {
+    auto tid = ParseProcessId(input, formatIsHex);
+    if (tid) {
+      return PidTid{pid, tid};
+    }
+  }
+
+  return PidTid{};
 }

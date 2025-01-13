@@ -3,7 +3,13 @@
 #include <memory>
 #include <memory_resource>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+
+#define ConsoleLine(FORMAT_STR) FORMAT_STR "\\r\\n"
+
+#define WriteConsoleLine(WRITE_BUFFER, FORMAT_STRING, ...)                                                        \
+  fmt::format_to(std::back_inserter(WRITE_BUFFER), FORMAT_STRING "\\r\\n" __VA_OPT__(, ) __VA_ARGS__)
 
 struct ConsoleCommandResult
 {
@@ -11,7 +17,7 @@ struct ConsoleCommandResult
   std::pmr::string mContents;
 };
 
-// Abstract base class for commands, that are called & evaluated via the `EvaluateRequest` request 
+// Abstract base class for commands, that are called & evaluated via the `EvaluateRequest` request
 class ConsoleCommand
 {
 public:
@@ -44,10 +50,10 @@ public:
 };
 
 /// Commands that are "generic" and installed via `Tracer::SetupConsoleCommands`
-/// For now, the system involves just adding a callable. See the current "threads", "stopped", and "resume" commands there
-/// The result from the callable is a `ConsoleCommandResult`, that gives the contents as a string and a success flag.
-/// This callable is called on the main thread, during the processing of a `EvaluateRequest` DAP event, and as such
-/// produces the contents of the resposne for that event.
+/// For now, the system involves just adding a callable. See the current "threads", "stopped", and "resume"
+/// commands there The result from the callable is a `ConsoleCommandResult`, that gives the contents as a string
+/// and a success flag. This callable is called on the main thread, during the processing of a `EvaluateRequest`
+/// DAP event, and as such produces the contents of the resposne for that event.
 class GenericCommand : public ConsoleCommand
 {
   using Function = std::function<ConsoleCommandResult(std::span<std::string_view>, std::pmr::memory_resource *)>;

@@ -50,7 +50,7 @@ ConsoleCommandInterpreter::Interpret(const std::string &input, std::pmr::memory_
   auto splitInput = utils::split_string(input, " ");
 
   if (splitInput.empty()) {
-    return ConsoleCommandResult{false, std::pmr::string{"No input for command", allocator}};
+    return ConsoleCommandResult{false, std::pmr::string{ConsoleLine("No input for command"), allocator}};
   }
 
   std::string_view commandName = splitInput[0];
@@ -61,8 +61,8 @@ ConsoleCommandInterpreter::Interpret(const std::string &input, std::pmr::memory_
     return command->execute(args, allocator);
   } else {
     std::pmr::string msg{"", allocator};
-    fmt::format_to(std::back_inserter(msg), "Unknown command: {}\nPossible commands:\n{}", commandName,
-                   fmt::join(registry.GetCommandNameList(), ", "));
+    WriteConsoleLine(msg, "Unknown command: {}", commandName);
+    WriteConsoleLine(msg, "Possible commands {}", fmt::join(registry.GetCommandNameList(), ", "));
     return ConsoleCommandResult{false, std::move(msg)};
   }
 }

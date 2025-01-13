@@ -52,7 +52,7 @@ using sym::dw::SourceCodeFile;
 
 // FORK constructor
 TraceeController::TraceeController(TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept
-    : mTaskLeader{interface->TaskLeaderTid()}, mSymbolFiles(parent.mSymbolFiles),
+    : mParentPid(parent.mTaskLeader), mTaskLeader{interface->TaskLeaderTid()}, mSymbolFiles(parent.mSymbolFiles),
       mMainExecutable{parent.mMainExecutable}, mThreads{}, mThreadInfos{}, mUserBreakpoints{*this},
       mSharedObjects{parent.mSharedObjects.clone()}, mStopAllTasksRequested{false},
       mInterfaceType{parent.mInterfaceType}, mInterpreterBase{parent.mInterpreterBase}, mEntry{parent.mEntry},
@@ -83,8 +83,8 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
 
 TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&interface,
                                    InterfaceType type) noexcept
-    : mTaskLeader{interface != nullptr ? interface->TaskLeaderTid() : 0}, mMainExecutable{nullptr}, mThreads{},
-      mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mStopAllTasksRequested{false},
+    : mParentPid(0), mTaskLeader{interface != nullptr ? interface->TaskLeaderTid() : 0}, mMainExecutable{nullptr},
+      mThreads{}, mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mStopAllTasksRequested{false},
       mInterfaceType(type), mInterpreterBase{}, mEntry{}, mSessionKind{targetSession},
       mStopHandler{new ptracestop::StopHandler{*this}}, mNullUnwinder{new sym::Unwinder{nullptr}},
       mTraceeInterface(std::move(interface))
@@ -421,7 +421,7 @@ TraceeController::StopAllTasks(TaskInfo *requestingTask) noexcept
   for (auto &task : mThreads) {
     auto &t = *task;
     if (!t.user_stopped && !t.tracer_stopped) {
-      DBGLOG(core, "Stopping {}", t.mTid);
+      DBGLOG(core, "Halting {}", t.mTid);
       const auto response = mTraceeInterface->StopTask(t);
       ASSERT(response.is_ok(), "Failed to stop {}: {}", t.mTid, strerror(response.sys_errno));
       t.set_stop();
@@ -1617,7 +1617,6 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
     }
   }
   const TraceEvent &r = *evt;
-  LogEvent(r, "Handling");
 
   auto processedStop = std::visit(
     Match{
@@ -1720,6 +1719,8 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
     },
     *evt->event);
 
+  DBGLOG(core, "[{}.{}]: handle {}, resume:{}", mTaskLeader, task->mTid, evt->event_type,
+         processedStop.should_resume);
   if (processedStop.mThreadExited) {
     for (auto &t : GetExitedThreads()) {
       if (evt->tid == t->mTid) {

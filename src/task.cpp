@@ -254,8 +254,20 @@ TaskInfo::ClearRequestedStopFlag() noexcept
   bfRequestedStop = false;
 }
 
-void TaskInfo::SetTracerState(SupervisorState state) noexcept {
+void
+TaskInfo::SetTracerState(SupervisorState state) noexcept
+{
   mState = state;
+}
+
+std::optional<Pid>
+TaskInfo::GetTaskLeaderTid() const noexcept
+{
+  if (mSupervisor == nullptr) {
+    return {};
+  }
+
+  return mSupervisor->TaskLeaderTid();
 }
 
 void

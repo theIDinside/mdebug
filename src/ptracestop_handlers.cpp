@@ -343,7 +343,7 @@ StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
   }
   case WaitStatusKind::Execed: {
     return TraceEvent::ExecEvent({.target = tc.TaskLeaderTid(), .tid = info.mTid, .sig_or_code = 5},
-                                 process_exe_path(info.mTid), {});
+                                 ProcessExecPath(info.mTid), {});
   }
   case WaitStatusKind::Exited: {
     // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any

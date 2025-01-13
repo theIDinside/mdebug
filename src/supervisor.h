@@ -79,6 +79,7 @@ class TraceeController
 {
   friend class Tracer;
   friend struct ui::UICommand;
+  pid_t mParentPid;
   // The process pid, or the initial task that was spawned for this process
   pid_t mTaskLeader;
   // The symbol files that this process is "built of"

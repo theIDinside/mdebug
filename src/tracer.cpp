@@ -261,13 +261,13 @@ Tracer::SetupConsoleCommands() noexcept
       }
 
       for (const auto &[tid, task] : mDebugSessionTasks) {
-        if (p != -1 && task->GetSupervisor()->TaskLeaderTid() != p) {
+        if ((p != -1 && task->GetSupervisor()->TaskLeaderTid() != p) || task->exited) {
           continue;
         }
-        fmt::format_to(
-          std::back_inserter(evalResult), "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}\\r\\n",
-          task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid, bool{task->user_stopped},
-          bool{task->tracer_stopped}, to_str(task->mLastWaitStatus.ws), task->mLastWaitStatus.signal);
+        WriteConsoleLine(evalResult, "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}",
+                         task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
+                         bool{task->user_stopped}, bool{task->tracer_stopped}, to_str(task->mLastWaitStatus.ws),
+                         task->mLastWaitStatus.signal);
       }
 
       return OK_RESULT(evalResult);
@@ -279,46 +279,81 @@ Tracer::SetupConsoleCommands() noexcept
       "stopped", [&mDebugSessionTasks = mDebugSessionTasks](auto args, auto *allocator) -> ConsoleCommandResult {
         std::pmr::string evalResult{allocator};
         evalResult.reserve(4096);
+        std::optional<int> filter = ParseProcessId(args.empty() ? "" : args[0], false);
+        namespace vw = std::ranges::views;
+
+        constexpr auto writeResult = [](auto &evalResult, const auto &task) noexcept {
+          WriteConsoleLine(evalResult, "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}",
+                           task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
+                           bool{task->user_stopped}, bool{task->tracer_stopped}, to_str(task->mLastWaitStatus.ws),
+                           task->mLastWaitStatus.signal);
+        };
 
         for (const auto &[tid, task] : mDebugSessionTasks) {
-          if (!task->tracer_stopped) {
+          if (!(task->tracer_stopped || task->user_stopped)) {
             continue;
           }
-          fmt::format_to(std::back_inserter(evalResult),
-                         "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}\\r\\n",
-                         task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
-                         bool{task->user_stopped}, bool{task->tracer_stopped}, to_str(task->mLastWaitStatus.ws),
-                         task->mLastWaitStatus.signal);
+          // we're probably *always* interested in currently-orphan tasks, as these may suggest there's something
+          // wrong in debugger core.
+          if (filter && (filter != task->GetTaskLeaderTid() && task->GetSupervisor())) {
+            continue;
+          }
+          writeResult(evalResult, task);
         }
-
         return OK_RESULT(evalResult);
       }));
 
   mConsoleCommandInterpreter->RegisterConsoleCommand("threads", threadsCommand);
   mConsoleCommandInterpreter->RegisterConsoleCommand(
+    "procs",
+    GenericCommand::CreateCommand("list ptraced processes", [this](auto, auto *allocator) -> ConsoleCommandResult {
+      std::pmr::string evalResult{allocator};
+      evalResult.reserve(4096);
+      for (const auto &t : Tracer::Instance->mTracedProcesses) {
+        WriteConsoleLine(evalResult, "{}, parent={}, executable={}", t->TaskLeaderTid(), t->mParentPid,
+                         t->mMainExecutable->GetObjectFilePath().filename().c_str());
+      }
+      return OK_RESULT(evalResult);
+    }));
+  mConsoleCommandInterpreter->RegisterConsoleCommand(
+    "resumeThread",
+    GenericCommand::CreateCommand(
+      "resumeThread", [this](std::span<std::string_view> args, auto *allocator) -> ConsoleCommandResult {
+        std::pmr::string evalResult{allocator};
+        evalResult.reserve(4096);
+        ReturnEvalExprError(args.size() < 1, "resume command needs a pid.tid argument");
+        auto tid = ParseProcessId(args.front(), false);
+        ReturnEvalExprError(tid, "input couldn't be parsed into a thread id");
+        auto task = Tracer::Instance->GetTask(tid.value());
+        ReturnEvalExprError(!task || task->exited, "task couldn't be found or has exited");
+        ReturnEvalExprError(task->GetSupervisor() != nullptr, "task has no associated supervisor yet");
+        task->GetSupervisor()->ResumeTask(
+          *task, {.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task, .mDeliverSignal = -1});
+        bool resumed = {task->tracer_stopped};
+        WriteConsoleLine(evalResult, "{}.{} resumed={}", task->GetSupervisor()->TaskLeaderTid(), task->mTid,
+                         resumed);
+        if (resumed) {
+          task->GetSupervisor()->GetDebugAdapterProtocolClient()->PostEvent(
+            new ui::dap::ContinuedEvent{task->mTid, false});
+        }
+        return OK_RESULT(evalResult);
+      }));
+
+  mConsoleCommandInterpreter->RegisterConsoleCommand(
     "resume", GenericCommand::CreateCommand("resume", [this](auto args, auto *allocator) -> ConsoleCommandResult {
       std::pmr::string evalResult{allocator};
       evalResult.reserve(4096);
-      ReturnEvalExprError(args.size() < 1, "resume command needs a pid.tid argument");
-      auto pidtid = utils::split_string(args[0], ".");
-      Tid pid, tid = 0;
-      ReturnEvalExprError(pidtid.size() < 2, "{} not correct arg for 'resume' command", args[0]);
-      auto resp = std::from_chars(pidtid[0].begin(), pidtid[0].end(), pid);
-      auto rest = std::from_chars(pidtid[1].begin(), pidtid[1].end(), tid);
-      ReturnEvalExprError(resp.ec != std::errc() || rest.ec != std::errc(),
-                          "Failed to parse pid tid out of {} and {}", pidtid[0], pidtid[1]);
-      auto task = Tracer::Instance->GetTask(tid);
-      ReturnEvalExprError(task == nullptr || task->GetSupervisor() == nullptr,
-                          "task with id {} not found or doesn't have a supervisor", tid);
-      task->GetSupervisor()->ResumeTarget(
-        {tc::RunType::Continue, tc::ResumeTarget::Task, task->mLastWaitStatus.signal});
-      bool resumed = !bool{task->tracer_stopped};
-      fmt::format_to(std::back_inserter(evalResult), "{}.{} resumed={}", task->GetSupervisor()->TaskLeaderTid(),
-                     task->mTid, resumed);
-      if (resumed) {
-        task->GetSupervisor()->GetDebugAdapterProtocolClient()->PostEvent(
-          new ui::dap::ContinuedEvent{task->mTid, false});
+      ReturnEvalExprError(args.size() < 1, "resume process command needs a pid argument");
+      std::optional<pid_t> pid = ParseProcessId(args.front(), false);
+      ReturnEvalExprError(!pid.has_value(), "couldn't parse pid argument");
+      for (const auto &target : Tracer::Instance->mTracedProcesses) {
+        if (target->TaskLeaderTid() == pid) {
+          bool resumed = target->ResumeTarget({tc::RunType::Continue, tc::ResumeTarget::Task, -1});
+          WriteConsoleLine(evalResult, "{} resumed={}", *pid, resumed);
+          return OK_RESULT(evalResult);
+        }
       }
+      WriteConsoleLine(evalResult, "Couldn't find process {}", *pid);
       return OK_RESULT(evalResult);
     }));
 }
