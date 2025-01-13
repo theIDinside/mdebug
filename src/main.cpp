@@ -6,7 +6,7 @@
 #include "notify_pipe.h"
 #include "supervisor.h"
 #include "tracer.h"
-#include "utils/scope_defer.h"
+#include "utils/debugger_thread.h"
 #include "utils/thread_pool.h"
 #include <asm-generic/errno-base.h>
 #include <chrono>
@@ -116,7 +116,7 @@ main(int argc, const char **argv)
       reported = false;
     }};
 
-  std::thread stateDebugThread{[intervalJobs = std::move(intervalJobs)]() {
+  auto stateDebugThread = DebuggerThread::SpawnDebuggerThread([intervalJobs = std::move(intervalJobs)]() {
     constexpr auto intervalSetting = std::chrono::milliseconds{500};
     while (Tracer::Instance->KeepAlive) {
       std::this_thread::sleep_for(std::chrono::milliseconds{intervalSetting});
@@ -124,8 +124,7 @@ main(int argc, const char **argv)
         f(intervalSetting);
       }
     }
-  }};
-  ScopedDefer JoinThread{[&stateDebugThread]() { stateDebugThread.join(); }};
+  });
 #endif
 
   const sys::DebuggerConfiguration &config = res.value();
@@ -154,12 +153,12 @@ main(int argc, const char **argv)
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;
 
-  std::thread ui_thread{[&ui_thread_setup]() {
+  auto ui_thread = DebuggerThread::SpawnDebuggerThread([&ui_thread_setup]() {
     ui::dap::DAP ui_interface{Tracer::Instance, STDIN_FILENO, STDOUT_FILENO};
     Tracer::Instance->set_ui(&ui_interface);
     ui_thread_setup = true;
     ui_interface.start_interface();
-  }};
+  });
 
   while (!ui_thread_setup) {
     std::this_thread::sleep_for(std::chrono::milliseconds{1});
@@ -203,6 +202,5 @@ main(int argc, const char **argv)
   utils::ThreadPool::shutdown_global_pool();
   exit_debug_session = true;
   Tracer::Instance->kill_ui();
-  ui_thread.join();
   DBGLOG(core, "Exited...");
 }

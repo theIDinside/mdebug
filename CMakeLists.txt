@@ -110,6 +110,8 @@ set(MIDAS_SOURCES
   src/utils/base64.h
   src/utils/byte_buffer.cpp
   src/utils/byte_buffer.h
+  src/utils/debugger_thread.cpp
+  src/utils/debugger_thread.h
   src/utils/logger.cpp
   src/utils/logger.h
   src/utils/scoped_fd.cpp

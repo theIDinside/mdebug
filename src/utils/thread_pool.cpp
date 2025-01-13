@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "thread_pool.h"
+#include "utils/debugger_thread.h"
 #include "utils/worker_task.h"
 #include <sys/prctl.h>
 #include <utils/signals.h>
@@ -49,8 +50,9 @@ ThreadPool::initialize(u32 pool_size) noexcept
   thread_pool.reserve(pool_size);
   for (auto i = 0u; i < pool_size; ++i) {
     thread_pool.emplace_back([this, i](auto stop_token) {
+      DebuggerThread::AssertSigChildIsBlocked();
       const auto name = "mdb-pool-" + std::to_string(i);
-      this->worker(stop_token, name.c_str());
+      worker(stop_token, name.c_str());
     });
   }
 }
