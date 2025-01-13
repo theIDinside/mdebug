@@ -501,219 +501,12 @@ Tracer::new_supervisor(std::unique_ptr<TraceeController> tc) noexcept
   return current_target;
 }
 
-static std::vector<int> open_fds;
-
-static int
-fdwalk(int (*func)(void *, int), void *arg)
-{
-  /* Checking __linux__ isn't great but it isn't clear what would be
-     better.  There doesn't seem to be a good way to check for this in
-     configure.  */
-#ifdef __linux__
-  DIR *dir;
-
-  dir = opendir("/proc/self/fd");
-  if (dir != NULL) {
-    struct dirent *entry;
-    int result = 0;
-
-    for (entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
-      long fd;
-      char *tail;
-
-      errno = 0;
-      fd = strtol(entry->d_name, &tail, 10);
-      if (*tail != '\0' || errno != 0) {
-        continue;
-      }
-      if ((int)fd != fd) {
-        /* What can we do here really?  */
-        continue;
-      }
-
-      if (fd == dirfd(dir)) {
-        continue;
-      }
-
-      result = func(arg, fd);
-      if (result != 0) {
-        break;
-      }
-    }
-
-    closedir(dir);
-    return result;
-  }
-  /* We may fall through to the next case.  */
-#endif
-#ifdef HAVE_KINFO_GETFILE
-  int nfd;
-  gdb::unique_xmalloc_ptr<struct kinfo_file[]> fdtbl(kinfo_getfile(getpid(), &nfd));
-  if (fdtbl != NULL) {
-    for (int i = 0; i < nfd; i++) {
-      if (fdtbl[i].kf_fd >= 0) {
-        int result = func(arg, fdtbl[i].kf_fd);
-        if (result != 0) {
-          return result;
-        }
-      }
-    }
-    return 0;
-  }
-  /* We may fall through to the next case.  */
-#endif
-
-  {
-    int max, fd;
-
-#if defined(HAVE_GETRLIMIT) && defined(RLIMIT_NOFILE)
-    struct rlimit rlim;
-
-    if (getrlimit(RLIMIT_NOFILE, &rlim) == 0 && rlim.rlim_max != RLIM_INFINITY) {
-      max = rlim.rlim_max;
-    } else
-#endif
-    {
-#ifdef _SC_OPEN_MAX
-      max = sysconf(_SC_OPEN_MAX);
-#else
-      /* Whoops.  */
-      return 0;
-#endif /* _SC_OPEN_MAX */
-    }
-
-    for (fd = 0; fd < max; ++fd) {
-      struct stat sb;
-      int result;
-
-      /* Only call FUNC for open fds.  */
-      if (fstat(fd, &sb) == -1) {
-        continue;
-      }
-
-      result = func(arg, fd);
-      if (result != 0) {
-        return result;
-      }
-    }
-
-    return 0;
-  }
-}
-
-static int
-do_mark_open_fd(void *ignore, int fd)
-{
-  open_fds.push_back(fd);
-  return 0;
-}
-
-void
-notice_open_fds(void)
-{
-  fdwalk(do_mark_open_fd, NULL);
-}
-
-void
-mark_fd_no_cloexec(int fd)
-{
-  do_mark_open_fd(NULL, fd);
-}
-
-static int
-do_close(void *ignore, int fd)
-{
-  for (int val : open_fds) {
-    if (fd == val) {
-      /* Keep this one open.  */
-      return 0;
-    }
-  }
-
-  close(fd);
-  return 0;
-}
-
-void
-close_most_fds(void)
-{
-  fdwalk(do_close, NULL);
-}
-
-static sigset_t pass_mask;
-
-/* Update signals to pass to the inferior.  */
-static void
-pass_signals(std::span<const unsigned char> pass_signals)
-{
-
-  sigemptyset(&pass_mask);
-  for (int signalNumber = 1; signalNumber < NSIG; signalNumber++) {
-    if (signalNumber < pass_signals.size() && pass_signals[signalNumber]) {
-      sigaddset(&pass_mask, signalNumber);
-    }
-  }
-}
-
-static struct sigaction original_signal_actions[NSIG];
-static sigset_t original_signal_mask;
-
-void
-save_original_signals_state(bool quiet)
-{
-  int res = pthread_sigmask(0, NULL, &original_signal_mask);
-  if (res == -1) {
-    DBGLOG(warning, "sigprocmask failed: {}", strerror(errno));
-  }
-
-  bool found_preinstalled = false;
-
-  for (int i = 1; i < NSIG; i++) {
-    struct sigaction *oldact = &original_signal_actions[i];
-
-    res = sigaction(i, NULL, oldact);
-    if (res == -1 && errno == EINVAL) {
-      /* Some signal numbers in the range are invalid.  */
-      continue;
-    } else if (res == -1) {
-      DBGLOG(warning, "sigaction failed: {}", strerror(errno));
-    }
-    if (!quiet && oldact->sa_handler != SIG_DFL && oldact->sa_handler != SIG_IGN) {
-      found_preinstalled = true;
-      DBGLOG(warning, "warning: Found custom handler for signal {} = {}", i, strsignal(i));
-    }
-  }
-}
-
-void
-restore_original_signals_state(void)
-{
-  for (int i = 1; i < NSIG; i++) {
-    const int res = sigaction(i, &original_signal_actions[i], NULL);
-    if (res == -1 && errno == EINVAL) {
-      /* Some signal numbers in the range are invalid.  */
-      continue;
-    } else if (res == -1) {
-      DBGLOG(warning, "sigaction failed: {}", strerror(errno));
-    }
-  }
-
-  if (pthread_sigmask(SIG_SETMASK, &original_signal_mask, NULL) == -1) {
-    DBGLOG(warning, "sigprocmask failed: {}", strerror(errno));
-  }
-}
-
 void
 Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path &program,
                std::span<const std::string> prog_args) noexcept
 {
   termios original_tty;
   winsize ws;
-  save_original_signals_state(true);
-
-  /* Remember stdio descriptors.  LISTEN_DESC must not be listed, it will be
-  opened by remote_prepare.  */
-  notice_open_fds();
 
   bool could_set_term_settings = (tcgetattr(STDIN_FILENO, &original_tty) != -1);
   if (could_set_term_settings) {
@@ -747,8 +540,6 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
       PANIC("Failed to set ADDR_NO_RANDOMIZE!");
     }
 
-    close_most_fds();
-
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = SIG_DFL; // Set handler to default action
@@ -766,8 +557,6 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
     } else {
       raise(SIGSTOP);
     }
-
-    restore_original_signals_state();
 
     if (exec(program, prog_args, environment.data()) == -1) {
       PANIC(fmt::format("EXECV Failed for {}", program.c_str()));
