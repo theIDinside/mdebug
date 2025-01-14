@@ -774,7 +774,7 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
 
   cfg_body["supportsConfigurationDoneRequest"] = true;
   cfg_body["supportsFunctionBreakpoints"] = true;
-  cfg_body["supportsConditionalBreakpoints"] = false;
+  cfg_body["supportsConditionalBreakpoints"] = true;
   cfg_body["supportsHitConditionalBreakpoints"] = true;
   cfg_body["supportsEvaluateForHovers"] = false;
   cfg_body["supportsStepBack"] = RRSession;
@@ -796,7 +796,7 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
   cfg_body["supportSuspendDebuggee"] = false;
   cfg_body["supportsDelayedStackTraceLoading"] = false;
   cfg_body["supportsLoadedSourcesRequest"] = false;
-  cfg_body["supportsLogPoints"] = false;
+  cfg_body["supportsLogPoints"] = true;
   cfg_body["supportsTerminateThreadsRequest"] = true;
   cfg_body["supportsVariableType"] = true;
   cfg_body["supportsSetExpression"] = false;
