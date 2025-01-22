@@ -1,24 +1,15 @@
 /** LICENSE TEMPLATE */
 #include "supervisor.h"
-#include "bp.h"
-#include "common.h"
-#include "event_queue.h"
 #include "fmt/core.h"
-#include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/dap/interface.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/ptrace_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "ptracestop_handlers.h"
-#include "so_loading.h"
-#include "symbolication/callstack.h"
-#include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf/name_index.h"
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_expressions.h"
 #include "symbolication/dwarf_frameunwinder.h"
-#include "symbolication/elf.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/objfile.h"
 #include "task.h"
@@ -40,7 +31,6 @@
 #include <iterator>
 #include <link.h>
 #include <mdbsys/ptrace.h>
-#include <optional>
 #include <ranges>
 #include <set>
 #include <span>
@@ -51,14 +41,21 @@
 
 using sym::dw::SourceCodeFile;
 
+template <typename TaskPointerType>
+constexpr auto
+FindByTid(std::vector<TaskPointerType> &container, Tid tid) noexcept
+{
+  return std::find_if(container.begin(), container.end(), [tid](const auto &task) { return task.mTid == tid; });
+}
+
 // FORK constructor
 TraceeController::TraceeController(TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept
     : mParentPid(parent.mTaskLeader), mTaskLeader{interface->TaskLeaderTid()}, mSymbolFiles(parent.mSymbolFiles),
       mMainExecutable{parent.mMainExecutable}, mThreads{}, mThreadInfos{}, mUserBreakpoints{*this},
-      mSharedObjects{parent.mSharedObjects.clone()}, mStopAllTasksRequested{false},
-      mInterfaceType{parent.mInterfaceType}, mInterpreterBase{parent.mInterpreterBase}, mEntry{parent.mEntry},
-      mSessionKind{parent.mSessionKind}, mStopHandler{new ptracestop::StopHandler{*this}},
-      mNullUnwinder{parent.mNullUnwinder}, mTraceeInterface{std::move(interface)}
+      mSharedObjects{parent.mSharedObjects.clone()}, mInterfaceType{parent.mInterfaceType},
+      mInterpreterBase{parent.mInterpreterBase}, mEntry{parent.mEntry}, mSessionKind{parent.mSessionKind},
+      mScheduler{std::make_unique<TaskScheduler>(this)}, mNullUnwinder{parent.mNullUnwinder},
+      mTraceeInterface{std::move(interface)}
 {
   mIsVForking = isVFork;
   // Must be set first.
@@ -66,36 +63,36 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
   mThreads.reserve(64);
 
   // Out of order events may have already created the task.
-  if (auto t = Tracer::Instance->TakeUninitializedTask(mTraceeInterface->TaskLeaderTid()); t) {
+  if (auto t = Tracer::Get().TakeUninitializedTask(mTraceeInterface->TaskLeaderTid()); t) {
     ASSERT(t->mSupervisor == nullptr, "This task {} already has a supervisor.", t->mTid);
     t->InitializeThread(*mTraceeInterface, false);
-    mThreads.emplace_back(std::move(t));
+    AddTask(std::move(t));
   } else {
     auto task = TaskInfo::CreateTask(*mTraceeInterface, mTraceeInterface->TaskLeaderTid(), false);
-    Tracer::Instance->RegisterTracedTask(task);
-    mThreads.emplace_back(std::move(task));
+    Tracer::Get().RegisterTracedTask(task);
+    AddTask(std::move(task));
   }
 
   mNewObjectFilePublisher.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->PostEvent(new ui::dap::ModuleEvent{"new", *sf});
     return true;
   });
+  mBreakpointBehavior = parent.mBreakpointBehavior;
 }
 
 TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&interface,
                                    InterfaceType type) noexcept
     : mParentPid(0), mTaskLeader{interface != nullptr ? interface->TaskLeaderTid() : 0}, mMainExecutable{nullptr},
-      mThreads{}, mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mStopAllTasksRequested{false},
-      mInterfaceType(type), mInterpreterBase{}, mEntry{}, mSessionKind{targetSession},
-      mStopHandler{new ptracestop::StopHandler{*this}}, mNullUnwinder{new sym::Unwinder{nullptr}},
-      mTraceeInterface(std::move(interface))
+      mThreads{}, mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mInterfaceType(type),
+      mInterpreterBase{}, mEntry{}, mSessionKind{targetSession}, mScheduler{std::make_unique<TaskScheduler>(this)},
+      mNullUnwinder{new sym::Unwinder{nullptr}}, mTraceeInterface(std::move(interface))
 {
   // Must be set first.
   mTraceeInterface->SetTarget(this);
   mThreads.reserve(64);
   auto task = TaskInfo::CreateTask(*mTraceeInterface, mTraceeInterface->TaskLeaderTid(), true);
-  Tracer::Instance->RegisterTracedTask(task);
-  mThreads.push_back(task);
+  Tracer::Get().RegisterTracedTask(task);
+  AddTask(std::move(task));
 
   mNewObjectFilePublisher.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->PostEvent(new ui::dap::ModuleEvent{"new", *sf});
@@ -108,6 +105,12 @@ std::unique_ptr<TraceeController>
 TraceeController::create(TargetSession session, tc::Interface &&interface, InterfaceType type)
 {
   return std::unique_ptr<TraceeController>(new TraceeController{session, std::move(interface), type});
+}
+
+void
+TraceeController::ConfigureBreakpointBehavior(BreakpointBehavior behavior) noexcept
+{
+  mBreakpointBehavior = behavior;
 }
 
 void
@@ -129,6 +132,14 @@ void
 TraceeController::ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept
 {
   mDebugAdapterClient = client;
+}
+
+void
+TraceeController::Disconnect() noexcept
+{
+  StopAllTasks(nullptr);
+  const auto ok = GetInterface().DoDisconnect(false);
+  VERIFY(ok.is_ok(), "Failed to disconnect: {}", strerror(ok.sys_errno));
 }
 
 std::unique_ptr<TraceeController>
@@ -210,7 +221,7 @@ parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept
 auto
 createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>
 {
-  auto existing_obj = Tracer::Instance->LookupSymbolfile(path);
+  auto existing_obj = Tracer::Get().LookupSymbolfile(path);
   if (existing_obj) {
     // This process already registered this symbol object.
     if (existing_obj->GetSupervisor() == &tc) {
@@ -296,25 +307,35 @@ TraceeController::IsIndividualTaskControlConfigured() noexcept
 void
 TraceeController::AddTask(std::shared_ptr<TaskInfo> &&task) noexcept
 {
-  mThreads.push_back(std::move(task));
+  Tid t = task->mTid;
+  mThreads.push_back({.mTid = t, .mTask = std::move(task)});
 }
 
 u32
-TraceeController::RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate)
+TraceeController::RemoveTasksNotInSet(std::span<const gdb::GdbThread> set) noexcept
 {
-  auto count = mThreads.size();
-  auto removeIterator = std::remove_if(mThreads.begin(), mThreads.end(), predicate);
-  mThreads.erase(removeIterator, mThreads.end());
-  return count - mThreads.size();
+  std::vector<u32> removeTask;
+  removeTask.reserve(mThreads.size());
+  for (const auto &[idx, task] : mThreads | std::views::enumerate) {
+    if (std::ranges::none_of(set, [tid = task.mTid](auto t) { return t.tid == tid; })) {
+      removeTask.push_back(idx - removeTask.size());
+    }
+  }
+
+  for (const auto index : removeTask) {
+    mExitedThreads.push_back(std::move(mThreads[index]));
+    mThreads.erase(mThreads.begin() + index);
+  }
+  return removeTask.size();
 }
 
-std::span<std::shared_ptr<TaskInfo>>
+std::span<TaskInfo::TaskInfoEntry>
 TraceeController::GetThreads() noexcept
 {
   return mThreads;
 }
 
-std::span<std::shared_ptr<TaskInfo>>
+std::span<TaskInfo::TaskInfoEntry>
 TraceeController::GetExitedThreads() noexcept
 {
   return mExitedThreads;
@@ -335,9 +356,9 @@ TraceeController::TaskLeaderTid() const noexcept
 TaskInfo *
 TraceeController::GetTaskByTid(pid_t tid) noexcept
 {
-  for (auto &t : mThreads) {
-    if (t->mTid == tid) {
-      return t.get();
+  for (auto &entry : mThreads) {
+    if (entry.mTid == tid) {
+      return entry.mTask.get();
     }
   }
   return nullptr;
@@ -354,15 +375,15 @@ TraceeController::CreateNewTask(Tid tid, bool running) noexcept
 {
   ASSERT(tid != 0 && !HasTask(tid), "Task {} has already been created!", tid);
   auto task = TaskInfo::CreateTask(*mTraceeInterface, tid, running);
-  Tracer::Instance->RegisterTracedTask(task);
-  mThreads.emplace_back(std::move(task));
+  Tracer::Get().RegisterTracedTask(task);
+  AddTask(std::move(task));
 }
 
 bool
 TraceeController::HasTask(Tid tid) noexcept
 {
-  for (const auto &task : mThreads) {
-    if (task->mTid == tid) {
+  for (const auto &taskEntry : mThreads) {
+    if (taskEntry.mTid == tid) {
       return true;
     }
   }
@@ -373,10 +394,10 @@ bool
 TraceeController::ResumeTarget(tc::ResumeAction action) noexcept
 {
   DBGLOG(core, "[supervisor]: resume tracee {}", to_str(action.type));
-  mStopAllTasksRequested = false;
+  mScheduler->SetNormalScheduling();
   bool resumedAtLeastOne = false;
-  for (auto &t : mThreads) {
-    resumedAtLeastOne |= t->user_stopped;
+  for (auto &entry : mThreads) {
+    resumedAtLeastOne |= entry.mTask->user_stopped;
   }
   return mTraceeInterface->ResumeTarget(this, action).is_ok() && resumedAtLeastOne;
 }
@@ -384,7 +405,7 @@ TraceeController::ResumeTarget(tc::ResumeAction action) noexcept
 void
 TraceeController::ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept
 {
-  mStopAllTasksRequested = false;
+  mScheduler->SetNormalScheduling();
   bool resume_task = !(task.loc_stat);
   // The breakpoint location which loc_stat refers to, may have been deleted; as such we don't need to step over
   // that breakpoint any more but we will need to remove the loc stat on this task.
@@ -405,6 +426,7 @@ TraceeController::ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept
   }
   task.mLastWaitStatus = WaitStatus{WaitStatusKind::NotKnown, {}};
   task.clear_stop_state();
+  task.SetCurrentResumeAction(type);
 }
 
 void
@@ -418,10 +440,15 @@ void
 TraceeController::StopAllTasks(TaskInfo *requestingTask) noexcept
 {
   DBGLOG(core, "Stopping all threads")
-  mStopAllTasksRequested = true;
-  for (auto &task : mThreads) {
-    auto &t = *task;
+  // If all threads were at a signal-delivery stop, then we will not receive new wait status events
+  // and we will never report to the user that everyone has stopped. We need to track that, and possibly emit a
+  // stopped event immediately.
+  bool actuallyStoppedChild = false;
+  mScheduler->SetStopAllScheduling();
+  for (auto &entry : mThreads) {
+    auto &t = *entry.mTask;
     if (!t.user_stopped && !t.tracer_stopped) {
+      actuallyStoppedChild = true;
       DBGLOG(core, "Halting {}", t.mTid);
       const auto response = mTraceeInterface->StopTask(t);
       ASSERT(response.is_ok(), "Failed to stop {}: {}", t.mTid, strerror(response.sys_errno));
@@ -431,15 +458,10 @@ TraceeController::StopAllTasks(TaskInfo *requestingTask) noexcept
       // we upgraded our tracer-stop to a user-stop
       t.set_stop();
     }
-    // if the stop is requested by `requesting_task` we don't want
-    // to remove it's ptrace action as it might be the one requesting the stop
-    if (&t != requestingTask) {
-      auto action = mStopHandler->get_proceed_action(t);
-      if (action) {
-        action->cancel();
-        mStopHandler->remove_action(t);
-      }
-    }
+  }
+
+  if (!actuallyStoppedChild) {
+    mAllStopPublisher.Emit();
   }
 }
 
@@ -732,8 +754,7 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
                 std::make_unique<UserBpSpec>(std::make_pair(std::string{source_file}, desc));
               auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
                 *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader,
-                LocationUserKind::Source, std::nullopt, std::nullopt, !IsIndividualTaskControlConfigured(),
-                std::move(spec));
+                LocationUserKind::Source, std::nullopt, std::nullopt, std::move(spec));
               mDebugAdapterClient->PostEvent(new ui::dap::BreakpointEvent{"new", {}, user.get()});
               user_ids.push_back(user->id);
               const auto last_slash = source_file.find_last_of('/');
@@ -758,8 +779,7 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
           *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
-          mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt,
-          !IsIndividualTaskControlConfigured(), std::make_unique<UserBpSpec>(fn));
+          mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt, std::make_unique<UserBpSpec>(fn));
         mDebugAdapterClient->PostEvent(new ui::dap::BreakpointEvent{"new", {}, user.get()});
         ids.push_back(user->id);
       }
@@ -795,7 +815,7 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
           const auto pc = e.pc + symbol_file->mBaseAddress;
           auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
             *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader, LocationUserKind::Source,
-            std::nullopt, std::nullopt, !IsIndividualTaskControlConfigured(),
+            std::nullopt, std::nullopt,
             std::make_unique<UserBpSpec>(std::make_pair(sourceFilePath.string(), sourceSpec)));
           map[sourceSpec].push_back(user->id);
           DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}", mTaskLeader,
@@ -815,9 +835,9 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
   // set User Breakpoints without breakpoint location; i.e. "pending" breakpoints, in GDB nomenclature
   for (auto &&srcbp : not_set) {
     auto spec = std::make_unique<UserBpSpec>(std::make_pair(sourceFilePath.string(), srcbp));
-    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-      *this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader, LocationUserKind::Source, std::nullopt,
-      std::nullopt, !IsIndividualTaskControlConfigured(), std::move(spec));
+    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec.get()}},
+                                                             mTaskLeader, LocationUserKind::Source, std::nullopt,
+                                                             std::nullopt, std::move(spec));
     map[srcbp].push_back(user->id);
   }
 
@@ -880,7 +900,7 @@ TraceeController::SetInstructionBreakpoints(const Set<InstructionBreakpointSpec>
         if (src && lte) {
           const auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
             *this, GetOrCreateBreakpointLocation(addr, *src, *lte), mTaskLeader, LocationUserKind::Address,
-            std::nullopt, std::nullopt, !IsIndividualTaskControlConfigured(), std::make_unique<UserBpSpec>(bp));
+            std::nullopt, std::nullopt, std::make_unique<UserBpSpec>(bp));
           mUserBreakpoints.instruction_breakpoints[bp] = user->id;
           was_not_set = false;
           break;
@@ -890,7 +910,7 @@ TraceeController::SetInstructionBreakpoints(const Set<InstructionBreakpointSpec>
     if (was_not_set) {
       const auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
         *this, GetOrCreateBreakpointLocation(addr), mTaskLeader, LocationUserKind::Address, std::nullopt,
-        std::nullopt, !IsIndividualTaskControlConfigured(), std::make_unique<UserBpSpec>(bp));
+        std::nullopt, std::make_unique<UserBpSpec>(bp));
       mUserBreakpoints.instruction_breakpoints[bp] = user->id;
     }
   }
@@ -935,7 +955,7 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
         auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
           *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
           mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt,
-          !IsIndividualTaskControlConfigured(), std::make_unique<UserBpSpec>(fn.mSpec));
+          std::make_unique<UserBpSpec>(fn.mSpec));
         mUserBreakpoints.fn_breakpoints[fn.mSpec].push_back(user->id);
         fn.mWasSet = true;
         mDebugAdapterClient->PostEvent(new ui::dap::BreakpointEvent{"new", "Breakpoint was created", user.get()});
@@ -946,9 +966,9 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
   for (auto &&[spec, specHash, wasSet] : specsToAdd) {
     if (!wasSet) {
       auto spec_ptr = std::make_unique<UserBpSpec>(std::move(spec));
-      auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-        *this, BpErr{ResolveError{.spec = spec_ptr.get()}}, mTaskLeader, LocationUserKind::Function, std::nullopt,
-        std::nullopt, !IsIndividualTaskControlConfigured(), std::move(spec_ptr));
+      auto user = mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec_ptr.get()}},
+                                                               mTaskLeader, LocationUserKind::Function,
+                                                               std::nullopt, std::nullopt, std::move(spec_ptr));
     }
   }
 
@@ -980,10 +1000,127 @@ TraceeController::TryTerminateGracefully() noexcept
   return ::kill(mTaskLeader, SIGKILL) == 0;
 }
 
-void
-TraceeController::SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> &&action) noexcept
+static inline TraceEvent *
+CreateTraceEventFromStopped(TraceeController& tc, TaskInfo &t) noexcept
 {
-  mStopHandler->SetAndRunAction(tid, std::move(action));
+  ASSERT(t.mLastWaitStatus.ws != WaitStatusKind::NotKnown,
+         "When creating a trace event from a wait status event, we must already know what kind it is.");
+  AddrPtr stepped_over_bp_id{nullptr};
+  if (t.loc_stat) {
+    const auto locstat = t.clear_bpstat();
+    return TraceEvent::Stepped({tc.TaskLeaderTid(), t.mTid, {}}, !locstat->should_resume, locstat,
+                               t.mNextResumeAction, {});
+  }
+  const auto pc = tc.CacheAndGetPcFor(t);
+  const auto prev_pc_byte = offset(pc, -1);
+  auto bp_loc = tc.GetUserBreakpoints().location_at(prev_pc_byte);
+  if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
+    tc.SetProgramCounterFor(t, prev_pc_byte);
+    return TraceEvent::SoftwareBreakpointHit({.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = {}},
+                                             prev_pc_byte, {});
+  }
+
+  return TraceEvent::DeferToSupervisor(
+    {.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = t.mLastWaitStatus.signal}, {}, false);
+}
+
+static inline TraceEvent *
+native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
+{
+  DBGLOG(core, "Processing CLONE for {}", cloning_task.mTid);
+  // we always have to cache these registers, because we need them to pull out some information
+  // about the new clone
+  tc.CacheRegistersFor(cloning_task);
+  pid_t np = -1;
+  // we should only ever hit this when running debugging a native-hosted session
+  ASSERT(tc.GetInterface().format == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
+  auto regs = cloning_task.native_registers();
+  const auto orig_rax = regs->orig_rax;
+  if (orig_rax == SYS_clone) {
+    const TPtr<void> stack_ptr = sys_arg_n<2>(*regs);
+    const TPtr<int> child_tid = sys_arg_n<4>(*regs);
+    const u64 tls = sys_arg_n<5>(*regs);
+    np = tc.ReadType(child_tid);
+
+    ASSERT(!tc.HasTask(np), "Tracee controller already has task {} !", np);
+    return TraceEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5},
+                                  TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls}, np, {});
+  } else if (orig_rax == SYS_clone3) {
+    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*regs);
+    const auto res = tc.ReadType(ptr);
+    np = tc.ReadType(TPtr<pid_t>{res.parent_tid});
+    return TraceEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5}, TaskVMInfo::from_clone_args(res), np,
+                                  {});
+  } else {
+    PANIC("Unknown clone syscall!");
+  }
+}
+
+TraceEvent *
+TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
+{
+  info.set_dirty();
+  info.stop_collected = true;
+  const auto ws = info.pending_wait_status();
+
+  switch (ws.ws) {
+  case WaitStatusKind::Stopped: {
+    if (!info.initialized) {
+      return TraceEvent::ThreadCreated({mTaskLeader, info.mTid, 5},
+                                       {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
+    }
+    return CreateTraceEventFromStopped(*this, info);
+  }
+  case WaitStatusKind::Execed: {
+    return TraceEvent::ExecEvent({.target = mTaskLeader, .tid = info.mTid, .sig_or_code = 5},
+                                 ProcessExecPath(info.mTid), {});
+  }
+  case WaitStatusKind::Exited: {
+    // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
+    // other threads
+    const bool process_needs_resuming = Tracer::Get().TraceExitConfigured;
+    return TraceEvent::ThreadExited({mTaskLeader, info.mTid, ws.exit_code}, process_needs_resuming, {});
+  }
+  case WaitStatusKind::Forked: {
+    Tid new_child = 0;
+    auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
+    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    DBGLOG(core, "[{} forked]: new process after fork {}", info.mTid, new_child);
+    return TraceEvent::ForkEvent_({mTaskLeader, info.mTid, 5}, new_child, {});
+  }
+  case WaitStatusKind::VForked: {
+    Tid new_child = 0;
+    auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
+    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    DBGLOG(core, "[vfork]: new process after fork {}", new_child);
+    return TraceEvent::VForkEvent_({mTaskLeader, info.mTid, 5}, new_child, {});
+  }
+  case WaitStatusKind::VForkDone:
+    TODO("WaitStatusKind::VForkDone");
+    break;
+  case WaitStatusKind::Cloned: {
+    return native_create_clone_event(*this, info);
+  } break;
+  case WaitStatusKind::Signalled:
+    return TraceEvent::Signal({mTaskLeader, info.mTid, info.mLastWaitStatus.signal}, {});
+  case WaitStatusKind::SyscallEntry:
+    TODO("WaitStatusKind::SyscallEntry");
+    break;
+  case WaitStatusKind::SyscallExit:
+    TODO("WaitStatusKind::SyscallExit");
+    break;
+  case WaitStatusKind::NotKnown:
+    TODO("WaitStatusKind::NotKnown");
+    break;
+  }
+  ASSERT(false, "Unknown wait status!");
+  MIDAS_UNREACHABLE
+}
+
+bool
+TraceeController::SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept
+{
+  return mScheduler->SetTaskScheduling(tid, std::move(action), true);
 }
 
 bool
@@ -995,18 +1132,18 @@ TraceeController::ExecutionHasNotEnded() const noexcept
 bool
 TraceeController::SomeTaskCanBeResumed() const noexcept
 {
-  return std::any_of(mThreads.cbegin(), mThreads.cend(), [](const std::shared_ptr<TaskInfo> &t) {
-    DBGLOG(core, "Thread {} stopped={}", t->mTid, t->is_stopped());
-    return t->is_stopped();
+  return std::any_of(mThreads.cbegin(), mThreads.cend(), [](const auto &entry) {
+    DBGLOG(core, "Thread {} stopped={}", entry.mTid, entry.mTask->is_stopped());
+    return entry.mTask->is_stopped();
   });
 }
 
 bool
 TraceeController::IsRunning() const noexcept
 {
-  return std::any_of(mThreads.cbegin(), mThreads.cend(), [](const std::shared_ptr<TaskInfo> &t) {
-    DBGLOG(core, "Thread {} stopped={}", t->mTid, t->is_stopped());
-    return !t->is_stopped();
+  return std::any_of(mThreads.cbegin(), mThreads.cend(), [](const auto &entry) {
+    DBGLOG(core, "Thread {} stopped={}", entry.mTid, entry.mTask->is_stopped());
+    return !entry.mTask->is_stopped();
   });
 }
 
@@ -1252,19 +1389,26 @@ TraceeController::GetInterface() noexcept
 }
 
 void
+TraceeController::ExitAll(TaskInfo::SupervisorState state) noexcept
+{
+  while (!mThreads.empty()) {
+    TaskExit(*mThreads[0].mTask, state, false);
+  }
+}
+
+void
 TraceeController::TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool notify) noexcept
 {
   Tid tid = task.mTid;
-  task.exited = true;
-  task.reaped = !Tracer::Instance->TraceExitConfigured;
-  auto taskIterator = std::find_if(mThreads.begin(), mThreads.end(),
-                                   [tid](const std::shared_ptr<TaskInfo> &t) { return t->mTid == tid; });
-  ASSERT(taskIterator != std::end(mThreads), "Could not find task {} in this process space", tid);
-  auto index = std::distance(mThreads.begin(), taskIterator);
+  auto it = FindByTid(mThreads, tid);
+  ASSERT(it != std::end(mThreads), "{} couldn't be found in this process {}", tid, mTaskLeader);
 
-  mExitedThreads.push_back(std::move(*taskIterator));
-  mExitedThreads.back()->SetTracerState(state);
-  mThreads.erase(taskIterator);
+  task.exited = true;
+  task.SetTracerState(state);
+
+  mExitedThreads.push_back(std::move(*it));
+  mThreads.erase(it);
+
   if (notify) {
     mDebugAdapterClient->PostEvent(new ui::dap::ThreadEvent{ui::dap::ThreadReason::Exited, tid});
   }
@@ -1289,13 +1433,13 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
       break;
     }
     auto &[symbol, obj] = result.value();
-    const auto id = Tracer::Instance->new_key();
-    Tracer::Instance->set_var_context(VariableContext{.tc = this,
-                                                      .t = &task,
-                                                      .symbol_file = obj,
-                                                      .frame_id = id,
-                                                      .id = static_cast<u16>(id),
-                                                      .type = ContextType::Frame});
+    const auto id = Tracer::Get().new_key();
+    Tracer::Get().set_var_context(VariableContext{.tc = this,
+                                                  .t = &task,
+                                                  .symbol_file = obj,
+                                                  .frame_id = id,
+                                                  .id = static_cast<u16>(id),
+                                                  .type = ContextType::Frame});
     if (symbol) {
       cs_ref.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {
@@ -1409,14 +1553,13 @@ TraceeController::EmitAllStopped() noexcept
   DBGLOG(core, "[all-stopped]: sending registered notifications");
   // all_stopped_observer.send_notifications();
   mAllStopPublisher.Emit();
-  mStopAllTasksRequested = false;
 }
 
 bool
 TraceeController::IsAllStopped() const noexcept
 {
-  for (const auto &task : mThreads) {
-    if (!task->stop_processed()) {
+  for (const auto &entry : mThreads) {
+    if (!entry.mTask->stop_processed()) {
       return false;
     }
   }
@@ -1578,9 +1721,9 @@ TraceeController::HandleThreadExited(TaskInfo *task, const ThreadExited &evt) no
 }
 
 static void
-ScheduleInvalidateThis(const TraceeController &t)
+ScheduleInvalidateThis(TraceeController *t)
 {
-  EventSystem::Get().PushInternalEvent(InvalidateSupervisor{t.TaskLeaderTid()});
+  EventSystem::Get().PushInternalEvent(InvalidateSupervisor{t});
 }
 
 tc::ProcessedStopEvent
@@ -1593,7 +1736,7 @@ TraceeController::HandleProcessExit(const ProcessExited &evt) noexcept
     t->reaped = true;
   }
 
-  ScheduleInvalidateThis(*this);
+  ScheduleInvalidateThis(this);
   mDebugAdapterClient->PostEvent(new ui::dap::ExitedEvent{evt.exit_code});
   return tc::ProcessedStopEvent::ProcessExited();
 }
@@ -1636,7 +1779,7 @@ TraceeController::PostExec(const std::string &exe) noexcept
     }
   }
 
-  if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(exe); symbol_obj == nullptr) {
+  if (auto symbol_obj = Tracer::Get().LookupSymbolfile(exe); symbol_obj == nullptr) {
     auto obj = ObjectFile::CreateObjectFile(this, exe);
     if (obj->GetElf()->AddressesNeedsRelocation()) {
       RegisterObjectFile(this, std::move(obj), true, baseAddress);
@@ -1661,6 +1804,8 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
   // their subscribed event handlers will return `false`).
   using tc::ProcessedStopEvent;
   using MatchResult = ProcessedStopEvent;
+
+  ASSERT(!mIsExited, "Supervisor exited already.");
 
   const auto arch = GetInterface().arch_info;
   auto task = GetTaskByTid(evt->tid);
@@ -1687,9 +1832,9 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
     task->collect_stop();
   }
   if (IsSessionAllStopMode()) {
-    for (auto &t : mThreads) {
-      t->set_stop();
-      t->stop_collected = true;
+    for (const auto &entry : GetThreads()) {
+      entry.mTask->set_stop();
+      entry.mTask->stop_collected = true;
     }
   }
   const TraceEvent &r = *evt;
@@ -1728,32 +1873,14 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
     },
     *evt->event);
 
+  // Now that event has been properly handled, we can check for "global" (process-local) handlers
+  // for instance, if we've requested all tasks to stop, or if we've requested a shut down, we will treat all
+  // proceeds the same. effectively ignoring the default proceed behaviors from an event.
+
   DBGLOG(core, "[{}.{}]: handle {}, resume:{}", mTaskLeader, task->mTid, evt->event_type,
          processedStop.should_resume);
-  if (processedStop.mThreadExited) {
-    for (auto &t : GetExitedThreads()) {
-      if (evt->tid == t->mTid) {
-        mStopHandler->handle_proceed(*t, processedStop);
-        return;
-      }
-    }
-  }
 
-  // N.B. we _HAVE_ to do this check here (stop_all_requested), not anywhere else, due to the existence of what gdb
-  // calls "all stop mode" which means that if *any* thread stops, all other threads are stopped (but they are not
-  // reported, it's just implicit to the M.O.) because of that, we will hit a stop, which may request to stop_all
-  // and since in all-stop, the other stops are implicit, we won't actually hit this function again, for the other
-  // threads, therefore this particular event *has* to have special attention here.
-  if (processedStop.mProcessExited) {
-    EventSystem::Get().PushInternalEvent(InvalidateSupervisor{mTaskLeader});
-  } else if (mStopAllTasksRequested) {
-    if (IsAllStopped()) {
-      EmitAllStopped();
-    }
-  } else {
-    auto task = GetTaskByTid(evt->tid);
-    mStopHandler->handle_proceed(*task, processedStop);
-  }
+  mScheduler->Schedule(*task, processedStop);
 }
 
 void
@@ -1797,9 +1924,9 @@ tc::ProcessedStopEvent
 TraceeController::HandleFork(const ForkEvent &evt) noexcept
 {
   auto interface = mTraceeInterface->OnFork(evt.child_pid);
-  auto new_supervisor = Tracer::Instance->new_supervisor(Fork(std::move(interface), evt.mIsVFork));
-  auto client = ui::dap::DebugAdapterClient::createSocketConnection(*mDebugAdapterClient);
-  client->client_configured(new_supervisor);
+  auto new_supervisor = Tracer::Get().AddNewSupervisor(Fork(std::move(interface), evt.mIsVFork));
+  auto client = ui::dap::DebugAdapterClient::CreateSocketConnection(*mDebugAdapterClient);
+  client->ClientConfigured(new_supervisor);
 
   if (!evt.mIsVFork) {
     DBGLOG(core, "event was not vfork; disabling breakpoints in new address space.");
@@ -1831,7 +1958,7 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
 tc::ProcessedStopEvent
 TraceeController::HandleClone(const Clone &evt) noexcept
 {
-  auto task = Tracer::Instance->TakeUninitializedTask(evt.child_tid);
+  auto task = Tracer::Get().TakeUninitializedTask(evt.child_tid);
   DBGLOG(core, "Running clone handler for {}: child created = {}. Already created: {}", evt.thread_id,
          evt.child_tid, task != nullptr);
   if (!task) {
@@ -1841,10 +1968,10 @@ TraceeController::HandleClone(const Clone &evt) noexcept
     }
   } else {
     task->InitializeThread(GetInterface(), true);
-    mThreads.push_back(task);
+    AddTask(std::move(task));
   }
   mDebugAdapterClient->PostEvent(new ui::dap::ThreadEvent{evt});
-  return tc::ProcessedStopEvent{!mStopHandler->event_settings.clone_stop, {}};
+  return tc::ProcessedStopEvent{true, {}};
 }
 
 tc::ProcessedStopEvent

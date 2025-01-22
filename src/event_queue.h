@@ -7,6 +7,9 @@
 #include <string>
 #include <sys/poll.h>
 #include <variant>
+
+class TraceeController;
+
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
 namespace ui {
 struct UICommand;
@@ -55,7 +58,7 @@ enum class TracerEventType : u8
 
 #define EventType(Type) static constexpr TracerEventType EvtType = TracerEventType::Type // NOLINT
 #define LogEvent(EventObject, Msg)                                                                                \
-  DBGLOG(core, "[Core Event:{}] ({}): {}", mTaskLeader, EventObject.event_type, Msg) // NOLINT
+  DBGLOG(core, "[Core Event:{}.{}] ({}): {}", mTaskLeader, task ? task->mTid : 0, EventObject.event_type, Msg) // NOLINT
 
 namespace fmt {
 
@@ -309,9 +312,10 @@ struct TraceEvent
   static TraceEvent *EntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept;
 };
 
-enum class InternalEventKind
+enum class InternalEventDiscriminant
 {
-  InvalidateSupervisor
+  InvalidateSupervisor,
+  TerminateDebugging,
 };
 
 // Event sent when a supervisor for a process "dies". Was called "DestroySupervisor" before
@@ -319,16 +323,10 @@ enum class InternalEventKind
 // so that it can be potentially lifted back into life, if the user reverse-continues across the boundary of it's normal death.
 struct InvalidateSupervisor
 {
-  Tid mTaskLeader;
+  TraceeController* mSupervisor;
 };
 
-#define UnionVariant(TYPE) TYPE u##TYPE
-
-#define UnionVariantConstructor(SUPER_TYPE, VARIANT_TYPE)                                                         \
-  constexpr SUPER_TYPE(VARIANT_TYPE variant) noexcept                                                             \
-      : mType(SUPER_TYPE##Kind::VARIANT_TYPE), u##VARIANT_TYPE(variant)                                           \
-  {                                                                                                               \
-  }
+struct TerminateDebugging {};
 
 struct InternalEvent
 {
@@ -339,10 +337,12 @@ struct InternalEvent
   union
   {
     InvalidateSupervisor uInvalidateSupervisor;
+    TerminateDebugging uTerminateDebugging;
   };
-  InternalEventKind mType;
+  InternalEventDiscriminant mType;
 
   UnionVariantConstructor(InternalEvent, InvalidateSupervisor)
+  UnionVariantConstructor(InternalEvent, TerminateDebugging)
 };
 
 struct Event
@@ -401,7 +401,7 @@ class EventSystem
   std::mutex mInternalEventGuard{};
   std::vector<TraceEvent *> mTraceEvents;
   std::vector<ui::UICommand *> mCommands;
-  std::vector<WaitEvent> mWaitEvents;
+  std::vector<Event> mWaitEvents;
   std::vector<TraceEvent *> mInitEvent;
   std::vector<InternalEvent> mInternal;
   EventSystem(int wait[2], int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
@@ -417,6 +417,8 @@ public:
   void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
   void PushInitEvent(TraceEvent *event) noexcept;
   void PushWaitResult(WaitResult result) noexcept;
+  void NotifyNewWaitpidResults() noexcept;
+  void PushReapedWaitResults(std::span<WaitResult> results) noexcept;
   void PushInternalEvent(InternalEvent event) noexcept;
   bool PollBlocking(std::vector<Event> &write) noexcept;
 

@@ -70,7 +70,7 @@ Logger::setup_channel(std::string_view name) noexcept
 }
 
 void
-Logger::setup_channel(const Path &logDirectory, Channel id) noexcept
+Logger::SetupChannel(const Path &logDirectory, Channel id) noexcept
 {
   ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
   Path p = logDirectory / fmt::format("{}.log", to_str(id));
@@ -92,7 +92,7 @@ Logger::log(Channel id, std::string_view log_msg) noexcept
 }
 
 Logger *
-Logger::get_logger() noexcept
+Logger::GetLogger() noexcept
 {
   return Logger::logger_instance;
 }
@@ -158,7 +158,7 @@ Logger::LogChannel::log(std::string_view msg) noexcept
 Logger::LogChannel *
 get_log_channel(std::string_view log_channel) noexcept
 {
-  if (auto logger = Logger::get_logger(); logger) {
+  if (auto logger = Logger::GetLogger(); logger) {
     return logger->channel(log_channel);
   }
   return nullptr;
@@ -167,13 +167,13 @@ get_log_channel(std::string_view log_channel) noexcept
 Logger::LogChannel *
 get_log_channel(Channel id) noexcept
 {
-  return Logger::get_logger()->channel(id);
+  return Logger::GetLogger()->channel(id);
 }
 
 Logger *
 get_logging() noexcept
 {
-  return Logger::get_logger();
+  return Logger::GetLogger();
 }
 
 } // namespace logging

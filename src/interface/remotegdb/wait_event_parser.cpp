@@ -6,7 +6,6 @@
 #include "interface/remotegdb/shared.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include <event_queue.h>
-#include <optional>
 #include <supervisor.h>
 #include <tracer.h>
 
@@ -153,7 +152,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
   }
 
   if (!init) {
-    auto tc = Tracer::Instance->get_controller(pid);
+    auto tc = Tracer::Get().get_controller(pid);
     auto t = tc != nullptr ? tc->GetTaskByTid(tid) : nullptr;
 
     if (t && t->loc_stat) {

@@ -184,8 +184,8 @@ private:
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
 
 class UnitHeadersRead {
-  u64 mTotalSize;
-  u64 mMaxUnitSize;
+  u64 mTotalSize{0};
+  u64 mMaxUnitSize{0};
   std::vector<UnitHeader> mUnitHeaders;
   void Accumulate(u64 unitSize) noexcept;
   u64 AverageUnitSize() noexcept;

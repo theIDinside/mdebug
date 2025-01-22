@@ -50,7 +50,7 @@ Barrier::Barrier(Pipe pipe) noexcept : pipe(pipe) {}
 
 Barrier::~Barrier() noexcept { pipe.close(); }
 
-Barrier::ShrPtr
+std::shared_ptr<Barrier>
 Barrier::create_shared() noexcept
 {
   return std::make_shared<Barrier>(create_pipe());

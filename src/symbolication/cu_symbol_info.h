@@ -38,34 +38,33 @@ class CompilationUnit
   dw::UnitData *mUnitData;
   AddrPtr mPcStart{nullptr};
   AddrPtr mPcEndExclusive{nullptr};
-  dw::LNPHeader* mLineNumberProgram{nullptr};
+  dw::LNPHeader *mLineNumberProgram{nullptr};
   std::vector<dw::LineTableEntry> mLineTable;
   std::string_view mCompilationUnitName;
   std::vector<sym::FunctionSymbol> mFunctionSymbols;
   std::vector<u32> imported_units;
   std::vector<AddressRange> mAddressRanges;
 
-  // Indexed by their definitions in the Line Number Program Header, so no need for a map here.
-  std::vector<std::shared_ptr<dw::SourceCodeFile>> mSourceCodeFiles{};
+  std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>> mSourceCodeFileMappings{};
   mutable std::mutex m{};
   mutable bool computed{false};
 
 public:
   NO_COPY(CompilationUnit);
-  CompilationUnit& operator=(CompilationUnit&&) noexcept = delete;
-  CompilationUnit(CompilationUnit&&) noexcept = delete;
+  CompilationUnit &operator=(CompilationUnit &&) noexcept = delete;
+  CompilationUnit(CompilationUnit &&) noexcept = delete;
 
   CompilationUnit(dw::UnitData *unitData) noexcept;
 
   void SetUnitName(std::string_view name) noexcept;
-  void SetAddressRanges(std::vector<AddressRange>&& ranges) noexcept;
+  void SetAddressRanges(std::vector<AddressRange> &&ranges) noexcept;
   void SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept;
-  void ProcessSourceCodeFiles(dw::LNPHeader* header) noexcept;
+  void ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept;
   bool LineTableComputed() noexcept;
   void ComputeLineTable() noexcept;
   std::span<const AddressRange> AddressRanges() const noexcept;
   std::span<const dw::LineTableEntry> GetLineTable() const noexcept;
-  std::span<std::shared_ptr<dw::SourceCodeFile>> sources() noexcept;
+  std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>>& sources() noexcept;
 
   bool HasKnownAddressBoundary() const noexcept;
   AddrPtr StartPc() const noexcept;
@@ -81,8 +80,9 @@ public:
     return AddressableSorter<CompilationUnit, false>{};
   }
 
-  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *> GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept;
-  dw::SourceCodeFile* GetFileByLineProgramIndex(u32 index) noexcept;
+  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
+  GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept;
+  dw::SourceCodeFile *GetFileByLineProgramIndex(u32 index) noexcept;
 
 private:
   void PrepareFunctionSymbols() noexcept;
@@ -93,7 +93,7 @@ class AddressToCompilationUnitMap
 public:
   AddressToCompilationUnitMap() noexcept;
   std::vector<CompilationUnit *> find_by_pc(AddrPtr pc) noexcept;
-  void add_cus(std::span<CompilationUnit*> cus) noexcept;
+  void add_cus(std::span<CompilationUnit *> cus) noexcept;
 
 private:
   void add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept;

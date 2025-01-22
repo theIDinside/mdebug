@@ -145,7 +145,7 @@ GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexce
   str.remove_prefix(1);
   auto ptr = read_buffer;
   char dec_buffer[size * 2];
-  const auto len = gdb::decode_rle(str, dec_buffer, size * 2);
+  const auto len = gdb::DecodeRunLengthEncoding(str, dec_buffer, size * 2);
   std::string_view decoded{dec_buffer, len};
   ASSERT((decoded.size() & 0b1) == 0, "Expected buffer to be divisible by 2");
   while (!decoded.empty()) {
@@ -256,8 +256,8 @@ GdbRemoteCommander::ReverseContinue() noexcept
   const auto resume_err = connection->send_vcont_command(reverse, 1000);
   ASSERT(!resume_err.has_value(), "reverse continue failed");
 
-  for (auto &t : tc->GetThreads()) {
-    t->SetCurrentResumeAction(
+  for (auto &entry : tc->GetThreads()) {
+    entry.mTask->SetCurrentResumeAction(
       {.type = RunType::Continue, .target = ResumeTarget::AllNonRunningInProcess, .mDeliverSignal = 0});
   }
   connection->invalidate_known_threads();
@@ -273,9 +273,9 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noex
     action.mDeliverSignal = 0;
   }
 
-  for (auto &t : tc->GetThreads()) {
-    if (t->loc_stat) {
-      t->step_over_breakpoint(tc, action);
+  for (auto &entry : tc->GetThreads()) {
+    if (entry.mTask->loc_stat) {
+      entry.mTask->step_over_breakpoint(tc, action);
       if (!connection->settings().is_non_stop) {
         return TaskExecuteResponse::Ok();
       }
@@ -308,8 +308,8 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noex
 
   const auto resume_err = connection->send_vcont_command(resume_command, {});
   ASSERT(!resume_err.has_value(), "vCont resume command failed");
-  for (auto &t : tc->GetThreads()) {
-    t->SetCurrentResumeAction(action);
+  for (auto &entry : tc->GetThreads()) {
+    entry.mTask->SetCurrentResumeAction(action);
   }
   connection->invalidate_known_threads();
   return TaskExecuteResponse::Ok();
@@ -470,9 +470,7 @@ GdbRemoteCommander::GetThreadName(Tid tid) noexcept
       return "";
     }
 
-    // DETERMINE WHAT PROCESS SPACES WE ARE ATTACHED TO
-    const auto threads = parse_threads(read_threads.response_buffer);
-    for (auto &&[pid, tid, name] : threads) {
+    for (auto &&[pid, tid, name] : parse_threads(read_threads.response_buffer)) {
       thread_names.emplace(tid, std::move(name));
     }
     return thread_names[tid];
@@ -525,7 +523,7 @@ GdbRemoteCommander::OnExec() noexcept
   ASSERT(auxv.is_expected(), "Failed to read auxiliary vector");
   GetSupervisor()->ParseAuxiliaryVectorInfo(std::move(auxv.take_value()));
 
-  if (auto symbol_obj = Tracer::Instance->LookupSymbolfile(*exec_file); symbol_obj == nullptr) {
+  if (auto symbol_obj = Tracer::Get().LookupSymbolfile(*exec_file); symbol_obj == nullptr) {
     auto obj = ObjectFile::CreateObjectFile(tc, *exec_file);
     if (obj->GetElf()->AddressesNeedsRelocation()) {
       tc->RegisterObjectFile(tc, std::move(obj), true, tc->EntryAddress());
@@ -553,7 +551,7 @@ GdbRemoteCommander::ExecedFile() noexcept
     return exec_file.transform([](auto &p) { return Path{p}; });
   } else {
     char buf[10]{0};
-    auto ptr = gdb::format_value(buf, process_id);
+    auto ptr = gdb::FormatValue(buf, process_id);
     gdb::qXferCommand execfile{"qXfer:exec-file:read:", 0x1000, std::string_view{buf, ptr}};
     const auto result = connection->send_qXfer_command_with_response(execfile, 1000);
     if (!result) {
@@ -658,7 +656,7 @@ GdbRemoteCommander::ReadAuxiliaryVector() noexcept
       return Error{.sys_errno = {}, .err_msg = "qXfer command failed"};
     }
     auto buf = std::make_unique<char[]>(BufSize);
-    auto d = gdb::decode_rle_to_str(read_auxv.response_buffer, buf.get(), BufSize);
+    auto d = gdb::DecodeRunLengthEncToStringView(read_auxv.response_buffer, buf.get(), BufSize);
     tc::Auxv aux;
     while (d.size() >= 16) {
       u64 k{0};
@@ -741,7 +739,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
       it->threads.push_back({tid, std::move(name)});
     } else {
       char buf[10]{0};
-      auto ptr = gdb::format_value(buf, pid);
+      auto ptr = gdb::FormatValue(buf, pid);
       gdb::qXferCommand execfile{"qXfer:exec-file:read:", 0x1000, std::string_view{buf, ptr}};
       if (!conn->execute_command(execfile, 0, 1000)) {
         return ConnInitError{.msg = "Failed to get exec file of process"};
@@ -859,10 +857,10 @@ RemoteSessionConfigurator::configure_session() noexcept
   for (auto &&[pid, tid, name] : threads) {
     auto it = std::ranges::find_if(pinfo, [&](const auto &p) { return p.pid == pid; });
     if (it != std::end(pinfo)) {
-      it->threads.push_back({tid, std::move(name)});
+      it->threads.push_back({tid, name});
     } else {
       char buf[10]{0};
-      auto ptr = gdb::format_value(buf, pid);
+      auto ptr = gdb::FormatValue(buf, pid);
       gdb::qXferCommand execfile{"qXfer:exec-file:read:", 0x1000, std::string_view{buf, ptr}};
       if (!conn->execute_command(execfile, 0, 1000)) {
         return ConnInitError{.msg = "Failed to get exec file of process"};

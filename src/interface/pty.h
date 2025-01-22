@@ -3,7 +3,6 @@
 
 #include <optional>
 #include <string>
-#include <string_view>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <variant>

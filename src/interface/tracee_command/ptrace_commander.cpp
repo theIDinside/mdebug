@@ -1,12 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "ptrace_commander.h"
-#include "awaiter.h"
 #include "common.h"
-#include "interface/tracee_command/tracee_command_interface.h"
 #include "register_description.h"
 #include "symbolication/objfile.h"
 #include "utils/logger.h"
-#include "utils/scoped_fd.h"
 #include <cerrno>
 #include <charconv>
 #include <fcntl.h>
@@ -18,7 +15,7 @@ namespace tc {
 
 PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
     : TraceeCommandInterface(TargetFormat::Native, nullptr, TraceeInterfaceType::Ptrace), procfs_memfd(),
-      awaiter_thread(std::make_unique<AwaiterThread>(process_space_id)), process_id(process_space_id)
+      process_id(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
   procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
@@ -142,11 +139,11 @@ PtraceCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 TaskExecuteResponse
 PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcept
 {
-  for (auto &t : tc->GetThreads()) {
-    if (t->can_continue()) {
-      tc->ResumeTask(*t, action);
+  for (auto &entry : tc->GetThreads()) {
+    if (entry.mTask->can_continue()) {
+      tc->ResumeTask(*entry.mTask, action);
     } else {
-      DBGLOG(core, "[{}:resume:target] {} can_continue=false", tc->TaskLeaderTid(), t->mTid);
+      DBGLOG(core, "[{}:resume:target] {} can_continue=false", tc->TaskLeaderTid(), entry.mTid);
     }
   }
   return TaskExecuteResponse::Ok();
@@ -296,24 +293,23 @@ PtraceCommander::Disconnect(bool killTarget) noexcept
 {
   using SupervisorState = TaskInfo::SupervisorState;
   if (killTarget && !GetSupervisor()->IsExited()) {
-    for (auto &t : GetSupervisor()->GetThreads()) {
+    for (auto &entry : GetSupervisor()->GetThreads()) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
       // here.
-      const auto _ = tgkill(process_id, t->mTid, SIGKILL);
-      GetSupervisor()->TaskExit(*t, SupervisorState::Killed, false);
+      const auto _ = tgkill(process_id, entry.mTid, SIGKILL);
     }
+    GetSupervisor()->ExitAll(SupervisorState::Killed);
   } else if (!GetSupervisor()->IsExited()) {
-    for (auto &t : GetSupervisor()->GetThreads()) {
+    tc->StopAllTasks(nullptr);
+    for (auto &user : tc->GetUserBreakpoints().all_users()) {
+      tc->GetUserBreakpoints().remove_bp(user->id);
+    }
+    for (auto &entry : GetSupervisor()->GetThreads()) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
       // here.
-      ptrace(PTRACE_DETACH, t->mTid, nullptr, nullptr);
-      GetSupervisor()->TaskExit(*t, SupervisorState::Detached, false);
+      ptrace(PTRACE_DETACH, entry.mTid, nullptr, nullptr);
     }
-
-    const auto ptrace_result = ptrace(PTRACE_DETACH, process_id, nullptr, nullptr);
-    if (ptrace_result == -1) {
-      return TaskExecuteResponse::Error(errno);
-    }
+    GetSupervisor()->ExitAll(SupervisorState::Detached);
   }
   PerformShutdown();
   return TaskExecuteResponse::Ok();
@@ -322,14 +318,12 @@ PtraceCommander::Disconnect(bool killTarget) noexcept
 bool
 PtraceCommander::PerformShutdown() noexcept
 {
-  awaiter_thread->init_shutdown();
   return true;
 }
 
 bool
 PtraceCommander::Initialize() noexcept
 {
-  awaiter_thread->start_awaiter_thread(this);
   return true;
 }
 

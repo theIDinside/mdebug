@@ -7,6 +7,7 @@
 #include "supervisor.h"
 #include "symbolication/block.h"
 #include "symbolication/cu_symbol_info.h"
+#include "symbolication/dwarf/lnp.h"
 #include "symbolication/dwarf_defs.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf_symbols.h"
@@ -258,8 +259,12 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
 
   for (auto compileUnit : newCompileUnits) {
     const auto sources = compileUnit->sources();
-    for (const auto &src : sources) {
-      mSourceCodeFiles[src->full_path->c_str()].push_back(src);
+    std::unordered_set<sym::dw::SourceCodeFile *> added;
+    for (const auto &[fileIndex, src] : sources) {
+      if (!added.contains(src.get())) {
+        mSourceCodeFiles[src->full_path->c_str()].push_back(src);
+        added.insert(src.get());
+      }
     }
   }
 
@@ -664,7 +669,7 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     for (auto &var : variables) {
       GetObjectFile()->InitializeDataVisualizer(var);
       RegisterValueResolver(var);
-      const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
+      const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Get().clone_from_var_context(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, var);
       }
@@ -681,8 +686,7 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
         mem.name, const_cast<sym::Field &>(mem), value->mMemoryContentsOffsets, value->TakeMemoryReference());
       GetObjectFile()->InitializeDataVisualizer(member_value);
       RegisterValueResolver(member_value);
-      const auto new_ref =
-        member_value->GetType()->IsPrimitive() ? 0 : Tracer::Instance->clone_from_var_context(ctx);
+      const auto new_ref = member_value->GetType()->IsPrimitive() ? 0 : Tracer::Get().clone_from_var_context(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, member_value);
       }
@@ -820,7 +824,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   frame.GetInitializedVariables(variables_kind, relevantSymbols);
 
   for (const sym::Symbol &symbol : relevantSymbols) {
-    const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Instance->new_key();
+    const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Get().new_key();
     if (ref == 0 && !symbol.mType->IsResolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
       ts_ctx.resolve_type();
@@ -832,9 +836,9 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     RegisterValueResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Instance->set_var_context({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
-                                         static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
-                                         ContextType::Variable});
+      Tracer::Get().set_var_context({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
+                                     static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
+                                     ContextType::Variable});
       frame.mTask.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});

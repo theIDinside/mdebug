@@ -117,8 +117,8 @@ Frame::Scopes() noexcept
   if (mFrameScopes[0].variables_reference == 0) {
     for (auto i = 0u; i < 3; ++i) {
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
-      const auto key = Tracer::Instance->new_key();
-      Tracer::Instance->set_var_context({mOwningSymbolFile->GetSupervisor(), mTask->ptr, mOwningSymbolFile,
+      const auto key = Tracer::Get().new_key();
+      Tracer::Get().set_var_context({mOwningSymbolFile->GetSupervisor(), mTask->ptr, mOwningSymbolFile,
                                          static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
       mFrameScopes[i].variables_reference = key;
     }

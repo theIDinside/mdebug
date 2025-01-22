@@ -3,11 +3,13 @@
 
 #include "../../notify_pipe.h"
 #include "dap_defs.h"
+#include "utils/logger.h"
 #include "utils/util.h"
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <deque>
 #include <nlohmann/json.hpp>
-#include <queue>
 #include <string_view>
 #include <tracee/util.h>
 #include <typedefs.h>
@@ -16,9 +18,8 @@ class Tracer;
 class TraceeController;
 /* The different DAP commands/requests */
 namespace alloc {
-  class ArenaAllocator;
+class ArenaAllocator;
 }
-
 
 namespace ui {
 struct UIResult;
@@ -53,11 +54,11 @@ public:
     auto start = std::chrono::high_resolution_clock::now();
     auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
     const auto duration_ms =
-    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
-      .count();
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+        .count();
     ASSERT(duration_ms < 1500, "Read took *way* too long");
-    if(read_bytes == -1) {
-      DBGLOG(core, "command buffer read error: {} for fd {}", strerror(errno), fd);
+    if (read_bytes == -1) {
+      CDLOG(errno != EWOULDBLOCK && errno != EAGAIN, core, "command buffer read error: {} for fd {}", strerror(errno), fd);
       return false;
     }
     VERIFY(read_bytes >= 0,
@@ -159,6 +160,7 @@ class DebugAdapterClient
   std::unique_ptr<alloc::ArenaAllocator> mCommandsAllocator;
   std::unique_ptr<alloc::ArenaAllocator> mCommandResponseAllocator;
   std::unique_ptr<alloc::ArenaAllocator> mEventsAllocator;
+  std::vector<DebugAdapterClient*> mChildren;
 
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
@@ -174,25 +176,27 @@ public:
   DapClientSession session_type;
   ~DebugAdapterClient() noexcept;
 
-  alloc::ArenaAllocator* GetCommandArenaAllocator() noexcept;
-  alloc::ArenaAllocator* GetResponseArenaAllocator() noexcept;
-  static DebugAdapterClient* createStandardIOConnection() noexcept;
-  static DebugAdapterClient* createSocketConnection(const DebugAdapterClient &client) noexcept;
-  void client_configured(TraceeController *tc, std::optional<int> ttyFileDescriptor = {}) noexcept;
+  alloc::ArenaAllocator *GetCommandArenaAllocator() noexcept;
+  alloc::ArenaAllocator *GetResponseArenaAllocator() noexcept;
+  static DebugAdapterClient *CreateStandardIOConnection() noexcept;
+  static DebugAdapterClient *CreateSocketConnection(DebugAdapterClient &client) noexcept;
+  void ClientConfigured(TraceeController *tc, std::optional<int> ttyFileDescriptor = {}) noexcept;
   void PostEvent(ui::UIResultPtr event);
 
-  int read_fd() const noexcept;
-  int out_fd() const noexcept;
+  int ReadFileDescriptor() const noexcept;
+  int WriteFileDescriptor() const noexcept;
 
-  bool write(std::string_view output) const noexcept;
-  void commands_read() noexcept;
-  void set_tty_out(int fd) noexcept;
-  std::optional<int> tty() const noexcept;
-  TraceeController *supervisor() const noexcept;
-  void set_session_type(DapClientSession type) noexcept;
+  bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;
+  void ReadPendingCommands() noexcept;
+  void SetTtyOut(int fd) noexcept;
+  std::optional<int> GetTtyFileDescriptor() const noexcept;
+  TraceeController *GetSupervisor() const noexcept;
+  void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void ShutDown() noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
   void FlushEvents() noexcept;
+  void AddChild(DebugAdapterClient* child) noexcept;
+  void RemoveChild(DebugAdapterClient* child) noexcept;
 };
 
 enum class InterfaceNotificationSource
@@ -213,7 +217,7 @@ private:
   std::unique_ptr<alloc::ArenaAllocator> mTemporaryArena;
 
 public:
-  explicit DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept;
+  explicit DAP(int inputFileDescriptor, int outputFileDescriptor) noexcept;
   ~DAP() noexcept;
 
   // After setup we call `infinite_poll` that does what the name suggests, polls for messages. We could say that
@@ -223,31 +227,30 @@ public:
   // exceptions.
   void run_ui_loop();
 
-  void start_interface() noexcept;
-  void new_client(utils::OwningPointer<DebugAdapterClient> client);
+  void StartIOPolling(std::stop_token& token) noexcept;
+  void NewClient(utils::OwningPointer<DebugAdapterClient> client);
   u32 notifiers_queue_size() const noexcept;
-  void init_poll(pollfd *fds);
-  void one_poll(u32 notifier_queue_size) noexcept;
-  void add_source(NotifSource source) noexcept;
+  void InitPolling(pollfd *fds);
+  void DoOnePoll(u32 notifier_queue_size) noexcept;
+  void AddPollingSource(NotifSource source) noexcept;
 
-  void notify_new_message() noexcept;
   void clean_up() noexcept;
   void flush_events() noexcept;
 
   void configure_tty(int master_pty_fd) noexcept;
   DebugAdapterClient *main_connection() const noexcept;
-  void RemoveSource(DebugAdapterClient* client) noexcept;
+  void RemoveSource(DebugAdapterClient *client) noexcept;
+
 private:
   UIResultPtr pop_event() noexcept;
-  void write_protocol_message(std::string_view msg) noexcept;
+  void WriteProtocolMessage(std::string_view msg) noexcept;
 
   utils::Notifier::WriteEnd posted_event_notifier;
   utils::Notifier::ReadEnd posted_evt_listener;
 
   utils::Notifier new_client_notifier;
-  Tracer *tracer;
-  int tracer_in_fd;
-  int tracer_out_fd;
+  int mTracerInputFileDescriptor;
+  int mTracerOutputFileDescriptor;
   bool keep_running;
   char *tracee_stdout_buffer;
   std::mutex mUIResultLock;

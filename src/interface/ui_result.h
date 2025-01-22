@@ -10,7 +10,7 @@ struct UIResult
 {
   UIResult() = default;
   UIResult(bool success, UICommandPtr cmd = nullptr) noexcept
-      : success(success), request_seq((cmd != nullptr) ? cmd->seq : 0), client(cmd->dap_client)
+      : success(success), request_seq((cmd != nullptr) ? cmd->seq : 0), client(cmd->mDAPClient)
   {
   }
   virtual ~UIResult() = default;

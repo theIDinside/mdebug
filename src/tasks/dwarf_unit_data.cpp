@@ -177,7 +177,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource* allo
   std::vector<UnitDataTask *> tasks;
   std::pmr::vector<u64> taskSize{allocator};
 
-  const auto workerCount = utils::ThreadPool::get_global_pool()->worker_count();
+  const auto workerCount = utils::ThreadPool::GetGlobalPool()->WorkerCount();
   works.resize(workerCount, {});
   tasks.reserve(workerCount);
   taskSize.resize(workerCount, 0);

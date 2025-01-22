@@ -18,6 +18,7 @@ class ByteBuffer
 {
 public:
   NO_COPY(ByteBuffer)
+  using OwnPtr = std::unique_ptr<ByteBuffer>;
 private:
   u8 *buffer;
   u32 value_size;

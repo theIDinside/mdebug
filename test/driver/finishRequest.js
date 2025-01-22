@@ -17,6 +17,7 @@ async function finishSuccess(DA) {
   })
   const threads = await DA.threads()
   await DA.contNextStop(threads[0].id)
+  console.log(`request stack trace`);
 
   let frames = await DA.stackTrace(threads[0].id)
   const next_up_frame = frames.body.stackFrames[1]

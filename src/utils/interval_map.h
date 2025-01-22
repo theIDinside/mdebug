@@ -1,23 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include <common.h>
+#include "util.h"
 
 namespace utils {
-
-template <typename CA, typename CB = CA>
-constexpr auto
-copy_to(const CA &c, CB &out)
-{
-  out.reserve(c.size());
-  std::copy(c.begin(), c.end(), std::back_inserter(out));
-}
-
-template <typename C, typename Fn>
-constexpr auto
-copy_to_transform(C &c, C &out, Fn transform)
-{
-  std::transform(c.begin(), c.end(), std::back_inserter(out), transform);
-}
 
 template <typename Datum> struct IntervalNodeValue
 {
@@ -64,10 +50,10 @@ public:
    * the key.
    */
   void
-  add_mapping(A start, A end, MapDatum value)
+  AddMapping(A start, A end, MapDatum value)
   {
-    auto it_a = maybe_partition_at<EndpointType::Start>(find_index_of<false>(start), start);
-    auto it_b = maybe_partition_at<EndpointType::End>(find_index_of<false>(end), end);
+    auto it_a = MaybePartitionAt<EndpointType::Start>(FindIndexOf<false>(start), start);
+    auto it_b = MaybePartitionAt<EndpointType::End>(FindIndexOf<false>(end), end);
 
     for (; it_a < it_b; ++it_a) {
       it_a->values.push_back({false, value});
@@ -79,9 +65,9 @@ public:
    * Find what values have a range that covers `key`. Returns found values. If nothing was found return `None`.
    */
   std::optional<std::vector<MapDatum>>
-  find(A key) const
+  Find(A key) const
   {
-    auto pos = find_index_of<true>(key);
+    auto pos = FindIndexOf<true>(key);
     if (pos == interval.size()) {
       return {};
     } else {
@@ -102,9 +88,9 @@ public:
    * any values were found, false otherwise.
    */
   constexpr bool
-  find(A key, std::vector<MapDatum> &write_to_result) noexcept
+  Find(A key, std::vector<MapDatum> &write_to_result) noexcept
   {
-    auto pos = find_index_of<true>(key);
+    auto pos = FindIndexOf<true>(key);
     if (pos == interval.size()) {
       return false;
     } else {
@@ -130,13 +116,13 @@ private:
   };
 
   constexpr bool
-  node_addr_equals(size_t index, A addr) noexcept
+  NodeAddressEquals(size_t index, A addr) noexcept
   {
     return interval[index].addr == addr;
   }
 
   constexpr auto
-  find_index_to_insert_at(A pc) const noexcept
+  FindIndexToInsertAt(A pc) const noexcept
   {
     constexpr auto find = [](const IntervalNode<MapDatum, A> &node, auto pc) { return node.addr < pc; };
 
@@ -147,7 +133,7 @@ private:
 
   template <bool AlsoEquals>
   constexpr auto
-  find_index_of(A pc) const noexcept
+  FindIndexOf(A pc) const noexcept
   {
     constexpr auto find = [](const IntervalNode<MapDatum, A> &node, auto pc) {
       if constexpr (AlsoEquals) {
@@ -163,7 +149,7 @@ private:
   }
 
   constexpr auto
-  ensure_no_iterator_invalidation() noexcept
+  EnsureNoIteratorInvalidation() noexcept
   {
     // Doing this, we can know, that two successive `maybe_partition_at` calls inside
     // `add_mapping` will not have the returned iterators from this function
@@ -188,15 +174,15 @@ private:
    */
   template <EndpointType type>
   constexpr auto
-  maybe_partition_at(size_t index, A with_addr) noexcept
+  MaybePartitionAt(size_t index, A with_addr) noexcept
   {
     if constexpr (type == EndpointType::Start) {
-      ensure_no_iterator_invalidation();
+      EnsureNoIteratorInvalidation();
     }
 
     // a node with this address already exists, no need to partition the range
     // [N .. M] that contains `with_addr`
-    if (node_addr_equals(index, with_addr)) {
+    if (NodeAddressEquals(index, with_addr)) {
       return interval.begin() + index;
     }
 

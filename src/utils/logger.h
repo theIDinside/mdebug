@@ -66,10 +66,10 @@ public:
   Logger() noexcept = default;
   ~Logger() noexcept;
   void setup_channel(std::string_view name) noexcept;
-  void setup_channel(const std::filesystem::path &logDirectory, Channel id) noexcept;
+  void SetupChannel(const std::filesystem::path &logDirectory, Channel id) noexcept;
   void log(std::string_view log_name, std::string_view log_msg) noexcept;
   void log(Channel id, std::string_view log_msg) noexcept;
-  static Logger *get_logger() noexcept;
+  static Logger *GetLogger() noexcept;
   void on_abort() noexcept;
   void OnAbort() noexcept;
   LogChannel *channel(std::string_view name);

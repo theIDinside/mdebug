@@ -67,7 +67,7 @@ std::optional<WaitPid> waitpid_block(pid_t tid) noexcept;
 
 std::string_view request_name(__ptrace_request req);
 
-void new_target_set_options(pid_t pid);
+void ConfigurePtraceSettings(pid_t pid);
 
 void ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location &loc);
 

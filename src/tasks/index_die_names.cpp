@@ -1,21 +1,22 @@
 /** LICENSE TEMPLATE */
 #include "index_die_names.h"
-#include "../symbolication/cu_symbol_info.h"
-#include "../symbolication/dwarf.h"
-#include "../symbolication/dwarf/debug_info_reader.h"
-#include "../symbolication/dwarf/lnp.h"
-#include "../symbolication/dwarf/name_index.h"
-#include "../symbolication/elf.h"
-#include "../symbolication/objfile.h"
-#include "../utils/thread_pool.h"
-#include "lib/arena_allocator.h"
-#include "symbolication/dwarf/die_ref.h"
-#include "symbolication/dwarf/rnglists.h"
-#include "symbolication/dwarf_defs.h"
-#include "utils/interval_map.h"
-#include "utils/scope_defer.h"
+// system
 #include <algorithm>
 #include <cstdint>
+// mdb
+#include <symbolication/cu_symbol_info.h>
+#include <symbolication/dwarf.h>
+#include <symbolication/dwarf/debug_info_reader.h>
+#include <symbolication/dwarf/die_ref.h>
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/dwarf/name_index.h>
+#include <symbolication/dwarf/rnglists.h>
+#include <symbolication/dwarf_defs.h>
+#include <symbolication/elf.h>
+#include <symbolication/objfile.h>
+#include <utils/interval_map.h>
+#include <utils/scope_defer.h>
+#include <utils/thread_pool.h>
 
 namespace sym::dw {
 
@@ -25,7 +26,7 @@ IndexingTask::IndexingTask(ObjectFile *obj, std::span<UnitData *> cus_to_index) 
 }
 
 /*static*/ std::vector<IndexingTask *>
-IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource* taskGroupAllocator)
+IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *taskGroupAllocator)
 {
   std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{taskGroupAllocator};
 
@@ -38,7 +39,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource* tas
   std::vector<IndexingTask *> tasks;
   std::vector<u64> taskSize;
 
-  const auto workerCount = utils::ThreadPool::get_global_pool()->worker_count();
+  const auto workerCount = utils::ThreadPool::GetGlobalPool()->WorkerCount();
   works.resize(workerCount, {});
   tasks.reserve(workerCount);
   taskSize.resize(workerCount, 0);
@@ -125,7 +126,7 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 }
 
 void
-IndexingTask::execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept
+IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexcept
 {
   using NameSet = std::vector<NameIndex::NameDieTuple>;
   using NameTypeSet = std::vector<NameIndex::NameTypeDieTuple>;

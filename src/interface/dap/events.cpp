@@ -3,8 +3,6 @@
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
-#include "interface/dap/dap_defs.h"
-#include "interface/dap/types.h"
 #include "nlohmann/json.hpp"
 #include <event_queue.h>
 #include <so_loading.h>

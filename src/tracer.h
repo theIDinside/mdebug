@@ -21,6 +21,7 @@
 class ObjectFile;
 class SymbolFile;
 class TraceeController;
+class WaitStatusReaderThread;
 
 using Pid = pid_t;
 using Tid = pid_t;
@@ -43,12 +44,6 @@ class Command;
 namespace ui {
 struct UICommand;
 }
-
-enum class Proceed
-{
-  Stop,
-  Resume
-};
 
 struct LWP;
 struct TaskInfo;
@@ -91,25 +86,53 @@ struct VariableContext
   SharedPtr<sym::Value> get_maybe_value() const noexcept;
 };
 
+enum class TracerProcess
+{
+  Running,
+  RequestedShutdown,
+  Shutdown
+};
+
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
-public:
-  static termios original_tty;
-  static winsize ws;
-  static Tracer *Instance;
-  static bool KeepAlive;
-  static bool use_traceme;
+  static TracerProcess sApplicationState;
+  static termios sOriginalTty;
+  static winsize sTerminalWindowSize;
+  static Tracer *sTracerInstance;
+  static bool sUsePTraceMe;
 #ifdef MDB_DEBUG
   u64 mDebuggerEvents;
+
+public:
+  constexpr bool
+  SeenNewEvents(u64 previousEvent) noexcept
+  {
+    return mDebuggerEvents > previousEvent;
+  }
+
+  constexpr u64 &
+  DebuggerEventCount() noexcept
+  {
+    return mDebuggerEvents;
+  }
+
+private:
 #endif
+public:
   friend struct ui::UICommand;
+  Tracer(sys::DebuggerConfiguration) noexcept;
 
-  Tracer(utils::Notifier::ReadEnd io_thread_pipe, utils::NotifyManager *events_notifier,
-         sys::DebuggerConfiguration) noexcept;
+  static Tracer *Create(sys::DebuggerConfiguration) noexcept;
 
-  void add_target_set_current(const tc::InterfaceConfig &config, TargetSession session) noexcept;
-  void load_and_process_objfile(pid_t target, const Path &objfile_path) noexcept;
+  static bool IsRunning() noexcept;
+  static bool UsingTraceMe() noexcept;
+  static Tracer &Get() noexcept;
+
+  void TerminateSession() noexcept;
+
+  void AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession session) noexcept;
+  void LoadAndProcessObjectFile(pid_t target, const Path &objfile_path) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
   TraceeController *GetProcessContainingTid(Tid tid) noexcept;
   // TODO(simon): This should be removed. When multiprocess becomes a thing _all_ supervisor access must happen via
@@ -120,7 +143,7 @@ public:
   void handle_command(ui::UICommand *cmd) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
-  void HandleInitEvent(TraceEvent* evt) noexcept;
+  void HandleInitEvent(TraceEvent *evt) noexcept;
   void SetupConsoleCommands() noexcept;
   std::pmr::string EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
                                                   std::pmr::memory_resource *allocator) noexcept;
@@ -128,13 +151,11 @@ public:
   void set_ui(ui::dap::DAP *dap) noexcept;
   void kill_ui() noexcept;
 
-  /** Receives a command and places it on the command queue to be executed. Thread-safe, but if re-entrant will
-   * hang. */
-  void accept_command(ui::UICommand *cmd) noexcept;
-  TraceeController *new_supervisor(std::unique_ptr<TraceeController> tc) noexcept;
+  TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
   void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path &program,
-              std::span<const std::string> prog_args) noexcept;
-  bool attach(const AttachArgs &args) noexcept;
+              std::span<const std::string> prog_args,
+              std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  bool Attach(const AttachArgs &args) noexcept;
   bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
   void detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept;
 
@@ -144,11 +165,10 @@ public:
   const sys::DebuggerConfiguration &get_configuration() const noexcept;
   std::shared_ptr<gdb::RemoteConnection>
   connectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
-  NonNullPtr<TraceeController> set_current_to_latest_target() noexcept;
 
   u32 new_breakpoint_id() noexcept;
   VarRefKey new_key() noexcept;
-  VariableContext var_context(VarRefKey varRefKey) noexcept;
+  VariableContext GetVariableContext(VarRefKey varRefKey) noexcept;
   VarRefKey new_var_context(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept;
   void set_var_context(VariableContext ctx) noexcept;
   u32 clone_from_var_context(const VariableContext &ctx) noexcept;
@@ -177,15 +197,11 @@ public:
   bool TraceExitConfigured{false};
 
 private:
-  TraceeController *current_target{nullptr};
+  std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
   u32 breakpoint_ids{0};
   VarRefKey id_counter{0};
   std::unordered_map<VarRefKey, VariableContext> refContext{};
-  SpinLock command_queue_lock;
-  std::queue<ui::UICommand *> command_queue;
-  utils::Notifier::ReadEnd io_thread_pipe;
   bool already_launched;
-  utils::NotifyManager *events_notifier;
   sys::DebuggerConfiguration config;
 
   // Apparently, due to the lovely way of the universe, if a thread clones or forks
@@ -196,5 +212,7 @@ private:
   // up before their wait status of their clone parent has been seen. This should work.
   std::unordered_map<Tid, std::shared_ptr<TaskInfo>> mUnInitializedThreads{};
   std::unordered_map<Tid, std::shared_ptr<TaskInfo>> mDebugSessionTasks;
-  ConsoleCommandInterpreter* mConsoleCommandInterpreter;
+  std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
+  std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
+  ConsoleCommandInterpreter *mConsoleCommandInterpreter;
 };

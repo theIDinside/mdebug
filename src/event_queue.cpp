@@ -285,6 +285,57 @@ EventSystem::PushWaitResult(WaitResult result) noexcept
 }
 
 void
+EventSystem::NotifyNewWaitpidResults() noexcept
+{
+  constexpr char writeChar = '+';
+  utils::DebugValue<int> writeValue = write(mWaitStatus[1], &writeChar, sizeof(writeChar));
+  ASSERT(writeValue != -1 && writeValue == sizeof(writeChar), "Failed to write notification to pipe");
+}
+
+void
+EventSystem::PushReapedWaitResults(std::span<WaitResult> results) noexcept
+{
+  std::lock_guard lock(mInternalEventGuard);
+  for (const auto [pid, stat] : results) {
+    if (WIFSTOPPED(stat)) {
+      const auto res = WaitResultToTaskWaitResult(pid, stat);
+      mWaitEvents.push_back(Event{WaitEvent{.wait = res, .core = 0}});
+    } else if (WIFEXITED(stat)) {
+      // We might as well only report this for process-tasks,
+      // as DAP doesn't support reporting an exit code for a thread, only for a process,
+      // because DAP distinguishes between the two in a way that most OS today, doesn't.
+      if (!Tracer::Get().TraceExitConfigured) {
+        // means this is the only place we're getting informed of thread exits
+        for (const auto &supervisor : Tracer::Get().mTracedProcesses) {
+          for (const auto &entry : supervisor->GetThreads()) {
+            if (entry.mTid == pid) {
+              mWaitEvents.push_back(
+                Event{TraceEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {})});
+            }
+          }
+        }
+      } else {
+        for (const auto &supervisor : Tracer::Get().mTracedProcesses) {
+          if (supervisor->TaskLeaderTid() == pid) {
+            supervisor->SetExitSeen();
+            int exit_code = WEXITSTATUS(stat);
+            mWaitEvents.push_back(
+              Event{TraceEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {})});
+          }
+        }
+      }
+    } else if (WIFSIGNALED(stat)) {
+      const auto signaled_evt =
+        TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
+      mWaitEvents.push_back(Event{WaitEvent{signaled_evt, 0}});
+    } else {
+      PANIC("Unknown wait status event");
+    }
+  }
+  NotifyNewWaitpidResults();
+}
+
+void
 EventSystem::PushInternalEvent(InternalEvent event) noexcept
 {
   std::lock_guard lock(mInternalEventGuard);
@@ -340,47 +391,10 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
                              [](InternalEvent event) { return Event{event}; });
       mInternal.clear();
     } else if (pfd.fd == mWaitStatus[0]) {
-      WaitResult result[8];
-      constexpr auto bufferSize = sizeof(WaitResult) * std::size(result);
-      ssize_t bytesRead = read(pfd.fd, result, bufferSize);
-      ASSERT(bytesRead % 8 == 0, "Did not write 8 byte aligned WaitResult value");
-      const auto count = bytesRead / sizeof(WaitResult);
-      for (auto [pid, stat] : std::span{result, count}) {
-        if (WIFSTOPPED(stat)) {
-          const auto res = WaitResultToTaskWaitResult(pid, stat);
-          write.push_back(Event{WaitEvent{.wait = res, .core = 0}});
-        } else if (WIFEXITED(stat)) {
-          // We might as well only report this for process-tasks,
-          // as DAP doesn't support reporting an exit code for a thread, only for a process,
-          // because DAP distinguishes between the two in a way that most OS today, doesn't.
-          if (!Tracer::Instance->TraceExitConfigured) {
-            // means this is the only place we're getting informed of thread exits
-            for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
-              for (const auto &t : supervisor->GetThreads()) {
-                if (t->mTid == pid) {
-                  write.push_back(Event{
-                    TraceEvent::ThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {})});
-                }
-              }
-            }
-          } else {
-            for (const auto &supervisor : Tracer::Instance->mTracedProcesses) {
-              if (supervisor->TaskLeaderTid() == pid) {
-                supervisor->SetExitSeen();
-                int exit_code = WEXITSTATUS(stat);
-                write.push_back(
-                  Event{TraceEvent::ProcessExitEvent(supervisor->TaskLeaderTid(), pid, exit_code, {})});
-              }
-            }
-          }
-        } else if (WIFSIGNALED(stat)) {
-          const auto signaled_evt = TaskWaitResult{
-            .tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
-          write.push_back(Event{WaitEvent{signaled_evt, 0}});
-        } else {
-          PANIC("Unknown wait status event");
-        }
-      }
+      std::lock_guard lock(mInternalEventGuard);
+      write.reserve(write.size() + mWaitEvents.size());
+      std::copy(mWaitEvents.begin(), mWaitEvents.end(), std::back_inserter(write));
+      mWaitEvents.clear();
     }
   }
   return write.size() != sizeBefore;

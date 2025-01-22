@@ -7,7 +7,7 @@
 #include "events/event.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
-#include "interface/tracee_command/tracee_command_interface.h"
+#include "interface/remotegdb/connection.h"
 #include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
@@ -15,7 +15,6 @@
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
 #include "task.h"
-#include "utils/byte_buffer.h"
 #include "utils/expected.h"
 #include <mdbsys/ptrace.h>
 #include <optional>
@@ -27,6 +26,10 @@
 template <typename T> using Set = std::unordered_set<T>;
 
 struct DeferToSupervisor;
+
+namespace utils {
+  class ByteBuffer;
+}
 
 namespace sym {
 class Unwinder;
@@ -87,10 +90,11 @@ class TraceeController
   std::vector<std::shared_ptr<SymbolFile>> mSymbolFiles;
   // The main executable symbol file; the initial executable binary, i.e. the one passed to `execve` at some point.
   std::shared_ptr<SymbolFile> mMainExecutable;
-  // The tasks that exist in this "process space"
-  std::vector<std::shared_ptr<TaskInfo>> mThreads;
+  // The tasks that exist in this "process space". Since tasks often are looked up by tid, before we want to do something with it
+  // we save an indirection by storing the tid inline here, same goes for mExitedThreads.
+  std::vector<TaskInfo::TaskInfoEntry> mThreads;
   // Tasks that have exited.
-  std::vector<std::shared_ptr<TaskInfo>> mExitedThreads;
+  std::vector<TaskInfo::TaskInfoEntry> mExitedThreads;
   // More low level information about tasks's. The idea (maybe?) is that at some point we will be able
   // to restore a process space, by doing some manual cloning of tasks, making checkpoint-like debugging possible
   // note: not as powerful as rr, in any sense of the word, but may be neat.
@@ -99,9 +103,6 @@ class TraceeController
   UserBreakpoints mUserBreakpoints;
   // The shared objects / dynamic libraries used by this process
   SharedObjectMap mSharedObjects;
-  // Stopping of all tasks requested by some event in the event loop. This flag is cleared, once all tasks have
-  // been stopped.
-  bool mStopAllTasksRequested;
   // Emits "all stopped" event to all subscribers
   Publisher<void> mAllStopPublisher{};
   // Emits "new module/new dynamic library" event to all subscribers
@@ -130,7 +131,7 @@ class TraceeController
   // Is Attach/Launch session?
   TargetSession mSessionKind;
   // The currently installed Stop handler
-  std::unique_ptr<ptracestop::StopHandler> mStopHandler;
+  std::unique_ptr<TaskScheduler> mScheduler;
   // an unwinder that always returns sym::UnwindInfo* = nullptr
   sym::Unwinder *mNullUnwinder;
   // The command interface that controls execution of the target. If the target is a "native" one, it means we're
@@ -155,6 +156,8 @@ class TraceeController
   // set by the comment-labled FORK constructor of TraceeController.
   bool mIsVForking{false};
 
+  BreakpointBehavior mBreakpointBehavior{BreakpointBehavior::StopAllThreadsWhenHit};
+
   // FORK constructor
   TraceeController(TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept;
   // Constructors
@@ -168,9 +171,12 @@ public:
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
 
+  void ConfigureBreakpointBehavior(BreakpointBehavior behavior) noexcept;
+  constexpr BreakpointBehavior GetBreakpointBehavior() const noexcept { return mBreakpointBehavior; }
   void TearDown(bool killProcess) noexcept;
   bool IsExited() const noexcept;
   void ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept;
+  void Disconnect() noexcept;
   // Called when a ("this") process forks
   std::unique_ptr<TraceeController> Fork(tc::Interface &&interface, bool isVFork) noexcept;
 
@@ -194,10 +200,11 @@ public:
   // thread also; it also means when for instance { thread: 9 } hits a breakpoint, all threads are stopped in their
   // track.
   bool IsIndividualTaskControlConfigured() noexcept;
-  std::span<std::shared_ptr<TaskInfo>> GetThreads() noexcept;
-  std::span<std::shared_ptr<TaskInfo>> GetExitedThreads() noexcept;
+  std::span<TaskInfo::TaskInfoEntry> GetThreads() noexcept;
+  std::span<TaskInfo::TaskInfoEntry> GetExitedThreads() noexcept;
+
   void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
-  u32 RemoveTaskIf(std::function<bool(const std::shared_ptr<TaskInfo> &)> &&predicate);
+  u32 RemoveTasksNotInSet(std::span<const gdb::GdbThread> set) noexcept;
   Tid TaskLeaderTid() const noexcept;
   void SetExitSeen() noexcept;
   TaskInfo *GetTaskByTid(pid_t pid) noexcept;
@@ -264,7 +271,9 @@ public:
   bool TryTerminateGracefully() noexcept;
   bool Detach(bool resume) noexcept;
 
-  void SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> &&action) noexcept;
+  bool SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept;
+  TraceEvent* CreateTraceEventFromWaitStatus(TaskInfo& task) noexcept;
+
 
   void PostExec(const std::string &exe) noexcept;
   /* Check if we have any tasks left in the process space. */
@@ -296,6 +305,7 @@ public:
   void ResumeEventHandling() noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void OnTearDown() noexcept;
+  void SetStopScheduler() noexcept;
 
 private:
   void DefaultHandler(TraceEvent *evt) noexcept;
@@ -373,6 +383,7 @@ public:
   tc::TraceeCommandInterface &GetInterface() noexcept;
 
   void TaskExit(TaskInfo& task, TaskInfo::SupervisorState state, bool notify) noexcept;
+  void ExitAll(TaskInfo::SupervisorState state) noexcept;
 
   // Core event handlers
   tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;

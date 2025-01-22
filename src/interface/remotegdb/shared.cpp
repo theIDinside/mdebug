@@ -5,7 +5,7 @@
 namespace gdb {
 
 std::pair<Pid, Tid>
-parse_thread_id(std::string_view arg) noexcept
+ParseThreadId(std::string_view arg) noexcept
 {
   ASSERT(arg[0] == 'p', "expected the multiprocess thread-id syntax.");
   arg.remove_prefix(1);
@@ -26,7 +26,7 @@ parse_thread_id(std::string_view arg) noexcept
 }
 
 char *
-format_value(char *ptr, u32 value) noexcept
+FormatValue(char *ptr, u32 value) noexcept
 {
   auto convert = std::to_chars(ptr, ptr + 8, value, 16);
   if (convert.ec != std::errc()) {
@@ -36,7 +36,7 @@ format_value(char *ptr, u32 value) noexcept
 }
 
 u32
-decode_rle(std::string_view v, char *buf, u32 size) noexcept
+DecodeRunLengthEncoding(std::string_view v, char *buf, u32 size) noexcept
 {
   auto ptr = buf;
   constexpr auto decodedSize = [](auto bptr, auto wptr) noexcept { return static_cast<u32>(wptr - bptr); };
@@ -60,9 +60,9 @@ decode_rle(std::string_view v, char *buf, u32 size) noexcept
 }
 
 std::string_view
-decode_rle_to_str(std::string_view v, char *buf, u32 size) noexcept
+DecodeRunLengthEncToStringView(std::string_view v, char *buf, u32 size) noexcept
 {
-  const auto length = decode_rle(v, buf, size);
+  const auto length = DecodeRunLengthEncoding(v, buf, size);
   return std::string_view{buf, buf + length};
 }
 

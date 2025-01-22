@@ -100,10 +100,12 @@ request_name(__ptrace_request req)
 }
 
 void
-new_target_set_options(pid_t pid)
+ConfigurePtraceSettings(pid_t pid)
 {
+  // PTRACE_O_TRACEEXIT stops on exit of a task, but it's not at a point where we can do anything. At which point my question becomes: what's the purpose?
+  // I'd rather just be notified that a task has died and that's that. 
   const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEVFORK;  // | PTRACE_O_TRACEEXIT;
-  Tracer::Instance->TraceExitConfigured = (options & PTRACE_O_TRACEEXIT) != 0;
+  Tracer::Get().TraceExitConfigured = (options & PTRACE_O_TRACEEXIT) != 0;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;
     if (-1 == waitpid(pid, &stat, 0)) {

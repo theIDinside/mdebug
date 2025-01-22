@@ -3,7 +3,6 @@
 #include "event_queue.h"
 #include "interface/dap/interface.h"
 #include "mdb_config.h"
-#include "notify_pipe.h"
 #include "supervisor.h"
 #include "tracer.h"
 #include "utils/debugger_thread.h"
@@ -39,11 +38,13 @@ std::string data;
 bool ready = false;
 bool exit_debug_session = false;
 
-termios Tracer::original_tty = {};
-winsize Tracer::ws = {};
-bool Tracer::use_traceme = true;
+Tracer *Tracer::sTracerInstance = nullptr;
+termios Tracer::sOriginalTty = {};
+winsize Tracer::sTerminalWindowSize = {};
+bool Tracer::sUsePTraceMe = true;
+TracerProcess Tracer::sApplicationState = TracerProcess::Running;
 
-utils::ThreadPool *utils::ThreadPool::global_thread_pool = new utils::ThreadPool{};
+utils::ThreadPool *utils::ThreadPool::sGlobalThreadPool = new utils::ThreadPool{};
 
 int
 main(int argc, const char **argv)
@@ -66,6 +67,27 @@ main(int argc, const char **argv)
     exit(-1);
   }
 
+  const sys::DebuggerConfiguration &config = res.value();
+  {
+    using enum logging::Channel;
+    for (const auto id : logging::DefaultChannels()) {
+      logging::Logger::GetLogger()->SetupChannel(config.LogDirectory(), id);
+    }
+  }
+
+  std::span<const char *> args(argv, argc);
+  DBGLOG(core, "MDB CLI Arguments");
+  for (const auto arg : args.subspan(1)) {
+    DBGLOG(core, "{}", arg);
+  }
+
+  auto log = config.log_config();
+  log.configure_logging(true);
+  CDLOG(log.awaiter, core, "Setting awaiter log on");
+
+  Tracer::Create(config);
+  utils::ThreadPool::GetGlobalPool()->Init(config.ThreadPoolSize());
+
 #ifdef MDB_DEBUG
 
   // timeDelta is the last time this function was called. That way
@@ -77,7 +99,7 @@ main(int argc, const char **argv)
         return;
       }
       delta = 0;
-      if (const auto &tasks = Tracer::Instance->UnInitializedTasks(); !tasks.empty()) {
+      if (const auto &tasks = Tracer::Get().UnInitializedTasks(); !tasks.empty()) {
         std::string res;
         auto iter = std::back_inserter(res);
         for (const auto &[tid, task] : tasks) {
@@ -93,15 +115,16 @@ main(int argc, const char **argv)
     },
     [events = u64{0}, stallTime = u64{0}, reported = false,
      writeBuffer = std::string{}](std::chrono::milliseconds interval) mutable noexcept {
-      if (Tracer::Instance->mDebuggerEvents == events) {
+      if (!Tracer::Get().SeenNewEvents(events)) {
         stallTime += interval.count();
         if (!reported) {
           writeBuffer.clear();
-          for (const auto &target : Tracer::Instance->mTracedProcesses) {
-            for (const auto &t : target->GetThreads()) {
-              if (t->can_continue()) {
+          for (const auto &target : Tracer::Get().mTracedProcesses) {
+            for (const auto &entry : target->GetThreads()) {
+              if (entry.mTask->can_continue()) {
                 fmt::format_to(std::back_inserter(writeBuffer), "tid={}, stopped={}, wait={}, ?pc?=0x{:x}\n",
-                               t->mTid, t->is_stopped(), to_str(t->mLastWaitStatus.ws), t->get_register(16));
+                               entry.mTid, entry.mTask->is_stopped(), to_str(entry.mTask->mLastWaitStatus.ws),
+                               entry.mTask->get_register(16));
               }
             }
           }
@@ -112,52 +135,30 @@ main(int argc, const char **argv)
         return;
       }
       stallTime = 0;
-      events = Tracer::Instance->mDebuggerEvents;
+      events = Tracer::Get().DebuggerEventCount();
       reported = false;
     }};
 
-  auto stateDebugThread = DebuggerThread::SpawnDebuggerThread([intervalJobs = std::move(intervalJobs)]() {
-    constexpr auto intervalSetting = std::chrono::milliseconds{500};
-    while (Tracer::Instance->KeepAlive) {
-      std::this_thread::sleep_for(std::chrono::milliseconds{intervalSetting});
-      for (auto &f : intervalJobs) {
-        f(intervalSetting);
+  auto stateDebugThread = DebuggerThread::SpawnDebuggerThread(
+    "MdbStateMonitor", [intervalJobs = std::move(intervalJobs)](std::stop_token &token) {
+      constexpr auto intervalSetting = std::chrono::milliseconds{500};
+      while (Tracer::Get().IsRunning() && !token.stop_requested()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{intervalSetting});
+        for (auto &f : intervalJobs) {
+          f(intervalSetting);
+        }
       }
-    }
-  });
+    });
 #endif
 
-  const sys::DebuggerConfiguration &config = res.value();
-  {
-    using enum logging::Channel;
-    for (const auto id : logging::DefaultChannels()) {
-      logging::Logger::get_logger()->setup_channel(config.LogDirectory(), id);
-    }
-  }
-
-  std::span<const char *> args(argv, argc);
-  DBGLOG(core, "MDB CLI Arguments");
-  for (const auto arg : args.subspan(1)) {
-    DBGLOG(core, "{}", arg);
-  }
-
-  auto [io_read, io_write] = utils::Notifier::notify_pipe();
-
-  auto log = config.log_config();
-  log.configure_logging(true);
-  CDLOG(log.awaiter, core, "Setting awaiter log on");
-
-  utils::NotifyManager notifiers{io_read};
-  Tracer::Instance = new Tracer{io_read, &notifiers, config};
-  auto &tracer = *Tracer::Instance;
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;
 
-  auto ui_thread = DebuggerThread::SpawnDebuggerThread([&ui_thread_setup]() {
-    ui::dap::DAP ui_interface{Tracer::Instance, STDIN_FILENO, STDOUT_FILENO};
-    Tracer::Instance->set_ui(&ui_interface);
+  auto ui_thread = DebuggerThread::SpawnDebuggerThread("IO-Thread", [&ui_thread_setup](std::stop_token &token) {
+    ui::dap::DAP ui_interface{STDIN_FILENO, STDOUT_FILENO};
+    Tracer::Get().set_ui(&ui_interface);
     ui_thread_setup = true;
-    ui_interface.start_interface();
+    ui_interface.StartIOPolling(token);
   });
 
   while (!ui_thread_setup) {
@@ -167,31 +168,31 @@ main(int argc, const char **argv)
   std::vector<Event> readInEvents{};
   readInEvents.reserve(128);
 
-  while (Tracer::Instance->KeepAlive) {
+  while (Tracer::Get().IsRunning()) {
 
     if (system->PollBlocking(readInEvents)) {
       for (auto evt : readInEvents) {
 #ifdef MDB_DEBUG
-        Tracer::Instance->mDebuggerEvents++;
+        Tracer::Get().DebuggerEventCount()++;
 #endif
         switch (evt.type) {
         case EventType::WaitStatus: {
           DBGLOG(awaiter, "stop for {}: {}", evt.uWait.wait.tid, to_str(evt.uWait.wait.ws.ws));
-          if (auto dbg_evt = tracer.ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
-            tracer.HandleTracerEvent(dbg_evt);
+          if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
+            Tracer::Get().HandleTracerEvent(dbg_evt);
           }
         } break;
         case EventType::Command: {
-          tracer.handle_command(evt.uCommand);
+          Tracer::Get().handle_command(evt.uCommand);
         } break;
         case EventType::TraceeEvent: {
-          tracer.HandleTracerEvent(evt.uDebugger);
+          Tracer::Get().HandleTracerEvent(evt.uDebugger);
         } break;
         case EventType::Initialization:
-          tracer.HandleInitEvent(evt.uDebugger);
+          Tracer::Get().HandleInitEvent(evt.uDebugger);
           break;
         case EventType::Internal: {
-          tracer.HandleInternalEvent(evt.uInternalEvent);
+          Tracer::Get().HandleInternalEvent(evt.uInternalEvent);
           break;
         }
         }
@@ -199,8 +200,8 @@ main(int argc, const char **argv)
       readInEvents.clear();
     }
   }
-  utils::ThreadPool::shutdown_global_pool();
+  utils::ThreadPool::ShutdownGlobalPool();
   exit_debug_session = true;
-  Tracer::Instance->kill_ui();
+  Tracer::Get().kill_ui();
   DBGLOG(core, "Exited...");
 }

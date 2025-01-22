@@ -44,7 +44,7 @@ DebuggerConfiguration::waitsystem() const noexcept
 }
 
 int
-DebuggerConfiguration::thread_pool_size() const noexcept
+DebuggerConfiguration::ThreadPoolSize() const noexcept
 {
   constexpr auto get_default = []() {
     const auto cpus = std::thread::hardware_concurrency();

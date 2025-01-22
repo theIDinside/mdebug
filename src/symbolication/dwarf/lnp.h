@@ -4,8 +4,7 @@
 #include "symbolication/block.h"
 #include "utils/immutable.h"
 #include <common.h>
-#include <compare>
-#include <elf.h>
+#include <limits>
 
 class Elf;
 class ObjectFile;
@@ -55,12 +54,61 @@ struct LNPFilePath
   explicit LNPFilePath(Path &&path, u32 index);
 };
 
+using IndexArray = std::array<u32, 6>;
+// This type is just to handle "buggy" debug symbol data. If producers of DWARF debug symbols
+// create line number programs where the *exact* same file show up multiple times with different
+// file index numbers, this is to consider pretty bad output, but we must handle it none the less - and
+// unfortunately this shows up in ld-linux-x86-64.so.2 - the linux linker's debug info!!! Sucky! And this binary
+// is mapped in, in *every single live executable process* so we must handle it. But we make the constraint - if
+// it's more than 6, we will panic and exit. You've created terrible debug output. Until further notice, MDB will
+// not support your gah'bage ;)
+struct FileEntryIndexVector
+{
+  using lim32 = std::numeric_limits<u32>;
+  IndexArray mIndices;
+  static constexpr auto EMPTY_VALUE = lim32::max();
+  static constexpr IndexArray EMPTY_ARRAY{lim32::max(), lim32::max(), lim32::max(),
+                                          lim32::max(), lim32::max(), lim32::max()};
+
+  constexpr FileEntryIndexVector() noexcept : mIndices(EMPTY_ARRAY) {}
+  constexpr FileEntryIndexVector(const FileEntryIndexVector &o) noexcept = default;
+  constexpr FileEntryIndexVector(FileEntryIndexVector &&o) noexcept = default;
+  constexpr FileEntryIndexVector &operator=(const FileEntryIndexVector &o) noexcept = default;
+  constexpr FileEntryIndexVector &operator=(FileEntryIndexVector &&o) noexcept = default;
+
+  void
+  Add(u32 fileIndex) noexcept
+  {
+    for (auto &e : mIndices) {
+      ASSERT(fileIndex != e, "File index for file already exists: {}", fileIndex);
+      if (e == EMPTY_VALUE) {
+        e = fileIndex;
+        return;
+      }
+    }
+    PANIC("DWARF debug symbol information was terrible. More than 6 instances of the same file found (but with "
+          "different file index numbers) in the line number program. Terrible.");
+  }
+
+  std::span<const u32>
+  FileIndices() const noexcept
+  {
+    const auto sz = std::size(mIndices);
+    for (auto i = 0ul; i < sz; ++i) {
+      if (mIndices[i] == EMPTY_VALUE) {
+        return std::span<const u32>{mIndices.data(), i};
+      }
+    }
+    return mIndices;
+  }
+};
+
 /**
  * The processed Line Number Program Header. For the raw byte-to-byte representation see LineHeader4/5
  */
 struct LNPHeader
 {
-  using FileEntryContainer = std::unordered_map<std::string, u32>;
+  using FileEntryContainer = std::unordered_map<std::string, FileEntryIndexVector>;
   NO_COPY_DEFAULTED_MOVE(LNPHeader);
   using shr_ptr = std::shared_ptr<LNPHeader>;
   using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;
@@ -98,10 +146,10 @@ struct LNPHeader
 private:
   void CacheLNPFilePaths() noexcept;
   Path CompileDirectoryJoin(const Path &p) const noexcept;
-  Path FileEntryToPath(const FileEntry& fileEntry) noexcept;
+  Path FileEntryToPath(const FileEntry &fileEntry) noexcept;
   std::vector<LNPFilePath> mFilePaths;
   FileEntryContainer mFileToFileIndex;
-  const char* mCompilationUnitBuildDirectory{nullptr};
+  const char *mCompilationUnitBuildDirectory{nullptr};
 };
 
 struct LineTableEntry
@@ -260,26 +308,22 @@ private:
   std::vector<LineTableRange> mLineTableRanges;
   AddressRange mSpan{nullptr, nullptr};
   const Elf *elf;
-  u32 mLineInfoFileIndex;
+  FileEntryIndexVector mLineInfoFileIndices;
+
   bool IsComputed() const noexcept;
   void ComputeLineTableForThis() noexcept;
   SourceCodeFile(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
-                 u32 fileIndex) noexcept;
+                 FileEntryIndexVector fileIndices) noexcept;
 
 public:
   Immutable<std::filesystem::path> full_path;
-  static SourceCodeFile::Ref Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
-                                    u32 lnpFileIndex) noexcept;
+  static SourceCodeFile::Ref Create(sym::CompilationUnit *compilationUnit, const Elf *elf,
+                                    std::filesystem::path path, FileEntryIndexVector fileIndices) noexcept;
   sym::CompilationUnit *GetOwningCompilationUnit() const noexcept;
   auto address_bounds() noexcept -> AddressRange;
   bool HasAddressRange() noexcept;
   void ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) noexcept;
-  void SetLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept;
-  u32
-  GetFileIndex() const noexcept
-  {
-    return mLineInfoFileIndex;
-  }
+  void AddLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept;
 
   constexpr AddrPtr
   StartAddress() const noexcept

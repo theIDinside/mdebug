@@ -143,7 +143,7 @@ struct RemoteProcess
   /** Threads we encounter when we attach to a remote process. */
   std::vector<Thread> threads;
   /** The newly created Tracee Command Interface for the remote process. */
-  GdbRemoteCommander::OwnPtr tc;
+  std::unique_ptr<GdbRemoteCommander> tc;
 };
 // Unlike PtraceCommander, which *is* initialized fully on construction, a remote session behaves and looks
 // substantially different When a Ptrace session starts, we are making a ptrace(ATTACH, pid) - thus starting the

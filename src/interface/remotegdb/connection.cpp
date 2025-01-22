@@ -10,15 +10,12 @@
 #include <initializer_list>
 #include <notify_pipe.h>
 #include <mdbsys/ptrace.h>
-#include <string>
 #include <tracer.h>
 #include <type_traits>
 #include <utils/enumerator.h>
-#include <utils/expected.h>
 #include <utils/logger.h>
 #include <utils/pipes.h>
 #include <utils/scope_defer.h>
-#include <utils/scoped_fd.h>
 #include <utils/sync_barrier.h>
 #include <utils/util.h>
 // system includes
@@ -31,11 +28,8 @@
 #include <iterator>
 #include <netinet/in.h>
 #include <numeric>
-#include <string_view>
-#include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/user.h>
-#include <thread>
 #include <unistd.h>
 
 namespace gdb {
@@ -726,7 +720,7 @@ RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload
         const auto register_number = RemoteConnection::parse_hexdigits(arg);
         auto contents = val;
 
-        auto decoded = gdb::decode_rle_to_str(contents, dec_buf, DecodeBufferSize);
+        auto decoded = gdb::DecodeRunLengthEncToStringView(contents, dec_buf, DecodeBufferSize);
         auto &[no, reg_contents] = parser.registers.emplace_back(register_number.value(), std::vector<u8>{});
         reg_contents.reserve(decoded.length() / 2);
         const auto sz = decoded.size();
@@ -1095,12 +1089,12 @@ RemoteConnection::execute_command(qXferCommand &cmd, u32 offset, int timeout) no
   const auto param = cmd_buf + cmd.fmt.size() + annex_sz + 1;
 
   while (true) {
-    auto ptr = format_value(param, offset);
+    auto ptr = FormatValue(param, offset);
     if (ptr == nullptr) {
       return false;
     }
     *ptr = ',';
-    ptr = format_value(++ptr, cmd.length);
+    ptr = FormatValue(++ptr, cmd.length);
     if (ptr == nullptr) {
       return false;
     }

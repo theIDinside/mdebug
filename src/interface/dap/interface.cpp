@@ -2,15 +2,12 @@
 #include "interface.h"
 #include "../../event_queue.h"
 #include "../../tracer.h"
-#include "../../utils/logger.h"
 #include "../ui_result.h"
 #include "commands.h"
 #include "common.h"
 #include "events.h"
 #include "lib/arena_allocator.h"
 #include "parse_buffer.h"
-#include "utils/util.h"
-#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
@@ -24,6 +21,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <utils/signals.h>
+#include <vector>
 namespace ui::dap {
 using namespace std::string_literals;
 
@@ -104,9 +102,10 @@ static constexpr std::string_view strings[]{
 
 using json = nlohmann::json;
 
-DAP::DAP(Tracer *tracer, int tracer_input_fd, int tracer_output_fd) noexcept
-    : tracer{tracer}, tracer_in_fd(tracer_input_fd), tracer_out_fd(tracer_output_fd), keep_running(true),
-      mUIResultLock{}, events_queue{}, seq(0)
+DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
+    : mTracerInputFileDescriptor(tracerInputFileDescriptor),
+      mTracerOutputFileDescriptor(tracerOutputFileDescriptor), keep_running(true), mUIResultLock{}, events_queue{},
+      seq(0)
 {
   auto [r, w] = utils::Notifier::notify_pipe();
   new_client_notifier = utils::Notifier::notify_pipe();
@@ -130,31 +129,31 @@ DAP::pop_event() noexcept
 }
 
 void
-DAP::write_protocol_message(std::string_view msg) noexcept
+DAP::WriteProtocolMessage(std::string_view msg) noexcept
 {
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
   CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
-  const auto headerWrite = write(tracer_out_fd, header.data(), header.size());
+  const auto headerWrite = write(mTracerOutputFileDescriptor, header.data(), header.size());
   VERIFY(headerWrite != -1 && headerWrite == header.size(),
          "Did not write entire header or some other error occured: {}", headerWrite);
-  const auto msgWrite = write(tracer_out_fd, msg.data(), msg.size());
+  const auto msgWrite = write(mTracerOutputFileDescriptor, msg.data(), msg.size());
   VERIFY(msgWrite != -1 && msgWrite == msg.size(), "Did not write entire message or some other error occured: {}",
          msgWrite);
 }
 
 void
-DAP::start_interface() noexcept
+DAP::StartIOPolling(std::stop_token& token) noexcept
 {
   utils::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
-  new_client({.t = DebugAdapterClient::createStandardIOConnection()});
+  NewClient({.t = DebugAdapterClient::CreateStandardIOConnection()});
 
-  while (keep_running) {
-    one_poll(sources.size());
+  while (keep_running && !token.stop_requested()) {
+    DoOnePoll(sources.size());
   }
 }
 
 void
-DAP::init_poll(pollfd *fds)
+DAP::InitPolling(pollfd *fds)
 {
   auto index = 0;
   for (const auto &[fd, src, client] : sources) {
@@ -163,19 +162,19 @@ DAP::init_poll(pollfd *fds)
 }
 
 void
-DAP::add_source(NotifSource source) noexcept
+DAP::AddPollingSource(NotifSource source) noexcept
 {
   sources.push_back(source);
 }
 
 void
-DAP::one_poll(u32 notifier_queue_size) noexcept
+DAP::DoOnePoll(u32 notifier_queue_size) noexcept
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wvla-cxx-extension"
   pollfd fds[notifier_queue_size];
 #pragma clang diagnostic pop
-  init_poll(fds);
+  InitPolling(fds);
   auto ready = poll(fds, notifier_queue_size, -1);
   VERIFY(ready != -1, "polling failed: {}", strerror(errno));
   if (ready == 0) {
@@ -191,17 +190,17 @@ DAP::one_poll(u32 notifier_queue_size) noexcept
         new_client_notifier.read.consume_expected();
         break;
       case InterfaceNotificationSource::DebugAdapterClient:
-        client->commands_read();
+        client->ReadPendingCommands();
         break;
       case InterfaceNotificationSource::ClientStdout: {
-        auto tty = client->tty();
+        auto tty = client->GetTtyFileDescriptor();
         ASSERT(tty.has_value(), "DAP Client has invalid configuration");
         const auto bytes_read = read(*tty, tracee_stdout_buffer, 4096 * 3);
         if (bytes_read == -1) {
           continue;
         }
         std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-        client->write(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(
+        client->WriteSerializedProtocolMessage(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(
           0, mTemporaryArena->ScopeAllocation().GetAllocator()));
       } break;
       }
@@ -210,15 +209,15 @@ DAP::one_poll(u32 notifier_queue_size) noexcept
 }
 
 void
-DAP::new_client(utils::OwningPointer<DebugAdapterClient> client)
+DAP::NewClient(utils::OwningPointer<DebugAdapterClient> client)
 {
   clients.push_back(client);
-  add_source({client->read_fd(), InterfaceNotificationSource::DebugAdapterClient, client});
+  AddPollingSource({client->ReadFileDescriptor(), InterfaceNotificationSource::DebugAdapterClient, client});
   new_client_notifier.write.notify();
 }
 
 void
-DebugAdapterClient::commands_read() noexcept
+DebugAdapterClient::ReadPendingCommands() noexcept
 {
   if (!parse_swapbuffer.expect_read_from_fd(in)) {
     return;
@@ -265,17 +264,17 @@ SetNonBlocking(int fd)
 }
 
 void
-DebugAdapterClient::set_tty_out(int fd) noexcept
+DebugAdapterClient::SetTtyOut(int fd) noexcept
 {
   ASSERT(tty_fd == -1, "TTY fd was already set!");
   tty_fd = fd;
-  auto dap = Tracer::Instance->dap;
+  auto dap = Tracer::Get().dap;
   dap->configure_tty(fd);
-  dap->add_source({fd, InterfaceNotificationSource::ClientStdout, this});
+  dap->AddPollingSource({fd, InterfaceNotificationSource::ClientStdout, this});
 }
 
 std::optional<int>
-DebugAdapterClient::tty() const noexcept
+DebugAdapterClient::GetTtyFileDescriptor() const noexcept
 {
   if (tty_fd != -1) {
     return tty_fd;
@@ -284,13 +283,13 @@ DebugAdapterClient::tty() const noexcept
 }
 
 TraceeController *
-DebugAdapterClient::supervisor() const noexcept
+DebugAdapterClient::GetSupervisor() const noexcept
 {
   return tc;
 }
 
 void
-DebugAdapterClient::set_session_type(DapClientSession type) noexcept
+DebugAdapterClient::SetDebugAdapterSessionType(DapClientSession type) noexcept
 {
   session_type = type;
 }
@@ -298,6 +297,7 @@ DebugAdapterClient::set_session_type(DapClientSession type) noexcept
 void
 DebugAdapterClient::ShutDown() noexcept
 {
+  FlushEvents();
   if (fs::exists(socket_path)) {
     unlink(socket_path.c_str());
     // means that in and out are of a socket, and not stdio
@@ -340,19 +340,23 @@ DebugAdapterClient::FlushEvents() noexcept
     }
   }
 
-  auto allocator = mEventsAllocator.get()->ScopeAllocation();
   for (auto evt : std::span{tmp, count}) {
+    auto allocator = mEventsAllocator.get()->ScopeAllocation();
     auto result = evt->Serialize(0, allocator);
-    write(result);
+    WriteSerializedProtocolMessage(result);
     delete evt;
   }
 }
 
 void
-DAP::notify_new_message() noexcept
+DebugAdapterClient::AddChild(DebugAdapterClient *child) noexcept
 {
-  PERFORM_ASSERT(posted_event_notifier.notify(), "failed to notify DAP interface of new message due to {}",
-                 strerror(errno));
+  mChildren.push_back(child);
+}
+void
+DebugAdapterClient::RemoveChild(DebugAdapterClient *child) noexcept
+{
+  mChildren.erase(std::find(mChildren.begin(), mChildren.end(), child));
 }
 
 void
@@ -362,7 +366,7 @@ DAP::flush_events() noexcept
   while (!events_queue.empty()) {
     auto evt = pop_event();
     const auto protocol_msg = evt->Serialize(0, tempAlloc);
-    write_protocol_message(protocol_msg);
+    WriteProtocolMessage(protocol_msg);
     delete evt;
   }
 }
@@ -466,7 +470,7 @@ generate_random_alphanumeric_string(size_t length)
 
 /*static*/
 DebugAdapterClient *
-DebugAdapterClient::createSocketConnection(const DebugAdapterClient &client) noexcept
+DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client) noexcept
 {
   fs::path socket_path = fmt::format("/tmp/midas-{}", generate_random_alphanumeric_string(15));
   if (fs::exists(socket_path)) {
@@ -493,14 +497,18 @@ DebugAdapterClient::createSocketConnection(const DebugAdapterClient &client) noe
     R"({{"seq":1,"type":"event","event":"startDebugging","body":{{"configuration":{{"path":"{}"}}}}}})",
     socket_path.c_str());
 
-  client.write(reverseRequest);
+  client.WriteSerializedProtocolMessage(reverseRequest);
 
   for (;;) {
     auto accepted = accept(socket_fd, nullptr, nullptr);
     if (accepted != -1) {
-      return new DebugAdapterClient{child_session(client.session_type), std::move(socket_path), accepted};
+      auto newClient =
+        new DebugAdapterClient{child_session(client.session_type), std::move(socket_path), accepted};
+      client.AddChild(newClient);
+      return newClient;
     }
   }
+  PANIC("Failed to set up child - this kind of error handling not yet implemented");
 }
 
 alloc::ArenaAllocator *
@@ -516,16 +524,16 @@ DebugAdapterClient::GetResponseArenaAllocator() noexcept
 }
 
 DebugAdapterClient *
-DebugAdapterClient::createStandardIOConnection() noexcept
+DebugAdapterClient::CreateStandardIOConnection() noexcept
 {
   VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
   return new DebugAdapterClient{DapClientSession::None, STDIN_FILENO, STDOUT_FILENO};
 }
 
 void
-DebugAdapterClient::client_configured(TraceeController *supervisor, std::optional<int> ttyFileDescriptor) noexcept
+DebugAdapterClient::ClientConfigured(TraceeController *supervisor, std::optional<int> ttyFileDescriptor) noexcept
 {
-  Tracer::Instance->dap->new_client({this});
+  Tracer::Get().dap->NewClient({this});
   tc = supervisor;
   tc->ConfigureDapClient(this);
   if (ttyFileDescriptor) {
@@ -543,17 +551,17 @@ DebugAdapterClient::PostEvent(ui::UIResultPtr event)
 
   auto allocator = mEventsAllocator.get()->ScopeAllocation();
   auto result = event->Serialize(0, allocator);
-  write(result);
+  WriteSerializedProtocolMessage(result);
   delete event;
 }
 
 int
-DebugAdapterClient::read_fd() const noexcept
+DebugAdapterClient::ReadFileDescriptor() const noexcept
 {
   return in;
 }
 int
-DebugAdapterClient::out_fd() const noexcept
+DebugAdapterClient::WriteFileDescriptor() const noexcept
 {
   return out;
 }
@@ -561,7 +569,7 @@ DebugAdapterClient::out_fd() const noexcept
 static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
 
 bool
-DebugAdapterClient::write(std::string_view output) const noexcept
+DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) const noexcept
 {
   char header_buffer[128]{"Content-Length: "};
   static constexpr auto header_end = "\r\n\r\n"sv;

@@ -17,6 +17,12 @@ namespace tc {
 class TraceeCommandInterface;
 };
 
+enum class BreakpointBehavior
+{
+  StopAllThreadsWhenHit,
+  StopOnlyThreadThatHit
+};
+
 enum class BreakpointRequestKind : u8
 {
   source,
@@ -418,7 +424,8 @@ public:
   void update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept;
 
   virtual UserBpSpec *user_spec() const noexcept;
-  virtual std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints& breakpointStorage, TraceeController& tc, std::shared_ptr<BreakpointLocation> bp) noexcept;
+  virtual std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
+                                                          std::shared_ptr<BreakpointLocation> bp) noexcept;
   virtual bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept = 0;
 
   template <typename UserBreakpoint, typename... Args>
@@ -427,24 +434,23 @@ public:
   {
     return std::make_shared<UserBreakpoint>(std::move(param), std::move(args)...);
   }
-
 };
 
 class Breakpoint : public UserBreakpoint
 {
 protected:
   std::optional<Tid> stop_only;
-  bool stop_all_threads_when_hit;
+  BreakpointBehavior mBehavior;
   std::unique_ptr<UserBpSpec> bp_spec;
 
 public:
   explicit Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                      std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit,
-                      std::unique_ptr<UserBpSpec> &&spec) noexcept;
+                      std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept;
   ~Breakpoint() noexcept override = default;
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept override;
   UserBpSpec *user_spec() const noexcept override;
-  std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints& breakpointStorage, TraceeController& tc, std::shared_ptr<BreakpointLocation> bp) noexcept override;
+  std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
+                                                  std::shared_ptr<BreakpointLocation> bp) noexcept override;
 };
 
 class TemporaryBreakpoint : public Breakpoint
@@ -453,7 +459,7 @@ class TemporaryBreakpoint : public Breakpoint
 
 public:
   explicit TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                               std::optional<StopCondition> &&cond, bool stop_all_threads_when_hit) noexcept;
+                               std::optional<StopCondition> &&cond) noexcept;
   ~TemporaryBreakpoint() noexcept override = default;
   bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept override;
 };
@@ -548,8 +554,9 @@ public:
 
   template <typename BreakpointT, typename... UserBpArgs>
   void
-  CreateAndAddUserBreakpoint(TraceeController &tc, utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> &&loc_or_err,
-                  Tid tid, UserBpArgs &&...args)
+  CreateAndAddUserBreakpoint(TraceeController &tc,
+                             utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> &&loc_or_err, Tid tid,
+                             UserBpArgs &&...args)
   {
     auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
       RequiredUserParameters{

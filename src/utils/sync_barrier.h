@@ -48,12 +48,12 @@ public:
 
 private:
   Pipe pipe;
-  ShrPtr create_shared() noexcept;
+  std::shared_ptr<Barrier> create_shared() noexcept;
 };
 
 class BarrierWait
 {
-  Barrier::ShrPtr barrier;
+  std::shared_ptr<Barrier> barrier;
 
 public:
   void wait();
@@ -61,7 +61,7 @@ public:
 
 class BarrierNotify
 {
-  Barrier::ShrPtr barrier;
+  std::shared_ptr<Barrier> barrier;
 
 public:
   void notify();

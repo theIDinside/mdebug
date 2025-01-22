@@ -5,7 +5,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <chrono>
 
 class Tracer;
 class TraceeController;
@@ -87,7 +86,7 @@ concept HasValidation = requires(const Json &json) {
 
 struct UICommand
 {
-  dap::DebugAdapterClient *dap_client;
+  dap::DebugAdapterClient *mDAPClient;
 
 public:
   explicit UICommand(std::uint64_t seq) noexcept : seq(seq) {}
@@ -96,7 +95,7 @@ public:
   constexpr void
   SetDebugAdapterClient(dap::DebugAdapterClient &da) noexcept
   {
-    dap_client = &da;
+    mDAPClient = &da;
   }
 
   /* Executes the command. This is always performed in the Tracer thread (where all tracee controller actions are

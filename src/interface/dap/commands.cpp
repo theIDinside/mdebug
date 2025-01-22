@@ -1,27 +1,19 @@
 /** LICENSE TEMPLATE */
 #include "commands.h"
-#include "bp.h"
 #include "common.h"
 #include "event_queue.h"
 #include "events/event.h"
-#include "fmt/ranges.h"
-#include "interface/attach_args.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "interface/ui_command.h"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
-#include "types.h"
 #include "utils/logger.h"
 #include "utils/util.h"
 #include <algorithm>
 #include <fmt/core.h>
 #include <fmt/format.h>
-#include <interface/dap/interface.h>
 #include <iterator>
-#include <lib/arena_allocator.h>
-#include <memory_resource>
 #include <optional>
 #include <ptracestop_handlers.h>
 #include <string>
@@ -166,14 +158,14 @@ PauseResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
 UIResultPtr
 Pause::Execute() noexcept
 {
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(pauseArgs.threadId);
   if (task->is_stopped()) {
     return new PauseResponse{false, this};
   }
-  target->SetAndCallRunAction(task->mTid,
-                              std::make_shared<ptracestop::StopImmediately>(*target, *task, StoppedReason::Pause));
-  return new PauseResponse{true, this};
+  const bool success = target->SetAndCallRunAction(
+    task->mTid, std::make_shared<ptracestop::StopImmediately>(*target, *task, StoppedReason::Pause));
+  return new PauseResponse{success, this};
 }
 
 std::pmr::string
@@ -201,7 +193,7 @@ UIResultPtr
 ReverseContinue::Execute() noexcept
 {
   auto res = new ReverseContinueResponse{true, this};
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto ok = target->GetInterface().ReverseContinue();
   res->success = ok;
   return res;
@@ -231,12 +223,12 @@ Continue::Execute() noexcept
 {
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   if (continue_all && !target->SomeTaskCanBeResumed()) {
     std::vector<Tid> running_tasks{};
-    for (const auto &t : target->GetThreads()) {
-      if (!t->is_stopped() || t->tracer_stopped) {
-        running_tasks.push_back(t->mTid);
+    for (const auto &entry : target->GetThreads()) {
+      if (!entry.mTask->is_stopped() || entry.mTask->tracer_stopped) {
+        running_tasks.push_back(entry.mTid);
       }
     }
     DBGLOG(core, "Denying continue request, target is running ([{}])", fmt::join(running_tasks, ", "));
@@ -261,13 +253,13 @@ Continue::Execute() noexcept
 UIResultPtr
 ContinueAll::Execute() noexcept
 {
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto res = new ContinueAllResponse{true, this, target->TaskLeaderTid()};
   auto result =
     target->ResumeTarget(tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1});
   res->success = result;
   if (result) {
-    dap_client->PushDelayedEvent(new ContinuedEvent{res->mTaskLeader, true});
+    mDAPClient->PushDelayedEvent(new ContinuedEvent{res->mTaskLeader, true});
   }
   return res;
 }
@@ -286,9 +278,9 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 UIResultPtr
 PauseAll::Execute() noexcept
 {
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto tid = target->TaskLeaderTid();
-  target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = dap_client, tid]() {
+  target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = mDAPClient, tid]() {
     client->PostEvent(new StoppedEvent{StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
   });
   auto res = new PauseAllResponse{true, this};
@@ -325,25 +317,27 @@ NextResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
 UIResultPtr
 Next::Execute() noexcept
 {
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->is_stopped()) {
     return new NextResponse{false, this};
   }
 
+  bool success = false;
   switch (granularity) {
   case SteppingGranularity::Instruction:
-    target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::InstructionStep>(*target, *task, 1));
+    success =
+      target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::InstructionStep>(*target, *task, 1));
     break;
   case SteppingGranularity::Line:
-    target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::LineStep>(*target, *task, 1));
+    success = target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::LineStep>(*target, *task, 1));
     break;
   case SteppingGranularity::LogicalBreakpointLocation:
     TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
     break;
   }
-  return new NextResponse{true, this};
+  return new NextResponse{success, this};
 }
 
 std::pmr::string
@@ -367,7 +361,7 @@ StepInResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 UIResultPtr
 StepIn::Execute() noexcept
 {
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->is_stopped()) {
@@ -383,8 +377,8 @@ StepIn::Execute() noexcept
       std::nullopt};
   }
 
-  target->SetAndCallRunAction(task->mTid, std::move(proceeder));
-  return new StepInResponse{true, this};
+  const bool success = target->SetAndCallRunAction(task->mTid, std::move(proceeder));
+  return new StepInResponse{success, this};
 }
 
 std::pmr::string
@@ -408,7 +402,7 @@ StepOutResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
 UIResultPtr
 StepOut::Execute() noexcept
 {
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->is_stopped()) {
@@ -424,9 +418,9 @@ StepOut::Execute() noexcept
   }
   auto user = target->GetUserBreakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->mTid,
                                                                              task->mTid);
-  target->SetAndCallRunAction(task->mTid,
-                              std::make_shared<ptracestop::FinishFunction>(*target, *task, user, false));
-  return new StepOutResponse{true, this};
+  bool success = target->SetAndCallRunAction(
+    task->mTid, std::make_shared<ptracestop::FinishFunction>(*target, *task, user, false));
+  return new StepOutResponse{success, this};
 }
 
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd,
@@ -488,7 +482,7 @@ UIResultPtr
 SetBreakpoints::Execute() noexcept
 {
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   if (!target) {
     return res;
   }
@@ -551,7 +545,7 @@ SetInstructionBreakpoints::Execute() noexcept
     ibkpt["instructionReference"].get_to(addr_str);
     bps.insert(InstructionBreakpointSpec{.instructionReference = std::string{addr_str}, .condition = {}});
   }
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   target->SetInstructionBreakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
@@ -591,7 +585,7 @@ SetFunctionBreakpoints::Execute() noexcept
 
     bkpts.insert(FunctionBreakpointSpec{fn_name, std::nullopt, is_regex});
   }
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
 
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().all_users()) {
@@ -624,7 +618,7 @@ WriteMemory::WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, st
 UIResultPtr
 WriteMemory::Execute() noexcept
 {
-  auto supervisor = dap_client->supervisor();
+  auto supervisor = mDAPClient->GetSupervisor();
   auto response = new WriteMemoryResponse{false, this};
   response->bytes_written = 0;
   if (address) {
@@ -664,7 +658,7 @@ UIResultPtr
 ReadMemory::Execute() noexcept
 {
   if (address) {
-    auto sv = dap_client->supervisor()->ReadToVector(*address, bytes);
+    auto sv = mDAPClient->GetSupervisor()->ReadToVector(*address, bytes);
     auto res = new ReadMemoryResponse{true, this};
     res->data_base64 = utils::encode_base64(sv->span());
     res->first_readable_address = *address;
@@ -691,17 +685,17 @@ ConfigurationDoneResponse::Serialize(int seq, std::pmr::memory_resource *arenaAl
 UIResultPtr
 ConfigurationDone::Execute() noexcept
 {
-  Tracer::Instance->config_done(dap_client);
-  switch (dap_client->supervisor()->GetSessionType()) {
+  Tracer::Get().config_done(mDAPClient);
+  switch (mDAPClient->GetSupervisor()->GetSessionType()) {
   case TargetSession::Launched: {
-    DBGLOG(core, "configurationDone - resuming target {}", dap_client->supervisor()->TaskLeaderTid());
+    DBGLOG(core, "configurationDone - resuming target {}", mDAPClient->GetSupervisor()->TaskLeaderTid());
     using namespace tc;
-    dap_client->supervisor()->ResumeTarget(
+    mDAPClient->GetSupervisor()->ResumeTarget(
       tc::ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
     break;
   }
   case TargetSession::Attached:
-    DBGLOG(core, "configurationDone - doing nothing {}", dap_client->supervisor()->TaskLeaderTid());
+    DBGLOG(core, "configurationDone - doing nothing {}", mDAPClient->GetSupervisor()->TaskLeaderTid());
     break;
   }
 
@@ -735,21 +729,23 @@ DisconnectResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
 }
 
 Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
-    : UICommand(seq), restart(restart), terminate_tracee(terminate_debuggee), suspend_tracee(suspend_debuggee)
+    : UICommand(seq), restart(restart), mTerminateTracee(terminate_debuggee), mSuspendTracee(suspend_debuggee)
 {
 }
 
 UIResultPtr
 Disconnect::Execute() noexcept
 {
-  const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
-  if (ok) {
-    Tracer::Instance->erase_target(
-      [this](auto &ptr) { return ptr->GetDebugAdapterProtocolClient() == dap_client; });
-    Tracer::Instance->KeepAlive = !Tracer::Instance->mTracedProcesses.empty();
+  // We don't allow for child sessions to be terminated, and not have the entire application torn down.
+  // We only allow for suspension, or detaching individual child sessions. This behavior is also mimicked for RR
+  // sessions, as destroying a process would invalidate the entire application trace.
+  if (mTerminateTracee) {
+    Tracer::Get().TerminateSession();
+  } else {
+    mDAPClient->GetSupervisor()->Disconnect();
   }
 
-  return new DisconnectResponse{ok, this};
+  return new DisconnectResponse{true, this};
 }
 
 InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept
@@ -815,8 +811,8 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
     R"({{"seq":0,"request_seq":{},"type":"response","success":true,"command":"initialize","body":{}}})",
     request_seq, cfg_body.dump());
 
-  client->write(payload);
-  client->write(InitializedEvent{}.Serialize(0, arenaAllocator));
+  client->WriteSerializedProtocolMessage(payload);
+  client->WriteSerializedProtocolMessage(InitializedEvent{}.Serialize(0, arenaAllocator));
   return std::pmr::string{arenaAllocator};
 }
 
@@ -831,16 +827,17 @@ LaunchResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   return result;
 }
 
-Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program,
-               std::vector<std::string> &&program_args) noexcept
-    : UICommand(seq), stopOnEntry(stopOnEntry), program(std::move(program)), program_args(std::move(program_args))
+Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program, std::vector<std::string> &&program_args,
+               std::optional<BreakpointBehavior> breakpointBehavior) noexcept
+    : UICommand(seq), mStopOnEntry(stopOnEntry), mProgram(std::move(program)),
+      mProgramArgs(std::move(program_args)), mBreakpointBehavior(breakpointBehavior)
 {
 }
 
 UIResultPtr
 Launch::Execute() noexcept
 {
-  Tracer::Instance->launch(dap_client, stopOnEntry, program, std::move(program_args));
+  Tracer::Get().launch(mDAPClient, mStopOnEntry, mProgram, std::move(mProgramArgs), mBreakpointBehavior);
   return new LaunchResponse{true, this};
 }
 
@@ -860,7 +857,7 @@ Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), 
 UIResultPtr
 Attach::Execute() noexcept
 {
-  const auto res = Tracer::Instance->attach(attachArgs);
+  const auto res = Tracer::Get().Attach(attachArgs);
   return new AttachResponse{res, this};
 }
 
@@ -878,12 +875,8 @@ TerminateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
 UIResultPtr
 Terminate::Execute() noexcept
 {
-  const auto ok = dap_client->supervisor()->GetInterface().DoDisconnect(true);
-  if (ok) {
-    EventSystem::Get().PushInternalEvent(InvalidateSupervisor{dap_client->supervisor()->TaskLeaderTid()});
-    Tracer::Instance->KeepAlive = !Tracer::Instance->mTracedProcesses.empty();
-  }
-  return new TerminateResponse{ok, this};
+  Tracer::Get().TerminateSession();
+  return new TerminateResponse{true, this};
 }
 
 std::pmr::string
@@ -907,7 +900,7 @@ Threads::Execute() noexcept
   // therefore we just hand back the threads of the currently active target
   auto response = new ThreadsResponse{true, this};
 
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
 
   response->threads.reserve(target->GetThreads().size());
   auto &it = target->GetInterface();
@@ -917,18 +910,15 @@ Threads::Execute() noexcept
     ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
     for (const auto thr : res) {
       if (std::ranges::none_of(target->GetThreads(),
-                               [t = thr.tid](const std::shared_ptr<TaskInfo> &task) { return task->mTid == t; })) {
+                               [t = thr.tid](const auto &entry) { return entry.mTid == t; })) {
         target->AddTask(TaskInfo::CreateTask(target->GetInterface(), thr.tid, false));
       }
     }
-
-    target->RemoveTaskIf([&](const auto &thread) {
-      return std::none_of(res.begin(), res.end(), [&](const auto pidtid) { return pidtid.tid == thread->mTid; });
-    });
+    target->RemoveTasksNotInSet(res);
   }
 
-  for (const auto &thread : target->GetThreads()) {
-    const auto tid = thread->mTid;
+  for (const auto &entry : target->GetThreads()) {
+    const auto tid = entry.mTid;
     response->threads.push_back(Thread{.id = tid, .name = it.GetThreadName(tid)});
   }
   return response;
@@ -976,7 +966,7 @@ UIResultPtr
 StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
-  auto target = dap_client->supervisor();
+  auto target = mDAPClient->GetSupervisor();
   if (!target || target->IsExited()) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Process has already died: {}", threadId), {}};
   }
@@ -1050,7 +1040,7 @@ ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> s
 UIResultPtr
 Scopes::Execute() noexcept
 {
-  auto ctx = Tracer::Instance->var_context(frameId);
+  auto ctx = Tracer::Get().GetVariableContext(frameId);
   if (!ctx.valid_context() || ctx.type != ContextType::Frame) {
     return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", frameId), {}};
   }
@@ -1078,7 +1068,7 @@ Disassemble::Execute() noexcept
     int remaining = ins_count;
     if (ins_offset < 0) {
       const int negative_offset = std::abs(ins_offset);
-      sym::zydis_disasm_backwards(dap_client->supervisor(), address.value(), static_cast<u32>(negative_offset),
+      sym::zydis_disasm_backwards(mDAPClient->GetSupervisor(), address.value(), static_cast<u32>(negative_offset),
                                   res->instructions);
       if (negative_offset < ins_count) {
         for (auto i = 0u; i < res->instructions.size(); i++) {
@@ -1101,7 +1091,7 @@ Disassemble::Execute() noexcept
     }
 
     if (remaining > 0) {
-      sym::zydis_disasm(dap_client->supervisor(), address.value(), static_cast<u32>(std::abs(ins_offset)),
+      sym::zydis_disasm(mDAPClient->GetSupervisor(), address.value(), static_cast<u32>(std::abs(ins_offset)),
                         remaining, res->instructions);
     }
     return res;
@@ -1143,7 +1133,7 @@ Evaluate::Execute() noexcept
     [[fallthrough]];
   case EvaluationContext::Repl: {
     auto result =
-      Tracer::Instance->EvaluateDebugConsoleExpression(expr, true, dap_client->GetResponseArenaAllocator());
+      Tracer::Get().EvaluateDebugConsoleExpression(expr, true, mDAPClient->GetResponseArenaAllocator());
     return new EvaluateResponse{true, this, {}, std::move(result), {}, {}};
   }
   case EvaluationContext::Hover:
@@ -1235,7 +1225,7 @@ Variables::error(std::string &&msg) noexcept
 UIResultPtr
 Variables::Execute() noexcept
 {
-  auto context = Tracer::Instance->var_context(var_ref);
+  auto context = Tracer::Get().GetVariableContext(var_ref);
   if (!context.valid_context()) {
     return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
   }
@@ -1408,6 +1398,17 @@ ParseCustomRequestCommand(const DebugAdapterClient &client, u64 seq, const std::
   return new InvalidArgs{seq, cmd_name, {}};
 }
 
+std::optional<std::string_view>
+PullStringValue(std::string_view name, const nlohmann::json &value) noexcept
+{
+  if (value.contains(name) && value[name].is_string()) {
+    std::string_view contents;
+    value[name].get_to(contents);
+    return std::optional<std::string_view>{contents};
+  }
+  return {};
+}
+
 ui::UICommand *
 ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) noexcept
 {
@@ -1416,7 +1417,8 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   auto obj = nlohmann::json::parse(packet, nullptr, false);
   std::string_view cmd_name;
   const std::string req = obj.dump();
-  DBGLOG(core, "[{}]: parsed request: {}", client.supervisor() ? client.supervisor()->TaskLeaderTid() : 0, req);
+  DBGLOG(core, "[{}]: parsed request: {}", client.GetSupervisor() ? client.GetSupervisor()->TaskLeaderTid() : 0,
+         req);
   obj["command"].get_to(cmd_name);
   ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
   const u64 seq = obj["seq"];
@@ -1515,7 +1517,20 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     if (args.contains("cwd")) {
     }
 
-    return new Launch{seq, stopOnEntry, std::move(path), std::move(prog_args)};
+    const auto behaviorSetting =
+      PullStringValue("breakpointBehavior", args)
+        .and_then([](const std::string_view &behavior) -> std::optional<BreakpointBehavior> {
+          if (behavior == "Stop all threads") {
+            return BreakpointBehavior::StopAllThreadsWhenHit;
+          } else if (behavior == "Stop single thread") {
+            return BreakpointBehavior::StopOnlyThreadThatHit;
+          } else {
+            return std::nullopt;
+          }
+        })
+        .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
+
+    return new Launch{seq, stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting};
   }
   case CommandType::LoadedSources:
     TODO("Command::LoadedSources");

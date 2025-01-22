@@ -38,7 +38,7 @@ public:
     result.reserve(mLineNumberProgramHeader->mFileEntries.size() + 1);
     result.resize(mLineNumberProgramHeader->mFileEntries.size() + 1);
 
-    auto current_file = 1;
+    auto current_file = mTable.front().file;
     auto currentIndex = 0;
 
     result[current_file].push_back({0, 0});
@@ -334,7 +334,8 @@ CompilationUnit::CompilationUnit(dw::UnitData *unitData) noexcept
 void
 CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
-  DBGLOG(dwarf, "cu=0x{:x} low_pc={} .. {} ({})", mUnitData->SectionOffset(), lowest, end_exclusive, mUnitData->GetObjectFile()->GetFilePath().filename().c_str());
+  DBGLOG(dwarf, "cu=0x{:x} low_pc={} .. {} ({})", mUnitData->SectionOffset(), lowest, end_exclusive,
+         mUnitData->GetObjectFile()->GetFilePath().filename().c_str());
   mPcStart = lowest;
   mPcEndExclusive = end_exclusive;
 }
@@ -351,7 +352,9 @@ CompilationUnit::GetLineTable() const noexcept
   return mLineTable;
 }
 
-std::span<const AddressRange> CompilationUnit::AddressRanges() const noexcept {
+std::span<const AddressRange>
+CompilationUnit::AddressRanges() const noexcept
+{
   return mAddressRanges;
 }
 
@@ -475,9 +478,14 @@ CompilationUnit::ComputeLineTable() noexcept
   computed = true;
 
   const auto sourceCodeTableMapping = state.CreateSubFileMappings();
+  // Our "hash"-function.
+  const auto hashIndex = [v = mLineNumberProgram->version](u32 index) -> u32 {
+    // u8 4-5 will overflow and we reduce it to 1.
+    return index + std::min<u32>(u32{std::to_underlying(v)} - u32{std::to_underlying(DwarfVersion::D5)}, 1);
+  };
 
-  for (auto i = 0; i < sourceCodeTableMapping.size() - 1; ++i) {
-    mSourceCodeFiles[i]->SetLineTableRanges(sourceCodeTableMapping[i + 1]);
+  for (auto i = 0u; i < sourceCodeTableMapping.size() - 1; ++i) {
+    mSourceCodeFileMappings[i]->AddLineTableRanges(sourceCodeTableMapping[hashIndex(i)]);
   }
 }
 
@@ -498,19 +506,18 @@ CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
          mUnitData->SectionOffset(), mCompilationUnitName);
 
   for (const auto &[fullPath, v] : mLineNumberProgram->FileEntries()) {
-    ASSERT(v > 0,
-           "We don't want to duplicate add the compilation unit source code file with the source code file.");
-    mSourceCodeFiles.push_back(dw::SourceCodeFile::Create(this, objectFile->GetElf(), fullPath, v));
+    auto ptr = dw::SourceCodeFile::Create(this, objectFile->GetElf(), fullPath, v);
+    for (auto index : v.FileIndices()) {
+      ASSERT(!mSourceCodeFileMappings.contains(index), "index {} already added!", index);
+      mSourceCodeFileMappings[index] = ptr;
+    }
   }
-
-  std::sort(mSourceCodeFiles.begin(), mSourceCodeFiles.end(),
-            [](auto &a, auto &b) { return a->GetFileIndex() < b->GetFileIndex(); });
 }
 
-std::span<std::shared_ptr<dw::SourceCodeFile>>
+std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>> &
 CompilationUnit::sources() noexcept
 {
-  return mSourceCodeFiles;
+  return mSourceCodeFileMappings;
 }
 
 void
@@ -578,20 +585,12 @@ CompilationUnit::GetFileByLineProgramIndex(u32 index) noexcept
 {
   // TODO(simon): do some form of O(1) lookup instead. But there's trickiness here. I don't want it to be
   // complicated but
-  //  in DWARF5, the line number program header contains the compilation unit name as well as the source code name,
-  //  so foo.cpp, will be 0 and 1 (or some other number) to solve that I just said fuck it, put them in a vector
-  //  and walk the list for now, but it is ugly. I've seen compilation units in libxul.so that has up towards 800
-  //  files, but even that should not be that to walk, really, even if it can be done much much faster. It's not a
-  //  bottle neck right now though.
 
-  auto f = std::lower_bound(mSourceCodeFiles.begin(), mSourceCodeFiles.end(), index,
-                            [](const auto &a, u32 index) -> bool { return a->GetFileIndex() < index; });
-
-  if (f == std::end(mSourceCodeFiles) || (*f)->GetFileIndex() != index) {
-    return nullptr;
+  if (auto ptr = mSourceCodeFileMappings[index]; ptr) {
+    return ptr.get();
   }
 
-  return (*f).get();
+  return nullptr;
 }
 
 AddrPtr
@@ -904,7 +903,7 @@ AddressToCompilationUnitMap::AddressToCompilationUnitMap() noexcept : mutex(), m
 std::vector<CompilationUnit *>
 AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 {
-  if (auto res = mapping.find(pc); res) {
+  if (auto res = mapping.Find(pc); res) {
     auto result = std::move(res.value());
     return result;
   } else {
@@ -927,7 +926,7 @@ AddressToCompilationUnitMap::add_cus(std::span<CompilationUnit *> compUnits) noe
 void
 AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept
 {
-  mapping.add_mapping(start, end, cu);
+  mapping.AddMapping(start, end, cu);
 }
 
 } // namespace sym

@@ -1,6 +1,7 @@
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -21,7 +22,7 @@ printDirectoryContents(const std::string &path, std::optional<int> sleepPerItera
         ++dirEntryItem; // #ITERATE_DIR_ENTRY_BP
         if (sleepPerIteration) {
           // Make sure we handle signals properly.
-          if(iter == 500) {
+          if (iter == 500) {
             raise(SIGINT);
           }
           std::this_thread::sleep_for(std::chrono::milliseconds{*sleepPerIteration});
@@ -48,19 +49,38 @@ main(int argc, char *argv[])
   }
 
   std::optional<int> sleepTimeMilliseconds{};
-  if(argc > 2) {
+  if (argc > 2) {
     std::string_view sleepArg{argv[2]};
     int readInValue = 0;
     const auto res = std::from_chars(sleepArg.begin(), sleepArg.end(), readInValue);
-    if(res.ec == std::errc()) {
+    if (res.ec == std::errc()) {
       sleepTimeMilliseconds = readInValue;
     } else {
       std::cout << " failed to read sleep arg: " << sleepArg << " setting to default value 1ms";
     }
   }
 
+  using ThreadPool = std::vector<std::thread>;
+  ThreadPool pool;
+  std::mutex stdioLock{};
+  static bool keepRunning = true;
+  for (auto i = 0; i < 8; i++) {
+    pool.emplace_back(std::thread{[&stdioLock, num = i]() {
+      while (keepRunning) {
+        std::printf("thread %d going to sleep\n", num);
+        std::this_thread::sleep_for(std::chrono::milliseconds{400 + num * 30});
+      }
+    }});
+  }
+
+  atexit([]() { keepRunning = false; });
+
   std::string directoryPath = argv[1];
   printDirectoryContents(directoryPath, sleepTimeMilliseconds);
+  keepRunning = false;
+  for (auto& j : pool) {
+    j.join();
+  }
 
   return 0;
 }

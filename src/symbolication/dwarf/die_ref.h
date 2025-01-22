@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/indexing.h"
 #include <optional>
 #include <symbolication/dwarf_defs.h>
 

@@ -4,9 +4,12 @@
 #include "utils/immutable.h"
 #include "utils/macros.h"
 #include <fmt/format.h>
-#include <memory_resource>
 #include <string_view>
 #include <typedefs.h>
+
+namespace std::pmr {
+  class memory_resource;
+}
 
 class SymbolFile;
 class UserBreakpoint;

@@ -1,7 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "awaiter.h"
 #include "tracee_command_interface.h"
 #include "utils/macros.h"
 #include <link.h>
@@ -11,18 +10,9 @@ class TraceeController;
 
 namespace tc {
 
-struct ProcessState
-{
-  utils::ScopedFd procfs_memfd;
-  AwaiterThread::handle awaiter_thread;
-  Tid process_id;
-  TPtr<r_debug_extended> tracee_r_debug{nullptr};
-};
-
 class PtraceCommander final : public TraceeCommandInterface
 {
   utils::ScopedFd procfs_memfd;
-  AwaiterThread::handle awaiter_thread;
   Tid process_id;
 
   std::unordered_map<Tid, std::string> thread_names{};

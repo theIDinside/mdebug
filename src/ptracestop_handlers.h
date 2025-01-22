@@ -2,7 +2,9 @@
 #pragma once
 
 #include "interface/dap/dap_defs.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/dwarf/lnp.h"
+#include "utils/macros.h"
 #include <symbolication/callstack.h>
 #include <unordered_map>
 
@@ -130,41 +132,17 @@ class StopHandler
 public:
   StopHandler(TraceeController &tc) noexcept;
   virtual ~StopHandler() = default;
-
-  bool has_action_installed(TaskInfo *t) noexcept;
-  std::shared_ptr<ThreadProceedAction> get_proceed_action(const TaskInfo &t) noexcept;
-  void remove_action(const TaskInfo &t) noexcept;
-  void handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &should_resume) noexcept;
-
-  TraceEvent *prepare_core_from_waitstat(TaskInfo &info) noexcept;
-  void set_stop_all() noexcept;
-  constexpr void stop_on_clone() noexcept;
-  constexpr void stop_on_exec() noexcept;
-  constexpr void stop_on_thread_exit() noexcept;
-
-  void SetAndRunAction(Tid tid, std::shared_ptr<ThreadProceedAction>&& action) noexcept;
+  std::shared_ptr<ThreadProceedAction> GetProceedAction(const TaskInfo &t) noexcept;
+  void RemoveProceedAction(const TaskInfo &t) noexcept;
+  void DecideProceedFor(TaskInfo &info, const tc::ProcessedStopEvent &should_resume) noexcept;
+  TraceEvent *CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept;
 
   TraceeController &tc;
-
-  bool stop_all;
-  union
-  {
-    u8 bitset;
-    struct
-    {
-      bool padding : 3;
-      bool clone_stop : 1;
-      bool exec_stop : 1;
-      bool fork_stop : 1;
-      bool thread_exit_stop : 1;
-      bool ignore_bps : 1;
-    };
-  } event_settings;
 
 private:
   // native_ because it's generated from a WaitStatus event (and thus comes directly from ptrace, not a remote)
   TraceEvent *CreateTraceEventFromStopped(TaskInfo &t) noexcept;
-  std::unordered_map<Tid, std::shared_ptr<ThreadProceedAction>> proceed_actions;
+  std::unordered_map<Tid, std::shared_ptr<ThreadProceedAction>> mTaskProceedActions;
 };
 
 class StepInto final : public ThreadProceedAction
@@ -186,3 +164,35 @@ public:
 };
 
 } // namespace ptracestop
+
+using Proceed = ptracestop::ThreadProceedAction;
+
+enum class SchedulingConfig
+{
+  NormalResume,
+  OneExclusive,
+  StopAll
+};
+
+class TaskScheduler
+{
+  TraceeController *mSupervisor;
+  SchedulingConfig mScheduling;
+  std::optional<Tid> mExclusiveTask;
+  std::unordered_map<Tid, std::shared_ptr<Proceed>> mIndividualScheduler{};
+  void RemoveIndividualScheduler(Tid tid) noexcept;
+  void RemoveAllIndividualSchedulers(std::optional<Tid> keep = {}) noexcept;
+
+public:
+  TaskScheduler(TraceeController *supervisor) noexcept;
+  ~TaskScheduler() noexcept = default;
+  bool SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualScheduler, bool resume) noexcept;
+  void Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
+  void NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
+  void StopAllScheduleTask(TaskInfo &task) noexcept;
+
+
+  void SetNormalScheduling() noexcept;
+  void SetStopAllScheduling() noexcept;
+  void SetOneExclusiveScheduling(Tid tid) noexcept;
+};

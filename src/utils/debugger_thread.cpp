@@ -2,13 +2,17 @@
 #include "debugger_thread.h"
 #include "common.h"
 #include <csignal>
-DebuggerThread::DebuggerThread(std::function<void()> &&task) noexcept
-    : mWork(std::move(task)), mThread(), mStarted(false)
+#include <linux/prctl.h>
+#include <stop_token>
+#include <sys/prctl.h>
+DebuggerThread::DebuggerThread(std::string &&name, std::function<void(std::stop_token &)> &&task) noexcept
+    : mThreadName(std::move(name)), mWork(std::move(task)), mThread(), mStarted(false)
 {
 }
 
 DebuggerThread::~DebuggerThread() noexcept
 {
+  mThread.request_stop();
   if (mThread.joinable()) {
     mThread.join();
   }
@@ -16,9 +20,19 @@ DebuggerThread::~DebuggerThread() noexcept
 
 /* static */
 std::unique_ptr<DebuggerThread>
-DebuggerThread::SpawnDebuggerThread(std::function<void()> task) noexcept
+DebuggerThread::SpawnDebuggerThread(std::function<void(std::stop_token &)> task) noexcept
 {
-  auto thread = std::unique_ptr<DebuggerThread>(new DebuggerThread{std::move(task)});
+  auto thread = std::unique_ptr<DebuggerThread>(
+    new DebuggerThread{fmt::format("mdb-{}", GetNextDebuggerThreadNumber()), std::move(task)});
+  thread->Start();
+  return thread;
+}
+
+/* static */
+std::unique_ptr<DebuggerThread>
+DebuggerThread::SpawnDebuggerThread(std::string name, std::function<void(std::stop_token &)> task) noexcept
+{
+  auto thread = std::unique_ptr<DebuggerThread>(new DebuggerThread{std::move(name), std::move(task)});
   thread->Start();
   return thread;
 }
@@ -30,11 +44,13 @@ DebuggerThread::Start() noexcept
   ASSERT(mStarted == false, "Thread already started");
   AssertSigChildIsBlocked();
   mStarted = true;
-  mThread = std::thread([this]() {
+  mThread = std::jthread([this](std::stop_token token) {
     // Be doubly-certain that we have not meddled with SIGCHLD. This is of utmost importance to make signalfd
     // work.
     AssertSigChildIsBlocked();
-    mWork();
+    auto cStringName = mThreadName.c_str();
+    VERIFY(prctl(PR_SET_NAME, cStringName) != -1, "Failed to set DebuggerThread name.");
+    mWork(token);
   });
 }
 
@@ -52,6 +68,12 @@ bool
 DebuggerThread::IsJoinable() const noexcept
 {
   return mThread.joinable();
+}
+
+bool
+DebuggerThread::RequestStop() noexcept
+{
+  return mThread.request_stop();
 }
 
 /* static */ void

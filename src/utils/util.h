@@ -233,4 +233,27 @@ IsSame()
   return false;
 }
 
+template <typename CA, typename CB = CA>
+constexpr auto
+copy_to(const CA &c, CB &out)
+{
+  if constexpr (requires(CB o) { o.reserve(1024); }) {
+    out.reserve(c.size());
+    std::copy(c.begin(), c.end(), std::back_inserter(out));
+  } else {
+    auto index = 0;
+    while (index < out.size() && index < c.size()) {
+      out[index] = c[index];
+      ++index;
+    }
+  }
+}
+
+template <typename C, typename Fn>
+constexpr auto
+copy_to_transform(C &c, C &out, Fn transform)
+{
+  std::transform(c.begin(), c.end(), std::back_inserter(out), transform);
+}
+
 } // namespace utils

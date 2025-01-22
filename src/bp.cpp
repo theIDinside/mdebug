@@ -103,7 +103,8 @@ BreakpointLocation::disable(Tid tid, tc::TraceeCommandInterface &tc) noexcept
 {
   if (installed) {
     const auto result = tc.DisableBreakpoint(tid, *this);
-    VERIFY(result.kind == tc::TaskExecuteResult::Ok, "[tracer:{}.{}] Failed to disable breakpoint", tc.TaskLeaderTid(), tid);
+    VERIFY(result.kind == tc::TaskExecuteResult::Ok, "[tracer:{}.{}] Failed to disable breakpoint",
+           tc.TaskLeaderTid(), tid);
     installed = false;
   }
 }
@@ -313,10 +314,9 @@ UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeContro
 }
 
 Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                       std::optional<StopCondition> &&stop_condition, bool stop_all_threads_when_hit,
-                       std::unique_ptr<UserBpSpec> &&spec) noexcept
+                       std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept
     : UserBreakpoint(std::move(param), kind, std::move(stop_condition)), stop_only(stop_only),
-      stop_all_threads_when_hit(stop_all_threads_when_hit), bp_spec(std::move(spec))
+      mBehavior(param.tc.GetBreakpointBehavior()), bp_spec(std::move(spec))
 {
 }
 
@@ -334,7 +334,7 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
 
   DBGLOG(core, "[{}:bkpt]: bp {} hit", t.mTid, id);
   increment_count();
-  if (stop_all_threads_when_hit) {
+  if (mBehavior == BreakpointBehavior::StopAllThreadsWhenHit) {
     const auto all_stopped = tc.IsAllStopped();
     if (all_stopped) {
       tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, id, true);
@@ -364,17 +364,16 @@ Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController
   auto breakpoint = std::make_shared<Breakpoint>(
     RequiredUserParameters{
       .tid = tid, .id = breakpointStorage.new_id(), .loc_or_err = std::move(bp), .times_to_hit = {}, .tc = tc},
-    kind, stop_only, std::move(clonedStopCondition), stop_all_threads_when_hit,
-    std::make_unique<UserBpSpec>(*bp_spec));
+    kind, stop_only, std::move(clonedStopCondition), std::make_unique<UserBpSpec>(*bp_spec));
   breakpointStorage.add_user(breakpoint);
   ASSERT(!breakpoint->bp_location()->loc_users().empty(), "Breakpoint location should have user now!");
   return breakpoint;
 }
 
 TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind,
-                                         std::optional<Tid> stop_only, std::optional<StopCondition> &&cond,
-                                         bool stop_all_threads_when_hit) noexcept
-    : Breakpoint(std::move(param), kind, stop_only, std::move(cond), stop_all_threads_when_hit, nullptr)
+                                         std::optional<Tid> stop_only,
+                                         std::optional<StopCondition> &&cond) noexcept
+    : Breakpoint(std::move(param), kind, stop_only, std::move(cond), nullptr)
 {
 }
 
@@ -434,8 +433,7 @@ ResumeToBreakpoint::on_hit(TraceeController &, TaskInfo &t) noexcept
 
 Logpoint::Logpoint(RequiredUserParameters param, std::string logExpression,
                    std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept
-    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::nullopt, std::move(stop_condition), false,
-                 std::move(spec)),
+    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::nullopt, std::move(stop_condition), std::move(spec)),
       expressionString(std::move(logExpression))
 {
 }
@@ -475,7 +473,7 @@ UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : tc(tc) {}
 u16
 UserBreakpoints::new_id() noexcept
 {
-  return Tracer::Instance->new_breakpoint_id();
+  return Tracer::Get().new_breakpoint_id();
 }
 
 void

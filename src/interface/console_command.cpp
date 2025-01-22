@@ -2,7 +2,6 @@
 #include "console_command.h"
 #include "fmt/ranges.h"
 #include "utils/util.h"
-#include <iterator>
 #include <tracer.h>
 #include <utility>
 

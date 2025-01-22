@@ -15,6 +15,7 @@
 #include <symbolication/objfile.h>
 #include <task.h>
 #include <tracer.h>
+#include <utility>
 
 namespace ptracestop {
 using sym::dw::LineTableEntry;
@@ -91,7 +92,8 @@ InstructionStep::~InstructionStep()
 {
   if (!cancelled) {
     DBGLOG(core, "[inst step]: instruction step for {} ended", task.mTid);
-    mSupervisor.EmitSteppedStop(LWP{.pid = mSupervisor.TaskLeaderTid(), .tid = task.mTid}, "Instruction stepping finished", false);
+    mSupervisor.EmitSteppedStop(LWP{.pid = mSupervisor.TaskLeaderTid(), .tid = task.mTid},
+                                "Instruction stepping finished", false);
   }
 }
 
@@ -200,223 +202,6 @@ LineStep::UpdateStepped() noexcept
       MaybeSetDone(true);
     }
   }
-}
-
-StopHandler::StopHandler(TraceeController &tc) noexcept
-    : tc(tc), stop_all(true), event_settings{.bitset = 0x00}, // all OFF by default
-      proceed_actions()
-{
-}
-
-bool
-StopHandler::has_action_installed(TaskInfo *t) noexcept
-{
-  return proceed_actions[t->mTid] != nullptr;
-}
-
-void
-StopHandler::remove_action(const TaskInfo &t) noexcept
-{
-  ASSERT(proceed_actions.contains(t.mTid), "No proceed action installed for {}", t.mTid);
-  proceed_actions.erase(t.mTid);
-}
-
-std::shared_ptr<ThreadProceedAction>
-StopHandler::get_proceed_action(const TaskInfo &t) noexcept
-{
-  return proceed_actions[t.mTid];
-}
-
-void
-StopHandler::handle_proceed(TaskInfo &info, const tc::ProcessedStopEvent &stop) noexcept
-{
-  auto proceed_action = get_proceed_action(info);
-  if (proceed_action) {
-    proceed_action->UpdateStepped();
-    const auto stopped_by_user = !stop.should_resume;
-    if (proceed_action->HasCompleted(stopped_by_user)) {
-      remove_action(info);
-    } else {
-      proceed_action->Proceed();
-    }
-  } else {
-    DBGLOG(core, "[action]: {} will resume (should_resume={}) => {} (pc={})", info.mTid, stop.should_resume,
-           stop.should_resume && info.can_continue(), info.GetRegisterCache().GetPc());
-    const auto kind =
-      stop.res.value_or(tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
-    bool resumed = false;
-    switch (kind.target) {
-    case tc::ResumeTarget::Task:
-      if (info.can_continue() && stop.should_resume) {
-        tc.ResumeTask(info, kind);
-        resumed = true;
-      } else {
-        info.set_stop();
-      }
-      break;
-    case tc::ResumeTarget::AllNonRunningInProcess:
-      tc.ResumeTarget(kind);
-      resumed = true;
-      break;
-    case tc::ResumeTarget::None:
-      info.set_stop();
-      break;
-    }
-
-    if (resumed && tc.IsSessionAllStopMode()) {
-      for (auto &t : tc.GetThreads()) {
-        t->SetCurrentResumeAction(kind);
-      }
-    }
-  }
-}
-
-static TraceEvent *
-native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
-{
-  DBGLOG(core, "Processing CLONE for {}", cloning_task.mTid);
-  // we always have to cache these registers, because we need them to pull out some information
-  // about the new clone
-  tc.CacheRegistersFor(cloning_task);
-  pid_t np = -1;
-  // we should only ever hit this when running debugging a native-hosted session
-  ASSERT(tc.GetInterface().format == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
-  auto regs = cloning_task.native_registers();
-  const auto orig_rax = regs->orig_rax;
-  if (orig_rax == SYS_clone) {
-    const TPtr<void> stack_ptr = sys_arg_n<2>(*regs);
-    const TPtr<int> child_tid = sys_arg_n<4>(*regs);
-    const u64 tls = sys_arg_n<5>(*regs);
-    np = tc.ReadType(child_tid);
-
-    ASSERT(!tc.HasTask(np), "Tracee controller already has task {} !", np);
-    return TraceEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5},
-                                  TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls}, np, {});
-  } else if (orig_rax == SYS_clone3) {
-    const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*regs);
-    const auto res = tc.ReadType(ptr);
-    np = tc.ReadType(TPtr<pid_t>{res.parent_tid});
-    return TraceEvent::CloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5}, TaskVMInfo::from_clone_args(res), np,
-                                  {});
-  } else {
-    PANIC("Unknown clone syscall!");
-  }
-}
-
-TraceEvent *
-StopHandler::CreateTraceEventFromStopped(TaskInfo &t) noexcept
-{
-  ASSERT(t.mLastWaitStatus.ws != WaitStatusKind::NotKnown,
-         "When creating a trace event from a wait status event, we must already know what kind it is.");
-  AddrPtr stepped_over_bp_id{nullptr};
-  if (t.loc_stat) {
-    const auto locstat = t.clear_bpstat();
-    return TraceEvent::Stepped({tc.TaskLeaderTid(), t.mTid, {}}, !locstat->should_resume, locstat,
-                               t.mNextResumeAction, {});
-  }
-  const auto pc = tc.CacheAndGetPcFor(t);
-  const auto prev_pc_byte = offset(pc, -1);
-  auto bp_loc = tc.GetUserBreakpoints().location_at(prev_pc_byte);
-  if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
-    tc.SetProgramCounterFor(t, prev_pc_byte);
-    return TraceEvent::SoftwareBreakpointHit({.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = {}},
-                                             prev_pc_byte, {});
-  }
-
-  return TraceEvent::DeferToSupervisor(
-    {.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = t.mLastWaitStatus.signal}, {}, false);
-}
-
-TraceEvent *
-StopHandler::prepare_core_from_waitstat(TaskInfo &info) noexcept
-{
-  info.set_dirty();
-  info.stop_collected = true;
-  const auto ws = info.pending_wait_status();
-
-  switch (ws.ws) {
-  case WaitStatusKind::Stopped: {
-    if (!info.initialized) {
-      return TraceEvent::ThreadCreated({tc.TaskLeaderTid(), info.mTid, 5},
-                                       {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
-    }
-    return CreateTraceEventFromStopped(info);
-  }
-  case WaitStatusKind::Execed: {
-    return TraceEvent::ExecEvent({.target = tc.TaskLeaderTid(), .tid = info.mTid, .sig_or_code = 5},
-                                 ProcessExecPath(info.mTid), {});
-  }
-  case WaitStatusKind::Exited: {
-    // in native mode, only the dying thread is the one that is actually stopped, so we don't have to resume any
-    // other threads
-    const bool process_needs_resuming = Tracer::Instance->TraceExitConfigured;
-    return TraceEvent::ThreadExited({tc.TaskLeaderTid(), info.mTid, ws.exit_code}, process_needs_resuming, {});
-  }
-  case WaitStatusKind::Forked: {
-    Tid new_child = 0;
-    auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
-    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
-    DBGLOG(core, "[{} forked]: new process after fork {}", info.mTid, new_child);
-    return TraceEvent::ForkEvent_({tc.TaskLeaderTid(), info.mTid, 5}, new_child, {});
-  }
-  case WaitStatusKind::VForked: {
-    Tid new_child = 0;
-    auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
-    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
-    DBGLOG(core, "[vfork]: new process after fork {}", new_child);
-    return TraceEvent::VForkEvent_({tc.TaskLeaderTid(), info.mTid, 5}, new_child, {});
-  }
-  case WaitStatusKind::VForkDone:
-    TODO("WaitStatusKind::VForkDone");
-    break;
-  case WaitStatusKind::Cloned: {
-    return native_create_clone_event(tc, info);
-  } break;
-  case WaitStatusKind::Signalled:
-    return TraceEvent::Signal({tc.TaskLeaderTid(), info.mTid, info.mLastWaitStatus.signal}, {});
-  case WaitStatusKind::SyscallEntry:
-    TODO("WaitStatusKind::SyscallEntry");
-    break;
-  case WaitStatusKind::SyscallExit:
-    TODO("WaitStatusKind::SyscallExit");
-    break;
-  case WaitStatusKind::NotKnown:
-    TODO("WaitStatusKind::NotKnown");
-    break;
-  }
-  ASSERT(false, "Unknown wait status!");
-  MIDAS_UNREACHABLE
-}
-
-void
-StopHandler::set_stop_all() noexcept
-{
-  event_settings.bitset = 0xff;
-}
-
-constexpr void
-StopHandler::stop_on_clone() noexcept
-{
-  event_settings.clone_stop = true;
-}
-constexpr void
-StopHandler::stop_on_exec() noexcept
-{
-  event_settings.exec_stop = true;
-}
-constexpr void
-StopHandler::stop_on_thread_exit() noexcept
-{
-  event_settings.thread_exit_stop = true;
-}
-
-void
-StopHandler::SetAndRunAction(Tid tid, std::shared_ptr<ThreadProceedAction>&& action) noexcept
-{
-  ASSERT(proceed_actions[tid] == nullptr,
-         "Attempted to set new thread proceed action, without performing cleanup of old");
-  proceed_actions[tid] = std::move(action);
-  proceed_actions[tid]->Proceed();
 }
 
 StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept
@@ -544,3 +329,120 @@ StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
 }
 
 } // namespace ptracestop
+
+TaskScheduler::TaskScheduler(TraceeController *supervisor) noexcept : mSupervisor(supervisor) {}
+
+void
+TaskScheduler::RemoveIndividualScheduler(Tid tid) noexcept
+{
+  mIndividualScheduler.erase(tid);
+}
+
+void
+TaskScheduler::RemoveAllIndividualSchedulers(std::optional<Tid> keep) noexcept
+{
+  std::erase_if(mIndividualScheduler, [keep](const auto &a) { return a.first != keep; });
+}
+
+bool
+TaskScheduler::SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualScheduler, bool resume) noexcept
+{
+  // We're collecting all task stops. We don't allow for new scheduling "algorithms" (until a full-stop has been
+  // consumed.)
+  switch (mScheduling) {
+  case SchedulingConfig::OneExclusive:
+    if (tid != mExclusiveTask) {
+      return false;
+    }
+    break;
+  case SchedulingConfig::StopAll:
+    return false;
+  case SchedulingConfig::NormalResume:
+    break;
+  }
+
+  mIndividualScheduler[tid] = std::move(individualScheduler);
+  if (resume) {
+    mIndividualScheduler[tid]->Proceed();
+  }
+
+  return true;
+}
+
+void
+TaskScheduler::SetNormalScheduling() noexcept
+{
+  mScheduling = SchedulingConfig::NormalResume;
+}
+
+void
+TaskScheduler::SetStopAllScheduling() noexcept
+{
+  RemoveAllIndividualSchedulers();
+  mScheduling = SchedulingConfig::StopAll;
+}
+void
+TaskScheduler::SetOneExclusiveScheduling(Tid tid) noexcept
+{
+  RemoveAllIndividualSchedulers(tid);
+  mExclusiveTask = tid;
+  mScheduling = SchedulingConfig::OneExclusive;
+}
+
+void
+TaskScheduler::Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept
+{
+  switch (mScheduling) {
+  case SchedulingConfig::OneExclusive:
+    if (task.mTid != mExclusiveTask) {
+      break;
+    }
+    [[fallthrough]];
+  case SchedulingConfig::NormalResume:
+    NormalScheduleTask(task, eventProceedResult);
+    break;
+  case SchedulingConfig::StopAll:
+    StopAllScheduleTask(task);
+    break;
+  }
+}
+
+void
+TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept
+{
+
+  // When a process has exited, or a task has exited, we always proceed the task in the same way (because it's
+  // dead, it can't be scheduled at all.)
+  if (task.exited || mSupervisor->IsExited()) {
+    DBGLOG(core, "{}.{} has exited, process exited={}", mSupervisor->TaskLeaderTid(), task.mTid,
+           mSupervisor->IsExited())
+    return;
+  }
+
+  auto individualScheduler = mIndividualScheduler[task.mTid];
+  if (individualScheduler) {
+    individualScheduler->UpdateStepped();
+    const auto stopped_by_user = !eventProceedResult.should_resume;
+    if (individualScheduler->HasCompleted(stopped_by_user)) {
+      RemoveIndividualScheduler(task.mTid);
+    } else {
+      individualScheduler->Proceed();
+    }
+  } else {
+    const auto kind = eventProceedResult.res.value_or(
+      tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
+    if (task.can_continue() && eventProceedResult.should_resume) {
+      mSupervisor->ResumeTask(task, kind);
+    } else {
+      task.set_stop();
+    }
+  }
+}
+
+void
+TaskScheduler::StopAllScheduleTask(TaskInfo &task) noexcept
+{
+  if (mSupervisor->IsAllStopped()) {
+    mSupervisor->EmitAllStopped();
+  }
+}

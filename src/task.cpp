@@ -105,7 +105,7 @@ std::shared_ptr<TaskInfo>
 TaskInfo::CreateUnInitializedTask(TaskWaitResult wait) noexcept
 {
   auto task = std::shared_ptr<TaskInfo>(new TaskInfo{wait.tid});
-  Tracer::Instance->RegisterTracedTask(task);
+  Tracer::Get().RegisterTracedTask(task);
   task->mLastWaitStatus = wait.ws;
   return task;
 }
@@ -214,7 +214,7 @@ void
 TaskInfo::clear_stop_state() noexcept
 {
   for (const auto ref : variableReferences) {
-    Tracer::Instance->destroy_reference(ref);
+    Tracer::Get().destroy_reference(ref);
   }
 
   variableReferences.clear();

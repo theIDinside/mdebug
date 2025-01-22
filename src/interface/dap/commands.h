@@ -542,10 +542,10 @@ struct DisconnectResponse final : public UIResult
 
 struct Disconnect final : public UICommand
 {
-  Disconnect(u64 seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept;
+  Disconnect(u64 seq, bool restart, bool terminateTracee, bool suspendTracee) noexcept;
   ~Disconnect() override = default;
   UIResultPtr Execute() noexcept final;
-  bool restart, terminate_tracee, suspend_tracee;
+  bool restart, mTerminateTracee, mSuspendTracee;
   DEFINE_NAME("disconnect");
   NoRequiredArgs();
 };
@@ -559,12 +559,14 @@ struct LaunchResponse final : public UIResult
 
 struct Launch final : public UICommand
 {
-  Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args) noexcept;
+  Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args,
+         std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   ~Launch() override = default;
   UIResultPtr Execute() noexcept final;
-  bool stopOnEntry;
-  Path program;
-  std::vector<std::string> program_args;
+  bool mStopOnEntry;
+  Path mProgram;
+  std::vector<std::string> mProgramArgs;
+  std::optional<BreakpointBehavior> mBreakpointBehavior;
   DEFINE_NAME("launch");
   RequiredArguments({"program"sv});
   DefineArgTypes({"program", FieldType::String});

@@ -22,10 +22,10 @@ struct ArchInfo
   RegisterNumbers regs{};
 };
 
-std::pair<Pid, Tid> parse_thread_id(std::string_view arg) noexcept;
+std::pair<Pid, Tid> ParseThreadId(std::string_view arg) noexcept;
 
-char *format_value(char *ptr, u32 value) noexcept;
+char *FormatValue(char *ptr, u32 value) noexcept;
 
-u32 decode_rle(std::string_view v, char *buf, u32 size) noexcept;
-std::string_view decode_rle_to_str(std::string_view v, char *buf, u32 size) noexcept;
+u32 DecodeRunLengthEncoding(std::string_view v, char *buf, u32 size) noexcept;
+std::string_view DecodeRunLengthEncToStringView(std::string_view v, char *buf, u32 size) noexcept;
 } // namespace gdb

@@ -3,7 +3,6 @@
 #include "symbolication/block.h"
 #include "utils/enumerator.h"
 #include <filesystem>
-#include <ranges>
 #include <set>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/die.h>
@@ -67,7 +66,8 @@ LNPHeader::CompileDirectoryJoin(const Path &p) const noexcept
   if (version == DwarfVersion::D5) {
     return (directories[0].path / p).lexically_normal();
   }
-  LNP_ASSERT(mCompilationUnitBuildDirectory != nullptr, "Expected build directory to not be null, p={}", p.c_str());
+  LNP_ASSERT(mCompilationUnitBuildDirectory != nullptr, "Expected build directory to not be null, p={}",
+             p.c_str());
   return (mCompilationUnitBuildDirectory / p).lexically_normal();
 }
 
@@ -111,11 +111,7 @@ LNPHeader::CacheLNPFilePaths() noexcept
     // and we have not made copies.
     if (directories.empty()) {
       auto p = FileEntryToPath(f);
-      if (fileIndex > 0) {
-        LNP_ASSERT(!mFileToFileIndex.contains(p), "File {} already exists={} new {}", p.c_str(),
-                   mFileToFileIndex[p], fileIndex);
-        mFileToFileIndex[p] = fileIndex;
-      }
+      mFileToFileIndex[p].Add(fileIndex);
     } else {
       std::string_view buildDir;
       if (std::to_underlying(version) < 5 && f.dir_index == 0) {
@@ -130,11 +126,7 @@ LNPHeader::CacheLNPFilePaths() noexcept
         p = CompileDirectoryJoin(p);
       }
 
-      if (fileIndex > 0) {
-        LNP_ASSERT(!mFileToFileIndex.contains(p), "File {} already exists={} new {}", p.c_str(),
-                   mFileToFileIndex[p], fileIndex);
-        mFileToFileIndex[p] = fileIndex;
-      }
+      mFileToFileIndex[p].Add(fileIndex);
     }
     fileIndex++;
   }
@@ -670,17 +662,17 @@ SourceCodeFile::GetOwningCompilationUnit() const noexcept
 }
 
 SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
-                               u32 fileIndex) noexcept
-    : mCompilationUnit(compilationUnit), elf(elf), full_path(std::move(path)), mLineInfoFileIndex(fileIndex)
+                               FileEntryIndexVector fileIndices) noexcept
+    : mCompilationUnit(compilationUnit), elf(elf), full_path(std::move(path)), mLineInfoFileIndices(fileIndices)
 {
 }
 
 /* static */
 SourceCodeFile::Ref
 SourceCodeFile::Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
-                       u32 fileIndex) noexcept
+                       FileEntryIndexVector fileIndices) noexcept
 {
-  return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{compilationUnit, elf, std::move(path), fileIndex});
+  return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{compilationUnit, elf, std::move(path), fileIndices});
 }
 
 AddressRange
@@ -702,7 +694,7 @@ SourceCodeFile::HasAddressRange() noexcept
 }
 
 void
-SourceCodeFile::SetLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept
+SourceCodeFile::AddLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept
 {
   for (const auto [start, end] : ranges) {
     mLineTableRanges.push_back({start, end});

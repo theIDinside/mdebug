@@ -94,6 +94,7 @@ struct TaskInfo
       bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
       bool exited : 1;         // task has exited
       bool reaped : 1;         // task has been reaped after exit
+      bool killed: 1 {false};
       bool bfRequestedStop : 1 {false};
     };
   };
@@ -109,8 +110,14 @@ private:
   TaskInfo(pid_t newTaskTid) noexcept;
 
 public:
-  std::optional<LocationStatus> loc_stat;
+  using Ptr = std::shared_ptr<TaskInfo>;
 
+  using TaskInfoEntry = struct {
+    Tid mTid;
+    Ptr mTask;
+  };
+
+  std::optional<LocationStatus> loc_stat;
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
   TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;

@@ -12,12 +12,6 @@
   PANIC(msg);                                                                                                     \
   MIDAS_UNREACHABLE
 
-#ifndef USING_SMART_PTRS
-#define USING_SMART_PTRS(CLASS)                                                                                   \
-  using OwnPtr = std::unique_ptr<CLASS>;                                                                          \
-  using ShrPtr = std::shared_ptr<CLASS>;
-#endif
-
 #ifndef NO_COPY
 /// Types that use NO_COPY in this codebase tend to be created and used via pointers, both raw and smart alike
 /// Therefore also define OwnPtr and ShrPtr shortcuts.
@@ -25,8 +19,7 @@
   CLASS(const CLASS &) = delete;                                                                                  \
   CLASS(CLASS &) = delete;                                                                                        \
   CLASS &operator=(CLASS &) = delete;                                                                             \
-  CLASS &operator=(const CLASS &) = delete;                                                                       \
-  USING_SMART_PTRS(CLASS)
+  CLASS &operator=(const CLASS &) = delete;
 #endif
 
 #ifndef MOVE_ONLY
@@ -51,3 +44,21 @@
   CLASS(CLASS &&) noexcept = default;                                                                             \
   CLASS &operator=(CLASS &&) noexcept = default;
 #endif
+
+// Useful for "variant" types, where a default construction is *never* valid state.
+#ifndef DELETED_DEFAULT_CTOR_DEFAULTED_COPY_MOVE
+#define DELETED_DEFAULT_CTOR_DEFAULTED_COPY_MOVE(CLASS)                                                           \
+  CLASS() noexcept = delete;                                                                                      \
+  CLASS(const CLASS &) noexcept = default;                                                                        \
+  CLASS &operator=(const CLASS &) noexcept = default;                                                             \
+  CLASS(CLASS &&) noexcept = default;                                                                             \
+  CLASS &operator=(CLASS &&) noexcept = default;
+#endif
+
+#define UnionVariant(TYPE) Immutable<TYPE> u##TYPE
+
+#define UnionVariantConstructor(SUPER_TYPE, VARIANT_TYPE)                                                         \
+  constexpr SUPER_TYPE(VARIANT_TYPE variant) noexcept                                                             \
+      : mType(SUPER_TYPE##Discriminant::VARIANT_TYPE), u##VARIANT_TYPE(variant)                                   \
+  {                                                                                                               \
+  }

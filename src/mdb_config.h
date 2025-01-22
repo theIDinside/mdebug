@@ -98,7 +98,7 @@ public:
   }
 
   WaitSystem waitsystem() const noexcept;
-  int thread_pool_size() const noexcept;
+  int ThreadPoolSize() const noexcept;
   LogConfig log_config() const noexcept;
   const Path &LogDirectory() const noexcept;
 };
