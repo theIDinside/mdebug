@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <string_view>
 #include <type_traits>
 #include <typedefs.h>
@@ -11,6 +12,13 @@
 #include <vector>
 
 namespace utils {
+
+template <typename... Args>
+constexpr auto
+FilterNullptr()
+{
+  return std::ranges::views::filter([](auto ptr) { return ptr != nullptr; });
+}
 
 constexpr std::optional<Pid>
 StrToPid(std::string_view str, bool hex) noexcept

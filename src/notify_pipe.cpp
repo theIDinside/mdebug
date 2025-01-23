@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "notify_pipe.h"
 #include <fcntl.h>
+#include <unistd.h>
 
 struct pollfd;
 // clang-format off

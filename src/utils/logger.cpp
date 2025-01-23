@@ -1,177 +1,101 @@
 /** LICENSE TEMPLATE */
 #include "logger.h"
 #include "../common.h"
-#include "utils/macros.h"
-#include <filesystem>
+#include "fmt/base.h"
+#include "utils/util.h"
+#include <ranges>
 
 using namespace std::string_view_literals;
 
 namespace logging {
 
-constexpr std::string_view
-to_str(Channel id) noexcept
-{
-  switch (id) {
-  case Channel::core:
-    return "core";
-  case Channel::dap:
-    return "dap";
-  case Channel::dwarf:
-    return "dwarf";
-  case Channel::awaiter:
-    return "awaiter";
-  case Channel::eh:
-    return "eh";
-  case Channel::remote:
-    return "remote";
-  case Channel::perf:
-    return "perf";
-  case Channel::warning:
-    return "warning";
-  case Channel::COUNT:
-    PANIC("Count not a valid Id");
-    break;
-  }
-  MIDAS_UNREACHABLE
-}
-
-logging::Logger *logging::Logger::logger_instance = new logging::Logger{};
+logging::Logger *logging::Logger::sLoggerInstance = new logging::Logger{};
 
 Logger::~Logger() noexcept
 {
-  // Should only happen statically at end of session, so this should be fine.
-  for (auto &[n, l] : log_files) {
-    if (l->fstream.is_open()) {
-      l->fstream.flush();
-      l->fstream.close();
-    }
-    delete l;
-  }
-
   for (auto ptr : LogChannels) {
     if (ptr) {
+      ptr->mFileStream.flush();
+      ptr->mFileStream.close();
       delete ptr;
     }
   }
 }
 
 void
-Logger::setup_channel(std::string_view name) noexcept
-{
-  ASSERT(!log_files.contains(name), "Creating log channel {} twice is not allowed.", name);
-  Path p = std::filesystem::current_path() / fmt::format("{}.log", name);
-  auto channel =
-    new LogChannel{.mChannelMutex = {},
-                   .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
-  if (!channel->fstream.is_open()) {
-    channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
-  }
-  log_files[name] = channel;
-}
-
-void
 Logger::SetupChannel(const Path &logDirectory, Channel id) noexcept
 {
-  ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} already created", to_str(id));
-  Path p = logDirectory / fmt::format("{}.log", to_str(id));
+  ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} ({}) already created", 1, id);
+  Path p = logDirectory / fmt::format("{}.log", id);
   auto channel =
     new LogChannel{.mChannelMutex = {},
-                   .fstream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
-  if (!channel->fstream.is_open()) {
-    channel->fstream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
+                   .mFileStream = std::fstream{p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc}};
+  if (!channel->mFileStream.is_open()) {
+    channel->mFileStream.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc);
   }
   LogChannels[std::to_underlying(id)] = channel;
 }
 
 void
-Logger::log(Channel id, std::string_view log_msg) noexcept
+Logger::Log(Channel id, std::string_view log_msg) noexcept
 {
   if (auto ptr = LogChannels[std::to_underlying(id)]; ptr) {
-    ptr->log(log_msg);
+    ptr->Log(log_msg);
   }
 }
 
 Logger *
 Logger::GetLogger() noexcept
 {
-  return Logger::logger_instance;
+  return Logger::sLoggerInstance;
 }
 
 void
 Logger::OnAbort() noexcept
 {
-  for (const auto &[name, channel] : log_files) {
-    channel->fstream << "\n aborted \n";
-    channel->fstream.flush();
-    channel->fstream.close();
-  }
-}
-
-void
-Logger::on_abort() noexcept
-{
-  for (const auto &[name, channel] : log_files) {
-    channel->log_message(std::source_location::current(), "\n - flushed"sv);
-    channel->fstream.flush();
+  for (auto chan : LogChannels | utils::FilterNullptr()) {
+    chan->mFileStream.flush();
+    chan->mFileStream.close();
   }
 }
 
 Logger::LogChannel *
-Logger::channel(std::string_view name)
-{
-  auto it = log_files.find(name);
-  if (it != std::end(log_files)) {
-    return it->second;
-  }
-  return nullptr;
-}
-
-Logger::LogChannel *
-Logger::channel(Channel id)
+Logger::GetChannel(Channel id)
 {
   return LogChannels[std::to_underlying(id)];
 }
 
 void
-Logger::LogChannel::log_message(std::source_location loc, std::string_view msg) noexcept
+Logger::LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept
 {
   std::lock_guard guard{mChannelMutex};
-  fstream << msg;
-  fstream << " [" << loc.file_name() << ":" << loc.line() << ":" << loc.column() << "]: " << std::endl;
+  mFileStream << message;
+  mFileStream << " [" << file << ":" << line << ":" << column << "]: " << std::endl;
 }
 
 void
-Logger::LogChannel::log_message(std::source_location loc, std::string &&msg) noexcept
+Logger::LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept
 {
   std::lock_guard guard{mChannelMutex};
-  fstream << msg;
-  fstream << "\t[" << loc.file_name() << ":" << loc.line() << ":" << loc.column() << "]" << std::endl;
+  mFileStream << message;
+  mFileStream << " [" << file << ":" << line << ":" << column << "]: " << std::endl;
 }
 
 void
-Logger::LogChannel::log(std::string_view msg) noexcept
+Logger::LogChannel::Log(std::string_view msg) noexcept
 {
   std::lock_guard guard{mChannelMutex};
-  fstream << msg << std::endl;
+  mFileStream << msg << std::endl;
 }
 
 Logger::LogChannel *
-get_log_channel(std::string_view log_channel) noexcept
+GetLogChannel(Channel id) noexcept
 {
-  if (auto logger = Logger::GetLogger(); logger) {
-    return logger->channel(log_channel);
-  }
-  return nullptr;
-}
-
-Logger::LogChannel *
-get_log_channel(Channel id) noexcept
-{
-  return Logger::GetLogger()->channel(id);
+  return Logger::GetLogger()->GetChannel(id);
 }
 
 Logger *
-get_logging() noexcept
+GetLogger() noexcept
 {
   return Logger::GetLogger();
 }

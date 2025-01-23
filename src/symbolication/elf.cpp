@@ -173,6 +173,6 @@ Elf::ParseMinimalSymbol(Elf* elf, ObjectFile& objectFile) noexcept
     std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
     objectFile.AddMinimalElfSymbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
   } else {
-    LOG(core, "[warning]: No .symtab for {}", objectFile.GetPathString());
+    DBGLOG(core, "[warning]: No .symtab for {}", objectFile.GetPathString());
   }
 }

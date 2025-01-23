@@ -29,11 +29,11 @@ public:
   {
     const auto signal = parse_exitcode();
     if (!signal) {
-      DLOG(logging::Channel::remote, "Failed to parse signal for {} packet: '{}'", Packet, received_payload);
+      DBGLOG(remote, "Failed to parse signal for {} packet: '{}'", Packet, received_payload);
     }
     const auto target = parse_process();
     if (mp_configured && !target) {
-      DLOG(logging::Channel::remote,
+      DBGLOG(remote,
            "Failed to parse process for {} packet - we expect multiprocess extension to be turned on: '{}'",
            Packet, received_payload);
     }

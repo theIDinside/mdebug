@@ -70,7 +70,7 @@ SourceCoordinate::SourceCoordinate(std::string path, u32 line, u32 col) noexcept
 panic(std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels)
 {
   using enum logging::Channel;
-#define PLOG(msg) logging::get_logging()->log(core, msg)
+#define PLOG(msg) logging::GetLogger()->GetChannel(logging::Channel::core)->Log(msg)
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];
@@ -117,7 +117,7 @@ ifbacktrace_failed:
                 file, line, functionName, err_msg, errno, strerr);
   PLOG(message);
   fmt::println("{}", message);
-  delete logging::get_logging();
+  delete logging::GetLogger();
   panic_exit();
 #undef PLOG
 }

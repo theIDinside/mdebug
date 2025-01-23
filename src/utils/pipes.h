@@ -31,7 +31,7 @@ template <typename Payload> class SynchronizedSignalPipe
   notify() const noexcept
   {
     if (const auto res = ::write(write_fd, "+", 1); res == -1) {
-      DLOG(logging::Channel::core, "Failed to notify on fd {}: {}", write_fd, strerror(errno));
+      DBGLOG(core, "Failed to notify on fd {}: {}", write_fd, strerror(errno));
       return false;
     }
     return true;
@@ -117,7 +117,7 @@ public:
     }
     auto cnt = ::poll(&pollcfg, 1, timeout);
     if (cnt < 0) {
-      DLOG(logging::Channel::core, "Failed to poll file descriptor: {}: {}", pollcfg.fd, strerror(errno));
+      DBGLOG(core, "Failed to poll file descriptor: {}: {}", pollcfg.fd, strerror(errno));
     }
     return cnt > 0;
   }
@@ -146,7 +146,7 @@ template <> class SynchronizedSignalPipe<void>
   notify() const noexcept
   {
     if (const auto res = ::write(write_fd, "+", 1); res == -1) {
-      DLOG(logging::Channel::core, "Failed to notify on fd {}: {}", write_fd, strerror(errno));
+      DBGLOG(core, "Failed to notify on fd {}: {}", write_fd, strerror(errno));
       return false;
     }
     return true;
@@ -255,7 +255,7 @@ public:
   {
     const auto res = ::poll(poll_configurations.data(), poll_configurations.size(), timeout);
     if (res == -1) {
-      DLOG(logging::Channel::core, "Failed to call syscall poll: {}", strerror(errno));
+      DBGLOG(core, "Failed to call syscall poll: {}", strerror(errno));
     }
 
     if (res == 0) {

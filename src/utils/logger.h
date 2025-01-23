@@ -1,118 +1,97 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../lib/spinlock.h"
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <source_location>
 #include <string>
 #include <typedefs.h>
 #include <unordered_map>
-#include <utility>
 
 namespace logging {
 
 enum class Channel : u32
 {
-  core = 0,
-  // Debug Adapter Protocol
-  dap,
-  // Debug Symbol Information
-  dwarf,
-  // Awaiter thread
-  awaiter,
-  // Exception frame headers
-  eh,
-  // Gdb Remote Protocol
-  remote,
-  // Performance timing results
-  perf,
-
-  // runtime warnings that may make debugging experience differ from normal execution
-  warning,
-
-  // Keep always last. Always.
-  COUNT
+#define DEFINE_CHANNEL(chan, name, desc) chan,
+#include <defs/log_channels.defs>
+#undef DEFINE_CHANNEL
 };
 
-consteval std::array<Channel, std::to_underlying(Channel::COUNT)>
+constexpr static auto LogChannelNames = std::to_array({
+#define DEFINE_CHANNEL(chan, name, desc) name,
+#include <defs/log_channels.defs>
+#undef DEFINE_CHANNEL
+});
+
+consteval static auto
+ChannelCount() noexcept
+{
+  return std::size(LogChannelNames);
+}
+
+consteval std::array<Channel, ChannelCount()>
 DefaultChannels()
 {
-  std::array<Channel, std::to_underlying(Channel::COUNT)> res{};
-  for (auto i = u32{0}; i < std::to_underlying(Channel::COUNT); ++i) {
+  std::array<Channel, ChannelCount()> res{};
+  for (auto i = u32{0}; i < ChannelCount(); ++i) {
     res[i] = static_cast<Channel>(i);
   }
   return res;
 }
 
-constexpr std::string_view to_str(Channel id) noexcept;
-
 class Logger
 {
-  static Logger *logger_instance;
+  static Logger *sLoggerInstance;
 
 public:
   struct LogChannel
   {
     std::mutex mChannelMutex;
-    std::fstream fstream;
-    void log_message(std::source_location loc, std::string_view msg) noexcept;
-    void log_message(std::source_location loc, std::string &&msg) noexcept;
-    void log(std::string_view msg) noexcept;
+    std::fstream mFileStream;
+    void LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept;
+    void LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept;
+    void Log(std::string_view msg) noexcept;
   };
 
   Logger() noexcept = default;
   ~Logger() noexcept;
-  void setup_channel(std::string_view name) noexcept;
   void SetupChannel(const std::filesystem::path &logDirectory, Channel id) noexcept;
-  void log(std::string_view log_name, std::string_view log_msg) noexcept;
-  void log(Channel id, std::string_view log_msg) noexcept;
+  void Log(Channel id, std::string_view log_msg) noexcept;
   static Logger *GetLogger() noexcept;
-  void on_abort() noexcept;
   void OnAbort() noexcept;
-  LogChannel *channel(std::string_view name);
-  LogChannel *channel(Channel id);
+  LogChannel *GetChannel(Channel id);
 
 private:
-  std::unordered_map<std::string_view, LogChannel *> log_files{};
-  std::array<LogChannel *, std::to_underlying(Channel::COUNT)> LogChannels{};
+  std::array<LogChannel *, ChannelCount()> LogChannels{};
 };
 
-Logger *get_logging() noexcept;
-Logger::LogChannel *get_log_channel(std::string_view log_channel) noexcept;
-Logger::LogChannel *get_log_channel(Channel id) noexcept;
+Logger *GetLogger() noexcept;
+Logger::LogChannel *GetLogChannel(Channel id) noexcept;
 
-// clang-format off
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
 
 // CONDITIONAL DEBUG LOG
-#define CDLOG(condition, channel_name, ...) if((condition)) { auto LOC = std::source_location::current();         \
-    if (auto channel = logging::get_log_channel(logging::Channel::channel_name); channel) {                       \
-      channel->log_message(LOC, fmt::format(__VA_ARGS__));                                                        \
+#define CDLOG(condition, channel_name, ...)                                                                       \
+  if ((condition)) {                                                                                              \
+    auto LOC = std::source_location::current();                                                                   \
+    if (auto channel = logging::GetLogChannel(logging::Channel::channel_name); channel) {                         \
+      channel->LogMessage(LOC.file_name(), LOC.line() - 1, LOC.column() - 2, fmt::format(__VA_ARGS__));           \
     }                                                                                                             \
   }
 
-// DEBUG LOG - Gets removed in release builds
-#define DLOG(channel_name, ...)  {std::source_location SOURCE_LOC__ = std::source_location::current();            \
-  if (auto channel = logging::get_log_channel(channel_name); channel) {                                           \
-    channel->log_message(SOURCE_LOC__, fmt::format(__VA_ARGS__));                                                 \
-  }}
-
-#define DBGLOG(channel, ...) {std::source_location SOURCE_LOC__ = std::source_location::current();                \
-  if (auto channel = logging::get_log_channel(logging::Channel::channel); channel) {                              \
-    channel->log_message(SOURCE_LOC__, fmt::format(__VA_ARGS__));                                                 \
-  }}
+#define DBGLOG(channel, ...)                                                                                      \
+  if (auto channel = logging::GetLogChannel(logging::Channel::channel); channel) {                                \
+    std::source_location srcLoc = std::source_location::current();                                                \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, fmt::format(__VA_ARGS__));    \
+  }
 #else
 #define DLOG(...)
 #define DBGLOG(...)
 #define CDLOG(...)
 #endif
-
-#define LOG(channel, ...) logging::get_logging()->log(logging::Channel::channel, fmt::format(__VA_ARGS__));
-
-// clang-format on
 
 } // namespace logging
 
@@ -122,9 +101,45 @@ template <typename... Ts>
 void
 debug_log(LogChannel id, const std::source_location &loc, std::string_view fmt_str, Ts... ts)
 {
-  if (auto channel = logging::get_log_channel(id); channel != nullptr) {
-    channel->log_message(loc, fmt::format(fmt_str, ts...));
+  if (auto channel = logging::GetLogChannel(id); channel != nullptr) {
+    channel->LogMessage(loc, fmt::format(fmt_str, ts...));
   }
 }
 
 #define DebugLog(id, FormatString, ...) debug_log(id, std::source_location::current(), FormatString, __VA_ARGS__);
+
+namespace fmt {
+
+// Make this the debug formatter in the future.
+template <typename T> struct DebugFormatter
+{
+  bool mDebug{false};
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &context)
+  {
+    return context.begin();
+  }
+};
+
+template <> struct formatter<logging::Channel> : DebugFormatter<logging::Channel>
+{
+
+  template <typename FormatContext>
+  auto
+  format(const logging::Channel &channel, FormatContext &ctx) const
+  {
+#define DEFINE_CHANNEL(chan, name, desc)                                                                          \
+  case logging::Channel::chan:                                                                                    \
+    if (mDebug) {                                                                                                 \
+      return fmt::format_to(ctx.out(), name);                                                                     \
+    } else {                                                                                                      \
+      return fmt::format_to(ctx.out(), #chan);                                                                    \
+    }
+    switch (channel) {
+#include <defs/log_channels.defs>
+    }
+#undef DEFINE_CHANNEL
+  }
+};
+} // namespace fmt

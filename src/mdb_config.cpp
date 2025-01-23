@@ -5,7 +5,6 @@
 #include "log.h"
 #include "utils/logger.h"
 #include "utils/util.h"
-#include "utils/worker_task.h"
 #include <charconv>
 #include <filesystem>
 #include <getopt.h>
@@ -112,9 +111,9 @@ parse_cli(int argc, const char **argv) noexcept
         std::string_view args{optarg};
         auto input_logs = utils::split_string(args, ",");
         if (const auto res = LogConfig::verify_ok(input_logs); !res.is_expected()) {
-          return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue,
-                                            .msg = fmt::format("Unknown log value: {}\nSupported: ", res.error(),
-                                                               fmt::join(LogConfig::LOGS, ","))});
+          auto msg =
+            fmt::format("Unknown log value: {}\nSupported: ", res.error(), fmt::join(LogConfig::LOGS, ","));
+          return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = std::move(msg)});
         }
         for (auto i : input_logs) {
           init.log.set(i);

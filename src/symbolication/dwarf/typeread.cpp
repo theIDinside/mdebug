@@ -122,8 +122,9 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
       break;
     } else {
       if (!state.mReferedDie) {
-        LOG(core, "[dwarf]: Ignoring DW_TAG_variable die, incomplete symbol information. die=0x{:x}",
-            originDie.GetDie()->section_offset);
+        DBGLOG(dwarf,
+               "[ProcessVariableDie]: Ignoring DW_TAG_variable die, incomplete symbol information. die=0x{:x}",
+               originDie.GetDie()->section_offset);
         return false;
       }
       dieRef = state.mReferedDie.value();

@@ -4,6 +4,7 @@
 #include "bp.h"
 #include "common.h"
 #include "event_queue.h"
+#include "events/event.h"
 #include "interface/attach_args.h"
 #include "interface/console_command.h"
 #include "interface/dap/interface.h"
@@ -130,7 +131,6 @@ public:
   static Tracer &Get() noexcept;
 
   void TerminateSession() noexcept;
-
   void AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession session) noexcept;
   void LoadAndProcessObjectFile(pid_t target, const Path &objfile_path) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;

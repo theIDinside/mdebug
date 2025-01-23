@@ -63,12 +63,11 @@ StopReplyParser::parse_thread_exited() noexcept
 {
   const auto exit_status = parse_exitcode();
   if (!exit_status) {
-    DLOG(logging::Channel::remote, "Failed to parse exit code for w packet: '{}'", received_payload);
+    DBGLOG(remote, "Failed to parse exit code for w packet: '{}'", received_payload);
   }
 
   if (parse_data.size() > 1 && parse_data[0] != ';') {
-    DLOG(logging::Channel::remote, "Invalid 'w' packet. A thread id must be found but wasn't in '{}'",
-         received_payload);
+    DBGLOG(remote, "Invalid 'w' packet. A thread id must be found but wasn't in '{}'", received_payload);
     return {};
   }
   parse_data.remove_prefix(1);

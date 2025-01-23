@@ -8,7 +8,6 @@
 #include <common.h>
 #include <event_queue.h>
 #include <initializer_list>
-#include <notify_pipe.h>
 #include <mdbsys/ptrace.h>
 #include <tracer.h>
 #include <type_traits>
@@ -147,13 +146,13 @@ BufferedSocket::write(std::string_view payload) noexcept
     const auto send_res = send(fd_socket, payload.data(), payload.size(), 0);
     const auto success = send_res != -1;
     if (!success) {
-      DLOG(LogChannel::remote, "failed sending {}", payload);
+      DBGLOG(remote, "failed sending {}", payload);
       return SystemError{.syserrno = errno};
     }
     bytes_sent += send_res;
   } while (bytes_sent < payload.size());
 
-  DLOG(LogChannel::remote, "sent: '{}'", payload);
+  DBGLOG(remote, "sent: '{}'", payload);
   return SentOk{};
 }
 
@@ -182,13 +181,13 @@ BufferedSocket::write_cmd(std::string_view payload) noexcept
     const auto send_res = send(fd_socket, output_buf, buf_sz, 0);
     const auto success = send_res != -1;
     if (!success) {
-      DLOG(LogChannel::remote, "failed sending {}", payload);
+      DBGLOG(remote, "failed sending {}", payload);
       return SystemError{.syserrno = errno};
     }
     bytes_sent += send_res;
   } while (bytes_sent < payload.size());
 
-  DLOG(LogChannel::remote, "sent: '{}'", payload);
+  DBGLOG(remote, "sent: '{}'", payload);
   return SentOk{};
 }
 
@@ -759,7 +758,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
     const auto signal = parser.parse_signal();
     ASSERT(signal.has_value(), "Expected to have at least the signal data");
     if (!signal) {
-      DLOG(logging::Channel::remote, "Failed to parse signal for T packet: '{}'", received_payload);
+      DBGLOG(remote, "Failed to parse signal for T packet: '{}'", received_payload);
       return false;
     }
     process_task_stop_reply_t(signal.value(), parser.parse_data, is_session_config);
@@ -789,7 +788,8 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       const auto &[pid, tid, code] = res.value();
       // If we're not non-stop, this will stop the entire process
       const auto process_needs_resuming = !remote_settings.is_non_stop;
-      EventSystem::Get().PushDebuggerEvent(TraceEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
+      EventSystem::Get().PushDebuggerEvent(
+        TraceEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
       return true;
     } else {
       return false;
@@ -846,7 +846,7 @@ RemoteConnection::parse_event_consume_remaining() noexcept
 void
 RemoteConnection::relinquish_control_to_core() noexcept
 {
-  DLOG(logging::Channel::core, "Preparing to give control of Remote Connection to user.");
+  DBGLOG(core, "Preparing to give control of Remote Connection to user.");
   give_ctrl_sync.arrive_and_wait();
   user_done_sync.arrive_and_wait();
 }
@@ -1119,10 +1119,10 @@ RemoteConnection::execute_command(qXferCommand &cmd, u32 offset, int timeout) no
 void
 RemoteConnection::parse_supported(std::string_view supported_response) noexcept
 {
-  DLOG(logging::Channel::remote,
-       "Currently we don't really care. We support what we support and expect what we expect until further "
-       "notice:\n{}",
-       supported_response);
+  DBGLOG(remote,
+         "Currently we don't really care. We support what we support and expect what we expect until further "
+         "notice:\n{}",
+         supported_response);
   supported_response.remove_prefix(1);
   const auto supported = utils::split_string(supported_response, ";");
   // This is an absolute requirement set by us.
