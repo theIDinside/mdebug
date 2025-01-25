@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "common.h"
+#include "utils/logger.h"
 #include <csignal>
 #include <cxxabi.h>
 #include <execinfo.h>
@@ -69,8 +70,8 @@ SourceCoordinate::SourceCoordinate(std::string path, u32 line, u32 col) noexcept
 [[noreturn]] void
 panic(std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels)
 {
-  using enum logging::Channel;
-#define PLOG(msg) logging::GetLogger()->GetChannel(logging::Channel::core)->Log(msg)
+  using enum Channel;
+#define PLOG(msg) logging::Logger::GetLogger()->GetLogChannel(Channel::core)->Log(msg)
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];
@@ -117,7 +118,7 @@ ifbacktrace_failed:
                 file, line, functionName, err_msg, errno, strerr);
   PLOG(message);
   fmt::println("{}", message);
-  delete logging::GetLogger();
+  delete logging::Logger::GetLogger();
   panic_exit();
 #undef PLOG
 }

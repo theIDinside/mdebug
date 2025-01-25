@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common.h"
 #include "interface/remotegdb/target_description.h"
 #include "tracee_pointer.h"
 #include "utils/macros.h"
@@ -51,7 +50,6 @@ class RegisterDescription
     {
       ASSERT(offset <= self.mSize, "Offset {} beyond boundary of buffer of size {}", offset, self.mSize);
       return self.mBuffer + offset;
-      ;
     }
 
     template <class Self>

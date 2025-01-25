@@ -115,6 +115,9 @@ parse_command_type(const std::string_view view) noexcept
     if (view == "restartFrame"sv) {
       return CommandType::RestartFrame;
     }
+    if (view == "importScript"sv) {
+      return CommandType::ImportScript;
+    }
   } break;
   case 13: {
     if (view == "customRequest"sv) {

@@ -5,6 +5,7 @@
 #include "symbolication/block.h"
 #include "utils/interval_map.h"
 #include <common.h>
+#include <mutex>
 #include <optional>
 
 using StringOpt = std::optional<std::string_view>;

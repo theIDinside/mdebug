@@ -8,6 +8,7 @@
 #include "supervisor.h"
 #include "task.h"
 #include "tracee/util.h"
+#include "utils/expected.h"
 #include "utils/macros.h"
 #include "utils/util.h"
 #include <algorithm>
@@ -109,7 +110,7 @@ Tracer::TerminateSession() noexcept
 {
   for (auto &t : mTracedProcesses) {
     t->GetInterface().DoDisconnect(true);
-    t->GetPublisher(ObserverType::AllStop).Once([sv=t.get()](){
+    t->GetPublisher(ObserverType::AllStop).Once([sv = t.get()]() {
       EventSystem::Get().PushInternalEvent(InvalidateSupervisor{sv});
     });
   }

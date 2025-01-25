@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "register_description.h"
-#include "utils/util.h"
+#include "interface/remotegdb/deserialization.h"
 
 constexpr void
 RegisterDescription::RegisterBuffer::Swap(RegisterBuffer &other) noexcept
@@ -97,5 +97,5 @@ RegisterDescription::Store(const std::vector<std::pair<u32, std::vector<u8>>> &d
 void
 RegisterDescription::FillFromHexEncodedString(std::string_view hexString) noexcept
 {
-  utils::deserialize_hex_encoded(hexString, mRegisterContents);
+  deserialize_hex_encoded(hexString, mRegisterContents);
 }

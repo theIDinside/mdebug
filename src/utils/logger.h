@@ -2,6 +2,7 @@
 #pragma once
 #include "fmt/core.h"
 #include "fmt/format.h"
+#include "utils/macros.h"
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -9,67 +10,66 @@
 #include <source_location>
 #include <string>
 #include <typedefs.h>
-#include <unordered_map>
+
+#define FOR_EACH_LOG(LOGCHANNEL)                                                                                  \
+  LOGCHANNEL(core, "Debugger Core", "Messages that don't have a intuitive log channel can be logged here.")       \
+  LOGCHANNEL(dap, "Debug Adapter Protocol", "Log messages involving the DA protocol should be logged here.")      \
+  LOGCHANNEL(dwarf, "DWARF Debug Symbol Information",                                                             \
+             "Log messages involving symbol parsing and value evaluation")                                        \
+  LOGCHANNEL(awaiter, "Wait Status Reading",                                                                      \
+             "Log messages involving the wait status or wait-status adjacent systems")                            \
+  LOGCHANNEL(eh, "Exception Frame Header",                                                                        \
+             "Log messages that involve unwinding and parsing unwind symbol information")                         \
+  LOGCHANNEL(remote, "GDB Remote Protocol", "Log messages related to the GDB Remote Protocol")                    \
+  LOGCHANNEL(perf, "Performance Timing & Measuring",                                                              \
+             "If you wrap computationally heavy operations in high resolution clock timing, log those messages "  \
+             "to this channel")                                                                                   \
+  LOGCHANNEL(warning, "Warnings", "Unexpected behaviors should be logged to this chanel")                         \
+  LOGCHANNEL(interpreter, "Debugger script interpreter", "Log interpreter related messages here")
+
+#define CAST_FN(VAL, NAME, INFO)                                                                                  \
+  case static_cast<i32>(Channel::VAL):                                                                            \
+    return Channel::VAL;
+#define LOGCHANNEL(chan, name, desc) chan,
+ENUM_TYPE_METADATA(Channel, FOR_EACH_LOG, LOGCHANNEL, CAST_FN)
+#undef LOGCHANNEL
+
+constexpr static auto LogChannelNames = std::to_array({
+#define LOGCHANNEL(chan, name, desc) name,
+  FOR_EACH_LOG(LOGCHANNEL)
+#undef LOGCHANNEL
+});
 
 namespace logging {
 
-enum class Channel : u32
+struct LogChannel
 {
-#define DEFINE_CHANNEL(chan, name, desc) chan,
-#include <defs/log_channels.defs>
-#undef DEFINE_CHANNEL
+  std::mutex mChannelMutex;
+  std::fstream mFileStream;
+  void LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept;
+  void LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept;
+  void Log(std::string_view msg) noexcept;
 };
-
-constexpr static auto LogChannelNames = std::to_array({
-#define DEFINE_CHANNEL(chan, name, desc) name,
-#include <defs/log_channels.defs>
-#undef DEFINE_CHANNEL
-});
-
-consteval static auto
-ChannelCount() noexcept
-{
-  return std::size(LogChannelNames);
-}
-
-consteval std::array<Channel, ChannelCount()>
-DefaultChannels()
-{
-  std::array<Channel, ChannelCount()> res{};
-  for (auto i = u32{0}; i < ChannelCount(); ++i) {
-    res[i] = static_cast<Channel>(i);
-  }
-  return res;
-}
 
 class Logger
 {
   static Logger *sLoggerInstance;
 
 public:
-  struct LogChannel
-  {
-    std::mutex mChannelMutex;
-    std::fstream mFileStream;
-    void LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept;
-    void LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept;
-    void Log(std::string_view msg) noexcept;
-  };
-
   Logger() noexcept = default;
   ~Logger() noexcept;
   void SetupChannel(const std::filesystem::path &logDirectory, Channel id) noexcept;
   void Log(Channel id, std::string_view log_msg) noexcept;
   static Logger *GetLogger() noexcept;
   void OnAbort() noexcept;
-  LogChannel *GetChannel(Channel id);
+  LogChannel *GetLogChannel(Channel id) noexcept;
 
 private:
-  std::array<LogChannel *, ChannelCount()> LogChannels{};
+  std::array<LogChannel *, Enum<Channel>::Count()> LogChannels{};
 };
 
 Logger *GetLogger() noexcept;
-Logger::LogChannel *GetLogChannel(Channel id) noexcept;
+LogChannel *GetLogChannel(Channel id) noexcept;
 
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
 
@@ -77,13 +77,13 @@ Logger::LogChannel *GetLogChannel(Channel id) noexcept;
 #define CDLOG(condition, channel_name, ...)                                                                       \
   if ((condition)) {                                                                                              \
     auto LOC = std::source_location::current();                                                                   \
-    if (auto channel = logging::GetLogChannel(logging::Channel::channel_name); channel) {                         \
+    if (auto channel = logging::GetLogChannel(Channel::channel_name); channel) {                                  \
       channel->LogMessage(LOC.file_name(), LOC.line() - 1, LOC.column() - 2, fmt::format(__VA_ARGS__));           \
     }                                                                                                             \
   }
 
 #define DBGLOG(channel, ...)                                                                                      \
-  if (auto channel = logging::GetLogChannel(logging::Channel::channel); channel) {                                \
+  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
     std::source_location srcLoc = std::source_location::current();                                                \
     channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, fmt::format(__VA_ARGS__));    \
   }
@@ -94,19 +94,6 @@ Logger::LogChannel *GetLogChannel(Channel id) noexcept;
 #endif
 
 } // namespace logging
-
-using LogChannel = logging::Channel;
-
-template <typename... Ts>
-void
-debug_log(LogChannel id, const std::source_location &loc, std::string_view fmt_str, Ts... ts)
-{
-  if (auto channel = logging::GetLogChannel(id); channel != nullptr) {
-    channel->LogMessage(loc, fmt::format(fmt_str, ts...));
-  }
-}
-
-#define DebugLog(id, FormatString, ...) debug_log(id, std::source_location::current(), FormatString, __VA_ARGS__);
 
 namespace fmt {
 
@@ -119,27 +106,6 @@ template <typename T> struct DebugFormatter
   parse(ParseContext &context)
   {
     return context.begin();
-  }
-};
-
-template <> struct formatter<logging::Channel> : DebugFormatter<logging::Channel>
-{
-
-  template <typename FormatContext>
-  auto
-  format(const logging::Channel &channel, FormatContext &ctx) const
-  {
-#define DEFINE_CHANNEL(chan, name, desc)                                                                          \
-  case logging::Channel::chan:                                                                                    \
-    if (mDebug) {                                                                                                 \
-      return fmt::format_to(ctx.out(), name);                                                                     \
-    } else {                                                                                                      \
-      return fmt::format_to(ctx.out(), #chan);                                                                    \
-    }
-    switch (channel) {
-#include <defs/log_channels.defs>
-    }
-#undef DEFINE_CHANNEL
   }
 };
 } // namespace fmt

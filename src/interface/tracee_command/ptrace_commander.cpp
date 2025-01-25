@@ -18,8 +18,8 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
       process_id(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
-  ASSERT(procfs_memfd.is_open(), "failed to open memfd for {}", process_space_id);
+  procfs_memfd = utils::ScopedFd::Open(procfs_path, O_RDWR);
+  ASSERT(procfs_memfd.IsOpen(), "failed to open memfd for {}", process_space_id);
 }
 
 bool
@@ -30,10 +30,10 @@ PtraceCommander::OnExec() noexcept
   DBGLOG(core, "Post Exec routine for {}", process_id);
   procfs_memfd = {};
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", process_id, process_id);
-  procfs_memfd = utils::ScopedFd::open(procfs_path, O_RDWR);
-  ASSERT(procfs_memfd.is_open(), "Failed to open proc mem fs for {}", process_id);
+  procfs_memfd = utils::ScopedFd::Open(procfs_path, O_RDWR);
+  ASSERT(procfs_memfd.IsOpen(), "Failed to open proc mem fs for {}", process_id);
 
-  return procfs_memfd.is_open();
+  return procfs_memfd.IsOpen();
 }
 
 Interface
@@ -115,7 +115,7 @@ PtraceCommander::ReadLibraries() noexcept
 ReadResult
 PtraceCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 {
-  auto read_bytes = pread64(procfs_memfd.get(), read_buffer, size, address.get());
+  auto read_bytes = pread64(procfs_memfd.Get(), read_buffer, size, address.get());
   if (read_bytes > 0) {
     return ReadResult::Ok(static_cast<u32>(read_bytes));
   } else if (read_bytes == 0) {
@@ -128,7 +128,7 @@ PtraceCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 TraceeWriteResult
 PtraceCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
 {
-  const auto result = pwrite64(procfs_memfd.get(), buf, size, addr.get());
+  const auto result = pwrite64(procfs_memfd.Get(), buf, size, addr.get());
   if (result > 0) {
     return TraceeWriteResult::Ok(static_cast<u32>(result));
   } else {
@@ -268,7 +268,7 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
   std::array<char, 256> pathbuf{};
   auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
   std::string_view path{pathbuf.data(), it};
-  auto file = utils::ScopedFd::open_read_only(path);
+  auto file = utils::ScopedFd::OpenFileReadOnly(path);
   char namebuf[16]{0};
   auto len = ::read(file, namebuf, 16);
 
@@ -338,7 +338,7 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
 {
   auto path = fmt::format("/proc/{}/auxv", TaskLeaderTid());
   DBGLOG(core, "Reading auxv for {} at {}", TaskLeaderTid(), path);
-  utils::ScopedFd procfile = utils::ScopedFd::open_read_only(path);
+  utils::ScopedFd procfile = utils::ScopedFd::OpenFileReadOnly(path);
   // we can read 256 elements at a time (id + value = u64 * 2)
   static constexpr auto Count = 512;
   auto offset = 0;

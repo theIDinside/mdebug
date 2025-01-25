@@ -9,12 +9,12 @@ namespace ui {
 struct UIResult
 {
   UIResult() = default;
-  UIResult(bool success, UICommandPtr cmd = nullptr) noexcept
+  constexpr UIResult(bool success, UICommandPtr cmd = nullptr) noexcept
       : success(success), request_seq((cmd != nullptr) ? cmd->seq : 0), client(cmd->mDAPClient)
   {
   }
   virtual ~UIResult() = default;
-  virtual std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource* allocator) const noexcept = 0;
+  virtual std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource *allocator) const noexcept = 0;
 
   bool success;
   std::uint64_t request_seq;

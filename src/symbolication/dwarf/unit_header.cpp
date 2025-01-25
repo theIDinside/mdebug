@@ -7,128 +7,128 @@ namespace sym::dw {
 UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
                        u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
                        DwarfUnitType unit_type) noexcept
-    : sec_offset(sec_offset), unit_size(unit_size), die_data(die_data), abbreviation_sec_offset(abbrev_offset),
-      address_size(addr_size), dwarf_format(format), dw_version(version), unit_type(unit_type), id(id)
+    : mSecOffset(sec_offset), mUnitSize(unit_size), mDieData(die_data), mAbbreviationSectionOffset(abbrev_offset),
+      mAddrSize(addr_size), mDwarfFormat(format), mDwarfVersion(version), mUnitType(unit_type), mId(id)
 {
 }
 
 // Type Unit-Header constructor
 UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
                        u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept
-    : sec_offset(sec_offset), unit_size(unit_size), die_data(die_data), abbreviation_sec_offset(abbrev_offset),
-      address_size(addr_size), dwarf_format(format), dw_version(DwarfVersion::D5),
-      unit_type(DwarfUnitType::DW_UT_type), id(id), type_sig(type_signature), type_offset(type_offset)
+    : mSecOffset(sec_offset), mUnitSize(unit_size), mDieData(die_data), mAbbreviationSectionOffset(abbrev_offset),
+      mAddrSize(addr_size), mDwarfFormat(format), mDwarfVersion(DwarfVersion::D5),
+      mUnitType(DwarfUnitType::DW_UT_type), mId(id), mTypeSignature(type_signature), mTypeOffset(type_offset)
 {
 }
 
 u8
-UnitHeader::offset_size() const noexcept
+UnitHeader::OffsetSize() const noexcept
 {
-  return dwarf_format;
+  return mDwarfFormat;
 }
 
 u8
-UnitHeader::addr_size() const noexcept
+UnitHeader::AddrSize() const noexcept
 {
-  return address_size;
+  return mAddrSize;
 }
 
 const u8 *
-UnitHeader::abbreviation_data(const ElfSection *abbrev_sec) const noexcept
+UnitHeader::AbbreviationData(const ElfSection *abbrev_sec) const noexcept
 {
   ASSERT(abbrev_sec->GetName() == ".debug_abbrev",
          "Wrong ELF section was used, expected .debug_abbrev but received {}", abbrev_sec->GetName());
-  return abbrev_sec->GetPointer(abbreviation_sec_offset);
+  return abbrev_sec->GetPointer(mAbbreviationSectionOffset);
 }
 
 const u8 *
-UnitHeader::data() const noexcept
+UnitHeader::Data() const noexcept
 {
-  return die_data.data();
+  return mDieData.data();
 }
 
 const u8 *
-UnitHeader::end_excl() const noexcept
+UnitHeader::EndExclusive() const noexcept
 {
-  return die_data.data() + die_data.size();
+  return mDieData.data() + mDieData.size();
 }
 
 u64
-UnitHeader::debug_info_offset() const noexcept
+UnitHeader::DebugInfoSectionOffset() const noexcept
 {
-  return sec_offset;
+  return mSecOffset;
 }
 
 u8
-UnitHeader::format() const noexcept
+UnitHeader::Format() const noexcept
 {
-  return dwarf_format;
+  return mDwarfFormat;
 }
 
 u8
-UnitHeader::header_len() const noexcept
+UnitHeader::HeaderLen() const noexcept
 {
-  const auto fmt = format();
+  const auto fmt = Format();
   ASSERT(fmt == 4 || fmt == 8, "Unknown format");
-  switch (unit_type) {
+  switch (mUnitType) {
   case DwarfUnitType::DW_UT_type:
     return fmt == 4 ? (4 * 6) : (4 * 10);
   case DwarfUnitType::DW_UT_compile:
     [[fallthrough]];
   case DwarfUnitType::DW_UT_partial: {
-    return 4 * (3 * (fmt / 4)) - ((std::to_underlying(dw_version) < 5) ? 1 : 0);
+    return 4 * (3 * (fmt / 4)) - ((std::to_underlying(mDwarfVersion) < 5) ? 1 : 0);
   }
   default:
-    ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at 0x{:x}", to_str(unit_type), sec_offset);
+    ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at 0x{:x}", to_str(mUnitType), mSecOffset);
     break;
   }
 }
 
 std::span<const u8>
-UnitHeader::get_die_data() const noexcept
+UnitHeader::GetDieData() const noexcept
 {
-  return die_data;
+  return mDieData;
 }
 
 bool
-UnitHeader::spans_across(u64 offset) const noexcept
+UnitHeader::SpansAcross(u64 offset) const noexcept
 {
-  return offset >= sec_offset && offset <= (sec_offset + unit_size);
+  return offset >= mSecOffset && offset <= (mSecOffset + mUnitSize);
 }
 
 SymbolInfoId
-UnitHeader::unit_id() const noexcept
+UnitHeader::UnitId() const noexcept
 {
-  return id;
+  return mId;
 }
 
 DwarfVersion
-UnitHeader::version() const noexcept
+UnitHeader::Version() const noexcept
 {
-  return dw_version;
+  return mDwarfVersion;
 }
 
 DwarfUnitType
-UnitHeader::get_unit_type() const noexcept
+UnitHeader::GetUnitType() const noexcept
 {
-  return unit_type;
+  return mUnitType;
 }
 
 u64
-UnitHeader::cu_size() const noexcept
+UnitHeader::CompilationUnitSize() const noexcept
 {
-  return unit_size;
+  return mUnitSize;
 }
 
 u64
-UnitHeader::type_signature() const noexcept
+UnitHeader::TypeSignature() const noexcept
 {
-  return type_sig;
+  return mTypeSignature;
 }
 
 u64
-UnitHeader::get_type_offset() const noexcept
+UnitHeader::GetTypeOffset() const noexcept
 {
-  return type_offset;
+  return mTypeOffset;
 }
 } // namespace sym::dw

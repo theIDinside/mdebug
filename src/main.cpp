@@ -51,7 +51,7 @@ main(int argc, const char **argv)
 {
   // Sets main thread id. It's static so subsequent calls from other threads should be fine.
   GetMainThreadId();
-  auto system = EventSystem::Initialize();
+  EventSystem* eventSystem = EventSystem::Initialize();
 
   auto res = sys::parse_cli(argc, argv);
   if (!res.is_expected()) {
@@ -69,8 +69,8 @@ main(int argc, const char **argv)
 
   const sys::DebuggerConfiguration &config = res.value();
   {
-    using enum logging::Channel;
-    for (const auto id : logging::DefaultChannels()) {
+    using enum Channel;
+    for (const auto id : Enum<Channel>::Variants()) {
       logging::Logger::GetLogger()->SetupChannel(config.LogDirectory(), id);
     }
   }

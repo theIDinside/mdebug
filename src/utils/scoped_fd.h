@@ -53,33 +53,33 @@ public:
   ScopedFd(ScopedFd &&) noexcept;
   ~ScopedFd() noexcept;
 
-  int get() const noexcept;
-  bool is_open() const noexcept;
-  void close() noexcept;
+  int Get() const noexcept;
+  bool IsOpen() const noexcept;
+  void Close() noexcept;
   operator int() const noexcept;
-  u64 file_size() const noexcept;
-  const Path &path() const noexcept;
-  void forget() noexcept;
+  u64 FileSize() const noexcept;
+  const Path &GetPath() const noexcept;
+  void Release() noexcept;
 
   template <typename T>
   T *
-  mmap_file(std::optional<u64> opt_size, bool read_only) noexcept
+  MmapFile(std::optional<u64> opt_size, bool read_only) noexcept
   {
-    ASSERT(is_open(), "Backing file not open: {}", path().c_str());
-    const auto size = opt_size.value_or(file_size());
-    auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, get(), 0);
-    ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, path().c_str());
+    ASSERT(IsOpen(), "Backing file not open: {}", GetPath().c_str());
+    const auto size = opt_size.value_or(FileSize());
+    auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, Get(), 0);
+    ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, GetPath().c_str());
     return ptr;
   }
 
-  static ScopedFd open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
-  static utils::Expected<ScopedFd, ConnectError> socket_connect(const std::string &host, int port) noexcept;
-  static ScopedFd open_read_only(const Path &p) noexcept;
-  static ScopedFd take_ownership(int fd) noexcept;
+  static ScopedFd Open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
+  static utils::Expected<ScopedFd, ConnectError> OpenSocketConnectTo(const std::string &host, int port) noexcept;
+  static ScopedFd OpenFileReadOnly(const Path &p) noexcept;
+  static ScopedFd TakeFileDescriptorOwnership(int fd) noexcept;
 
 private:
-  int fd;
-  Path p;
-  std::optional<u64> file_size_;
+  int mFd;
+  Path mPath;
+  std::optional<u64> mFileSize;
 };
 } // namespace utils

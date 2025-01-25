@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #include "dwarf_unit_data.h"
-#include "lib/arena_allocator.h"
 #include "symbolication/cu_symbol_info.h"
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die.h"
@@ -20,12 +19,12 @@ static void
 ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::CompilationUnit &src) noexcept
 {
   auto cu = src.get_dwarf_unit();
-  const auto version = cu->header().version();
+  const auto version = cu->header().Version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
   auto elf = cu->GetObjectFile()->GetElf();
 
   if (version == DwarfVersion::D4) {
-    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->GetPointer(ranges_offset.address()));
+    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->GetPointer(ranges_offset.AsAddress()));
     auto lowest = UINTMAX_MAX;
     auto highest = 0ul;
     auto start = 0ul;
@@ -45,7 +44,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
           continue;
         }
       } else {
-        if(start != 1 && end != 1) {
+        if (start != 1 && end != 1) {
           lowest = std::min(start, lowest);
           highest = std::max(end, highest);
           found_a_range = true;
@@ -59,11 +58,11 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
     ASSERT(elf->debug_rnglists != nullptr,
            "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
     if (ranges_offset.form == AttributeForm::DW_FORM_sec_offset) {
-      auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.unsigned_value());
+      auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.AsUnsignedValue());
       src.SetAddressBoundary(addr_range.StartPc(), addr_range.EndPc());
     } else {
       auto ranges =
-        sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.unsigned_value()));
+        sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.AsUnsignedValue()));
       AddrPtr lowpc = static_cast<u64>(-1);
       AddrPtr highpc = nullptr;
       for (const auto [low, high] : ranges) {
@@ -77,7 +76,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
 }
 
 void
-UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) noexcept
+UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) noexcept
 {
   std::vector<UnitData *> result;
   for (const auto &header : mCompilationUnitsToParse) {
@@ -86,7 +85,7 @@ UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) 
     const auto time =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
         .count();
-    DBGLOG(perf, "prepared unit data for 0x{:x} in {}us", header.debug_info_offset(), time);
+    DBGLOG(perf, "prepared unit data for 0x{:x} in {}us", header.DebugInfoSectionOffset(), time);
     result.push_back(unit_data);
   }
 
@@ -96,53 +95,53 @@ UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) 
        result | std::views::filter([](UnitData *unit) { return unit->IsCompilationUnitLike(); })) {
     UnitReader reader{dwarfUnit};
 
-    if (dwarfUnit->header().get_unit_type() == DwarfUnitType::DW_UT_partial) {
+    if (dwarfUnit->header().GetUnitType() == DwarfUnitType::DW_UT_partial) {
       DBGLOG(dwarf, "partial unit supported not implemented, skipped 0x{:x}", dwarfUnit->SectionOffset());
       continue;
     }
 
-    const auto die_sec_offset = reader.sec_offset();
-    const auto [abbr_code, uleb_sz] = reader.read_uleb128();
-    auto &abbrs = dwarfUnit->get_abbreviation(abbr_code);
-    const auto unitDie = DieMetaData::create_die(die_sec_offset, abbrs, NONE_INDEX, uleb_sz, NONE_INDEX);
+    const auto die_sec_offset = reader.SectionOffset();
+    const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
+    auto &abbrs = dwarfUnit->GetAbbreviation(abbr_code);
+    const auto unitDie = DieMetaData::CreateDie(die_sec_offset, abbrs, NONE_INDEX, uleb_sz, NONE_INDEX);
     auto *newCompilationUnit = new sym::CompilationUnit{dwarfUnit};
 
     std::optional<AddrPtr> low;
     std::optional<AddrPtr> high;
 
-    for (const auto &abbr : abbrs.attributes) {
-      switch (abbr.name) {
+    for (const auto &abbr : abbrs.mAttributes) {
+      switch (abbr.mName) {
       case Attribute::DW_AT_stmt_list: {
-        const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-        const auto offset = attr.address();
+        const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
+        const auto offset = attr.AsAddress();
         auto header = dw::LNPHeader::ReadLineNumberProgramHeader(obj, offset);
         newCompilationUnit->ProcessSourceCodeFiles(header);
         break;
       }
       case Attribute::DW_AT_name: {
-        const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-        const auto name = attr.string();
+        const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
+        const auto name = attr.AsCString();
         newCompilationUnit->SetUnitName(name);
         break;
       }
       case Attribute::DW_AT_ranges: {
-        const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
+        const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
         ProcessCompilationUnitBoundary(attr, *newCompilationUnit);
       } break;
       case Attribute::DW_AT_low_pc: {
-        const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
+        const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
         if (!low) {
-          low = attr.address();
+          low = attr.AsAddress();
         }
       } break;
       case Attribute::DW_AT_high_pc: {
-        const auto attr = read_attribute_value(reader, abbr, abbrs.implicit_consts);
-        high = attr.address();
+        const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
+        high = attr.AsAddress();
       } break;
       case Attribute::DW_AT_import:
         [[fallthrough]];
       default:
-        reader.skip_attribute(abbr);
+        reader.SkipAttribute(abbr);
         break;
       }
     }
@@ -161,7 +160,7 @@ UnitDataTask::execute_task(std::pmr::memory_resource* mGroupTemporaryAllocator) 
 
 /* static */
 std::vector<UnitDataTask *>
-UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource* allocator) noexcept
+UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allocator) noexcept
 {
   const auto sectionSize = obj->GetElf()->debug_info->Size();
   UnitHeadersRead headerRead;
@@ -169,10 +168,11 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource* allo
   std::pmr::vector<std::pmr::vector<sym::dw::UnitHeader>> works{allocator};
 
   std::pmr::vector<sym::dw::UnitHeader> sortedBySize{allocator};
-  utils::copy_to(headerRead.Headers(), sortedBySize);
+  utils::CopyTo(headerRead.Headers(), sortedBySize);
 
-  std::sort(sortedBySize.begin(), sortedBySize.end(),
-            [](const UnitHeader &a, const UnitHeader &b) { return a.cu_size() > b.cu_size(); });
+  std::sort(sortedBySize.begin(), sortedBySize.end(), [](const UnitHeader &a, const UnitHeader &b) {
+    return a.CompilationUnitSize() > b.CompilationUnitSize();
+  });
 
   std::vector<UnitDataTask *> tasks;
   std::pmr::vector<u64> taskSize{allocator};
@@ -188,7 +188,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource* allo
 
     // Assign the number to this subgroup
     works[minIndex].push_back(header);
-    taskSize[minIndex] += header.cu_size();
+    taskSize[minIndex] += header.CompilationUnitSize();
   }
 
   auto acc = 0u;
@@ -203,6 +203,5 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource* allo
 
   return tasks;
 }
-
 
 } // namespace sym::dw

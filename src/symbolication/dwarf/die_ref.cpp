@@ -11,26 +11,27 @@ namespace sym::dw {
 std::tuple<u64, const char *>
 PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
 {
-  ASSERT(cu && std::to_underlying(cu->header().version()) < 5, "Expected compillation to not be null and version <= 4");
+  ASSERT(cu && std::to_underlying(cu->header().Version()) < 5,
+         "Expected compillation to not be null and version <= 4");
   UnitReader reader{cu};
   reader.SeekDie(unitDie);
-  const auto &attrs = cu->get_abbreviation(unitDie.abbreviation_code);
+  const auto &attrs = cu->GetAbbreviation(unitDie.mAbbreviationCode);
 
   u64 offset = std::numeric_limits<u64>::max();
   const char *directory = nullptr;
 
-  for (auto attribute : attrs.attributes) {
-    switch (attribute.name) {
+  for (auto attribute : attrs.mAttributes) {
+    switch (attribute.mName) {
     case Attribute::DW_AT_stmt_list: {
-      const auto val = read_attribute_value(reader, attribute, attrs.implicit_consts);
-      offset = val.unsigned_value();
+      const auto val = ReadAttributeValue(reader, attribute, attrs.mImplicitConsts);
+      offset = val.AsUnsignedValue();
     } break;
     case Attribute::DW_AT_comp_dir: {
-      const auto val = read_attribute_value(reader, attribute, attrs.implicit_consts);
-      directory = val.string();
+      const auto val = ReadAttributeValue(reader, attribute, attrs.mImplicitConsts);
+      directory = val.AsCString();
     } break;
     default:
-      reader.skip_attribute(attribute);
+      reader.SkipAttribute(attribute);
     }
   }
 
@@ -61,18 +62,18 @@ DieReference::MaybeResolveReference() const noexcept
     return DieReference{nullptr, nullptr};
   }
   UnitReader reader{mUnitData};
-  const auto &attrs = mUnitData->get_abbreviation(mDebugInfoEntry->abbreviation_code);
+  const auto &attrs = mUnitData->GetAbbreviation(mDebugInfoEntry->mAbbreviationCode);
   reader.SeekDie(*mDebugInfoEntry);
-  for (auto abbreviation : attrs.attributes) {
-    switch (abbreviation.name) {
+  for (auto abbreviation : attrs.mAttributes) {
+    switch (abbreviation.mName) {
     case Attribute::DW_AT_abstract_origin:
     case Attribute::DW_AT_specification: {
-      const auto value = read_attribute_value(reader, abbreviation, {});
-      auto offset = value.unsigned_value();
+      const auto value = ReadAttributeValue(reader, abbreviation, {});
+      auto offset = value.AsUnsignedValue();
       return mUnitData->GetObjectFile()->GetDieReference(offset);
     }
     default:
-      reader.skip_attribute(abbreviation);
+      reader.SkipAttribute(abbreviation);
     }
   }
   return DieReference{nullptr, nullptr};
@@ -87,7 +88,7 @@ DieReference::IndexOfDie() const noexcept
 const AbbreviationInfo &
 DieReference::GetAbbreviation() const noexcept
 {
-  return mUnitData->get_abbreviation(mDebugInfoEntry->abbreviation_code);
+  return mUnitData->GetAbbreviation(mDebugInfoEntry->mAbbreviationCode);
 }
 
 bool
@@ -126,16 +127,16 @@ DieReference::GetReader() const noexcept
 }
 
 std::optional<AttributeValue>
-DieReference::read_attribute(Attribute attr) const noexcept
+DieReference::ReadAttribute(Attribute attr) const noexcept
 {
   UnitReader reader{mUnitData};
-  const auto &attrs = mUnitData->get_abbreviation(mDebugInfoEntry->abbreviation_code);
+  const auto &attrs = mUnitData->GetAbbreviation(mDebugInfoEntry->mAbbreviationCode);
   reader.SeekDie(*mDebugInfoEntry);
   auto i = 0u;
-  for (auto attribute : attrs.attributes) {
-    if (attribute.name == attr) {
-      reader.skip_attributes(std::span{attrs.attributes.begin(), attrs.attributes.begin() + i});
-      return read_attribute_value(reader, attribute, attrs.implicit_consts);
+  for (auto attribute : attrs.mAttributes) {
+    if (attribute.mName == attr) {
+      reader.SkipAttributes(std::span{attrs.mAttributes.begin(), attrs.mAttributes.begin() + i});
+      return ReadAttributeValue(reader, attribute, attrs.mImplicitConsts);
     } else {
       ++i;
     }
@@ -158,6 +159,6 @@ IndexedDieReference::GetIndex() const noexcept
 const DieMetaData *
 IndexedDieReference::GetDie() noexcept
 {
-  return &mUnitData->get_dies()[mDieIndex];
+  return &mUnitData->GetDies()[mDieIndex];
 }
 } // namespace sym::dw

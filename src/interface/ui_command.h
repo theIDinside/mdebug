@@ -90,7 +90,7 @@ struct UICommand
 
 public:
   explicit UICommand(std::uint64_t seq) noexcept : seq(seq) {}
-  virtual ~UICommand() = default;
+  virtual ~UICommand() noexcept = default;
 
   constexpr void
   SetDebugAdapterClient(dap::DebugAdapterClient &da) noexcept

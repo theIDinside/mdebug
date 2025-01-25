@@ -20,39 +20,39 @@ public:
   UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset,
              u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept;
 
-  UnitHeader(const UnitHeader&) = default;
-  UnitHeader& operator=(const UnitHeader&) = default;
-  UnitHeader(UnitHeader&&) = default;
-  UnitHeader& operator=(UnitHeader&&) = default;
+  UnitHeader(const UnitHeader &) = default;
+  UnitHeader &operator=(const UnitHeader &) = default;
+  UnitHeader(UnitHeader &&) = default;
+  UnitHeader &operator=(UnitHeader &&) = default;
 
-  u8 offset_size() const noexcept;
-  u8 addr_size() const noexcept;
-  const u8 *abbreviation_data(const ElfSection *abbrev_sec) const noexcept;
-  const u8 *data() const noexcept;
-  const u8 *end_excl() const noexcept;
-  u64 debug_info_offset() const noexcept;
-  u8 format() const noexcept;
-  u8 header_len() const noexcept;
-  std::span<const u8> get_die_data() const noexcept;
-  bool spans_across(u64 sec_offset) const noexcept;
-  SymbolInfoId unit_id() const noexcept;
-  DwarfVersion version() const noexcept;
-  DwarfUnitType get_unit_type() const noexcept;
-  u64 cu_size() const noexcept;
-  u64 type_signature() const noexcept;
-  u64 get_type_offset() const noexcept;
+  u8 OffsetSize() const noexcept;
+  u8 AddrSize() const noexcept;
+  const u8 *AbbreviationData(const ElfSection *abbrev_sec) const noexcept;
+  const u8 *Data() const noexcept;
+  const u8 *EndExclusive() const noexcept;
+  u64 DebugInfoSectionOffset() const noexcept;
+  u8 Format() const noexcept;
+  u8 HeaderLen() const noexcept;
+  std::span<const u8> GetDieData() const noexcept;
+  bool SpansAcross(u64 sec_offset) const noexcept;
+  SymbolInfoId UnitId() const noexcept;
+  DwarfVersion Version() const noexcept;
+  DwarfUnitType GetUnitType() const noexcept;
+  u64 CompilationUnitSize() const noexcept;
+  u64 TypeSignature() const noexcept;
+  u64 GetTypeOffset() const noexcept;
 
 private:
-  u64 sec_offset;
-  u64 unit_size;
-  std::span<const u8> die_data;
-  u64 abbreviation_sec_offset;
-  u8 address_size;
-  u8 dwarf_format;
-  DwarfVersion dw_version;
-  DwarfUnitType unit_type;
-  SymbolInfoId id;
-  u64 type_sig{0};
-  u64 type_offset{0};
+  u64 mSecOffset;
+  u64 mUnitSize;
+  std::span<const u8> mDieData;
+  u64 mAbbreviationSectionOffset;
+  u8 mAddrSize;
+  u8 mDwarfFormat;
+  DwarfVersion mDwarfVersion;
+  DwarfUnitType mUnitType;
+  SymbolInfoId mId;
+  u64 mTypeSignature{0};
+  u64 mTypeOffset{0};
 };
 } // namespace sym::dw

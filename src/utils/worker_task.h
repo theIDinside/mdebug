@@ -18,15 +18,15 @@ class Task
 public:
   Task() noexcept = default;
   virtual ~Task() noexcept = default;
-  void set_owner(TaskGroup *group) noexcept;
-  void execute() noexcept;
+  void SetOwner(TaskGroup *group) noexcept;
+  void Execute() noexcept;
 
 protected:
-  virtual void execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept = 0;
+  virtual void ExecuteTask(std::pmr::memory_resource* temporaryAllocator) noexcept = 0;
 
 private:
-  bool is_group_job() const noexcept;
-  TaskGroup *owning_group{nullptr};
+  bool IsGroupJob() const noexcept;
+  TaskGroup *mOwningGroup{nullptr};
 };
 
 class NoOp final : public Task
@@ -36,7 +36,7 @@ public:
   ~NoOp() noexcept override = default;
 
 protected:
-  void execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept final;
+  void ExecuteTask(std::pmr::memory_resource* temporaryAllocator) noexcept final;
 };
 
 using JobPtr = Task *;
@@ -47,30 +47,30 @@ public:
   TaskGroup(std::string_view name) noexcept;
   ~TaskGroup() noexcept;
 
-  void add_task(Task *task) noexcept;
+  void AddTask(Task *task) noexcept;
 
   template <typename Task>
   void
-  add_tasks(std::span<Task *> tasks) noexcept
+  AddTasks(std::span<Task *> tasks) noexcept
   {
-    std::lock_guard lock(m_task_lock);
+    std::lock_guard lock(mTaskLock);
     for (auto t : tasks) {
-      m_tasks.push_back(t);
-      t->set_owner(this);
+      mTasks.push_back(t);
+      t->SetOwner(this);
     }
   }
-  std::future<void> schedule_work() noexcept;
-  void task_done(Task *task) noexcept;
+  std::future<void> ScheduleWork() noexcept;
+  void TaskDone(Task *task) noexcept;
 
   alloc::ArenaAllocator* GetTemporaryAllocator() const noexcept;
 
 private:
-  std::chrono::high_resolution_clock::time_point start;
-  std::promise<void> m_promise;
-  std::string_view m_name;
-  std::mutex m_task_lock;
-  std::vector<Task *> m_tasks;
-  std::vector<Task *> m_done_tasks;
+  std::chrono::high_resolution_clock::time_point mStart;
+  std::promise<void> mPromise;
+  std::string_view mName;
+  std::mutex mTaskLock;
+  std::vector<Task *> mTasks;
+  std::vector<Task *> mDoneTasks;
   std::unique_ptr<alloc::ArenaAllocator> mGroupTemporaryAllocator;
 };
 } // namespace utils

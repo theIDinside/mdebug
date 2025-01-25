@@ -250,44 +250,41 @@ ArrayResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::
   }
 }
 
-ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept
-    : mDataProvider(std::move(provider))
-{
-}
+ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : mDataProvider(std::move(provider)) {}
 
 std::optional<std::pmr::string>
-PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource* allocator) noexcept
+PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept
 {
   auto &enums = t.GetEnumerations();
   EnumeratorConstValue value;
   if (enums.is_signed) {
     switch (t.size_of) {
     case 1:
-      value.i = bit_copy<i8>(span);
+      value.i = BitCopy<i8>(span);
       break;
     case 2:
-      value.i = bit_copy<i16>(span);
+      value.i = BitCopy<i16>(span);
       break;
     case 4:
-      value.i = bit_copy<i32>(span);
+      value.i = BitCopy<i32>(span);
       break;
     case 8:
-      value.i = bit_copy<i64>(span);
+      value.i = BitCopy<i64>(span);
       break;
     }
   } else {
     switch (t.size_of) {
     case 1:
-      value.u = bit_copy<u8>(span);
+      value.u = BitCopy<u8>(span);
       break;
     case 2:
-      value.u = bit_copy<u16>(span);
+      value.u = BitCopy<u16>(span);
       break;
     case 4:
-      value.u = bit_copy<u32>(span);
+      value.u = BitCopy<u32>(span);
       break;
     case 8:
-      value.u = bit_copy<u64>(span);
+      value.u = BitCopy<u64>(span);
       break;
     }
   }
@@ -320,7 +317,7 @@ PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept
 }
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::pmr::string>
-PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
+PrimitiveVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -337,7 +334,7 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
   std::pmr::string result{allocator};
 
   if (type->IsReference()) {
-    const std::uintptr_t ptr = bit_copy<std::uintptr_t>(span);
+    const std::uintptr_t ptr = BitCopy<std::uintptr_t>(span);
     FormatAndReturn(result, "0x{:x}", ptr);
   }
 
@@ -346,7 +343,7 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
     if (!target_type->IsResolved()) {
       dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
                                        *target_type.ptr};
-      ctx.resolve_type();
+      ctx.ResolveType();
     }
 
     return FormatEnum(*target_type, span, allocator);
@@ -354,19 +351,19 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
 
   switch (type->GetBaseType().value()) {
   case BaseTypeEncoding::DW_ATE_address: {
-    std::uintptr_t value = bit_copy<std::uintptr_t>(span);
+    std::uintptr_t value = BitCopy<std::uintptr_t>(span);
     FormatAndReturn(result, "0x{}", value);
   }
   case BaseTypeEncoding::DW_ATE_boolean: {
-    bool value = bit_copy<bool>(span);
+    bool value = BitCopy<bool>(span);
     FormatAndReturn(result, "{}", value);
   }
   case BaseTypeEncoding::DW_ATE_float: {
     if (size_of == 4u) {
-      float value = bit_copy<float>(span);
+      float value = BitCopy<float>(span);
       FormatAndReturn(result, "{}", value);
     } else if (size_of == 8u) {
-      double value = bit_copy<double>(span);
+      double value = BitCopy<double>(span);
       FormatAndReturn(result, "{}", value);
     } else {
       PANIC("Expected byte size of a floating point to be 4 or 8");
@@ -376,19 +373,19 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
   case BaseTypeEncoding::DW_ATE_signed:
     switch (size_of) {
     case 1: {
-      signed char value = bit_copy<signed char>(span);
+      signed char value = BitCopy<signed char>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 2: {
-      signed short value = bit_copy<signed short>(span);
+      signed short value = BitCopy<signed short>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 4: {
-      int value = bit_copy<int>(span);
+      int value = BitCopy<int>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 8: {
-      signed long long value = bit_copy<signed long long>(span);
+      signed long long value = BitCopy<signed long long>(span);
       FormatAndReturn(result, "{}", value);
     }
     }
@@ -397,25 +394,25 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
   case BaseTypeEncoding::DW_ATE_unsigned:
     switch (size_of) {
     case 1: {
-      u8 value = bit_copy<unsigned char>(span);
+      u8 value = BitCopy<unsigned char>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 2: {
-      u16 value = bit_copy<unsigned short>(span);
+      u16 value = BitCopy<unsigned short>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 4: {
-      u32 value = bit_copy<u32>(span);
+      u32 value = BitCopy<u32>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 8: {
-      u64 value = bit_copy<u64>(span);
+      u64 value = BitCopy<u64>(span);
       FormatAndReturn(result, "{}", value);
     }
     }
     break;
   case BaseTypeEncoding::DW_ATE_UTF: {
-    u32 value = bit_copy<u32>(span);
+    u32 value = BitCopy<u32>(span);
     FormatAndReturn(result, "{}", value);
   } break;
   case BaseTypeEncoding::DW_ATE_ASCII:
@@ -440,7 +437,8 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
 }
 
 std::optional<std::pmr::string>
-PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept
+PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference,
+                               std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -467,13 +465,14 @@ DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noe
 }
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::pmr::string>
-DefaultStructVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
+DefaultStructVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
 {
   TODO("not done");
 }
 
 std::optional<std::pmr::string>
-DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept
+DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference,
+                                   std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -495,13 +494,13 @@ InvalidValueVisualizer::InvalidValueVisualizer(std::weak_ptr<Value> providerWith
 }
 
 std::optional<std::pmr::string>
-InvalidValueVisualizer::FormatValue(std::pmr::memory_resource*) noexcept
+InvalidValueVisualizer::FormatValue(std::pmr::memory_resource *) noexcept
 {
   TODO("InvalidValueVisualizer::format_value() not yet implemented");
 }
 
 std::optional<std::pmr::string>
-InvalidValueVisualizer::DapFormat(std::string_view, int, std::pmr::memory_resource* allocator) noexcept
+InvalidValueVisualizer::DapFormat(std::string_view, int, std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   std::pmr::string result{allocator};
@@ -510,19 +509,16 @@ InvalidValueVisualizer::DapFormat(std::string_view, int, std::pmr::memory_resour
                   ptr->mName, ptr->mName, *ptr->GetType());
 }
 
-ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept
-    : ValueVisualizer(std::move(provider))
-{
-}
+ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(std::move(provider)) {}
 
 std::optional<std::pmr::string>
-ArrayVisualizer::FormatValue(std::pmr::memory_resource*) noexcept
+ArrayVisualizer::FormatValue(std::pmr::memory_resource *) noexcept
 {
   TODO("not impl");
 }
 
 std::optional<std::pmr::string>
-ArrayVisualizer::DapFormat(std::string_view, int variablesReference, std::pmr::memory_resource* allocator) noexcept
+ArrayVisualizer::DapFormat(std::string_view, int variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -538,13 +534,14 @@ ArrayVisualizer::DapFormat(std::string_view, int variablesReference, std::pmr::m
     ptr->mName, t, t, variablesReference, ptr->Address(), no_alias->ArraySize());
 }
 
-CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider, std::optional<u32> nullTerminatorPosition) noexcept
+CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider,
+                                     std::optional<u32> nullTerminatorPosition) noexcept
     : ValueVisualizer(std::move(dataProvider)), null_terminator(nullTerminatorPosition)
 {
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
+CStringVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {
@@ -560,7 +557,7 @@ CStringVisualizer::FormatValue(std::pmr::memory_resource* allocator) noexcept
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::DapFormat(std::string_view name, int, std::pmr::memory_resource* allocator) noexcept
+CStringVisualizer::DapFormat(std::string_view name, int, std::pmr::memory_resource *allocator) noexcept
 {
   auto ptr = mDataProvider.lock();
   if (!ptr) {

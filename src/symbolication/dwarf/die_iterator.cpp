@@ -8,7 +8,7 @@ namespace sym::dw {
 const DieMetaData *
 DieSiblingIterator::StartDie(const DieMetaData *die) noexcept
 {
-  return die->sibling();
+  return die->Sibling();
 }
 
 DieSiblingIterator::DieSiblingIterator(UnitData *cu, const DieMetaData *die) noexcept : cu(cu), die(die) {}
@@ -16,7 +16,7 @@ DieSiblingIterator::DieSiblingIterator(UnitData *cu, const DieMetaData *die) noe
 DieSiblingIterator &
 DieSiblingIterator::operator++() noexcept
 {
-  die = die->sibling();
+  die = die->Sibling();
   return *this;
 }
 
@@ -24,7 +24,7 @@ DieSiblingIterator
 DieSiblingIterator::operator++(int) noexcept
 {
   auto it = *this;
-  die = die->sibling();
+  die = die->Sibling();
   return it;
 }
 

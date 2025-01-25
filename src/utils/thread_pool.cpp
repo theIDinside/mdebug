@@ -88,7 +88,7 @@ ThreadPool::WorkerLoop(std::stop_token &stop_token) noexcept
       mTaskQueue.pop();
     }
     ASSERT(job != nullptr, "Failed to retrieve work from task queue");
-    job->execute();
+    job->Execute();
     delete job;
   }
 }

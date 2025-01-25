@@ -25,40 +25,47 @@ public:
   UnitReader(const UnitReader &o) noexcept;
   UnitReader &operator=(const UnitReader &reader) noexcept;
 
-  void skip_attributes(const std::span<const Abbreviation> &attributes) noexcept;
-  void skip_attribute(const Abbreviation &abbreviation) noexcept;
-  AddrPtr read_address() noexcept;
-  std::string_view read_string() noexcept;
+  // Skip a computec offset in the byte stream we are reading from by determining
+  // the total amount of bytes that `attributes` would consist of
+  void SkipAttributes(const std::span<const Abbreviation> &attributes) noexcept;
+  // See `SkipAttributes` but for 1
+  void SkipAttribute(const Abbreviation &abbreviation) noexcept;
+
+  AddrPtr ReadAddress() noexcept;
+  std::string_view ReadString() noexcept;
   const char *ReadCString() noexcept;
-  DataBlock read_block(u64 block_size) noexcept;
-  u64 bytes_read() const noexcept;
+  DataBlock ReadBlock(u64 block_size) noexcept;
+  u64 BytesRead() const noexcept;
 
-  u64 uleb128() noexcept;
-  i64 leb128() noexcept;
+  u64 ReadULEB128() noexcept;
+  i64 ReadLEB128() noexcept;
 
-  LEB128Read<u64> read_uleb128() noexcept;
-  LEB128Read<i64> read_leb128() noexcept;
-  u64 read_offset() noexcept;
-  u64 read_section_offset(u64 offset) const noexcept;
-  u64 read_n_bytes(u8 n_bytes) noexcept;
-  AddrPtr read_by_idx_from_addr_table(u64 address_index) const noexcept;
-  const char *read_by_idx_from_str_table(u64 str_index) const noexcept;
-  u64 read_by_idx_from_rnglist(u64 range_index) const noexcept;
-  u64 read_loclist_index(u64 range_index, std::optional<u64> loc_list_base) const noexcept;
-  u64 sec_offset() const noexcept;
-  bool has_more() const noexcept;
+  // Read* functions just reads the U/LEB128 value. Decode* functions
+  // read the value and also returns the amount of bytes that was needed to parse for that value.
+  LEB128Read<u64> DecodeULEB128() noexcept;
+  LEB128Read<i64> DecodeLEB128() noexcept;
+  u64 ReadOffsetValue() noexcept;
+  u64 ReadSectionOffsetValue(u64 offset) const noexcept;
+  u64 ReadNumbBytes(u8 n_bytes) noexcept;
+  AddrPtr ReadByIndexFromAddressTable(u64 address_index) const noexcept;
+  const char *ReadByIndexFromStringTable(u64 str_index) const noexcept;
+  u64 ReadByIndexFromRangeList(u64 range_index) const noexcept;
+  u64 ReadLocationListIndex(u64 range_index, std::optional<u64> loc_list_base) const noexcept;
+  u64 SectionOffset() const noexcept;
+  bool HasMore() const noexcept;
 
   /* Set UnitReader to start reading the data for `entry` */
   void SeekDie(const DieMetaData &entry) noexcept;
   void SetOffset(u64 offset) noexcept;
-  ObjectFile *objfile() const noexcept;
-  const Elf *elf() const noexcept;
-  const u8 *ptr() const noexcept;
+  /// Return the `ObjectFile` that UnitReader is reading a compilation unit from.
+  ObjectFile *GetObjectFile() const noexcept;
+  const Elf *GetElf() const noexcept;
+  const u8 *RawPointer() const noexcept;
 
   /// Needs to be auto, otherwise we are not widening the value
   template <std::integral Integral>
   constexpr auto
-  read_integral() noexcept
+  ReadIntegralValue() noexcept
   {
     Integral type = *(Integral *)current_ptr;
     current_ptr += sizeof(Integral);
@@ -90,8 +97,8 @@ private:
   u8 mFormat;
 };
 
-AttributeValue read_attribute_value(UnitReader &reader, Abbreviation abbr,
-                                    const std::vector<i64> &implicit_consts) noexcept;
+AttributeValue ReadAttributeValue(UnitReader &reader, Abbreviation abbr,
+                                  const std::vector<i64> &implicit_consts) noexcept;
 
 class DieAttributeReader
 {

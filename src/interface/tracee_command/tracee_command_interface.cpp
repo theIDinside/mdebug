@@ -11,7 +11,7 @@ namespace tc {
 TraceeCommandInterface::TraceeCommandInterface(TargetFormat format,
                                                std::shared_ptr<gdb::ArchictectureInfo> &&arch_info,
                                                TraceeInterfaceType type) noexcept
-    : format(format), arch_info(std::move(arch_info)), mType(type)
+    : mFormat(format), mArchInfo(std::move(arch_info)), mType(type)
 {
 }
 
@@ -53,7 +53,6 @@ TraceeCommandInterface::DoDisconnect(bool terminate) noexcept
     Disconnect(true);
     return TaskExecuteResponse::Ok();
   }
-
 
   for (auto &user : tc->GetUserBreakpoints().all_users()) {
     tc->GetUserBreakpoints().remove_bp(user->id);

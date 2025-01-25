@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "../common.h"
-#include "fmt/ranges.h"
+#include "utils/logger.h"
 #include <array>
 #include <csignal>
 #include <cstring>
@@ -12,35 +12,35 @@
 namespace utils {
 class ScopedBlockedSignals
 {
-  sigset_t restore_to;
-  sigset_t newly_set;
+  sigset_t mRestoreTo;
+  sigset_t mNewlySet;
 
 public:
   template <size_t N>
-  ScopedBlockedSignals(std::array<int, N> signals_to_block) noexcept : restore_to(), newly_set()
+  ScopedBlockedSignals(std::array<int, N> signalsToBlock) noexcept : mRestoreTo(), mNewlySet()
   {
-    sigemptyset(&newly_set);
+    sigemptyset(&mNewlySet);
     std::string signalNames;
-    for (int signal : signals_to_block) {
+    for (int signal : signalsToBlock) {
       fmt::format_to(std::back_inserter(signalNames), "{}", strsignal(signal));
-      if (signal != signals_to_block.back()) {
+      if (signal != signalsToBlock.back()) {
         signalNames.push_back(',');
       }
     }
     DBGLOG(core, "{} Configuring to block signals: {}", gettid(), signalNames);
-    for (const auto sig : signals_to_block) {
-      if (-1 == sigaddset(&newly_set, sig)) {
+    for (const auto sig : signalsToBlock) {
+      if (-1 == sigaddset(&mNewlySet, sig)) {
         PANIC(fmt::format("Adding signal {} to set failed", sig));
       }
     }
-    if (-1 == pthread_sigmask(SIG_BLOCK, &newly_set, &restore_to)) {
+    if (-1 == pthread_sigmask(SIG_BLOCK, &mNewlySet, &mRestoreTo)) {
       PANIC("Failed to block signals.");
     }
   }
 
   ~ScopedBlockedSignals() noexcept
   {
-    if (-1 == pthread_sigmask(SIG_SETMASK, &restore_to, nullptr)) {
+    if (-1 == pthread_sigmask(SIG_SETMASK, &mRestoreTo, nullptr)) {
       PANIC("Failed to restore signals.");
     }
   }

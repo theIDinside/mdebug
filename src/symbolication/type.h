@@ -7,6 +7,7 @@
 #include "utils/indexing.h"
 #include "utils/macros.h"
 #include "utils/util.h"
+#include <mutex>
 
 using namespace std::string_view_literals;
 
@@ -155,7 +156,11 @@ public:
     return mKind;
   }
 
-  u32 LocListOffset() const noexcept { return uLocListOffset; }
+  u32
+  LocListOffset() const noexcept
+  {
+    return uLocListOffset;
+  }
 };
 
 // Fields are: member variables, member functions, etc
@@ -168,7 +173,7 @@ struct Field
 
 template <typename To, typename From>
 constexpr auto
-bit_copy_from(From from) -> To
+BitCopyFrom(From from) -> To
 {
   static_assert(std::is_trivial_v<To>, "Target of bit copy must be trivially constructible.");
   To to;
@@ -182,7 +187,7 @@ bit_copy_from(From from) -> To
 
 template <typename To, typename FromRepr>
 To
-bit_copy(std::span<const FromRepr> from)
+BitCopy(std::span<const FromRepr> from)
 {
   static_assert(std::is_trivial_v<To>, "Target of bit copy must be trivially constructible.");
   ASSERT(from.size_bytes() >= sizeof(To), "Span must contain {} bytes but only contained {}", sizeof(To),

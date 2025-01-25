@@ -20,6 +20,11 @@ trivial_destruct()
   }
 }
 
+template <typename ExpValue> struct ExpectedValue
+{
+  ExpValue mValue;
+};
+
 template <typename Err> struct Unexpected
 {
   Err err;
@@ -39,6 +44,20 @@ unexpected(Err &&err) noexcept
   return Unexpected<Err>{std::forward<Err>(err)};
 }
 
+template <typename T>
+constexpr auto
+expected(T &&value) noexcept
+{
+  return ExpectedValue<T>{std::move(value)};
+}
+
+template <typename T>
+constexpr auto
+expected(const T &value) noexcept
+{
+  return ExpectedValue<T>{value};
+}
+
 // Base template for the variadic template
 template <typename T, typename... Args> struct IsFirstTypeSame;
 
@@ -49,34 +68,66 @@ template <typename T, typename First, typename... Rest> struct IsFirstTypeSame<T
 };
 
 // Just a thin, stupid, inefficient wrapper around std::variant. It'll do for now.
-template <typename T, typename Err> class Expected
+template <typename ActualT, typename Err> class Expected
 {
+  static_assert(!std::is_same_v<Err, void>,
+                "Expected types where err is void is not supported. Why use expected at all, at that point?");
+
+  using T = std::conditional_t<std::is_same_v<ActualT, void>, bool, ActualT>;
+
   std::variant<T, Err> val_or_err;
-  bool has_value;
+  bool mHasExpectedValue;
 
 public:
   template <typename... Args>
-  Expected(Args &&...args) noexcept
+  constexpr Expected(Args &&...args) noexcept
     requires(!IsFirstTypeSame<Err, Args...>::value)
-      : val_or_err(std::forward<Args>(args)...), has_value(true)
+      : val_or_err(args...), mHasExpectedValue(true)
   {
     ASSERT(val_or_err.index() == 0, "You've broken the invariant");
   }
 
-  Expected(Expected &&move) noexcept : val_or_err(std::move(move.val_or_err)), has_value(move.has_value) {}
+  constexpr Expected(T &&value) noexcept
+      : val_or_err(std::in_place_type<T>, std::forward<T>(value)), mHasExpectedValue(true)
+  {
+  }
 
-  Expected(Err &&e) noexcept : val_or_err(std::move(e)), has_value(false) {}
-  Expected(const Err &e) noexcept : val_or_err(e), has_value(false) {}
+  constexpr Expected(Err &&error) noexcept
+      : val_or_err(std::in_place_type<Err>, std::forward<Err>(error)), mHasExpectedValue(false)
+  {
+  }
 
-  Expected(const Unexpected<Err> &conv) : val_or_err(conv.err), has_value(false) {}
-  Expected(Unexpected<Err> &&conv) : val_or_err(std::move(conv.err)), has_value(false) {}
+  constexpr Expected() noexcept
+    requires(std::is_same_v<ActualT, void>)
+      : val_or_err(true), mHasExpectedValue(true)
+  {
+  }
+
+  constexpr Expected(Expected &&move) noexcept
+      : val_or_err(std::move(move.val_or_err)), mHasExpectedValue(move.mHasExpectedValue)
+  {
+  }
+
+  constexpr Expected(const Err &e) noexcept : val_or_err(e), mHasExpectedValue(false) {}
+
+  constexpr Expected(ExpectedValue<T> &&value) noexcept
+      : val_or_err(std::in_place_type<T>, std::move(value.mValue)), mHasExpectedValue(true)
+  {
+  }
+  constexpr Expected(const ExpectedValue<T> &value) noexcept
+      : val_or_err(std::in_place_type<T>, value.mValue), mHasExpectedValue(true)
+  {
+  }
+
+  constexpr Expected(const Unexpected<Err> &conv) : val_or_err(conv.err), mHasExpectedValue(false) {}
+  constexpr Expected(Unexpected<Err> &&conv) : val_or_err(std::move(conv.err)), mHasExpectedValue(false) {}
 
   template <typename ConvertErr> Expected(Expected<T, ConvertErr> &&ExpectedWithValueRequiringConversion) noexcept
   {
     ASSERT(ExpectedWithValueRequiringConversion.is_expected(),
            "Conversion from expected that had a value, but was expected to be an error");
     val_or_err = std::move(ExpectedWithValueRequiringConversion.take_value());
-    has_value = true;
+    mHasExpectedValue = true;
   }
 
   ~Expected() noexcept = default;
@@ -84,7 +135,7 @@ public:
   constexpr bool
   is_expected() const noexcept
   {
-    return has_value;
+    return mHasExpectedValue;
   }
 
   constexpr bool
@@ -96,19 +147,21 @@ public:
   T *
   operator->() noexcept
   {
-    ASSERT(has_value, "Expected did not have a value");
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
     return std::get_if<T>(&val_or_err);
   }
 
   auto &
   operator*() & noexcept
   {
-    ASSERT(has_value, "Expected did not have a value");
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
     return *std::get_if<T>(&val_or_err);
   }
 
-  T&& expected(std::string_view errorMessage) && {
-    if(is_error()) {
+  T &&
+  expected(std::string_view errorMessage) &&
+  {
+    if (is_error()) {
       PANIC(errorMessage);
     }
     return std::move(value());
@@ -117,14 +170,14 @@ public:
   T &
   value() & noexcept
   {
-    ASSERT(has_value, "Expected did not have a value");
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
     return *std::get_if<T>(&val_or_err);
   }
 
   T &&
   value() && noexcept
   {
-    ASSERT(has_value, "Expected did not have a value");
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
     return std::get<T>(std::move(val_or_err));
   }
 
@@ -132,44 +185,43 @@ public:
   T &&
   take_value() noexcept
   {
-    ASSERT(has_value, "Expected did not have a value");
-    auto &&moved = std::get<T>(std::move(val_or_err));
-    has_value = false;
-    return moved;
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    mHasExpectedValue = false;
+    return std::get<T>(std::move(val_or_err));
   }
 
   const T &
   value() const & noexcept
   {
-    ASSERT(has_value, "Expected did not have a value");
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
     return std::get<T>(val_or_err);
   }
 
   Err &
   error() & noexcept
   {
-    ASSERT(!has_value, "Expected have a value");
+    ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(val_or_err);
   }
 
   Err &&
   take_error() noexcept
   {
-    ASSERT(!has_value, "Expected have a value");
+    ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(std::move(val_or_err));
   }
 
   Err &&
   error() && noexcept
   {
-    ASSERT(!has_value, "Expected have a value");
+    ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(std::move(val_or_err));
   }
 
   const Err &
   error() const & noexcept
   {
-    ASSERT(!has_value, "Expected have a value");
+    ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(val_or_err);
   }
 
@@ -178,7 +230,7 @@ public:
   transform(Transform &&fn) && noexcept -> utils::Expected<FnResult<Transform, T>, Err>
   {
     using Return = FnResult<Transform, T>;
-    if (has_value) {
+    if (mHasExpectedValue) {
       auto &&res = fn(take_value());
       return utils::Expected<Return, Err>{res};
     } else {
@@ -190,13 +242,35 @@ public:
   constexpr auto
   and_then(Transform &&fn) && noexcept -> FnResult<Transform, T>
   {
-    if (has_value) {
+    if (mHasExpectedValue) {
       return fn(take_value());
     } else {
       return unexpected(NewErr{take_error()});
     }
   }
+
+  constexpr
+  operator bool() const noexcept
+  {
+    return mHasExpectedValue;
+  }
 };
+
+// auto EXPECT(result, expectedObject);
+
+
+
+#define EXPECT_REF(expr, exp)                                                                                     \
+  if (!exp) {                                                                                                     \
+    return std::move(exp.error());                                                                                \
+  }                                                                                                               \
+  expr = exp.value();
+
+#define EXPECT(expr, exp)                                                                                         \
+  if (!exp) {                                                                                                     \
+    return std::move(exp.error());                                                                                \
+  }                                                                                                               \
+  expr = std::move(exp.value());
 
 template <typename Pointee> struct is_smart_ptr : std::false_type
 {

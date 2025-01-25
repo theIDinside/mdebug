@@ -17,10 +17,11 @@ public:
   UnitDataTask(ObjectFile *obj, std::span<UnitHeader> headers) noexcept;
   ~UnitDataTask() override = default;
   /* Takes `obj`, parses it's CU Headers and divides all CU's over `size of thread pool`.*/
-  static std::vector<UnitDataTask *> CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource* allocator) noexcept;
+  static std::vector<UnitDataTask *> CreateParsingJobs(ObjectFile *obj,
+                                                       std::pmr::memory_resource *allocator) noexcept;
 
 protected:
-  void execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept override;
+  void ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept override;
 
 private:
   ObjectFile *obj;

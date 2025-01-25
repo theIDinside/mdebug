@@ -771,7 +771,7 @@ struct Disassemble final : public UICommand
 {
   Disassemble(u64 seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
-  ~Disassemble() override = default;
+  ~Disassemble() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 
   std::optional<AddrPtr> address;

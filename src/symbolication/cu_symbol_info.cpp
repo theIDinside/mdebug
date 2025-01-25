@@ -726,36 +726,36 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
 {
   std::optional<dw::DieReference> additional_die_reference = std::optional<dw::DieReference>{};
   dw::UnitReader reader = ref.GetReader();
-  const auto &abbreviation = ref.GetUnitData()->get_abbreviation(ref.GetDie()->abbreviation_code);
-  if (!abbreviation.IsDeclaration) {
+  const auto &abbreviation = ref.GetUnitData()->GetAbbreviation(ref.GetDie()->mAbbreviationCode);
+  if (!abbreviation.mIsDeclaration) {
     state.add_maybe_origin(ref.AsIndexed());
   }
 
-  if (const auto parent = ref.GetDie()->parent();
+  if (const auto parent = ref.GetDie()->GetParent();
       maybe_null_any_of<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
     dw::DieReference parentReference{ref.GetUnitData(), parent};
-    if (auto class_name = parentReference.read_attribute(Attribute::DW_AT_name); class_name) {
-      state.namespace_ish = class_name->string();
+    if (auto class_name = parentReference.ReadAttribute(Attribute::DW_AT_name); class_name) {
+      state.namespace_ish = class_name->AsStringView();
     }
   }
 
-  for (const auto &attr : abbreviation.attributes) {
-    auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
+  for (const auto &attr : abbreviation.mAttributes) {
+    auto value = ReadAttributeValue(reader, attr, abbreviation.mImplicitConsts);
     switch (value.name) {
     case Attribute::DW_AT_name:
-      state.name = value.string();
+      state.name = value.AsStringView();
       break;
     case Attribute::DW_AT_linkage_name:
-      state.mangled_name = value.string();
+      state.mangled_name = value.AsStringView();
       break;
     // is address-representable?
     case Attribute::DW_AT_low_pc:
-      state.low_pc = value.address();
+      state.low_pc = value.AsAddress();
       break;
     case Attribute::DW_AT_decl_file: {
       if (!state.lnp_file) {
         state.lnp_file =
-          src_file.get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+          src_file.get_lnp_file(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
         CDLOG(ref.GetUnitData() != src_file.get_dwarf_unit(), core,
               "[dwarf]: Cross CU requires (?) another LNP. ref.cu = 0x{:x}, src file cu=0x{:x}",
               ref.GetUnitData()->SectionOffset(), src_file.get_dwarf_unit()->SectionOffset());
@@ -763,19 +763,19 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
     } break;
     case Attribute::DW_AT_decl_line:
       if (!state.line) {
-        state.line = value.unsigned_value();
+        state.line = value.AsUnsignedValue();
       }
       break;
     case Attribute::DW_AT_high_pc:
       if (value.form != AttributeForm::DW_FORM_addr) {
-        state.high_pc = state.low_pc.get() + value.address();
+        state.high_pc = state.low_pc.get() + value.AsAddress();
       } else {
-        state.high_pc = value.address();
+        state.high_pc = value.AsAddress();
       }
       break;
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
-      const auto declaring_die_offset = value.unsigned_value();
+      const auto declaring_die_offset = value.AsUnsignedValue();
       additional_die_reference =
         ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
     } break;
@@ -789,7 +789,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
 void
 CompilationUnit::PrepareFunctionSymbols() noexcept
 {
-  const auto &dies = mUnitData->get_dies();
+  const auto &dies = mUnitData->GetDies();
 
   dw::UnitReader reader{mUnitData};
   // For a function symbol, we want to record a DIE, from which we can reach all it's (possible) references.
@@ -799,7 +799,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
   std::pmr::monotonic_buffer_resource rsrc{&buf, std::size(buf), std::pmr::null_memory_resource()};
   std::pmr::polymorphic_allocator<u8> allocator{&rsrc};
   for (const auto &die : dies) {
-    switch (die.tag) {
+    switch (die.mTag) {
     case DwarfTag::DW_TAG_subprogram:
       break;
     // TODO: implement support for inlined subroutines. They introduce some substantial complexity, so for now
@@ -810,9 +810,9 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
     default:
       continue;
     }
-    const auto &abbreviation = mUnitData->get_abbreviation(die.abbreviation_code);
+    const auto &abbreviation = mUnitData->GetAbbreviation(die.mAbbreviationCode);
     // Skip declarations - we will visit them if necessary, but on their own they can't tell us anything.
-    if (abbreviation.IsDeclaration || !abbreviation.IsAddressable) {
+    if (abbreviation.mIsDeclaration || !abbreviation.mIsAddressable) {
       continue;
     }
 
@@ -821,41 +821,41 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
     ResolveFnSymbolState state{this};
 
     std::pmr::list<dw::DieReference> &die_refs = *allocator.new_object<std::pmr::list<dw::DieReference>>();
-    for (const auto &attr : abbreviation.attributes) {
-      auto value = read_attribute_value(reader, attr, abbreviation.implicit_consts);
+    for (const auto &attr : abbreviation.mAttributes) {
+      auto value = ReadAttributeValue(reader, attr, abbreviation.mImplicitConsts);
       switch (value.name) {
       case Attribute::DW_AT_frame_base:
-        state.frame_base_description = as_span(value.block());
+        state.frame_base_description = as_span(value.AsDataBlock());
         break;
       case Attribute::DW_AT_name:
-        state.name = value.string();
+        state.name = value.AsStringView();
         break;
       case Attribute::DW_AT_linkage_name:
-        state.mangled_name = value.string();
+        state.mangled_name = value.AsStringView();
         break;
       case Attribute::DW_AT_low_pc:
-        state.low_pc = value.address();
+        state.low_pc = value.AsAddress();
         break;
       case Attribute::DW_AT_high_pc:
         if (value.form != AttributeForm::DW_FORM_addr) {
-          state.high_pc = state.low_pc.get() + value.address();
+          state.high_pc = state.low_pc.get() + value.AsAddress();
         } else {
-          state.high_pc = value.address();
+          state.high_pc = value.AsAddress();
         }
         break;
       case Attribute::DW_AT_decl_file: {
         ASSERT(!state.lnp_file.has_value(), "lnp file has been set already, to {}, new {}", state.lnp_file.value(),
-               value.unsigned_value());
-        state.lnp_file = get_lnp_file(value.unsigned_value()).transform([](auto &&p) { return p.string(); });
+               value.AsUnsignedValue());
+        state.lnp_file = get_lnp_file(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
       } break;
       case Attribute::DW_AT_decl_line:
         ASSERT(!state.line.has_value(), "file line number has been set already, to {}, new {}", state.line.value(),
-               value.unsigned_value());
-        state.line = value.unsigned_value();
+               value.AsUnsignedValue());
+        state.line = value.AsUnsignedValue();
         break;
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
-        const auto declaring_die_offset = value.unsigned_value();
+        const auto declaring_die_offset = value.AsUnsignedValue();
         if (auto die_ref = mUnitData->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset); die_ref) {
           die_refs.push_back(*die_ref);
         } else {
@@ -864,7 +864,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
         break;
       }
       case Attribute::DW_AT_type: {
-        const auto type_id = value.unsigned_value();
+        const auto type_id = value.AsUnsignedValue();
         auto obj = mUnitData->GetObjectFile();
         const auto ref = obj->GetDebugInfoEntryReference(type_id);
         state.ret_type = obj->GetTypeStorage()->GetOrCreateNewType(ref->AsIndexed());

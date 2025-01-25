@@ -905,7 +905,7 @@ Threads::Execute() noexcept
   response->threads.reserve(target->GetThreads().size());
   auto &it = target->GetInterface();
 
-  if (it.format == TargetFormat::Remote) {
+  if (it.mFormat == TargetFormat::Remote) {
     auto res = it.RemoteConnection()->query_target_threads({target->TaskLeaderTid(), target->TaskLeaderTid()});
     ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
     for (const auto thr : res) {
@@ -1303,7 +1303,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
       // do individual type checking again.
       //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
       auto span = v.variable_value->MemoryView();
-      const std::uintptr_t ptr = sym::bit_copy<std::uintptr_t>(span);
+      const std::uintptr_t ptr = sym::BitCopy<std::uintptr_t>(span);
       auto ptr_str = fmt::format("0x{:x}", ptr);
       const std::string_view name = v.variable_value->mName.string_view();
       it = fmt::format_to(

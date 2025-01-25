@@ -27,8 +27,8 @@ static constexpr auto INVALID_DIE = 0;
 
 struct Abbreviation
 {
-  Attribute name;
-  AttributeForm form;
+  Attribute mName;
+  AttributeForm mForm;
   // An index into a IMPLICIT_CONST table for this abbreviation table
   // This is solely done for space reasons, instead of paying the cost of 64 bits for every
   // Abbreviation. Let's hope that only 255 implicit consts exist within each abbrev table.
@@ -41,24 +41,24 @@ struct AbbreviationInfo
   /// as such a hash map is not required here; just perform arithmetic (-1) and look-up by index.
   using Table = std::vector<AbbreviationInfo>;
   // The abbreviation code
-  u32 code;
-  DwarfTag tag;
-  bool HasChildren : 1;
-  bool IsDeclaration : 1;
+  u32 mCode;
+  DwarfTag mTag;
+  bool mHasChildren : 1;
+  bool mIsDeclaration : 1;
   // Whether or not this abbreviation represents an addressable Debug Information Entry
   // One may wonder why it's not sufficient to check if tag == DW_TAG_subprogram etc; well, thanks to referenceing
   // DIE's we're f'ed. Not all subprogram dies have address. They are instead often found on DIE's that reference
   // another subprogram die and have the abstract_origin attribute or specification attribute.
-  // Therefore, when we load the abbreviations, we scan if the abbreviation set contained a "PC-like" attribute, like
-  // DW_AT_low_pc, DW_AT_high_pc, DW_AT_ranges or DW_AT_entry
-  bool IsAddressable : 1;
-  bool AbstractOrigin : 1;
-  std::vector<Abbreviation> attributes;
-  std::vector<i64> implicit_consts;
+  // Therefore, when we load the abbreviations, we scan if the abbreviation set contained a "PC-like" attribute,
+  // like DW_AT_low_pc, DW_AT_high_pc, DW_AT_ranges or DW_AT_entry
+  bool mIsAddressable : 1;
+  bool mAbstractOrigin : 1;
+  std::vector<Abbreviation> mAttributes;
+  std::vector<i64> mImplicitConsts;
   // TODO(simon): implement. These will be needed/useful when we resolve indirect/inter-DIE references. Ugh. DWARF.
   // More like, BARF, right?
-  std::optional<std::tuple<int, Abbreviation>> find_abbreviation_indexed(Attribute name) const noexcept;
-  std::optional<Abbreviation> find_abbreviation(Attribute name) const noexcept;
+  std::optional<std::tuple<int, Abbreviation>> FindAbbreviationIndex(Attribute name) const noexcept;
+  std::optional<Abbreviation> FindAbbreviation(Attribute name) const noexcept;
 };
 
 /*
@@ -74,30 +74,30 @@ struct AbbreviationInfo
 struct DieMetaData
 {
   // .debug_info object file offset (absolute file offset)
-  u64 section_offset : 37;
-  u64 parent_id : 24;
-  u64 die_data_offset : 3;
-  u32 next_sibling : 31;
+  u64 mSectionOffset : 37;
+  u64 mParentId : 24;
+  u64 mDieDataOffset : 3;
+  u32 mNextSibling : 31;
 
-  bool has_children : 1;
-  u16 abbreviation_code;
-  DwarfTag tag;
+  bool mHasChildren : 1;
+  u16 mAbbreviationCode;
+  DwarfTag mTag;
 
-  const DieMetaData *parent() const noexcept;
-  const DieMetaData *sibling() const noexcept;
-  const DieMetaData *children() const noexcept;
-  bool is_super_scope_variable() const noexcept;
+  const DieMetaData *GetParent() const noexcept;
+  const DieMetaData *Sibling() const noexcept;
+  const DieMetaData *GetChildren() const noexcept;
+  bool IsSuperScopeVariable() const noexcept;
 
   // sets the parent's offset relative to this die in the vector containing all dies
   // thus, giving the ability to calculate parent by saying DebugInfoEntry* parent = (this - p_id);
-  void set_parent_id(u64 p_id) noexcept;
+  void SetParentId(u64 p_id) noexcept;
 
   // sets the next sibling offset relative to this die in the vector containing all dies
   // thus, giving the ability to calculate next sibling by saying DebugInfoEntry* sib = (this + next_sibling);
-  void set_sibling_id(u32 sib_id) noexcept;
+  void SetSiblingId(u32 sib_id) noexcept;
 
-  static DieMetaData create_die(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset,
-                                u64 next_sibling) noexcept;
+  static DieMetaData CreateDie(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset,
+                               u64 next_sibling) noexcept;
 };
 
 template <DwarfTag... tags>
@@ -107,7 +107,7 @@ maybe_null_any_of(const DieMetaData *die)
   if (die == nullptr) {
     return false;
   }
-  return ((die->tag == tags) || ...);
+  return ((die->mTag == tags) || ...);
 }
 
 class DieReference;
@@ -126,12 +126,12 @@ public:
                                       AbbreviationInfo::Table &&abbreviations) noexcept;
   bool IsCompilationUnitLike() const noexcept;
 
-  void set_abbreviations(AbbreviationInfo::Table &&table) noexcept;
+  void SetAbbreviations(AbbreviationInfo::Table &&table) noexcept;
 
-  bool has_loaded_dies() const noexcept;
-  const std::vector<DieMetaData> &get_dies() noexcept;
+  bool HasLoadedDies() const noexcept;
+  const std::vector<DieMetaData> &GetDies() noexcept;
   void ClearLoadedCache() noexcept;
-  const AbbreviationInfo &get_abbreviation(u32 abbreviation_code) const noexcept;
+  const AbbreviationInfo &GetAbbreviation(u32 abbreviation_code) const noexcept;
   ObjectFile *GetObjectFile() const noexcept;
   const UnitHeader &header() const noexcept;
   /// The offset from the beginning of the ELF section called .debug_info to this compilation unit.
@@ -142,7 +142,7 @@ public:
   u64 index_of(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
 
-  const char* GetBuildDirectory() const noexcept;
+  const char *GetBuildDirectory() const noexcept;
   const DieMetaData *GetDebugInfoEntry(u64 offset) noexcept;
   DieReference GetDieReferenceByOffset(u64 offset) noexcept;
   DieReference GetDieByCacheIndex(u64 index) noexcept;
@@ -183,14 +183,19 @@ private:
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
 UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
 
-class UnitHeadersRead {
+class UnitHeadersRead
+{
   u64 mTotalSize{0};
   u64 mMaxUnitSize{0};
   std::vector<UnitHeader> mUnitHeaders;
   void Accumulate(u64 unitSize) noexcept;
   u64 AverageUnitSize() noexcept;
-  void AddUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version, DwarfUnitType unit_type) noexcept;
-  void AddTypeUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data, u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept;
+  void AddUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
+                     u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
+                     DwarfUnitType unit_type) noexcept;
+  void AddTypeUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
+                         u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept;
+
 public:
   void ReadUnitHeaders(ObjectFile *obj) noexcept;
   std::span<UnitHeader> Headers() noexcept;
@@ -232,11 +237,11 @@ template <> struct formatter<sym::dw::DieReference>
   format(const sym::dw::DieReference &ref, FormatContext &ctx) const
   {
     if (auto cu = ref.GetUnitData(); cu != nullptr) {
-      if (ref.GetUnitData()->has_loaded_dies()) {
+      if (ref.GetUnitData()->HasLoadedDies()) {
         auto die = ref.GetDie();
         ASSERT(die, "die was null!");
         return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", cu->SectionOffset(),
-                              die->section_offset, to_str(die->tag));
+                              die->mSectionOffset, to_str(die->mTag));
       } else {
         return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", cu->SectionOffset());
       }

@@ -1,6 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <utility>
+#include "typedefs.h"
+#include <optional>
+// Needed for the macro that uses to_array
+#include <array>
+#include <utils/util.h>
 
 #if defined(__clang__)
 #define MIDAS_UNREACHABLE std::unreachable();
@@ -62,3 +66,66 @@
       : mType(SUPER_TYPE##Discriminant::VARIANT_TYPE), u##VARIANT_TYPE(variant)                                   \
   {                                                                                                               \
   }
+
+#define STRINGIFY_VAL(x, ...) #x,
+
+template <typename T> struct Enum
+{
+  static constexpr u32 Count() noexcept;
+  static constexpr std::optional<T> FromInt(int value) noexcept;
+};
+
+#define ENUM_FMT(ENUM_TYPE, FOR_EACH_FN, CASE_FN)                                                                 \
+  template <> struct fmt::formatter<ENUM_TYPE> : public Default<ENUM_TYPE>                                        \
+  {                                                                                                               \
+    template <typename FormatContext>                                                                             \
+    auto                                                                                                          \
+    format(const ENUM_TYPE &value, FormatContext &ctx) const                                                      \
+    {                                                                                                             \
+      return fmt::format_to(ctx.out(), "{}", Enum<ENUM_TYPE>::ToString(value));                                   \
+    }                                                                                                             \
+  }
+
+#define ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN, CAST_FN)                                                 \
+  enum class ENUM_TYPE : i32                                                                                      \
+  {                                                                                                               \
+    FOR_EACH(EACH_FN)                                                                                             \
+  };                                                                                                              \
+  namespace detail {                                                                                              \
+  using enum ENUM_TYPE;                                                                                           \
+  static constexpr auto ENUM_TYPE##Ids = std::to_array({FOR_EACH(EACH_FN)});                                      \
+  static constexpr auto ENUM_TYPE##Names = std::to_array<std::string_view>({FOR_EACH(STRINGIFY_VAL)});            \
+  }                                                                                                               \
+  template <> struct Enum<ENUM_TYPE>                                                                              \
+  {                                                                                                               \
+    static constexpr u32                                                                                          \
+    Count() noexcept                                                                                              \
+    {                                                                                                             \
+      return detail::ENUM_TYPE##Ids.size();                                                                       \
+    }                                                                                                             \
+                                                                                                                  \
+    static constexpr std::optional<ENUM_TYPE>                                                                     \
+    FromInt(int value) noexcept                                                                                   \
+    {                                                                                                             \
+      if (value < 0 || value > std::to_underlying(detail::ENUM_TYPE##Ids.back())) {                               \
+        return std::nullopt;                                                                                      \
+      }                                                                                                           \
+      switch (value) {                                                                                            \
+        FOR_EACH(CAST_FN)                                                                                         \
+      default:                                                                                                    \
+        return std::nullopt;                                                                                      \
+      }                                                                                                           \
+      MIDAS_UNREACHABLE                                                                                           \
+    }                                                                                                             \
+    static constexpr std::span<const ENUM_TYPE>                                                                   \
+    Variants()                                                                                                    \
+    {                                                                                                             \
+      return std::span{detail::ENUM_TYPE##Ids};                                                                   \
+    }                                                                                                             \
+    static constexpr std::string_view                                                                             \
+    ToString(ENUM_TYPE value) noexcept                                                                            \
+    {                                                                                                             \
+      return detail::ENUM_TYPE##Names[std::to_underlying(value)];                                                 \
+    }                                                                                                             \
+  };                                                                                                              \
+  ENUM_FMT(ENUM_TYPE, FOR_EACH, EACH_FN);

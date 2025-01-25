@@ -63,7 +63,7 @@ TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
     : mTid(newTaskTid), mLastWaitStatus(), user_stopped(isUserStopped), tracer_stopped(true), initialized(true),
       cache_dirty(true), rip_dirty(true), exited(false), reaped(false),
-      regs(supervisor.format, supervisor.arch_info.as_t().get()), loc_stat(),
+      regs(supervisor.mFormat, supervisor.mArchInfo.as_t().get()), loc_stat(),
       mSupervisor(supervisor.GetSupervisor())
 {
   call_stack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
@@ -80,7 +80,7 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
   rip_dirty = true;
   exited = false;
   reaped = false;
-  regs = {tc.format, tc.arch_info.as_t().get()};
+  regs = {tc.mFormat, tc.mArchInfo.as_t().get()};
   loc_stat = {};
   call_stack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
   mSupervisor = tc.GetSupervisor();

@@ -11,34 +11,34 @@
 namespace utils {
 
 void
-Task::set_owner(TaskGroup *group) noexcept
+Task::SetOwner(TaskGroup *group) noexcept
 {
-  ASSERT(owning_group == nullptr, "Moving owning task group for task is not allowed");
-  owning_group = group;
+  ASSERT(mOwningGroup == nullptr, "Moving owning task group for task is not allowed");
+  mOwningGroup = group;
 }
 
 bool
-Task::is_group_job() const noexcept
+Task::IsGroupJob() const noexcept
 {
-  return owning_group != nullptr;
+  return mOwningGroup != nullptr;
 }
 
 void
-Task::execute() noexcept
+Task::Execute() noexcept
 {
-  auto allocator = owning_group ? owning_group->GetTemporaryAllocator() : nullptr;
-  execute_task(allocator);
-  if (is_group_job()) {
-    owning_group->task_done(this);
+  auto allocator = mOwningGroup ? mOwningGroup->GetTemporaryAllocator() : nullptr;
+  ExecuteTask(allocator);
+  if (IsGroupJob()) {
+    mOwningGroup->TaskDone(this);
   }
 }
 
 void
-NoOp::execute_task(std::pmr::memory_resource* temporaryAllocator) noexcept
+NoOp::ExecuteTask(std::pmr::memory_resource* temporaryAllocator) noexcept
 {
 }
 
-TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name), m_task_lock(), m_done_tasks()
+TaskGroup::TaskGroup(std::string_view name) noexcept : mPromise(), mName(name), mTaskLock(), mDoneTasks()
 {
   DBGLOG(perf, "Created task group {}", name);
   mGroupTemporaryAllocator = alloc::ArenaAllocator::Create(alloc::Page{10000}, nullptr);
@@ -46,51 +46,51 @@ TaskGroup::TaskGroup(std::string_view name) noexcept : m_promise(), m_name(name)
 
 TaskGroup::~TaskGroup() noexcept
 {
-  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "Task group {} finished - destroying task group", m_name);
+  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "Task group {} finished - destroying task group", mName);
 }
 
 void
-TaskGroup::add_task(Task *task) noexcept
+TaskGroup::AddTask(Task *task) noexcept
 {
-  std::lock_guard lock(m_task_lock);
-  m_tasks.push_back(task);
-  task->set_owner(this);
+  std::lock_guard lock(mTaskLock);
+  mTasks.push_back(task);
+  task->SetOwner(this);
 }
 
 std::future<void>
-TaskGroup::schedule_work() noexcept
+TaskGroup::ScheduleWork() noexcept
 {
-  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG: {}] - Scheduling {} tasks", m_name, m_tasks.size());
+  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG: {}] - Scheduling {} tasks", mName, mTasks.size());
   if (mdb::log::Config::LogTaskGroup()) {
-    start = std::chrono::high_resolution_clock::now();
+    mStart = std::chrono::high_resolution_clock::now();
   }
-  auto fut = m_promise.get_future();
-  m_done_tasks.reserve(m_tasks.size());
-  ThreadPool::GetGlobalPool()->PostTasks(m_tasks);
+  auto fut = mPromise.get_future();
+  mDoneTasks.reserve(mTasks.size());
+  ThreadPool::GetGlobalPool()->PostTasks(mTasks);
   return fut;
 }
 
 void
-TaskGroup::task_done(Task *task) noexcept
+TaskGroup::TaskDone(Task *task) noexcept
 {
-  std::lock_guard lock(m_task_lock);
-  if (std::ranges::any_of(m_done_tasks, [task](auto t) { return t == task; })) {
+  std::lock_guard lock(mTaskLock);
+  if (std::ranges::any_of(mDoneTasks, [task](auto t) { return t == task; })) {
     std::vector<std::uintptr_t> tasks_{};
-    std::transform(m_done_tasks.begin(), m_done_tasks.end(), std::back_inserter(tasks_),
+    std::transform(mDoneTasks.begin(), mDoneTasks.end(), std::back_inserter(tasks_),
                    [](auto t) { return std::uintptr_t(t); });
     ASSERT(false, "Task 0x{:x} has already been added to done list: [0x{:x}]", std::uintptr_t(task),
            fmt::join(tasks_, ", "));
   }
-  m_done_tasks.push_back(task);
-  if (m_done_tasks.size() == m_tasks.size()) {
+  mDoneTasks.push_back(task);
+  if (mDoneTasks.size() == mTasks.size()) {
     if (mdb::log::Config::LogTaskGroup()) {
       auto time =
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - mStart)
           .count();
 
-      CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG {}]: done, time={}us", m_name, time);
+      CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG {}]: done, time={}us", mName, time);
     }
-    m_promise.set_value();
+    mPromise.set_value();
   }
 }
 

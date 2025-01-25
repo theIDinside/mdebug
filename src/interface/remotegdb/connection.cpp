@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 // includes
 #include "connection.h"
+#include "interface/remotegdb/deserialization.h"
 #include "shared.h"
 #include "stopreply_parser.h"
 // mdb workspace includes
@@ -395,7 +396,7 @@ BufferedSocket::wait_for_ack(int timeout) noexcept
     if (!ack) {
       no_more_no_ack_found = buffer_n_timeout(4096, timeout) == 0;
     } else {
-      return *ack;
+      return utils::expected(std::move(*ack));
     }
   }
 
@@ -430,7 +431,7 @@ RemoteConnection::connect(const std::string &host, int port,
                           std::optional<RemoteSettings> remote_settings) noexcept
 {
   // returns a Expected<ScopedFd, ConnectError>. Transform it into Expected<Connection, ConnectError>
-  return utils::ScopedFd::socket_connect(host, port)
+  return utils::ScopedFd::OpenSocketConnectTo(host, port)
     .and_then<InitError>([&](auto &&socket) -> utils::Expected<Connection, InitError> {
       std::shared_ptr<RemoteConnection> connection = std::make_shared<RemoteConnection>(
         std::string{host}, port, std::move(socket), remote_settings.value_or(RemoteSettings{}));
@@ -724,7 +725,7 @@ RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload
         reg_contents.reserve(decoded.length() / 2);
         const auto sz = decoded.size();
         for (auto i = 0u; i < sz; i += 2) {
-          reg_contents.push_back(utils::fromhex(decoded[i]) * 16 + utils::fromhex(decoded[i + 1]));
+          reg_contents.push_back(fromhex(decoded[i]) * 16 + fromhex(decoded[i + 1]));
         }
       }
     }
@@ -1197,11 +1198,12 @@ RemoteConnection::send_commands_inorder_failfast(std::vector<std::variant<Socket
       c);
     // clang-format on
     if (!command_result) {
-      return SystemError{0};
+      return SendError{SystemError{0}};
     }
   }
   return results;
 }
+
 
 utils::Expected<std::vector<std::string>, SendError>
 RemoteConnection::send_inorder_command_chain(std::span<std::string_view> commands,
@@ -1231,10 +1233,10 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
     if (ack) {
       auto ack = socket.wait_for_ack(timeout.value_or(-1));
       if (ack.is_error()) {
-        return Timeout{.msg = "Connection timed out waiting for ack"};
+        return SendError{Timeout{.msg = "Connection timed out waiting for ack"}};
       }
       if (!ack->second) {
-        return NAck{};
+        return SendError{NAck{}};
       }
       ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
       socket.consume_n(ack->first + 1);
@@ -1243,9 +1245,9 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
     std::optional<std::string> response = read_command_response(timeout.value_or(-1), false);
     if (!response) {
       if (socket.size() > 0) {
-        return NAck{};
+        return SendError{NAck{}};
       } else {
-        return Timeout{.msg = "Timed out waiting for response to command"};
+        return SendError{Timeout{.msg = "Timed out waiting for response to command"}};
       }
     }
     result.emplace_back(std::move(response).value());
@@ -1303,21 +1305,21 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
   if (ack) {
     auto ack = socket.wait_for_ack(timeout.value_or(-1));
     if (ack.is_error()) {
-      return Timeout{.msg = "Connection timed out waiting for ack"};
+      return SendError{Timeout{.msg = "Connection timed out waiting for ack"}};
     }
     if (!ack->second) {
-      return NAck{};
+      return SendError{NAck{}};
     }
     ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
     socket.consume_n(ack->first + 1);
   }
 
-  const auto response = read_command_response(timeout.value_or(-1), false);
+  auto response = read_command_response(timeout.value_or(-1), false);
   if (!response) {
     if (socket.size() > 0) {
-      return NAck{};
+      return SendError{NAck{}};
     } else {
-      return Timeout{.msg = "Timed out waiting for response to command"};
+      return SendError{Timeout{.msg = "Timed out waiting for response to command"}};
     }
   }
   const auto &ref = response.value();
@@ -1325,7 +1327,7 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
     return SendError{SystemError{.syserrno = 0}};
   }
 
-  return std::move(response.value());
+  return utils::expected(std::move(response.value()));
 }
 
 std::optional<SendError>

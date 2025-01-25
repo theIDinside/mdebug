@@ -20,48 +20,46 @@ namespace sym::dw {
 
 class FunctionSymbolicationContext
 {
-  ObjectFile &obj;
+  ObjectFile &mObjectRef;
   sym::FunctionSymbol *mFunctionSymbol;
-  SymbolBlock params;
-  std::vector<SymbolBlock> lexicalBlockStack;
-  u32 frame_locals_count{0};
+  SymbolBlock mParams;
+  std::vector<SymbolBlock> mLexicalBlockStack;
+  u32 mFrameLocalsCount{0};
 
   // Process the variable DIE referenced by `variableDebugInfoEntry` and store it (if successful) in
   // `processedSymbolStack`
   bool ProcessVariableDie(DieReference variableDebugInfoEntry, std::vector<Symbol> &processedSymbolStack) noexcept;
   void ProcessVariable(DieReference dieRef) noexcept;
-  void ProcessFormalParameter(DieReference cu_die) noexcept;
+  void ProcessFormalParameter(DieReference die) noexcept;
 
-  void process_formal_param(DieReference cu_die) noexcept;
-  void process_variable(DieReference cu_die) noexcept;
-  void process_lexical_block(DieReference cu_die) noexcept;
-  void ProcessInlinedSubroutine(DieReference cu_die) noexcept;
-  NonNullPtr<Type> process_type(DieReference cu_die) noexcept;
+  void ProcessLexicalBlockDie(DieReference die) noexcept;
+  void ProcessInlinedSubroutineDie(DieReference die) noexcept;
+  NonNullPtr<Type> ProcessTypeDie(DieReference die) noexcept;
 
 public:
   explicit FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept;
-  void process_symbol_information() noexcept;
+  void ProcessSymbolInformation() noexcept;
 };
 
 class TypeSymbolicationContext
 {
-  ObjectFile &obj;
-  std::vector<Field> type_fields;
-  sym::Type *current_type;
+  ObjectFile &mObjectRef;
+  std::vector<Field> mTypeFields;
+  sym::Type *mCurrentType;
 
-  sym::Type *enumeration_type{nullptr};
-  bool enum_is_signed{false};
-  std::vector<EnumeratorConstValue> const_values{};
-  void process_member_variable(DieReference cu_die) noexcept;
-  void process_inheritance(DieReference cu_die) noexcept;
-  void process_enum(DieReference cu_die) noexcept;
+  sym::Type *mEnumerationType{nullptr};
+  bool mEnumIsSigned{false};
+  std::vector<EnumeratorConstValue> mConstValues{};
+  void process_member_variable(DieReference die) noexcept;
+  void ProcessInheritanceDie(DieReference die) noexcept;
+  void ProcessEnumDie(DieReference die) noexcept;
 
 public:
   TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept;
-  static TypeSymbolicationContext continueWith(const TypeSymbolicationContext &ctx, Type *t) noexcept;
+  static TypeSymbolicationContext ContinueWith(const TypeSymbolicationContext &ctx, Type *t) noexcept;
 
   // Fully resolves `Type`
-  void resolve_type() noexcept;
+  void ResolveType() noexcept;
 };
 
 } // namespace sym::dw

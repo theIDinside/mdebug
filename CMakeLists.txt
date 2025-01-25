@@ -151,6 +151,8 @@ set(MIDAS_SOURCES
   # Gdb Remote interface
   src/interface/remotegdb/connection.cpp
   src/interface/remotegdb/connection.h
+  src/interface/remotegdb/deserialization.cpp
+  src/interface/remotegdb/deserialization.h
   src/interface/remotegdb/shared.cpp
   src/interface/remotegdb/shared.h
   src/interface/remotegdb/stopreply_parser.cpp
@@ -255,7 +257,7 @@ endif()
 # To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)
 if(MIDAS_BUILD_TYPE STREQUAL "DEBUG")
-  target_compile_definitions(mdb PRIVATE MDB_DEBUG=1)
+  target_compile_definitions(mdb PRIVATE MDB_DEBUG=1 DEBUG)
 elseif(MIDAS_BUILD_TYPE STREQUAL "RELEASE")
   target_compile_definitions(mdb PRIVATE MDB_DEBUG=0)
 endif()

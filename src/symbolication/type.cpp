@@ -13,9 +13,9 @@
 #include <utility>
 
 static constexpr bool
-is_not_complete_type_die(const sym::dw::DieMetaData *die)
+IsNotCompleteTypeDie(const sym::dw::DieMetaData *die)
 {
-  switch (die->tag) {
+  switch (die->mTag) {
   case DwarfTag::DW_TAG_pointer_type:
   case DwarfTag::DW_TAG_reference_type:
   case DwarfTag::DW_TAG_const_type:
@@ -32,7 +32,7 @@ is_not_complete_type_die(const sym::dw::DieMetaData *die)
 bool
 sym::IsReferenceLike(const dw::DieMetaData *die) noexcept
 {
-  return IsReferenceLike(ToTypeModifierWillPanic(die->tag));
+  return IsReferenceLike(ToTypeModifierWillPanic(die->mTag));
 }
 
 bool
@@ -123,21 +123,21 @@ TypeStorage::GetUnitType() noexcept
 }
 
 static u32
-resolve_array_bounds(sym::dw::DieReference array_die) noexcept
+ResolveArrayBounds(sym::dw::DieReference array_die) noexcept
 {
-  ASSERT(array_die.GetDie()->has_children, "expected die {} to have children", array_die);
+  ASSERT(array_die.GetDie()->mHasChildren, "expected die {} to have children", array_die);
 
-  for (const auto child : sym::dw::IterateSiblings{array_die.GetUnitData(), array_die.GetDie()->children()}) {
-    if (child.tag == DwarfTag::DW_TAG_subrange_type) {
+  for (const auto child : sym::dw::IterateSiblings{array_die.GetUnitData(), array_die.GetDie()->GetChildren()}) {
+    if (child.mTag == DwarfTag::DW_TAG_subrange_type) {
       const sym::dw::DieReference ref{array_die.GetUnitData(), &child};
       u64 count{};
       sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader &reader, sym::dw::Abbreviation &attr, const auto &info) {
-        switch (attr.name) {
+        switch (attr.mName) {
         case Attribute::DW_AT_upper_bound:
           [[fallthrough]];
         case Attribute::DW_AT_count:
-          count = sym::dw::read_attribute_value(reader, attr, info.implicit_consts).unsigned_value() +
-                  1u * std::clamp(u32(attr.name == Attribute::DW_AT_upper_bound), 0u, 1u);
+          count = sym::dw::ReadAttributeValue(reader, attr, info.mImplicitConsts).AsSignedValue() +
+                  1u * std::clamp(u32(attr.mName == Attribute::DW_AT_upper_bound), 0u, 1u);
           return sym::dw::DieAttributeRead::Done;
         default:
           return sym::dw::DieAttributeRead::Continue;
@@ -153,17 +153,17 @@ sym::Type *
 TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
 {
   const sym::dw::DieReference this_ref{die_ref.GetUnitData(), die_ref.GetDie()};
-  const auto type_id = this_ref.GetDie()->section_offset;
+  const auto type_id = this_ref.GetDie()->mSectionOffset;
 
   if (mTypeStorage.contains(type_id)) {
     auto t = mTypeStorage[type_id];
     return t;
   }
 
-  if (is_not_complete_type_die(this_ref.GetDie())) {
-    const auto attr = this_ref.read_attribute(Attribute::DW_AT_type);
+  if (IsNotCompleteTypeDie(this_ref.GetDie())) {
+    const auto attr = this_ref.ReadAttribute(Attribute::DW_AT_type);
     auto base_type =
-      attr.transform([](auto v) { return v.unsigned_value(); })
+      attr.transform([](auto v) { return v.AsUnsignedValue(); })
         .and_then(
           [&](auto offset) { return die_ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(offset); })
         .transform([this](auto other_cu_die) { return GetOrCreateNewType(other_cu_die.AsIndexed()); })
@@ -174,45 +174,45 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
     // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
     // are 8 bytes large
     if (sym::IsReferenceLike(this_ref.GetDie()) || base_type->IsReference()) {
-      if (this_ref.GetDie()->tag == DwarfTag::DW_TAG_array_type) {
-        array_bounds = resolve_array_bounds(this_ref);
+      if (this_ref.GetDie()->mTag == DwarfTag::DW_TAG_array_type) {
+        array_bounds = ResolveArrayBounds(this_ref);
       }
       size = REFERENCE_SIZE;
     } else {
       size = base_type->Size();
     }
 
-    auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, size, base_type,
-                              this_ref.GetDie()->tag == DwarfTag::DW_TAG_typedef};
+    auto type = new sym::Type{this_ref.GetDie()->mTag, die_ref, size, base_type,
+                              this_ref.GetDie()->mTag == DwarfTag::DW_TAG_typedef};
     type->SetArrayBounds(array_bounds);
-    mTypeStorage[this_ref.GetDie()->section_offset] = type;
+    mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
     return type;
   } else {
-    if (const auto &attr_val = this_ref.read_attribute(Attribute::DW_AT_signature); attr_val) {
+    if (const auto &attr_val = this_ref.ReadAttribute(Attribute::DW_AT_signature); attr_val) {
       // DWARF5 support; we might run into type units, therefore we have to resolve the *actual* die we want here
       // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
       // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
       // just means mulitple keys can reach the value, which is a pointer to the actual type.
       auto tu_die_ref =
-        this_ref.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(attr_val->unsigned_value());
+        this_ref.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(attr_val->AsUnsignedValue());
       ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
-      const u32 sz = tu_die_ref.read_attribute(Attribute::DW_AT_byte_size)->unsigned_value();
-      const auto name = tu_die_ref.read_attribute(Attribute::DW_AT_name)
-                          .transform(AttributeValue::as_string)
+      const u32 sz = tu_die_ref.ReadAttribute(Attribute::DW_AT_byte_size)->AsUnsignedValue();
+      const auto name = tu_die_ref.ReadAttribute(Attribute::DW_AT_name)
+                          .transform(AttributeValue::ToStringView)
                           .value_or("<no name>");
-      auto type = new sym::Type{this_ref.GetDie()->tag, tu_die_ref.AsIndexed(), sz, name};
-      mTypeStorage[this_ref.GetDie()->section_offset] = type;
+      auto type = new sym::Type{this_ref.GetDie()->mTag, tu_die_ref.AsIndexed(), sz, name};
+      mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
       return type;
     } else {
       // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
       // Like come on dog. Give it a bogus name, whatever really. But nothing?
-      const auto name = this_ref.read_attribute(Attribute::DW_AT_name)
-                          .transform([](auto v) { return v.string(); })
+      const auto name = this_ref.ReadAttribute(Attribute::DW_AT_name)
+                          .transform([](auto v) { return v.AsStringView(); })
                           .value_or("lambda");
       const u32 sz =
-        this_ref.read_attribute(Attribute::DW_AT_byte_size).transform(AttributeValue::as_unsigned).value_or(0);
-      auto type = new sym::Type{this_ref.GetDie()->tag, die_ref, sz, name};
-      mTypeStorage[this_ref.GetDie()->section_offset] = type;
+        this_ref.ReadAttribute(Attribute::DW_AT_byte_size).transform(AttributeValue::AsUnsigned).value_or(0);
+      auto type = new sym::Type{this_ref.GetDie()->mTag, die_ref, sz, name};
+      mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
       return type;
     }
   }
@@ -277,7 +277,7 @@ LocationList::Get() noexcept
 Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target,
            bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
-      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->tag)}, mIsTypedef(isTypedef),
+      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag)}, mIsTypedef(isTypedef),
       size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target), mFields(), mBaseTypes(),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {
@@ -286,7 +286,7 @@ Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryRef
 Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf,
            std::string_view name) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
-      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->tag)}, mIsTypedef(false),
+      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag)}, mIsTypedef(false),
       size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes(),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {

@@ -73,7 +73,7 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
     AddTask(std::move(task));
   }
 
-  mNewObjectFilePublisher.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
+  mNewObjectFilePublisher.Subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->PostEvent(new ui::dap::ModuleEvent{"new", *sf});
     return true;
   });
@@ -94,7 +94,7 @@ TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&
   Tracer::Get().RegisterTracedTask(task);
   AddTask(std::move(task));
 
-  mNewObjectFilePublisher.subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
+  mNewObjectFilePublisher.Subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->PostEvent(new ui::dap::ModuleEvent{"new", *sf});
     return true;
   });
@@ -1001,7 +1001,7 @@ TraceeController::TryTerminateGracefully() noexcept
 }
 
 static inline TraceEvent *
-CreateTraceEventFromStopped(TraceeController& tc, TaskInfo &t) noexcept
+CreateTraceEventFromStopped(TraceeController &tc, TaskInfo &t) noexcept
 {
   ASSERT(t.mLastWaitStatus.ws != WaitStatusKind::NotKnown,
          "When creating a trace event from a wait status event, we must already know what kind it is.");
@@ -1033,7 +1033,7 @@ native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
   tc.CacheRegistersFor(cloning_task);
   pid_t np = -1;
   // we should only ever hit this when running debugging a native-hosted session
-  ASSERT(tc.GetInterface().format == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
+  ASSERT(tc.GetInterface().mFormat == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
   auto regs = cloning_task.native_registers();
   const auto orig_rax = regs->orig_rax;
   if (orig_rax == SYS_clone) {
@@ -1174,7 +1174,7 @@ TraceeController::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, boo
            b->GetObjectFilePath().c_str());
     return a->LowProgramCounter() < b->LowProgramCounter() && a->HighProgramCounter() < b->HighProgramCounter();
   });
-  mNewObjectFilePublisher.emit(symbolFile.get());
+  mNewObjectFilePublisher.Emit(symbolFile.get());
 }
 
 // Debug Symbols Related Logic
@@ -1645,7 +1645,7 @@ TraceeController::HandleThreadCreated(TaskInfo *task, const ThreadCreated &e,
     CreateNewTask(e.thread_id, true);
     task = GetTaskByTid(e.thread_id);
     if (!register_data.empty()) {
-      ASSERT(*GetInterface().arch_info != nullptr,
+      ASSERT(*GetInterface().mArchInfo != nullptr,
              "Passing raw register contents with no architecture description doesn't work.");
       task->StoreToRegisterCache(register_data);
       for (const auto &p : register_data) {
@@ -1807,7 +1807,7 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
 
   ASSERT(!mIsExited, "Supervisor exited already.");
 
-  const auto arch = GetInterface().arch_info;
+  const auto arch = GetInterface().mArchInfo;
   auto task = GetTaskByTid(evt->tid);
   // we _have_ to do this check here, because the event *might* be a ThreadCreated event
   // and *it* happens *slightly* different depending on if it's a Remote or a Native session that sends it.

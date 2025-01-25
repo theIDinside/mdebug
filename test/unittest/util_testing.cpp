@@ -1,3 +1,4 @@
+#include "interface/remotegdb/deserialization.h"
 #include "utils/expected.h"
 #include <gtest/gtest.h>
 #include <set>
@@ -55,12 +56,12 @@ static constexpr std::string_view decoded =
 TEST(GdbRemote, DecodeGPacket)
 {
   std::array<u8, 816> buf{};
-  utils::deserialize_hex_encoded(registerPacket2, buf);
+  deserialize_hex_encoded(registerPacket2, buf);
   std::array<u8, 816> buf2{};
   std::string_view v = decoded;
   auto i = 0;
   while (!v.empty()) {
-    buf2[i] = (utils::fromhex(v[0]) << 4) | utils::fromhex(v[1]);
+    buf2[i] = (fromhex(v[0]) << 4) | fromhex(v[1]);
     v.remove_prefix(2);
     ++i;
   }
@@ -75,8 +76,8 @@ TEST(GdbRemote, RunLengthDecode)
   std::array<u8, 8> val_non_encoded{};
   std::array<u8, 8> val_encoded{};
 
-  utils::deserialize_hex_encoded(contents, val_non_encoded);
-  utils::deserialize_hex_encoded(encoded, val_encoded);
+  deserialize_hex_encoded(contents, val_non_encoded);
+  deserialize_hex_encoded(encoded, val_encoded);
 
   for (auto i = 0u; i < val_encoded.size(); ++i) {
     EXPECT_EQ(val_encoded[i], val_non_encoded[i]);

@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "dwarf_binary_reader.h"
 #include "elf.h"
+#include <utils/logger.h>
 
 u64
 DwarfBinaryReader::dwarf_spec_read_value() noexcept

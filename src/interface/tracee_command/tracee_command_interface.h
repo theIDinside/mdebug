@@ -5,6 +5,7 @@
 #include "tracee_pointer.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"
+#include "utils/logger.h"
 #include "utils/macros.h"
 #include <link.h>
 #include <sys/ptrace.h>
@@ -277,8 +278,8 @@ protected:
   TraceeController *tc{nullptr};
 
 public:
-  Immutable<TargetFormat> format;
-  Immutable<std::shared_ptr<gdb::ArchictectureInfo>> arch_info;
+  Immutable<TargetFormat> mFormat;
+  Immutable<std::shared_ptr<gdb::ArchictectureInfo>> mArchInfo;
   TraceeInterfaceType mType;
   TPtr<r_debug_extended> tracee_r_debug{nullptr};
 
@@ -360,7 +361,7 @@ public:
         continue;
       }
     }
-    return utils::Expected<T, std::string_view>{t_result};
+    return utils::expected<T>(t_result);
   }
 
   template <typename T>
@@ -381,7 +382,7 @@ public:
           .address = AddrPtr{addr_value}, .bytes_written = total_written, .sys_errno = written.err.sys_error_num});
       }
     }
-    return {total_written};
+    return utils::expected(static_cast<u32>(total_written));
   }
 
   inline constexpr TraceeController *

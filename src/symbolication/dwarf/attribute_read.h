@@ -16,18 +16,18 @@ read_attributes(UnitData *unitData, const DieMetaData &die, std::array<Attribute
 {
   std::array<std::optional<AttributeValue>, N> result;
   UnitReader reader{unitData};
-  const auto &attrs = unitData->get_abbreviation(die.abbreviation_code);
+  const auto &attrs = unitData->GetAbbreviation(die.mAbbreviationCode);
   reader.SeekDie(die);
 
-  for (auto attribute : attrs.attributes) {
+  for (auto attribute : attrs.mAttributes) {
     for (auto i = 0; i < attributes.size(); ++i) {
-      if (attribute.name == attributes[i]) {
-        result[i] = read_attribute_value(reader, attribute, attrs.implicit_consts);
+      if (attribute.mName == attributes[i]) {
+        result[i] = ReadAttributeValue(reader, attribute, attrs.mImplicitConsts);
         goto resume;
       }
     }
 
-    reader.skip_attribute(attribute);
+    reader.SkipAttribute(attribute);
   resume:
     continue;
   }
@@ -52,15 +52,15 @@ ProcessDie(DieReference dieRef, Fn &&fn) noexcept
   const auto die = unit ? dieRef.GetDie() : nullptr;
   ASSERT(unit && die, "Compilation Unit required to be not-null");
   UnitReader reader{unit};
-  const auto &attrs = unit->get_abbreviation(die->abbreviation_code);
+  const auto &attrs = unit->GetAbbreviation(die->mAbbreviationCode);
   reader.SeekDie(*die);
-  for (auto attribute : attrs.attributes) {
+  for (auto attribute : attrs.mAttributes) {
     switch (fn(reader, attribute, attrs)) {
     case DieAttributeRead::Continue:
       break;
       ;
     case DieAttributeRead::Skipped:
-      reader.skip_attribute(attribute);
+      reader.SkipAttribute(attribute);
       break;
     case DieAttributeRead::Done:
       return;

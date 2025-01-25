@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "typedefs.h"
 #include <algorithm>
 #include <charconv>
 #include <concepts>
@@ -11,7 +12,6 @@
 #include <sys/mman.h>
 #include <sys/user.h>
 #include <type_traits>
-#include <utils/logger.h>
 #include <utils/macros.h>
 #include <variant>
 #include <vector>
@@ -125,8 +125,8 @@ std::string_view syscall_name(unsigned long long syscall_number);
     auto loc = std::source_location::current();                                                                   \
     const auto todo_msg = fmt::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
     fmt::println("{}", todo_msg);                                                                                 \
-    logging::GetLogChannel(logging::Channel::core)->Log(todo_msg);                                                \
-    logging::GetLogger()->OnAbort();                                                                              \
+    logging::Logger::GetLogger()->GetLogChannel(Channel::core)->Log(todo_msg);                                    \
+    logging::Logger::GetLogger()->OnAbort();                                                                      \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     MIDAS_UNREACHABLE                                                                                             \
   }
@@ -151,9 +151,9 @@ IgnoreArgs(const Args &...)
     const auto todo_msg = fmt::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
     fmt::println("{}", todo_msg_hdr);                                                                             \
     fmt::println("{}", todo_msg);                                                                                 \
-    logging::GetLogChannel(logging::Channel::core)->Log(todo_msg_hdr);                                            \
-    logging::GetLogChannel(logging::Channel::core)->Log(todo_msg);                                                \
-    logging::GetLogger()->OnAbort();                                                                              \
+    logging::GetLogChannel(Channel::core)->Log(todo_msg_hdr);                                \
+    logging::GetLogChannel(Channel::core)->Log(todo_msg);                                    \
+    logging::Logger::GetLogger()->OnAbort();                                                                      \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     MIDAS_UNREACHABLE                                                                                             \
   }

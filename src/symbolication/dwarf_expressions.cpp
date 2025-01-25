@@ -6,6 +6,7 @@
 #include "dwarf_defs.h"
 #include "dwarf_frameunwinder.h"
 #include <utility>
+#include <utils/logger.h>
 
 namespace sym {
 
@@ -492,7 +493,9 @@ op_call_ref(ExprByteCodeInterpreter &i) noexcept
 void
 op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 {
-  ASSERT(i.mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
+  ASSERT(
+    i.mFrameLevel != -1,
+    "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
   auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel);
   ASSERT(unwindState, "The interpreter can not know the CFA value.");
   i.mStack.Push(unwindState->CanonicalFrameAddress());

@@ -59,14 +59,8 @@ Logger::OnAbort() noexcept
   }
 }
 
-Logger::LogChannel *
-Logger::GetChannel(Channel id)
-{
-  return LogChannels[std::to_underlying(id)];
-}
-
 void
-Logger::LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept
+LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept
 {
   std::lock_guard guard{mChannelMutex};
   mFileStream << message;
@@ -74,7 +68,7 @@ Logger::LogChannel::LogMessage(const char *file, u32 line, u32 column, std::stri
 }
 
 void
-Logger::LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept
+LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept
 {
   std::lock_guard guard{mChannelMutex};
   mFileStream << message;
@@ -82,22 +76,28 @@ Logger::LogChannel::LogMessage(const char *file, u32 line, u32 column, std::stri
 }
 
 void
-Logger::LogChannel::Log(std::string_view msg) noexcept
+LogChannel::Log(std::string_view msg) noexcept
 {
   std::lock_guard guard{mChannelMutex};
   mFileStream << msg << std::endl;
 }
 
-Logger::LogChannel *
-GetLogChannel(Channel id) noexcept
+LogChannel *
+Logger::GetLogChannel(Channel id) noexcept
 {
-  return Logger::GetLogger()->GetChannel(id);
+  return LogChannels[std::to_underlying(id)];
 }
 
 Logger *
 GetLogger() noexcept
 {
   return Logger::GetLogger();
+}
+
+LogChannel *
+GetLogChannel(Channel id) noexcept
+{
+  return GetLogger()->GetLogChannel(id);
 }
 
 } // namespace logging

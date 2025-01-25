@@ -2,6 +2,7 @@
 #pragma once
 #include "utils/immutable.h"
 #include <common.h>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -41,11 +42,11 @@ struct DieNameReference
   DieNameReference() noexcept : cu(nullptr), die_index(0) {}
   DieNameReference(UnitData *cu, u64 die_index) noexcept : cu(cu), die_index(die_index) {}
 
-  bool is_valid() const;
-  bool is_unique() const noexcept;
-  void set_as_collision_variant(u64 index) noexcept;
-  void set_not_unique() noexcept;
-  void set_collision_index(u64 index) noexcept;
+  bool IsValid() const;
+  bool IsUnique() const noexcept;
+  void SetAsCollisionVariant(u64 index) noexcept;
+  void SetNotUnique() noexcept;
+  void SetCollisionIndex(u64 index) noexcept;
 };
 
 class UnitData;
@@ -53,8 +54,8 @@ class UnitData;
 class NameIndex
 {
 public:
-  using NameDieTuple = std::tuple<const char*, u64, UnitData *>;
-  using NameTypeDieTuple = std::tuple<const char*, u64, UnitData *, u64>;
+  using NameDieTuple = std::tuple<const char *, u64, UnitData *>;
+  using NameTypeDieTuple = std::tuple<const char *, u64, UnitData *, u64>;
   struct FindResult
   {
     DieNameReference *dies;
@@ -73,14 +74,15 @@ public:
   };
 
   NameIndex(std::string_view name) noexcept;
-  std::optional<std::span<const DieNameReference>> search(std::string_view name) const noexcept;
-  FindResult get_dies(std::string_view name) noexcept;
-  void merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
-  void merge_types(NonNullPtr<TypeStorage> objfile, const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept;
+  std::optional<std::span<const DieNameReference>> Search(std::string_view name) const noexcept;
+  FindResult GetDies(std::string_view name) noexcept;
+  void Merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
+  void MergeTypes(NonNullPtr<TypeStorage> objfile,
+                  const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept;
 
 private:
-  void add_name(const char* name, u64 die_index, UnitData *cu) noexcept;
-  void convert_to_collision_variant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept;
+  void AddName(const char *name, u64 die_index, UnitData *cu) noexcept;
+  void ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept;
   // The mutex only guars insert operations, because when the user is going to use query operations (finding a die
   // by it's name) the entire name index should be fully built.
   std::string_view index_name;
@@ -92,24 +94,24 @@ private:
 struct ObjectFileNameIndex
 {
   // backlink to the object file owning this name index
-  NameIndex free_functions{"free functions"};
-  NameIndex methods{"methods"};
-  NameIndex types{"types"};
-  NameIndex global_variables{"global variables"};
-  NameIndex namespaces{"namespaces"};
+  NameIndex mFreeFunctions{"free functions"};
+  NameIndex mMethods{"methods"};
+  NameIndex mTypes{"types"};
+  NameIndex mGlobalVariables{"global variables"};
+  NameIndex mNamespaces{"namespaces"};
 
   template <typename Fn>
   void
-  for_each_fn(std::string_view name, Fn &&f) const noexcept
+  ForEachFn(std::string_view name, Fn &&f) const noexcept
   {
-    if (const auto ff_res = free_functions.search(name); ff_res) {
+    if (const auto ff_res = mFreeFunctions.Search(name); ff_res) {
       auto &res = ff_res.value();
       for (auto &item : res) {
         f(item);
       }
     }
 
-    if (const auto mf_res = methods.search(name); mf_res) {
+    if (const auto mf_res = mMethods.Search(name); mf_res) {
       auto &res = mf_res.value();
       for (auto &item : res) {
         f(item);
@@ -119,16 +121,16 @@ struct ObjectFileNameIndex
 
   template <typename Fn>
   void
-  regex_for_each_fn(const std::string &regex_pattern, Fn &&f) const noexcept
+  RegexForEachFn(const std::string &regex_pattern, Fn &&f) const noexcept
   {
-    if (const auto ff_res = free_functions.search(regex_pattern); ff_res) {
+    if (const auto ff_res = mFreeFunctions.Search(regex_pattern); ff_res) {
       auto &res = ff_res.value();
       for (auto &item : res) {
         f(item);
       }
     }
 
-    if (const auto mf_res = methods.search(regex_pattern); mf_res) {
+    if (const auto mf_res = mMethods.Search(regex_pattern); mf_res) {
       auto &res = mf_res.value();
       for (auto &item : res) {
         f(item);

@@ -2,6 +2,7 @@
 #include "die.h"
 #include "common.h"
 #include "debug_info_reader.h"
+#include "symbolication/dwarf.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "typedefs.h"
 #include "utils/logger.h"
@@ -47,42 +48,42 @@ IsCompileUnit(DwarfUnitType type)
 }
 
 const DieMetaData *
-DieMetaData::parent() const noexcept
+DieMetaData::GetParent() const noexcept
 {
-  if (parent_id == 0) {
+  if (mParentId == 0) {
     return nullptr;
   }
-  return (this - parent_id);
+  return (this - mParentId);
 }
 const DieMetaData *
-DieMetaData::sibling() const noexcept
+DieMetaData::Sibling() const noexcept
 {
-  if (next_sibling == 0) {
+  if (mNextSibling == 0) {
     return nullptr;
   }
-  return (this + next_sibling);
+  return (this + mNextSibling);
 }
 
 const DieMetaData *
-DieMetaData::children() const noexcept
+DieMetaData::GetChildren() const noexcept
 {
-  if (!has_children) {
+  if (!mHasChildren) {
     return nullptr;
   }
   return this + 1;
 }
 
 bool
-DieMetaData::is_super_scope_variable() const noexcept
+DieMetaData::IsSuperScopeVariable() const noexcept
 {
   using enum DwarfTag;
-  if (tag != DW_TAG_variable) {
+  if (mTag != DW_TAG_variable) {
     return false;
   }
 
-  auto parent_die = parent();
+  auto parent_die = GetParent();
   while (parent_die != nullptr) {
-    switch (parent_die->tag) {
+    switch (parent_die->mTag) {
     case DW_TAG_subprogram:
     case DW_TAG_lexical_block:
     case DW_TAG_inlined_subroutine:
@@ -93,34 +94,34 @@ DieMetaData::is_super_scope_variable() const noexcept
     default:
       break;
     }
-    parent_die = parent_die->parent();
+    parent_die = parent_die->GetParent();
   }
   return false;
 }
 
 void
-DieMetaData::set_parent_id(u64 p_id) noexcept
+DieMetaData::SetParentId(u64 p_id) noexcept
 {
-  parent_id = p_id;
+  mParentId = p_id;
 }
 
 void
-DieMetaData::set_sibling_id(u32 sib_id) noexcept
+DieMetaData::SetSiblingId(u32 sib_id) noexcept
 {
-  next_sibling = sib_id;
+  mNextSibling = sib_id;
 }
 
 /*static*/ DieMetaData
-DieMetaData::create_die(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset,
-                        u64 next_sibling) noexcept
+DieMetaData::CreateDie(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset,
+                       u64 next_sibling) noexcept
 {
-  return DieMetaData{.section_offset = sec_offset,
-                     .parent_id = parent_id,
-                     .die_data_offset = die_data_offset,
-                     .next_sibling = static_cast<u32>(next_sibling),
-                     .has_children = abbr.HasChildren,
-                     .abbreviation_code = static_cast<u16>(abbr.code),
-                     .tag = abbr.tag};
+  return DieMetaData{.mSectionOffset = sec_offset,
+                     .mParentId = parent_id,
+                     .mDieDataOffset = die_data_offset,
+                     .mNextSibling = static_cast<u32>(next_sibling),
+                     .mHasChildren = abbr.mHasChildren,
+                     .mAbbreviationCode = static_cast<u16>(abbr.mCode),
+                     .mTag = abbr.mTag};
 }
 
 /* static */
@@ -129,7 +130,7 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
                              AbbreviationInfo::Table &&abbreviations) noexcept
 {
   auto dwarfUnit = new UnitData{owningObject, header};
-  dwarfUnit->set_abbreviations(std::move(abbreviations));
+  dwarfUnit->SetAbbreviations(std::move(abbreviations));
 
   // No further init needed. If it's not a compilation unit, we don't need build directory or name
   // if it is, but it's of version 5, the Line Number Program headers will actually contain the build directory
@@ -138,20 +139,20 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
   // `SourceCodeFile` with a full path, by joining the build directory with the relative directory and the file
   // names. In this regard, DWARF5 is infinitely better, although this cost is just paid 1, up front for our Dwarf4
   // implementation.
-  if (!dwarfUnit->IsCompilationUnitLike() || dwarfUnit->header().version() == DwarfVersion::D5) {
+  if (!dwarfUnit->IsCompilationUnitLike() || dwarfUnit->header().Version() == DwarfVersion::D5) {
     return dwarfUnit;
   }
 
   UnitReader reader{dwarfUnit};
 
-  const auto die_sec_offset = reader.sec_offset();
-  const auto [abbr_code, uleb_sz] = reader.read_uleb128();
+  const auto die_sec_offset = reader.SectionOffset();
+  const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
 
   ASSERT(abbr_code <= dwarfUnit->mAbbreviation.size() && abbr_code != 0,
          "[cu=0x{:x}]: Unit DIE abbreviation code {} is invalid, max={}", dwarfUnit->SectionOffset(), abbr_code,
          dwarfUnit->mAbbreviation.size());
   auto &abbreviation = dwarfUnit->mAbbreviation[abbr_code - 1];
-  const auto unitDie = DieMetaData::create_die(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
+  const auto unitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
   auto [lineNumberProgramOffset, buildDirectory] = PrepareCompileUnitPreDwarf5(dwarfUnit, unitDie);
   dwarfUnit->mBuildDirectory = buildDirectory;
   dwarfUnit->mStatementListOffset = lineNumberProgramOffset;
@@ -165,7 +166,7 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
 bool
 UnitData::IsCompilationUnitLike() const noexcept
 {
-  return IsCompileUnit(mUnitHeader.get_unit_type());
+  return IsCompileUnit(mUnitHeader.GetUnitType());
 }
 
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
@@ -175,13 +176,13 @@ UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
 }
 
 void
-UnitData::set_abbreviations(AbbreviationInfo::Table &&table) noexcept
+UnitData::SetAbbreviations(AbbreviationInfo::Table &&table) noexcept
 {
   mAbbreviation = std::move(table);
 }
 
 const AbbreviationInfo &
-UnitData::get_abbreviation(u32 abbreviation_code) const noexcept
+UnitData::GetAbbreviation(u32 abbreviation_code) const noexcept
 {
   const auto adjusted = abbreviation_code - 1;
   ASSERT(adjusted < mAbbreviation.size(), "Abbreviation code was {} but we only have {}", abbreviation_code,
@@ -190,14 +191,14 @@ UnitData::get_abbreviation(u32 abbreviation_code) const noexcept
 }
 
 bool
-UnitData::has_loaded_dies() const noexcept
+UnitData::HasLoadedDies() const noexcept
 {
   std::lock_guard lock(mLoadDiesMutex);
   return mFullyLoaded;
 }
 
 const std::vector<DieMetaData> &
-UnitData::get_dies() noexcept
+UnitData::GetDies() noexcept
 {
   if (mFullyLoaded) {
     return mDieCollection;
@@ -234,19 +235,19 @@ UnitData::header() const noexcept
 u64
 UnitData::SectionOffset() const noexcept
 {
-  return header().debug_info_offset();
+  return header().DebugInfoSectionOffset();
 }
 
 u64
 UnitData::UnitSize() const noexcept
 {
-  return header().cu_size();
+  return header().CompilationUnitSize();
 }
 
 bool
 UnitData::spans_across(u64 offset) const noexcept
 {
-  return header().spans_across(offset);
+  return header().SpansAcross(offset);
 }
 
 u64
@@ -277,10 +278,10 @@ UnitData::GetDebugInfoEntry(u64 offset) noexcept
   LoadDieMetadata();
 
   auto it = std::lower_bound(mDieCollection.begin(), mDieCollection.end(), offset,
-                             [](const dw::DieMetaData &die, u64 offset) { return die.section_offset < offset; });
+                             [](const dw::DieMetaData &die, u64 offset) { return die.mSectionOffset < offset; });
 
-  ASSERT(it->section_offset == offset, "failed to find die with offset 0x{:x}, found 0x{:x}", offset,
-         u64{it->section_offset})
+  ASSERT(it->mSectionOffset == offset, "failed to find die with offset 0x{:x}, found 0x{:x}", offset,
+         u64{it->mSectionOffset})
   return &(*it);
 }
 
@@ -293,7 +294,7 @@ UnitData::GetDieReferenceByOffset(u64 offset) noexcept
 DieReference
 UnitData::GetDieByCacheIndex(u64 index) noexcept
 {
-  return DieReference{this, &get_dies()[index]};
+  return DieReference{this, &GetDies()[index]};
 }
 
 u32
@@ -302,10 +303,10 @@ UnitData::AddressBase() noexcept
   if (mAddrOffset) {
     return mAddrOffset.value();
   }
-  DieReference ref{this, &get_dies()[0]};
-  auto base = ref.read_attribute(Attribute::DW_AT_addr_base);
+  DieReference ref{this, &GetDies()[0]};
+  auto base = ref.ReadAttribute(Attribute::DW_AT_addr_base);
   ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: 0x{:x}", SectionOffset());
-  mAddrOffset = base.transform([](auto v) { return v.unsigned_value(); });
+  mAddrOffset = base.transform([](auto v) { return v.AsUnsignedValue(); });
   return mAddrOffset.value();
 }
 
@@ -315,10 +316,10 @@ UnitData::RangeListBase() noexcept
   if (mRngListOffset) {
     return mRngListOffset.value();
   }
-  DieReference ref{this, &get_dies()[0]};
-  auto base = ref.read_attribute(Attribute::DW_AT_rnglists_base);
+  DieReference ref{this, &GetDies()[0]};
+  auto base = ref.ReadAttribute(Attribute::DW_AT_rnglists_base);
   ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: 0x{:x}", SectionOffset());
-  mRngListOffset = base.transform([](auto v) { return v.unsigned_value(); });
+  mRngListOffset = base.transform([](auto v) { return v.AsUnsignedValue(); });
   return mRngListOffset.value();
 }
 
@@ -328,10 +329,10 @@ UnitData::StrOffsetBase() noexcept
   if (mStringOffset) {
     return mStringOffset;
   }
-  DieReference ref{this, &get_dies()[0]};
-  auto base = ref.read_attribute(Attribute::DW_AT_str_offsets_base);
+  DieReference ref{this, &GetDies()[0]};
+  auto base = ref.ReadAttribute(Attribute::DW_AT_str_offsets_base);
   ASSERT(base, "Could not find Attribute::DW_AT_str_offsets_base for this cu: 0x{:x}", SectionOffset());
-  mStringOffset = base.transform([](auto v) { return v.unsigned_value(); });
+  mStringOffset = base.transform(AttributeValue::ToUnsignedValue);
   return mStringOffset;
 }
 
@@ -352,27 +353,28 @@ UnitData::LoadDieMetadata() noexcept
   mFullyLoaded = true;
   UnitReader reader{this};
 
-  const auto die_sec_offset = reader.sec_offset();
-  const auto [abbr_code, uleb_sz] = reader.read_uleb128();
+  const auto die_sec_offset = reader.SectionOffset();
+  const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
 
   ASSERT(abbr_code <= mAbbreviation.size() && abbr_code != 0,
          "[cu=0x{:x}]: Unit DIE abbreviation code {} is invalid, max={}", SectionOffset(), abbr_code,
          mAbbreviation.size());
   auto &abbreviation = mAbbreviation[abbr_code - 1];
-  reader.skip_attributes(abbreviation.attributes);
+  reader.SkipAttributes(abbreviation.mAttributes);
   // Siblings and parent ids stored here
   std::vector<int> parent_node;
   std::vector<int> sibling_node;
   parent_node.push_back(0);
   sibling_node.push_back(0);
-  mUnitDie = DieMetaData::create_die(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
+  mUnitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
   ASSERT(mDieCollection.empty(), "Expected dies to be empty, but wasn't! (cu=0x{:x})", SectionOffset());
-  mDieCollection.reserve(mLoadedDiesCount != 0 ? mLoadedDiesCount : guess_die_count(header().cu_size()));
+  mDieCollection.reserve(mLoadedDiesCount != 0 ? mLoadedDiesCount
+                                               : guess_die_count(header().CompilationUnitSize()));
   mDieCollection.push_back(mUnitDie);
   bool new_level = true;
-  while (reader.has_more()) {
-    const auto die_sec_offset = reader.sec_offset();
-    const auto [abbr_code, uleb_sz] = reader.read_uleb128();
+  while (reader.HasMore()) {
+    const auto die_sec_offset = reader.SectionOffset();
+    const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
     ASSERT(abbr_code <= mAbbreviation.size(), "Abbreviation code {} is invalid. Dies processed={}", abbr_code,
            mDieCollection.size());
     if (abbr_code == 0) {
@@ -386,18 +388,18 @@ UnitData::LoadDieMetadata() noexcept
     }
 
     if (!new_level) {
-      mDieCollection[sibling_node.back()].set_sibling_id(mDieCollection.size() - sibling_node.back());
+      mDieCollection[sibling_node.back()].SetSiblingId(mDieCollection.size() - sibling_node.back());
       sibling_node.back() = mDieCollection.size();
     } else {
       sibling_node.push_back(mDieCollection.size());
     }
 
     auto &abbreviation = mAbbreviation[abbr_code - 1];
-    auto new_entry = DieMetaData::create_die(die_sec_offset, abbreviation,
-                                             mDieCollection.size() - parent_node.back(), uleb_sz, NONE_INDEX);
+    auto new_entry = DieMetaData::CreateDie(die_sec_offset, abbreviation,
+                                            mDieCollection.size() - parent_node.back(), uleb_sz, NONE_INDEX);
 
-    reader.skip_attributes(abbreviation.attributes);
-    new_level = abbreviation.HasChildren;
+    reader.SkipAttributes(abbreviation.mAttributes);
+    new_level = abbreviation.mHasChildren;
     if (new_level) {
       parent_node.push_back(mDieCollection.size());
     }
@@ -439,21 +441,21 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
   const auto abbrev_sec = obj->GetElf()->debug_abbrev;
 
   AbbreviationInfo::Table result{};
-  const u8 *abbr_ptr = header.abbreviation_data(abbrev_sec);
+  const u8 *abbr_ptr = header.AbbreviationData(abbrev_sec);
   alignas(32) uint64_t attributes[64];
   while (true) {
     AbbreviationInfo &info = result.emplace_back();
-    info.IsDeclaration = false;
-    info.AbstractOrigin = false;
-    abbr_ptr = decode_uleb128(abbr_ptr, info.code);
+    info.mIsDeclaration = false;
+    info.mAbstractOrigin = false;
+    abbr_ptr = decode_uleb128(abbr_ptr, info.mCode);
 
     // we've reached the end of this abbrev sub-section.
-    if (info.code == 0) {
+    if (info.mCode == 0) {
       break;
     }
 
-    abbr_ptr = decode_uleb128(abbr_ptr, info.tag);
-    info.HasChildren = *abbr_ptr;
+    abbr_ptr = decode_uleb128(abbr_ptr, info.mTag);
+    info.mHasChildren = *abbr_ptr;
     abbr_ptr++;
 
     const auto restore_to = abbr_ptr;
@@ -463,10 +465,10 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
     for (;; ++count) {
       Abbreviation abbr;
       abbr_ptr = decode_uleb128(abbr_ptr, attributes[count]);
-      abbr_ptr = decode_uleb128(abbr_ptr, abbr.form);
-      if (abbr.form == AttributeForm::DW_FORM_implicit_const) {
-        ASSERT((u8)info.implicit_consts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
-        abbr.IMPLICIT_CONST_INDEX = info.implicit_consts.size();
+      abbr_ptr = decode_uleb128(abbr_ptr, abbr.mForm);
+      if (abbr.mForm == AttributeForm::DW_FORM_implicit_const) {
+        ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
+        abbr.IMPLICIT_CONST_INDEX = info.mImplicitConsts.size();
         i64 value = 0;
         abbr_ptr = decode_leb128(abbr_ptr, value);
       } else {
@@ -477,7 +479,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
         break;
       }
     }
-    info.attributes.reserve(count);
+    info.mAttributes.reserve(count);
     bool isAddressable = false;
     bool isAbstractOrigin = false;
     auto index = count;
@@ -501,36 +503,36 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
     }
 
     abbr_ptr = restore_to;
-    info.IsAddressable = isAddressable;
+    info.mIsAddressable = isAddressable;
     // read declarations
     for (size_t i = 0;; ++i) {
       Abbreviation abbr;
-      abbr_ptr = decode_uleb128(abbr_ptr, abbr.name);
-      abbr_ptr = decode_uleb128(abbr_ptr, abbr.form);
-      switch (abbr.name) {
+      abbr_ptr = decode_uleb128(abbr_ptr, abbr.mName);
+      abbr_ptr = decode_uleb128(abbr_ptr, abbr.mForm);
+      switch (abbr.mName) {
       case Attribute::DW_AT_declaration:
-        info.IsDeclaration = true;
+        info.mIsDeclaration = true;
         break;
       case Attribute::DW_AT_abstract_origin:
-        info.AbstractOrigin = true;
+        info.mAbstractOrigin = true;
         break;
       default:
         break;
       }
 
-      if (abbr.form == AttributeForm::DW_FORM_implicit_const) {
-        ASSERT((u8)info.implicit_consts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
-        abbr.IMPLICIT_CONST_INDEX = info.implicit_consts.size();
-        info.implicit_consts.push_back(0);
-        abbr_ptr = decode_leb128(abbr_ptr, info.implicit_consts.back());
+      if (abbr.mForm == AttributeForm::DW_FORM_implicit_const) {
+        ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
+        abbr.IMPLICIT_CONST_INDEX = info.mImplicitConsts.size();
+        info.mImplicitConsts.push_back(0);
+        abbr_ptr = decode_leb128(abbr_ptr, info.mImplicitConsts.back());
       } else {
         abbr.IMPLICIT_CONST_INDEX = -1;
       }
 
-      if (utils::castenum(abbr.name) == 0) {
+      if (utils::castenum(abbr.mName) == 0) {
         break;
       }
-      info.attributes.push_back(abbr);
+      info.mAttributes.push_back(abbr);
     }
   }
 
@@ -621,7 +623,7 @@ UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
       const auto die_data_len = unit_len - header_len;
       ASSERT(header_len == 20 || header_len == 28, "Unexpected header length: {}", header_len);
       AddTypeUnitHeader({unit_index}, sec_offset, total_unit_size, reader.get_span(die_data_len), abb_offs,
-                               addr_size, format, type_sig, type_offset);
+                        addr_size, format, type_sig, type_offset);
     } break;
     case DwarfUnitType::DW_UT_compile:
       [[fallthrough]];
@@ -634,8 +636,8 @@ UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
                "Unexpected compilation unit header size: {}", header_len);
       }
       const auto die_data_len = unit_len - header_len;
-      AddUnitHeader(SymbolInfoId{unit_index}, sec_offset, total_unit_size, reader.get_span(die_data_len),
-                           abb_offs, addr_size, format, (DwarfVersion)version, unit_type);
+      AddUnitHeader(SymbolInfoId{unit_index}, sec_offset, total_unit_size, reader.get_span(die_data_len), abb_offs,
+                    addr_size, format, (DwarfVersion)version, unit_type);
     } break;
     default:
       ASSERT(false, "Unit type {} not supported yet", to_str(unit_type));

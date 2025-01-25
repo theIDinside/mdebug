@@ -284,9 +284,9 @@ void
 ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
 {
   for (const auto tu : tus) {
-    ASSERT(tu->header().get_unit_type() == DwarfUnitType::DW_UT_type, "Expected DWARF Unit Type but got {}",
-           to_str(tu->header().get_unit_type()));
-    mTypeToUnitDataMap[tu->header().type_signature()] = tu;
+    ASSERT(tu->header().GetUnitType() == DwarfUnitType::DW_UT_type, "Expected DWARF Unit Type but got {}",
+           to_str(tu->header().GetUnitType()));
+    mTypeToUnitDataMap[tu->header().TypeSignature()] = tu;
   }
 }
 
@@ -311,11 +311,11 @@ ObjectFile::GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept
 {
   auto typeunit = GetTypeUnit(type_signature);
   ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
-  const auto type_die_cu_offset = typeunit->header().get_type_offset();
+  const auto type_die_cu_offset = typeunit->header().GetTypeOffset();
   const auto type_die_section_offset = typeunit->SectionOffset() + type_die_cu_offset;
-  const auto &dies = typeunit->get_dies();
+  const auto &dies = typeunit->GetDies();
   for (const auto &d : dies) {
-    if (d.section_offset == type_die_section_offset) {
+    if (d.mSectionOffset == type_die_section_offset) {
       return sym::dw::DieReference{typeunit, &d};
     }
   }
@@ -359,13 +359,13 @@ ObjectFile::InitializeDebugSymbolInfo() noexcept
   // First block of tasks need to finish before continuing with anything else.
   utils::TaskGroup cu_taskgroup("Compilation Unit Data");
   auto cu_work = sym::dw::UnitDataTask::CreateParsingJobs(this, cu_taskgroup.GetTemporaryAllocator());
-  cu_taskgroup.add_tasks(std::span{cu_work});
-  cu_taskgroup.schedule_work().wait();
+  cu_taskgroup.AddTasks(std::span{cu_work});
+  cu_taskgroup.ScheduleWork().wait();
 
   utils::TaskGroup name_index_taskgroup("Name Indexing");
   auto ni_work = sym::dw::IndexingTask::CreateIndexingJobs(this, name_index_taskgroup.GetTemporaryAllocator());
-  name_index_taskgroup.add_tasks(std::span{ni_work});
-  name_index_taskgroup.schedule_work().wait();
+  name_index_taskgroup.AddTasks(std::span{ni_work});
+  name_index_taskgroup.ScheduleWork().wait();
 }
 
 void
@@ -450,10 +450,10 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
     return nullptr;
   }
 
-  auto fd = utils::ScopedFd::open_read_only(path);
-  const auto addr = fd.mmap_file<u8>({}, true);
+  auto fd = utils::ScopedFd::OpenFileReadOnly(path);
+  const auto addr = fd.MmapFile<u8>({}, true);
   const auto objfile =
-    new ObjectFile{fmt::format("{}:{}", tc.TaskLeaderTid(), path.c_str()), path, fd.file_size(), addr};
+    new ObjectFile{fmt::format("{}:{}", tc.TaskLeaderTid(), path.c_str()), path, fd.FileSize(), addr};
 
   return objfile;
 }
@@ -466,10 +466,10 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
     return nullptr;
   }
 
-  auto fd = utils::ScopedFd::open_read_only(path);
-  const auto addr = fd.mmap_file<u8>({}, true);
+  auto fd = utils::ScopedFd::OpenFileReadOnly(path);
+  const auto addr = fd.MmapFile<u8>({}, true);
   const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->TaskLeaderTid(), path.c_str()), path,
-                                                    fd.file_size(), addr);
+                                                    fd.FileSize(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
   const auto header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
@@ -622,7 +622,7 @@ SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
   }
   if (!symbolInformation->IsResolved()) {
     sym::dw::FunctionSymbolicationContext sym_ctx{*this->GetObjectFile(), frame};
-    sym_ctx.process_symbol_information();
+    sym_ctx.ProcessSymbolInformation();
   }
 
   switch (set) {
@@ -658,7 +658,7 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
   auto type = value->GetType();
   if (!type->IsResolved()) {
     sym::dw::TypeSymbolicationContext ts_ctx{*GetObjectFile(), *type};
-    ts_ctx.resolve_type();
+    ts_ctx.ResolveType();
   }
 
   auto value_resolver = value->GetResolver();
@@ -766,14 +766,14 @@ SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept 
 
   for (const auto &n : search_for) {
     auto ni = obj->GetNameIndex();
-    ni->for_each_fn(n, [&](const sym::dw::DieNameReference &ref) {
+    ni->ForEachFn(n, [&](const sym::dw::DieNameReference &ref) {
       auto die_ref = ref.cu->GetDieByCacheIndex(ref.die_index);
-      auto low_pc = die_ref.read_attribute(Attribute::DW_AT_low_pc);
+      auto low_pc = die_ref.ReadAttribute(Attribute::DW_AT_low_pc);
       if (low_pc) {
-        const auto addr = low_pc->address();
+        const auto addr = low_pc->AsAddress();
         matching_symbols.emplace_back(n, addr, 0);
         DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->GetPathString(),
-               die_ref.GetUnitData()->SectionOffset(), die_ref.GetDie()->section_offset, n, addr);
+               die_ref.GetUnitData()->SectionOffset(), die_ref.GetDie()->mSectionOffset, n, addr);
       }
     });
   }
@@ -827,7 +827,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Get().new_key();
     if (ref == 0 && !symbol.mType->IsResolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
-      ts_ctx.resolve_type();
+      ts_ctx.ResolveType();
     }
 
     auto value_object =

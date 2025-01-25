@@ -189,12 +189,12 @@ private:
     if constexpr (type == EndpointType::Start) {
       auto it =
         interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
-      copy_to(interval[index - 1].values, it->values);
+      CopyTo(interval[index - 1].values, it->values);
     } else {
       auto it =
         interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
       if (index < interval.size() - 1) {
-        copy_to_transform(interval[index + 1].values, it->values, [](auto it) {
+        TransformCopyTo(interval[index + 1].values, it->values, [](auto it) {
           auto copy = it;
           copy.end = false;
           return copy;

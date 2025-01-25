@@ -2,7 +2,6 @@
 #include "index_die_names.h"
 // system
 #include <algorithm>
-#include <cstdint>
 // mdb
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf.h>
@@ -20,8 +19,8 @@
 
 namespace sym::dw {
 
-IndexingTask::IndexingTask(ObjectFile *obj, std::span<UnitData *> cus_to_index) noexcept
-    : obj(obj), cus_to_index(cus_to_index.begin(), cus_to_index.end())
+IndexingTask::IndexingTask(ObjectFile *objectFile, std::span<UnitData *> compUnits) noexcept
+    : mObjectFile(objectFile), mCompUnitsToIndex(compUnits.begin(), compUnits.end())
 {
 }
 
@@ -31,7 +30,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{taskGroupAllocator};
 
   std::pmr::vector<sym::dw::UnitData *> sortedBySize{taskGroupAllocator};
-  utils::copy_to(obj->GetAllCompileUnits(), sortedBySize);
+  utils::CopyTo(obj->GetAllCompileUnits(), sortedBySize);
 
   std::sort(sortedBySize.begin(), sortedBySize.end(),
             [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
@@ -66,23 +65,6 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   return tasks;
 }
 
-template <Attribute... Attrs>
-std::vector<AttributeValue>
-read_values(UnitData &cu, const DieMetaData &die) noexcept
-{
-  UnitReader reader{&cu};
-  const auto &attrs = cu.get_abbreviation(die.abbreviation_code);
-  reader.SeekDie(die);
-  std::vector<AttributeValue> attribute_values{};
-  for (auto attribute : attrs.attributes) {
-    const auto value = read_attribute_value(reader, attribute, attrs.implicit_consts);
-    if (((value.name == Attrs) || ...)) {
-      attribute_values.push_back(value);
-    }
-  }
-  return attribute_values;
-}
-
 static bool
 IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 {
@@ -93,25 +75,25 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
     auto reader = ref.GetReader();
     bool consideredComplete = true;
 
-    for (auto it = std::cbegin(abbreviations.attributes);
-         it != std::cend(abbreviations.attributes) && consideredComplete; ++it) {
-      switch (it->name) {
+    for (auto it = std::cbegin(abbreviations.mAttributes);
+         it != std::cend(abbreviations.mAttributes) && consideredComplete; ++it) {
+      switch (it->mName) {
       case Attribute::DW_AT_specification:
         [[fallthrough]];
       case Attribute::DW_AT_abstract_origin: {
         consideredComplete = false;
-        const auto offset = read_attribute_value(reader, *it, abbreviations.implicit_consts).unsigned_value();
+        const auto offset = ReadAttributeValue(reader, *it, abbreviations.mImplicitConsts).AsUnsignedValue();
         UnitData *originCu = objectFile->GetCompileUnitFromOffset(offset);
         ref = originCu->GetDieReferenceByOffset(offset);
       } break;
       default:
-        reader.skip_attribute(*it);
+        reader.SkipAttribute(*it);
         break;
       }
     }
 
     if (consideredComplete) {
-      switch (ref.GetDie()->parent()->tag) {
+      switch (ref.GetDie()->GetParent()->mTag) {
       case DwarfTag::DW_TAG_class_type:
         return true;
       case DwarfTag::DW_TAG_structure_type:
@@ -126,14 +108,14 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 }
 
 void
-IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexcept
+IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
 {
   using NameSet = std::vector<NameIndex::NameDieTuple>;
   using NameTypeSet = std::vector<NameIndex::NameTypeDieTuple>;
 
   auto sz = 0;
-  for (const auto unit : cus_to_index) {
-    sz += unit->header().cu_size();
+  for (const auto unit : mCompUnitsToIndex) {
+    sz += unit->header().CompilationUnitSize();
   }
 
   NameSet free_functions;
@@ -152,7 +134,7 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
   std::vector<sym::dw::UnitData *> type_units{};
 
   ScopedDefer clear_metadata{[&]() {
-    for (auto &comp_unit : cus_to_index) {
+    for (auto &comp_unit : mCompUnitsToIndex) {
       comp_unit->ClearLoadedCache();
     }
 
@@ -161,11 +143,11 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
     }
   }};
 
-  for (auto comp_unit : cus_to_index) {
+  for (auto comp_unit : mCompUnitsToIndex) {
     auto start = std::chrono::high_resolution_clock::now();
     std::vector<i64> implicit_consts;
-    const auto &dies = comp_unit->get_dies();
-    if (dies.front().tag == DwarfTag::DW_TAG_type_unit) {
+    const auto &dies = comp_unit->GetDies();
+    if (dies.front().mTag == DwarfTag::DW_TAG_type_unit) {
       DBGLOG(core, "DWARF Unit is a type unit: 0x{:x}", comp_unit->SectionOffset());
       type_units.push_back(comp_unit);
     }
@@ -175,7 +157,7 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
     for (const auto &die : dies) {
       ++die_index;
       // work only on dies, that can have a name associated (via DW_AT_name attribute)
-      switch (die.tag) {
+      switch (die.mTag) {
       case DwarfTag::DW_TAG_array_type:
       case DwarfTag::DW_TAG_class_type:
       case DwarfTag::DW_TAG_entry_point:
@@ -200,7 +182,7 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
         continue;
       }
 
-      const auto &abb = comp_unit->get_abbreviation(die.abbreviation_code);
+      const auto &abb = comp_unit->GetAbbreviation(die.mAbbreviationCode);
 
       const char *name = nullptr;
       const char *mangled_name = nullptr;
@@ -211,22 +193,22 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
       auto decl_file = 0u;
       auto decl_line = 0u;
       reader.SeekDie(die);
-      for (const auto &value : abb.attributes) {
-        switch (value.name) {
+      for (const auto &value : abb.mAttributes) {
+        switch (value.mName) {
         case Attribute::DW_AT_decl_file: {
-          decl_file = read_attribute_value(reader, value, abb.implicit_consts).unsigned_value();
+          decl_file = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
         } break;
         case Attribute::DW_AT_decl_line: {
-          decl_line = read_attribute_value(reader, value, abb.implicit_consts).unsigned_value();
+          decl_line = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
         } break;
         // register name
         case Attribute::DW_AT_name: {
-          auto attr = read_attribute_value(reader, value, abb.implicit_consts);
-          name = attr.string();
+          auto attr = ReadAttributeValue(reader, value, abb.mImplicitConsts);
+          name = attr.AsCString();
         } break;
         case Attribute::DW_AT_linkage_name: {
-          auto attr = read_attribute_value(reader, value, abb.implicit_consts);
-          mangled_name = attr.string();
+          auto attr = ReadAttributeValue(reader, value, abb.mImplicitConsts);
+          mangled_name = attr.AsCString();
         } break;
         // is address-representable?
         case Attribute::DW_AT_low_pc:
@@ -237,47 +219,46 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
           [[fallthrough]];
         case Attribute::DW_AT_ranges:
           addr_representable = true;
-          reader.skip_attribute(value);
+          reader.SkipAttribute(value);
           break;
         // is global or static value?
         case Attribute::DW_AT_location:
         case Attribute::DW_AT_const_value:
           has_loc = true;
-          is_super_scope_var = die.is_super_scope_variable();
-          reader.skip_attribute(value);
+          is_super_scope_var = die.IsSuperScopeVariable();
+          reader.SkipAttribute(value);
           break;
         case Attribute::DW_AT_declaration:
           is_decl = true;
-          reader.skip_attribute(value);
+          reader.SkipAttribute(value);
           break;
         case Attribute::DW_AT_specification:
           [[fallthrough]];
         case Attribute::DW_AT_abstract_origin: {
-          switch (die.tag) {
+          switch (die.mTag) {
           case DwarfTag::DW_TAG_subprogram:
             [[fallthrough]];
           case DwarfTag::DW_TAG_inlined_subroutine: {
             // We're doing name indexing.. we only care to find the name of referenced DIE, really.
-            auto ref = read_attribute_value(reader, value, abb.implicit_consts).unsigned_value();
+            auto ref = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
             while (!name) {
-              auto refUnit = obj->GetCompileUnitFromOffset(ref);
+              auto refUnit = mObjectFile->GetCompileUnitFromOffset(ref);
               UnitReader innerReader{refUnit, ref};
-              const auto [abbr_code, uleb_sz] = innerReader.read_uleb128();
-              const auto &remoteAbbrev = refUnit->get_abbreviation(abbr_code);
+              const auto [abbr_code, uleb_sz] = innerReader.DecodeULEB128();
+              const auto &remoteAbbrev = refUnit->GetAbbreviation(abbr_code);
               u64 newRef = 0;
-              for (const auto &abbrev : remoteAbbrev.attributes) {
-                switch (abbrev.name) {
+              for (const auto &abbrev : remoteAbbrev.mAttributes) {
+                switch (abbrev.mName) {
                 case Attribute::DW_AT_name:
-                  name = read_attribute_value(innerReader, abbrev, remoteAbbrev.implicit_consts).string();
+                  name = ReadAttributeValue(innerReader, abbrev, remoteAbbrev.mImplicitConsts).AsCString();
                   break;
                 case Attribute::DW_AT_specification:
                   [[fallthrough]];
                 case Attribute::DW_AT_abstract_origin:
-                  newRef =
-                    read_attribute_value(innerReader, abbrev, remoteAbbrev.implicit_consts).unsigned_value();
+                  newRef = ReadAttributeValue(innerReader, abbrev, remoteAbbrev.mImplicitConsts).AsUnsignedValue();
                   break;
                 default:
-                  innerReader.skip_attribute(abbrev);
+                  innerReader.SkipAttribute(abbrev);
                 }
                 if (name) {
                   break;
@@ -299,12 +280,12 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
         } break;
         default:
         skip:
-          reader.skip_attribute(value);
+          reader.SkipAttribute(value);
           break;
         }
       }
 
-      switch (die.tag) {
+      switch (die.mTag) {
       case DwarfTag::DW_TAG_variable:
         // We only register global variables, everything else wouldn't make sense.
         if (name && has_loc && is_super_scope_var) {
@@ -370,76 +351,20 @@ IndexingTask::execute_task(std::pmr::memory_resource *temporaryAllocator) noexce
            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
              .count());
   }
-  auto idx = obj->GetNameIndex();
-  idx->namespaces.merge(namespaces);
-  idx->free_functions.merge(free_functions);
-  idx->global_variables.merge(global_variables);
-  idx->methods.merge(methods);
-  idx->types.merge_types(obj->GetTypeStorage(), types);
+  auto idx = mObjectFile->GetNameIndex();
+  idx->mNamespaces.Merge(namespaces);
+  idx->mFreeFunctions.Merge(free_functions);
+  idx->mGlobalVariables.Merge(global_variables);
+  idx->mMethods.Merge(methods);
+  idx->mTypes.MergeTypes(mObjectFile->GetTypeStorage(), types);
 
   if (!type_units.empty()) {
-    obj->AddTypeUnits(type_units);
-  }
-}
-
-static void
-process_cu_boundary(const AttributeValue &ranges_offset, sym::CompilationUnit &src) noexcept
-{
-  auto cu = src.get_dwarf_unit();
-  const auto version = cu->header().version();
-  ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
-  auto elf = cu->GetObjectFile()->GetElf();
-  if (version == DwarfVersion::D4) {
-    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->GetPointer(ranges_offset.address()));
-    auto lowest = UINTMAX_MAX;
-    auto highest = 0ul;
-    auto start = 0ul;
-    auto end = 1ul;
-    bool found_a_range = false;
-    while (true) {
-      start = *byte_ptr++;
-      end = *byte_ptr++;
-      if (start == 0) {
-        // garbage garbled DW_AT_ranges data is *super* common, and when start == 0.
-        // after some research of the DWARF data (using llvm-dwarfdump), it seems to be the case that
-        // DW_AT_ranges values with start=0, end=N, are actually some form of duplicate DIE's that has not been
-        // de-duplicated. Which is shite.
-        if (end == 0) {
-          break;
-        } else {
-          continue;
-        }
-      } else {
-        lowest = std::min(start, lowest);
-        highest = std::max(end, highest);
-        found_a_range = true;
-      }
-    }
-    if (found_a_range) {
-      src.SetAddressBoundary(lowest, highest);
-    }
-  } else if (version == DwarfVersion::D5) {
-    ASSERT(elf->debug_rnglists != nullptr,
-           "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
-    if (ranges_offset.form == AttributeForm::DW_FORM_sec_offset) {
-      auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.unsigned_value());
-      src.SetAddressBoundary(addr_range.StartPc(), addr_range.EndPc());
-    } else {
-      auto ranges =
-        sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.unsigned_value()));
-      AddrPtr lowpc = static_cast<u64>(-1);
-      AddrPtr highpc = nullptr;
-      for (const auto [low, high] : ranges) {
-        lowpc = std::min(low, lowpc);
-        highpc = std::max(high, highpc);
-      }
-      src.SetAddressBoundary(lowpc, highpc);
-    }
+    mObjectFile->AddTypeUnits(type_units);
   }
 }
 
 sym::PartialCompilationUnitSymbolInfo
-IndexingTask::initialize_partial_compilation_unit(UnitData *partial_cu, const DieMetaData &) noexcept
+IndexingTask::InitPartialCompilationUnit(UnitData *partial_cu, const DieMetaData &) noexcept
 {
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
   return sym::PartialCompilationUnitSymbolInfo{partial_cu};

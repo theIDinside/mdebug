@@ -27,6 +27,7 @@ class DieReference
 protected:
   UnitData *mUnitData;
   const DieMetaData *mDebugInfoEntry;
+
 public:
   DieReference() noexcept = default;
   DieReference(UnitData *compilationUnit, const DieMetaData *die) noexcept;
@@ -35,11 +36,11 @@ public:
   DieReference MaybeResolveReference() const noexcept;
   u64 IndexOfDie() const noexcept;
 
-  const AbbreviationInfo & GetAbbreviation() const noexcept;
+  const AbbreviationInfo &GetAbbreviation() const noexcept;
 
   bool IsValid() const noexcept;
   IndexedDieReference AsIndexed() const noexcept;
-  std::optional<AttributeValue> read_attribute(Attribute attr) const noexcept;
+  std::optional<AttributeValue> ReadAttribute(Attribute attr) const noexcept;
   UnitReader GetReader() const noexcept;
 };
 

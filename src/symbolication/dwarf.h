@@ -24,9 +24,9 @@ struct StrSlice
   }
 
 template <typename T>
-concept AttributeValueType =
-  std::is_same_v<T, u64> || std::is_same_v<T, i64> || std::is_same_v<T, DataBlock> ||
-  std::is_same_v<T, StrSlice> || std::is_same_v<T, std::string_view> || std::is_same_v<T, AddrPtr> || std::is_same_v<T, const char*>;
+concept AttributeValueType = std::is_same_v<T, u64> || std::is_same_v<T, i64> || std::is_same_v<T, DataBlock> ||
+                             std::is_same_v<T, StrSlice> || std::is_same_v<T, std::string_view> ||
+                             std::is_same_v<T, AddrPtr> || std::is_same_v<T, const char *>;
 
 /** Fully-formed attribtue */
 struct AttributeValue
@@ -64,47 +64,56 @@ struct AttributeValue
   }
 
   std::uintptr_t
-  address() const noexcept
+  AsAddress() const noexcept
   {
     return value.addr;
   }
 
-  const char*
-  string() const noexcept { return value.str; }
+  const char *
+  AsCString() const noexcept
+  {
+    return value.str;
+  }
 
   std::string_view
-  string_view() const noexcept
+  AsStringView() const noexcept
   {
     return value.str;
   }
 
   DataBlock
-  block() const noexcept
+  AsDataBlock() const noexcept
   {
     return value.block;
   }
   u64
-  unsigned_value() const noexcept
+  AsUnsignedValue() const noexcept
   {
     return value.u;
   }
 
-  static inline u64
-  as_unsigned(const AttributeValue &v)
+  constexpr static u64
+  ToUnsignedValue(const AttributeValue &value) noexcept
   {
-    return v.unsigned_value();
+    return value.AsUnsignedValue();
+  }
+
+  constexpr static u64
+  AsUnsigned(const AttributeValue &v)
+  {
+    return v.AsUnsignedValue();
   }
 
   i64
-  signed_value() const noexcept
+  AsSignedValue() const noexcept
   {
     return value.i;
   }
 
-  static std::string_view
-  as_string(const AttributeValue &v) noexcept
+  constexpr static std::string_view
+  ToStringView(const AttributeValue &v) noexcept
   {
-    return v.string();
+    return v.AsCString();
   }
 
   // std::uintptr_t address() const noexcept;
@@ -118,7 +127,7 @@ struct AttributeValue
 private:
   union _value
   { // Size = 16 bytes
-    constexpr _value(const char* str) noexcept : str{str} {}
+    constexpr _value(const char *str) noexcept : str{str} {}
     constexpr _value(DataBlock block) noexcept : block(block) {}
     constexpr _value(u64 u) noexcept : u(u) {}
     constexpr _value(i64 i) noexcept : i(i) {}
@@ -142,7 +151,7 @@ private:
 
     DataBlock block;
     // StrSlice str;
-    const char* str;
+    const char *str;
     u64 u;
     i64 i;
     AddrPtr addr;

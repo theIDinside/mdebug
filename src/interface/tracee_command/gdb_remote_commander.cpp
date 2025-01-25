@@ -4,6 +4,7 @@
 #include "fmt/core.h"
 #include "interface/attach_args.h"
 #include "interface/remotegdb/connection.h"
+#include "interface/remotegdb/deserialization.h"
 #include "interface/remotegdb/shared.h"
 #include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
@@ -149,7 +150,7 @@ GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexce
   std::string_view decoded{dec_buffer, len};
   ASSERT((decoded.size() & 0b1) == 0, "Expected buffer to be divisible by 2");
   while (!decoded.empty()) {
-    *ptr = utils::fromhex(decoded[0]) * 16 + utils::fromhex(decoded[1]);
+    *ptr = fromhex(decoded[0]) * 16 + fromhex(decoded[1]);
     ++ptr;
     decoded.remove_prefix(2);
   }
@@ -410,7 +411,7 @@ GdbRemoteCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
   auto register_value = convert_to_target(register_contents, addr.get());
   auto cmds =
     std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), t.mTid),
-                   SerializeCommand(set_pc_bytes, "P{:x}={}", arch_info->mDebugContextRegisters->mRIPNumber.as_t(),
+                   SerializeCommand(set_pc_bytes, "P{:x}={}", mArchInfo->mDebugContextRegisters->mRIPNumber.as_t(),
                                     register_value)});
   auto response = connection->send_inorder_command_chain(cmds, 1000);
   if (response.is_error()) {
@@ -446,7 +447,7 @@ GdbRemoteCommander::GetThreadName(Tid tid) noexcept
       n.remove_prefix("$"sv.size());
       name.reserve(n.size() / 2);
       for (auto i = 0u; i < n.size(); i += 2) {
-        char ch = utils::fromhex(n[i]) << 4 | utils::fromhex(n[i + 1]);
+        char ch = fromhex(n[i]) << 4 | fromhex(n[i + 1]);
         if (ch == 0) {
           break;
         }
@@ -644,7 +645,7 @@ GdbRemoteCommander::ReadAuxiliaryVector() noexcept
 {
   static constexpr auto BufSize = PAGE_SIZE;
   if (!auxv_data.vector.empty()) {
-    return auxv_data;
+    return utils::expected(std::move(auxv_data));
   } else {
     std::array<char, 64> bytes{};
     auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), TaskLeaderTid());

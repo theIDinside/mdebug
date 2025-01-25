@@ -66,7 +66,7 @@ create_substrs(const std::string &s, unsigned count)
     res[1] = str;
     res[2] = str;
     res[3] = str;
-    return utils::Expected<std::array<std::string, 4>, int>{res};
+    return utils::expected(std::move(res));
   } else {
     return utils::unexpected<int>(static_cast<int>(count - s.size()));
   }
