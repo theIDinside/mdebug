@@ -1,13 +1,11 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "fmt/core.h"
-#include "fmt/format.h"
 #include "utils/macros.h"
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
-#include <source_location>
 #include <string>
 #include <typedefs.h>
 
@@ -27,20 +25,9 @@
   LOGCHANNEL(warning, "Warnings", "Unexpected behaviors should be logged to this chanel")                         \
   LOGCHANNEL(interpreter, "Debugger script interpreter", "Log interpreter related messages here")
 
-#define CAST_FN(VAL, NAME, INFO)                                                                                  \
-  case static_cast<i32>(Channel::VAL):                                                                            \
-    return Channel::VAL;
-#define LOGCHANNEL(chan, name, desc) chan,
-ENUM_TYPE_METADATA(Channel, FOR_EACH_LOG, LOGCHANNEL, CAST_FN)
-#undef LOGCHANNEL
+ENUM_TYPE_METADATA(Channel, FOR_EACH_LOG, DEFAULT_ENUM)
 
-constexpr static auto LogChannelNames = std::to_array({
-#define LOGCHANNEL(chan, name, desc) name,
-  FOR_EACH_LOG(LOGCHANNEL)
-#undef LOGCHANNEL
-});
-
-namespace logging {
+namespace mdb::logging {
 
 struct LogChannel
 {
@@ -85,7 +72,7 @@ LogChannel *GetLogChannel(Channel id) noexcept;
 #define DBGLOG(channel, ...)                                                                                      \
   if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, fmt::format(__VA_ARGS__));    \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::fmt::format(__VA_ARGS__));  \
   }
 #else
 #define DLOG(...)
@@ -93,7 +80,7 @@ LogChannel *GetLogChannel(Channel id) noexcept;
 #define CDLOG(...)
 #endif
 
-} // namespace logging
+} // namespace mdb::logging
 
 namespace fmt {
 

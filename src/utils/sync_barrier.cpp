@@ -4,8 +4,7 @@
 #include <cstring>
 #include <fcntl.h>
 
-namespace utils {
-
+namespace mdb {
 int
 ReadEnd::read(void *buf, std::size_t bytes) noexcept
 {
@@ -56,4 +55,4 @@ Barrier::create_shared() noexcept
   return std::make_shared<Barrier>(create_pipe());
 }
 
-} // namespace utils
+} // namespace mdb

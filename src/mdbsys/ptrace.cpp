@@ -4,7 +4,7 @@
 #include <sys/syscall.h>
 #include <tracer.h>
 #include <utility>
-
+namespace mdb {
 std::string_view
 request_name(__ptrace_request req)
 {
@@ -102,10 +102,10 @@ request_name(__ptrace_request req)
 void
 ConfigurePtraceSettings(pid_t pid)
 {
-  // PTRACE_O_TRACEEXIT stops on exit of a task, but it's not at a point where we can do anything. At which point my question becomes: what's the purpose?
-  // I'd rather just be notified that a task has died and that's that. 
-  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEVFORK;  // | PTRACE_O_TRACEEXIT;
-  Tracer::Get().TraceExitConfigured = (options & PTRACE_O_TRACEEXIT) != 0;
+  // PTRACE_O_TRACEEXIT stops on exit of a task, but it's not at a point where we can do anything. At which point
+  // my question becomes: what's the purpose? I'd rather just be notified that a task has died and that's that.
+  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD |
+                       PTRACE_O_TRACEVFORK; // | PTRACE_O_TRACEEXIT;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;
     if (-1 == waitpid(pid, &stat, 0)) {
@@ -288,3 +288,4 @@ waitpid_block(pid_t tid) noexcept
   }
   return WaitPid{waited_pid, status};
 }
+} // namespace mdb

@@ -2,7 +2,7 @@
 #pragma once
 
 #include <compare>
-namespace sym::dw {
+namespace mdb::sym::dw {
 class UnitData;
 struct DieMetaData;
 class DieReference;
@@ -75,4 +75,4 @@ public:
     return DieSiblingIterator{cu, nullptr};
   }
 };
-} // namespace sym::dw
+} // namespace mdb::sym::dw

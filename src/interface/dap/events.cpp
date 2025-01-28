@@ -8,7 +8,7 @@
 #include <so_loading.h>
 #include <symbolication/objfile.h>
 
-namespace ui::dap {
+namespace mdb::ui::dap {
 #define ReturnFormatted(formatString, ...)                                                                        \
   std::pmr::string result{arenaAllocator};                                                                        \
   fmt::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
@@ -182,21 +182,21 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   it = fmt::format_to(
     it,
     R"({{"seq":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
-    seq, reason, breakpoint->id, breakpoint->verified());
+    seq, reason, breakpoint->id, breakpoint->IsVerified());
 
   if (message) {
     it = fmt::format_to(it, R"(,"message": "{}")", message.value());
   }
-  if (auto src = breakpoint->source_file(); src) {
+  if (auto src = breakpoint->GetSourceFile(); src) {
     it = fmt::format_to(it, R"(,"source": {{"name":"{}", "path": "{}"}})", src.value(), src.value());
   }
-  if (const auto line = breakpoint->line(); line) {
+  if (const auto line = breakpoint->Line(); line) {
     it = fmt::format_to(it, R"(,"line":{})", line.value());
   }
-  if (const auto col = breakpoint->column(); col) {
+  if (const auto col = breakpoint->Column(); col) {
     it = fmt::format_to(it, R"(,"column":{})", col.value());
   }
-  if (auto addr = breakpoint->address(); addr) {
+  if (auto addr = breakpoint->Address(); addr) {
     it = fmt::format_to(it, R"(,"instructionReference": "{}")", addr.value());
   }
 
@@ -221,6 +221,6 @@ OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
                  category, body);
   return result;
 }
-} // namespace ui::dap
+} // namespace mdb::ui::dap
 
 #undef ReturnFormatted

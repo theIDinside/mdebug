@@ -5,11 +5,14 @@
 #include "common.h"
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "symbolication/callstack.h"
+#include "utils/smartptr.h"
 #include <linux/sched.h>
 #include <mdbsys/ptrace.h>
 #include <sys/user.h>
 
 using namespace std::string_view_literals;
+namespace mdb {
 class TraceeController;
 class RegisterDescription;
 
@@ -58,7 +61,8 @@ struct TaskRegisters
 
 struct TaskInfo
 {
-
+  INTERNAL_REFERENCE_COUNT(TaskInfo)
+public:
   enum class SupervisorState
   {
     Traced,
@@ -81,27 +85,28 @@ struct TaskInfo
     u16 bit_set;
     struct
     {
-      bool stop_collected : 1; // if we're in a "waiting for all stop" state, we check if we've collected the stop
-                               // for this task
-      bool user_stopped : 1;   // stops visible (possibly) to the user
-      bool tracer_stopped : 1; // stops invisible to the user - may be upgraded to user stops. tracer_stop always
-                               // occur when waitpid has returned a result for this task, or when a remote has sent
-                               // a stop reply for a thread if the remote is also in "not non-stop mode", *all*
-                               // threads get set to true on each stop (and false on each continue) regardless of
-                               // what thread the user is operating on. It's "all stop mode".
-      bool initialized : 1;    // fully initialized task. after a clone syscall some setup is required
-      bool cache_dirty : 1;    // register is dirty and requires refetching
-      bool rip_dirty : 1;      // rip requires fetching FIXME(simon): Is this even needed anymore?
-      bool exited : 1;         // task has exited
-      bool reaped : 1;         // task has been reaped after exit
-      bool killed: 1 {false};
+      bool mHasProcessedStop : 1; // if we're in a "waiting for all stop" state, we check if we've collected the
+                                  // stop for this task
+      bool mUserVisibleStop : 1;  // stops visible (possibly) to the user
+      bool
+        mTracerVisibleStop : 1; // stops invisible to the user - may be upgraded to user stops. tracer_stop always
+                                // occur when waitpid has returned a result for this task, or when a remote has
+                                // sent a stop reply for a thread if the remote is also in "not non-stop mode",
+                                // *all* threads get set to true on each stop (and false on each continue)
+                                // regardless of what thread the user is operating on. It's "all stop mode".
+      bool initialized : 1;     // fully initialized task. after a clone syscall some setup is required
+      bool mRegisterCacheDirty : 1;      // register is dirty and requires refetching
+      bool mInstructionPointerDirty : 1; // rip requires fetching FIXME(simon): Is this even needed anymore?
+      bool exited : 1;                   // task has exited
+      bool reaped : 1;                   // task has been reaped after exit
+      bool killed : 1 {false};
       bool bfRequestedStop : 1 {false};
     };
   };
 
 private:
   TaskRegisters regs;
-  std::unique_ptr<sym::CallStack> call_stack;
+  std::unique_ptr<sym::CallStack> mTaskCallstack;
   std::vector<u32> variableReferences{};
   std::unordered_map<u32, SharedPtr<sym::Value>> valobj_cache{};
   TraceeController *mSupervisor;
@@ -110,20 +115,21 @@ private:
   TaskInfo(pid_t newTaskTid) noexcept;
 
 public:
-  using Ptr = std::shared_ptr<TaskInfo>;
+  using Ptr = Ref<TaskInfo>;
 
-  using TaskInfoEntry = struct {
+  using TaskInfoEntry = struct
+  {
     Tid mTid;
     Ptr mTask;
   };
 
-  std::optional<LocationStatus> loc_stat;
+  std::optional<LocationStatus> mBreakpointLocationStatus;
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
   TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
 
-  TaskInfo(TaskInfo &&o) noexcept = default;
-  TaskInfo &operator=(TaskInfo &&) noexcept = default;
+  TaskInfo(TaskInfo &&o) noexcept = delete;
+  TaskInfo &operator=(TaskInfo &&) noexcept = delete;
   // Delete copy constructors. These are unique values.
   TaskInfo(const TaskInfo &o) noexcept = delete;
   TaskInfo(TaskInfo &o) noexcept = delete;
@@ -132,10 +138,9 @@ public:
 
   ~TaskInfo() noexcept = default;
 
-  static std::shared_ptr<TaskInfo> CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid,
-                                              bool isRunning) noexcept;
+  static Ptr CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept;
 
-  static std::shared_ptr<TaskInfo> CreateUnInitializedTask(TaskWaitResult wait) noexcept;
+  static Ptr CreateUnInitializedTask(TaskWaitResult wait) noexcept;
 
   user_regs_struct *native_registers() const noexcept;
   RegisterDescription *remote_x86_registers() const noexcept;
@@ -158,7 +163,7 @@ public:
   bool can_continue() noexcept;
   void set_dirty() noexcept;
   void set_updated() noexcept;
-  void add_bpstat(AddrPtr address) noexcept;
+  void AddBreakpointLocationStatus(AddrPtr address) noexcept;
   std::optional<LocationStatus> clear_bpstat() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
@@ -194,9 +199,10 @@ struct ExecutionContext
   TraceeController *tc;
   TaskInfo *t;
 };
+} // namespace mdb
 
 namespace fmt {
-template <> struct formatter<TaskVMInfo>
+template <> struct formatter<mdb::TaskVMInfo>
 {
   template <typename ParseContext>
   constexpr auto
@@ -207,14 +213,14 @@ template <> struct formatter<TaskVMInfo>
 
   template <typename FormatContext>
   auto
-  format(TaskVMInfo const &vm_info, FormatContext &ctx)
+  format(mdb::TaskVMInfo const &vm_info, FormatContext &ctx)
   {
     return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low,
                           vm_info.stack_size, vm_info.tls);
   }
 };
 // CallStackRequest
-template <> struct formatter<CallStackRequest>
+template <> struct formatter<mdb::CallStackRequest>
 {
 
   template <typename ParseContext>
@@ -226,9 +232,9 @@ template <> struct formatter<CallStackRequest>
 
   template <typename FormatContext>
   auto
-  format(CallStackRequest const &req, FormatContext &ctx) const
+  format(mdb::CallStackRequest const &req, FormatContext &ctx) const
   {
-    if (req.req == CallStackRequest::Type::Full) {
+    if (req.req == mdb::CallStackRequest::Type::Full) {
       return fmt::format_to(ctx.out(), "all");
     } else {
       return fmt::format_to(ctx.out(), "{}", req.count);
@@ -236,7 +242,7 @@ template <> struct formatter<CallStackRequest>
   }
 };
 
-template <> struct formatter<TaskInfo>
+template <> struct formatter<mdb::TaskInfo>
 {
 
   template <typename ParseContext>
@@ -248,16 +254,16 @@ template <> struct formatter<TaskInfo>
 
   template <typename FormatContext>
   auto
-  format(TaskInfo const &task, FormatContext &ctx)
+  format(mdb::TaskInfo const &task, FormatContext &ctx)
   {
 
     std::string_view wait_status = "None";
-    if (task.mLastWaitStatus.ws != WaitStatusKind::NotKnown) {
+    if (task.mLastWaitStatus.ws != mdb::WaitStatusKind::NotKnown) {
       wait_status = to_str(task.mLastWaitStatus.ws);
     }
 
     return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.mTid,
-                          task.user_stopped, task.tracer_stopped, wait_status);
+                          task.mUserVisibleStop, task.mTracerVisibleStop, wait_status);
   }
 };
 

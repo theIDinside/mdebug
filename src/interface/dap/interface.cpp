@@ -22,7 +22,7 @@
 #include <unistd.h>
 #include <utils/signals.h>
 #include <vector>
-namespace ui::dap {
+namespace mdb::ui::dap {
 using namespace std::string_literals;
 
 DapClientSession
@@ -107,8 +107,8 @@ DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
       mTracerOutputFileDescriptor(tracerOutputFileDescriptor), keep_running(true), mUIResultLock{}, events_queue{},
       seq(0)
 {
-  auto [r, w] = utils::Notifier::notify_pipe();
-  new_client_notifier = utils::Notifier::notify_pipe();
+  auto [r, w] = mdb::Notifier::notify_pipe();
+  new_client_notifier = mdb::Notifier::notify_pipe();
   posted_event_notifier = w;
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
@@ -142,9 +142,9 @@ DAP::WriteProtocolMessage(std::string_view msg) noexcept
 }
 
 void
-DAP::StartIOPolling(std::stop_token& token) noexcept
+DAP::StartIOPolling(std::stop_token &token) noexcept
 {
-  utils::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
+  mdb::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
   NewClient({.t = DebugAdapterClient::CreateStandardIOConnection()});
 
   while (keep_running && !token.stop_requested()) {
@@ -209,7 +209,7 @@ DAP::DoOnePoll(u32 notifier_queue_size) noexcept
 }
 
 void
-DAP::NewClient(utils::OwningPointer<DebugAdapterClient> client)
+DAP::NewClient(mdb::OwningPointer<DebugAdapterClient> client)
 {
   clients.push_back(client);
   AddPollingSource({client->ReadFileDescriptor(), InterfaceNotificationSource::DebugAdapterClient, client});
@@ -388,7 +388,7 @@ DAP::main_connection() const noexcept
 void
 DAP::RemoveSource(DebugAdapterClient *client) noexcept
 {
-  utils::OwningPointer<DebugAdapterClient> ptr{nullptr};
+  mdb::OwningPointer<DebugAdapterClient> ptr{nullptr};
   for (auto t : clients) {
     if (t.t == client) {
       ptr = t;
@@ -542,7 +542,7 @@ DebugAdapterClient::ClientConfigured(TraceeController *supervisor, std::optional
 }
 
 void
-DebugAdapterClient::PostEvent(ui::UIResultPtr event)
+DebugAdapterClient::PostDapEvent(ui::UIResultPtr event)
 {
   // TODO(simon): I'm split on the idea if we should have one thread for each DebugAdapterClient, or like we do
   // now, 1 thread for all debug adapter client, that does it's dispatching vie the poll system calls. If we land,
@@ -603,4 +603,4 @@ DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) cons
   return result >= static_cast<ssize_t>(output.size());
 }
 
-} // namespace ui::dap
+} // namespace mdb::ui::dap

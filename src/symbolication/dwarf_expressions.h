@@ -6,10 +6,12 @@
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
 
+namespace mdb {
 class TraceeController;
 struct TaskInfo;
+} // namespace mdb
 
-namespace sym {
+namespace mdb::sym {
 
 namespace dw {
 class FrameBaseExpression
@@ -89,8 +91,8 @@ struct ExprByteCodeInterpreter
   explicit ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
                                    std::span<const u8> byteStream, std::span<const u8> frameBaseCode) noexcept;
   AddrPtr ComputeFrameBase() noexcept;
-  // Read contents of register, at frame level `mFrameLevel` - if registers hasn't been unwound, or if that register
-  // for some reason could not be determined, returns nullopt.
+  // Read contents of register, at frame level `mFrameLevel` - if registers hasn't been unwound, or if that
+  // register for some reason could not be determined, returns nullopt.
   std::optional<u64> GetRegister(u64 number);
 
   u64 Run() noexcept;
@@ -107,4 +109,4 @@ struct ExprByteCodeInterpreter
 
 using Op = void (*)(ExprByteCodeInterpreter &);
 
-} // namespace sym
+} // namespace mdb::sym

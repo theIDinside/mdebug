@@ -16,12 +16,12 @@
 #include <utils/scoped_fd.h>
 using MonotonicResource = std::pmr::monotonic_buffer_resource;
 
-namespace utils {
+namespace mdb {
 class BarrierWait;
 class BarrierNotify;
-} // namespace utils
+} // namespace mdb
 
-namespace gdb {
+namespace mdb::gdb {
 
 // std::string cloned_deserialize_buffer(std::string_view buf) noexcept;
 
@@ -289,7 +289,7 @@ struct MessageElement
 // A socket that tries to buffer reads. Writes are sent immediately.
 class BufferedSocket
 {
-  utils::ScopedFd fd_socket;
+  mdb::ScopedFd fd_socket;
   std::vector<char> buffer{};
   u32 head{0};
 
@@ -305,7 +305,7 @@ public:
   using pointer = typename std::vector<char>::pointer;
   using value_type = typename std::vector<char>::value_type;
 
-  BufferedSocket(utils::ScopedFd &&fd, u32 reserve_size = 4096) noexcept;
+  BufferedSocket(mdb::ScopedFd &&fd, u32 reserve_size = 4096) noexcept;
 
   pollfd
   get_pollcfg() const noexcept
@@ -342,7 +342,7 @@ public:
   std::optional<u32> find_from(char c, u32 pos) const noexcept;
 
   std::optional<std::pair<u32, bool>> find_ack() const noexcept;
-  utils::Expected<std::pair<u32, bool>, Timeout> wait_for_ack(int timeout) noexcept;
+  mdb::Expected<std::pair<u32, bool>, Timeout> wait_for_ack(int timeout) noexcept;
   std::optional<char> at(u32 index) const noexcept;
   char at_unchecked(u32 index) const noexcept;
 
@@ -423,7 +423,7 @@ public:
   }
 };
 
-using CommandResult = utils::Expected<std::string, SendResultKind>;
+using CommandResult = mdb::Expected<std::string, SendResultKind>;
 class RemoteConnection;
 
 MessageType message_type(std::string_view msg) noexcept;
@@ -516,11 +516,11 @@ struct GdbThread
   static GdbThread parse_thread(std::string_view input) noexcept;
 };
 
-}; // namespace gdb
+}; // namespace mdb::gdb
 
-template <> struct std::hash<gdb::GdbThread>
+template <> struct std::hash<mdb::gdb::GdbThread>
 {
-  using argument_type = gdb::GdbThread;
+  using argument_type = mdb::gdb::GdbThread;
   using result_type = u64;
 
   result_type
@@ -533,7 +533,7 @@ template <> struct std::hash<gdb::GdbThread>
   }
 };
 
-namespace gdb {
+namespace mdb::gdb {
 class RemoteConnection
 {
 public:
@@ -577,12 +577,12 @@ private:
   static std::unordered_map<std::string_view, TraceeStopReason> StopReasonMap;
 
 public:
-  RemoteConnection(std::string &&host, int port, utils::ScopedFd &&socket, RemoteSettings settings) noexcept;
+  RemoteConnection(std::string &&host, int port, mdb::ScopedFd &&socket, RemoteSettings settings) noexcept;
   ~RemoteConnection() noexcept;
 
   // Construction and init routines
-  static utils::Expected<ShrPtr, ConnectError> connect(const std::string &host, int port,
-                                                       std::optional<RemoteSettings> remote_settings) noexcept;
+  static mdb::Expected<ShrPtr, ConnectError> connect(const std::string &host, int port,
+                                                     std::optional<RemoteSettings> remote_settings) noexcept;
 
   static std::optional<int> parse_hexdigits(std::string_view input) noexcept;
   std::optional<std::string> take_pending() noexcept;
@@ -604,13 +604,13 @@ public:
   std::optional<std::pmr::string> read_command_response(MonotonicResource &arena, int timeout) noexcept;
 
   // Blocking call for `timeout` ms
-  utils::Expected<std::string, SendError> SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread,
-                                                                     std::string_view command,
-                                                                     std::optional<int> timeout) noexcept;
+  mdb::Expected<std::string, SendError> SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread,
+                                                                   std::string_view command,
+                                                                   std::optional<int> timeout) noexcept;
 
   void send_interrupt_byte() noexcept;
 
-  utils::Expected<std::vector<std::string>, SendError>
+  mdb::Expected<std::vector<std::string>, SendError>
   send_inorder_command_chain(std::span<std::string_view> commands, std::optional<int> timeout) noexcept;
 
   // Make these private. These should not be called as they place *ultimate* responsibility on the caller that it
@@ -620,7 +620,7 @@ public:
   std::vector<GdbThread> get_remote_threads() noexcept;
   std::span<const GdbThread> query_target_threads(GdbThread thread) noexcept;
 
-  utils::Expected<std::vector<std::string>, SendError>
+  mdb::Expected<std::vector<std::string>, SendError>
   send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
                                  std::optional<int> timeout) noexcept;
 
@@ -635,4 +635,4 @@ public:
 
 std::vector<GdbThread> protocol_parse_threads(std::string_view input) noexcept;
 
-} // namespace gdb
+} // namespace mdb::gdb

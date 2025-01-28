@@ -4,12 +4,11 @@
 #include <iterator>
 #include <type_traits>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 struct DieMetaData;
 }
 
-namespace utils {
-
+namespace mdb {
 template <typename Container, typename Fn> class FilterView
 {
   using non_const_value_type = std::remove_const_t<Container>;
@@ -150,4 +149,4 @@ public:
     return Iterator{c.cend(), c.cend(), f};
   }
 };
-} // namespace utils
+} // namespace mdb

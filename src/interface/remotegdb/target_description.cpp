@@ -4,9 +4,9 @@
 #include "utils/xml.h"
 #include <common.h>
 
-namespace gdb {
+namespace mdb::gdb {
 
-std::vector<gdb::ArchReg>
+std::vector<ArchReg>
 read_arch_info(const xml::XMLElementView &root) noexcept
 {
   std::vector<gdb::ArchReg> result{};
@@ -34,7 +34,7 @@ read_arch_info(const xml::XMLElementView &root) noexcept
     // Debugger-Context Registers. I like my own name for these registers. Because they're the debug context; the
     // stack, the pc and the current stack frame (if available)
   }
-  utils::sort(result, [](const auto &a, const auto &b) { return a.regnum < b.regnum; });
+  mdb::sort(result, [](const auto &a, const auto &b) { return a.regnum < b.regnum; });
   return result;
 }
 
@@ -84,8 +84,8 @@ ArchictectureInfo::ArchictectureInfo(RegisterInfo &&registers,
 u32
 ArchictectureInfo::register_bytes() const noexcept
 {
-  return utils::accumulate(mRegisters->mRegisterMetaData,
-                           [](u32 acc, auto &reg) -> u32 { return acc + (reg.bit_size / 8); });
+  return mdb::accumulate(mRegisters->mRegisterMetaData,
+                         [](u32 acc, auto &reg) -> u32 { return acc + (reg.bit_size / 8); });
 }
 
-} // namespace gdb
+} // namespace mdb::gdb

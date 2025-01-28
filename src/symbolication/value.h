@@ -9,13 +9,15 @@
 #include <utils/byte_buffer.h>
 #include <utils/expected.h>
 
+namespace mdb {
 using Bytes = std::span<const u8>;
-using MemoryContentBytes = utils::ByteBuffer::OwnPtr;
+using MemoryContentBytes = mdb::ByteBuffer::OwnPtr;
 
 class TraceeController;
 struct TaskInfo;
+} // namespace mdb
 
-namespace sym {
+namespace mdb::sym {
 
 struct Field;
 struct Symbol;
@@ -94,7 +96,7 @@ public:
   std::span<const u8> MemoryView() const noexcept;
   std::span<const u8> FullMemoryView() const noexcept;
   SharedPtr<MemoryContentsObject> TakeMemoryReference() noexcept;
-  utils::Expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
+  mdb::Expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
   void SetResolver(std::unique_ptr<ValueResolver> &&vis) noexcept;
   ValueResolver *GetResolver() noexcept;
   bool HasVisualizer() const noexcept;
@@ -167,7 +169,7 @@ public:
   // shit in computer time - reading the entire chunk is faster than managing sub parts here and there. Just pull
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
-  static std::shared_ptr<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame& frame, Symbol &symbol,
+  static std::shared_ptr<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
                                                     bool lazy) noexcept;
 
   static Value *CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,
@@ -201,4 +203,4 @@ public:
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };
-} // namespace sym
+} // namespace mdb::sym

@@ -2,8 +2,10 @@
 
 #include "typedefs.h"
 #include <algorithm>
-#include <string_view>
 #include <common.h>
+#include <string_view>
+
+namespace mdb {
 
 u8 fromhex(char a) noexcept;
 
@@ -93,3 +95,4 @@ deserialize_hex_encoded(std::string_view hex, std::array<u8, N> &out) noexcept
   ASSERT(p < (out.data() + out.size()), "Stack buffer overrun. Array of {} bytes overrun by {} bytes", out.size(),
          static_cast<u64>(p - (out.data() + out.size())));
 }
+} // namespace mdb

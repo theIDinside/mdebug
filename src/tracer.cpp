@@ -4,9 +4,16 @@
 #include "event_queue.h"
 #include "interface/console_command.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "ptracestop_handlers.h"
+#include "js/Context.h"
+#include "js/ErrorReport.h"
+#include "js/Initialization.h"
+#include "js/Warnings.h"
+#include "jsfriendapi.h"
+#include "mdbjs/event_dispatcher.h"
+#include "mdbjs/mdbjs.h"
 #include "supervisor.h"
 #include "task.h"
+#include "task_scheduling.h"
 #include "tracee/util.h"
 #include "utils/expected.h"
 #include "utils/macros.h"
@@ -40,7 +47,7 @@
 #include <unistd.h>
 
 #include <dirent.h>
-
+namespace mdb {
 void
 on_sigchild_handler(int)
 {
@@ -180,7 +187,7 @@ Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
   WaiterSystemConfigured = true;
 }
 
-std::shared_ptr<TaskInfo>
+Ref<TaskInfo>
 Tracer::TakeUninitializedTask(Tid tid) noexcept
 {
   if (mUnInitializedThreads.contains(tid)) {
@@ -297,7 +304,7 @@ Tracer::SetupConsoleCommands() noexcept
       std::pmr::string evalResult{allocator};
       Pid p = -1;
       if (!args.empty()) {
-        auto param = utils::StrToPid(args[0], false);
+        auto param = mdb::StrToPid(args[0], false);
         ReturnEvalExprError(!param.has_value(), "Could not parse pid from {}", args[0]);
         p = param.value();
       }
@@ -308,8 +315,8 @@ Tracer::SetupConsoleCommands() noexcept
         }
         WriteConsoleLine(evalResult, "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}",
                          task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
-                         bool{task->user_stopped}, bool{task->tracer_stopped}, to_str(task->mLastWaitStatus.ws),
-                         task->mLastWaitStatus.signal);
+                         bool{task->mUserVisibleStop}, bool{task->mTracerVisibleStop},
+                         to_str(task->mLastWaitStatus.ws), task->mLastWaitStatus.signal);
       }
 
       return OK_RESULT(evalResult);
@@ -327,12 +334,12 @@ Tracer::SetupConsoleCommands() noexcept
         constexpr auto writeResult = [](auto &evalResult, const auto &task) noexcept {
           WriteConsoleLine(evalResult, "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}",
                            task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
-                           bool{task->user_stopped}, bool{task->tracer_stopped}, to_str(task->mLastWaitStatus.ws),
-                           task->mLastWaitStatus.signal);
+                           bool{task->mUserVisibleStop}, bool{task->mTracerVisibleStop},
+                           to_str(task->mLastWaitStatus.ws), task->mLastWaitStatus.signal);
         };
 
         for (const auto &[tid, task] : mDebugSessionTasks) {
-          if (!(task->tracer_stopped || task->user_stopped) || task->exited) {
+          if (!(task->mTracerVisibleStop || task->mUserVisibleStop) || task->exited) {
             continue;
           }
           // we're probably *always* interested in currently-orphan tasks, as these may suggest there's something
@@ -371,11 +378,11 @@ Tracer::SetupConsoleCommands() noexcept
         ReturnEvalExprError(task->GetSupervisor() != nullptr, "task has no associated supervisor yet");
         task->GetSupervisor()->ResumeTask(
           *task, {.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task, .mDeliverSignal = -1});
-        bool resumed = {task->tracer_stopped};
+        bool resumed = {task->mTracerVisibleStop};
         WriteConsoleLine(evalResult, "{}.{} resumed={}", task->GetSupervisor()->TaskLeaderTid(), task->mTid,
                          resumed);
         if (resumed) {
-          task->GetSupervisor()->GetDebugAdapterProtocolClient()->PostEvent(
+          task->GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(
             new ui::dap::ContinuedEvent{task->mTid, false});
         }
         return OK_RESULT(evalResult);
@@ -502,12 +509,12 @@ Tracer::Attach(const AttachArgs &args) noexcept
               for (auto &entry : supervisor->GetThreads()) {
                 entry.mTask->set_stop();
               }
-              client->PostEvent(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
-                                                          "attached",
-                                                          client->GetSupervisor()->TaskLeaderTid(),
-                                                          {},
-                                                          "Attached to session",
-                                                          true});
+              client->PostDapEvent(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
+                                                             "attached",
+                                                             client->GetSupervisor()->TaskLeaderTid(),
+                                                             {},
+                                                             "Attached to session",
+                                                             true});
             };
 
             auto main_connection = dap->main_connection();
@@ -713,14 +720,14 @@ Tracer::destroy_reference(VarRefKey key) noexcept
   refContext.erase(key);
 }
 
-std::unordered_map<Tid, std::shared_ptr<TaskInfo>> &
+std::unordered_map<Tid, Ref<TaskInfo>> &
 Tracer::UnInitializedTasks() noexcept
 {
   return mUnInitializedThreads;
 }
 
 void
-Tracer::RegisterTracedTask(std::shared_ptr<TaskInfo> newTask) noexcept
+Tracer::RegisterTracedTask(Ref<TaskInfo> newTask) noexcept
 {
   ASSERT(!mDebugSessionTasks.contains(newTask->mTid), "task {} has already been registered.", newTask->mTid);
   ASSERT(!mUnInitializedThreads.contains(newTask->mTid), "task {} exists also in an unit state.", newTask->mTid);
@@ -728,7 +735,7 @@ Tracer::RegisterTracedTask(std::shared_ptr<TaskInfo> newTask) noexcept
   mDebugSessionTasks.emplace(tid, std::move(newTask));
 }
 
-std::shared_ptr<TaskInfo>
+Ref<TaskInfo>
 Tracer::GetTask(Tid tid) noexcept
 {
   if (const auto it = mDebugSessionTasks.find(tid); it != std::end(mDebugSessionTasks)) {
@@ -790,3 +797,144 @@ VariableContext::get_maybe_value() const noexcept
 {
   return t->get_maybe_value(id);
 }
+
+// Function to call a stored callback from C++, passing two integers
+void
+TriggerEvent(mdb::js::ScriptRuntime *js, StopEvents event, int arg1, int arg2)
+{
+  JSContext *cx = js->GetRuntimeContext();
+  mdb::js::EventDispatcher *dispatcher = js->GetEventDispatcher();
+  for (auto &cb : dispatcher->GetSubscribers(event)) {
+    JS::RootedValue jsfnVal(cx, JS::ObjectValue(*cb));
+    JS::RootedValue rval(cx);
+
+    // Prepare the arguments (two integers) and ensure they are rooted
+    // Prepare the arguments
+    JS::RootedValue jsArg1(cx, JS::Int32Value(arg1));
+    JS::RootedValue jsArg2(cx, JS::Int32Value(arg2));
+    JS::RootedValueVector args{cx};
+    VERIFY(args.resize(2), "Failed to resize arg vector");
+    args[0].setInt32(arg1);
+    args[1].setInt32(arg2);
+
+    // Create a handle array for the arguments
+    if (!JS_CallFunctionValue(cx, nullptr, jsfnVal, args, &rval)) {
+      DBGLOG(interpreter, "Failed to call function for event {}", "clone");
+    } else {
+      auto exception = mdb::js::ConsumePendingException(js->GetRuntimeContext());
+      DBGLOG(interpreter, "Called callback for event {} successfully", "clone");
+    }
+  }
+}
+
+/* static */
+void
+Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
+{
+  if (!JS_Init()) {
+    PANIC("Failed to init JS!");
+  }
+
+  JSContext *cx = JS_NewContext(JS::DefaultHeapMaxBytes);
+
+  if (!::js::UseInternalJobQueues(cx)) {
+    PANIC("Failed to use internal job queues");
+  }
+  // We must instantiate self-hosting *after* setting up job queue.
+  if (!JS::InitSelfHostedCode(cx)) {
+    PANIC("init self hosted code failed");
+  }
+  JS::RootedObject global(cx, mdb::js::RuntimeGlobal::create(cx));
+
+  if (!global) {
+    PANIC("Failed to create debugger global object");
+  }
+
+  JS::SetWarningReporter(cx, [](JSContext *cx, JSErrorReport *report) { JS::PrintError(stderr, report, true); });
+  MdbScriptRuntime *js = mdb::js::ScriptRuntime::Create(cx, global);
+  js->InitRuntime();
+
+  JSAutoRealm ar(js->GetRuntimeContext(), js->GetRuntimeGlobal());
+
+  // Example script to register a callback
+
+  constexpr auto scriptSettingValue = R"(let HelloWorld = 42;)";
+  if (auto res = js->EvaluateJavascriptStringView(scriptSettingValue); !res) {
+    DBGLOG(interpreter, "Could not evaluate script: {}", res.error());
+  }
+
+  constexpr auto script = R"(
+        mdb.events.on(mdb.events.clone, (a, b) => {
+            for (const prop in mdb) {
+              log(mdb.interpreter, `property: ${prop}: ${mdb[prop]}`);
+            }
+            for (const prop in mdb.events) {
+              log(mdb.interpreter, `property: ${prop}: ${mdb.events[prop]}`);
+            }
+
+            log(mdb.interpreter, `Stop all: ${mdb.None}`);
+            log(mdb.interpreter, `Stop all: ${mdb.Resume}`);
+            log(mdb.interpreter, `Stop all: ${mdb.Stop}`);
+            log(mdb.interpreter, `Stop all: ${mdb.StopAll}`);
+            if(HelloWorld != undefined || HelloWorld != null) {
+              HelloWorld += 1;
+              log(mdb.interpreter, `Hello world value: ${HelloWorld}`);
+            }
+            log(mdb.interpreter, `Callback executed for clone with arguments: task=${a}, newtid=${b}`);
+        });
+    )"sv;
+
+  // everything should live under this realm. I think. Who knows, not that great documented.
+
+  if (auto result = js->EvaluateJavascriptStringView(script); !result) {
+    DBGLOG(interpreter, "Exception when evaluating script: {}", result.error());
+  }
+
+  TriggerEvent(js, StopEvents::clone, 1337, 42);
+  TriggerEvent(js, StopEvents::clone, 304, 303);
+
+  MainLoop(eventSystem, js);
+}
+
+void
+Tracer::MainLoop(EventSystem *eventSystem, mdb::js::ScriptRuntime *scriptRuntime) noexcept
+{
+  auto &appInstance = Get();
+  appInstance.mScriptRuntime = scriptRuntime;
+
+  std::vector<Event> readInEvents{};
+  readInEvents.reserve(128);
+  while (appInstance.IsRunning()) {
+
+    if (eventSystem->PollBlocking(readInEvents)) {
+      for (auto evt : readInEvents) {
+#ifdef MDB_DEBUG
+        Tracer::Get().DebuggerEventCount()++;
+#endif
+        switch (evt.type) {
+        case EventType::WaitStatus: {
+          DBGLOG(awaiter, "stop for {}: {}", evt.uWait.wait.tid, to_str(evt.uWait.wait.ws.ws));
+          if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
+            Tracer::Get().HandleTracerEvent(dbg_evt);
+          }
+        } break;
+        case EventType::Command: {
+          Tracer::Get().handle_command(evt.uCommand);
+        } break;
+        case EventType::TraceeEvent: {
+          Tracer::Get().HandleTracerEvent(evt.uDebugger);
+        } break;
+        case EventType::Initialization:
+          Tracer::Get().HandleInitEvent(evt.uDebugger);
+          break;
+        case EventType::Internal: {
+          Tracer::Get().HandleInternalEvent(evt.uInternalEvent);
+          break;
+        }
+        }
+      }
+      readInEvents.clear();
+    }
+  }
+}
+} // namespace mdb

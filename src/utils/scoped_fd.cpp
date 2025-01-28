@@ -8,8 +8,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 
-namespace utils {
-
+namespace mdb {
 ScopedFd::ScopedFd() noexcept : mFd(-1), mPath{}, mFileSize() {}
 
 ScopedFd::ScopedFd(int fd, Path path) noexcept : mFd(fd), mPath(std::move(path)), mFileSize()
@@ -118,7 +117,7 @@ ScopedFd::Open(const Path &p, int flags, mode_t mode) noexcept
   return ScopedFd{::open(p.c_str(), flags, mode), p};
 }
 
-/* static */ utils::Expected<ScopedFd, ConnectError>
+/* static */ mdb::Expected<ScopedFd, ConnectError>
 ScopedFd::OpenSocketConnectTo(const std::string &host, int port) noexcept
 {
   addrinfo hints = {};
@@ -173,4 +172,4 @@ ScopedFd::TakeFileDescriptorOwnership(int fd) noexcept
 {
   return ScopedFd{fd};
 }
-} // namespace utils
+} // namespace mdb

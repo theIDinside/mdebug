@@ -5,6 +5,7 @@
 #include <linux/prctl.h>
 #include <stop_token>
 #include <sys/prctl.h>
+namespace mdb {
 DebuggerThread::DebuggerThread(std::string &&name, std::function<void(std::stop_token &)> &&task) noexcept
     : mThreadName(std::move(name)), mWork(std::move(task)), mThread(), mStarted(false)
 {
@@ -88,3 +89,4 @@ DebuggerThread::AssertSigChildIsBlocked() noexcept
     PANIC("SIGCHLD is not blocked for thread.");
   }
 }
+} // namespace mdb

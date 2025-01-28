@@ -10,12 +10,14 @@
 #include <symbolication/dwarf.h>
 #include <utils/indexing.h>
 
+namespace mdb {
 class ObjectFile;
 struct ElfSection;
 
 void SetDwarfLogConfig(bool value) noexcept;
+} // namespace mdb
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 bool IsCompileUnit(DwarfUnitType type);
 
@@ -201,9 +203,10 @@ public:
   std::span<UnitHeader> Headers() noexcept;
 };
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw
 
 namespace fmt {
+namespace sym = mdb::sym;
 template <> struct formatter<sym::dw::UnitData>
 {
 

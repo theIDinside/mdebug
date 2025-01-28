@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <utility>
 
+namespace mdb {
 template <typename T> class Immutable
 {
   T data;
@@ -50,14 +51,14 @@ public:
 
   constexpr const T *
   operator->() const noexcept
-    requires(!IsSmartPointer<T>)
+    requires(!mdb::IsSmartPointer<T>)
   {
     return std::addressof(data);
   }
 
   constexpr const auto *
   operator->() const noexcept
-    requires(IsSmartPointer<T>)
+    requires(mdb::IsSmartPointer<T>)
   {
     return data.get();
   }
@@ -68,7 +69,9 @@ public:
     return std::move(data);
   }
 
-  constexpr operator const T&() & {
+  constexpr
+  operator const T &() &
+  {
     return data;
   }
 
@@ -100,14 +103,14 @@ public:
 
   constexpr auto
   begin() const noexcept
-    requires(IsRange<T>)
+    requires(mdb::IsRange<T>)
   {
     return data.cbegin();
   }
 
   constexpr auto
   end() const noexcept
-    requires(IsRange<T>)
+    requires(mdb::IsRange<T>)
   {
     return data.cend();
   }
@@ -236,7 +239,9 @@ public:
     return std::string_view{data};
   }
 
-  constexpr operator const T&() & {
+  constexpr
+  operator const T &() &
+  {
     return data;
   }
 
@@ -341,9 +346,10 @@ operator+(const Immutable<T> &l, const Immutable<U> &r)
   // explicit coercion.
   return (*l) + (*r);
 }
+} // namespace mdb
 
 namespace fmt {
-
+template <typename T> using Immutable = mdb::Immutable<T>;
 template <typename T> struct formatter<Immutable<T>>
 {
   template <typename ParseContext>
@@ -361,7 +367,7 @@ template <typename T> struct formatter<Immutable<T>>
   }
 };
 } // namespace fmt
-
+namespace mdb {
 template <typename T> struct NonNullPtr
 {
   T *ptr;
@@ -408,5 +414,5 @@ NonNull(U &ref) noexcept
   return NonNullPtr<U>{.ptr = &ref};
 }
 
-template <typename T>
-using ImmutablePtr = Immutable<NonNullPtr<T>>;
+template <typename T> using ImmutablePtr = Immutable<NonNullPtr<T>>;
+} // namespace mdb

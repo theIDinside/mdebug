@@ -5,7 +5,7 @@
 #include <sys/signalfd.h>
 #include <sys/wait.h>
 #include <tracer.h>
-
+namespace mdb {
 static void
 SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
 {
@@ -22,8 +22,8 @@ SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
 
   // ScopedFd panics if fd == -1 (error value).
   // So we don't need error checking here. This is a hard error, we don't even try here.
-  utils::ScopedFd sfd = signalfd(-1, &mask, 0);
-  utils::ScopedFd epollFileDescriptor = epoll_create1(0);
+  mdb::ScopedFd sfd = signalfd(-1, &mask, 0);
+  mdb::ScopedFd epollFileDescriptor = epoll_create1(0);
 
   // Add the signalfd to the epoll instance
   epoll_event ev{};
@@ -103,3 +103,4 @@ WaitStatusReaderThread::Init() noexcept
   }
   return std::unique_ptr<WaitStatusReaderThread>{new WaitStatusReaderThread{}};
 }
+} // namespace mdb

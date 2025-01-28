@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 
+namespace mdb {
 using StringOpt = std::optional<std::string_view>;
 using AddrOpt = std::optional<AddrPtr>;
 
@@ -65,7 +66,7 @@ public:
   void ComputeLineTable() noexcept;
   std::span<const AddressRange> AddressRanges() const noexcept;
   std::span<const dw::LineTableEntry> GetLineTable() const noexcept;
-  std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>>& sources() noexcept;
+  std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>> &sources() noexcept;
 
   bool HasKnownAddressBoundary() const noexcept;
   AddrPtr StartPc() const noexcept;
@@ -99,6 +100,7 @@ public:
 private:
   void add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept;
   std::mutex mutex;
-  utils::IntervalMapping<AddrPtr, CompilationUnit *> mapping;
+  mdb::IntervalMapping<AddrPtr, CompilationUnit *> mapping;
 };
 } // namespace sym
+} // namespace mdb

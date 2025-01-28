@@ -5,13 +5,14 @@
 #include <symbolication/dwarf/unit_header.h>
 #include <utils/worker_task.h>
 
+namespace mdb {
 class ObjectFile;
-
-namespace sym::dw {
+}
+namespace mdb::sym::dw {
 
 class UnitData;
 
-class UnitDataTask : public utils::Task
+class UnitDataTask : public mdb::Task
 {
 public:
   UnitDataTask(ObjectFile *obj, std::span<UnitHeader> headers) noexcept;
@@ -28,4 +29,4 @@ private:
   std::vector<UnitHeader> mCompilationUnitsToParse;
 };
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

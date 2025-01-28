@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "debug_str.h"
 
-namespace sym {
+namespace mdb::sym {
 
 DebugStringSection::DebugStringSection(const u8 *data) noexcept
 {
@@ -23,4 +23,4 @@ DebugString::str_view(const DebugStringSection &sec) const noexcept
   return std::string_view{cstr_ptr, str_size};
 }
 
-} // namespace sym
+} // namespace mdb::sym

@@ -2,7 +2,7 @@
 #include "event.h"
 #include "../supervisor.h"
 #include "../task.h"
-
+namespace mdb {
 void
 StopObserver::send_notifications() noexcept
 {
@@ -36,3 +36,10 @@ SignalStop::send() noexcept
 {
   tc.EmitSignalEvent({.pid = tc.TaskLeaderTid(), .tid = tid}, signal);
 }
+} // namespace mdb
+
+namespace mdb::pub {
+#define EACH_FN(EVT, DESC, RET, ...) decltype(EVT) EVT{};
+FOR_EACH_EVENT(EACH_FN)
+#undef EACH_FN
+} // namespace mdb::pub

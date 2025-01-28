@@ -16,6 +16,10 @@
 #include <variant>
 #include <vector>
 
+namespace mdb {
+
+namespace fmt = ::fmt;
+
 namespace fs = std::filesystem;
 using Path = fs::path;
 
@@ -117,7 +121,7 @@ std::string_view syscall_name(unsigned long long syscall_number);
 #define PANIC(err_msg)                                                                                            \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
-    panic(err_msg, loc, 1);                                                                                       \
+    mdb::panic(err_msg, loc, 1);                                                                                  \
   }
 
 #define TODO(abort_msg)                                                                                           \
@@ -125,8 +129,8 @@ std::string_view syscall_name(unsigned long long syscall_number);
     auto loc = std::source_location::current();                                                                   \
     const auto todo_msg = fmt::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
     fmt::println("{}", todo_msg);                                                                                 \
-    logging::Logger::GetLogger()->GetLogChannel(Channel::core)->Log(todo_msg);                                    \
-    logging::Logger::GetLogger()->OnAbort();                                                                      \
+    mdb::logging::Logger::GetLogger()->GetLogChannel(Channel::core)->Log(todo_msg);                               \
+    mdb::logging::Logger::GetLogger()->OnAbort();                                                                 \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     MIDAS_UNREACHABLE                                                                                             \
   }
@@ -151,9 +155,9 @@ IgnoreArgs(const Args &...)
     const auto todo_msg = fmt::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
     fmt::println("{}", todo_msg_hdr);                                                                             \
     fmt::println("{}", todo_msg);                                                                                 \
-    logging::GetLogChannel(Channel::core)->Log(todo_msg_hdr);                                \
-    logging::GetLogChannel(Channel::core)->Log(todo_msg);                                    \
-    logging::Logger::GetLogger()->OnAbort();                                                                      \
+    mdb::logging::GetLogChannel(Channel::core)->Log(todo_msg_hdr);                                                \
+    mdb::logging::GetLogChannel(Channel::core)->Log(todo_msg);                                                    \
+    mdb::logging::Logger::GetLogger()->OnAbort();                                                                 \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
     MIDAS_UNREACHABLE                                                                                             \
   }
@@ -161,14 +165,14 @@ IgnoreArgs(const Args &...)
 #define MUST_HOLD(cond, msg)                                                                                      \
   if (!(cond)) [[unlikely]] {                                                                                     \
     const std::source_location loc = std::source_location::current();                                             \
-    panic(fmt::format("{}: assertion failed: {}", msg, #cond), loc.function_name(), loc.file_name(),              \
-          loc.line() - 2, 3);                                                                                     \
+    mdb::panic(fmt::format("{}: assertion failed: {}", msg, #cond), loc.function_name(), loc.file_name(),         \
+               loc.line() - 2, 3);                                                                                \
   }
 
 // clang-format off
 // Identical to ASSERT, but doesn't care about build type
 #define VERIFY(cond, msg, ...) if (!(cond)) [[unlikely]] { std::source_location loc = std::source_location::current(); \
-    panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);               \
+    mdb::panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);               \
   }
 // clang-format on
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
@@ -352,3 +356,5 @@ template <class... Ts> Match(Ts...) -> Match<Ts...>;
 #elif defined(__GNUC__) || defined(__GNUG__)
 #define COMPILERUSED_GCC
 #endif
+
+} // namespace mdb

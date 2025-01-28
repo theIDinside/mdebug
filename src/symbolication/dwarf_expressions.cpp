@@ -8,7 +8,7 @@
 #include <utility>
 #include <utils/logger.h>
 
-namespace sym {
+namespace mdb::sym {
 
 u64
 DwarfStack::Pop() noexcept

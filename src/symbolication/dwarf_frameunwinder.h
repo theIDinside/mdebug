@@ -5,6 +5,7 @@
 #include "dwarf_defs.h"
 #include "symbolication/callstack.h"
 
+namespace mdb {
 struct ElfSection;
 class ObjectFile;
 class SymbolFile;
@@ -12,8 +13,9 @@ class TraceeController;
 struct TaskInfo;
 class DwarfBinaryReader;
 class Elf;
+} // namespace mdb
 
-namespace sym {
+namespace mdb::sym {
 
 struct UnwinderSymbolFilePair;
 struct UnwindInfoSymbolFilePair;
@@ -97,8 +99,9 @@ public:
    * registers. */
   static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
                               AddrPtr pc) noexcept;
-  u64 ComputeExpression(std::span<const u8> bytes, int frameLevel=-1) noexcept;
-  u64 ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel=-1) noexcept;
+  u64 ComputeExpression(std::span<const u8> bytes, int frameLevel = -1) noexcept;
+  u64 ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame,
+                              int frameLevel = -1) noexcept;
   void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
   void RememberState() noexcept;
   void RestoreState() noexcept;
@@ -292,14 +295,17 @@ private:
 using CommonInfoEntryCount = u64;
 using FrameDescriptionEntryCount = u64;
 
-std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount> CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept;
-std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount> CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept;
+std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
+CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept;
+std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
+CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept;
 CommonInformationEntry ReadCommonInformationEntry(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
-std::unique_ptr<Unwinder> ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSection) noexcept;
+std::unique_ptr<Unwinder> ParseExceptionHeaderSection(ObjectFile *objfile,
+                                                      const ElfSection *ehFrameSection) noexcept;
 void ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *debugFrame) noexcept;
 
 FrameDescriptionEntry ReadFrameDescriptionEntry(DwarfBinaryReader &reader);
 
 int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
-} // namespace sym
+} // namespace mdb::sym

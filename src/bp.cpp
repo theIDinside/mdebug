@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "bp.h"
+#include "events/stop_event.h"
 #include "utils/expected.h"
 #include <algorithm>
 #include <mdbsys/ptrace.h>
@@ -7,6 +8,12 @@
 #include <symbolication/objfile.h>
 #include <tracer.h>
 #include <type_traits>
+
+#define BP_KEEP(STOP) {STOP, BreakpointOp::Keep}
+#define BP_RETIRE(STOP) {STOP, BreakpointOp::Retire}
+namespace mdb {
+
+namespace fmt = ::fmt;
 
 BreakpointLocation::BreakpointLocation(AddrPtr addr, u8 original) noexcept
     : addr(addr), source_info(), original_byte(original)
@@ -29,22 +36,22 @@ BreakpointLocation::~BreakpointLocation() noexcept
   DBGLOG(core, "[breakpoint loc]: Destroying breakpoint location at {}", addr);
 }
 
-/*static*/ std::shared_ptr<BreakpointLocation>
+/*static*/ BreakpointLocation::Ref
 BreakpointLocation::CreateLocation(AddrPtr addr, u8 original) noexcept
 {
-  return std::make_shared<BreakpointLocation>(addr, original);
+  return RcHandle<BreakpointLocation>::MakeShared(addr, original);
 }
-/*static*/ std::shared_ptr<BreakpointLocation>
+/*static*/ BreakpointLocation::Ref
 BreakpointLocation::CreateLocationWithSource(AddrPtr addr, u8 original,
                                              std::unique_ptr<LocationSourceInfo> &&src_info) noexcept
 {
-  return std::make_shared<BreakpointLocation>(addr, original, std::move(src_info));
+  return RcHandle<BreakpointLocation>::MakeShared(addr, original, std::move(src_info));
 }
 
 bool
 BreakpointLocation::any_user_active() const noexcept
 {
-  return std::any_of(users.begin(), users.end(), [](const auto user) { return user->is_enabled(); });
+  return std::any_of(users.begin(), users.end(), [](const auto user) { return user->IsEnabled(); });
 }
 
 std::vector<u32>
@@ -123,14 +130,12 @@ BreakpointLocation::add_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &u
   users.push_back(&user);
 
   if (!installed) {
-    user.enable(ctrl);
+    user.Enable(ctrl);
   }
 }
 
-UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
-                               std::optional<StopCondition> &&cond) noexcept
-    : enabled_by_user(true), stop_condition(std::move(cond)), id(param.id), tid(param.tid), kind(kind),
-      hit_count(param.times_to_hit.value_or(0))
+UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind kind) noexcept
+    : mEnabledByUser(true), id(param.id), tid(param.tid), kind(kind), hit_count(param.times_to_hit.value_or(0))
 {
 
   if (param.loc_or_err.is_expected()) {
@@ -156,39 +161,32 @@ UserBreakpoint::pre_destruction(tc::TraceeCommandInterface &ctrl) noexcept
   }
 }
 
-std::shared_ptr<BreakpointLocation>
-UserBreakpoint::bp_location() noexcept
+BreakpointLocation::Ref
+UserBreakpoint::GetLocation() noexcept
 {
   return bp;
 }
 
-void
-UserBreakpoint::increment_count() noexcept
-{
-  ++on_hit_count;
-}
-
 bool
-UserBreakpoint::is_enabled() noexcept
+UserBreakpoint::IsEnabled() noexcept
 {
-  return bp != nullptr && enabled_by_user && bp->is_installed();
+  return mEnabledByUser && bp != nullptr && bp->is_installed();
 }
 
 void
-UserBreakpoint::enable(tc::TraceeCommandInterface &ctrl) noexcept
+UserBreakpoint::Enable(tc::TraceeCommandInterface &ctrl) noexcept
 {
-  if (!enabled_by_user && bp != nullptr) {
+  if (mEnabledByUser && bp != nullptr) {
     bp->enable(ctrl.TaskLeaderTid(), ctrl);
   }
-
-  enabled_by_user = (bp != nullptr);
+  mEnabledByUser = bp != nullptr;
 }
 
 void
-UserBreakpoint::disable(tc::TraceeCommandInterface &ctrl) noexcept
+UserBreakpoint::Disable(tc::TraceeCommandInterface &ctrl) noexcept
 {
-  if (enabled_by_user && bp != nullptr) {
-    enabled_by_user = false;
+  if (mEnabledByUser && bp != nullptr) {
+    mEnabledByUser = false;
     if (bp->any_user_active()) {
       bp->disable(ctrl.TaskLeaderTid(), ctrl);
     }
@@ -196,19 +194,19 @@ UserBreakpoint::disable(tc::TraceeCommandInterface &ctrl) noexcept
 }
 
 Tid
-UserBreakpoint::get_tid() noexcept
+UserBreakpoint::GetTid() noexcept
 {
   return tid;
 }
 
-bool
-UserBreakpoint::check_should_stop(TaskInfo &t) noexcept
+EventResult
+UserBreakpoint::EvaluateStopCondition(TaskInfo &t) noexcept
 {
-  return stop_condition.transform([&](auto &fn) { return fn(this, t); }).value_or(true);
+  return EventResult::None;
 }
 
 std::optional<AddrPtr>
-UserBreakpoint::address() const noexcept
+UserBreakpoint::Address() const noexcept
 {
   if (bp == nullptr) {
     return {};
@@ -217,13 +215,13 @@ UserBreakpoint::address() const noexcept
 }
 
 bool
-UserBreakpoint::verified() const noexcept
+UserBreakpoint::IsVerified() const noexcept
 {
   return bp != nullptr;
 }
 
 std::optional<u32>
-UserBreakpoint::line() const noexcept
+UserBreakpoint::Line() const noexcept
 {
   if (!bp) {
     return {};
@@ -237,7 +235,7 @@ UserBreakpoint::line() const noexcept
 }
 
 std::optional<u32>
-UserBreakpoint::column() const noexcept
+UserBreakpoint::Column() const noexcept
 {
   if (!bp) {
     return {};
@@ -251,7 +249,7 @@ UserBreakpoint::column() const noexcept
 }
 
 std::optional<std::string_view>
-UserBreakpoint::source_file() const noexcept
+UserBreakpoint::GetSourceFile() const noexcept
 {
   if (!bp) {
     return {};
@@ -265,9 +263,9 @@ UserBreakpoint::source_file() const noexcept
 }
 
 std::optional<std::string>
-UserBreakpoint::error_message() const noexcept
+UserBreakpoint::GetErrorMessage() const noexcept
 {
-  return utils::transform(err, [t = this](const BpErr &err) {
+  return mdb::transform(err, [t = this](const BpErr &err) {
     std::string message{};
     auto it = std::back_inserter(message);
     std::visit(
@@ -276,7 +274,7 @@ UserBreakpoint::error_message() const noexcept
         if constexpr (std::is_same_v<T, MemoryError>) {
           fmt::format_to(it, "Could not write to {} ({})", e.requested_address, strerror(e.error_no));
         } else if constexpr (std::is_same_v<T, ResolveError>) {
-          auto spec = t->user_spec();
+          auto spec = t->UserProvidedSpec();
           if (spec) {
             fmt::format_to(it, "Could not resolve using spec: {}", *spec);
           } else {
@@ -292,22 +290,22 @@ UserBreakpoint::error_message() const noexcept
 }
 
 void
-UserBreakpoint::update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept
+UserBreakpoint::UpdateLocation(Ref<BreakpointLocation> bploc) noexcept
 {
   bp = std::move(bploc);
 }
 
 /* virtual */
 UserBpSpec *
-UserBreakpoint::user_spec() const noexcept
+UserBreakpoint::UserProvidedSpec() const noexcept
 {
   return nullptr;
 }
 
 /* virtual */
-std::shared_ptr<UserBreakpoint>
+Ref<UserBreakpoint>
 UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
-                                std::shared_ptr<BreakpointLocation>) noexcept
+                                Ref<BreakpointLocation>) noexcept
 {
   PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
@@ -315,26 +313,47 @@ UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeContro
 
 Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
                        std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept
-    : UserBreakpoint(std::move(param), kind, std::move(stop_condition)), stop_only(stop_only),
-      mBehavior(param.tc.GetBreakpointBehavior()), bp_spec(std::move(spec))
+    : UserBreakpoint(std::move(param), kind), mStopOnlyThread(stop_only), mBreakpointSpec(std::move(spec)),
+      mStopConditionEvaluator(std::move(stop_condition))
 {
 }
 
-bp_hit
-Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
+static bool
+HookRequestedResume(EventResult result) noexcept
 {
-  if (stop_only.value_or(t.mTid) != t.mTid) {
-    // This task (`TaskInfo t`) is not supposed to be stopped by this breakpoint
-    return bp_hit::noop();
-  }
+  return result == EventResult::Resume;
+}
 
-  if (!UserBreakpoint::check_should_stop(t)) {
-    return bp_hit::noop();
+constexpr static BreakpointBehavior
+DetermineBehavior(EventResult evaluationResult, TraceeController &tc) noexcept
+{
+  ASSERT(evaluationResult != EventResult::Resume, "Requires a stop behavior (or default)");
+  if (evaluationResult == EventResult::Stop) {
+    return BreakpointBehavior::StopOnlyThreadThatHit;
+  } else if (evaluationResult == EventResult::StopAll) {
+    return BreakpointBehavior::StopAllThreadsWhenHit;
   }
+  // Get session-wide configuration of breakpoint behavior.
+  return tc.GetBreakpointBehavior();
+}
 
+BreakpointHitEventResult
+Breakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
+{
   DBGLOG(core, "[{}:bkpt]: bp {} hit", t.mTid, id);
-  increment_count();
-  if (mBehavior == BreakpointBehavior::StopAllThreadsWhenHit) {
+  IncrementHitCount();
+  if (mStopOnlyThread.value_or(t.mTid) != t.mTid) {
+    // This task (`TaskInfo t`) is not supposed to be stopped by this breakpoint
+    return BP_KEEP(None);
+  }
+
+  const auto evaluatedResult = EvaluateStopCondition(t);
+
+  if (HookRequestedResume(evaluatedResult)) {
+    return BP_KEEP(evaluatedResult);
+  };
+
+  if (DetermineBehavior(evaluatedResult, tc) == BreakpointBehavior::StopAllThreadsWhenHit) {
     const auto all_stopped = tc.IsAllStopped();
     if (all_stopped) {
       tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, id, true);
@@ -347,26 +366,28 @@ Breakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
   } else {
     tc.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, id, false);
   }
-  return bp_hit::normal_stop();
+  return BP_KEEP(EventResult::Stop);
 }
 
 UserBpSpec *
-Breakpoint::user_spec() const noexcept
+Breakpoint::UserProvidedSpec() const noexcept
 {
-  return bp_spec.get();
+  return mBreakpointSpec.get();
 }
 
-std::shared_ptr<UserBreakpoint>
+Ref<UserBreakpoint>
 Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
-                            std::shared_ptr<BreakpointLocation> bp) noexcept
+                            Ref<BreakpointLocation> bp) noexcept
 {
-  auto clonedStopCondition = stop_condition;
-  auto breakpoint = std::make_shared<Breakpoint>(
+  auto clonedStopCondition = mStopConditionEvaluator;
+
+  auto breakpoint = Ref<Breakpoint>::MakeShared(
     RequiredUserParameters{
       .tid = tid, .id = breakpointStorage.new_id(), .loc_or_err = std::move(bp), .times_to_hit = {}, .tc = tc},
-    kind, stop_only, std::move(clonedStopCondition), std::make_unique<UserBpSpec>(*bp_spec));
+    kind, mStopOnlyThread, std::move(clonedStopCondition), std::make_unique<UserBpSpec>(*mBreakpointSpec));
+
   breakpointStorage.add_user(breakpoint);
-  ASSERT(!breakpoint->bp_location()->loc_users().empty(), "Breakpoint location should have user now!");
+  ASSERT(!breakpoint->GetLocation()->loc_users().empty(), "Breakpoint location should have user now!");
   return breakpoint;
 }
 
@@ -377,28 +398,28 @@ TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param, LocationU
 {
 }
 
-bp_hit
-TemporaryBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
+BreakpointHitEventResult
+TemporaryBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 {
-  const auto res = Breakpoint::on_hit(tc, t);
-  if (res.stop) {
+  const auto res = Breakpoint::OnHit(tc, t);
+  if (res.ShouldStop()) {
     DBGLOG(core, "Hit temporary_breakpoint_t {}", id);
-    return bp_hit::stop_retire_bp();
+    return BP_RETIRE(res.mResult);
   } else {
-    return bp_hit::noop();
+    return BP_KEEP(None);
   }
 }
 
 FinishBreakpoint::FinishBreakpoint(RequiredUserParameters param, Tid stop_only) noexcept
-    : UserBreakpoint(std::move(param), LocationUserKind::FinishFunction, std::nullopt), stop_only(stop_only)
+    : UserBreakpoint(std::move(param), LocationUserKind::FinishFunction), stop_only(stop_only)
 {
 }
 
-bp_hit
-FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
+BreakpointHitEventResult
+FinishBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 {
   if (t.mTid != stop_only) {
-    return bp_hit::noop();
+    return BP_KEEP(Resume);
   }
   DBGLOG(core, "Hit finish_bp_t {}", id);
   const auto all_stopped = tc.IsAllStopped();
@@ -412,28 +433,29 @@ FinishBreakpoint::on_hit(TraceeController &tc, TaskInfo &t) noexcept
       tc.EmitSteppedStop({tc.TaskLeaderTid(), tid}, "Finished function", true);
     });
   }
-  return bp_hit::stop_retire_bp();
+  return BP_RETIRE(Stop);
 }
 
 ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) noexcept
-    : UserBreakpoint(std::move(param), LocationUserKind::ResumeTo, {}), stop_only(tid)
+    : UserBreakpoint(std::move(param), LocationUserKind::ResumeTo), stop_only(tid)
 {
 }
 
-bp_hit
-ResumeToBreakpoint::on_hit(TraceeController &, TaskInfo &t) noexcept
+BreakpointHitEventResult
+ResumeToBreakpoint::OnHit(TraceeController &, TaskInfo &t) noexcept
 {
   if (t.mTid == stop_only) {
     DBGLOG(core, "Hit resume_bp_t {}", id);
-    return bp_hit::continue_retire_bp();
+    return BP_RETIRE(Resume);
   } else {
-    return bp_hit::noop();
+    return BP_KEEP(None);
   }
 }
 
 Logpoint::Logpoint(RequiredUserParameters param, std::string logExpression,
                    std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept
-    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::nullopt, std::move(stop_condition), std::move(spec)),
+    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::nullopt, std::move(stop_condition),
+                 std::move(spec)),
       expressionString(std::move(logExpression))
 {
 }
@@ -445,27 +467,26 @@ Logpoint::compile_expression() noexcept
   // logging. Whatever really.
 }
 
-bp_hit
-Logpoint::on_hit(TraceeController &, TaskInfo &) noexcept
+BreakpointHitEventResult
+Logpoint::OnHit(TraceeController &, TaskInfo &) noexcept
 {
   if (compiledExpression == nullptr) {
     compile_expression();
   }
-  return bp_hit::noop();
+  return BP_KEEP(Resume);
 }
 
 SOLoadingBreakpoint::SOLoadingBreakpoint(RequiredUserParameters param) noexcept
-    : UserBreakpoint(std::move(param), LocationUserKind::SharedObjectLoaded, std::nullopt)
+    : UserBreakpoint(std::move(param), LocationUserKind::SharedObjectLoaded)
 {
 }
 
-bp_hit
-SOLoadingBreakpoint::on_hit(TraceeController &tc, TaskInfo &) noexcept
+BreakpointHitEventResult
+SOLoadingBreakpoint::OnHit(TraceeController &tc, TaskInfo &) noexcept
 {
-  increment_count();
   tc.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints
-  return bp_hit::noop();
+  return {EventResult::Resume, BreakpointOp::Keep};
 }
 
 UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : tc(tc) {}
@@ -485,7 +506,7 @@ UserBreakpoints::OnProcessExit() noexcept
       // friend-mechanism).
       user->bp->installed = false;
       user->bp->users.clear();
-      user->bp.reset();
+      user->bp = nullptr;
     }
   }
   user_breakpoints.clear();
@@ -504,7 +525,7 @@ UserBreakpoints::on_exec() noexcept
       // friend-mechanism).
       user->bp->installed = false;
       user->bp->users.clear();
-      user->bp.reset();
+      user->bp.Reset();
     }
   }
   bps_at_loc.clear();
@@ -513,13 +534,13 @@ UserBreakpoints::on_exec() noexcept
 void
 UserBreakpoints::add_bp_location(const UserBreakpoint &updated_bp) noexcept
 {
-  bps_at_loc[updated_bp.address().value()].push_back(updated_bp.id);
+  bps_at_loc[updated_bp.Address().value()].push_back(updated_bp.id);
 }
 
 void
-UserBreakpoints::add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept
+UserBreakpoints::add_user(Ref<UserBreakpoint> user_bp) noexcept
 {
-  if (user_bp->verified()) {
+  if (user_bp->IsVerified()) {
     add_bp_location(*user_bp);
   }
   user_breakpoints[user_bp->id] = std::move(user_bp);
@@ -537,7 +558,7 @@ UserBreakpoints::remove_bp(u32 id) noexcept
   user_breakpoints.erase(bp);
 }
 
-std::shared_ptr<BreakpointLocation>
+Ref<BreakpointLocation>
 UserBreakpoints::location_at(AddrPtr address) noexcept
 {
   auto first_user_bp_at = bps_at_loc.find(address);
@@ -546,7 +567,7 @@ UserBreakpoints::location_at(AddrPtr address) noexcept
   }
   for (const auto it : first_user_bp_at->second) {
     if (const auto ubp = user_breakpoints.find(it); ubp != std::end(user_breakpoints)) {
-      if (const auto loc = ubp->second->bp_location(); loc != nullptr) {
+      if (const auto loc = ubp->second->GetLocation(); loc != nullptr) {
         return loc;
       }
     }
@@ -554,8 +575,8 @@ UserBreakpoints::location_at(AddrPtr address) noexcept
   return nullptr;
 }
 
-std::shared_ptr<UserBreakpoint>
-UserBreakpoints::get_user(u32 id) const noexcept
+Ref<UserBreakpoint>
+UserBreakpoints::GetUserBreakpoint(u32 id) const noexcept
 {
   auto it = user_breakpoints.find(id);
   if (it == std::end(user_breakpoints)) {
@@ -565,10 +586,10 @@ UserBreakpoints::get_user(u32 id) const noexcept
   return it->second;
 }
 
-std::vector<std::shared_ptr<UserBreakpoint>>
+std::vector<Ref<UserBreakpoint>>
 UserBreakpoints::all_users() const noexcept
 {
-  std::vector<std::shared_ptr<UserBreakpoint>> result{};
+  std::vector<Ref<UserBreakpoint>> result{};
   result.reserve(user_breakpoints.size());
 
   for (auto [id, user] : user_breakpoints) {
@@ -577,12 +598,12 @@ UserBreakpoints::all_users() const noexcept
   return result;
 }
 
-std::vector<std::shared_ptr<UserBreakpoint>>
+std::vector<Ref<UserBreakpoint>>
 UserBreakpoints::non_verified() const noexcept
 {
-  std::vector<std::shared_ptr<UserBreakpoint>> result;
+  std::vector<Ref<UserBreakpoint>> result;
   for (const auto &[id, bp] : user_breakpoints) {
-    if (!bp->verified()) {
+    if (!bp->IsVerified()) {
       result.push_back(bp);
     }
   }
@@ -612,3 +633,4 @@ UserBreakpoints::sources_with_bpspecs() const noexcept
   }
   return result;
 }
+} // namespace mdb

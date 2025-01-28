@@ -2,15 +2,16 @@
 #pragma once
 #include <chrono>
 #include <future>
-#include <vector>
 #include <memory_resource>
+#include <vector>
 
+namespace mdb {
 namespace alloc {
-  class ArenaAllocator;
-};
+class ArenaAllocator;
+}
+}; // namespace mdb
 
-void SetTaskGroupLog(bool value) noexcept;
-namespace utils {
+namespace mdb {
 class TaskGroup;
 
 class Task
@@ -22,7 +23,7 @@ public:
   void Execute() noexcept;
 
 protected:
-  virtual void ExecuteTask(std::pmr::memory_resource* temporaryAllocator) noexcept = 0;
+  virtual void ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept = 0;
 
 private:
   bool IsGroupJob() const noexcept;
@@ -36,7 +37,7 @@ public:
   ~NoOp() noexcept override = default;
 
 protected:
-  void ExecuteTask(std::pmr::memory_resource* temporaryAllocator) noexcept final;
+  void ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept final;
 };
 
 using JobPtr = Task *;
@@ -62,7 +63,7 @@ public:
   std::future<void> ScheduleWork() noexcept;
   void TaskDone(Task *task) noexcept;
 
-  alloc::ArenaAllocator* GetTemporaryAllocator() const noexcept;
+  alloc::ArenaAllocator *GetTemporaryAllocator() const noexcept;
 
 private:
   std::chrono::high_resolution_clock::time_point mStart;
@@ -73,4 +74,4 @@ private:
   std::vector<Task *> mDoneTasks;
   std::unique_ptr<alloc::ArenaAllocator> mGroupTemporaryAllocator;
 };
-} // namespace utils
+} // namespace mdb

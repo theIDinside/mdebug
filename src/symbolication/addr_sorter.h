@@ -3,7 +3,7 @@
 
 #include "tracee_pointer.h"
 #include <concepts>
-
+namespace mdb {
 template <typename AddressContainingType>
 concept Addressable = requires(AddressContainingType t) {
   // clang-format off
@@ -12,7 +12,7 @@ concept Addressable = requires(AddressContainingType t) {
   // clang-format on
 };
 
-template <Addressable T, bool ByDecreasingEnd=false> class AddressableSorter
+template <Addressable T, bool ByDecreasingEnd = false> class AddressableSorter
 {
 public:
   constexpr bool
@@ -64,3 +64,4 @@ contained_in(const T &t, AddrPtr pc) noexcept -> bool
 {
   return t.StartPc() <= pc && t.EndPc() >= pc;
 }
+} // namespace mdb

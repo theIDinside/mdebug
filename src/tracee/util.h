@@ -6,12 +6,16 @@
 
 struct user_regs_struct;
 
+namespace mdb {
+
 struct PidTid
 {
   std::optional<Pid> mPid;
   std::optional<Tid> mTid;
 
-  constexpr operator bool() const noexcept {
+  constexpr
+  operator bool() const noexcept
+  {
     return mPid.has_value();
   }
 };
@@ -38,3 +42,4 @@ std::optional<pid_t> ParseProcessId(std::string_view input, bool hex) noexcept;
 /// this will return two nullopts to signal invalid format.
 /// `formatIsHex` specifies if the format is in hex or decimal.
 PidTid ParsePidTid(std::string_view input, bool formatIsHex) noexcept;
+} // namespace mdb

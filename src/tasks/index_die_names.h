@@ -3,16 +3,17 @@
 #include "../symbolication/dwarf/die.h"
 #include "../utils/worker_task.h"
 
+namespace mdb {
 class ObjectFile;
-
 namespace sym {
 class CompilationUnit;
 class PartialCompilationUnitSymbolInfo;
 } // namespace sym
+} // namespace mdb
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 struct DieMetaData;
-class IndexingTask : public utils::Task
+class IndexingTask : public mdb::Task
 {
 public:
   IndexingTask(ObjectFile *obj, std::span<UnitData *> cus_to_index) noexcept;
@@ -35,4 +36,4 @@ private:
   ObjectFile *mObjectFile;
   std::vector<UnitData *> mCompUnitsToIndex;
 };
-} // namespace sym::dw
+} // namespace mdb::sym::dw

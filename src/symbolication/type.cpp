@@ -11,7 +11,7 @@
 #include <symbolication/dwarf/debug_info_reader.h>
 #include <symbolication/objfile.h>
 #include <utility>
-
+namespace mdb {
 static constexpr bool
 IsNotCompleteTypeDie(const sym::dw::DieMetaData *die)
 {
@@ -493,3 +493,4 @@ Type::SetArrayBounds(u32 bounds) noexcept
   mArrayBounds = bounds;
 }
 } // namespace sym
+} // namespace mdb

@@ -10,7 +10,7 @@ template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_s
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
 #endif
-
+namespace mdb {
 struct StrSlice
 {
   const char *ptr;
@@ -157,6 +157,7 @@ private:
     AddrPtr addr;
   } value;
 };
+} // namespace mdb
 
 #if defined(COMPILERUSED_GCC)
 #pragma GCC diagnostic pop

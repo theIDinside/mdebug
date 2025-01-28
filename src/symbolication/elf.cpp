@@ -4,6 +4,8 @@
 #include "objfile.h"
 #include <algorithm>
 
+namespace mdb {
+
 std::string_view
 ElfSection::GetName() const noexcept
 {
@@ -31,9 +33,10 @@ ElfSection::Into(AddrPtr vm_addr) const noexcept
   return begin() + offset.get();
 }
 
-const char* ElfSection::GetCString(u64 offset) const noexcept
+const char *
+ElfSection::GetCString(u64 offset) const noexcept
 {
-  return (const char*)mSectionData->data() + offset;
+  return (const char *)mSectionData->data() + offset;
 }
 
 u64
@@ -146,7 +149,7 @@ Elf::AddressesNeedsRelocation() const noexcept
 
 /* static */
 void
-Elf::ParseMinimalSymbol(Elf* elf, ObjectFile& objectFile) noexcept
+Elf::ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept
 {
   if (auto strtab = elf->GetSection(ElfSec::StringTable); !strtab) {
     return;
@@ -176,3 +179,4 @@ Elf::ParseMinimalSymbol(Elf* elf, ObjectFile& objectFile) noexcept
     DBGLOG(core, "[warning]: No .symtab for {}", objectFile.GetPathString());
   }
 }
+} // namespace mdb

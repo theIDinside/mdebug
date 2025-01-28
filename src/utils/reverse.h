@@ -1,8 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-namespace utils {
-
+namespace mdb {
 template <typename C> class Reversed
 {
   const C &container;
@@ -22,6 +21,6 @@ public:
     return container.rend();
   }
 };
-} // namespace utils
+} // namespace mdb
 
-template <typename T> using Rev = utils::Reversed<T>;
+template <typename T> using Rev = mdb::Reversed<T>;

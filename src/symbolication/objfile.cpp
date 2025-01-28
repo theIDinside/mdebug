@@ -29,7 +29,7 @@
 #include <utils/scoped_fd.h>
 
 #include <lib/arena_allocator.h>
-
+namespace mdb {
 ParsedAuxiliaryVector
 ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
 {
@@ -357,12 +357,12 @@ void
 ObjectFile::InitializeDebugSymbolInfo() noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
-  utils::TaskGroup cu_taskgroup("Compilation Unit Data");
+  mdb::TaskGroup cu_taskgroup("Compilation Unit Data");
   auto cu_work = sym::dw::UnitDataTask::CreateParsingJobs(this, cu_taskgroup.GetTemporaryAllocator());
   cu_taskgroup.AddTasks(std::span{cu_work});
   cu_taskgroup.ScheduleWork().wait();
 
-  utils::TaskGroup name_index_taskgroup("Name Indexing");
+  mdb::TaskGroup name_index_taskgroup("Name Indexing");
   auto ni_work = sym::dw::IndexingTask::CreateIndexingJobs(this, name_index_taskgroup.GetTemporaryAllocator());
   name_index_taskgroup.AddTasks(std::span{ni_work});
   name_index_taskgroup.ScheduleWork().wait();
@@ -380,7 +380,7 @@ ObjectFile::AddMinimalElfSymbols(std::vector<MinSymbol> &&fn_symbols,
 void
 ObjectFile::InitializeMinimalSymbolLookup() noexcept
 {
-  for (const auto &[index, sym] : utils::EnumerateView(mMinimalFunctionSymbolsSorted)) {
+  for (const auto &[index, sym] : mdb::EnumerateView(mMinimalFunctionSymbolsSorted)) {
     mMinimalFunctionSymbols[sym.name] = Index{static_cast<u32>(index)};
   }
 }
@@ -450,7 +450,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
     return nullptr;
   }
 
-  auto fd = utils::ScopedFd::OpenFileReadOnly(path);
+  auto fd = mdb::ScopedFd::OpenFileReadOnly(path);
   const auto addr = fd.MmapFile<u8>({}, true);
   const auto objfile =
     new ObjectFile{fmt::format("{}:{}", tc.TaskLeaderTid(), path.c_str()), path, fd.FileSize(), addr};
@@ -466,7 +466,7 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
     return nullptr;
   }
 
-  auto fd = utils::ScopedFd::OpenFileReadOnly(path);
+  auto fd = mdb::ScopedFd::OpenFileReadOnly(path);
   const auto addr = fd.MmapFile<u8>({}, true);
   const auto objfile = std::make_shared<ObjectFile>(fmt::format("{}:{}", tc->TaskLeaderTid(), path.c_str()), path,
                                                     fd.FileSize(), addr);
@@ -845,3 +845,4 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   }
   return result;
 }
+} // namespace mdb

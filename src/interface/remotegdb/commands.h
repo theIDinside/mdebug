@@ -2,7 +2,7 @@
 #pragma once
 #include <string_view>
 
-namespace gdb {
+namespace mdb::gdb {
 
 enum class Command
 {
@@ -23,4 +23,4 @@ struct RemoteCommand
   Command cmd;
 };
 
-} // namespace gdb
+} // namespace mdb::gdb

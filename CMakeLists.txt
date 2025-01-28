@@ -9,6 +9,10 @@ option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug 
 option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
 option(CLANG_TIDY_CHECK "Configure clang-tidy to run during build" OFF)
 
+find_package(PkgConfig REQUIRED)
+set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
+
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
@@ -28,14 +32,14 @@ set(MIDAS_SOURCES
   src/mdb_config.h
   src/notify_pipe.cpp
   src/notify_pipe.h
-  src/ptracestop_handlers.cpp
-  src/ptracestop_handlers.h
   src/register_description.cpp
   src/register_description.h
   src/so_loading.cpp
   src/so_loading.h
   src/supervisor.cpp
   src/supervisor.h
+  src/task_scheduling.cpp
+  src/task_scheduling.h
   src/task.cpp
   src/task.h
   src/tracer.cpp
@@ -49,9 +53,9 @@ set(MIDAS_SOURCES
   src/events/event.cpp
   src/events/event.h
   # lib
-  src/lib/lockguard.h
   src/lib/arena_allocator.cpp
   src/lib/arena_allocator.h
+  src/lib/lockguard.h
   # symbolication
   src/symbolication/block.cpp
   src/symbolication/block.h
@@ -132,6 +136,8 @@ set(MIDAS_SOURCES
   src/tracee/util.h
 
   # Various interfaces
+  src/interface/console_command.cpp
+  src/interface/console_command.h
   src/interface/dap/commands.cpp
   src/interface/dap/commands.h
   src/interface/dap/dap_defs.h
@@ -143,8 +149,6 @@ set(MIDAS_SOURCES
   src/interface/dap/parse_buffer.h
   src/interface/dap/types.cpp
   src/interface/dap/types.h
-  src/interface/console_command.cpp
-  src/interface/console_command.h
   src/interface/pty.cpp
   src/interface/pty.h
 
@@ -170,6 +174,16 @@ set(MIDAS_SOURCES
   src/interface/tracee_command/tracee_command_interface.cpp
   src/interface/tracee_command/tracee_command_interface.h
 
+  # Interpreter
+  src/mdbjs/bpjs.cpp
+  src/mdbjs/bpjs.h
+  src/mdbjs/event_dispatcher.cpp
+  src/mdbjs/event_dispatcher.h
+  src/mdbjs/jsobject.h
+  src/mdbjs/mdbjs.cpp
+  src/mdbjs/mdbjs.h
+  src/mdbjs/util.cpp
+  src/mdbjs/util.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)
@@ -208,7 +222,13 @@ set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 set(JSON_Install OFF CACHE INTERNAL "")
 add_subdirectory(dependencies/nlohmann_json)
 
-target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zydis)
+target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zydis ${SPIDERMONKEY_LIBRARIES})
+# Add the include directories
+target_include_directories(mdb PRIVATE ${SPIDERMONKEY_INCLUDE_DIRS})
+# Add the library directories
+target_link_directories(mdb PRIVATE ${SPIDERMONKEY_LIBRARY_DIRS})
+# Link the libraries to your target
+
 target_include_directories(mdb PUBLIC ./dependencies)
 target_include_directories(mdb PUBLIC ./src)
 
@@ -226,7 +246,7 @@ if(BUILD_MDB_TESTS)
   )
 
   AddTest(NAME test_utils
-    SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp
+    SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp
     LIBS fmt::fmt mdb_spinlock)
 
   AddTest(NAME expected_tests

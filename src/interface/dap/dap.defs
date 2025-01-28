@@ -41,6 +41,7 @@ ITEM(TerminateThreads, 38)
 ITEM(Threads, 39)
 ITEM(Variables, 40)
 ITEM(WriteMemory, 41)
+ITEM(ImportScript, 42)
 #endif
 
 #ifdef DAP_EVENTS

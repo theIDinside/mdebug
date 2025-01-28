@@ -2,7 +2,7 @@
 #include "stopreply_parser.h"
 #include "connection.h"
 
-namespace gdb {
+namespace mdb::gdb {
 StopReplyParser::StopReplyParser(const RemoteSettings &settings, std::string_view reply) noexcept
     : received_payload(reply), parse_data(reply), mp_configured(settings.multiprocess_configured)
 {
@@ -75,4 +75,4 @@ StopReplyParser::parse_thread_exited() noexcept
 
   return std::make_tuple(pid, tid, exit_status.value());
 }
-} // namespace gdb
+} // namespace mdb::gdb

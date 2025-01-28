@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace xml {
+namespace mdb::xml {
 // Forward declarations
 struct XMLElementView;
 using ElementList = std::vector<Immutable<XMLElementView>>;
@@ -78,4 +78,4 @@ private:
 std::vector<const XMLElementView *> collect_by_name(const XMLElementView &root, std::string_view name,
                                                     bool can_contain_children, u32 guess_total = 85) noexcept;
 
-} // namespace xml
+} // namespace mdb::xml

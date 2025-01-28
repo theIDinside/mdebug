@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+namespace mdb {
 class Tracer;
 class TraceeController;
 namespace ui {
@@ -130,7 +131,7 @@ public:
   template <typename JsonArgs, typename CommandArg>
   static auto
   CheckArgumentContains(const JsonArgs &args,
-                     const CommandArg &cmd_arg) -> std::optional<std::pair<ArgumentError, std::string>>
+                        const CommandArg &cmd_arg) -> std::optional<std::pair<ArgumentError, std::string>>
   {
     if (!args.contains(cmd_arg)) {
       return std::make_pair<ArgumentError, std::string>(
@@ -146,3 +147,4 @@ public:
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here
 using UICommandPtr = UICommand *;
 }; // namespace ui
+} // namespace mdb

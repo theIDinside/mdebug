@@ -6,7 +6,7 @@
 #include <memory_resource>
 #include <sys/user.h>
 
-namespace alloc {
+namespace mdb::alloc {
 class ArenaAllocator;
 
 struct Page
@@ -84,4 +84,4 @@ public:
   std::pmr::monotonic_buffer_resource &Resource() noexcept;
   std::pmr::polymorphic_allocator<> &Allocator() noexcept;
 };
-} // namespace alloc
+} // namespace mdb::alloc

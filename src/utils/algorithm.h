@@ -4,10 +4,9 @@
 #include <optional>
 #include <type_traits>
 
-namespace utils {
-
+namespace mdb {
 template <typename T>
-concept Comparable = requires(const T& t) {
+concept Comparable = requires(const T &t) {
   { t == t } -> std::convertible_to<bool>;
 };
 
@@ -114,13 +113,12 @@ none_of(const Container &c, Fn &&fn) noexcept
   return std::none_of(c.begin(), c.end(), std::move(fn));
 }
 
-
 template <typename Container, Comparable T>
 constexpr auto
-any_of(const Container &c, const T& value) noexcept
+any_of(const Container &c, const T &value) noexcept
 {
-  for(const auto& v : c) {
-    if(v == value) {
+  for (const auto &v : c) {
+    if (v == value) {
       return true;
     }
   }
@@ -130,9 +128,9 @@ any_of(const Container &c, const T& value) noexcept
 
 template <typename Container, Comparable T>
 constexpr auto
-none_of(const Container &c, const T& value) noexcept
+none_of(const Container &c, const T &value) noexcept
 {
   return !any_of(c, value);
 }
 
-} // namespace utils
+} // namespace mdb

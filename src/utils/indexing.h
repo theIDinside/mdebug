@@ -1,12 +1,16 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include <typedefs.h>
-
+namespace mdb {
 // TODO(simon): Re-name & refactor this to mean "section offset"?
 struct Offset
 {
   u64 i;
-  constexpr operator u64() const noexcept { return i; }
+  constexpr
+  operator u64() const noexcept
+  {
+    return i;
+  }
   constexpr u64
   value() const noexcept
   {
@@ -28,7 +32,11 @@ struct Offset
 
 struct Index
 {
-  constexpr operator u32() const noexcept { return i; }
+  constexpr
+  operator u32() const noexcept
+  {
+    return i;
+  }
   constexpr u32
   value() const noexcept
   {
@@ -64,3 +72,4 @@ struct Index
 
   u32 i;
 };
+} // namespace mdb

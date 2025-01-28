@@ -6,7 +6,7 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <variant>
-
+namespace mdb {
 struct MasterPty
 {
   std::string name;
@@ -20,9 +20,12 @@ struct PtyParentResult
   std::optional<int> fd;
 };
 
-struct ParentResult {
+struct ParentResult
+{
   pid_t child_pid;
 };
 
 std::optional<MasterPty> open_pty_master() noexcept;
-std::variant<pid_t, PtyParentResult, ParentResult> pty_fork(bool dontDuplicateStdio, const termios *slave_termios, const winsize *slave_winsize);
+std::variant<pid_t, PtyParentResult, ParentResult> pty_fork(bool dontDuplicateStdio, const termios *slave_termios,
+                                                            const winsize *slave_winsize);
+} // namespace mdb

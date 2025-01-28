@@ -4,8 +4,7 @@
 #include <sys/prctl.h>
 #include <utils/signals.h>
 
-namespace utils {
-
+namespace mdb {
 /*static*/ ThreadPool *
 ThreadPool::GetGlobalPool() noexcept
 {
@@ -92,4 +91,4 @@ ThreadPool::WorkerLoop(std::stop_token &stop_token) noexcept
     delete job;
   }
 }
-} // namespace utils
+} // namespace mdb

@@ -17,7 +17,7 @@ concept EnumType = std::is_enum<E>::value && requires(E e) {
 };
 // clang-format on
 
-namespace utils {
+namespace mdb {
 struct Notifier
 {
   struct ReadEnd
@@ -62,4 +62,4 @@ struct NotifyManager
   bool has_io_ready() noexcept;
   void has_wait_ready(std::vector<NotifyResult> &result, bool flush);
 };
-}; // namespace utils
+}; // namespace mdb

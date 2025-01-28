@@ -10,7 +10,7 @@
 #include <symbolication/callstack.h>
 #include <symbolication/objfile.h>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : mObjectRef(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
@@ -389,4 +389,4 @@ TypeSymbolicationContext::ResolveType() noexcept
   }
 }
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

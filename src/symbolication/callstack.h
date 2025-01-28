@@ -8,18 +8,18 @@
 #include <common.h>
 #include <symbolication/fnsymbol.h>
 
+namespace mdb {
 class SymbolFile;
 struct CallStackRequest;
 struct TaskInfo;
 namespace ui::dap {
 struct Scope;
 }
-
 namespace sym {
 namespace dw {
-  class SourceCodeFile;
-  struct LineTableEntry;
-}
+class SourceCodeFile;
+struct LineTableEntry;
+} // namespace dw
 
 class CFAStateMachine;
 
@@ -280,8 +280,9 @@ private:
   std::vector<FrameUnwindState> mUnwoundRegister{};
 };
 } // namespace sym
-
+} // namespace mdb
 namespace fmt {
+namespace sym = mdb::sym;
 template <> struct formatter<sym::Frame>
 {
   template <typename ParseContext>

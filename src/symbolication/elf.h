@@ -8,6 +8,7 @@
 #include <string_view>
 #include <typedefs.h>
 
+namespace mdb {
 constexpr static u8 ELF_MAGIC[4]{0x7F, 0x45, 0x4C, 0x46};
 constexpr static u8 ELF_MAGIC_[4]{EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3};
 using Elf64Header = Elf64_Ehdr;
@@ -54,7 +55,7 @@ struct ElfSection
   const u8 *begin() const noexcept;
   const u8 *end() const noexcept;
   const u8 *Into(AddrPtr addr) const noexcept;
-  const char* GetCString(u64 offset) const noexcept;
+  const char *GetCString(u64 offset) const noexcept;
 
   /**
    * Determines offset of `inside_ptr` from `m_section_ptr`.
@@ -67,10 +68,12 @@ struct ElfSection
   u64 Size() const noexcept;
 
   template <typename T>
-  auto GetDataAs() const noexcept -> std::span<const T> {
+  auto
+  GetDataAs() const noexcept -> std::span<const T>
+  {
     ASSERT(mSectionData->size_bytes() % sizeof(T) == 0, "data is unaligned!");
-    const T* ptr = reinterpret_cast<const T*>(mSectionData->data());
-    return std::span<const T>{ptr, mSectionData->size_bytes() / sizeof(T) };
+    const T *ptr = reinterpret_cast<const T *>(mSectionData->data());
+    return std::span<const T>{ptr, mSectionData->size_bytes() / sizeof(T)};
   }
 };
 
@@ -83,7 +86,7 @@ struct ElfSectionData
 class Elf
 {
 public:
-  Elf(Elf64Header *header, std::vector<ElfSection>&& sections) noexcept;
+  Elf(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept;
   std::span<const ElfSection> GetSections() const noexcept;
   const ElfSection *GetSection(std::string_view name) const noexcept;
   constexpr const ElfSection *GetSection(ElfSec section) const noexcept;
@@ -91,7 +94,7 @@ public:
   bool HasDWARF() const noexcept;
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
-  static void ParseMinimalSymbol(Elf* elf, ObjectFile& objectFile) noexcept;
+  static void ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept;
   bool AddressesNeedsRelocation() const noexcept;
 
   Elf64Header *header;
@@ -112,3 +115,4 @@ public:
   const ElfSection *debug_rnglists;
   const ElfSection *debug_loclist;
 };
+} // namespace mdb

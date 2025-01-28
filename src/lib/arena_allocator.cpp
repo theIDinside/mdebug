@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <memory_resource>
 #include <sys/mman.h>
-namespace alloc {
+namespace mdb::alloc {
 ScopedArenaAllocator::ScopedArenaAllocator(ArenaAllocator *allocator) noexcept : mAllocator(allocator)
 {
   mStartOffset = mAllocator->CurrentlyAllocated();
@@ -130,4 +130,4 @@ StackAllocator<N>::Allocator() noexcept
 {
   return mUsingStackAllocator;
 }
-} // namespace alloc
+} // namespace mdb::alloc

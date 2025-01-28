@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <span>
 
-namespace sym {
+namespace mdb::sym {
 
 void
 Reg::SetExpression(std::span<const u8> expression) noexcept
@@ -154,7 +154,8 @@ CFAStateMachine::RestoreState() noexcept
 }
 
 u64
-CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel) noexcept
+CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame,
+                                         int frameLevel) noexcept
 {
   auto &reg = mRuleTable[registerNumber];
   switch (reg.mRule) {
@@ -652,7 +653,8 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
 }
 
 CommonInformationEntry
-ReadCommonInformationEntry(u64 commonInfoEntryLength, u64 commonInfoEntryOffset, DwarfBinaryReader &entryReader) noexcept
+ReadCommonInformationEntry(u64 commonInfoEntryLength, u64 commonInfoEntryOffset,
+                           DwarfBinaryReader &entryReader) noexcept
 {
   CIE cie;
   cie.mSectionOffset = commonInfoEntryOffset;
@@ -824,4 +826,4 @@ UnwindInfoSymbolFilePair::GetFrameDescriptionEntryData() const
   return mInfo->mInstructionByteStreamFde;
 }
 
-} // namespace sym
+} // namespace mdb::sym

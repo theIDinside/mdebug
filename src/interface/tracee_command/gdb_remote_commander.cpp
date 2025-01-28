@@ -21,7 +21,7 @@
 #include <sys/user.h>
 #include <tracer.h>
 
-namespace tc {
+namespace mdb::tc {
 
 // Commands that only return OK response, uses this
 #define OkOtherwiseErr(cmd, errMsg)                                                                               \
@@ -275,7 +275,7 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noex
   }
 
   for (auto &entry : tc->GetThreads()) {
-    if (entry.mTask->loc_stat) {
+    if (entry.mTask->mBreakpointLocationStatus) {
       entry.mTask->step_over_breakpoint(tc, action);
       if (!connection->settings().is_non_stop) {
         return TaskExecuteResponse::Ok();
@@ -460,7 +460,7 @@ GdbRemoteCommander::GetThreadName(Tid tid) noexcept
   }
   case RemoteType::GDB: {
     // TODO(Implement name change)
-    if (auto opt = utils::find_if(thread_names, [tid](auto &kvp) { return kvp.first == tid; }); opt) {
+    if (auto opt = mdb::find_if(thread_names, [tid](auto &kvp) { return kvp.first == tid; }); opt) {
       return (*opt)->second;
     }
     // READ ALL THREADS THAT REMOTE IS ATTACHED TO
@@ -640,12 +640,12 @@ GdbRemoteCommander::RemoteConnection() noexcept
   return connection;
 }
 
-utils::Expected<Auxv, Error>
+mdb::Expected<Auxv, Error>
 GdbRemoteCommander::ReadAuxiliaryVector() noexcept
 {
   static constexpr auto BufSize = PAGE_SIZE;
   if (!auxv_data.vector.empty()) {
-    return utils::expected(std::move(auxv_data));
+    return mdb::expected(std::move(auxv_data));
   } else {
     std::array<char, 64> bytes{};
     auto cmd = SerializeCommand(bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), TaskLeaderTid());
@@ -684,7 +684,7 @@ RemoteSessionConfigurator::RemoteSessionConfigurator(gdb::RemoteConnection::ShrP
 {
 }
 
-utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError>
+mdb::Expected<std::vector<RemoteProcess>, gdb::ConnInitError>
 RemoteSessionConfigurator::configure_rr_session() noexcept
 {
   using gdb::ConnInitError, gdb::SocketCommand;
@@ -814,7 +814,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
   return result;
 }
 
-utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError>
+mdb::Expected<std::vector<RemoteProcess>, gdb::ConnInitError>
 RemoteSessionConfigurator::configure_session() noexcept
 {
   using gdb::ConnInitError, gdb::SocketCommand;
@@ -917,4 +917,4 @@ RemoteSessionConfigurator::configure_session() noexcept
   return result;
 }
 
-} // namespace tc
+} // namespace mdb::tc

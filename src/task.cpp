@@ -14,6 +14,7 @@
 #include <tracer.h>
 #include <utility>
 
+namespace mdb {
 TaskRegisters::TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo) : mRegisterFormat(format)
 {
   switch (mRegisterFormat) {
@@ -44,9 +45,9 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 {
   switch (mRegisterFormat) {
   case TargetFormat::Native:
-    return ::get_register(registers, regNumber);
+    return get_register(registers, regNumber);
   case TargetFormat::Remote:
-    static_assert(utils::castenum(ArchType::COUNT) == 1, "Supported architectures have increased");
+    static_assert(mdb::castenum(ArchType::COUNT) == 1, "Supported architectures have increased");
     return registerFile->GetRegister(regNumber);
     break;
   }
@@ -54,57 +55,57 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 }
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
-    : mTid(newTaskTid), mLastWaitStatus(), user_stopped(true), tracer_stopped(true), initialized(false),
-      cache_dirty(true), rip_dirty(true), exited(false), reaped(false), regs(), loc_stat(), call_stack(nullptr),
-      mSupervisor(nullptr)
+    : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), initialized(false),
+      mRegisterCacheDirty(true), mInstructionPointerDirty(true), exited(false), reaped(false), regs(),
+      mBreakpointLocationStatus(), mTaskCallstack(nullptr), mSupervisor(nullptr)
 {
 }
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
-    : mTid(newTaskTid), mLastWaitStatus(), user_stopped(isUserStopped), tracer_stopped(true), initialized(true),
-      cache_dirty(true), rip_dirty(true), exited(false), reaped(false),
-      regs(supervisor.mFormat, supervisor.mArchInfo.as_t().get()), loc_stat(),
+    : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
+      initialized(true), mRegisterCacheDirty(true), mInstructionPointerDirty(true), exited(false), reaped(false),
+      regs(supervisor.mFormat, supervisor.mArchInfo.as_t().get()), mBreakpointLocationStatus(),
       mSupervisor(supervisor.GetSupervisor())
 {
-  call_stack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
+  mTaskCallstack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
 }
 
 void
 TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcept
 {
-  ASSERT(call_stack == nullptr && initialized == false, "Thread has already been initialized.");
-  user_stopped = true;
-  tracer_stopped = true;
+  ASSERT(mTaskCallstack == nullptr && initialized == false, "Thread has already been initialized.");
+  mUserVisibleStop = true;
+  mTracerVisibleStop = true;
   initialized = true;
-  cache_dirty = true;
-  rip_dirty = true;
+  mRegisterCacheDirty = true;
+  mInstructionPointerDirty = true;
   exited = false;
   reaped = false;
   regs = {tc.mFormat, tc.mArchInfo.as_t().get()};
-  loc_stat = {};
-  call_stack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
+  mBreakpointLocationStatus = {};
+  mTaskCallstack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
   mSupervisor = tc.GetSupervisor();
   ASSERT(mSupervisor != nullptr, "must have supervisor");
   DBGLOG(core, "Deferred initializing of thread {} completed", mTid);
   if (restart) {
-    EventSystem::Get().PushDebuggerEvent(TraceEvent::ThreadCreated(
+    EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateThreadCreated(
       {tc.TaskLeaderTid(), mTid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
   }
 }
 
 /*static*/
-std::shared_ptr<TaskInfo>
+Ref<TaskInfo>
 TaskInfo::CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept
 {
   DBGLOG(core, "creating task {}.{}: running={}", supervisor.TaskLeaderTid(), newTaskTid, isRunning);
-  return std::make_shared<TaskInfo>(supervisor, newTaskTid, !isRunning);
+  return RcHandle<TaskInfo>::MakeShared(supervisor, newTaskTid, !isRunning);
 }
 
 /** static */
-std::shared_ptr<TaskInfo>
+Ref<TaskInfo>
 TaskInfo::CreateUnInitializedTask(TaskWaitResult wait) noexcept
 {
-  auto task = std::shared_ptr<TaskInfo>(new TaskInfo{wait.tid});
+  auto task = Ref<TaskInfo>{new TaskInfo{wait.tid}};
   Tracer::Get().RegisterTracedTask(task);
   task->mLastWaitStatus = wait.ws;
   return task;
@@ -148,7 +149,7 @@ TaskInfo::get_register(u64 reg_num) noexcept
 u64
 TaskInfo::unwind_buffer_register(u8 level, u16 register_number) const noexcept
 {
-  return call_stack->UnwindRegister(level, register_number);
+  return mTaskCallstack->UnwindRegister(level, register_number);
 }
 
 void
@@ -159,30 +160,30 @@ TaskInfo::StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>
 
 #define RETURN_RET_ADDR_IF(cond)                                                                                  \
   if ((cond))                                                                                                     \
-    return call_stack->ReturnAddresses();
+    return mTaskCallstack->ReturnAddresses();
 
 #define RETURN_RET_ADDR_LOG(cond, ...)                                                                            \
   if ((cond)) {                                                                                                   \
     DBGLOG(core, __VA_ARGS__);                                                                                    \
-    return call_stack->ReturnAddresses();                                                                         \
+    return mTaskCallstack->ReturnAddresses();                                                                     \
   }
 
 std::span<const AddrPtr>
 TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
 {
-  RETURN_RET_ADDR_IF(!call_stack->IsDirty());
+  RETURN_RET_ADDR_IF(!mTaskCallstack->IsDirty());
 
   tc->CacheRegistersFor(*this);
   // initialize bottom frame's registers with actual live register contents
   // this is then used to execute the dwarf binary code
-  call_stack->Unwind(req);
-  return call_stack->ReturnAddresses();
+  mTaskCallstack->Unwind(req);
+  return mTaskCallstack->ReturnAddresses();
 }
 
 sym::FrameUnwindState *
 TaskInfo::GetUnwindState(int frameLevel) noexcept
 {
-  return call_stack->GetUnwindState(static_cast<u32>(frameLevel));
+  return mTaskCallstack->GetUnwindState(static_cast<u32>(frameLevel));
 }
 
 TraceeController *
@@ -207,7 +208,7 @@ TaskInfo::pending_wait_status() const noexcept
 sym::CallStack &
 TaskInfo::get_callstack() noexcept
 {
-  return *call_stack;
+  return *mTaskCallstack;
 }
 
 void
@@ -274,17 +275,17 @@ TaskInfo::GetTaskLeaderTid() const noexcept
 void
 TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume) noexcept
 {
-  ASSERT(loc_stat.has_value(), "Requires a valid bpstat");
+  ASSERT(mBreakpointLocationStatus.has_value(), "Requires a valid bpstat");
 
-  auto loc = tc->GetUserBreakpoints().location_at(loc_stat->loc);
+  auto loc = tc->GetUserBreakpoints().location_at(mBreakpointLocationStatus->loc);
   auto user_ids = loc->loc_users();
   DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", mTid, fmt::join(user_ids, ", "), loc->address());
 
   auto &control = tc->GetInterface();
   loc->disable(mTid, control);
-  loc_stat->stepped_over = true;
-  loc_stat->re_enable_bp = true;
-  loc_stat->should_resume = resume.type != tc::RunType::None;
+  mBreakpointLocationStatus->stepped_over = true;
+  mBreakpointLocationStatus->re_enable_bp = true;
+  mBreakpointLocationStatus->should_resume = resume.type != tc::RunType::None;
 
   mNextResumeAction = resume;
 
@@ -295,16 +296,16 @@ TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume) no
 void
 TaskInfo::set_stop() noexcept
 {
-  user_stopped = true;
-  tracer_stopped = true;
+  mUserVisibleStop = true;
+  mTracerVisibleStop = true;
 }
 
 void
 TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
 {
-  stop_collected = false;
-  user_stopped = false;
-  tracer_stopped = false;
+  mHasProcessedStop = false;
+  mUserVisibleStop = false;
+  mTracerVisibleStop = false;
   mLastResumeAction = type;
   set_dirty();
   clear_stop_state();
@@ -313,55 +314,56 @@ TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
 bool
 TaskInfo::can_continue() noexcept
 {
-  return initialized && (user_stopped || tracer_stopped) && !reaped;
+  return initialized && (mUserVisibleStop || mTracerVisibleStop) && !reaped;
 }
 
 void
 TaskInfo::set_dirty() noexcept
 {
-  cache_dirty = true;
-  rip_dirty = true;
-  call_stack->SetDirty();
+  mRegisterCacheDirty = true;
+  mInstructionPointerDirty = true;
+  mTaskCallstack->SetDirty();
 }
 
 void
 TaskInfo::set_updated() noexcept
 {
-  rip_dirty = false;
-  cache_dirty = false;
+  mInstructionPointerDirty = false;
+  mRegisterCacheDirty = false;
 }
 
 void
-TaskInfo::add_bpstat(AddrPtr address) noexcept
+TaskInfo::AddBreakpointLocationStatus(AddrPtr address) noexcept
 {
-  loc_stat = LocationStatus{.loc = address, .should_resume = false, .stepped_over = false, .re_enable_bp = false};
+  mBreakpointLocationStatus =
+    LocationStatus{.loc = address, .should_resume = false, .stepped_over = false, .re_enable_bp = false};
 }
 
 std::optional<LocationStatus>
 TaskInfo::clear_bpstat() noexcept
 {
-  const auto copy = loc_stat;
-  loc_stat = std::nullopt;
+  const auto copy = mBreakpointLocationStatus;
+  mBreakpointLocationStatus = std::nullopt;
   return copy;
 }
 
 bool
 TaskInfo::is_stopped() const noexcept
 {
-  return user_stopped;
+  return mUserVisibleStop;
 }
 
 bool
 TaskInfo::stop_processed() const noexcept
 {
-  return stop_collected;
+  return mHasProcessedStop;
 }
 
 void
 TaskInfo::collect_stop() noexcept
 {
-  stop_collected = true;
-  tracer_stopped = true;
+  mHasProcessedStop = true;
+  mTracerVisibleStop = true;
 }
 
 TaskVMInfo
@@ -381,3 +383,4 @@ CallStackRequest::full() noexcept
 {
   return CallStackRequest{.req = Type::Full, .count = 0};
 }
+} // namespace mdb

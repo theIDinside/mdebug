@@ -4,15 +4,16 @@
 #include <typedefs.h>
 #include <vector>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 class UnitData;
 }
-
+namespace mdb {
 class Elf;
 struct ElfSection;
 struct AddressRange;
+} // namespace mdb
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 struct RangeListHeader
 {
   static constexpr auto StaticHeaderSize = 10;
@@ -36,4 +37,4 @@ struct ResolvedRangeListOffset
 AddressRange read_boundaries(const ElfSection *rnglists, const RangeListHeader &header) noexcept;
 AddressRange read_boundaries(const ElfSection *rnglists, const u64 offset) noexcept;
 std::vector<AddressRange> read_boundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset offset) noexcept;
-} // namespace sym::dw
+} // namespace mdb::sym::dw

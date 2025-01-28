@@ -2,11 +2,15 @@
 #pragma once
 #include "eval/eval.h"
 #include "events/event.h"
+#include "events/stop_event.h"
 #include "tracee_pointer.h"
 #include "typedefs.h"
 #include "utils/expected.h"
 #include "utils/immutable.h"
+#include "utils/smartptr.h"
 #include <functional>
+
+namespace mdb {
 
 class TraceeController;
 struct TaskInfo;
@@ -16,7 +20,6 @@ class SymbolFile;
 namespace tc {
 class TraceeCommandInterface;
 };
-
 enum class BreakpointBehavior
 {
   StopAllThreadsWhenHit,
@@ -66,9 +69,38 @@ struct SourceBreakpointSpec
   }
 };
 
-template <> struct std::hash<SourceBreakpointSpec>
+struct FunctionBreakpointSpec
 {
-  using argument_type = SourceBreakpointSpec;
+  std::string name;
+  std::optional<std::string> condition;
+  bool is_regex;
+  friend constexpr auto operator<=>(const FunctionBreakpointSpec &l, const FunctionBreakpointSpec &r) = default;
+
+  friend constexpr auto
+  operator==(const FunctionBreakpointSpec &l, const FunctionBreakpointSpec &r)
+  {
+    return l.name == r.name && l.condition == r.condition;
+  }
+};
+
+struct InstructionBreakpointSpec
+{
+  std::string instructionReference;
+  std::optional<std::string> condition;
+  friend constexpr auto operator<=>(const InstructionBreakpointSpec &l,
+                                    const InstructionBreakpointSpec &r) = default;
+  friend constexpr auto
+  operator==(const InstructionBreakpointSpec &l, const InstructionBreakpointSpec &r)
+  {
+    return l.instructionReference == r.instructionReference && l.condition == r.condition;
+  }
+};
+
+}; // namespace mdb
+
+template <> struct std::hash<mdb::SourceBreakpointSpec>
+{
+  using argument_type = mdb::SourceBreakpointSpec;
   using result_type = size_t;
 
   result_type
@@ -94,23 +126,9 @@ template <> struct std::hash<SourceBreakpointSpec>
   }
 };
 
-struct FunctionBreakpointSpec
+template <> struct std::hash<mdb::FunctionBreakpointSpec>
 {
-  std::string name;
-  std::optional<std::string> condition;
-  bool is_regex;
-  friend constexpr auto operator<=>(const FunctionBreakpointSpec &l, const FunctionBreakpointSpec &r) = default;
-
-  friend constexpr auto
-  operator==(const FunctionBreakpointSpec &l, const FunctionBreakpointSpec &r)
-  {
-    return l.name == r.name && l.condition == r.condition;
-  }
-};
-
-template <> struct std::hash<FunctionBreakpointSpec>
-{
-  using argument_type = FunctionBreakpointSpec;
+  using argument_type = mdb::FunctionBreakpointSpec;
   using result_type = size_t;
 
   result_type
@@ -120,22 +138,9 @@ template <> struct std::hash<FunctionBreakpointSpec>
   }
 };
 
-struct InstructionBreakpointSpec
+template <> struct std::hash<mdb::InstructionBreakpointSpec>
 {
-  std::string instructionReference;
-  std::optional<std::string> condition;
-  friend constexpr auto operator<=>(const InstructionBreakpointSpec &l,
-                                    const InstructionBreakpointSpec &r) = default;
-  friend constexpr auto
-  operator==(const InstructionBreakpointSpec &l, const InstructionBreakpointSpec &r)
-  {
-    return l.instructionReference == r.instructionReference && l.condition == r.condition;
-  }
-};
-
-template <> struct std::hash<InstructionBreakpointSpec>
-{
-  using argument_type = InstructionBreakpointSpec;
+  using argument_type = mdb::InstructionBreakpointSpec;
   using result_type = size_t;
 
   result_type
@@ -145,6 +150,8 @@ template <> struct std::hash<InstructionBreakpointSpec>
            std::hash<std::string_view>{}(m.condition.value_or(""));
   }
 };
+
+namespace mdb {
 
 using UserBpSpec =
   std::variant<std::pair<std::string, SourceBreakpointSpec>, FunctionBreakpointSpec, InstructionBreakpointSpec>;
@@ -169,154 +176,32 @@ struct ResolveError
 
 using BpErr = std::variant<MemoryError, ResolveError>;
 
-namespace fmt {
-template <> struct formatter<std::pair<std::string, SourceBreakpointSpec>>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const std::pair<std::string, SourceBreakpointSpec> &source_spec, FormatContext &ctx) const
-  {
-    const auto &spec = source_spec.second;
-
-    auto out = fmt::format_to(ctx.out(), R"(Source = {}:{})", source_spec.first, spec.line);
-    if (spec.column) {
-      out = fmt::format_to(out, R"(:{})", *spec.column);
-    }
-    if (spec.condition) {
-      out = fmt::format_to(out, R"( with custom hit condition)", *spec.condition);
-    }
-    if (spec.log_message) {
-      out = fmt::format_to(out, R"( and a evaluated log message)", *spec.log_message);
-    }
-
-    return out;
-  }
-};
-
-template <> struct formatter<FunctionBreakpointSpec>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const FunctionBreakpointSpec &spec, FormatContext &ctx) const
-  {
-    const auto &[name, condition, regex] = spec;
-    auto out = fmt::format_to(ctx.out(), R"(Function={}, searched using regex={})", name, regex);
-    if (condition.has_value()) {
-      out = fmt::format_to(out, R"( with custom hit condition)", *condition);
-    }
-
-    return out;
-  }
-};
-
-template <> struct formatter<InstructionBreakpointSpec>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const InstructionBreakpointSpec &spec, FormatContext &ctx) const
-  {
-    const auto &[insReference, condition] = spec;
-    auto out = fmt::format_to(ctx.out(), R"(Instruction Address={})", insReference);
-    if (condition.has_value()) {
-      out = fmt::format_to(out, R"( with custom hit condition)", *condition);
-    }
-
-    return out;
-  }
-};
-
-template <> struct formatter<UserBpSpec>
-{
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto
-  format(const UserBpSpec &spec, FormatContext &ctx) const
-  {
-    auto iterator = ctx.out();
-    std::visit(
-      [&iterator](const auto &var) {
-        using T = std::remove_cvref_t<decltype(var)>;
-        if constexpr (std::is_same_v<T, std::pair<std::string, SourceBreakpointSpec>>) {
-          fmt::format_to(iterator, "{}", var);
-        } else if constexpr (std::is_same_v<T, FunctionBreakpointSpec>) {
-          fmt::format_to(iterator, "{}", var);
-        } else if constexpr (std::is_same_v<T, InstructionBreakpointSpec>) {
-          fmt::format_to(iterator, "{}", var);
-        } else {
-          static_assert(always_false<T>, "Unhandled breakpoint spec type");
-        }
-      },
-      spec);
-    return iterator;
-  }
-};
-}; // namespace fmt
-
 /** A type that informs the supervisor on what to do with the breakpoint after that breakpoint has been hit.
  * Currently describes if the thread should stop and/or if the breakpoint is to be retired. */
-struct bp_hit
+struct BreakpointHitEventResult
 {
   // if true, thread that hit breakpoint should be stopped
-  bool stop : 1;
+  EventResult mResult : 31;
   // if true, this user breakpoint should be removed now.
-  bool retire_bp : 1;
+  BreakpointOp mRetireBreakpoint : 1;
 
-  static bp_hit
-  noop() noexcept
+  constexpr bool
+  ShouldStop() const noexcept
   {
-    return bp_hit{false, false};
+    return mResult == EventResult::Stop || mResult == EventResult::StopAll;
   }
 
-  static bp_hit
-  normal_stop() noexcept
+  constexpr bool
+  ShouldRetire() const noexcept
   {
-    return bp_hit{true, false};
-  }
-
-  static bp_hit
-  continue_retire_bp() noexcept
-  {
-    return bp_hit{false, true};
-  }
-
-  static bp_hit
-  stop_retire_bp() noexcept
-  {
-    return bp_hit{true, true};
+    return mRetireBreakpoint == BreakpointOp::Retire;
   }
 };
 
 class UserBreakpoints;
 
 class UserBreakpoint;
-using StopCondition = std::function<bool(UserBreakpoint *, TaskInfo &t)>;
+using StopCondition = std::function<StopEvents(UserBreakpoint *, TaskInfo &t)>;
 
 struct LocationSourceInfo
 {
@@ -327,18 +212,19 @@ struct LocationSourceInfo
 
 class BreakpointLocation
 {
-  AddrPtr addr;
+  INTERNAL_REFERENCE_COUNT(BreakpointLocation)
   bool installed{true};
+  AddrPtr addr;
   std::vector<UserBreakpoint *> users{};
   std::unique_ptr<LocationSourceInfo> source_info;
   friend UserBreakpoints;
 
 public:
   Immutable<u8> original_byte;
-  using shr_ptr = std::shared_ptr<BreakpointLocation>;
-  static shr_ptr CreateLocation(AddrPtr addr, u8 original) noexcept;
-  static shr_ptr CreateLocationWithSource(AddrPtr addr, u8 original,
-                                          std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
+  using Ref = RcHandle<BreakpointLocation>;
+  static Ref CreateLocation(AddrPtr addr, u8 original) noexcept;
+  static Ref CreateLocationWithSource(AddrPtr addr, u8 original,
+                                      std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
 
   explicit BreakpointLocation(AddrPtr addr, u8 original) noexcept;
   explicit BreakpointLocation(AddrPtr addr, u8 original, std::unique_ptr<LocationSourceInfo> &&src_info) noexcept;
@@ -372,18 +258,18 @@ struct RequiredUserParameters
 {
   Tid tid;
   u16 id;
-  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> loc_or_err;
+  Expected<Ref<BreakpointLocation>, BpErr> loc_or_err;
   std::optional<u32> times_to_hit;
   TraceeController &tc;
 };
 
 class UserBreakpoint
 {
+  INTERNAL_REFERENCE_COUNT(UserBreakpoint)
 protected:
-  bool enabled_by_user;
-  std::shared_ptr<BreakpointLocation> bp;
-  u32 on_hit_count{0};
-  std::optional<StopCondition> stop_condition;
+  using enum EventResult;
+  bool mEnabledByUser;
+  Ref<BreakpointLocation> bp;
   std::unique_ptr<BpErr> err;
   friend UserBreakpoints;
 
@@ -395,7 +281,7 @@ public:
   // The actual interface that sets a breakpoint "in software" of the tracee. Due to the nature of the current
   // design we must carry this reference in `UserBreakpoint`, because on destruction of one (`~UserBreakpoint`), we
   // may be the last user of a `BreakpointLocation` at which point we want to unset it in the tracee. However, we
-  // don't do no manual deletion anywhere, so it can/will happen when std::shared_ptr<UserBreakpoint> gets dropped.
+  // don't do no manual deletion anywhere, so it can/will happen when Ref<UserBreakpoint> gets dropped.
   // Yay? Anyway, it's "just" 8 bytes.
   Immutable<u32> id;
   Immutable<Tid> tid;
@@ -403,54 +289,63 @@ public:
   Immutable<u32> hit_count;
   Immutable<u32> spec_key{};
 
-  explicit UserBreakpoint(RequiredUserParameters param, LocationUserKind kind,
-                          std::optional<StopCondition> &&cond) noexcept;
+  explicit UserBreakpoint(RequiredUserParameters param, LocationUserKind kind) noexcept;
   virtual ~UserBreakpoint() noexcept;
   void pre_destruction(tc::TraceeCommandInterface &ctrl) noexcept;
 
-  std::shared_ptr<BreakpointLocation> bp_location() noexcept;
-  void increment_count() noexcept;
-  bool is_enabled() noexcept;
-  void enable(tc::TraceeCommandInterface &ctrl) noexcept;
-  void disable(tc::TraceeCommandInterface &ctrl) noexcept;
-  Tid get_tid() noexcept;
-  bool check_should_stop(TaskInfo &t) noexcept;
-  std::optional<AddrPtr> address() const noexcept;
-  bool verified() const noexcept;
-  std::optional<u32> line() const noexcept;
-  std::optional<u32> column() const noexcept;
-  std::optional<std::string_view> source_file() const noexcept;
-  std::optional<std::string> error_message() const noexcept;
-  void update_location(std::shared_ptr<BreakpointLocation> bploc) noexcept;
+  Ref<BreakpointLocation> GetLocation() noexcept;
 
-  virtual UserBpSpec *user_spec() const noexcept;
-  virtual std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
-                                                          std::shared_ptr<BreakpointLocation> bp) noexcept;
-  virtual bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept = 0;
+  bool IsEnabled() noexcept;
+  void Enable(tc::TraceeCommandInterface &ctrl) noexcept;
+  void Disable(tc::TraceeCommandInterface &ctrl) noexcept;
+  Tid GetTid() noexcept;
+  EventResult EvaluateStopCondition(TaskInfo &t) noexcept;
+  std::optional<AddrPtr> Address() const noexcept;
+  bool IsVerified() const noexcept;
+  std::optional<u32> Line() const noexcept;
+  std::optional<u32> Column() const noexcept;
+  std::optional<std::string_view> GetSourceFile() const noexcept;
+  std::optional<std::string> GetErrorMessage() const noexcept;
+  void UpdateLocation(Ref<BreakpointLocation> bploc) noexcept;
 
-  template <typename UserBreakpoint, typename... Args>
-  static std::shared_ptr<UserBreakpoint>
+  virtual UserBpSpec *UserProvidedSpec() const noexcept;
+  virtual Ref<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
+                                              Ref<BreakpointLocation> bp) noexcept;
+
+  /// Evaluate the result of hitting this breakpoint which determines what behavior the task scheduler will take.
+  /// `tc` is the relevant supervisor for the task `t` that hit the breakpoint.
+  virtual BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept = 0;
+
+  template <typename UB, typename... Args>
+  static Ref<UB>
   create_user_breakpoint(RequiredUserParameters &&param, Args &&...args) noexcept
   {
-    return std::make_shared<UserBreakpoint>(std::move(param), std::move(args)...);
+    return Ref<UB>::MakeShared(std::move(param), std::move(args)...);
   }
 };
 
 class Breakpoint : public UserBreakpoint
 {
 protected:
-  std::optional<Tid> stop_only;
-  BreakpointBehavior mBehavior;
-  std::unique_ptr<UserBpSpec> bp_spec;
+  using BpOp = BreakpointOp;
+  std::optional<Tid> mStopOnlyThread;
+  std::unique_ptr<UserBpSpec> mBreakpointSpec;
+  u32 mHitCount{0};
+  std::optional<StopCondition> mStopConditionEvaluator;
 
 public:
   explicit Breakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
                       std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept;
   ~Breakpoint() noexcept override = default;
-  bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept override;
-  UserBpSpec *user_spec() const noexcept override;
-  std::shared_ptr<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
-                                                  std::shared_ptr<BreakpointLocation> bp) noexcept override;
+  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept override;
+  UserBpSpec *UserProvidedSpec() const noexcept override;
+  Ref<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
+                                      Ref<BreakpointLocation> bp) noexcept override;
+  constexpr void
+  IncrementHitCount() noexcept
+  {
+    ++mHitCount;
+  }
 };
 
 class TemporaryBreakpoint : public Breakpoint
@@ -461,7 +356,7 @@ public:
   explicit TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
                                std::optional<StopCondition> &&cond) noexcept;
   ~TemporaryBreakpoint() noexcept override = default;
-  bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept override;
+  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept override;
 };
 
 class FinishBreakpoint : public UserBreakpoint
@@ -470,7 +365,7 @@ class FinishBreakpoint : public UserBreakpoint
 
 public:
   explicit FinishBreakpoint(RequiredUserParameters param, Tid stop_only) noexcept;
-  bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
 class ResumeToBreakpoint : public UserBreakpoint
@@ -479,7 +374,7 @@ class ResumeToBreakpoint : public UserBreakpoint
 
 public:
   explicit ResumeToBreakpoint(RequiredUserParameters param, Tid tid) noexcept;
-  bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
 class Logpoint : public Breakpoint
@@ -491,14 +386,14 @@ class Logpoint : public Breakpoint
 public:
   explicit Logpoint(RequiredUserParameters param, std::string expression,
                     std::optional<StopCondition> &&stop_condition, std::unique_ptr<UserBpSpec> &&spec) noexcept;
-  bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
 class SOLoadingBreakpoint : public UserBreakpoint
 {
 public:
   explicit SOLoadingBreakpoint(RequiredUserParameters param) noexcept;
-  bp_hit on_hit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 
 class UserBreakpoints
@@ -510,7 +405,7 @@ public:
 
 private:
   TraceeController &tc;
-  std::unordered_map<BpId, std::shared_ptr<UserBreakpoint>> user_breakpoints{};
+  std::unordered_map<BpId, Ref<UserBreakpoint>> user_breakpoints{};
   std::unordered_map<AddrPtr, std::vector<BpId>> bps_at_loc{};
   std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> source_breakpoints{};
 
@@ -527,21 +422,21 @@ public:
   void on_exec() noexcept;
   void OnProcessExit() noexcept;
   void add_bp_location(const UserBreakpoint &updated_bp) noexcept;
-  void add_user(std::shared_ptr<UserBreakpoint> user_bp) noexcept;
+  void add_user(Ref<UserBreakpoint> user_bp) noexcept;
   void remove_bp(u32 id) noexcept;
-  std::shared_ptr<BreakpointLocation> location_at(AddrPtr address) noexcept;
-  std::shared_ptr<UserBreakpoint> get_user(u32 id) const noexcept;
-  std::vector<std::shared_ptr<UserBreakpoint>> all_users() const noexcept;
+  Ref<BreakpointLocation> location_at(AddrPtr address) noexcept;
+  Ref<UserBreakpoint> GetUserBreakpoint(u32 id) const noexcept;
+  std::vector<Ref<UserBreakpoint>> all_users() const noexcept;
   // Get all user breakpoints that has not been verified (set at an actual address in memory)
-  std::vector<std::shared_ptr<UserBreakpoint>> non_verified() const noexcept;
+  std::vector<Ref<UserBreakpoint>> non_verified() const noexcept;
   SourceFileBreakpointMap &bps_for_source(const SourceCodeFileName &src_file) noexcept;
   SourceFileBreakpointMap &bps_for_source(std::string_view src_file) noexcept;
   std::vector<std::string_view> sources_with_bpspecs() const noexcept;
 
   template <typename BreakpointT, typename... UserBpArgs>
-  std::shared_ptr<UserBreakpoint>
-  create_loc_user(TraceeController &tc, utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> &&loc_or_err,
-                  Tid tid, UserBpArgs &&...args)
+  Ref<UserBreakpoint>
+  create_loc_user(TraceeController &tc, Expected<Ref<BreakpointLocation>, BpErr> &&loc_or_err, Tid tid,
+                  UserBpArgs &&...args)
   {
     auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
       RequiredUserParameters{
@@ -554,8 +449,7 @@ public:
 
   template <typename BreakpointT, typename... UserBpArgs>
   void
-  CreateAndAddUserBreakpoint(TraceeController &tc,
-                             utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> &&loc_or_err, Tid tid,
+  CreateAndAddUserBreakpoint(TraceeController &tc, Expected<Ref<BreakpointLocation>, BpErr> &&loc_or_err, Tid tid,
                              UserBpArgs &&...args)
   {
     auto user = UserBreakpoint::create_user_breakpoint<BreakpointT>(
@@ -566,3 +460,114 @@ public:
   }
   u16 new_id() noexcept;
 };
+}; // namespace mdb
+
+namespace fmt {
+template <> struct formatter<std::pair<std::string, mdb::SourceBreakpointSpec>>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const std::pair<std::string, mdb::SourceBreakpointSpec> &source_spec, FormatContext &ctx) const
+  {
+    const auto &spec = source_spec.second;
+
+    auto out = fmt::format_to(ctx.out(), R"(Source = {}:{})", source_spec.first, spec.line);
+    if (spec.column) {
+      out = fmt::format_to(out, R"(:{})", *spec.column);
+    }
+    if (spec.condition) {
+      out = fmt::format_to(out, R"( with custom hit condition)", *spec.condition);
+    }
+    if (spec.log_message) {
+      out = fmt::format_to(out, R"( and a evaluated log message)", *spec.log_message);
+    }
+
+    return out;
+  }
+};
+
+template <> struct formatter<mdb::FunctionBreakpointSpec>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const mdb::FunctionBreakpointSpec &spec, FormatContext &ctx) const
+  {
+    const auto &[name, condition, regex] = spec;
+    auto out = fmt::format_to(ctx.out(), R"(Function={}, searched using regex={})", name, regex);
+    if (condition.has_value()) {
+      out = fmt::format_to(out, R"( with custom hit condition)", *condition);
+    }
+
+    return out;
+  }
+};
+
+template <> struct formatter<mdb::InstructionBreakpointSpec>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const mdb::InstructionBreakpointSpec &spec, FormatContext &ctx) const
+  {
+    const auto &[insReference, condition] = spec;
+    auto out = fmt::format_to(ctx.out(), R"(Instruction Address={})", insReference);
+    if (condition.has_value()) {
+      out = fmt::format_to(out, R"( with custom hit condition)", *condition);
+    }
+
+    return out;
+  }
+};
+
+template <> struct formatter<mdb::UserBpSpec>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(const mdb::UserBpSpec &spec, FormatContext &ctx) const
+  {
+    auto iterator = ctx.out();
+    std::visit(
+      [&iterator](const auto &var) {
+        using T = std::remove_cvref_t<decltype(var)>;
+        if constexpr (std::is_same_v<T, std::pair<std::string, mdb::SourceBreakpointSpec>>) {
+          fmt::format_to(iterator, "{}", var);
+        } else if constexpr (std::is_same_v<T, mdb::FunctionBreakpointSpec>) {
+          fmt::format_to(iterator, "{}", var);
+        } else if constexpr (std::is_same_v<T, mdb::InstructionBreakpointSpec>) {
+          fmt::format_to(iterator, "{}", var);
+        } else {
+          static_assert(mdb::always_false<T>, "Unhandled breakpoint spec type");
+        }
+      },
+      spec);
+    return iterator;
+  }
+};
+}; // namespace fmt

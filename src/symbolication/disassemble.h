@@ -3,12 +3,13 @@
 #include "tracee_pointer.h"
 #include <common.h>
 #include <typedefs.h>
-
+namespace mdb {
 class TraceeController;
 struct ElfSection;
 struct LineTableEntry;
+} // namespace mdb
 
-namespace sym {
+namespace mdb::sym {
 struct Disassembly
 {
   AddrPtr address;
@@ -25,9 +26,10 @@ void zydis_disasm_backwards(TraceeController *target, AddrPtr addr, i32 ins_offs
 
 void zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
                   std::vector<sym::Disassembly> &output) noexcept;
-} // namespace sym
+} // namespace mdb::sym
 
 namespace fmt {
+namespace sym = mdb::sym;
 template <> struct formatter<sym::Disassembly>
 {
 

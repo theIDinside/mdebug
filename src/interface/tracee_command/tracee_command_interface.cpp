@@ -6,7 +6,7 @@
 #include <tracer.h>
 #include <type_traits>
 
-namespace tc {
+namespace mdb::tc {
 
 TraceeCommandInterface::TraceeCommandInterface(TargetFormat format,
                                                std::shared_ptr<gdb::ArchictectureInfo> &&arch_info,
@@ -111,4 +111,4 @@ to_str(RunType type) noexcept
   __builtin_unreachable();
 }
 
-} // namespace tc
+} // namespace mdb::tc

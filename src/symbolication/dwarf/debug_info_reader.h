@@ -5,12 +5,13 @@
 #include <common.h>
 #include <typedefs.h>
 
+namespace mdb {
 class Elf;
 class ObjectFile;
-
 struct AttributeValue;
+} // namespace mdb
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 class UnitData;
 struct Abbreviation;
@@ -109,4 +110,4 @@ public:
   DieAttributeReader(DieReference die, const AbbreviationInfo &info) noexcept;
 };
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

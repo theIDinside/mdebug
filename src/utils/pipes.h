@@ -10,9 +10,9 @@
 #include <mutex>
 #include <optional>
 #include <sys/poll.h>
+#include <unistd.h>
 
-namespace utils {
-
+namespace mdb {
 template <typename Payload> class SynchronizedSignalPipe
 {
   std::mutex payload_guard{};
@@ -263,7 +263,7 @@ public:
     }
     PollResult result{res};
 
-    for (auto [i, cfg] : utils::EnumerateView{poll_configurations}) {
+    for (auto [i, cfg] : mdb::EnumerateView{poll_configurations}) {
       if (cfg.revents != 0) {
         result.add(i);
         cfg.revents = 0;
@@ -279,4 +279,4 @@ CreateSignalPipes(auto &&...ps) noexcept
   return SignalPipes{ps...};
 }
 
-} // namespace utils
+} // namespace mdb

@@ -2,7 +2,7 @@
 #include "die_iterator.h"
 #include "die.h"
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 /*static*/
 const DieMetaData *
@@ -52,4 +52,4 @@ DieSiblingIterator::operator->() noexcept
   return die;
 }
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

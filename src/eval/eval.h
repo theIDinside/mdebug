@@ -3,18 +3,13 @@
 #include "utils/byte_buffer.h"
 #include "utils/immutable.h"
 
-#include <cstdint>
 #include <memory>
 #include <typedefs.h>
-#include <variant>
-
+namespace mdb {
 class TraceeController;
+}
 
-namespace eval {
-
-struct EvalValue
-{
-};
+namespace mdb::eval {
 
 enum class ValueKind
 {
@@ -59,9 +54,9 @@ class EvaluationContext
   TraceeController &tc;
 
 public:
-  EvaluationContext(TraceeController &tc, std::unique_ptr<utils::ByteBuffer> &&buffer, int frame_id) noexcept;
-  Immutable<std::unique_ptr<utils::ByteBuffer>> input;
+  EvaluationContext(TraceeController &tc, std::unique_ptr<mdb::ByteBuffer> &&buffer, int frame_id) noexcept;
+  Immutable<std::unique_ptr<mdb::ByteBuffer>> input;
   Immutable<int> frame_id;
 };
 
-} // namespace eval
+} // namespace mdb::eval

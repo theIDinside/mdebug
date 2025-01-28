@@ -4,7 +4,7 @@
 #include "symbolication/elf.h"
 #include "symbolication/objfile.h"
 #include <filesystem>
-
+namespace mdb {
 SharedObject::SharedObject(int so_id, TPtr<link_map> tloc, AddrPtr addr, Path &&path) noexcept
     : so_id(so_id), tracee_location(tloc), elf_vma_addr_diff(addr), path(std::move(path)),
       so_name(this->path.filename()), symbol_info(SharedObjectSymbols::None), objfile(nullptr)
@@ -117,3 +117,4 @@ SharedObjectMap::new_id() noexcept
   ++next_so_id;
   return it;
 }
+} // namespace mdb

@@ -11,8 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace utils {
-
+namespace mdb {
 template <typename... Args>
 constexpr auto
 FilterNullptr()
@@ -162,7 +161,7 @@ TransformCopyTo(C &c, C &out, Fn transform)
   std::transform(c.begin(), c.end(), std::back_inserter(out), transform);
 }
 
-} // namespace utils
+} // namespace mdb
 
 template <typename T> struct Default
 {

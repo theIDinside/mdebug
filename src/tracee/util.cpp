@@ -8,7 +8,7 @@
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
-
+namespace mdb {
 u32
 SystemVectorExtensionSize() noexcept
 {
@@ -130,3 +130,4 @@ ParsePidTid(std::string_view input, bool formatIsHex) noexcept
 
   return PidTid{};
 }
+} // namespace mdb

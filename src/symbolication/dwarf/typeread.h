@@ -3,14 +3,15 @@
 #include <symbolication/dwarf/die_ref.h>
 #include <symbolication/type.h>
 
+namespace mdb {
+class ObjectFile;
 namespace sym {
 class FunctionSymbol;
 class Frame;
 } // namespace sym
+} // namespace mdb
 
-class ObjectFile;
-
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 /** SymbolicationContext "kinds" are types that "fully" resolve the surface areas of some entity (a function, a
  * type). Notice the terminology "surface area" and fully resolving it. A type may have many layers of various sub
@@ -62,4 +63,4 @@ public:
   void ResolveType() noexcept;
 };
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

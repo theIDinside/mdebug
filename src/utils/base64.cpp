@@ -2,8 +2,7 @@
 #include "base64.h"
 #include <cmath>
 
-namespace utils {
-
+namespace mdb {
 consteval std::array<int, 256>
 BaseTable() noexcept
 {
@@ -66,4 +65,4 @@ encode_base64(std::span<std::uint8_t> data) noexcept
 
   return buffer;
 }
-} // namespace utils
+} // namespace mdb

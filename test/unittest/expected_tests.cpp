@@ -31,8 +31,9 @@ struct Destructible
 
   ~Destructible() noexcept
   {
-    if (!moved_from)
+    if (!moved_from) {
       destroyed_n_times++;
+    }
   }
   std::string data;
 };
@@ -45,18 +46,18 @@ int Destructible::copy_ctor = 0;
 
 TEST(Expected, TestTrivialTypes) {}
 
-static utils::Expected<Destructible, int>
+static mdb::Expected<Destructible, int>
 take_chars_must_have_len(const std::string &s, unsigned count)
 {
   if (s.size() > count) {
     auto str = s.substr(0, count);
-    return utils::Expected<Destructible, int>{str};
+    return mdb::Expected<Destructible, int>{str};
   } else {
-    return utils::unexpected(static_cast<int>(count - s.size()));
+    return mdb::unexpected(static_cast<int>(count - s.size()));
   }
 }
 
-static utils::Expected<std::array<std::string, 4>, int>
+static mdb::Expected<std::array<std::string, 4>, int>
 create_substrs(const std::string &s, unsigned count)
 {
   if (s.size() > count) {
@@ -66,9 +67,9 @@ create_substrs(const std::string &s, unsigned count)
     res[1] = str;
     res[2] = str;
     res[3] = str;
-    return utils::expected(std::move(res));
+    return mdb::expected(std::move(res));
   } else {
-    return utils::unexpected<int>(static_cast<int>(count - s.size()));
+    return mdb::unexpected<int>(static_cast<int>(count - s.size()));
   }
 }
 

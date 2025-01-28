@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "block.h"
-
+namespace mdb {
 bool
 AddressRange::Contains(AddressRange &block) const noexcept
 {
@@ -60,3 +60,4 @@ BoundaryBuilder::Build() const noexcept
 {
   return AddressRange{low, high};
 }
+} // namespace mdb

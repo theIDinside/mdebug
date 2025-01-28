@@ -7,8 +7,7 @@
 #include <typedefs.h>
 #include <vector>
 
-namespace utils {
-
+namespace mdb {
 // clang-format off
 template <typename ContainerT>
 concept Containerish = requires(ContainerT c) {
@@ -45,4 +44,4 @@ private:
   std::mutex mTaskMutex;
   std::condition_variable mTaskConditionVariable;
 };
-} // namespace utils
+} // namespace mdb

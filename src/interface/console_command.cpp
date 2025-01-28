@@ -6,7 +6,8 @@
 #include <utility>
 
 /// ConsoleCommandRegistry implementation
-
+namespace mdb {
+namespace fmt = ::fmt;
 void
 ConsoleCommandRegistry::RegisterConsoleCommand(std::string_view name,
                                                std::shared_ptr<ConsoleCommand> command) noexcept
@@ -47,7 +48,7 @@ ConsoleCommandInterpreter::RegisterConsoleCommand(std::string_view name,
 ConsoleCommandResult
 ConsoleCommandInterpreter::Interpret(const std::string &input, std::pmr::memory_resource *allocator) noexcept
 {
-  auto splitInput = utils::split_string(input, " ");
+  auto splitInput = mdb::split_string(input, " ");
 
   if (splitInput.empty()) {
     return ConsoleCommandResult{false, std::pmr::string{ConsoleLine("No input for command"), allocator}};
@@ -84,3 +85,4 @@ GenericCommand::execute(std::span<std::string_view> args, std::pmr::memory_resou
 {
   return mFunction(args, allocator);
 }
+} // namespace mdb

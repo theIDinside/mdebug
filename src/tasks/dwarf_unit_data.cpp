@@ -8,7 +8,7 @@
 #include <ranges>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 UnitDataTask::UnitDataTask(ObjectFile *obj, std::span<UnitHeader> headers) noexcept
     : obj(obj), mCompilationUnitsToParse(headers.begin(), headers.end())
@@ -168,7 +168,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
   std::pmr::vector<std::pmr::vector<sym::dw::UnitHeader>> works{allocator};
 
   std::pmr::vector<sym::dw::UnitHeader> sortedBySize{allocator};
-  utils::CopyTo(headerRead.Headers(), sortedBySize);
+  mdb::CopyTo(headerRead.Headers(), sortedBySize);
 
   std::sort(sortedBySize.begin(), sortedBySize.end(), [](const UnitHeader &a, const UnitHeader &b) {
     return a.CompilationUnitSize() > b.CompilationUnitSize();
@@ -177,7 +177,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
   std::vector<UnitDataTask *> tasks;
   std::pmr::vector<u64> taskSize{allocator};
 
-  const auto workerCount = utils::ThreadPool::GetGlobalPool()->WorkerCount();
+  const auto workerCount = mdb::ThreadPool::GetGlobalPool()->WorkerCount();
   works.resize(workerCount, {});
   tasks.reserve(workerCount);
   taskSize.resize(workerCount, 0);
@@ -204,4 +204,4 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
   return tasks;
 }
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

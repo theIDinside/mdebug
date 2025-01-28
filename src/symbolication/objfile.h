@@ -12,6 +12,8 @@
 #include <sys/mman.h>
 #include <type_traits>
 
+namespace mdb {
+
 using VariablesReference = int;
 template <typename T> using Set = std::unordered_set<T>;
 
@@ -88,14 +90,14 @@ class ObjectFile
   std::unordered_map<std::string_view, MinSymbol> mMinimalObjectSymbols;
 
   std::mutex mLnpHeaderMutex{};
-  std::unordered_map<u64, sym::dw::LNPHeader*> mLineNumberProgramHeaders{};
+  std::unordered_map<u64, sym::dw::LNPHeader *> mLineNumberProgramHeaders{};
 
   std::mutex mUnitDataWriteLock;
   std::vector<sym::dw::UnitData *> mCompileUnits;
   std::unique_ptr<sym::dw::ObjectFileNameIndex> mNameToDieIndex;
 
   std::mutex mCompileUnitWriteLock;
-  std::vector<sym::CompilationUnit*> mCompilationUnits;
+  std::vector<sym::CompilationUnit *> mCompilationUnits;
   std::unordered_map<u64, sym::dw::UnitData *> mTypeToUnitDataMap{};
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
@@ -134,9 +136,9 @@ public:
   auto GetAddressRange() const noexcept -> AddressRange;
   auto HasReadLnpHeader(u64 offset) noexcept -> bool;
   auto GetLnpHeader(u64 offset) noexcept -> sym::dw::LNPHeader *;
-  // This method may fail in inserting `header` - but it only does so because it was raced by another thread and completed faster
-  // the caller must therefore delete `header` upon seeing `false` returned.
-  auto SetLnpHeader(u64 offset, sym::dw::LNPHeader* header) noexcept -> bool;
+  // This method may fail in inserting `header` - but it only does so because it was raced by another thread and
+  // completed faster the caller must therefore delete `header` upon seeing `false` returned.
+  auto SetLnpHeader(u64 offset, sym::dw::LNPHeader *header) noexcept -> bool;
 
   auto GetTypeStorage() noexcept -> NonNullPtr<TypeStorage>;
   auto GetElfSection(Elf *elf, u32 index) const noexcept -> u8 *;
@@ -151,15 +153,16 @@ public:
   auto GetDieReference(u64 offset) noexcept -> sym::dw::DieReference;
   auto GetNameIndex() noexcept -> sym::dw::ObjectFileNameIndex *;
 
-  auto AddInitializedCompileUnits(std::span<sym::CompilationUnit*> new_cus) noexcept -> void;
+  auto AddInitializedCompileUnits(std::span<sym::CompilationUnit *> new_cus) noexcept -> void;
   auto AddTypeUnits(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
   auto AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept -> void;
 
   auto GetTypeUnit(u64 type_signature) noexcept -> sym::dw::UnitData *;
   auto GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept -> sym::dw::DieReference;
 
-  auto GetSourceCodeFiles(std::string_view full_path) noexcept -> std::span<std::shared_ptr<sym::dw::SourceCodeFile>>;
-  auto GetCompilationUnits() noexcept -> std::span<sym::CompilationUnit*>;
+  auto
+  GetSourceCodeFiles(std::string_view full_path) noexcept -> std::span<std::shared_ptr<sym::dw::SourceCodeFile>>;
+  auto GetCompilationUnits() noexcept -> std::span<sym::CompilationUnit *>;
 
   auto InitializeDebugSymbolInfo() noexcept -> void;
   auto AddMinimalElfSymbols(std::vector<MinSymbol> &&fn_symbols,
@@ -243,3 +246,4 @@ private:
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;
 void object_file_unloader(ObjectFile *obj);
+} // namespace mdb

@@ -4,10 +4,11 @@
 #include <symbolication/dwarf/common.h>
 #include <symbolication/dwarf_defs.h>
 #include <typedefs.h>
-
+namespace mdb {
 struct ElfSection;
+}
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 class UnitHeader
 {
@@ -55,4 +56,4 @@ private:
   u64 mTypeSignature{0};
   u64 mTypeOffset{0};
 };
-} // namespace sym::dw
+} // namespace mdb::sym::dw

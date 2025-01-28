@@ -5,7 +5,7 @@
 #include <string_view>
 #include <typedefs.h>
 
-namespace gdb {
+namespace mdb::gdb {
 struct RemoteSettings;
 
 struct StopReplyParser
@@ -34,10 +34,10 @@ public:
     const auto target = parse_process();
     if (mp_configured && !target) {
       DBGLOG(remote,
-           "Failed to parse process for {} packet - we expect multiprocess extension to be turned on: '{}'",
-           Packet, received_payload);
+             "Failed to parse process for {} packet - we expect multiprocess extension to be turned on: '{}'",
+             Packet, received_payload);
     }
     return std::make_pair(target, signal);
   }
 };
-} // namespace gdb
+} // namespace mdb::gdb

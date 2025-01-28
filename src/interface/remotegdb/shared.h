@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <typedefs.h>
 #include <string_view>
+#include <typedefs.h>
 
-namespace gdb {
+namespace mdb::gdb {
 
 enum class ArchId
 {
@@ -28,4 +28,4 @@ char *FormatValue(char *ptr, u32 value) noexcept;
 
 u32 DecodeRunLengthEncoding(std::string_view v, char *buf, u32 size) noexcept;
 std::string_view DecodeRunLengthEncToStringView(std::string_view v, char *buf, u32 size) noexcept;
-} // namespace gdb
+} // namespace mdb::gdb

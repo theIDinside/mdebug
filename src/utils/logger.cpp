@@ -7,7 +7,7 @@
 
 using namespace std::string_view_literals;
 
-namespace logging {
+namespace mdb::logging {
 
 logging::Logger *logging::Logger::sLoggerInstance = new logging::Logger{};
 
@@ -53,7 +53,7 @@ Logger::GetLogger() noexcept
 void
 Logger::OnAbort() noexcept
 {
-  for (auto chan : LogChannels | utils::FilterNullptr()) {
+  for (auto chan : LogChannels | mdb::FilterNullptr()) {
     chan->mFileStream.flush();
     chan->mFileStream.close();
   }
@@ -100,4 +100,4 @@ GetLogChannel(Channel id) noexcept
   return GetLogger()->GetLogChannel(id);
 }
 
-} // namespace logging
+} // namespace mdb::logging

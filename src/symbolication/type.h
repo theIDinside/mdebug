@@ -11,9 +11,9 @@
 
 using namespace std::string_view_literals;
 
+namespace mdb {
 class TraceeController;
 class ObjectFile;
-
 namespace sym {
 class Type;
 class Frame;
@@ -90,7 +90,7 @@ public:
 
   template <typename T> constexpr SymbolLocation(T &&t)
   {
-    using utils::IsSame;
+    using mdb::IsSame;
     if constexpr (IsSame<std::span<const u8>, T>()) {
       mKind = LocKind::DwarfExpression;
       uDwarfExpression = t;
@@ -484,8 +484,9 @@ struct BlockSymbolIterator
 };
 
 } // namespace sym
-
+} // namespace mdb
 namespace fmt {
+namespace sym = mdb::sym;
 template <> struct formatter<sym::Type>
 {
   template <typename ParseContext>

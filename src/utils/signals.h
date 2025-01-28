@@ -9,15 +9,14 @@
 #include <signal.h>
 #include <unistd.h>
 
-namespace utils {
+namespace mdb {
 class ScopedBlockedSignals
 {
   sigset_t mRestoreTo;
   sigset_t mNewlySet;
 
 public:
-  template <size_t N>
-  ScopedBlockedSignals(std::array<int, N> signalsToBlock) noexcept : mRestoreTo(), mNewlySet()
+  template <size_t N> ScopedBlockedSignals(std::array<int, N> signalsToBlock) noexcept : mRestoreTo(), mNewlySet()
   {
     sigemptyset(&mNewlySet);
     std::string signalNames;
@@ -45,4 +44,4 @@ public:
     }
   }
 };
-}; // namespace utils
+}; // namespace mdb

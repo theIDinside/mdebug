@@ -6,7 +6,7 @@
 
 using PtrVal = std::uintptr_t;
 
-namespace sym {
+namespace mdb::sym {
 
 class DebugString;
 
@@ -35,4 +35,4 @@ private:
   PtrVal ptr;
 };
 
-}; // namespace sym
+}; // namespace mdb::sym

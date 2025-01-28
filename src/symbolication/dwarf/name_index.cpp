@@ -4,7 +4,7 @@
 #include "symbolication/dwarf/debug_info_reader.h"
 #include <symbolication/objfile.h>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 bool
 DieNameReference::IsValid() const
@@ -153,4 +153,4 @@ NameIndex::GetDies(std::string_view name) noexcept
   return FindResult{dies.data(), static_cast<u32>(dies.size())};
 }
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

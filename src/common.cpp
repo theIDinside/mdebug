@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <typedefs.h>
 
+namespace mdb {
 std::string_view
 syscall_name(u64 syscall_number)
 {
@@ -128,3 +129,4 @@ panic(std::string_view err_msg, const std::source_location &loc, int strip_level
 {
   panic(err_msg, loc.function_name(), loc.file_name(), loc.line(), strip_levels);
 }
+} // namespace mdb

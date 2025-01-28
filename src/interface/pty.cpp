@@ -6,7 +6,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
-
+namespace mdb {
 std::optional<MasterPty>
 open_pty_master() noexcept
 {
@@ -23,11 +23,11 @@ open_pty_master() noexcept
 std::variant<pid_t, PtyParentResult, ParentResult>
 pty_fork(bool dontDuplicateStdio, const termios *slave_termios, const winsize *slave_winsize)
 {
-  if(dontDuplicateStdio) {
+  if (dontDuplicateStdio) {
     auto child_pid = fork();
 
     if (child_pid != 0) {
-      return ParentResult{.child_pid = child_pid };
+      return ParentResult{.child_pid = child_pid};
     } else {
       return 0;
     }
@@ -68,3 +68,4 @@ pty_fork(bool dontDuplicateStdio, const termios *slave_termios, const winsize *s
   }
   return 0;
 }
+} // namespace mdb

@@ -11,14 +11,14 @@
 #include <sys/ptrace.h>
 #include <unistd.h>
 
-namespace tc {
+namespace mdb::tc {
 
 PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
     : TraceeCommandInterface(TargetFormat::Native, nullptr, TraceeInterfaceType::Ptrace), procfs_memfd(),
       process_id(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-  procfs_memfd = utils::ScopedFd::Open(procfs_path, O_RDWR);
+  procfs_memfd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
   ASSERT(procfs_memfd.IsOpen(), "failed to open memfd for {}", process_space_id);
 }
 
@@ -30,7 +30,7 @@ PtraceCommander::OnExec() noexcept
   DBGLOG(core, "Post Exec routine for {}", process_id);
   procfs_memfd = {};
   const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", process_id, process_id);
-  procfs_memfd = utils::ScopedFd::Open(procfs_path, O_RDWR);
+  procfs_memfd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
   ASSERT(procfs_memfd.IsOpen(), "Failed to open proc mem fs for {}", process_id);
 
   return procfs_memfd.IsOpen();
@@ -152,9 +152,9 @@ PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcep
 TaskExecuteResponse
 PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 {
-  ASSERT(t.user_stopped || t.tracer_stopped, "Was in neither user_stop ({}) or tracer_stop ({})",
-         bool{t.user_stopped}, bool{t.tracer_stopped});
-  if (t.tracer_stopped) {
+  ASSERT(t.mUserVisibleStop || t.mTracerVisibleStop, "Was in neither user_stop ({}) or tracer_stop ({})",
+         bool{t.mUserVisibleStop}, bool{t.mTracerVisibleStop});
+  if (t.mTracerVisibleStop) {
     action.mDeliverSignal = t.mLastWaitStatus.signal == SIGTRAP ? 0 : t.mLastWaitStatus.signal;
     if (t.bfRequestedStop) {
       action.mDeliverSignal = 0;
@@ -268,7 +268,7 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
   std::array<char, 256> pathbuf{};
   auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
   std::string_view path{pathbuf.data(), it};
-  auto file = utils::ScopedFd::OpenFileReadOnly(path);
+  auto file = mdb::ScopedFd::OpenFileReadOnly(path);
   char namebuf[16]{0};
   auto len = ::read(file, namebuf, 16);
 
@@ -333,12 +333,12 @@ PtraceCommander::RemoteConnection() noexcept
   return nullptr;
 }
 
-utils::Expected<Auxv, Error>
+mdb::Expected<Auxv, Error>
 PtraceCommander::ReadAuxiliaryVector() noexcept
 {
   auto path = fmt::format("/proc/{}/auxv", TaskLeaderTid());
   DBGLOG(core, "Reading auxv for {} at {}", TaskLeaderTid(), path);
-  utils::ScopedFd procfile = utils::ScopedFd::OpenFileReadOnly(path);
+  mdb::ScopedFd procfile = mdb::ScopedFd::OpenFileReadOnly(path);
   // we can read 256 elements at a time (id + value = u64 * 2)
   static constexpr auto Count = 512;
   auto offset = 0;
@@ -367,4 +367,4 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
   }
 }
 
-} // namespace tc
+} // namespace mdb::tc

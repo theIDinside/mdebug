@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <set>
 
-namespace sym {
+namespace mdb::sym {
 
 struct SourceInfo
 {
@@ -175,4 +175,4 @@ zydis_disasm(TraceeController *target, AddrPtr addr, u32 ins_offset, u32 total,
     --total;
   }
 }
-} // namespace sym
+} // namespace mdb::sym

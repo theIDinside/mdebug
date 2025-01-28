@@ -3,6 +3,7 @@
 #include "addr_sorter.h"
 #include <typedefs.h>
 
+namespace mdb {
 /**
  * Description of a range of executable code, inside of a compilation unit.
  */
@@ -49,3 +50,4 @@ public:
   void CompareBoundary(AddrPtr low, AddrPtr high) noexcept;
   AddressRange Build() const noexcept;
 };
+} // namespace mdb

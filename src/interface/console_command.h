@@ -12,6 +12,7 @@
 #define WriteConsoleLine(WRITE_BUFFER, FORMAT_STRING, ...)                                                        \
   fmt::format_to(std::back_inserter(WRITE_BUFFER), FORMAT_STRING "\\r\\n" __VA_OPT__(, ) __VA_ARGS__)
 
+namespace mdb {
 struct ConsoleCommandResult
 {
   bool mSuccess;
@@ -75,3 +76,4 @@ public:
   ConsoleCommandResult execute(std::span<std::string_view> args,
                                std::pmr::memory_resource *allocator) noexcept override;
 };
+} // namespace mdb

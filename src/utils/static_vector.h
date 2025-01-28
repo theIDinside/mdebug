@@ -6,8 +6,7 @@
 #include <cstring>
 #include <immintrin.h>
 
-namespace utils {
-
+namespace mdb {
 // Minimum allocation of MDB_PAGE_SIZE
 // Meant to hold "trivial" types.
 template <typename T> class StaticVector
@@ -261,4 +260,4 @@ private:
   u32 mSize{0};
   char mArray[Cap];
 };
-} // namespace utils
+} // namespace mdb

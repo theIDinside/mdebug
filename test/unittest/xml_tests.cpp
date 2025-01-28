@@ -54,14 +54,14 @@ static constexpr std::string_view xmlData = R"(<threads>
 
 TEST(XML, ParseThreads)
 {
-  xml::XMLParser parser(xmlData);
-  xml::XMLElementView root = parser.parse();
+  mdb::xml::XMLParser parser(xmlData);
+  mdb::xml::XMLElementView root = parser.parse();
 }
 
 TEST(XML, ParsedThreadValues)
 {
-  xml::XMLParser parser(xmlData);
-  xml::XMLElementView root = parser.parse();
+  mdb::xml::XMLParser parser(xmlData);
+  mdb::xml::XMLElementView root = parser.parse();
   EXPECT_EQ(root.children.size(), 10);
   std::unordered_set<std::string> thread_names{};
   for (const auto &child : root.children) {
@@ -77,8 +77,8 @@ TEST(XML, ParsedThreadValues)
 
 TEST(XML, CollectByName)
 {
-  xml::XMLParser parser(xmlData);
-  xml::XMLElementView root = parser.parse();
-  const auto elems = xml::collect_by_name(root, "thread", false);
+  mdb::xml::XMLParser parser(xmlData);
+  mdb::xml::XMLElementView root = parser.parse();
+  const auto elems = mdb::xml::collect_by_name(root, "thread", false);
   EXPECT_EQ(root.children.size(), 10);
 }

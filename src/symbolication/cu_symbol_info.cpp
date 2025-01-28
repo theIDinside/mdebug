@@ -18,7 +18,7 @@
 #include <set>
 #include <utils/filter.h>
 
-namespace sym {
+namespace mdb::sym {
 
 class SourceCodeFileLNPResolver
 {
@@ -663,7 +663,7 @@ struct ResolveFnSymbolState
   CompilationUnit *symtab;
   std::string_view name{};
   std::string_view mangled_name{};
-  // a namespace or a class, so foo::foo, like a constructor, or utils::foo for a namespace with foo as a fn, for
+  // a namespace or a class, so foo::foo, like a constructor, or mdb::foo for a namespace with foo as a fn, for
   // instance.
   std::string_view namespace_ish{};
   AddrPtr low_pc{nullptr};
@@ -929,4 +929,4 @@ AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, CompilationUnit 
   mapping.AddMapping(start, end, cu);
 }
 
-} // namespace sym
+} // namespace mdb::sym

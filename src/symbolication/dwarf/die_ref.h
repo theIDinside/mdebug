@@ -3,9 +3,11 @@
 #include <optional>
 #include <symbolication/dwarf_defs.h>
 
+namespace mdb {
 struct AttributeValue;
+}
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 class UnitData;
 struct DieMetaData;
 class UnitReader;
@@ -66,4 +68,4 @@ public:
   }
 };
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

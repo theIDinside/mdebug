@@ -4,8 +4,7 @@
 #include "common.h"
 #include <iterator>
 #include <utils/indexing.h>
-namespace utils {
-
+namespace mdb {
 template <typename C> concept HasReferenceAlias = requires(C c) { typename C::reference; };
 template <typename C> concept HasIteratorAlias = requires(C c) { typename C::iterator; };
 template <typename C> concept HasPointerAlias = requires(C c) { typename C::pointer; };
@@ -120,4 +119,4 @@ public:
     return Enumerator<decltype(c.cend())>{c.cend(), 0};
   }
 };
-} // namespace utils
+} // namespace mdb

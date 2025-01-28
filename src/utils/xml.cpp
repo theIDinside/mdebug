@@ -11,7 +11,7 @@
     exit(-1);                                                                                                     \
   }
 
-namespace xml {
+namespace mdb::xml {
 
 void
 RefMap::insert(std::string_view attr, std::string_view value) noexcept
@@ -191,7 +191,7 @@ XMLParser::eat_n(size_t count) noexcept
 void
 XMLParser::skip_whitespace() noexcept
 {
-  pbuf.remove_prefix(utils::position(pbuf, [](char c) { return !isspace(c); }).value_or(0));
+  pbuf.remove_prefix(mdb::position(pbuf, [](char c) { return !isspace(c); }).value_or(0));
 }
 
 static void
@@ -222,4 +222,4 @@ collect_by_name(const XMLElementView &root, std::string_view name, bool can_cont
   return result;
 }
 
-} // namespace xml
+} // namespace mdb::xml

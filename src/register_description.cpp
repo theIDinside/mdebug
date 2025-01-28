@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "register_description.h"
 #include "interface/remotegdb/deserialization.h"
-
+namespace mdb {
 constexpr void
 RegisterDescription::RegisterBuffer::Swap(RegisterBuffer &other) noexcept
 {
@@ -99,3 +99,4 @@ RegisterDescription::FillFromHexEncodedString(std::string_view hexString) noexce
 {
   deserialize_hex_encoded(hexString, mRegisterContents);
 }
+} // namespace mdb

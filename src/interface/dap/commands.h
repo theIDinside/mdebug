@@ -15,6 +15,9 @@
 #include <symbolication/disassemble.h>
 #include <typedefs.h>
 
+namespace mdb {
+namespace fmt = ::fmt;
+
 using namespace std::string_view_literals;
 enum class BreakpointType : std::uint8_t;
 
@@ -785,6 +788,35 @@ struct Disassemble final : public UICommand
                  {"instructionOffset", FieldType::Int}, {"offset", FieldType::Int});
 };
 
+enum ScriptKind : u8
+{
+  Inline,
+  File
+};
+
+struct ImportScript final : public UICommand
+{
+  DEFINE_NAME("importScript");
+  ImportScript(u64 seq, std::string &&scriptSource) noexcept;
+  ~ImportScript() noexcept override = default;
+  UIResultPtr Execute() noexcept final;
+  std::string mSource;
+};
+
+struct ImportScriptResponse final : public UIResult
+{
+  using EvalResult = mdb::Expected<void, std::string>;
+
+  constexpr ImportScriptResponse(bool success, UICommandPtr cmd, EvalResult &&evalResult) noexcept
+      : UIResult(success, cmd), mEvaluateResult(std::move(evalResult))
+  {
+  }
+
+  ~ImportScriptResponse() noexcept override = default;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+  EvalResult mEvaluateResult;
+};
+
 struct InvalidArgsResponse final : public UIResult
 {
   InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
@@ -826,3 +858,4 @@ Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
   }
 }
 }; // namespace ui::dap
+} // namespace mdb

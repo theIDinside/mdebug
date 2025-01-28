@@ -6,6 +6,6 @@
 TEST(Base64Encoding, Encoding)
 {
   std::uint8_t values[] = {71, 73, 70};
-  const auto res = utils::encode_base64(values);
+  const auto res = mdb::encode_base64(values);
   EXPECT_EQ(res, "R0lG");
 }

@@ -7,8 +7,7 @@ struct pollfd;
 // clang-format off
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay, cppcoreguidelines-init-variables, cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-pro-type-vararg)
 // clang-format on
-namespace utils {
-
+namespace mdb {
 /*static*/ Notifier
 Notifier::notify_pipe() noexcept
 {
@@ -93,7 +92,7 @@ Notifier::WriteEnd::notify() const noexcept
   return ::write(fd, "+", 1) > 0;
 }
 
-} // namespace utils
+} // namespace mdb
 
 // clang-format off
 // NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay, cppcoreguidelines-init-variables, cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-pro-type-vararg)

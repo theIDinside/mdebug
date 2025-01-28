@@ -8,9 +8,9 @@
 #include <typedefs.h>
 
 namespace std::pmr {
-  class memory_resource;
+class memory_resource;
 }
-
+namespace mdb {
 class SymbolFile;
 class UserBreakpoint;
 
@@ -41,9 +41,9 @@ struct Breakpoint
   std::optional<std::string_view> source_path;
   std::optional<std::string> error_message;
 
-  std::pmr::string serialize(std::pmr::memory_resource* memoryResource) const noexcept;
+  std::pmr::string serialize(std::pmr::memory_resource *memoryResource) const noexcept;
   static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
-  static Breakpoint from_user_bp(const UserBreakpoint& user_bp) noexcept;
+  static Breakpoint from_user_bp(const UserBreakpoint &user_bp) noexcept;
 };
 
 struct DataBreakpoint
@@ -178,8 +178,10 @@ struct Variable
 };
 
 }; // namespace ui::dap
+} // namespace mdb
 
 namespace fmt {
+namespace ui = mdb::ui;
 
 template <> struct formatter<ui::dap::Scope>
 {

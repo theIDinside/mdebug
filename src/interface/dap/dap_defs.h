@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace ui::dap {
+namespace mdb::ui::dap {
 
 enum class CommandType : std::uint8_t
 {
@@ -139,4 +139,4 @@ to_str(ThreadReason reason) noexcept
   MIDAS_UNREACHABLE
 }
 
-} // namespace ui::dap
+} // namespace mdb::ui::dap

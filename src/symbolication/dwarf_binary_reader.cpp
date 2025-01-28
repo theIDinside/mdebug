@@ -2,7 +2,7 @@
 #include "dwarf_binary_reader.h"
 #include "elf.h"
 #include <utils/logger.h>
-
+namespace mdb {
 u64
 DwarfBinaryReader::dwarf_spec_read_value() noexcept
 {
@@ -234,3 +234,4 @@ DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
   end = buffer + new_size;
   size = new_size;
 }
+} // namespace mdb

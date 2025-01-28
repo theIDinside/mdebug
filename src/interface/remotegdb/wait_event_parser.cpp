@@ -9,7 +9,7 @@
 #include <supervisor.h>
 #include <tracer.h>
 
-namespace gdb {
+namespace mdb::gdb {
 
 WaitEventParser::WaitEventParser(RemoteConnection &conn) noexcept : connection(conn) {}
 
@@ -114,24 +114,24 @@ WaitEventParser::new_debugger_event(bool init) noexcept
   if (stop_reason) {
     switch (*stop_reason) {
     case TraceeStopReason::Watch:
-      return TraceEvent::WriteWatchpoint(param(), wp_address, std::move(registers));
+      return TraceEvent::CreateWriteWatchpoint(param(), wp_address, std::move(registers));
     case TraceeStopReason::RWatch:
-      return TraceEvent::ReadWatchpoint(param(), wp_address, std::move(registers));
+      return TraceEvent::CreateReadWatchpoint(param(), wp_address, std::move(registers));
     case TraceeStopReason::AWatch:
-      return TraceEvent::AccessWatchpoint(param(), wp_address, std::move(registers));
+      return TraceEvent::CreateAccessWatchpoint(param(), wp_address, std::move(registers));
     case TraceeStopReason::SyscallEntry:
-      return TraceEvent::SyscallEntry(param(), syscall_no, std::move(registers));
+      return TraceEvent::CreateSyscallEntry(param(), syscall_no, std::move(registers));
     case TraceeStopReason::SyscallReturn:
-      return TraceEvent::SyscallExit(param(), syscall_no, std::move(registers));
+      return TraceEvent::CreateSyscallExit(param(), syscall_no, std::move(registers));
     case TraceeStopReason::Library:
-      return TraceEvent::LibraryEvent(param(), std::move(registers));
+      return TraceEvent::CreateLibraryEvent(param(), std::move(registers));
     case TraceeStopReason::ReplayLog:
       TODO("Implement TraceeStopReason::ReplayLog");
     case TraceeStopReason::SWBreak: {
-      return TraceEvent::SoftwareBreakpointHit(param(), determine_pc(), std::move(registers));
+      return TraceEvent::CreateSoftwareBreakpointHit(param(), determine_pc(), std::move(registers));
     }
     case TraceeStopReason::HWBreak: {
-      return TraceEvent::HardwareBreakpointHit(param(), determine_pc(), std::move(registers));
+      return TraceEvent::CreateHardwareBreakpointHit(param(), determine_pc(), std::move(registers));
     }
     case TraceeStopReason::Fork:
       TODO("Implement handling of TraceeStopReason::Fork");
@@ -146,7 +146,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
     case TraceeStopReason::Create: {
       const auto target =
         connection.settings().is_non_stop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
-      return TraceEvent::ThreadCreated(param(), {tc::RunType::Continue, target}, std::move(registers));
+      return TraceEvent::CreateThreadCreated(param(), {tc::RunType::Continue, target}, std::move(registers));
     }
     }
   }
@@ -155,19 +155,19 @@ WaitEventParser::new_debugger_event(bool init) noexcept
     auto tc = Tracer::Get().get_controller(pid);
     auto t = tc != nullptr ? tc->GetTaskByTid(tid) : nullptr;
 
-    if (t && t->loc_stat) {
+    if (t && t->mBreakpointLocationStatus) {
       const auto locstat = t->clear_bpstat();
-      return TraceEvent::Stepped(param(), !locstat->should_resume, locstat, std::move(t->mNextResumeAction),
-                                std::move(registers));
+      return TraceEvent::CreateStepped(param(), !locstat->should_resume, locstat, std::move(t->mNextResumeAction),
+                                       std::move(registers));
     }
 
     if (signal != SIGTRAP) {
-      return TraceEvent::Signal(param(), std::move(registers));
+      return TraceEvent::CreateSignal(param(), std::move(registers));
     }
   }
 
   // We got no stop reason. Defer to supervisor, let it figure it out.Nu
-  return TraceEvent::DeferToSupervisor(param(), std::move(registers), control_kind_is_attached);
+  return TraceEvent::CreateDeferToSupervisor(param(), std::move(registers), control_kind_is_attached);
 }
 
 void
@@ -271,4 +271,4 @@ WaitEventParser::parse_threads_parameter(std::string_view input) noexcept
   return threads;
 }
 
-} // namespace gdb
+} // namespace mdb::gdb

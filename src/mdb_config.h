@@ -7,7 +7,7 @@
 #include <unordered_set>
 
 // system namespace - anything and everything that involves the configuration of mdb
-namespace sys {
+namespace mdb::sys {
 
 enum class CLIErrorInfo
 {
@@ -53,13 +53,13 @@ struct LogConfig
   };
   bool time_log = false;
 
-  static utils::Expected<bool, std::string_view>
+  static mdb::Expected<bool, std::string_view>
   verify_ok(const std::span<std::string_view> &parsed) noexcept
   {
     std::unordered_set<std::string_view> logs{LogConfig::LOGS.begin(), LogConfig::LOGS.end()};
     for (const auto i : parsed) {
       if (!logs.contains(i)) {
-        return utils::unexpected(i);
+        return mdb::unexpected(i);
       }
     }
     return true;
@@ -87,7 +87,7 @@ class DebuggerConfiguration
   Path mLogDirectory;
 
 public:
-  friend utils::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
+  friend mdb::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
 
   static auto
   Default() noexcept
@@ -102,6 +102,6 @@ public:
   const Path &LogDirectory() const noexcept;
 };
 
-utils::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
+mdb::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
 
-}; // namespace sys
+}; // namespace mdb::sys

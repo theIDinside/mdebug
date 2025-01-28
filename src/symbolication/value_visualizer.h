@@ -7,10 +7,11 @@
 #include <typedefs.h>
 #include <vector>
 
+namespace mdb {
 class TraceeController;
 class SymbolFile;
-
-namespace sym {
+} // namespace mdb
+namespace mdb::sym {
 
 class Type;
 class Value;
@@ -107,8 +108,9 @@ public:
   explicit ValueVisualizer(std::weak_ptr<Value> value) noexcept;
   virtual ~ValueVisualizer() noexcept = default;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  virtual std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource* allocator) noexcept = 0;
-  virtual std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept = 0;
+  virtual std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource *allocator) noexcept = 0;
+  virtual std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference,
+                                                    std::pmr::memory_resource *allocator) noexcept = 0;
 };
 
 class PrimitiveVisualizer final : public ValueVisualizer
@@ -118,9 +120,11 @@ public:
 
   explicit PrimitiveVisualizer(std::weak_ptr<Value> value) noexcept;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource* allocator) noexcept final;
-  std::optional<std::pmr::string> FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource* allocator) noexcept;
-  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept final;
+  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> FormatEnum(Type &t, std::span<const u8> span,
+                                             std::pmr::memory_resource *allocator) noexcept;
+  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference,
+                                            std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class DefaultStructVisualizer final : public ValueVisualizer
@@ -130,8 +134,9 @@ public:
 
   explicit DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept;
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource* allocator) noexcept final;
-  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept final;
+  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference,
+                                            std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class InvalidValueVisualizer final : public ValueVisualizer
@@ -139,8 +144,9 @@ class InvalidValueVisualizer final : public ValueVisualizer
 public:
   explicit InvalidValueVisualizer(std::weak_ptr<Value> provider) noexcept;
   ~InvalidValueVisualizer() noexcept override = default;
-  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource* allocator) noexcept override;
-  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept final;
+  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource *allocator) noexcept override;
+  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference,
+                                            std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class ArrayVisualizer final : public ValueVisualizer
@@ -149,8 +155,9 @@ class ArrayVisualizer final : public ValueVisualizer
 public:
   ~ArrayVisualizer() noexcept override = default;
   explicit ArrayVisualizer(std::weak_ptr<Value> provider) noexcept;
-  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource* allocator) noexcept override;
-  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept final;
+  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource *allocator) noexcept override;
+  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference,
+                                            std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class CStringVisualizer final : public ValueVisualizer
@@ -160,8 +167,9 @@ class CStringVisualizer final : public ValueVisualizer
 public:
   explicit CStringVisualizer(std::weak_ptr<Value> provider, std::optional<u32> nullTerminatorPosition) noexcept;
   ~CStringVisualizer() noexcept override = default;
-  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource* allocator) noexcept final;
-  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference, std::pmr::memory_resource* allocator) noexcept final;
+  std::optional<std::pmr::string> FormatValue(std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> DapFormat(std::string_view name, int variablesReference,
+                                            std::pmr::memory_resource *allocator) noexcept final;
 };
 
-} // namespace sym
+} // namespace mdb::sym

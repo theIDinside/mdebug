@@ -7,10 +7,11 @@
 #include <string_view>
 #include <unordered_map>
 #include <utils/indexing.h>
-
+namespace mdb {
 class ObjectFile;
 class TypeStorage;
-namespace sym::dw {
+} // namespace mdb
+namespace mdb::sym::dw {
 
 class UnitData;
 
@@ -138,4 +139,4 @@ struct ObjectFileNameIndex
     }
   }
 };
-} // namespace sym::dw
+} // namespace mdb::sym::dw

@@ -3,8 +3,7 @@
 #include "utils/macros.h"
 #include <memory>
 
-namespace utils {
-
+namespace mdb {
 struct ReadEnd
 {
   int fd;
@@ -67,4 +66,4 @@ public:
   void notify();
 };
 
-} // namespace utils
+} // namespace mdb

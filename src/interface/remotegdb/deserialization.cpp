@@ -1,6 +1,8 @@
 #include "deserialization.h"
 
-u8 fromhex(char a) noexcept
+namespace mdb {
+u8
+fromhex(char a) noexcept
 {
   if (a >= '0' && a <= '9') {
     return a - '0';
@@ -13,3 +15,4 @@ u8 fromhex(char a) noexcept
     return 0;
   }
 }
+} // namespace mdb

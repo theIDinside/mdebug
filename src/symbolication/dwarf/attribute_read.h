@@ -8,7 +8,7 @@
 #include <array>
 #include <optional>
 #include <type_traits>
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 template <size_t N>
 std::array<std::optional<AttributeValue>, N>
@@ -67,4 +67,4 @@ ProcessDie(DieReference dieRef, Fn &&fn) noexcept
     }
   }
 }
-} // namespace sym::dw
+} // namespace mdb::sym::dw

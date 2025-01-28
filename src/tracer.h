@@ -19,43 +19,43 @@
 #include <unordered_map>
 #include <utils/immutable.h>
 
+namespace mdb::js {
+class ScriptRuntime;
+}
+namespace mdb {
+
 class ObjectFile;
 class SymbolFile;
 class TraceeController;
 class WaitStatusReaderThread;
-
-using Pid = pid_t;
-using Tid = pid_t;
-
-namespace gdb {
-class RemoteConnection;
-struct RemoteSettings;
-} // namespace gdb
-
-namespace ui::dap {
-class DAP;
-struct Event;
-struct Scope;
-} // namespace ui::dap
-
-namespace cmd {
-class Command;
-};
-
-namespace ui {
-struct UICommand;
-}
-
 struct LWP;
 struct TaskInfo;
 
+using Pid = pid_t;
+using Tid = pid_t;
 using BreakpointSpecId = u32;
-
 using VarRefKey = u32;
+} // namespace mdb
+namespace mdb::gdb {
+class RemoteConnection;
+struct RemoteSettings;
+} // namespace mdb::gdb
 
-struct VariableObject
-{
+namespace mdb::ui::dap {
+class DAP;
+struct Event;
+struct Scope;
+} // namespace mdb::ui::dap
+
+namespace mdb::cmd {
+class Command;
 };
+
+namespace mdb::ui {
+struct UICommand;
+}
+
+namespace mdb {
 
 enum class ContextType : u8
 {
@@ -139,7 +139,7 @@ public:
   // a process id or some other handle/id. this is just for convenience when developing the product, really.
   void config_done(ui::dap::DebugAdapterClient *client) noexcept;
   TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
-  std::shared_ptr<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
+  Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
   void handle_command(ui::UICommand *cmd) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
@@ -174,9 +174,9 @@ public:
   u32 clone_from_var_context(const VariableContext &ctx) noexcept;
   void destroy_reference(VarRefKey key) noexcept;
 
-  std::unordered_map<Tid, std::shared_ptr<TaskInfo>> &UnInitializedTasks() noexcept;
-  void RegisterTracedTask(std::shared_ptr<TaskInfo> newTask) noexcept;
-  std::shared_ptr<TaskInfo> GetTask(Tid tid) noexcept;
+  std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
+  void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
+  Ref<TaskInfo> GetTask(Tid tid) noexcept;
 
   template <typename Predicate>
   bool
@@ -196,13 +196,18 @@ public:
 
   bool TraceExitConfigured{false};
 
+  mdb::js::ScriptRuntime *GetRuntime() noexcept;
+  static void InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept;
+
 private:
+  static void MainLoop(EventSystem *eventSystem, mdb::js::ScriptRuntime *interpreterInstance) noexcept;
   std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
   u32 breakpoint_ids{0};
   VarRefKey id_counter{0};
   std::unordered_map<VarRefKey, VariableContext> refContext{};
   bool already_launched;
   sys::DebuggerConfiguration config;
+  mdb::js::ScriptRuntime *mScriptRuntime{nullptr};
 
   // Apparently, due to the lovely way of the universe, if a thread clones or forks
   // we may actually see the wait status of the clone child before we get to see the wait status of the
@@ -210,9 +215,10 @@ private:
   // on system call boundaries (and therefore checked "ARE WE DOING A CLONE? THAT IS A SPECIAL CASE ONE" for
   // instance). For now, we will solve this problem by having an "unitialized" thread; these are the ones that show
   // up before their wait status of their clone parent has been seen. This should work.
-  std::unordered_map<Tid, std::shared_ptr<TaskInfo>> mUnInitializedThreads{};
-  std::unordered_map<Tid, std::shared_ptr<TaskInfo>> mDebugSessionTasks;
+  std::unordered_map<Tid, Ref<TaskInfo>> mUnInitializedThreads{};
+  std::unordered_map<Tid, Ref<TaskInfo>> mDebugSessionTasks;
   std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
   std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;
 };
+} // namespace mdb

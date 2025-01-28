@@ -8,11 +8,11 @@
 
 class TraceeController;
 
-namespace tc {
+namespace mdb::tc {
 
 class PtraceCommander final : public TraceeCommandInterface
 {
-  utils::ScopedFd procfs_memfd;
+  mdb::ScopedFd procfs_memfd;
   Tid process_id;
 
   std::unordered_map<Tid, std::string> thread_names{};
@@ -55,7 +55,7 @@ public:
   std::optional<Path> ExecedFile() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept final;
   std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept final;
-  utils::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept final;
+  mdb::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept final;
   //
 };
-} // namespace tc
+} // namespace mdb::tc

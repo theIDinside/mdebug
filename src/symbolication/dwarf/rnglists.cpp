@@ -5,7 +5,7 @@
 #include <symbolication/dwarf/die.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 /*static*/ ResolvedRangeListOffset
 ResolvedRangeListOffset::make(sym::dw::UnitData &cu, u64 unresolved_offset) noexcept
@@ -224,4 +224,4 @@ read_boundaries(const ElfSection *rnglists, const RangeListHeader &header) noexc
   }
   return builder.Build();
 }
-} // namespace sym::dw
+} // namespace mdb::sym::dw

@@ -4,12 +4,12 @@
 #include <typedefs.h>
 #include <vector>
 
-namespace xml {
+namespace mdb::xml {
 struct XMLElementView;
 };
 
 // Code explicitly created to handle GDB (for all it's awesomeness and horridness).
-namespace gdb {
+namespace mdb::gdb {
 
 struct ArchReg
 {
@@ -59,4 +59,4 @@ struct ArchictectureInfo
 
 std::vector<gdb::ArchReg> read_arch_info(const xml::XMLElementView &root) noexcept;
 
-} // namespace gdb
+} // namespace mdb::gdb

@@ -2,8 +2,7 @@
 #pragma once
 #include <iterator>
 #include <type_traits>
-namespace utils {
-
+namespace mdb {
 template <typename Container> class Skiperator
 {
   Container &c;
@@ -121,4 +120,4 @@ public:
   }
 };
 
-} // namespace utils
+} // namespace mdb

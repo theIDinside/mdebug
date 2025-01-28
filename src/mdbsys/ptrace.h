@@ -9,7 +9,7 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <typedefs.h>
-
+namespace mdb {
 struct TaskInfo;
 
 template <size_t... T> constexpr bool always_false_i = false;
@@ -260,3 +260,4 @@ IS_TRACE_EVENT(auto stopsig, auto ptrace_event) noexcept -> bool
 }
 
 TaskWaitResult WaitResultToTaskWaitResult(Tid tid, int status) noexcept;
+} // namespace mdb

@@ -32,7 +32,7 @@
 #include <sys/user.h>
 #include <unistd.h>
 
-namespace gdb {
+namespace mdb::gdb {
 using Connection = RemoteConnection::ShrPtr;
 
 std::unordered_map<std::string_view, TraceeStopReason> RemoteConnection::StopReasonMap{
@@ -77,7 +77,7 @@ checksum(std::string_view payload) noexcept
   return std::make_pair(HexDigits[FirstIndex], HexDigits[SecondIndex]);
 }
 
-RemoteConnection::RemoteConnection(std::string &&host, int port, utils::ScopedFd &&socket,
+RemoteConnection::RemoteConnection(std::string &&host, int port, mdb::ScopedFd &&socket,
                                    RemoteSettings settings) noexcept
     : host(std::move(host)), socket(std::move(socket)), port(port), remote_settings(settings)
 {
@@ -110,7 +110,7 @@ RemoteConnection::~RemoteConnection() noexcept
   close(quit_fd[1]);
 }
 
-BufferedSocket::BufferedSocket(utils::ScopedFd &&fd, u32 reserve_size) noexcept : fd_socket(std::move(fd))
+BufferedSocket::BufferedSocket(mdb::ScopedFd &&fd, u32 reserve_size) noexcept : fd_socket(std::move(fd))
 {
   buffer.reserve(reserve_size);
 }
@@ -387,7 +387,7 @@ BufferedSocket::find_ack() const noexcept
   return {};
 }
 
-utils::Expected<std::pair<u32, bool>, Timeout>
+mdb::Expected<std::pair<u32, bool>, Timeout>
 BufferedSocket::wait_for_ack(int timeout) noexcept
 {
   bool no_more_no_ack_found = false;
@@ -396,7 +396,7 @@ BufferedSocket::wait_for_ack(int timeout) noexcept
     if (!ack) {
       no_more_no_ack_found = buffer_n_timeout(4096, timeout) == 0;
     } else {
-      return utils::expected(std::move(*ack));
+      return mdb::expected(std::move(*ack));
     }
   }
 
@@ -420,19 +420,19 @@ BufferedSocket::at_unchecked(u32 index) const noexcept
 }
 
 void
-take_wait(std::unique_ptr<utils::BarrierWait> &&b)
+take_wait(std::unique_ptr<mdb::BarrierWait> &&b)
 {
   (void)b;
 }
 
 /*static*/
-utils::Expected<Connection, ConnectError>
+mdb::Expected<Connection, ConnectError>
 RemoteConnection::connect(const std::string &host, int port,
                           std::optional<RemoteSettings> remote_settings) noexcept
 {
   // returns a Expected<ScopedFd, ConnectError>. Transform it into Expected<Connection, ConnectError>
-  return utils::ScopedFd::OpenSocketConnectTo(host, port)
-    .and_then<InitError>([&](auto &&socket) -> utils::Expected<Connection, InitError> {
+  return mdb::ScopedFd::OpenSocketConnectTo(host, port)
+    .and_then<InitError>([&](auto &&socket) -> mdb::Expected<Connection, InitError> {
       std::shared_ptr<RemoteConnection> connection = std::make_shared<RemoteConnection>(
         std::string{host}, port, std::move(socket), remote_settings.value_or(RemoteSettings{}));
 
@@ -674,7 +674,7 @@ RemoteConnection::put_pending_notification(std::string_view payload) noexcept
 std::vector<GdbThread>
 protocol_parse_threads(std::string_view input) noexcept
 {
-  auto ts = utils::split_string(input, ",");
+  auto ts = mdb::split_string(input, ",");
   std::vector<GdbThread> threads{};
   threads.reserve(ts.size());
   for (auto t : ts) {
@@ -689,7 +689,7 @@ protocol_parse_threads(std::string_view input) noexcept
 bool
 RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept
 {
-  auto params = utils::split_string(payload, ";");
+  auto params = mdb::split_string(payload, ";");
   WaitEventParser parser{*this};
   parser.control_kind_is_attached = is_session_config;
   parser.signal = signal;
@@ -707,7 +707,7 @@ RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload
       const auto threads = parser.parse_threads_parameter(val);
       update_known_threads(threads);
     } else if (arg == "thread-pcs") {
-      auto pcs = utils::split_string(val, ",");
+      auto pcs = mdb::split_string(val, ",");
       DBGLOG(core, "parsing thread-pcs not yet implemented");
     } else if (arg == "core") {
       parser.parse_core(val);
@@ -771,7 +771,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       return false;
     }
     EventSystem::Get().PushDebuggerEvent(
-      TraceEvent::ProcessExitEvent(target.value(), target.value(), exit_code.value(), {}));
+      TraceEvent::CreateProcessExitEvent(target.value(), target.value(), exit_code.value(), {}));
     break;
   }
   case 'X': {
@@ -781,7 +781,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
     }
     TODO("Add Terminated event or make ProcessExit have two variants (i like this better)");
     EventSystem::Get().PushDebuggerEvent(
-      TraceEvent::ProcessExitEvent(target.value(), target.value(), signal.value(), {}));
+      TraceEvent::CreateProcessExitEvent(target.value(), target.value(), signal.value(), {}));
     break;
   }
   case 'w': {
@@ -789,8 +789,8 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       const auto &[pid, tid, code] = res.value();
       // If we're not non-stop, this will stop the entire process
       const auto process_needs_resuming = !remote_settings.is_non_stop;
-      EventSystem::Get().PushDebuggerEvent(
-        TraceEvent::ThreadExited({.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
+      EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateThreadExited(
+        {.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
       return true;
     } else {
       return false;
@@ -1125,7 +1125,7 @@ RemoteConnection::parse_supported(std::string_view supported_response) noexcept
          "notice:\n{}",
          supported_response);
   supported_response.remove_prefix(1);
-  const auto supported = utils::split_string(supported_response, ";");
+  const auto supported = mdb::split_string(supported_response, ";");
   // This is an absolute requirement set by us.
   bool has_multiprocess = false;
   for (const auto v : supported) {
@@ -1163,7 +1163,7 @@ RemoteConnection::send_qXfer_command_with_response(qXferCommand &cmd, std::optio
     },                                                                                                            \
     var)
 
-utils::Expected<std::vector<std::string>, SendError>
+mdb::Expected<std::vector<std::string>, SendError>
 RemoteConnection::send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
                                                  std::optional<int> timeout) noexcept
 {
@@ -1204,8 +1204,7 @@ RemoteConnection::send_commands_inorder_failfast(std::vector<std::variant<Socket
   return results;
 }
 
-
-utils::Expected<std::vector<std::string>, SendError>
+mdb::Expected<std::vector<std::string>, SendError>
 RemoteConnection::send_inorder_command_chain(std::span<std::string_view> commands,
                                              std::optional<int> timeout) noexcept
 {
@@ -1272,7 +1271,7 @@ RemoteConnection::send_interrupt_byte() noexcept
   }
 }
 
-utils::Expected<std::string, SendError>
+mdb::Expected<std::string, SendError>
 RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread, std::string_view command,
                                              std::optional<int> timeout) noexcept
 {
@@ -1327,7 +1326,7 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
     return SendError{SystemError{.syserrno = 0}};
   }
 
-  return utils::expected(std::move(response.value()));
+  return mdb::expected(std::move(response.value()));
 }
 
 std::optional<SendError>
@@ -1509,4 +1508,4 @@ GdbThread::maybe_parse_thread(std::string_view input) noexcept
   }
 }
 
-} // namespace gdb
+} // namespace mdb::gdb

@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "parse_buffer.h"
 
-namespace ui::dap {
+namespace mdb::ui::dap {
 
 static const std::regex CONTENT_LENGTH_HEADER = std::regex{R"(Content-Length: (\d+)\r\n\r\n)"};
 
@@ -53,4 +53,4 @@ parse_headers_from(const std::string_view buffer_view, bool *all_msgs_ok) noexce
   }
   return result;
 }
-} // namespace ui::dap
+} // namespace mdb::ui::dap

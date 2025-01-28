@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 using FileIndex = u32;
 
 /*
@@ -49,7 +49,7 @@ LNPHeader::file(u32 f_index) const noexcept
     return {};
   }
 
-  for (const auto &[i, f] : utils::EnumerateView(mFileEntries)) {
+  for (const auto &[i, f] : mdb::EnumerateView(mFileEntries)) {
     if (i == adjusted_index) {
       const auto dir_index = lnp_index(f.dir_index, version);
       return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
@@ -644,7 +644,7 @@ static bool
 LineTableContainsPc(std::span<const PerCompilationUnitLineTable> lineTables, AddrPtr unrelocatedPc,
                     u32 *outIndex) noexcept
 {
-  for (const auto &[idx, lt] : utils::EnumerateView{lineTables}) {
+  for (const auto &[idx, lt] : mdb::EnumerateView{lineTables}) {
     if (lt.ContainsPc(unrelocatedPc)) {
       if (outIndex) {
         *outIndex = idx;
@@ -762,4 +762,4 @@ SourceCodeFile::ComputeLineTableForThis() noexcept
   mCompilationUnit->ComputeLineTable();
 }
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

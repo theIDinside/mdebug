@@ -12,7 +12,7 @@
 #include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
 
-namespace sym {
+namespace mdb::sym {
 
 #define FormatAndReturn(result, formatString, ...)                                                                \
   fmt::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
@@ -124,7 +124,7 @@ CStringResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std
       adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
 
     auto span = mIndirectValueObject->View(0, requestedLength);
-    for (const auto [index, ch] : utils::EnumerateView(span)) {
+    for (const auto [index, ch] : mdb::EnumerateView(span)) {
       if (ch == 0) {
         mNullTerminatorPosition = index.i;
         break;
@@ -577,4 +577,4 @@ CStringVisualizer::DapFormat(std::string_view name, int, std::pmr::memory_resour
 }
 
 #undef FormatAndReturn
-} // namespace sym
+} // namespace mdb::sym

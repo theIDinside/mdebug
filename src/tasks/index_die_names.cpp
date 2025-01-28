@@ -17,7 +17,7 @@
 #include <utils/scope_defer.h>
 #include <utils/thread_pool.h>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 IndexingTask::IndexingTask(ObjectFile *objectFile, std::span<UnitData *> compUnits) noexcept
     : mObjectFile(objectFile), mCompUnitsToIndex(compUnits.begin(), compUnits.end())
@@ -30,7 +30,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{taskGroupAllocator};
 
   std::pmr::vector<sym::dw::UnitData *> sortedBySize{taskGroupAllocator};
-  utils::CopyTo(obj->GetAllCompileUnits(), sortedBySize);
+  mdb::CopyTo(obj->GetAllCompileUnits(), sortedBySize);
 
   std::sort(sortedBySize.begin(), sortedBySize.end(),
             [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
@@ -38,7 +38,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   std::vector<IndexingTask *> tasks;
   std::vector<u64> taskSize;
 
-  const auto workerCount = utils::ThreadPool::GetGlobalPool()->WorkerCount();
+  const auto workerCount = mdb::ThreadPool::GetGlobalPool()->WorkerCount();
   works.resize(workerCount, {});
   tasks.reserve(workerCount);
   taskSize.resize(workerCount, 0);
@@ -369,4 +369,4 @@ IndexingTask::InitPartialCompilationUnit(UnitData *partial_cu, const DieMetaData
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
   return sym::PartialCompilationUnitSymbolInfo{partial_cu};
 }
-}; // namespace sym::dw
+}; // namespace mdb::sym::dw

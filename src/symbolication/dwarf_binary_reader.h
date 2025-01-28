@@ -4,7 +4,7 @@
 #include "dwarf_defs.h"
 #include <type_traits>
 #include <typedefs.h>
-
+namespace mdb {
 class Elf;
 
 static constexpr u8 LEB128_MASK = 0b0111'1111;
@@ -258,3 +258,5 @@ private:
   std::vector<u64> bookmarks;
   const Elf *elf;
 };
+
+} // namespace mdb

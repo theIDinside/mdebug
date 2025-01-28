@@ -7,6 +7,7 @@
 #include <typedefs.h>
 #include <utils/macros.h>
 
+namespace mdb {
 template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
 
 /* Holds the decoded value of a ULEB/LEB128 as well as the length of the decoded data (in bytes). */
@@ -409,9 +410,10 @@ is_class_type(DwarfTag tag) noexcept
   return tag == DwarfTag::DW_TAG_class_type || tag == DwarfTag::DW_TAG_structure_type ||
          tag == DwarfTag::DW_TAG_union_type;
 }
+} // namespace mdb
 
 namespace fmt {
-template <> struct formatter<Attribute>
+template <> struct formatter<mdb::Attribute>
 {
   template <typename ParseContext>
   constexpr auto
@@ -422,13 +424,13 @@ template <> struct formatter<Attribute>
 
   template <typename FormatContext>
   auto
-  format(Attribute const &attribute, FormatContext &ctx)
+  format(mdb::Attribute const &attribute, FormatContext &ctx)
   {
     return fmt::format_to(ctx.out(), "{}", to_str(attribute));
   }
 };
 
-template <> struct formatter<AttributeForm>
+template <> struct formatter<mdb::AttributeForm>
 {
   template <typename ParseContext>
   constexpr auto
@@ -439,13 +441,13 @@ template <> struct formatter<AttributeForm>
 
   template <typename FormatContext>
   auto
-  format(AttributeForm form, FormatContext &ctx)
+  format(mdb::AttributeForm form, FormatContext &ctx)
   {
     return fmt::format_to(ctx.out(), "{}", to_str(form));
   }
 };
 
-template <> struct formatter<DwarfTag>
+template <> struct formatter<mdb::DwarfTag>
 {
   template <typename ParseContext>
   constexpr auto
@@ -456,7 +458,7 @@ template <> struct formatter<DwarfTag>
 
   template <typename FormatContext>
   auto
-  format(DwarfTag const &tag, FormatContext &ctx)
+  format(mdb::DwarfTag const &tag, FormatContext &ctx)
   {
     return fmt::format_to(ctx.out(), "{}", to_str(tag));
   }

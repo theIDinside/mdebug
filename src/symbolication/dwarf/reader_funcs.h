@@ -3,7 +3,7 @@
 #include "symbolication/dwarf_defs.h"
 #include <common.h>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 constexpr const u8 *
 read_initial_length(const u8 *ptr, u64 &out, u8 &init_len_len) noexcept
@@ -59,4 +59,4 @@ read_offset_entry_count(const u8 *ptr, u32 &offset_entry_count) noexcept
   ptr += 4;
   return ptr;
 }
-} // namespace sym::dw
+} // namespace mdb::sym::dw

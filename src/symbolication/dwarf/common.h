@@ -2,7 +2,7 @@
 #pragma once
 #include <typedefs.h>
 
-namespace sym {
+namespace mdb::sym {
 struct SymbolInfoId
 {
   u32 id;
@@ -18,4 +18,4 @@ struct SymbolInfoId
     return id;
   }
 };
-}; // namespace sym
+}; // namespace mdb::sym

@@ -5,7 +5,7 @@
 #include <fmt/core.h>
 #endif
 
-namespace utils {
+namespace mdb {
 template <typename T> class DebugValue
 {
 public:
@@ -36,13 +36,13 @@ public:
   }
 
   template <class Self>
-  constexpr auto GetValue(this Self&& self) noexcept {
+  constexpr auto
+  GetValue(this Self &&self) noexcept
+  {
     return self.mValue;
   }
 
-  operator T() {
-    return mValue;
-  }
+  operator T() { return mValue; }
 
 private:
   T mValue;
@@ -69,11 +69,11 @@ public:
   }
 #endif
 };
-} // namespace utils
+} // namespace mdb
 
 #ifdef MDB_DEBUG
 namespace fmt {
-template <typename T> struct formatter<utils::DebugValue<T>>
+template <typename T> struct formatter<mdb::DebugValue<T>>
 {
   template <typename ParseContext>
   constexpr auto
@@ -84,7 +84,7 @@ template <typename T> struct formatter<utils::DebugValue<T>>
 
   template <typename FormatContext>
   auto
-  format(const utils::DebugValue<T>& debugValue, FormatContext &ctx) const
+  format(const mdb::DebugValue<T> &debugValue, FormatContext &ctx) const
   {
     return fmt::format_to(ctx.out(), "{}", debugValue.GetValue());
   }

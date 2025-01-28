@@ -7,8 +7,7 @@
 #include <utility>
 #include <variant>
 
-namespace utils {
-
+namespace mdb {
 template <typename T>
 constexpr bool
 trivial_destruct()
@@ -167,6 +166,14 @@ public:
     return std::move(value());
   }
 
+  template <class Self>
+  constexpr auto &&
+  value(this Self &&self)
+  {
+    ASSERT(self.mHasExpectedValue, "Expected did not have a value");
+    return std::forward<Self>(std::get<T>(self));
+  }
+
   T &
   value() & noexcept
   {
@@ -227,12 +234,12 @@ public:
 
   template <typename Transform>
   constexpr auto
-  transform(Transform &&fn) && noexcept -> utils::Expected<FnResult<Transform, T>, Err>
+  transform(Transform &&fn) && noexcept -> mdb::Expected<FnResult<Transform, T>, Err>
   {
     using Return = FnResult<Transform, T>;
     if (mHasExpectedValue) {
       auto &&res = fn(take_value());
-      return utils::Expected<Return, Err>{res};
+      return mdb::Expected<Return, Err>{res};
     } else {
       return unexpected(take_error());
     }
@@ -257,8 +264,6 @@ public:
 };
 
 // auto EXPECT(result, expectedObject);
-
-
 
 #define EXPECT_REF(expr, exp)                                                                                     \
   if (!exp) {                                                                                                     \
@@ -294,4 +299,4 @@ transform(const IsPointer auto &smart_ptr, Fn &&fn) noexcept -> std::optional<de
   return std::make_optional(fn(*smart_ptr));
 }
 
-} // namespace utils
+} // namespace mdb

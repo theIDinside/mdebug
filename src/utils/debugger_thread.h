@@ -3,6 +3,7 @@
 #include <functional>
 #include <thread>
 
+namespace mdb {
 class DebuggerThread
 {
   static int
@@ -43,3 +44,4 @@ private:
   std::jthread mThread;                            // The underlying std::thread
   bool mStarted;
 };
+} // namespace mdb

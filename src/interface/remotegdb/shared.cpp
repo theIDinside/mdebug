@@ -2,7 +2,7 @@
 #include "shared.h"
 #include <common.h>
 
-namespace gdb {
+namespace mdb::gdb {
 
 std::pair<Pid, Tid>
 ParseThreadId(std::string_view arg) noexcept
@@ -66,4 +66,4 @@ DecodeRunLengthEncToStringView(std::string_view v, char *buf, u32 size) noexcept
   return std::string_view{buf, buf + length};
 }
 
-} // namespace gdb
+} // namespace mdb::gdb

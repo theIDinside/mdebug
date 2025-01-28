@@ -2,8 +2,7 @@
 #include "byte_buffer.h"
 #include <common.h>
 
-namespace utils {
-
+namespace mdb {
 constexpr ByteBuffer::ByteBuffer(std::pmr::memory_resource *allocator, u32 cap) noexcept
     : capacity(cap), mAllocator(allocator)
 {
@@ -63,4 +62,4 @@ ByteBuffer::create(std::pmr::memory_resource *allocator, u64 size) noexcept
   return std::make_unique<ByteBuffer>(allocator, size);
 }
 
-} // namespace utils
+} // namespace mdb

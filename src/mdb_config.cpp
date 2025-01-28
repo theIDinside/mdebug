@@ -13,7 +13,7 @@
 #include <thread>
 #include <unistd.h>
 
-namespace sys {
+namespace mdb::sys {
 static constexpr auto OptArgRequired = 1;
 static constexpr auto OptNoArgument = 0;
 
@@ -80,7 +80,7 @@ static constexpr auto USAGE_STR =
   "\n"
   "-d <directory>\n"
   "\t The directory where log files should be saved.";
-utils::Expected<DebuggerConfiguration, CLIError>
+mdb::Expected<DebuggerConfiguration, CLIError>
 parse_cli(int argc, const char **argv) noexcept
 {
   auto init = DebuggerConfiguration::Default();
@@ -103,23 +103,23 @@ parse_cli(int argc, const char **argv) noexcept
           init.mLogDirectory = std::move(pathArg);
         }
       } else {
-        return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
+        return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
       }
     } break;
     case 'l':
       if (optarg) {
         std::string_view args{optarg};
-        auto input_logs = utils::split_string(args, ",");
+        auto input_logs = mdb::split_string(args, ",");
         if (const auto res = LogConfig::verify_ok(input_logs); !res.is_expected()) {
           auto msg =
             fmt::format("Unknown log value: {}\nSupported: ", res.error(), fmt::join(LogConfig::LOGS, ","));
-          return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = std::move(msg)});
+          return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = std::move(msg)});
         }
         for (auto i : input_logs) {
           init.log.set(i);
         }
       } else {
-        return utils::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
+        return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
       }
       break;
     case 'p':
@@ -137,7 +137,7 @@ parse_cli(int argc, const char **argv) noexcept
     case '?': {
       DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
       auto cliErrorMessage = fmt::format("Unknown argument: {}\n\n{}", argv[optind], USAGE_STR);
-      return utils::unexpected(
+      return mdb::unexpected(
         CLIError{.info = CLIErrorInfo::UnknownArgs, .msg = std::move(cliErrorMessage)}); // NOLINT
     }
     default:
@@ -146,4 +146,4 @@ parse_cli(int argc, const char **argv) noexcept
   }
   return init;
 }
-} // namespace sys
+} // namespace mdb::sys

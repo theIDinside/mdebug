@@ -8,13 +8,13 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/remotegdb/connection.h"
-#include "ptracestop_handlers.h"
 #include "so_loading.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
 #include "task.h"
+#include "task_scheduling.h"
 #include "utils/expected.h"
 #include <mdbsys/ptrace.h>
 #include <optional>
@@ -23,13 +23,10 @@
 #include <utils/scoped_fd.h>
 #include <utils/static_vector.h>
 
+namespace mdb {
 template <typename T> using Set = std::unordered_set<T>;
-
 struct DeferToSupervisor;
-
-namespace utils {
-  class ByteBuffer;
-}
+class ByteBuffer;
 
 namespace sym {
 class Unwinder;
@@ -52,7 +49,7 @@ class StopObserver;
 
 struct NonFullRead
 {
-  std::unique_ptr<utils::ByteBuffer> bytes;
+  std::unique_ptr<ByteBuffer> bytes;
   u32 unread_bytes;
   int err_no;
 };
@@ -90,8 +87,8 @@ class TraceeController
   std::vector<std::shared_ptr<SymbolFile>> mSymbolFiles;
   // The main executable symbol file; the initial executable binary, i.e. the one passed to `execve` at some point.
   std::shared_ptr<SymbolFile> mMainExecutable;
-  // The tasks that exist in this "process space". Since tasks often are looked up by tid, before we want to do something with it
-  // we save an indirection by storing the tid inline here, same goes for mExitedThreads.
+  // The tasks that exist in this "process space". Since tasks often are looked up by tid, before we want to do
+  // something with it we save an indirection by storing the tid inline here, same goes for mExitedThreads.
   std::vector<TaskInfo::TaskInfoEntry> mThreads;
   // Tasks that have exited.
   std::vector<TaskInfo::TaskInfoEntry> mExitedThreads;
@@ -172,7 +169,11 @@ public:
   TraceeController &operator=(const TraceeController &) = delete;
 
   void ConfigureBreakpointBehavior(BreakpointBehavior behavior) noexcept;
-  constexpr BreakpointBehavior GetBreakpointBehavior() const noexcept { return mBreakpointBehavior; }
+  constexpr BreakpointBehavior
+  GetBreakpointBehavior() const noexcept
+  {
+    return mBreakpointBehavior;
+  }
   void TearDown(bool killProcess) noexcept;
   bool IsExited() const noexcept;
   void ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept;
@@ -190,7 +191,7 @@ public:
   void OnSharedObjectEvent() noexcept;
   // Check if new breakpoint locations need to be installed, because of a new symbol file being loaded.
   bool CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, UserBreakpoint &userBreakpoint,
-                                             std::vector<std::shared_ptr<BreakpointLocation>> &locs) noexcept;
+                                             std::vector<Ref<BreakpointLocation>> &locs) noexcept;
   // Check if new breakpoint locations need to be installed, because of a new symbol file being loaded.
   void DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&newSymbolFiles) noexcept;
 
@@ -203,7 +204,7 @@ public:
   std::span<TaskInfo::TaskInfoEntry> GetThreads() noexcept;
   std::span<TaskInfo::TaskInfoEntry> GetExitedThreads() noexcept;
 
-  void AddTask(std::shared_ptr<TaskInfo> &&task) noexcept;
+  void AddTask(Ref<TaskInfo> &&task) noexcept;
   u32 RemoveTasksNotInSet(std::span<const gdb::GdbThread> set) noexcept;
   Tid TaskLeaderTid() const noexcept;
   void SetExitSeen() noexcept;
@@ -218,7 +219,7 @@ public:
   void ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void StopAllTasks(TaskInfo *requestingTask) noexcept;
-  void StopAllTasks(TaskInfo *requestingTask, std::function<void()>&& callback) noexcept;
+  void StopAllTasks(TaskInfo *requestingTask, std::function<void()> &&callback) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *RegisterTaskWaited(TaskWaitResult wait) noexcept;
@@ -249,12 +250,12 @@ public:
   tc::ProcessedStopEvent ProcessDeferredStopEvent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   // Get (&& ||) Create breakpoint locations
-  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
-  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  Expected<Ref<BreakpointLocation>, BpErr> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
+  Expected<Ref<BreakpointLocation>, BpErr>
   GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile,
                                 const sym::dw::LineTableEntry &lte) noexcept;
 
-  utils::Expected<std::shared_ptr<BreakpointLocation>, BpErr>
+  Expected<Ref<BreakpointLocation>, BpErr>
   GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
                                              std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void SetSourceBreakpoints(const std::filesystem::path &source_filepath,
@@ -272,8 +273,7 @@ public:
   bool Detach(bool resume) noexcept;
 
   bool SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept;
-  TraceEvent* CreateTraceEventFromWaitStatus(TaskInfo& task) noexcept;
-
+  TraceEvent *CreateTraceEventFromWaitStatus(TaskInfo &task) noexcept;
 
   void PostExec(const std::string &exe) noexcept;
   /* Check if we have any tasks left in the process space. */
@@ -296,10 +296,10 @@ public:
 
   TargetSession GetSessionType() const noexcept;
 
-  utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> SafeRead(AddrPtr addr, u64 bytes) noexcept;
-  utils::Expected<std::unique_ptr<utils::ByteBuffer>, NonFullRead> SafeRead(std::pmr::memory_resource *allocator,
-                                                                            AddrPtr addr, u64 bytes) noexcept;
-  utils::StaticVector<u8>::OwnPtr ReadToVector(AddrPtr addr, u64 bytes) noexcept;
+  Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(AddrPtr addr, u64 bytes) noexcept;
+  Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr,
+                                                              u64 bytes) noexcept;
+  StaticVector<u8>::OwnPtr ReadToVector(AddrPtr addr, u64 bytes) noexcept;
 
   void DeferEvent(Event event) noexcept;
   void ResumeEventHandling() noexcept;
@@ -382,13 +382,13 @@ public:
   void CacheRegistersFor(TaskInfo &t) noexcept;
   tc::TraceeCommandInterface &GetInterface() noexcept;
 
-  void TaskExit(TaskInfo& task, TaskInfo::SupervisorState state, bool notify) noexcept;
+  void TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool notify) noexcept;
   void ExitAll(TaskInfo::SupervisorState state) noexcept;
 
   // Core event handlers
   tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;
-  tc::ProcessedStopEvent HandleStepped(TaskInfo* task, const Stepped& event) noexcept;
-  tc::ProcessedStopEvent HandleEntry(TaskInfo* task, const EntryEvent &e) noexcept;
+  tc::ProcessedStopEvent HandleStepped(TaskInfo *task, const Stepped &event) noexcept;
+  tc::ProcessedStopEvent HandleEntry(TaskInfo *task, const EntryEvent &e) noexcept;
   tc::ProcessedStopEvent HandleThreadCreated(TaskInfo *task, const ThreadCreated &evt,
                                              const RegisterData &register_data) noexcept;
   bool OneRemainingTask() noexcept;
@@ -404,7 +404,7 @@ public:
 private:
   void ShutDownDebugAdapterClient() noexcept;
   // Writes breakpoint point and returns the original value found at that address
-  utils::Expected<u8, BpErr> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
+  Expected<u8, BpErr> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
   SupervisorEventHandlerAction mAction{SupervisorEventHandlerAction::Default};
   std::vector<TraceEvent *> mDeferredEvents;
   TraceeController *mVForkedSupervisor{nullptr};
@@ -417,3 +417,4 @@ struct ProbeInfo
 };
 
 std::vector<ProbeInfo> parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept;
+} // namespace mdb

@@ -6,14 +6,16 @@
 #include <common.h>
 #include <limits>
 
+namespace mdb {
 class Elf;
 class ObjectFile;
+} // namespace mdb
 
-namespace sym {
+namespace mdb::sym {
 class CompilationUnit;
 }
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 class UnitData;
 
 struct DirEntry
@@ -338,4 +340,4 @@ public:
 };
 
 std::vector<LNPHeader> read_lnp_headers(ObjectFile *objectFile) noexcept;
-} // namespace sym::dw
+} // namespace mdb::sym::dw

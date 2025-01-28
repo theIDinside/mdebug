@@ -4,7 +4,7 @@
 #include <string>
 #include <typedefs.h>
 #include <variant>
-
+namespace mdb {
 enum class RemoteType
 {
   RR,
@@ -26,3 +26,4 @@ struct GdbRemoteAttachArgs
 };
 
 using AttachArgs = std::variant<PtraceAttachArgs, GdbRemoteAttachArgs>;
+} // namespace mdb

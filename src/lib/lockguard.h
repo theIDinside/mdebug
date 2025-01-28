@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
-
+namespace mdb {
 template <typename Lock>
 concept Lockable = requires(Lock lock) {
   lock.lock();
@@ -16,3 +16,4 @@ public:
 private:
   Lock &m_locked;
 };
+} // namespace mdb

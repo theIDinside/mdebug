@@ -15,6 +15,8 @@
 
 static bool DwarfLog = false;
 
+namespace mdb {
+
 void
 SetDwarfLogConfig(bool value) noexcept
 {
@@ -529,7 +531,7 @@ prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
         abbr.IMPLICIT_CONST_INDEX = -1;
       }
 
-      if (utils::castenum(abbr.mName) == 0) {
+      if (mdb::castenum(abbr.mName) == 0) {
         break;
       }
       info.mAttributes.push_back(abbr);
@@ -657,3 +659,4 @@ UnitHeadersRead::Headers() noexcept
   return mUnitHeaders;
 }
 } // namespace sym::dw
+} // namespace mdb

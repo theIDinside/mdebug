@@ -1,16 +1,17 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+#include "events/stop_event.h"
 #include "utils/macros.h"
 #include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <sys/types.h>
-#include <type_traits>
 #include <utils/algorithm.h>
 #include <vector>
 
+namespace mdb {
 class TraceeController;
 
 class StopEventNotification
@@ -130,9 +131,9 @@ RemoveSubscriber() noexcept
   return false;
 }
 
-template <typename EventData> class Publisher
+template <typename... EventData> class Publisher
 {
-  using SubscriberAction = std::function<bool(EventData)>;
+  using SubscriberAction = std::function<void(EventData...)>;
 
   struct Subscriber
   {
@@ -146,19 +147,17 @@ template <typename EventData> class Publisher
   std::vector<SubscriberAction> sub_once{};
 
 public:
-  template <typename Fn>
   void
-  subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
+  Subscribe(SubscriberIdentity identity, SubscriberAction &&fn) noexcept
   {
-    ASSERT(utils::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
+    ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
            "Expected Identity to be a unique value");
     subscribers.emplace_back(identity, std::move(fn));
   }
 
   void
-  unsubscribe(SubscriberIdentity identity) noexcept
+  Unsubscribe(SubscriberIdentity identity) noexcept
   {
-
     if (auto it = std::find_if(subscribers.begin(), subscribers.end(),
                                [&identity](const auto &sub) { return sub.identity == identity; });
         it != std::end(subscribers)) {
@@ -166,33 +165,22 @@ public:
     }
   }
 
-  template <typename Fn>
   void
-  once(Fn &&fn) noexcept
+  Once(SubscriberAction &&fn) noexcept
   {
     sub_once.push_back(std::move(fn));
   }
 
   void
-  emit(const EventData &evt) noexcept
-    requires(!std::is_void_v<EventData>)
+  Emit(EventData &&...data) noexcept
   {
     for (auto &&fn : sub_once) {
-      fn(evt);
+      fn(std::forward<EventData>(data)...);
     }
     sub_once.clear();
 
-    std::vector<SubscriberIdentity> remove{};
-    remove.reserve(subscribers.size());
     for (auto &sub : subscribers) {
-      const auto keep = sub.fn(evt);
-      if (!keep) {
-        remove.push_back(sub.identity);
-      }
-    }
-
-    for (auto i : remove) {
-      unsubscribe(i);
+      sub.fn(std::forward<EventData>(data)...);
     }
   }
 };
@@ -217,7 +205,7 @@ public:
   void
   Subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
   {
-    ASSERT(utils::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
+    ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
            "Expected Identity to be a unique value");
     subscribers.emplace_back(identity, std::move(fn));
   }
@@ -252,3 +240,10 @@ public:
     }
   }
 };
+} // namespace mdb
+
+namespace mdb::pub {
+#define EACH_FN(EVT, DESC, RET, ...) extern Publisher<__VA_ARGS__> EVT;
+FOR_EACH_EVENT(EACH_FN)
+#undef EACH_FN
+} // namespace mdb::pub

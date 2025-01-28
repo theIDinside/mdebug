@@ -4,10 +4,10 @@
 #include <memory_resource>
 #include <supervisor.h>
 
-namespace ui::dap {
+namespace mdb::ui::dap {
 
 std::pmr::string
-Breakpoint::serialize(std::pmr::memory_resource* memoryResource) const noexcept
+Breakpoint::serialize(std::pmr::memory_resource *memoryResource) const noexcept
 {
   std::pmr::string buf{memoryResource};
   // TODO(simon): Here we really should be using some form of arena allocation for the DAP interpreter
@@ -53,13 +53,13 @@ Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
 Breakpoint
 Breakpoint::from_user_bp(const UserBreakpoint &user_bp) noexcept
 {
-  if (const auto addr = user_bp.address(); addr) {
+  if (const auto addr = user_bp.Address(); addr) {
     return Breakpoint{.id = user_bp.id,
                       .verified = true,
                       .addr = addr.value(),
-                      .line = user_bp.line(),
-                      .col = user_bp.column(),
-                      .source_path = user_bp.source_file(),
+                      .line = user_bp.Line(),
+                      .col = user_bp.Column(),
+                      .source_path = user_bp.GetSourceFile(),
                       .error_message = {}};
   } else {
     return Breakpoint{.id = user_bp.id,
@@ -68,7 +68,7 @@ Breakpoint::from_user_bp(const UserBreakpoint &user_bp) noexcept
                       .line = {},
                       .col = {},
                       .source_path = {},
-                      .error_message = user_bp.error_message()};
+                      .error_message = user_bp.GetErrorMessage()};
   }
 }
 
@@ -100,4 +100,4 @@ VariablesReference::parent() const noexcept
     return std::nullopt;
   }
 }
-}; // namespace ui::dap
+}; // namespace mdb::ui::dap

@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <typedefs.h>
 
+namespace mdb {
 using Path = std::filesystem::path;
 
 struct ConnectError
@@ -42,7 +43,6 @@ struct ConnectError
   }
 };
 
-namespace utils {
 class ScopedFd
 {
 public:
@@ -73,7 +73,7 @@ public:
   }
 
   static ScopedFd Open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
-  static utils::Expected<ScopedFd, ConnectError> OpenSocketConnectTo(const std::string &host, int port) noexcept;
+  static mdb::Expected<ScopedFd, ConnectError> OpenSocketConnectTo(const std::string &host, int port) noexcept;
   static ScopedFd OpenFileReadOnly(const Path &p) noexcept;
   static ScopedFd TakeFileDescriptorOwnership(int fd) noexcept;
 
@@ -82,4 +82,4 @@ private:
   Path mPath;
   std::optional<u64> mFileSize;
 };
-} // namespace utils
+} // namespace mdb

@@ -67,7 +67,13 @@
   {                                                                                                               \
   }
 
+#define DEFAULT_ENUM(Value, ...) Value,
+
 #define STRINGIFY_VAL(x, ...) #x,
+
+#define CAST_FN(Value, ...)                                                                                       \
+  case static_cast<i32>(Value):                                                                                   \
+    return Value;
 
 template <typename T> struct Enum
 {
@@ -86,7 +92,7 @@ template <typename T> struct Enum
     }                                                                                                             \
   }
 
-#define ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN, CAST_FN)                                                 \
+#define ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN)                                                          \
   enum class ENUM_TYPE : i32                                                                                      \
   {                                                                                                               \
     FOR_EACH(EACH_FN)                                                                                             \
@@ -107,6 +113,7 @@ template <typename T> struct Enum
     static constexpr std::optional<ENUM_TYPE>                                                                     \
     FromInt(int value) noexcept                                                                                   \
     {                                                                                                             \
+      using enum ENUM_TYPE;                                                                                       \
       if (value < 0 || value > std::to_underlying(detail::ENUM_TYPE##Ids.back())) {                               \
         return std::nullopt;                                                                                      \
       }                                                                                                           \
@@ -127,5 +134,11 @@ template <typename T> struct Enum
     {                                                                                                             \
       return detail::ENUM_TYPE##Names[std::to_underlying(value)];                                                 \
     }                                                                                                             \
+    static constexpr std::span<const std::string_view>                                                            \
+    Names() noexcept                                                                                              \
+    {                                                                                                             \
+      return std::span{detail::ENUM_TYPE##Names};                                                                 \
+    }                                                                                                             \
   };                                                                                                              \
+  template <ENUM_TYPE EVENT> struct ENUM_TYPE##Traits;                                                            \
   ENUM_FMT(ENUM_TYPE, FOR_EACH, EACH_FN);

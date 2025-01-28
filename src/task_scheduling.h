@@ -1,24 +1,27 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+#include "bp.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/dwarf/lnp.h"
-#include "utils/macros.h"
+#include "utils/smartptr.h"
 #include <symbolication/callstack.h>
 #include <unordered_map>
 
+namespace mdb {
 class TraceeController;
 struct BpStat;
 struct TaskInfo;
-
 struct TraceEvent;
+} // namespace mdb
 
-namespace tc {
+namespace mdb::tc {
 class TraceeCommandInterface;
 struct ProcessedStopEvent;
-} // namespace tc
+} // namespace mdb::tc
 
+namespace mdb {
 namespace ptracestop {
 
 class StopHandler;
@@ -92,21 +95,20 @@ private:
   bool resumed_to_resume_addr;
   sym::Frame startFrame;
   sym::dw::LineTableEntry entry;
-  std::shared_ptr<UserBreakpoint> resume_bp{nullptr};
+  Ref<UserBreakpoint> resume_bp{nullptr};
 };
 
 class FinishFunction : public ThreadProceedAction
 {
 public:
-  FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_ptr<UserBreakpoint> bp,
-                 bool should_clean_up) noexcept;
+  FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp, bool should_clean_up) noexcept;
   ~FinishFunction() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
   void UpdateStepped() noexcept override;
 
 private:
-  std::shared_ptr<UserBreakpoint> bp;
+  Ref<UserBreakpoint> bp;
   bool should_cleanup;
 };
 
@@ -191,8 +193,8 @@ public:
   void NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
   void StopAllScheduleTask(TaskInfo &task) noexcept;
 
-
   void SetNormalScheduling() noexcept;
   void SetStopAllScheduling() noexcept;
   void SetOneExclusiveScheduling(Tid tid) noexcept;
 };
+} // namespace mdb

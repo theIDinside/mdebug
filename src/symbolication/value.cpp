@@ -9,7 +9,7 @@
 #include <supervisor.h>
 #include <symbolication/objfile.h>
 
-namespace sym {
+namespace mdb::sym {
 Value::Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
              std::shared_ptr<MemoryContentsObject> &&valueObject) noexcept
     : mName(name), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&kind),
@@ -61,12 +61,12 @@ Value::GetType() const noexcept
   }
 }
 
-utils::Expected<AddrPtr, ValueError>
+mdb::Expected<AddrPtr, ValueError>
 Value::ToRemotePointer() noexcept
 {
   const auto bytes = MemoryView();
   if (bytes.size_bytes() != 8) {
-    return utils::unexpected(ValueError::InvalidSize);
+    return mdb::unexpected(ValueError::InvalidSize);
   }
   std::uintptr_t ptr{};
   std::memcpy(&ptr, bytes.data(), 8);
@@ -321,4 +321,4 @@ MemoryContentsObject::CreateFrameVariable(std::pmr::memory_resource *allocator, 
   TODO_IGNORE_WARN("Unimplemented", allocator, tc, task, frame, symbol, lazy);
   return nullptr;
 }
-} // namespace sym
+} // namespace mdb::sym

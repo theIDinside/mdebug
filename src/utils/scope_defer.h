@@ -3,6 +3,7 @@
 #include "utils/macros.h"
 #include <utility>
 
+namespace mdb {
 template <typename DeferFn> class ScopedDefer
 {
 public:
@@ -23,3 +24,4 @@ public:
 private:
   DeferFn defer_fn;
 };
+} // namespace mdb

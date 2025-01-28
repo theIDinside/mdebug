@@ -9,7 +9,7 @@
 #include <interface/remotegdb/connection.h>
 #include <link.h>
 
-namespace tc {
+namespace mdb::tc {
 
 template <size_t N> struct CommandSerializer
 {
@@ -119,7 +119,7 @@ public:
   std::optional<Path> ExecedFile() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept final;
   std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept final;
-  utils::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept final;
+  mdb::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept final;
 
   gdb::RemoteSettings &remote_settings() noexcept;
 };
@@ -157,7 +157,7 @@ class RemoteSessionConfigurator
 public:
   // First target
   explicit RemoteSessionConfigurator(gdb::RemoteConnection::ShrPtr remote) noexcept;
-  utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError> configure_session() noexcept;
-  utils::Expected<std::vector<RemoteProcess>, gdb::ConnInitError> configure_rr_session() noexcept;
+  mdb::Expected<std::vector<RemoteProcess>, gdb::ConnInitError> configure_session() noexcept;
+  mdb::Expected<std::vector<RemoteProcess>, gdb::ConnInitError> configure_rr_session() noexcept;
 };
-} // namespace tc
+} // namespace mdb::tc

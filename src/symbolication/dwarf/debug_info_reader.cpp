@@ -5,7 +5,7 @@
 #include "symbolication/dwarf_binary_reader.h"
 #include "utils/util.h"
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 UnitReader::UnitReader(UnitData *data) noexcept
     : compilation_unit(data), current_ptr(nullptr), mFormat(data->header().Format())
@@ -596,8 +596,8 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
   case AttributeForm::DW_FORM_strx3:
     [[fallthrough]];
   case AttributeForm::DW_FORM_strx4: {
-    const auto base = utils::castenum(AttributeForm::DW_FORM_strx1) - 1;
-    const auto bytes_to_read = utils::castenum(abbr.mForm) - base;
+    const auto base = mdb::castenum(AttributeForm::DW_FORM_strx1) - 1;
+    const auto bytes_to_read = mdb::castenum(abbr.mForm) - base;
     const auto idx = reader.ReadNumbBytes(bytes_to_read);
     return AttributeValue{reader.ReadByIndexFromStringTable(idx), abbr.mForm, abbr.mName};
   }
@@ -616,8 +616,8 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
   case AttributeForm::DW_FORM_addrx4: {
     ASSERT(elf->debug_addr != nullptr, ".debug_addr not read in or found in objfile {}",
            reader.GetObjectFile()->GetPathString());
-    const auto base = utils::castenum(AttributeForm::DW_FORM_addrx1) - 1;
-    const auto bytes_to_read = utils::castenum(abbr.mForm) - base;
+    const auto base = mdb::castenum(AttributeForm::DW_FORM_addrx1) - 1;
+    const auto bytes_to_read = mdb::castenum(abbr.mForm) - base;
     const auto addr_index = reader.ReadNumbBytes(bytes_to_read);
     return AttributeValue{reader.ReadByIndexFromAddressTable(addr_index), abbr.mForm, abbr.mName};
   }
@@ -658,4 +658,4 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
   PANIC("Unknown Attribute Form");
 }
 
-} // namespace sym::dw
+} // namespace mdb::sym::dw

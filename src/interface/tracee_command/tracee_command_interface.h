@@ -11,23 +11,25 @@
 #include <sys/ptrace.h>
 
 using namespace std::string_view_literals;
+namespace mdb {
 class TraceeController;
 struct TaskInfo;
 class SymbolFile;
 
 class BreakpointLocation;
+} // namespace mdb
 
-namespace ui::dap {
+namespace mdb::ui::dap {
 struct Thread;
 };
 
-namespace gdb {
+namespace mdb::gdb {
 class RemoteConnection;
 struct RemoteSettings;
-} // namespace gdb
+} // namespace mdb::gdb
 
 /// Tracee Control
-namespace tc {
+namespace mdb::tc {
 
 enum class RunType : u8
 {
@@ -326,7 +328,7 @@ public:
   virtual std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept = 0;
 
   virtual std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept = 0;
-  virtual utils::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept = 0;
+  virtual mdb::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept = 0;
 
   virtual bool TargetManagesBreakpoints() noexcept;
   TaskExecuteResponse DoDisconnect(bool terminate) noexcept;
@@ -336,7 +338,7 @@ public:
   void SetTarget(TraceeController *tc) noexcept;
 
   template <typename T>
-  utils::Expected<T, std::string_view>
+  mdb::Expected<T, std::string_view>
   ReadType(TraceePointer<T> address) noexcept
   {
     typename TPtr<T>::Type t_result;
@@ -347,9 +349,9 @@ public:
       auto read_result = ReadBytes(address.as_void(), sz - total_read, ptr + total_read);
       switch (read_result.op_result) {
       case ReadResultType::SystemError:
-        return utils::unexpected<std::string_view>(strerror(read_result.sys_errno));
+        return mdb::unexpected<std::string_view>(strerror(read_result.sys_errno));
       case ReadResultType::EoF:
-        return utils::unexpected<std::string_view>("End of file reported"sv);
+        return mdb::unexpected<std::string_view>("End of file reported"sv);
       case ReadResultType::DebuggerError:
         TODO("implement handling of 'DebuggerError' in read_type");
       case ReadResultType::OK:
@@ -361,11 +363,11 @@ public:
         continue;
       }
     }
-    return utils::expected<T>(t_result);
+    return mdb::expected<T>(t_result);
   }
 
   template <typename T>
-  utils::Expected<u32, WriteError>
+  mdb::Expected<u32, WriteError>
   Write(TraceePointer<T> address, const T &value)
   {
     auto total_written = 0ull;
@@ -378,11 +380,11 @@ public:
         total_written += written.bytes_written;
       } else {
         auto addr_value = reinterpret_cast<std::uintptr_t>(ptr) + total_written;
-        return utils::unexpected(WriteError{
+        return mdb::unexpected(WriteError{
           .address = AddrPtr{addr_value}, .bytes_written = total_written, .sys_errno = written.err.sys_error_num});
       }
     }
-    return utils::expected(static_cast<u32>(total_written));
+    return mdb::expected(static_cast<u32>(total_written));
   }
 
   inline constexpr TraceeController *
@@ -392,11 +394,11 @@ public:
   }
 };
 
-} // namespace tc
+} // namespace mdb::tc
 
 namespace fmt {
 
-template <> struct formatter<tc::RunType>
+template <> struct formatter<mdb::tc::RunType>
 {
   template <typename ParseContext>
   constexpr auto
@@ -407,22 +409,23 @@ template <> struct formatter<tc::RunType>
 
   template <typename FormatContext>
   auto
-  format(const tc::RunType &type, FormatContext &ctx) const
+  format(const mdb::tc::RunType &type, FormatContext &ctx) const
   {
+    using enum mdb::tc::RunType;
     switch (type) {
-    case tc::RunType::Step:
+    case Step:
       return fmt::format_to(ctx.out(), "RunType::Step");
-    case tc::RunType::Continue:
+    case Continue:
       return fmt::format_to(ctx.out(), "RunType::Continue");
-    case tc::RunType::SyscallContinue:
+    case SyscallContinue:
       return fmt::format_to(ctx.out(), "RunType::SyscallContinue");
-    case tc::RunType::Unknown:
+    case Unknown:
       return fmt::format_to(ctx.out(), "RunType::UNKNOWN");
     }
   }
 };
 
-template <> struct formatter<tc::ResumeTarget>
+template <> struct formatter<mdb::tc::ResumeTarget>
 {
   template <typename ParseContext>
   constexpr auto
@@ -433,18 +436,18 @@ template <> struct formatter<tc::ResumeTarget>
 
   template <typename FormatContext>
   constexpr auto
-  format(const tc::ResumeTarget &tgt, FormatContext &ctx) const
+  format(const mdb::tc::ResumeTarget &tgt, FormatContext &ctx) const
   {
 
     switch (tgt) {
-    case tc::ResumeTarget::Task:
+    case mdb::tc::ResumeTarget::Task:
       return fmt::format_to(ctx.out(), "ResumeTarget::Task");
-    case tc::ResumeTarget::AllNonRunningInProcess:
+    case mdb::tc::ResumeTarget::AllNonRunningInProcess:
       return fmt::format_to(ctx.out(), "ResumeTarget::AllNonRunningInProcess");
-    case tc::ResumeTarget::None:
+    case mdb::tc::ResumeTarget::None:
       return fmt::format_to(ctx.out(), "ResumeTarget::None");
     default:
-      static_assert(always_false<FormatContext>, "All cases not handled");
+      static_assert(mdb::always_false<FormatContext>, "All cases not handled");
     }
   }
 };

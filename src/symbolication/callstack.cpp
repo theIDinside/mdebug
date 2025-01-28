@@ -16,7 +16,7 @@
 #include <symbolication/objfile.h>
 #include <task.h>
 
-namespace sym {
+namespace mdb::sym {
 
 static constexpr auto X86_64_RIP_REGISTER = 16;
 
@@ -119,7 +119,7 @@ Frame::Scopes() noexcept
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::Get().new_key();
       Tracer::Get().set_var_context({mOwningSymbolFile->GetSupervisor(), mTask->ptr, mOwningSymbolFile,
-                                         static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
+                                     static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
       mFrameScopes[i].variables_reference = key;
     }
   }
@@ -397,7 +397,7 @@ bool
 CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
 {
   auto &cfa = stateMachine.GetCanonicalFrameAddressData();
-  int frameLevel = mUnwoundRegister.size()-1;
+  int frameLevel = mUnwoundRegister.size() - 1;
   const u64 canonicalFrameAddr =
     stateMachine.GetCanonicalFrameAddressData().mIsExpression
       ? stateMachine.ComputeExpression(cfa.uExpression, frameLevel)
@@ -429,7 +429,7 @@ decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state)
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
   DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
-  const utils::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.mInfo);
+  const mdb::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.mInfo);
   DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
   DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
   sym::decode(fde, state, info.mInfo);
@@ -518,4 +518,4 @@ CallStack::Unwind(const CallStackRequest &req)
   mCallstackIsDirty = false;
 }
 
-} // namespace sym
+} // namespace mdb::sym

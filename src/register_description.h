@@ -4,6 +4,7 @@
 #include "tracee_pointer.h"
 #include "utils/macros.h"
 #include <typedefs.h>
+namespace mdb {
 
 enum class TargetFormat : u8
 {
@@ -79,3 +80,4 @@ public:
   void Store(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
   void FillFromHexEncodedString(std::string_view hexString) noexcept;
 };
+} // namespace mdb

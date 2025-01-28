@@ -7,8 +7,7 @@
 #include <vector>
 
 // see https://arxiv.org/pdf/1704.00605.pdf for fancy pants AVX2 optimizations
-namespace utils {
-
+namespace mdb {
 static constexpr char base64_lookup[] = {
   'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
   'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
@@ -45,4 +44,4 @@ constexpr static char lookup_byte4[256] = {
 std::string encode_base64(std::span<std::uint8_t> data) noexcept;
 std::optional<std::vector<std::uint8_t>> decode_base64(std::string_view encoded) noexcept;
 
-} // namespace utils
+} // namespace mdb

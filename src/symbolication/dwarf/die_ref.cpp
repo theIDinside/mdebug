@@ -6,7 +6,7 @@
 #include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 
 std::tuple<u64, const char *>
 PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
@@ -161,4 +161,4 @@ IndexedDieReference::GetDie() noexcept
 {
   return &mUnitData->GetDies()[mDieIndex];
 }
-} // namespace sym::dw
+} // namespace mdb::sym::dw

@@ -6,10 +6,10 @@
 #include "utils/macros.h"
 #include <array>
 
+namespace mdb {
 class ObjectFile;
 struct ElfSection;
 class Elf;
-
 constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
   "r_debug_state",      "_r_debug_state",          "_dl_debug_state",
   "rtld_db_dlactivity", "__dl_rtld_db_dlactivity", "_rtld_debug_state",
@@ -84,3 +84,4 @@ private:
 };
 
 Path interpreter_path(const Elf *elf, const ElfSection *interp) noexcept;
+} // namespace mdb

@@ -1,5 +1,5 @@
 /** LICENSE TEMPLATE */
-#include "ptracestop_handlers.h"
+#include "task_scheduling.h"
 #include "bp.h"
 #include "event_queue.h"
 #include "interface/tracee_command/tracee_command_interface.h"
@@ -16,7 +16,7 @@
 #include <task.h>
 #include <tracer.h>
 #include <utility>
-
+namespace mdb {
 namespace ptracestop {
 using sym::dw::LineTableEntry;
 
@@ -31,7 +31,7 @@ ThreadProceedAction::cancel() noexcept
   cancelled = true;
 }
 
-FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, std::shared_ptr<UserBreakpoint> bp,
+FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp,
                                bool should_clean_up) noexcept
     : ThreadProceedAction(ctrl, t), bp(std::move(bp)), should_cleanup(should_clean_up)
 {
@@ -49,7 +49,7 @@ bool
 FinishFunction::HasCompleted(bool stopped_by_user) const noexcept
 {
 
-  return mSupervisor.CacheAndGetPcFor(task) == bp->address() || stopped_by_user;
+  return mSupervisor.CacheAndGetPcFor(task) == bp->Address() || stopped_by_user;
 }
 
 void
@@ -138,7 +138,7 @@ LineStep::~LineStep() noexcept
 {
   if (!cancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", task.mTid);
-    EventSystem::Get().PushDebuggerEvent(TraceEvent::SteppingDone(
+    EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateSteppingDone(
       {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0}, "Line stepping finished", {}));
   } else {
     if (resume_bp) {
@@ -252,7 +252,7 @@ StepInto::StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_fram
 StepInto::~StepInto() noexcept
 {
   if (!cancelled) {
-    EventSystem::Get().PushDebuggerEvent(TraceEvent::SteppingDone(
+    EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateSteppingDone(
       {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0}, "Step in done", {}));
   }
 }
@@ -446,3 +446,4 @@ TaskScheduler::StopAllScheduleTask(TaskInfo &task) noexcept
     mSupervisor->EmitAllStopped();
   }
 }
+} // namespace mdb

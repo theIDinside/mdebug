@@ -2,7 +2,7 @@
 #include "unit_header.h"
 #include <symbolication/elf.h>
 
-namespace sym::dw {
+namespace mdb::sym::dw {
 // Partial/Compile Unit-header constructor
 UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
                        u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
@@ -131,4 +131,4 @@ UnitHeader::GetTypeOffset() const noexcept
 {
   return mTypeOffset;
 }
-} // namespace sym::dw
+} // namespace mdb::sym::dw

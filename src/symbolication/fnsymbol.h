@@ -5,7 +5,7 @@
 #include "symbolication/type.h"
 #include "utils/immutable.h"
 
-namespace sym {
+namespace mdb::sym {
 namespace dw {
 class FunctionSymbolicationContext;
 }
@@ -108,7 +108,7 @@ private:
 };
 bool IsSame(const FunctionSymbol &l, const FunctionSymbol &r) noexcept;
 bool IsSame(const FunctionSymbol *l, const FunctionSymbol *r) noexcept;
-} // namespace sym
+} // namespace mdb::sym
 
 namespace fmt {
 

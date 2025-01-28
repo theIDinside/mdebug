@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <memory_resource>
 
-namespace alloc {
-  class ArenaAllocator;
+namespace mdb::alloc {
+class ArenaAllocator;
 }
 
 namespace mdb {
@@ -35,42 +35,53 @@ template <typename T> class Vector
 
 public:
   Vector(u32 capacity) noexcept : mPtr(mAllocator->allocate(sizeof(T) * capacity, 64)), mCapacity(capacity) {}
-  void Push(T&& t) noexcept {}
+  void
+  Push(T &&t) noexcept
+  {
+  }
 };
 
-template <typename T>
-class Array {
-  T* mPtr;
+template <typename T> class Array
+{
+  T *mPtr;
   u64 mSize;
-public:
-  Array(T* finalizedBuffer, u64 size) : mPtr(finalizedBuffer), mSize(size) {}
 
-  auto begin() noexcept {
+public:
+  Array(T *finalizedBuffer, u64 size) : mPtr(finalizedBuffer), mSize(size) {}
+
+  auto
+  begin() noexcept
+  {
     return mPtr;
   }
 
-  auto end() noexcept {
+  auto
+  end() noexcept
+  {
     return mPtr + mSize;
   }
 };
 
-/** CollectionBuilder takes an arena allocator that can allocate new pages consecutively to previous ones - this makes
-* this allocator great to use with this "collection builder" which is sort of meant to be as a temporary std::vector that "finalizes" an array.
-* and because our AA can re-alloc it's internal buffer contigously, the CollectionBuilder can keep push-backing, re-alloc, push back, re alloc,
-* without having to copy over it's old elements. */
-template<typename T>
-class CollectionBuilder {
-  alloc::ArenaAllocator* mAllocator;
-  T* mPtr;
+/** CollectionBuilder takes an arena allocator that can allocate new pages consecutively to previous ones - this
+ * makes this allocator great to use with this "collection builder" which is sort of meant to be as a temporary
+ * std::vector that "finalizes" an array. and because our AA can re-alloc it's internal buffer contigously, the
+ * CollectionBuilder can keep push-backing, re-alloc, push back, re alloc, without having to copy over it's old
+ * elements. */
+template <typename T> class CollectionBuilder
+{
+  alloc::ArenaAllocator *mAllocator;
+  T *mPtr;
   u32 mCurrentSize;
   u32 mCurrentCapacity;
-public:
-  explicit CollectionBuilder(alloc::ArenaAllocator* alloc) noexcept : mAllocator(alloc) {
-  }
 
-  template <typename ...Args>
-  T& Emplace(Args&&... args) {
-    if(mCurrentSize == mCurrentCapacity) {
+public:
+  explicit CollectionBuilder(alloc::ArenaAllocator *alloc) noexcept : mAllocator(alloc) {}
+
+  template <typename... Args>
+  T &
+  Emplace(Args &&...args)
+  {
+    if (mCurrentSize == mCurrentCapacity) {
       mAllocator->allocate()
     }
   }

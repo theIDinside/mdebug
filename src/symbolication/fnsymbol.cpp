@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "fnsymbol.h"
-namespace sym {
+namespace mdb::sym {
 
 ReturnValueClass
 DetermineArchitectureReturnClass(sym::Type *type) noexcept
@@ -15,18 +15,20 @@ FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name
                                sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
                                CompilationUnit &decl_file, std::span<const u8> fb_expr,
                                std::optional<SourceCoordinate> &&source) noexcept
-    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock({start, end}, {}), mFunctionSymbolBlocks(),
-      mMaybeOriginDies(maybe_origin), mFrameBaseDwarfExpression(fb_expr), mFunctionReturnType(return_type), pc_start(start),
-      pc_end_exclusive(end), member_of(member_of), name(name), source(std::move(source))
+    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock({start, end}, {}),
+      mFunctionSymbolBlocks(), mMaybeOriginDies(maybe_origin), mFrameBaseDwarfExpression(fb_expr),
+      mFunctionReturnType(return_type), pc_start(start), pc_end_exclusive(end), member_of(member_of), name(name),
+      source(std::move(source))
 {
 }
 
 FunctionSymbol::FunctionSymbol(FunctionSymbol &&fn) noexcept
-    : mDeclaringCompilationUnit(fn.mDeclaringCompilationUnit), mFormalParametersBlock(std::move(fn.mFormalParametersBlock)),
-      mFunctionSymbolBlocks(std::move(fn.mFunctionSymbolBlocks)),
-      mMaybeOriginDies(fn.mMaybeOriginDies), mFrameBaseDwarfExpression(fn.mFrameBaseDwarfExpression),
-      mFunctionReturnType(fn.mFunctionReturnType), pc_start(fn.pc_start), pc_end_exclusive(fn.pc_end_exclusive),
-      member_of(fn.member_of), name(fn.name), source(std::move(fn.source))
+    : mDeclaringCompilationUnit(fn.mDeclaringCompilationUnit),
+      mFormalParametersBlock(std::move(fn.mFormalParametersBlock)),
+      mFunctionSymbolBlocks(std::move(fn.mFunctionSymbolBlocks)), mMaybeOriginDies(fn.mMaybeOriginDies),
+      mFrameBaseDwarfExpression(fn.mFrameBaseDwarfExpression), mFunctionReturnType(fn.mFunctionReturnType),
+      pc_start(fn.pc_start), pc_end_exclusive(fn.pc_end_exclusive), member_of(fn.member_of), name(fn.name),
+      source(std::move(fn.source))
 {
 }
 
@@ -128,4 +130,4 @@ IsSame(const FunctionSymbol &l, const FunctionSymbol &r) noexcept
   return *l.name == *r.name && *l.pc_start == *r.pc_start && *l.pc_end_exclusive == *r.pc_end_exclusive;
 }
 
-} // namespace sym
+} // namespace mdb::sym

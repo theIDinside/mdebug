@@ -6,6 +6,7 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "mdbjs/mdbjs.h"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
 #include "utils/logger.h"
@@ -15,18 +16,18 @@
 #include <fmt/format.h>
 #include <iterator>
 #include <optional>
-#include <ptracestop_handlers.h>
 #include <string>
 #include <supervisor.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
 #include <symbolication/value.h>
 #include <symbolication/value_visualizer.h>
+#include <task_scheduling.h>
 #include <tracer.h>
 #include <utils/base64.h>
 
 namespace fmt {
-
+namespace ui = mdb::ui;
 template <> struct formatter<ui::dap::Message>
 {
   template <typename ParseContext>
@@ -66,6 +67,7 @@ template <> struct formatter<ui::dap::Message>
 
 } // namespace fmt
 
+namespace mdb {
 ui::UIResultPtr
 ui::UICommand::LogExecute() noexcept
 {
@@ -227,7 +229,7 @@ Continue::Execute() noexcept
   if (continue_all && !target->SomeTaskCanBeResumed()) {
     std::vector<Tid> running_tasks{};
     for (const auto &entry : target->GetThreads()) {
-      if (!entry.mTask->is_stopped() || entry.mTask->tracer_stopped) {
+      if (!entry.mTask->is_stopped() || entry.mTask->mTracerVisibleStop) {
         running_tasks.push_back(entry.mTid);
       }
     }
@@ -281,7 +283,7 @@ PauseAll::Execute() noexcept
   auto target = mDAPClient->GetSupervisor();
   auto tid = target->TaskLeaderTid();
   target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = mDAPClient, tid]() {
-    client->PostEvent(new StoppedEvent{StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
+    client->PostDapEvent(new StoppedEvent{StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
   });
   auto res = new PauseAllResponse{true, this};
   return res;
@@ -433,7 +435,7 @@ std::pmr::string
 SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   std::pmr::string result{arenaAllocator};
-  result.reserve(utils::SystemPagesInBytes(1) / 2);
+  result.reserve(mdb::SystemPagesInBytes(1) / 2);
   auto outIt = std::back_inserter(result);
   std::pmr::vector<std::pmr::string> serialized_bkpts{arenaAllocator};
   serialized_bkpts.reserve(breakpoints.size());
@@ -504,7 +506,7 @@ SetBreakpoints::Execute() noexcept
 
   for (const auto &[bp, ids] : target->GetUserBreakpoints().bps_for_source(file)) {
     for (const auto id : ids) {
-      const auto user = target->GetUserBreakpoints().get_user(id);
+      const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
       res->breakpoints.push_back(BP::from_user_bp(*user));
     }
   }
@@ -552,7 +554,7 @@ SetInstructionBreakpoints::Execute() noexcept
   res->breakpoints.reserve(target->GetUserBreakpoints().instruction_breakpoints.size());
 
   for (const auto &[k, id] : target->GetUserBreakpoints().instruction_breakpoints) {
-    res->breakpoints.push_back(BP::from_user_bp(*target->GetUserBreakpoints().get_user(id)));
+    res->breakpoints.push_back(BP::from_user_bp(*target->GetUserBreakpoints().GetUserBreakpoint(id)));
   }
 
   res->success = true;
@@ -660,7 +662,7 @@ ReadMemory::Execute() noexcept
   if (address) {
     auto sv = mDAPClient->GetSupervisor()->ReadToVector(*address, bytes);
     auto res = new ReadMemoryResponse{true, this};
-    res->data_base64 = utils::encode_base64(sv->span());
+    res->data_base64 = mdb::encode_base64(sv->span());
     res->first_readable_address = *address;
     res->success = true;
     res->unreadable_bytes = 0;
@@ -1322,6 +1324,39 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   return result;
 }
 
+ImportScript::ImportScript(u64 seq, std::string &&scriptSource) noexcept
+    : UICommand(seq), mSource(std::move(scriptSource))
+{
+}
+
+UIResultPtr
+ImportScript::Execute() noexcept
+{
+  TODO("ImportScript::Execute() noexcept");
+  mdb::js::ScriptRuntime *i = Tracer::Get().GetRuntime();
+  return new ImportScriptResponse{true, this, i->EvaluateJavascriptString(mSource)};
+}
+
+std::pmr::string
+ImportScriptResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
+{
+  std::pmr::string result{arenaAllocator};
+  result.reserve(512);
+
+  if (mEvaluateResult) {
+    fmt::format_to(
+      std::back_inserter(result),
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"importScript","body":{{"evaluatedOk":true}}}})",
+      seq, request_seq);
+  } else {
+    fmt::format_to(
+      std::back_inserter(result),
+      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"importScript","body":{{"evaluatedOk":false, "error": {}}}}})",
+      seq, request_seq, mEvaluateResult.error());
+  }
+  return result;
+}
+
 InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
     : UICommand(seq), command(command), missing_arguments(std::move(missing_args))
 {
@@ -1701,12 +1736,14 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     std::string_view data{};
     args.at("data").get_to(data);
 
-    if (auto bytes = utils::decode_base64(data); bytes) {
+    if (auto bytes = mdb::decode_base64(data); bytes) {
       return new WriteMemory{seq, addr, offset, std::move(bytes.value())};
     } else {
       return new InvalidArgs{seq, "writeMemory", {}};
     }
   }
+  case CommandType::ImportScript:
+    break;
   case CommandType::UNKNOWN:
     break;
   }
@@ -1715,3 +1752,4 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
 }
 
 } // namespace ui::dap
+} // namespace mdb

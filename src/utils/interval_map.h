@@ -1,10 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <common.h>
 #include "util.h"
+#include <common.h>
 
-namespace utils {
-
+namespace mdb {
 template <typename Datum> struct IntervalNodeValue
 {
   bool end;
@@ -205,4 +204,4 @@ private:
   }
 };
 
-} // namespace utils
+} // namespace mdb

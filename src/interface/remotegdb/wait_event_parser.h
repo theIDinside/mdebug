@@ -7,7 +7,7 @@
 #include <optional>
 #include <string_view>
 #include <typedefs.h>
-
+namespace mdb {
 struct TraceEvent;
 class TraceeController;
 
@@ -134,3 +134,4 @@ struct WaitEventParser
   std::vector<GdbThread> parse_threads_parameter(std::string_view input) noexcept;
 };
 } // namespace gdb
+} // namespace mdb

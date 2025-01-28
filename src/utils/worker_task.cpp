@@ -8,8 +8,7 @@
 #include "utils/logger.h"
 #include <chrono>
 
-namespace utils {
-
+namespace mdb {
 void
 Task::SetOwner(TaskGroup *group) noexcept
 {
@@ -34,7 +33,7 @@ Task::Execute() noexcept
 }
 
 void
-NoOp::ExecuteTask(std::pmr::memory_resource* temporaryAllocator) noexcept
+NoOp::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
 {
 }
 
@@ -100,4 +99,4 @@ TaskGroup::GetTemporaryAllocator() const noexcept
   return mGroupTemporaryAllocator.get();
 }
 
-} // namespace utils
+} // namespace mdb
