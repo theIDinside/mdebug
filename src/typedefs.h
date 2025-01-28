@@ -19,3 +19,34 @@ using Tid = pid_t;
 using Pid = pid_t;
 
 template <typename Fn, typename... FnArgs> using FnResult = std::invoke_result_t<Fn, FnArgs...>;
+
+template <typename T> struct IsTemplateType : std::false_type
+{
+};
+
+template <template <typename...> class TemplatedType, typename... Args>
+struct IsTemplateType<TemplatedType<Args...>> : std::true_type
+{
+};
+
+template <typename T> static inline constexpr bool IsTemplate = IsTemplateType<T>::value;
+
+// String literal wrapper for use in template parameters
+// Template type for string literals
+template <std::size_t N> struct StringLiteral
+{
+  consteval StringLiteral(const char (&str)[N]) noexcept
+  {
+    for (std::size_t i = 0; i < N; ++i) {
+      value[i] = str[i];
+    }
+  }
+
+  char value[N];
+
+  consteval const char *
+  CString() const
+  {
+    return value;
+  }
+};
