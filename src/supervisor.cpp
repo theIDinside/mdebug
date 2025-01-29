@@ -631,14 +631,14 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, 
   const auto sz = locs.size();
   if (auto specPtr = user.UserProvidedSpec(); specPtr != nullptr) {
     auto objfile = symbolFile.GetObjectFile();
-    switch (specPtr->index()) {
-    case UserBreakpoint::SOURCE_BREAKPOINT: {
-      const auto &spec = std::get<std::pair<std::string, SourceBreakpointSpec>>(*specPtr);
-      const auto predicate = [&srcSpec = spec.second](const sym::dw::LineTableEntry &entry) {
+    switch (specPtr->mKind) {
+    case DapBreakpointType::source: {
+      const auto &spec = specPtr->uSource;
+      const auto predicate = [&srcSpec = spec->mSpec](const sym::dw::LineTableEntry &entry) {
         return srcSpec.line == entry.line && srcSpec.column.value_or(entry.column) == entry.column &&
                !entry.IsEndOfSequence;
       };
-      for (auto &sourceCodeFile : objfile->GetSourceCodeFiles(spec.first)) {
+      for (auto &sourceCodeFile : objfile->GetSourceCodeFiles(spec->mFilePath)) {
         std::vector<sym::dw::LineTableEntry> entries;
         sourceCodeFile->ReadInSourceCodeLineTable(entries);
 
@@ -646,16 +646,15 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, 
           const auto pc = lte.pc + symbolFile.mBaseAddress;
           if (auto res = GetOrCreateBreakpointLocation(pc, *sourceCodeFile, lte); res.is_expected()) {
             locs.push_back(res.take_value());
-            if (!spec.second.column.has_value()) {
+            if (!spec->mSpec.column.has_value()) {
               break;
             }
           }
         }
       }
     } break;
-    case UserBreakpoint::FUNCTION_BREAKPOINT: {
-      const auto &spec = std::get<FunctionBreakpointSpec>(*specPtr);
-      auto result = symbolFile.LookupBreakpointBySpec(spec);
+    case DapBreakpointType::function: {
+      auto result = symbolFile.LookupFunctionBreakpointBySpec(*specPtr);
 
       if (auto it =
             std::find_if(result.begin(), result.end(), [](const auto &it) { return it.loc_src_info.has_value(); });
@@ -673,9 +672,9 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, 
         }
       }
     } break;
-    case UserBreakpoint::INSTRUCTION_BREAKPOINT:
-      const auto &spec = std::get<InstructionBreakpointSpec>(*specPtr);
-      auto addr_opt = to_addr(spec.instructionReference);
+    case DapBreakpointType::instruction: {
+      const auto &spec = *specPtr->uInstruction;
+      auto addr_opt = to_addr(spec.mInstructionReference);
       ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
       const auto addr = addr_opt.value();
       if (symbolFile.ContainsProgramCounter(addr)) {
@@ -684,6 +683,7 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, 
         }
       }
       break;
+    } break;
     }
   }
 
@@ -738,26 +738,25 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
         for (auto &[desc, user_ids] : file_bp_map) {
           entries.clear();
           const auto predicate = [&desc](const Entry &lte) {
-            return lte.line == desc.line && desc.column.value_or(lte.column) == lte.column && !lte.IsEndOfSequence;
+            return lte.line == desc.uSource->mSpec.line &&
+                   desc.uSource->mSpec.column.value_or(lte.column) == lte.column && !lte.IsEndOfSequence;
           };
           sourceCodeFile->ReadInSourceCodeLineTable(entries);
           for (const auto &e : entries | std::views::filter(predicate)) {
             const auto pc = AddrPtr{e.pc + sym->mBaseAddress};
-            bool same_src_loc_different_pc = false;
+            bool sameSourceLocDiffPc = false;
             for (const auto id : user_ids) {
               auto user = mUserBreakpoints.GetUserBreakpoint(id);
               if (user->Address() != pc) {
-                same_src_loc_different_pc = true;
+                sameSourceLocDiffPc = true;
               }
             }
-            if (same_src_loc_different_pc) {
-              std::unique_ptr<UserBpSpec> spec =
-                std::make_unique<UserBpSpec>(std::make_pair(std::string{source_file}, desc));
+            if (sameSourceLocDiffPc) {
               auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
                 *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader,
-                LocationUserKind::Source, std::nullopt, std::nullopt, std::move(spec));
+                LocationUserKind::Source, desc.Clone());
               mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{"new", {}, user});
-              user_ids.push_back(user->id);
+              user_ids.push_back(user->mId);
               const auto last_slash = source_file.find_last_of('/');
               const std::string_view file_name =
                 source_file.substr(last_slash == std::string_view::npos ? 0 : last_slash);
@@ -766,7 +765,7 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
             }
             // If the breakpoint spec has no column info, pick the first found line table entry with the desired
             // line.
-            if (!desc.column) {
+            if (!desc.Column()) {
               break;
             }
           }
@@ -776,13 +775,13 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
 
     // Do update for "function breakpoints", set via a name or regex of a function name spec.
     for (auto &[fn, ids] : mUserBreakpoints.fn_breakpoints) {
-      auto result = sym->LookupBreakpointBySpec(fn);
+      auto result = sym->LookupFunctionBreakpointBySpec(fn);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
           *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
-          mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt, std::make_unique<UserBpSpec>(fn));
+          mTaskLeader, LocationUserKind::Function, fn.Clone());
         mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{"new", {}, user});
-        ids.push_back(user->id);
+        ids.push_back(user->mId);
       }
     }
   }
@@ -790,12 +789,12 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
 
 void
 TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-                                          std::vector<SourceBreakpointSpec> &&add,
-                                          const std::vector<SourceBreakpointSpec> &remove) noexcept
+                                          std::vector<BreakpointSpecification> &&add,
+                                          const std::vector<BreakpointSpecification> &remove) noexcept
 {
   UserBreakpoints::SourceFileBreakpointMap &map = mUserBreakpoints.bps_for_source(sourceFilePath.string());
 
-  Set<SourceBreakpointSpec> not_set{add.begin(), add.end()};
+  Set<BreakpointSpecification> not_set{add.begin(), add.end()};
 
   for (const auto &symbol_file : mSymbolFiles) {
     auto obj = symbol_file->GetObjectFile();
@@ -809,23 +808,24 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
           if (entry.IsEndOfSequence) {
             return false;
           }
-          return sourceSpec.line == entry.line && sourceSpec.column.value_or(entry.column) == entry.column;
+          return sourceSpec.Line().value() == entry.line &&
+                 sourceSpec.Column().value_or(entry.column) == entry.column;
         };
 
         for (const auto &e : foundEntries | std::views::filter(predicate)) {
           const auto pc = e.pc + symbol_file->mBaseAddress;
+
           auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
             *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader, LocationUserKind::Source,
-            std::nullopt, std::nullopt,
-            std::make_unique<UserBpSpec>(std::make_pair(sourceFilePath.string(), sourceSpec)));
-          map[sourceSpec].push_back(user->id);
+            sourceSpec.Clone());
+          map[sourceSpec].push_back(user->mId);
           DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}", mTaskLeader,
-                 sourceCodeFile->full_path->filename().c_str(), user->id, pc,
+                 sourceCodeFile->full_path->filename().c_str(), user->mId, pc,
                  user->GetLocation() != nullptr ? *user->GetLocation()->original_byte : u8{0});
           if (const auto it = not_set.find(sourceSpec); it != std::end(not_set)) {
             not_set.erase(it);
           }
-          if (!sourceSpec.column.has_value()) {
+          if (!sourceSpec.Column()) {
             break;
           }
         }
@@ -835,11 +835,10 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
 
   // set User Breakpoints without breakpoint location; i.e. "pending" breakpoints, in GDB nomenclature
   for (auto &&srcbp : not_set) {
-    auto spec = std::make_unique<UserBpSpec>(std::make_pair(sourceFilePath.string(), srcbp));
-    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec.get()}},
-                                                             mTaskLeader, LocationUserKind::Source, std::nullopt,
-                                                             std::nullopt, std::move(spec));
-    map[srcbp].push_back(user->id);
+    auto spec = srcbp.Clone();
+    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
+      *this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader, LocationUserKind::Source, std::move(spec));
+    map[srcbp].push_back(user->mId);
   }
 
   for (const auto &bp : remove) {
@@ -853,11 +852,12 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
 
 void
 TraceeController::SetSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-                                       const Set<SourceBreakpointSpec> &bps) noexcept
+                                       const Set<BreakpointSpecification> &bps) noexcept
 {
   const UserBreakpoints::SourceFileBreakpointMap &map = mUserBreakpoints.bps_for_source(sourceFilePath.string());
-  std::vector<SourceBreakpointSpec> remove{};
-  std::vector<SourceBreakpointSpec> add{};
+  std::vector<BreakpointSpecification> remove{};
+  std::vector<BreakpointSpecification> add{};
+
   for (const auto &[b, id] : map) {
     if (!bps.contains(b)) {
       remove.push_back(b);
@@ -874,14 +874,16 @@ TraceeController::SetSourceBreakpoints(const std::filesystem::path &sourceFilePa
 }
 
 void
-TraceeController::SetInstructionBreakpoints(const Set<InstructionBreakpointSpec> &bps) noexcept
+TraceeController::SetInstructionBreakpoints(const Set<BreakpointSpecification> &bps) noexcept
 {
-  std::vector<InstructionBreakpointSpec> add{};
-  std::vector<InstructionBreakpointSpec> remove{};
+  ASSERT(std::ranges::all_of(bps, [](const auto &item) { return item.mKind == DapBreakpointType::instruction; }),
+         "Require all bps be instruction breakpoints");
+  std::vector<BreakpointSpecification> add{};
+  std::vector<BreakpointSpecification> remove{};
 
   for (const auto &[bp, id] : mUserBreakpoints.instruction_breakpoints) {
+    bool search = false;
     if (!bps.contains(bp)) {
-      remove.push_back(bp);
     }
   }
 
@@ -892,17 +894,17 @@ TraceeController::SetInstructionBreakpoints(const Set<InstructionBreakpointSpec>
   }
 
   for (const auto &bp : add) {
-    auto addr = to_addr(bp.instructionReference).value();
+    auto addr = to_addr(bp.uInstruction->mInstructionReference).value();
     bool was_not_set = true;
     if (auto symbolFile = FindObjectByPc(addr); symbolFile) {
       auto cus = symbolFile->GetCompilationUnits(addr);
       for (auto cu : cus) {
         auto [src, lte] = cu->GetLineTableEntry(symbolFile->UnrelocateAddress(addr));
         if (src && lte) {
-          const auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-            *this, GetOrCreateBreakpointLocation(addr, *src, *lte), mTaskLeader, LocationUserKind::Address,
-            std::nullopt, std::nullopt, std::make_unique<UserBpSpec>(bp));
-          mUserBreakpoints.instruction_breakpoints[bp] = user->id;
+          const auto user =
+            mUserBreakpoints.create_loc_user<Breakpoint>(*this, GetOrCreateBreakpointLocation(addr, *src, *lte),
+                                                         mTaskLeader, LocationUserKind::Address, bp.Clone());
+          mUserBreakpoints.instruction_breakpoints[bp] = user->mId;
           was_not_set = false;
           break;
         }
@@ -910,9 +912,8 @@ TraceeController::SetInstructionBreakpoints(const Set<InstructionBreakpointSpec>
     }
     if (was_not_set) {
       const auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-        *this, GetOrCreateBreakpointLocation(addr), mTaskLeader, LocationUserKind::Address, std::nullopt,
-        std::nullopt, std::make_unique<UserBpSpec>(bp));
-      mUserBreakpoints.instruction_breakpoints[bp] = user->id;
+        *this, GetOrCreateBreakpointLocation(addr), mTaskLeader, LocationUserKind::Address, bp.Clone());
+      mUserBreakpoints.instruction_breakpoints[bp] = user->mId;
     }
   }
 
@@ -925,12 +926,12 @@ TraceeController::SetInstructionBreakpoints(const Set<InstructionBreakpointSpec>
 }
 
 void
-TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps) noexcept
+TraceeController::SetFunctionBreakpoints(const Set<BreakpointSpecification> &bps) noexcept
 {
-  std::vector<FunctionBreakpointSpec> remove{};
+  std::vector<BreakpointSpecification> remove{};
   struct SpecWasSet
   {
-    FunctionBreakpointSpec mSpec;
+    BreakpointSpecification mSpec;
     size_t mSpecHash;
     bool mWasSet;
   };
@@ -942,7 +943,7 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
       remove.push_back(b);
     }
   }
-  std::hash<FunctionBreakpointSpec> specHasher{};
+  std::hash<BreakpointSpecification> specHasher{};
   for (const auto &b : bps) {
     if (!mUserBreakpoints.fn_breakpoints.contains(b)) {
       specsToAdd.push_back({b, specHasher(b), false});
@@ -951,13 +952,12 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
 
   for (auto &sym : mSymbolFiles) {
     for (auto &fn : specsToAdd) {
-      auto result = sym->LookupBreakpointBySpec(fn.mSpec);
+      auto result = sym->LookupFunctionBreakpointBySpec(fn.mSpec);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
           *this, GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
-          mTaskLeader, LocationUserKind::Function, std::nullopt, std::nullopt,
-          std::make_unique<UserBpSpec>(fn.mSpec));
-        mUserBreakpoints.fn_breakpoints[fn.mSpec].push_back(user->id);
+          mTaskLeader, LocationUserKind::Function, fn.mSpec.Clone());
+        mUserBreakpoints.fn_breakpoints[fn.mSpec].push_back(user->mId);
         fn.mWasSet = true;
         mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{"new", "Breakpoint was created", user});
       }
@@ -966,10 +966,10 @@ TraceeController::SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps)
 
   for (auto &&[spec, specHash, wasSet] : specsToAdd) {
     if (!wasSet) {
-      auto spec_ptr = std::make_unique<UserBpSpec>(std::move(spec));
-      auto user = mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec_ptr.get()}},
-                                                               mTaskLeader, LocationUserKind::Function,
-                                                               std::nullopt, std::nullopt, std::move(spec_ptr));
+      auto spec_ptr = spec.Clone();
+      auto user =
+        mUserBreakpoints.create_loc_user<Breakpoint>(*this, BpErr{ResolveError{.spec = spec_ptr.get()}},
+                                                     mTaskLeader, LocationUserKind::Function, std::move(spec_ptr));
     }
   }
 
@@ -1701,7 +1701,7 @@ TraceeController::HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &
     should_resume = should_resume && !breakpointResult.ShouldStop();
     if (breakpointResult.ShouldRetire()) {
       --aliveBreakpoints;
-      GetUserBreakpoints().remove_bp(user->id);
+      GetUserBreakpoints().remove_bp(user->mId);
     }
   }
   // If all breakpoints at @ has retired, don't add a breakpoint location status, because the next operation we can

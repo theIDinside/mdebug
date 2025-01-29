@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "block.h"
+#include "bp.h"
 #include "elf.h"
 #include "elf_symbols.h"
 #include "interface/dap/types.h"
@@ -235,7 +236,8 @@ public:
   auto GetMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto GetObjectFilePath() const noexcept -> Path;
 
-  auto LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>;
+  auto
+  LookupFunctionBreakpointBySpec(const BreakpointSpecification &spec) noexcept -> std::vector<BreakpointLookup>;
   auto GetSupervisor() noexcept -> TraceeController *;
   auto GetTextSection() const noexcept -> const ElfSection *;
 

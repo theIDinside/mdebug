@@ -146,7 +146,7 @@ public:
   }
 
   constexpr Untraced<T>
-  DisOwn() noexcept
+  DisOwn() && noexcept
   {
     T *swap = nullptr;
     std::swap(mRef, swap);
@@ -214,22 +214,46 @@ public:
     return ptr != refPtr.Get();
   }
 };
+template <typename T>
+concept IsRefCountable = requires(T *t) {
+  { RcHandle<T>{t} };
+};
+namespace js {
+template <typename Derived, IsRefCountable WrappedType, StringLiteral string> struct RefPtrJsObject;
+}
 
 template <typename T> class Untraced
 {
   T *mUnManged;
 
-  friend struct RefPtrObject;
+  /// Drop and Forget are purposefully private metods. And the class `RefPtrJsObject` and `RcHandle` are, for that
+  /// same reason, friend classes. RefPtrJsObject uses the forget & drop mechanism when participating in GC and
+  /// automatic life time memory management by the js embedding. This is also the reason why Increase/DecreaseCount
+  /// are private methods because they are not supposed to be used by any other interfaces than the ones explicitly
+  /// allowed to, via friend declarations.
   constexpr void
   Drop() noexcept
   {
     mUnManged->DecreaseUseCount();
   }
 
-public:
+  constexpr T *
+  Forget() noexcept
+  {
+    T *result{nullptr};
+    std::swap(result, mUnManged);
+    return result;
+  }
+
   using Type = T;
+  template <typename Derived, IsRefCountable WrappedType, StringLiteral string> friend struct js::RefPtrJsObject;
   friend class RcHandle<T>;
+
   constexpr Untraced(T *take) noexcept : mUnManged(take) {}
+
+public:
+  // It's fine to move Untraced and it's ok to destroy Untraced in non-friend contexts (because in those contexts,
+  // you transform the untraced to a ref counted pointer via .Take() or direct conversion)
   constexpr ~Untraced() noexcept { ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
   constexpr Untraced(Untraced &&other) noexcept : mUnManged(nullptr) { std::swap(mUnManged, other.mUnManged); }
 
@@ -276,4 +300,5 @@ struct IsUniquePtrCheck<Template<U>>
 
 template <typename TypeToCheck> concept IsRefPointer = IsRefPointerCheck<TypeToCheck>::value;
 template <typename TypeToCheck> concept IsUniquePtr = IsUniquePtrCheck<TypeToCheck>::value;
+
 } // namespace mdb

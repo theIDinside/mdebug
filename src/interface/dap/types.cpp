@@ -54,7 +54,7 @@ Breakpoint
 Breakpoint::from_user_bp(const UserBreakpoint &user_bp) noexcept
 {
   if (const auto addr = user_bp.Address(); addr) {
-    return Breakpoint{.id = user_bp.id,
+    return Breakpoint{.id = user_bp.mId,
                       .verified = true,
                       .addr = addr.value(),
                       .line = user_bp.Line(),
@@ -62,7 +62,7 @@ Breakpoint::from_user_bp(const UserBreakpoint &user_bp) noexcept
                       .source_path = user_bp.GetSourceFile(),
                       .error_message = {}};
   } else {
-    return Breakpoint{.id = user_bp.id,
+    return Breakpoint{.id = user_bp.mId,
                       .verified = false,
                       .addr = nullptr,
                       .line = {},

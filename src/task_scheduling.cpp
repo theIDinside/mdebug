@@ -42,7 +42,7 @@ FinishFunction::~FinishFunction() noexcept
   if (!cancelled) {
     task.set_stop();
   }
-  mSupervisor.RemoveBreakpoint(bp->id);
+  mSupervisor.RemoveBreakpoint(bp->mId);
 }
 
 bool
@@ -142,7 +142,7 @@ LineStep::~LineStep() noexcept
       {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0}, "Line stepping finished", {}));
   } else {
     if (resume_bp) {
-      mSupervisor.RemoveBreakpoint(resume_bp->id);
+      mSupervisor.RemoveBreakpoint(resume_bp->mId);
     }
   }
 }

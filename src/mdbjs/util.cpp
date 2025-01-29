@@ -1,5 +1,9 @@
+/** LICENSE TEMPLATE */
 #include "./util.h"
-
+#include "js/Conversions.h"
+#include "js/String.h"
+#include "js/Value.h"
+namespace mdb::js {
 mdb::Expected<JS::SourceText<mozilla::Utf8Unit>, std::string>
 SourceFromString(JSContext *context, std::string_view str) noexcept
 {
@@ -10,3 +14,36 @@ SourceFromString(JSContext *context, std::string_view str) noexcept
 
   return mdb::expected(std::move(source));
 }
+
+mdb::Expected<JS::UniqueChars, std::string_view>
+ToString(JSContext *cx, JS::Handle<JS::Value> stringObject) noexcept
+{
+  JS::RootedString rootedJsString(cx, JS::ToString(cx, stringObject));
+  if (rootedJsString) {
+    JS::UniqueChars utf8String = ::JS_EncodeStringToUTF8(cx, rootedJsString);
+
+    if (utf8String) {
+      return expected(std::move(utf8String));
+    }
+  }
+  return mdb::unexpected<std::string_view>("failed to convert to string");
+}
+
+bool
+ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) noexcept
+{
+  bool success = false;
+  if (string) {
+    success = true;
+    auto stringLength = JS_GetStringEncodingLength(cx, string);
+
+    writeBuffer.resize_and_overwrite(stringLength, [cx, string, &success](char *ptr, size_t size) {
+      if (!JS_EncodeStringToBuffer(cx, string, ptr, size)) {
+        success = false;
+      }
+      return size;
+    });
+  }
+  return success;
+}
+} // namespace mdb::js

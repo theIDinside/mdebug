@@ -2,6 +2,7 @@
 #include "objfile.h"
 #include "../so_loading.h"
 #include "./dwarf/name_index.h"
+#include "bp.h"
 #include "dwarf.h"
 #include "dwarf/die.h"
 #include "supervisor.h"
@@ -745,23 +746,25 @@ SymbolFile::GetTextSection() const noexcept -> const ElfSection *
 }
 
 auto
-SymbolFile::LookupBreakpointBySpec(const FunctionBreakpointSpec &spec) noexcept -> std::vector<BreakpointLookup>
+SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec) noexcept
+  -> std::vector<BreakpointLookup>
 {
-
+  ASSERT(bpSpec.mKind == DapBreakpointType::function, "required type=function");
   std::vector<MinSymbol> matching_symbols;
   std::vector<BreakpointLookup> result{};
 
   auto obj = GetObjectFile();
   std::vector<std::string> search_for{};
-  if (spec.is_regex) {
+  const auto &spec = *bpSpec.uFunction;
+  if (spec.mIsRegex) {
     const auto start = std::chrono::high_resolution_clock::now();
-    search_for = obj->SearchDebugSymbolStringTable(spec.name);
+    search_for = obj->SearchDebugSymbolStringTable(spec.mName);
     const auto elapsed =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
         .count();
     DBGLOG(core, "regex searched {} in {}us", obj->GetPathString(), elapsed);
   } else {
-    search_for = {spec.name};
+    search_for = {spec.mName};
   }
 
   for (const auto &n : search_for) {

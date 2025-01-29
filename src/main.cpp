@@ -40,6 +40,9 @@ bool ready = false;
 bool exit_debug_session = false;
 
 mdb::Tracer *mdb::Tracer::sTracerInstance = nullptr;
+mdb::js::AppScriptingInstance *mdb::Tracer::sScriptRuntime = nullptr;
+JSContext *mdb::Tracer::sApplicationJsContext = nullptr;
+
 termios mdb::Tracer::sOriginalTty = {};
 winsize mdb::Tracer::sTerminalWindowSize = {};
 bool mdb::Tracer::sUsePTraceMe = true;

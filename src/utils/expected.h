@@ -171,7 +171,7 @@ public:
   value(this Self &&self)
   {
     ASSERT(self.mHasExpectedValue, "Expected did not have a value");
-    return std::forward<Self>(std::get<T>(self));
+    return std::get<T>(std::forward<Self>(self).val_or_err);
   }
 
   T &
@@ -188,6 +188,13 @@ public:
     return std::get<T>(std::move(val_or_err));
   }
 
+  const T &
+  value() const & noexcept
+  {
+    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    return std::get<T>(val_or_err);
+  }
+
   // Just make it explicit. Easier for everyone to know, we are *definitely* moving out of this value.
   T &&
   take_value() noexcept
@@ -197,11 +204,11 @@ public:
     return std::get<T>(std::move(val_or_err));
   }
 
-  const T &
-  value() const & noexcept
+  Err &&
+  take_error() noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
-    return std::get<T>(val_or_err);
+    ASSERT(!mHasExpectedValue, "Expected have a value");
+    return std::get<Err>(std::move(val_or_err));
   }
 
   Err &
@@ -209,13 +216,6 @@ public:
   {
     ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(val_or_err);
-  }
-
-  Err &&
-  take_error() noexcept
-  {
-    ASSERT(!mHasExpectedValue, "Expected have a value");
-    return std::get<Err>(std::move(val_or_err));
   }
 
   Err &&
@@ -254,6 +254,21 @@ public:
     } else {
       return unexpected(NewErr{take_error()});
     }
+  }
+
+  template <typename Self>
+  constexpr auto
+  some(this Self &&self) noexcept
+  {
+    // if ActualT is void, we can't return std::optional<void> because it doesn't support it
+    // so return a std::optional<T>, but with nullopt.
+    if constexpr (std::is_same_v<ActualT, void>) {
+      return std::optional<T>{};
+    }
+    if (!self.mHasExpectedValue) {
+      return std::optional<T>{};
+    }
+    return std::make_optional<T>(std::forward<T>(std::forward<Self>(self).value()));
   }
 
   constexpr

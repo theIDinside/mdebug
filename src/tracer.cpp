@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "tracer.h"
 #include "awaiter.h"
+#include "bp.h"
 #include "event_queue.h"
 #include "interface/console_command.h"
 #include "interface/tracee_command/tracee_command_interface.h"
@@ -631,7 +632,8 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
     }
 
     if (stopOnEntry) {
-      Set<FunctionBreakpointSpec> fns{{"main", {}, false}};
+      Set<BreakpointSpecification> fns{
+        BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, "main", false)};
       // fns.insert({"main", {}, false});
       client->GetSupervisor()->SetFunctionBreakpoints(fns);
     }
@@ -798,33 +800,18 @@ VariableContext::get_maybe_value() const noexcept
   return t->get_maybe_value(id);
 }
 
-// Function to call a stored callback from C++, passing two integers
-void
-TriggerEvent(mdb::js::ScriptRuntime *js, StopEvents event, int arg1, int arg2)
+/* static */
+mdb::js::AppScriptingInstance &
+Tracer::GetScriptingInstance() noexcept
 {
-  JSContext *cx = js->GetRuntimeContext();
-  mdb::js::EventDispatcher *dispatcher = js->GetEventDispatcher();
-  for (auto &cb : dispatcher->GetSubscribers(event)) {
-    JS::RootedValue jsfnVal(cx, JS::ObjectValue(*cb));
-    JS::RootedValue rval(cx);
+  return *sScriptRuntime;
+}
 
-    // Prepare the arguments (two integers) and ensure they are rooted
-    // Prepare the arguments
-    JS::RootedValue jsArg1(cx, JS::Int32Value(arg1));
-    JS::RootedValue jsArg2(cx, JS::Int32Value(arg2));
-    JS::RootedValueVector args{cx};
-    VERIFY(args.resize(2), "Failed to resize arg vector");
-    args[0].setInt32(arg1);
-    args[1].setInt32(arg2);
-
-    // Create a handle array for the arguments
-    if (!JS_CallFunctionValue(cx, nullptr, jsfnVal, args, &rval)) {
-      DBGLOG(interpreter, "Failed to call function for event {}", "clone");
-    } else {
-      auto exception = mdb::js::ConsumePendingException(js->GetRuntimeContext());
-      DBGLOG(interpreter, "Called callback for event {} successfully", "clone");
-    }
-  }
+/* static */
+JSContext *
+Tracer::GetJsContext() noexcept
+{
+  return sApplicationJsContext;
 }
 
 /* static */
@@ -851,61 +838,26 @@ Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
   }
 
   JS::SetWarningReporter(cx, [](JSContext *cx, JSErrorReport *report) { JS::PrintError(stderr, report, true); });
-  MdbScriptRuntime *js = mdb::js::ScriptRuntime::Create(cx, global);
+  AppScriptingInstance *js = mdb::js::AppScriptingInstance::Create(cx, global);
   js->InitRuntime();
 
   JSAutoRealm ar(js->GetRuntimeContext(), js->GetRuntimeGlobal());
 
-  // Example script to register a callback
-
-  constexpr auto scriptSettingValue = R"(let HelloWorld = 42;)";
-  if (auto res = js->EvaluateJavascriptStringView(scriptSettingValue); !res) {
-    DBGLOG(interpreter, "Could not evaluate script: {}", res.error());
-  }
-
-  constexpr auto script = R"(
-        mdb.events.on(mdb.events.clone, (a, b) => {
-            for (const prop in mdb) {
-              log(mdb.interpreter, `property: ${prop}: ${mdb[prop]}`);
-            }
-            for (const prop in mdb.events) {
-              log(mdb.interpreter, `property: ${prop}: ${mdb.events[prop]}`);
-            }
-
-            log(mdb.interpreter, `Stop all: ${mdb.None}`);
-            log(mdb.interpreter, `Stop all: ${mdb.Resume}`);
-            log(mdb.interpreter, `Stop all: ${mdb.Stop}`);
-            log(mdb.interpreter, `Stop all: ${mdb.StopAll}`);
-            if(HelloWorld != undefined || HelloWorld != null) {
-              HelloWorld += 1;
-              log(mdb.interpreter, `Hello world value: ${HelloWorld}`);
-            }
-            log(mdb.interpreter, `Callback executed for clone with arguments: task=${a}, newtid=${b}`);
-        });
-    )"sv;
-
-  // everything should live under this realm. I think. Who knows, not that great documented.
-
-  if (auto result = js->EvaluateJavascriptStringView(script); !result) {
-    DBGLOG(interpreter, "Exception when evaluating script: {}", result.error());
-  }
-
-  TriggerEvent(js, StopEvents::clone, 1337, 42);
-  TriggerEvent(js, StopEvents::clone, 304, 303);
-
+  sApplicationJsContext = cx;
+  sScriptRuntime = js;
+  // It's now safe to use `ScriptRuntime`
   MainLoop(eventSystem, js);
 }
 
 void
-Tracer::MainLoop(EventSystem *eventSystem, mdb::js::ScriptRuntime *scriptRuntime) noexcept
+Tracer::MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *scriptRuntime) noexcept
 {
   auto &appInstance = Get();
-  appInstance.mScriptRuntime = scriptRuntime;
+  appInstance.sScriptRuntime = scriptRuntime;
 
   std::vector<Event> readInEvents{};
   readInEvents.reserve(128);
   while (appInstance.IsRunning()) {
-
     if (eventSystem->PollBlocking(readInEvents)) {
       for (auto evt : readInEvents) {
 #ifdef MDB_DEBUG

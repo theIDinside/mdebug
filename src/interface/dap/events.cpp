@@ -182,7 +182,7 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   it = fmt::format_to(
     it,
     R"({{"seq":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
-    seq, reason, breakpoint->id, breakpoint->IsVerified());
+    seq, reason, breakpoint->mId, breakpoint->IsVerified());
 
   if (message) {
     it = fmt::format_to(it, R"(,"message": "{}")", message.value());

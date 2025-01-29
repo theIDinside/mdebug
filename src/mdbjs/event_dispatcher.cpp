@@ -1,13 +1,18 @@
+/** LICENSE TEMPLATE */
 #include "event_dispatcher.h"
+#include "bpjs.h"
 #include "common.h"
 #include "events/event.h"
+#include "events/stop_event.h"
 #include "js/Object.h"
 #include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
 #include "js/Value.h"
 #include "jsapi.h"
 #include "mdbjs/mdbjs.h"
+#include "mdbjs/taskinfojs.h"
 #include "utils/logger.h"
+#include <supervisor.h>
 #include <task.h>
 #include <utility>
 
@@ -64,7 +69,7 @@ EventDispatcher::Init() noexcept
   MdbObject *mdb = JS::GetMaybePtrFromReservedSlot<MdbObject>(mdbObject, MdbObject::ThisPointer);
 
   DBGLOG(interpreter, "Regstering EventDispatcher sub system with trace system");
-  mdb->AddTrace([this](JSTracer *trc) {
+  mRuntime->AddTrace([this](JSTracer *trc) {
     for (auto &event : mSubscribers) {
       for (auto &cb : event) {
         JS::TraceEdge(trc, &cb, "event listener");
@@ -72,16 +77,48 @@ EventDispatcher::Init() noexcept
     }
   });
 
-  pub::clone.Subscribe(SubscriberIdentity{this}, [this](TraceeController *tc, const Ref<TaskInfo> &task, Tid tid) {
-    this->EmitCloneEvent(tc, task, tid);
-  });
+  pub::breakpointHitEvent.Subscribe(
+    SubscriberIdentity{this}, [this](TraceeController *tc, const Ref<mdb::TaskInfo> &taskInfo, u32 breakpointId) {
+      const auto subs = GetSubscribers(StopEvents::breakpointHitEvent);
+      if (subs.empty()) {
+        return;
+      }
+
+      JSContext *cx = mRuntime->GetRuntimeContext();
+      auto bp = tc->GetUserBreakpoints().GetUserBreakpoint(breakpointId);
+      JS::Rooted<JSObject *> obj{cx, mdb::js::Breakpoint::Create(cx, std::move(bp))};
+
+      for (auto &cb : subs) {
+        JS::RootedValue jsfnVal(cx, JS::ObjectValue(*cb));
+        JS::RootedValue rval(cx);
+
+        // Prepare the arguments (two integers) and ensure they are rooted
+        // Prepare the arguments
+        JS::RootedValueVector args{cx};
+        VERIFY(args.resize(2), "Failed to resize arg vector");
+
+        JS::Rooted<JSObject *> task(cx, js::TaskInfo::Create(cx, taskInfo));
+        args[0].setObject(*obj);
+        args[1].setObject(*task);
+
+        // Create a handle array for the arguments
+        if (!JS_CallFunctionValue(cx, nullptr, jsfnVal, args, &rval)) {
+          DBGLOG(interpreter, "Failed to call function for event {}", "breakpointHitEvent");
+        } else {
+          DBGLOG(interpreter, "Called callback for event {} successfully", "breakpointHitEvent");
+        }
+      }
+    });
+
+  pub::clone.Subscribe(SubscriberIdentity{this},
+                       [this](TraceeController *tc, const Ref<mdb::TaskInfo> &task, Tid tid) {});
 }
 
-EventDispatcher::EventDispatcher(mdb::js::ScriptRuntime *runtime) noexcept : mRuntime(runtime) {}
+EventDispatcher::EventDispatcher(mdb::js::AppScriptingInstance *runtime) noexcept : mRuntime(runtime) {}
 
 /* static */
 EventDispatcher *
-EventDispatcher::Create(mdb::js::ScriptRuntime *instance) noexcept
+EventDispatcher::Create(mdb::js::AppScriptingInstance *instance) noexcept
 {
   JS::RootedObject global(instance->GetRuntimeContext(), instance->GetRuntimeGlobal());
   auto eventDispatcher = new EventDispatcher{instance};
@@ -144,7 +181,7 @@ EventDispatcher::JS_On(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 }
 
 EventResult
-EventDispatcher::EmitCloneEvent(TraceeController *supervisor, Ref<TaskInfo> task, int newTid) noexcept
+EventDispatcher::EmitCloneEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task, int newTid) noexcept
 {
   JSContext *cx = mRuntime->GetRuntimeContext();
   for (auto &cb : mSubscribers[std::to_underlying(StopEvents::clone)]) {
@@ -169,19 +206,21 @@ EventDispatcher::EmitCloneEvent(TraceeController *supervisor, Ref<TaskInfo> task
 }
 
 EventResult
-EventDispatcher::EmitExecEvent(TraceeController *supervisor, Ref<TaskInfo> task, std::string execedFile) noexcept
+EventDispatcher::EmitExecEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task,
+                               std::string execedFile) noexcept
 {
   TODO(__PRETTY_FUNCTION__);
 }
 
 EventResult
-EventDispatcher::EmitBreakpointEvent(TraceeController *supervisor, Ref<TaskInfo> task, u32 breakpointId) noexcept
+EventDispatcher::EmitBreakpointEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task,
+                                     u32 breakpointId) noexcept
 {
   TODO(__PRETTY_FUNCTION__);
 }
 
 EventResult
-EventDispatcher::EmitSignalEvent(TraceeController *supervisor, Ref<TaskInfo> task, u32 signalNumber) noexcept
+EventDispatcher::EmitSignalEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task, u32 signalNumber) noexcept
 {
   TODO(__PRETTY_FUNCTION__);
 }

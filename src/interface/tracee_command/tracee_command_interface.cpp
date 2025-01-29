@@ -55,7 +55,7 @@ TraceeCommandInterface::DoDisconnect(bool terminate) noexcept
   }
 
   for (auto &user : tc->GetUserBreakpoints().all_users()) {
-    tc->GetUserBreakpoints().remove_bp(user->id);
+    tc->GetUserBreakpoints().remove_bp(user->mId);
   }
   Disconnect(false);
 

@@ -259,13 +259,13 @@ public:
   GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
                                              std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
   void SetSourceBreakpoints(const std::filesystem::path &source_filepath,
-                            const Set<SourceBreakpointSpec> &bps) noexcept;
+                            const Set<BreakpointSpecification> &bps) noexcept;
   void UpdateSourceBreakpoints(const std::filesystem::path &source_filepath,
-                               std::vector<SourceBreakpointSpec> &&add,
-                               const std::vector<SourceBreakpointSpec> &remove) noexcept;
+                               std::vector<BreakpointSpecification> &&add,
+                               const std::vector<BreakpointSpecification> &remove) noexcept;
 
-  void SetInstructionBreakpoints(const Set<InstructionBreakpointSpec> &bps) noexcept;
-  void SetFunctionBreakpoints(const Set<FunctionBreakpointSpec> &bps) noexcept;
+  void SetInstructionBreakpoints(const Set<BreakpointSpecification> &bps) noexcept;
+  void SetFunctionBreakpoints(const Set<BreakpointSpecification> &bps) noexcept;
   void RemoveBreakpoint(u32 bp_id) noexcept;
 
   // Right now, I don't think we care or empathize at all with anything - we just abort/panic, more or less.

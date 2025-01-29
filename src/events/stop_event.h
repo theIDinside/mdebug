@@ -2,29 +2,12 @@
 
 #include "utils/macros.h"
 #include <csignal>
-#include <functional>
+#include <typedefs.h>
 #include <utils/smartptr.h>
 namespace mdb {
 class TraceeController;
 struct TaskInfo;
 } // namespace mdb
-template <typename... Args> struct ReturnType;
-
-// Specialization for non-empty packs
-template <typename First, typename... Rest> struct ReturnType<First, Rest...>
-{
-  using Type = First; // The first type in the parameter pack
-};
-
-// Helper to convert TypeList to std::function
-template <typename Tuple> struct ToFunction;
-
-template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<ReturnType, Args...>>
-{
-  using FunctionType = std::function<ReturnType(Args...)>;
-  using Return = ReturnType;
-  using FnArgs = std::tuple<Args...>;
-};
 
 #define FOR_EACH_EVENT(EACH_FN)                                                                                   \
   EACH_FN(stop, "Generic, unspecfied stop", void, mdb::TraceeController *, const mdb::Ref<mdb::TaskInfo> &)       \

@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #pragma once
 
 #include "events/stop_event.h"
@@ -13,13 +14,13 @@ struct TaskInfo;
 
 namespace mdb::js {
 
-class ScriptRuntime;
+class AppScriptingInstance;
 
 // EventDispatcher class to manage events
 // Conceptually the global `mdb.events` in Javascript land.
 class EventDispatcher
 {
-  ScriptRuntime *mRuntime;
+  AppScriptingInstance *mRuntime;
   std::array<std::vector<JS::Heap<JSObject *>>, Enum<StopEvents>::Count()> mSubscribers{};
 
   // Javascript Embedding
@@ -43,18 +44,20 @@ class EventDispatcher
   static constexpr JSFunctionSpec EventDispatcherFunctions[] = {
     JS_FN("on", &EventDispatcher::JS_On, 2, 0), JS_FN("once", &EventDispatcher::JS_Once, 2, 0), JS_FS_END};
 
-  EventDispatcher(mdb::js::ScriptRuntime *runtime) noexcept;
+  EventDispatcher(mdb::js::AppScriptingInstance *runtime) noexcept;
   void Init() noexcept;
 
 public:
-  static EventDispatcher *Create(mdb::js::ScriptRuntime *instance) noexcept;
+  static EventDispatcher *Create(mdb::js::AppScriptingInstance *instance) noexcept;
 
   // JavaScript bindings for the `on` method
 
-  EventResult EmitCloneEvent(TraceeController *supervisor, Ref<TaskInfo> task, int newTid) noexcept;
-  EventResult EmitExecEvent(TraceeController *supervisor, Ref<TaskInfo> task, std::string execedFile) noexcept;
-  EventResult EmitBreakpointEvent(TraceeController *supervisor, Ref<TaskInfo> task, u32 breakpointId) noexcept;
-  EventResult EmitSignalEvent(TraceeController *supervisor, Ref<TaskInfo> task, u32 signalNumber) noexcept;
+  EventResult EmitCloneEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task, int newTid) noexcept;
+  EventResult EmitExecEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task,
+                            std::string execedFile) noexcept;
+  EventResult EmitBreakpointEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task,
+                                  u32 breakpointId) noexcept;
+  EventResult EmitSignalEvent(TraceeController *supervisor, Ref<mdb::TaskInfo> task, u32 signalNumber) noexcept;
   EventResult EmitStoppedAllEvent(TraceeController *supervisor) noexcept;
   std::span<JS::Heap<JSObject *>> GetSubscribers(StopEvents event) noexcept;
   std::unique_ptr<EventDispatcher> Create() noexcept;

@@ -22,6 +22,8 @@ set(MIDAS_SOURCES
   src/awaiter.h
   src/bp.cpp
   src/bp.h
+  src/bp_spec.cpp
+  src/bp_spec.h
   src/common.cpp
   src/common.h
   src/event_queue_event_param.h
@@ -182,6 +184,8 @@ set(MIDAS_SOURCES
   src/mdbjs/jsobject.h
   src/mdbjs/mdbjs.cpp
   src/mdbjs/mdbjs.h
+  src/mdbjs/taskinfojs.cpp
+  src/mdbjs/taskinfojs.h
   src/mdbjs/util.cpp
   src/mdbjs/util.h
 )

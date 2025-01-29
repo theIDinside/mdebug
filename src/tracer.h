@@ -19,8 +19,10 @@
 #include <unordered_map>
 #include <utils/immutable.h>
 
+class JSContext;
+
 namespace mdb::js {
-class ScriptRuntime;
+class AppScriptingInstance;
 }
 namespace mdb {
 
@@ -101,6 +103,9 @@ class Tracer
   static termios sOriginalTty;
   static winsize sTerminalWindowSize;
   static Tracer *sTracerInstance;
+  static mdb::js::AppScriptingInstance *sScriptRuntime;
+  // same as sScriptRuntime::mContext. But it's used so often that having direct access to it, is sensible.
+  static JSContext *sApplicationJsContext;
   static bool sUsePTraceMe;
 #ifdef MDB_DEBUG
   u64 mDebuggerEvents;
@@ -196,18 +201,18 @@ public:
 
   bool TraceExitConfigured{false};
 
-  mdb::js::ScriptRuntime *GetRuntime() noexcept;
+  static mdb::js::AppScriptingInstance &GetScriptingInstance() noexcept;
+  static JSContext *GetJsContext() noexcept;
   static void InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept;
 
 private:
-  static void MainLoop(EventSystem *eventSystem, mdb::js::ScriptRuntime *interpreterInstance) noexcept;
+  static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
   std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
   u32 breakpoint_ids{0};
   VarRefKey id_counter{0};
   std::unordered_map<VarRefKey, VariableContext> refContext{};
   bool already_launched;
   sys::DebuggerConfiguration config;
-  mdb::js::ScriptRuntime *mScriptRuntime{nullptr};
 
   // Apparently, due to the lovely way of the universe, if a thread clones or forks
   // we may actually see the wait status of the clone child before we get to see the wait status of the

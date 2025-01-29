@@ -1,13 +1,19 @@
+/** LICENSE TEMPLATE */
 #pragma once
+#include "js/CharacterEncoding.h"
 #include "js/Class.h"
 #include "js/PropertyDescriptor.h"
 #include "js/PropertySpec.h"
 #include "js/RootingAPI.h"
+#include "js/String.h"
 #include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
+#include "js/Value.h"
 #include "mdbjs/event_dispatcher.h"
+#include "mdbjs/util.h"
 #include "utils/expected.h"
 #include "utils/logger.h"
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -17,6 +23,11 @@ class Tracer;
 extern const JSClassOps DefaultGlobalClassOps;
 
 namespace mdb::js {
+
+// Todo: In the future this interface will probably change
+// where we instead return some structured data for the exception that happened in js-land.
+// For now, if this returns a non-none value, it means an exception happened (and we consumed it).
+std::optional<std::string> ConsumePendingException(JSContext *context) noexcept;
 
 class EventDispatcher;
 
@@ -44,11 +55,15 @@ class RuntimeGlobal
 
   static constexpr JSFunctionSpec sRuntimeFunctions[] = {FOR_EACH_FN(FN) JS_FS_END};
 
+#undef FOR_EACH_FN
+#undef DEFINE_FN
+#undef FN
+
 public:
   static JSObject *create(JSContext *cx) noexcept;
 };
 
-class ScriptRuntime;
+class AppScriptingInstance;
 
 using RegisterTraceFunction = std::function<void(JSTracer *trc)>;
 
@@ -83,10 +98,10 @@ public:
 #undef CHANNEL_ITEM
 #undef EVENT_ITEM
 
-  // When the CustomObject is collected, delete the stored box.
+  // When the MdbObject is collected, delete the stored box.
   static void finalize(JS::GCContext *gcx, JSObject *obj);
 
-  // When a CustomObject is traced, it must trace the stored box.
+  // When a MdbObject is traced, it must trace the stored box.
   static void TraceSubsystems(JSTracer *trc, JSObject *obj);
 
   static constexpr JSClassOps classOps = {.finalize = finalize, .trace = TraceSubsystems};
@@ -95,11 +110,22 @@ public:
                                     .flags = JSCLASS_HAS_RESERVED_SLOTS(SlotCount) | JSCLASS_FOREGROUND_FINALIZE,
                                     .cOps = &classOps};
 
-  static JSObject *CreateAndBindToJsObject(ScriptRuntime *runtime, MdbObject *handle) noexcept;
+  static JSObject *CreateAndBindToJsObject(AppScriptingInstance *runtime, MdbObject *handle) noexcept;
   void AddTrace(RegisterTraceFunction &&fn) noexcept;
 };
 
-class ScriptRuntime
+static consteval auto
+ComputeEnumNames()
+{
+  u8 max = std::numeric_limits<u8>::max();
+  JS::ValueType tMax = static_cast<JS::ValueType>(max);
+  return tMax;
+}
+
+// `AppScriptingInstance` the interface between the debugger and the scripting mechanics/embedding of SpiderMonkey
+// Responsible for sourcing javascsript code into objects and state that we can manipulate in a fashion that best
+// suits us.
+class AppScriptingInstance
 {
   friend RuntimeGlobal;
   EventDispatcher *mEventDispatcher;
@@ -110,33 +136,91 @@ class ScriptRuntime
   JSObject *mGlobalObject;
   bool DefineDebuggerObject(JS::HandleObject global) noexcept;
 
-  ScriptRuntime(JSContext *context, JSObject *globalObject) noexcept
+  AppScriptingInstance(JSContext *context, JSObject *globalObject) noexcept
       : mContext(context), mGlobalObject(globalObject)
   {
   }
 
-  bool GuessIfSourceIsFunction(std::string_view source) noexcept;
-
 public:
-  static ScriptRuntime *Create(JSContext *context, JSObject *globalObject) noexcept;
+  static AppScriptingInstance *Create(JSContext *context, JSObject *globalObject) noexcept;
   void InitRuntime() noexcept;
+
+  // Register tracing via Runtime, on the MdbObject, which has a persistent root to start tracing from
+  void AddTrace(RegisterTraceFunction &&fn) noexcept;
 
   EventDispatcher *GetEventDispatcher() noexcept;
   JSContext *GetRuntimeContext() noexcept;
   JSObject *GetRuntimeGlobal() noexcept;
 
-  mdb::Expected<JSFunction *, std::string> SourceBreakpointCondition(u32 breakpointId,
-                                                                     std::string_view condition) noexcept;
-  mdb::Expected<void, std::string> EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept;
-  mdb::Expected<void, std::string> EvaluateJavascriptFileView(std::string_view filePath) noexcept;
-  mdb::Expected<void, std::string> EvaluateJavascriptString(const std::string &javascriptSource) noexcept;
-  mdb::Expected<void, std::string> EvaluateJavascriptFile(const std::string &filePath) noexcept;
-};
+  template <typename ErrType> struct CallError
+  {
+    ErrType mError;
+    std::string_view mErrorMessage;
+  };
 
-// Todo: In the future this interface will probably change
-// where we instead return some structured data for the exception that happened in js-land.
-// For now, if this returns a non-none value, it means an exception happened (and we consumed it).
-std::optional<std::string> ConsumePendingException(JSContext *context) noexcept;
+  template <typename ExpectedReturnType>
+  std::optional<ExpectedReturnType>
+  CallFunction(JS::Handle<JSFunction *> compiledFun, JS::HandleValueArray arguments,
+               std::string &errorMessage) noexcept
+  {
+    JS::Rooted<JSFunction *> fn{mContext, compiledFun};
+    JS::RootedValue rval(mContext);
+    JS::Rooted<JSObject *> global(mContext, mGlobalObject);
+
+    constexpr auto writeError = [](std::string &msg, std::string_view type) {
+      fmt::format_to(std::back_inserter(msg), "Function had the wrong return type, expected: {}", type);
+    };
+
+    if (!JS_CallFunction(mContext, global, fn, arguments, &rval)) {
+      auto exception = ConsumePendingException(mContext);
+      fmt::format_to(std::back_inserter(errorMessage), "Failed to call function: {}",
+                     exception.value_or("No exception found"));
+      return {};
+    }
+
+    if constexpr (std::is_integral_v<ExpectedReturnType>) {
+      if (!rval.isInt32()) {
+        writeError(errorMessage, "int");
+        return {};
+      }
+      return rval.toInt32();
+    } else if constexpr (std::is_same_v<ExpectedReturnType, std::string>) {
+      if (!rval.isString()) {
+        writeError(errorMessage, "string");
+        return {};
+      }
+      JS::Rooted<JSString *> string{mContext, rval.toString()};
+      std::string result;
+      bool ok = ToStdString(mContext, string, result);
+      if (!ok) {
+        fmt::format_to(std::back_inserter(errorMessage), "Failed to copy string result");
+        return {};
+      }
+      return std::make_optional<std::string>(std::move(result));
+    } else if constexpr (std::is_same_v<ExpectedReturnType, JSObject>) {
+      if (!rval.isObject()) {
+        writeError(errorMessage, "object");
+        return {};
+      }
+      return rval.toObjectOrNull();
+    } else if constexpr (std::is_same_v<ExpectedReturnType, bool>) {
+      if (!rval.isBoolean()) {
+        writeError(errorMessage, "boolean");
+        return {};
+      }
+      return rval.toBoolean();
+    } else {
+      static_assert(always_false<ExpectedReturnType>, "Unsupported type for this function");
+    }
+  }
+
+  Expected<JSFunction *, std::string> SourceBreakpointCondition(u32 breakpointId,
+                                                                std::string_view condition) noexcept;
+  Expected<void, std::string> EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept;
+  Expected<void, std::string> EvaluateJavascriptFileView(std::string_view filePath) noexcept;
+  Expected<void, std::string> EvaluateJavascriptString(const std::string &javascriptSource) noexcept;
+  Expected<void, std::string> EvaluateJavascriptFile(const std::string &filePath) noexcept;
+};
 } // namespace mdb::js
 
-using MdbScriptRuntime = mdb::js::ScriptRuntime;
+using AppScriptingInstance = mdb::js::AppScriptingInstance;

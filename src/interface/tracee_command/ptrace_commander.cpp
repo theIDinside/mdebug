@@ -302,7 +302,7 @@ PtraceCommander::Disconnect(bool killTarget) noexcept
   } else if (!GetSupervisor()->IsExited()) {
     tc->StopAllTasks(nullptr);
     for (auto &user : tc->GetUserBreakpoints().all_users()) {
-      tc->GetUserBreakpoints().remove_bp(user->id);
+      tc->GetUserBreakpoints().remove_bp(user->mId);
     }
     for (auto &entry : GetSupervisor()->GetThreads()) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error

@@ -1,4 +1,6 @@
+/** LICENSE TEMPLATE */
 #include "mdbjs.h"
+#include "fmt/ranges.h"
 #include "js/CallAndConstruct.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
@@ -10,8 +12,10 @@
 #include "js/Object.h"
 #include "js/PropertyAndElement.h"
 #include "js/RootingAPI.h"
+#include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
 #include "js/Warnings.h"
+#include "jsfriendapi.h"
 #include "mdbjs/event_dispatcher.h"
 #include "mdbjs/util.h"
 #include <jsapi.h>
@@ -20,8 +24,14 @@
 
 namespace mdb::js {
 
+void
+AppScriptingInstance::AddTrace(RegisterTraceFunction &&fn) noexcept
+{
+  mMdbObject.AddTrace(std::move(fn));
+}
+
 EventDispatcher *
-ScriptRuntime::GetEventDispatcher() noexcept
+AppScriptingInstance::GetEventDispatcher() noexcept
 {
   return mEventDispatcher;
 }
@@ -106,6 +116,7 @@ RuntimeGlobal::create(JSContext *cx) noexcept
 void
 MdbObject::finalize(JS::GCContext *gcx, JSObject *obj)
 {
+  PANIC("Finalizing MdbObject is a bug");
   // delete MdbObject::fromObject(obj)->ownedBox();
   // Do NOT delete unownedBox().
 }
@@ -121,7 +132,7 @@ MdbObject::TraceSubsystems(JSTracer *trc, JSObject *obj)
 
 /* static */
 JSObject *
-MdbObject::CreateAndBindToJsObject(ScriptRuntime *runtime, MdbObject *handle) noexcept
+MdbObject::CreateAndBindToJsObject(AppScriptingInstance *runtime, MdbObject *handle) noexcept
 {
   JSContext *cx = runtime->GetRuntimeContext();
   JS::Rooted<JSObject *> obj(cx, JS_NewObject(cx, &clasp));
@@ -147,7 +158,7 @@ MdbObject::AddTrace(RegisterTraceFunction &&fn) noexcept
 
 // Define the "debugger" object and its "on" method
 bool
-ScriptRuntime::DefineDebuggerObject(JS::HandleObject global) noexcept
+AppScriptingInstance::DefineDebuggerObject(JS::HandleObject global) noexcept
 {
   // Create the "debugger" object
 
@@ -168,7 +179,7 @@ ScriptRuntime::DefineDebuggerObject(JS::HandleObject global) noexcept
 }
 
 void
-ScriptRuntime::InitRuntime() noexcept
+AppScriptingInstance::InitRuntime() noexcept
 {
   JSAutoRealm ar(mContext, mGlobalObject);
 
@@ -181,59 +192,63 @@ ScriptRuntime::InitRuntime() noexcept
 }
 
 /* static */
-ScriptRuntime *
-ScriptRuntime::Create(JSContext *context, JSObject *globalObject) noexcept
+AppScriptingInstance *
+AppScriptingInstance::Create(JSContext *context, JSObject *globalObject) noexcept
 {
-  return new ScriptRuntime{context, globalObject};
+  return new AppScriptingInstance{context, globalObject};
 }
 
 JSContext *
-ScriptRuntime::GetRuntimeContext() noexcept
+AppScriptingInstance::GetRuntimeContext() noexcept
 {
   return mContext;
 }
 
 JSObject *
-ScriptRuntime::GetRuntimeGlobal() noexcept
+AppScriptingInstance::GetRuntimeGlobal() noexcept
 {
   return mGlobalObject;
 }
 
-bool
-ScriptRuntime::GuessIfSourceIsFunction(std::string_view source) noexcept
+Expected<JSFunction *, std::string>
+AppScriptingInstance::SourceBreakpointCondition(u32 breakpointId, std::string_view condition) noexcept
 {
-  return source.contains("return") || source.contains("=>") || source.contains("function");
-}
-
-mdb::Expected<JSFunction *, std::string>
-ScriptRuntime::SourceBreakpointCondition(u32 breakpointId, std::string_view condition) noexcept
-{
-  if (GuessIfSourceIsFunction(condition)) {
-    TODO_FMT("Implement ScriptRuntime::SourceBreakpointCondition {}", condition);
-  } else {
-    const auto processedSource = fmt::format("function (supervisor, taskId, breakpoint) {{ {} }}", condition);
-    EXPECT(auto src, SourceFromString(mContext, processedSource));
-    JS::RootedObject global(mContext, mGlobalObject);
-    JS::CompileOptions options{mContext};
-    JS::EnvironmentChain envChain{mContext, JS::SupportUnscopables::Yes};
-    auto file = fmt::format("breakpoint:{}", breakpointId);
-    auto fnName = fmt::format("bpCondition_{}", breakpointId);
-    options.setIntroductionType("eventHandler").setFileAndLine(file.c_str(), 0).setDeferDebugMetadata();
-    constexpr auto argNames = std::to_array({"pid", "tid", "bpId"});
-    JS::Rooted<JSFunction *> func{mContext, JS::CompileFunction(mContext, envChain, options, fnName.c_str(),
-                                                                argNames.size(), argNames.data(), src)};
-    if (!func) {
-      DBGLOG(core, "failed to compile event handler: {}", condition);
-      return ConsumePendingException(mContext)
-        .transform([](auto &&str) -> mdb::Unexpected<std::string> { return mdb::unexpected(std::move(str)); })
-        .value_or(mdb::Unexpected{std::string{"Failed"}});
-    }
-    return mdb::expected<JSFunction *>(func.get());
+  JSAutoRealm ar(mContext, GetRuntimeGlobal());
+  ASSERT(::js::GetContextRealm(mContext), "Context realm retrieval failed.");
+  JS::EnvironmentChain envChain{mContext, JS::SupportUnscopables::Yes};
+  if (envChain.length() != 0) {
+    ASSERT(::js::IsObjectInContextCompartment(envChain.chain()[0], mContext),
+           "Object is not in context compartment.");
   }
+
+  // Do the junk Gecko is supposed to do before calling into JSAPI.
+  for (size_t i = 0; i < envChain.length(); ++i) {
+    JS::ExposeObjectToActiveJS(envChain.chain()[i]);
+  }
+  constexpr auto argNames = std::to_array({"tc", "task", "bp"});
+  auto file = fmt::format("breakpoint:{}", breakpointId);
+  auto fnName = fmt::format("bpCondition_{}", breakpointId);
+  auto src = SourceFromString(mContext, condition);
+  ASSERT(src.is_expected(), "expected source to have been constructed");
+  DBGLOG(core, "source constructed: {} bytes", src.value().length());
+  JS::RootedObject global(mContext, mGlobalObject);
+  JS::CompileOptions options{mContext};
+
+  options.setFileAndLine("inline", breakpointId);
+
+  JS::Rooted<JSFunction *> func{mContext, JS::CompileFunction(mContext, envChain, options, fnName.c_str(),
+                                                              argNames.size(), argNames.data(), src.value())};
+  if (!func) {
+    DBGLOG(core, "failed to compile event handler: {}", condition);
+    return ConsumePendingException(mContext)
+      .transform([](auto &&str) -> mdb::Unexpected<std::string> { return mdb::unexpected(std::move(str)); })
+      .value_or(mdb::Unexpected{std::string{"Failed"}});
+  }
+  return expected<JSFunction *>(func.get());
 }
 
 mdb::Expected<void, std::string>
-ScriptRuntime::EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept
+AppScriptingInstance::EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept
 {
   auto ctx = GetRuntimeContext();
   JS::RootedValue result(ctx);
@@ -256,7 +271,7 @@ ScriptRuntime::EvaluateJavascriptStringView(std::string_view javascriptSource) n
 }
 
 mdb::Expected<void, std::string>
-ScriptRuntime::EvaluateJavascriptFileView(std::string_view filePath) noexcept
+AppScriptingInstance::EvaluateJavascriptFileView(std::string_view filePath) noexcept
 {
   ScopedFd f = ScopedFd::OpenFileReadOnly(filePath);
   auto sz = f.FileSize();
@@ -277,13 +292,13 @@ ScriptRuntime::EvaluateJavascriptFileView(std::string_view filePath) noexcept
 }
 
 mdb::Expected<void, std::string>
-ScriptRuntime::EvaluateJavascriptString(const std::string &javascriptSource) noexcept
+AppScriptingInstance::EvaluateJavascriptString(const std::string &javascriptSource) noexcept
 {
   return EvaluateJavascriptStringView(javascriptSource);
 }
 
 mdb::Expected<void, std::string>
-ScriptRuntime::EvaluateJavascriptFile(const std::string &filePath) noexcept
+AppScriptingInstance::EvaluateJavascriptFile(const std::string &filePath) noexcept
 {
   return EvaluateJavascriptFileView(filePath);
 }

@@ -2,7 +2,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <string_view>
 #include <sys/types.h>
+#include <tuple>
 #include <type_traits>
 
 using u64 = std::uint64_t;
@@ -49,4 +52,29 @@ template <std::size_t N> struct StringLiteral
   {
     return value;
   }
+
+  consteval std::string_view
+  StringView() const
+  {
+    return std::string_view{value};
+  }
+};
+
+template <typename... Args> struct ReturnType;
+
+// Specialization for non-empty packs
+template <typename First, typename... Rest> struct ReturnType<First, Rest...>
+{
+  using Type = First; // The first type in the parameter pack
+};
+
+// Helper to convert TypeList to std::function
+template <typename Tuple> struct ToFunction;
+
+template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<ReturnType, Args...>>
+{
+  using FunctionType = std::function<ReturnType(Args...)>;
+  using Return = ReturnType;
+  using FnArgs = std::tuple<Args...>;
+  static constexpr inline auto ArgSize = std::tuple_size_v<FnArgs>;
 };

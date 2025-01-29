@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "commands.h"
+#include "bp.h"
 #include "common.h"
 #include "event_queue.h"
 #include "events/event.h"
@@ -492,15 +493,21 @@ SetBreakpoints::Execute() noexcept
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
   const std::string file = args["source"]["path"];
-  Set<SourceBreakpointSpec> src_bps;
+  Set<BreakpointSpecification> srcBpSpecs;
   for (const auto &src_bp : args.at("breakpoints")) {
     ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
     const u32 line = src_bp["line"];
-    src_bps.insert(SourceBreakpointSpec{line, get<u32>(src_bp, "column"), get<std::string>(src_bp, "condition"),
-                                        get<std::string>(src_bp, "logMessage")});
+    auto column = get<u32>(src_bp, "column");
+    auto hitCondition = get<std::string>(src_bp, "hitCondition");
+    auto logMessage = get<std::string>(src_bp, "logMessage");
+    auto condition = get<std::string>(src_bp, "condition");
+
+    srcBpSpecs.insert(BreakpointSpecification::Create<SourceBreakpointSpecPair>(
+      std::move(condition), std::move(hitCondition), file,
+      SourceBreakpointSpec{.line = line, .column = column, .log_message = std::move(logMessage)}));
   }
 
-  target->SetSourceBreakpoints(file, src_bps);
+  target->SetSourceBreakpoints(file, srcBpSpecs);
 
   using BP = ui::dap::Breakpoint;
 
@@ -538,14 +545,14 @@ UIResultPtr
 SetInstructionBreakpoints::Execute() noexcept
 {
   using BP = ui::dap::Breakpoint;
-  Set<InstructionBreakpointSpec> bps{};
+  Set<BreakpointSpecification> bps{};
   const auto ibps = args.at("breakpoints");
   for (const auto &ibkpt : ibps) {
     ASSERT(ibkpt.contains("instructionReference") && ibkpt["instructionReference"].is_string(),
            "instructionReference field not in args or wasn't of type string");
     std::string_view addr_str;
     ibkpt["instructionReference"].get_to(addr_str);
-    bps.insert(InstructionBreakpointSpec{.instructionReference = std::string{addr_str}, .condition = {}});
+    bps.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{addr_str}));
   }
   auto target = mDAPClient->GetSupervisor();
   target->SetInstructionBreakpoints(bps);
@@ -573,7 +580,7 @@ UIResultPtr
 SetFunctionBreakpoints::Execute() noexcept
 {
   using BP = ui::dap::Breakpoint;
-  Set<FunctionBreakpointSpec> bkpts{};
+  Set<BreakpointSpecification> bkpts{};
   std::vector<std::string_view> new_ones{};
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::function};
   for (const auto &fnbkpt : args.at("breakpoints")) {
@@ -585,13 +592,13 @@ SetFunctionBreakpoints::Execute() noexcept
       is_regex = fnbkpt["regex"];
     }
 
-    bkpts.insert(FunctionBreakpointSpec{fn_name, std::nullopt, is_regex});
+    bkpts.insert(BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, fn_name, is_regex));
   }
   auto target = mDAPClient->GetSupervisor();
 
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().all_users()) {
-    if (user->kind == LocationUserKind::Function) {
+    if (user->mKind == LocationUserKind::Function) {
       res->breakpoints.push_back(BP::from_user_bp(*user));
     }
   }
@@ -1333,8 +1340,8 @@ UIResultPtr
 ImportScript::Execute() noexcept
 {
   TODO("ImportScript::Execute() noexcept");
-  mdb::js::ScriptRuntime *i = Tracer::Get().GetRuntime();
-  return new ImportScriptResponse{true, this, i->EvaluateJavascriptString(mSource)};
+  auto &i = Tracer::GetScriptingInstance();
+  return new ImportScriptResponse{true, this, i.EvaluateJavascriptString(mSource)};
 }
 
 std::pmr::string
