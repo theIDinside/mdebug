@@ -7,15 +7,15 @@
 namespace mdb {
 template <typename T> class Immutable
 {
-  T data;
+  T mData;
   using SelfT = Immutable<T>;
 
 public:
-  constexpr Immutable(const T &t) noexcept : data(t) {}
+  constexpr Immutable(const T &t) noexcept : mData(t) {}
 
   constexpr Immutable(T &&t) noexcept
     requires(!std::is_trivial_v<T> && !std::is_trivially_copyable_v<T>)
-      : data(std::move(t))
+      : mData(std::move(t))
   {
   }
   constexpr Immutable(const Immutable &) noexcept = default;
@@ -23,96 +23,95 @@ public:
   constexpr Immutable &operator=(const Immutable &) noexcept = default;
   constexpr Immutable &operator=(Immutable &&other) noexcept = default;
 
-  template <typename... Args> Immutable(Args... args) noexcept : data(std::forward<Args>(args)...) {}
+  template <typename... Args> Immutable(Args... args) noexcept : mData(std::forward<Args>(args)...) {}
 
   constexpr
   operator const T &() const &
   {
-    return data;
+    return mData;
   }
 
   constexpr T
-  clone() const noexcept
+  Clone() const noexcept
   {
-    return data;
+    return mData;
   }
 
   constexpr const T &
   operator*() const & noexcept
   {
-    return data;
+    return mData;
   }
 
   constexpr
   operator std::optional<T>() const
   {
-    return std::optional<T>{data};
+    return std::optional<T>{mData};
   }
 
   constexpr const T *
   operator->() const noexcept
     requires(!mdb::IsSmartPointer<T>)
   {
-    return std::addressof(data);
+    return std::addressof(mData);
   }
 
   constexpr const auto *
   operator->() const noexcept
     requires(mdb::IsSmartPointer<T>)
   {
-    return data.get();
+    return mData.get();
   }
 
   constexpr
   operator T &&() &&
   {
-    return std::move(data);
+    return std::move(mData);
   }
 
   constexpr
   operator const T &() &
   {
-    return data;
+    return mData;
   }
 
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const Immutable<T> &rhs) noexcept
   {
-    return lhs.data <=> rhs.data;
+    return lhs.mData <=> rhs.mData;
   }
 
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const T &rhs) noexcept
   {
-    return lhs.data <=> rhs;
+    return lhs.mData <=> rhs;
   }
 
   constexpr friend auto
   operator<=>(const T &lhs, const Immutable<T> &rhs) noexcept
   {
-    return lhs <=> rhs.data;
+    return lhs <=> rhs.mData;
   }
 
-  // An Immutable<T> member variable, might want to hand out a mutable reference to a sub object. This is
-  // absolutely fine.
+  // Escape hatch for when we want to cache something perhaps. Will possibly change. Don't rely on this method.
   constexpr T &
-  mut() noexcept
+  Mut() noexcept
   {
-    return data;
+    return mData;
   }
 
   constexpr auto
   begin() const noexcept
     requires(mdb::IsRange<T>)
   {
-    return data.cbegin();
+    return mData.cbegin();
   }
 
   constexpr auto
   end() const noexcept
     requires(mdb::IsRange<T>)
   {
-    return data.cend();
+    return mData.cend();
   }
 
   friend constexpr auto
@@ -143,130 +142,129 @@ public:
     return l + (*r);
   }
 
-  // friend constexpr auto
-  // operator==(const SelfT &l, std::nullptr_t) noexcept
-  //   requires(IsSmartPointer<T>)
-  // {
-  //   return l.data.get() == nullptr;
-  // }
-
-  // friend constexpr auto
-  // operator!=(const SelfT &l, std::nullptr_t) noexcept
-  //   requires(IsSmartPointer<T>)
-  // {
-  //   return l.data.get() != nullptr;
-  // }
-
   friend constexpr auto
   operator==(const SelfT &l, const SelfT &r) noexcept
   {
-    return l.data == r.data;
+    return l.mData == r.mData;
   }
 
   friend constexpr auto
   operator==(const SelfT &l, const auto &r) noexcept
   {
-    return l.data == r;
+    return l.mData == r;
   }
 
   friend constexpr bool
   operator==(const T &r, const SelfT &l) noexcept
   {
-    return l.data == r;
+    return l.mData == r;
   }
 
   friend constexpr bool
   operator!=(const SelfT &l, const SelfT &r) noexcept
   {
-    return !(l.data == r.data);
+    return !(l.mData == r.mData);
   }
 
   friend constexpr auto
   operator!=(const SelfT &l, const auto &r) noexcept
   {
-    return !(l.data == r);
+    return !(l.mData == r);
   }
 
   friend constexpr bool
   operator!=(const T &l, const SelfT &r) noexcept
   {
-    return !(r.data == l);
+    return !(r.mData == l);
   }
 
   constexpr const T &
-  as_t() const noexcept
+  Cast() const noexcept
   {
-    return data;
+    return mData;
   }
 };
 
 template <> class Immutable<std::string>
 {
   using T = std::string;
-  T data;
+  T mData;
 
 public:
-  constexpr Immutable(const T &t) noexcept : data(t) {}
-  constexpr Immutable(T &&t) noexcept : data(std::move(t)) {}
+  constexpr Immutable(const T &t) noexcept : mData(t) {}
+  constexpr Immutable(T &&t) noexcept : mData(std::move(t)) {}
 
   constexpr Immutable(const Immutable &) noexcept = default;
   constexpr Immutable(Immutable &&other) noexcept = default;
   constexpr Immutable &operator=(const Immutable &) noexcept = default;
   constexpr Immutable &operator=(Immutable &&other) noexcept = default;
 
-  template <typename... Args> Immutable(Args... args) noexcept : data(std::forward<Args>(args)...) {}
+  template <typename... Args> Immutable(Args... args) noexcept : mData(std::forward<Args>(args)...) {}
 
   constexpr
   operator const std::string_view() const &
   {
-    return data;
+    return mData;
   }
   constexpr
   operator const std::optional<std::string_view>() const &
   {
-    return data;
+    return mData;
   }
 
   constexpr std::string_view
-  string_view() const noexcept
+  StringView() const noexcept
   {
-    return data;
+    return mData;
   }
 
   constexpr const std::string_view
   operator*() const & noexcept
   {
-    return std::string_view{data};
+    return std::string_view{mData};
   }
 
   constexpr
   operator const T &() &
   {
-    return data;
+    return mData;
   }
 
   constexpr
   operator T &&() &&
   {
-    return std::move(data);
+    return std::move(mData);
   }
 
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const Immutable<T> &rhs) noexcept
   {
-    return lhs.data <=> rhs.data;
+    return lhs.mData <=> rhs.mData;
   }
 
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const T &rhs) noexcept
   {
-    return lhs.data <=> rhs;
+    return lhs.mData <=> rhs;
   }
 
   constexpr friend auto
   operator<=>(const T &lhs, const Immutable<T> &rhs) noexcept
   {
-    return lhs <=> rhs.data;
+    return lhs <=> rhs.mData;
+  }
+
+  // If this string represents a file path, and contains a /, return the last component
+  // If no '/' is found, return the entire string.
+  constexpr std::string_view
+  FileName() const noexcept
+  {
+    auto index = mData.find_last_of('/');
+    if (index == std::string::npos) {
+      return StringView();
+    }
+
+    return std::string_view{mData}.substr(index + 1);
   }
 };
 
@@ -315,19 +313,19 @@ public:
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const Immutable<T> &rhs) noexcept
   {
-    return lhs.data <=> rhs.data;
+    return lhs.mData <=> rhs.mData;
   }
 
   constexpr friend auto
   operator<=>(const Immutable<T> &lhs, const T &rhs) noexcept
   {
-    return *(lhs.data) <=> rhs;
+    return *(lhs.mData) <=> rhs;
   }
 
   constexpr friend auto
   operator<=>(const T &lhs, const Immutable<T> &rhs) noexcept
   {
-    return lhs <=> *(rhs.data);
+    return lhs <=> *(rhs.mData);
   }
 
   // An Immutable<T> member variable, might want to hand out a mutable reference to a sub object. This is

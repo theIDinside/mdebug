@@ -411,7 +411,7 @@ GdbRemoteCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
   auto register_value = convert_to_target(register_contents, addr.get());
   auto cmds =
     std::to_array({SerializeCommand(thr_set_bytes, "Hgp{:x}.{:x}", TaskLeaderTid(), t.mTid),
-                   SerializeCommand(set_pc_bytes, "P{:x}={}", mArchInfo->mDebugContextRegisters->mRIPNumber.as_t(),
+                   SerializeCommand(set_pc_bytes, "P{:x}={}", mArchInfo->mDebugContextRegisters->mRIPNumber.Cast(),
                                     register_value)});
   auto response = connection->send_inorder_command_chain(cmds, 1000);
   if (response.is_error()) {

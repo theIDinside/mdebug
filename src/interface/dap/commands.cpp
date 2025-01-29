@@ -993,7 +993,7 @@ StackTrace::Execute() noexcept
         stack_frames.push_back(
           StackFrame{.id = frame.FrameId(),
                      .name = frame.Name().value_or("unknown"),
-                     .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
+                     .source = Source{.name = src->mFullPath.StringView(), .path = src->mFullPath.StringView()},
                      .line = static_cast<int>(lte->line),
                      .column = static_cast<int>(lte->column),
                      .rip = fmt::format("{}", frame.FramePc())});
@@ -1001,7 +1001,7 @@ StackTrace::Execute() noexcept
         stack_frames.push_back(
           StackFrame{.id = frame.FrameId(),
                      .name = frame.Name().value_or("unknown"),
-                     .source = Source{.name = src->full_path->c_str(), .path = src->full_path->c_str()},
+                     .source = Source{.name = src->mFullPath.StringView(), .path = src->mFullPath.StringView()},
                      .line = 0,
                      .column = 0,
                      .rip = fmt::format("{}", frame.FramePc())});
@@ -1314,7 +1314,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
       auto span = v.variable_value->MemoryView();
       const std::uintptr_t ptr = sym::BitCopy<std::uintptr_t>(span);
       auto ptr_str = fmt::format("0x{:x}", ptr);
-      const std::string_view name = v.variable_value->mName.string_view();
+      const std::string_view name = v.variable_value->mName.StringView();
       it = fmt::format_to(
         it,
         R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }},)",

@@ -663,13 +663,13 @@ SourceCodeFile::GetOwningCompilationUnit() const noexcept
 
 SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
                                FileEntryIndexVector fileIndices) noexcept
-    : mCompilationUnit(compilationUnit), elf(elf), full_path(std::move(path)), mLineInfoFileIndices(fileIndices)
+    : mCompilationUnit(compilationUnit), elf(elf), mFullPath(std::move(path)), mLineInfoFileIndices(fileIndices)
 {
 }
 
 /* static */
 SourceCodeFile::Ref
-SourceCodeFile::Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path path,
+SourceCodeFile::Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::string path,
                        FileEntryIndexVector fileIndices) noexcept
 {
   return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{compilationUnit, elf, std::move(path), fileIndices});

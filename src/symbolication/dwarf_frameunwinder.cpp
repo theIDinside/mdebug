@@ -510,7 +510,7 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
   ASSERT(ehFrameSection->mName == ".eh_frame", "expected only .eh_frame section");
   DwarfBinaryReader reader{objfile->GetElf(), ehFrameSection->mSectionData};
   DBGLOG(eh, "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->GetPathString(),
-         reader.remaining_size(), ehFrameSection->file_offset.as_t());
+         reader.remaining_size(), ehFrameSection->file_offset.Cast());
   auto unwinder_db = std::make_unique<Unwinder>(objfile);
 
   using CieId = u64;

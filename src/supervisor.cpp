@@ -600,7 +600,7 @@ TraceeController::GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCod
   auto original_byte = res.take_value();
   return BreakpointLocation::CreateLocationWithSource(
     addr, original_byte,
-    std::make_unique<LocationSourceInfo>(sourceFile.full_path->string(), lte.line, u32{lte.column}));
+    std::make_unique<LocationSourceInfo>(sourceFile.mFullPath.StringView(), lte.line, u32{lte.column}));
 }
 
 mdb::Expected<Ref<BreakpointLocation>, BpErr>
@@ -820,7 +820,7 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
             sourceSpec.Clone());
           map[sourceSpec].push_back(user->mId);
           DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}", mTaskLeader,
-                 sourceCodeFile->full_path->filename().c_str(), user->mId, pc,
+                 sourceCodeFile->mFullPath.FileName(), user->mId, pc,
                  user->GetLocation() != nullptr ? *user->GetLocation()->original_byte : u8{0});
           if (const auto it = not_set.find(sourceSpec); it != std::end(not_set)) {
             not_set.erase(it);

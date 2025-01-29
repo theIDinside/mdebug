@@ -485,7 +485,10 @@ CompilationUnit::ComputeLineTable() noexcept
   };
 
   for (auto i = 0u; i < sourceCodeTableMapping.size() - 1; ++i) {
-    mSourceCodeFileMappings[i]->AddLineTableRanges(sourceCodeTableMapping[hashIndex(i)]);
+    // Versions below DWARF5 have their index starting at 1. So we "hash" the index with our stupid simple hashing
+    // function
+    auto adjusted = hashIndex(i);
+    mSourceCodeFileMappings[adjusted]->AddLineTableRanges(sourceCodeTableMapping[adjusted]);
   }
 }
 

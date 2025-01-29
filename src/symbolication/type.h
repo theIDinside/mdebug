@@ -524,7 +524,7 @@ template <> struct formatter<sym::Type>
           out = fmt::format_to(out, "{}]", t->mArrayBounds);
         }
       } else {
-        out = fmt::format_to(out, "{}", t->mName.as_t());
+        out = fmt::format_to(out, "{}", t->mName.Cast());
       }
       if (++index != type_span.size()) {
         out = fmt::format_to(out, " ");

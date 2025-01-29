@@ -348,7 +348,7 @@ TypeSymbolicationContext::ResolveType() noexcept
       continue;
     }
     auto cu = type_iter->mCompUnitDieReference->GetUnitData();
-    auto die = type_iter->mCompUnitDieReference.mut().GetDie();
+    auto die = type_iter->mCompUnitDieReference.Mut().GetDie();
     auto typedie = DieReference{cu, die};
     if (die->mTag == DwarfTag::DW_TAG_enumeration_type) {
       const auto type_id = typedie.ReadAttribute(Attribute::DW_AT_type);

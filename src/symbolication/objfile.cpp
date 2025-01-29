@@ -263,7 +263,7 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
     std::unordered_set<sym::dw::SourceCodeFile *> added;
     for (const auto &[fileIndex, src] : sources) {
       if (!added.contains(src.get())) {
-        mSourceCodeFiles[src->full_path->c_str()].push_back(src);
+        mSourceCodeFiles[std::string{src->mFullPath.StringView()}].push_back(src);
         added.insert(src.get());
       }
     }
@@ -294,7 +294,7 @@ ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
 void
 ObjectFile::AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept
 {
-  mSourceCodeFiles[file->full_path->c_str()].push_back(std::move(file));
+  mSourceCodeFiles[std::string{file->mFullPath.StringView()}].push_back(std::move(file));
 }
 
 sym::dw::UnitData *
@@ -788,8 +788,8 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
       for (auto cu : GetCompilationUnits(relocatedAddress)) {
         const auto [sourceFile, lineEntry] = cu->GetLineTableEntry(sym.address);
         if (sourceFile && lineEntry) {
-          result.emplace_back(relocatedAddress, LocationSourceInfo{sourceFile->full_path->c_str(), lineEntry->line,
-                                                                   u32{lineEntry->column}});
+          result.emplace_back(relocatedAddress, LocationSourceInfo{sourceFile->mFullPath.StringView(),
+                                                                   lineEntry->line, u32{lineEntry->column}});
           bps_set.insert(relocatedAddress);
           break;
         }
@@ -842,7 +842,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
       Tracer::Get().set_var_context({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
                                      static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
                                      ContextType::Variable});
-      frame.mTask.mut()->cache_object(ref, value_object);
+      frame.mTask.Mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});
   }

@@ -55,8 +55,8 @@ create_disasm_entry(TraceeController *target, AddrPtr vm_address, const ZydisDis
       return sym::Disassembly{.address = vm_address,
                               .opcode = std::move(machine_code),
                               .instruction = ins.text,
-                              .source_name = sourceInfo.mSource->full_path->c_str(),
-                              .source_path = sourceInfo.mSource->full_path->c_str(),
+                              .source_name = sourceInfo.mSource->mFullPath.StringView(),
+                              .source_path = sourceInfo.mSource->mFullPath.StringView(),
                               .line = sourceInfo.mEntry->line,
                               .column = sourceInfo.mEntry->column};
     } else {

@@ -87,7 +87,7 @@ RegisterDescription::GetRegister(u32 regNumber) const noexcept
 void
 RegisterDescription::Store(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept
 {
-  const auto &metaData = mArchInfo->mRegisters->mRegisterMetaData.as_t();
+  const auto &metaData = mArchInfo->mRegisters->mRegisterMetaData.Cast();
   for (const auto &[number, contents] : data) {
     u8 *ptr = mRegisterContents.Data(metaData[number].mOffset);
     std::memcpy(ptr, contents.data(), contents.size());

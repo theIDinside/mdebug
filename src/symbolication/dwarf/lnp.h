@@ -318,9 +318,9 @@ private:
                  FileEntryIndexVector fileIndices) noexcept;
 
 public:
-  Immutable<std::filesystem::path> full_path;
-  static SourceCodeFile::Ref Create(sym::CompilationUnit *compilationUnit, const Elf *elf,
-                                    std::filesystem::path path, FileEntryIndexVector fileIndices) noexcept;
+  Immutable<std::string> mFullPath;
+  static SourceCodeFile::Ref Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::string path,
+                                    FileEntryIndexVector fileIndices) noexcept;
   sym::CompilationUnit *GetOwningCompilationUnit() const noexcept;
   auto address_bounds() noexcept -> AddressRange;
   bool HasAddressRange() noexcept;
