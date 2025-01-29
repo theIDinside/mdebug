@@ -2,6 +2,15 @@
 #include "taskinfojs.h"
 
 namespace mdb::js {
+
+/* static */
+bool
+TaskInfo::js_pc(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  TODO(__PRETTY_FUNCTION__);
+  return true;
+}
+
 /* static */
 bool
 TaskInfo::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept

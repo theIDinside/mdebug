@@ -4,6 +4,7 @@
 #include "js/Class.h"
 #include "js/GCTypeMacros.h"
 #include "js/Object.h"
+#include "js/PropertyAndElement.h"
 #include "js/TypeDecls.h"
 #include "jsapi.h"
 #include "utils/smartptr.h"
@@ -27,7 +28,7 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
   // in C++ is trash, 40 years later.
   using Self = RefPtrJsObject<Derived, WrappedType, string>;
   using SelfJs = Derived;
-  using RefPtr = Ref<WrappedType>;
+  using Reference = Ref<WrappedType>;
 
   static constexpr const char *Name = string.CString();
 
@@ -69,14 +70,15 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
                                     .cOps = &classOps};
 
   static JSObject *
-  Create(JSContext *cx, const RefPtr &object) noexcept
+  Create(JSContext *cx, const Reference &object) noexcept
   {
-    auto tmp = RefPtr{object};
+    // we take and hold a reference to this object, keeping it alive
+    auto tmp = Reference{object};
     return Create(cx, std::move(tmp));
   }
 
   static JSObject *
-  Create(JSContext *cx, RefPtr &&object) noexcept
+  Create(JSContext *cx, Reference &&object) noexcept
   {
     JS::Rooted<JSObject *> obj(cx, JS_NewObject(cx, &clasp));
     if (!obj) {
@@ -84,10 +86,17 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     }
     JS_SetReservedSlot(obj, Derived::ThisPointer, JS::PrivateValue(std::move(object).DisOwn().Forget()));
 
-    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::DefineProperties(cx, obj); }) {
-      Derived::DefineProperties(cx, obj.get());
+    // Types with additional (more complex) setup/config opts into that, by exposing the static function Configure
+    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::Configure(cx, obj); }) {
+      Derived::Configure(cx, obj);
     }
 
+    // Types with properties exposes a static JSPropertySpec[] and it gets defined here
+    if constexpr (requires { Derived::PropertiesSpec; }) {
+      JS_DefineProperties(cx, obj, Derived::PropertiesSpec);
+    }
+
+    // Types with methods exposes a static JSFunctionSpec[] and it gets defined here
     if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::FunctionSpec; }) {
       JS_DefineFunctions(cx, obj, Derived::FunctionSpec);
     }
@@ -95,7 +104,8 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     return obj;
   }
 
-  constexpr RefPtr
+  // Hand out a new reference to the debugger core object
+  constexpr Reference
   Get() noexcept
   {
     JSObject *thisJs = Self::AsObject(this);
@@ -103,7 +113,8 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     return pObj.Take();
   }
 
-  static constexpr RefPtr
+  // Hand out a new reference to the debugger core object
+  static constexpr Reference
   Get(JSObject *This) noexcept
   {
     Untraced<WrappedType> pObj{JS::GetMaybePtrFromReservedSlot<WrappedType>(This, Derived::ThisPointer)};

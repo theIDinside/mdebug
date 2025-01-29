@@ -21,18 +21,13 @@ struct TaskInfo : public RefPtrJsObject<mdb::js::TaskInfo, mdb::TaskInfo, String
   };
 
   static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
+  static bool js_pc(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
 
-  static void
-  DefineProperties(JSContext *cx, JSObject *thisObj) noexcept
-  {
-    constexpr JSPropertySpec ReadOnlyPropertySpecs[]{JS_PS_END};
-  }
+  static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0), JS_FN("pc", &js_pc, 0, 0),
+                                                    JS_FS_END};
 
-  static void
-  DefineFunctions(JSContext *cx, JSObject *thisObj) noexcept
-  {
-    static constexpr JSFunctionSpec breakpointFunctions[] = {JS_FN("id", &js_id, 0, 0), JS_FS_END};
-  }
+  // Uncomment when you want to define properties
+  // static constexpr JSPropertySpec PropertiesSpec[]{JS_PS_END};
 };
 
 } // namespace mdb::js

@@ -30,12 +30,8 @@ struct Breakpoint : public RefPtrJsObject<mdb::js::Breakpoint, mdb::UserBreakpoi
   static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
 
   static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0), JS_FS_END};
-
-  static void
-  DefineProperties(JSContext *cx, JSObject *thisObj) noexcept
-  {
-    constexpr JSPropertySpec ReadOnlyPropertySpecs[]{JS_PS_END};
-  }
+  // Uncomment when you want to define properties
+  // static constexpr JSPropertySpec PropertiesSpec[]{JS_PS_END};
 };
 
 } // namespace mdb::js
