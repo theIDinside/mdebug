@@ -49,9 +49,9 @@ ENUM_TYPE_METADATA(StopEvents, FOR_EACH_EVENT, DEFAULT_ENUM)
 FOR_EACH_EVENT(ENUM_MAP)
 
 #define FOR_EACH_EVENT_RESULT(RETURN_KIND)                                                                        \
+  RETURN_KIND(Resume, "Don't halt the task that saw the current event")                                           \
   RETURN_KIND(None, "No value returned. Perform default behavior. For events like breakpoint hits, this usually " \
                     "means to notify user of a stop. For events like clone, it means resuming silently.")         \
-  RETURN_KIND(Resume, "Don't halt the task that saw the current event")                                           \
   RETURN_KIND(Stop, "Stop task and don't resume until explicitly told to do so.")                                 \
   RETURN_KIND(StopAll, "Stop task, and also halt all other tasks in this process.")
 

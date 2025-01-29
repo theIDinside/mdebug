@@ -158,8 +158,12 @@ public:
     std::string_view mErrorMessage;
   };
 
-  template <typename ExpectedReturnType>
-  std::optional<ExpectedReturnType>
+  /// Call function `compiledFunction` expecting template parameter `ExpectedReturnType` as return type.
+  /// If `ExpectedReturnType` is int, but the return type from the javascript function is a boolean, we convert the
+  /// boolean to an integer result (0 = false).
+  /// std::string maps to JSString for now. No other string can therefore be used yet.
+  template <typename ReturnType>
+  std::optional<ReturnType>
   CallFunction(JS::Handle<JSFunction *> compiledFun, JS::HandleValueArray arguments,
                std::string &errorMessage) noexcept
   {
@@ -178,13 +182,15 @@ public:
       return {};
     }
 
-    if constexpr (std::is_integral_v<ExpectedReturnType>) {
+    if constexpr (std::is_integral_v<ReturnType>) {
+      bool isBool = rval.isBoolean();
       if (!rval.isInt32()) {
         writeError(errorMessage, "int");
         return {};
       }
-      return rval.toInt32();
-    } else if constexpr (std::is_same_v<ExpectedReturnType, std::string>) {
+      // For the bozos who use < 0 for falsy.
+      return !isBool ? rval.toInt32() : std::abs(static_cast<int>(rval.toBoolean()));
+    } else if constexpr (std::is_same_v<ReturnType, std::string>) {
       if (!rval.isString()) {
         writeError(errorMessage, "string");
         return {};
@@ -197,20 +203,20 @@ public:
         return {};
       }
       return std::make_optional<std::string>(std::move(result));
-    } else if constexpr (std::is_same_v<ExpectedReturnType, JSObject>) {
+    } else if constexpr (std::is_same_v<ReturnType, JSObject>) {
       if (!rval.isObject()) {
         writeError(errorMessage, "object");
         return {};
       }
       return rval.toObjectOrNull();
-    } else if constexpr (std::is_same_v<ExpectedReturnType, bool>) {
+    } else if constexpr (std::is_same_v<ReturnType, bool>) {
       if (!rval.isBoolean()) {
         writeError(errorMessage, "boolean");
         return {};
       }
       return rval.toBoolean();
     } else {
-      static_assert(always_false<ExpectedReturnType>, "Unsupported type for this function");
+      static_assert(always_false<ReturnType>, "Unsupported type for this function");
     }
   }
 
