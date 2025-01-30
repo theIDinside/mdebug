@@ -184,7 +184,7 @@ public:
 
     if constexpr (std::is_integral_v<ReturnType>) {
       bool isBool = rval.isBoolean();
-      if (!rval.isInt32()) {
+      if (!rval.isInt32() && !isBool) {
         writeError(errorMessage, "int");
         return {};
       }

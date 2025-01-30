@@ -95,7 +95,7 @@ public:
 
   // Escape hatch for when we want to cache something perhaps. Will possibly change. Don't rely on this method.
   constexpr T &
-  Mut() noexcept
+  mut() noexcept
   {
     return mData;
   }

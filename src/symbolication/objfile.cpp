@@ -842,7 +842,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
       Tracer::Get().set_var_context({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
                                      static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
                                      ContextType::Variable});
-      frame.mTask.Mut()->cache_object(ref, value_object);
+      frame.mTask.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});
   }
