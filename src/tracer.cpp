@@ -264,7 +264,6 @@ Tracer::HandleInternalEvent(InternalEvent evt) noexcept
                            [sv](const auto &t) { return t.get() == sv; });
     if (it != std::end(mTracedProcesses)) {
       sv->OnTearDown();
-      dap->RemoveSource(sv->GetDebugAdapterProtocolClient());
       std::unique_ptr<TraceeController> swap = std::move(*it);
       mTracedProcesses.erase(it);
       mExitedProcesses.push_back(std::move(swap));
@@ -614,7 +613,7 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
 
     const auto leader = childPid;
     AddLaunchedTarget(tc::PtraceCfg{leader}, TargetSession::Launched);
-    client->ClientConfigured(mTracedProcesses.back().get());
+    client->ClientConfigured(mTracedProcesses.back().get(), /* alreadyAdded */ true);
     client->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
     client->GetSupervisor()->ConfigureBreakpointBehavior(
       breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));

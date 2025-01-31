@@ -185,7 +185,8 @@ public:
   alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *CreateStandardIOConnection() noexcept;
   static DebugAdapterClient *CreateSocketConnection(DebugAdapterClient &client) noexcept;
-  void ClientConfigured(TraceeController *tc, std::optional<int> ttyFileDescriptor = {}) noexcept;
+  void ClientConfigured(TraceeController *tc, bool alreadyAdded = false,
+                        std::optional<int> ttyFileDescriptor = {}) noexcept;
   void PostDapEvent(ui::UIResultPtr event);
 
   int ReadFileDescriptor() const noexcept;
@@ -202,11 +203,11 @@ public:
   void FlushEvents() noexcept;
   void AddChild(DebugAdapterClient *child) noexcept;
   void RemoveChild(DebugAdapterClient *child) noexcept;
+  bool IsClosed() noexcept;
 };
 
 enum class InterfaceNotificationSource
 {
-  NewClient,
   DebugAdapterClient,
   ClientStdout
 };
@@ -214,14 +215,78 @@ enum class InterfaceNotificationSource
 using DAPKey = std::uintptr_t;
 using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterClient *>;
 
+struct DapNotification
+{
+  InterfaceNotificationSource mSource;
+  DebugAdapterClient *mClient;
+};
+
+struct StandardIo
+{
+  int mFd;
+  DebugAdapterClient *mClient;
+};
+
+struct PollState
+{
+  std::vector<pollfd> fds{};
+  std::unordered_map<int, DapNotification> map{};
+
+  constexpr void
+  Clear() noexcept
+  {
+    fds.clear();
+    map.clear();
+  }
+
+  constexpr void
+  ClearInit(int newClientNotifierFd) noexcept
+  {
+    Clear();
+    fds.push_back({.fd = newClientNotifierFd, .events = POLLIN, .revents = 0});
+  }
+
+  constexpr void
+  AddCommandSource(int fd, DebugAdapterClient *client) noexcept
+  {
+    fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
+    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::DebugAdapterClient, .mClient = client};
+  }
+
+  constexpr void
+  AddStandardIOSource(int fd, DebugAdapterClient *client) noexcept
+  {
+    fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
+    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::ClientStdout, .mClient = client};
+  }
+
+  constexpr auto
+  ClientFds() noexcept
+  {
+    return std::span{fds.begin() + 1, fds.end()};
+  }
+
+  constexpr DapNotification
+  Get(int fd) noexcept
+  {
+    return map[fd];
+  }
+};
+
 class DAP
 {
 private:
-  std::vector<mdb::OwningPointer<DebugAdapterClient>> clients{};
-  std::vector<NotifSource> sources{};
-  std::unique_ptr<alloc::ArenaAllocator> mTemporaryArena;
+  std::vector<DebugAdapterClient *> mClients{};
+  std::vector<DebugAdapterClient *> mShutdownClients;
+  std::vector<StandardIo> mStandardIo;
+  std::vector<DapNotification> mNewEvents;
+
+  std::unique_ptr<alloc::ArenaResource> mTemporaryArena;
 
 public:
+  using StackAllocator = alloc::StackAllocator<2048>;
+  bool WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexcept;
+
   explicit DAP(int inputFileDescriptor, int outputFileDescriptor) noexcept;
   ~DAP() noexcept;
 
@@ -234,10 +299,8 @@ public:
 
   void StartIOPolling(std::stop_token &token) noexcept;
   void NewClient(mdb::OwningPointer<DebugAdapterClient> client);
-  u32 notifiers_queue_size() const noexcept;
-  void InitPolling(pollfd *fds);
-  void DoOnePoll(u32 notifier_queue_size) noexcept;
-  void AddPollingSource(NotifSource source) noexcept;
+  void Poll(PollState &state) noexcept;
+  void AddStandardIOSource(int fd, DebugAdapterClient *client) noexcept;
 
   void clean_up() noexcept;
   void flush_events() noexcept;
