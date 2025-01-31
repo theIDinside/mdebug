@@ -215,7 +215,7 @@ void
 TaskInfo::clear_stop_state() noexcept
 {
   for (const auto ref : variableReferences) {
-    Tracer::Get().destroy_reference(ref);
+    Tracer::Get().DestroyVariablesReference(ref);
   }
 
   variableReferences.clear();

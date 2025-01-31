@@ -153,53 +153,35 @@ public:
   std::pmr::string EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
                                                   std::pmr::memory_resource *allocator) noexcept;
 
-  void set_ui(ui::dap::DAP *dap) noexcept;
-  void kill_ui() noexcept;
+  void SetUI(ui::dap::DAP *dap) noexcept;
+  void KillUI() noexcept;
 
   TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
-  void launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path &program,
+  void Launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path &program,
               std::span<const std::string> prog_args,
               std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   bool Attach(const AttachArgs &args) noexcept;
-  bool remote_attach_init(tc::GdbRemoteCommander &tc) noexcept;
-  void detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept;
+  bool RemoteAttachInit(tc::GdbRemoteCommander &tc) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
-  const sys::DebuggerConfiguration &getConfig() noexcept;
 
-  const sys::DebuggerConfiguration &get_configuration() const noexcept;
   std::shared_ptr<gdb::RemoteConnection>
-  connectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
+  ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
 
-  u32 new_breakpoint_id() noexcept;
-  VarRefKey new_key() noexcept;
+  u32 GenerateNewBreakpointId() noexcept;
+  VarRefKey NewVariablesReference() noexcept;
   VariableContext GetVariableContext(VarRefKey varRefKey) noexcept;
-  VarRefKey new_var_context(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept;
-  void set_var_context(VariableContext ctx) noexcept;
-  u32 clone_from_var_context(const VariableContext &ctx) noexcept;
-  void destroy_reference(VarRefKey key) noexcept;
+  VarRefKey NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId,
+                                         SymbolFile *file) noexcept;
+  void SetVariableContext(VariableContext ctx) noexcept;
+  u32 CloneFromVariableContext(const VariableContext &ctx) noexcept;
+  void DestroyVariablesReference(VarRefKey key) noexcept;
 
   std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
   void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
   Ref<TaskInfo> GetTask(Tid tid) noexcept;
-
-  template <typename Predicate>
-  bool
-  erase_target(Predicate &&fn)
-  {
-    auto it = std::find_if(mTracedProcesses.begin(), mTracedProcesses.end(), std::move(fn));
-    const bool erased = it != std::end(mTracedProcesses);
-#ifdef MDB_DEBUG
-    DBGLOG(core, "found tracer to delete: {}", erased);
-#endif
-    mTracedProcesses.erase(it);
-    return erased;
-  }
-
-  std::vector<std::unique_ptr<TraceeController>> mTracedProcesses;
-  ui::dap::DAP *dap;
-
-  bool TraceExitConfigured{false};
+  std::vector<TraceeController *> GetAllProcesses() const noexcept;
+  ui::dap::DAP *GetDap() const noexcept;
 
   static mdb::js::AppScriptingInstance &GetScriptingInstance() noexcept;
   static JSContext *GetJsContext() noexcept;
@@ -207,10 +189,13 @@ public:
 
 private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
+
+  std::vector<std::unique_ptr<TraceeController>> mTracedProcesses;
+  ui::dap::DAP *mDAP;
   std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
-  u32 breakpoint_ids{0};
-  VarRefKey id_counter{0};
-  std::unordered_map<VarRefKey, VariableContext> refContext{};
+  u32 mBreakpointID{0};
+  VarRefKey mVariablesReferenceCounter{0};
+  std::unordered_map<VarRefKey, VariableContext> mVariablesReferenceContext{};
   bool already_launched;
   sys::DebuggerConfiguration config;
 

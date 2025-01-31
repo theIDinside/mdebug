@@ -524,7 +524,7 @@ UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : tc(tc)
 u16
 UserBreakpoints::new_id() noexcept
 {
-  return Tracer::Get().new_breakpoint_id();
+  return Tracer::Get().GenerateNewBreakpointId();
 }
 
 void

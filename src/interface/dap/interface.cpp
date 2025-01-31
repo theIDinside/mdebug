@@ -286,7 +286,7 @@ DebugAdapterClient::SetTtyOut(int fd) noexcept
 {
   ASSERT(tty_fd == -1, "TTY fd was already set!");
   tty_fd = fd;
-  auto dap = Tracer::Get().dap;
+  auto dap = Tracer::Get().GetDap();
   dap->configure_tty(fd);
   dap->AddStandardIOSource(fd, this);
 }
@@ -340,7 +340,7 @@ DebugAdapterClient::ShutDown() noexcept
     close(tty_fd);
   }
   tty_fd = -1;
-  Tracer::Get().dap->RemoveSource(this);
+  Tracer::Get().GetDap()->RemoveSource(this);
 }
 
 void
@@ -559,7 +559,7 @@ DebugAdapterClient::ClientConfigured(TraceeController *supervisor, bool alreadyA
                                      std::optional<int> ttyFileDescriptor) noexcept
 {
   if (!alreadyAdded) {
-    Tracer::Get().dap->NewClient({this});
+    Tracer::Get().GetDap()->NewClient({this});
   }
 
   tc = supervisor;

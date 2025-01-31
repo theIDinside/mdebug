@@ -846,7 +846,7 @@ Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program, std::vector<
 UIResultPtr
 Launch::Execute() noexcept
 {
-  Tracer::Get().launch(mDAPClient, mStopOnEntry, mProgram, std::move(mProgramArgs), mBreakpointBehavior);
+  Tracer::Get().Launch(mDAPClient, mStopOnEntry, mProgram, std::move(mProgramArgs), mBreakpointBehavior);
   return new LaunchResponse{true, this};
 }
 

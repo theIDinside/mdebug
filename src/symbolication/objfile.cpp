@@ -670,7 +670,7 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     for (auto &var : variables) {
       GetObjectFile()->InitializeDataVisualizer(var);
       RegisterValueResolver(var);
-      const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Get().clone_from_var_context(ctx);
+      const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, var);
       }
@@ -687,7 +687,8 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
         mem.name, const_cast<sym::Field &>(mem), value->mMemoryContentsOffsets, value->TakeMemoryReference());
       GetObjectFile()->InitializeDataVisualizer(member_value);
       RegisterValueResolver(member_value);
-      const auto new_ref = member_value->GetType()->IsPrimitive() ? 0 : Tracer::Get().clone_from_var_context(ctx);
+      const auto new_ref =
+        member_value->GetType()->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
       if (new_ref > 0) {
         ctx.t->cache_object(new_ref, member_value);
       }
@@ -827,7 +828,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   frame.GetInitializedVariables(variables_kind, relevantSymbols);
 
   for (const sym::Symbol &symbol : relevantSymbols) {
-    const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Get().new_key();
+    const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Get().NewVariablesReference();
     if (ref == 0 && !symbol.mType->IsResolved()) {
       sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
       ts_ctx.ResolveType();
@@ -839,9 +840,9 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     RegisterValueResolver(value_object);
 
     if (ref > 0) {
-      Tracer::Get().set_var_context({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
-                                     static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
-                                     ContextType::Variable});
+      Tracer::Get().SetVariableContext({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
+                                        static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
+                                        ContextType::Variable});
       frame.mTask.mut()->cache_object(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});

@@ -305,7 +305,7 @@ EventSystem::PushReapedWaitResults(std::span<WaitResult> results) noexcept
       const auto res = WaitResultToTaskWaitResult(pid, stat);
       mWaitEvents.push_back(Event{WaitEvent{.wait = res, .core = 0}});
     } else if (WIFEXITED(stat)) {
-      for (const auto &supervisor : Tracer::Get().mTracedProcesses) {
+      for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
         for (const auto &entry : supervisor->GetThreads()) {
           if (entry.mTid == pid) {
             mWaitEvents.push_back(Event{

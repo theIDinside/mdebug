@@ -124,7 +124,7 @@ main(int argc, const char **argv)
         stallTime += interval.count();
         if (!reported) {
           writeBuffer.clear();
-          for (const auto &target : mdb::Tracer::Get().mTracedProcesses) {
+          for (const auto &target : mdb::Tracer::Get().GetAllProcesses()) {
             for (const auto &entry : target->GetThreads()) {
               if (entry.mTask->can_continue()) {
                 fmt::format_to(std::back_inserter(writeBuffer), "tid={}, stopped={}, wait={}, ?pc?=0x{:x}\n",
@@ -162,7 +162,7 @@ main(int argc, const char **argv)
   auto ui_thread =
     mdb::DebuggerThread::SpawnDebuggerThread("IO-Thread", [&ui_thread_setup](std::stop_token &token) {
       mdb::ui::dap::DAP ui_interface{STDIN_FILENO, STDOUT_FILENO};
-      mdb::Tracer::Get().set_ui(&ui_interface);
+      mdb::Tracer::Get().SetUI(&ui_interface);
       ui_thread_setup = true;
       ui_interface.StartIOPolling(token);
     });
@@ -175,6 +175,6 @@ main(int argc, const char **argv)
 
   mdb::ThreadPool::ShutdownGlobalPool();
   exit_debug_session = true;
-  mdb::Tracer::Get().kill_ui();
+  mdb::Tracer::Get().KillUI();
   DBGLOG(core, "Exited...");
 }

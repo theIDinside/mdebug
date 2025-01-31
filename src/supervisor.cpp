@@ -1431,13 +1431,13 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
       break;
     }
     auto &[symbol, obj] = result.value();
-    const auto id = Tracer::Get().new_key();
-    Tracer::Get().set_var_context(VariableContext{.tc = this,
-                                                  .t = &task,
-                                                  .symbol_file = obj,
-                                                  .frame_id = id,
-                                                  .id = static_cast<u16>(id),
-                                                  .type = ContextType::Frame});
+    const auto id = Tracer::Get().NewVariablesReference();
+    Tracer::Get().SetVariableContext(VariableContext{.tc = this,
+                                                     .t = &task,
+                                                     .symbol_file = obj,
+                                                     .frame_id = id,
+                                                     .id = static_cast<u16>(id),
+                                                     .type = ContextType::Frame});
     if (symbol) {
       cs_ref.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {

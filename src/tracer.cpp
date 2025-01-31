@@ -358,7 +358,7 @@ Tracer::SetupConsoleCommands() noexcept
     GenericCommand::CreateCommand("list ptraced processes", [this](auto, auto *allocator) -> ConsoleCommandResult {
       std::pmr::string evalResult{allocator};
       evalResult.reserve(4096);
-      for (const auto &t : Tracer::Get().mTracedProcesses) {
+      for (const auto &t : Tracer::Get().GetAllProcesses()) {
         WriteConsoleLine(evalResult, "{}, parent={}, executable={}", t->TaskLeaderTid(), t->mParentPid,
                          t->mMainExecutable->GetObjectFilePath().filename().c_str());
       }
@@ -395,7 +395,7 @@ Tracer::SetupConsoleCommands() noexcept
       ReturnEvalExprError(args.size() < 1, "resume process command needs a pid argument");
       std::optional<pid_t> pid = ParseProcessId(args.front(), false);
       ReturnEvalExprError(!pid.has_value(), "couldn't parse pid argument");
-      for (const auto &target : Tracer::Get().mTracedProcesses) {
+      for (const auto &target : Tracer::Get().GetAllProcesses()) {
         if (target->TaskLeaderTid() == pid) {
           bool resumed = target->ResumeTarget({tc::RunType::Continue, tc::ResumeTarget::Task, -1});
           WriteConsoleLine(evalResult, "{} resumed={}", *pid, resumed);
@@ -418,15 +418,15 @@ Tracer::EvaluateDebugConsoleExpression(const std::string &expression, bool escap
 }
 
 void
-Tracer::set_ui(ui::dap::DAP *dap) noexcept
+Tracer::SetUI(ui::dap::DAP *dap) noexcept
 {
-  this->dap = dap;
+  this->mDAP = dap;
 }
 
 void
-Tracer::kill_ui() noexcept
+Tracer::KillUI() noexcept
 {
-  dap->clean_up();
+  mDAP->clean_up();
 }
 
 static int
@@ -472,7 +472,7 @@ Tracer::Attach(const AttachArgs &args) noexcept
             // we want our design to be consistent (1 commander / process. Otherwise we turn into
             // gdb hell hole.)
             auto remote_init = tc::RemoteSessionConfigurator{
-              Tracer::Get().connectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
+              Tracer::Get().ConnectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
 
             std::vector<tc::RemoteProcess> res;
 
@@ -517,7 +517,7 @@ Tracer::Attach(const AttachArgs &args) noexcept
                                                              true});
             };
 
-            auto main_connection = dap->main_connection();
+            auto main_connection = mDAP->main_connection();
             hookupDapWithRemote(std::move(it->tc), main_connection);
 
             ++it;
@@ -539,7 +539,7 @@ Tracer::AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept
 }
 
 void
-Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path &program,
+Tracer::Launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path &program,
                std::span<const std::string> prog_args,
                std::optional<BreakpointBehavior> breakpointBehavior) noexcept
 {
@@ -640,13 +640,6 @@ Tracer::launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
   }
 }
 
-void
-Tracer::detach_target(std::unique_ptr<TraceeController> &&target, bool resume_on_detach) noexcept
-{
-  // we have taken ownership of `target` in this "sink". Target will be destroyed (should be?)
-  target->GetInterface().Disconnect(!resume_on_detach);
-}
-
 std::shared_ptr<SymbolFile>
 Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
 {
@@ -658,20 +651,8 @@ Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
   return nullptr;
 }
 
-const sys::DebuggerConfiguration &
-Tracer::getConfig() noexcept
-{
-  return config;
-}
-
-const sys::DebuggerConfiguration &
-Tracer::get_configuration() const noexcept
-{
-  return config;
-}
-
 std::shared_ptr<gdb::RemoteConnection>
-Tracer::connectToRemoteGdb(const tc::GdbRemoteCfg &config,
+Tracer::ConnectToRemoteGdb(const tc::GdbRemoteCfg &config,
                            const std::optional<gdb::RemoteSettings> &settings) noexcept
 {
   for (auto &t : mTracedProcesses) {
@@ -689,36 +670,36 @@ Tracer::connectToRemoteGdb(const tc::GdbRemoteCfg &config,
 }
 
 u32
-Tracer::new_breakpoint_id() noexcept
+Tracer::GenerateNewBreakpointId() noexcept
 {
-  return ++breakpoint_ids;
+  return ++mBreakpointID;
 }
 
 VarRefKey
-Tracer::new_key() noexcept
+Tracer::NewVariablesReference() noexcept
 {
-  return ++id_counter;
+  return ++mVariablesReferenceCounter;
 }
 
 VariableContext
 Tracer::GetVariableContext(u32 varRefKey) noexcept
 {
-  return refContext[varRefKey];
+  return mVariablesReferenceContext[varRefKey];
 }
 
 VarRefKey
-Tracer::new_var_context(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept
+Tracer::NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept
 {
-  auto key = new_key();
-  refContext[key] =
+  auto key = NewVariablesReference();
+  mVariablesReferenceContext[key] =
     VariableContext{.tc = &tc, .t = &t, .symbol_file = file, .frame_id = frameId, .id = static_cast<u16>(key)};
   return key;
 }
 
 void
-Tracer::destroy_reference(VarRefKey key) noexcept
+Tracer::DestroyVariablesReference(VarRefKey key) noexcept
 {
-  refContext.erase(key);
+  mVariablesReferenceContext.erase(key);
 }
 
 std::unordered_map<Tid, Ref<TaskInfo>> &
@@ -745,18 +726,40 @@ Tracer::GetTask(Tid tid) noexcept
   return nullptr;
 }
 
-void
-Tracer::set_var_context(VariableContext ctx) noexcept
+std::vector<TraceeController *>
+Tracer::GetAllProcesses() const noexcept
 {
-  refContext[ctx.id] = ctx;
+  std::vector<TraceeController *> result;
+  result.reserve(mTracedProcesses.size() + mExitedProcesses.size());
+  for (auto &p : mTracedProcesses) {
+    result.push_back(p.get());
+  }
+
+  for (auto &p : mExitedProcesses) {
+    result.push_back(p.get());
+  }
+
+  return result;
+}
+
+ui::dap::DAP *
+Tracer::GetDap() const noexcept
+{
+  return mDAP;
+}
+
+void
+Tracer::SetVariableContext(VariableContext ctx) noexcept
+{
+  mVariablesReferenceContext[ctx.id] = ctx;
   ctx.t->add_reference(ctx.id);
 }
 
 u32
-Tracer::clone_from_var_context(const VariableContext &ctx) noexcept
+Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
 {
-  const auto key = new_key();
-  refContext.emplace(key, VariableContext::subcontext(key, ctx));
+  const auto key = NewVariablesReference();
+  mVariablesReferenceContext.emplace(key, VariableContext::subcontext(key, ctx));
   return key;
 }
 
