@@ -25,7 +25,7 @@ class NonExecutableCompilationUnitFile;
 template <typename T> using Optional = std::optional<T>;
 
 namespace alloc {
-class ArenaAllocator;
+class ArenaResource;
 };
 
 namespace sym {
@@ -79,7 +79,7 @@ class ObjectFile
   u64 mSize;
   const u8 *mLoadedBinary;
   Elf *elf{nullptr};
-  alloc::ArenaAllocator *mPrivateAllocator{nullptr};
+  alloc::ArenaResource *mPrivateAllocator{nullptr};
   std::unique_ptr<sym::Unwinder> unwinder{nullptr};
 
   // Address bounds determined by reading the program segments of the elf binary

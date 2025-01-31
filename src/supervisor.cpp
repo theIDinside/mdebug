@@ -275,7 +275,7 @@ TraceeController::InstallDynamicLoaderBreakpoints() noexcept
 void
 TraceeController::OnSharedObjectEvent() noexcept
 {
-  DBGLOG(core, "so event triggered");
+  DBGLOG(core, "[{}:so] shared object event triggered", mTaskLeader);
   if (const auto libs_result = mTraceeInterface->ReadLibraries(); libs_result) {
     std::vector<std::shared_ptr<SymbolFile>> obj_files{};
     const auto &libs = libs_result.value();
@@ -1531,7 +1531,8 @@ TraceeController::InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexc
     DBGLOG(core, "[{}:bkpt:loc]: error while installing location: {}", mTaskLeader, addr);
     return mdb::unexpected(BpErr{MemoryError{errno, addr}});
   }
-  DBGLOG(core, "[{}:bkpt:loc]: installing location: {}", mTaskLeader, addr);
+  DBGLOG(core, "[{}:bkpt:loc]: installing location: {}, original byte: 0x{:x}", mTaskLeader, addr,
+         static_cast<u8>(res.data));
   return static_cast<u8>(res.data);
 }
 

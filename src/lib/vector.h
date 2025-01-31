@@ -69,13 +69,13 @@ public:
  * elements. */
 template <typename T> class CollectionBuilder
 {
-  alloc::ArenaAllocator *mAllocator;
+  alloc::ArenaResource *mAllocator;
   T *mPtr;
   u32 mCurrentSize;
   u32 mCurrentCapacity;
 
 public:
-  explicit CollectionBuilder(alloc::ArenaAllocator *alloc) noexcept : mAllocator(alloc) {}
+  explicit CollectionBuilder(alloc::ArenaResource *alloc) noexcept : mAllocator(alloc) {}
 
   template <typename... Args>
   T &

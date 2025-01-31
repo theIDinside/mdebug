@@ -206,7 +206,7 @@ MemoryContentsObject::ReadMemory(std::pmr::memory_resource *allocator, TraceeCon
 }
 
 static void
-ReadInLocationList(Symbol &symbol, alloc::ArenaAllocator *allocator, const ElfSection &locList) noexcept
+ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSection &locList) noexcept
 {
   uint64_t base;
   uint64_t start;

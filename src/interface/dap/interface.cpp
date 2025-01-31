@@ -8,6 +8,7 @@
 #include "events.h"
 #include "lib/arena_allocator.h"
 #include "parse_buffer.h"
+#include <algorithm>
 #include <fcntl.h>
 #include <filesystem>
 #include <fmt/core.h>
@@ -20,6 +21,7 @@
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <utils/signals.h>
 #include <vector>
 namespace mdb::ui::dap {
@@ -112,8 +114,7 @@ DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
   posted_event_notifier = w;
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
-  sources.push_back({new_client_notifier.read.fd, InterfaceNotificationSource::NewClient, nullptr});
-  mTemporaryArena = alloc::ArenaAllocator::Create(alloc::Page{16}, nullptr);
+  mTemporaryArena = alloc::ArenaResource::Create(alloc::Page{16}, nullptr);
 }
 
 DAP::~DAP() noexcept {}
@@ -147,78 +148,95 @@ DAP::StartIOPolling(std::stop_token &token) noexcept
   mdb::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
   NewClient({.t = DebugAdapterClient::CreateStandardIOConnection()});
 
+  PollState state{};
   while (keep_running && !token.stop_requested()) {
-    DoOnePoll(sources.size());
+    Poll(state);
   }
 }
 
 void
-DAP::InitPolling(pollfd *fds)
+DAP::AddStandardIOSource(int fd, DebugAdapterClient *client) noexcept
 {
-  auto index = 0;
-  for (const auto &[fd, src, client] : sources) {
-    fds[index++] = pollfd{.fd = fd, .events = POLLIN, .revents = 0};
+  mStandardIo.push_back({fd, client});
+}
+
+bool
+DAP::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexcept
+{
+  // TODO(simon): Change this to a stack allocated (or a memory arena from which we can pull the contiguous memory
+  // from and then just leak back to the allocator)
+  state.ClearInit(new_client_notifier.read.fd);
+
+  for (auto client : mClients) {
+    if (!client->IsClosed()) {
+      const auto fd = client->ReadFileDescriptor();
+      state.AddCommandSource(fd, client);
+    }
   }
+
+  for (auto io : mStandardIo) {
+    state.AddStandardIOSource(io.mFd, io.mClient);
+  }
+
+  if (poll(state.fds.data(), state.fds.size(), -1) <= 0) {
+    return false;
+  }
+
+  if ((state.fds[0].revents & POLLIN) == POLLIN) {
+    new_client_notifier.read.consume_expected();
+  }
+
+  for (const auto pollResult :
+       state.ClientFds() | std::views::filter([](auto pfd) { return (pfd.revents & POLLIN) == POLLIN; })) {
+    events.push_back(state.Get(pollResult.fd));
+  }
+
+  return !events.empty();
 }
 
 void
-DAP::AddPollingSource(NotifSource source) noexcept
+DAP::Poll(PollState &state) noexcept
 {
-  sources.push_back(source);
-}
-
-void
-DAP::DoOnePoll(u32 notifier_queue_size) noexcept
-{
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wvla-cxx-extension"
-  pollfd fds[notifier_queue_size];
-#pragma clang diagnostic pop
-  InitPolling(fds);
-  auto ready = poll(fds, notifier_queue_size, -1);
-  VERIFY(ready != -1, "polling failed: {}", strerror(errno));
-  if (ready == 0) {
-    // no ready events
-    return;
-  }
-  for (auto i = 0u; i < notifier_queue_size; ++i) {
-    if ((fds[i].revents & POLLIN) == POLLIN) {
-      auto [fd, source, client] = sources[i];
-      switch (source) {
-      case InterfaceNotificationSource::NewClient:
-        // do nothing. We just need to be woken up, to start polling it.
-        new_client_notifier.read.consume_expected();
-        break;
+  if (WaitForEvents(state, mNewEvents)) {
+    for (auto &event : mNewEvents) {
+      switch (event.mSource) {
       case InterfaceNotificationSource::DebugAdapterClient:
-        client->ReadPendingCommands();
+        if (event.mClient->IsClosed()) {
+          RemoveSource(event.mClient);
+          continue;
+        }
+        event.mClient->ReadPendingCommands();
         break;
       case InterfaceNotificationSource::ClientStdout: {
-        auto tty = client->GetTtyFileDescriptor();
+        auto tty = event.mClient->GetTtyFileDescriptor();
         ASSERT(tty.has_value(), "DAP Client has invalid configuration");
         const auto bytes_read = read(*tty, tracee_stdout_buffer, 4096 * 3);
         if (bytes_read == -1) {
           continue;
         }
         std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-        client->WriteSerializedProtocolMessage(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(
+        event.mClient->WriteSerializedProtocolMessage(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(
           0, mTemporaryArena->ScopeAllocation().GetAllocator()));
       } break;
       }
     }
   }
+
+  mNewEvents.clear();
 }
 
 void
 DAP::NewClient(mdb::OwningPointer<DebugAdapterClient> client)
 {
-  clients.push_back(client);
-  AddPollingSource({client->ReadFileDescriptor(), InterfaceNotificationSource::DebugAdapterClient, client});
+  ASSERT(!std::ranges::any_of(mClients, [&client](auto p) { return p == client.t; }), "Already added client!");
+  mClients.push_back(client);
   new_client_notifier.write.notify();
 }
 
 void
 DebugAdapterClient::ReadPendingCommands() noexcept
 {
+  ASSERT(in != -1, "filedescriptor for DAP Client of process {} invalid", tc->TaskLeaderTid());
   if (!parse_swapbuffer.expect_read_from_fd(in)) {
     return;
   }
@@ -270,7 +288,7 @@ DebugAdapterClient::SetTtyOut(int fd) noexcept
   tty_fd = fd;
   auto dap = Tracer::Get().dap;
   dap->configure_tty(fd);
-  dap->AddPollingSource({fd, InterfaceNotificationSource::ClientStdout, this});
+  dap->AddStandardIOSource(fd, this);
 }
 
 std::optional<int>
@@ -292,6 +310,12 @@ void
 DebugAdapterClient::SetDebugAdapterSessionType(DapClientSession type) noexcept
 {
   session_type = type;
+}
+
+bool
+DebugAdapterClient::IsClosed() noexcept
+{
+  return in == -1;
 }
 
 void
@@ -316,6 +340,7 @@ DebugAdapterClient::ShutDown() noexcept
     close(tty_fd);
   }
   tty_fd = -1;
+  Tracer::Get().dap->RemoveSource(this);
 }
 
 void
@@ -382,26 +407,25 @@ DAP::clean_up() noexcept
 DebugAdapterClient *
 DAP::main_connection() const noexcept
 {
-  return clients.front();
+  return mClients.front();
 }
 
 void
 DAP::RemoveSource(DebugAdapterClient *client) noexcept
 {
-  mdb::OwningPointer<DebugAdapterClient> ptr{nullptr};
-  for (auto t : clients) {
-    if (t.t == client) {
-      ptr = t;
+  for (auto i = 0u; i < mClients.size(); ++i) {
+    if (mClients[i] == client) {
+      mShutdownClients.push_back(client);
+      break;
     }
   }
 
-  auto it = std::ranges::find_if(sources, [ptr](const auto &source) {
-    const auto &client = std::get<DebugAdapterClient *>(source);
-    return client == ptr.t;
-  });
-
-  sources.erase(it);
-  delete ptr.t;
+  for (auto it = mStandardIo.begin(); it != std::end(mStandardIo); ++it) {
+    if (it->mClient == client) {
+      mStandardIo.erase(it);
+      return;
+    }
+  }
 }
 
 void
@@ -419,13 +443,13 @@ DAP::configure_tty(int master_pty_fd) noexcept
 void
 DebugAdapterClient::InitAllocators() noexcept
 {
-  using alloc::ArenaAllocator;
+  using alloc::ArenaResource;
   using alloc::Page;
 
   // Create a 1 megabyte arena allocator.
-  mCommandsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
-  mCommandResponseAllocator = ArenaAllocator::Create(Page{128}, nullptr);
-  mEventsAllocator = ArenaAllocator::Create(Page{16}, nullptr);
+  mCommandsAllocator = ArenaResource::Create(Page{16}, nullptr);
+  mCommandResponseAllocator = ArenaResource::Create(Page{128}, nullptr);
+  mEventsAllocator = ArenaResource::Create(Page{16}, nullptr);
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
@@ -511,13 +535,13 @@ DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client) noexcept
   PANIC("Failed to set up child - this kind of error handling not yet implemented");
 }
 
-alloc::ArenaAllocator *
+alloc::ArenaResource *
 DebugAdapterClient::GetCommandArenaAllocator() noexcept
 {
   return mCommandsAllocator.get();
 }
 
-alloc::ArenaAllocator *
+alloc::ArenaResource *
 DebugAdapterClient::GetResponseArenaAllocator() noexcept
 {
   return mCommandResponseAllocator.get();
@@ -531,9 +555,13 @@ DebugAdapterClient::CreateStandardIOConnection() noexcept
 }
 
 void
-DebugAdapterClient::ClientConfigured(TraceeController *supervisor, std::optional<int> ttyFileDescriptor) noexcept
+DebugAdapterClient::ClientConfigured(TraceeController *supervisor, bool alreadyAdded,
+                                     std::optional<int> ttyFileDescriptor) noexcept
 {
-  Tracer::Get().dap->NewClient({this});
+  if (!alreadyAdded) {
+    Tracer::Get().dap->NewClient({this});
+  }
+
   tc = supervisor;
   tc->ConfigureDapClient(this);
   if (ttyFileDescriptor) {

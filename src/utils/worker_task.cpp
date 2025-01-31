@@ -40,7 +40,7 @@ NoOp::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
 TaskGroup::TaskGroup(std::string_view name) noexcept : mPromise(), mName(name), mTaskLock(), mDoneTasks()
 {
   DBGLOG(perf, "Created task group {}", name);
-  mGroupTemporaryAllocator = alloc::ArenaAllocator::Create(alloc::Page{10000}, nullptr);
+  mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{10000}, nullptr);
 }
 
 TaskGroup::~TaskGroup() noexcept
@@ -93,7 +93,7 @@ TaskGroup::TaskDone(Task *task) noexcept
   }
 }
 
-alloc::ArenaAllocator *
+alloc::ArenaResource *
 TaskGroup::GetTemporaryAllocator() const noexcept
 {
   return mGroupTemporaryAllocator.get();
