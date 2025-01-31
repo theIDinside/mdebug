@@ -7,7 +7,7 @@
 #include <sys/user.h>
 
 namespace mdb::alloc {
-class ArenaAllocator;
+class ArenaResource;
 
 struct Page
 {
@@ -24,24 +24,24 @@ struct Page
 // arena.
 class ScopedArenaAllocator
 {
-  ArenaAllocator *mAllocator;
+  ArenaResource *mAllocator;
   u64 mStartOffset;
 
 public:
   MOVE_ONLY(ScopedArenaAllocator);
-  explicit ScopedArenaAllocator(ArenaAllocator *allocator) noexcept;
+  explicit ScopedArenaAllocator(ArenaResource *allocator) noexcept;
   ~ScopedArenaAllocator() noexcept;
   ScopedArenaAllocator(ScopedArenaAllocator &&move) noexcept;
 
   // I'm not sure a = std::move(b) makes sense for this type.
   ScopedArenaAllocator &operator=(ScopedArenaAllocator &&move) noexcept = delete;
 
-  ArenaAllocator *GetAllocator() const noexcept;
-  operator ArenaAllocator *() const noexcept { return GetAllocator(); }
+  ArenaResource *GetAllocator() const noexcept;
+  operator ArenaResource *() const noexcept { return GetAllocator(); }
 };
 
 // A temporary bump-allocator.
-class ArenaAllocator : public std::pmr::memory_resource
+class ArenaResource : public std::pmr::memory_resource
 {
   std::pmr::memory_resource *mResource;
 
@@ -49,14 +49,14 @@ class ArenaAllocator : public std::pmr::memory_resource
   std::size_t mAllocated;
   std::size_t mArenaCapacity;
 
-  ArenaAllocator(std::size_t allocBlockSize, std::pmr::memory_resource *upstreamResource) noexcept;
+  ArenaResource(std::size_t allocBlockSize, std::pmr::memory_resource *upstreamResource) noexcept;
 
   bool ExtendAllocation(Page pageCount) noexcept;
 
 public:
-  using UniquePtr = std::unique_ptr<ArenaAllocator>;
-  using SharedPtr = std::shared_ptr<ArenaAllocator>;
-  ~ArenaAllocator() noexcept override;
+  using UniquePtr = std::unique_ptr<ArenaResource>;
+  using SharedPtr = std::shared_ptr<ArenaResource>;
+  ~ArenaResource() noexcept override;
 
   // Creates an arena allocator. `upstreamResource` can be null, if you don't want the arena allocator
   // to be able to allocate more memory than it's pre-allocated block.

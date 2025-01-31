@@ -7,7 +7,7 @@
 
 namespace mdb {
 namespace alloc {
-class ArenaAllocator;
+class ArenaResource;
 }
 }; // namespace mdb
 
@@ -63,7 +63,7 @@ public:
   std::future<void> ScheduleWork() noexcept;
   void TaskDone(Task *task) noexcept;
 
-  alloc::ArenaAllocator *GetTemporaryAllocator() const noexcept;
+  alloc::ArenaResource *GetTemporaryAllocator() const noexcept;
 
 private:
   std::chrono::high_resolution_clock::time_point mStart;
@@ -72,6 +72,6 @@ private:
   std::mutex mTaskLock;
   std::vector<Task *> mTasks;
   std::vector<Task *> mDoneTasks;
-  std::unique_ptr<alloc::ArenaAllocator> mGroupTemporaryAllocator;
+  std::unique_ptr<alloc::ArenaResource> mGroupTemporaryAllocator;
 };
 } // namespace mdb

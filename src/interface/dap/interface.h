@@ -3,6 +3,7 @@
 
 #include "../../notify_pipe.h"
 #include "dap_defs.h"
+#include "lib/arena_allocator.h"
 #include "utils/logger.h"
 #include "utils/util.h"
 #include <cerrno>
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <deque>
 #include <nlohmann/json.hpp>
+#include <ranges>
 #include <string_view>
 #include <tracee/util.h>
 #include <typedefs.h>
@@ -20,7 +22,7 @@ class Tracer;
 class TraceeController;
 /* The different DAP commands/requests */
 namespace alloc {
-class ArenaAllocator;
+class ArenaResource;
 }
 
 namespace ui {
@@ -160,9 +162,9 @@ class DebugAdapterClient
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
   // away.
-  std::unique_ptr<alloc::ArenaAllocator> mCommandsAllocator;
-  std::unique_ptr<alloc::ArenaAllocator> mCommandResponseAllocator;
-  std::unique_ptr<alloc::ArenaAllocator> mEventsAllocator;
+  std::unique_ptr<alloc::ArenaResource> mCommandsAllocator;
+  std::unique_ptr<alloc::ArenaResource> mCommandResponseAllocator;
+  std::unique_ptr<alloc::ArenaResource> mEventsAllocator;
   std::vector<DebugAdapterClient *> mChildren;
 
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
@@ -179,8 +181,8 @@ public:
   DapClientSession session_type;
   ~DebugAdapterClient() noexcept;
 
-  alloc::ArenaAllocator *GetCommandArenaAllocator() noexcept;
-  alloc::ArenaAllocator *GetResponseArenaAllocator() noexcept;
+  alloc::ArenaResource *GetCommandArenaAllocator() noexcept;
+  alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *CreateStandardIOConnection() noexcept;
   static DebugAdapterClient *CreateSocketConnection(DebugAdapterClient &client) noexcept;
   void ClientConfigured(TraceeController *tc, std::optional<int> ttyFileDescriptor = {}) noexcept;
