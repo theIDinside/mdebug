@@ -168,8 +168,8 @@ class UserBreakpoint
 protected:
   using enum EventResult;
   bool mEnabledByUser;
-  Ref<BreakpointLocation> bp;
-  std::unique_ptr<BpErr> err;
+  Ref<BreakpointLocation> mBreakpointLocation;
+  std::unique_ptr<BpErr> mInstallError;
   std::unique_ptr<js::CompiledBreakpointCondition> mExpression;
   friend UserBreakpoints;
 
@@ -183,7 +183,6 @@ public:
   Immutable<Tid> mTid;
   Immutable<LocationUserKind> mKind;
   Immutable<u32> mHitCondition;
-  Immutable<u32> mSpecKey{};
 
   explicit UserBreakpoint(RequiredUserParameters param, LocationUserKind kind) noexcept;
   virtual ~UserBreakpoint() noexcept;
