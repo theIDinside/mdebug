@@ -2,6 +2,7 @@
 #pragma once
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
+#include "utils/smartptr.h"
 #include <common.h>
 #include <fmt/core.h>
 #include <memory_resource>
@@ -22,7 +23,7 @@ namespace mdb::sym {
 struct Field;
 struct Symbol;
 class Type;
-class ValueVisualizer;
+class DebugAdapterSerializer;
 class Frame;
 
 enum class ValueDisplayType
@@ -65,30 +66,40 @@ class ValueResolver;
 
 class Value
 {
-public:
+  REF_COUNTED_WITH_WEAKREF_SUPPORT(Value);
   friend struct fmt::formatter<sym::Value>;
-  using ShrPtr = std::shared_ptr<Value>;
+  friend class IValueResolve;
+  friend class ResolveReference;
   // contructor for `Values` that represent a block symbol (so a frame argument, stack variable, static / global
   // variable)
+
   Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> &&valueObject) noexcept;
+        std::shared_ptr<MemoryContentsObject> &&valueObject,
+        DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   // constructor for `Value`s that represent a member variable (possibly of some other `Value`)
   Value(std::string_view memberName, Field &kind, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
+        std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
 
-  Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
-  Value(std::string &&name, Type &type, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
+  Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
+        DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(std::string &&name, Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
+        DebugAdapterSerializer *serializer = nullptr) noexcept;
 
+  template <typename... Args>
+  static Value *
+  CreateForRef(Args &&...args) noexcept
+  {
+    return new Value{std::forward<Args>(args)...};
+  }
+
+public:
   ~Value() noexcept;
 
-  template <typename Vis, typename... Args>
-  static std::shared_ptr<Value>
-  WithVisualizer(std::shared_ptr<Value> &&value, Args... args) noexcept
+  void
+  SetDapSerializer(DebugAdapterSerializer *serializer) noexcept
   {
-    value->mVisualizer = std::make_unique<Vis>(value, args...);
-    return value;
+    mVisualizer = serializer;
   }
 
   AddrPtr Address() const noexcept;
@@ -100,7 +111,7 @@ public:
   void SetResolver(std::unique_ptr<ValueResolver> &&vis) noexcept;
   ValueResolver *GetResolver() noexcept;
   bool HasVisualizer() const noexcept;
-  ValueVisualizer *GetVisualizer() noexcept;
+  DebugAdapterSerializer *GetVisualizer() noexcept;
   bool IsValidValue() const noexcept;
 
   Immutable<std::string> mName;
@@ -120,8 +131,7 @@ private:
   //  and instead have both the raw data read from the tracee as well as the UI results, managed by a local arena
   //  allocator. PMR galore!
   std::shared_ptr<MemoryContentsObject> mValueObject;
-  std::unique_ptr<ValueResolver> mResolver{nullptr};
-  std::unique_ptr<ValueVisualizer> mVisualizer{nullptr};
+  DebugAdapterSerializer *mVisualizer{nullptr};
 };
 
 enum class ReadResultInfo
@@ -154,6 +164,7 @@ public:
   MemoryContentsObject(AddrPtr start, AddrPtr end) noexcept;
   virtual ~MemoryContentsObject() noexcept = default;
 
+  virtual bool Refresh(TraceeController &supervisor) noexcept = 0;
   virtual std::span<const u8> RawView() noexcept = 0;
   virtual std::span<const u8> View(u32 offset, u32 size) noexcept = 0;
 
@@ -169,8 +180,8 @@ public:
   // shit in computer time - reading the entire chunk is faster than managing sub parts here and there. Just pull
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
-  static std::shared_ptr<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
-                                                    bool lazy) noexcept;
+  static Ref<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
+                                        bool lazy) noexcept;
 
   static Value *CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,
                                     NonNullPtr<TaskInfo> task, NonNullPtr<sym::Frame> frame, Symbol &symbol,
@@ -188,6 +199,7 @@ class EagerMemoryContentsObject final : public MemoryContentsObject
 public:
   EagerMemoryContentsObject(AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept;
 
+  bool Refresh(TraceeController &supervisor) noexcept final;
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };
@@ -200,6 +212,7 @@ class LazyMemoryContentsObject final : public MemoryContentsObject
 
 public:
   LazyMemoryContentsObject(TraceeController &supervisor, AddrPtr start, AddrPtr end) noexcept;
+  bool Refresh(TraceeController &supervisor) noexcept final;
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };

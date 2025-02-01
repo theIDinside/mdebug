@@ -10,8 +10,10 @@
 #define FORWARD_DECLARE_REF
 #ifndef FORWARD_DECLARE_REFPTR
 #define FORWARD_DECLARE_REFPTR
+namespace mdb {
 template <typename U> class RcHandle;
 template <typename U> class Untraced;
+} // namespace mdb
 #endif
 
 #define INTERNAL_REFERENCE_COUNT(Type)                                                                            \
@@ -31,8 +33,94 @@ protected:                                                                      
       delete this;                                                                                                \
     }                                                                                                             \
   }
+
+#define REF_COUNTED_WITH_WEAKREF_SUPPORT(Type)                                                                    \
+protected:                                                                                                        \
+  template <typename U> friend class RcHandle;                                                                    \
+  template <typename U> friend class Untraced;                                                                    \
+  friend class RcHandle<Type>;                                                                                    \
+  friend class Untraced<Type>;                                                                                    \
+  mdb::ControlBlock<Type> *mControlBlock;                                                                         \
+                                                                                                                  \
+public:                                                                                                           \
+  constexpr void IncreaseUseCount() const noexcept { mControlBlock->IncreaseStrongReference(); }                  \
+                                                                                                                  \
+  constexpr void DecreaseUseCount() const noexcept                                                                \
+  {                                                                                                               \
+    mControlBlock->DecreaseStrongReference(const_cast<Type *>(static_cast<const Type *>(this)));                  \
+  }
+
 namespace mdb {
 template <typename T> class Untraced;
+
+template <typename T> struct ControlBlock
+{
+  std::atomic<int> mReferenceCount;
+  std::atomic<int> mWeakReference;
+
+  void
+  IncreaseStrongReference() noexcept
+  {
+    mReferenceCount.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void
+  IncreaseWeakReference() noexcept
+  {
+    mWeakReference.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void
+  DecreaseStrongReference(T *This) noexcept
+  {
+    if (mReferenceCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      delete This;
+      if (mWeakReference == 0) {
+        delete this;
+      }
+    }
+  }
+
+  void
+  DecreaseWeakReference() noexcept
+  {
+    if (mWeakReference.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      delete this;
+    }
+  }
+};
+
+template <typename T> class WeakRef
+{
+  T *mPtr;
+  ControlBlock<T> *mControlBlock;
+  friend class RcHandle<T>;
+
+  // Should be constructed by RcHandle<T>::WeakRef()
+  WeakRef(T *ptr, ControlBlock<T> *controlBlock) noexcept : mPtr(ptr), mControlBlock(controlBlock) {}
+
+public:
+  WeakRef() noexcept : mPtr(nullptr), mControlBlock(nullptr) {}
+  ~WeakRef() noexcept { mControlBlock->DecreaseWeakReference(); }
+
+  bool
+  IsAlive() noexcept
+  {
+    return mControlBlock->mReferenceCount > 0;
+  }
+
+  RcHandle<T>
+  Acquire() const noexcept
+  {
+    if (!IsAlive()) {
+      return nullptr;
+    }
+
+    return RcHandle{mPtr};
+  }
+};
+
+template <typename T> concept HasControlBlock = requires(T t) { t.mControlBlock; };
 
 /// `RcHandle` is a handle to a internally reference counted type.
 template <typename T> class RcHandle
@@ -72,6 +160,18 @@ public:
 
   constexpr RcHandle(RcHandle &&other) noexcept : mRef(other.mRef) { other.mRef = nullptr; }
 
+  WeakRef<T>
+  Weak() noexcept
+    requires HasControlBlock<T>
+  {
+    if (!mRef) [[unlikely]] {
+      return nullptr;
+    }
+    mRef->mControlBlock->IncreaseWeakReference();
+
+    return WeakRef<T>{mRef, mRef->mControlBlock};
+  }
+
   // Implicit conversion operator from RcHandle<Derived> to RcHandle<Base>
   template <typename Derived>
   constexpr RcHandle(const RcHandle<Derived> &other) noexcept
@@ -99,6 +199,17 @@ public:
   MakeShared(Args &&...args) noexcept
   {
     return RcHandle{new T{std::forward<Args>(args)...}};
+  }
+
+  // Ref<T> constructor for types that support weak references.
+  template <typename... Args>
+  constexpr static RcHandle<T>
+  MakeShared(Args &&...args) noexcept
+    requires HasControlBlock<T>
+  {
+    auto t = T::CreateForRef(std::forward<Args>(args)...);
+    t->mControlBlock = new ControlBlock<T>{};
+    return RcHandle{t};
   }
 
   // Assignment operators
@@ -214,6 +325,7 @@ public:
     return ptr != refPtr.Get();
   }
 };
+
 template <typename T>
 concept IsRefCountable = requires(T *t) {
   { RcHandle<T>{t} };
@@ -226,11 +338,11 @@ template <typename T> class Untraced
 {
   T *mUnManged;
 
-  /// Drop and Forget are purposefully private metods. And the class `RefPtrJsObject` and `RcHandle` are, for that
-  /// same reason, friend classes. RefPtrJsObject uses the forget & drop mechanism when participating in GC and
-  /// automatic life time memory management by the js embedding. This is also the reason why Increase/DecreaseCount
-  /// are private methods because they are not supposed to be used by any other interfaces than the ones explicitly
-  /// allowed to, via friend declarations.
+  /// Drop and Forget are purposefully private metods. And the class `RefPtrJsObject` and `RcHandle` are, for
+  /// that same reason, friend classes. RefPtrJsObject uses the forget & drop mechanism when participating in GC
+  /// and automatic life time memory management by the js embedding. This is also the reason why
+  /// Increase/DecreaseCount are private methods because they are not supposed to be used by any other interfaces
+  /// than the ones explicitly allowed to, via friend declarations.
   constexpr void
   Drop() noexcept
   {
@@ -252,8 +364,8 @@ template <typename T> class Untraced
   constexpr Untraced(T *take) noexcept : mUnManged(take) {}
 
 public:
-  // It's fine to move Untraced and it's ok to destroy Untraced in non-friend contexts (because in those contexts,
-  // you transform the untraced to a ref counted pointer via .Take() or direct conversion)
+  // It's fine to move Untraced and it's ok to destroy Untraced in non-friend contexts (because in those
+  // contexts, you transform the untraced to a ref counted pointer via .Take() or direct conversion)
   constexpr ~Untraced() noexcept { ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
   constexpr Untraced(Untraced &&other) noexcept : mUnManged(nullptr) { std::swap(mUnManged, other.mUnManged); }
 

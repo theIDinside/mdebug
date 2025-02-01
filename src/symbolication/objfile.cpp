@@ -386,7 +386,7 @@ ObjectFile::InitializeMinimalSymbolLookup() noexcept
   }
 }
 
-std::unique_ptr<sym::ValueVisualizer>
+std::unique_ptr<sym::DebugAdapterSerializer>
 ObjectFile::FindCustomDataVisualizerFor(sym::Type &) noexcept
 {
   return nullptr;
@@ -399,26 +399,23 @@ ObjectFile::FindCustomDataResolverFor(sym::Type &) noexcept
 }
 
 void
-ObjectFile::InitializeDataVisualizer(std::shared_ptr<sym::Value> &value) noexcept
+ObjectFile::InitializeDataVisualizer(sym::Value &value) noexcept
 {
-  if (!value->IsValidValue()) {
-    value = sym::Value::WithVisualizer<sym::InvalidValueVisualizer>(std::move(value));
+  if (!value.IsValidValue()) {
+    value.SetDapSerializer(Tracer::GetSerializer<sym::InvalidValueVisualizer>());
   }
-  if (value->HasVisualizer()) {
+  if (value.HasVisualizer()) {
     return;
   }
 
-  sym::Type &type = *value->GetType()->ResolveAlias();
-  if (auto custom_visualiser = FindCustomDataVisualizerFor(type); custom_visualiser != nullptr) {
-    return;
-  }
+  sym::Type &type = *value.GetType()->ResolveAlias();
 
   if (type.IsArrayType()) {
-    value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
+    value.SetDapSerializer(Tracer::GetSerializer<sym::ArrayVisualizer>());
   } else if (type.IsPrimitive() || type.IsReference()) {
-    value = sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(std::move(value));
+    value.SetDapSerializer(Tracer::GetSerializer<sym::PrimitiveVisualizer>());
   } else {
-    value = sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(std::move(value));
+    value.SetDapSerializer(Tracer::GetSerializer<sym::DefaultStructVisualizer>());
   }
 }
 
@@ -575,45 +572,6 @@ SymbolFile::UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr
 }
 
 auto
-SymbolFile::RegisterValueResolver(std::shared_ptr<sym::Value> &value) noexcept -> void
-{
-  // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
-  //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
-  //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
-  //   values and how to display them, which *is* the issue with GDB's pretty printers
-  auto type = value->GetType()->ResolveAlias();
-
-  if (auto resolver = GetObjectFile()->FindCustomDataResolverFor(*type); resolver != nullptr) {
-    value->SetResolver(std::move(resolver));
-    return;
-  }
-  auto layout_type = type->TypeDescribingLayoutOfThis();
-
-  const auto array_type = type->IsArrayType();
-  if (type->IsReference() && !array_type) {
-    if (layout_type->IsCharType()) {
-      DBGLOG(core, "[datviz]: setting cstring resolver for value");
-      auto ptr = std::make_unique<sym::CStringResolver>(this, value, value->GetType());
-      value->SetResolver(std::move(ptr));
-    } else {
-      DBGLOG(core, "[datviz]: setting pointer resolver for value");
-      value->SetResolver(std::make_unique<sym::ReferenceResolver>(this, value, value->GetType()));
-    }
-    return;
-  }
-
-  // todo: again, this is hardcoded, which is counter to the whole idea here.
-  if (array_type) {
-    DBGLOG(core, "[datviz]: setting array resolver for value");
-    auto layout_type = type->TypeDescribingLayoutOfThis();
-    auto ptr = std::make_unique<sym::ArrayResolver>(this, layout_type, type->ArraySize(), value->Address());
-    value->SetResolver(std::move(ptr));
-    value = sym::Value::WithVisualizer<sym::ArrayVisualizer>(std::move(value));
-    return;
-  }
-}
-
-auto
 SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
                          sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
 {
@@ -647,13 +605,40 @@ SymbolFile::GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::Compila
   return mObjectFile->GetCompilationUnitsSpanningPC(pc - *mBaseAddress);
 }
 
+static sym::IValueResolve *
+GetStaticResolver(sym::Value &value)
+{
+  // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
+  //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
+  //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
+  //   values and how to display them, which *is* the issue with GDB's pretty printers
+  auto type = value.GetType()->ResolveAlias();
+
+  auto layout_type = type->TypeDescribingLayoutOfThis();
+
+  const auto array_type = type->IsArrayType();
+  if (type->IsReference() && !array_type) {
+    if (layout_type->IsCharType()) {
+      return Tracer::Get().GetResolver<sym::ResolveCString>();
+    } else {
+      return Tracer::Get().GetResolver<sym::ResolveReference>();
+    }
+  }
+
+  // todo: again, this is hardcoded, which is counter to the whole idea here.
+  if (array_type) {
+    return Tracer::Get().GetResolver<sym::ResolveArray>();
+  }
+  return nullptr;
+}
+
 auto
 SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
                             std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
 {
-  auto value = ctx.get_maybe_value();
+  auto value = ctx.GetValue();
   if (value == nullptr) {
-    DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ctx.id);
+    DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ctx.mId);
     return {};
   }
   auto type = value->GetType();
@@ -662,17 +647,16 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     ts_ctx.ResolveType();
   }
 
-  auto value_resolver = value->GetResolver();
-  if (value_resolver != nullptr) {
-    auto variables = value_resolver->Resolve(*ctx.tc, start, count);
+  auto resolver = GetStaticResolver(*value);
+  if (resolver != nullptr) {
+    auto variables = resolver->Resolve(*value, *ctx.mTask->GetSupervisor(), this, {start, count});
     std::vector<ui::dap::Variable> result{};
 
     for (auto &var : variables) {
-      GetObjectFile()->InitializeDataVisualizer(var);
-      RegisterValueResolver(var);
+      GetObjectFile()->InitializeDataVisualizer(*var);
       const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
       if (new_ref > 0) {
-        ctx.t->cache_object(new_ref, var);
+        ctx.mTask->CacheValueObject(new_ref, var);
       }
       result.push_back(ui::dap::Variable{static_cast<int>(new_ref), var});
     }
@@ -683,14 +667,13 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     result.reserve(type->MemberFields().size());
 
     for (auto &mem : type->MemberFields()) {
-      auto member_value = std::make_shared<sym::Value>(
-        mem.name, const_cast<sym::Field &>(mem), value->mMemoryContentsOffsets, value->TakeMemoryReference());
-      GetObjectFile()->InitializeDataVisualizer(member_value);
-      RegisterValueResolver(member_value);
+      auto member_value = Ref<sym::Value>::MakeShared(mem.name, const_cast<sym::Field &>(mem),
+                                                      value->mMemoryContentsOffsets, value->TakeMemoryReference());
+      GetObjectFile()->InitializeDataVisualizer(*member_value);
       const auto new_ref =
         member_value->GetType()->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
       if (new_ref > 0) {
-        ctx.t->cache_object(new_ref, member_value);
+        ctx.mTask->CacheValueObject(new_ref, member_value);
       }
       result.push_back(ui::dap::Variable{static_cast<int>(new_ref), std::move(member_value)});
     }
@@ -836,14 +819,12 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
 
     auto value_object =
       sym::MemoryContentsObject::CreateFrameVariable(tc, frame, const_cast<sym::Symbol &>(symbol), true);
-    GetObjectFile()->InitializeDataVisualizer(value_object);
-    RegisterValueResolver(value_object);
+    GetObjectFile()->InitializeDataVisualizer(*value_object);
 
     if (ref > 0) {
-      Tracer::Get().SetVariableContext({&tc, frame.mTask->ptr, frame.GetSymbolFile(),
-                                        static_cast<u32>(frame.FrameId()), static_cast<u16>(ref),
-                                        ContextType::Variable});
-      frame.mTask.mut()->cache_object(ref, value_object);
+      Tracer::Get().SetVariableContext({frame.mTask->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.FrameId()),
+                                        static_cast<u16>(ref), ContextType::Variable});
+      frame.mTask.mut()->CacheValueObject(ref, value_object);
     }
     result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});
   }

@@ -11,29 +11,30 @@
 
 namespace mdb::sym {
 Value::Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
-             std::shared_ptr<MemoryContentsObject> &&valueObject) noexcept
+             std::shared_ptr<MemoryContentsObject> &&valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName(name), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&kind),
-      mValueObject(std::move(valueObject))
+      mValueObject(std::move(valueObject)), mVisualizer(serializer)
 {
 }
 
 Value::Value(std::string_view memberName, Field &kind, u32 containingStructureOffset,
-             std::shared_ptr<MemoryContentsObject> valueObject) noexcept
+             std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.offset_of), mValueOrigin(&kind),
-      mValueObject(std::move(valueObject))
+      mValueObject(std::move(valueObject)), mVisualizer(serializer)
 {
 }
 
-Value::Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject) noexcept
+Value::Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
+             DebugAdapterSerializer *serializer) noexcept
     : mName("value"), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&type),
-      mValueObject(std::move(valueObject))
+      mValueObject(std::move(valueObject)), mVisualizer(serializer)
 {
 }
 
 Value::Value(std::string &&name, Type &type, u32 memContentsOffset,
-             std::shared_ptr<MemoryContentsObject> valueObject) noexcept
+             std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&type),
-      mValueObject(std::move(valueObject))
+      mValueObject(std::move(valueObject)), mVisualizer(serializer)
 {
 }
 
@@ -73,17 +74,6 @@ Value::ToRemotePointer() noexcept
   return AddrPtr{ptr};
 }
 
-void
-Value::SetResolver(std::unique_ptr<ValueResolver> &&res) noexcept
-{
-  mResolver = std::move(res);
-}
-
-ValueResolver *
-Value::GetResolver() noexcept
-{
-  return mResolver.get();
-}
 bool
 Value::HasVisualizer() const noexcept
 {
@@ -100,10 +90,10 @@ Value::IsValidValue() const noexcept
   return !mValueObject->RawView().empty();
 }
 
-ValueVisualizer *
+DebugAdapterSerializer *
 Value::GetVisualizer() noexcept
 {
-  return mVisualizer.get();
+  return mVisualizer;
 }
 
 SharedPtr<MemoryContentsObject>
@@ -138,6 +128,12 @@ LazyMemoryContentsObject::LazyMemoryContentsObject(TraceeController &supervisor,
 {
 }
 
+bool
+EagerMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
+{
+  TODO(__PRETTY_FUNCTION__);
+}
+
 std::span<const u8>
 EagerMemoryContentsObject::RawView() noexcept
 {
@@ -159,6 +155,12 @@ LazyMemoryContentsObject::CacheMemory() noexcept
   } else {
     mContents = std::move(res.take_error().bytes);
   }
+}
+
+bool
+LazyMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
+{
+  TODO(__PRETTY_FUNCTION__);
 }
 
 std::span<const u8>
@@ -271,7 +273,7 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
 }
 
 /*static*/
-SharedPtr<Value>
+Ref<Value>
 MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
                                           bool lazy) noexcept
 {
@@ -290,7 +292,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
   }
   auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
   if (dwarfExpression.empty()) {
-    return std::make_shared<Value>(symbol.mName, symbol, 0, nullptr);
+    return Ref<Value>::MakeShared(symbol.mName, symbol, 0u, nullptr);
   }
   auto interp = ExprByteCodeInterpreter{frame.FrameLevel(), tc, *frame.mTask, dwarfExpression,
                                         fnSymbol->GetFrameBaseDwarfExpression()};
@@ -298,7 +300,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
   const auto address = interp.Run();
   if (lazy) {
     auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
-    return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));
+    return Ref<sym::Value>::MakeShared(symbol.mName, symbol, 0u, std::move(memory_object));
   } else {
     auto res = tc.SafeRead(address, requested_byte_size);
     if (!res.is_expected()) {
@@ -307,7 +309,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
     DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
     auto memory_object =
       std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
-    return std::make_shared<Value>(symbol.mName, symbol, 0, std::move(memory_object));
+    return Ref<Value>::MakeShared(symbol.mName, symbol, 0u, std::move(memory_object));
   }
   return nullptr;
 }

@@ -6,6 +6,7 @@
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_frameunwinder.h"
+#include "symbolication/value.h"
 #include "utils/logger.h"
 #include "utils/util.h"
 #include <mdbsys/ptrace.h>
@@ -169,7 +170,7 @@ TaskInfo::StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>
   }
 
 std::span<const AddrPtr>
-TaskInfo::return_addresses(TraceeController *tc, CallStackRequest req) noexcept
+TaskInfo::UnwindReturnAddresses(TraceeController *tc, CallStackRequest req) noexcept
 {
   RETURN_RET_ADDR_IF(!mTaskCallstack->IsDirty());
 
@@ -212,33 +213,22 @@ TaskInfo::get_callstack() noexcept
 }
 
 void
-TaskInfo::clear_stop_state() noexcept
-{
-  for (const auto ref : variableReferences) {
-    Tracer::Get().DestroyVariablesReference(ref);
-  }
-
-  variableReferences.clear();
-  valobj_cache.clear();
-}
-
-void
 TaskInfo::add_reference(u32 id) noexcept
 {
   variableReferences.push_back(id);
 }
 
 void
-TaskInfo::cache_object(u32 ref, SharedPtr<sym::Value> value) noexcept
+TaskInfo::CacheValueObject(u32 ref, Ref<sym::Value> value) noexcept
 {
-  valobj_cache.emplace(ref, std::move(value));
+  mVariablesCache.emplace(ref, std::move(value));
 }
 
-SharedPtr<sym::Value>
-TaskInfo::get_maybe_value(u32 ref) noexcept
+Ref<sym::Value>
+TaskInfo::GetVariablesReference(u32 ref) noexcept
 {
-  auto it = valobj_cache.find(ref);
-  if (it == std::end(valobj_cache)) {
+  auto it = mVariablesCache.find(ref);
+  if (it == std::end(mVariablesCache)) {
     return nullptr;
   }
   return it->second;
@@ -307,8 +297,7 @@ TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
   mUserVisibleStop = false;
   mTracerVisibleStop = false;
   mLastResumeAction = type;
-  set_dirty();
-  clear_stop_state();
+  SetInvalidCache();
 }
 
 bool
@@ -318,11 +307,18 @@ TaskInfo::can_continue() noexcept
 }
 
 void
-TaskInfo::set_dirty() noexcept
+TaskInfo::SetInvalidCache() noexcept
 {
   mRegisterCacheDirty = true;
   mInstructionPointerDirty = true;
   mTaskCallstack->SetDirty();
+  // Clear the variables reference cache
+  for (const auto ref : variableReferences) {
+    Tracer::Get().DestroyVariablesReference(ref);
+  }
+
+  variableReferences.clear();
+  mVariablesCache.clear();
 }
 
 void

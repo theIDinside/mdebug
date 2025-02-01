@@ -95,10 +95,10 @@ public:
                                 // *all* threads get set to true on each stop (and false on each continue)
                                 // regardless of what thread the user is operating on. It's "all stop mode".
       bool initialized : 1;     // fully initialized task. after a clone syscall some setup is required
-      bool mRegisterCacheDirty : 1;      // register is dirty and requires refetching
-      bool mInstructionPointerDirty : 1; // rip requires fetching FIXME(simon): Is this even needed anymore?
-      bool exited : 1;                   // task has exited
-      bool reaped : 1;                   // task has been reaped after exit
+      bool mRegisterCacheDirty : 1 {true};      // register is dirty and requires refetching
+      bool mInstructionPointerDirty : 1 {true}; // rip requires fetching FIXME(simon): Is this even needed anymore?
+      bool exited : 1;                          // task has exited
+      bool reaped : 1;                          // task has been reaped after exit
       bool killed : 1 {false};
       bool bfRequestedStop : 1 {false};
     };
@@ -108,7 +108,7 @@ private:
   TaskRegisters regs;
   std::unique_ptr<sym::CallStack> mTaskCallstack;
   std::vector<u32> variableReferences{};
-  std::unordered_map<u32, SharedPtr<sym::Value>> valobj_cache{};
+  std::unordered_map<u32, Ref<sym::Value>> mVariablesCache{};
   TraceeController *mSupervisor;
 
   // Unititialized thread constructor
@@ -150,7 +150,7 @@ public:
   u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
   void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
-  std::span<const AddrPtr> return_addresses(TraceeController *tc, CallStackRequest req) noexcept;
+  std::span<const AddrPtr> UnwindReturnAddresses(TraceeController *tc, CallStackRequest req) noexcept;
   sym::FrameUnwindState *GetUnwindState(int frameLevel) noexcept;
   TraceeController *GetSupervisor() const noexcept;
 
@@ -161,7 +161,7 @@ public:
   void SetCurrentResumeAction(tc::ResumeAction type) noexcept;
   void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
   bool can_continue() noexcept;
-  void set_dirty() noexcept;
+  void SetInvalidCache() noexcept;
   void set_updated() noexcept;
   void AddBreakpointLocationStatus(AddrPtr address) noexcept;
   std::optional<LocationStatus> clear_bpstat() noexcept;
@@ -175,10 +175,9 @@ public:
   WaitStatus pending_wait_status() const noexcept;
 
   sym::CallStack &get_callstack() noexcept;
-  void clear_stop_state() noexcept;
   void add_reference(u32 id) noexcept;
-  void cache_object(u32 ref, SharedPtr<sym::Value> value) noexcept;
-  SharedPtr<sym::Value> get_maybe_value(u32 ref) noexcept;
+  void CacheValueObject(u32 ref, Ref<sym::Value> value) noexcept;
+  Ref<sym::Value> GetVariablesReference(u32 ref) noexcept;
   void RequestedStop() noexcept;
   void ClearRequestedStopFlag() noexcept;
   void SetTracerState(SupervisorState state) noexcept;

@@ -412,7 +412,7 @@ StepOut::Execute() noexcept
     return new StepOutResponse{false, this};
   }
   const auto req = CallStackRequest::partial(2);
-  auto resume_addrs = task->return_addresses(target, req);
+  auto resume_addrs = task->UnwindReturnAddresses(target, req);
   ASSERT(resume_addrs.size() >= static_cast<std::size_t>(req.count), "Could not find frame info");
   const auto rip = resume_addrs[1];
   auto loc = target->GetOrCreateBreakpointLocation(rip);
@@ -1050,10 +1050,10 @@ UIResultPtr
 Scopes::Execute() noexcept
 {
   auto ctx = Tracer::Get().GetVariableContext(frameId);
-  if (!ctx.valid_context() || ctx.type != ContextType::Frame) {
+  if (!ctx.IsValidContext() || ctx.mType != ContextType::Frame) {
     return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", frameId), {}};
   }
-  auto frame = ctx.get_frame(frameId);
+  auto frame = ctx.GetFrame(frameId);
   if (!frame) {
     return new ScopesResponse{false, this, {}};
   }
@@ -1235,26 +1235,28 @@ UIResultPtr
 Variables::Execute() noexcept
 {
   auto context = Tracer::Get().GetVariableContext(var_ref);
-  if (!context.valid_context()) {
+  if (!context.IsValidContext()) {
     return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
   }
-  auto frame = context.get_frame(var_ref);
+  auto frame = context.GetFrame(var_ref);
   if (!frame) {
     return error(fmt::format("Could not find frame that's referenced via variablesReference {}", var_ref));
   }
 
-  switch (context.type) {
+  switch (context.mType) {
   case ContextType::Frame:
     return error(fmt::format("Sent a variables request using a reference for a frame is an error.", var_ref));
   case ContextType::Scope: {
     auto scope = frame->Scope(var_ref);
     switch (scope->type) {
     case ScopeType::Arguments: {
-      auto vars = context.symbol_file->GetVariables(*context.tc, *frame, sym::VariableSet::Arguments);
+      auto vars =
+        context.mSymbolFile->GetVariables(*context.mTask->GetSupervisor(), *frame, sym::VariableSet::Arguments);
       return new VariablesResponse{true, this, std::move(vars)};
     }
     case ScopeType::Locals: {
-      auto vars = context.symbol_file->GetVariables(*context.tc, *frame, sym::VariableSet::Locals);
+      auto vars =
+        context.mSymbolFile->GetVariables(*context.mTask->GetSupervisor(), *frame, sym::VariableSet::Locals);
       return new VariablesResponse{true, this, std::move(vars)};
     }
     case ScopeType::Registers: {
@@ -1263,7 +1265,7 @@ Variables::Execute() noexcept
     }
   } break;
   case ContextType::Variable:
-    return new VariablesResponse{true, this, context.symbol_file->ResolveVariable(context, start, count)};
+    return new VariablesResponse{true, this, context.mSymbolFile->ResolveVariable(context, start, count)};
   case ContextType::Global:
     TODO("Global variables not yet implemented support for");
     break;
@@ -1276,6 +1278,8 @@ VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<V
     : UIResult(success, cmd), requested_reference(cmd != nullptr ? cmd->var_ref : 0), variables(std::move(vars))
 {
 }
+
+VariablesResponse::~VariablesResponse() noexcept = default;
 
 std::pmr::string
 VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
@@ -1294,7 +1298,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : variables) {
     if (auto datvis = v.variable_value->GetVisualizer(); datvis != nullptr) {
-      auto opt = datvis->DapFormat(v.variable_value->mName, v.ref, arenaAllocator);
+      auto opt = datvis->Serialize(*v.variable_value, v.variable_value->mName, v.ref, arenaAllocator);
       if (opt) {
         it = fmt::format_to(it, "{},", *opt);
       } else {

@@ -32,7 +32,7 @@ namespace sym {
 class Unwinder;
 class Type;
 class Value;
-class ValueVisualizer;
+class DebugAdapterSerializer;
 class ValueResolver;
 enum class VariableSet : u8;
 enum class FrameVariableKind : u8;
@@ -106,7 +106,7 @@ class ObjectFile
   std::unordered_map<std::string, std::vector<std::shared_ptr<sym::dw::SourceCodeFile>>> mSourceCodeFiles;
 
   sym::AddressToCompilationUnitMap mAddressToCompileUnitMapping;
-  std::unordered_map<int, SharedPtr<sym::Value>> mValueObjectCache;
+  std::unordered_map<int, Ref<sym::Value>> mValueObjectCache;
 
 public:
   ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept;
@@ -171,9 +171,9 @@ public:
 
   auto InitializeMinimalSymbolLookup() noexcept -> void;
 
-  auto FindCustomDataVisualizerFor(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueVisualizer>;
+  auto FindCustomDataVisualizerFor(sym::Type &type) noexcept -> std::unique_ptr<sym::DebugAdapterSerializer>;
   auto FindCustomDataResolverFor(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueResolver>;
-  auto InitializeDataVisualizer(std::shared_ptr<sym::Value> &value) noexcept -> void;
+  auto InitializeDataVisualizer(sym::Value &value) noexcept -> void;
 
   /**
    * Search the string tables of a object file, using regex pattern `regex_pattern`
@@ -216,12 +216,6 @@ public:
   auto ContainsProgramCounter(AddrPtr pc) const noexcept -> bool;
   auto UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr;
 
-  // Clears the variablesReference cache - not that this doesn't necessarily mean the objects will die; it only
-  // mean that from a Variables Reference standpoint, they're no longer reachable. For instance, in the future, we
-  // might open for extending the debugger so that the user can do scripts etc, and they might want to hold on to
-  // values for longer than a "stop". but since our cache contains `std::shared_ptr<Value>` this will be ok, if the
-  // user will have created something that holds a reference to the value it will now become the sole owner.
-  auto RegisterValueResolver(std::shared_ptr<sym::Value> &value) noexcept -> void;
   auto GetVariables(TraceeController &tc, sym::Frame &frame,
                     sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>;
   auto GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;

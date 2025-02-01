@@ -426,7 +426,6 @@ TraceeController::ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept
     CDLOG(!res.is_ok(), core, "Unable to resume task {}: {}", task.mTid, strerror(res.sys_errno));
   }
   task.mLastWaitStatus = WaitStatus{WaitStatusKind::NotKnown, {}};
-  task.clear_stop_state();
   task.SetCurrentResumeAction(type);
 }
 
@@ -1060,7 +1059,6 @@ native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
 TraceEvent *
 TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
 {
-  info.set_dirty();
   info.mHasProcessedStop = true;
   const auto ws = info.pending_wait_status();
 
@@ -1422,7 +1420,7 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
   CacheRegistersFor(task);
   auto &cs_ref = *task.mTaskCallstack;
 
-  auto frame_pcs = task.return_addresses(this, req);
+  auto frame_pcs = task.UnwindReturnAddresses(this, req);
   for (const auto &[depth, i] : mdb::EnumerateView{frame_pcs}) {
     auto frame_pc = i.as_void();
     auto result = FindFunctionByPc(frame_pc);
@@ -1432,12 +1430,11 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
     }
     auto &[symbol, obj] = result.value();
     const auto id = Tracer::Get().NewVariablesReference();
-    Tracer::Get().SetVariableContext(VariableContext{.tc = this,
-                                                     .t = &task,
-                                                     .symbol_file = obj,
-                                                     .frame_id = id,
-                                                     .id = static_cast<u16>(id),
-                                                     .type = ContextType::Frame});
+    Tracer::Get().SetVariableContext(VariableContext{.mTask = &task,
+                                                     .mSymbolFile = obj,
+                                                     .mFrameId = id,
+                                                     .mId = static_cast<u16>(id),
+                                                     .mType = ContextType::Frame});
     if (symbol) {
       cs_ref.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {

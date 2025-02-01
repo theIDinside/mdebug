@@ -3,6 +3,7 @@
 #include <iterator>
 #include <memory_resource>
 #include <supervisor.h>
+#include <symbolication/value.h>
 
 namespace mdb::ui::dap {
 

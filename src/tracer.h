@@ -10,6 +10,7 @@
 #include "interface/dap/interface.h"
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "symbolication/value_visualizer.h"
 #include <mdb_config.h>
 #include <mdbsys/ptrace.h>
 #include <memory_resource>
@@ -53,6 +54,16 @@ namespace mdb::cmd {
 class Command;
 };
 
+namespace mdb::sym {
+// The base class serializer
+class DebugAdapterSerializer;
+class InvalidValueVisualizer;
+class ArrayVisualizer;
+class PrimitiveVisualizer;
+class DefaultStructVisualizer;
+class CStringVisualizer;
+} // namespace mdb::sym
+
 namespace mdb::ui {
 struct UICommand;
 }
@@ -69,24 +80,23 @@ enum class ContextType : u8
 
 struct VariableContext
 {
-  TraceeController *tc{nullptr};
-  TaskInfo *t{nullptr};
-  SymbolFile *symbol_file{nullptr};
-  u32 frame_id{0};
-  u16 id{0};
-  ContextType type{ContextType::Global};
+  TaskInfo *mTask{nullptr};
+  SymbolFile *mSymbolFile{nullptr};
+  u32 mFrameId{0};
+  u16 mId{0};
+  ContextType mType{ContextType::Global};
 
   static VariableContext
-  subcontext(u32 newId, const VariableContext &ctx) noexcept
+  MakeDependentContext(u32 newId, const VariableContext &ctx) noexcept
   {
-    return VariableContext{
-      ctx.tc, ctx.t, ctx.symbol_file, ctx.frame_id, static_cast<u16>(newId), ContextType::Variable};
+    return VariableContext{ctx.mTask, ctx.mSymbolFile, ctx.mFrameId, static_cast<u16>(newId),
+                           ContextType::Variable};
   }
 
-  bool valid_context() const noexcept;
-  std::optional<std::array<ui::dap::Scope, 3>> scopes_reference(VarRefKey frameKey) const noexcept;
-  sym::Frame *get_frame(VarRefKey ref) noexcept;
-  SharedPtr<sym::Value> get_maybe_value() const noexcept;
+  bool IsValidContext() const noexcept;
+  std::optional<std::array<ui::dap::Scope, 3>> GetScopes(VarRefKey frameKey) const noexcept;
+  sym::Frame *GetFrame(VarRefKey ref) noexcept;
+  Ref<sym::Value> GetValue() const noexcept;
 };
 
 enum class TracerProcess
@@ -186,6 +196,43 @@ public:
   static mdb::js::AppScriptingInstance &GetScriptingInstance() noexcept;
   static JSContext *GetJsContext() noexcept;
   static void InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept;
+  static void InitializeDapSerializers() noexcept;
+
+  template <typename DapSerializer>
+  static DapSerializer *
+  GetSerializer() noexcept
+  {
+    using namespace sym;
+    if constexpr (std::is_same_v<DapSerializer, InvalidValueVisualizer>) {
+      return Get().mInvalidValueDapSerializer;
+    } else if constexpr (std::is_same_v<DapSerializer, ArrayVisualizer>) {
+      return Get().mArrayValueDapSerializer;
+    } else if constexpr (std::is_same_v<DapSerializer, PrimitiveVisualizer>) {
+      return Get().mPrimitiveValueDapSerializer;
+    } else if constexpr (std::is_same_v<DapSerializer, DefaultStructVisualizer>) {
+      return Get().mDefaultStructDapSerializer;
+    } else if constexpr (std::is_same_v<DapSerializer, CStringVisualizer>) {
+      return Get().mCStringDapSerializer;
+    } else {
+      static_assert(always_false<DapSerializer>, "Invalid DAP serializer - write a new one?");
+    }
+  }
+
+  template <typename ValueResolver>
+  static ValueResolver *
+  GetResolver() noexcept
+  {
+    using namespace sym;
+    if constexpr (std::is_same_v<ValueResolver, ResolveReference>) {
+      return Get().mResolveReference;
+    } else if constexpr (std::is_same_v<ValueResolver, ResolveCString>) {
+      return Get().mResolveCString;
+    } else if constexpr (std::is_same_v<ValueResolver, ResolveArray>) {
+      return Get().mResolveArray;
+    } else {
+      static_assert(always_false<ValueResolver>, "Unsupported type: write a new one?");
+    }
+  }
 
 private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
@@ -210,5 +257,15 @@ private:
   std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
   std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;
+
+  sym::InvalidValueVisualizer *mInvalidValueDapSerializer{nullptr};
+  sym::ArrayVisualizer *mArrayValueDapSerializer{nullptr};
+  sym::PrimitiveVisualizer *mPrimitiveValueDapSerializer{nullptr};
+  sym::DefaultStructVisualizer *mDefaultStructDapSerializer{nullptr};
+  sym::CStringVisualizer *mCStringDapSerializer{nullptr};
+
+  sym::ResolveReference *mResolveReference{nullptr};
+  sym::ResolveCString *mResolveCString{nullptr};
+  sym::ResolveArray *mResolveArray{nullptr};
 };
 } // namespace mdb

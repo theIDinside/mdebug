@@ -5,6 +5,8 @@
 #include "js/GCTypeMacros.h"
 #include "js/Object.h"
 #include "js/PropertyAndElement.h"
+#include "js/PropertySpec.h"
+#include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
 #include "jsapi.h"
 #include "utils/smartptr.h"

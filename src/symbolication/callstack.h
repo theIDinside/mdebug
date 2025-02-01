@@ -274,7 +274,7 @@ private:
 
   TaskInfo *mTask; // the task associated with this call stack
   TraceeController *mSupervisor;
-  bool mCallstackIsDirty;
+  bool mCallstackIsDirty{true};
   std::vector<Frame> mStackFrames{}; // the call stack
   std::vector<AddrPtr> mFrameProgramCounters{};
   std::vector<FrameUnwindState> mUnwoundRegister{};

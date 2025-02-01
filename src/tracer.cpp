@@ -13,6 +13,8 @@
 #include "mdbjs/event_dispatcher.h"
 #include "mdbjs/mdbjs.h"
 #include "supervisor.h"
+#include "symbolication/value.h"
+#include "symbolication/value_visualizer.h"
 #include "task.h"
 #include "task_scheduling.h"
 #include "tracee/util.h"
@@ -692,7 +694,7 @@ Tracer::NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 fram
 {
   auto key = NewVariablesReference();
   mVariablesReferenceContext[key] =
-    VariableContext{.tc = &tc, .t = &t, .symbol_file = file, .frame_id = frameId, .id = static_cast<u16>(key)};
+    VariableContext{.mTask = &t, .mSymbolFile = file, .mFrameId = frameId, .mId = static_cast<u16>(key)};
   return key;
 }
 
@@ -751,28 +753,28 @@ Tracer::GetDap() const noexcept
 void
 Tracer::SetVariableContext(VariableContext ctx) noexcept
 {
-  mVariablesReferenceContext[ctx.id] = ctx;
-  ctx.t->add_reference(ctx.id);
+  mVariablesReferenceContext[ctx.mId] = ctx;
+  ctx.mTask->add_reference(ctx.mId);
 }
 
 u32
 Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
 {
   const auto key = NewVariablesReference();
-  mVariablesReferenceContext.emplace(key, VariableContext::subcontext(key, ctx));
+  mVariablesReferenceContext.emplace(key, VariableContext::MakeDependentContext(key, ctx));
   return key;
 }
 
 bool
-VariableContext::valid_context() const noexcept
+VariableContext::IsValidContext() const noexcept
 {
-  return tc != nullptr && t != nullptr;
+  return mTask != nullptr;
 }
 
 std::optional<std::array<ui::dap::Scope, 3>>
-VariableContext::scopes_reference(VarRefKey frameKey) const noexcept
+VariableContext::GetScopes(VarRefKey frameKey) const noexcept
 {
-  auto frame = t->get_callstack().GetFrame(frameKey);
+  auto frame = mTask->get_callstack().GetFrame(frameKey);
   if (!frame) {
     return {};
   } else {
@@ -781,14 +783,14 @@ VariableContext::scopes_reference(VarRefKey frameKey) const noexcept
 }
 
 sym::Frame *
-VariableContext::get_frame(VarRefKey ref) noexcept
+VariableContext::GetFrame(VarRefKey ref) noexcept
 {
-  switch (type) {
+  switch (mType) {
   case ContextType::Frame:
-    return t->get_callstack().GetFrame(ref);
+    return mTask->get_callstack().GetFrame(ref);
   case ContextType::Scope:
   case ContextType::Variable:
-    return t->get_callstack().GetFrame(frame_id);
+    return mTask->get_callstack().GetFrame(mFrameId);
   case ContextType::Global:
     PANIC("Global variables not yet supported");
     break;
@@ -796,10 +798,10 @@ VariableContext::get_frame(VarRefKey ref) noexcept
   NEVER("Unknown context type");
 }
 
-SharedPtr<sym::Value>
-VariableContext::get_maybe_value() const noexcept
+Ref<sym::Value>
+VariableContext::GetValue() const noexcept
 {
-  return t->get_maybe_value(id);
+  return mTask->GetVariablesReference(mId);
 }
 
 /* static */
@@ -818,8 +820,25 @@ Tracer::GetJsContext() noexcept
 
 /* static */
 void
+Tracer::InitializeDapSerializers() noexcept
+{
+  auto &tracer = Get();
+  tracer.mInvalidValueDapSerializer = new sym::InvalidValueVisualizer{};
+  tracer.mArrayValueDapSerializer = new sym::ArrayVisualizer{};
+  tracer.mPrimitiveValueDapSerializer = new sym::PrimitiveVisualizer{};
+  tracer.mDefaultStructDapSerializer = new sym::DefaultStructVisualizer{};
+  tracer.mCStringDapSerializer = new sym::CStringVisualizer{};
+
+  tracer.mResolveReference = new sym::ResolveReference{};
+  tracer.mResolveCString = new sym::ResolveCString{};
+  tracer.mResolveArray = new sym::ResolveArray{};
+}
+
+/* static */
+void
 Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
 {
+
   if (!JS_Init()) {
     PANIC("Failed to init JS!");
   }

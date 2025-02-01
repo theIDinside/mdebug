@@ -3,8 +3,10 @@
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
+#include "utils/smartptr.h"
 #include <fmt/format.h>
 #include <string_view>
+#include <symbolication/value.h>
 #include <typedefs.h>
 
 namespace std::pmr {
@@ -13,10 +15,6 @@ class memory_resource;
 namespace mdb {
 class SymbolFile;
 class UserBreakpoint;
-
-namespace sym {
-class Value;
-}
 
 namespace ui::dap {
 
@@ -174,7 +172,7 @@ public:
 struct Variable
 {
   int ref;
-  SharedPtr<sym::Value> variable_value;
+  Ref<sym::Value> variable_value;
 };
 
 }; // namespace ui::dap

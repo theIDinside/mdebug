@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "value_visualizer.h"
 #include "symbolication/dwarf/typeread.h"
+#include "tracer.h"
 #include "type.h"
 #include "utils/enumerator.h"
 #include "value.h"
@@ -52,205 +53,106 @@ ValueResolver::Resolve(TraceeController &tc, std::optional<u32> start, std::opti
   return GetChildren(tc, start, count);
 }
 
-ReferenceResolver::ReferenceResolver(SymbolFile *obj, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
-    : ValueResolver(obj, std::move(val), type)
+std::vector<Ref<Value>>
+ResolveReference::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile,
+                          ValueRange valueRange) noexcept
 {
-}
+  std::vector<Ref<Value>> mResults;
 
-Children
-ReferenceResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
-{
-  auto locked = mValuePointer.lock();
-  if (!locked) {
-    mChildren.clear();
-    return mChildren;
-  }
-  if (const auto address = locked->ToRemotePointer(); address.is_expected()) {
-    auto adjusted_address = address.value() + (start.value_or(0) * locked->GetType()->Size());
-    const auto requested_length = count.value_or(32);
+  if (const auto address = value.ToRemotePointer(); address.is_expected()) {
+    auto adjusted_address = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
+    const auto requested_length = valueRange.count.value_or(32);
     auto memory = sym::MemoryContentsObject::ReadMemory(tc, adjusted_address, requested_length);
     if (!memory.is_ok()) {
-      auto t = locked->GetType()->TypeDescribingLayoutOfThis();
-      mChildren.push_back(
-        sym::Value::WithVisualizer<sym::InvalidValueVisualizer>(std::make_shared<sym::Value>(*t, 0, nullptr)));
-      return mChildren;
+      auto t = value.GetType()->TypeDescribingLayoutOfThis();
+      mResults.push_back(
+        Ref<Value>::MakeShared(*t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
+      return mResults;
     }
-    mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
+    auto mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
     // actual `T` type behind the reference
-    auto layout_type = locked->GetType()->TypeDescribingLayoutOfThis();
+    auto layout_type = value.GetType()->TypeDescribingLayoutOfThis();
 
     if (layout_type->IsArrayType()) {
-      mChildren.push_back(sym::Value::WithVisualizer<sym::ArrayVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject)));
+      mResults.push_back(Ref<Value>::MakeShared(*layout_type, 0u, mIndirectValueObject,
+                                                Tracer::GetSerializer<sym::ArrayVisualizer>()));
     } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
-      mChildren.push_back(sym::Value::WithVisualizer<sym::PrimitiveVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject)));
+      mResults.push_back(Ref<Value>::MakeShared(*layout_type, 0u, mIndirectValueObject,
+                                                Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
     } else {
-      mChildren.push_back(sym::Value::WithVisualizer<sym::DefaultStructVisualizer>(
-        std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject)));
+      mResults.push_back(Ref<Value>::MakeShared(*layout_type, 0u, mIndirectValueObject,
+                                                Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
     }
   }
-  mIsCached = true;
-  return mChildren;
+  return mResults;
 }
 
-CStringResolver::CStringResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
-    : ValueResolver(objectFile, std::move(val), type)
+std::vector<Ref<Value>>
+ResolveCString::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
-}
-
-Children
-CStringResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
-{
-  auto locked = mValuePointer.lock();
-  if (!locked) {
-    mChildren.clear();
-    return mChildren;
-  }
-
-  if (const auto address = locked->ToRemotePointer(); address.is_expected()) {
-    auto adjustedAddress = address.value() + (start.value_or(0) * locked->GetType()->Size());
-    const auto requestedLength = count.value_or(256);
+  std::vector<Ref<Value>> mResults;
+  if (const auto address = value.ToRemotePointer(); address.is_expected()) {
+    auto adjustedAddress = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
+    const auto requestedLength = valueRange.count.value_or(256);
     auto referencedMemory = sym::MemoryContentsObject::ReadMemory(tc, adjustedAddress, requestedLength);
     if (!referencedMemory.is_ok()) {
-      auto layoutType = locked->GetType()->TypeDescribingLayoutOfThis();
-      mChildren.push_back(
-        Value::WithVisualizer<InvalidValueVisualizer>(std::make_shared<sym::Value>(*layoutType, 0, nullptr)));
-      return mChildren;
+      auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
+      mResults.push_back(
+        Ref<Value>::MakeShared(*layoutType, 0u, nullptr, Tracer::GetSerializer<InvalidValueVisualizer>()));
+      return mResults;
     }
-    mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
+    auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
 
-    auto span = mIndirectValueObject->View(0, requestedLength);
-    for (const auto [index, ch] : mdb::EnumerateView(span)) {
-      if (ch == 0) {
-        mNullTerminatorPosition = index.i;
-        break;
-      }
-    }
+    auto span = indirectValueObject->View(0, requestedLength);
+
     // actual `char` type
-    auto layout_type = locked->GetType()->TypeDescribingLayoutOfThis();
-    auto string_value = Value::WithVisualizer<CStringVisualizer>(
-      std::make_shared<sym::Value>(*layout_type, 0, mIndirectValueObject), mNullTerminatorPosition);
+    auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
+    auto stringValue = Ref<sym::Value>::MakeShared(*layoutType, 0u, indirectValueObject,
+                                                   Tracer::GetSerializer<CStringVisualizer>());
 
-    mChildren.push_back(string_value);
+    mResults.push_back(std::move(stringValue));
   }
-  mIsCached = true;
-  return mChildren;
+  return mResults;
 }
 
-ArrayResolver::ArrayResolver(SymbolFile *objectFile, TypePtr type, u32 arraySize,
-                             AddrPtr remoteBaseAddress) noexcept
-    : ValueResolver(objectFile, {}, type), mBaseAddress(remoteBaseAddress), mElementCount(arraySize),
-      mLayoutType(type->TypeDescribingLayoutOfThis())
+std::vector<Ref<Value>>
+ResolveArray::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
-}
+  ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
+  std::vector<Ref<Value>> mResults;
+  const auto arraySize = value.GetType()->ArraySize();
+  Type *elementsType = value.GetType()->TypeDescribingLayoutOfThis();
 
-Children
-ArrayResolver::get_all(TraceeController &) noexcept
-{
-  TODO("ArrayResolver::get_all not implemented");
-  return mChildren;
-}
-
-std::optional<Children>
-ArrayResolver::HasCached(std::optional<u32> start, std::optional<u32> count) noexcept
-{
-  if (!start) {
-    return (mChildren.size() == mElementCount) ? std::optional{std::span{mChildren}} : std::nullopt;
-  }
-
-  const auto start_index = start.value();
-  const auto addr_base = AddressOf(start_index);
-  auto iter =
-    std::find_if(mChildren.begin(), mChildren.end(), [&](const auto &v) { return v->Address() == addr_base; });
-
-  if (iter == std::end(mChildren)) {
-    return std::nullopt;
-  }
-
-  const u32 iter_index = std::distance(mChildren.begin(), iter);
-  if (mChildren.size() - iter_index < count.value()) {
-    return std::nullopt;
-  }
-  const auto e = count.value() + iter_index;
-  for (auto i = iter_index + 1; i < e; ++i) {
-    auto this_addr = AddressOf(i);
-    if (mChildren[i]->Address() != this_addr) {
-      return std::nullopt;
-    }
-  }
-
-  return std::span{mChildren}.subspan(iter_index, count.value());
-}
-
-AddrPtr
-ArrayResolver::AddressOf(u32 index) noexcept
-{
-  return mBaseAddress + (index * mLayoutType->Size());
-}
-
-Children
-ArrayResolver::GetChildren(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
-{
-  if (!start) {
-    return get_all(tc);
-  }
-
-  if (start.value() + count.value_or(0) > mElementCount) {
+  if (valueRange.start.value() >= arraySize) {
     return {};
   }
 
-  const u32 s = start.value();
-  const u32 e = s + std::min(count.value_or(100), mElementCount);
+  auto count = std::min(valueRange.count.value_or(100), arraySize - valueRange.start.value());
 
-  auto addr_base = mBaseAddress + (s * mLayoutType->Size());
+  const u32 startIndex = valueRange.start.value();
+  const u32 endIndex = startIndex + count;
 
-  auto start_insert_at = std::find_if(mChildren.begin(), mChildren.end(), [&](auto &v) {
-    const auto cmp = v->Address();
-    if (cmp == addr_base) {
-      return true;
-    }
-    return cmp > addr_base;
-  });
+  const auto arrayBaseAddress = value.Address();
 
-  if (start_insert_at == end(mChildren)) {
-    const auto idx = mChildren.size();
-    const u32 type_sz = mLayoutType->size_of;
-    for (auto i = 0u; i < (e - s); ++i) {
-      const auto current_address = addr_base + (type_sz * i);
-      auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, current_address, current_address + type_sz);
-      mChildren.emplace_back(std::make_shared<Value>(std::to_string(s + i), *mLayoutType, 0, lazy));
-    }
+  const auto desiredFirstElementAddress = arrayBaseAddress + (startIndex * elementsType->size_of);
+  const u32 elementTypeSize = elementsType->size_of;
+  auto underlying = (endIndex - startIndex) * elementTypeSize;
+  // We make backing memory view for the entire sub-range.
+  auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, desiredFirstElementAddress,
+                                                         desiredFirstElementAddress + underlying);
 
-    return std::span{mChildren.begin() + idx, mChildren.end()};
-  } else {
-    const u32 idx = std::distance(mChildren.begin(), start_insert_at);
-    u32 i = 0u;
-    const u32 total = std::min(count.value_or(100), mElementCount - idx);
-    auto iter = start_insert_at;
-    const u32 type_sz = mLayoutType->size_of;
-    while (i < total) {
-      auto current_address = addr_base + (type_sz * i);
-      if (iter == std::end(mChildren)) {
-        auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, current_address, current_address + type_sz);
-        iter = mChildren.insert(iter, std::make_shared<Value>(std::to_string(s + i), *mLayoutType, 0, lazy));
-      } else if ((*iter)->Address() != current_address) {
-        auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, current_address, current_address + type_sz);
-        iter = mChildren.insert(iter, std::make_shared<Value>(std::to_string(s + i), *mLayoutType, 0, lazy));
-      }
-      ++iter;
-      ++i;
-    }
-    const auto span_start = mChildren.begin() + idx;
-    const auto span_end = span_start + total;
-    return std::span{span_start, span_end};
+  for (auto i = 0u; i < (endIndex - startIndex); ++i) {
+    const auto current_address = desiredFirstElementAddress + (elementTypeSize * i);
+    const auto memoryObjectOffset = i * elementTypeSize;
+    mResults.emplace_back(
+      Ref<Value>::MakeShared(std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
   }
-}
 
-ValueVisualizer::ValueVisualizer(std::weak_ptr<Value> provider) noexcept : mDataProvider(std::move(provider)) {}
+  return mResults;
+}
 
 std::optional<std::pmr::string>
 PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept
@@ -311,24 +213,15 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
   }
 }
 
-PrimitiveVisualizer::PrimitiveVisualizer(std::weak_ptr<Value> provider) noexcept
-    : ValueVisualizer(std::move(provider))
-{
-}
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::pmr::string>
-PrimitiveVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
+PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
-  auto ptr = mDataProvider.lock();
-  if (!ptr) {
-    return std::nullopt;
-  }
-
-  const auto span = ptr->MemoryView();
+  const auto span = value.MemoryView();
   if (span.empty()) {
     return std::nullopt;
   }
-  auto type = ptr->GetType();
+  auto type = value.GetType();
   const auto size_of = type->size_of;
 
   std::pmr::string result{allocator};
@@ -437,117 +330,67 @@ PrimitiveVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
 }
 
 std::optional<std::pmr::string>
-PrimitiveVisualizer::DapFormat(std::string_view name, int variablesReference,
+PrimitiveVisualizer::Serialize(const Value &value, std::string_view name, int variablesReference,
                                std::pmr::memory_resource *allocator) noexcept
 {
-  auto ptr = mDataProvider.lock();
-  if (!ptr) {
-    return std::nullopt;
-  }
-  ASSERT(name == ptr->mName, "variable name {} != provided name {}", ptr->mName, name);
-  const auto byte_span = ptr->MemoryView();
+  ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
+  const auto byte_span = value.MemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
 
-  auto value_field = FormatValue(allocator).value_or(std::pmr::string{"could not serialize value", allocator});
+  auto value_field =
+    FormatValue(value, allocator).value_or(std::pmr::string{"could not serialize value", allocator});
   std::pmr::string result{allocator};
 
   FormatAndReturn(
     result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
-    value_field, (*ptr->GetType()), variablesReference, ptr->Address());
-}
-
-DefaultStructVisualizer::DefaultStructVisualizer(std::weak_ptr<Value> value) noexcept
-    : ValueVisualizer(std::move(value))
-{
-}
-// TODO(simon): add optimization where we can format our value directly to an outbuf?
-std::optional<std::pmr::string>
-DefaultStructVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
-{
-  TODO("not done");
+    value_field, *(value.GetType()), variablesReference, value.Address());
 }
 
 std::optional<std::pmr::string>
-DefaultStructVisualizer::DapFormat(std::string_view name, int variablesReference,
+DefaultStructVisualizer::Serialize(const Value &value, std::string_view name, int variablesReference,
                                    std::pmr::memory_resource *allocator) noexcept
 {
-  auto ptr = mDataProvider.lock();
-  if (!ptr) {
-    return std::nullopt;
-  }
 
-  ASSERT(name == ptr->mName, "variable name {} != provided name {}", ptr->mName, name);
-  const auto &t = *ptr->GetType();
+  ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
+  const auto &t = *value.GetType();
   std::pmr::string result{allocator};
   FormatAndReturn(
     result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
-    t, t, variablesReference, ptr->Address());
-}
-
-InvalidValueVisualizer::InvalidValueVisualizer(std::weak_ptr<Value> providerWithNoValue) noexcept
-    : ValueVisualizer(std::move(providerWithNoValue))
-{
+    t, t, variablesReference, value.Address());
 }
 
 std::optional<std::pmr::string>
-InvalidValueVisualizer::FormatValue(std::pmr::memory_resource *) noexcept
+InvalidValueVisualizer::Serialize(const Value &value, std::string_view, int,
+                                  std::pmr::memory_resource *allocator) noexcept
 {
-  TODO("InvalidValueVisualizer::format_value() not yet implemented");
-}
-
-std::optional<std::pmr::string>
-InvalidValueVisualizer::DapFormat(std::string_view, int, std::pmr::memory_resource *allocator) noexcept
-{
-  auto ptr = mDataProvider.lock();
   std::pmr::string result{allocator};
   FormatAndReturn(result,
                   R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})",
-                  ptr->mName, ptr->mName, *ptr->GetType());
-}
-
-ArrayVisualizer::ArrayVisualizer(std::weak_ptr<Value> provider) noexcept : ValueVisualizer(std::move(provider)) {}
-
-std::optional<std::pmr::string>
-ArrayVisualizer::FormatValue(std::pmr::memory_resource *) noexcept
-{
-  TODO("not impl");
+                  value.mName, value.mName, *value.GetType());
 }
 
 std::optional<std::pmr::string>
-ArrayVisualizer::DapFormat(std::string_view, int variablesReference, std::pmr::memory_resource *allocator) noexcept
+ArrayVisualizer::Serialize(const Value &value, std::string_view, int variablesReference,
+                           std::pmr::memory_resource *allocator) noexcept
 {
-  auto ptr = mDataProvider.lock();
-  if (!ptr) {
-    return std::nullopt;
-  }
-
-  auto &t = *ptr->GetType();
+  auto &t = *value.GetType();
   const auto no_alias = t.ResolveAlias();
   std::pmr::string result{allocator};
   FormatAndReturn(
     result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-    ptr->mName, t, t, variablesReference, ptr->Address(), no_alias->ArraySize());
-}
-
-CStringVisualizer::CStringVisualizer(std::weak_ptr<Value> dataProvider,
-                                     std::optional<u32> nullTerminatorPosition) noexcept
-    : ValueVisualizer(std::move(dataProvider)), null_terminator(nullTerminatorPosition)
-{
+    value.mName, t, t, variablesReference, value.Address(), no_alias->ArraySize());
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
+CStringVisualizer::FormatValue(const Value &ptr, std::optional<u32> null_terminator,
+                               std::pmr::memory_resource *allocator) noexcept
 {
-  auto ptr = mDataProvider.lock();
-  if (!ptr) {
-    return std::nullopt;
-  }
-  const auto byte_span = ptr->FullMemoryView();
+  const auto byte_span = ptr.FullMemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
@@ -557,15 +400,19 @@ CStringVisualizer::FormatValue(std::pmr::memory_resource *allocator) noexcept
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::DapFormat(std::string_view name, int, std::pmr::memory_resource *allocator) noexcept
+CStringVisualizer::Serialize(const Value &value, std::string_view name, int,
+                             std::pmr::memory_resource *allocator) noexcept
 {
-  auto ptr = mDataProvider.lock();
-  if (!ptr) {
-    return std::nullopt;
-  }
-  const auto byte_span = ptr->FullMemoryView();
+  const auto byte_span = value.FullMemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
+  }
+  std::optional<u32> null_terminator = {};
+  for (const auto [index, ch] : mdb::EnumerateView(byte_span)) {
+    if (ch == 0) {
+      null_terminator = index;
+      break;
+    }
   }
 
   std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
@@ -573,7 +420,7 @@ CStringVisualizer::DapFormat(std::string_view name, int, std::pmr::memory_resour
   FormatAndReturn(
     result,
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-    name, cast, 0, ptr->Address());
+    name, cast, 0, value.Address());
 }
 
 #undef FormatAndReturn

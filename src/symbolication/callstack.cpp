@@ -118,8 +118,8 @@ Frame::Scopes() noexcept
     for (auto i = 0u; i < 3; ++i) {
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::Get().NewVariablesReference();
-      Tracer::Get().SetVariableContext({mOwningSymbolFile->GetSupervisor(), mTask->ptr, mOwningSymbolFile,
-                                        static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
+      Tracer::Get().SetVariableContext(
+        {mTask->ptr, mOwningSymbolFile, static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
       mFrameScopes[i].variables_reference = key;
     }
   }
@@ -258,8 +258,7 @@ FrameUnwindState::GetRegister(u64 registerNumber) const noexcept
   return mFrameRegisters[registerNumber];
 }
 
-CallStack::CallStack(TraceeController *supervisor, TaskInfo *task) noexcept
-    : mTask(task), mSupervisor(supervisor), mCallstackIsDirty(true)
+CallStack::CallStack(TraceeController *supervisor, TaskInfo *task) noexcept : mTask(task), mSupervisor(supervisor)
 {
 }
 
