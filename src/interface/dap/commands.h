@@ -755,11 +755,11 @@ struct Variables final : public UICommand
 
 struct VariablesResponse final : public UIResult
 {
-  VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept;
+  VariablesResponse(bool success, Variables *cmd, std::vector<Ref<sym::Value>> &&vars) noexcept;
   ~VariablesResponse() noexcept override;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   int requested_reference;
-  std::vector<Variable> variables;
+  std::vector<Ref<sym::Value>> variables;
 };
 
 struct DisassembleResponse final : public UIResult

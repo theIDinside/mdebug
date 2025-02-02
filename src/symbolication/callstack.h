@@ -4,6 +4,7 @@
 // #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/type.h"
+#include "symbolication/variable_reference.h"
 #include "utils/immutable.h"
 #include <common.h>
 #include <symbolication/fnsymbol.h>
@@ -66,7 +67,7 @@ private:
 
   u32 mFrameLevel = -1;
   FrameType mFrameType = FrameType::Unknown;
-  u32 mFrameId = -1;
+  VariableReferenceId mFrameId = -1;
   SymbolFile *mOwningSymbolFile;
   std::array<ui::dap::Scope, 3> mFrameScopes{};
 
@@ -74,7 +75,8 @@ public:
   Immutable<NonNullPtr<TaskInfo>> mTask;
 
   template <typename T>
-  explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, u32 frame_id, AddrPtr pc, T sym_info) noexcept
+  explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, VariableReferenceId frame_id, AddrPtr pc,
+                 T sym_info) noexcept
       : mFramePc(pc), mFrameLevel(level), mFrameId(frame_id), mOwningSymbolFile(symbol_file), mTask(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
@@ -108,7 +110,7 @@ public:
   // checks if this Frame has symbol info, whether that be of type Full or Elf
   bool HasSymbolInfo() const noexcept;
   FrameType GetFrameType() const noexcept;
-  int FrameId() const noexcept;
+  VariableReferenceId FrameId() const noexcept;
   int FrameLevel() const noexcept;
   AddrPtr FramePc() const noexcept;
   SymbolFile *GetSymbolFile() const noexcept;
@@ -227,6 +229,13 @@ public:
 
 class CallStack
 {
+  enum class CallStackState
+  {
+    Invalidated,
+    Partial,
+    Full,
+  };
+
 public:
   NO_COPY(CallStack);
   explicit CallStack(TraceeController *supervisor, TaskInfo *task) noexcept;
@@ -274,7 +283,7 @@ private:
 
   TaskInfo *mTask; // the task associated with this call stack
   TraceeController *mSupervisor;
-  bool mCallstackIsDirty{true};
+  CallStackState mCallstackState{CallStackState::Invalidated};
   std::vector<Frame> mStackFrames{}; // the call stack
   std::vector<AddrPtr> mFrameProgramCounters{};
   std::vector<FrameUnwindState> mUnwoundRegister{};

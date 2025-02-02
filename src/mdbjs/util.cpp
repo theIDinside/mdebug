@@ -46,4 +46,15 @@ ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) no
   }
   return success;
 }
+
+JSString *
+PrepareString(JSContext *cx, std::string_view string) noexcept
+{
+  JSString *jsString = JS_NewStringCopyN(cx, string.data(), string.size());
+
+  if (!jsString) {
+    return nullptr;
+  }
+  return jsString;
+}
 } // namespace mdb::js

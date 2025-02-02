@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "symbolication/variable_reference.h"
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
@@ -60,7 +61,7 @@ struct Thread
 
 struct StackFrame
 {
-  int id;
+  VariableReferenceId id;
   std::string_view name;
   std::optional<Source> source;
   int line;
@@ -167,14 +168,6 @@ public:
   // identify. Because only 1 objectfile of some binary will *ever* be loaded into memory.
   Immutable<NonNullPtr<SymbolFile>> object_file;
 };
-
-// DAP Result for `variables` request.
-struct Variable
-{
-  int ref;
-  Ref<sym::Value> variable_value;
-};
-
 }; // namespace ui::dap
 } // namespace mdb
 

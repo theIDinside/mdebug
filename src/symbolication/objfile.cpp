@@ -398,6 +398,7 @@ ObjectFile::FindCustomDataResolverFor(sym::Type &) noexcept
   return nullptr;
 }
 
+/* static */
 void
 ObjectFile::InitializeDataVisualizer(sym::Value &value) noexcept
 {
@@ -573,7 +574,7 @@ SymbolFile::UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr
 
 auto
 SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame,
-                         sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>
+                         sym::VariableSet set) noexcept -> std::vector<Ref<sym::Value>>
 {
   auto symbolInformation = frame.MaybeGetFullSymbolInfo();
   if (!symbolInformation) {
@@ -605,8 +606,9 @@ SymbolFile::GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::Compila
   return mObjectFile->GetCompilationUnitsSpanningPC(pc - *mBaseAddress);
 }
 
-static sym::IValueResolve *
-GetStaticResolver(sym::Value &value)
+/* static */
+sym::IValueResolve *
+SymbolFile::GetStaticResolver(sym::Value &value) noexcept
 {
   // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
@@ -634,7 +636,7 @@ GetStaticResolver(sym::Value &value)
 
 auto
 SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
-                            std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>
+                            std::optional<u32> count) noexcept -> std::vector<Ref<sym::Value>>
 {
   auto value = ctx.GetValue();
   if (value == nullptr) {
@@ -649,33 +651,22 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
 
   auto resolver = GetStaticResolver(*value);
   if (resolver != nullptr) {
-    auto variables = resolver->Resolve(*value, *ctx.mTask->GetSupervisor(), this, {start, count});
-    std::vector<ui::dap::Variable> result{};
-
-    for (auto &var : variables) {
-      GetObjectFile()->InitializeDataVisualizer(*var);
-      const auto new_ref = var->GetType()->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
-      if (new_ref > 0) {
-        ctx.mTask->CacheValueObject(new_ref, var);
-      }
-      result.push_back(ui::dap::Variable{static_cast<int>(new_ref), var});
-    }
-
-    return result;
+    return resolver->Resolve(ctx, this, {start, count});
   } else {
-    std::vector<ui::dap::Variable> result{};
+    std::vector<Ref<sym::Value>> result{};
     result.reserve(type->MemberFields().size());
 
-    for (auto &mem : type->MemberFields()) {
-      auto member_value = Ref<sym::Value>::MakeShared(mem.name, const_cast<sym::Field &>(mem),
-                                                      value->mMemoryContentsOffsets, value->TakeMemoryReference());
-      GetObjectFile()->InitializeDataVisualizer(*member_value);
-      const auto new_ref =
-        member_value->GetType()->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
-      if (new_ref > 0) {
-        ctx.mTask->CacheValueObject(new_ref, member_value);
+    for (auto &memberField : type->MemberFields()) {
+      const auto variablesReference =
+        memberField.type->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
+      auto memberVariable =
+        Ref<sym::Value>::MakeShared(variablesReference, memberField.name, const_cast<sym::Field &>(memberField),
+                                    value->mMemoryContentsOffsets, value->TakeMemoryReference());
+      GetObjectFile()->InitializeDataVisualizer(*memberVariable);
+      if (variablesReference > 0) {
+        ctx.mTask->CacheValueObject(variablesReference, memberVariable);
       }
-      result.push_back(ui::dap::Variable{static_cast<int>(new_ref), std::move(member_value)});
+      result.push_back(std::move(memberVariable));
     }
     return result;
   }
@@ -795,9 +786,9 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
 
 auto
 SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                         sym::Frame &frame) noexcept -> std::vector<ui::dap::Variable>
+                         sym::Frame &frame) noexcept -> std::vector<Ref<sym::Value>>
 {
-  std::vector<ui::dap::Variable> result{};
+  std::vector<Ref<sym::Value>> result{};
   switch (variables_kind) {
   case sym::FrameVariableKind::Arguments:
     result.reserve(frame.FrameParameterCounts());
@@ -811,22 +802,22 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   frame.GetInitializedVariables(variables_kind, relevantSymbols);
 
   for (const sym::Symbol &symbol : relevantSymbols) {
-    const auto ref = symbol.mType->IsPrimitive() ? 0 : Tracer::Get().NewVariablesReference();
-    if (ref == 0 && !symbol.mType->IsResolved()) {
-      sym::dw::TypeSymbolicationContext ts_ctx{*this->GetObjectFile(), symbol.mType};
-      ts_ctx.ResolveType();
+
+    if (symbol.mType->IsPrimitive() && !symbol.mType->IsResolved()) {
+      sym::dw::TypeSymbolicationContext symbolicationContext{*this->GetObjectFile(), symbol.mType};
+      symbolicationContext.ResolveType();
     }
 
-    auto value_object =
+    auto variableValue =
       sym::MemoryContentsObject::CreateFrameVariable(tc, frame, const_cast<sym::Symbol &>(symbol), true);
-    GetObjectFile()->InitializeDataVisualizer(*value_object);
+    GetObjectFile()->InitializeDataVisualizer(*variableValue);
 
-    if (ref > 0) {
-      Tracer::Get().SetVariableContext({frame.mTask->ptr, frame.GetSymbolFile(), static_cast<u32>(frame.FrameId()),
-                                        static_cast<u16>(ref), ContextType::Variable});
-      frame.mTask.mut()->CacheValueObject(ref, value_object);
+    if (const auto id = variableValue->ReferenceId(); id > 0) {
+      Tracer::Get().SetVariableContext(
+        {frame.mTask->ptr, frame.GetSymbolFile(), frame.FrameId(), id, ContextType::Variable});
+      frame.mTask.mut()->CacheValueObject(id, variableValue);
     }
-    result.push_back(ui::dap::Variable{static_cast<int>(ref), std::move(value_object)});
+    result.push_back(std::move(variableValue));
   }
   return result;
 }

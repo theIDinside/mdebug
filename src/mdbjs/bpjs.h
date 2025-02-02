@@ -1,13 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "bp.h"
-#include "js/CallArgs.h"
-#include "js/PropertySpec.h"
-#include "js/RootingAPI.h"
 #include "mdbjs/jsobject.h"
-#include "supervisor.h"
 #include "typedefs.h"
-#include "utils/smartptr.h"
 #include <cstring>
 
 namespace mdb::js {
@@ -28,6 +23,10 @@ struct Breakpoint : public RefPtrJsObject<mdb::js::Breakpoint, mdb::UserBreakpoi
   };
 
   static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
+
+  // TODO(simon): implement
+  static bool js_enable(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
+  static bool js_disable(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
 
   static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0), JS_FS_END};
   // Uncomment when you want to define properties

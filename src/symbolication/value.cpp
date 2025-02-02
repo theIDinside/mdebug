@@ -1,40 +1,43 @@
 /** LICENSE TEMPLATE */
 #include "value.h"
 #include "common.h"
+#include "interface/dap/types.h"
 #include "lib/arena_allocator.h"
+#include "symbolication/dwarf/typeread.h"
 #include "symbolication/dwarf_expressions.h"
 #include "type.h"
 #include "value_visualizer.h"
 #include <memory_resource>
 #include <supervisor.h>
+#include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
 
 namespace mdb::sym {
-Value::Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
+Value::Value(VariableReferenceId id, std::string_view name, Symbol &kind, u32 memContentsOffset,
              std::shared_ptr<MemoryContentsObject> &&valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName(name), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&kind),
-      mValueObject(std::move(valueObject)), mVisualizer(serializer)
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mVariableReference(id)
 {
 }
 
-Value::Value(std::string_view memberName, Field &kind, u32 containingStructureOffset,
+Value::Value(VariableReferenceId id, std::string_view memberName, Field &kind, u32 containingStructureOffset,
              std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.offset_of), mValueOrigin(&kind),
-      mValueObject(std::move(valueObject)), mVisualizer(serializer)
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mVariableReference(id)
 {
 }
 
-Value::Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
-             DebugAdapterSerializer *serializer) noexcept
+Value::Value(VariableReferenceId id, Type &type, u32 memContentsOffset,
+             std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName("value"), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&type),
-      mValueObject(std::move(valueObject)), mVisualizer(serializer)
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mVariableReference(id)
 {
 }
 
-Value::Value(std::string &&name, Type &type, u32 memContentsOffset,
+Value::Value(VariableReferenceId id, std::string &&name, Type &type, u32 memContentsOffset,
              std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
     : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueOrigin(&type),
-      mValueObject(std::move(valueObject)), mVisualizer(serializer)
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mVariableReference(id)
 {
 }
 
@@ -88,6 +91,60 @@ Value::IsValidValue() const noexcept
   }
 
   return !mValueObject->RawView().empty();
+}
+
+bool
+Value::HasMember(std::string_view memberName) noexcept
+{
+  if (auto type = GetType(); !type->IsResolved()) {
+    sym::dw::TypeSymbolicationContext ts_ctx{*type->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *type};
+    ts_ctx.ResolveType();
+  }
+
+  for (const auto &field : GetType()->MemberFields()) {
+    if (field.name == memberName) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Ref<Value>
+Value::GetMember(std::string_view memberName) noexcept
+{
+  auto type = GetType();
+
+  if (!type->IsResolved()) {
+    sym::dw::TypeSymbolicationContext ts_ctx{*type->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *type};
+    ts_ctx.ResolveType();
+  }
+
+  auto resolver = SymbolFile::GetStaticResolver(*this);
+
+  for (auto &mem : type->MemberFields()) {
+    if (mem.name == memberName) {
+      const auto variablesReferenceId =
+        mem.type->IsPrimitive()
+          ? 0
+          : Tracer::Get().CloneFromVariableContext(Tracer::Get().GetVariableContext(mVariableReference));
+      auto memberValue = Ref<sym::Value>::MakeShared(variablesReferenceId, mem.name, const_cast<sym::Field &>(mem),
+                                                     mMemoryContentsOffsets, TakeMemoryReference());
+      ObjectFile::InitializeDataVisualizer(*memberValue);
+      auto context = Tracer::Get().GetVariableContext(variablesReferenceId);
+
+      if (variablesReferenceId > 0) {
+        context.mTask->CacheValueObject(variablesReferenceId, memberValue);
+      }
+      return memberValue;
+    }
+  }
+  return nullptr;
+}
+
+VariableReferenceId
+Value::ReferenceId() const noexcept
+{
+  return mVariableReference;
 }
 
 DebugAdapterSerializer *
@@ -291,8 +348,10 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
                        *frame.GetSymbolFile()->GetObjectFile()->GetElf()->debug_loclist);
   }
   auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
+  const auto varRefId = symbol.mType->IsPrimitive() ? 0 : Tracer::Get().NewVariablesReference();
+
   if (dwarfExpression.empty()) {
-    return Ref<Value>::MakeShared(symbol.mName, symbol, 0u, nullptr);
+    return Ref<Value>::MakeShared(varRefId, symbol.mName, symbol, 0u, nullptr);
   }
   auto interp = ExprByteCodeInterpreter{frame.FrameLevel(), tc, *frame.mTask, dwarfExpression,
                                         fnSymbol->GetFrameBaseDwarfExpression()};
@@ -300,7 +359,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
   const auto address = interp.Run();
   if (lazy) {
     auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
-    return Ref<sym::Value>::MakeShared(symbol.mName, symbol, 0u, std::move(memory_object));
+    return Ref<sym::Value>::MakeShared(varRefId, symbol.mName, symbol, 0u, std::move(memory_object));
   } else {
     auto res = tc.SafeRead(address, requested_byte_size);
     if (!res.is_expected()) {
@@ -309,18 +368,9 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
     DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
     auto memory_object =
       std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
-    return Ref<Value>::MakeShared(symbol.mName, symbol, 0u, std::move(memory_object));
+    return Ref<Value>::MakeShared(varRefId, symbol.mName, symbol, 0u, std::move(memory_object));
   }
   return nullptr;
 }
 
-/*static*/
-Value *
-MemoryContentsObject::CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,
-                                          NonNullPtr<TaskInfo> task, NonNullPtr<sym::Frame> frame, Symbol &symbol,
-                                          bool lazy) noexcept
-{
-  TODO_IGNORE_WARN("Unimplemented", allocator, tc, task, frame, symbol, lazy);
-  return nullptr;
-}
 } // namespace mdb::sym

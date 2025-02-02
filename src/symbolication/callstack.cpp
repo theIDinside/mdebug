@@ -58,7 +58,7 @@ Frame::GetFrameType() const noexcept
   return mFrameType;
 }
 
-int
+VariableReferenceId
 Frame::FrameId() const noexcept
 {
   return mFrameId;
@@ -292,13 +292,13 @@ CallStack::UnwindRegister(u8 level, u16 register_number) noexcept
 bool
 CallStack::IsDirty() const noexcept
 {
-  return mCallstackIsDirty;
+  return mCallstackState == CallStackState::Invalidated;
 }
 
 void
 CallStack::SetDirty() noexcept
 {
-  mCallstackIsDirty = true;
+  mCallstackState = CallStackState::Invalidated;
 }
 
 void
@@ -447,6 +447,9 @@ void
 CallStack::Unwind(const CallStackRequest &req)
 {
   // TODO: Implement frame unwind caching.
+  if (mCallstackState == CallStackState::Full) {
+    return;
+  }
   const auto pc = mTask->GetRegisterCache().GetPc();
   sym::UnwindIterator it{mSupervisor, pc};
   auto uninfo = it.GetInfo(pc);
@@ -496,6 +499,7 @@ CallStack::Unwind(const CallStackRequest &req)
       }
       mFrameProgramCounters.push_back(GetTopMostPc());
     }
+    mCallstackState = CallStackState::Full;
     break;
   }
   case CallStackRequest::Type::Partial: {
@@ -510,11 +514,10 @@ CallStack::Unwind(const CallStackRequest &req)
       }
       mFrameProgramCounters.push_back(GetTopMostPc());
     }
+    mCallstackState = CallStackState::Partial;
     break;
   }
   }
-
-  mCallstackIsDirty = false;
 }
 
 } // namespace mdb::sym

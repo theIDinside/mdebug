@@ -1,5 +1,8 @@
 /** LICENSE TEMPLATE */
 #include "taskinfojs.h"
+#include "framejs.h"
+#include "js/BigInt.h"
+#include <supervisor.h>
 
 namespace mdb::js {
 
@@ -7,7 +10,33 @@ namespace mdb::js {
 bool
 TaskInfo::js_pc(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
-  TODO(__PRETTY_FUNCTION__);
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto task = Get(callee.get());
+
+  JS::BigInt *bigInt = JS::NumberToBigInt(cx, task->GetRegisterCache().GetPc().get());
+  if (!bigInt) {
+    JS_ReportErrorASCII(cx, "Failed to create BigInt");
+    return false;
+  }
+
+  args.rval().setBigInt(bigInt);
+  return true;
+}
+
+bool
+TaskInfo::js_frame(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto task = Get(callee.get());
+  auto &callStack = task->GetSupervisor()->BuildCallFrameStack(*task, CallStackRequest::full());
+  auto frame = callStack.GetFrameAtLevel(0);
+
+  JS::Rooted<JSObject *> frameJs{
+    cx, mdb::js::Frame::Create(cx, Ref<FrameLookupHandle>{new FrameLookupHandle{task, *frame}})};
+  args.rval().setObject(*frameJs);
+
   return true;
 }
 

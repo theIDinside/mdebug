@@ -9,6 +9,7 @@
 #include "mdbjs/mdbjs.h"
 #include "mdbjs/taskinfojs.h"
 #include "task.h"
+#include <supervisor.h>
 #include <tracer.h>
 
 namespace mdb::js {

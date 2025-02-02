@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "value_visualizer.h"
 #include "symbolication/dwarf/typeread.h"
+#include "symbolication/variable_reference.h"
 #include "tracer.h"
 #include "type.h"
 #include "utils/enumerator.h"
@@ -19,54 +20,20 @@ namespace mdb::sym {
   fmt::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
   return result
 
-ValueResolver::ValueResolver(SymbolFile *objectFile, std::weak_ptr<sym::Value> val, TypePtr type) noexcept
-    : mType(type), mSymbolFile(objectFile), mValuePointer(std::move(val)), mChildren()
-{
-}
-
-Value *
-ValueResolver::GetValue() noexcept
-{
-  if (auto locked = mValuePointer.lock(); locked) {
-    return locked.get();
-  } else {
-    return nullptr;
-  }
-}
-
-std::optional<Children>
-ValueResolver::HasCached(std::optional<u32>, std::optional<u32>) noexcept
-{
-  if (mIsCached) {
-    return mChildren;
-  }
-  return std::nullopt;
-}
-
-Children
-ValueResolver::Resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept
-{
-  if (const auto res = HasCached(start, count); res) {
-    return res.value();
-  }
-
-  return GetChildren(tc, start, count);
-}
-
 std::vector<Ref<Value>>
-ResolveReference::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile,
-                          ValueRange valueRange) noexcept
+ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
   std::vector<Ref<Value>> mResults;
-
+  auto value = *context.GetValue();
   if (const auto address = value.ToRemotePointer(); address.is_expected()) {
     auto adjusted_address = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
     const auto requested_length = valueRange.count.value_or(32);
-    auto memory = sym::MemoryContentsObject::ReadMemory(tc, adjusted_address, requested_length);
+    auto memory =
+      sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjusted_address, requested_length);
     if (!memory.is_ok()) {
       auto t = value.GetType()->TypeDescribingLayoutOfThis();
       mResults.push_back(
-        Ref<Value>::MakeShared(*t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
+        Ref<Value>::MakeShared(0u, *t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
       return mResults;
     }
     auto mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
@@ -75,32 +42,41 @@ ResolveReference::Resolve(Value &value, TraceeController &tc, SymbolFile *symbol
     // actual `T` type behind the reference
     auto layout_type = value.GetType()->TypeDescribingLayoutOfThis();
 
+    const auto variablesReference =
+      layout_type->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(context);
+
     if (layout_type->IsArrayType()) {
-      mResults.push_back(Ref<Value>::MakeShared(*layout_type, 0u, mIndirectValueObject,
+      mResults.push_back(Ref<Value>::MakeShared(variablesReference, *layout_type, 0u, mIndirectValueObject,
                                                 Tracer::GetSerializer<sym::ArrayVisualizer>()));
     } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
-      mResults.push_back(Ref<Value>::MakeShared(*layout_type, 0u, mIndirectValueObject,
+      mResults.push_back(Ref<Value>::MakeShared(variablesReference, *layout_type, 0u, mIndirectValueObject,
                                                 Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
     } else {
-      mResults.push_back(Ref<Value>::MakeShared(*layout_type, 0u, mIndirectValueObject,
+      mResults.push_back(Ref<Value>::MakeShared(variablesReference, *layout_type, 0u, mIndirectValueObject,
                                                 Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
+    }
+    ObjectFile::InitializeDataVisualizer(*mResults.back());
+    if (variablesReference > 0) {
+      context.mTask->CacheValueObject(variablesReference, mResults.back());
     }
   }
   return mResults;
 }
 
 std::vector<Ref<Value>>
-ResolveCString::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
   std::vector<Ref<Value>> mResults;
+  auto &value = *context.GetValue();
   if (const auto address = value.ToRemotePointer(); address.is_expected()) {
     auto adjustedAddress = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
     const auto requestedLength = valueRange.count.value_or(256);
-    auto referencedMemory = sym::MemoryContentsObject::ReadMemory(tc, adjustedAddress, requestedLength);
+    auto referencedMemory =
+      sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjustedAddress, requestedLength);
     if (!referencedMemory.is_ok()) {
       auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
       mResults.push_back(
-        Ref<Value>::MakeShared(*layoutType, 0u, nullptr, Tracer::GetSerializer<InvalidValueVisualizer>()));
+        Ref<Value>::MakeShared(0u, *layoutType, 0u, nullptr, Tracer::GetSerializer<InvalidValueVisualizer>()));
       return mResults;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
@@ -110,7 +86,7 @@ ResolveCString::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFi
 
     // actual `char` type
     auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
-    auto stringValue = Ref<sym::Value>::MakeShared(*layoutType, 0u, indirectValueObject,
+    auto stringValue = Ref<sym::Value>::MakeShared(0u, *layoutType, 0u, indirectValueObject,
                                                    Tracer::GetSerializer<CStringVisualizer>());
 
     mResults.push_back(std::move(stringValue));
@@ -119,8 +95,9 @@ ResolveCString::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFi
 }
 
 std::vector<Ref<Value>>
-ResolveArray::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
+  auto &value = *context.GetValue();
   ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
   std::vector<Ref<Value>> mResults;
   const auto arraySize = value.GetType()->ArraySize();
@@ -141,14 +118,20 @@ ResolveArray::Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile
   const u32 elementTypeSize = elementsType->size_of;
   auto underlying = (endIndex - startIndex) * elementTypeSize;
   // We make backing memory view for the entire sub-range.
-  auto lazy = std::make_shared<LazyMemoryContentsObject>(tc, desiredFirstElementAddress,
-                                                         desiredFirstElementAddress + underlying);
+  auto lazy = std::make_shared<LazyMemoryContentsObject>(
+    *context.mTask->GetSupervisor(), desiredFirstElementAddress, desiredFirstElementAddress + underlying);
 
   for (auto i = 0u; i < (endIndex - startIndex); ++i) {
     const auto current_address = desiredFirstElementAddress + (elementTypeSize * i);
     const auto memoryObjectOffset = i * elementTypeSize;
+    const auto varRefId = elementsType->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(context);
     mResults.emplace_back(
-      Ref<Value>::MakeShared(std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
+      Ref<Value>::MakeShared(varRefId, std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
+
+    ObjectFile::InitializeDataVisualizer(*mResults.back());
+    if (varRefId > 0) {
+      context.mTask->CacheValueObject(varRefId, mResults.back());
+    }
   }
 
   return mResults;

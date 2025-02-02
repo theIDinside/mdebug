@@ -1274,7 +1274,7 @@ Variables::Execute() noexcept
   return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
 }
 
-VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Variable> &&vars) noexcept
+VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Ref<sym::Value>> &&vars) noexcept
     : UIResult(success, cmd), requested_reference(cmd != nullptr ? cmd->var_ref : 0), variables(std::move(vars))
 {
 }
@@ -1297,32 +1297,32 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   variables_contents.reserve(256 * variables_contents.size());
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : variables) {
-    if (auto datvis = v.variable_value->GetVisualizer(); datvis != nullptr) {
-      auto opt = datvis->Serialize(*v.variable_value, v.variable_value->mName, v.ref, arenaAllocator);
+    if (auto datvis = v->GetVisualizer(); datvis != nullptr) {
+
+      auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), arenaAllocator);
       if (opt) {
         it = fmt::format_to(it, "{},", *opt);
       } else {
         fmt::format_to(
           std::back_inserter(result),
           R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
-          seq, request_seq, v.variable_value->mName);
+          seq, request_seq, v->mName);
         return result;
       }
     } else {
-      ASSERT(v.variable_value->GetType()->IsReference(),
-             "Add visualizer & resolver for T* types. It will look more "
-             "or less identical to CStringResolver & ArrayResolver");
+      ASSERT(v->GetType()->IsReference(), "Add visualizer & resolver for T* types. It will look more "
+                                          "or less identical to CStringResolver & ArrayResolver");
       // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we
       // do individual type checking again.
       //  this should be streamlined, to be handled once up front. We also need some way to create "new" types.
-      auto span = v.variable_value->MemoryView();
+      auto span = v->MemoryView();
       const std::uintptr_t ptr = sym::BitCopy<std::uintptr_t>(span);
       auto ptr_str = fmt::format("0x{:x}", ptr);
-      const std::string_view name = v.variable_value->mName.StringView();
+      const std::string_view name = v->mName.StringView();
       it = fmt::format_to(
         it,
         R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }},)",
-        name, ptr_str, *v.variable_value->GetType(), v.ref, v.variable_value->Address());
+        name, ptr_str, *v->GetType(), v->ReferenceId(), v->Address());
     }
   }
 

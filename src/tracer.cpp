@@ -677,19 +677,19 @@ Tracer::GenerateNewBreakpointId() noexcept
   return ++mBreakpointID;
 }
 
-VarRefKey
+VariableReferenceId
 Tracer::NewVariablesReference() noexcept
 {
   return ++mVariablesReferenceCounter;
 }
 
 VariableContext
-Tracer::GetVariableContext(u32 varRefKey) noexcept
+Tracer::GetVariableContext(VariableReferenceId varRefKey) noexcept
 {
   return mVariablesReferenceContext[varRefKey];
 }
 
-VarRefKey
+VariableReferenceId
 Tracer::NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept
 {
   auto key = NewVariablesReference();
@@ -699,7 +699,7 @@ Tracer::NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 fram
 }
 
 void
-Tracer::DestroyVariablesReference(VarRefKey key) noexcept
+Tracer::DestroyVariablesReference(VariableReferenceId key) noexcept
 {
   mVariablesReferenceContext.erase(key);
 }
@@ -757,51 +757,12 @@ Tracer::SetVariableContext(VariableContext ctx) noexcept
   ctx.mTask->add_reference(ctx.mId);
 }
 
-u32
+VariableReferenceId
 Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
 {
   const auto key = NewVariablesReference();
   mVariablesReferenceContext.emplace(key, VariableContext::MakeDependentContext(key, ctx));
   return key;
-}
-
-bool
-VariableContext::IsValidContext() const noexcept
-{
-  return mTask != nullptr;
-}
-
-std::optional<std::array<ui::dap::Scope, 3>>
-VariableContext::GetScopes(VarRefKey frameKey) const noexcept
-{
-  auto frame = mTask->get_callstack().GetFrame(frameKey);
-  if (!frame) {
-    return {};
-  } else {
-    return frame->Scopes();
-  }
-}
-
-sym::Frame *
-VariableContext::GetFrame(VarRefKey ref) noexcept
-{
-  switch (mType) {
-  case ContextType::Frame:
-    return mTask->get_callstack().GetFrame(ref);
-  case ContextType::Scope:
-  case ContextType::Variable:
-    return mTask->get_callstack().GetFrame(mFrameId);
-  case ContextType::Global:
-    PANIC("Global variables not yet supported");
-    break;
-  }
-  NEVER("Unknown context type");
-}
-
-Ref<sym::Value>
-VariableContext::GetValue() const noexcept
-{
-  return mTask->GetVariablesReference(mId);
 }
 
 /* static */

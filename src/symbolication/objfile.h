@@ -15,7 +15,8 @@
 
 namespace mdb {
 
-using VariablesReference = int;
+class VariableContext;
+
 template <typename T> using Set = std::unordered_set<T>;
 
 class TraceeController;
@@ -173,7 +174,7 @@ public:
 
   auto FindCustomDataVisualizerFor(sym::Type &type) noexcept -> std::unique_ptr<sym::DebugAdapterSerializer>;
   auto FindCustomDataResolverFor(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueResolver>;
-  auto InitializeDataVisualizer(sym::Value &value) noexcept -> void;
+  static auto InitializeDataVisualizer(sym::Value &value) noexcept -> void;
 
   /**
    * Search the string tables of a object file, using regex pattern `regex_pattern`
@@ -217,10 +218,11 @@ public:
   auto UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr;
 
   auto GetVariables(TraceeController &tc, sym::Frame &frame,
-                    sym::VariableSet set) noexcept -> std::vector<ui::dap::Variable>;
+                    sym::VariableSet set) noexcept -> std::vector<Ref<sym::Value>>;
   auto GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
+  static sym::IValueResolve *GetStaticResolver(sym::Value &value) noexcept;
   auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start,
-                       std::optional<u32> count) noexcept -> std::vector<ui::dap::Variable>;
+                       std::optional<u32> count) noexcept -> std::vector<Ref<sym::Value>>;
 
   auto LowProgramCounter() noexcept -> AddrPtr;
   auto HighProgramCounter() noexcept -> AddrPtr;
@@ -236,8 +238,8 @@ public:
   auto GetTextSection() const noexcept -> const ElfSection *;
 
 private:
-  std::vector<ui::dap::Variable> GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
-                                              sym::Frame &frame) noexcept;
+  std::vector<Ref<sym::Value>> GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
+                                            sym::Frame &frame) noexcept;
 };
 
 ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;

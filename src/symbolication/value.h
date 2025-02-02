@@ -1,5 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "interface/dap/types.h"
+#include "symbolication/variable_reference.h"
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/smartptr.h"
@@ -73,18 +75,18 @@ class Value
   // contructor for `Values` that represent a block symbol (so a frame argument, stack variable, static / global
   // variable)
 
-  Value(std::string_view name, Symbol &kind, u32 memContentsOffset,
+  Value(VariableReferenceId variableReference, std::string_view name, Symbol &kind, u32 memContentsOffset,
         std::shared_ptr<MemoryContentsObject> &&valueObject,
         DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   // constructor for `Value`s that represent a member variable (possibly of some other `Value`)
-  Value(std::string_view memberName, Field &kind, u32 memContentsOffset,
+  Value(VariableReferenceId variableReference, std::string_view memberName, Field &kind, u32 memContentsOffset,
         std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
 
-  Value(Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
-        DebugAdapterSerializer *serializer = nullptr) noexcept;
-  Value(std::string &&name, Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
-        DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VariableReferenceId variableReference, Type &type, u32 memContentsOffset,
+        std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VariableReferenceId variableReference, std::string &&name, Type &type, u32 memContentsOffset,
+        std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   template <typename... Args>
   static Value *
@@ -108,11 +110,12 @@ public:
   std::span<const u8> FullMemoryView() const noexcept;
   SharedPtr<MemoryContentsObject> TakeMemoryReference() noexcept;
   mdb::Expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
-  void SetResolver(std::unique_ptr<ValueResolver> &&vis) noexcept;
-  ValueResolver *GetResolver() noexcept;
   bool HasVisualizer() const noexcept;
   DebugAdapterSerializer *GetVisualizer() noexcept;
   bool IsValidValue() const noexcept;
+  bool HasMember(std::string_view memberName) noexcept;
+  Ref<Value> GetMember(std::string_view memberName) noexcept;
+  VariableReferenceId ReferenceId() const noexcept;
 
   Immutable<std::string> mName;
   Immutable<u32> mMemoryContentsOffsets;
@@ -132,6 +135,7 @@ private:
   //  allocator. PMR galore!
   std::shared_ptr<MemoryContentsObject> mValueObject;
   DebugAdapterSerializer *mVisualizer{nullptr};
+  VariableReferenceId mVariableReference;
 };
 
 enum class ReadResultInfo
@@ -182,10 +186,6 @@ public:
   // anythign else.
   static Ref<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
                                         bool lazy) noexcept;
-
-  static Value *CreateFrameVariable(std::pmr::memory_resource *allocator, TraceeController &tc,
-                                    NonNullPtr<TaskInfo> task, NonNullPtr<sym::Frame> frame, Symbol &symbol,
-                                    bool lazy) noexcept;
 
   static ReadResult ReadMemory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
   static ReadResult ReadMemory(std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address,

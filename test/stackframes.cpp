@@ -13,25 +13,31 @@ struct Bar
 
 int fib(int n);
 
-int fib2(int n) {
-    if (n <= 1) {
-        return n;
-    }
-    return fib(n - 1) + fib(n - 2);
+int
+fib2(int n)
+{
+  if (n <= 1) {
+    return n;
+  }
+  return fib(n - 1) + fib(n - 2);
 }
 
-int fib(int n) {
-    if (n <= 1) {
-        return n;
-    }
-    return fib2(n - 1) + fib2(n - 2);
+int
+fib(int n)
+{
+  if (n <= 1) {
+    return n;
+  }
+  return fib2(n - 1) + fib2(n - 2);
 }
 
-int fibonacci(int n) {
-    if (n <= 1) {
-        return n;
-    }
-    return fibonacci(n - 1) + fibonacci(n - 2);
+int
+fibonacci(int n)
+{
+  if (n <= 1) {
+    return n;
+  }
+  return fibonacci(n - 1) + fibonacci(n - 2);
 }
 
 static int

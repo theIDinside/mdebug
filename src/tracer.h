@@ -15,6 +15,7 @@
 #include <mdbsys/ptrace.h>
 #include <memory_resource>
 #include <notify_pipe.h>
+#include <symbolication/variable_reference.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unordered_map>
@@ -37,7 +38,7 @@ struct TaskInfo;
 using Pid = pid_t;
 using Tid = pid_t;
 using BreakpointSpecId = u32;
-using VarRefKey = u32;
+
 } // namespace mdb
 namespace mdb::gdb {
 class RemoteConnection;
@@ -69,35 +70,6 @@ struct UICommand;
 }
 
 namespace mdb {
-
-enum class ContextType : u8
-{
-  Frame,
-  Scope,
-  Variable,
-  Global,
-};
-
-struct VariableContext
-{
-  TaskInfo *mTask{nullptr};
-  SymbolFile *mSymbolFile{nullptr};
-  u32 mFrameId{0};
-  u16 mId{0};
-  ContextType mType{ContextType::Global};
-
-  static VariableContext
-  MakeDependentContext(u32 newId, const VariableContext &ctx) noexcept
-  {
-    return VariableContext{ctx.mTask, ctx.mSymbolFile, ctx.mFrameId, static_cast<u16>(newId),
-                           ContextType::Variable};
-  }
-
-  bool IsValidContext() const noexcept;
-  std::optional<std::array<ui::dap::Scope, 3>> GetScopes(VarRefKey frameKey) const noexcept;
-  sym::Frame *GetFrame(VarRefKey ref) noexcept;
-  Ref<sym::Value> GetValue() const noexcept;
-};
 
 enum class TracerProcess
 {
@@ -179,13 +151,13 @@ public:
   ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
 
   u32 GenerateNewBreakpointId() noexcept;
-  VarRefKey NewVariablesReference() noexcept;
-  VariableContext GetVariableContext(VarRefKey varRefKey) noexcept;
-  VarRefKey NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId,
-                                         SymbolFile *file) noexcept;
+  VariableReferenceId NewVariablesReference() noexcept;
+  VariableContext GetVariableContext(VariableReferenceId varRefKey) noexcept;
+  VariableReferenceId NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId,
+                                                   SymbolFile *file) noexcept;
   void SetVariableContext(VariableContext ctx) noexcept;
-  u32 CloneFromVariableContext(const VariableContext &ctx) noexcept;
-  void DestroyVariablesReference(VarRefKey key) noexcept;
+  VariableReferenceId CloneFromVariableContext(const VariableContext &ctx) noexcept;
+  void DestroyVariablesReference(VariableReferenceId key) noexcept;
 
   std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
   void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
@@ -241,8 +213,8 @@ private:
   ui::dap::DAP *mDAP;
   std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
   u32 mBreakpointID{0};
-  VarRefKey mVariablesReferenceCounter{0};
-  std::unordered_map<VarRefKey, VariableContext> mVariablesReferenceContext{};
+  VariableReferenceId mVariablesReferenceCounter{0};
+  std::unordered_map<VariableReferenceId, VariableContext> mVariablesReferenceContext{};
   bool already_launched;
   sys::DebuggerConfiguration config;
 

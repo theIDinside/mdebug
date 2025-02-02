@@ -106,6 +106,8 @@ set(MIDAS_SOURCES
   src/symbolication/value_visualizer.h
   src/symbolication/value.cpp
   src/symbolication/value.h
+  src/symbolication/variable_reference.cpp
+  src/symbolication/variable_reference.h
   # tasks
   src/tasks/dwarf_unit_data.cpp
   src/tasks/dwarf_unit_data.h
@@ -181,6 +183,8 @@ set(MIDAS_SOURCES
   src/mdbjs/bpjs.h
   src/mdbjs/event_dispatcher.cpp
   src/mdbjs/event_dispatcher.h
+  src/mdbjs/framejs.cpp
+  src/mdbjs/framejs.h
   src/mdbjs/jsobject.h
   src/mdbjs/mdbjs.cpp
   src/mdbjs/mdbjs.h
@@ -188,6 +192,8 @@ set(MIDAS_SOURCES
   src/mdbjs/taskinfojs.h
   src/mdbjs/util.cpp
   src/mdbjs/util.h
+  src/mdbjs/variablejs.cpp
+  src/mdbjs/variablejs.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h)

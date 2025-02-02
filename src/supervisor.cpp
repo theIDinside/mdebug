@@ -1414,11 +1414,13 @@ sym::CallStack &
 TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noexcept
 {
   DBGLOG(core, "stacktrace for {}", task.mTid);
-  if (!task.mTaskCallstack->IsDirty()) {
+  if (!task.mTaskCallstack->IsDirty() && (req.req == CallStackRequest::Type::Full ||
+                                          (req.req == CallStackRequest::Type::Partial &&
+                                           req.count == task.mTaskCallstack->FramesCount() == req.count))) {
     return *task.mTaskCallstack;
   }
   CacheRegistersFor(task);
-  auto &cs_ref = *task.mTaskCallstack;
+  auto &callStack = *task.mTaskCallstack;
 
   auto frame_pcs = task.UnwindReturnAddresses(this, req);
   for (const auto &[depth, i] : mdb::EnumerateView{frame_pcs}) {
@@ -1436,19 +1438,19 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
                                                      .mId = static_cast<u16>(id),
                                                      .mType = ContextType::Frame});
     if (symbol) {
-      cs_ref.PushFrame(obj, task, depth, id, i.as_void(), symbol);
+      callStack.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {
       auto obj = FindObjectByPc(frame_pc);
       auto min_sym = obj->SearchMinimalSymbolFunctionInfo(frame_pc);
       if (min_sym) {
-        cs_ref.PushFrame(obj, task, depth, id, i.as_void(), min_sym);
+        callStack.PushFrame(obj, task, depth, id, i.as_void(), min_sym);
       } else {
         DBGLOG(core, "[stackframe]: WARNING, no frame info for pc {}", i.as_void());
-        cs_ref.PushFrame(obj, task, depth, id, i.as_void(), nullptr);
+        callStack.PushFrame(obj, task, depth, id, i.as_void(), nullptr);
       }
     }
   }
-  return cs_ref;
+  return callStack;
 }
 
 SymbolFile *

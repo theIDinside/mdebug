@@ -12,9 +12,17 @@
 #include "utils/smartptr.h"
 namespace mdb::js {
 
+#define GET_THIS(name)                                                                                            \
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);                                                               \
+  JS::RootedObject callee(cx, &args.thisv().toObject());                                                          \
+  auto name = Get(callee.get());
+
 template <typename DerivedJsObject> concept HasJsLayout = requires { DerivedJsObject::ThisPointer; };
 
 template <typename T> concept HasTraceFunction = requires(T t, JSTracer *trc) { t.trace(trc); };
+template <typename T>
+concept HasResolve =
+  requires(T t, JSContext *cx, JS::HandleId id, bool *resolved) { t.resolve(cx, id, resolved); };
 
 template <typename T>
 concept DefinesProperties = requires(JSContext *cx, JSObject *obj) { T::DefineProperties(cx, obj); };
@@ -42,6 +50,13 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     FromObject(obj)->trace(trc);
   }
 
+  static constexpr bool
+  ResolveProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *resolved) noexcept
+  {
+    JS::Rooted<JSObject *> object{cx, obj};
+    return FromObject(object)->resolve(cx, id, resolved);
+  }
+
   static constexpr void
   RefPtrFinalize(JS::GCContext *gcx, JSObject *thisJs) noexcept
   {
@@ -64,12 +79,39 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     return nullptr;
   }
 
-  static constexpr JSClassOps classOps = {.finalize = DetermineFinalizeOp(), .trace = DetermineTraceFunction()};
+  static consteval JSClassOps
+  ClassOps() noexcept
+  {
+    if constexpr (HasResolve<Derived>) {
+      return JSClassOps{
+        .resolve = &ResolveProperty, .finalize = DetermineFinalizeOp(), .trace = DetermineTraceFunction()};
+    } else {
+      return JSClassOps{.resolve = nullptr, .finalize = DetermineFinalizeOp(), .trace = DetermineTraceFunction()};
+    }
+  }
+
+  static constexpr JSClassOps classOps = ClassOps();
 
   static constexpr JSClass clasp = {.name = Name,
                                     .flags =
                                       JSCLASS_HAS_RESERVED_SLOTS(Derived::SlotCount) | JSCLASS_FOREGROUND_FINALIZE,
                                     .cOps = &classOps};
+
+  template <typename... Args>
+  static JSObject *
+  Make(JSContext *cx, Args &&...args) noexcept
+  {
+    Create(cx, Ref<WrappedType>::MakeShared(std::forward<Args>(args)...));
+  }
+
+  template <typename... Args>
+  static JSObject *
+  CustomCreate(JSContext *cx, WrappedType *coreObject, Args &&...args) noexcept
+  {
+    JS::Rooted<JSObject *> jsObject{cx, Create(cx, Reference{coreObject})};
+    Derived::Finalize(cx, jsObject, coreObject, std::forward<Args>(args)...);
+    return jsObject;
+  }
 
   static JSObject *
   Create(JSContext *cx, const Reference &object) noexcept
@@ -86,11 +128,15 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     if (!obj) {
       return nullptr;
     }
+
+    WrappedType *ptr = object.Get();
     JS_SetReservedSlot(obj, Derived::ThisPointer, JS::PrivateValue(std::move(object).DisOwn().Forget()));
 
     // Types with additional (more complex) setup/config opts into that, by exposing the static function Configure
-    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::Configure(cx, obj); }) {
-      Derived::Configure(cx, obj);
+    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj, WrappedType *t) {
+                    Derived::Configure(cx, obj, t);
+                  }) {
+      Derived::Configure(cx, obj, ptr);
     }
 
     // Types with properties exposes a static JSPropertySpec[] and it gets defined here
@@ -106,13 +152,20 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     return obj;
   }
 
+  static Derived *
+  GetThis(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+  {
+    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+    return Get(args.thisv().toObject());
+  }
+
   // Hand out a new reference to the debugger core object
   constexpr Reference
   Get() noexcept
   {
-    JSObject *thisJs = Self::AsObject(this);
+    JSObject *thisJs = Self::AsObject(static_cast<Derived *>(this));
     Untraced<WrappedType> pObj{JS::GetMaybePtrFromReservedSlot<WrappedType>(thisJs, Derived::ThisPointer)};
-    return pObj.Take();
+    return pObj.CloneReference();
   }
 
   // Hand out a new reference to the debugger core object
@@ -120,7 +173,7 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
   Get(JSObject *This) noexcept
   {
     Untraced<WrappedType> pObj{JS::GetMaybePtrFromReservedSlot<WrappedType>(This, Derived::ThisPointer)};
-    return pObj.Take();
+    return pObj.CloneReference();
   }
 
   // Full type of JSObject is not known, so we can't inherit.

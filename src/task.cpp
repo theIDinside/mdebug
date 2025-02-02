@@ -57,16 +57,15 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
     : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), initialized(false),
-      mRegisterCacheDirty(true), mInstructionPointerDirty(true), exited(false), reaped(false), regs(),
-      mBreakpointLocationStatus(), mTaskCallstack(nullptr), mSupervisor(nullptr)
+      exited(false), reaped(false), regs(), mBreakpointLocationStatus(), mTaskCallstack(nullptr),
+      mSupervisor(nullptr)
 {
 }
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
     : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
-      initialized(true), mRegisterCacheDirty(true), mInstructionPointerDirty(true), exited(false), reaped(false),
-      regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()), mBreakpointLocationStatus(),
-      mSupervisor(supervisor.GetSupervisor())
+      initialized(true), exited(false), reaped(false), regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()),
+      mBreakpointLocationStatus(), mSupervisor(supervisor.GetSupervisor())
 {
   mTaskCallstack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
 }

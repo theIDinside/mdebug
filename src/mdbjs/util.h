@@ -15,6 +15,8 @@ mdb::Expected<JS::UniqueChars, std::string_view> ToString(JSContext *cx,
 
 bool ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) noexcept;
 
+JSString *PrepareString(JSContext *cx, std::string_view string) noexcept;
+
 } // namespace mdb::js
 template <> struct fmt::formatter<JSErrorReport> : public Default<JSErrorReport>
 {

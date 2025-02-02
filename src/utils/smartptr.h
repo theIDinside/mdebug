@@ -4,6 +4,7 @@
 // Base class / mixin for internal reference counting
 #include "typedefs.h"
 #include <atomic>
+#include <common.h>
 #include <memory>
 #include <type_traits>
 
@@ -347,6 +348,8 @@ template <typename T> class Untraced
   Drop() noexcept
   {
     mUnManged->DecreaseUseCount();
+    T *result{nullptr};
+    std::swap(result, mUnManged);
   }
 
   constexpr T *
@@ -355,6 +358,13 @@ template <typename T> class Untraced
     T *result{nullptr};
     std::swap(result, mUnManged);
     return result;
+  }
+
+  // Also only callable from RefPtrJsObject, that manually manages reference counting.
+  constexpr RcHandle<T>
+  CloneReference() noexcept
+  {
+    return RcHandle<T>{Forget()};
   }
 
   using Type = T;

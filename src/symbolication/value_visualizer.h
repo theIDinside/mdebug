@@ -9,6 +9,7 @@
 #include <vector>
 
 namespace mdb {
+class VariableContext;
 class TraceeController;
 class SymbolFile;
 } // namespace mdb
@@ -24,32 +25,6 @@ using Children = std::span<Ref<Value>>;
 using ChildStorage = std::vector<Ref<Value>>;
 using VariablesReference = int;
 
-/// This type and all it's customized derived variants
-/// define and describe how to build, or "resolve" additional
-/// values from a given value.
-class ValueResolver
-{
-protected:
-  bool mIsCached{false};
-  TypePtr mType;
-  SymbolFile *mSymbolFile;
-  ValuePtr mValuePointer;
-  ChildStorage mChildren;
-
-public:
-  ValueResolver(SymbolFile *objectFile, ValuePtr val, TypePtr type) noexcept;
-  virtual ~ValueResolver() noexcept = default;
-
-  Children Resolve(TraceeController &tc, std::optional<u32> start, std::optional<u32> count) noexcept;
-  Value *GetValue() noexcept;
-
-  virtual std::optional<Children> HasCached(std::optional<u32> start, std::optional<u32> count) noexcept;
-
-private:
-  virtual Children GetChildren(TraceeController &tc, std::optional<u32> start,
-                               std::optional<u32> count) noexcept = 0;
-};
-
 struct ValueRange
 {
   std::optional<u32> start;
@@ -59,28 +34,28 @@ struct ValueRange
 class IValueResolve
 {
 public:
-  virtual std::vector<Ref<Value>> Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile,
+  virtual std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
                                           ValueRange valueRange = {}) noexcept = 0;
 };
 
 class ResolveReference final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile,
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
                                   ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveCString final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile,
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
                                   ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveArray final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(Value &value, TraceeController &tc, SymbolFile *symbolFile,
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
                                   ValueRange valueRange = {}) noexcept final;
 };
 
