@@ -5,6 +5,21 @@
 #include <task.h>
 
 namespace mdb {
+VariableContext::VariableContext(TaskInfo *task, SymbolFile *symbolFile, VariableReferenceId frameId,
+                                 VariableReferenceId varRefId, ContextType type) noexcept
+    : mTask(task), mSymbolFile(symbolFile), mFrameId(frameId), mId(varRefId), mType(type)
+{
+}
+
+bool
+VariableContext::IsLiveReference() const noexcept
+{
+  if (!mTask) {
+    return false;
+  }
+  return !mTask->VariableReferenceIsStale(mId);
+}
+
 bool
 VariableContext::IsValidContext() const noexcept
 {
@@ -43,4 +58,12 @@ VariableContext::GetValue() const noexcept
 {
   return mTask->GetVariablesReference(mId);
 }
+
+// static
+std::shared_ptr<VariableContext>
+VariableContext::FromFrame(VariableReferenceId varRefId, ContextType type, const sym::Frame &frame) noexcept
+{
+  return std::make_shared<VariableContext>(frame.Task(), frame.GetSymbolFile(), frame.FrameId(), varRefId, type);
+}
+
 } // namespace mdb

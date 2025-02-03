@@ -42,6 +42,28 @@ TaskInfo::js_frame(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 
 /* static */
 bool
+TaskInfo::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  char buf[512];
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto task = Get(callee.get());
+  auto it = fmt::format_to(buf, "thread {}.{}: stopped={}", task->GetTaskLeaderTid().value_or(-1), task->mTid,
+                           task->is_stopped());
+  *it = 0;
+  auto length = std::distance(buf, it + 1);
+  // Define your custom string representation
+  JSString *str = JS_NewStringCopyN(cx, buf, length);
+  if (!str) {
+    return false;
+  }
+
+  args.rval().setString(str);
+  return true;
+}
+
+/* static */
+bool
 TaskInfo::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);

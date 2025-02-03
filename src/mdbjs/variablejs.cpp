@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "variablejs.h"
 #include "js/ArrayBuffer.h"
 #include "js/ArrayBufferMaybeShared.h"
@@ -26,8 +27,8 @@ Variable::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto v = JS::GetReservedSlot(callee, Slots::VariablesReference);
-  args.rval().set(v);
+  auto var = Get(callee.get());
+  args.rval().setBigInt(JS::NumberToBigInt(cx, var->ReferenceId()));
   return true;
 }
 
@@ -54,6 +55,22 @@ Variable::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::RootedObject callee(cx, &args.thisv().toObject());
   auto var = Get(callee.get());
   var->GetVisualizer()->Serialize(*var, var->mName, var->ReferenceId(), nullptr);
+}
+
+/* static */
+bool
+Variable::js_type_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto var = Get(callee.get());
+  auto str = PrepareString(cx, var->GetType()->mName);
+  if (!str) {
+    JS_ReportOutOfMemory(cx);
+    return false;
+  }
+  args.rval().setString(str);
+  return true;
 }
 
 /* static */ bool
@@ -90,17 +107,33 @@ Variable::js_bytes(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 
   return true;
 }
-/* static */ bool
-Variable::js_dereference(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+
+/* static */
+bool
+Variable::js_is_live(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
-  TODO(__PRETTY_FUNCTION__);
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto var = Get(callee.get());
+
+  args.rval().setBoolean(var->IsLive());
+  return true;
 }
 
 /* static */
-void
-Variable::Finalize(JSContext *cx, JS::Handle<JSObject *> object, sym::Value *value, int variablesReference)
+bool
+Variable::js_dereference(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
-  JS_SetReservedSlot(object, Slots::VariablesReference, JS::Int32Value(variablesReference));
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto var = Get(callee.get());
+  if (!var->GetType()->IsReference()) {
+    JS_ReportErrorASCII(cx, "value is not a reference");
+    return false;
+  }
+
+  JS_ReportErrorASCII(cx, "dereference not implemented yet");
+  return false;
 }
 
 bool

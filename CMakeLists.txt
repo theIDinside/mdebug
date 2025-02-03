@@ -185,6 +185,8 @@ set(MIDAS_SOURCES
   src/mdbjs/jsobject.h
   src/mdbjs/mdbjs.cpp
   src/mdbjs/mdbjs.h
+  src/mdbjs/supervisorjs.cpp
+  src/mdbjs/supervisorjs.h
   src/mdbjs/taskinfojs.cpp
   src/mdbjs/taskinfojs.h
   src/mdbjs/util.cpp

@@ -189,6 +189,113 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
     return reinterpret_cast<JSObject *>(obj);
   }
 };
+
+// Implement a Javascript type for `WrappedType`. The pointed to core object is a raw pointer type, unlike
+// `RefPtrJsObject` which works on `Ref<T>` instead of `T*`. For some types this is safe; like TraceeController,
+// which is a type for objects, when created will never be destroyed.
+template <typename Derived, typename WrappedType, StringLiteral string> struct PtrJsObject
+{
+  // Unfortunately we can't pass WrappedType via Derived. Oh my lord meta programming and compile time programming
+  // in C++ is trash, 40 years later.
+  using Self = RefPtrJsObject<Derived, WrappedType, string>;
+  using Reference = WrappedType *;
+
+  static constexpr const char *Name = string.CString();
+
+  // When a CustomObject is traced, it must trace the stored box.
+  static constexpr void
+  TraceSubobjects(JSTracer *trc, JSObject *obj) noexcept
+    requires(HasTraceFunction<Derived>)
+  {
+    FromObject(obj)->trace(trc);
+  }
+
+  static constexpr bool
+  ResolveProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *resolved) noexcept
+  {
+    JS::Rooted<JSObject *> object{cx, obj};
+    return FromObject(object)->resolve(cx, id, resolved);
+  }
+
+  static consteval JSClassOps
+  ClassOps() noexcept
+  {
+    // This type will never have a `finalize` method because it will never actually own the object.
+    if constexpr (HasResolve<Derived>) {
+      return JSClassOps{.resolve = &ResolveProperty, .finalize = nullptr, .trace = &TraceSubobjects};
+    } else {
+      return JSClassOps{.resolve = nullptr, .finalize = nullptr, .trace = &TraceSubobjects};
+    }
+  }
+
+  static constexpr JSClassOps classOps = ClassOps();
+
+  static constexpr JSClass clasp = {.name = Name,
+                                    .flags =
+                                      JSCLASS_HAS_RESERVED_SLOTS(Derived::SlotCount) | JSCLASS_FOREGROUND_FINALIZE,
+                                    .cOps = &classOps};
+
+  template <typename... Args>
+  static JSObject *
+  CustomCreate(JSContext *cx, Reference coreObject, Args &&...args) noexcept
+  {
+    JS::Rooted<JSObject *> jsObject{cx, Create(cx, coreObject)};
+    Derived::Finalize(cx, jsObject, coreObject, std::forward<Args>(args)...);
+    return jsObject;
+  }
+
+  static JSObject *
+  Create(JSContext *cx, const Reference object) noexcept
+  {
+    JS::Rooted<JSObject *> obj(cx, JS_NewObject(cx, &clasp));
+    if (!obj) {
+      return nullptr;
+    }
+
+    JS_SetReservedSlot(obj, Derived::ThisPointer, JS::PrivateValue(object));
+
+    // Types with properties exposes a static JSPropertySpec[] and it gets defined here
+    if constexpr (requires { Derived::PropertiesSpec; }) {
+      JS_DefineProperties(cx, obj, Derived::PropertiesSpec);
+    }
+
+    // Types with methods exposes a static JSFunctionSpec[] and it gets defined here
+    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::FunctionSpec; }) {
+      JS_DefineFunctions(cx, obj, Derived::FunctionSpec);
+    }
+
+    return obj;
+  }
+
+  // Hand out a new reference to the debugger core object
+  constexpr Reference
+  Get() noexcept
+  {
+    JSObject *thisJs = Self::AsObject(static_cast<Derived *>(this));
+    return Get(thisJs);
+  }
+
+  // Hand out a new reference to the debugger core object
+  static constexpr Reference
+  Get(JSObject *This) noexcept
+  {
+    return JS::GetMaybePtrFromReservedSlot<WrappedType>(This, Derived::ThisPointer);
+  }
+
+  // Full type of JSObject is not known, so we can't inherit.
+  static Derived *
+  FromObject(JSObject *obj)
+  {
+    return reinterpret_cast<Derived *>(obj);
+  }
+
+  static JSObject *
+  AsObject(Derived *obj)
+  {
+    return reinterpret_cast<JSObject *>(obj);
+  }
+};
+
 } // namespace mdb::js
 
 #define JS_METHOD(METHOD_NAME) static bool METHOD_NAME(JSContext *cx, unsigned argc, JS::Value *vp) noexcept

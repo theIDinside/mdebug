@@ -22,6 +22,7 @@ public:
   sym::Frame mFrame;
 
   FrameLookupHandle(Ref<TaskInfo> task, sym::Frame frame) noexcept : mTask(std::move(task)), mFrame(frame) {}
+  bool IsValid() noexcept;
 };
 }; // namespace mdb
 

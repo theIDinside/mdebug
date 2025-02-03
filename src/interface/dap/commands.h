@@ -741,11 +741,11 @@ struct EvaluateResponse final : public UIResult
 
 struct Variables final : public UICommand
 {
-  Variables(u64 seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
+  Variables(u64 seq, VariableReferenceId var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
   UIResultPtr Execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
-  int var_ref;
+  VariableReferenceId mVariablesReferenceId;
   std::optional<u32> start;
   std::optional<u32> count;
   DEFINE_NAME("variables");

@@ -107,6 +107,7 @@ public:
 
   InsideRange IsInside(TPtr<void> addr) const noexcept;
   std::optional<std::string_view> Name() const noexcept;
+  std::optional<const char *> CStringName() const noexcept;
   // checks if this Frame has symbol info, whether that be of type Full or Elf
   bool HasSymbolInfo() const noexcept;
   FrameType GetFrameType() const noexcept;
@@ -114,6 +115,7 @@ public:
   int FrameLevel() const noexcept;
   AddrPtr FramePc() const noexcept;
   SymbolFile *GetSymbolFile() const noexcept;
+  TaskInfo *Task() const noexcept;
 
   sym::FunctionSymbol &FullSymbolInfo() noexcept;
 

@@ -47,7 +47,10 @@ class RuntimeGlobal
 
 #define FOR_EACH_FN(FN)                                                                                           \
   FN(Log, "log", 2, 0)                                                                                            \
-  FN(GetSupervisor, "supervisor", 1, 0)
+  FN(GetSupervisor, "supervisor", 1, 0)                                                                           \
+  FN(GetTask, "getThread", 1, 0)                                                                                  \
+  FN(PrintThreads, "listThreads", 1, 0)                                                                           \
+  FN(PrintProcesses, "procs", 1, 0)
 
 #define DEFINE_FN(FUNC, ...) static bool FUNC(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
   FOR_EACH_FN(DEFINE_FN);

@@ -3,13 +3,12 @@
 
 #include <charconv>
 #include <cstdint>
+#include <fmt/core.h>
+#include <functional>
 #include <optional>
 #include <type_traits>
-#include <functional>
-#include <fmt/core.h>
 
-template<typename T>
-concept Integral = std::is_integral_v<T>;
+template <typename T> concept Integral = std::is_integral_v<T>;
 
 template <typename T> class TraceePointer
 {

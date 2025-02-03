@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "interface/dap/types.h"
 #include "symbolication/variable_reference.h"
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
@@ -34,26 +33,6 @@ enum class ValueDisplayType
   Structured,
 };
 
-struct ValueDescriptor
-{
-  enum class Kind
-  {
-    Symbol,
-    Field,
-    AbsoluteAddress
-  } kind;
-  union
-  {
-    Symbol *symbol;
-    Field *field;
-    Type *type;
-  };
-
-  ValueDescriptor(Symbol *symbol) noexcept : kind(Kind::Symbol), symbol(symbol) {}
-  ValueDescriptor(Field *field) noexcept : kind(Kind::Field), field(field) {}
-  ValueDescriptor(Type *type) noexcept : kind(Kind::AbsoluteAddress), type(type) {}
-};
-
 class MemoryContentsObject;
 class LazyMemoryContentsObject;
 
@@ -65,6 +44,7 @@ enum class ValueError
 };
 
 class ValueResolver;
+using VarContext = std::shared_ptr<VariableContext>;
 
 class Value
 {
@@ -75,17 +55,17 @@ class Value
   // contructor for `Values` that represent a block symbol (so a frame argument, stack variable, static / global
   // variable)
 
-  Value(VariableReferenceId variableReference, std::string_view name, Symbol &kind, u32 memContentsOffset,
+  Value(VarContext context, std::string_view name, Symbol &kind, u32 memContentsOffset,
         std::shared_ptr<MemoryContentsObject> &&valueObject,
         DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   // constructor for `Value`s that represent a member variable (possibly of some other `Value`)
-  Value(VariableReferenceId variableReference, std::string_view memberName, Field &kind, u32 memContentsOffset,
+  Value(VarContext context, std::string_view memberName, Field &kind, u32 memContentsOffset,
         std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
 
-  Value(VariableReferenceId variableReference, Type &type, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
-  Value(VariableReferenceId variableReference, std::string &&name, Type &type, u32 memContentsOffset,
+  Value(VarContext context, Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
+        DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VarContext context, std::string &&name, Type &type, u32 memContentsOffset,
         std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   template <typename... Args>
@@ -94,6 +74,11 @@ class Value
   {
     return new Value{std::forward<Args>(args)...};
   }
+
+  // Union constructors
+  void SetKind(Symbol *symbol) noexcept;
+  void SetKind(Field *field) noexcept;
+  void SetKind(Type *type) noexcept;
 
 public:
   ~Value() noexcept;
@@ -116,13 +101,26 @@ public:
   bool HasMember(std::string_view memberName) noexcept;
   Ref<Value> GetMember(std::string_view memberName) noexcept;
   VariableReferenceId ReferenceId() const noexcept;
+  bool IsLive() const noexcept;
+  void RegisterContext() noexcept;
 
   Immutable<std::string> mName;
   Immutable<u32> mMemoryContentsOffsets;
 
 private:
   // This value is either a block symbol (e.g. a variable on the stack) or a member of some block symbol (a field)
-  ValueDescriptor mValueOrigin;
+  enum class ValueKind
+  {
+    Symbol,
+    Field,
+    AbsoluteAddress
+  } kind;
+  union
+  {
+    Symbol *uSymbol;
+    Field *uField;
+    Type *uType;
+  };
   // The actual backing storage for this value. For instance, we may want to create multiple values out of a single
   // range of bytes in the target which is the case for struct Foo { int a; int b; } foo_val; we may want a Value
   // for a and b. The `MemoryContentsObject` is the storage for foo_val
@@ -135,7 +133,7 @@ private:
   //  allocator. PMR galore!
   std::shared_ptr<MemoryContentsObject> mValueObject;
   DebugAdapterSerializer *mVisualizer{nullptr};
-  VariableReferenceId mVariableReference;
+  VarContext mContext;
 };
 
 enum class ReadResultInfo

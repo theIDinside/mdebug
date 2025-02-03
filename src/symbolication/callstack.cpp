@@ -82,6 +82,12 @@ Frame::GetSymbolFile() const noexcept
   return mOwningSymbolFile;
 }
 
+TaskInfo *
+Frame::Task() const noexcept
+{
+  return mTask->ptr;
+}
+
 sym::FunctionSymbol &
 Frame::FullSymbolInfo() noexcept
 {
@@ -119,7 +125,7 @@ Frame::Scopes() noexcept
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::Get().NewVariablesReference();
       Tracer::Get().SetVariableContext(
-        {mTask->ptr, mOwningSymbolFile, static_cast<u32>(FrameId()), static_cast<u16>(key), ContextType::Scope});
+        std::make_shared<VariableContext>(mTask->ptr, mOwningSymbolFile, FrameId(), key, ContextType::Scope));
       mFrameScopes[i].variables_reference = key;
     }
   }
@@ -192,6 +198,12 @@ std::optional<std::string_view>
 Frame::Name() const noexcept
 {
   return GetFunctionName();
+}
+
+std::optional<const char *>
+Frame::CStringName() const noexcept
+{
+  return Name().transform([](auto view) { return view.data(); });
 }
 
 std::optional<std::string_view>

@@ -33,7 +33,7 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
     if (!memory.is_ok()) {
       auto t = value.GetType()->TypeDescribingLayoutOfThis();
       mResults.push_back(
-        Ref<Value>::MakeShared(0u, *t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
+        Ref<Value>::MakeShared(nullptr, *t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
       return mResults;
     }
     auto mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
@@ -42,22 +42,22 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
     // actual `T` type behind the reference
     auto layout_type = value.GetType()->TypeDescribingLayoutOfThis();
 
-    const auto variablesReference =
-      layout_type->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(context);
+    auto clonedContext = layout_type->IsPrimitive() ? VariableContext::CloneFrom(0, context)
+                                                    : Tracer::Get().CloneFromVariableContext(context);
 
     if (layout_type->IsArrayType()) {
-      mResults.push_back(Ref<Value>::MakeShared(variablesReference, *layout_type, 0u, mIndirectValueObject,
+      mResults.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
                                                 Tracer::GetSerializer<sym::ArrayVisualizer>()));
     } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
-      mResults.push_back(Ref<Value>::MakeShared(variablesReference, *layout_type, 0u, mIndirectValueObject,
+      mResults.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
                                                 Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
     } else {
-      mResults.push_back(Ref<Value>::MakeShared(variablesReference, *layout_type, 0u, mIndirectValueObject,
+      mResults.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
                                                 Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
     }
     ObjectFile::InitializeDataVisualizer(*mResults.back());
-    if (variablesReference > 0) {
-      context.mTask->CacheValueObject(variablesReference, mResults.back());
+    if (clonedContext->mId > 0) {
+      clonedContext->mTask->CacheValueObject(clonedContext->mId, mResults.back());
     }
   }
   return mResults;
@@ -75,8 +75,8 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
       sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjustedAddress, requestedLength);
     if (!referencedMemory.is_ok()) {
       auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
-      mResults.push_back(
-        Ref<Value>::MakeShared(0u, *layoutType, 0u, nullptr, Tracer::GetSerializer<InvalidValueVisualizer>()));
+      mResults.push_back(Ref<Value>::MakeShared(nullptr, *layoutType, 0u, nullptr,
+                                                Tracer::GetSerializer<InvalidValueVisualizer>()));
       return mResults;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
@@ -86,8 +86,9 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
 
     // actual `char` type
     auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
-    auto stringValue = Ref<sym::Value>::MakeShared(0u, *layoutType, 0u, indirectValueObject,
-                                                   Tracer::GetSerializer<CStringVisualizer>());
+    auto stringValue =
+      Ref<sym::Value>::MakeShared(VariableContext::CloneFrom(0, context), *layoutType, 0u, indirectValueObject,
+                                  Tracer::GetSerializer<CStringVisualizer>());
 
     mResults.push_back(std::move(stringValue));
   }
@@ -124,13 +125,14 @@ ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, Va
   for (auto i = 0u; i < (endIndex - startIndex); ++i) {
     const auto current_address = desiredFirstElementAddress + (elementTypeSize * i);
     const auto memoryObjectOffset = i * elementTypeSize;
-    const auto varRefId = elementsType->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(context);
+    auto varContext = elementsType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
+                                                  : Tracer::Get().CloneFromVariableContext(context);
     mResults.emplace_back(
-      Ref<Value>::MakeShared(varRefId, std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
+      Ref<Value>::MakeShared(varContext, std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
 
     ObjectFile::InitializeDataVisualizer(*mResults.back());
-    if (varRefId > 0) {
-      context.mTask->CacheValueObject(varRefId, mResults.back());
+    if (varContext->mId > 0) {
+      context.mTask->CacheValueObject(varContext->mId, mResults.back());
     }
   }
 

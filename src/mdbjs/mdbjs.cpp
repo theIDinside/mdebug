@@ -16,7 +16,9 @@
 #include "js/Warnings.h"
 #include "jsfriendapi.h"
 #include "mdbjs/event_dispatcher.h"
+#include "mdbjs/taskinfojs.h"
 #include "mdbjs/util.h"
+#include "supervisor.h"
 #include <jsapi.h>
 #include <tracer.h>
 #include <utils/logger.h>
@@ -55,6 +57,73 @@ bool
 RuntimeGlobal::GetSupervisor(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
   TODO("Implement RuntimeGlobal::GetSupervisor");
+}
+
+bool
+RuntimeGlobal::GetTask(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args[0].isInt32()) {
+    JS_ReportErrorASCII(cx, "Argument to get_task must be an int32.");
+    return false;
+  }
+  auto taskInfo = Tracer::Get().GetTask(args[0].toInt32());
+  if (!taskInfo) {
+    args.rval().setNull();
+    return true;
+  }
+  JS::Rooted<JSObject *> task(cx, JSTaskInfo::Create(cx, taskInfo));
+  args.rval().setObject(*task);
+  return true;
+}
+
+bool
+RuntimeGlobal::PrintThreads(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args[0].isInt32()) {
+    JS_ReportErrorASCII(cx, "Argument to list_threads must be an int32.");
+    return false;
+  }
+  auto taskInfo = Tracer::Get().GetTask(args[0].toInt32());
+  if (!taskInfo) {
+    args.rval().setNull();
+    return true;
+  }
+  JS::Rooted<JSObject *> task(cx, JSTaskInfo::Create(cx, taskInfo));
+  args.rval().setObject(*task);
+  return true;
+}
+
+bool
+RuntimeGlobal::PrintProcesses(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+
+  if (args.length() > 0 && !args[0].isBoolean()) {
+    JS_ReportErrorASCII(cx, "Argument to list_threads must be an int32.");
+    return false;
+  }
+
+  bool escapeString = args.length() > 0 ? args[0].toBoolean() : true;
+  std::string buffer;
+  buffer.reserve(4096);
+  // Define your custom string representation
+
+  auto iterator = std::back_inserter(buffer);
+  for (auto supervisor : Tracer::Get().GetAllProcesses()) {
+    if (escapeString) {
+      iterator = fmt::format_to(iterator, R"(supervisor {}: threads={}, exited={}\n)", supervisor->TaskLeaderTid(),
+                                supervisor->GetThreads().size(), supervisor->IsExited());
+    } else {
+      iterator = fmt::format_to(iterator, "supervisor {}: threads={}, exited={}\n", supervisor->TaskLeaderTid(),
+                                supervisor->GetThreads().size(), supervisor->IsExited());
+    }
+  }
+
+  JSString *str = JS_NewStringCopyN(cx, buffer.data(), buffer.size());
+  args.rval().setString(str);
+  return true;
 }
 
 bool

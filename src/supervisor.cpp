@@ -813,14 +813,24 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
 
         for (const auto &e : foundEntries | std::views::filter(predicate)) {
           const auto pc = e.pc + symbol_file->mBaseAddress;
+          if (sourceSpec.uSource->mSpec.log_message) {
+            auto user = mUserBreakpoints.create_loc_user<Logpoint>(
+              *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader,
+              std::string_view{sourceSpec.uSource->mSpec.log_message.value()}, sourceSpec.Clone());
+            map[sourceSpec].push_back(user->mId);
+            DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}", mTaskLeader,
+                   sourceCodeFile->mFullPath.FileName(), user->mId, pc,
+                   user->GetLocation() != nullptr ? *user->GetLocation()->original_byte : u8{0});
+          } else {
+            auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
+              *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader, LocationUserKind::Source,
+              sourceSpec.Clone());
+            map[sourceSpec].push_back(user->mId);
+            DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}", mTaskLeader,
+                   sourceCodeFile->mFullPath.FileName(), user->mId, pc,
+                   user->GetLocation() != nullptr ? *user->GetLocation()->original_byte : u8{0});
+          }
 
-          auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-            *this, GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e), mTaskLeader, LocationUserKind::Source,
-            sourceSpec.Clone());
-          map[sourceSpec].push_back(user->mId);
-          DBGLOG(core, "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}", mTaskLeader,
-                 sourceCodeFile->mFullPath.FileName(), user->mId, pc,
-                 user->GetLocation() != nullptr ? *user->GetLocation()->original_byte : u8{0});
           if (const auto it = not_set.find(sourceSpec); it != std::end(not_set)) {
             not_set.erase(it);
           }
@@ -835,9 +845,16 @@ TraceeController::UpdateSourceBreakpoints(const std::filesystem::path &sourceFil
   // set User Breakpoints without breakpoint location; i.e. "pending" breakpoints, in GDB nomenclature
   for (auto &&srcbp : not_set) {
     auto spec = srcbp.Clone();
-    auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
-      *this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader, LocationUserKind::Source, std::move(spec));
-    map[srcbp].push_back(user->mId);
+    if (spec->uSource->mSpec.log_message) {
+      auto user = mUserBreakpoints.create_loc_user<Logpoint>(
+        *this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader,
+        std::string_view{spec->uSource->mSpec.log_message.value()}, std::move(spec));
+      map[srcbp].push_back(user->mId);
+    } else {
+      auto user = mUserBreakpoints.create_loc_user<Breakpoint>(
+        *this, BpErr{ResolveError{.spec = spec.get()}}, mTaskLeader, LocationUserKind::Source, std::move(spec));
+      map[srcbp].push_back(user->mId);
+    }
   }
 
   for (const auto &bp : remove) {
@@ -1432,11 +1449,7 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
     }
     auto &[symbol, obj] = result.value();
     const auto id = Tracer::Get().NewVariablesReference();
-    Tracer::Get().SetVariableContext(VariableContext{.mTask = &task,
-                                                     .mSymbolFile = obj,
-                                                     .mFrameId = id,
-                                                     .mId = static_cast<u16>(id),
-                                                     .mType = ContextType::Frame});
+    Tracer::Get().SetVariableContext(std::make_shared<VariableContext>(&task, obj, id, id, ContextType::Frame));
     if (symbol) {
       callStack.PushFrame(obj, task, depth, id, i.as_void(), symbol);
     } else {
@@ -1822,19 +1835,19 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
     CreateNewTask(evt->tid, false);
     task = GetTaskByTid(evt->tid);
   }
-  if (task) {
-    task->mLastWaitStatus.signal = evt->signal;
-    if (!evt->registers->empty()) {
-      ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
-      task->StoreToRegisterCache(evt->registers);
-      for (const auto &p : evt->registers) {
-        if (p.first == 16) {
-          task->mInstructionPointerDirty = false;
-        }
+  ASSERT(task, "no task when handling a task event?");
+  task->mLastWaitStatus.signal = evt->signal;
+  if (!evt->registers->empty()) {
+    ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
+    task->StoreToRegisterCache(evt->registers);
+    for (const auto &p : evt->registers) {
+      if (p.first == 16) {
+        task->mInstructionPointerDirty = false;
       }
     }
-    task->collect_stop();
   }
+  task->collect_stop();
+  task->SetValueLiveness(Tracer::Get().GetCurrentVariableReferenceBoundary());
   if (IsSessionAllStopMode()) {
     for (const auto &entry : GetThreads()) {
       entry.mTask->set_stop();

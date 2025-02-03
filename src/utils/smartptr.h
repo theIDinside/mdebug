@@ -119,6 +119,12 @@ public:
 
     return RcHandle{mPtr};
   }
+
+  constexpr
+  operator bool() const noexcept
+  {
+    return mPtr != nullptr;
+  }
 };
 
 template <typename T> concept HasControlBlock = requires(T t) { t.mControlBlock; };

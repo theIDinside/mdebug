@@ -6,6 +6,7 @@
 #include "interface/dap/types.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/callstack.h"
+#include "symbolication/variable_reference.h"
 #include "utils/smartptr.h"
 #include <linux/sched.h>
 #include <mdbsys/ptrace.h>
@@ -108,7 +109,8 @@ private:
   TaskRegisters regs;
   std::unique_ptr<sym::CallStack> mTaskCallstack;
   std::vector<u32> variableReferences{};
-  std::unordered_map<u32, Ref<sym::Value>> mVariablesCache{};
+  VariableReferenceId mLivenessBoundary;
+  std::unordered_map<VariableReferenceId, Ref<sym::Value>> mVariablesCache{};
   TraceeController *mSupervisor;
 
   // Unititialized thread constructor
@@ -175,8 +177,16 @@ public:
   WaitStatus pending_wait_status() const noexcept;
 
   sym::CallStack &get_callstack() noexcept;
-  void add_reference(u32 id) noexcept;
-  void CacheValueObject(u32 ref, Ref<sym::Value> value) noexcept;
+  // Add the `VariableReferenceId` to this task, so that once the task is resumed, it can instruct MDB to destroy
+  // it's variable context's mapped to these id's (or at least clear it from it's application wide cache, so they
+  // no longer can be reached via an ID). If a value in javascript is holding a reference to a variable context,
+  // that's fine, it means that value is now no longer "live" (since the task was resumed, we can't guarantee it's
+  // correctness or liveness anymore). But it's a shared pointer, because, that value may still want to query the
+  // task about things, even when the value itself is stale.
+  void AddReference(VariableReferenceId id) noexcept;
+  bool VariableReferenceIsStale(VariableReferenceId value) const noexcept;
+  void SetValueLiveness(VariableReferenceId value) noexcept;
+  void CacheValueObject(VariableReferenceId ref, Ref<sym::Value> value) noexcept;
   Ref<sym::Value> GetVariablesReference(u32 ref) noexcept;
   void RequestedStop() noexcept;
   void ClearRequestedStopFlag() noexcept;

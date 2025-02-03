@@ -90,7 +90,7 @@ enum class ScopeType : u8
 struct Scope
 {
   ScopeType type{};
-  u32 variables_reference{};
+  VariableReferenceId variables_reference{};
 
   constexpr std::string_view
   name() const noexcept

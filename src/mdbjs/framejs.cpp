@@ -1,6 +1,7 @@
 #include "framejs.h"
 #include "js/AllocPolicy.h"
 #include "js/Array.h"
+#include "js/ErrorReport.h"
 #include "js/TypeDecls.h"
 #include "mdbjs/util.h"
 #include "mdbjs/variablejs.h"
@@ -9,6 +10,12 @@
 #include <symbolication/objfile.h>
 
 namespace mdb {
+
+bool
+FrameLookupHandle::IsValid() noexcept
+{
+  return !mTask->VariableReferenceIsStale(mFrame.FrameId());
+}
 
 } // namespace mdb
 
@@ -31,6 +38,11 @@ Frame::js_locals(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS ::CallArgs args = JS ::CallArgsFromVp(argc, vp);
   JS ::RootedObject callee(cx, &args.thisv().toObject());
   auto frameJs = Get(callee.get());
+  if (!frameJs->IsValid()) {
+    JS_ReportErrorASCII(cx, "frame liveness not guaranteed for %s. Request new stack frames & variables.",
+                        frameJs->mFrame.CStringName().value_or("<unknown frame name>"));
+    return false;
+  }
   auto symbolFile = frameJs->mFrame.GetSymbolFile();
   auto variables =
     symbolFile->GetVariables(*frameJs->mTask->GetSupervisor(), frameJs->mFrame, sym::VariableSet::Locals);
@@ -38,8 +50,7 @@ Frame::js_locals(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::Rooted<JSObject *> arrayObject{cx, JS::NewArrayObject(cx, variables.size())};
 
   for (auto i = 0u; i < variables.size(); ++i) {
-    JS::Rooted<JSObject *> jsVariable{
-      cx, mdb::js::Variable::CustomCreate(cx, variables[i], variables[i]->ReferenceId())};
+    JS::Rooted<JSObject *> jsVariable{cx, mdb::js::Variable::Create(cx, variables[i])};
     JS_SetElement(cx, arrayObject, i, jsVariable);
   }
 
@@ -54,6 +65,7 @@ Frame::js_arguments(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS ::CallArgs args = JS ::CallArgsFromVp(argc, vp);
   JS ::RootedObject callee(cx, &args.thisv().toObject());
   auto frameJs = Get(callee.get());
+
   auto symbolFile = frameJs->mFrame.GetSymbolFile();
   auto variables =
     symbolFile->GetVariables(*frameJs->mTask->GetSupervisor(), frameJs->mFrame, sym::VariableSet::Arguments);
@@ -61,8 +73,7 @@ Frame::js_arguments(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::Rooted<JSObject *> arrayObject{cx, JS::NewArrayObject(cx, variables.size())};
 
   for (auto i = 0u; i < variables.size(); ++i) {
-    JS::Rooted<JSObject *> jsVariable{
-      cx, mdb::js::Variable::CustomCreate(cx, variables[i], variables[i]->ReferenceId())};
+    JS::Rooted<JSObject *> jsVariable{cx, mdb::js::Variable::Create(cx, variables[i])};
     JS_SetElement(cx, arrayObject, i, jsVariable);
   }
 

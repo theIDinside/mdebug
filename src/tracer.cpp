@@ -68,7 +68,6 @@ Tracer::Tracer(sys::DebuggerConfiguration init) noexcept
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
          (uintptr_t)this, (uintptr_t)sTracerInstance);
   mConsoleCommandInterpreter = new ConsoleCommandInterpreter{};
-  SetupConsoleCommands();
 }
 
 void
@@ -297,117 +296,6 @@ Tracer::HandleInitEvent(TraceEvent *evt) noexcept
 
 #define OK_RESULT(res)                                                                                            \
   ConsoleCommandResult { true, std::move(res) }
-
-void
-Tracer::SetupConsoleCommands() noexcept
-{
-  auto threadsCommand =
-    GenericCommand::CreateCommand("threads", [this](auto args, auto *allocator) -> ConsoleCommandResult {
-      std::pmr::string evalResult{allocator};
-      Pid p = -1;
-      if (!args.empty()) {
-        auto param = mdb::StrToPid(args[0], false);
-        ReturnEvalExprError(!param.has_value(), "Could not parse pid from {}", args[0]);
-        p = param.value();
-      }
-
-      for (const auto &[tid, task] : mDebugSessionTasks) {
-        if ((p != -1 && task->GetSupervisor()->TaskLeaderTid() != p) || task->exited) {
-          continue;
-        }
-        WriteConsoleLine(evalResult, "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}",
-                         task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
-                         bool{task->mUserVisibleStop}, bool{task->mTracerVisibleStop},
-                         to_str(task->mLastWaitStatus.ws), task->mLastWaitStatus.signal);
-      }
-
-      return OK_RESULT(evalResult);
-    });
-
-  mConsoleCommandInterpreter->RegisterConsoleCommand(
-    "stopped",
-    GenericCommand::CreateCommand(
-      "stopped", [&mDebugSessionTasks = mDebugSessionTasks](auto args, auto *allocator) -> ConsoleCommandResult {
-        std::pmr::string evalResult{allocator};
-        evalResult.reserve(4096);
-        std::optional<int> filter = ParseProcessId(args.empty() ? "" : args[0], false);
-        namespace vw = std::ranges::views;
-
-        constexpr auto writeResult = [](auto &evalResult, const auto &task) noexcept {
-          WriteConsoleLine(evalResult, "{}.{} user_stop={}, tracer_stop={}, ws={}, signal={}",
-                           task->GetSupervisor() ? task->GetSupervisor()->TaskLeaderTid() : 0, task->mTid,
-                           bool{task->mUserVisibleStop}, bool{task->mTracerVisibleStop},
-                           to_str(task->mLastWaitStatus.ws), task->mLastWaitStatus.signal);
-        };
-
-        for (const auto &[tid, task] : mDebugSessionTasks) {
-          if (!(task->mTracerVisibleStop || task->mUserVisibleStop) || task->exited) {
-            continue;
-          }
-          // we're probably *always* interested in currently-orphan tasks, as these may suggest there's something
-          // wrong in debugger core.
-          if (filter && (filter != task->GetTaskLeaderTid() && task->GetSupervisor())) {
-            continue;
-          }
-          writeResult(evalResult, task);
-        }
-        return OK_RESULT(evalResult);
-      }));
-
-  mConsoleCommandInterpreter->RegisterConsoleCommand("threads", threadsCommand);
-  mConsoleCommandInterpreter->RegisterConsoleCommand(
-    "procs",
-    GenericCommand::CreateCommand("list ptraced processes", [this](auto, auto *allocator) -> ConsoleCommandResult {
-      std::pmr::string evalResult{allocator};
-      evalResult.reserve(4096);
-      for (const auto &t : Tracer::Get().GetAllProcesses()) {
-        WriteConsoleLine(evalResult, "{}, parent={}, executable={}", t->TaskLeaderTid(), t->mParentPid,
-                         t->mMainExecutable->GetObjectFilePath().filename().c_str());
-      }
-      return OK_RESULT(evalResult);
-    }));
-  mConsoleCommandInterpreter->RegisterConsoleCommand(
-    "resumeThread",
-    GenericCommand::CreateCommand(
-      "resumeThread", [this](std::span<std::string_view> args, auto *allocator) -> ConsoleCommandResult {
-        std::pmr::string evalResult{allocator};
-        evalResult.reserve(4096);
-        ReturnEvalExprError(args.size() < 1, "resume command needs a pid.tid argument");
-        auto tid = ParseProcessId(args.front(), false);
-        ReturnEvalExprError(tid, "input couldn't be parsed into a thread id");
-        auto task = Tracer::Get().GetTask(tid.value());
-        ReturnEvalExprError(!task || task->exited, "task couldn't be found or has exited");
-        ReturnEvalExprError(task->GetSupervisor() != nullptr, "task has no associated supervisor yet");
-        task->GetSupervisor()->ResumeTask(
-          *task, {.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task, .mDeliverSignal = -1});
-        bool resumed = {task->mTracerVisibleStop};
-        WriteConsoleLine(evalResult, "{}.{} resumed={}", task->GetSupervisor()->TaskLeaderTid(), task->mTid,
-                         resumed);
-        if (resumed) {
-          task->GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(
-            new ui::dap::ContinuedEvent{task->mTid, false});
-        }
-        return OK_RESULT(evalResult);
-      }));
-
-  mConsoleCommandInterpreter->RegisterConsoleCommand(
-    "resume", GenericCommand::CreateCommand("resume", [this](auto args, auto *allocator) -> ConsoleCommandResult {
-      std::pmr::string evalResult{allocator};
-      evalResult.reserve(4096);
-      ReturnEvalExprError(args.size() < 1, "resume process command needs a pid argument");
-      std::optional<pid_t> pid = ParseProcessId(args.front(), false);
-      ReturnEvalExprError(!pid.has_value(), "couldn't parse pid argument");
-      for (const auto &target : Tracer::Get().GetAllProcesses()) {
-        if (target->TaskLeaderTid() == pid) {
-          bool resumed = target->ResumeTarget({tc::RunType::Continue, tc::ResumeTarget::Task, -1});
-          WriteConsoleLine(evalResult, "{} resumed={}", *pid, resumed);
-          return OK_RESULT(evalResult);
-        }
-      }
-      WriteConsoleLine(evalResult, "Couldn't find process {}", *pid);
-      return OK_RESULT(evalResult);
-    }));
-}
 
 std::pmr::string
 Tracer::EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
@@ -683,19 +571,19 @@ Tracer::NewVariablesReference() noexcept
   return ++mVariablesReferenceCounter;
 }
 
-VariableContext
-Tracer::GetVariableContext(VariableReferenceId varRefKey) noexcept
+VariableReferenceId
+Tracer::GetCurrentVariableReferenceBoundary() const noexcept
 {
-  return mVariablesReferenceContext[varRefKey];
+  return mVariablesReferenceCounter;
 }
 
-VariableReferenceId
-Tracer::NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId, SymbolFile *file) noexcept
+sym::VarContext
+Tracer::GetVariableContext(VariableReferenceId varRefKey) noexcept
 {
-  auto key = NewVariablesReference();
-  mVariablesReferenceContext[key] =
-    VariableContext{.mTask = &t, .mSymbolFile = file, .mFrameId = frameId, .mId = static_cast<u16>(key)};
-  return key;
+  if (mVariablesReferenceContext.contains(varRefKey)) {
+    return mVariablesReferenceContext[varRefKey];
+  }
+  return nullptr;
 }
 
 void
@@ -751,18 +639,26 @@ Tracer::GetDap() const noexcept
 }
 
 void
-Tracer::SetVariableContext(VariableContext ctx) noexcept
+Tracer::SetVariableContext(std::shared_ptr<VariableContext> ctx) noexcept
 {
-  mVariablesReferenceContext[ctx.mId] = ctx;
-  ctx.mTask->add_reference(ctx.mId);
+  auto id = ctx->mId;
+  ctx->mTask->AddReference(id);
+  mVariablesReferenceContext[id] = std::move(ctx);
 }
 
-VariableReferenceId
+sym::VarContext
 Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
 {
+  if (ctx.mTask->VariableReferenceIsStale(ctx.mId)) {
+    // Don't register new context with mVariablesReferenceContext, because the cloned context is cloned from a
+    // stale context
+    return VariableContext::CloneFrom(ctx.mId - 1, ctx);
+  }
   const auto key = NewVariablesReference();
-  mVariablesReferenceContext.emplace(key, VariableContext::MakeDependentContext(key, ctx));
-  return key;
+
+  auto context = VariableContext::CloneFrom(key, ctx);
+  mVariablesReferenceContext.emplace(key, context);
+  return context;
 }
 
 /* static */

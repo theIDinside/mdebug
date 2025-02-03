@@ -657,14 +657,15 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     result.reserve(type->MemberFields().size());
 
     for (auto &memberField : type->MemberFields()) {
-      const auto variablesReference =
-        memberField.type->IsPrimitive() ? 0 : Tracer::Get().CloneFromVariableContext(ctx);
-      auto memberVariable =
-        Ref<sym::Value>::MakeShared(variablesReference, memberField.name, const_cast<sym::Field &>(memberField),
-                                    value->mMemoryContentsOffsets, value->TakeMemoryReference());
+      auto variableContext = memberField.type->IsPrimitive() ? VariableContext::CloneFrom(0, ctx)
+                                                             : Tracer::Get().CloneFromVariableContext(ctx);
+      auto vId = variableContext->mId;
+      auto memberVariable = Ref<sym::Value>::MakeShared(
+        std::move(variableContext), memberField.name, const_cast<sym::Field &>(memberField),
+        value->mMemoryContentsOffsets, value->TakeMemoryReference());
       GetObjectFile()->InitializeDataVisualizer(*memberVariable);
-      if (variablesReference > 0) {
-        ctx.mTask->CacheValueObject(variablesReference, memberVariable);
+      if (vId > 0) {
+        ctx.mTask->CacheValueObject(vId, memberVariable);
       }
       result.push_back(std::move(memberVariable));
     }
@@ -813,9 +814,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
     GetObjectFile()->InitializeDataVisualizer(*variableValue);
 
     if (const auto id = variableValue->ReferenceId(); id > 0) {
-      Tracer::Get().SetVariableContext(
-        {frame.mTask->ptr, frame.GetSymbolFile(), frame.FrameId(), id, ContextType::Variable});
-      frame.mTask.mut()->CacheValueObject(id, variableValue);
+      variableValue->RegisterContext();
     }
     result.push_back(std::move(variableValue));
   }

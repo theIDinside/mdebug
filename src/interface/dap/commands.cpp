@@ -1050,10 +1050,10 @@ UIResultPtr
 Scopes::Execute() noexcept
 {
   auto ctx = Tracer::Get().GetVariableContext(frameId);
-  if (!ctx.IsValidContext() || ctx.mType != ContextType::Frame) {
+  if (!ctx || !ctx->IsValidContext() || ctx->mType != ContextType::Frame) {
     return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", frameId), {}};
   }
-  auto frame = ctx.GetFrame(frameId);
+  auto frame = ctx->GetFrame(frameId);
   if (!frame) {
     return new ScopesResponse{false, this, {}};
   }
@@ -1219,8 +1219,9 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   return evalResponseResult;
 }
 
-Variables::Variables(std::uint64_t seq, int var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
-    : UICommand(seq), var_ref(var_ref), start(start), count(count)
+Variables::Variables(std::uint64_t seq, VariableReferenceId var_ref, std::optional<u32> start,
+                     std::optional<u32> count) noexcept
+    : UICommand(seq), mVariablesReferenceId(var_ref), start(start), count(count)
 {
 }
 
@@ -1234,20 +1235,23 @@ Variables::error(std::string &&msg) noexcept
 UIResultPtr
 Variables::Execute() noexcept
 {
-  auto context = Tracer::Get().GetVariableContext(var_ref);
-  if (!context.IsValidContext()) {
-    return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
+  auto requestedContext = Tracer::Get().GetVariableContext(mVariablesReferenceId);
+  if (!requestedContext || !requestedContext->IsValidContext()) {
+    return error(fmt::format("Could not find variable with variablesReference {}", mVariablesReferenceId));
   }
-  auto frame = context.GetFrame(var_ref);
+  auto &context = *requestedContext;
+  auto frame = context.GetFrame(mVariablesReferenceId);
   if (!frame) {
-    return error(fmt::format("Could not find frame that's referenced via variablesReference {}", var_ref));
+    return error(
+      fmt::format("Could not find frame that's referenced via variablesReference {}", mVariablesReferenceId));
   }
 
   switch (context.mType) {
   case ContextType::Frame:
-    return error(fmt::format("Sent a variables request using a reference for a frame is an error.", var_ref));
+    return error(
+      fmt::format("Sent a variables request using a reference for a frame is an error.", mVariablesReferenceId));
   case ContextType::Scope: {
-    auto scope = frame->Scope(var_ref);
+    auto scope = frame->Scope(mVariablesReferenceId);
     switch (scope->type) {
     case ScopeType::Arguments: {
       auto vars =
@@ -1271,11 +1275,12 @@ Variables::Execute() noexcept
     break;
   }
 
-  return error(fmt::format("Could not find variable with variablesReference {}", var_ref));
+  return error(fmt::format("Could not find variable with variablesReference {}", mVariablesReferenceId));
 }
 
 VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Ref<sym::Value>> &&vars) noexcept
-    : UIResult(success, cmd), requested_reference(cmd != nullptr ? cmd->var_ref : 0), variables(std::move(vars))
+    : UIResult(success, cmd), requested_reference(cmd != nullptr ? cmd->mVariablesReferenceId : 0),
+      variables(std::move(vars))
 {
 }
 
@@ -1723,7 +1728,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::Variables: {
     IfInvalidArgsReturn(Variables);
 
-    int var_ref = args["variablesReference"];
+    VariableReferenceId variablesReference = args["variablesReference"];
     std::optional<u32> start{};
     std::optional<u32> count{};
     if (args.contains("start")) {
@@ -1732,7 +1737,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     if (args.contains("count")) {
       count = args.at("count");
     }
-    return new Variables{seq, var_ref, start, count};
+    return new Variables{seq, variablesReference, start, count};
   }
   case CommandType::WriteMemory: {
     IfInvalidArgsReturn(WriteMemory);

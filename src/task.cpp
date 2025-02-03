@@ -211,14 +211,26 @@ TaskInfo::get_callstack() noexcept
   return *mTaskCallstack;
 }
 
+bool
+TaskInfo::VariableReferenceIsStale(VariableReferenceId value) const noexcept
+{
+  return !(value >= mLivenessBoundary);
+}
+
 void
-TaskInfo::add_reference(u32 id) noexcept
+TaskInfo::SetValueLiveness(VariableReferenceId value) noexcept
+{
+  mLivenessBoundary = value;
+}
+
+void
+TaskInfo::AddReference(VariableReferenceId id) noexcept
 {
   variableReferences.push_back(id);
 }
 
 void
-TaskInfo::CacheValueObject(u32 ref, Ref<sym::Value> value) noexcept
+TaskInfo::CacheValueObject(VariableReferenceId ref, Ref<sym::Value> value) noexcept
 {
   mVariablesCache.emplace(ref, std::move(value));
 }

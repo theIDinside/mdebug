@@ -10,6 +10,7 @@
 #include "interface/dap/interface.h"
 #include "interface/tracee_command/gdb_remote_commander.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "symbolication/value.h"
 #include "symbolication/value_visualizer.h"
 #include <mdb_config.h>
 #include <mdbsys/ptrace.h>
@@ -131,7 +132,6 @@ public:
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
-  void SetupConsoleCommands() noexcept;
   std::pmr::string EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
                                                   std::pmr::memory_resource *allocator) noexcept;
 
@@ -152,11 +152,11 @@ public:
 
   u32 GenerateNewBreakpointId() noexcept;
   VariableReferenceId NewVariablesReference() noexcept;
-  VariableContext GetVariableContext(VariableReferenceId varRefKey) noexcept;
-  VariableReferenceId NewVariablesReferenceContext(TraceeController &tc, TaskInfo &t, u32 frameId,
-                                                   SymbolFile *file) noexcept;
-  void SetVariableContext(VariableContext ctx) noexcept;
-  VariableReferenceId CloneFromVariableContext(const VariableContext &ctx) noexcept;
+  VariableReferenceId GetCurrentVariableReferenceBoundary() const noexcept;
+  sym::VarContext GetVariableContext(VariableReferenceId varRefKey) noexcept;
+
+  void SetVariableContext(std::shared_ptr<VariableContext> ctx) noexcept;
+  sym::VarContext CloneFromVariableContext(const VariableContext &ctx) noexcept;
   void DestroyVariablesReference(VariableReferenceId key) noexcept;
 
   std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
@@ -213,8 +213,18 @@ private:
   ui::dap::DAP *mDAP;
   std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
   u32 mBreakpointID{0};
+
+  // We do a monotonic increase. Unlike implementations I've previously worked on, and seen (like gdb)
+  // We will _never_ reset the variables reference value. It's in fact used to determine "liveness" of variable
+  // values. It works like this:
+  // Every time a task is stopped (_every_ time), it reads the `current variables reference` value, and sets it as
+  // it's new boundary Any values that has been created in this execution context can then compare itself against
+  // this "boundary value" and if's above, then we know it's live, if's below, it's at some previous time.
+  // Now - just because it's determined that the value is not live, does not mean it's invalid (or even the wrong
+  // value!). It just means we can't guarantee it anymore. To guarantee, we need to `refresh` the backing memory
+  // (and update the `Value`'s `mVariableReference`)
   VariableReferenceId mVariablesReferenceCounter{0};
-  std::unordered_map<VariableReferenceId, VariableContext> mVariablesReferenceContext{};
+  std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
   bool already_launched;
   sys::DebuggerConfiguration config;
 
