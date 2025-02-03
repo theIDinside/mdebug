@@ -14,6 +14,7 @@ mdb::Expected<JS::UniqueChars, std::string_view> ToString(JSContext *cx,
                                                           JS::Handle<JSString *> stringObject) noexcept;
 
 bool ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) noexcept;
+bool ToStdString(JSContext *cx, JS::HandleString string, std::pmr::string &writeBuffer) noexcept;
 
 JSString *PrepareString(JSContext *cx, std::string_view string) noexcept;
 

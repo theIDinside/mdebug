@@ -6,12 +6,15 @@
 #include <cstring>
 
 namespace mdb::js {
-struct CompiledBreakpointCondition
+struct CompileBreakpointCallable
 {
   JS::Heap<JSFunction *> mCompiledFunction;
 
   void trace(JSTracer *trc, const char *name);
-  std::optional<EventResult> Evaluate(JSContext *context, mdb::TaskInfo *task, mdb::UserBreakpoint *bp) noexcept;
+  std::optional<EventResult> EvaluateCondition(JSContext *context, mdb::TaskInfo *task,
+                                               mdb::UserBreakpoint *bp) noexcept;
+  std::optional<std::string> EvaluateLog(JSContext *context, mdb::TaskInfo *task,
+                                         mdb::UserBreakpoint *bp) noexcept;
 };
 
 struct Breakpoint : public RefPtrJsObject<mdb::js::Breakpoint, mdb::UserBreakpoint, StringLiteral{"Breakpoint"}>

@@ -1,7 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "bp_spec.h"
-#include "eval/eval.h"
 #include "events/event.h"
 #include "events/stop_event.h"
 #include "tracee_pointer.h"
@@ -16,7 +15,7 @@ class JSTracer;
 namespace mdb {
 
 namespace js {
-struct CompiledBreakpointCondition;
+struct CompileBreakpointCallable;
 }
 
 class TraceeController;
@@ -170,7 +169,7 @@ protected:
   bool mEnabledByUser;
   Ref<BreakpointLocation> mBreakpointLocation;
   std::unique_ptr<BpErr> mInstallError;
-  std::unique_ptr<js::CompiledBreakpointCondition> mExpression;
+  std::unique_ptr<js::CompileBreakpointCallable> mExpression;
   friend UserBreakpoints;
 
 public:
@@ -201,7 +200,7 @@ public:
   std::optional<std::string_view> GetSourceFile() const noexcept;
   std::optional<std::string> GetErrorMessage() const noexcept;
   void UpdateLocation(Ref<BreakpointLocation> bploc) noexcept;
-  void SetExpression(std::unique_ptr<js::CompiledBreakpointCondition> expression) noexcept;
+  void SetExpression(std::unique_ptr<js::CompileBreakpointCallable> expression) noexcept;
 
   virtual BreakpointSpecification *UserProvidedSpec() const noexcept;
   virtual Ref<UserBreakpoint> CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
@@ -252,7 +251,7 @@ class TemporaryBreakpoint : public Breakpoint
 
 public:
   explicit TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stop_only,
-                               std::unique_ptr<js::CompiledBreakpointCondition> cond) noexcept;
+                               std::unique_ptr<js::CompileBreakpointCallable> cond) noexcept;
   ~TemporaryBreakpoint() noexcept override = default;
   BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept override;
 };
@@ -277,13 +276,14 @@ public:
 
 class Logpoint : public Breakpoint
 {
-  std::string expressionString;
-  std::unique_ptr<eval::Expr> compiledExpression{nullptr};
-  void compile_expression() noexcept;
+  std::string mExpressionString;
+  void prepareExpression(std::string_view expr) noexcept;
+  void EvaluateLog(TaskInfo &t) noexcept;
 
 public:
-  explicit Logpoint(RequiredUserParameters param, std::string expression,
+  explicit Logpoint(RequiredUserParameters param, std::string_view expression,
                     std::unique_ptr<BreakpointSpecification> spec) noexcept;
+
   BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
 };
 

@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "bp.h"
 #include "events/stop_event.h"
+#include "interface/dap/events.h"
 #include "js/TracingAPI.h"
 #include "utils/expected.h"
 #include <algorithm>
@@ -211,7 +212,7 @@ UserBreakpoint::EvaluateStopCondition(TaskInfo &t) noexcept
     return EventResult::None;
   }
 
-  return mExpression->Evaluate(Tracer::GetJsContext(), &t, this).value_or(EventResult::None);
+  return mExpression->EvaluateCondition(Tracer::GetJsContext(), &t, this).value_or(EventResult::None);
 }
 
 std::optional<AddrPtr>
@@ -305,7 +306,7 @@ UserBreakpoint::UpdateLocation(Ref<BreakpointLocation> bploc) noexcept
 }
 
 void
-UserBreakpoint::SetExpression(std::unique_ptr<js::CompiledBreakpointCondition> expression) noexcept
+UserBreakpoint::SetExpression(std::unique_ptr<js::CompileBreakpointCallable> expression) noexcept
 {
   mExpression = std::move(expression);
 }
@@ -343,7 +344,7 @@ Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind,
     if (res.is_error()) {
       DBGLOG(core, "failed to source breakpoint condition: {}", res.error());
     }
-    SetExpression(std::make_unique<js::CompiledBreakpointCondition>(JS::Heap{res.value()}));
+    SetExpression(std::make_unique<js::CompileBreakpointCallable>(JS::Heap{res.value()}));
   }
 }
 
@@ -416,7 +417,7 @@ Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController
 
 TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param, LocationUserKind kind,
                                          std::optional<Tid> stop_only,
-                                         std::unique_ptr<js::CompiledBreakpointCondition> cond) noexcept
+                                         std::unique_ptr<js::CompileBreakpointCallable> cond) noexcept
     : Breakpoint(std::move(param), kind, nullptr)
 {
 }
@@ -475,26 +476,66 @@ ResumeToBreakpoint::OnHit(TraceeController &, TaskInfo &t) noexcept
   }
 }
 
-Logpoint::Logpoint(RequiredUserParameters param, std::string logExpression,
+Logpoint::Logpoint(RequiredUserParameters param, std::string_view logExpression,
                    std::unique_ptr<BreakpointSpecification> spec) noexcept
-    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::move(spec)),
-      expressionString(std::move(logExpression))
+    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::move(spec))
 {
+  ASSERT(!mBreakpointSpec->mCondition, "logpoint should not have condition!");
+  prepareExpression(logExpression);
+  auto res = Tracer::GetScriptingInstance().SourceBreakpointCondition(mId, mExpressionString);
+  if (res.is_error()) {
+    DBGLOG(core, "failed to source breakpoint condition: {}", res.error());
+  } else {
+    SetExpression(std::make_unique<js::CompileBreakpointCallable>(JS::Heap{res.value()}));
+  }
 }
 
 void
-Logpoint::compile_expression() noexcept
+Logpoint::prepareExpression(std::string_view expr) noexcept
 {
-  // TODO(simon): Implement some form of rudimentary scripting language here. Or perhaps a DSL strictly for
-  // logging. Whatever really.
+  if (!expr.starts_with("return")) {
+    mExpressionString.append("return `");
+  }
+  // we magically guess that we have at most 24 interpolated values. Therefore add space for 24 '$'
+  mExpressionString.reserve(expr.size() + 24 + "return"sv.size());
+  bool previousWasBracket = false;
+  for (auto ch : expr) {
+    if (ch == '{') {
+      if (previousWasBracket) {
+        mExpressionString.push_back('{');
+        mExpressionString.push_back('{');
+        // an "escaped" interpolation was seen ({{ }} should not be interpreted as ${})
+        previousWasBracket = false;
+      } else {
+        previousWasBracket = true;
+      }
+    } else {
+      if (previousWasBracket) {
+        mExpressionString.push_back('$');
+        mExpressionString.push_back('{');
+        previousWasBracket = false;
+      }
+      mExpressionString.push_back(ch);
+    }
+  }
+  mExpressionString.push_back('`');
+}
+
+void
+Logpoint::EvaluateLog(TaskInfo &t) noexcept
+{
+  if (!mExpression) {
+    return;
+  }
+  auto result = mExpression->EvaluateLog(Tracer::GetJsContext(), &t, this);
+  t.GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(
+    new ui::dap::OutputEvent{"console", std::move(result.value())});
 }
 
 BreakpointHitEventResult
-Logpoint::OnHit(TraceeController &, TaskInfo &) noexcept
+Logpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 {
-  if (compiledExpression == nullptr) {
-    compile_expression();
-  }
+  EvaluateLog(t);
   return BP_KEEP(Resume);
 }
 

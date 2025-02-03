@@ -1,7 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "console_command.h"
-#include "fmt/ranges.h"
-#include "utils/util.h"
+#include "mdbjs/mdbjs.h"
 #include <tracer.h>
 #include <utility>
 
@@ -48,24 +47,8 @@ ConsoleCommandInterpreter::RegisterConsoleCommand(std::string_view name,
 ConsoleCommandResult
 ConsoleCommandInterpreter::Interpret(const std::string &input, std::pmr::memory_resource *allocator) noexcept
 {
-  auto splitInput = mdb::split_string(input, " ");
-
-  if (splitInput.empty()) {
-    return ConsoleCommandResult{false, std::pmr::string{ConsoleLine("No input for command"), allocator}};
-  }
-
-  std::string_view commandName = splitInput[0];
-  auto args = std::span{splitInput}.subspan(1);
-
-  auto command = registry.GetConsoleCommand(commandName);
-  if (command) {
-    return command->execute(args, allocator);
-  } else {
-    std::pmr::string msg{"", allocator};
-    WriteConsoleLine(msg, "Unknown command: {}", commandName);
-    WriteConsoleLine(msg, "Possible commands {}", fmt::join(registry.GetCommandNameList(), ", "));
-    return ConsoleCommandResult{false, std::move(msg)};
-  }
+  auto result = Tracer::GetScriptingInstance().ReplEvaluate(input, allocator);
+  return ConsoleCommandResult{true, std::move(result)};
 }
 
 GenericCommand::GenericCommand(std::string functionName, Function &&function) noexcept

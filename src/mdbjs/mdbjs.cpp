@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #include "mdbjs.h"
-#include "fmt/ranges.h"
 #include "js/CallAndConstruct.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
@@ -245,6 +244,122 @@ AppScriptingInstance::SourceBreakpointCondition(u32 breakpointId, std::string_vi
       .value_or(mdb::Unexpected{std::string{"Failed"}});
   }
   return expected<JSFunction *>(func.get());
+}
+
+template <typename StdString>
+static bool
+FormatResult(JSContext *cx, JS::HandleValue value, StdString &writeBuffer)
+{
+  JS::RootedString str(cx);
+
+  /* Special case format for strings */
+  if (value.isString()) {
+    str = value.toString();
+    return ToStdString(cx, str, writeBuffer);
+  }
+
+  str = JS::ToString(cx, value);
+
+  if (!str) {
+    JS_ClearPendingException(cx);
+    str = JS_ValueToSource(cx, value);
+  }
+
+  if (!str) {
+    JS_ClearPendingException(cx);
+    if (value.isObject()) {
+      const JSClass *klass = JS::GetClass(&value.toObject());
+      if (klass) {
+        str = JS_NewStringCopyZ(cx, klass->name);
+      } else {
+        writeBuffer.append("[unknown object]");
+        return true;
+      }
+    } else {
+      writeBuffer.append("[unknown non-object]");
+      return true;
+    }
+  }
+
+  if (!str) {
+    JS_ClearPendingException(cx);
+    writeBuffer.append("[invalid class]");
+    return true;
+  }
+
+  if (!ToStdString(cx, str, writeBuffer)) {
+    JS_ClearPendingException(cx);
+    writeBuffer.clear();
+    writeBuffer.append("[invalid string]");
+    return false;
+  }
+
+  return true;
+}
+
+std::pmr::string
+AppScriptingInstance::ReplEvaluate(std::string_view input, std::pmr::memory_resource *allocator) noexcept
+{
+  static int ReplLineNumber = 1;
+  std::pmr::string res{allocator};
+  JS::CompileOptions options(mContext);
+  options.setFileAndLine("repl", ReplLineNumber);
+
+  auto src = SourceFromString(mContext, input);
+
+  if (src.is_error()) {
+    auto &e = src.error();
+    std::copy(e.begin(), e.end(), std::back_inserter(res));
+    return res;
+  }
+
+  JS::RootedValue result(mContext);
+  if (!JS::Evaluate(mContext, options, src.value(), &result)) {
+    auto exception = ConsumePendingException(mContext);
+    fmt::format_to(std::back_inserter(res), "Failed to evaluate: {}", input);
+    return res;
+  }
+
+  JS_MaybeGC(mContext);
+
+  if (result.isUndefined()) {
+    return res;
+  }
+
+  if (!FormatResult(mContext, result, res)) {
+    DBGLOG(interpreter, "repl evaluation unsuccesful for '{}'", input);
+  }
+  return res;
+}
+
+std::string
+AppScriptingInstance::ReplEvaluate(std::string_view input) noexcept
+{
+  static int ReplLineNumber = 1;
+  JS::CompileOptions options(mContext);
+  options.setFileAndLine("repl", ReplLineNumber);
+
+  auto src = SourceFromString(mContext, input);
+
+  if (src.is_error()) {
+    return src.error();
+  }
+
+  JS::RootedValue result(mContext);
+  if (!JS::Evaluate(mContext, options, src.value(), &result)) {
+    return fmt::format("Failed to evaluate: {}", input);
+  }
+
+  JS_MaybeGC(mContext);
+
+  if (result.isUndefined()) {
+    return "";
+  }
+  std::string res{};
+  if (!FormatResult(mContext, result, res)) {
+    DBGLOG(interpreter, "repl evaluation unsuccesful for '{}'", input);
+  }
+  return res;
 }
 
 mdb::Expected<void, std::string>

@@ -30,6 +30,24 @@ ToString(JSContext *cx, JS::Handle<JS::Value> stringObject) noexcept
 }
 
 bool
+ToStdString(JSContext *cx, JS::HandleString string, std::pmr::string &writeBuffer) noexcept
+{
+  bool success = false;
+  if (string) {
+    success = true;
+    auto stringLength = JS_GetStringEncodingLength(cx, string);
+
+    writeBuffer.resize_and_overwrite(stringLength, [cx, string, &success](char *ptr, size_t size) {
+      if (!JS_EncodeStringToBuffer(cx, string, ptr, size)) {
+        success = false;
+      }
+      return size;
+    });
+  }
+  return success;
+}
+
+bool
 ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) noexcept
 {
   bool success = false;

@@ -14,6 +14,7 @@
 #include "utils/expected.h"
 #include "utils/logger.h"
 #include <limits>
+#include <memory_resource>
 #include <optional>
 #include <string>
 
@@ -222,6 +223,8 @@ public:
 
   Expected<JSFunction *, std::string> SourceBreakpointCondition(u32 breakpointId,
                                                                 std::string_view condition) noexcept;
+  std::pmr::string ReplEvaluate(std::string_view input, std::pmr::memory_resource *allocator) noexcept;
+  std::string ReplEvaluate(std::string_view input) noexcept;
   Expected<void, std::string> EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept;
   Expected<void, std::string> EvaluateJavascriptFileView(std::string_view filePath) noexcept;
   Expected<void, std::string> EvaluateJavascriptString(const std::string &javascriptSource) noexcept;

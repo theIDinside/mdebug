@@ -132,9 +132,6 @@ set(MIDAS_SOURCES
   src/utils/worker_task.h
   src/utils/xml.cpp
   src/utils/xml.h
-  # eval
-  src/eval/eval.cpp
-  src/eval/eval.h
 
   src/tracee/util.cpp
   src/tracee/util.h
