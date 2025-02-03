@@ -405,7 +405,7 @@ CStringVisualizer::Serialize(const Value &value, std::string_view name, int,
   FormatAndReturn(
     result,
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-    name, cast, 0, value.Address());
+    name, DAPStringView{cast}, 0, value.Address());
 }
 
 #undef FormatAndReturn

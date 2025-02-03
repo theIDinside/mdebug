@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "typedefs.h"
 #include <functional>
 #include <memory>
 #include <memory_resource>
@@ -16,7 +17,7 @@ namespace mdb {
 struct ConsoleCommandResult
 {
   bool mSuccess;
-  std::pmr::string mContents;
+  std::pmr::string *mContents;
 };
 
 // Abstract base class for commands, that are called & evaluated via the `EvaluateRequest` request
@@ -48,7 +49,7 @@ private:
 
 public:
   void RegisterConsoleCommand(std::string_view name, std::shared_ptr<ConsoleCommand> command) noexcept;
-  ConsoleCommandResult Interpret(const std::string &input, std::pmr::memory_resource *allocator) noexcept;
+  ConsoleCommandResult Interpret(const std::string &input, Allocator *allocator) noexcept;
 };
 
 /// Commands that are "generic" and installed via `Tracer::SetupConsoleCommands`
