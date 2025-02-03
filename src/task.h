@@ -64,7 +64,7 @@ struct TaskInfo
 {
   INTERNAL_REFERENCE_COUNT(TaskInfo)
 public:
-  enum class SupervisorState
+  enum class SupervisorState : u8
   {
     Traced,
     Exited,
@@ -74,12 +74,13 @@ public:
 
   friend class TraceeController;
   pid_t mTid;
+  u32 mSessionId{0};
   WaitStatus mLastWaitStatus;
   TargetFormat mTargetFormat;
-  tc::ResumeAction mLastResumeAction;
-  std::optional<tc::ResumeAction> mNextResumeAction{};
   bool firstResume{true};
   SupervisorState mState{SupervisorState::Traced};
+  tc::ResumeAction mLastResumeAction;
+  std::optional<tc::ResumeAction> mNextResumeAction{};
 
   union
   {
@@ -192,6 +193,7 @@ public:
   void ClearRequestedStopFlag() noexcept;
   void SetTracerState(SupervisorState state) noexcept;
   std::optional<Pid> GetTaskLeaderTid() const noexcept;
+  void SetSessionId(u32 sessionId) noexcept;
 };
 
 struct TaskVMInfo

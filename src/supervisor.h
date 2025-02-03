@@ -80,6 +80,9 @@ class TraceeController
 {
   friend class Tracer;
   friend struct ui::UICommand;
+  // The id given to this process by the debugger
+  u32 mSessionId;
+  // This process' parent pid
   pid_t mParentPid;
   // The process pid, or the initial task that was spawned for this process
   pid_t mTaskLeader;
@@ -156,12 +159,12 @@ class TraceeController
   BreakpointBehavior mBreakpointBehavior{BreakpointBehavior::StopAllThreadsWhenHit};
 
   // FORK constructor
-  TraceeController(TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept;
+  TraceeController(u32 sessionId, TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept;
   // Constructors
-  TraceeController(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
+  TraceeController(u32 sessionId, TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
 
 public:
-  static std::unique_ptr<TraceeController> create(TargetSession session, tc::Interface &&interface,
+  static std::unique_ptr<TraceeController> create(u32 sessionId, TargetSession session, tc::Interface &&interface,
                                                   InterfaceType type);
   ~TraceeController() noexcept;
 
@@ -207,6 +210,7 @@ public:
   void AddTask(Ref<TaskInfo> &&task) noexcept;
   u32 RemoveTasksNotInSet(std::span<const gdb::GdbThread> set) noexcept;
   Tid TaskLeaderTid() const noexcept;
+  u32 SessionId() const noexcept;
   void SetExitSeen() noexcept;
   TaskInfo *GetTaskByTid(pid_t pid) noexcept;
   UserBreakpoints &GetUserBreakpoints() noexcept;

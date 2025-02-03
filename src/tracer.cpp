@@ -129,8 +129,10 @@ Tracer::TerminateSession() noexcept
 void
 Tracer::AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession session) noexcept
 {
-  mTracedProcesses.push_back(TraceeController::create(
-    session, tc::TraceeCommandInterface::CreateCommandInterface(config), InterfaceType::Ptrace));
+  mTracedProcesses.push_back(TraceeController::create(mSessionProcessId++, session,
+                                                      tc::TraceeCommandInterface::CreateCommandInterface(config),
+                                                      InterfaceType::Ptrace));
+
   const auto newProcess = mTracedProcesses.back()->GetInterface().TaskLeaderTid();
 
   if (!Tracer::sUsePTraceMe) {
@@ -341,8 +343,9 @@ Tracer::Attach(const AttachArgs &args) noexcept
   return std::visit(
     Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
             auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-            mTracedProcesses.push_back(
-              TraceeController::create(TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
+            mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
+                                                                TargetSession::Attached, std::move(interface),
+                                                                InterfaceType::Ptrace));
             auto *supervisor = mTracedProcesses.back().get();
             if (const std::optional<Path> execFile = supervisor->GetInterface().ExecedFile(); execFile) {
               const Tid newProcess = supervisor->GetInterface().TaskLeaderTid();
@@ -385,8 +388,9 @@ Tracer::Attach(const AttachArgs &args) noexcept
 
             auto it = res.begin();
             const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
-              mTracedProcesses.push_back(
-                TraceeController::create(TargetSession::Attached, std::move(tc), InterfaceType::GdbRemote));
+              mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
+                                                                  TargetSession::Attached, std::move(tc),
+                                                                  InterfaceType::GdbRemote));
               auto *supervisor = mTracedProcesses.back().get();
               auto &ti = supervisor->GetInterface();
               client->ClientConfigured(supervisor);
@@ -602,6 +606,7 @@ Tracer::RegisterTracedTask(Ref<TaskInfo> newTask) noexcept
   ASSERT(!mDebugSessionTasks.contains(newTask->mTid), "task {} has already been registered.", newTask->mTid);
   ASSERT(!mUnInitializedThreads.contains(newTask->mTid), "task {} exists also in an unit state.", newTask->mTid);
   auto tid = newTask->mTid;
+  newTask->SetSessionId(mSessionThreadId++);
   mDebugSessionTasks.emplace(tid, std::move(newTask));
 }
 
@@ -610,6 +615,28 @@ Tracer::GetTask(Tid tid) noexcept
 {
   if (const auto it = mDebugSessionTasks.find(tid); it != std::end(mDebugSessionTasks)) {
     return it->second;
+  }
+  return nullptr;
+}
+
+Ref<TaskInfo>
+Tracer::GetTaskBySessionId(u32 sessionId) noexcept
+{
+  for (auto &task : mDebugSessionTasks) {
+    if (task.second->mSessionId == sessionId) {
+      return task.second;
+    }
+  }
+  return nullptr;
+}
+
+TraceeController *
+Tracer::GetSupervisorBySessionId(u32 sessionId) noexcept
+{
+  for (auto &t : mTracedProcesses) {
+    if (t->mSessionId == sessionId) {
+      return t.get();
+    }
   }
   return nullptr;
 }
@@ -687,6 +714,12 @@ Tracer::InitializeDapSerializers() noexcept
   tracer.mResolveReference = new sym::ResolveReference{};
   tracer.mResolveCString = new sym::ResolveCString{};
   tracer.mResolveArray = new sym::ResolveArray{};
+}
+
+u32
+Tracer::NewSupervisorId() noexcept
+{
+  return mSessionProcessId++;
 }
 
 /* static */

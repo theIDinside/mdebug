@@ -274,6 +274,12 @@ TaskInfo::GetTaskLeaderTid() const noexcept
 }
 
 void
+TaskInfo::SetSessionId(u32 sessionId) noexcept
+{
+  mSessionId = sessionId;
+}
+
+void
 TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume) noexcept
 {
   ASSERT(mBreakpointLocationStatus.has_value(), "Requires a valid bpstat");

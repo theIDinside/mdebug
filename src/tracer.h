@@ -162,6 +162,8 @@ public:
   std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
   void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
   Ref<TaskInfo> GetTask(Tid tid) noexcept;
+  Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
+  TraceeController *GetSupervisorBySessionId(u32 sessionId) noexcept;
   std::vector<TraceeController *> GetAllProcesses() const noexcept;
   ui::dap::DAP *GetDap() const noexcept;
 
@@ -206,6 +208,8 @@ public:
     }
   }
 
+  u32 NewSupervisorId() noexcept;
+
 private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
 
@@ -236,6 +240,8 @@ private:
   // up before their wait status of their clone parent has been seen. This should work.
   std::unordered_map<Tid, Ref<TaskInfo>> mUnInitializedThreads{};
   std::unordered_map<Tid, Ref<TaskInfo>> mDebugSessionTasks;
+  u32 mSessionThreadId{1};
+  u32 mSessionProcessId{1};
   std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
   std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;

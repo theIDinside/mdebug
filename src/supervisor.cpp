@@ -52,13 +52,14 @@ FindByTid(std::vector<TaskPointerType> &container, Tid tid) noexcept
 }
 
 // FORK constructor
-TraceeController::TraceeController(TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept
-    : mParentPid(parent.mTaskLeader), mTaskLeader{interface->TaskLeaderTid()}, mSymbolFiles(parent.mSymbolFiles),
-      mMainExecutable{parent.mMainExecutable}, mThreads{}, mThreadInfos{}, mUserBreakpoints{*this},
-      mSharedObjects{parent.mSharedObjects.clone()}, mInterfaceType{parent.mInterfaceType},
-      mInterpreterBase{parent.mInterpreterBase}, mEntry{parent.mEntry}, mSessionKind{parent.mSessionKind},
-      mScheduler{std::make_unique<TaskScheduler>(this)}, mNullUnwinder{parent.mNullUnwinder},
-      mTraceeInterface{std::move(interface)}
+TraceeController::TraceeController(u32 sessionId, TraceeController &parent, tc::Interface &&interface,
+                                   bool isVFork) noexcept
+    : mSessionId(sessionId), mParentPid(parent.mTaskLeader), mTaskLeader{interface->TaskLeaderTid()},
+      mSymbolFiles(parent.mSymbolFiles), mMainExecutable{parent.mMainExecutable}, mThreads{}, mThreadInfos{},
+      mUserBreakpoints{*this}, mSharedObjects{parent.mSharedObjects.clone()},
+      mInterfaceType{parent.mInterfaceType}, mInterpreterBase{parent.mInterpreterBase}, mEntry{parent.mEntry},
+      mSessionKind{parent.mSessionKind}, mScheduler{std::make_unique<TaskScheduler>(this)},
+      mNullUnwinder{parent.mNullUnwinder}, mTraceeInterface{std::move(interface)}
 {
   mIsVForking = isVFork;
   // Must be set first.
@@ -82,12 +83,13 @@ TraceeController::TraceeController(TraceeController &parent, tc::Interface &&int
   mBreakpointBehavior = parent.mBreakpointBehavior;
 }
 
-TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&interface,
+TraceeController::TraceeController(u32 sessionId, TargetSession targetSession, tc::Interface &&interface,
                                    InterfaceType type) noexcept
-    : mParentPid(0), mTaskLeader{interface != nullptr ? interface->TaskLeaderTid() : 0}, mMainExecutable{nullptr},
-      mThreads{}, mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{}, mInterfaceType(type),
-      mInterpreterBase{}, mEntry{}, mSessionKind{targetSession}, mScheduler{std::make_unique<TaskScheduler>(this)},
-      mNullUnwinder{new sym::Unwinder{nullptr}}, mTraceeInterface(std::move(interface))
+    : mSessionId(sessionId), mParentPid(0), mTaskLeader{interface != nullptr ? interface->TaskLeaderTid() : 0},
+      mMainExecutable{nullptr}, mThreads{}, mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{},
+      mInterfaceType(type), mInterpreterBase{}, mEntry{}, mSessionKind{targetSession},
+      mScheduler{std::make_unique<TaskScheduler>(this)}, mNullUnwinder{new sym::Unwinder{nullptr}},
+      mTraceeInterface(std::move(interface))
 {
   // Must be set first.
   mTraceeInterface->SetTarget(this);
@@ -103,9 +105,9 @@ TraceeController::TraceeController(TargetSession targetSession, tc::Interface &&
 
 /*static*/
 std::unique_ptr<TraceeController>
-TraceeController::create(TargetSession session, tc::Interface &&interface, InterfaceType type)
+TraceeController::create(u32 sessionId, TargetSession session, tc::Interface &&interface, InterfaceType type)
 {
-  return std::unique_ptr<TraceeController>(new TraceeController{session, std::move(interface), type});
+  return std::unique_ptr<TraceeController>(new TraceeController{sessionId, session, std::move(interface), type});
 }
 
 void
@@ -146,7 +148,8 @@ TraceeController::Disconnect() noexcept
 std::unique_ptr<TraceeController>
 TraceeController::Fork(tc::Interface &&interface, bool isVFork) noexcept
 {
-  auto child = std::unique_ptr<TraceeController>(new TraceeController{*this, std::move(interface), isVFork});
+  auto child = std::unique_ptr<TraceeController>(
+    new TraceeController{Tracer::Get().NewSupervisorId(), *this, std::move(interface), isVFork});
   return child;
 }
 
@@ -352,6 +355,12 @@ Tid
 TraceeController::TaskLeaderTid() const noexcept
 {
   return mTaskLeader;
+}
+
+u32
+TraceeController::SessionId() const noexcept
+{
+  return mSessionId;
 }
 
 TaskInfo *
