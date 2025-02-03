@@ -1141,9 +1141,9 @@ Evaluate::Execute() noexcept
   case EvaluationContext::Watch:
     [[fallthrough]];
   case EvaluationContext::Repl: {
-    auto result =
-      Tracer::Get().EvaluateDebugConsoleExpression(expr, true, mDAPClient->GetResponseArenaAllocator());
-    return new EvaluateResponse{true, this, {}, std::move(result), {}, {}};
+    Allocator alloc{mDAPClient->GetResponseArenaAllocator()};
+    auto result = Tracer::Get().EvaluateDebugConsoleExpression(expr, true, &alloc);
+    return new EvaluateResponse{true, this, {}, result, {}, {}};
   }
   case EvaluationContext::Hover:
     [[fallthrough]];
@@ -1193,9 +1193,9 @@ Evaluate::PrepareEvaluateCommand(u64 seq, const nlohmann::json &args)
 }
 
 EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference,
-                                   std::pmr::string &&evalResult, std::optional<std::string> &&type,
+                                   std::pmr::string *evalResult, std::optional<std::string> &&type,
                                    std::optional<std::string> &&memoryReference) noexcept
-    : UIResult(success, cmd), result(std::move(evalResult)), type(std::move(type)),
+    : UIResult(success, cmd), result(evalResult), type(std::move(type)),
       variablesReference(variablesReference.value_or(0)), memoryReference(std::move(memoryReference))
 {
 }
@@ -1209,12 +1209,12 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
     fmt::format_to(
       std::back_inserter(evalResponseResult),
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
-      seq, request_seq, result, variablesReference);
+      seq, request_seq, DebugAdapterProtocolString{*result}, variablesReference);
   } else {
     fmt::format_to(
       std::back_inserter(evalResponseResult),
       R"({{"seq":0,"request_seq":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
-      request_seq, success, result);
+      request_seq, success, DebugAdapterProtocolString{*result});
   }
   return evalResponseResult;
 }

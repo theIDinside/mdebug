@@ -366,11 +366,11 @@ FormatResult(JSContext *cx, JS::HandleValue value, StdString &writeBuffer)
   return true;
 }
 
-std::pmr::string
-AppScriptingInstance::ReplEvaluate(std::string_view input, std::pmr::memory_resource *allocator) noexcept
+std::pmr::string *
+AppScriptingInstance::ReplEvaluate(std::string_view input, Allocator *allocator) noexcept
 {
   static int ReplLineNumber = 1;
-  std::pmr::string res{allocator};
+  std::pmr::string *res = allocator->new_object<std::pmr::string>();
   JS::CompileOptions options(mContext);
   options.setFileAndLine("repl", ReplLineNumber);
 
@@ -378,14 +378,14 @@ AppScriptingInstance::ReplEvaluate(std::string_view input, std::pmr::memory_reso
 
   if (src.is_error()) {
     auto &e = src.error();
-    std::copy(e.begin(), e.end(), std::back_inserter(res));
+    std::copy(e.begin(), e.end(), std::back_inserter(*res));
     return res;
   }
 
   JS::RootedValue result(mContext);
   if (!JS::Evaluate(mContext, options, src.value(), &result)) {
     auto exception = ConsumePendingException(mContext);
-    fmt::format_to(std::back_inserter(res), "Failed to evaluate: {}", input);
+    fmt::format_to(std::back_inserter(*res), "Failed to evaluate: {}", input);
     return res;
   }
 
@@ -395,7 +395,7 @@ AppScriptingInstance::ReplEvaluate(std::string_view input, std::pmr::memory_reso
     return res;
   }
 
-  if (!FormatResult(mContext, result, res)) {
+  if (!FormatResult(mContext, result, *res)) {
     DBGLOG(interpreter, "repl evaluation unsuccesful for '{}'", input);
   }
   return res;
@@ -506,6 +506,23 @@ ConsumePendingException(JSContext *cx) noexcept
     return "JavaScript Exception: <failed to get pending exception>";
   } else {
     return std::nullopt;
+  }
+}
+
+bool
+ConsumePendingException(JSContext *ctx, std::pmr::string &writeToBuffer) noexcept
+{
+  if (JS_IsExceptionPending(ctx)) {
+    JS::RootedValue exception(ctx);
+    if (JS_GetPendingException(ctx, &exception)) {
+      JS_ClearPendingException(ctx);
+
+      JS::RootedString exceptionString(ctx, JS::ToString(ctx, exception));
+      return ToStdString(ctx, exceptionString, writeToBuffer);
+    }
+    return false;
+  } else {
+    return false;
   }
 }
 } // namespace mdb::js

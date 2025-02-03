@@ -220,7 +220,7 @@ Tracer::ConvertWaitEvent(TaskWaitResult wait_res) noexcept
 }
 
 void
-Tracer::handle_command(ui::UICommand *cmd) noexcept
+Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 {
   auto dapClient = cmd->mDAPClient;
   DBGLOG(core, "[{}] accepted command {}",
@@ -297,12 +297,10 @@ Tracer::HandleInitEvent(TraceEvent *evt) noexcept
 #define OK_RESULT(res)                                                                                            \
   ConsoleCommandResult { true, std::move(res) }
 
-std::pmr::string
+std::pmr::string *
 Tracer::EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
-                                       std::pmr::memory_resource *allocator) noexcept
+                                       Allocator *allocator) noexcept
 {
-  // TODO(simon): write a simple interpreter for custom CLI-like commands. For now, do the absolute dumbest thing
-  // of all.
   auto res = mConsoleCommandInterpreter->Interpret(expression, allocator);
   return res.mContents;
 }
@@ -749,7 +747,7 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *script
           }
         } break;
         case EventType::Command: {
-          Tracer::Get().handle_command(evt.uCommand);
+          Tracer::Get().ExecuteCommand(evt.uCommand);
         } break;
         case EventType::TraceeEvent: {
           Tracer::Get().HandleTracerEvent(evt.uDebugger);

@@ -172,3 +172,84 @@ template <typename T> struct Default
     return context.begin();
   }
 };
+
+// Debug adapter protocol messages are json, and as such may need escaping (in the cases where we can't control the
+// format up front.)
+struct DebugAdapterProtocolString
+{
+  std::string_view mStringView;
+  static constexpr auto mQuoteChar = '"';
+  static constexpr auto mEscapeChar = '\\';
+
+  template <typename OutputIterator>
+  constexpr OutputIterator
+  copy(OutputIterator out) const
+  {
+    for (const auto &c : mStringView) {
+      switch (c) {
+      case '\0':
+        *out++ = mEscapeChar;
+        *out++ = '0';
+        break;
+      case '\a':
+        *out++ = mEscapeChar;
+        *out++ = 'a';
+        break;
+      case '\b':
+        *out++ = mEscapeChar;
+        *out++ = 'b';
+        break;
+      case '\t':
+        *out++ = mEscapeChar;
+        *out++ = 't';
+        break;
+      case '\n':
+        *out++ = mEscapeChar;
+        *out++ = 'n';
+        break;
+      case '\v':
+        *out++ = mEscapeChar;
+        *out++ = 'v';
+        break;
+      case '\f':
+        *out++ = mEscapeChar;
+        *out++ = 'f';
+        break;
+      case '\r':
+        *out++ = mEscapeChar;
+        *out++ = 'r';
+        break;
+      case '\\':
+        *out++ = mEscapeChar;
+        *out++ = mEscapeChar;
+        break;
+      case '"':
+        *out++ = mEscapeChar;
+        *out++ = mQuoteChar;
+        break;
+      default:
+        *out++ = c;
+      }
+    }
+    return out;
+  }
+};
+
+template <> struct fmt::formatter<DebugAdapterProtocolString>
+{
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  constexpr auto
+  format(const DebugAdapterProtocolString &escapeView, FormatContext &ctx) const
+  {
+    return escapeView.copy(ctx.out());
+  }
+};
+
+using DAPStringView = DebugAdapterProtocolString;

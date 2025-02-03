@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "js/CharacterEncoding.h"
 #include "js/Class.h"
 #include "js/PropertyDescriptor.h"
 #include "js/PropertySpec.h"
@@ -29,6 +28,7 @@ namespace mdb::js {
 // where we instead return some structured data for the exception that happened in js-land.
 // For now, if this returns a non-none value, it means an exception happened (and we consumed it).
 std::optional<std::string> ConsumePendingException(JSContext *context) noexcept;
+bool ConsumePendingException(JSContext *context, std::pmr::string &writeToBuffer) noexcept;
 
 class EventDispatcher;
 
@@ -226,7 +226,7 @@ public:
 
   Expected<JSFunction *, std::string> SourceBreakpointCondition(u32 breakpointId,
                                                                 std::string_view condition) noexcept;
-  std::pmr::string ReplEvaluate(std::string_view input, std::pmr::memory_resource *allocator) noexcept;
+  std::pmr::string *ReplEvaluate(std::string_view input, Allocator *allocator) noexcept;
   std::string ReplEvaluate(std::string_view input) noexcept;
   Expected<void, std::string> EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept;
   Expected<void, std::string> EvaluateJavascriptFileView(std::string_view filePath) noexcept;

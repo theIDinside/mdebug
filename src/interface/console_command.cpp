@@ -45,10 +45,10 @@ ConsoleCommandInterpreter::RegisterConsoleCommand(std::string_view name,
 }
 
 ConsoleCommandResult
-ConsoleCommandInterpreter::Interpret(const std::string &input, std::pmr::memory_resource *allocator) noexcept
+ConsoleCommandInterpreter::Interpret(const std::string &input, Allocator *allocator) noexcept
 {
   auto result = Tracer::GetScriptingInstance().ReplEvaluate(input, allocator);
-  return ConsoleCommandResult{true, std::move(result)};
+  return ConsoleCommandResult{true, result};
 }
 
 GenericCommand::GenericCommand(std::string functionName, Function &&function) noexcept

@@ -366,8 +366,7 @@ DebugAdapterClient::FlushEvents() noexcept
   }
 
   for (auto evt : std::span{tmp, count}) {
-    auto allocator = mEventsAllocator.get()->ScopeAllocation();
-    auto result = evt->Serialize(0, allocator);
+    auto result = evt->Serialize(0, mEventsAllocator.get());
     WriteSerializedProtocolMessage(result);
     delete evt;
   }

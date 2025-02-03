@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory_resource>
 #include <string_view>
 #include <sys/types.h>
 #include <tuple>
@@ -20,6 +21,8 @@ using i8 = std::int8_t;
 
 using Tid = pid_t;
 using Pid = pid_t;
+
+using Allocator = std::pmr::polymorphic_allocator<>;
 
 template <typename Fn, typename... FnArgs> using FnResult = std::invoke_result_t<Fn, FnArgs...>;
 

@@ -128,12 +128,12 @@ public:
   void config_done(ui::dap::DebugAdapterClient *client) noexcept;
   TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
-  void handle_command(ui::UICommand *cmd) noexcept;
+  void ExecuteCommand(ui::UICommand *cmd) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
-  std::pmr::string EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
-                                                  std::pmr::memory_resource *allocator) noexcept;
+  std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
+                                                   Allocator *allocator) noexcept;
 
   void SetUI(ui::dap::DAP *dap) noexcept;
   void KillUI() noexcept;

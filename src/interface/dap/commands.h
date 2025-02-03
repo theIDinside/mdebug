@@ -728,12 +728,12 @@ struct Evaluate final : public UICommand
 
 struct EvaluateResponse final : public UIResult
 {
-  EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::pmr::string &&result,
+  EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::pmr::string *result,
                    std::optional<std::string> &&type, std::optional<std::string> &&memoryReference) noexcept;
   ~EvaluateResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 
-  std::pmr::string result;
+  std::pmr::string *result;
   std::optional<std::string> type;
   int variablesReference;
   std::optional<std::string> memoryReference;
