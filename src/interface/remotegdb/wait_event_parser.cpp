@@ -27,7 +27,7 @@ WaitEventParser::parse_stop_reason(TraceeStopReason reason, std::string_view val
   case TraceeStopReason::Watch:
   case TraceeStopReason::RWatch:
   case TraceeStopReason::AWatch: {
-    const auto addr = to_addr(val);
+    const auto addr = ToAddress(val);
     ASSERT(addr, "Failed to parse address for remote stub watchpoint event from: '{}'", val);
     set_wp_address(addr.value());
     break;

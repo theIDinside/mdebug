@@ -1508,7 +1508,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
 
     std::string_view addr_str;
     args["memoryReference"].get_to(addr_str);
-    const auto addr = to_addr(addr_str);
+    const auto addr = ToAddress(addr_str);
     int offset = args.at("offset");
     int instructionOffset = args.at("instructionOffset");
     int instructionCount = args.at("instructionCount");
@@ -1609,7 +1609,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
 
     std::string_view addr_str;
     args.at("memoryReference").get_to(addr_str);
-    const auto addr = to_addr(addr_str);
+    const auto addr = ToAddress(addr_str);
     const auto offset = args.value("offset", 0);
     const u64 count = args.at("count");
     return new ui::dap::ReadMemory{seq, addr, offset, count};
@@ -1736,9 +1736,9 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   }
   case CommandType::WriteMemory: {
     IfInvalidArgsReturn(WriteMemory);
-    std::string_view addr_str;
-    args["memoryReference"].get_to(addr_str);
-    const auto addr = to_addr(addr_str);
+    std::string_view addrString;
+    args["memoryReference"].get_to(addrString);
+    const auto addr = ToAddress(addrString);
     int offset = 0;
     if (args.contains("offset")) {
       args.at("offset").get_to(offset);

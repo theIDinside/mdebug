@@ -673,7 +673,7 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, 
     } break;
     case DapBreakpointType::instruction: {
       const auto &spec = *specPtr->uInstruction;
-      auto addr_opt = to_addr(spec.mInstructionReference);
+      auto addr_opt = ToAddress(spec.mInstructionReference);
       ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
       const auto addr = addr_opt.value();
       if (symbolFile.ContainsProgramCounter(addr)) {
@@ -893,7 +893,7 @@ TraceeController::SetInstructionBreakpoints(const Set<BreakpointSpecification> &
   }
 
   for (const auto &bp : add) {
-    auto addr = to_addr(bp.uInstruction->mInstructionReference).value();
+    auto addr = ToAddress(bp.uInstruction->mInstructionReference).value();
     bool was_not_set = true;
     if (auto symbolFile = FindObjectByPc(addr); symbolFile) {
       auto cus = symbolFile->GetCompilationUnits(addr);

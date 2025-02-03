@@ -234,7 +234,7 @@ template <typename T> using TPtr = TraceePointer<T>;
 template <typename T> using Option = std::optional<T>;
 
 constexpr Option<AddrPtr>
-to_addr(std::string_view s) noexcept
+ToAddress(std::string_view s) noexcept
 {
   if (s.starts_with("0x")) {
     s.remove_prefix(2);
