@@ -48,8 +48,7 @@ TaskInfo::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   JS::RootedObject callee(cx, &args.thisv().toObject());
   auto task = Get(callee.get());
-  auto it = fmt::format_to(buf, "thread {}.{}: stopped={}", task->GetTaskLeaderTid().value_or(-1), task->mTid,
-                           task->is_stopped());
+  auto it = ToString(buf, *task);
   *it = 0;
   auto length = std::distance(buf, it + 1);
   // Define your custom string representation

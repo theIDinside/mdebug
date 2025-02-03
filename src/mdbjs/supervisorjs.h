@@ -4,6 +4,15 @@
 #include "supervisor.h"
 
 namespace mdb::js {
+
+template <typename Out, typename Supervisor>
+constexpr Out
+ToString(Out iteratorLike, Supervisor *supervisor)
+{
+  return fmt::format_to(iteratorLike, "supervisor {}: threads={}, exited={}", supervisor->TaskLeaderTid(),
+                        supervisor->GetThreads().size(), supervisor->IsExited());
+}
+
 struct Supervisor : public PtrJsObject<mdb::js::Supervisor, mdb::TraceeController, StringLiteral{"Supervisor"}>
 {
   enum Slots

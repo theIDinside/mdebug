@@ -47,7 +47,7 @@ async function inConstructor(debugAdapter) {
       assertVarResponseLength(vres.body.variables, 3, scope.variablesReference, vres)
       // clang emits `Class *` for a `this` pointer of type Class, gcc emits `Class *const` ... sigh. why gcc. why.
       assert(
-        vres.body.variables.some((v) => v.name == 'this' && (v.type == 'Class *' || v.type == "const Class *")),
+        vres.body.variables.some((v) => v.name == 'this' && (v.type == 'Class *' || v.type == 'const Class *')),
         () => `Expected to see a 'this' parameter, but didn't. Variables: ${prettyJson(vres.body.variables)}`
       )
     }
@@ -84,7 +84,7 @@ async function scopeLocalsTest(debugAdapter) {
         assertEqAInB(expected[v.name], v)
         if (v.name == 'structure') {
           const expected = {
-            name: newVarObject('name', val => true, 'const char *'),
+            name: newVarObject('name', (val) => true, 'const char *'),
             count: newVarObject('count', '1', 'int', 0),
             fraction: newVarObject('fraction', '1.25', 'float', 0),
           }
@@ -486,9 +486,9 @@ async function resolvePointeeValue(da) {
   {
     let { ptr, pointee } = await threads[0]
       .stacktrace(100)
-      .then((frames) => frames[0].locals(100))
+      .then((frames) => frames[0].locals(1000))
       .then((vars) => vars[0])
-      .then((ptr) => ptr.variables(100).then((r) => ({ ptr: ptr, pointee: r[0] })))
+      .then((ptr) => ptr.variables(1000).then((r) => ({ ptr: ptr, pointee: r[0] })))
 
     assertLog(
       pointee.memoryReference == ptr.value,

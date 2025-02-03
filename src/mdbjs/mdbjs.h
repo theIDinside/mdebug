@@ -45,21 +45,22 @@ class RuntimeGlobal
   static RuntimeGlobal *priv(JSObject *global) noexcept;
   static const JSClass klass;
 
-#define FOR_EACH_FN(FN)                                                                                           \
-  FN(Log, "log", 2, 0)                                                                                            \
-  FN(GetSupervisor, "supervisor", 1, 0)                                                                           \
-  FN(GetTask, "getThread", 1, 0)                                                                                  \
-  FN(PrintThreads, "listThreads", 1, 0)                                                                           \
-  FN(PrintProcesses, "procs", 1, 0)
+#define FOR_EACH_GLOBAL_FN(FN)                                                                                    \
+  FN(Log, "log", 2, 0, "Log to one of the debug logging channels. usage: log(channel, `message`)")                \
+  FN(GetSupervisor, "getSupervisor", 1, 0,                                                                        \
+     "Get the supervisor for the process with `pid` as an id. usage: getSupervisor(12345)")                       \
+  FN(GetTask, "getThread", 1, 0, "Get the thread that has `tid`. usage: getThread(12345);")                       \
+  FN(PrintThreads, "listThreads", 0, 0, "List all threads in this debug session. usage: listThreads()")           \
+  FN(PrintProcesses, "procs", 0, 0, "List all processes supervisor info. usage: procs()")                         \
+  FN(Help, "help", 1, 0, "Show this help message.")
 
 #define DEFINE_FN(FUNC, ...) static bool FUNC(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  FOR_EACH_FN(DEFINE_FN);
+  FOR_EACH_GLOBAL_FN(DEFINE_FN);
 
-#define FN(FUNC, NAME, ARGS, FLAGS) JS_FN(NAME, &RuntimeGlobal::FUNC, ARGS, FLAGS),
+#define FN(FUNC, NAME, ARGS, FLAGS, ...) JS_FN(NAME, &RuntimeGlobal::FUNC, ARGS, FLAGS),
 
-  static constexpr JSFunctionSpec sRuntimeFunctions[] = {FOR_EACH_FN(FN) JS_FS_END};
+  static constexpr JSFunctionSpec sRuntimeFunctions[] = {FOR_EACH_GLOBAL_FN(FN) JS_FS_END};
 
-#undef FOR_EACH_FN
 #undef DEFINE_FN
 #undef FN
 

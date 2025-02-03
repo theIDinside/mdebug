@@ -16,6 +16,7 @@
 #include "js/Warnings.h"
 #include "jsfriendapi.h"
 #include "mdbjs/event_dispatcher.h"
+#include "mdbjs/supervisorjs.h"
 #include "mdbjs/taskinfojs.h"
 #include "mdbjs/util.h"
 #include "supervisor.h"
@@ -81,17 +82,25 @@ bool
 RuntimeGlobal::PrintThreads(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  if (!args[0].isInt32()) {
-    JS_ReportErrorASCII(cx, "Argument to list_threads must be an int32.");
-    return false;
+
+  std::string buffer;
+  buffer.reserve(4096);
+  // Define your custom string representation
+
+  auto iterator = std::back_inserter(buffer);
+  for (auto supervisor : Tracer::Get().GetAllProcesses()) {
+    iterator = ToString(iterator, supervisor);
+    *iterator++ = '\n';
+
+    for (const auto &t : supervisor->GetThreads()) {
+      iterator = ToString(iterator, *t.mTask);
+      *iterator++ = '\n';
+    }
+    iterator = fmt::format_to(iterator, "----------\n");
   }
-  auto taskInfo = Tracer::Get().GetTask(args[0].toInt32());
-  if (!taskInfo) {
-    args.rval().setNull();
-    return true;
-  }
-  JS::Rooted<JSObject *> task(cx, JSTaskInfo::Create(cx, taskInfo));
-  args.rval().setObject(*task);
+
+  JS::Rooted<JSString *> str{cx, JS_NewStringCopyN(cx, buffer.data(), buffer.size())};
+  args.rval().setString(str);
   return true;
 }
 
@@ -100,25 +109,43 @@ RuntimeGlobal::PrintProcesses(JSContext *cx, unsigned argc, JS::Value *vp) noexc
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
-  if (args.length() > 0 && !args[0].isBoolean()) {
-    JS_ReportErrorASCII(cx, "Argument to list_threads must be an int32.");
-    return false;
-  }
-
-  bool escapeString = args.length() > 0 ? args[0].toBoolean() : true;
   std::string buffer;
   buffer.reserve(4096);
   // Define your custom string representation
 
   auto iterator = std::back_inserter(buffer);
   for (auto supervisor : Tracer::Get().GetAllProcesses()) {
-    if (escapeString) {
-      iterator = fmt::format_to(iterator, R"(supervisor {}: threads={}, exited={}\n)", supervisor->TaskLeaderTid(),
-                                supervisor->GetThreads().size(), supervisor->IsExited());
-    } else {
-      iterator = fmt::format_to(iterator, "supervisor {}: threads={}, exited={}\n", supervisor->TaskLeaderTid(),
-                                supervisor->GetThreads().size(), supervisor->IsExited());
-    }
+    iterator = ToString(iterator, supervisor);
+    *iterator++ = '\n';
+  }
+
+  JSString *str = JS_NewStringCopyN(cx, buffer.data(), buffer.size());
+  args.rval().setString(str);
+  return true;
+}
+
+static consteval auto
+GlobalFunctionsInfo() noexcept
+{
+#ifdef FN
+#undef FN
+#endif
+#define FN(FUNC, NAME, ARGS, FLAGS, INFO) std::tuple{NAME, ARGS, INFO##sv},
+  return std::to_array({FOR_EACH_GLOBAL_FN(FN)});
+#undef FN
+}
+
+bool
+RuntimeGlobal::Help(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  auto globalFns = GlobalFunctionsInfo();
+  std::string buffer;
+  buffer.reserve(4096);
+  auto it = std::back_inserter(buffer);
+  it = fmt::format_to(it, "Global functions\n");
+  for (const auto &[name, argCount, helpInfo] : globalFns) {
+    it = fmt::format_to(it, "{}, arg count: {} - {}\n", name, argCount, helpInfo);
   }
 
   JSString *str = JS_NewStringCopyN(cx, buffer.data(), buffer.size());

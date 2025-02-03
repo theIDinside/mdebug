@@ -12,6 +12,14 @@
 
 namespace mdb::js {
 
+template <typename Out, typename TaskT>
+constexpr Out
+ToString(Out iteratorLike, const TaskT &task)
+{
+  return fmt::format_to(iteratorLike, "thread {}.{}, dbg id={}: stopped={}", task.GetTaskLeaderTid().value_or(-1),
+                        task.mTid, task.mSessionId, task.is_stopped());
+}
+
 struct TaskInfo : public RefPtrJsObject<mdb::js::TaskInfo, mdb::TaskInfo, StringLiteral{"Task"}>
 {
   enum Slots

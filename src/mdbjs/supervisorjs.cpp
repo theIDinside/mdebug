@@ -23,8 +23,7 @@ Supervisor::js_to_string(JSContext *cx, unsigned argc, JS ::Value *vp) noexcept
   JS::RootedObject callee(cx, &args.thisv().toObject());
   auto supervisor = Get(callee);
   char buf[512];
-  auto it = fmt::format_to(buf, "supervisor {}: threads={}, exited={}", supervisor->TaskLeaderTid(),
-                           supervisor->GetThreads().size(), supervisor->IsExited());
+  auto it = ToString(buf, supervisor);
   *it = 0;
   auto length = std::distance(buf, it + 1);
   // Define your custom string representation
