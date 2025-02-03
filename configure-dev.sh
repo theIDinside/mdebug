@@ -64,12 +64,13 @@ fi
 
 # Setup pre-commit formatting requirement hooks
 cp $relative_repo_root_dir/setup/pre-commit $relative_repo_root_dir/.git/hooks/pre-commit
+chmod +x $relative_repo_root_dir/.git/hooks/pre-commit
 
 # Verify that clang-format exists on $PATH
 which clang-format >/dev/null 2>&1
 found=$?
 if [ "$found" -eq 1 ]; then
-  echo "You need to install clang-format or make sure that 'clang-format' can be found on $PATH - or you won't be able to contribute to MDB" 
+  echo "You need to install clang-format or make sure that 'clang-format' can be found on $PATH - or you won't be able to contribute to MDB"
 else
-  echo "clang-format found on \$PATH. You're good to go." 
+  echo "clang-format found on \$PATH. You're good to go."
 fi
