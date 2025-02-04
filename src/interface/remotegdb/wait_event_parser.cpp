@@ -156,7 +156,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
     auto t = tc != nullptr ? tc->GetTaskByTid(tid) : nullptr;
 
     if (t && t->mBreakpointLocationStatus) {
-      const auto locstat = t->clear_bpstat();
+      const auto locstat = t->ClearBreakpointLocStatus();
       return TraceEvent::CreateStepped(param(), !locstat->should_resume, locstat, std::move(t->mNextResumeAction),
                                        std::move(registers));
     }

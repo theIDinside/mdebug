@@ -145,12 +145,12 @@ public:
 
   static Ptr CreateUnInitializedTask(TaskWaitResult wait) noexcept;
 
-  user_regs_struct *native_registers() const noexcept;
-  RegisterDescription *remote_x86_registers() const noexcept;
-  void remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept;
+  user_regs_struct *NativeRegisters() const noexcept;
+  RegisterDescription *RemoteX86Registers() const noexcept;
+  void RemoteFromHexdigitEncoding(std::string_view hex_encoded) noexcept;
   const TaskRegisters &GetRegisterCache() const;
-  u64 get_register(u64 reg_num) noexcept;
-  u64 unwind_buffer_register(u8 level, u16 register_number) const noexcept;
+  u64 GetRegister(u64 reg_num) noexcept;
+  u64 UnwindBufferRegister(u8 level, u16 register_number) const noexcept;
   void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
 
   std::span<const AddrPtr> UnwindReturnAddresses(TraceeController *tc, CallStackRequest req) noexcept;
@@ -159,25 +159,25 @@ public:
 
   void set_taskwait(TaskWaitResult wait) noexcept;
 
-  void step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
-  void set_stop() noexcept;
+  void StepOverBreakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
+  void SetStop() noexcept;
   void SetCurrentResumeAction(tc::ResumeAction type) noexcept;
   void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
-  bool can_continue() noexcept;
+  bool CanContinue() noexcept;
   void SetInvalidCache() noexcept;
-  void set_updated() noexcept;
+  void SetUpdated() noexcept;
   void AddBreakpointLocationStatus(AddrPtr address) noexcept;
-  std::optional<LocationStatus> clear_bpstat() noexcept;
+  std::optional<LocationStatus> ClearBreakpointLocStatus() noexcept;
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
    */
-  bool is_stopped() const noexcept;
-  bool stop_processed() const noexcept;
-  void collect_stop() noexcept;
-  WaitStatus pending_wait_status() const noexcept;
+  bool IsStopped() const noexcept;
+  bool IsStopProcessed() const noexcept;
+  void CollectStop() noexcept;
+  WaitStatus PendingWaitStatus() const noexcept;
 
-  sym::CallStack &get_callstack() noexcept;
+  sym::CallStack &GetCallstack() noexcept;
   // Add the `VariableReferenceId` to this task, so that once the task is resumed, it can instruct MDB to destroy
   // it's variable context's mapped to these id's (or at least clear it from it's application wide cache, so they
   // no longer can be reached via an ID). If a value in javascript is holding a reference to a variable context,

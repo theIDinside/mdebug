@@ -112,26 +112,26 @@ TaskInfo::CreateUnInitializedTask(TaskWaitResult wait) noexcept
 }
 
 user_regs_struct *
-TaskInfo::native_registers() const noexcept
+TaskInfo::NativeRegisters() const noexcept
 {
   ASSERT(regs.mRegisterFormat == TargetFormat::Native, "Used in the wrong context");
   return regs.registers;
 }
 
 RegisterDescription *
-TaskInfo::remote_x86_registers() const noexcept
+TaskInfo::RemoteX86Registers() const noexcept
 {
   ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Used in the wrong context");
   return regs.registerFile;
 }
 
 void
-TaskInfo::remote_from_hexdigit_encoding(std::string_view hex_encoded) noexcept
+TaskInfo::RemoteFromHexdigitEncoding(std::string_view hex_encoded) noexcept
 {
   ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Expected remote format");
 
   regs.registerFile->FillFromHexEncodedString(hex_encoded);
-  set_updated();
+  SetUpdated();
 }
 
 const TaskRegisters &
@@ -141,13 +141,13 @@ TaskInfo::GetRegisterCache() const
 }
 
 u64
-TaskInfo::get_register(u64 reg_num) noexcept
+TaskInfo::GetRegister(u64 reg_num) noexcept
 {
   return regs.GetRegister(reg_num);
 }
 
 u64
-TaskInfo::unwind_buffer_register(u8 level, u16 register_number) const noexcept
+TaskInfo::UnwindBufferRegister(u8 level, u16 register_number) const noexcept
 {
   return mTaskCallstack->UnwindRegister(level, register_number);
 }
@@ -199,14 +199,14 @@ TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
 }
 
 WaitStatus
-TaskInfo::pending_wait_status() const noexcept
+TaskInfo::PendingWaitStatus() const noexcept
 {
   ASSERT(mLastWaitStatus.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", mTid);
   return mLastWaitStatus;
 }
 
 sym::CallStack &
-TaskInfo::get_callstack() noexcept
+TaskInfo::GetCallstack() noexcept
 {
   return *mTaskCallstack;
 }
@@ -280,7 +280,7 @@ TaskInfo::SetSessionId(u32 sessionId) noexcept
 }
 
 void
-TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume) noexcept
+TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::ResumeAction resume) noexcept
 {
   ASSERT(mBreakpointLocationStatus.has_value(), "Requires a valid bpstat");
 
@@ -301,7 +301,7 @@ TaskInfo::step_over_breakpoint(TraceeController *tc, tc::ResumeAction resume) no
 }
 
 void
-TaskInfo::set_stop() noexcept
+TaskInfo::SetStop() noexcept
 {
   mUserVisibleStop = true;
   mTracerVisibleStop = true;
@@ -318,7 +318,7 @@ TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
 }
 
 bool
-TaskInfo::can_continue() noexcept
+TaskInfo::CanContinue() noexcept
 {
   return initialized && (mUserVisibleStop || mTracerVisibleStop) && !reaped;
 }
@@ -339,7 +339,7 @@ TaskInfo::SetInvalidCache() noexcept
 }
 
 void
-TaskInfo::set_updated() noexcept
+TaskInfo::SetUpdated() noexcept
 {
   mInstructionPointerDirty = false;
   mRegisterCacheDirty = false;
@@ -353,7 +353,7 @@ TaskInfo::AddBreakpointLocationStatus(AddrPtr address) noexcept
 }
 
 std::optional<LocationStatus>
-TaskInfo::clear_bpstat() noexcept
+TaskInfo::ClearBreakpointLocStatus() noexcept
 {
   const auto copy = mBreakpointLocationStatus;
   mBreakpointLocationStatus = std::nullopt;
@@ -361,19 +361,19 @@ TaskInfo::clear_bpstat() noexcept
 }
 
 bool
-TaskInfo::is_stopped() const noexcept
+TaskInfo::IsStopped() const noexcept
 {
   return mUserVisibleStop;
 }
 
 bool
-TaskInfo::stop_processed() const noexcept
+TaskInfo::IsStopProcessed() const noexcept
 {
   return mHasProcessedStop;
 }
 
 void
-TaskInfo::collect_stop() noexcept
+TaskInfo::CollectStop() noexcept
 {
   mHasProcessedStop = true;
   mTracerVisibleStop = true;

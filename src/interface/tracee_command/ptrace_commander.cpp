@@ -140,7 +140,7 @@ TaskExecuteResponse
 PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcept
 {
   for (auto &entry : tc->GetThreads()) {
-    if (entry.mTask->can_continue()) {
+    if (entry.mTask->CanContinue()) {
       tc->ResumeTask(*entry.mTask, action);
     } else {
       DBGLOG(core, "[{}:resume:target] {} can_continue=false", tc->TaskLeaderTid(), entry.mTid);
@@ -232,7 +232,7 @@ PtraceCommander::InstallBreakpoint(Tid tid, AddrPtr address) noexcept
 TaskExecuteResponse
 PtraceCommander::ReadRegisters(TaskInfo &t) noexcept
 {
-  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.mTid, nullptr, t.native_registers());
+  if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.mTid, nullptr, t.NativeRegisters());
       ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   } else {
@@ -254,7 +254,7 @@ PtraceCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
   if (ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   }
-  t.native_registers()->rip = addr;
+  t.NativeRegisters()->rip = addr;
   return TaskExecuteResponse::Ok();
 }
 

@@ -163,7 +163,7 @@ Pause::Execute() noexcept
 {
   auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(pauseArgs.threadId);
-  if (task->is_stopped()) {
+  if (task->IsStopped()) {
     return new PauseResponse{false, this};
   }
   const bool success = target->SetAndCallRunAction(
@@ -230,7 +230,7 @@ Continue::Execute() noexcept
   if (continue_all && !target->SomeTaskCanBeResumed()) {
     std::vector<Tid> running_tasks{};
     for (const auto &entry : target->GetThreads()) {
-      if (!entry.mTask->is_stopped() || entry.mTask->mTracerVisibleStop) {
+      if (!entry.mTask->IsStopped() || entry.mTask->mTracerVisibleStop) {
         running_tasks.push_back(entry.mTid);
       }
     }
@@ -323,7 +323,7 @@ Next::Execute() noexcept
   auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
-  if (!task->is_stopped()) {
+  if (!task->IsStopped()) {
     return new NextResponse{false, this};
   }
 
@@ -367,7 +367,7 @@ StepIn::Execute() noexcept
   auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
-  if (!task->is_stopped()) {
+  if (!task->IsStopped()) {
     return new StepInResponse{false, this};
   }
 
@@ -408,7 +408,7 @@ StepOut::Execute() noexcept
   auto target = mDAPClient->GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
-  if (!task->is_stopped()) {
+  if (!task->IsStopped()) {
     return new StepOutResponse{false, this};
   }
   const auto req = CallStackRequest::partial(2);

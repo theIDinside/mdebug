@@ -109,7 +109,7 @@ main(int argc, const char **argv)
         auto iter = std::back_inserter(res);
         for (const auto &[tid, task] : tasks) {
           iter = fmt::format_to(iter, "{}{}:{}", res.empty() ? '[' : ',', tid,
-                                task->is_stopped() ? "stopped" : "running");
+                                task->IsStopped() ? "stopped" : "running");
         }
         if (!res.empty()) {
           res.push_back(']');
@@ -126,10 +126,10 @@ main(int argc, const char **argv)
           writeBuffer.clear();
           for (const auto &target : mdb::Tracer::Get().GetAllProcesses()) {
             for (const auto &entry : target->GetThreads()) {
-              if (entry.mTask->can_continue()) {
+              if (entry.mTask->CanContinue()) {
                 fmt::format_to(std::back_inserter(writeBuffer), "tid={}, stopped={}, wait={}, ?pc?=0x{:x}\n",
-                               entry.mTid, entry.mTask->is_stopped(), to_str(entry.mTask->mLastWaitStatus.ws),
-                               entry.mTask->get_register(16));
+                               entry.mTid, entry.mTask->IsStopped(), to_str(entry.mTask->mLastWaitStatus.ws),
+                               entry.mTask->GetRegister(16));
               }
             }
           }

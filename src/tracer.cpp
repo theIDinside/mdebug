@@ -399,7 +399,7 @@ Tracer::Attach(const AttachArgs &args) noexcept
                 supervisor->CreateNewTask(t.tid, false);
               }
               for (auto &entry : supervisor->GetThreads()) {
-                entry.mTask->set_stop();
+                entry.mTask->SetStop();
               }
               client->PostDapEvent(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
                                                              "attached",

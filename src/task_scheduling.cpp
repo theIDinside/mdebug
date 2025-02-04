@@ -40,7 +40,7 @@ FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBrea
 FinishFunction::~FinishFunction() noexcept
 {
   if (!cancelled) {
-    task.set_stop();
+    task.SetStop();
   }
   mSupervisor.RemoveBreakpoint(bp->mId);
 }
@@ -219,7 +219,7 @@ StopImmediately::~StopImmediately() noexcept
 void
 StopImmediately::notify_stopped() noexcept
 {
-  task.set_stop();
+  task.SetStop();
   mSupervisor.EmitStopped(task.mTid, reason, "stopped", false, {});
 }
 
@@ -431,10 +431,10 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
   } else {
     const auto kind = eventProceedResult.res.value_or(
       tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
-    if (task.can_continue() && eventProceedResult.should_resume) {
+    if (task.CanContinue() && eventProceedResult.should_resume) {
       mSupervisor->ResumeTask(task, kind);
     } else {
-      task.set_stop();
+      task.SetStop();
     }
   }
 }

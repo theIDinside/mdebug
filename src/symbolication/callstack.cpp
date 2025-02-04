@@ -470,7 +470,7 @@ CallStack::Unwind(const CallStackRequest &req)
     constexpr auto STACK_POINTER_NUMBER = 7;
     // we may be in a plt entry. Try sniffing out this frame before throwing away the entire call stack
     // a call instruction automatically pushes rip onto the stack at $rsp
-    const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{mTask->get_register(STACK_POINTER_NUMBER)});
+    const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{mTask->GetRegister(STACK_POINTER_NUMBER)});
     uninfo = it.GetInfo(resumeAddress);
     if (uninfo) {
       Initialize();

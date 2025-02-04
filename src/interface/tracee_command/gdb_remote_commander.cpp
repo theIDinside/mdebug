@@ -276,7 +276,7 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noex
 
   for (auto &entry : tc->GetThreads()) {
     if (entry.mTask->mBreakpointLocationStatus) {
-      entry.mTask->step_over_breakpoint(tc, action);
+      entry.mTask->StepOverBreakpoint(tc, action);
       if (!connection->settings().is_non_stop) {
         return TaskExecuteResponse::Ok();
       }
@@ -391,7 +391,7 @@ GdbRemoteCommander::ReadRegisters(TaskInfo &t) noexcept
   ASSERT(payload.front() == '$', "Expected OK response");
   payload.remove_prefix(1);
 
-  t.remote_from_hexdigit_encoding(payload);
+  t.RemoteFromHexdigitEncoding(payload);
 
   return TaskExecuteResponse::Ok(register_contents.size());
 }
@@ -427,7 +427,7 @@ GdbRemoteCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
     }
     ++i;
   }
-  t.remote_x86_registers()->SetPc(addr);
+  t.RemoteX86Registers()->SetPc(addr);
   return TaskExecuteResponse::Ok(0);
 }
 

@@ -90,5 +90,8 @@ main(int argc, const char **argv)
 {
   foo();
   Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2}; // A2 B3 C4 D5
+  printf("bar.bar_value=%d\n", bar.bar_value);
+  printf("Hello world!\n");
+  printf("bar.bar_value=%d\n", bar.bar_value);
   return -15;
 }

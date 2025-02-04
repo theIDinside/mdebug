@@ -422,9 +422,9 @@ TraceeController::ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept
   if (task.mBreakpointLocationStatus) {
     auto location = mUserBreakpoints.location_at(task.mBreakpointLocationStatus->loc);
     if (location) {
-      task.step_over_breakpoint(this, type);
+      task.StepOverBreakpoint(this, type);
     } else {
-      task.clear_bpstat();
+      task.ClearBreakpointLocStatus();
       resume_task = true;
     }
   }
@@ -461,11 +461,11 @@ TraceeController::StopAllTasks(TaskInfo *requestingTask) noexcept
       DBGLOG(core, "Halting {}", t.mTid);
       const auto response = mTraceeInterface->StopTask(t);
       ASSERT(response.is_ok(), "Failed to stop {}: {}", t.mTid, strerror(response.sys_errno));
-      t.set_stop();
+      t.SetStop();
     } else if (t.mTracerVisibleStop) {
       // we're in a tracer-stop, not in a user-stop, so we need no stopping, we only need to inform ourselves that
       // we upgraded our tracer-stop to a user-stop
-      t.set_stop();
+      t.SetStop();
     }
   }
 
@@ -1033,7 +1033,7 @@ CreateTraceEventFromStopped(TraceeController &tc, TaskInfo &t) noexcept
          "When creating a trace event from a wait status event, we must already know what kind it is.");
   AddrPtr stepped_over_bp_id{nullptr};
   if (t.mBreakpointLocationStatus) {
-    const auto locstat = t.clear_bpstat();
+    const auto locstat = t.ClearBreakpointLocStatus();
     return TraceEvent::CreateStepped({tc.TaskLeaderTid(), t.mTid, {}}, !locstat->should_resume, locstat,
                                      t.mNextResumeAction, {});
   }
@@ -1060,7 +1060,7 @@ native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
   pid_t np = -1;
   // we should only ever hit this when running debugging a native-hosted session
   ASSERT(tc.GetInterface().mFormat == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
-  auto regs = cloning_task.native_registers();
+  auto regs = cloning_task.NativeRegisters();
   const auto orig_rax = regs->orig_rax;
   if (orig_rax == SYS_clone) {
     const TPtr<void> stack_ptr = sys_arg_n<2>(*regs);
@@ -1086,7 +1086,7 @@ TraceEvent *
 TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
 {
   info.mHasProcessedStop = true;
-  const auto ws = info.pending_wait_status();
+  const auto ws = info.PendingWaitStatus();
 
   switch (ws.ws) {
   case WaitStatusKind::Stopped: {
@@ -1155,8 +1155,8 @@ bool
 TraceeController::SomeTaskCanBeResumed() const noexcept
 {
   return std::any_of(mThreads.cbegin(), mThreads.cend(), [](const auto &entry) {
-    DBGLOG(core, "Thread {} stopped={}", entry.mTid, entry.mTask->is_stopped());
-    return entry.mTask->is_stopped();
+    DBGLOG(core, "Thread {} stopped={}", entry.mTid, entry.mTask->IsStopped());
+    return entry.mTask->IsStopped();
   });
 }
 
@@ -1164,8 +1164,8 @@ bool
 TraceeController::IsRunning() const noexcept
 {
   return std::any_of(mThreads.cbegin(), mThreads.cend(), [](const auto &entry) {
-    DBGLOG(core, "Thread {} stopped={}", entry.mTid, entry.mTask->is_stopped());
-    return !entry.mTask->is_stopped();
+    DBGLOG(core, "Thread {} stopped={}", entry.mTid, entry.mTask->IsStopped());
+    return !entry.mTask->IsStopped();
   });
 }
 
@@ -1579,7 +1579,7 @@ bool
 TraceeController::IsAllStopped() const noexcept
 {
   for (const auto &entry : mThreads) {
-    if (!entry.mTask->stop_processed()) {
+    if (!entry.mTask->IsStopProcessed()) {
       return false;
     }
   }
@@ -1855,11 +1855,11 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
       }
     }
   }
-  task->collect_stop();
+  task->CollectStop();
   task->SetValueLiveness(Tracer::Get().GetCurrentVariableReferenceBoundary());
   if (IsSessionAllStopMode()) {
     for (const auto &entry : GetThreads()) {
-      entry.mTask->set_stop();
+      entry.mTask->SetStop();
       entry.mTask->mHasProcessedStop = true;
     }
   }

@@ -17,7 +17,7 @@ constexpr Out
 ToString(Out iteratorLike, const TaskT &task)
 {
   return fmt::format_to(iteratorLike, "thread {}.{}, dbg id={}: stopped={}", task.GetTaskLeaderTid().value_or(-1),
-                        task.mTid, task.mSessionId, task.is_stopped());
+                        task.mTid, task.mSessionId, task.IsStopped());
 }
 
 struct TaskInfo : public RefPtrJsObject<mdb::js::TaskInfo, mdb::TaskInfo, StringLiteral{"Task"}>

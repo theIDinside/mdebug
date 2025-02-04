@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory_resource>
@@ -18,6 +19,9 @@ using i64 = std::int64_t;
 using i32 = std::int32_t;
 using i16 = std::int16_t;
 using i8 = std::int8_t;
+
+using f32 = float;
+using f64 = double;
 
 using Tid = pid_t;
 using Pid = pid_t;
