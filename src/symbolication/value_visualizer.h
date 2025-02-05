@@ -59,6 +59,13 @@ public:
                                   ValueRange valueRange = {}) noexcept final;
 };
 
+class ResolveRange final : public IValueResolve
+{
+public:
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
+                                  ValueRange valueRange = {}) noexcept final;
+};
+
 // The `value` visualizer - it formats a `Value` so that it can be displayed in the `value` field of a Variable
 // object in the serialized data.
 
@@ -115,6 +122,23 @@ class CStringVisualizer final : public DebugAdapterSerializer
 public:
   std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name, int variablesReference,
                                             std::pmr::memory_resource *allocator) noexcept final;
+};
+
+struct SerializeOptions
+{
+  int mDepth{2};
+  bool mNewLineAfterMember{false};
+};
+
+class JavascriptValueSerializer
+{
+  template <typename FmtIterator>
+  static FmtIterator Serialize(Value *value, FmtIterator fmtIterator, const SerializeOptions &options,
+                               int currentDepth) noexcept;
+
+public:
+  template <typename StringType>
+  static bool Serialize(Value *value, StringType &outputBuffer, const SerializeOptions &options) noexcept;
 };
 
 } // namespace mdb::sym

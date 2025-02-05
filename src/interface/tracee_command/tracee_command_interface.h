@@ -290,7 +290,7 @@ public:
                          TraceeInterfaceType type) noexcept;
   virtual ~TraceeCommandInterface() noexcept = default;
   virtual ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
-  virtual TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept = 0;
+  virtual TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept = 0;
   virtual TaskExecuteResponse ReverseContinue() noexcept;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction run) noexcept = 0;

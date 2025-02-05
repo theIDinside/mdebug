@@ -45,19 +45,23 @@ class RuntimeGlobal
   static RuntimeGlobal *priv(JSObject *global) noexcept;
   static const JSClass klass;
 
+#define FN_ARGS(...) std::to_array<std::string_view>({__VA_ARGS__})
+#define EMPTY_ARGS()                                                                                              \
+  std::array<std::string_view, 0> {}
+
 #define FOR_EACH_GLOBAL_FN(FN)                                                                                    \
-  FN(Log, "log", 2, 0, "Log to one of the debug logging channels. usage: log(channel, `message`)")                \
-  FN(GetSupervisor, "getSupervisor", 1, 0,                                                                        \
-     "Get the supervisor for the process with `pid` as an id. usage: getSupervisor(12345)")                       \
-  FN(GetTask, "getThread", 1, 0, "Get the thread that has `tid`. usage: getThread(12345);")                       \
-  FN(PrintThreads, "listThreads", 0, 0, "List all threads in this debug session. usage: listThreads()")           \
-  FN(PrintProcesses, "procs", 0, 0, "List all processes supervisor info. usage: procs()")                         \
-  FN(Help, "help", 1, 0, "Show this help message.")
+  FN(Log, "log", FN_ARGS("channel", "message"), 0, "Log to one of the debug logging channels", "usage")           \
+  FN(GetSupervisor, "getSupervisor", FN_ARGS("pid"), 0, "Get the supervisor that has the provided pid", "usage")  \
+  FN(GetTask, "getThread", FN_ARGS("tid | dbgId", "useDbgId"), 0,                                                 \
+     "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId", "usage")                         \
+  FN(PrintThreads, "listThreads", EMPTY_ARGS(), 0, "List all threads in this debug session", "usage")             \
+  FN(PrintProcesses, "procs", EMPTY_ARGS(), 0, "List all processes supervisor info", "usage")                     \
+  FN(Help, "help", FN_ARGS("functionName"), 0, "Show this help message.", "usage")
 
 #define DEFINE_FN(FUNC, ...) static bool FUNC(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
   FOR_EACH_GLOBAL_FN(DEFINE_FN);
 
-#define FN(FUNC, NAME, ARGS, FLAGS, ...) JS_FN(NAME, &RuntimeGlobal::FUNC, ARGS, FLAGS),
+#define FN(FUNC, NAME, ARGS, FLAGS, ...) JS_FN(NAME, &RuntimeGlobal::FUNC, std::size(ARGS), FLAGS),
 
   static constexpr JSFunctionSpec sRuntimeFunctions[] = {FOR_EACH_GLOBAL_FN(FN) JS_FS_END};
 
@@ -77,7 +81,8 @@ using RegisterTraceFunction = std::function<void(JSTracer *trc)>;
 // Responsible for memory management, the public mdb API (functions found on mdb.foo(), mdb.bar())
 // as well as where the subsystems can be reached from.
 
-// You want to add a listener for some event, e.g. clone? it's mdb.events.on(mdb.events.clone, (pid, tid) => { ...
+// You want to add a listener for some event, e.g. clone? it's mdb.events.on(mdb.events.clone, (pid, tid) => {
+// ...
 // })
 class MdbObject
 {
@@ -127,9 +132,9 @@ ComputeEnumNames()
   return tMax;
 }
 
-// `AppScriptingInstance` the interface between the debugger and the scripting mechanics/embedding of SpiderMonkey
-// Responsible for sourcing javascsript code into objects and state that we can manipulate in a fashion that best
-// suits us.
+// `AppScriptingInstance` the interface between the debugger and the scripting mechanics/embedding of
+// SpiderMonkey Responsible for sourcing javascsript code into objects and state that we can manipulate in a
+// fashion that best suits us.
 class AppScriptingInstance
 {
   friend RuntimeGlobal;
@@ -164,9 +169,9 @@ public:
   };
 
   /// Call function `compiledFunction` expecting template parameter `ExpectedReturnType` as return type.
-  /// If `ExpectedReturnType` is int, but the return type from the javascript function is a boolean, we convert the
-  /// boolean to an integer result (0 = false).
-  /// std::string maps to JSString for now. No other string can therefore be used yet.
+  /// If `ExpectedReturnType` is int, but the return type from the javascript function is a boolean, we convert
+  /// the boolean to an integer result (0 = false). std::string maps to JSString for now. No other string can
+  /// therefore be used yet.
   template <typename ReturnType>
   std::optional<ReturnType>
   CallFunction(JS::Handle<JSFunction *> compiledFun, JS::HandleValueArray arguments,

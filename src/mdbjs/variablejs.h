@@ -14,6 +14,7 @@ struct Variable : public RefPtrJsObject<mdb::js::Variable, sym::Value, StringLit
   enum Slots
   {
     ThisPointer,
+    TypeTransform,
     SlotCount
   };
 
@@ -36,6 +37,10 @@ struct Variable : public RefPtrJsObject<mdb::js::Variable, sym::Value, StringLit
   /** Returns `true` if this variable is known to be live (because it was created at "this" stop). */
   static bool js_is_live(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
 
+  /** Attempts to set the value with the contents of the passed in value. Throws exception if the value this object
+   * represents isn't a primitive that matches the input value. */
+  static bool js_set_value(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
+
   static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0),
                                                     JS_FN("name", &js_name, 0, 0),
                                                     JS_FN("toString", &js_to_string, 0, 0),
@@ -44,6 +49,7 @@ struct Variable : public RefPtrJsObject<mdb::js::Variable, sym::Value, StringLit
                                                     JS_FN("dereference", &js_dereference, 0, 0),
                                                     JS_FN("typeName", &js_type_name, 0, 0),
                                                     JS_FN("isLive", &js_is_live, 0, 0),
+                                                    JS_FN("setValue", &js_set_value, 1, 0),
                                                     JS_FS_END};
   // Uncomment when you want to define properties
   // static constexpr JSPropertySpec PropertiesSpec[]{JS_PS_END};

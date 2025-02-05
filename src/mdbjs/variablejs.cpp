@@ -4,7 +4,9 @@
 #include "js/ArrayBufferMaybeShared.h"
 #include "js/BigInt.h"
 #include "js/CompilationAndEvaluation.h"
+#include "js/Conversions.h"
 #include "js/EnvironmentChain.h"
+#include "js/ErrorReport.h"
 #include "js/GCVector.h"
 #include "js/Modules.h"
 #include "js/PropertyAndElement.h"
@@ -18,6 +20,7 @@
 #include <js/ArrayBuffer.h> // For JS_NewArrayBuffer and JS_GetArrayBufferData
 #include <js/experimental/TypedData.h>
 
+#include <symbolication/objfile.h>
 #include <symbolication/type.h>
 
 namespace mdb::js {
@@ -47,14 +50,53 @@ Variable::js_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   return true;
 }
 
+// Function to extract "depth" and "nl" properties from a JSObject*
+static bool
+GetSerializeOptions(JSContext *cx, JS::HandleObject obj, sym::SerializeOptions &options)
+{
+  JS::RootedValue val(cx);
+
+  // Check for "depth" property
+  if (JS_GetProperty(cx, obj, "depth", &val) && val.isInt32()) {
+    options.mDepth = val.toInt32();
+  }
+
+  // Check for "nl" property
+  if (JS_GetProperty(cx, obj, "nl", &val) && val.isBoolean()) {
+    options.mNewLineAfterMember = val.toBoolean();
+  }
+
+  return true;
+}
+
 /*static*/ bool
 Variable::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
-  TODO(__PRETTY_FUNCTION__);
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  sym::SerializeOptions options{};
+  if (args.length() == 1) {
+    if (!args[0].isObject()) {
+      JS_ReportErrorASCII(cx, "options to toString must be an object { depth: int, nl: boolean } that describes "
+                              "levels to print and if newlines should be printed after fields");
+      return false;
+    }
+    JS::Rooted<JSObject *> obj{cx, &args[0].toObject()};
+    // options are default, if no opts are passed in.
+    GetSerializeOptions(cx, obj, options);
+  }
+
   JS::RootedObject callee(cx, &args.thisv().toObject());
   auto var = Get(callee.get());
-  var->GetVisualizer()->Serialize(*var, var->mName, var->ReferenceId(), nullptr);
+
+  std::string string;
+  sym::JavascriptValueSerializer::Serialize(var, string, options);
+  auto str = PrepareString(cx, string);
+  if (!str) {
+    JS_ReportOutOfMemory(cx);
+    return false;
+  }
+  args.rval().setString(str);
+  return true;
 }
 
 /* static */
@@ -117,6 +159,57 @@ Variable::js_is_live(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   auto var = Get(callee.get());
 
   args.rval().setBoolean(var->IsLive());
+  return true;
+}
+
+/* static */
+bool
+Variable::js_set_value(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  if (args.length() != 1) {
+    JS_ReportErrorASCII(cx, "Function expects a value that the variable can be overwritten with.");
+    return false;
+  }
+
+  auto var = Get(callee.get());
+  if (args[0].isInt32()) {
+    int value = args[0].toInt32();
+    if (!var->WritePrimitive(value)) {
+      JS_ReportErrorASCII(cx, "Failed to set value");
+      return false;
+    }
+  } else if (args[0].isDouble()) {
+    double value;
+    if (!JS::ToNumber(cx, args[0], &value)) {
+      JS_ReportErrorASCII(cx, "Conversion to number failed");
+      return false;
+    }
+    if (!var->WritePrimitive(value)) {
+      JS_ReportErrorASCII(cx, "Failed to set value");
+      return false;
+    }
+  } else if (args[0].isBigInt()) {
+    auto bigInt = args[0].toBigInt();
+    if (JS::BigIntIsNegative(bigInt)) {
+      int64_t value = JS::ToBigInt64(bigInt);
+      if (!var->WritePrimitive(value)) {
+        JS_ReportErrorASCII(cx, "Failed to set value");
+        return false;
+      }
+    } else {
+      uint64_t value = JS::ToBigUint64(bigInt);
+      if (!var->WritePrimitive(value)) {
+        JS_ReportErrorASCII(cx, "Failed to set value");
+        return false;
+      }
+    }
+  } else {
+    JS_ReportErrorASCII(cx, "Over-write value type unsupported at the moment");
+    return false;
+  }
+
   return true;
 }
 

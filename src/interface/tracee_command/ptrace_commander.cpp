@@ -126,7 +126,7 @@ PtraceCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 }
 
 TraceeWriteResult
-PtraceCommander::WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept
+PtraceCommander::WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
 {
   const auto result = pwrite64(procfs_memfd.Get(), buf, size, addr.get());
   if (result > 0) {

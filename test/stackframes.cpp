@@ -1,14 +1,37 @@
 #include "./templated_code/template.h"
+#include <cstdint>
 #include <cstdio>
 #include <sys/signal.h>
+
+enum class ProgrammingLanaguage : std::uint8_t
+{
+  C,
+  CPP,
+  Javascript,
+  Java,
+  Rust,
+  DLang,
+  Go,
+};
+
 struct Foo
 {
   int foo_value;
+  ProgrammingLanaguage lang;
 };
 struct Bar
 {
   Foo foo;
   int bar_value;
+  ProgrammingLanaguage lang;
+};
+
+struct Baz
+{
+  Bar bar;
+  float foo;
+  const char *name;
+  ProgrammingLanaguage lang;
 };
 
 int fib(int n);
@@ -89,7 +112,15 @@ int
 main(int argc, const char **argv)
 {
   foo();
-  Bar bar{.foo = Foo{.foo_value = 1}, .bar_value = 2}; // A2 B3 C4 D5
+  Baz baz{.bar = {.foo = Foo{.foo_value = 42, .lang = ProgrammingLanaguage::CPP},
+                  .bar_value = 1337,
+                  .lang = ProgrammingLanaguage::DLang},
+          .foo = 80085.4f,
+          .name = "The great baz",
+          .lang = ProgrammingLanaguage::Javascript};
+  Bar bar{.foo = Foo{.foo_value = 1, .lang = ProgrammingLanaguage::Javascript},
+          .bar_value = 2,
+          .lang = ProgrammingLanaguage::CPP}; // A2 B3 C4 D5
   printf("bar.bar_value=%d\n", bar.bar_value);
   printf("Hello world!\n");
   printf("bar.bar_value=%d\n", bar.bar_value);

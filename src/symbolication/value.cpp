@@ -11,6 +11,7 @@
 #include <supervisor.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
+#include <type_traits>
 
 namespace mdb::sym {
 
@@ -189,6 +190,143 @@ Value::RegisterContext() noexcept
   mContext->mTask->CacheValueObject(mContext->mId, RcHandle<sym::Value>{this});
 }
 
+bool
+Value::OverwriteValueBytes(u32 offset, const std::span<const std::byte> newBytes) noexcept
+{
+  auto oldSpan = MemoryView();
+  if (newBytes.size() > oldSpan.size()) {
+    return false;
+  }
+  auto addr = Address();
+
+  auto supervisor = mContext->mTask->GetSupervisor();
+
+  const auto result = supervisor->GetInterface().WriteBytes(addr, (const u8 *)newBytes.data(), newBytes.size());
+  mValueObject->Refresh(*supervisor);
+
+  return result.success;
+}
+
+template <class T>
+static constexpr auto
+ByteViewOf(const T &t) -> std::span<const std::byte>
+{
+  return std::as_bytes(std::span<const T>{std::addressof(t), 1});
+}
+
+template <typename Primitive>
+bool
+Value::WritePrimitive(Primitive value) noexcept
+{
+  auto type = GetType();
+
+  if (type->IsReference()) {
+    if constexpr (!std::is_integral_v<Primitive>) {
+      return false;
+    }
+    auto cast = static_cast<u64>(value);
+    return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+  }
+
+  // if *not* a reference, or *is* array type, get layout describing type
+  if (!(GetType()->IsReference() || GetType()->IsArrayType())) {
+    type = type->TypeDescribingLayoutOfThis();
+  }
+
+  auto baseType = type->GetBaseType();
+  // TODO(simon): implement support for enum, which can have base type underlying types (at which point baseType ==
+  // nullopt). When that is fixed, the check below should be baseType->IsPrimitive(), which also lets enum types
+  // (with primitive backing storage) through
+  if (!baseType) {
+    return false;
+  }
+  auto sz = type->SizeBytes();
+  switch (baseType.value()) {
+  case BaseTypeEncoding::DW_ATE_float: {
+    if constexpr (!std::is_floating_point_v<Primitive>) {
+      return false;
+    }
+    switch (sz) {
+    case 4: {
+      auto cast = static_cast<f32>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 8: {
+      auto cast = static_cast<f64>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    }
+  } break;
+  case BaseTypeEncoding::DW_ATE_signed_char:
+    [[fallthrough]];
+  case BaseTypeEncoding::DW_ATE_signed: {
+    if constexpr (!std::is_integral_v<Primitive>) {
+      return false;
+    }
+    switch (sz) {
+    case 1: {
+      auto cast = static_cast<i8>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 2: {
+      auto cast = static_cast<i16>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 4: {
+      auto cast = static_cast<i32>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 8: {
+      auto cast = static_cast<i64>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    }
+  } break;
+  case BaseTypeEncoding::DW_ATE_unsigned_char:
+    [[fallthrough]];
+  case BaseTypeEncoding::DW_ATE_unsigned: {
+    if constexpr (!std::is_integral_v<Primitive>) {
+      return false;
+    }
+    switch (sz) {
+    case 1: {
+      auto cast = static_cast<u8>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 2: {
+      auto cast = static_cast<u16>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 4: {
+      auto cast = static_cast<u32>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    case 8: {
+      auto cast = static_cast<u64>(value);
+      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    } break;
+    }
+  } break;
+
+  default:
+    break;
+  }
+  return false;
+}
+
+template bool Value::WritePrimitive<i8>(i8 value) noexcept;
+template bool Value::WritePrimitive<i16>(i16 value) noexcept;
+template bool Value::WritePrimitive<i32>(i32 value) noexcept;
+template bool Value::WritePrimitive<i64>(i64 value) noexcept;
+
+template bool Value::WritePrimitive<u8>(u8 value) noexcept;
+template bool Value::WritePrimitive<u16>(u16 value) noexcept;
+template bool Value::WritePrimitive<u32>(u32 value) noexcept;
+template bool Value::WritePrimitive<u64>(u64 value) noexcept;
+
+template bool Value::WritePrimitive<f32>(f32 value) noexcept;
+template bool Value::WritePrimitive<f64>(f64 value) noexcept;
+
 DebugAdapterSerializer *
 Value::GetVisualizer() noexcept
 {
@@ -230,7 +368,10 @@ LazyMemoryContentsObject::LazyMemoryContentsObject(TraceeController &supervisor,
 bool
 EagerMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
 {
-  TODO(__PRETTY_FUNCTION__);
+  auto mem = ReadMemory(supervisor, start, RawView().size_bytes());
+  ASSERT(mem.is_ok(), "failed to refresh {} .. {}", start, end);
+  mContents = std::move(mem.value);
+  return mem.is_ok();
 }
 
 std::span<const u8>
@@ -259,7 +400,8 @@ LazyMemoryContentsObject::CacheMemory() noexcept
 bool
 LazyMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
 {
-  TODO(__PRETTY_FUNCTION__);
+  CacheMemory();
+  return true;
 }
 
 std::span<const u8>

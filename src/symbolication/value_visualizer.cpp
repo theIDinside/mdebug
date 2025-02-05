@@ -139,6 +139,12 @@ ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, Va
   return mResults;
 }
 
+std::vector<Ref<Value>>
+ResolveRange::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+{
+  TODO(__PRETTY_FUNCTION__);
+}
+
 std::optional<std::pmr::string>
 PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept
 {
@@ -409,4 +415,286 @@ CStringVisualizer::Serialize(const Value &value, std::string_view name, int,
 }
 
 #undef FormatAndReturn
+
+// TODO(simon): add optimization where we can format our value directly to an outbuf?
+
+#define FormatAndReturn(result, formatString, ...)                                                                \
+  return fmt::format_to(result, formatString __VA_OPT__(, ) __VA_ARGS__);
+
+template <typename Iterator>
+static Iterator
+FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
+{
+  auto &enums = t.GetEnumerations();
+  EnumeratorConstValue value;
+  if (enums.is_signed) {
+    switch (t.size_of) {
+    case 1:
+      value.i = BitCopy<i8>(span);
+      break;
+    case 2:
+      value.i = BitCopy<i16>(span);
+      break;
+    case 4:
+      value.i = BitCopy<i32>(span);
+      break;
+    case 8:
+      value.i = BitCopy<i64>(span);
+      break;
+    }
+  } else {
+    switch (t.size_of) {
+    case 1:
+      value.u = BitCopy<u8>(span);
+      break;
+    case 2:
+      value.u = BitCopy<u16>(span);
+      break;
+    case 4:
+      value.u = BitCopy<u32>(span);
+      break;
+    case 8:
+      value.u = BitCopy<u64>(span);
+      break;
+    }
+  }
+
+  const auto &fields = t.MemberFields();
+  if (enums.is_signed) {
+    for (auto i = 0u; i < fields.size(); ++i) {
+      if (enums.e_values[i].i == value.i) {
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
+      }
+    }
+    FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
+  } else {
+    for (auto i = 0u; i < fields.size(); ++i) {
+      if (enums.e_values[i].u == value.u) {
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
+      }
+    }
+    FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
+  }
+}
+
+template <typename Iterator>
+Iterator
+FormatValue(Value &value, Iterator iter) noexcept
+{
+  const auto span = value.MemoryView();
+  if (span.empty()) {
+    return fmt::format_to(iter, "<err:value had no memory contents>");
+  }
+  auto type = value.GetType();
+  const auto size_of = type->size_of;
+
+  if (type->IsReference()) {
+    const std::uintptr_t ptr = BitCopy<std::uintptr_t>(span);
+    FormatAndReturn(iter, "0x{:x}", ptr);
+  }
+
+  auto target_type = type->GetTargetType();
+  if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
+    if (!target_type->IsResolved()) {
+      dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+                                       *target_type.ptr};
+      ctx.ResolveType();
+    }
+
+    return FormatEnum(*target_type, span, iter);
+  }
+
+  switch (type->GetBaseType().value()) {
+  case BaseTypeEncoding::DW_ATE_address: {
+    std::uintptr_t value = BitCopy<std::uintptr_t>(span);
+    FormatAndReturn(iter, "0x{}", value);
+  }
+  case BaseTypeEncoding::DW_ATE_boolean: {
+    bool value = BitCopy<bool>(span);
+    FormatAndReturn(iter, "{}", value);
+  }
+  case BaseTypeEncoding::DW_ATE_float: {
+    if (size_of == 4u) {
+      float value = BitCopy<float>(span);
+      FormatAndReturn(iter, "{}", value);
+    } else if (size_of == 8u) {
+      double value = BitCopy<double>(span);
+      FormatAndReturn(iter, "{}", value);
+    } else {
+      PANIC("Expected byte size of a floating point to be 4 or 8");
+    }
+  }
+  case BaseTypeEncoding::DW_ATE_signed_char:
+  case BaseTypeEncoding::DW_ATE_signed:
+    switch (size_of) {
+    case 1: {
+      signed char value = BitCopy<signed char>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    case 2: {
+      signed short value = BitCopy<signed short>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    case 4: {
+      int value = BitCopy<int>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    case 8: {
+      signed long long value = BitCopy<signed long long>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    }
+    break;
+  case BaseTypeEncoding::DW_ATE_unsigned_char:
+  case BaseTypeEncoding::DW_ATE_unsigned:
+    switch (size_of) {
+    case 1: {
+      u8 value = BitCopy<unsigned char>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    case 2: {
+      u16 value = BitCopy<unsigned short>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    case 4: {
+      u32 value = BitCopy<u32>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    case 8: {
+      u64 value = BitCopy<u64>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    }
+    break;
+  case BaseTypeEncoding::DW_ATE_UTF: {
+    u32 value = BitCopy<u32>(span);
+    FormatAndReturn(iter, "{}", value);
+  } break;
+  case BaseTypeEncoding::DW_ATE_ASCII:
+  case BaseTypeEncoding::DW_ATE_edited:
+  case BaseTypeEncoding::DW_ATE_signed_fixed:
+  case BaseTypeEncoding::DW_ATE_unsigned_fixed:
+  case BaseTypeEncoding::DW_ATE_decimal_float:
+  case BaseTypeEncoding::DW_ATE_imaginary_float:
+  case BaseTypeEncoding::DW_ATE_packed_decimal:
+  case BaseTypeEncoding::DW_ATE_numeric_string:
+  case BaseTypeEncoding::DW_ATE_complex_float:
+
+  case BaseTypeEncoding::DW_ATE_UCS: {
+    TODO_FMT("Currently not implemented base type encoding: {}", to_str(type->GetBaseType().value()));
+    break;
+  }
+  case BaseTypeEncoding::DW_ATE_lo_user:
+  case BaseTypeEncoding::DW_ATE_hi_user:
+    break;
+  }
+  PANIC("unknown base type encoding");
+}
+
+template <size_t N>
+static consteval StringLiteral<N>
+IndentString() noexcept
+{
+  StringLiteral<N> buf;
+  for (auto &c : buf.value) {
+    c = ' ';
+  }
+  return StringLiteral<N>{buf};
+}
+
+static constexpr std::array<char, 257> IndentStringArray{
+  "                                                                                                               "
+  "                                                                                                               "
+  "                                  "};
+
+static constexpr std::string_view
+GetIndent(uint64_t level) noexcept
+{
+  return std::string_view{IndentStringArray.data(), level * 2};
+}
+
+/* static */
+template <typename FmtIterator>
+FmtIterator
+JavascriptValueSerializer::Serialize(Value *value, FmtIterator fmtIterator, const SerializeOptions &options,
+                                     int currentDepth) noexcept
+{
+  static constexpr auto finalizeField = [](auto it, const auto &opts) noexcept {
+    if (opts.mNewLineAfterMember) {
+      return fmt::format_to(it, ",\n");
+    } else {
+      return fmt::format_to(it, ", ");
+    }
+  };
+  auto valueType = value->GetType();
+  if (!valueType->IsResolved()) {
+    sym::dw::TypeSymbolicationContext symbolicationContext{
+      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType};
+    symbolicationContext.ResolveType();
+  }
+
+  auto indentLevel = options.mDepth - currentDepth;
+  auto indent = GetIndent(options.mNewLineAfterMember ? indentLevel : 0);
+  if (value->GetType()->IsPrimitive()) {
+    auto it = fmt::format_to(fmtIterator, "{}{} : ", indent, value->mName);
+    it = FormatValue(*value, it);
+    return finalizeField(it, options);
+  } else if (currentDepth == 0) {
+    auto it =
+      fmt::format_to(fmtIterator, "{}{} : struct {}{{ .. }}", indent, value->mName, value->GetType()->mName);
+    return finalizeField(it, options);
+  }
+  // This is a struct/class
+  auto it = fmt::format_to(fmtIterator, "{}{} : {}{{", indent, value->mName, valueType->mName);
+  if (options.mNewLineAfterMember) {
+    it = fmt::format_to(it, "\n");
+  }
+  for (const auto &m : value->GetType()->MemberFields()) {
+    auto v = value->GetMember(m.name);
+    it = Serialize(v, it, options, currentDepth - 1);
+  }
+  fmt::format_to(it, "{}}}", indent);
+  return finalizeField(it, options);
+}
+
+/* static */
+template <typename StringType>
+bool
+JavascriptValueSerializer::Serialize(Value *value, StringType &outputBuffer,
+                                     const SerializeOptions &options) noexcept
+{
+  auto it = std::back_inserter(outputBuffer);
+  auto valueType = value->GetType();
+  if (!valueType->IsResolved()) {
+    sym::dw::TypeSymbolicationContext symbolicationContext{
+      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType};
+    symbolicationContext.ResolveType();
+  }
+
+  if (value->GetType()->IsPrimitive()) {
+    FormatValue(*value, it);
+    return true;
+  }
+
+  if (options.mNewLineAfterMember) {
+    it = fmt::format_to(it, "{{\n");
+  } else {
+    it = fmt::format_to(it, "{{");
+  }
+
+  for (const auto &m : value->GetType()->MemberFields()) {
+    auto v = value->GetMember(m.name);
+    it = Serialize(v, it, options, options.mDepth - 1);
+  }
+  fmt::format_to(std::back_inserter(outputBuffer), "}}");
+
+  return true;
+}
+
+template bool JavascriptValueSerializer::Serialize(Value *value, std::string &fmtIterator,
+                                                   const SerializeOptions &options) noexcept;
+
+template bool JavascriptValueSerializer::Serialize(Value *value, std::pmr::string &fmtIterator,
+                                                   const SerializeOptions &options) noexcept;
+
 } // namespace mdb::sym

@@ -45,6 +45,8 @@ template <typename T> static inline constexpr bool IsTemplate = IsTemplateType<T
 // Template type for string literals
 template <std::size_t N> struct StringLiteral
 {
+  consteval StringLiteral() = default;
+
   consteval StringLiteral(const char (&str)[N]) noexcept
   {
     for (std::size_t i = 0; i < N; ++i) {
@@ -63,7 +65,7 @@ template <std::size_t N> struct StringLiteral
   consteval std::string_view
   StringView() const
   {
-    return std::string_view{value};
+    return std::string_view{value, N};
   }
 };
 

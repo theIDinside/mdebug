@@ -24,7 +24,7 @@ public:
 
   // TRACEE COMMAND INTERFACE API
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
-  TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
+  TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction resume) noexcept final;
   TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction action) noexcept final;

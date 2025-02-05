@@ -130,7 +130,7 @@ GlobalFunctionsInfo() noexcept
 #ifdef FN
 #undef FN
 #endif
-#define FN(FUNC, NAME, ARGS, FLAGS, INFO) std::tuple{NAME, ARGS, INFO##sv},
+#define FN(FUNC, NAME, ARGS, FLAGS, INFO, USAGE) std::tuple{NAME, std::size(ARGS), INFO##sv},
   return std::to_array({FOR_EACH_GLOBAL_FN(FN)});
 #undef FN
 }
@@ -399,7 +399,7 @@ AppScriptingInstance::ReplEvaluate(std::string_view input, Allocator *allocator)
   static int ReplLineNumber = 1;
   std::pmr::string *res = allocator->new_object<std::pmr::string>();
   JS::CompileOptions options(mContext);
-  options.setFileAndLine("repl", ReplLineNumber);
+  options.setFileAndLine("repl", ReplLineNumber++);
 
   auto src = SourceFromString(mContext, input);
 
@@ -412,11 +412,13 @@ AppScriptingInstance::ReplEvaluate(std::string_view input, Allocator *allocator)
   JS::RootedValue result(mContext);
   if (!JS::Evaluate(mContext, options, src.value(), &result)) {
     auto exception = ConsumePendingException(mContext);
-    fmt::format_to(std::back_inserter(*res), "Failed to evaluate: {}", input);
+    if (exception) {
+      fmt::format_to(std::back_inserter(*res), "{}", exception.value());
+    } else {
+      fmt::format_to(std::back_inserter(*res), "Failed to evaluate {}", input);
+    }
     return res;
   }
-
-  JS_MaybeGC(mContext);
 
   if (result.isUndefined()) {
     return res;

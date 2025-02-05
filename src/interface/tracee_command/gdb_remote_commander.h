@@ -88,7 +88,7 @@ public:
   ~GdbRemoteCommander() noexcept override = default;
 
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
-  TraceeWriteResult WriteBytes(AddrPtr addr, u8 *buf, u32 size) noexcept final;
+  TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ReverseContinue() noexcept final;
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction type) noexcept final;

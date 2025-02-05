@@ -65,6 +65,11 @@ int_ptr()
 int
 main()
 {
+  int *a = new int{42};
+  int *b = new int{1337};
+  int *c = b;
+  c = a;
+  c = nullptr;
   int_ptr();
   person_ptr();
   ptr_int_ptr();
