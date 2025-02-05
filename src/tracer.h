@@ -163,6 +163,7 @@ public:
   void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
   Ref<TaskInfo> GetTask(Tid tid) noexcept;
   Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
+  static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;
   TraceeController *GetSupervisorBySessionId(u32 sessionId) noexcept;
   std::vector<TraceeController *> GetAllProcesses() const noexcept;
   ui::dap::DAP *GetDap() const noexcept;

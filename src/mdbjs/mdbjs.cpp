@@ -68,7 +68,7 @@ RuntimeGlobal::GetTask(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
     JS_ReportErrorASCII(cx, "Argument to get_task must be an int32.");
     return false;
   }
-  auto taskInfo = Tracer::Get().GetTask(args[0].toInt32());
+  auto taskInfo = Tracer::GetThreadByTidOrDebugId(args[0].toInt32());
   if (!taskInfo) {
     args.rval().setNull();
     return true;

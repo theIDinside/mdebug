@@ -619,6 +619,17 @@ Tracer::GetTask(Tid tid) noexcept
   return nullptr;
 }
 
+/* static */
+Ref<TaskInfo>
+Tracer::GetThreadByTidOrDebugId(Tid tid) noexcept
+{
+  auto t = Tracer::Get().GetTask(tid);
+  if (t) {
+    return t;
+  }
+  return Tracer::Get().GetTaskBySessionId(static_cast<u32>(tid));
+}
+
 Ref<TaskInfo>
 Tracer::GetTaskBySessionId(u32 sessionId) noexcept
 {
