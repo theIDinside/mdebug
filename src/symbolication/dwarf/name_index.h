@@ -103,6 +103,18 @@ struct ObjectFileNameIndex
 
   template <typename Fn>
   void
+  ForEachType(std::string_view name, Fn &&fn) const noexcept
+  {
+    if (const auto searchResult = mTypes.Search(name); searchResult) {
+      auto &res = searchResult.value();
+      for (auto &item : res) {
+        fn(item);
+      }
+    }
+  }
+
+  template <typename Fn>
+  void
   ForEachFn(std::string_view name, Fn &&f) const noexcept
   {
     if (const auto ff_res = mFreeFunctions.Search(name); ff_res) {
@@ -113,25 +125,6 @@ struct ObjectFileNameIndex
     }
 
     if (const auto mf_res = mMethods.Search(name); mf_res) {
-      auto &res = mf_res.value();
-      for (auto &item : res) {
-        f(item);
-      }
-    }
-  }
-
-  template <typename Fn>
-  void
-  RegexForEachFn(const std::string &regex_pattern, Fn &&f) const noexcept
-  {
-    if (const auto ff_res = mFreeFunctions.Search(regex_pattern); ff_res) {
-      auto &res = ff_res.value();
-      for (auto &item : res) {
-        f(item);
-      }
-    }
-
-    if (const auto mf_res = mMethods.Search(regex_pattern); mf_res) {
       auto &res = mf_res.value();
       for (auto &item : res) {
         f(item);
