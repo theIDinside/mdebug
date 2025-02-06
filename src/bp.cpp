@@ -556,7 +556,7 @@ UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : tc(tc)
 {
   Tracer::GetScriptingInstance().AddTrace([this](JSTracer *trc) {
     DBGLOG(interpreter, "[GC]: tracing UserBreakpoints::UserBreakpoints");
-    for (const auto &user : all_users()) {
+    for (const auto &user : AllUserBreakpoints()) {
       user->TraceJs(trc);
     }
   });
@@ -571,7 +571,7 @@ UserBreakpoints::new_id() noexcept
 void
 UserBreakpoints::OnProcessExit() noexcept
 {
-  for (auto &user : all_users()) {
+  for (auto &user : AllUserBreakpoints()) {
     if (user->mBreakpointLocation) {
       // to prevent assertion. UserBreakpoints is the only type allowed to touch ->installed (via
       // friend-mechanism).
@@ -590,7 +590,7 @@ UserBreakpoints::OnProcessExit() noexcept
 void
 UserBreakpoints::on_exec() noexcept
 {
-  for (auto &user : all_users()) {
+  for (auto &user : AllUserBreakpoints()) {
     if (user->mBreakpointLocation) {
       // to prevent assertion. UserBreakpoints is the only type allowed to touch ->installed (via
       // friend-mechanism).
@@ -658,7 +658,7 @@ UserBreakpoints::GetUserBreakpoint(u32 id) const noexcept
 }
 
 std::vector<Ref<UserBreakpoint>>
-UserBreakpoints::all_users() const noexcept
+UserBreakpoints::AllUserBreakpoints() const noexcept
 {
   std::vector<Ref<UserBreakpoint>> result{};
   result.reserve(user_breakpoints.size());

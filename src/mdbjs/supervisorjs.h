@@ -23,6 +23,7 @@ struct Supervisor : public PtrJsObject<mdb::js::Supervisor, mdb::TraceeControlle
 
   static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
   static bool js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
+  static bool js_breakpoints(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
 
   static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0),
                                                     JS_FN("toString", &js_to_string, 0, 0), JS_FS_END};

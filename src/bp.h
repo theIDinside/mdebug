@@ -324,7 +324,7 @@ public:
   void remove_bp(u32 id) noexcept;
   Ref<BreakpointLocation> location_at(AddrPtr address) noexcept;
   Ref<UserBreakpoint> GetUserBreakpoint(u32 id) const noexcept;
-  std::vector<Ref<UserBreakpoint>> all_users() const noexcept;
+  std::vector<Ref<UserBreakpoint>> AllUserBreakpoints() const noexcept;
   // Get all user breakpoints that has not been verified (set at an actual address in memory)
   std::vector<Ref<UserBreakpoint>> non_verified() const noexcept;
   SourceFileBreakpointMap &bps_for_source(const SourceCodeFileName &src_file) noexcept;

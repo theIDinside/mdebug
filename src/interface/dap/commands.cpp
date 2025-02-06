@@ -597,7 +597,7 @@ SetFunctionBreakpoints::Execute() noexcept
   auto target = mDAPClient->GetSupervisor();
 
   target->SetFunctionBreakpoints(bkpts);
-  for (const auto &user : target->GetUserBreakpoints().all_users()) {
+  for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
     if (user->mKind == LocationUserKind::Function) {
       res->breakpoints.push_back(BP::from_user_bp(*user));
     }

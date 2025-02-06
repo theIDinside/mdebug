@@ -301,7 +301,7 @@ PtraceCommander::Disconnect(bool killTarget) noexcept
     GetSupervisor()->ExitAll(SupervisorState::Killed);
   } else if (!GetSupervisor()->IsExited()) {
     tc->StopAllTasks(nullptr);
-    for (auto &user : tc->GetUserBreakpoints().all_users()) {
+    for (auto &user : tc->GetUserBreakpoints().AllUserBreakpoints()) {
       tc->GetUserBreakpoints().remove_bp(user->mId);
     }
     for (auto &entry : GetSupervisor()->GetThreads()) {

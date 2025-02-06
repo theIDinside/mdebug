@@ -1,5 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "supervisorjs.h"
+#include "js/Array.h"
+#include "js/GCVector.h"
+#include "js/PropertyAndElement.h"
+#include "mdbjs/bpjs.h"
 
 namespace mdb::js {
 
@@ -33,6 +37,28 @@ Supervisor::js_to_string(JSContext *cx, unsigned argc, JS ::Value *vp) noexcept
   }
 
   args.rval().setString(str);
+  return true;
+}
+
+/* static */
+bool
+Supervisor::js_breakpoints(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JS::RootedObject callee(cx, &args.thisv().toObject());
+  auto supervisor = Get(callee);
+
+  auto bps = supervisor->GetUserBreakpoints().AllUserBreakpoints();
+
+  JS::Rooted<JSObject *> resultArray{cx, JS::NewArrayObject(cx, bps.size())};
+
+  auto index = 0u;
+  for (auto bp : bps) {
+    JS::Rooted<JSObject *> jsBp{cx, js::Breakpoint::Create(cx, std::move(bp))};
+    JS_SetElement(cx, resultArray, index++, jsBp);
+  }
+
+  args.rval().setObject(*resultArray);
   return true;
 }
 

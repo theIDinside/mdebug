@@ -1961,7 +1961,7 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
     // we restore the newly forked process space to the real contents. New breakpoints will be set
     // by the initialize -> configDone sequence
     auto &supervisor = new_supervisor->GetInterface();
-    for (auto &user : mUserBreakpoints.all_users()) {
+    for (auto &user : mUserBreakpoints.AllUserBreakpoints()) {
       if (auto loc = user->GetLocation(); loc) {
         supervisor.DisableBreakpoint(evt.child_pid, *loc);
       }
