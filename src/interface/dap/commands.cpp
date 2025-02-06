@@ -1372,6 +1372,28 @@ ImportScriptResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocat
   }
   return result;
 }
+UIResultPtr
+GetProcesses::Execute() noexcept
+{
+  IdContainer result{};
+  for (auto tc : Tracer::Get().GetAllProcesses()) {
+    result.emplace_back(tc->TaskLeaderTid(), tc->SessionId());
+  }
+
+  return new GetProcessesResponse{true, this, std::move(result)};
+}
+
+std::pmr::string
+GetProcessesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
+{
+  std::pmr::string result{arenaAllocator};
+  result.reserve(512);
+  fmt::format_to(
+    std::back_inserter(result),
+    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"getProcesses","body":{{ "processes": [{}] }}}})",
+    seq, request_seq, fmt::join(mProcesses, ", "));
+  return result;
+}
 
 InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
     : UICommand(seq), command(command), missing_arguments(std::move(missing_args))
@@ -1445,6 +1467,9 @@ ParseCustomRequestCommand(const DebugAdapterClient &client, u64 seq, const std::
   }
   if (cmd_name == "pauseAll") {
     return new PauseAll{seq};
+  }
+  if (cmd_name == "getProcesses") {
+    return new GetProcesses{seq};
   }
   return new InvalidArgs{seq, cmd_name, {}};
 }

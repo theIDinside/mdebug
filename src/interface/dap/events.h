@@ -75,6 +75,19 @@ struct ContinuedEvent final : public ui::UIResult
                              std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
+struct CustomEvent final : public ui::UIResult
+{
+  std::string mCustomEventName;
+  std::string mSerializedBody;
+  /// `serializedBodyContents`, must contain the brackets around the JSON object, so must be `{ ... }`
+  CustomEvent(std::string name, std::string serializedBodyContents) noexcept
+      : mCustomEventName(std::move(name)), mSerializedBody(std::move(serializedBodyContents))
+  {
+  }
+  std::pmr::string Serialize(int monotonic_id,
+                             std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+};
+
 struct Process final : public ui::UIResult
 {
   std::string name;

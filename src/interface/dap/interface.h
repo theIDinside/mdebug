@@ -184,7 +184,7 @@ public:
   alloc::ArenaResource *GetCommandArenaAllocator() noexcept;
   alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *CreateStandardIOConnection() noexcept;
-  static DebugAdapterClient *CreateSocketConnection(DebugAdapterClient &client) noexcept;
+  static DebugAdapterClient *CreateSocketConnection(DebugAdapterClient &client, std::string_view name) noexcept;
   void ClientConfigured(TraceeController *tc, bool alreadyAdded = false,
                         std::optional<int> ttyFileDescriptor = {}) noexcept;
   void PostDapEvent(ui::UIResultPtr event);

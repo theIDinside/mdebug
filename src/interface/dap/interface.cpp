@@ -493,7 +493,7 @@ generate_random_alphanumeric_string(size_t length)
 
 /*static*/
 DebugAdapterClient *
-DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client) noexcept
+DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client, std::string_view name) noexcept
 {
   fs::path socket_path = fmt::format("/tmp/midas-{}", generate_random_alphanumeric_string(15));
   if (fs::exists(socket_path)) {
@@ -517,8 +517,8 @@ DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client) noexcept
   }
 
   auto reverseRequest = fmt::format(
-    R"({{"seq":1,"type":"event","event":"startDebugging","body":{{"configuration":{{"path":"{}"}}}}}})",
-    socket_path.c_str());
+    R"({{"seq":1,"type":"event","event":"startDebugging","body":{{"configuration":{{"path":"{}", "name": "{}" }}}}}})",
+    socket_path.c_str(), name);
 
   client.WriteSerializedProtocolMessage(reverseRequest);
 

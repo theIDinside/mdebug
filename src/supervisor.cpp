@@ -1951,7 +1951,8 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
 {
   auto interface = mTraceeInterface->OnFork(evt.child_pid);
   auto new_supervisor = Tracer::Get().AddNewSupervisor(Fork(std::move(interface), evt.mIsVFork));
-  auto client = ui::dap::DebugAdapterClient::CreateSocketConnection(*mDebugAdapterClient);
+  auto clientName = fmt::format("forked {}", new_supervisor->TaskLeaderTid());
+  auto client = ui::dap::DebugAdapterClient::CreateSocketConnection(*mDebugAdapterClient, clientName);
   client->ClientConfigured(new_supervisor);
 
   if (!evt.mIsVFork) {
@@ -2007,6 +2008,8 @@ TraceeController::HandleExec(const Exec &evt) noexcept
   const bool resumeFromExec = !mIsVForking;
   PostExec(evt.exec_file);
   mDebugAdapterClient->PostDapEvent(new ui::dap::Process{evt.exec_file, true});
+  mDebugAdapterClient->PostDapEvent(
+    new ui::dap::CustomEvent{"setSessionName", fmt::format(R"({{ "name": "{}" }})", evt.exec_file)});
   return tc::ProcessedStopEvent{resumeFromExec, {}};
 }
 

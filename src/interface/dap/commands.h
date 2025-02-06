@@ -816,6 +816,32 @@ struct ImportScriptResponse final : public UIResult
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   EvalResult mEvaluateResult;
 };
+struct ProcessId
+{
+  Pid mPid;
+  u32 mDebugSessionId;
+};
+
+struct GetProcesses final : public UICommand
+{
+  using IdContainer = std::vector<ProcessId>;
+  DEFINE_NAME("getProcesses");
+  GetProcesses(u64 seq) noexcept : UICommand(seq) {}
+  ~GetProcesses() noexcept override = default;
+  UIResultPtr Execute() noexcept final;
+};
+
+struct GetProcessesResponse final : public UIResult
+{
+  constexpr GetProcessesResponse(bool success, UICommandPtr cmd, GetProcesses::IdContainer &&processes) noexcept
+      : UIResult(success, cmd), mProcesses(std::move(processes))
+  {
+  }
+
+  ~GetProcessesResponse() noexcept override = default;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+  GetProcesses::IdContainer mProcesses;
+};
 
 struct InvalidArgsResponse final : public UIResult
 {
@@ -859,3 +885,16 @@ Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
 }
 }; // namespace ui::dap
 } // namespace mdb
+
+namespace fmt {
+template <> struct formatter<mdb::ui::dap::ProcessId> : Default<mdb::ui::dap::ProcessId>
+{
+  template <typename FormatContext>
+  auto
+  format(const mdb::ui::dap::ProcessId &processId, FormatContext &ctx) const
+  {
+    auto it = ctx.out();
+    return fmt::format_to(it, R"({{ "pid": {}, "sessionId": {} }})", processId.mPid, processId.mDebugSessionId);
+  }
+};
+} // namespace fmt

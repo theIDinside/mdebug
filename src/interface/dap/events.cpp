@@ -108,6 +108,13 @@ ContinuedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 Process::Process(std::string name, bool is_local) noexcept : name(std::move(name)), is_local(is_local) {}
 
 std::pmr::string
+CustomEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
+{
+  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"{}", "body": {}}})", seq, mCustomEventName,
+                  mSerializedBody);
+}
+
+std::pmr::string
 Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(
