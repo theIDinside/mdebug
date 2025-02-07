@@ -344,10 +344,11 @@ struct StepOut final : public ui::UICommand
 struct SetBreakpointsResponse final : ui::UIResult
 {
   SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointRequestKind type) noexcept;
-  std::vector<ui::dap::Breakpoint> breakpoints;
+  std::vector<ui::dap::Breakpoint> mBreakpoints;
   BreakpointRequestKind mType;
   ~SetBreakpointsResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+  void AddBreakpoint(Breakpoint &&bp) noexcept;
 };
 
 struct SetBreakpoints final : public ui::UICommand

@@ -384,7 +384,7 @@ StepOut::Execute() noexcept
 
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd,
                                                BreakpointRequestKind type) noexcept
-    : ui::UIResult(success, cmd), mType(type), breakpoints()
+    : ui::UIResult(success, cmd), mType(type), mBreakpoints()
 {
 }
 
@@ -395,8 +395,8 @@ SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAlloc
   result.reserve(mdb::SystemPagesInBytes(1) / 2);
   auto outIt = std::back_inserter(result);
   std::pmr::vector<std::pmr::string> serialized_bkpts{arenaAllocator};
-  serialized_bkpts.reserve(breakpoints.size());
-  for (auto &bp : breakpoints) {
+  serialized_bkpts.reserve(mBreakpoints.size());
+  for (auto &bp : mBreakpoints) {
     serialized_bkpts.push_back(bp.serialize(arenaAllocator));
   }
   switch (this->mType) {
@@ -428,6 +428,12 @@ SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAlloc
     PANIC("DAP doesn't expect Tracer breakpoints");
   }
   return result;
+}
+
+void
+SetBreakpointsResponse::AddBreakpoint(Breakpoint &&bp) noexcept
+{
+  mBreakpoints.push_back(std::move(bp));
 }
 
 SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
@@ -470,7 +476,7 @@ SetBreakpoints::Execute() noexcept
   for (const auto &[bp, ids] : target->GetUserBreakpoints().bps_for_source(file)) {
     for (const auto id : ids) {
       const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
-      res->breakpoints.push_back(BP::from_user_bp(*user));
+      res->AddBreakpoint(BP::from_user_bp(*user));
     }
   }
 
@@ -514,10 +520,11 @@ SetInstructionBreakpoints::Execute() noexcept
   target->SetInstructionBreakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
-  res->breakpoints.reserve(target->GetUserBreakpoints().instruction_breakpoints.size());
+  auto &userBreakpoints = target->GetUserBreakpoints();
+  res->mBreakpoints.reserve(userBreakpoints.instruction_breakpoints.size());
 
-  for (const auto &[k, id] : target->GetUserBreakpoints().instruction_breakpoints) {
-    res->breakpoints.push_back(BP::from_user_bp(*target->GetUserBreakpoints().GetUserBreakpoint(id)));
+  for (const auto &[k, id] : userBreakpoints.instruction_breakpoints) {
+    res->AddBreakpoint(BP::from_user_bp(*userBreakpoints.GetUserBreakpoint(id)));
   }
 
   res->success = true;
@@ -555,7 +562,7 @@ SetFunctionBreakpoints::Execute() noexcept
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
     if (user->mKind == LocationUserKind::Function) {
-      res->breakpoints.push_back(BP::from_user_bp(*user));
+      res->AddBreakpoint(BP::from_user_bp(*user));
     }
   }
   res->success = true;
