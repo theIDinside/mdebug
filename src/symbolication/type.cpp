@@ -90,6 +90,7 @@ sym::ToTypeModifierWillPanic(DwarfTag tag) noexcept
   case DwarfTag::DW_TAG_union_type:
   case DwarfTag::DW_TAG_typedef:
   case DwarfTag::DW_TAG_subroutine_type:
+  case DwarfTag::DW_TAG_unspecified_type:
     return sym::Modifier::None;
   default:
     break;

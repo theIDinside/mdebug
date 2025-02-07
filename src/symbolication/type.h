@@ -197,6 +197,8 @@ BitCopy(std::span<const FromRepr> from)
   return to;
 }
 
+// A modifier of `None` means the `Type` with that modifier can be considered the "Layout type" or "Type describing
+// this." It's essentially the interesting type information, not just some combinatorial type info.
 enum class Modifier : i8
 {
   Const = -2,
