@@ -107,7 +107,8 @@ async function insidePrologueTest(DA) {
     }
     assert(
       application_frames == 3,
-      `We're exactly at the start of the first instruction of main - expecting only 3 frame but got ${stackFrames.length
+      `We're exactly at the start of the first instruction of main - expecting only 3 frame but got ${
+        stackFrames.length
       }: ${JSON.stringify(stackFrames)}`
     )
     return stackFrames
@@ -135,7 +136,8 @@ async function insideEpilogueTest(DA) {
     assert(
       application_frames == 3,
       () =>
-        `We're exactly at the start of the first instruction of main - expecting only 3 frame but got ${stackFrames.length
+        `We're exactly at the start of the first instruction of main - expecting only 3 frame but got ${
+          stackFrames.length
         }: ${JSON.stringify(stackFrames)}`
     )
     return stackFrames
@@ -149,35 +151,34 @@ function createExpectedStacktraces(debugAdapter) {
   const sourceFileContents = readFileContents(repoDirFile('test/stackframes.cpp'))
 
   const callstack = (idents) =>
-    idents.map((ident) => getLineOf(sourceFileContents, ident))
+    idents
+      .map((ident) => getLineOf(sourceFileContents, ident))
       .filter((item) => item != null)
-      .map((l) => ({ line: l }));
-  const checks = ['A', 'B', 'C', 'D'];
-  const [callstackA, callstackB, callstackC, callstackD] =
-    [2, 3, 4, 5]
-      .map((num, checkIndex) =>
-        new Array(num)
-          .fill(0)
-          .map((_, index) => `${checks[checkIndex]}${index + 1}`))
-      .map(stack => callstack(stack))
-  const names = [
-    'quux',
-    'baz',
-    'bar',
-    'foo',
-    'main'
-  ];
+      .map((l) => ({ line: l }))
+  const checks = ['A', 'B', 'C', 'D']
+  const [callstackA, callstackB, callstackC, callstackD] = [2, 3, 4, 5]
+    .map((num, checkIndex) => new Array(num).fill(0).map((_, index) => `${checks[checkIndex]}${index + 1}`))
+    .map((stack) => callstack(stack))
+  const names = ['quux', 'baz', 'bar', 'foo', 'main']
 
   // the C/ELF/posix runtime usually have 3 frames above the main function, the first one being _start.
-  const libcStack = [{ line: 0, name: '*' }, { line: 0, name: '*' }, { line: 0, name: '_start' }];
+  const libcStack = [
+    { line: 0, name: '*' },
+    { line: 0, name: '*' },
+    { line: 0, name: '_start' },
+  ]
 
-  return [callstackA, callstackB, callstackC, callstackD].map(stack =>
-    stack.map((item, index) => ({ line: item.line, name: names.slice(names.length - stack.length)[index] })).concat(libcStack)
+  const cs = [callstackA, callstackB, callstackC, callstackD].map((stack) =>
+    stack
+      .map((item, index) => ({ line: item.line, name: names.slice(names.length - stack.length)[index] }))
+      .concat(libcStack)
   )
+  console.log(`expected: ${JSON.stringify(cs, null, 2)}`)
+  return cs
 }
 
 async function normalTest(DA) {
-  const expectedStackTraces = createExpectedStacktraces(DA);
+  const expectedStackTraces = createExpectedStacktraces(DA)
 
   await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
@@ -204,7 +205,8 @@ async function normalTest(DA) {
     assert(
       frames.length == 4,
       () =>
-        `We're exactly at the start of the first instruction of main - expecting only 1 frame but got ${stackFrames.length
+        `We're exactly at the start of the first instruction of main - expecting only 1 frame but got ${
+          stackFrames.length
         }: ${prettyJson(stackFrames)}`
     )
 
@@ -230,7 +232,8 @@ async function normalTest(DA) {
         assert(
           stackFrames[idx].line == expectedStackTraces[i - total][idx].line,
           () =>
-            `Expected line to be at ${expectedStackTraces[i - total][idx].line} but was ${stackFrames[idx].line
+            `Expected line to be at ${expectedStackTraces[i - total][idx].line} but was ${
+              stackFrames[idx].line
             }: ${prettyJson(stackFrames)}`
         )
         if (
@@ -239,7 +242,8 @@ async function normalTest(DA) {
         ) {
           assert(
             false,
-            `Expected name to be ${expectedStackTraces[i - total][idx].name} but was ${stackFrames[idx].name
+            `Expected name to be ${expectedStackTraces[i - total][idx].name} but was ${
+              stackFrames[idx].name
             }: ${prettyJson(stackFrames)}`
           )
         }

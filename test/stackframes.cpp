@@ -14,22 +14,22 @@ enum class ProgrammingLanaguage : std::uint8_t
   Go,
 };
 
-struct Foo
+struct IntLangPair
 {
-  int foo_value;
+  int value;
   ProgrammingLanaguage lang;
 };
-struct Bar
+struct IntLangDoublePair
 {
-  Foo foo;
-  int bar_value;
+  IntLangPair pair;
+  int value;
   ProgrammingLanaguage lang;
 };
 
-struct Baz
+struct MiscData
 {
-  Bar bar;
-  float foo;
+  IntLangDoublePair pair;
+  float fpvalue;
   const char *name;
   ProgrammingLanaguage lang;
 };
@@ -112,17 +112,18 @@ int
 main(int argc, const char **argv)
 {
   foo();
-  Baz baz{.bar = {.foo = Foo{.foo_value = 42, .lang = ProgrammingLanaguage::CPP},
-                  .bar_value = 1337,
-                  .lang = ProgrammingLanaguage::DLang},
-          .foo = 80085.4f,
-          .name = "The great baz",
-          .lang = ProgrammingLanaguage::Javascript};
-  Bar bar{.foo = Foo{.foo_value = 1, .lang = ProgrammingLanaguage::Javascript},
-          .bar_value = 2,
-          .lang = ProgrammingLanaguage::CPP}; // A2 B3 C4 D5
-  printf("bar.bar_value=%d\n", bar.bar_value);
+  // A2 B3 C4 D5
+  MiscData val1{.pair = {.pair = IntLangPair{.value = 42, .lang = ProgrammingLanaguage::CPP},
+                         .value = 1337,
+                         .lang = ProgrammingLanaguage::DLang},
+                .fpvalue = 80085.4f,
+                .name = "The great baz",
+                .lang = ProgrammingLanaguage::Javascript};
+  IntLangDoublePair val2{.pair = IntLangPair{.value = 1, .lang = ProgrammingLanaguage::Javascript},
+                         .value = 2,
+                         .lang = ProgrammingLanaguage::CPP};
+  printf("val2.value=%d\n", val2.value);
   printf("Hello world!\n");
-  printf("bar.bar_value=%d\n", bar.bar_value);
+  printf("val2.value=%d\n", val2.value);
   return -15;
 }

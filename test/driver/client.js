@@ -69,7 +69,7 @@ async function createRemoteService(gdbserver, host, port, binary, args) {
     if (args == undefined || args == null) {
       args = []
     }
-    console.log(`spawning gdbserver...`);
+    console.log(`spawning gdbserver...`)
     let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary, ...args], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -222,7 +222,7 @@ function unpackDebuggerArgs() {
     const env = process.env['MDB']
     console.log(`MDB=${env}`)
     const params = env.split(';')
-    return params.flatMap(p => p.split(' '))
+    return params.flatMap((p) => p.split(' '))
   } else {
     return []
   }
@@ -784,6 +784,7 @@ class DAClient {
     }
 
     let entry_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
+    console.log(`attach args: ${JSON.stringify(this.remoteService.attachArgs, null, 2)}`)
     const attach_res = await this.sendReqGetResponse('attach', this.remoteService.attachArgs, timeout)
     checkResponse(attach_res, 'attach', true)
     const functions = ['main'].map((n) => ({ name: n }))
@@ -1123,7 +1124,7 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
 async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
   await DA.startRunToMain(DA.buildDirFile(exeFile), [], 5000)
   const bpres = await SetBreakpoints(DA, filePath, bpIdentifiers)
-  console.log(`bpres: ${JSON.stringify(bpres)}`);
+  console.log(`bpres: ${JSON.stringify(bpres)}`)
   const threads = await DA.threads()
   console.log(`threads: ${JSON.stringify(threads)}`)
   await DA.contNextStop(threads[0].id)
