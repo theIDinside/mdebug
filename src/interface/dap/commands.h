@@ -23,30 +23,7 @@ enum class BreakpointType : std::uint8_t;
 
 namespace ui::dap {
 
-#define CTOR(Type)                                                                                                \
-  Type(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
-
 struct Breakpoint;
-
-template <typename... Args>
-consteval auto
-count_tuple(Args... args)
-{
-  return std::tuple_size<decltype(std::make_tuple(std::string_view{args}...))>::value;
-}
-
-#define ReqArg(TypeName, ...)                                                                                     \
-  enum class TypeName##Args : u8{__VA_ARGS__};                                                                    \
-  static constexpr std::array<std::string_view, count_tuple(#__VA_ARGS__)> ArgNames =                             \
-    std::to_array({#__VA_ARGS__});
-
-#define RequiredArguments(...)                                                                                    \
-  static constexpr const auto ReqArgs = std::to_array(__VA_ARGS__);                                               \
-  static constexpr const auto &Arguments() noexcept { return ReqArgs; }
-
-#define NoRequiredArgs()                                                                                          \
-  static constexpr const std::array<std::string_view, 0> ReqArgs{};                                               \
-  static constexpr const std::array<std::string_view, 0> &Arguments() noexcept { return ReqArgs; }
 
 using namespace std::string_view_literals;
 
@@ -260,41 +237,6 @@ struct Continue final : public ui::UICommand
   DEFINE_NAME("continue");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
-};
-
-// Resume all (currently stopped) processes and their tasks
-struct ContinueAll final : public ui::UICommand
-{
-  DEFINE_NAME("continueAll");
-  ContinueAll(u64 seq) noexcept : UICommand(seq) {}
-  ~ContinueAll() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
-};
-
-struct ContinueAllResponse final : ui::UIResult
-{
-  ~ContinueAllResponse() noexcept override = default;
-  std ::pmr ::string Serialize(int seq, std ::pmr ::memory_resource *arenaAllocator) const noexcept final;
-  ContinueAllResponse(bool success, UICommandPtr cmd, Tid taskLeader) noexcept
-      : UIResult(success, cmd), mTaskLeader(taskLeader)
-  {
-  }
-  Tid mTaskLeader;
-};
-
-struct PauseAll final : ui::UICommand
-{
-  DEFINE_NAME("pauseAll");
-  PauseAll(u64 seq) noexcept : UICommand(seq) {}
-  ~PauseAll() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
-};
-
-struct PauseAllResponse final : ui::UIResult
-{
-  ~PauseAllResponse() noexcept override = default;
-  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  PauseAllResponse(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
 };
 
 struct PauseResponse final : ui::UIResult
@@ -788,113 +730,12 @@ struct Disassemble final : public UICommand
                  {"instructionOffset", FieldType::Int}, {"offset", FieldType::Int});
 };
 
-enum ScriptKind : u8
-{
-  Inline,
-  File
-};
-
-struct ImportScript final : public UICommand
-{
-  DEFINE_NAME("importScript");
-  ImportScript(u64 seq, std::string &&scriptSource) noexcept;
-  ~ImportScript() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
-  std::string mSource;
-};
-
-struct ImportScriptResponse final : public UIResult
-{
-  using EvalResult = mdb::Expected<void, std::string>;
-
-  constexpr ImportScriptResponse(bool success, UICommandPtr cmd, EvalResult &&evalResult) noexcept
-      : UIResult(success, cmd), mEvaluateResult(std::move(evalResult))
-  {
-  }
-
-  ~ImportScriptResponse() noexcept override = default;
-  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  EvalResult mEvaluateResult;
-};
-struct ProcessId
-{
-  Pid mPid;
-  u32 mDebugSessionId;
-};
-
-struct GetProcesses final : public UICommand
-{
-  using IdContainer = std::vector<ProcessId>;
-  DEFINE_NAME("getProcesses");
-  GetProcesses(u64 seq) noexcept : UICommand(seq) {}
-  ~GetProcesses() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
-};
-
-struct GetProcessesResponse final : public UIResult
-{
-  constexpr GetProcessesResponse(bool success, UICommandPtr cmd, GetProcesses::IdContainer &&processes) noexcept
-      : UIResult(success, cmd), mProcesses(std::move(processes))
-  {
-  }
-
-  ~GetProcessesResponse() noexcept override = default;
-  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  GetProcesses::IdContainer mProcesses;
-};
-
-struct InvalidArgsResponse final : public UIResult
-{
-  InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
-  ~InvalidArgsResponse() noexcept override = default;
-  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  std::string_view command;
-  MissingOrInvalidArgs missing_or_invalid;
-};
-
 template <typename T>
 concept HasName = requires(T t) {
   { T::Request } -> std::convertible_to<std::string_view>;
 };
 
-struct InvalidArgs final : public UICommand
-{
-  InvalidArgs(u64 seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
-  ~InvalidArgs() override = default;
-
-  UIResultPtr Execute() noexcept final;
-
-  ArgumentErrorKind kind;
-  std::string_view command;
-  MissingOrInvalidArgs missing_arguments;
-
-  DEFINE_NAME("disassemble");
-};
-
 ui::UICommand *ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) noexcept;
 
-template <typename Derived, typename JsonArgs>
-static constexpr auto
-Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
-{
-  if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {
-    return new ui::dap::InvalidArgs{seq, Derived::Request, std::move(missing.value())};
-  } else {
-    return nullptr;
-  }
-}
 }; // namespace ui::dap
 } // namespace mdb
-
-namespace fmt {
-template <> struct formatter<mdb::ui::dap::ProcessId> : Default<mdb::ui::dap::ProcessId>
-{
-  template <typename FormatContext>
-  auto
-  format(const mdb::ui::dap::ProcessId &processId, FormatContext &ctx) const
-  {
-    auto it = ctx.out();
-    return fmt::format_to(it, R"({{ "pid": {}, "sessionId": {} }})", processId.mPid, processId.mDebugSessionId);
-  }
-};
-} // namespace fmt

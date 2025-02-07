@@ -141,11 +141,15 @@ set(MIDAS_SOURCES
   src/interface/console_command.h
   src/interface/dap/commands.cpp
   src/interface/dap/commands.h
+  src/interface/dap/custom_commands.cpp
+  src/interface/dap/custom_commands.h
   src/interface/dap/dap_defs.h
   src/interface/dap/events.cpp
   src/interface/dap/events.h
   src/interface/dap/interface.cpp
   src/interface/dap/interface.h
+  src/interface/dap/invalid.cpp
+  src/interface/dap/invalid.h
   src/interface/dap/parse_buffer.cpp
   src/interface/dap/parse_buffer.h
   src/interface/dap/types.cpp

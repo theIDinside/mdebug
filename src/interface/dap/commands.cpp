@@ -1,5 +1,8 @@
 /** LICENSE TEMPLATE */
 #include "commands.h"
+#include "custom_commands.h"
+#include "invalid.h"
+
 #include "bp.h"
 #include "common.h"
 #include "event_queue.h"
@@ -251,53 +254,6 @@ Continue::Execute() noexcept
   }
 
   return res;
-}
-
-UIResultPtr
-ContinueAll::Execute() noexcept
-{
-  auto target = mDAPClient->GetSupervisor();
-  auto res = new ContinueAllResponse{true, this, target->TaskLeaderTid()};
-  auto result =
-    target->ResumeTarget(tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1});
-  res->success = result;
-  if (result) {
-    mDAPClient->PushDelayedEvent(new ContinuedEvent{res->mTaskLeader, true});
-  }
-  return res;
-}
-
-std::pmr::string
-ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
-{
-  std::pmr::string result{arenaAllocator};
-  fmt::format_to(
-    std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"continueAll","body":{{"threadId":{}}}}})",
-    seq, request_seq, success, mTaskLeader);
-  return result;
-}
-
-UIResultPtr
-PauseAll::Execute() noexcept
-{
-  auto target = mDAPClient->GetSupervisor();
-  auto tid = target->TaskLeaderTid();
-  target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = mDAPClient, tid]() {
-    client->PostDapEvent(new StoppedEvent{StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
-  });
-  auto res = new PauseAllResponse{true, this};
-  return res;
-}
-
-std::pmr::string
-PauseAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
-{
-  std::pmr::string result{arenaAllocator};
-  fmt::format_to(std::back_inserter(result),
-                 R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"pauseAll"}})", seq,
-                 request_seq, success);
-  return result;
 }
 
 std::pmr::string
@@ -1122,11 +1078,6 @@ DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   return result;
 }
 
-#define IfInvalidArgsReturn(type)                                                                                 \
-  if (const auto missing = Validate<type>(seq, args); missing) {                                                  \
-    return missing;                                                                                               \
-  }
-
 Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
                    std::optional<EvaluationContext> context) noexcept
     : UICommand(seq), expr(std::move(expression)), frameId(frameId),
@@ -1338,140 +1289,6 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
     seq, request_seq, variables_contents);
   return result;
-}
-
-ImportScript::ImportScript(u64 seq, std::string &&scriptSource) noexcept
-    : UICommand(seq), mSource(std::move(scriptSource))
-{
-}
-
-UIResultPtr
-ImportScript::Execute() noexcept
-{
-  TODO("ImportScript::Execute() noexcept");
-  auto &i = Tracer::GetScriptingInstance();
-  return new ImportScriptResponse{true, this, i.EvaluateJavascriptString(mSource)};
-}
-
-std::pmr::string
-ImportScriptResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
-{
-  std::pmr::string result{arenaAllocator};
-  result.reserve(512);
-
-  if (mEvaluateResult) {
-    fmt::format_to(
-      std::back_inserter(result),
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"importScript","body":{{"evaluatedOk":true}}}})",
-      seq, request_seq);
-  } else {
-    fmt::format_to(
-      std::back_inserter(result),
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"importScript","body":{{"evaluatedOk":false, "error": {}}}}})",
-      seq, request_seq, mEvaluateResult.error());
-  }
-  return result;
-}
-UIResultPtr
-GetProcesses::Execute() noexcept
-{
-  IdContainer result{};
-  for (auto tc : Tracer::Get().GetAllProcesses()) {
-    result.emplace_back(tc->TaskLeaderTid(), tc->SessionId());
-  }
-
-  return new GetProcessesResponse{true, this, std::move(result)};
-}
-
-std::pmr::string
-GetProcessesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
-{
-  std::pmr::string result{arenaAllocator};
-  result.reserve(512);
-  fmt::format_to(
-    std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"getProcesses","body":{{ "processes": [{}] }}}})",
-    seq, request_seq, fmt::join(mProcesses, ", "));
-  return result;
-}
-
-InvalidArgs::InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-    : UICommand(seq), command(command), missing_arguments(std::move(missing_args))
-{
-}
-
-UIResultPtr
-InvalidArgs::Execute() noexcept
-{
-  return new InvalidArgsResponse{command, std::move(missing_arguments)};
-}
-
-InvalidArgsResponse::InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-    : command(command), missing_or_invalid(std::move(missing_args))
-{
-}
-
-std::pmr::string
-InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
-{
-  std::pmr::vector<std::string_view> missing{arenaAllocator};
-  std::pmr::vector<const InvalidArg *> parsed_and_invalid{arenaAllocator};
-  missing.reserve(missing_or_invalid.size());
-  for (const auto &pair : missing_or_invalid) {
-    const auto &[k, v] = pair;
-    switch (k.kind) {
-    case ArgumentErrorKind::Missing:
-      missing.push_back(v);
-      break;
-    case ArgumentErrorKind::InvalidInput:
-      parsed_and_invalid.push_back(&pair);
-      break;
-    }
-  }
-
-  std::array<char, 1024> message{};
-  auto it = !missing.empty() ? fmt::format_to(message.begin(), "Missing arguments: {}. ", fmt::join(missing, ", "))
-                             : message.begin();
-
-  std::array<char, 1024> invals{};
-  if (!parsed_and_invalid.empty()) {
-    decltype(fmt::format_to(invals.begin(), "")) inv_it;
-    for (auto ref : parsed_and_invalid) {
-      if (ref->first.description) {
-        inv_it = fmt::format_to(invals.begin(), "{}: {}\\n", ref->second, ref->first.description.value());
-      } else {
-        inv_it = fmt::format_to(invals.begin(), "{}\\n", ref->second);
-      }
-    }
-
-    it = fmt::format_to(it, "Invalid input for: {}", std::string_view{invals.begin(), inv_it});
-  }
-  *it = 0;
-  std::string_view msg{message.begin(), message.begin() + std::distance(message.begin(), it)};
-
-  std::pmr::string result{arenaAllocator};
-  fmt::format_to(
-    std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})", seq,
-    request_seq, command, msg);
-
-  return result;
-}
-
-static ui::UICommand *
-ParseCustomRequestCommand(const DebugAdapterClient &client, u64 seq, const std::string &cmd_name,
-                          const nlohmann::basic_json<> &json) noexcept
-{
-  if (cmd_name == "continueAll") {
-    return new ContinueAll{seq};
-  }
-  if (cmd_name == "pauseAll") {
-    return new PauseAll{seq};
-  }
-  if (cmd_name == "getProcesses") {
-    return new GetProcesses{seq};
-  }
-  return new InvalidArgs{seq, cmd_name, {}};
 }
 
 std::optional<std::string_view>

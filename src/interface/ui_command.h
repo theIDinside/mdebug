@@ -6,6 +6,27 @@
 #include <string_view>
 #include <vector>
 
+#define ReqArg(TypeName, ...)                                                                                     \
+  enum class TypeName##Args : u8{__VA_ARGS__};                                                                    \
+  static constexpr std::array<std::string_view, count_tuple(#__VA_ARGS__)> ArgNames =                             \
+    std::to_array({#__VA_ARGS__});
+
+#define RequiredArguments(...)                                                                                    \
+  static constexpr const auto ReqArgs = std::to_array(__VA_ARGS__);                                               \
+  static constexpr const auto &Arguments() noexcept { return ReqArgs; }
+
+#define NoRequiredArgs()                                                                                          \
+  static constexpr const std::array<std::string_view, 0> ReqArgs{};                                               \
+  static constexpr const std::array<std::string_view, 0> &Arguments() noexcept { return ReqArgs; }
+
+#define CTOR(Type)                                                                                                \
+  Type(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
+
+#define IfInvalidArgsReturn(type)                                                                                 \
+  if (const auto missing = Validate<type>(seq, args); missing) {                                                  \
+    return missing;                                                                                               \
+  }
+
 namespace mdb {
 class Tracer;
 class TraceeController;
@@ -13,7 +34,15 @@ namespace ui {
 
 namespace dap {
 class DebugAdapterClient;
+
+template <typename... Args>
+consteval auto
+count_tuple(Args... args)
+{
+  return std::tuple_size<decltype(std::make_tuple(std::string_view{args}...))>::value;
 }
+
+} // namespace dap
 
 struct UIResult;
 using UIResultPtr = const UIResult *;
