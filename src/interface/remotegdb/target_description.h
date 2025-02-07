@@ -13,8 +13,8 @@ namespace mdb::gdb {
 
 struct ArchReg
 {
-  std::string_view name;
-  std::string_view type;
+  std::string name;
+  std::string type;
   u16 bit_size;
   u16 regnum;
 };
@@ -31,8 +31,8 @@ struct DebuggerContextRegisters
 
 struct RegisterName
 {
-  std::string_view name;
-  std::string_view type;
+  std::string name;
+  std::string type;
 };
 
 struct RegisterMetadata
@@ -57,6 +57,6 @@ struct ArchictectureInfo
   u32 register_bytes() const noexcept;
 };
 
-std::vector<gdb::ArchReg> read_arch_info(const xml::XMLElementView &root) noexcept;
+std::vector<gdb::ArchReg> read_arch_info(const xml::XMLElementView &root, int *registerNumber) noexcept;
 
 } // namespace mdb::gdb

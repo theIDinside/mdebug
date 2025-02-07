@@ -7,7 +7,7 @@
 namespace mdb::gdb {
 
 std::vector<ArchReg>
-read_arch_info(const xml::XMLElementView &root) noexcept
+read_arch_info(const xml::XMLElementView &root, int *registerNumber) noexcept
 {
   std::vector<gdb::ArchReg> result{};
   result.reserve(85);
@@ -28,8 +28,13 @@ read_arch_info(const xml::XMLElementView &root) noexcept
       } else if (k == "regnum") {
         const auto res = std::from_chars(v.data(), v.data() + v.size(), r.regnum);
         ASSERT(res.ec == std::errc(), "Failed to parse reg num from target description for register");
+        ASSERT(r.regnum == *registerNumber, "Target description is no longer contiguous.");
       }
     }
+    if (r.regnum == 0) {
+      r.regnum = *registerNumber;
+    }
+    (*registerNumber) += 1;
 
     // Debugger-Context Registers. I like my own name for these registers. Because they're the debug context; the
     // stack, the pc and the current stack frame (if available)

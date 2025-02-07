@@ -763,6 +763,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
       xml::XMLParser parser{request_arch_info.response_buffer};
       auto root_element = parser.parse();
       std::vector<gdb::ArchReg> complete_arch{};
+      auto registerNumber = 0;
       for (const auto &child : root_element->children) {
         if (child->name == "xi:include") {
           const auto include = child->attribute("href");
@@ -773,7 +774,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
           }
           xml::XMLParser parser{included.response_buffer};
           auto include_root_element = parser.parse();
-          auto arch = gdb::read_arch_info(include_root_element);
+          auto arch = gdb::read_arch_info(include_root_element, &registerNumber);
           std::copy(arch.begin(), arch.end(), std::back_inserter(complete_arch));
         }
       }
@@ -883,8 +884,8 @@ RemoteSessionConfigurator::configure_session() noexcept
 
       xml::XMLParser parser{request_arch_info.response_buffer};
       auto root_element = parser.parse();
-
-      auto arch = gdb::read_arch_info(root_element);
+      auto registerNumber = 0;
+      auto arch = gdb::read_arch_info(root_element, &registerNumber);
 
       // Notice that we do not add the "main thread" to the list of threads. Because meta data for that thread
       // is created when we spawn the TraceeController supervisor struct (it creates a normal thread meta data
