@@ -674,21 +674,6 @@ ConfigurationDone::Execute() noexcept
   return new ConfigurationDoneResponse{true, this};
 }
 
-Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
-    : UICommand(seq), args(std::move(arguments))
-{
-}
-
-UIResultPtr
-Initialize::Execute() noexcept
-{
-  bool RRSession = false;
-  if (args.contains("RRSession")) {
-    RRSession = args.at("RRSession");
-  }
-  return new InitializeResponse{RRSession, true, this};
-}
-
 std::pmr::string
 DisconnectResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
@@ -718,6 +703,21 @@ Disconnect::Execute() noexcept
   }
 
   return new DisconnectResponse{true, this};
+}
+
+Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
+    : UICommand(seq), args(std::move(arguments))
+{
+}
+
+UIResultPtr
+Initialize::Execute() noexcept
+{
+  bool RRSession = false;
+  if (args.contains("RRSession")) {
+    RRSession = args.at("RRSession");
+  }
+  return new InitializeResponse{RRSession, true, this};
 }
 
 InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept
