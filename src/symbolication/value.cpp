@@ -174,6 +174,10 @@ Value::GetMember(std::string_view memberName) noexcept
 VariableReferenceId
 Value::ReferenceId() const noexcept
 {
+  // This value is invalid (for whatever reason).
+  if (!mContext) {
+    return 0;
+  }
   return mContext->mId;
 }
 
