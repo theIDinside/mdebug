@@ -387,12 +387,14 @@ Tracer::Attach(const AttachArgs &args) noexcept
         }
 
         auto it = res.begin();
+        bool alreadyAdded = true;
         const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
           mTracedProcesses.push_back(TraceeController::create(
             Tracer::Get().NewSupervisorId(), TargetSession::Attached, std::move(tc), InterfaceType::GdbRemote));
           auto *supervisor = mTracedProcesses.back().get();
           auto &ti = supervisor->GetInterface();
-          client->ClientConfigured(supervisor);
+          client->ClientConfigured(supervisor, alreadyAdded);
+          alreadyAdded = false;
           ti.OnExec();
           for (const auto &t : it->threads) {
             supervisor->CreateNewTask(t.tid, false);
