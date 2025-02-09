@@ -35,11 +35,17 @@ ToStdString(JSContext *cx, JS::HandleString string, std::pmr::string &writeBuffe
   bool success = false;
   if (string) {
     success = true;
-    auto stringLength = JS_GetStringEncodingLength(cx, string);
+    JS::Rooted<JSString *> str{cx, string};
+    auto stringLength = JS_GetStringEncodingLength(cx, str);
 
-    writeBuffer.resize_and_overwrite(stringLength, [cx, string, &success](char *ptr, size_t size) {
-      if (!JS_EncodeStringToBuffer(cx, string, ptr, size)) {
+    writeBuffer.resize_and_overwrite(stringLength, [cx, &str, &success](char *ptr, size_t size) -> size_t {
+      if (!JS_EncodeStringToBuffer(cx, str, ptr, size)) {
         success = false;
+      }
+      for (auto it = ptr; it < ptr + size; ++it) {
+        if (*it == 0) {
+          return std::distance(ptr, it);
+        }
       }
       return size;
     });
