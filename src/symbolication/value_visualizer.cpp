@@ -679,7 +679,7 @@ JavascriptValueSerializer::Serialize(Value *value, StringType &outputBuffer,
   if (options.mNewLineAfterMember) {
     it = fmt::format_to(it, "{{\n");
   } else {
-    it = fmt::format_to(it, "{{");
+    it = fmt::format_to(it, "{{ ");
   }
 
   for (const auto &m : value->GetType()->MemberFields()) {
