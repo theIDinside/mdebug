@@ -18,6 +18,8 @@ struct Variable : public RefPtrJsObject<mdb::js::Variable, sym::Value, StringLit
     SlotCount
   };
 
+  static void Configure(JSContext *cx, JSObject *obj, sym::Value *t);
+
   bool resolve(JSContext *cx, JS::HandleId id, bool *resolved) noexcept;
 
   /** Return the variables reference (id) for this variable*/
@@ -43,7 +45,7 @@ struct Variable : public RefPtrJsObject<mdb::js::Variable, sym::Value, StringLit
 
   static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0),
                                                     JS_FN("name", &js_name, 0, 0),
-                                                    JS_FN("toString", &js_to_string, 0, 0),
+                                                    JS_FN("toString", &js_to_string, 1, 0),
                                                     JS_FN("address", &js_address, 0, 0),
                                                     JS_FN("bytes", &js_bytes, 0, 0),
                                                     JS_FN("dereference", &js_dereference, 0, 0),

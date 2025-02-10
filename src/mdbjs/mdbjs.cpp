@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "mdbjs.h"
+#include "common.h"
 #include "js/CallAndConstruct.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"

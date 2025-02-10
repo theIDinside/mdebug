@@ -12,6 +12,7 @@
 #include "js/PropertyAndElement.h"
 #include "js/PropertyDescriptor.h"
 #include "js/RootingAPI.h"
+#include "js/Symbol.h"
 #include "js/Value.h"
 #include "jsapi.h"
 #include "mdbjs/util.h"
@@ -75,14 +76,15 @@ Variable::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   sym::SerializeOptions options{};
   if (args.length() == 1) {
-    if (!args[0].isObject()) {
+    if (!args[0].isObject() && !args[0].isString()) {
       JS_ReportErrorASCII(cx, "options to toString must be an object { depth: int, nl: boolean } that describes "
                               "levels to print and if newlines should be printed after fields");
       return false;
+    } else if (args[0].isObject()) {
+      JS::Rooted<JSObject *> obj{cx, &args[0].toObject()};
+      // options are default, if no opts are passed in.
+      GetSerializeOptions(cx, obj, options);
     }
-    JS::Rooted<JSObject *> obj{cx, &args[0].toObject()};
-    // options are default, if no opts are passed in.
-    GetSerializeOptions(cx, obj, options);
   }
 
   JS::RootedObject callee(cx, &args.thisv().toObject());
@@ -95,6 +97,7 @@ Variable::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
     JS_ReportOutOfMemory(cx);
     return false;
   }
+  ASSERT(!JS_IsExceptionPending(cx), "Exception left unhandled");
   args.rval().setString(str);
   return true;
 }
@@ -229,37 +232,55 @@ Variable::js_dereference(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   return false;
 }
 
+void
+Variable::Configure(JSContext *cx, JSObject *obj, sym::Value *t)
+{
+  JSFunction *func = JS_NewFunction(cx, Variable::js_to_string, 0, 0, "toPrimitive");
+  if (func) {
+    JSObject *funcObj = JS_GetFunctionObject(func);
+    if (funcObj) {
+      JS::RootedValue funcVal(cx, JS::ObjectValue(*funcObj));
+      JS::Rooted<JSObject *> rootedObj{cx, obj};
+      JS::Symbol *sym = JS::GetWellKnownSymbol(cx, JS::SymbolCode::toPrimitive);
+      JS::RootedId symId(cx, JS::PropertyKey::Symbol(sym)); // Convert to jsid
+      // Define `Symbol.toPrimitive`
+      JS_DefinePropertyById(cx, rootedObj, symId, funcVal, JSPROP_ENUMERATE);
+    }
+  }
+}
+
 bool
 Variable::resolve(JSContext *cx, JS::HandleId id, bool *resolved) noexcept
 {
   JS::Rooted<JS::Value> idValue{cx};
+  *resolved = false;
   if (!JS_IdToValue(cx, id, &idValue)) {
     return false;
   }
 
-  if (!idValue.isString()) {
-    return false;
-  }
-
-  JS::Rooted<JSString *> str{cx, idValue.toString()};
-  std::string propertyName;
-  if (!ToStdString(cx, str, propertyName)) {
-    return false;
-  }
-  auto value = Get();
-  if (!value->HasMember(propertyName)) {
-    return true;
-  }
-  auto member = value->GetMember(propertyName);
-  if (member) {
-    JS::Rooted<JSObject *> memberObject{cx, Create(cx, member)};
-    if (!memberObject) {
+  if (idValue.isString()) {
+    JS::Rooted<JSString *> str{cx, idValue.toString()};
+    std::string propertyName;
+    if (!ToStdString(cx, str, propertyName)) {
       return false;
     }
-    JS::Rooted<JSObject *> thisObject{cx, AsObject(this)};
-    JS_DefinePropertyById(cx, thisObject, id, memberObject, JSPROP_ENUMERATE);
-    *resolved = true;
+    auto value = Get();
+    if (!value->HasMember(propertyName)) {
+      return true;
+    }
+    auto member = value->GetMember(propertyName);
+    if (member) {
+      JS::Rooted<JSObject *> memberObject{cx, Create(cx, member)};
+      if (!memberObject) {
+        return false;
+      }
+      JS::Rooted<JSObject *> thisObject{cx, AsObject(this)};
+      JS_DefinePropertyById(cx, thisObject, id, memberObject, JSPROP_ENUMERATE);
+      *resolved = true;
+    }
+    return true;
   }
+
   return true;
 }
 
