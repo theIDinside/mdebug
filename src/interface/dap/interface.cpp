@@ -28,7 +28,7 @@ namespace mdb::ui::dap {
 using namespace std::string_literals;
 
 DapClientSession
-child_session(DapClientSession type) noexcept
+GetNewChildSessionType(DapClientSession type) noexcept
 {
   switch (type) {
   case DapClientSession::None:
@@ -526,7 +526,7 @@ DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client, std::stri
     auto accepted = accept(socket_fd, nullptr, nullptr);
     if (accepted != -1) {
       auto newClient =
-        new DebugAdapterClient{child_session(client.session_type), std::move(socket_path), accepted};
+        new DebugAdapterClient{GetNewChildSessionType(client.session_type), std::move(socket_path), accepted};
       client.AddChild(newClient);
       return newClient;
     }

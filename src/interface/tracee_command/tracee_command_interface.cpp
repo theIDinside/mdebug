@@ -41,8 +41,12 @@ TraceeCommandInterface::TargetManagesBreakpoints() noexcept
 }
 
 TaskExecuteResponse
-TraceeCommandInterface::ReverseContinue() noexcept
+TraceeCommandInterface::ReverseContinue(bool onlyStep) noexcept
 {
+  // In the future, when we're 100% certain that everything works as intended, we can change this
+  // to just return a TaskExecuteResponse::Error. But for now, we want it to be a hard error, so that we catch when
+  // the system has an invalid configuration
+  PANIC("Something is broken if this ever gets called.");
   return TaskExecuteResponse::Error(0);
 }
 

@@ -401,6 +401,17 @@ TraceeController::HasTask(Tid tid) noexcept
 }
 
 bool
+TraceeController::ReverseResumeTarget(tc::ResumeAction type) noexcept
+{
+  // This is *probably* not necessary during Reverse Execution sessions, because we will be "noSingleThreadControl"
+  // and I don't see how we could do anything but normal scheduling. But to keep with `ResumeTarget` we'll set it
+  // here anyway, if in the future, this changes.
+  mScheduler->SetNormalScheduling();
+  mTraceeInterface->ReverseContinue(type.type == tc::RunType::Step);
+  return true;
+}
+
+bool
 TraceeController::ResumeTarget(tc::ResumeAction action) noexcept
 {
   DBGLOG(core, "[supervisor]: resume tracee {}", to_str(action.type));
@@ -1946,40 +1957,37 @@ TraceeController::OnTearDown() noexcept
   ShutDownDebugAdapterClient();
 }
 
+bool
+TraceeController::IsReplaySession() const noexcept
+{
+  return mTraceeInterface->IsReplaySession();
+}
+
 tc::ProcessedStopEvent
 TraceeController::HandleFork(const ForkEvent &evt) noexcept
 {
   auto interface = mTraceeInterface->OnFork(evt.child_pid);
-  auto new_supervisor = Tracer::Get().AddNewSupervisor(Fork(std::move(interface), evt.mIsVFork));
-  auto clientName = fmt::format("forked {}", new_supervisor->TaskLeaderTid());
+  auto newSupervisor = Tracer::Get().AddNewSupervisor(Fork(std::move(interface), evt.mIsVFork));
+  auto clientName = fmt::format("forked {}", newSupervisor->TaskLeaderTid());
   auto client = ui::dap::DebugAdapterClient::CreateSocketConnection(*mDebugAdapterClient, clientName);
-  client->ClientConfigured(new_supervisor);
+  client->ClientConfigured(newSupervisor);
 
+  bool resume = true;
   if (!evt.mIsVFork) {
-    DBGLOG(core, "event was not vfork; disabling breakpoints in new address space.");
-    // the new process space copies the old one; which contains breakpoints.
-    // we restore the newly forked process space to the real contents. New breakpoints will be set
-    // by the initialize -> configDone sequence
-    auto &supervisor = new_supervisor->GetInterface();
-    for (auto &user : mUserBreakpoints.AllUserBreakpoints()) {
-      if (auto loc = user->GetLocation(); loc) {
-        supervisor.DisableBreakpoint(evt.child_pid, *loc);
-      }
-    }
+    resume = newSupervisor->GetInterface().PostFork(this);
   } else {
     SetDeferEventHandler();
-    new_supervisor->mIsVForking = true;
-    new_supervisor->mOnExecOrExitPublisher.Once(
-      [parent = this, self = new_supervisor, resumeTid = evt.thread_id]() {
-        parent->ResumeEventHandling();
-        self->mIsVForking = false;
-        self->mConfigurationIsDone = true;
-        EventSystem::Get().PushDebuggerEvent(
-          TraceEvent::CreateDeferToSupervisor({.target = parent->TaskLeaderTid(), .tid = resumeTid}, {}, {}));
-      });
+    newSupervisor->mIsVForking = true;
+    newSupervisor->mOnExecOrExitPublisher.Once([parent = this, self = newSupervisor, resumeTid = evt.thread_id]() {
+      parent->ResumeEventHandling();
+      self->mIsVForking = false;
+      self->mConfigurationIsDone = true;
+      EventSystem::Get().PushDebuggerEvent(
+        TraceEvent::CreateDeferToSupervisor({.target = parent->TaskLeaderTid(), .tid = resumeTid}, {}, {}));
+    });
   }
 
-  return tc::ProcessedStopEvent{.should_resume = !evt.mIsVFork, .res = {}, .mVForked = evt.mIsVFork};
+  return tc::ProcessedStopEvent{.should_resume = !evt.mIsVFork && resume, .res = {}, .mVForked = evt.mIsVFork};
 }
 
 tc::ProcessedStopEvent

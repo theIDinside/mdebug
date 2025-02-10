@@ -97,7 +97,7 @@ append_checksum(char (&buf)[N], std::string_view payload)
 }
 
 GdbRemoteCommander::GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn,
-                                       Pid process_id, std::string &&exec_file,
+                                       Pid process_id, std::optional<std::string> &&exec_file,
                                        std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept
     : TraceeCommandInterface(TargetFormat::Remote, std::move(arch), TraceeInterfaceType::GdbRemote),
       connection(std::move(conn)), process_id(process_id), exec_file(std::move(exec_file)), type(type)
@@ -247,13 +247,13 @@ GdbRemoteCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ReverseContinue() noexcept
+GdbRemoteCommander::ReverseContinue(bool stepOnly) noexcept
 {
   if (type != RemoteType::RR) {
     return TaskExecuteResponse::Error(0);
   }
 
-  constexpr auto reverse = "bc";
+  auto reverse = stepOnly ? "bs" : "bc";
   const auto resume_err = connection->send_vcont_command(reverse, 1000);
   ASSERT(!resume_err.has_value(), "reverse continue failed");
 
@@ -540,9 +540,23 @@ GdbRemoteCommander::OnExec() noexcept
 }
 
 Interface
-GdbRemoteCommander::OnFork(Pid) noexcept
+GdbRemoteCommander::OnFork(Pid newProcess) noexcept
 {
-  TODO("implement GdbRemoteCommander::on_fork() noexcept");
+  // RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id, std::string &&exec_file,
+  // std::shared_ptr<gdb::ArchictectureInfo> &&arch
+  auto arch = mArchInfo;
+  auto execFile = exec_file;
+  return std::make_unique<GdbRemoteCommander>(type, connection, newProcess, std::move(execFile), std::move(arch));
+}
+
+bool
+GdbRemoteCommander::PostFork(TraceeController *parent) noexcept
+{
+  // RR manages process creation entirely (more or less). It doesn't just copy
+  // address space willy nilly. Therefore we need to actually install
+  // breakpoints for the newly forked process, because they don't follow like
+  // they would during a ptrace session of a fork.
+  return type != RemoteType::RR;
 }
 
 std::optional<Path>
@@ -809,8 +823,6 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
     return result;
   }
 
-  SocketCommand select_thread_cmd{"QListThreadsInStopReply"};
-  OkOtherwiseErr(select_thread_cmd, "Failed to configure RR to list threads in stop reply");
   conn->initialize_thread();
   return result;
 }

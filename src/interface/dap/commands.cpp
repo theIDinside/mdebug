@@ -200,7 +200,7 @@ ReverseContinue::Execute() noexcept
 {
   auto res = new ReverseContinueResponse{true, this};
   auto target = mDAPClient->GetSupervisor();
-  auto ok = target->GetInterface().ReverseContinue();
+  auto ok = target->ReverseResumeTarget(tc::ResumeAction{.type = tc::RunType::Continue});
   res->success = ok;
   return res;
 }
@@ -297,6 +297,52 @@ Next::Execute() noexcept
     break;
   }
   return new NextResponse{success, this};
+}
+
+std::pmr::string
+StepBackResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
+{
+  std::pmr::string result{arenaAllocator};
+  result.reserve(256);
+  auto outIt = std::back_inserter(result);
+  if (success) {
+    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepBack"}})",
+                   seq, request_seq);
+  } else {
+    std::string_view error;
+    switch (mResult) {
+    case Result::Success:
+      PANIC("Invariant broken");
+    case Result::NotStopped:
+      error = "notStopped";
+      break;
+    case Result::NotReplaySession:
+      error = "notReplaySession";
+      break;
+    }
+    fmt::format_to(
+      outIt,
+      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepBack","message":"{}"}})",
+      seq, request_seq, error);
+  }
+  return result;
+}
+
+UIResultPtr
+StepBack::Execute() noexcept
+{
+  auto target = mDAPClient->GetSupervisor();
+
+  if (!target->IsReplaySession()) {
+    return new StepBackResponse{StepBackResponse::Result::NotReplaySession, this};
+  } else if (target->IsRunning()) {
+    // During reverse execution, because we are RR-oriented, the entire process will be stopped, so we don't have
+    // to actually check individual tasks here.
+    return new StepBackResponse{StepBackResponse::Result::NotStopped, this};
+  }
+
+  target->ReverseResumeTarget(tc::ResumeAction{.type = tc::RunType::Step});
+  return new StepBackResponse{StepBackResponse::Result::Success, this};
 }
 
 std::pmr::string
@@ -667,7 +713,13 @@ ConfigurationDone::Execute() noexcept
     break;
   }
   case TargetSession::Attached:
-    DBGLOG(core, "configurationDone - doing nothing {}", mDAPClient->GetSupervisor()->TaskLeaderTid());
+    if (mDAPClient->GetSupervisor()->IsReplaySession()) {
+      mDAPClient->GetSupervisor()->ResumeTarget(tc::ResumeAction{tc::RunType::Continue});
+    } else {
+      DBGLOG(core, "configurationDone - doing nothing for normal attach sessions {}",
+             mDAPClient->GetSupervisor()->TaskLeaderTid());
+    }
+
     break;
   }
 
@@ -878,7 +930,8 @@ Threads::Execute() noexcept
   auto &it = target->GetInterface();
 
   if (it.mFormat == TargetFormat::Remote) {
-    auto res = it.RemoteConnection()->query_target_threads({target->TaskLeaderTid(), target->TaskLeaderTid()});
+    auto res =
+      it.RemoteConnection()->QueryTargetThreads({target->TaskLeaderTid(), target->TaskLeaderTid()}, false);
     ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
     for (const auto thr : res) {
       if (std::ranges::none_of(target->GetThreads(),

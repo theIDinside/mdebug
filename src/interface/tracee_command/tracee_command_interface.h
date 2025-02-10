@@ -291,7 +291,8 @@ public:
   virtual ~TraceeCommandInterface() noexcept = default;
   virtual ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
   virtual TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept = 0;
-  virtual TaskExecuteResponse ReverseContinue() noexcept;
+  // Reverse execute. `onlyStep` if we should be stepping. If false, do reverse execution.
+  virtual TaskExecuteResponse ReverseContinue(bool onlyStep) noexcept;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction run) noexcept = 0;
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
@@ -322,6 +323,12 @@ public:
 
   // Called after a fork for the creation of a new process supervisor
   virtual Interface OnFork(Pid pid) noexcept = 0;
+  // Returns true|false if the process that forked, should be resumed immediately.
+  // In cases like RR, where we control the entire application across many processes, we don't actually want to let
+  // the process resume. Because we need to do a full configuration first (and set potential breakpoints, according
+  // to how DAP defines the initialization process). In those cases we want to halt (because the session will be
+  // resumed once the new process has been configured and has it's `ConfigurationDone` request performed.)
+  virtual bool PostFork(TraceeController *parent) noexcept = 0;
 
   virtual Tid TaskLeaderTid() const noexcept = 0;
   virtual std::optional<Path> ExecedFile() noexcept = 0;
@@ -391,6 +398,12 @@ public:
   GetSupervisor() noexcept
   {
     return tc;
+  }
+
+  virtual bool
+  IsReplaySession() const noexcept
+  {
+    return false;
   }
 };
 

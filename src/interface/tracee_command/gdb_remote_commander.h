@@ -84,13 +84,14 @@ class GdbRemoteCommander final : public TraceeCommandInterface
 
 public:
   GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id,
-                     std::string &&exec_file, std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept;
+                     std::optional<std::string> &&exec_file,
+                     std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept;
   ~GdbRemoteCommander() noexcept override = default;
 
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
-  TaskExecuteResponse ReverseContinue() noexcept final;
+  TaskExecuteResponse ReverseContinue(bool stepOnly) noexcept final;
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction type) noexcept final;
   TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
@@ -113,6 +114,7 @@ public:
   bool OnExec() noexcept final;
   // Called after a fork for the creation of a new process supervisor
   Interface OnFork(Pid pid) noexcept final;
+  bool PostFork(TraceeController *parent) noexcept final;
 
   Tid TaskLeaderTid() const noexcept final;
   gdb::GdbThread leader_to_gdb() const noexcept;
@@ -122,6 +124,12 @@ public:
   mdb::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept final;
 
   gdb::RemoteSettings &remote_settings() noexcept;
+
+  bool
+  IsReplaySession() const noexcept final
+  {
+    return type == RemoteType::RR;
+  }
 };
 
 struct Thread

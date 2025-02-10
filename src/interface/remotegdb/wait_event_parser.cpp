@@ -134,13 +134,13 @@ WaitEventParser::new_debugger_event(bool init) noexcept
       return TraceEvent::CreateHardwareBreakpointHit(param(), determine_pc(), std::move(registers));
     }
     case TraceeStopReason::Fork:
-      TODO("Implement handling of TraceeStopReason::Fork");
+      return TraceEvent::CreateForkEvent_(param(), new_pid, std::move(registers));
     case TraceeStopReason::VFork:
       TODO("Implement handling of TraceeStopReason::VFork");
     case TraceeStopReason::VForkDone:
       TODO("Implement handling of TraceeStopReason::VForkDone");
     case TraceeStopReason::Exec:
-      TODO("Implement handling of TraceeStopReason::Exec");
+      return TraceEvent::CreateExecEvent(param(), exec_path, std::move(registers));
     case TraceeStopReason::Clone:
       TODO("Implement handling of TraceeStopReason::Clone");
     case TraceeStopReason::Create: {

@@ -42,6 +42,21 @@ PtraceCommander::OnFork(Pid pid) noexcept
   return std::make_unique<PtraceCommander>(pid);
 }
 
+bool
+PtraceCommander::PostFork(TraceeController *parent) noexcept
+{
+  DBGLOG(core, "event was not vfork; disabling breakpoints in new address space.");
+  // the new process space copies the old one; which contains breakpoints.
+  // we restore the newly forked process space to the real contents. New breakpoints will be set
+  // by the initialize -> configDone sequence
+  for (auto &user : parent->GetUserBreakpoints().AllUserBreakpoints()) {
+    if (auto loc = user->GetLocation(); loc) {
+      DisableBreakpoint(process_id, *loc);
+    }
+  }
+  return true;
+}
+
 Tid
 PtraceCommander::TaskLeaderTid() const noexcept
 {

@@ -50,6 +50,7 @@ public:
   bool OnExec() noexcept final;
   // Called after a fork for the creation of a new process supervisor
   Interface OnFork(Pid pid) noexcept final;
+  bool PostFork(TraceeController *parent) noexcept final;
 
   Tid TaskLeaderTid() const noexcept final;
   std::optional<Path> ExecedFile() noexcept final;

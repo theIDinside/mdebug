@@ -549,12 +549,12 @@ private:
   std::thread stop_reply_and_event_listener;
   u16 port;
   RemoteSettings remote_settings;
-  bool threads_known : 1 {false};
+  bool mThreadsKnown : 1 {false};
   bool is_initialized : 1 {false};
   bool remote_configured : 1 {false};
   bool run : 1 {true};
   gdb::GdbThread selected_thread{0, 0};
-  std::recursive_mutex tracee_control_mutex{};
+  std::recursive_mutex mTraceeControlMutex{};
 
   // When debugger (core) wants control, it will acquire this lock
   // but it will already be in use, whereby we unlock it on the dispatcher thread
@@ -571,7 +571,7 @@ private:
   bool process_stop_reply_payload(std::string_view payload, bool is_session_config) noexcept;
   bool process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept;
   void put_pending_notification(std::string_view payload) noexcept;
-  void update_known_threads(std::span<const GdbThread> threads) noexcept;
+  void UpdateKnownThreads(std::span<const GdbThread> threads) noexcept;
   void set_query_thread(gdb::GdbThread thread) noexcept;
 
   static std::unordered_map<std::string_view, TraceeStopReason> StopReasonMap;
@@ -618,7 +618,7 @@ public:
   bool execute_command(SocketCommand &cmd, int timeout) noexcept;
   bool execute_command(qXferCommand &cmd, u32 offset, int timeout) noexcept;
   std::vector<GdbThread> get_remote_threads() noexcept;
-  std::span<const GdbThread> query_target_threads(GdbThread thread) noexcept;
+  std::span<const GdbThread> QueryTargetThreads(GdbThread thread, bool forceFlush) noexcept;
 
   mdb::Expected<std::vector<std::string>, SendError>
   send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,

@@ -294,6 +294,34 @@ struct Next final : public ui::UICommand
   DefineArgTypes({"threadId", FieldType::Int});
 };
 
+struct StepBackResponse final : ui::UIResult
+{
+  enum class Result
+  {
+    Success,
+    NotStopped,
+    NotReplaySession
+  };
+  StepBackResponse(Result result, UICommandPtr cmd) noexcept
+      : UIResult(result == Result::Success, cmd), mResult(result) {};
+  ~StepBackResponse() noexcept override = default;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+
+  Result mResult;
+};
+
+struct StepBack final : public ui::UICommand
+{
+  int thread_id;
+
+  StepBack(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid) {}
+  ~StepBack() override = default;
+  UIResultPtr Execute() noexcept final;
+  DEFINE_NAME("stepBack");
+  RequiredArguments({"threadId"sv});
+  DefineArgTypes({"threadId", FieldType::Int});
+};
+
 struct StepInResponse final : ui::UIResult
 {
   CTOR(StepInResponse);

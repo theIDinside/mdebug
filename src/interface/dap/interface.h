@@ -149,7 +149,7 @@ enum class DapClientSession
   RRChildSession
 };
 
-DapClientSession child_session(DapClientSession type) noexcept;
+DapClientSession GetNewChildSessionType(DapClientSession type) noexcept;
 
 class DebugAdapterClient
 {

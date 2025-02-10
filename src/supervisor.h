@@ -61,7 +61,7 @@ auto createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared
 enum class InterfaceType
 {
   Ptrace,
-  GdbRemote
+  GdbRemote,
 };
 
 enum class ObserverType
@@ -217,6 +217,7 @@ public:
   /* Create new task meta data for `tid` */
   void CreateNewTask(Tid tid, bool running) noexcept;
   bool HasTask(Tid tid) noexcept;
+  bool ReverseResumeTarget(tc::ResumeAction type) noexcept;
   /* Resumes all tasks in this target. */
   bool ResumeTarget(tc::ResumeAction type) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
@@ -309,7 +310,7 @@ public:
   void ResumeEventHandling() noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void OnTearDown() noexcept;
-  void SetStopScheduler() noexcept;
+  bool IsReplaySession() const noexcept;
 
 private:
   void DefaultHandler(TraceEvent *evt) noexcept;

@@ -455,7 +455,7 @@ RemoteConnection::consume_poll_events(int fd) noexcept
 void
 RemoteConnection::request_control() noexcept
 {
-  std::lock_guard lock(tracee_control_mutex);
+  std::lock_guard lock(mTraceeControlMutex);
 
   auto tries = 0;
   while (::write(request_command_fd[1], "+", 1) == -1 && tries++ < 10) {
@@ -632,14 +632,14 @@ struct Core
 } // namespace TArg
 
 void
-RemoteConnection::update_known_threads(std::span<const GdbThread> threads_) noexcept
+RemoteConnection::UpdateKnownThreads(std::span<const GdbThread> threads_) noexcept
 {
   threads.clear();
   for (const auto gdb_thread : threads_) {
     // pid.pid == process/task leader of pid.tid(s), but it is a task too, not something special.
     threads[{gdb_thread.pid, gdb_thread.pid}].push_back(gdb_thread);
   }
-  threads_known = true;
+  mThreadsKnown = true;
 }
 
 void
@@ -705,7 +705,7 @@ RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload
       parser.parse_pid_tid(val);
     } else if (arg == "threads") {
       const auto threads = parser.parse_threads_parameter(val);
-      update_known_threads(threads);
+      UpdateKnownThreads(threads);
     } else if (arg == "thread-pcs") {
       auto pcs = mdb::split_string(val, ",");
       DBGLOG(core, "parsing thread-pcs not yet implemented");
@@ -1008,17 +1008,22 @@ string_length(const std::string_view &str) noexcept
 }
 
 std::span<const GdbThread>
-RemoteConnection::query_target_threads(GdbThread thread) noexcept
+RemoteConnection::QueryTargetThreads(GdbThread thread, bool forceFlush) noexcept
 {
-  if (threads_known) {
-    const auto &thrs = threads[thread];
-    return thrs;
+  if (forceFlush) {
+    mThreadsKnown = false;
   }
-  const auto threads_result = get_remote_threads();
-  tracee_control_mutex.lock();
-  ScopedDefer fn{[&]() { tracee_control_mutex.unlock(); }};
+  if (mThreadsKnown) {
+    const auto &thrs = threads[thread];
+    if (!thrs.empty()) {
+      return thrs;
+    }
+  }
+  const auto threadsResults = get_remote_threads();
+  mTraceeControlMutex.lock();
+  ScopedDefer fn{[&]() { mTraceeControlMutex.unlock(); }};
 
-  update_known_threads(threads_result);
+  UpdateKnownThreads(threadsResults);
 
   return threads[thread];
 }
@@ -1026,10 +1031,10 @@ RemoteConnection::query_target_threads(GdbThread thread) noexcept
 std::vector<GdbThread>
 RemoteConnection::get_remote_threads() noexcept
 {
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
 
   request_control();
@@ -1142,10 +1147,10 @@ RemoteConnection::parse_supported(std::string_view supported_response) noexcept
 bool
 RemoteConnection::send_qXfer_command_with_response(qXferCommand &cmd, std::optional<int> timeout) noexcept
 {
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
 
   request_control();
@@ -1169,10 +1174,10 @@ RemoteConnection::send_commands_inorder_failfast(std::vector<std::variant<Socket
 {
   std::vector<std::string> results{};
   results.reserve(commands.size());
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
 
   request_control();
@@ -1208,10 +1213,10 @@ mdb::Expected<std::vector<std::string>, SendError>
 RemoteConnection::send_inorder_command_chain(std::span<std::string_view> commands,
                                              std::optional<int> timeout) noexcept
 {
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
   request_control();
   std::vector<std::string> result{};
@@ -1257,10 +1262,10 @@ RemoteConnection::send_inorder_command_chain(std::span<std::string_view> command
 void
 RemoteConnection::send_interrupt_byte() noexcept
 {
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
 
   request_control();
@@ -1280,10 +1285,10 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
   // inside of request_control() (instead of 1 control thread and the RemoteConnection thread) and thus "let each
   // other through". Which would be... pretty bad.
   // when this returns, we have control
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
 
   request_control();
@@ -1338,10 +1343,10 @@ RemoteConnection::send_vcont_command(std::string_view command, std::optional<int
   // inside of request_control() (instead of 1 control thread and the RemoteConnection thread) and thus "let each
   // other through". Which would be... pretty bad.
   // when this returns, we have control
-  tracee_control_mutex.lock();
+  mTraceeControlMutex.lock();
   ScopedDefer fn{[&]() {
     user_done_sync.arrive_and_wait();
-    tracee_control_mutex.unlock();
+    mTraceeControlMutex.unlock();
   }};
 
   request_control();
@@ -1380,7 +1385,7 @@ RemoteConnection::is_connected_to(const std::string &host, int port) noexcept
 void
 RemoteConnection::invalidate_known_threads() noexcept
 {
-  threads_known = false;
+  mThreadsKnown = false;
 }
 
 static std::mutex InitMutex{};

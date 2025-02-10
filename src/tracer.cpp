@@ -4,6 +4,7 @@
 #include "bp.h"
 #include "event_queue.h"
 #include "interface/console_command.h"
+#include "interface/dap/interface.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "js/Context.h"
 #include "js/ErrorReport.h"
@@ -412,7 +413,8 @@ Tracer::Attach(const AttachArgs &args) noexcept
 
         auto main_connection = mDAP->main_connection();
         hookupDapWithRemote(std::move(it->tc), main_connection);
-
+        main_connection->SetDebugAdapterSessionType(
+          (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
         ++it;
         for (; it != std::end(res); ++it) {
           hookupDapWithRemote(std::move(it->tc),
