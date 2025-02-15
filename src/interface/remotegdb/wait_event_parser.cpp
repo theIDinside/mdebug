@@ -5,6 +5,8 @@
 #include "interface/remotegdb/connection.h"
 #include "interface/remotegdb/shared.h"
 #include "interface/tracee_command/tracee_command_interface.h"
+#include "utils/debug_value.h"
+#include <charconv>
 #include <event_queue.h>
 #include <supervisor.h>
 #include <tracer.h>
@@ -17,6 +19,21 @@ EventDataParam
 WaitEventParser::param() const noexcept
 {
   return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal};
+}
+
+static std::string
+DecodeHexString(std::string_view hexString)
+{
+  std::string result{};
+  result.reserve(hexString.size() / 2);
+  const auto end = hexString.end();
+  for (auto it = hexString.begin(); it != end; it += 2) {
+    char character = 0;
+    DebugValue res = std::from_chars(it, it + 2, character, 16);
+    ASSERT(res.GetValue().ec == std::errc(), "Failed to convert hexstring char bytes to char");
+    result.push_back(character);
+  }
+  return result;
 }
 
 void
@@ -230,7 +247,7 @@ WaitEventParser::set_tid(Tid thread) noexcept
 void
 WaitEventParser::set_execed(std::string_view exec) noexcept
 {
-  exec_path = exec;
+  exec_path = DecodeHexString(exec);
 }
 
 void
