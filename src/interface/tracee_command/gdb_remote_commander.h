@@ -115,6 +115,7 @@ public:
   // Called after a fork for the creation of a new process supervisor
   Interface OnFork(Pid pid) noexcept final;
   bool PostFork(TraceeController *parent) noexcept final;
+  bool IsAllStopSession() noexcept final;
 
   Tid TaskLeaderTid() const noexcept final;
   gdb::GdbThread leader_to_gdb() const noexcept;

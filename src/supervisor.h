@@ -143,18 +143,21 @@ class TraceeController
   // what the executable file was etc.
   tc::Auxv mAuxiliaryVector{};
 
-  bool mConfigurationIsDone{false};
-
+  bool mConfigurationIsDone : 1 {false};
   // Whether this is the very first stop wait status we have seen
-  bool mOnEntry{false};
-
+  bool mOnEntry : 1 {false};
   // Whether or not a process exit has been seen for this process.
-  bool mIsExited{false};
-
+  bool mIsExited : 1 {false};
   // If this process was vforked it needs special attention/massaging until it performs an EXEC. It can't do the
   // normal fork/clone/exec dances, as this would affect the caller of vfork's process space as well. This flag is
   // set by the comment-labled FORK constructor of TraceeController.
-  bool mIsVForking{false};
+  bool mIsVForking : 1 {false};
+  // Signals whether any stop that is encounted should signal to the debug adapter that everything stopped at the
+  // same time.
+  bool mAllStopSession : 1 {false};
+
+  int mCreationEventTime{0};
+  int mCurrentEventTime{0};
 
   BreakpointBehavior mBreakpointBehavior{BreakpointBehavior::StopAllThreadsWhenHit};
 
@@ -308,6 +311,7 @@ public:
 
   void DeferEvent(Event event) noexcept;
   void ResumeEventHandling() noexcept;
+  void InvalidateThreads(int eventTime) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void OnTearDown() noexcept;
   bool IsReplaySession() const noexcept;

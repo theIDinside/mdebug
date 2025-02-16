@@ -90,6 +90,7 @@ class Tracer
   // same as sScriptRuntime::mContext. But it's used so often that having direct access to it, is sensible.
   static JSContext *sApplicationJsContext;
   static bool sUsePTraceMe;
+  static int sLastTraceEventTime;
 #ifdef MDB_DEBUG
   u64 mDebuggerEvents;
 
@@ -132,6 +133,7 @@ public:
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
+  void InvalidateSessions(int frameTime) noexcept;
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
                                                    Allocator *allocator) noexcept;
 
@@ -215,6 +217,7 @@ private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
 
   std::vector<std::unique_ptr<TraceeController>> mTracedProcesses;
+  std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses;
   ui::dap::DAP *mDAP;
   std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
   u32 mBreakpointID{0};

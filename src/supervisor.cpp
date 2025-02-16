@@ -59,7 +59,8 @@ TraceeController::TraceeController(u32 sessionId, TraceeController &parent, tc::
       mUserBreakpoints{*this}, mSharedObjects{parent.mSharedObjects.clone()},
       mInterfaceType{parent.mInterfaceType}, mInterpreterBase{parent.mInterpreterBase}, mEntry{parent.mEntry},
       mSessionKind{parent.mSessionKind}, mScheduler{std::make_unique<TaskScheduler>(this)},
-      mNullUnwinder{parent.mNullUnwinder}, mTraceeInterface{std::move(interface)}
+      mNullUnwinder{parent.mNullUnwinder}, mTraceeInterface{std::move(interface)},
+      mAllStopSession{mTraceeInterface->IsAllStopSession()}
 {
   mIsVForking = isVFork;
   // Must be set first.
@@ -89,7 +90,7 @@ TraceeController::TraceeController(u32 sessionId, TargetSession targetSession, t
       mMainExecutable{nullptr}, mThreads{}, mThreadInfos{}, mUserBreakpoints{*this}, mSharedObjects{},
       mInterfaceType(type), mInterpreterBase{}, mEntry{}, mSessionKind{targetSession},
       mScheduler{std::make_unique<TaskScheduler>(this)}, mNullUnwinder{new sym::Unwinder{nullptr}},
-      mTraceeInterface(std::move(interface))
+      mTraceeInterface(std::move(interface)), mAllStopSession(mTraceeInterface->IsAllStopSession())
 {
   // Must be set first.
   mTraceeInterface->SetTarget(this);
@@ -537,8 +538,9 @@ TraceeController::EmitStoppedAtBreakpoints(LWP lwp, u32 bp_id, bool allStopped) 
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
   DBGLOG(core, "[dap event]: stopped at breakpoint {} emitted", bp_id);
+  const bool stopAll = allStopped | mAllStopSession;
   auto evt =
-    new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", allStopped};
+    new ui::dap::StoppedEvent{ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", stopAll};
   evt->bp_ids.push_back(bp_id);
   mDebugAdapterClient->PostDapEvent(evt);
 }
@@ -554,8 +556,9 @@ TraceeController::EmitSteppedStop(LWP lwp) noexcept
 void
 TraceeController::EmitSteppedStop(LWP lwp, std::string_view message, bool allStopped) noexcept
 {
+  const bool stopAll = allStopped | mAllStopSession;
   mDebugAdapterClient->PostDapEvent(
-    new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, message, lwp.tid, {}, "", allStopped});
+    new ui::dap::StoppedEvent{ui::dap::StoppedReason::Step, message, lwp.tid, {}, "", stopAll});
 }
 
 void
@@ -563,16 +566,18 @@ TraceeController::EmitSignalEvent(LWP lwp, int signal) noexcept
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
+  const bool stopAll = mAllStopSession;
   mDebugAdapterClient->PostDapEvent(new ui::dap::StoppedEvent{
-    ui::dap::StoppedReason::Exception, fmt::format("Signalled {}", signal), lwp.tid, {}, "", true});
+    ui::dap::StoppedReason::Exception, fmt::format("Signalled {}", signal), lwp.tid, {}, "", stopAll});
 }
 
 void
 TraceeController::EmitStopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool allStopped,
                               std::vector<int> bps_hit) noexcept
 {
+  const bool stopAll = allStopped | mAllStopSession;
   mDebugAdapterClient->PostDapEvent(
-    new ui::dap::StoppedEvent{reason, message, tid, std::move(bps_hit), message, allStopped});
+    new ui::dap::StoppedEvent{reason, message, tid, std::move(bps_hit), message, stopAll});
 }
 
 void
@@ -1781,7 +1786,7 @@ TraceeController::HandleProcessExit(const ProcessExited &evt) noexcept
 void
 TraceeController::PostExec(const std::string &exe) noexcept
 {
-  DBGLOG(core, "Processing EXEC for {} - process was vforked: {}", mTaskLeader, mIsVForking);
+  DBGLOG(core, "Processing EXEC for {} - process was vforked: {}", mTaskLeader, bool{mIsVForking});
   if (mMainExecutable) {
     mMainExecutable = nullptr;
   }
@@ -1934,8 +1939,18 @@ TraceeController::SetDeferEventHandler() noexcept
 }
 
 void
+TraceeController::InvalidateThreads(int eventTime) noexcept
+{
+  DBGLOG(core, "implement handling of reverse-execution across thread/process births");
+}
+
+void
 TraceeController::HandleTracerEvent(TraceEvent *evt) noexcept
 {
+  if (evt->event_time != -1 && (evt->event_time < mCurrentEventTime)) {
+    InvalidateThreads(evt->event_time);
+  }
+  mCurrentEventTime = std::max<int>(0, evt->event_time);
   switch (mAction) {
   case SupervisorEventHandlerAction::Default:
     DefaultHandler(evt);
@@ -1986,8 +2001,8 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
         TraceEvent::CreateDeferToSupervisor({.target = parent->TaskLeaderTid(), .tid = resumeTid}, {}, {}));
     });
   }
-
-  return tc::ProcessedStopEvent{.should_resume = !evt.mIsVFork && resume, .res = {}, .mVForked = evt.mIsVFork};
+  const bool should_resume = !evt.mIsVFork && resume;
+  return tc::ProcessedStopEvent{.should_resume = should_resume, .res = {}, .mVForked = evt.mIsVFork};
 }
 
 tc::ProcessedStopEvent

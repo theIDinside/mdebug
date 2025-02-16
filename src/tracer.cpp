@@ -245,11 +245,22 @@ Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 }
 
 void
+Tracer::InvalidateSessions(int frameTime) noexcept
+{
+  DBGLOG(core, "implement handling of reverse-execution across thread/process births");
+}
+
+void
 Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
 {
   auto task = Tracer::Get().GetTask(evt->tid);
   TraceeController *supervisor = task->GetSupervisor();
-
+  if ((evt->event_time >= 0) && evt->event_time < sLastTraceEventTime) {
+    InvalidateSessions(evt->event_time);
+  }
+  ASSERT(supervisor->mCreationEventTime >= evt->event_time,
+         "Event time is before the creation of this supervisor?");
+  sLastTraceEventTime = std::max<int>(0, evt->event_time);
   if (!supervisor) {
     // out-of-order wait status; defer & wait for complete initilization of new supervisor
     TODO("not impl");

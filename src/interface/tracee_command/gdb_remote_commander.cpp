@@ -559,6 +559,14 @@ GdbRemoteCommander::PostFork(TraceeController *parent) noexcept
   return type != RemoteType::RR;
 }
 
+bool
+GdbRemoteCommander::IsAllStopSession() noexcept
+{
+  // TODO: Add support for configurable "all stop sessions" for gdb remotes. For now it's entirely uninteresting.
+  // We're aiming for RR-first support then we can start caring about a broader gdb remote support.
+  return type == RemoteType::RR;
+}
+
 std::optional<Path>
 GdbRemoteCommander::ExecedFile() noexcept
 {

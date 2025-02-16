@@ -90,6 +90,7 @@ struct WaitEventParser
   Tid new_tid{0};
   u32 core{0};
   int syscall_no{0};
+  int event_time{};
   AddrPtr wp_address{nullptr};
   std::string exec_path{};
   RegisterData registers;
@@ -126,6 +127,7 @@ struct WaitEventParser
   void set_execed(std::string_view exec) noexcept;
 
   void parse_clone(std::string_view data) noexcept;
+  void parse_event_time(std::string_view data) noexcept;
 
   void set_syscall_exit(int number) noexcept;
 

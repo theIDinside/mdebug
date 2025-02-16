@@ -268,6 +268,7 @@ struct TraceEvent
   Immutable<CoreEventVariant> event;
   // The signal generated (or the exit code returned) by the process that generated the
   Immutable<TracerEventType> event_type;
+  Immutable<int> event_time;
   union
   {
     int signal;
@@ -278,7 +279,7 @@ struct TraceEvent
   // result of the syscall waitpid(...)). If the target is native, this will always be empty.
   Immutable<RegisterData> registers{};
 
-  TraceEvent(Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type, int sig_code,
+  TraceEvent(int event_time, Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type, int sig_code,
              RegisterData &&regs) noexcept;
 
   TraceEvent(const EventDataParam &param, CoreEventVariant &&p, TracerEventType type,

@@ -23,16 +23,16 @@ EventSystem *EventSystem::sEventSystem = nullptr;
 //  param.tid.value_or(-1) __VA_OPT__(, ) __VA_ARGS__)
 
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
-TraceEvent::TraceEvent(Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type, int sig_code,
-                       RegisterData &&reg) noexcept
+TraceEvent::TraceEvent(int event_time, Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type,
+                       int sig_code, RegisterData &&reg) noexcept
     : target(target), tid(tid), event(std::move(p)), event_type(type), signal(sig_code), registers(std::move(reg))
 {
 }
 
 TraceEvent::TraceEvent(const EventDataParam &param, CoreEventVariant &&p, TracerEventType type,
                        RegisterData &&regs) noexcept
-    : TraceEvent{param.target,   param.tid.value(), std::move(p), type, param.sig_or_code.value_or(0),
-                 std::move(regs)}
+    : TraceEvent{param.event_time.value_or(-1), param.target,   param.tid.value(), std::move(p), type,
+                 param.sig_or_code.value_or(0), std::move(regs)}
 {
 }
 
@@ -158,8 +158,9 @@ TraceEvent *
 TraceEvent::CreateProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept
 {
   DBGLOG(core, "[Core Event]: creating event ProcessExitEvent for {}:{}", pid, tid);
-  return new TraceEvent{
-    pid, tid, ProcessExited{{tid}, pid, exit_code}, TracerEventType::ProcessExited, exit_code, std::move(reg)};
+  EventDataParam param{.target = pid, .tid = tid, .sig_or_code = exit_code, .event_time = {}};
+  return new TraceEvent{param, ProcessExited{{tid}, pid, exit_code}, TracerEventType::ProcessExited,
+                        std::move(reg)};
 }
 
 TraceEvent *

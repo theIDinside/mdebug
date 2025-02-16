@@ -344,6 +344,12 @@ public:
   std::optional<std::string> ReadNullTerminatedString(TraceePointer<char> address, u32 buffer_size = 128) noexcept;
   void SetTarget(TraceeController *tc) noexcept;
 
+  virtual bool
+  IsAllStopSession() noexcept
+  {
+    return false;
+  }
+
   template <typename T>
   mdb::Expected<T, std::string_view>
   ReadType(TraceePointer<T> address) noexcept

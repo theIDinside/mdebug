@@ -18,7 +18,8 @@ WaitEventParser::WaitEventParser(RemoteConnection &conn) noexcept : connection(c
 EventDataParam
 WaitEventParser::param() const noexcept
 {
-  return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal};
+  std::optional<int> eventTime = event_time > 0 ? std::nullopt : std::optional{event_time};
+  return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal, .event_time = event_time};
 }
 
 static std::string
@@ -258,6 +259,17 @@ WaitEventParser::parse_clone(std::string_view data) noexcept
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   new_pid = pid;
   new_tid = tid;
+}
+
+void
+WaitEventParser::parse_event_time(std::string_view data) noexcept
+{
+  ASSERT(event_time == 0, "Event time has already been seen?");
+  int frameTime;
+  auto value = std::from_chars(data.begin(), data.end(), frameTime, 16);
+  if (value.ec == std::errc()) {
+    event_time = frameTime;
+  }
 }
 
 void

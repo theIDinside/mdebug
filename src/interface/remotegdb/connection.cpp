@@ -711,6 +711,8 @@ RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload
       DBGLOG(core, "parsing thread-pcs not yet implemented");
     } else if (arg == "core") {
       parser.parse_core(val);
+    } else if (arg == "frametime") {
+      parser.parse_event_time(val);
     } else {
       const auto maybeStopReason = valueOf(arg);
       if (parser.is_stop_reason(maybeStopReason)) {
