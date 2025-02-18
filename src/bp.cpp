@@ -529,7 +529,7 @@ Logpoint::EvaluateLog(TaskInfo &t) noexcept
   }
   auto result = mExpression->EvaluateLog(Tracer::GetJsContext(), &t, this);
   t.GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(
-    new ui::dap::OutputEvent{"console", std::move(result.value())});
+    new ui::dap::OutputEvent{t.GetSupervisor()->TaskLeaderTid(), "console", std::move(result.value())});
 }
 
 BreakpointHitEventResult

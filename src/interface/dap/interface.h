@@ -15,6 +15,7 @@
 #include <string_view>
 #include <tracee/util.h>
 #include <typedefs.h>
+#include <unordered_set>
 #include <vector>
 
 namespace mdb {
@@ -31,6 +32,9 @@ using UIResultPtr = const UIResult *;
 } // namespace ui
 
 namespace ui::dap {
+
+struct LaunchResponse;
+struct AttachResponse;
 
 struct Event;
 
@@ -151,6 +155,21 @@ enum class DapClientSession
 
 DapClientSession GetNewChildSessionType(DapClientSession type) noexcept;
 
+struct SupervisorEntry
+{
+  Pid mSupervisorId;
+  TraceeController *mSupervisor;
+
+  constexpr auto operator<=>(const SupervisorEntry &) const = default;
+};
+
+struct InitializationState
+{
+  Pid mPid;
+  std::string mSessionId;
+  UIResult *mLaunchOrAttachResponse;
+};
+
 class DebugAdapterClient
 {
   std::filesystem::path socket_path{};
@@ -158,14 +177,13 @@ class DebugAdapterClient
   int out{};
   ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
   int tty_fd{-1};
-  TraceeController *tc{nullptr};
+  std::vector<SupervisorEntry> mSupervisors;
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
   // away.
   std::unique_ptr<alloc::ArenaResource> mCommandsAllocator;
   std::unique_ptr<alloc::ArenaResource> mCommandResponseAllocator;
   std::unique_ptr<alloc::ArenaResource> mEventsAllocator;
-  std::vector<DebugAdapterClient *> mChildren;
 
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
@@ -173,7 +191,11 @@ class DebugAdapterClient
   DebugAdapterClient(DapClientSession session, int standard_in, int standard_out) noexcept;
 
   std::mutex m{};
+  // Delayed events are used when we want to either delay and event or result or order events and results from a
+  // command in a specific order. For instance, during attach/launch, there is non-trivial ordering in how events
+  // need to be sent and received and this solves that problem.
   std::vector<UIResultPtr> mDelayedEvents{};
+  std::vector<InitializationState> mSessionInit;
 
   void InitAllocators() noexcept;
 
@@ -184,25 +206,25 @@ public:
   alloc::ArenaResource *GetCommandArenaAllocator() noexcept;
   alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *CreateStandardIOConnection() noexcept;
-  static DebugAdapterClient *CreateSocketConnection(DebugAdapterClient &client, std::string_view name) noexcept;
-  void ClientConfigured(TraceeController *tc, bool alreadyAdded = false,
-                        std::optional<int> ttyFileDescriptor = {}) noexcept;
+  void AddSupervisor(TraceeController *tc) noexcept;
+  void RemoveSupervisor(TraceeController *supervisor) noexcept;
   void PostDapEvent(ui::UIResultPtr event);
 
   int ReadFileDescriptor() const noexcept;
   int WriteFileDescriptor() const noexcept;
 
+  void PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept;
+  void PrepareAttach(std::string sessionId, AttachResponse *attachResponse) noexcept;
+  void ConfigDone(Pid processId) noexcept;
+
   bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;
   void ReadPendingCommands() noexcept;
-  void SetTtyOut(int fd) noexcept;
+  void SetTtyOut(int fd, Pid pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
-  TraceeController *GetSupervisor() const noexcept;
+  TraceeController *GetSupervisor(Pid pid) const noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
-  void ShutDown() noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
   void FlushEvents() noexcept;
-  void AddChild(DebugAdapterClient *child) noexcept;
-  void RemoveChild(DebugAdapterClient *child) noexcept;
   bool IsClosed() noexcept;
 };
 
@@ -218,13 +240,14 @@ using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterCli
 struct DapNotification
 {
   InterfaceNotificationSource mSource;
-  DebugAdapterClient *mClient;
+  Pid mPid{0};
 };
 
 struct StandardIo
 {
   int mFd;
-  DebugAdapterClient *mClient;
+  // The process ID that outputs to it's standard IO
+  Pid mPid;
 };
 
 struct PollState
@@ -243,27 +266,26 @@ struct PollState
   ClearInit(int newClientNotifierFd) noexcept
   {
     Clear();
-    fds.push_back({.fd = newClientNotifierFd, .events = POLLIN, .revents = 0});
   }
 
   constexpr void
   AddCommandSource(int fd, DebugAdapterClient *client) noexcept
   {
     fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
-    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::DebugAdapterClient, .mClient = client};
+    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::DebugAdapterClient};
   }
 
   constexpr void
-  AddStandardIOSource(int fd, DebugAdapterClient *client) noexcept
+  AddStandardIOSource(int fd, Pid processId) noexcept
   {
     fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
-    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::ClientStdout, .mClient = client};
+    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::ClientStdout, .mPid = processId};
   }
 
   constexpr auto
   ClientFds() noexcept
   {
-    return std::span{fds.begin() + 1, fds.end()};
+    return std::span{fds.begin(), fds.end()};
   }
 
   constexpr DapNotification
@@ -276,8 +298,7 @@ struct PollState
 class DAP
 {
 private:
-  std::vector<DebugAdapterClient *> mClients{};
-  std::vector<DebugAdapterClient *> mShutdownClients;
+  DebugAdapterClient *mClient;
   std::vector<StandardIo> mStandardIo;
   std::vector<DapNotification> mNewEvents;
 
@@ -298,16 +319,15 @@ public:
   void run_ui_loop();
 
   void StartIOPolling(std::stop_token &token) noexcept;
-  void NewClient(mdb::OwningPointer<DebugAdapterClient> client);
+  void SetClient(DebugAdapterClient *client) noexcept;
   void Poll(PollState &state) noexcept;
-  void AddStandardIOSource(int fd, DebugAdapterClient *client) noexcept;
+  void AddStandardIOSource(int fd, Pid pid) noexcept;
 
   void clean_up() noexcept;
   void flush_events() noexcept;
 
   void configure_tty(int master_pty_fd) noexcept;
-  DebugAdapterClient *main_connection() const noexcept;
-  void RemoveSource(DebugAdapterClient *client) noexcept;
+  DebugAdapterClient *Get() const noexcept;
 
 private:
   UIResultPtr pop_event() noexcept;

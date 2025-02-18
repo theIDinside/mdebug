@@ -17,39 +17,45 @@ namespace mdb::ui::dap {
 std::pmr::string
 InitializedEvent::Serialize(int, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"initialized" }})", 1);
+  // The debug adapter supporting client, can now map the sessionId it provided to us, to the `processId` so that
+  // it can know, for what session, the process is mapped to.
+  ReturnFormatted(
+    R"({{"seq":{},"processId":{},"type":"event","event":"initialized", "body":{{"sessionId":"{}", "processId":{}}}}})",
+    1, mPid, mSessionUUID, mPid);
 }
 
 std::pmr::string
 TerminatedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"terminated" }})", seq);
+  ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event", "event":"terminated" }})", seq, mPid);
 }
 
-ModuleEvent::ModuleEvent(std::string_view id, std::string_view reason, std::string &&name, Path &&path,
+ModuleEvent::ModuleEvent(Pid pid, std::string_view id, std::string_view reason, std::string &&name, Path &&path,
                          std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
                          AddressRange range, SharedObjectSymbols so_sym_info) noexcept
-    : objfile_id(id), reason(reason), name(std::move(name)), path(std::move(path)), addr_range(range),
-      sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)), version(std::move(version))
+    : UIResult(pid), objfile_id(id), reason(reason), name(std::move(name)), path(std::move(path)),
+      addr_range(range), sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)),
+      version(std::move(version))
 {
 }
 
-ModuleEvent::ModuleEvent(std::string_view reason, const SharedObject &so) noexcept
-    : objfile_id(so.objfile->GetObjectFileId()), reason(reason), name(so.name()), path(so.path),
+ModuleEvent::ModuleEvent(Pid pid, std::string_view reason, const SharedObject &so) noexcept
+    : UIResult(pid), objfile_id(so.objfile->GetObjectFileId()), reason(reason), name(so.name()), path(so.path),
       addr_range(so.relocated_addr_range()), sym_info(so.symbol_info), symbol_file_path(so.symbol_file_path()),
       version(so.version())
 {
 }
 
-ModuleEvent::ModuleEvent(std::string_view reason, const ObjectFile &object_file) noexcept
-    : objfile_id(object_file.GetObjectFileId()), reason(reason), name(object_file.GetFilePath().filename()),
-      path(object_file.GetFilePath()), addr_range(object_file.GetAddressRange()),
-      sym_info(SharedObjectSymbols::None), symbol_file_path(object_file.GetFilePath()), version()
+ModuleEvent::ModuleEvent(Pid pid, std::string_view reason, const ObjectFile &object_file) noexcept
+    : UIResult(pid), objfile_id(object_file.GetObjectFileId()), reason(reason),
+      name(object_file.GetFilePath().filename()), path(object_file.GetFilePath()),
+      addr_range(object_file.GetAddressRange()), sym_info(SharedObjectSymbols::None),
+      symbol_file_path(object_file.GetFilePath()), version()
 {
 }
 
-ModuleEvent::ModuleEvent(std::string_view reason, const SymbolFile &symbol_file) noexcept
-    : objfile_id(symbol_file.mSymbolObjectFileId), reason(reason),
+ModuleEvent::ModuleEvent(Pid pid, std::string_view reason, const SymbolFile &symbol_file) noexcept
+    : UIResult(pid), objfile_id(symbol_file.mSymbolObjectFileId), reason(reason),
       name(symbol_file.GetObjectFilePath().filename()), path(symbol_file.GetObjectFilePath()),
       addr_range(symbol_file.mPcBounds), sym_info(SharedObjectSymbols::Full),
       symbol_file_path(symbol_file.GetObjectFilePath().c_str()), version()
@@ -75,8 +81,8 @@ ModuleEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
 
   auto it = fmt::format_to(
     std::back_inserter(result),
-    R"({{"seq":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
-    seq, reason, objfile_id, name, path.c_str());
+    R"({{"seq":{},"processId":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
+    seq, mPid, reason, objfile_id, name, path.c_str());
 
   if (version) {
     it = fmt::format_to(it, R"(,"version":"{}")", *version);
@@ -92,8 +98,8 @@ ModuleEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
   return result;
 }
 
-ContinuedEvent::ContinuedEvent(Tid tid, bool all_threads) noexcept
-    : thread_id(tid), all_threads_continued(all_threads)
+ContinuedEvent::ContinuedEvent(Pid pid, Tid tid, bool all_threads) noexcept
+    : UIResult{pid}, thread_id(tid), all_threads_continued(all_threads)
 {
 }
 
@@ -101,47 +107,58 @@ std::pmr::string
 ContinuedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(
-    R"({{"seq":{}, "type":"event", "event":"continued", "body":{{"threadId":{}, "allThreadsContinued":{}}}}})",
-    seq, thread_id, all_threads_continued);
+    R"({{"seq":{},"processId":{},"type":"event","event":"continued","body":{{"threadId":{},"allThreadsContinued":{}}}}})",
+    seq, mPid, thread_id, all_threads_continued);
 }
 
-Process::Process(std::string name, bool is_local) noexcept : name(std::move(name)), is_local(is_local) {}
+Process::Process(Pid parentPid, Pid pid, std::string name, bool is_local) noexcept
+    : UIResult{parentPid}, name(std::move(name)), mProcessId(pid), is_local(is_local)
+{
+}
 
 std::pmr::string
 CustomEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"{}", "body": {}}})", seq, mCustomEventName,
-                  mSerializedBody);
+  ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event","event":"{}","body":{}}})", seq, mPid,
+                  mCustomEventName, mSerializedBody);
 }
 
 std::pmr::string
 Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(
-    R"({{"seq":{}, "type":"event", "event":"process", "body":{{"name":"{}", "isLocalProcess": true, "startMethod": "attach" }}}})",
-    seq, name);
+    R"({{"seq":{},"processId":{},"type":"event","event":"process","body":{{"name":"{}","isLocalProcess":true,"startMethod":"attach","processId":{}}}}})",
+    seq, mPid, name, mProcessId);
 }
 
-ExitedEvent::ExitedEvent(int exit_code) noexcept : exit_code(exit_code) {}
+ExitedEvent::ExitedEvent(Pid pid, int exit_code) noexcept : UIResult{pid}, exit_code(exit_code) {}
 std::pmr::string
 ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"exited", "body":{{"exitCode":{}}}}})", seq, exit_code);
+  ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event","event":"exited","body":{{"exitCode":{}}}}})", seq,
+                  mPid, exit_code);
 }
 
-ThreadEvent::ThreadEvent(ThreadReason reason, Tid tid) noexcept : reason(reason), tid(tid) {}
-ThreadEvent::ThreadEvent(const Clone &event) noexcept : reason(ThreadReason::Started), tid(event.child_tid) {}
+ThreadEvent::ThreadEvent(Pid pid, ThreadReason reason, Tid tid) noexcept : UIResult{pid}, reason(reason), tid(tid)
+{
+}
+ThreadEvent::ThreadEvent(Pid pid, const Clone &event) noexcept
+    : UIResult{pid}, reason(ThreadReason::Started), tid(event.child_tid)
+{
+}
 
 std::pmr::string
 ThreadEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{}, "type":"event", "event":"thread", "body":{{"reason":"{}", "threadId":{}}}}})",
-                  seq, to_str(reason), tid);
+  ReturnFormatted(
+    R"({{"seq":{},"processId":{},"type":"event","event":"thread","body":{{"reason":"{}","threadId":{}}}}})", seq,
+    mPid, to_str(reason), tid);
 }
 
-StoppedEvent::StoppedEvent(StoppedReason reason, std::string_view description, Tid tid, std::vector<int> bps,
-                           std::string_view text, bool all_stopped) noexcept
-    : reason(reason), description(description), tid(tid), bp_ids(bps), text(text), all_threads_stopped(all_stopped)
+StoppedEvent::StoppedEvent(Pid pid, StoppedReason reason, std::string_view description, Tid tid,
+                           std::vector<int> bps, std::string_view text, bool all_stopped) noexcept
+    : UIResult{pid}, reason(reason), description(description), tid(tid), bp_ids(bps), text(text),
+      all_threads_stopped(all_stopped)
 {
 }
 
@@ -152,20 +169,20 @@ StoppedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
   const auto description_utf8 = ensure_desc_utf8.dump();
   if (text.empty()) {
     ReturnFormatted(
-      R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": "", "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
-      seq, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
+      R"({{"seq":{},"processId":{},"type":"event","event":"stopped","body":{{"reason":"{}","threadId":{},"description":{},"text":"","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
+      seq, mPid, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
   } else {
     const nlohmann::json ensure_utf8 = text;
     const auto utf8text = ensure_utf8.dump();
     ReturnFormatted(
-      R"({{"seq":{}, "type":"event", "event":"stopped", "body":{{ "reason":"{}", "threadId":{}, "description": {}, "text": {}, "allThreadsStopped": {}, "hitBreakpointIds": [{}]}}}})",
-      seq, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
+      R"({{"seq":{},"processId":{},"type":"event","event":"stopped","body":{{ "reason":"{}","threadId":{},"description":{},"text":{},"allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
+      seq, mPid, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
   }
 }
 
-BreakpointEvent::BreakpointEvent(std::string_view reason, std::optional<std::string> message,
+BreakpointEvent::BreakpointEvent(Pid pid, std::string_view reason, std::optional<std::string> message,
                                  const UserBreakpoint *breakpoint) noexcept
-    : reason(reason), message(std::move(message)), breakpoint(breakpoint)
+    : UIResult{pid}, reason(reason), message(std::move(message)), breakpoint(breakpoint)
 {
 }
 
@@ -188,8 +205,8 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   auto it = std::back_inserter(result);
   it = fmt::format_to(
     it,
-    R"({{"seq":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
-    seq, reason, breakpoint->mId, breakpoint->IsVerified());
+    R"({{"seq":{},"processId":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
+    seq, mPid, reason, breakpoint->mId, breakpoint->IsVerified());
 
   if (message) {
     it = fmt::format_to(it, R"(,"message": "{}")", message.value());
@@ -211,8 +228,8 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   return result;
 }
 
-OutputEvent::OutputEvent(std::string_view category, std::string &&output) noexcept
-    : category(category), output(std::move(output))
+OutputEvent::OutputEvent(Pid pid, std::string_view category, std::string &&output) noexcept
+    : UIResult{pid}, category(category), output(std::move(output))
 {
 }
 
@@ -223,9 +240,10 @@ OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
   escape_hack = output;
   const auto body = escape_hack.dump();
   std::pmr::string result{arenaAllocator};
-  fmt::format_to(std::back_inserter(result),
-                 R"({{"seq":{}, "type":"event", "event":"output", "body":{{"category":"{}", "output":{}}}}})", seq,
-                 category, body);
+  fmt::format_to(
+    std::back_inserter(result),
+    R"({{"seq":{},"processId":{},"type":"event","event":"output","body":{{"category":"{}","output":{}}}}})", seq,
+    mPid, category, body);
   return result;
 }
 } // namespace mdb::ui::dap

@@ -109,7 +109,6 @@ public:
 
   TaskExecuteResponse Disconnect(bool terminate) noexcept final;
   bool PerformShutdown() noexcept final;
-  bool Initialize() noexcept final;
 
   bool OnExec() noexcept final;
   // Called after a fork for the creation of a new process supervisor

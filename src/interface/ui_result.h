@@ -8,14 +8,24 @@ namespace mdb::ui {
 
 struct UIResult
 {
-  UIResult() = default;
-  constexpr UIResult(bool success, UICommandPtr cmd = nullptr) noexcept
-      : success(success), request_seq((cmd != nullptr) ? cmd->seq : 0), client(cmd->mDAPClient)
+  // Events contruct UIResult like so:
+  constexpr UIResult(Pid processId) noexcept : mPid(processId), success(true), request_seq(0) {}
+
+  // Responses from commands construct UIResult:
+  constexpr UIResult(bool success, UICommandPtr cmd) noexcept
+      : mPid(cmd->mPid), success(success), request_seq(cmd->seq), client(cmd->mDAPClient)
   {
   }
   virtual ~UIResult() = default;
   virtual std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource *allocator) const noexcept = 0;
 
+  Pid
+  ProcessId() const noexcept
+  {
+    return mPid;
+  }
+
+  Pid mPid;
   bool success;
   std::uint64_t request_seq;
   ui::dap::DebugAdapterClient *client;

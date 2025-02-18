@@ -184,6 +184,11 @@ public:
   bool IsExited() const noexcept;
   void ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexcept;
   void Disconnect() noexcept;
+  void
+  ConfigurationDone() noexcept
+  {
+    mConfigurationIsDone = true;
+  }
   // Called when a ("this") process forks
   std::unique_ptr<TraceeController> Fork(tc::Interface &&interface, bool isVFork) noexcept;
 

@@ -336,12 +336,6 @@ PtraceCommander::PerformShutdown() noexcept
   return true;
 }
 
-bool
-PtraceCommander::Initialize() noexcept
-{
-  return true;
-}
-
 std::shared_ptr<gdb::RemoteConnection>
 PtraceCommander::RemoteConnection() noexcept
 {

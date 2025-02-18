@@ -508,16 +508,6 @@ GdbRemoteCommander::PerformShutdown() noexcept
 }
 
 bool
-GdbRemoteCommander::Initialize() noexcept
-{
-  // TODO(simon): possibly have args to the attach config, where we do some work here, depending on that arg -
-  // however, we can *not* wait until now
-  //  to actually initialize the remote connection thread. It has to start before this, because it is required to
-  //  determine how many targets we have, object files to parse, etc
-  return true;
-}
-
-bool
 GdbRemoteCommander::OnExec() noexcept
 {
   auto auxv = ReadAuxiliaryVector();

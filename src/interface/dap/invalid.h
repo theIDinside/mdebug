@@ -5,17 +5,18 @@
 namespace mdb::ui::dap {
 struct InvalidArgsResponse final : public UIResult
 {
-  InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
+  InvalidArgsResponse(Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
   ~InvalidArgsResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
+  Pid mProcessId;
   std::string_view command;
   MissingOrInvalidArgs missing_or_invalid;
 };
 
 struct InvalidArgs final : public UICommand
 {
-  InvalidArgs(std::uint64_t seq, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-      : UICommand(seq), command(command), missing_arguments(std::move(missing_args))
+  InvalidArgs(UICommandArg arg, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
+      : UICommand(arg), command(command), missing_arguments(std::move(missing_args))
   {
   }
   ~InvalidArgs() override = default;
@@ -23,7 +24,7 @@ struct InvalidArgs final : public UICommand
   UIResultPtr
   Execute() noexcept final
   {
-    return new InvalidArgsResponse{command, std::move(missing_arguments)};
+    return new InvalidArgsResponse{mPid, command, std::move(missing_arguments)};
   }
 
   ArgumentErrorKind kind;
@@ -39,10 +40,10 @@ struct InvalidArgs final : public UICommand
 
 template <typename Derived, typename JsonArgs>
 static constexpr auto
-Validate(uint64_t seq, const JsonArgs &args) -> InvalidArgs *
+Validate(UICommandArg arg, const JsonArgs &args) -> InvalidArgs *
 {
   if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {
-    return new ui::dap::InvalidArgs{seq, Derived::Request, std::move(missing.value())};
+    return new ui::dap::InvalidArgs{arg, Derived::Request, std::move(missing.value())};
   } else {
     return nullptr;
   }

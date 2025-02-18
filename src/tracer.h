@@ -124,9 +124,6 @@ public:
   void LoadAndProcessObjectFile(pid_t target, const Path &objfile_path) noexcept;
   TraceeController *get_controller(pid_t pid) noexcept;
   TraceeController *GetProcessContainingTid(Tid tid) noexcept;
-  // TODO(simon): This should be removed. When multiprocess becomes a thing _all_ supervisor access must happen via
-  // a process id or some other handle/id. this is just for convenience when developing the product, really.
-  void config_done(ui::dap::DebugAdapterClient *client) noexcept;
   TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
   void ExecuteCommand(ui::UICommand *cmd) noexcept;
@@ -141,10 +138,10 @@ public:
   void KillUI() noexcept;
 
   TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
-  void Launch(ui::dap::DebugAdapterClient *client, bool stopAtEntry, const Path &program,
-              std::span<const std::string> prog_args,
-              std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
-  bool Attach(const AttachArgs &args) noexcept;
+  static pid_t Launch(ui::dap::DebugAdapterClient *client, const std::string &sessionId, bool stopAtEntry,
+                      const Path &program, std::span<const std::string> prog_args,
+                      std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  bool Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept;
   bool RemoteAttachInit(tc::GdbRemoteCommander &tc) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;

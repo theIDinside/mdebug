@@ -3,6 +3,7 @@
 #include "awaiter.h"
 #include "bp.h"
 #include "event_queue.h"
+#include "interface/attach_args.h"
 #include "interface/console_command.h"
 #include "interface/dap/interface.h"
 #include "interface/tracee_command/tracee_command_interface.h"
@@ -163,35 +164,6 @@ Tracer::get_controller(pid_t pid) noexcept
   return it->get();
 }
 
-static bool WaiterSystemConfigured = false;
-void
-Tracer::config_done(ui::dap::DebugAdapterClient *client) noexcept
-{
-  auto tc = client->GetSupervisor();
-  switch (tc->mInterfaceType) {
-  case InterfaceType::Ptrace: {
-    switch (config.waitsystem()) {
-    case sys::WaitSystem::UseAwaiterThread:
-      if (!WaiterSystemConfigured) {
-        // signal(SIGCHLD, on_sigchild_handler);
-      }
-      break;
-    case sys::WaitSystem::UseSignalHandler:
-      if (!WaiterSystemConfigured) {
-        // signal(SIGCHLD, on_sigchild_handler);
-      }
-      break;
-    }
-    break;
-  }
-  case InterfaceType::GdbRemote:
-    tc->GetInterface().Initialize();
-    break;
-  }
-  tc->mConfigurationIsDone = true;
-  WaiterSystemConfigured = true;
-}
-
 Ref<TaskInfo>
 Tracer::TakeUninitializedTask(Tid tid) noexcept
 {
@@ -226,22 +198,20 @@ void
 Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 {
   auto dapClient = cmd->mDAPClient;
-  DBGLOG(core, "[{}] accepted command {}",
-         dapClient->GetSupervisor() ? dapClient->GetSupervisor()->mTaskLeader : 0, cmd->name());
-
   auto scoped = dapClient->GetResponseArenaAllocator()->ScopeAllocation();
   auto result = cmd->LogExecute();
 
-  ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
-  auto data = result->Serialize(0, scoped.GetAllocator());
-  if (!data.empty()) {
-    dapClient->WriteSerializedProtocolMessage(data);
+  if (result) [[likely]] {
+    ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
+    auto data = result->Serialize(0, scoped.GetAllocator());
+    if (!data.empty()) {
+      dapClient->WriteSerializedProtocolMessage(data);
+    }
+
+    delete cmd;
+    delete result;
   }
-
   dapClient->FlushEvents();
-
-  delete cmd;
-  delete result;
 }
 
 void
@@ -348,91 +318,97 @@ exec(const Path &program, std::span<const std::string> prog_args, char **env)
 }
 
 bool
-Tracer::Attach(const AttachArgs &args) noexcept
+Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept
 {
   using MatchResult = bool;
 
   return std::visit(
-    Match{
-      [&](const PtraceAttachArgs &ptrace) -> MatchResult {
-        auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-        mTracedProcesses.push_back(TraceeController::create(
-          Tracer::Get().NewSupervisorId(), TargetSession::Attached, std::move(interface), InterfaceType::Ptrace));
-        auto *supervisor = mTracedProcesses.back().get();
-        if (const std::optional<Path> execFile = supervisor->GetInterface().ExecedFile(); execFile) {
-          const Tid newProcess = supervisor->GetInterface().TaskLeaderTid();
-          LoadAndProcessObjectFile(newProcess, *execFile);
-        }
-        return true;
-      },
-      [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
-        DBGLOG(core, "Initializing remote protocol interface...");
-        // Since we may connect to a remote that is not connected to nuthin,
-        // we need an extra step here (via the RemoteSessionConfiguirator), before
-        // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
-        // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
-        // 1 process, that's it. But the remote target might actually be attached to many, and
-        // we want our design to be consistent (1 commander / process. Otherwise we turn into
-        // gdb hell hole.)
-        auto remote_init = tc::RemoteSessionConfigurator{
-          Tracer::Get().ConnectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
+    Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
+            auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
+            mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
+                                                                TargetSession::Attached, std::move(interface),
+                                                                InterfaceType::Ptrace));
+            auto *supervisor = mTracedProcesses.back().get();
+            if (const std::optional<Path> execFile = supervisor->GetInterface().ExecedFile(); execFile) {
+              const Tid newProcess = supervisor->GetInterface().TaskLeaderTid();
+              LoadAndProcessObjectFile(newProcess, *execFile);
+            }
+            return true;
+          },
+          [&](const AutoArgs &child) -> MatchResult {
+            DBGLOG(core, "Configuring new supervisor for DAP session");
+            client->PostDapEvent(new ui::dap::InitializedEvent{sessionId, child.mExistingProcessId});
+            return true;
+          },
+          [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
+            DBGLOG(core, "Initializing remote protocol interface...");
+            // Since we may connect to a remote that is not connected to nuthin,
+            // we need an extra step here (via the RemoteSessionConfiguirator), before
+            // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
+            // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
+            // 1 process, that's it. But the remote target might actually be attached to many, and
+            // we want our design to be consistent (1 commander / process. Otherwise we turn into
+            // gdb hell hole.)
+            auto remote_init = tc::RemoteSessionConfigurator{
+              Tracer::Get().ConnectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
 
-        std::vector<tc::RemoteProcess> res;
+            std::vector<tc::RemoteProcess> res;
 
-        switch (gdb.type) {
-        case RemoteType::RR: {
-          auto result = remote_init.configure_rr_session();
-          if (result.is_expected()) {
-            res = std::move(result.take_value());
-          } else {
-            PANIC("Failed to configure session");
-          }
-        } break;
-        case RemoteType::GDB: {
-          auto result = remote_init.configure_session();
-          if (result.is_expected()) {
-            res = std::move(result.take_value());
-          } else {
-            PANIC("Failed to configure session");
-          }
-        } break;
-        }
+            switch (gdb.type) {
+            case RemoteType::RR: {
+              auto result = remote_init.configure_rr_session();
+              if (result.is_expected()) {
+                res = std::move(result.take_value());
+              } else {
+                PANIC("Failed to configure session");
+              }
+            } break;
+            case RemoteType::GDB: {
+              auto result = remote_init.configure_session();
+              if (result.is_expected()) {
+                res = std::move(result.take_value());
+              } else {
+                PANIC("Failed to configure session");
+              }
+            } break;
+            }
 
-        auto it = res.begin();
-        bool alreadyAdded = true;
-        const auto hookupDapWithRemote = [&](auto &&tc, auto client) {
-          mTracedProcesses.push_back(TraceeController::create(
-            Tracer::Get().NewSupervisorId(), TargetSession::Attached, std::move(tc), InterfaceType::GdbRemote));
-          auto *supervisor = mTracedProcesses.back().get();
-          auto &ti = supervisor->GetInterface();
-          client->ClientConfigured(supervisor, alreadyAdded);
-          alreadyAdded = false;
-          ti.OnExec();
-          for (const auto &t : it->threads) {
-            supervisor->CreateNewTask(t.tid, false);
-          }
-          for (auto &entry : supervisor->GetThreads()) {
-            entry.mTask->SetStop();
-          }
-          client->PostDapEvent(new ui::dap::StoppedEvent{ui::dap::StoppedReason::Entry,
-                                                         "attached",
-                                                         client->GetSupervisor()->TaskLeaderTid(),
-                                                         {},
-                                                         "Attached to session",
-                                                         true});
-        };
+            auto it = res.begin();
+            bool alreadyAdded = true;
+            const auto hookupDapWithRemote = [&](auto &&tc, ui::dap::DebugAdapterClient *client) {
+              mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
+                                                                  TargetSession::Attached, std::move(tc),
+                                                                  InterfaceType::GdbRemote));
+              auto *supervisor = mTracedProcesses.back().get();
+              auto &ti = supervisor->GetInterface();
+              client->AddSupervisor(supervisor);
+              alreadyAdded = false;
+              ti.OnExec();
+              for (const auto &t : it->threads) {
+                supervisor->CreateNewTask(t.tid, false);
+              }
+              for (auto &entry : supervisor->GetThreads()) {
+                entry.mTask->SetStop();
+              }
+              client->PostDapEvent(new ui::dap::StoppedEvent{supervisor->mTaskLeader,
+                                                             ui::dap::StoppedReason::Entry,
+                                                             "attached",
+                                                             supervisor->mTaskLeader,
+                                                             {},
+                                                             "Attached to session",
+                                                             true});
+            };
 
-        auto main_connection = mDAP->main_connection();
-        hookupDapWithRemote(std::move(it->tc), main_connection);
-        main_connection->SetDebugAdapterSessionType(
-          (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
-        ++it;
-        for (; it != std::end(res); ++it) {
-          hookupDapWithRemote(std::move(it->tc),
-                              ui::dap::DebugAdapterClient::CreateSocketConnection(*main_connection, "attached"));
-        }
-        return true;
-      }},
+            auto main_connection = mDAP->Get();
+            hookupDapWithRemote(std::move(it->tc), main_connection);
+            main_connection->SetDebugAdapterSessionType(
+              (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
+            ++it;
+            for (; it != std::end(res); ++it) {
+              hookupDapWithRemote(std::move(it->tc), main_connection);
+            }
+            return true;
+          }},
     args);
 }
 
@@ -444,9 +420,10 @@ Tracer::AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept
   return mTracedProcesses.back().get();
 }
 
-void
-Tracer::Launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path &program,
-               std::span<const std::string> prog_args,
+/* static */
+pid_t
+Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::string &sessionId, bool stopOnEntry,
+               const Path &program, std::span<const std::string> prog_args,
                std::optional<BreakpointBehavior> breakpointBehavior) noexcept
 {
   termios original_tty;
@@ -518,30 +495,37 @@ Tracer::Launch(ui::dap::DebugAdapterClient *client, bool stopOnEntry, const Path
     }
 
     const auto leader = childPid;
-    AddLaunchedTarget(tc::PtraceCfg{leader}, TargetSession::Launched);
-    client->ClientConfigured(mTracedProcesses.back().get(), /* alreadyAdded */ true);
-    client->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
-    client->GetSupervisor()->ConfigureBreakpointBehavior(
+
+    Get().AddLaunchedTarget(tc::PtraceCfg{leader}, TargetSession::Launched);
+    auto supervisor = Get().mTracedProcesses.back().get();
+
+    // Inform the debug adater supporting client, that we can now start a configuration init cycle.
+    // We also pass along the extension `processId` in the initilization event, so that the debug adapter
+    // supporting client can map a debug adapter client to a process id, hence forth.
+    debugAdapterClient->PostDapEvent(new ui::dap::InitializedEvent{sessionId, leader});
+    debugAdapterClient->AddSupervisor(supervisor);
+    debugAdapterClient->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
+    supervisor->ConfigureBreakpointBehavior(
       breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
 
     TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
-    auto task = client->GetSupervisor()->RegisterTaskWaited(twr);
+    auto task = supervisor->RegisterTaskWaited(twr);
     if (task == nullptr) {
       PANIC("Expected a task but could not find one for that wait status");
     }
 
-    client->GetSupervisor()->PostExec(program);
+    supervisor->PostExec(program);
 
     if (ttyFd) {
-      client->SetTtyOut(*ttyFd);
+      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->mTaskLeader);
     }
 
     if (stopOnEntry) {
       Set<BreakpointSpecification> fns{
         BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, "main", false)};
-      // fns.insert({"main", {}, false});
-      client->GetSupervisor()->SetFunctionBreakpoints(fns);
+      supervisor->SetFunctionBreakpoints(fns);
     }
+    return childPid;
   }
   }
 }

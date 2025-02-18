@@ -84,6 +84,14 @@ ui::UICommand::LogExecute() noexcept
   return result;
 }
 
+namespace ui {
+TraceeController *
+UICommand::GetSupervisor() noexcept
+{
+  return mDAPClient->GetSupervisor(mPid);
+}
+} // namespace ui
+
 namespace ui::dap {
 
 template <typename Res, typename JsonObj>
@@ -112,7 +120,7 @@ from_str(std::string_view granularity) noexcept
 
 ErrorResponse::ErrorResponse(std::string_view command, ui::UICommandPtr cmd,
                              std::optional<std::string> &&short_message, std::optional<Message> &&message) noexcept
-    : ui::UIResult(false, cmd), command(command), short_message(std::move(short_message)),
+    : ui::UIResult(false, cmd), mPid(cmd->mPid), command(command), short_message(std::move(short_message)),
       message(std::move(message))
 {
 }
@@ -126,20 +134,22 @@ ErrorResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
     const Message &m = message.value();
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{"error":{}}}}})",
-      seq, request_seq, command, *short_message, m);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{"error":{}}}}})",
+      seq, request_seq, mPid, command, *short_message, m);
   } else if (short_message && !message) {
     fmt::format_to(
-      outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
-      seq, request_seq, command, *short_message);
+      outIt,
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
+      seq, request_seq, mPid, command, *short_message);
   } else if (!short_message && message) {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
-      seq, request_seq, command, *message);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
+      seq, request_seq, mPid, command, *message);
   } else {
-    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}"}})", seq,
-                   request_seq, command);
+    fmt::format_to(
+      outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}"}})",
+      seq, request_seq, mPid, command);
   }
   return result;
 }
@@ -150,13 +160,14 @@ PauseResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
   std::pmr::string result{arenaAllocator};
   auto outIt = std::back_inserter(result);
   if (success) {
-    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"pause"}})",
-                   seq, request_seq);
+    fmt::format_to(
+      outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"pause"}})",
+      seq, request_seq, mPid);
   } else {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
+      seq, request_seq, mPid);
   }
   return result;
 }
@@ -164,7 +175,8 @@ PauseResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
 UIResultPtr
 Pause::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
+  ASSERT(target, "No target {}", mPid);
   auto task = target->GetTaskByTid(pauseArgs.threadId);
   if (task->IsStopped()) {
     return new PauseResponse{false, this};
@@ -182,24 +194,26 @@ ReverseContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllo
   if (success) {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
-      seq, request_seq, continue_all);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
+      seq, request_seq, mPid, continue_all);
   } else {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
+      seq, request_seq, mPid);
   }
   return result;
 }
 
-ReverseContinue::ReverseContinue(u64 seq, int thread_id) noexcept : UICommand(seq), thread_id(thread_id) {}
+ReverseContinue::ReverseContinue(UICommandArg arg, int thread_id) noexcept : UICommand(arg), thread_id(thread_id)
+{
+}
 
 UIResultPtr
 ReverseContinue::Execute() noexcept
 {
   auto res = new ReverseContinueResponse{true, this};
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   auto ok = target->ReverseResumeTarget(tc::ResumeAction{.type = tc::RunType::Continue});
   res->success = ok;
   return res;
@@ -213,13 +227,13 @@ ContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   if (success) {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
-      seq, request_seq, continue_all);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
+      seq, request_seq, mPid, continue_all);
   } else {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
+      seq, request_seq, mPid);
   }
   return result;
 }
@@ -229,7 +243,7 @@ Continue::Execute() noexcept
 {
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   if (continue_all && !target->SomeTaskCanBeResumed()) {
     std::vector<Tid> running_tasks{};
     for (const auto &entry : target->GetThreads()) {
@@ -262,13 +276,14 @@ NextResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
   std::pmr::string result{arenaAllocator};
   auto outIt = std::back_inserter(result);
   if (success) {
-    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"next"}})",
-                   seq, request_seq);
+    fmt::format_to(
+      outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"next"}})",
+      seq, request_seq, mPid);
   } else {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
+      seq, request_seq, mPid);
   }
   return result;
 }
@@ -276,7 +291,7 @@ NextResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
 UIResultPtr
 Next::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->IsStopped()) {
@@ -306,8 +321,10 @@ StepBackResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   result.reserve(256);
   auto outIt = std::back_inserter(result);
   if (success) {
-    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepBack"}})",
-                   seq, request_seq);
+    fmt::format_to(
+      outIt,
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepBack"}})", seq,
+      request_seq, mPid);
   } else {
     std::string_view error;
     switch (mResult) {
@@ -322,8 +339,8 @@ StepBackResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
     }
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepBack","message":"{}"}})",
-      seq, request_seq, error);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepBack","message":"{}"}})",
+      seq, request_seq, mPid, error);
   }
   return result;
 }
@@ -331,7 +348,7 @@ StepBackResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
 UIResultPtr
 StepBack::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
 
   if (!target->IsReplaySession()) {
     return new StepBackResponse{StepBackResponse::Result::NotReplaySession, this};
@@ -352,13 +369,14 @@ StepInResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   result.reserve(256);
   auto outIt = std::back_inserter(result);
   if (success) {
-    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepIn"}})",
-                   seq, request_seq);
+    fmt::format_to(
+      outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepIn"}})",
+      seq, request_seq, mPid);
   } else {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
+      seq, request_seq, mPid);
   }
   return result;
 }
@@ -366,7 +384,7 @@ StepInResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 UIResultPtr
 StepIn::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->IsStopped()) {
@@ -393,13 +411,15 @@ StepOutResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   result.reserve(256);
   auto outIt = std::back_inserter(result);
   if (success) {
-    fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stepOut"}})",
-                   seq, request_seq);
+    fmt::format_to(
+      outIt,
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepOut"}})", seq,
+      request_seq, mPid);
   } else {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
+      seq, request_seq, mPid);
   }
   return result;
 }
@@ -407,7 +427,7 @@ StepOutResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
 UIResultPtr
 StepOut::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->IsStopped()) {
@@ -449,26 +469,26 @@ SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAlloc
   case BreakpointRequestKind::source:
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, fmt::join(serialized_bkpts, ","));
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, mPid, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::function:
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, fmt::join(serialized_bkpts, ","));
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, mPid, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::instruction:
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, fmt::join(serialized_bkpts, ","));
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, mPid, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::exception:
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, success, fmt::join(serialized_bkpts, ","));
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+      seq, request_seq, mPid, success, fmt::join(serialized_bkpts, ","));
     break;
   default:
     PANIC("DAP doesn't expect Tracer breakpoints");
@@ -482,8 +502,8 @@ SetBreakpointsResponse::AddBreakpoint(Breakpoint &&bp) noexcept
   mBreakpoints.push_back(std::move(bp));
 }
 
-SetBreakpoints::SetBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
-    : ui::UICommand(seq), args(std::move(arguments))
+SetBreakpoints::SetBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept
+    : ui::UICommand(arg), args(std::move(arguments))
 {
   ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
          "Arguments did not contain 'breakpoints' field or wasn't an array");
@@ -493,7 +513,7 @@ UIResultPtr
 SetBreakpoints::Execute() noexcept
 {
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   if (!target) {
     return res;
   }
@@ -529,8 +549,8 @@ SetBreakpoints::Execute() noexcept
   return res;
 }
 
-SetExceptionBreakpoints::SetExceptionBreakpoints(std::uint64_t sequence, nlohmann::json &&args) noexcept
-    : ui::UICommand{sequence}, args(std::move(args))
+SetExceptionBreakpoints::SetExceptionBreakpoints(UICommandArg arg, nlohmann::json &&args) noexcept
+    : ui::UICommand{arg}, args(std::move(args))
 {
 }
 
@@ -542,8 +562,8 @@ SetExceptionBreakpoints::Execute() noexcept
   return res;
 }
 
-SetInstructionBreakpoints::SetInstructionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
-    : UICommand(seq), args(std::move(arguments))
+SetInstructionBreakpoints::SetInstructionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept
+    : UICommand{arg}, args(std::move(arguments))
 {
   ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
          "Arguments did not contain 'breakpoints' field or wasn't an array");
@@ -562,7 +582,7 @@ SetInstructionBreakpoints::Execute() noexcept
     ibkpt["instructionReference"].get_to(addr_str);
     bps.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{addr_str}));
   }
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   target->SetInstructionBreakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
@@ -578,8 +598,8 @@ SetInstructionBreakpoints::Execute() noexcept
   return res;
 }
 
-SetFunctionBreakpoints::SetFunctionBreakpoints(std::uint64_t seq, nlohmann::json &&arguments) noexcept
-    : UICommand(seq), args(std::move(arguments))
+SetFunctionBreakpoints::SetFunctionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept
+    : UICommand{arg}, args(std::move(arguments))
 {
   ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
          "Arguments did not contain 'breakpoints' field or wasn't an array");
@@ -603,7 +623,7 @@ SetFunctionBreakpoints::Execute() noexcept
 
     bkpts.insert(BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, fn_name, is_regex));
   }
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
 
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
@@ -623,20 +643,21 @@ WriteMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   auto outIt = std::back_inserter(result);
   fmt::format_to(
     outIt,
-    R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
-    seq, request_seq, success, bytes_written);
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
+    seq, request_seq, mPid, success, bytes_written);
   return result;
 }
 
-WriteMemory::WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept
-    : ui::UICommand(seq), address(address), offset(offset), bytes(std::move(bytes))
+WriteMemory::WriteMemory(UICommandArg arg, std::optional<AddrPtr> address, int offset,
+                         std::vector<u8> &&bytes) noexcept
+    : ui::UICommand(arg), address(address), offset(offset), bytes(std::move(bytes))
 {
 }
 
 UIResultPtr
 WriteMemory::Execute() noexcept
 {
-  auto supervisor = mDAPClient->GetSupervisor();
+  auto supervisor = GetSupervisor();
   auto response = new WriteMemoryResponse{false, this};
   response->bytes_written = 0;
   if (address) {
@@ -659,16 +680,16 @@ ReadMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   if (success) {
     fmt::format_to(
       outIt,
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
-      seq, request_seq, first_readable_address, unreadable_bytes, data_base64);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
+      seq, request_seq, mPid, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
   }
   return result;
 }
 
-ReadMemory::ReadMemory(std::uint64_t seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept
-    : UICommand(seq), address(address), offset(offset), bytes(bytes)
+ReadMemory::ReadMemory(UICommandArg arg, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept
+    : UICommand{arg}, address(address), offset(offset), bytes(bytes)
 {
 }
 
@@ -676,7 +697,7 @@ UIResultPtr
 ReadMemory::Execute() noexcept
 {
   if (address) {
-    auto sv = mDAPClient->GetSupervisor()->ReadToVector(*address, bytes);
+    auto sv = GetSupervisor()->ReadToVector(*address, bytes);
     auto res = new ReadMemoryResponse{true, this};
     res->data_base64 = mdb::encode_base64(sv->span());
     res->first_readable_address = *address;
@@ -694,36 +715,43 @@ ConfigurationDoneResponse::Serialize(int seq, std::pmr::memory_resource *arenaAl
   std::pmr::string result{arenaAllocator};
   auto outIt = std::back_inserter(result);
   result.reserve(256);
-  fmt::format_to(outIt,
-                 R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"configurationDone"}})",
-                 seq, request_seq);
+  fmt::format_to(
+    outIt,
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"configurationDone"}})",
+    seq, request_seq, mPid);
   return result;
 }
 
 UIResultPtr
 ConfigurationDone::Execute() noexcept
 {
-  Tracer::Get().config_done(mDAPClient);
-  switch (mDAPClient->GetSupervisor()->GetSessionType()) {
+  auto supervisor = GetSupervisor();
+  ASSERT(supervisor, "Requires a supervisor");
+  // Debug Adapter supporting client should see the following order:
+  // ConfigDone response
+  // Launch/attach response
+  // <continued events from resuming>
+  // It's a bit contrived. But this part of the protocol just is.
+  mDAPClient->PushDelayedEvent(new ConfigurationDoneResponse{true, this});
+  mDAPClient->ConfigDone(mPid);
+  supervisor->ConfigurationDone();
+  switch (supervisor->GetSessionType()) {
   case TargetSession::Launched: {
-    DBGLOG(core, "configurationDone - resuming target {}", mDAPClient->GetSupervisor()->TaskLeaderTid());
+    DBGLOG(core, "configurationDone - resuming target {}", supervisor->TaskLeaderTid());
     using namespace tc;
-    mDAPClient->GetSupervisor()->ResumeTarget(
-      tc::ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
+    supervisor->ResumeTarget(tc::ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
     break;
   }
   case TargetSession::Attached:
-    if (mDAPClient->GetSupervisor()->IsReplaySession()) {
-      mDAPClient->GetSupervisor()->ResumeTarget(tc::ResumeAction{tc::RunType::Continue});
+    if (supervisor->IsReplaySession()) {
+      supervisor->ResumeTarget(tc::ResumeAction{tc::RunType::Continue});
     } else {
-      DBGLOG(core, "configurationDone - doing nothing for normal attach sessions {}",
-             mDAPClient->GetSupervisor()->TaskLeaderTid());
+      DBGLOG(core, "configurationDone - doing nothing for normal attach sessions {}", supervisor->TaskLeaderTid());
     }
-
     break;
   }
 
-  return new ConfigurationDoneResponse{true, this};
+  return nullptr;
 }
 
 std::pmr::string
@@ -732,13 +760,15 @@ DisconnectResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   std::pmr::string result{arenaAllocator};
   result.reserve(256);
   auto outIt = std::back_inserter(result);
-  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disconnect"}})",
-                 seq, request_seq);
+  fmt::format_to(
+    outIt,
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disconnect"}})", seq,
+    request_seq, mPid);
   return result;
 }
 
-Disconnect::Disconnect(std::uint64_t seq, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
-    : UICommand(seq), restart(restart), mTerminateTracee(terminate_debuggee), mSuspendTracee(suspend_debuggee)
+Disconnect::Disconnect(UICommandArg arg, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
+    : UICommand{arg}, restart(restart), mTerminateTracee(terminate_debuggee), mSuspendTracee(suspend_debuggee)
 {
 }
 
@@ -751,14 +781,15 @@ Disconnect::Execute() noexcept
   if (mTerminateTracee) {
     Tracer::Get().TerminateSession();
   } else {
-    mDAPClient->GetSupervisor()->Disconnect();
+    GetSupervisor()->Disconnect();
   }
-
-  return new DisconnectResponse{true, this};
+  mDAPClient->PushDelayedEvent(new DisconnectResponse{true, this});
+  mDAPClient->PushDelayedEvent(new TerminatedEvent{mPid});
+  return nullptr;
 }
 
-Initialize::Initialize(std::uint64_t seq, nlohmann::json &&arguments) noexcept
-    : UICommand(seq), args(std::move(arguments))
+Initialize::Initialize(UICommandArg arg, nlohmann::json &&arguments) noexcept
+    : UICommand{arg}, args(std::move(arguments))
 {
 }
 
@@ -769,11 +800,12 @@ Initialize::Execute() noexcept
   if (args.contains("RRSession")) {
     RRSession = args.at("RRSession");
   }
-  return new InitializeResponse{RRSession, true, this};
+  std::string sessionId = args.at("sessionId");
+  return new InitializeResponse{sessionId, RRSession, true, this};
 }
 
-InitializeResponse::InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept
-    : UIResult(ok, cmd), RRSession(rrsession)
+InitializeResponse::InitializeResponse(std::string sessionId, bool rrsession, bool ok, UICommandPtr cmd) noexcept
+    : UIResult(ok, cmd), mSessionId(std::move(sessionId)), RRSession(rrsession)
 {
 }
 
@@ -831,13 +863,13 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
   cfg_body["supportsInstructionBreakpoints"] = true;
   cfg_body["supportsExceptionFilterOptions"] = false;
 
-  auto payload = fmt::format(
-    R"({{"seq":0,"request_seq":{},"type":"response","success":true,"command":"initialize","body":{}}})",
-    request_seq, cfg_body.dump());
+  std::pmr::string res{arenaAllocator};
 
-  client->WriteSerializedProtocolMessage(payload);
-  client->WriteSerializedProtocolMessage(InitializedEvent{}.Serialize(0, arenaAllocator));
-  return std::pmr::string{arenaAllocator};
+  fmt::format_to(
+    std::back_inserter(res),
+    R"({{"seq":0,"request_seq":{},"processId":"{}","type":"response","success":true,"command":"initialize","body":{}}})",
+    request_seq, mSessionId, cfg_body.dump());
+  return res;
 }
 
 std::pmr::string
@@ -846,24 +878,34 @@ LaunchResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   std::pmr::string result{arenaAllocator};
   result.reserve(256);
   auto outIt = std::back_inserter(result);
-  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"launch"}})",
-                 seq, request_seq);
+  fmt::format_to(
+    outIt,
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {}}}}})",
+    seq, request_seq, mPid,
+    mProcessId.and_then([](pid_t value) -> std::optional<std::string> { return fmt::format("{}", value); })
+      .value_or("null"));
   return result;
 }
 
-Launch::Launch(std::uint64_t seq, bool stopOnEntry, Path &&program, std::vector<std::string> &&program_args,
+Launch::Launch(UICommandArg arg, SessionId &&id, bool stopOnEntry, Path &&program,
+               std::vector<std::string> &&program_args,
                std::optional<BreakpointBehavior> breakpointBehavior) noexcept
-    : UICommand(seq), mStopOnEntry(stopOnEntry), mProgram(std::move(program)),
-      mProgramArgs(std::move(program_args)), mBreakpointBehavior(breakpointBehavior)
+    : UICommand{arg}, mRequestingSessionId{std::move(id)}, mStopOnEntry{stopOnEntry}, mProgram{std::move(program)},
+      mProgramArgs{std::move(program_args)}, mBreakpointBehavior{breakpointBehavior}
 {
 }
 
 UIResultPtr
 Launch::Execute() noexcept
 {
-  Tracer::Get().Launch(mDAPClient, mStopOnEntry, mProgram, std::move(mProgramArgs), mBreakpointBehavior);
-  return new LaunchResponse{true, this};
+  const auto processId = Tracer::Launch(mDAPClient, mRequestingSessionId, mStopOnEntry, mProgram,
+                                        std::move(mProgramArgs), mBreakpointBehavior);
+  mDAPClient->PrepareLaunch(mRequestingSessionId, processId,
+                            new LaunchResponse{std::move(mRequestingSessionId), processId, true, this});
+  return nullptr;
 }
+
+LaunchResponse::~LaunchResponse() noexcept {}
 
 std::pmr::string
 AttachResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
@@ -871,18 +913,24 @@ AttachResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   std::pmr::string result{arenaAllocator};
   result.reserve(256);
   auto outIt = std::back_inserter(result);
-  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"attach"}})",
-                 seq, request_seq);
+  fmt::format_to(
+    outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"attach"}})",
+    seq, request_seq, mPid);
   return result;
 }
 
-Attach::Attach(std::uint64_t seq, AttachArgs &&args) noexcept : UICommand(seq), attachArgs(std::move(args)) {}
+Attach::Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs &&args) noexcept
+    : UICommand{arg}, mRequestingSessionId{std::move(sessionId)}, attachArgs{std::move(args)}
+{
+}
 
 UIResultPtr
 Attach::Execute() noexcept
 {
-  const auto res = Tracer::Get().Attach(attachArgs);
-  return new AttachResponse{res, this};
+  const auto res = Tracer::Get().Attach(mDAPClient, mRequestingSessionId, attachArgs);
+  mDAPClient->PrepareAttach(mRequestingSessionId, new AttachResponse{res, this});
+
+  return nullptr;
 }
 
 std::pmr::string
@@ -891,8 +939,10 @@ TerminateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   std::pmr::string result{arenaAllocator};
   result.reserve(256);
   auto outIt = std::back_inserter(result);
-  fmt::format_to(outIt, R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"terminate"}})",
-                 seq, request_seq);
+  fmt::format_to(
+    outIt,
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"terminate"}})", seq,
+    request_seq, mPid);
   return result;
 }
 
@@ -911,8 +961,8 @@ ThreadsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   auto outIt = std::back_inserter(result);
   fmt::format_to(
     outIt,
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
-    seq, request_seq, fmt::join(threads, ","));
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
+    seq, request_seq, mPid, fmt::join(threads, ","));
   return result;
 }
 
@@ -924,7 +974,7 @@ Threads::Execute() noexcept
   // therefore we just hand back the threads of the currently active target
   auto response = new ThreadsResponse{true, this};
 
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
 
   response->threads.reserve(target->GetThreads().size());
   auto &it = target->GetInterface();
@@ -949,9 +999,9 @@ Threads::Execute() noexcept
   return response;
 }
 
-StackTrace::StackTrace(std::uint64_t seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
+StackTrace::StackTrace(UICommandArg arg, int threadId, std::optional<int> startFrame, std::optional<int> levels,
                        std::optional<StackTraceFormat> format) noexcept
-    : UICommand(seq), threadId(threadId), startFrame(startFrame), levels(levels), format(format)
+    : UICommand{arg}, threadId(threadId), startFrame(startFrame), levels(levels), format(format)
 {
 }
 
@@ -972,8 +1022,8 @@ StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   auto outIt = std::back_inserter(result);
   fmt::format_to(
     outIt,
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
-    seq, request_seq, fmt::join(stack_frames, ","));
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
+    seq, request_seq, mPid, fmt::join(stack_frames, ","));
   return result;
 }
 
@@ -991,7 +1041,7 @@ UIResultPtr
 StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   if (!target || target->IsExited()) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Process has already died: {}", threadId), {}};
   }
@@ -1042,7 +1092,7 @@ StackTrace::Execute() noexcept
   return new StackTraceResponse{true, this, std::move(stack_frames)};
 }
 
-Scopes::Scopes(std::uint64_t seq, int frameId) noexcept : UICommand(seq), frameId(frameId) {}
+Scopes::Scopes(UICommandArg arg, int frameId) noexcept : UICommand{arg}, frameId(frameId) {}
 
 std::pmr::string
 ScopesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
@@ -1052,8 +1102,8 @@ ScopesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   auto outIt = std::back_inserter(result);
   fmt::format_to(
     outIt,
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
-    seq, request_seq, fmt::join(scopes, ","));
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
+    seq, request_seq, mPid, fmt::join(scopes, ","));
   return result;
 }
 
@@ -1077,9 +1127,9 @@ Scopes::Execute() noexcept
   return new ScopesResponse{true, this, scopes};
 }
 
-Disassemble::Disassemble(std::uint64_t seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset,
+Disassemble::Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byte_offset, int ins_offset,
                          int ins_count, bool resolve_symbols) noexcept
-    : UICommand(seq), address(address), byte_offset(byte_offset), ins_offset(ins_offset), ins_count(ins_count),
+    : UICommand{arg}, address(address), byte_offset(byte_offset), ins_offset(ins_offset), ins_count(ins_count),
       resolve_symbols(resolve_symbols)
 {
 }
@@ -1093,7 +1143,7 @@ Disassemble::Execute() noexcept
     int remaining = ins_count;
     if (ins_offset < 0) {
       const int negative_offset = std::abs(ins_offset);
-      sym::zydis_disasm_backwards(mDAPClient->GetSupervisor(), address.value(), static_cast<u32>(negative_offset),
+      sym::zydis_disasm_backwards(GetSupervisor(), address.value(), static_cast<u32>(negative_offset),
                                   res->instructions);
       if (negative_offset < ins_count) {
         for (auto i = 0u; i < res->instructions.size(); i++) {
@@ -1116,8 +1166,8 @@ Disassemble::Execute() noexcept
     }
 
     if (remaining > 0) {
-      sym::zydis_disasm(mDAPClient->GetSupervisor(), address.value(), static_cast<u32>(std::abs(ins_offset)),
-                        remaining, res->instructions);
+      sym::zydis_disasm(GetSupervisor(), address.value(), static_cast<u32>(std::abs(ins_offset)), remaining,
+                        res->instructions);
     }
     return res;
   } else {
@@ -1133,14 +1183,14 @@ DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   auto outIt = std::back_inserter(result);
   fmt::format_to(
     outIt,
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[{}]}}}})",
-    seq, request_seq, fmt::join(instructions, ","));
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[{}]}}}})",
+    seq, request_seq, mPid, fmt::join(instructions, ","));
   return result;
 }
 
-Evaluate::Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
+Evaluate::Evaluate(UICommandArg arg, std::string &&expression, std::optional<int> frameId,
                    std::optional<EvaluationContext> context) noexcept
-    : UICommand(seq), expr(std::move(expression)), frameId(frameId),
+    : UICommand{arg}, expr(std::move(expression)), frameId(frameId),
       context(context.value_or(EvaluationContext::Watch))
 {
 }
@@ -1185,7 +1235,7 @@ Evaluate::parse_context(std::string_view input) noexcept
 
 /*static*/
 UICommand *
-Evaluate::PrepareEvaluateCommand(u64 seq, const nlohmann::json &args)
+Evaluate::PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args)
 {
   IfInvalidArgsReturn(Evaluate);
 
@@ -1200,7 +1250,7 @@ Evaluate::PrepareEvaluateCommand(u64 seq, const nlohmann::json &args)
   args.at("context").get_to(context);
   ctx = Evaluate::parse_context(context);
 
-  return new ui::dap::Evaluate{seq, std::move(expr), frameId, ctx};
+  return new ui::dap::Evaluate{arg, std::move(expr), frameId, ctx};
 }
 
 EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference,
@@ -1219,8 +1269,8 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   if (success) {
     fmt::format_to(
       std::back_inserter(evalResponseResult),
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
-      seq, request_seq, DebugAdapterProtocolString{*result}, variablesReference);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
+      seq, request_seq, mPid, DebugAdapterProtocolString{*result}, variablesReference);
   } else {
     fmt::format_to(
       std::back_inserter(evalResponseResult),
@@ -1230,9 +1280,9 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   return evalResponseResult;
 }
 
-Variables::Variables(std::uint64_t seq, VariableReferenceId var_ref, std::optional<u32> start,
+Variables::Variables(UICommandArg arg, VariableReferenceId var_ref, std::optional<u32> start,
                      std::optional<u32> count) noexcept
-    : UICommand(seq), mVariablesReferenceId(var_ref), start(start), count(count)
+    : UICommand{arg}, mVariablesReferenceId(var_ref), start(start), count(count)
 {
 }
 
@@ -1305,8 +1355,8 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   if (variables.empty()) {
     fmt::format_to(
       std::back_inserter(result),
-      R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
-      seq, request_seq);
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
+      seq, request_seq, mPid);
     return result;
   }
   std::pmr::string variables_contents{arenaAllocator};
@@ -1321,8 +1371,8 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
       } else {
         fmt::format_to(
           std::back_inserter(result),
-          R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
-          seq, request_seq, v->mName);
+          R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
+          seq, request_seq, mPid, v->mName);
         return result;
       }
     } else {
@@ -1346,8 +1396,8 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
 
   fmt::format_to(
     std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
-    seq, request_seq, variables_contents);
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
+    seq, request_seq, mPid, variables_contents);
   return result;
 }
 
@@ -1370,24 +1420,29 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   auto obj = nlohmann::json::parse(packet, nullptr, false);
   std::string_view cmd_name;
   const std::string req = obj.dump();
-  DBGLOG(core, "[{}]: parsed request: {}", client.GetSupervisor() ? client.GetSupervisor()->TaskLeaderTid() : 0,
-         req);
+  DBGLOG(core, "[dap]: parsed request: {}", req);
   obj["command"].get_to(cmd_name);
   ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
+  ASSERT(obj.contains("processId"),
+         "Request did not contain 'processId' field which is a DAP-extension requirement for MDB. It makes "
+         "multiprocess debugging under DAP actually function in a non-catastrophically bad way.");
   const u64 seq = obj["seq"];
+  const Pid processId = obj["processId"];
+  UICommandArg arg{seq, processId};
+
   const auto cmd = parse_command_type(cmd_name);
   auto &&args = std::move(obj["arguments"]);
   switch (cmd) {
   case CommandType::Attach: {
     IfInvalidArgsReturn(Attach);
-    return Attach::create(seq, args);
+    return Attach::create(arg, args);
   }
   case CommandType::BreakpointLocations:
     TODO("Command::BreakpointLocations");
   case CommandType::Completions:
     TODO("Command::Completions");
   case CommandType::ConfigurationDone:
-    return new ConfigurationDone{seq};
+    return new ConfigurationDone{arg};
     break;
   case CommandType::Continue: {
     IfInvalidArgsReturn(Continue);
@@ -1398,15 +1453,15 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
       all_threads = !b;
     }
 
-    return new Continue{seq, args.at("threadId"), all_threads};
+    return new Continue{arg, args.at("threadId"), all_threads};
   }
   case CommandType::CustomRequest: {
     if (args.contains("command") && args.contains("arguments")) {
       std::string customCommand;
       args["command"].get_to(customCommand);
-      return ParseCustomRequestCommand(client, seq, customCommand, args["arguments"]);
+      return ParseCustomRequestCommand(client, arg, customCommand, args["arguments"]);
     }
-    return new InvalidArgs{seq, "customRequest", {}};
+    return new InvalidArgs{arg, "customRequest", {}};
   }
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
@@ -1419,7 +1474,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     int offset = args.at("offset");
     int instructionOffset = args.at("instructionOffset");
     int instructionCount = args.at("instructionCount");
-    return new ui::dap::Disassemble{seq, addr, offset, instructionOffset, instructionCount, false};
+    return new ui::dap::Disassemble{arg, addr, offset, instructionOffset, instructionCount, false};
   }
   case CommandType::Disconnect: {
     IfInvalidArgsReturn(Disconnect);
@@ -1436,10 +1491,10 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     if (args.contains("suspendDebuggee")) {
       suspend_debuggee = args.at("suspendDebuggee");
     }
-    return new Disconnect{seq, restart, terminate_debuggee, suspend_debuggee};
+    return new Disconnect{arg, restart, terminate_debuggee, suspend_debuggee};
   }
   case CommandType::Evaluate: {
-    return Evaluate::PrepareEvaluateCommand(seq, args);
+    return Evaluate::PrepareEvaluateCommand(arg, args);
   }
   case CommandType::ExceptionInfo:
     TODO("Command::ExceptionInfo");
@@ -1448,10 +1503,11 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::GotoTargets:
     TODO("Command::GotoTargets");
   case CommandType::Initialize:
-    return new Initialize{seq, std::move(args)};
+    return new Initialize{arg, std::move(args)};
   case CommandType::Launch: {
     IfInvalidArgsReturn(Launch);
 
+    SessionId sessionId = args.at("sessionId");
     Path path = args.at("program");
     Path cwd;
     std::vector<std::string> prog_args;
@@ -1483,7 +1539,8 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
         })
         .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
 
-    return new Launch{seq, stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting};
+    return new Launch{
+      arg, std::move(sessionId), stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting};
   }
   case CommandType::LoadedSources:
     TODO("Command::LoadedSources");
@@ -1503,13 +1560,12 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     if (args.contains("singleThread")) {
       single_thread = args["singleThread"];
     }
-    return new Next{seq, thread_id, !single_thread, step_type};
+    return new Next{arg, thread_id, !single_thread, step_type};
   }
   case CommandType::Pause: {
     IfInvalidArgsReturn(Pause);
-
     int thread_id = args["threadId"];
-    return new Pause(seq, Pause::Args{thread_id});
+    return new Pause(arg, Pause::Args{thread_id});
   }
   case CommandType::ReadMemory: {
     IfInvalidArgsReturn(ReadMemory);
@@ -1519,7 +1575,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     const auto addr = ToAddress(addr_str);
     const auto offset = args.value("offset", 0);
     const u64 count = args.at("count");
-    return new ui::dap::ReadMemory{seq, addr, offset, count};
+    return new ui::dap::ReadMemory{arg, addr, offset, count};
   }
   case CommandType::Restart:
     TODO("Command::Restart");
@@ -1528,34 +1584,34 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::ReverseContinue: {
     IfInvalidArgsReturn(ReverseContinue);
     int thread_id = args["threadId"];
-    return new ui::dap::ReverseContinue{seq, thread_id};
+    return new ui::dap::ReverseContinue{arg, thread_id};
   }
   case CommandType::Scopes: {
     IfInvalidArgsReturn(Scopes);
 
     const int frame_id = args.at("frameId");
-    return new ui::dap::Scopes{seq, frame_id};
+    return new ui::dap::Scopes{arg, frame_id};
   }
   case CommandType::SetBreakpoints:
     IfInvalidArgsReturn(SetBreakpoints);
 
-    return new SetBreakpoints{seq, std::move(args)};
+    return new SetBreakpoints{arg, std::move(args)};
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
   case CommandType::SetExceptionBreakpoints: {
     IfInvalidArgsReturn(SetExceptionBreakpoints);
-    return new SetExceptionBreakpoints{seq, std::move(args)};
+    return new SetExceptionBreakpoints{arg, std::move(args)};
   }
   case CommandType::SetExpression:
     TODO("Command::SetExpression");
   case CommandType::SetFunctionBreakpoints:
     IfInvalidArgsReturn(SetFunctionBreakpoints);
 
-    return new SetFunctionBreakpoints{seq, std::move(args)};
+    return new SetFunctionBreakpoints{arg, std::move(args)};
   case CommandType::SetInstructionBreakpoints:
     IfInvalidArgsReturn(SetInstructionBreakpoints);
 
-    return new SetInstructionBreakpoints{seq, std::move(args)};
+    return new SetInstructionBreakpoints{arg, std::move(args)};
   case CommandType::SetVariable:
     TODO("Command::SetVariable");
   case CommandType::Source:
@@ -1584,7 +1640,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
       format.includeAll = fmt.value("includeAll", true);
       format_ = format;
     }
-    return new ui::dap::StackTrace{seq, args.at("threadId"), startFrame, levels, format_};
+    return new ui::dap::StackTrace{arg, args.at("threadId"), startFrame, levels, format_};
   }
   case CommandType::StepBack:
     TODO("Command::StepBack");
@@ -1603,7 +1659,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
       single_thread = args["singleThread"];
     }
 
-    return new StepIn{seq, thread_id, single_thread, step_type};
+    return new StepIn{arg, thread_id, single_thread, step_type};
   }
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
@@ -1615,18 +1671,18 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     if (args.contains("singleThread")) {
       single_thread = args["singleThread"];
     }
-    return new ui::dap::StepOut{seq, thread_id, !single_thread};
+    return new ui::dap::StepOut{arg, thread_id, !single_thread};
   }
   case CommandType::Terminate:
     IfInvalidArgsReturn(Terminate);
 
-    return new Terminate{seq};
+    return new Terminate{arg};
   case CommandType::TerminateThreads:
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
     IfInvalidArgsReturn(Threads);
 
-    return new Threads{seq};
+    return new Threads{arg};
   case CommandType::Variables: {
     IfInvalidArgsReturn(Variables);
 
@@ -1639,7 +1695,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     if (args.contains("count")) {
       count = args.at("count");
     }
-    return new Variables{seq, variablesReference, start, count};
+    return new Variables{arg, variablesReference, start, count};
   }
   case CommandType::WriteMemory: {
     IfInvalidArgsReturn(WriteMemory);
@@ -1655,9 +1711,9 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     args.at("data").get_to(data);
 
     if (auto bytes = mdb::decode_base64(data); bytes) {
-      return new WriteMemory{seq, addr, offset, std::move(bytes.value())};
+      return new WriteMemory{arg, addr, offset, std::move(bytes.value())};
     } else {
-      return new InvalidArgs{seq, "writeMemory", {}};
+      return new InvalidArgs{arg, "writeMemory", {}};
     }
   }
   case CommandType::ImportScript:

@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "typedefs.h"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -23,7 +24,7 @@
   Type(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
 
 #define IfInvalidArgsReturn(type)                                                                                 \
-  if (const auto missing = Validate<type>(seq, args); missing) {                                                  \
+  if (const auto missing = Validate<type>(arg, args); missing) {                                                  \
     return missing;                                                                                               \
   }
 
@@ -114,12 +115,19 @@ concept HasValidation = requires(const Json &json) {
   { DerivedCommand::ValidateArg(std::string_view{}, json) } -> std::convertible_to<std::optional<InvalidArg>>;
 };
 
+struct UICommandArg
+{
+  u64 seq;
+  Pid pid;
+};
+
 struct UICommand
 {
   dap::DebugAdapterClient *mDAPClient;
+  Pid mPid;
 
 public:
-  explicit UICommand(std::uint64_t seq) noexcept : seq(seq) {}
+  explicit UICommand(UICommandArg arg) noexcept : seq(arg.seq), mPid(arg.pid) {}
   virtual ~UICommand() noexcept = default;
 
   constexpr void
@@ -128,8 +136,10 @@ public:
     mDAPClient = &da;
   }
 
-  /* Executes the command. This is always performed in the Tracer thread (where all tracee controller actions are
-   * performed. )*/
+  TraceeController *GetSupervisor() noexcept;
+
+  /** Returns either the result or nullptr. If nullptr is returned, it's because it's been queued/scheduled in the
+   * delayed events queue, because some particular-to-the-DAP request ordering is required.*/
   virtual UIResultPtr Execute() noexcept = 0;
 
   UIResultPtr LogExecute() noexcept;

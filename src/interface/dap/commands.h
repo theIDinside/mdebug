@@ -191,6 +191,7 @@ struct ErrorResponse final : ui::UIResult
   ~ErrorResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 
+  Pid mPid;
   std::string_view command;
   std::optional<std::string> short_message;
   std::optional<Message> message;
@@ -207,7 +208,7 @@ struct ReverseContinueResponse final : ui::UIResult
 /** ReverseContinue under RR is *always* "continue all"*/
 struct ReverseContinue final : ui::UICommand
 {
-  ReverseContinue(u64 seq, int thread_id) noexcept;
+  ReverseContinue(UICommandArg arg, int thread_id) noexcept;
   ~ReverseContinue() noexcept override = default;
   int thread_id;
   UIResultPtr Execute() noexcept final;
@@ -230,7 +231,7 @@ struct Continue final : public ui::UICommand
   int thread_id;
   bool continue_all;
 
-  Continue(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
+  Continue(UICommandArg arg, int tid, bool all) noexcept : UICommand(arg), thread_id(tid), continue_all(all) {}
   ~Continue() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -253,7 +254,7 @@ struct Pause final : public ui::UICommand
     int threadId;
   };
 
-  Pause(u64 seq, Args args) noexcept : UICommand(seq), pauseArgs(args) {}
+  Pause(UICommandArg arg, Args args) noexcept : UICommand(arg), pauseArgs(args) {}
   ~Pause() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -283,8 +284,8 @@ struct Next final : public ui::UICommand
   bool continue_all;
   SteppingGranularity granularity;
 
-  Next(u64 seq, int tid, bool all, SteppingGranularity granularity) noexcept
-      : UICommand(seq), thread_id(tid), continue_all(all), granularity(granularity)
+  Next(UICommandArg arg, int tid, bool all, SteppingGranularity granularity) noexcept
+      : UICommand(arg), thread_id(tid), continue_all(all), granularity(granularity)
   {
   }
   ~Next() override = default;
@@ -314,7 +315,7 @@ struct StepBack final : public ui::UICommand
 {
   int thread_id;
 
-  StepBack(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid) {}
+  StepBack(UICommandArg arg, int tid, bool all) noexcept : UICommand(arg), thread_id(tid) {}
   ~StepBack() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepBack");
@@ -335,8 +336,8 @@ struct StepIn final : public ui::UICommand
   bool singleThread;
   SteppingGranularity granularity;
 
-  StepIn(u64 seq, int thread_id, bool singleThread, SteppingGranularity granularity) noexcept
-      : UICommand(seq), thread_id(thread_id), singleThread(singleThread), granularity(granularity)
+  StepIn(UICommandArg arg, int thread_id, bool singleThread, SteppingGranularity granularity) noexcept
+      : UICommand(arg), thread_id(thread_id), singleThread(singleThread), granularity(granularity)
   {
   }
 
@@ -359,7 +360,7 @@ struct StepOut final : public ui::UICommand
   int thread_id;
   bool continue_all;
 
-  StepOut(u64 seq, int tid, bool all) noexcept : UICommand(seq), thread_id(tid), continue_all(all) {}
+  StepOut(UICommandArg arg, int tid, bool all) noexcept : UICommand(arg), thread_id(tid), continue_all(all) {}
   ~StepOut() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepOut");
@@ -381,7 +382,7 @@ struct SetBreakpointsResponse final : ui::UIResult
 
 struct SetBreakpoints final : public ui::UICommand
 {
-  SetBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
+  SetBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept;
   ~SetBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr Execute() noexcept final;
@@ -391,7 +392,7 @@ struct SetBreakpoints final : public ui::UICommand
 
 struct SetExceptionBreakpoints final : public ui::UICommand
 {
-  SetExceptionBreakpoints(u64 sequence, nlohmann::json &&args) noexcept;
+  SetExceptionBreakpoints(UICommandArg arguence, nlohmann::json &&args) noexcept;
   ~SetExceptionBreakpoints() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -404,7 +405,7 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
-  SetInstructionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
+  SetInstructionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept;
   ~SetInstructionBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr Execute() noexcept final;
@@ -414,7 +415,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 
 struct SetFunctionBreakpoints final : public ui::UICommand
 {
-  SetFunctionBreakpoints(u64 seq, nlohmann::json &&arguments) noexcept;
+  SetFunctionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept;
   ~SetFunctionBreakpoints() override = default;
   nlohmann::json args;
   UIResultPtr Execute() noexcept final;
@@ -432,7 +433,7 @@ struct WriteMemoryResponse final : public ui::UIResult
 
 struct WriteMemory final : public ui::UICommand
 {
-  WriteMemory(u64 seq, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept;
+  WriteMemory(UICommandArg arg, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept;
   ~WriteMemory() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -457,7 +458,7 @@ struct ReadMemoryResponse final : public ui::UIResult
 
 struct ReadMemory final : public ui::UICommand
 {
-  ReadMemory(u64 seq, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
+  ReadMemory(UICommandArg arg, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept;
   ~ReadMemory() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -479,7 +480,7 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 
 struct ConfigurationDone final : public ui::UICommand
 {
-  ConfigurationDone(u64 seq) noexcept : UICommand(seq) {}
+  ConfigurationDone(UICommandArg arg) noexcept : UICommand(arg) {}
   ~ConfigurationDone() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -490,16 +491,16 @@ struct ConfigurationDone final : public ui::UICommand
 struct InitializeResponse final : public ui::UIResult
 {
   CTOR(InitializeResponse);
-  InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept;
+  InitializeResponse(std::string sessionId, bool rrsession, bool ok, UICommandPtr cmd) noexcept;
   ~InitializeResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-
+  std::string mSessionId;
   bool RRSession;
 };
 
 struct Initialize final : public ui::UICommand
 {
-  Initialize(u64 seq, nlohmann::json &&arguments) noexcept;
+  Initialize(UICommandArg arg, nlohmann::json &&arguments) noexcept;
   ~Initialize() override = default;
   UIResultPtr Execute() noexcept final;
   nlohmann::json args;
@@ -516,7 +517,7 @@ struct DisconnectResponse final : public UIResult
 
 struct Disconnect final : public UICommand
 {
-  Disconnect(u64 seq, bool restart, bool terminateTracee, bool suspendTracee) noexcept;
+  Disconnect(UICommandArg arg, bool restart, bool terminateTracee, bool suspendTracee) noexcept;
   ~Disconnect() override = default;
   UIResultPtr Execute() noexcept final;
   bool restart, mTerminateTracee, mSuspendTracee;
@@ -524,59 +525,74 @@ struct Disconnect final : public UICommand
   NoRequiredArgs();
 };
 
+using SessionId = std::string;
+
 struct LaunchResponse final : public UIResult
 {
-  CTOR(LaunchResponse);
-  ~LaunchResponse() noexcept override = default;
+  LaunchResponse(SessionId &&sessionId, std::optional<Pid> newProcess, bool success, UICommandPtr cmd) noexcept
+      : UIResult{success, cmd}, mRequestingSessionId{std::move(sessionId)}, mProcessId{newProcess} {};
+  ~LaunchResponse() noexcept override;
+  std::optional<Pid> mProcessId;
+  SessionId mRequestingSessionId;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 };
 
 struct Launch final : public UICommand
 {
-  Launch(u64 seq, bool stopAtEntry, Path &&program, std::vector<std::string> &&program_args,
-         std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  Launch(UICommandArg arg, SessionId &&id, bool stopAtEntry, Path &&program,
+         std::vector<std::string> &&program_args, std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   ~Launch() override = default;
   UIResultPtr Execute() noexcept final;
   bool mStopOnEntry;
   Path mProgram;
   std::vector<std::string> mProgramArgs;
   std::optional<BreakpointBehavior> mBreakpointBehavior;
+  SessionId mRequestingSessionId;
   DEFINE_NAME("launch");
-  RequiredArguments({"program"sv});
-  DefineArgTypes({"program", FieldType::String});
+  RequiredArguments({"program"sv, "sessionId"sv});
+  DefineArgTypes({"program", FieldType::String}, {"sessionId", FieldType::String});
 };
 
 struct AttachResponse final : public UIResult
 {
-  CTOR(AttachResponse);
+  AttachResponse(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
   ~AttachResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 };
 
 struct Attach final : public UICommand
 {
-  Attach(u64 seq, AttachArgs &&args) noexcept;
+  Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs &&args) noexcept;
   ~Attach() override = default;
   UIResultPtr Execute() noexcept final;
 
+  SessionId mRequestingSessionId;
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
-  RequiredArguments({"type"});
+  RequiredArguments({"type"sv, "sessionId"sv});
 
   DefineArgTypes({"port", FieldType::Int}, {"host", FieldType::String}, {"pid", FieldType::Int},
-                 {"type", FieldType::Enumeration, {"ptrace"sv, "gdbremote"sv, "rr"}});
+                 {
+                   "type",
+                   FieldType::Enumeration,
+                   {"ptrace"sv, "gdbremote"sv, "rr"sv, "auto"sv},
+                 },
+                 {"sessionId"sv, FieldType::String});
 
   // Attach gets a `create` function because in the future, constructing this command will be much more complex
   // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
   // bat shit crazy in 2024.
   static Attach *
-  create(uint64_t seq, const nlohmann::basic_json<> &args)
+  create(UICommandArg arg, const nlohmann::basic_json<> &args)
   {
     std::string_view type;
     args.at("type").get_to(type);
+    ASSERT(args.contains("sessionId"), "Attach arguments had no 'sessionId' field.");
     if (type == "ptrace") {
       Pid pid = args.at("pid");
-      return new Attach{seq, PtraceAttachArgs{.pid = pid}};
+      return new Attach{arg, args.at("sessionId"), PtraceAttachArgs{.pid = pid}};
+    } else if (type == "auto") {
+      return new Attach{arg, args.at("sessionId"), AutoArgs{}};
     } else {
       int port = args.at("port");
       std::string host = args.at("host");
@@ -586,7 +602,7 @@ struct Attach final : public UICommand
       }
       RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
 
-      return new Attach{seq,
+      return new Attach{arg, args.at("sessionId"),
                         GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop, .type = remote_type}};
     };
   }
@@ -601,7 +617,7 @@ struct TerminateResponse final : public UIResult
 
 struct Terminate final : public UICommand
 {
-  Terminate(u64 seq) noexcept : UICommand(seq) {}
+  Terminate(UICommandArg arg) noexcept : UICommand(arg) {}
   ~Terminate() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("terminate");
@@ -618,7 +634,7 @@ struct ThreadsResponse final : public UIResult
 
 struct Threads final : public UICommand
 {
-  Threads(u64 seq) noexcept : UICommand(seq) {}
+  Threads(UICommandArg arg) noexcept : UICommand(arg) {}
   ~Threads() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("threads");
@@ -627,7 +643,7 @@ struct Threads final : public UICommand
 
 struct StackTrace final : public UICommand
 {
-  StackTrace(u64 seq, int threadId, std::optional<int> startFrame, std::optional<int> levels,
+  StackTrace(UICommandArg arg, int threadId, std::optional<int> startFrame, std::optional<int> levels,
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
   UIResultPtr Execute() noexcept final;
@@ -651,7 +667,7 @@ struct StackTraceResponse final : public UIResult
 
 struct Scopes final : public UICommand
 {
-  Scopes(u64 seq, int frameId) noexcept;
+  Scopes(UICommandArg arg, int frameId) noexcept;
   ~Scopes() override = default;
   UIResultPtr Execute() noexcept final;
   int frameId;
@@ -680,7 +696,7 @@ enum class EvaluationContext
 
 struct Evaluate final : public UICommand
 {
-  Evaluate(u64 seq, std::string &&expression, std::optional<int> frameId,
+  Evaluate(UICommandArg arg, std::string &&expression, std::optional<int> frameId,
            std::optional<EvaluationContext> context) noexcept;
   ~Evaluate() noexcept final = default;
   UIResultPtr Execute() noexcept final;
@@ -694,7 +710,7 @@ struct Evaluate final : public UICommand
   DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int}, {"context", FieldType::String});
 
   static EvaluationContext parse_context(std::string_view input) noexcept;
-  static UICommand *PrepareEvaluateCommand(u64 seq, const nlohmann::json &args);
+  static UICommand *PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args);
 };
 
 struct EvaluateResponse final : public UIResult
@@ -712,7 +728,8 @@ struct EvaluateResponse final : public UIResult
 
 struct Variables final : public UICommand
 {
-  Variables(u64 seq, VariableReferenceId var_ref, std::optional<u32> start, std::optional<u32> count) noexcept;
+  Variables(UICommandArg arg, VariableReferenceId var_ref, std::optional<u32> start,
+            std::optional<u32> count) noexcept;
   ~Variables() override = default;
   UIResultPtr Execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
@@ -743,7 +760,7 @@ struct DisassembleResponse final : public UIResult
 
 struct Disassemble final : public UICommand
 {
-  Disassemble(u64 seq, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
+  Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
               bool resolve_symbols) noexcept;
   ~Disassemble() noexcept override = default;
   UIResultPtr Execute() noexcept final;

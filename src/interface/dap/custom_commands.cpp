@@ -10,31 +10,31 @@
 
 namespace mdb::ui::dap {
 ui::UICommand *
-ParseCustomRequestCommand(const DebugAdapterClient &client, u64 seq, const std::string &cmd_name,
+ParseCustomRequestCommand(const DebugAdapterClient &client, UICommandArg arg, const std::string &cmd_name,
                           const nlohmann::basic_json<> &json) noexcept
 {
   if (cmd_name == "continueAll") {
-    return new ContinueAll{seq};
+    return new ContinueAll{arg};
   }
   if (cmd_name == "pauseAll") {
-    return new PauseAll{seq};
+    return new PauseAll{arg};
   }
   if (cmd_name == "getProcesses") {
-    return new GetProcesses{seq};
+    return new GetProcesses{arg};
   }
-  return new InvalidArgs{seq, cmd_name, {}};
+  return new InvalidArgs{arg, cmd_name, {}};
 }
 
 UIResultPtr
 ContinueAll::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   auto res = new ContinueAllResponse{true, this, target->TaskLeaderTid()};
   auto result =
     target->ResumeTarget(tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1});
   res->success = result;
   if (result) {
-    mDAPClient->PushDelayedEvent(new ContinuedEvent{res->mTaskLeader, true});
+    mDAPClient->PushDelayedEvent(new ContinuedEvent{mPid, res->mTaskLeader, true});
   }
   return res;
 }
@@ -53,10 +53,10 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 UIResultPtr
 PauseAll::Execute() noexcept
 {
-  auto target = mDAPClient->GetSupervisor();
+  auto target = GetSupervisor();
   auto tid = target->TaskLeaderTid();
-  target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = mDAPClient, tid]() {
-    client->PostDapEvent(new StoppedEvent{StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
+  target->StopAllTasks(target->GetTaskByTid(target->TaskLeaderTid()), [client = mDAPClient, tid, pid = mPid]() {
+    client->PostDapEvent(new StoppedEvent{pid, StoppedReason::Pause, "Paused", tid, {}, "Paused all", true});
   });
   auto res = new PauseAllResponse{true, this};
   return res;
@@ -72,8 +72,8 @@ PauseAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   return result;
 }
 
-ImportScript::ImportScript(u64 seq, std::string &&scriptSource) noexcept
-    : UICommand(seq), mSource(std::move(scriptSource))
+ImportScript::ImportScript(UICommandArg arg, std::string &&scriptSource) noexcept
+    : UICommand(arg), mSource(std::move(scriptSource))
 {
 }
 

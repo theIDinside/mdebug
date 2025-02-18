@@ -44,7 +44,6 @@ public:
 
   TaskExecuteResponse Disconnect(bool kill_target) noexcept final;
   bool PerformShutdown() noexcept final;
-  bool Initialize() noexcept final;
 
   /// Re-open proc fs mem file descriptor. Configure
   bool OnExec() noexcept final;

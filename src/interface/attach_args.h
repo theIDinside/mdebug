@@ -25,5 +25,10 @@ struct GdbRemoteAttachArgs
   RemoteType type;
 };
 
-using AttachArgs = std::variant<PtraceAttachArgs, GdbRemoteAttachArgs>;
+struct AutoArgs
+{
+  Pid mExistingProcessId;
+};
+
+using AttachArgs = std::variant<PtraceAttachArgs, GdbRemoteAttachArgs, AutoArgs>;
 } // namespace mdb

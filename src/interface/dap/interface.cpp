@@ -143,10 +143,17 @@ DAP::WriteProtocolMessage(std::string_view msg) noexcept
 }
 
 void
+DAP::SetClient(DebugAdapterClient *client) noexcept
+{
+  mClient = client;
+}
+
+void
 DAP::StartIOPolling(std::stop_token &token) noexcept
 {
   mdb::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
-  NewClient({.t = DebugAdapterClient::CreateStandardIOConnection()});
+  // TODO: Implement support to spawn the DAP client for a socket etc, instead of stdio
+  SetClient(DebugAdapterClient::CreateStandardIOConnection());
 
   PollState state{};
   while (keep_running && !token.stop_requested()) {
@@ -155,9 +162,9 @@ DAP::StartIOPolling(std::stop_token &token) noexcept
 }
 
 void
-DAP::AddStandardIOSource(int fd, DebugAdapterClient *client) noexcept
+DAP::AddStandardIOSource(int fd, Pid pid) noexcept
 {
-  mStandardIo.push_back({fd, client});
+  mStandardIo.push_back({fd, pid});
 }
 
 bool
@@ -167,23 +174,15 @@ DAP::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexc
   // from and then just leak back to the allocator)
   state.ClearInit(new_client_notifier.read.fd);
 
-  for (auto client : mClients) {
-    if (!client->IsClosed()) {
-      const auto fd = client->ReadFileDescriptor();
-      state.AddCommandSource(fd, client);
-    }
-  }
+  const auto fd = mClient->ReadFileDescriptor();
+  state.AddCommandSource(fd, mClient);
 
   for (auto io : mStandardIo) {
-    state.AddStandardIOSource(io.mFd, io.mClient);
+    state.AddStandardIOSource(io.mFd, io.mPid);
   }
 
   if (poll(state.fds.data(), state.fds.size(), -1) <= 0) {
     return false;
-  }
-
-  if ((state.fds[0].revents & POLLIN) == POLLIN) {
-    new_client_notifier.read.consume_expected();
   }
 
   for (const auto pollResult :
@@ -201,22 +200,19 @@ DAP::Poll(PollState &state) noexcept
     for (auto &event : mNewEvents) {
       switch (event.mSource) {
       case InterfaceNotificationSource::DebugAdapterClient:
-        if (event.mClient->IsClosed()) {
-          RemoveSource(event.mClient);
-          continue;
-        }
-        event.mClient->ReadPendingCommands();
+        mClient->ReadPendingCommands();
         break;
       case InterfaceNotificationSource::ClientStdout: {
-        auto tty = event.mClient->GetTtyFileDescriptor();
+        auto tty = mClient->GetTtyFileDescriptor();
         ASSERT(tty.has_value(), "DAP Client has invalid configuration");
         const auto bytes_read = read(*tty, tracee_stdout_buffer, 4096 * 3);
         if (bytes_read == -1) {
           continue;
         }
         std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
-        event.mClient->WriteSerializedProtocolMessage(ui::dap::OutputEvent{"stdout", std::string{data}}.Serialize(
-          0, mTemporaryArena->ScopeAllocation().GetAllocator()));
+        mClient->WriteSerializedProtocolMessage(
+          ui::dap::OutputEvent{event.mPid, "stdout", std::string{data}}.Serialize(
+            0, mTemporaryArena->ScopeAllocation().GetAllocator()));
       } break;
       }
     }
@@ -226,17 +222,9 @@ DAP::Poll(PollState &state) noexcept
 }
 
 void
-DAP::NewClient(mdb::OwningPointer<DebugAdapterClient> client)
-{
-  ASSERT(!std::ranges::any_of(mClients, [&client](auto p) { return p == client.t; }), "Already added client!");
-  mClients.push_back(client);
-  new_client_notifier.write.notify();
-}
-
-void
 DebugAdapterClient::ReadPendingCommands() noexcept
 {
-  ASSERT(in != -1, "filedescriptor for DAP Client of process {} invalid", tc->TaskLeaderTid());
+  ASSERT(in != -1, "file descriptor for reading commands invalid: {}", in);
   if (!parse_swapbuffer.expect_read_from_fd(in)) {
     return;
   }
@@ -282,13 +270,13 @@ SetNonBlocking(int fd)
 }
 
 void
-DebugAdapterClient::SetTtyOut(int fd) noexcept
+DebugAdapterClient::SetTtyOut(int fd, Pid pid) noexcept
 {
   ASSERT(tty_fd == -1, "TTY fd was already set!");
   tty_fd = fd;
   auto dap = Tracer::Get().GetDap();
   dap->configure_tty(fd);
-  dap->AddStandardIOSource(fd, this);
+  dap->AddStandardIOSource(fd, pid);
 }
 
 std::optional<int>
@@ -301,9 +289,14 @@ DebugAdapterClient::GetTtyFileDescriptor() const noexcept
 }
 
 TraceeController *
-DebugAdapterClient::GetSupervisor() const noexcept
+DebugAdapterClient::GetSupervisor(Pid pid) const noexcept
 {
-  return tc;
+  for (const auto entry : mSupervisors) {
+    if (entry.mSupervisorId == pid) {
+      return entry.mSupervisor;
+    }
+  }
+  return nullptr;
 }
 
 void
@@ -319,31 +312,6 @@ DebugAdapterClient::IsClosed() noexcept
 }
 
 void
-DebugAdapterClient::ShutDown() noexcept
-{
-  FlushEvents();
-  if (fs::exists(socket_path)) {
-    unlink(socket_path.c_str());
-    // means that in and out are of a socket, and not stdio
-    if (in != -1) {
-      close(in);
-    }
-
-    if (out != -1) {
-      close(out);
-    }
-    in = -1;
-    out = -1;
-  }
-
-  if (tty_fd != -1) {
-    close(tty_fd);
-  }
-  tty_fd = -1;
-  Tracer::Get().GetDap()->RemoveSource(this);
-}
-
-void
 DebugAdapterClient::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
 {
   std::lock_guard lock(m);
@@ -353,6 +321,10 @@ DebugAdapterClient::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
 void
 DebugAdapterClient::FlushEvents() noexcept
 {
+  if (mDelayedEvents.empty()) {
+    return;
+  }
+
   UIResultPtr tmp[32];
   const auto count = std::min(mDelayedEvents.size(), std::size(tmp));
   {
@@ -370,17 +342,6 @@ DebugAdapterClient::FlushEvents() noexcept
     WriteSerializedProtocolMessage(result);
     delete evt;
   }
-}
-
-void
-DebugAdapterClient::AddChild(DebugAdapterClient *child) noexcept
-{
-  mChildren.push_back(child);
-}
-void
-DebugAdapterClient::RemoveChild(DebugAdapterClient *child) noexcept
-{
-  mChildren.erase(std::find(mChildren.begin(), mChildren.end(), child));
 }
 
 void
@@ -404,27 +365,9 @@ DAP::clean_up() noexcept
 }
 
 DebugAdapterClient *
-DAP::main_connection() const noexcept
+DAP::Get() const noexcept
 {
-  return mClients.front();
-}
-
-void
-DAP::RemoveSource(DebugAdapterClient *client) noexcept
-{
-  for (auto i = 0u; i < mClients.size(); ++i) {
-    if (mClients[i] == client) {
-      mShutdownClients.push_back(client);
-      break;
-    }
-  }
-
-  for (auto it = mStandardIo.begin(); it != std::end(mStandardIo); ++it) {
-    if (it->mClient == client) {
-      mStandardIo.erase(it);
-      return;
-    }
-  }
+  return mClient;
 }
 
 void
@@ -491,49 +434,6 @@ generate_random_alphanumeric_string(size_t length)
   return random_string;
 }
 
-/*static*/
-DebugAdapterClient *
-DebugAdapterClient::CreateSocketConnection(DebugAdapterClient &client, std::string_view name) noexcept
-{
-  fs::path socket_path = fmt::format("/tmp/midas-{}", generate_random_alphanumeric_string(15));
-  if (fs::exists(socket_path)) {
-    if (unlink(socket_path.c_str()) == -1) {
-      PANIC("Failed to unlink old socket path");
-    }
-  }
-  auto socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  sockaddr_un address;
-  std::memset(&address, 0, sizeof(sockaddr_un));
-  address.sun_family = AF_UNIX;
-  std::strncpy(address.sun_path, socket_path.c_str(), sizeof(address.sun_path) - 1);
-  if (bind(socket_fd, (sockaddr *)&address, sizeof(sockaddr_un)) == -1) {
-    close(socket_fd);
-    return nullptr;
-  }
-
-  if (listen(socket_fd, 1) == -1) {
-    close(socket_fd);
-    return nullptr;
-  }
-
-  auto reverseRequest = fmt::format(
-    R"({{"seq":1,"type":"event","event":"startDebugging","body":{{"configuration":{{"path":"{}", "name": "{}" }}}}}})",
-    socket_path.c_str(), name);
-
-  client.WriteSerializedProtocolMessage(reverseRequest);
-
-  for (;;) {
-    auto accepted = accept(socket_fd, nullptr, nullptr);
-    if (accepted != -1) {
-      auto newClient =
-        new DebugAdapterClient{GetNewChildSessionType(client.session_type), std::move(socket_path), accepted};
-      client.AddChild(newClient);
-      return newClient;
-    }
-  }
-  PANIC("Failed to set up child - this kind of error handling not yet implemented");
-}
-
 alloc::ArenaResource *
 DebugAdapterClient::GetCommandArenaAllocator() noexcept
 {
@@ -554,18 +454,18 @@ DebugAdapterClient::CreateStandardIOConnection() noexcept
 }
 
 void
-DebugAdapterClient::ClientConfigured(TraceeController *supervisor, bool alreadyAdded,
-                                     std::optional<int> ttyFileDescriptor) noexcept
+DebugAdapterClient::AddSupervisor(TraceeController *supervisor) noexcept
 {
-  if (!alreadyAdded) {
-    Tracer::Get().GetDap()->NewClient({this});
-  }
+  mSupervisors.push_back({supervisor->TaskLeaderTid(), supervisor});
+  supervisor->ConfigureDapClient(this);
+}
 
-  tc = supervisor;
-  tc->ConfigureDapClient(this);
-  if (ttyFileDescriptor) {
-    // set_tty_out(*ttyFileDescriptor);
-  }
+void
+DebugAdapterClient::RemoveSupervisor(TraceeController *supervisor) noexcept
+{
+  SupervisorEntry entry{supervisor->TaskLeaderTid(), supervisor};
+  auto it = std::find(mSupervisors.begin(), mSupervisors.end(), entry);
+  mSupervisors.erase(it);
 }
 
 void
@@ -593,6 +493,32 @@ DebugAdapterClient::WriteFileDescriptor() const noexcept
   return out;
 }
 
+void
+DebugAdapterClient::ConfigDone(Pid processId) noexcept
+{
+  auto it = std::find_if(mSessionInit.begin(), mSessionInit.end(),
+                         [processId](const auto &e) { return e.mPid == processId; });
+
+  ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared?");
+  if (it != std::end(mSessionInit)) {
+    PushDelayedEvent(it->mLaunchOrAttachResponse);
+  }
+
+  mSessionInit.erase(it);
+}
+
+void
+DebugAdapterClient::PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept
+{
+  mSessionInit.push_back(InitializationState{processId, std::move(sessionId), launchResponse});
+}
+
+void
+DebugAdapterClient::PrepareAttach(std::string sessionId, AttachResponse *attachResponse) noexcept
+{
+  mSessionInit.push_back(InitializationState{attachResponse->ProcessId(), std::move(sessionId), attachResponse});
+}
+
 static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
 
 bool
@@ -616,11 +542,7 @@ DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) cons
 
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", output.size());
   if constexpr (MDB_DEBUG == 1) {
-    if (tc == nullptr) {
-      CDLOG(MDB_DEBUG == 1, dap, "[Partial DA] WRITING -->{}{}<---", header, output);
-    } else {
-      CDLOG(MDB_DEBUG == 1, dap, "[Process: {}] WRITING -->{}{}<---", tc->TaskLeaderTid(), header, output);
-    }
+    DBGLOG(dap, "WRITING -->{}{}<---", header, output);
   }
 
   const auto result = ::writev(out, iov, 2);

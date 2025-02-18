@@ -20,14 +20,14 @@ using ui::UICommand;
 using ui::UIResult;
 using ui::UIResultPtr;
 
-ui::UICommand *ParseCustomRequestCommand(const DebugAdapterClient &client, u64 seq, const std::string &cmd_name,
-                                         const nlohmann::basic_json<> &json) noexcept;
+ui::UICommand *ParseCustomRequestCommand(const DebugAdapterClient &client, UICommandArg arg,
+                                         const std::string &cmd_name, const nlohmann::basic_json<> &json) noexcept;
 
 // Resume all (currently stopped) processes and their tasks
 struct ContinueAll final : public ui::UICommand
 {
   DEFINE_NAME("continueAll");
-  ContinueAll(u64 seq) noexcept : UICommand(seq) {}
+  ContinueAll(UICommandArg arg) noexcept : UICommand(arg) {}
   ~ContinueAll() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };
@@ -46,7 +46,7 @@ struct ContinueAllResponse final : UIResult
 struct PauseAll final : UICommand
 {
   DEFINE_NAME("pauseAll");
-  PauseAll(u64 seq) noexcept : UICommand(seq) {}
+  PauseAll(UICommandArg arg) noexcept : UICommand(arg) {}
   ~PauseAll() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };
@@ -68,7 +68,7 @@ struct GetProcesses final : public UICommand
 {
   using IdContainer = std::vector<ProcessId>;
   DEFINE_NAME("getProcesses");
-  GetProcesses(u64 seq) noexcept : UICommand(seq) {}
+  GetProcesses(UICommandArg arg) noexcept : UICommand(arg) {}
   ~GetProcesses() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };
@@ -94,7 +94,7 @@ enum ScriptKind : u8
 struct ImportScript final : public UICommand
 {
   DEFINE_NAME("importScript");
-  ImportScript(u64 seq, std::string &&scriptSource) noexcept;
+  ImportScript(UICommandArg arg, std::string &&scriptSource) noexcept;
   ~ImportScript() noexcept override = default;
   UIResultPtr Execute() noexcept final;
   std::string mSource;

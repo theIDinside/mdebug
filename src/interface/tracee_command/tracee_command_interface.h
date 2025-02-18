@@ -313,7 +313,6 @@ public:
   virtual TaskExecuteResponse Disconnect(bool terminate) noexcept = 0;
 
   virtual bool PerformShutdown() noexcept = 0;
-  virtual bool Initialize() noexcept = 0;
 
   virtual std::string_view GetThreadName(Tid tid) noexcept = 0;
 

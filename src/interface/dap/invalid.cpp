@@ -5,8 +5,9 @@
 #include <fmt/ranges.h>
 
 namespace mdb::ui::dap {
-InvalidArgsResponse::InvalidArgsResponse(std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-    : command(command), missing_or_invalid(std::move(missing_args))
+InvalidArgsResponse::InvalidArgsResponse(Pid processId, std::string_view command,
+                                         MissingOrInvalidArgs &&missing_args) noexcept
+    : UIResult(processId), mProcessId(processId), command(command), missing_or_invalid(std::move(missing_args))
 {
 }
 
@@ -51,8 +52,8 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   std::pmr::string result{arenaAllocator};
   fmt::format_to(
     std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{},"type":"response","success":false,"command":"{}","message":"{}"}})", seq,
-    request_seq, command, msg);
+    R"({{"seq":{},"request_seq":{}, "processId":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
+    seq, request_seq, mProcessId, command, msg);
 
   return result;
 }
