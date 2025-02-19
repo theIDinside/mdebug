@@ -80,6 +80,15 @@ struct ArgumentError
   }
 
   constexpr static ArgumentError
+  RequiredAddressType() noexcept
+  {
+    return ArgumentError{
+      .kind = ArgumentErrorKind::InvalidInput,
+      .description =
+        "Argument required to be a string in the format of a hexadecimal address (0x can be omitted)."};
+  }
+
+  constexpr static ArgumentError
   RequiredBooleanType() noexcept
   {
     return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,

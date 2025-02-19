@@ -317,10 +317,10 @@ exec(const Path &program, std::span<const std::string> prog_args, char **env)
   return execvp(cmd, (char *const *)args);
 }
 
-bool
+Pid
 Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept
 {
-  using MatchResult = bool;
+  using MatchResult = Pid;
 
   return std::visit(
     Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
@@ -333,12 +333,12 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId
               const Tid newProcess = supervisor->GetInterface().TaskLeaderTid();
               LoadAndProcessObjectFile(newProcess, *execFile);
             }
-            return true;
+            return ptrace.pid;
           },
           [&](const AutoArgs &child) -> MatchResult {
             DBGLOG(core, "Configuring new supervisor for DAP session");
             client->PostDapEvent(new ui::dap::InitializedEvent{sessionId, child.mExistingProcessId});
-            return true;
+            return child.mExistingProcessId;
           },
           [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
             DBGLOG(core, "Initializing remote protocol interface...");
@@ -374,8 +374,10 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId
             }
 
             auto it = res.begin();
+            const auto firstAttachedId = it->tc->TaskLeaderTid();
+            mDAP->Get()->PostDapEvent(new ui::dap::InitializedEvent{sessionId, firstAttachedId});
             bool alreadyAdded = true;
-            const auto hookupDapWithRemote = [&](auto &&tc, ui::dap::DebugAdapterClient *client) {
+            const auto hookupDapWithRemote = [&](auto &&tc, ui::dap::DebugAdapterClient *client, bool newProc) {
               mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
                                                                   TargetSession::Attached, std::move(tc),
                                                                   InterfaceType::GdbRemote));
@@ -389,25 +391,22 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId
               }
               for (auto &entry : supervisor->GetThreads()) {
                 entry.mTask->SetStop();
+              };
+
+              if (newProc) {
+                client->PostDapEvent(new ui::dap::Process{0, supervisor->TaskLeaderTid(), "process", false});
               }
-              client->PostDapEvent(new ui::dap::StoppedEvent{supervisor->mTaskLeader,
-                                                             ui::dap::StoppedReason::Entry,
-                                                             "attached",
-                                                             supervisor->mTaskLeader,
-                                                             {},
-                                                             "Attached to session",
-                                                             true});
             };
 
             auto main_connection = mDAP->Get();
-            hookupDapWithRemote(std::move(it->tc), main_connection);
+            hookupDapWithRemote(std::move(it->tc), main_connection, false);
             main_connection->SetDebugAdapterSessionType(
               (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
             ++it;
             for (; it != std::end(res); ++it) {
-              hookupDapWithRemote(std::move(it->tc), main_connection);
+              hookupDapWithRemote(std::move(it->tc), main_connection, true);
             }
-            return true;
+            return firstAttachedId;
           }},
     args);
 }
@@ -735,7 +734,6 @@ Tracer::NewSupervisorId() noexcept
 void
 Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
 {
-
   if (!JS_Init()) {
     PANIC("Failed to init JS!");
   }

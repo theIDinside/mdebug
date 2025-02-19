@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "invalid.h"
+#include "fmt/base.h"
 #include <array>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -29,32 +30,44 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
     }
   }
 
-  std::array<char, 1024> message{};
-  auto it = !missing.empty() ? fmt::format_to(message.begin(), "Missing arguments: {}. ", fmt::join(missing, ", "))
-                             : message.begin();
-
-  std::array<char, 1024> invals{};
-  if (!parsed_and_invalid.empty()) {
-    decltype(fmt::format_to(invals.begin(), "")) inv_it;
-    for (auto ref : parsed_and_invalid) {
-      if (ref->first.description) {
-        inv_it = fmt::format_to(invals.begin(), "{}: {}\\n", ref->second, ref->first.description.value());
-      } else {
-        inv_it = fmt::format_to(invals.begin(), "{}\\n", ref->second);
-      }
-    }
-
-    it = fmt::format_to(it, "Invalid input for: {}", std::string_view{invals.begin(), inv_it});
-  }
-  *it = 0;
-  std::string_view msg{message.begin(), message.begin() + std::distance(message.begin(), it)};
-
   std::pmr::string result{arenaAllocator};
-  fmt::format_to(
+  auto formatIter = fmt::format_to(
     std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{}, "processId":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
-    seq, request_seq, mProcessId, command, msg);
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"Invalid request made. Arguments missing or of invalid type.", "body": {{)",
+    seq, request_seq, mProcessId, command);
 
+  bool wrote = false;
+  if (!missing.empty()) {
+    formatIter = fmt::format_to(formatIter, R"("missing": [)", fmt::join(missing, ", "));
+    for (const auto m : missing) {
+      if (wrote) {
+        *formatIter++ = ',';
+      }
+      formatIter = fmt::format_to(formatIter, R"("{}")", m);
+      wrote = true;
+    }
+    *formatIter++ = ']';
+  }
+
+  if (!parsed_and_invalid.empty()) {
+    if (wrote) {
+      *formatIter++ = ',';
+    }
+    wrote = false;
+    formatIter = fmt::format_to(formatIter, R"("errors": {{)");
+    for (auto ref : parsed_and_invalid) {
+      if (wrote) {
+        *formatIter++ = ',';
+      }
+      formatIter =
+        fmt::format_to(formatIter, R"("{}":"{}")", ref->second, ref->first.description.value_or("unknown error"));
+      wrote = true;
+    }
+    *formatIter++ = '}';
+  }
+
+  *formatIter++ = '}';
+  *formatIter++ = '}';
   return result;
 }
 } // namespace mdb::ui::dap

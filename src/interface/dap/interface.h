@@ -214,7 +214,7 @@ public:
   int WriteFileDescriptor() const noexcept;
 
   void PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept;
-  void PrepareAttach(std::string sessionId, AttachResponse *attachResponse) noexcept;
+  void PrepareAttach(std::string sessionId, Pid processId, AttachResponse *attachResponse) noexcept;
   void ConfigDone(Pid processId) noexcept;
 
   bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;

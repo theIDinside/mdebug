@@ -141,7 +141,14 @@ public:
   static pid_t Launch(ui::dap::DebugAdapterClient *client, const std::string &sessionId, bool stopAtEntry,
                       const Path &program, std::span<const std::string> prog_args,
                       std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
-  bool Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept;
+  // Returns the PID we've attached to; if we've attached to a remote target, there's a chance
+  // that we may have in fact really attached to multiple processes. In this case, this is just the "first" process
+  // id that we return - the remainder of the processes will get auto attached (via attach requests using the
+  // "auto" type) which essentially is just a thin wrapper around attach, to make DAP create new sessions for these
+  // processes. In the future, when we've written a new Callstack UI, we can remove all this nonsense, because
+  // then, one session can be responsible for multiple processes. Until then, we're stuck with this 1979 version of
+  // a protocol.
+  Pid Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept;
   bool RemoteAttachInit(tc::GdbRemoteCommander &tc) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;

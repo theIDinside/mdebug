@@ -499,7 +499,7 @@ DebugAdapterClient::ConfigDone(Pid processId) noexcept
   auto it = std::find_if(mSessionInit.begin(), mSessionInit.end(),
                          [processId](const auto &e) { return e.mPid == processId; });
 
-  ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared?");
+  ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared for {}?", processId);
   if (it != std::end(mSessionInit)) {
     PushDelayedEvent(it->mLaunchOrAttachResponse);
   }
@@ -510,13 +510,15 @@ DebugAdapterClient::ConfigDone(Pid processId) noexcept
 void
 DebugAdapterClient::PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept
 {
+  DBGLOG(core, "prepare initialization for session '{}' and process={}", sessionId, launchResponse->ProcessId());
   mSessionInit.push_back(InitializationState{processId, std::move(sessionId), launchResponse});
 }
 
 void
-DebugAdapterClient::PrepareAttach(std::string sessionId, AttachResponse *attachResponse) noexcept
+DebugAdapterClient::PrepareAttach(std::string sessionId, Pid processId, AttachResponse *attachResponse) noexcept
 {
-  mSessionInit.push_back(InitializationState{attachResponse->ProcessId(), std::move(sessionId), attachResponse});
+  DBGLOG(core, "prepare initialization for session '{}' and process={}", sessionId, attachResponse->ProcessId());
+  mSessionInit.push_back(InitializationState{processId, std::move(sessionId), attachResponse});
 }
 
 static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();

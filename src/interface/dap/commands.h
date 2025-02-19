@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include <cctype>
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
 #include <memory_resource>
@@ -34,7 +35,8 @@ enum class FieldType
   Int,
   Boolean,
   Enumeration,
-  Array
+  Array,
+  Address
 };
 
 struct VerifyResult
@@ -112,6 +114,22 @@ template <size_t Size> struct VerifyMap
           std::find_if(fields.cbegin(), fields.cend(), [&](const auto &f) { return fieldName == f.name; });
         it != std::cend(fields)) {
       switch (it->type) {
+      case FieldType::Address:
+        if (!j.is_string()) {
+          return VerifyResult{std::make_pair(ArgumentError::RequiredStringType(), fieldName)};
+        } else {
+          std::string_view s;
+          j.get_to(s);
+          if (s.starts_with("0x")) {
+            s.remove_prefix(2);
+          }
+          for (auto ch : s) {
+            if (!std::isxdigit(ch)) {
+              return VerifyResult{std::make_pair(ArgumentError::RequiredAddressType(), fieldName)};
+            }
+          }
+          return VerifyResult{std::nullopt};
+        }
       case FieldType::String:
         if (!j.is_string()) {
           return VerifyResult{std::make_pair(ArgumentError::RequiredStringType(), fieldName)};
@@ -468,7 +486,7 @@ struct ReadMemory final : public ui::UICommand
 
   DEFINE_NAME("readMemory");
   RequiredArguments({"memoryReference"sv, "count"sv});
-  DefineArgTypes({"memoryReference", FieldType::String}, {"count", FieldType::Int}, {"offset", FieldType::Int});
+  DefineArgTypes({"memoryReference", FieldType::Address}, {"count", FieldType::Int}, {"offset", FieldType::Int});
 };
 
 struct ConfigurationDoneResponse final : public ui::UIResult
@@ -505,7 +523,7 @@ struct Initialize final : public ui::UICommand
   UIResultPtr Execute() noexcept final;
   nlohmann::json args;
   DEFINE_NAME("initialize");
-  NoRequiredArgs();
+  RequiredArguments({"sessionId"sv});
 };
 
 struct DisconnectResponse final : public UIResult
@@ -555,8 +573,12 @@ struct Launch final : public UICommand
 
 struct AttachResponse final : public UIResult
 {
-  AttachResponse(bool success, UICommandPtr cmd) noexcept : UIResult(success, cmd) {}
+  AttachResponse(Pid processId, bool success, UICommandPtr cmd) noexcept
+      : UIResult(success, cmd), mProcessId(processId)
+  {
+  }
   ~AttachResponse() noexcept override = default;
+  Pid mProcessId;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 };
 

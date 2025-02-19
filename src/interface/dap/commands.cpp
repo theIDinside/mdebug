@@ -10,7 +10,6 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/events.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "mdbjs/mdbjs.h"
 #include "parse_buffer.h"
 #include "symbolication/callstack.h"
 #include "utils/logger.h"
@@ -927,8 +926,8 @@ Attach::Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs &&args) noexc
 UIResultPtr
 Attach::Execute() noexcept
 {
-  const auto res = Tracer::Get().Attach(mDAPClient, mRequestingSessionId, attachArgs);
-  mDAPClient->PrepareAttach(mRequestingSessionId, new AttachResponse{res, this});
+  const auto processId = Tracer::Get().Attach(mDAPClient, mRequestingSessionId, attachArgs);
+  mDAPClient->PrepareAttach(mRequestingSessionId, processId, new AttachResponse{processId, true, this});
 
   return nullptr;
 }
@@ -1424,8 +1423,9 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   obj["command"].get_to(cmd_name);
   ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
   ASSERT(obj.contains("processId"),
-         "Request did not contain 'processId' field which is a DAP-extension requirement for MDB. It makes "
-         "multiprocess debugging under DAP actually function in a non-catastrophically bad way.");
+         "Request '{}' did not contain 'processId' field which is a DAP-extension requirement for MDB. It makes "
+         "multiprocess debugging under DAP actually function in a non-catastrophically bad way.",
+         cmd_name);
   const u64 seq = obj["seq"];
   const Pid processId = obj["processId"];
   UICommandArg arg{seq, processId};
@@ -1503,6 +1503,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::GotoTargets:
     TODO("Command::GotoTargets");
   case CommandType::Initialize:
+    IfInvalidArgsReturn(Initialize);
     return new Initialize{arg, std::move(args)};
   case CommandType::Launch: {
     IfInvalidArgsReturn(Launch);
