@@ -1,4 +1,5 @@
 /** LICENSE TEMPLATE */
+#pragma once
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
 

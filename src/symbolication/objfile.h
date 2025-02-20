@@ -158,6 +158,7 @@ public:
   auto AddInitializedCompileUnits(std::span<sym::CompilationUnit *> new_cus) noexcept -> void;
   auto AddTypeUnits(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
   auto AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept -> void;
+  auto ReadDebugRanges(u64 sectionOffset) noexcept -> std::vector<AddressRange>;
 
   auto GetTypeUnit(u64 type_signature) noexcept -> sym::dw::UnitData *;
   auto GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept -> sym::dw::DieReference;

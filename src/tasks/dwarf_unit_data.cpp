@@ -81,7 +81,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
   std::vector<UnitData *> result;
   for (const auto &header : mCompilationUnitsToParse) {
     const auto start = std::chrono::high_resolution_clock::now();
-    auto unit_data = prepare_unit_data(obj, header);
+    auto unit_data = PrepareUnitData(obj, header);
     const auto time =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
         .count();

@@ -21,6 +21,7 @@
 #include "utils/worker_task.h"
 #include "value.h"
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <regex>
 #include <symbolication/dwarf/typeread.h>
@@ -295,6 +296,108 @@ void
 ObjectFile::AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept
 {
   mSourceCodeFiles[std::string{file->mFullPath.StringView()}].push_back(std::move(file));
+}
+
+const uint64_t *
+FindRangeListNullTerminator(const uint64_t *data, std::size_t size)
+{
+
+  if (size < 2) {
+    return nullptr; // Need at least two elements
+  }
+
+  std::size_t i = 0;
+  constexpr std::size_t stride = 4;
+  std::size_t simd_end = size - (size % stride);
+
+  for (; i < simd_end; i += stride) {
+    // Load 4 uint64_t values
+    __m256i values = _mm256_load_si256(reinterpret_cast<const __m256i *>(&data[i]));
+
+    // Compare elements with 0
+    __m256i zero = _mm256_setzero_si256();
+    __m256i cmp = _mm256_cmpeq_epi64(values, zero);
+
+    // Extract bitmask (each comparison result is 1 bit)
+    const unsigned mask = static_cast<unsigned>(_mm256_movemask_pd(_mm256_castsi256_pd(cmp)));
+    const unsigned masked = (mask & 0b1111);
+
+    // Count trailing 0s
+    const unsigned trailing_zeros = std::countr_zero(masked);
+    // Count trailing 1s in the shifted mask
+    unsigned trailing_ones = std::countr_one((masked) >> trailing_zeros);
+
+    if (trailing_ones >= 2) {
+      return &data[i + trailing_zeros];
+    }
+  }
+
+  // Fallback: Process remaining elements normally
+  for (; i < size - 1; ++i) {
+    if (data[i] == 0 && data[i + 1] == 0) {
+      return &data[i];
+    }
+  }
+
+  return nullptr;
+}
+
+static u32
+ReadAligned(const u64 *start, const u64 *end, std::vector<AddressRange> &result) noexcept
+{
+  auto it = start;
+  auto last = FindRangeListNullTerminator(start, static_cast<std::size_t>(end - start));
+  result.reserve(result.size() + std::ptrdiff_t(last - it) / 2);
+  for (; it < last; it += 2) {
+    result.push_back({*it, *(it + 1)});
+  }
+  return result.size();
+}
+
+static u32
+ReadUnAligned(const u8 *start, const u8 *end, std::vector<AddressRange> &result) noexcept
+{
+  auto it = start;
+  u64 buf[32];
+  while (it < end) {
+    const auto bytesCount = std::min<size_t>(sizeof(u64) * std::size(buf), end - it);
+    std::memcpy(buf, it, bytesCount);
+    const auto elemCount = bytesCount / 8;
+    auto ptr = FindRangeListNullTerminator(buf, bytesCount);
+    if (ptr) {
+      for (auto it = buf; it < ptr; it += 2) {
+        result.push_back({*it, *(it + 1)});
+      }
+      return result.size();
+    } else {
+      for (auto it = buf; it < std::end(buf); it += 2) {
+        result.push_back({*it, *(it + 1)});
+      }
+    }
+  }
+  return result.size();
+}
+
+std::vector<AddressRange>
+ObjectFile::ReadDebugRanges(u64 sectionOffset) noexcept
+{
+  if (!elf->debug_ranges) {
+    return {};
+  }
+  if (elf->debug_ranges->Size() <= sectionOffset) {
+    return {};
+  }
+
+  std::vector<AddressRange> result;
+  auto ptr = elf->debug_ranges->GetDataAsIfAligned<u64>(sectionOffset);
+  if (ptr) {
+    auto count = elf->debug_ranges->mSectionData->size() / sizeof(u64);
+    auto read = ReadAligned(ptr, (elf->debug_ranges->GetDataAs<u64>().data() + count), result);
+    return result;
+  } else {
+    auto read = ReadUnAligned(elf->debug_ranges->begin() + sectionOffset, elf->debug_ranges->end(), result);
+    return result;
+  }
 }
 
 sym::dw::UnitData *

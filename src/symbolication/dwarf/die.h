@@ -183,7 +183,7 @@ private:
 };
 
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
-UnitData *prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept;
+UnitData *PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept;
 
 class UnitHeadersRead
 {

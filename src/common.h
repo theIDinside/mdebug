@@ -2,6 +2,7 @@
 #pragma once
 #include "typedefs.h"
 #include <algorithm>
+#include <bit>
 #include <charconv>
 #include <concepts>
 #include <filesystem>
@@ -356,5 +357,12 @@ template <class... Ts> Match(Ts...) -> Match<Ts...>;
 #elif defined(__GNUC__) || defined(__GNUG__)
 #define COMPILERUSED_GCC
 #endif
+
+template <typename T>
+constexpr bool
+IsAligned(void *ptr)
+{
+  return (std::bit_cast<uintptr_t>(ptr) % sizeof(T)) == 0;
+}
 
 } // namespace mdb

@@ -504,6 +504,8 @@ DebugAdapterClient::ConfigDone(Pid processId) noexcept
     PushDelayedEvent(it->mLaunchOrAttachResponse);
   }
 
+  DBGLOG(core, "Config done, removing prepared session.");
+
   mSessionInit.erase(it);
 }
 

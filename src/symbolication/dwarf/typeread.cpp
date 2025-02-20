@@ -3,6 +3,7 @@
 #include "symbolication/block.h"
 #include "symbolication/dwarf.h"
 #include "symbolication/dwarf/attribute_read.h"
+#include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die_iterator.h"
 #include "symbolication/dwarf_defs.h"
 #include "symbolication/type.h"
@@ -14,9 +15,9 @@ namespace mdb::sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : mObjectRef(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
-      mParams{{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}, {}}, mLexicalBlockStack()
+      mParams{{AddressRange{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}}, {}}, mLexicalBlockStack()
 {
-  mLexicalBlockStack.emplace_back(AddressRange{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()},
+  mLexicalBlockStack.emplace_back(std::vector{AddressRange{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}},
                                   std::vector<Symbol>{});
   ASSERT(mLexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", mLexicalBlockStack.size());
   MUST_HOLD(mFunctionSymbol != nullptr,
@@ -42,6 +43,24 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
   UnitReader reader{die.GetUnitData()};
   reader.SeekDie(*die.GetDie());
 
+  bool hadRanges = false;
+  for (const auto &abbr : attr.mAttributes) {
+    const auto attribute = ReadAttributeValue(reader, abbr, attr.mImplicitConsts);
+    if (abbr.mName == Attribute::DW_AT_ranges) {
+      hadRanges = true;
+      auto ranges = mObjectRef.ReadDebugRanges(attribute.AsUnsignedValue());
+      mLexicalBlockStack.emplace_back(std::move(ranges), std::vector<Symbol>{});
+    }
+    if (attribute.name == Attribute::DW_AT_low_pc || attribute.name == Attribute::DW_AT_entry_pc) {
+      low = attribute.AsAddress();
+    }
+  }
+
+  if (hadRanges) {
+    ASSERT(low == nullptr, "We need to adjust the ranges by LOW PC I think.");
+    return;
+  }
+
   for (const auto abbr : attr.mAttributes) {
     auto value = ReadAttributeValue(reader, abbr, attr.mImplicitConsts);
     if (value.name == Attribute::DW_AT_low_pc || value.name == Attribute::DW_AT_entry_pc) {
@@ -54,7 +73,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
       break;
     }
   }
-  mLexicalBlockStack.emplace_back(AddressRange{low, low + hi}, std::vector<Symbol>{});
+  mLexicalBlockStack.emplace_back(std::vector{AddressRange{low, low + hi}}, std::vector<Symbol>{});
 }
 
 void

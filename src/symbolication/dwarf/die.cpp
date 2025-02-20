@@ -438,7 +438,7 @@ HasAddressAttribute(uint16_t value1, uint16_t value2)
 }
 
 UnitData *
-prepare_unit_data(ObjectFile *obj, const UnitHeader &header) noexcept
+PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
 {
   const auto abbrev_sec = obj->GetElf()->debug_abbrev;
 

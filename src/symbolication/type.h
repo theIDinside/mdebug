@@ -3,6 +3,7 @@
 #include "common.h"
 #include "symbolication/block.h"
 #include "symbolication/dwarf/die_ref.h"
+#include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/indexing.h"
 #include "utils/macros.h"
@@ -379,8 +380,40 @@ struct Symbol
 
 struct SymbolBlock
 {
-  AddressRange mProgramCounterRange;
+  std::vector<AddressRange> mRanges;
   std::vector<Symbol> mSymbols;
+
+  AddressRange
+  AddressBounds() const noexcept
+  {
+    if (mRanges.empty()) {
+      return {nullptr, nullptr};
+    }
+    return {mRanges.front().low, mRanges.back().high};
+  }
+
+  AddrPtr
+  StartPc() const noexcept
+  {
+    return mRanges.front().StartPc();
+  }
+
+  AddrPtr
+  EndPc() const noexcept
+  {
+    return mRanges.back().EndPc();
+  }
+
+  bool
+  ContainsPc(AddrPtr pc) const noexcept
+  {
+    for (const auto addr : mRanges) {
+      if (addr.Contains(pc)) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 struct BlockSymbolIterator

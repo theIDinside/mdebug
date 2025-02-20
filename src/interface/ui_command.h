@@ -60,6 +60,13 @@ struct ArgumentError
   std::optional<std::string> description;
 
   constexpr static ArgumentError
+  Missing(std::string_view description)
+  {
+    return ArgumentError{.kind = ArgumentErrorKind::Missing,
+                         .description = std::make_optional<std::string>(description)};
+  }
+
+  constexpr static ArgumentError
   Invalid(std::string_view desc) noexcept
   {
     return ArgumentError{.kind = ArgumentErrorKind::InvalidInput, .description = std::string{desc}};

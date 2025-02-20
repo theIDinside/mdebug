@@ -5,6 +5,7 @@
 #include "utils/macros.h"
 #include <common.h>
 #include <elf.h>
+#include <span>
 #include <string_view>
 #include <typedefs.h>
 
@@ -74,6 +75,16 @@ struct ElfSection
     ASSERT(mSectionData->size_bytes() % sizeof(T) == 0, "data is unaligned!");
     const T *ptr = reinterpret_cast<const T *>(mSectionData->data());
     return std::span<const T>{ptr, mSectionData->size_bytes() / sizeof(T)};
+  }
+
+  template <typename T>
+  const T *
+  GetDataAsIfAligned(u64 offset) const noexcept
+  {
+    if (IsAligned<T>((void *)(mSectionData->data() + offset))) {
+      return (const T *)(mSectionData->data() + offset);
+    }
+    return nullptr;
   }
 };
 

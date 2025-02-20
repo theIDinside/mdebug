@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "invalid.h"
 #include <cctype>
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
@@ -604,17 +605,24 @@ struct Attach final : public UICommand
   // Attach gets a `create` function because in the future, constructing this command will be much more complex
   // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
   // bat shit crazy in 2024.
-  static Attach *
+  static ui::UICommand *
   create(UICommandArg arg, const nlohmann::basic_json<> &args)
   {
     std::string_view type;
+
     args.at("type").get_to(type);
     ASSERT(args.contains("sessionId"), "Attach arguments had no 'sessionId' field.");
     if (type == "ptrace") {
       Pid pid = args.at("pid");
       return new Attach{arg, args.at("sessionId"), PtraceAttachArgs{.pid = pid}};
     } else if (type == "auto") {
-      return new Attach{arg, args.at("sessionId"), AutoArgs{}};
+      Pid processId;
+      if (args.contains("processId")) {
+        args.at("processId").get_to(processId);
+        return new Attach{arg, args.at("sessionId"), AutoArgs{processId}};
+      }
+      return new ui::dap::InvalidArgs{
+        arg, "attach", std::vector<InvalidArg>{{ArgumentError::Missing("Required for auto attach"), "processId"}}};
     } else {
       int port = args.at("port");
       std::string host = args.at("host");

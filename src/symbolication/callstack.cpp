@@ -171,7 +171,7 @@ Frame::GetInitializedVariables(FrameVariableKind variableSet,
   }
   case FrameVariableKind::Locals: {
     for (const auto &block : FullSymbolInfo().GetFrameLocalVariableBlocks()) {
-      if (block.mProgramCounterRange.Contains(mFramePc)) {
+      if (block.ContainsPc(mOwningSymbolFile->UnrelocateAddress(mFramePc))) {
         for (const auto &sym : block.mSymbols) {
           outVector.push_back(NonNull(sym));
         }
