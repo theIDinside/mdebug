@@ -170,7 +170,8 @@ Frame::GetInitializedVariables(FrameVariableKind variableSet,
     return args.size();
   }
   case FrameVariableKind::Locals: {
-    for (const auto &block : FullSymbolInfo().GetFrameLocalVariableBlocks()) {
+    const auto &lexicalSymbolBlocks = FullSymbolInfo().GetFrameLocalVariableBlocks();
+    for (const auto &block : lexicalSymbolBlocks) {
       if (block.ContainsPc(mOwningSymbolFile->UnrelocateAddress(mFramePc))) {
         for (const auto &sym : block.mSymbols) {
           outVector.push_back(NonNull(sym));

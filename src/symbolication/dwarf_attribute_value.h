@@ -63,6 +63,24 @@ struct AttributeValue
     return *this;
   }
 
+  bool
+  IsDataForm() const noexcept
+  {
+    using enum AttributeForm;
+    switch (form) {
+    case AttributeForm::DW_FORM_data2:
+      [[fallthrough]];
+    case AttributeForm::DW_FORM_data4:
+      [[fallthrough]];
+    case AttributeForm::DW_FORM_data8:
+      [[fallthrough]];
+    case AttributeForm::DW_FORM_data1:
+      return true;
+    default:
+      return false;
+    }
+  }
+
   std::uintptr_t
   AsAddress() const noexcept
   {

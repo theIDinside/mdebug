@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "type.h"
-#include "dwarf.h"
+#include "dwarf_attribute_value.h"
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/die_iterator.h"

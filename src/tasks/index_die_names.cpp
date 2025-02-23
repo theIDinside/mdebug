@@ -5,12 +5,12 @@
 // mdb
 #include <chrono>
 #include <symbolication/cu_symbol_info.h>
-#include <symbolication/dwarf.h>
 #include <symbolication/dwarf/debug_info_reader.h>
 #include <symbolication/dwarf/die_ref.h>
 #include <symbolication/dwarf/lnp.h>
 #include <symbolication/dwarf/name_index.h>
 #include <symbolication/dwarf/rnglists.h>
+#include <symbolication/dwarf_attribute_value.h>
 #include <symbolication/dwarf_defs.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>

@@ -1,10 +1,10 @@
 /** LICENSE TEMPLATE */
 #include "typeread.h"
 #include "symbolication/block.h"
-#include "symbolication/dwarf.h"
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die_iterator.h"
+#include "symbolication/dwarf_attribute_value.h"
 #include "symbolication/dwarf_defs.h"
 #include "symbolication/type.h"
 #include "utils/logger.h"
@@ -45,14 +45,22 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
 
   bool hadRanges = false;
   for (const auto &abbr : attr.mAttributes) {
-    const auto attribute = ReadAttributeValue(reader, abbr, attr.mImplicitConsts);
+    const auto value = ReadAttributeValue(reader, abbr, attr.mImplicitConsts);
     if (abbr.mName == Attribute::DW_AT_ranges) {
       hadRanges = true;
-      auto ranges = mObjectRef.ReadDebugRanges(attribute.AsUnsignedValue());
+      auto ranges = mObjectRef.ReadDebugRanges(value.AsUnsignedValue());
       mLexicalBlockStack.emplace_back(std::move(ranges), std::vector<Symbol>{});
     }
-    if (attribute.name == Attribute::DW_AT_low_pc || attribute.name == Attribute::DW_AT_entry_pc) {
-      low = attribute.AsAddress();
+    if (value.name == Attribute::DW_AT_low_pc || value.name == Attribute::DW_AT_entry_pc) {
+      low = value.AsAddress();
+    }
+    if (value.name == Attribute::DW_AT_high_pc) {
+      // high address is (low + offset) when IsDataForm
+      if (value.IsDataForm()) {
+        hi = low + value.AsUnsignedValue();
+      } else {
+        hi = value.AsAddress();
+      }
     }
   }
 
@@ -63,9 +71,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
 
   for (const auto abbr : attr.mAttributes) {
     auto value = ReadAttributeValue(reader, abbr, attr.mImplicitConsts);
-    if (value.name == Attribute::DW_AT_low_pc || value.name == Attribute::DW_AT_entry_pc) {
-      low = value.AsAddress();
-    }
+
     if (value.name == Attribute::DW_AT_high_pc) {
       hi = value.AsAddress();
     }

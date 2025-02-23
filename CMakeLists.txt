@@ -80,13 +80,13 @@ set(MIDAS_SOURCES
   src/symbolication/cu_symbol_info.h
   src/symbolication/disassemble.cpp
   src/symbolication/disassemble.h
+  src/symbolication/dwarf_attribute_value.h
   src/symbolication/dwarf_binary_reader.cpp
   src/symbolication/dwarf_binary_reader.h
   src/symbolication/dwarf_expressions.cpp
   src/symbolication/dwarf_expressions.h
   src/symbolication/dwarf_frameunwinder.cpp
   src/symbolication/dwarf_frameunwinder.h
-  src/symbolication/dwarf.h
   src/symbolication/dwarf/debug_info_reader.cpp
   src/symbolication/dwarf/debug_info_reader.h
   src/symbolication/dwarf/die_iterator.cpp

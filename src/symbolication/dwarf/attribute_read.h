@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "symbolication/dwarf.h"
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die.h"
+#include "symbolication/dwarf_attribute_value.h"
 #include "symbolication/dwarf_defs.h"
 #include <array>
 #include <optional>

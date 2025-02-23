@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "cu_symbol_info.h"
-#include "dwarf.h"
 #include "dwarf/debug_info_reader.h"
 #include "dwarf/die.h"
 #include "dwarf/lnp.h"
+#include "dwarf_attribute_value.h"
 #include "fnsymbol.h"
 #include "objfile.h"
 #include "symbolication/dwarf/die_ref.h"

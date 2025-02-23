@@ -7,7 +7,7 @@
 #include <limits>
 #include <mutex>
 #include <symbolication/block.h>
-#include <symbolication/dwarf.h>
+#include <symbolication/dwarf_attribute_value.h>
 #include <utils/indexing.h>
 
 namespace mdb {

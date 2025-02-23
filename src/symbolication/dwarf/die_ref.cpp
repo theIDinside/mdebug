@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "die_ref.h"
-#include "symbolication/dwarf.h"
 #include "symbolication/dwarf/debug_info_reader.h"
+#include "symbolication/dwarf_attribute_value.h"
 #include <limits>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
