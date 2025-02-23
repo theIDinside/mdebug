@@ -24,6 +24,7 @@
 #include "utils/logger.h"
 #include "utils/macros.h"
 #include "utils/scope_defer.h"
+#include "utils/util.h"
 #include <algorithm>
 #include <chrono>
 #include <elf.h>
@@ -444,7 +445,9 @@ TraceeController::ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept
   // we do it like this, to not have to say tc->resume_task(...) in multiple places.
   if (resume_task) {
     const auto res = mTraceeInterface->ResumeTask(task, type);
-    CDLOG(!res.is_ok(), core, "Unable to resume task {}: {}", task.mTid, strerror(res.sys_errno));
+    if (!res.is_ok()) {
+      DBGLOG(core, "Unable to resume task {}: {}", task.mTid, strerror(res.sys_errno));
+    }
   }
   task.mLastWaitStatus = WaitStatus{WaitStatusKind::NotKnown, {}};
   task.SetCurrentResumeAction(type);
@@ -927,12 +930,6 @@ TraceeController::SetInstructionBreakpoints(const Set<BreakpointSpecification> &
   std::vector<BreakpointSpecification> add{};
   std::vector<BreakpointSpecification> remove{};
 
-  for (const auto &[bp, id] : mUserBreakpoints.instruction_breakpoints) {
-    bool search = false;
-    if (!bps.contains(bp)) {
-    }
-  }
-
   for (const auto &bp : bps) {
     if (!mUserBreakpoints.instruction_breakpoints.contains(bp)) {
       add.push_back(bp);
@@ -1056,7 +1053,7 @@ CreateTraceEventFromStopped(TraceeController &tc, TaskInfo &t) noexcept
   AddrPtr stepped_over_bp_id{nullptr};
   if (t.mBreakpointLocationStatus) {
     const auto locstat = t.ClearBreakpointLocStatus();
-    return TraceEvent::CreateStepped({tc.TaskLeaderTid(), t.mTid, {}}, !locstat->should_resume, locstat,
+    return TraceEvent::CreateStepped({tc.TaskLeaderTid(), t.mTid, {}, {}}, !locstat->should_resume, locstat,
                                      t.mNextResumeAction, {});
   }
   const auto pc = tc.CacheAndGetPcFor(t);
@@ -1065,11 +1062,12 @@ CreateTraceEventFromStopped(TraceeController &tc, TaskInfo &t) noexcept
   if (bp_loc != nullptr && bp_loc->address() != stepped_over_bp_id) {
     tc.SetProgramCounterFor(t, prev_pc_byte);
     return TraceEvent::CreateSoftwareBreakpointHit(
-      {.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = {}}, prev_pc_byte, {});
+      {.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = {}, .event_time = {}}, prev_pc_byte, {});
   }
 
   return TraceEvent::CreateDeferToSupervisor(
-    {.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = t.mLastWaitStatus.signal}, {}, false);
+    {.target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = t.mLastWaitStatus.signal, .event_time = {}}, {},
+    false);
 }
 
 static inline TraceEvent *
@@ -1091,13 +1089,13 @@ native_create_clone_event(TraceeController &tc, TaskInfo &cloning_task) noexcept
     np = tc.ReadType(child_tid);
 
     ASSERT(!tc.HasTask(np), "Tracee controller already has task {} !", np);
-    return TraceEvent::CreateCloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5},
+    return TraceEvent::CreateCloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5, {}},
                                         TaskVMInfo{.stack_low = stack_ptr, .stack_size = 0, .tls = tls}, np, {});
   } else if (orig_rax == SYS_clone3) {
     const TraceePointer<clone_args> ptr = sys_arg<SysRegister::RDI>(*regs);
     const auto res = tc.ReadType(ptr);
     np = tc.ReadType(TPtr<pid_t>{res.parent_tid});
-    return TraceEvent::CreateCloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5},
+    return TraceEvent::CreateCloneEvent({tc.TaskLeaderTid(), cloning_task.mTid, 5, {}},
                                         TaskVMInfo::from_clone_args(res), np, {});
   } else {
     PANIC("Unknown clone syscall!");
@@ -1113,31 +1111,32 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
   switch (ws.ws) {
   case WaitStatusKind::Stopped: {
     if (!info.initialized) {
-      return TraceEvent::CreateThreadCreated({mTaskLeader, info.mTid, 5},
-                                             {tc::RunType::Continue, tc::ResumeTarget::Task}, {});
+      return TraceEvent::CreateThreadCreated({mTaskLeader, info.mTid, 5, {}},
+                                             {tc::RunType::Continue, tc::ResumeTarget::Task, {}}, {});
     }
     return CreateTraceEventFromStopped(*this, info);
   }
   case WaitStatusKind::Execed: {
-    return TraceEvent::CreateExecEvent({.target = mTaskLeader, .tid = info.mTid, .sig_or_code = 5},
-                                       ProcessExecPath(info.mTid), {});
+    return TraceEvent::CreateExecEvent(
+      {.target = mTaskLeader, .tid = info.mTid, .sig_or_code = 5, .event_time = {}}, ProcessExecPath(info.mTid),
+      {});
   }
   case WaitStatusKind::Exited: {
-    return TraceEvent::CreateThreadExited({mTaskLeader, info.mTid, ws.exit_code}, false, {});
+    return TraceEvent::CreateThreadExited({mTaskLeader, info.mTid, ws.exit_code, {}}, false, {});
   }
   case WaitStatusKind::Forked: {
     Tid new_child = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
     ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
     DBGLOG(core, "[{} forked]: new process after fork {}", info.mTid, new_child);
-    return TraceEvent::CreateForkEvent_({mTaskLeader, info.mTid, 5}, new_child, {});
+    return TraceEvent::CreateForkEvent_({mTaskLeader, info.mTid, 5, {}}, new_child, {});
   }
   case WaitStatusKind::VForked: {
     Tid new_child = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
     ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
     DBGLOG(core, "[vfork]: new process after fork {}", new_child);
-    return TraceEvent::CreateVForkEvent_({mTaskLeader, info.mTid, 5}, new_child, {});
+    return TraceEvent::CreateVForkEvent_({mTaskLeader, info.mTid, 5, {}}, new_child, {});
   }
   case WaitStatusKind::VForkDone:
     TODO("WaitStatusKind::VForkDone");
@@ -1146,7 +1145,7 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
     return native_create_clone_event(*this, info);
   } break;
   case WaitStatusKind::Signalled:
-    return TraceEvent::CreateSignal({mTaskLeader, info.mTid, info.mLastWaitStatus.signal}, {});
+    return TraceEvent::CreateSignal({mTaskLeader, info.mTid, info.mLastWaitStatus.signal, {}}, {});
   case WaitStatusKind::SyscallEntry:
     TODO("WaitStatusKind::SyscallEntry");
     break;
@@ -1464,7 +1463,7 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
   DBGLOG(core, "stacktrace for {}", task.mTid);
   if (!task.mTaskCallstack->IsDirty() && (req.req == CallStackRequest::Type::Full ||
                                           (req.req == CallStackRequest::Type::Partial &&
-                                           req.count == task.mTaskCallstack->FramesCount() == req.count))) {
+                                           task.mTaskCallstack->FramesCount() == static_cast<u32>(req.count)))) {
     return *task.mTaskCallstack;
   }
   CacheRegistersFor(task);
@@ -1524,9 +1523,7 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
   const auto start = std::chrono::high_resolution_clock::now();
   sym::FunctionSymbol *foundFn = nullptr;
   ScopedDefer defer{[start, symbolFile = symbolFile, &foundFn, addr]() {
-    auto us =
-      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-        .count();
+    auto us = MicroSecondsSince(start);
     DBGLOG(perf, "Parsed symbols & found function symbol {} in {} us ({}), unreloc addr={}",
            foundFn ? foundFn->name : "<no known name>", us, symbolFile->GetObjectFilePath().filename().c_str(),
            symbolFile->UnrelocateAddress(addr));
@@ -1539,7 +1536,6 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
 
   alreadyParse.reserve(cus_matching_addr.size());
   sortedCompUnits.reserve(cus_matching_addr.size());
-  u64 totalSize = 0;
   for (auto src : cus_matching_addr) {
     if (src->IsFunctionSymbolsResolved()) {
       if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
@@ -1547,7 +1543,6 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
         return std::make_pair(fn, NonNull(*symbolFile));
       }
     } else {
-      totalSize += src->get_dwarf_unit()->UnitSize();
       sortedCompUnits.push_back(src);
     }
   }
@@ -1886,7 +1881,6 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
       entry.mTask->mHasProcessedStop = true;
     }
   }
-  const TraceEvent &r = *evt;
 
   auto processedStop = std::visit(
     Match{
@@ -2004,8 +1998,8 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
       parent->ResumeEventHandling();
       self->mIsVForking = false;
       self->mConfigurationIsDone = true;
-      EventSystem::Get().PushDebuggerEvent(
-        TraceEvent::CreateDeferToSupervisor({.target = parent->TaskLeaderTid(), .tid = resumeTid}, {}, {}));
+      EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateDeferToSupervisor(
+        {.target = parent->TaskLeaderTid(), .tid = resumeTid, .sig_or_code = 0, .event_time = {}}, {}, {}));
     });
   }
   const bool should_resume = !evt.mIsVFork && resume;

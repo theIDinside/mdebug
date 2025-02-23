@@ -14,8 +14,10 @@
 #include <mdbjs/bpjs.h>
 #include <mdbjs/mdbjs.h>
 
-#define BP_KEEP(STOP) {STOP, BreakpointOp::Keep}
-#define BP_RETIRE(STOP) {STOP, BreakpointOp::Retire}
+#define BP_KEEP(STOP)                                                                                             \
+  BreakpointHitEventResult { STOP, BreakpointOp::Keep }
+#define BP_RETIRE(STOP)                                                                                           \
+  BreakpointHitEventResult { STOP, BreakpointOp::Retire }
 namespace mdb {
 
 namespace fmt = ::fmt;
@@ -140,8 +142,7 @@ BreakpointLocation::add_user(tc::TraceeCommandInterface &ctrl, UserBreakpoint &u
 }
 
 UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind kind) noexcept
-    : mEnabledByUser(true), mId(param.id), mTid(param.tid), mKind(kind),
-      mHitCondition(param.times_to_hit.value_or(0)), mExpression(nullptr)
+    : mId(param.id), mTid(param.tid), mKind(kind), mHitCondition(param.times_to_hit.value_or(0))
 {
 
   if (param.loc_or_err.is_expected()) {
@@ -549,7 +550,7 @@ SOLoadingBreakpoint::OnHit(TraceeController &tc, TaskInfo &) noexcept
 {
   tc.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints
-  return {EventResult::Resume, BreakpointOp::Keep};
+  return BreakpointHitEventResult{EventResult::Resume, BreakpointOp::Keep};
 }
 
 UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : tc(tc)

@@ -55,7 +55,7 @@ FinishFunction::HasCompleted(bool stopped_by_user) const noexcept
 void
 FinishFunction::Proceed() noexcept
 {
-  mSupervisor.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task});
+  mSupervisor.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task, 0});
 }
 
 void
@@ -79,7 +79,7 @@ void
 InstructionStep::Proceed() noexcept
 {
   DBGLOG(core, "[InstructionStep] stepping 1 instruction for {}", task.mTid);
-  mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task});
+  mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
 }
 
 void
@@ -139,7 +139,8 @@ LineStep::~LineStep() noexcept
   if (!cancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", task.mTid);
     EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateSteppingDone(
-      {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0}, "Line stepping finished", {}));
+      {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0, .event_time = {}},
+      "Line stepping finished", {}));
   } else {
     if (resume_bp) {
       mSupervisor.RemoveBreakpoint(resume_bp->mId);
@@ -158,11 +159,11 @@ LineStep::Proceed() noexcept
 {
   if (resume_bp && !resumed_to_resume_addr) {
     DBGLOG(core, "[line step]: continuing sub frame for {}", task.mTid);
-    mSupervisor.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task});
+    mSupervisor.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task, 0});
     resumed_to_resume_addr = true;
   } else {
     DBGLOG(core, "[line step]: no resume address set, keep istepping");
-    mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task});
+    mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
   }
 }
 
@@ -253,7 +254,8 @@ StepInto::~StepInto() noexcept
 {
   if (!cancelled) {
     EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateSteppingDone(
-      {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0}, "Step in done", {}));
+      {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0, .event_time = {}},
+      "Step in done", {}));
   }
 }
 
@@ -266,7 +268,7 @@ StepInto::HasCompleted(bool stopped_by_user) const noexcept
 void
 StepInto::Proceed() noexcept
 {
-  mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task});
+  mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
 }
 
 bool
@@ -430,7 +432,7 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
     }
   } else {
     const auto kind = eventProceedResult.res.value_or(
-      tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task});
+      tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task, .mDeliverSignal = 0});
     if (task.CanContinue() && eventProceedResult.should_resume) {
       mSupervisor->ResumeTask(task, kind);
     } else {

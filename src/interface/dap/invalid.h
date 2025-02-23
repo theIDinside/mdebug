@@ -40,7 +40,7 @@ struct InvalidArgs final : public UICommand
 };
 
 template <typename Derived, typename JsonArgs>
-static constexpr auto
+constexpr auto
 Validate(UICommandArg arg, const JsonArgs &args) -> InvalidArgs *
 {
   if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {

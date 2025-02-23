@@ -19,7 +19,7 @@ EventDataParam
 WaitEventParser::param() const noexcept
 {
   std::optional<int> eventTime = event_time > 0 ? std::nullopt : std::optional{event_time};
-  return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal, .event_time = event_time};
+  return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal, .event_time = eventTime};
 }
 
 static std::string
@@ -30,8 +30,8 @@ DecodeHexString(std::string_view hexString)
   const auto end = hexString.end();
   for (auto it = hexString.begin(); it != end; it += 2) {
     char character = 0;
-    DebugValue res = std::from_chars(it, it + 2, character, 16);
-    ASSERT(res.GetValue().ec == std::errc(), "Failed to convert hexstring char bytes to char");
+    const auto res = std::from_chars(it, it + 2, character, 16);
+    ASSERT(res.ec == std::errc(), "Failed to convert hexstring char bytes to char");
     result.push_back(character);
   }
   return result;
@@ -164,7 +164,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
     case TraceeStopReason::Create: {
       const auto target =
         connection.settings().is_non_stop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
-      return TraceEvent::CreateThreadCreated(param(), {tc::RunType::Continue, target}, std::move(registers));
+      return TraceEvent::CreateThreadCreated(param(), {tc::RunType::Continue, target, 0}, std::move(registers));
     }
     }
   }

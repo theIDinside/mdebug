@@ -181,7 +181,7 @@ IgnoreArgs(const Args &...)
 /* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
 #define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
 #else
-#define ASSERT(cond, msg, ...)
+#define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 #define PERFORM_ASSERT(op, msg, ...) op
 #endif
 
@@ -353,9 +353,13 @@ template <typename... Ts> struct Match : Ts...
 template <class... Ts> Match(Ts...) -> Match<Ts...>;
 
 #if defined(__clang__)
+#ifndef COMPILERUSED
 #define COMPILERUSED clang
+#endif
 #elif defined(__GNUC__) || defined(__GNUG__)
+#ifndef COMPILERUSED_GCC
 #define COMPILERUSED_GCC
+#endif
 #endif
 
 template <typename T>

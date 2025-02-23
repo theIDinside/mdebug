@@ -2,6 +2,7 @@
 
 #include "typedefs.h"
 #include <algorithm>
+#include <alloca.h>
 #include <common.h>
 #include <string_view>
 
@@ -11,10 +12,10 @@ u8 fromhex(char a) noexcept;
 
 template <typename Container>
 constexpr void
-deserialize_hex_encoded(std::string_view hex, Container &out) noexcept
+DeserializeHexEncoded(std::string_view hex, Container &out) noexcept
 {
   auto p = out.Data();
-
+  char scratchBuffer[512];
   constexpr auto repeat = [](char c) noexcept -> u32 { return static_cast<u32>(c - char{29}); };
   while (!hex.empty()) {
     // at what position `i` is the to-be-repeated-character
@@ -26,13 +27,14 @@ deserialize_hex_encoded(std::string_view hex, Container &out) noexcept
       const auto hex0_is_rep = (i == -1);
       const auto add_sz = (repeat_uneven) ? 1 : (hex0_is_rep ? 0 : 2);
       const auto buf_sz = r + add_sz;
-      char buf[buf_sz]; // NOLINT
-      std::fill_n(buf, buf_sz, *(hex.data() + i));
+      std::fill_n(scratchBuffer, buf_sz, *(hex.data() + i));
       const auto add_after_0 = hex0_is_rep && repeat_uneven;
       const auto add_after_1 = !hex0_is_rep && !repeat_uneven;
-      buf[buf_sz - 1] = add_after_0 ? *(hex.data() + 2) : (add_after_1 ? *(hex.data() + 3) : buf[buf_sz - 1]);
+      ASSERT(buf_sz <= std::size(scratchBuffer), "RLE too large for scratch buffer");
+      scratchBuffer[buf_sz - 1] =
+        add_after_0 ? *(hex.data() + 2) : (add_after_1 ? *(hex.data() + 3) : scratchBuffer[buf_sz - 1]);
       // this is safe, because we've made sure buf_sz % 2 == 0. I think.
-      std::string_view view{buf, buf_sz};
+      std::string_view view{scratchBuffer, buf_sz};
       while (!view.empty()) {
         *p = (fromhex(view[0]) << 4) | (fromhex(view[1]));
         view.remove_prefix(2);
@@ -54,12 +56,12 @@ deserialize_hex_encoded(std::string_view hex, Container &out) noexcept
 
 template <size_t N>
 constexpr void
-deserialize_hex_encoded(std::string_view hex, std::array<u8, N> &out) noexcept
+DeserializeHexEncoded(std::string_view hex, std::array<u8, N> &out) noexcept
 {
   auto p = out.data();
 
   constexpr auto repeat = [](char c) noexcept -> u32 { return static_cast<u32>(c - char{29}); };
-
+  char scratchBuffer[512];
   while (!hex.empty()) {
     // at what position `i` is the to-be-repeated-character
     auto i = hex[0] == '*' ? -1 : (hex[1] == '*' ? 0 : 1);
@@ -70,13 +72,14 @@ deserialize_hex_encoded(std::string_view hex, std::array<u8, N> &out) noexcept
       const auto hex0_is_rep = (i == -1);
       const auto add_sz = (repeat_uneven) ? 1 : (hex0_is_rep ? 0 : 2);
       const auto buf_sz = r + add_sz;
-      char buf[buf_sz]; // NOLINT
-      std::fill_n(buf, buf_sz, *(hex.data() + i));
+      ASSERT(buf_sz <= std::size(scratchBuffer), "scratch buffer size insufficient");
+      std::fill_n(scratchBuffer, buf_sz, *(hex.data() + i));
       const auto add_after_0 = hex0_is_rep && repeat_uneven;
       const auto add_after_1 = !hex0_is_rep && !repeat_uneven;
-      buf[buf_sz - 1] = add_after_0 ? *(hex.data() + 2) : (add_after_1 ? *(hex.data() + 3) : buf[buf_sz - 1]);
+      scratchBuffer[buf_sz - 1] =
+        add_after_0 ? *(hex.data() + 2) : (add_after_1 ? *(hex.data() + 3) : scratchBuffer[buf_sz - 1]);
       // this is safe, because we've made sure buf_sz % 2 == 0. I think.
-      std::string_view view{buf, buf_sz};
+      std::string_view view{scratchBuffer, buf_sz};
       while (!view.empty()) {
         *p = (fromhex(view[0]) << 4) | (fromhex(view[1]));
         view.remove_prefix(2);

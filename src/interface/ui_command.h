@@ -143,7 +143,7 @@ struct UICommand
   Pid mPid;
 
 public:
-  explicit UICommand(UICommandArg arg) noexcept : seq(arg.seq), mPid(arg.pid) {}
+  explicit UICommand(UICommandArg arg) noexcept : mPid(arg.pid), seq(arg.seq) {}
   virtual ~UICommand() noexcept = default;
 
   constexpr void

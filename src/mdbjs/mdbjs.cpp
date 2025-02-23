@@ -40,9 +40,13 @@ AppScriptingInstance::GetEventDispatcher() noexcept
 }
 
 /* The class of the global object. */
-const JSClass RuntimeGlobal::klass = {"RuntimeGlobal",
-                                      JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_RESERVED_SLOTS(RuntimeGlobal::SlotCount),
-                                      &JS::DefaultGlobalClassOps};
+const JSClass RuntimeGlobal::klass = []() {
+  JSClass result;
+  result.name = "RuntimeGlobal";
+  result.flags = JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_RESERVED_SLOTS(RuntimeGlobal::SlotCount);
+  result.cOps = &JS::DefaultGlobalClassOps;
+  return result;
+}();
 
 constexpr JSFunctionSpec RuntimeGlobal::sRuntimeFunctions[];
 

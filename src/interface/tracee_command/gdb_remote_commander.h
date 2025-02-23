@@ -70,6 +70,7 @@ using AuxvData = std::optional<std::string>;
 class GdbRemoteCommander final : public TraceeCommandInterface
 {
   std::shared_ptr<gdb::RemoteConnection> connection;
+  gdb::WriteBuffer *mWriteBuffer = gdb::WriteBuffer::Create(16);
   Pid process_id;
   std::optional<std::string> exec_file{};
   Auxv auxv_data{};

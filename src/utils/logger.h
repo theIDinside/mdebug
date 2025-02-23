@@ -76,7 +76,11 @@ LogChannel *GetLogChannel(Channel id) noexcept;
   }
 #else
 #define DLOG(...)
-#define DBGLOG(...)
+#define DBGLOG(channel, ...)                                                                                      \
+  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
+    std::source_location srcLoc = std::source_location::current();                                                \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::fmt::format(__VA_ARGS__));  \
+  }
 #define CDLOG(...)
 #endif
 

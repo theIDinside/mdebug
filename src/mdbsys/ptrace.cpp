@@ -239,19 +239,6 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
   return TaskWaitResult{.tid = tid, .ws = {.ws = kind, .signal = signal}};
 }
 
-static TaskWaitResult
-wait_result_exited(Tid tid, int status)
-{
-  int exit_code = WEXITSTATUS(status);
-  return TaskWaitResult{.tid = tid, .ws = {.ws = WaitStatusKind::Exited, .exit_code = exit_code}};
-}
-
-static TaskWaitResult
-wait_result_signalled(Tid tid, int status)
-{
-  return TaskWaitResult{.tid = tid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status)}};
-}
-
 std::optional<WaitPid>
 waitpid_peek(pid_t tid) noexcept
 {

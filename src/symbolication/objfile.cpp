@@ -312,7 +312,7 @@ FindRangeListNullTerminator(const uint64_t *data, std::size_t size)
 
   for (; i < simd_end; i += stride) {
     // Load 4 uint64_t values
-    __m256i values = _mm256_load_si256(reinterpret_cast<const __m256i *>(&data[i]));
+    __m256i values = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(&data[i]));
 
     // Compare elements with 0
     __m256i zero = _mm256_setzero_si256();
@@ -345,11 +345,18 @@ FindRangeListNullTerminator(const uint64_t *data, std::size_t size)
 static u32
 ReadAligned(const u64 *start, const u64 *end, std::vector<AddressRange> &result) noexcept
 {
-  auto it = start;
-  auto last = FindRangeListNullTerminator(start, static_cast<std::size_t>(end - start));
-  result.reserve(result.size() + std::ptrdiff_t(last - it) / 2);
-  for (; it < last; it += 2) {
-    result.push_back({*it, *(it + 1)});
+
+  for (auto it = start; it < end; it += 2) {
+    const auto a = *it;
+    const auto b = *(it + 1);
+    if (a == 0) {
+      if (b == 0) {
+        return result.size();
+      } else {
+        continue;
+      }
+    }
+    result.push_back({a, b});
   }
   return result.size();
 }
@@ -358,22 +365,20 @@ static u32
 ReadUnAligned(const u8 *start, const u8 *end, std::vector<AddressRange> &result) noexcept
 {
   auto it = start;
-  u64 buf[32];
+  alignas(32) u64 buf[32];
   while (it < end) {
     const auto bytesCount = std::min<size_t>(sizeof(u64) * std::size(buf), end - it);
     std::memcpy(buf, it, bytesCount);
-    const auto elemCount = bytesCount / 8;
-    auto ptr = FindRangeListNullTerminator(buf, bytesCount);
-    if (ptr) {
-      for (auto it = buf; it < ptr; it += 2) {
-        result.push_back({*it, *(it + 1)});
+
+    for (auto i = 0u; i < std::size(buf); i += 2) {
+      if (buf[i] == 0) {
+        if (buf[i + 1] == 0) {
+          return result.size();
+        }
       }
-      return result.size();
-    } else {
-      for (auto it = buf; it < std::end(buf); it += 2) {
-        result.push_back({*it, *(it + 1)});
-      }
+      result.push_back({.low = buf[i], .high = buf[i + 1]});
     }
+    it += bytesCount;
   }
   return result.size();
 }
@@ -392,10 +397,10 @@ ObjectFile::ReadDebugRanges(u64 sectionOffset) noexcept
   auto ptr = elf->debug_ranges->GetDataAsIfAligned<u64>(sectionOffset);
   if (ptr) {
     auto count = elf->debug_ranges->mSectionData->size() / sizeof(u64);
-    auto read = ReadAligned(ptr, (elf->debug_ranges->GetDataAs<u64>().data() + count), result);
+    ReadAligned(ptr, (elf->debug_ranges->GetDataAs<u64>().data() + count), result);
     return result;
   } else {
-    auto read = ReadUnAligned(elf->debug_ranges->begin() + sectionOffset, elf->debug_ranges->end(), result);
+    ReadUnAligned(elf->debug_ranges->begin() + sectionOffset, elf->debug_ranges->end(), result);
     return result;
   }
 }
@@ -491,12 +496,6 @@ ObjectFile::InitializeMinimalSymbolLookup() noexcept
 
 std::unique_ptr<sym::DebugAdapterSerializer>
 ObjectFile::FindCustomDataVisualizerFor(sym::Type &) noexcept
-{
-  return nullptr;
-}
-
-std::unique_ptr<sym::ValueResolver>
-ObjectFile::FindCustomDataResolverFor(sym::Type &) noexcept
 {
   return nullptr;
 }
@@ -654,12 +653,6 @@ auto
 SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
   return mObjectFile->GetProbableCompilationUnits(pc - mBaseAddress->get());
-}
-
-inline auto
-SymbolFile::GetObjectFile() const noexcept -> ObjectFile *
-{
-  return mObjectFile.get();
 }
 
 auto
@@ -838,9 +831,7 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
   if (spec.mIsRegex) {
     const auto start = std::chrono::high_resolution_clock::now();
     search_for = obj->SearchDebugSymbolStringTable(spec.mName);
-    const auto elapsed =
-      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-        .count();
+    const auto elapsed = MicroSecondsSince(start);
     DBGLOG(core, "regex searched {} in {}us", obj->GetPathString(), elapsed);
   } else {
     search_for = {spec.mName};

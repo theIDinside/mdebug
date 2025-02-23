@@ -60,7 +60,7 @@ struct TaskRegisters
   u64 GetRegister(u32 regNumber) const noexcept;
 };
 
-struct TaskInfo
+class TaskInfo
 {
   INTERNAL_REFERENCE_COUNT(TaskInfo)
 public:

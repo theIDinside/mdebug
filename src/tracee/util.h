@@ -27,7 +27,7 @@ u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
 std::string ProcessExecPath(Pid pid) noexcept;
 
 /// Returns the largest vector register size on your system
-u32 SystemVectorExtensionSize() noexcept;
+u32 QueryAvxSupport() noexcept;
 
 /// Return the main thread ID, used to identify if some debugger-core
 /// code should/can be executed.

@@ -15,7 +15,7 @@
 
 namespace mdb {
 
-class VariableContext;
+struct VariableContext;
 
 template <typename T> using Set = std::unordered_set<T>;
 
@@ -174,7 +174,6 @@ public:
   auto InitializeMinimalSymbolLookup() noexcept -> void;
 
   auto FindCustomDataVisualizerFor(sym::Type &type) noexcept -> std::unique_ptr<sym::DebugAdapterSerializer>;
-  auto FindCustomDataResolverFor(sym::Type &type) noexcept -> std::unique_ptr<sym::ValueResolver>;
   static auto InitializeDataVisualizer(sym::Value &value) noexcept -> void;
 
   /**
@@ -214,7 +213,11 @@ public:
   auto Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
 
-  auto GetObjectFile() const noexcept -> ObjectFile *;
+  inline auto
+  GetObjectFile() const noexcept -> ObjectFile *
+  {
+    return mObjectFile.get();
+  }
   auto ContainsProgramCounter(AddrPtr pc) const noexcept -> bool;
   auto UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr;
 

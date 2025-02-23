@@ -57,15 +57,16 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
     : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), initialized(false),
-      exited(false), reaped(false), regs(), mBreakpointLocationStatus(), mTaskCallstack(nullptr),
-      mSupervisor(nullptr)
+      exited(false), reaped(false), regs(), mTaskCallstack(nullptr), mSupervisor(nullptr),
+      mBreakpointLocationStatus()
+
 {
 }
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
     : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
       initialized(true), exited(false), reaped(false), regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()),
-      mBreakpointLocationStatus(), mSupervisor(supervisor.GetSupervisor())
+      mSupervisor(supervisor.GetSupervisor()), mBreakpointLocationStatus()
 {
   mTaskCallstack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
 }
@@ -89,7 +90,7 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
   DBGLOG(core, "Deferred initializing of thread {} completed", mTid);
   if (restart) {
     EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateThreadCreated(
-      {tc.TaskLeaderTid(), mTid, 5}, {tc::RunType::Continue, tc::ResumeTarget::Task}, {}));
+      {tc.TaskLeaderTid(), mTid, 5, 0}, {tc::RunType::Continue, tc::ResumeTarget::Task, 0}, {}));
   }
 }
 

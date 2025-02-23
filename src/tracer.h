@@ -14,7 +14,6 @@
 #include "symbolication/value_visualizer.h"
 #include <mdb_config.h>
 #include <mdbsys/ptrace.h>
-#include <memory_resource>
 #include <notify_pipe.h>
 #include <symbolication/variable_reference.h>
 #include <sys/ioctl.h>
@@ -22,7 +21,7 @@
 #include <unordered_map>
 #include <utils/immutable.h>
 
-class JSContext;
+struct JSContext;
 
 namespace mdb::js {
 class AppScriptingInstance;
@@ -34,7 +33,7 @@ class SymbolFile;
 class TraceeController;
 class WaitStatusReaderThread;
 struct LWP;
-struct TaskInfo;
+class TaskInfo;
 
 using Pid = pid_t;
 using Tid = pid_t;
@@ -220,10 +219,10 @@ public:
 private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
 
-  std::vector<std::unique_ptr<TraceeController>> mTracedProcesses;
-  std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses;
+  std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
+  std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
   ui::dap::DAP *mDAP;
-  std::unique_ptr<WaitStatusReaderThread> mWaiterThread;
+  std::unique_ptr<WaitStatusReaderThread> mWaiterThread{nullptr};
   u32 mBreakpointID{0};
 
   // We do a monotonic increase. Unlike implementations I've previously worked on, and seen (like gdb)
@@ -237,7 +236,7 @@ private:
   // (and update the `Value`'s `mVariableReference`)
   VariableReferenceId mVariablesReferenceCounter{0};
   std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
-  bool already_launched;
+  bool already_launched{false};
   sys::DebuggerConfiguration config;
 
   // Apparently, due to the lovely way of the universe, if a thread clones or forks

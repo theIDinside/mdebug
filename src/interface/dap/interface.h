@@ -61,9 +61,7 @@ public:
     VERIFY(current_size() < buffer_size, "Next read would read < 0 bytes!");
     auto start = std::chrono::high_resolution_clock::now();
     auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
-    const auto duration_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
-        .count();
+    const auto duration_ms = MilliSecondsSince(start);
     ASSERT(duration_ms < 1500, "Read took *way* too long");
     if (read_bytes == -1) {
       CDLOG(errno != EWOULDBLOCK && errno != EAGAIN, core, "command buffer read error: {} for fd {}",
@@ -263,13 +261,13 @@ struct PollState
   }
 
   constexpr void
-  ClearInit(int newClientNotifierFd) noexcept
+  ClearInit() noexcept
   {
     Clear();
   }
 
   constexpr void
-  AddCommandSource(int fd, DebugAdapterClient *client) noexcept
+  AddCommandSource(int fd) noexcept
   {
     fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
     map[fd] = DapNotification{.mSource = InterfaceNotificationSource::DebugAdapterClient};

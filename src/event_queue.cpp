@@ -3,13 +3,11 @@
 #include "common.h"
 #include "supervisor.h"
 #include "tracer.h"
-#include "utils/debug_value.h"
 #include <cstring>
 #include <fcntl.h>
 #include <interface/ui_command.h>
 #include <mutex>
 #include <optional>
-#include <ranges>
 
 namespace mdb {
 
@@ -125,7 +123,7 @@ TraceEvent *
 TraceEvent::CreateForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
 {
   CORE_EVENT_LOG("creating event ForkEvent");
-  return new TraceEvent{param, ForkEvent{{param.target}, new_pid}, TracerEventType::Fork, std::move(reg)};
+  return new TraceEvent{param, ForkEvent{{param.target}, new_pid, false}, TracerEventType::Fork, std::move(reg)};
 }
 
 /* static */
@@ -228,11 +226,11 @@ EventSystem::Initialize() noexcept
   int init[2];
   int internal[2];
 
-  ASSERT(pipe(wait) != -1, "Failed to open pipe");
-  ASSERT(pipe(commands) != -1, "Failed to open pipe");
-  ASSERT(pipe(dbg) != -1, "Failed to open pipe");
-  ASSERT(pipe(init) != -1, "Failed to open pipe")
-  ASSERT(pipe(internal) != -1, "Failed to open pipe")
+  MUST_HOLD(pipe(wait) != -1, "Failed to open pipe");
+  MUST_HOLD(pipe(commands) != -1, "Failed to open pipe");
+  MUST_HOLD(pipe(dbg) != -1, "Failed to open pipe");
+  MUST_HOLD(pipe(init) != -1, "Failed to open pipe")
+  MUST_HOLD(pipe(internal) != -1, "Failed to open pipe")
 
   for (auto read : {wait[0], commands[0], dbg[0], init[0], internal[0]}) {
     ASSERT(fcntl(read, F_SETFL, O_NONBLOCK) != -1, "failed to set read as non-blocking.");
@@ -248,7 +246,8 @@ EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, ui::UIComman
   std::lock_guard lock(mCommandsGuard);
   cmd->SetDebugAdapterClient(*debugAdapter);
   mCommands.push_back(cmd);
-  mdb::DebugValue<int> writeValue = write(mCommandEvents[1], "+", 1);
+  DBGLOG(core, "notify of new command...");
+  int writeValue = write(mCommandEvents[1], "+", 1);
   ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
@@ -257,7 +256,7 @@ EventSystem::PushDebuggerEvent(TraceEvent *event) noexcept
 {
   std::lock_guard lock(mTraceEventGuard);
   mTraceEvents.push_back(event);
-  mdb::DebugValue<int> writeValue = write(mDebuggerEvents[1], "+", 1);
+  int writeValue = write(mDebuggerEvents[1], "+", 1);
   ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
@@ -269,7 +268,7 @@ EventSystem::ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept
     mTraceEvents.push_back(e);
   }
   events.clear();
-  mdb::DebugValue<int> writeValue = write(mDebuggerEvents[1], "+", 1);
+  int writeValue = write(mDebuggerEvents[1], "+", 1);
   ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
@@ -278,14 +277,14 @@ EventSystem::PushInitEvent(TraceEvent *event) noexcept
 {
   std::lock_guard lock(mTraceEventGuard);
   mInitEvent.push_back(event);
-  mdb::DebugValue<int> writeValue = write(mInitEvents[1], "+", 1);
+  int writeValue = write(mInitEvents[1], "+", 1);
   ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
 EventSystem::PushWaitResult(WaitResult result) noexcept
 {
-  mdb::DebugValue<int> writeValue = write(mWaitStatus[1], &result, sizeof(result));
+  int writeValue = write(mWaitStatus[1], &result, sizeof(result));
   ASSERT(writeValue != -1 && writeValue == sizeof(result), "Failed to write notification to pipe");
 }
 
@@ -293,7 +292,7 @@ void
 EventSystem::NotifyNewWaitpidResults() noexcept
 {
   constexpr char writeChar = '+';
-  mdb::DebugValue<int> writeValue = write(mWaitStatus[1], &writeChar, sizeof(writeChar));
+  int writeValue = write(mWaitStatus[1], &writeChar, sizeof(writeChar));
   ASSERT(writeValue != -1 && writeValue == sizeof(writeChar), "Failed to write notification to pipe");
 }
 
@@ -309,8 +308,8 @@ EventSystem::PushReapedWaitResults(std::span<WaitResult> results) noexcept
       for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
         for (const auto &entry : supervisor->GetThreads()) {
           if (entry.mTid == pid) {
-            mWaitEvents.push_back(Event{
-              TraceEvent::CreateThreadExited({supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat)}, false, {})});
+            mWaitEvents.push_back(Event{TraceEvent::CreateThreadExited(
+              {supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat), 0}, false, {})});
           }
         }
       }
@@ -331,7 +330,7 @@ EventSystem::PushInternalEvent(InternalEvent event) noexcept
 {
   std::lock_guard lock(mInternalEventGuard);
   mInternal.push_back(event);
-  mdb::DebugValue<int> writeValue = write(mInternalEvents[1], "+", 1);
+  int writeValue = write(mInternalEvents[1], "+", 1);
   ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
@@ -349,33 +348,33 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
   auto sizeBefore = write.size();
 
   // Check for events
-  constexpr auto HadEventFilter = [](const pollfd &pfd) { return (pfd.revents & POLLIN) == POLLIN; };
-  namespace vw = std::views;
-
-  for (auto &pfd : mPollDescriptors | vw::filter(HadEventFilter)) {
+  for (auto &pfd : mPollDescriptors) {
+    if ((pfd.revents & POLLIN) != POLLIN) {
+      continue;
+    }
     char buffer[128];
     if (pfd.fd == mCommandEvents[0]) {
-      mdb::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytes_read != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mCommandsGuard);
       std::ranges::transform(mCommands, std::back_inserter(write), [](ui::UICommand *cmd) { return Event{cmd}; });
       mCommands.clear();
     } else if (pfd.fd == mDebuggerEvents[0]) {
-      mdb::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytes_read != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(mTraceEvents, std::back_inserter(write),
                              [](TraceEvent *event) { return Event{event}; });
       mTraceEvents.clear();
     } else if (pfd.fd == mInitEvents[0]) {
-      mdb::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytes_read != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(mInitEvent, std::back_inserter(write),
                              [](TraceEvent *event) { return Event{event, true}; });
       mInitEvent.clear();
     } else if (pfd.fd == mInternalEvents[0]) {
-      mdb::DebugValue<ssize_t> bytes_read = read(pfd.fd, buffer, sizeof(buffer));
+      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytes_read != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mInternalEventGuard);
       std::ranges::transform(mInternal, std::back_inserter(write),

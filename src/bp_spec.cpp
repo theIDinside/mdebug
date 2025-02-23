@@ -103,8 +103,9 @@ BreakpointSpecification::Line() const noexcept
   case DapBreakpointType::function:
     [[fallthrough]];
   case DapBreakpointType::instruction:
-    return {};
+    break;
   }
+  return {};
 }
 
 /* static */

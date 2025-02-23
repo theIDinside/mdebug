@@ -79,7 +79,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
 void
 FunctionSymbolicationContext::ProcessInlinedSubroutineDie(DieReference cu_die) noexcept
 {
-  DBGLOG(core, "[symbolication]: process_inline not implemented (cu={}, die={})",
+  DBGLOG(core, "[symbolication]: process_inline not implemented (cu=0x{:x}, die=0x{:x})",
          cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->mSectionOffset);
 }
 
@@ -292,6 +292,7 @@ name_from_tag(DwarfTag tag) noexcept
     break;
   }
   ASSERT(false, "Did not expect that DwarfTag");
+  return "no tag";
 }
 
 void

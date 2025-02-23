@@ -275,10 +275,10 @@ CallStack::CallStack(TraceeController *supervisor, TaskInfo *task) noexcept : mT
 }
 
 Frame *
-CallStack::GetFrame(int frame_id) noexcept
+CallStack::GetFrame(u64 frameId) noexcept
 {
   for (auto &f : mStackFrames) {
-    if (f.FrameId() == frame_id) {
+    if (f.FrameId() == frameId) {
       return &f;
     }
   }
@@ -440,7 +440,7 @@ decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state)
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
   DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
-  const mdb::DebugValue<int> decodedInstructions = sym::decode(reader, state, info.mInfo);
+  const int decodedInstructions = sym::decode(reader, state, info.mInfo);
   DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
   DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
   sym::decode(fde, state, info.mInfo);

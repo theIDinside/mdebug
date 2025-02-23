@@ -79,10 +79,8 @@ NameIndex::Merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_ref
 {
   std::lock_guard lock(mutex);
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
-  auto count = 0;
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
     AddName(name, idx, cu);
-    count++;
   }
 }
 

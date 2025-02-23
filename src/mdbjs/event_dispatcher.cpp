@@ -66,8 +66,6 @@ EventDispatcher::Init() noexcept
     PANIC("Failed to instantiate mdb.events in the ScriptRuntime");
   }
 
-  MdbObject *mdb = JS::GetMaybePtrFromReservedSlot<MdbObject>(mdbObject, MdbObject::ThisPointer);
-
   DBGLOG(interpreter, "Regstering EventDispatcher sub system with trace system");
   mRuntime->AddTrace([this](JSTracer *trc) {
     for (auto &event : mSubscribers) {
@@ -111,7 +109,7 @@ EventDispatcher::Init() noexcept
     });
 
   pub::clone.Subscribe(SubscriberIdentity{this},
-                       [this](TraceeController *tc, const Ref<mdb::TaskInfo> &task, Tid tid) {});
+                       [](TraceeController *tc, const Ref<mdb::TaskInfo> &task, Tid tid) {});
 }
 
 EventDispatcher::EventDispatcher(mdb::js::AppScriptingInstance *runtime) noexcept : mRuntime(runtime) {}

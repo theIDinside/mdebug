@@ -150,8 +150,6 @@ Value::GetMember(std::string_view memberName) noexcept
     return nullptr;
   }
 
-  auto resolver = SymbolFile::GetStaticResolver(*this);
-
   for (auto &mem : type->MemberFields()) {
     if (mem.name == memberName) {
       ASSERT(mContext, "Creating member from value that has no context");

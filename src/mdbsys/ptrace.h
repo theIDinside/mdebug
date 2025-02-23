@@ -10,7 +10,7 @@
 #include <sys/wait.h>
 #include <typedefs.h>
 namespace mdb {
-struct TaskInfo;
+class TaskInfo;
 
 template <size_t... T> constexpr bool always_false_i = false;
 

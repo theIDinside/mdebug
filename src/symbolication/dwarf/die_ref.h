@@ -11,7 +11,7 @@ namespace mdb::sym::dw {
 class UnitData;
 struct DieMetaData;
 class UnitReader;
-class AbbreviationInfo;
+struct AbbreviationInfo;
 
 /**
  * Reads the following data from the unit die for the compilation unit `compilationUnit`:

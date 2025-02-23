@@ -11,6 +11,7 @@
 #include "symbolication/dwarf_defs.h"
 #include "utils/immutable.h"
 #include "utils/scope_defer.h"
+#include "utils/util.h"
 #include <array>
 #include <chrono>
 #include <list>
@@ -25,9 +26,8 @@ class SourceCodeFileLNPResolver
 public:
   SourceCodeFileLNPResolver(CompilationUnit *compilationUnit, dw::LNPHeader *header,
                             std::vector<dw::LineTableEntry> &table, std::vector<AddressRange> &sequences) noexcept
-      : mUnit(compilationUnit), mLineNumberProgramHeader{header},
-        mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()), mTable(table),
-        mSequences(sequences), mIsStatement(header->default_is_stmt)
+      : mLineNumberProgramHeader{header}, mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()),
+        mTable(table), mSequences(sequences), mIsStatement(header->default_is_stmt)
   {
   }
 
@@ -283,7 +283,6 @@ private:
     return mCurrentObjectFileAddressRange.Contains(mAddress);
   }
 
-  CompilationUnit *mUnit;
   dw::LNPHeader *mLineNumberProgramHeader;
   AddressRange mCurrentObjectFileAddressRange;
   std::vector<dw::LineTableEntry> &mTable;
@@ -626,9 +625,7 @@ CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
   if (!IsFunctionSymbolsResolved()) {
     ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData,
                               &mFunctionSymbols = mFunctionSymbols]() {
-      auto us =
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-          .count();
+      const auto us = MicroSecondsSince(start);
       DBGLOG(perf, "Resolved {} function symbols for 0x{:x} in {}us ({})", mFunctionSymbols.size(),
              unit_data->SectionOffset(), us, unit_data->GetObjectFile()->GetFilePath().filename().c_str());
     }};

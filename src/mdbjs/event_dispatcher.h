@@ -10,7 +10,7 @@
 #include <utils/macros.h>
 
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 
 namespace mdb::js {
 
@@ -38,8 +38,20 @@ class EventDispatcher
   // Javascript Type Definition
   /* The class of the global object. */
 
-  static constexpr JSClass JsClass = {
-    .name = "Events", .flags = JSCLASS_HAS_RESERVED_SLOTS(SlotCount), .cOps = nullptr};
+  static consteval JSClass
+  CreateJsClass()
+  {
+    // c++ init, yay!
+    JSClass result{};
+    return result;
+  }
+
+  static constexpr JSClass JsClass = []() {
+    JSClass result{};
+    result.name = "Events";
+    result.flags = JSCLASS_HAS_RESERVED_SLOTS(SlotCount);
+    return result;
+  }();
 
   static constexpr JSFunctionSpec EventDispatcherFunctions[] = {
     JS_FN("on", &EventDispatcher::JS_On, 2, 0), JS_FN("once", &EventDispatcher::JS_Once, 2, 0), JS_FS_END};

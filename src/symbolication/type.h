@@ -76,7 +76,7 @@ public:
 
 class SymbolLocation
 {
-  friend class Symbol;
+  friend struct Symbol;
 
   LocKind mKind;
   union

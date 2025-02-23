@@ -483,7 +483,6 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
     }
     info.mAttributes.reserve(count);
     bool isAddressable = false;
-    bool isAbstractOrigin = false;
     auto index = count;
     while (index > 2 && !isAddressable) {
       isAddressable = HasAddressAttribute(attributes[index - 1], attributes[index - 2]);
@@ -507,7 +506,7 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
     abbr_ptr = restore_to;
     info.mIsAddressable = isAddressable;
     // read declarations
-    for (size_t i = 0;; ++i) {
+    for (;;) {
       Abbreviation abbr;
       abbr_ptr = decode_uleb128(abbr_ptr, abbr.mName);
       abbr_ptr = decode_uleb128(abbr_ptr, abbr.mForm);

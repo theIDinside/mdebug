@@ -82,8 +82,6 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
 
-    auto span = indirectValueObject->View(0, requestedLength);
-
     // actual `char` type
     auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
     auto stringValue =
@@ -123,7 +121,6 @@ ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, Va
     *context.mTask->GetSupervisor(), desiredFirstElementAddress, desiredFirstElementAddress + underlying);
 
   for (auto i = 0u; i < (endIndex - startIndex); ++i) {
-    const auto current_address = desiredFirstElementAddress + (elementTypeSize * i);
     const auto memoryObjectOffset = i * elementTypeSize;
     auto varContext = elementsType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
                                                   : Tracer::Get().CloneFromVariableContext(context);

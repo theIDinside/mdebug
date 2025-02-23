@@ -629,32 +629,6 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
   return headers;
 }
 
-static bool
-LineTableEmpty(std::span<const PerCompilationUnitLineTable> lineTables) noexcept
-{
-  for (const auto &lt : lineTables) {
-    if (!lt.mLineTable.empty()) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool
-LineTableContainsPc(std::span<const PerCompilationUnitLineTable> lineTables, AddrPtr unrelocatedPc,
-                    u32 *outIndex) noexcept
-{
-  for (const auto &[idx, lt] : mdb::EnumerateView{lineTables}) {
-    if (lt.ContainsPc(unrelocatedPc)) {
-      if (outIndex) {
-        *outIndex = idx;
-      }
-      return true;
-    }
-  }
-  return false;
-}
-
 sym::CompilationUnit *
 SourceCodeFile::GetOwningCompilationUnit() const noexcept
 {
@@ -663,7 +637,7 @@ SourceCodeFile::GetOwningCompilationUnit() const noexcept
 
 SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
                                FileEntryIndexVector fileIndices) noexcept
-    : mCompilationUnit(compilationUnit), elf(elf), mFullPath(std::move(path)), mLineInfoFileIndices(fileIndices)
+    : mCompilationUnit(compilationUnit), elf(elf), mLineInfoFileIndices(fileIndices), mFullPath(std::move(path))
 {
 }
 

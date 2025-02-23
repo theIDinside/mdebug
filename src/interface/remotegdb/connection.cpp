@@ -161,25 +161,28 @@ SendResult
 BufferedSocket::write_cmd(std::string_view payload) noexcept
 {
   u32 bytes_sent = 0;
-  char output_buf[payload.size() + 4];
-  output_buf[0] = '$';
+  // TODO(low hanging fruit): This sucks. double writes. Write new container for this specific purpose.
+  mOutputBuffer.clear();
+  mOutputBuffer.reserve(payload.size() + 4);
+  mOutputBuffer.push_back('$');
   u32 acc = 0;
   auto buf_sz = 1u;
   for (; buf_sz < payload.size() + 1; ++buf_sz) {
     char c = payload[buf_sz - 1];
-    output_buf[buf_sz] = c;
+    mOutputBuffer.push_back(c);
     acc += c;
   }
-  output_buf[buf_sz++] = '#';
+  mOutputBuffer.push_back('#');
 
   acc = acc % 256;
   u8 csum = acc;
-  output_buf[buf_sz++] = HexDigits[(csum & 0xf0) >> 4];
-  output_buf[buf_sz++] = HexDigits[(csum & 0xf)];
-  ASSERT(buf_sz == payload.size() + 4, "Unexpected buffer length");
+  mOutputBuffer.push_back(HexDigits[(csum & 0xf0) >> 4]);
+  mOutputBuffer.push_back(HexDigits[(csum & 0xf)]);
+  ASSERT(mOutputBuffer.size() == payload.size() + 4, "Unexpected buffer length: {} == {}", mOutputBuffer.size(),
+         payload.size() + 4);
 
   do {
-    const auto send_res = send(fd_socket, output_buf, buf_sz, 0);
+    const auto send_res = send(fd_socket, mOutputBuffer.data(), mOutputBuffer.size(), 0);
     const auto success = send_res != -1;
     if (!success) {
       DBGLOG(remote, "failed sending {}", payload);
@@ -249,7 +252,8 @@ BufferedSocket::peek_char() noexcept
 u32
 BufferedSocket::buffer_n(u32 requested) noexcept
 {
-  char buf[requested];
+  ASSERT(requested <= 4096, "Maximally a page can be buffered on the stack.");
+  char buf[4096];
   auto can_read = ready(1);
   if (!can_read) {
     return 0;
@@ -269,7 +273,8 @@ BufferedSocket::buffer_n_timeout(u32 requested, int timeout) noexcept
   if (!can_read) {
     return 0;
   } else {
-    char buf[requested];
+    char buf[4096];
+    ASSERT(requested <= std::size(buf), "Requested size larger than stack buffer.");
     if (const auto res = read(fd_socket, buf, requested); res != -1) {
       std::copy(buf, buf + res, std::back_inserter(buffer));
       return res;
@@ -792,7 +797,7 @@ RemoteConnection::process_stop_reply_payload(std::string_view received_payload, 
       // If we're not non-stop, this will stop the entire process
       const auto process_needs_resuming = !remote_settings.is_non_stop;
       EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateThreadExited(
-        {.target = pid, .tid = tid, .sig_or_code = code}, process_needs_resuming, {}));
+        {.target = pid, .tid = tid, .sig_or_code = code, .event_time = 0}, process_needs_resuming, {}));
       return true;
     } else {
       return false;
@@ -1086,15 +1091,15 @@ RemoteConnection::execute_command(qXferCommand &cmd, u32 offset, int timeout) no
   }
   const auto annex_sz = cmd.annex.transform(string_length).value_or(0);
   const auto sz = cmd.fmt.size() + annex_sz + 1 + OffsetLengthFormatMaxBufSize;
-  char cmd_buf[sz];
-  std::memcpy(cmd_buf, cmd.fmt.data(), cmd.fmt.size());
+  auto buf = mBuffer->TakeSpan(sz);
+  std::memcpy(buf.data(), cmd.fmt.data(), cmd.fmt.size());
   if (cmd.annex) {
     const auto &annex = cmd.annex.value();
-    std::memcpy(cmd_buf + cmd.fmt.size(), annex.data(), annex.size());
+    std::memcpy(buf.data() + cmd.fmt.size(), annex.data(), annex.size());
   }
 
-  cmd_buf[cmd.fmt.size() + annex_sz] = ':';
-  const auto param = cmd_buf + cmd.fmt.size() + annex_sz + 1;
+  buf[cmd.fmt.size() + annex_sz] = ':';
+  const auto param = buf.data() + cmd.fmt.size() + annex_sz + 1;
 
   while (true) {
     auto ptr = FormatValue(param, offset);
@@ -1106,7 +1111,7 @@ RemoteConnection::execute_command(qXferCommand &cmd, u32 offset, int timeout) no
     if (ptr == nullptr) {
       return false;
     }
-    std::string_view formatted_command{cmd_buf, ptr};
+    std::string_view formatted_command{buf.data(), ptr};
     const auto write_result = socket.write_cmd(formatted_command);
     ASSERT(write_result, "Failed to execute command '{}'", formatted_command);
 

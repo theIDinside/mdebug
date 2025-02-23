@@ -12,7 +12,7 @@
 namespace mdb {
 class SymbolFile;
 struct CallStackRequest;
-struct TaskInfo;
+class TaskInfo;
 namespace ui::dap {
 struct Scope;
 }
@@ -243,7 +243,7 @@ public:
   explicit CallStack(TraceeController *supervisor, TaskInfo *task) noexcept;
   ~CallStack() = default;
 
-  Frame *GetFrame(int frame_id) noexcept;
+  Frame *GetFrame(u64 frameId) noexcept;
   Frame *GetFrameAtLevel(u32 level) noexcept;
   u64 UnwindRegister(u8 level, u16 register_number) noexcept;
 

@@ -5,7 +5,7 @@
 #include <utils/smartptr.h>
 
 namespace mdb::ui::dap {
-class Scope;
+struct Scope;
 }
 
 namespace mdb::sym {

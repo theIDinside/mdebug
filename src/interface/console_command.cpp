@@ -52,7 +52,7 @@ ConsoleCommandInterpreter::Interpret(const std::string &input, Allocator *alloca
 }
 
 GenericCommand::GenericCommand(std::string functionName, Function &&function) noexcept
-    : mFunctionName(std::move(functionName)), mFunction(std::move(function))
+    : mFunction(std::move(function)), mFunctionName(std::move(functionName))
 {
 }
 

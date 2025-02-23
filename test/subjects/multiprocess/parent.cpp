@@ -55,7 +55,7 @@ main(int argc, char *argv[])
     bool exitThread = false;
     std::thread bg_thr{[&]() {
       for (; !exitThread;) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{2500});
+        std::this_thread::sleep_for(std::chrono::milliseconds{15});
         std::cout << "Yaaaaaaawn I " << std::this_thread::get_id() << " just woke up" << std::endl;
       }
     }};

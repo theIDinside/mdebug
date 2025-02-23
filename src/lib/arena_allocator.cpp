@@ -28,8 +28,7 @@ ScopedArenaAllocator::GetAllocator() const noexcept
   return mAllocator;
 }
 
-ArenaResource::ArenaResource(std::size_t allocBlockSize, std::pmr::memory_resource *upstreamResource) noexcept
-    : mResource(upstreamResource), mAllocated(0), mArenaCapacity(allocBlockSize)
+ArenaResource::ArenaResource(std::size_t allocBlockSize) noexcept : mAllocated(0), mArenaCapacity(allocBlockSize)
 {
   auto result = mmap(nullptr, allocBlockSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   MUST_HOLD(result != MAP_FAILED, "posix_memalign failed");
@@ -55,16 +54,16 @@ ArenaResource::ExtendAllocation(Page pageCount) noexcept
 
 /*static*/
 ArenaResource::UniquePtr
-ArenaResource::Create(Page pagesToAllocate, std::pmr::memory_resource *upstreamResource) noexcept
+ArenaResource::Create(Page pagesToAllocate) noexcept
 {
-  return std::unique_ptr<ArenaResource>(new ArenaResource{pagesToAllocate.SizeBytes(), upstreamResource});
+  return std::unique_ptr<ArenaResource>(new ArenaResource{pagesToAllocate.SizeBytes()});
 }
 
 /*static*/
 ArenaResource::SharedPtr
-ArenaResource::CreateShared(Page pagesToAllocate, std::pmr::memory_resource *upstreamResource) noexcept
+ArenaResource::CreateShared(Page pagesToAllocate) noexcept
 {
-  return std::shared_ptr<ArenaResource>(new ArenaResource{pagesToAllocate.SizeBytes(), upstreamResource});
+  return std::shared_ptr<ArenaResource>(new ArenaResource{pagesToAllocate.SizeBytes()});
 }
 
 u64

@@ -114,7 +114,7 @@ DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
   posted_event_notifier = w;
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
-  mTemporaryArena = alloc::ArenaResource::Create(alloc::Page{16}, nullptr);
+  mTemporaryArena = alloc::ArenaResource::Create(alloc::Page{16});
 }
 
 DAP::~DAP() noexcept {}
@@ -135,11 +135,11 @@ DAP::WriteProtocolMessage(std::string_view msg) noexcept
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
   CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
   const auto headerWrite = write(mTracerOutputFileDescriptor, header.data(), header.size());
-  VERIFY(headerWrite != -1 && headerWrite == header.size(),
+  VERIFY(headerWrite != -1 && headerWrite == static_cast<ssize_t>(header.size()),
          "Did not write entire header or some other error occured: {}", headerWrite);
   const auto msgWrite = write(mTracerOutputFileDescriptor, msg.data(), msg.size());
-  VERIFY(msgWrite != -1 && msgWrite == msg.size(), "Did not write entire message or some other error occured: {}",
-         msgWrite);
+  VERIFY(msgWrite != -1 && msgWrite == static_cast<ssize_t>(msg.size()),
+         "Did not write entire message or some other error occured: {}", msgWrite);
 }
 
 void
@@ -172,10 +172,10 @@ DAP::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexc
 {
   // TODO(simon): Change this to a stack allocated (or a memory arena from which we can pull the contiguous memory
   // from and then just leak back to the allocator)
-  state.ClearInit(new_client_notifier.read.fd);
+  state.ClearInit();
 
   const auto fd = mClient->ReadFileDescriptor();
-  state.AddCommandSource(fd, mClient);
+  state.AddCommandSource(fd);
 
   for (auto io : mStandardIo) {
     state.AddStandardIOSource(io.mFd, io.mPid);
@@ -389,9 +389,9 @@ DebugAdapterClient::InitAllocators() noexcept
   using alloc::Page;
 
   // Create a 1 megabyte arena allocator.
-  mCommandsAllocator = ArenaResource::Create(Page{16}, nullptr);
-  mCommandResponseAllocator = ArenaResource::Create(Page{128}, nullptr);
-  mEventsAllocator = ArenaResource::Create(Page{16}, nullptr);
+  mCommandsAllocator = ArenaResource::Create(Page{16});
+  mCommandResponseAllocator = ArenaResource::Create(Page{128});
+  mEventsAllocator = ArenaResource::Create(Page{16});
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
@@ -414,24 +414,6 @@ DebugAdapterClient::~DebugAdapterClient() noexcept
     close(in);
     close(out);
   }
-}
-
-static std::string
-generate_random_alphanumeric_string(size_t length)
-{
-  static constexpr std::string_view characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  std::string random_string;
-  random_string.reserve(length);
-
-  std::random_device rd;  // Seed for the random number engine
-  std::mt19937 gen(rd()); // Standard mersenne_twister_engine
-  std::uniform_int_distribution<> dis(0, characters.size() - 1);
-
-  for (size_t i = 0; i < length; ++i) {
-    random_string.push_back(characters[dis(gen)]);
-  }
-
-  return random_string;
 }
 
 alloc::ArenaResource *
@@ -545,13 +527,13 @@ DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) cons
   iov[1].iov_len = output.size();
 
   const auto header = fmt::format("Content-Length: {}\r\n\r\n", output.size());
-  if constexpr (MDB_DEBUG == 1) {
-    DBGLOG(dap, "WRITING -->{}{}<---", header, output);
-  }
+#ifdef DEBUG
+  DBGLOG(dap, "WRITING -->{}{}<---", header, output);
+#endif
 
   const auto result = ::writev(out, iov, 2);
-  VERIFY(result == (header_length + output.size()), "Required flush-write but wrote partial content: {} out of {}",
-         result, header_length + output.size());
+  VERIFY(result == (header_length + static_cast<ssize_t>(output.size())),
+         "Required flush-write but wrote partial content: {} out of {}", result, header_length + output.size());
   VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", out, output);
   return result >= static_cast<ssize_t>(output.size());
 }

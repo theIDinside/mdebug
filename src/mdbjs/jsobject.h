@@ -82,20 +82,24 @@ template <typename Derived, IsRefCountable WrappedType, StringLiteral string> st
   static consteval JSClassOps
   ClassOps() noexcept
   {
+    JSClassOps result{};
     if constexpr (HasResolve<Derived>) {
-      return JSClassOps{
-        .resolve = &ResolveProperty, .finalize = DetermineFinalizeOp(), .trace = DetermineTraceFunction()};
-    } else {
-      return JSClassOps{.resolve = nullptr, .finalize = DetermineFinalizeOp(), .trace = DetermineTraceFunction()};
+      result.resolve = &ResolveProperty;
     }
+    result.finalize = DetermineFinalizeOp();
+    result.trace = DetermineTraceFunction();
+    return result;
   }
 
   static constexpr JSClassOps classOps = ClassOps();
 
-  static constexpr JSClass clasp = {.name = Name,
-                                    .flags =
-                                      JSCLASS_HAS_RESERVED_SLOTS(Derived::SlotCount) | JSCLASS_FOREGROUND_FINALIZE,
-                                    .cOps = &classOps};
+  static constexpr JSClass clasp = []() {
+    JSClass result{};
+    result.name = Name;
+    result.flags = JSCLASS_HAS_RESERVED_SLOTS(Derived::SlotCount) | JSCLASS_FOREGROUND_FINALIZE;
+    result.cOps = &classOps;
+    return result;
+  }();
 
   template <typename... Args>
   static JSObject *
@@ -221,11 +225,12 @@ template <typename Derived, typename WrappedType, StringLiteral string> struct P
   ClassOps() noexcept
   {
     // This type will never have a `finalize` method because it will never actually own the object.
+    JSClassOps result{};
     if constexpr (HasResolve<Derived>) {
-      return JSClassOps{.resolve = &ResolveProperty, .finalize = nullptr, .trace = &TraceSubobjects};
-    } else {
-      return JSClassOps{.resolve = nullptr, .finalize = nullptr, .trace = &TraceSubobjects};
+      result.resolve = &ResolveProperty;
     }
+    result.trace = &TraceSubobjects;
+    return result;
   }
 
   static constexpr JSClassOps classOps = ClassOps();

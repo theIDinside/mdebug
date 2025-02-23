@@ -13,7 +13,7 @@
 using namespace std::string_view_literals;
 namespace mdb {
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 class SymbolFile;
 
 class BreakpointLocation;
@@ -340,7 +340,7 @@ public:
   TaskExecuteResponse DoDisconnect(bool terminate) noexcept;
 
   static Interface CreateCommandInterface(const InterfaceConfig &config) noexcept;
-  std::optional<std::string> ReadNullTerminatedString(TraceePointer<char> address, u32 buffer_size = 128) noexcept;
+  std::optional<std::string> ReadNullTerminatedString(TraceePointer<char> address) noexcept;
   void SetTarget(TraceeController *tc) noexcept;
 
   virtual bool

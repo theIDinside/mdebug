@@ -67,14 +67,14 @@ TraceeCommandInterface::DoDisconnect(bool terminate) noexcept
 }
 
 std::optional<std::string>
-TraceeCommandInterface::ReadNullTerminatedString(TraceePointer<char> address, u32 buffer_size) noexcept
+TraceeCommandInterface::ReadNullTerminatedString(TraceePointer<char> address) noexcept
 {
   std::string result{};
   if (address == nullptr) {
     return std::nullopt;
   }
-  u8 buf[buffer_size];
-  auto res = ReadBytes(address.as<void>(), buffer_size, buf);
+  u8 buf[256];
+  auto res = ReadBytes(address.as<void>(), std::size(buf), buf);
   while (res.success()) {
     for (auto i = 0u; i < res.bytes_read; ++i) {
       if (buf[i] == 0) {

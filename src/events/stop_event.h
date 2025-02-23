@@ -6,7 +6,7 @@
 #include <utils/smartptr.h>
 namespace mdb {
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 } // namespace mdb
 
 #define FOR_EACH_EVENT(EACH_FN)                                                                                   \

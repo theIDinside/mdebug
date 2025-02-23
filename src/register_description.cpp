@@ -97,6 +97,6 @@ RegisterDescription::Store(const std::vector<std::pair<u32, std::vector<u8>>> &d
 void
 RegisterDescription::FillFromHexEncodedString(std::string_view hexString) noexcept
 {
-  deserialize_hex_encoded(hexString, mRegisterContents);
+  DeserializeHexEncoded(hexString, mRegisterContents);
 }
 } // namespace mdb

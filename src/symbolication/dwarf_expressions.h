@@ -8,7 +8,7 @@
 
 namespace mdb {
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 } // namespace mdb
 
 namespace mdb::sym {

@@ -56,7 +56,7 @@ static constexpr std::string_view decoded =
 TEST(GdbRemote, DecodeGPacket)
 {
   std::array<u8, 816> buf{};
-  mdb::deserialize_hex_encoded(registerPacket2, buf);
+  mdb::DeserializeHexEncoded(registerPacket2, buf);
   std::array<u8, 816> buf2{};
   std::string_view v = decoded;
   auto i = 0;
@@ -76,8 +76,8 @@ TEST(GdbRemote, RunLengthDecode)
   std::array<u8, 8> val_non_encoded{};
   std::array<u8, 8> val_encoded{};
 
-  mdb::deserialize_hex_encoded(contents, val_non_encoded);
-  mdb::deserialize_hex_encoded(encoded, val_encoded);
+  mdb::DeserializeHexEncoded(contents, val_non_encoded);
+  mdb::DeserializeHexEncoded(encoded, val_encoded);
 
   for (auto i = 0u; i < val_encoded.size(); ++i) {
     EXPECT_EQ(val_encoded[i], val_non_encoded[i]);

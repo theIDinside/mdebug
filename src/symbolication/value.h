@@ -16,7 +16,7 @@ using Bytes = std::span<const u8>;
 using MemoryContentBytes = mdb::ByteBuffer::OwnPtr;
 
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 } // namespace mdb
 
 namespace mdb::sym {
@@ -43,7 +43,6 @@ enum class ValueError
   SegFault
 };
 
-class ValueResolver;
 using VarContext = std::shared_ptr<VariableContext>;
 
 class Value

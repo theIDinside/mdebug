@@ -4,8 +4,10 @@
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/rnglists.h"
+#include "utils/scope_defer.h"
 #include <chrono>
 #include <ranges>
+#include <ratio>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
 namespace mdb::sym::dw {
@@ -78,14 +80,17 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
 void
 UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) noexcept
 {
+  auto bytesPrepared = 0;
+  ScopedDefer scopedTiming{[start = std::chrono::high_resolution_clock::now(), this, &bytesPrepared]() {
+    const auto time = MicroSecondsSince(start);
+    DBGLOG(perf, "Unit data task for {} units ({} bytes) finished in {}us", mCompilationUnitsToParse.size(),
+           bytesPrepared, time);
+  }};
   std::vector<UnitData *> result;
+  result.reserve(mCompilationUnitsToParse.size());
   for (const auto &header : mCompilationUnitsToParse) {
-    const auto start = std::chrono::high_resolution_clock::now();
+    bytesPrepared += header.CompilationUnitSize();
     auto unit_data = PrepareUnitData(obj, header);
-    const auto time =
-      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-        .count();
-    DBGLOG(perf, "prepared unit data for 0x{:x} in {}us", header.DebugInfoSectionOffset(), time);
     result.push_back(unit_data);
   }
 
@@ -100,10 +105,8 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
       continue;
     }
 
-    const auto die_sec_offset = reader.SectionOffset();
     const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
     auto &abbrs = dwarfUnit->GetAbbreviation(abbr_code);
-    const auto unitDie = DieMetaData::CreateDie(die_sec_offset, abbrs, NONE_INDEX, uleb_sz, NONE_INDEX);
     auto *newCompilationUnit = new sym::CompilationUnit{dwarfUnit};
 
     std::optional<AddrPtr> low;
@@ -162,7 +165,6 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
 std::vector<UnitDataTask *>
 UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allocator) noexcept
 {
-  const auto sectionSize = obj->GetElf()->debug_info->Size();
   UnitHeadersRead headerRead;
   headerRead.ReadUnitHeaders(obj);
   std::pmr::vector<std::pmr::vector<sym::dw::UnitHeader>> works{allocator};

@@ -3,6 +3,7 @@
 // system
 #include <algorithm>
 // mdb
+#include <chrono>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf.h>
 #include <symbolication/dwarf/debug_info_reader.h>
@@ -132,7 +133,6 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
 
   std::vector<sym::dw::UnitData *> followed_references{};
   std::vector<sym::dw::UnitData *> type_units{};
-
   ScopedDefer clear_metadata{[&]() {
     for (auto &comp_unit : mCompUnitsToIndex) {
       comp_unit->ClearLoadedCache();
@@ -142,9 +142,8 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       cu->ClearLoadedCache();
     }
   }};
-
+  auto start = std::chrono::high_resolution_clock::now();
   for (auto comp_unit : mCompUnitsToIndex) {
-    auto start = std::chrono::high_resolution_clock::now();
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->GetDies();
     if (dies.front().mTag == DwarfTag::DW_TAG_type_unit) {
@@ -190,16 +189,14 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       auto is_decl = false;
       auto is_super_scope_var = false;
       auto has_loc = false;
-      auto decl_file = 0u;
-      auto decl_line = 0u;
       reader.SeekDie(die);
       for (const auto &value : abb.mAttributes) {
         switch (value.mName) {
         case Attribute::DW_AT_decl_file: {
-          decl_file = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
+          reader.SkipAttribute(value);
         } break;
         case Attribute::DW_AT_decl_line: {
-          decl_line = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
+          reader.SkipAttribute(value);
         } break;
         // register name
         case Attribute::DW_AT_name: {
@@ -346,11 +343,9 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
         continue;
       }
     }
-
-    DBGLOG(perf, "unit 0x{:x} indexed in {}", comp_unit->SectionOffset(),
-           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-             .count());
   }
+  auto us = MicroSecondsSince(start);
+  DBGLOG(core, "indexed {} compilation units ({} bytes) in {}us", mCompUnitsToIndex.size(), sz, us);
   auto idx = mObjectFile->GetNameIndex();
   idx->mNamespaces.Merge(namespaces);
   idx->mFreeFunctions.Merge(free_functions);

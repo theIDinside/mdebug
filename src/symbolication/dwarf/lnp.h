@@ -165,12 +165,6 @@ struct LineTableEntry
   bool epilogue_begin : 1;
   bool IsEndOfSequence : 1 {false};
 
-  friend auto
-  operator<=>(const LineTableEntry &l, const LineTableEntry &r) noexcept
-  {
-    const auto res = (l.pc.get() + l.IsEndOfSequence) <=> (r.pc.get() + r.IsEndOfSequence);
-  }
-
   AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
 };
 

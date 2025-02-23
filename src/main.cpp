@@ -171,6 +171,7 @@ main(int argc, const char **argv)
   while (!ui_thread_setup) {
     std::this_thread::sleep_for(std::chrono::milliseconds{1});
   }
+  DBGLOG(core, "UI thread initialized and configured.");
 
   mdb::Tracer::InitializeDapSerializers();
   mdb::Tracer::InitInterpreterAndStartDebugger(eventSystem);

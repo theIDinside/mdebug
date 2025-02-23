@@ -347,15 +347,15 @@ struct InternalEvent
   InternalEvent(const InternalEvent &) noexcept = default;
   InternalEvent &operator=(const InternalEvent &) noexcept = default;
 
+  InternalEventDiscriminant mType;
   union
   {
     InvalidateSupervisor uInvalidateSupervisor;
     TerminateDebugging uTerminateDebugging;
   };
-  InternalEventDiscriminant mType;
 
-  UnionVariantConstructor(InternalEvent, InvalidateSupervisor)
-    UnionVariantConstructor(InternalEvent, TerminateDebugging)
+  UnionVariantConstructor(InternalEvent, InvalidateSupervisor);
+  UnionVariantConstructor(InternalEvent, TerminateDebugging);
 };
 
 struct Event

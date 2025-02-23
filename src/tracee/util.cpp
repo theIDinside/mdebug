@@ -10,7 +10,7 @@
 #include <sys/wait.h>
 namespace mdb {
 u32
-SystemVectorExtensionSize() noexcept
+QueryAvxSupport() noexcept
 {
 #if defined(__GNUC__) || defined(__clang__)
   if (__builtin_cpu_supports("avx512f")) {
@@ -36,8 +36,6 @@ SystemVectorExtensionSize() noexcept
   return 16; // Fallback: Assume 128 bits = 16 bytes
 }
 
-static constexpr std::string_view reg_names[17] = {"rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp", "r8",
-                                                   "r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip"};
 static constexpr u16 RegNumToX86_64Offsets[24] = {
   offsetof(user_regs_struct, rax), offsetof(user_regs_struct, rbx), offsetof(user_regs_struct, rcx),
   offsetof(user_regs_struct, rdx), offsetof(user_regs_struct, rsi), offsetof(user_regs_struct, rdi),
@@ -49,6 +47,7 @@ static constexpr u16 RegNumToX86_64Offsets[24] = {
   offsetof(user_regs_struct, es),  offsetof(user_regs_struct, fs),  offsetof(user_regs_struct, gs),
 };
 
+#ifdef DEBUG
 static constexpr std::array<std::pair<u8, u16>, 24> UserRegsMapping = {
   {{8, offsetof(user_regs_struct, rax)}, {8, offsetof(user_regs_struct, rbx)},
    {8, offsetof(user_regs_struct, rcx)}, {8, offsetof(user_regs_struct, rdx)},
@@ -62,7 +61,7 @@ static constexpr std::array<std::pair<u8, u16>, 24> UserRegsMapping = {
    {4, offsetof(user_regs_struct, cs)},  {4, offsetof(user_regs_struct, ss)},
    {4, offsetof(user_regs_struct, ds)},  {4, offsetof(user_regs_struct, es)},
    {4, offsetof(user_regs_struct, fs)},  {4, offsetof(user_regs_struct, gs)}}};
-
+#endif
 u64
 get_register(user_regs_struct *regs, int reg_number) noexcept
 {
@@ -113,7 +112,6 @@ PidTid
 ParsePidTid(std::string_view input, bool formatIsHex) noexcept
 {
   auto sep = input.find('.');
-  const auto format = formatIsHex ? 16 : 10;
   if (sep == input.npos) {
     return PidTid{.mPid = ParseProcessId(input, formatIsHex), .mTid = {}};
   }

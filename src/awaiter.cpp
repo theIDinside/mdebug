@@ -85,8 +85,8 @@ SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
 void
 WaitStatusReaderThread::Start() noexcept
 {
-  mThread = DebuggerThread::SpawnDebuggerThread(
-    "WaitStatReader", [this](std::stop_token &token) { SignalFileDescriptorWork(token); });
+  mThread = DebuggerThread::SpawnDebuggerThread("WaitStatReader",
+                                                [](std::stop_token &token) { SignalFileDescriptorWork(token); });
 }
 
 /* static */

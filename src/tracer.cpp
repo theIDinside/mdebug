@@ -63,8 +63,7 @@ on_sigchild_handler(int)
   }
 }
 
-Tracer::Tracer(sys::DebuggerConfiguration init) noexcept
-    : mTracedProcesses{}, already_launched(false), config(std::move(init)), mWaiterThread(nullptr)
+Tracer::Tracer(sys::DebuggerConfiguration init) noexcept : config(std::move(init))
 {
   ASSERT(Tracer::sTracerInstance == nullptr,
          "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -305,7 +304,8 @@ static int
 exec(const Path &program, std::span<const std::string> prog_args, char **env)
 {
   const auto arg_size = prog_args.size() + 2;
-  const char *args[arg_size];
+  std::vector<const char *> args;
+  args.resize(arg_size, nullptr);
   const char *cmd = program.c_str();
   args[0] = cmd;
   auto idx = 1;
@@ -314,7 +314,7 @@ exec(const Path &program, std::span<const std::string> prog_args, char **env)
   }
   environ = env;
   args[arg_size - 1] = nullptr;
-  return execvp(cmd, (char *const *)args);
+  return execvp(cmd, (char *const *)args.data());
 }
 
 Pid
@@ -722,6 +722,8 @@ Tracer::InitializeDapSerializers() noexcept
   tracer.mResolveReference = new sym::ResolveReference{};
   tracer.mResolveCString = new sym::ResolveCString{};
   tracer.mResolveArray = new sym::ResolveArray{};
+
+  DBGLOG(core, "Debug Adapter serializers initialized.");
 }
 
 u32
@@ -756,9 +758,8 @@ Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
   JS::SetWarningReporter(cx, [](JSContext *cx, JSErrorReport *report) { JS::PrintError(stderr, report, true); });
   AppScriptingInstance *js = mdb::js::AppScriptingInstance::Create(cx, global);
   js->InitRuntime();
-
   JSAutoRealm ar(js->GetRuntimeContext(), js->GetRuntimeGlobal());
-
+  DBGLOG(core, "Javascript initialized. Starting debugger core loop.");
   sApplicationJsContext = cx;
   sScriptRuntime = js;
   // It's now safe to use `ScriptRuntime`

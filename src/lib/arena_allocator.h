@@ -43,13 +43,12 @@ public:
 // A temporary bump-allocator.
 class ArenaResource : public std::pmr::memory_resource
 {
-  std::pmr::memory_resource *mResource;
 
   u8 *mAllocatedBuffer;
   std::size_t mAllocated;
   std::size_t mArenaCapacity;
 
-  ArenaResource(std::size_t allocBlockSize, std::pmr::memory_resource *upstreamResource) noexcept;
+  ArenaResource(std::size_t allocBlockSize) noexcept;
 
   bool ExtendAllocation(Page pageCount) noexcept;
 
@@ -60,8 +59,8 @@ public:
 
   // Creates an arena allocator. `upstreamResource` can be null, if you don't want the arena allocator
   // to be able to allocate more memory than it's pre-allocated block.
-  static UniquePtr Create(Page pagesToAllocate, std::pmr::memory_resource *upstreamResource) noexcept;
-  static SharedPtr CreateShared(Page pagesToAllocate, std::pmr::memory_resource *upstreamResource) noexcept;
+  static UniquePtr Create(Page pagesToAllocate) noexcept;
+  static SharedPtr CreateShared(Page pagesToAllocate) noexcept;
   u64 CurrentlyAllocated() const noexcept;
   void Reset() noexcept;
   void Reset(u64 previousOffset) noexcept;

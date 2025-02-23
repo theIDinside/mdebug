@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <sys/mman.h>
 #include <sys/poll.h>
 #include <thread>
 #include <typedefs.h>
@@ -291,6 +292,7 @@ class BufferedSocket
 {
   mdb::ScopedFd fd_socket;
   std::vector<char> buffer{};
+  std::vector<char> mOutputBuffer{};
   u32 head{0};
 
   bool empty() const noexcept;
@@ -534,6 +536,33 @@ template <> struct std::hash<mdb::gdb::GdbThread>
 };
 
 namespace mdb::gdb {
+
+class WriteBuffer
+{
+  char *mPtr;
+  u64 mSize;
+
+  WriteBuffer(char *ptr, u64 size) : mPtr(ptr), mSize(size) {}
+
+public:
+  static WriteBuffer *
+  Create(u64 pages) noexcept
+  {
+    auto ptr = (char *)mmap(nullptr, pages * 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    MUST_HOLD(ptr != MAP_FAILED && ptr != nullptr, "mmap failed");
+    return new WriteBuffer{ptr, pages * 4096};
+  }
+
+  std::span<char>
+  TakeSpan(u64 size) noexcept
+  {
+    if (size > mSize) {
+      PANIC("Max size reached");
+    }
+    return std::span{mPtr, size};
+  }
+};
+
 class RemoteConnection
 {
 public:
@@ -543,6 +572,7 @@ public:
   friend class RemoteSessionConfigurator;
 
 private:
+  WriteBuffer *mBuffer = WriteBuffer::Create(16);
   std::unordered_map<GdbThread, std::vector<GdbThread>> threads;
   std::string host;
   BufferedSocket socket;

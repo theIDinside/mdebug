@@ -17,7 +17,7 @@
 #include <optional>
 #include <string>
 
-class JSContext;
+struct JSContext;
 class Tracer;
 
 extern const JSClassOps DefaultGlobalClassOps;
@@ -114,11 +114,20 @@ public:
   // When a MdbObject is traced, it must trace the stored box.
   static void TraceSubsystems(JSTracer *trc, JSObject *obj);
 
-  static constexpr JSClassOps classOps = {.finalize = finalize, .trace = TraceSubsystems};
+  static constexpr JSClassOps classOps = []() {
+    JSClassOps result{};
+    result.finalize = finalize;
+    result.trace = TraceSubsystems;
+    return result;
+  }();
 
-  static constexpr JSClass clasp = {.name = "mdb",
-                                    .flags = JSCLASS_HAS_RESERVED_SLOTS(SlotCount) | JSCLASS_FOREGROUND_FINALIZE,
-                                    .cOps = &classOps};
+  static constexpr JSClass clasp = []() {
+    JSClass result{};
+    result.name = "mdb";
+    result.flags = JSCLASS_HAS_RESERVED_SLOTS(SlotCount) | JSCLASS_FOREGROUND_FINALIZE;
+    result.cOps = &classOps;
+    return result;
+  }();
 
   static JSObject *CreateAndBindToJsObject(AppScriptingInstance *runtime, MdbObject *handle) noexcept;
   void AddTrace(RegisterTraceFunction &&fn) noexcept;

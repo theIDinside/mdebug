@@ -19,7 +19,7 @@ struct CompileBreakpointCallable;
 }
 
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 class ObjectFile;
 class SymbolFile;
 
@@ -166,10 +166,10 @@ class UserBreakpoint
   INTERNAL_REFERENCE_COUNT(UserBreakpoint)
 protected:
   using enum EventResult;
-  bool mEnabledByUser;
+  bool mEnabledByUser{true};
   Ref<BreakpointLocation> mBreakpointLocation;
   std::unique_ptr<BpErr> mInstallError;
-  std::unique_ptr<js::CompileBreakpointCallable> mExpression;
+  std::unique_ptr<js::CompileBreakpointCallable> mExpression{nullptr};
   friend UserBreakpoints;
 
 public:

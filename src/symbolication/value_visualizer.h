@@ -9,7 +9,7 @@
 #include <vector>
 
 namespace mdb {
-class VariableContext;
+struct VariableContext;
 class TraceeController;
 class SymbolFile;
 } // namespace mdb

@@ -6,6 +6,7 @@
 #include "log.h"
 #include "thread_pool.h"
 #include "utils/logger.h"
+#include "utils/util.h"
 #include <chrono>
 
 namespace mdb {
@@ -33,14 +34,14 @@ Task::Execute() noexcept
 }
 
 void
-NoOp::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
+NoOp::ExecuteTask(std::pmr::memory_resource *) noexcept
 {
 }
 
 TaskGroup::TaskGroup(std::string_view name) noexcept : mPromise(), mName(name), mTaskLock(), mDoneTasks()
 {
   DBGLOG(perf, "Created task group {}", name);
-  mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{10000}, nullptr);
+  mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{10000});
 }
 
 TaskGroup::~TaskGroup() noexcept
@@ -82,13 +83,8 @@ TaskGroup::TaskDone(Task *task) noexcept
   }
   mDoneTasks.push_back(task);
   if (mDoneTasks.size() == mTasks.size()) {
-    if (mdb::log::Config::LogTaskGroup()) {
-      auto time =
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - mStart)
-          .count();
-
-      CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG {}]: done, time={}us", mName, time);
-    }
+    const auto time = MicroSecondsSince(mStart);
+    DBGLOG(perf, "[TG {}]: done, time={}us", mName, time);
     mPromise.set_value();
   }
 }

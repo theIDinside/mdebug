@@ -2,6 +2,7 @@
 #pragma once
 #include "common.h"
 #include <algorithm>
+#include <chrono>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -251,5 +252,19 @@ template <> struct fmt::formatter<DebugAdapterProtocolString>
     return escapeView.copy(ctx.out());
   }
 };
+
+constexpr auto
+MicroSecondsSince(auto start) noexcept
+{
+  return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+    .count();
+}
+
+constexpr auto
+MilliSecondsSince(auto start) noexcept
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+    .count();
+}
 
 using DAPStringView = DebugAdapterProtocolString;

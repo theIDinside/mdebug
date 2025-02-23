@@ -120,7 +120,7 @@ namespace fmt {
 template <> struct formatter<mdb::ui::dap::ProcessId> : Default<mdb::ui::dap::ProcessId>
 {
   template <typename FormatContext>
-  auto
+  constexpr auto
   format(const mdb::ui::dap::ProcessId &processId, FormatContext &ctx) const
   {
     auto it = ctx.out();

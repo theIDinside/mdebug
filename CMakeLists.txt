@@ -10,12 +10,25 @@ option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
 option(CLANG_TIDY_CHECK "Configure clang-tidy to run during build" OFF)
 
 find_package(PkgConfig REQUIRED)
-set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
+string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
+
+set(SPIDERMONKEY_FLAGDISABLES "-Wno-invalid-offsetof -Wno-unused-parameter")
+
+if(MIDAS_BUILD_TYPE STREQUAL "DEBUG")
+  set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey-debug/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
+elseif(MIDAS_BUILD_TYPE STREQUAL "RELEASE")
+  set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
+elseif(MIDAS_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
+  set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
+endif()
+
+message(Spidermonkey cflags: ${SPIDERMONKEY_CFLAGS})
 
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
-string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 set(MIDAS_SOURCES
   # root
   src/awaiter.cpp
@@ -219,8 +232,20 @@ else()
   set(MIDAS_DEBUG_FLAGS "${MIDAS_DEBUG_FLAGS} -gdwarf-4")
 endif()
 
+# Check if the compiler name contains gcc or clang
+if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
+  message("Compiler is GNU, and it gives false positives on dangling references for libfmt, making release builds impossible. Therefore gcc uses -Wno-error=dangling-reference")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference ${SPIDERMONKEY_FLAGDISABLES} -Wno-exceptions")
+elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  # clang using GNU's stdlib ranges, is.... iffy at the moment.
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto ${SPIDERMONKEY_FLAGDISABLES} -Wno-exceptions")
+else ()
+  error("Unknown compiler")
+endif ()
+
 set(CMAKE_CXX_FLAGS_DEBUG "${COMMON_FLAGS} ${MIDAS_DEBUG_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${COMMON_FLAGS} ${MIDAS_RELEASE_FLAGS} -g3")
 message("Build type for project: ${CMAKE_BUILD_TYPE}")
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -263,7 +288,7 @@ if(BUILD_MDB_TESTS)
     LIBS fmt::fmt mdb_spinlock)
 
   AddTest(NAME expected_tests
-    SOURCES test/unittest/expected_tests.cpp
+    SOURCES test/unittest/expected_tests.cpp src/common.cpp src/utils/logger.cpp
     LIBS fmt::fmt)
 
   AddTest(NAME xml_tests
@@ -300,12 +325,12 @@ target_link_options(mdb PRIVATE "-fuse-ld=lld")
 # Check if the compiler name contains gcc or clang
 if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
   message("Compiler is GNU, and it gives false positives on dangling references for libfmt, making release builds impossible. Therefore gcc uses -Wno-error=dangling-reference")
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference ${SPIDERMONKEY_FLAGDISABLES}")
   target_compile_definitions(mdb PRIVATE COMPILERUSED_GCC)
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   # clang using GNU's stdlib ranges, is.... iffy at the moment.
   target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto ${SPIDERMONKEY_FLAGDISABLES}")
 else ()
   error("Unknown compiler")
 endif ()
@@ -322,3 +347,4 @@ if(CLANG_TIDY_CHECK)
   # set CXX_CLANG_TIDY property after defining the target
   set_target_properties(mdb PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
 endif()
+

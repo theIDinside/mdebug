@@ -392,7 +392,7 @@ struct StepOut final : public ui::UICommand
 struct SetBreakpointsResponse final : ui::UIResult
 {
   SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointRequestKind type) noexcept;
-  std::vector<ui::dap::Breakpoint> mBreakpoints;
+  std::vector<ui::dap::Breakpoint> mBreakpoints{};
   BreakpointRequestKind mType;
   ~SetBreakpointsResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
@@ -549,7 +549,7 @@ using SessionId = std::string;
 struct LaunchResponse final : public UIResult
 {
   LaunchResponse(SessionId &&sessionId, std::optional<Pid> newProcess, bool success, UICommandPtr cmd) noexcept
-      : UIResult{success, cmd}, mRequestingSessionId{std::move(sessionId)}, mProcessId{newProcess} {};
+      : UIResult{success, cmd}, mProcessId{newProcess}, mRequestingSessionId{std::move(sessionId)} {};
   ~LaunchResponse() noexcept override;
   std::optional<Pid> mProcessId;
   SessionId mRequestingSessionId;

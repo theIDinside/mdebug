@@ -10,7 +10,7 @@ struct ElfSection;
 class ObjectFile;
 class SymbolFile;
 class TraceeController;
-struct TaskInfo;
+class TaskInfo;
 class DwarfBinaryReader;
 class Elf;
 } // namespace mdb

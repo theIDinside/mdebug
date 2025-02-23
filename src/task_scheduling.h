@@ -12,7 +12,7 @@
 namespace mdb {
 class TraceeController;
 struct BpStat;
-struct TaskInfo;
+class TaskInfo;
 struct TraceEvent;
 } // namespace mdb
 

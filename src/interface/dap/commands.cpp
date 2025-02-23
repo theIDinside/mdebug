@@ -49,26 +49,32 @@ template <> struct formatter<ui::dap::Message>
       return fmt::format_to(ctx.out(), R"({{"id":{},"format":"{}","showUser":{}}})", msg.id.value_or(-1),
                             msg.format, msg.show_user);
     } else {
-      std::vector<char> buf{0};
-      buf.reserve(256);
+
       auto sz = 1u;
       auto max = msg.variables.size();
+      auto it = fmt::format_to(ctx.out(), R"({{ "id": {}, "format": "{}","variables":{{)", msg.id.value_or(-1),
+                               msg.format);
       for (const auto &[k, v] : msg.variables) {
         if (sz < max) {
-          fmt::format_to(std::back_inserter(buf), R"("{}":"{}", )", k, v);
+          it = fmt::format_to(it, R"("{}":"{}", )", k, v);
         } else {
-          fmt::format_to(std::back_inserter(buf), R"("{}":"{}")", k, v);
+          it = fmt::format_to(it, R"("{}":"{}")", k, v);
         }
         ++sz;
       }
-      buf.push_back(0);
-      return fmt::format_to(ctx.out(), R"({{ "id": {}, "format": "{}", "variables":{{ {} }}, "showUser":{}}})",
-                            msg.id.value_or(-1), msg.format, fmt::join(buf, ""), msg.show_user);
+
+      return fmt::format_to(it, R"(}}, "showUser":{}}})", msg.show_user);
     }
   }
 };
 
 } // namespace fmt
+
+#define GetOrSendError(name)                                                                                      \
+  auto name = GetSupervisor();                                                                                    \
+  if (!name || name->IsExited()) {                                                                                \
+    return new ErrorResponse{StackTrace::Request, this, fmt::format("Process no longer live: {}", mPid), {}};     \
+  }
 
 namespace mdb {
 ui::UIResultPtr
@@ -76,10 +82,8 @@ ui::UICommand::LogExecute() noexcept
 {
   auto start = std::chrono::high_resolution_clock::now();
   auto result = Execute();
-  const auto duration_us =
-    std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
-      .count();
-  DBGLOG(perf, "[command]: {} executed in {} us", name(), duration_us);
+  const auto commandExecTime = MicroSecondsSince(start);
+  DBGLOG(perf, "[command]: {} executed in {} us", name(), commandExecTime);
   return result;
 }
 
@@ -174,7 +178,8 @@ PauseResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
 UIResultPtr
 Pause::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  GetOrSendError(target);
+
   ASSERT(target, "No target {}", mPid);
   auto task = target->GetTaskByTid(pauseArgs.threadId);
   if (task->IsStopped()) {
@@ -213,7 +218,11 @@ ReverseContinue::Execute() noexcept
 {
   auto res = new ReverseContinueResponse{true, this};
   auto target = GetSupervisor();
-  auto ok = target->ReverseResumeTarget(tc::ResumeAction{.type = tc::RunType::Continue});
+  // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
+  // _any_ target, and use that to resume backwards (since RR is the controller.).
+  ASSERT(target, "must have target.");
+  auto ok = target->ReverseResumeTarget(tc::ResumeAction{
+    .type = tc::RunType::Continue, .target = tc::ResumeTarget::AllNonRunningInProcess, .mDeliverSignal = 0});
   res->success = ok;
   return res;
 }
@@ -240,9 +249,9 @@ ContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
 UIResultPtr
 Continue::Execute() noexcept
 {
+  GetOrSendError(target);
   auto res = new ContinueResponse{true, this};
   res->continue_all = continue_all;
-  auto target = GetSupervisor();
   if (continue_all && !target->SomeTaskCanBeResumed()) {
     std::vector<Tid> running_tasks{};
     for (const auto &entry : target->GetThreads()) {
@@ -290,7 +299,8 @@ NextResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
 UIResultPtr
 Next::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  GetOrSendError(target);
+
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->IsStopped()) {
@@ -348,6 +358,7 @@ UIResultPtr
 StepBack::Execute() noexcept
 {
   auto target = GetSupervisor();
+  ASSERT(target, "must have target");
 
   if (!target->IsReplaySession()) {
     return new StepBackResponse{StepBackResponse::Result::NotReplaySession, this};
@@ -357,7 +368,8 @@ StepBack::Execute() noexcept
     return new StepBackResponse{StepBackResponse::Result::NotStopped, this};
   }
 
-  target->ReverseResumeTarget(tc::ResumeAction{.type = tc::RunType::Step});
+  target->ReverseResumeTarget(tc::ResumeAction{
+    .type = tc::RunType::Step, .target = tc::ResumeTarget::AllNonRunningInProcess, .mDeliverSignal = 0});
   return new StepBackResponse{StepBackResponse::Result::Success, this};
 }
 
@@ -383,7 +395,8 @@ StepInResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 UIResultPtr
 StepIn::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  GetOrSendError(target);
+
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->IsStopped()) {
@@ -426,7 +439,7 @@ StepOutResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
 UIResultPtr
 StepOut::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  GetOrSendError(target);
   auto task = target->GetTaskByTid(thread_id);
 
   if (!task->IsStopped()) {
@@ -449,7 +462,7 @@ StepOut::Execute() noexcept
 
 SetBreakpointsResponse::SetBreakpointsResponse(bool success, ui::UICommandPtr cmd,
                                                BreakpointRequestKind type) noexcept
-    : ui::UIResult(success, cmd), mType(type), mBreakpoints()
+    : ui::UIResult(success, cmd), mType(type)
 {
 }
 
@@ -511,11 +524,8 @@ SetBreakpoints::SetBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noe
 UIResultPtr
 SetBreakpoints::Execute() noexcept
 {
+  GetOrSendError(target);
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::source};
-  auto target = GetSupervisor();
-  if (!target) {
-    return res;
-  }
 
   ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
   ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
@@ -571,6 +581,8 @@ SetInstructionBreakpoints::SetInstructionBreakpoints(UICommandArg arg, nlohmann:
 UIResultPtr
 SetInstructionBreakpoints::Execute() noexcept
 {
+  GetOrSendError(target);
+
   using BP = ui::dap::Breakpoint;
   Set<BreakpointSpecification> bps{};
   const auto ibps = args.at("breakpoints");
@@ -581,7 +593,7 @@ SetInstructionBreakpoints::Execute() noexcept
     ibkpt["instructionReference"].get_to(addr_str);
     bps.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{addr_str}));
   }
-  auto target = GetSupervisor();
+
   target->SetInstructionBreakpoints(bps);
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
@@ -607,6 +619,8 @@ SetFunctionBreakpoints::SetFunctionBreakpoints(UICommandArg arg, nlohmann::json 
 UIResultPtr
 SetFunctionBreakpoints::Execute() noexcept
 {
+  GetOrSendError(target);
+
   using BP = ui::dap::Breakpoint;
   Set<BreakpointSpecification> bkpts{};
   std::vector<std::string_view> new_ones{};
@@ -622,7 +636,6 @@ SetFunctionBreakpoints::Execute() noexcept
 
     bkpts.insert(BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, fn_name, is_regex));
   }
-  auto target = GetSupervisor();
 
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
@@ -656,11 +669,12 @@ WriteMemory::WriteMemory(UICommandArg arg, std::optional<AddrPtr> address, int o
 UIResultPtr
 WriteMemory::Execute() noexcept
 {
-  auto supervisor = GetSupervisor();
+  GetOrSendError(target);
+
   auto response = new WriteMemoryResponse{false, this};
   response->bytes_written = 0;
   if (address) {
-    const auto result = supervisor->GetInterface().WriteBytes(address.value(), bytes.data(), bytes.size());
+    const auto result = target->GetInterface().WriteBytes(address.value(), bytes.data(), bytes.size());
     response->success = result.success;
     if (result.success) {
       response->bytes_written = result.bytes_written;
@@ -696,7 +710,8 @@ UIResultPtr
 ReadMemory::Execute() noexcept
 {
   if (address) {
-    auto sv = GetSupervisor()->ReadToVector(*address, bytes);
+    GetOrSendError(target);
+    auto sv = target->ReadToVector(*address, bytes);
     auto res = new ReadMemoryResponse{true, this};
     res->data_base64 = mdb::encode_base64(sv->span());
     res->first_readable_address = *address;
@@ -734,16 +749,16 @@ ConfigurationDone::Execute() noexcept
   mDAPClient->PushDelayedEvent(new ConfigurationDoneResponse{true, this});
   mDAPClient->ConfigDone(mPid);
   supervisor->ConfigurationDone();
+  using namespace tc;
   switch (supervisor->GetSessionType()) {
   case TargetSession::Launched: {
     DBGLOG(core, "configurationDone - resuming target {}", supervisor->TaskLeaderTid());
-    using namespace tc;
-    supervisor->ResumeTarget(tc::ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
+    supervisor->ResumeTarget(ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
     break;
   }
   case TargetSession::Attached:
     if (supervisor->IsReplaySession()) {
-      supervisor->ResumeTarget(tc::ResumeAction{tc::RunType::Continue});
+      supervisor->ResumeTarget(ResumeAction{RunType::Continue, ResumeTarget::AllNonRunningInProcess, 0});
     } else {
       DBGLOG(core, "configurationDone - doing nothing for normal attach sessions {}", supervisor->TaskLeaderTid());
     }
@@ -777,10 +792,12 @@ Disconnect::Execute() noexcept
   // We don't allow for child sessions to be terminated, and not have the entire application torn down.
   // We only allow for suspension, or detaching individual child sessions. This behavior is also mimicked for RR
   // sessions, as destroying a process would invalidate the entire application trace.
+  GetOrSendError(target);
+
   if (mTerminateTracee) {
     Tracer::Get().TerminateSession();
   } else {
-    GetSupervisor()->Disconnect();
+    target->Disconnect();
   }
   mDAPClient->PushDelayedEvent(new DisconnectResponse{true, this});
   mDAPClient->PushDelayedEvent(new TerminatedEvent{mPid});
@@ -795,6 +812,7 @@ Initialize::Initialize(UICommandArg arg, nlohmann::json &&arguments) noexcept
 UIResultPtr
 Initialize::Execute() noexcept
 {
+  DBGLOG(core, "Executing initialize request.");
   bool RRSession = false;
   if (args.contains("RRSession")) {
     RRSession = args.at("RRSession");
@@ -889,8 +907,9 @@ LaunchResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 Launch::Launch(UICommandArg arg, SessionId &&id, bool stopOnEntry, Path &&program,
                std::vector<std::string> &&program_args,
                std::optional<BreakpointBehavior> breakpointBehavior) noexcept
-    : UICommand{arg}, mRequestingSessionId{std::move(id)}, mStopOnEntry{stopOnEntry}, mProgram{std::move(program)},
-      mProgramArgs{std::move(program_args)}, mBreakpointBehavior{breakpointBehavior}
+    : UICommand{arg}, mStopOnEntry{stopOnEntry}, mProgram{std::move(program)},
+      mProgramArgs{std::move(program_args)}, mBreakpointBehavior{breakpointBehavior},
+      mRequestingSessionId{std::move(id)}
 {
 }
 
@@ -968,13 +987,9 @@ ThreadsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
 UIResultPtr
 Threads::Execute() noexcept
 {
-  // todo(simon): right now, we only support 1 process, but theoretically the current design
-  // allows for more; it would require some work to get the DAP protocol to play nicely though.
-  // therefore we just hand back the threads of the currently active target
+  GetOrSendError(target);
+
   auto response = new ThreadsResponse{true, this};
-
-  auto target = GetSupervisor();
-
   response->threads.reserve(target->GetThreads().size());
   auto &it = target->GetInterface();
 
@@ -1026,24 +1041,12 @@ StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   return result;
 }
 
-constexpr bool
-is_debug_build()
-{
-  if constexpr (MDB_DEBUG == 0) {
-    return false;
-  } else {
-    return true;
-  }
-}
-
 UIResultPtr
 StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
-  auto target = GetSupervisor();
-  if (!target || target->IsExited()) {
-    return new ErrorResponse{StackTrace::Request, this, fmt::format("Process has already died: {}", threadId), {}};
-  }
+  GetOrSendError(target);
+
   auto task = target->GetTaskByTid(threadId);
   if (task == nullptr) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
@@ -1137,13 +1140,13 @@ UIResultPtr
 Disassemble::Execute() noexcept
 {
   if (address) {
+    GetOrSendError(target);
     auto res = new DisassembleResponse{true, this};
     res->instructions.reserve(ins_count);
     int remaining = ins_count;
     if (ins_offset < 0) {
       const int negative_offset = std::abs(ins_offset);
-      sym::zydis_disasm_backwards(GetSupervisor(), address.value(), static_cast<u32>(negative_offset),
-                                  res->instructions);
+      sym::zydis_disasm_backwards(target, address.value(), static_cast<u32>(negative_offset), res->instructions);
       if (negative_offset < ins_count) {
         for (auto i = 0u; i < res->instructions.size(); i++) {
           if (res->instructions[i].address == address) {
@@ -1165,7 +1168,7 @@ Disassemble::Execute() noexcept
     }
 
     if (remaining > 0) {
-      sym::zydis_disasm(GetSupervisor(), address.value(), static_cast<u32>(std::abs(ins_offset)), remaining,
+      sym::zydis_disasm(target, address.value(), static_cast<u32>(std::abs(ins_offset)), remaining,
                         res->instructions);
     }
     return res;
@@ -1180,10 +1183,19 @@ DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   std::pmr::string result{arenaAllocator};
   result.reserve(256 + (256 * instructions.size()));
   auto outIt = std::back_inserter(result);
-  fmt::format_to(
+  auto it = fmt::format_to(
     outIt,
-    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[{}]}}}})",
-    seq, request_seq, mPid, fmt::join(instructions, ","));
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[)",
+    seq, request_seq, mPid);
+  auto count = 0;
+  for (const auto &inst : instructions) {
+    if (count > 0) {
+      *it++ = ',';
+    }
+    it = fmt::format_to(it, R"({})", inst);
+    count++;
+  }
+  it = fmt::format_to(it, R"(]}}}})");
   return result;
 }
 

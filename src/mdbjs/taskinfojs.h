@@ -20,8 +20,9 @@ ToString(Out iteratorLike, const TaskT &task)
                         task.mTid, task.mSessionId, task.IsStopped());
 }
 
-struct TaskInfo : public RefPtrJsObject<mdb::js::TaskInfo, mdb::TaskInfo, StringLiteral{"Task"}>
+class TaskInfo : public RefPtrJsObject<mdb::js::TaskInfo, mdb::TaskInfo, StringLiteral{"Task"}>
 {
+public:
   enum Slots
   {
     ThisPointer,

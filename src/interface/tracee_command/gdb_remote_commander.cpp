@@ -145,9 +145,9 @@ GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexce
   std::string_view str{msg};
   str.remove_prefix(1);
   auto ptr = read_buffer;
-  char dec_buffer[size * 2];
-  const auto len = gdb::DecodeRunLengthEncoding(str, dec_buffer, size * 2);
-  std::string_view decoded{dec_buffer, len};
+  auto decodeBuffer = mWriteBuffer->TakeSpan(size * 2);
+  const auto len = gdb::DecodeRunLengthEncoding(str, decodeBuffer.data(), decodeBuffer.size_bytes());
+  std::string_view decoded{decodeBuffer.data(), len};
   ASSERT((decoded.size() & 0b1) == 0, "Expected buffer to be divisible by 2");
   while (!decoded.empty()) {
     *ptr = fromhex(decoded[0]) * 16 + fromhex(decoded[1]);
