@@ -44,9 +44,11 @@ using JobPtr = Task *;
 
 class TaskGroup
 {
+  pid_t mPid;
+
 public:
   TaskGroup(std::string_view name) noexcept;
-  ~TaskGroup() noexcept;
+  ~TaskGroup() noexcept = default;
 
   void AddTask(Task *task) noexcept;
 
@@ -66,7 +68,6 @@ public:
   alloc::ArenaResource *GetTemporaryAllocator() const noexcept;
 
 private:
-  std::chrono::high_resolution_clock::time_point mStart;
   std::promise<void> mPromise;
   std::string_view mName;
   std::mutex mTaskLock;

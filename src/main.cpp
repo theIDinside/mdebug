@@ -37,7 +37,6 @@ std::mutex m;
 std::condition_variable cv;
 std::string data;
 bool ready = false;
-bool exit_debug_session = false;
 
 mdb::Tracer *mdb::Tracer::sTracerInstance = nullptr;
 mdb::js::AppScriptingInstance *mdb::Tracer::sScriptRuntime = nullptr;
@@ -54,11 +53,20 @@ mdb::ThreadPool *mdb::ThreadPool::sGlobalThreadPool = new mdb::ThreadPool{};
 int
 main(int argc, const char **argv)
 {
+  using mdb::logging::Logger;
+  using mdb::logging::ProfilingLogger;
+  signal(SIGTERM, [](int sig) {
+    if (auto logger = ProfilingLogger::Instance(); logger && sig == SIGTERM) {
+      logger->WriteEvents();
+      delete logger;
+    }
+    mdb::EventSystem::Get().PushInternalEvent(mdb::TerminateDebugging{});
+  });
   // Sets main thread id. It's static so subsequent calls from other threads should be fine.
   mdb::GetMainThreadId();
   mdb::EventSystem *eventSystem = mdb::EventSystem::Initialize();
 
-  auto res = mdb::sys::parse_cli(argc, argv);
+  auto res = mdb::sys::ParseCommandLineArguments(argc, argv);
   if (!res.is_expected()) {
     auto &&err = res.error();
     switch (err.info) {
@@ -73,12 +81,10 @@ main(int argc, const char **argv)
   }
 
   const mdb::sys::DebuggerConfiguration &config = res.value();
-  {
-    using enum Channel;
-    for (const auto id : Enum<Channel>::Variants()) {
-      mdb::logging::Logger::GetLogger()->SetupChannel(config.LogDirectory(), id);
-    }
-  }
+
+  const auto logEnvVar = std::getenv("LOG");
+  Logger::ConfigureLogging(config.LogDirectory(), logEnvVar);
+  ProfilingLogger::ConfigureProfiling(config.LogDirectory());
 
   std::span<const char *> args(argv, argc);
   namespace logging = mdb::logging;
@@ -86,10 +92,6 @@ main(int argc, const char **argv)
   for (const auto arg : args.subspan(1)) {
     DBGLOG(core, "{}", arg);
   }
-
-  auto log = config.log_config();
-  log.configure_logging(true);
-  CDLOG(log.awaiter, core, "Setting awaiter log on");
 
   mdb::Tracer::Create(config);
   mdb::ThreadPool::GetGlobalPool()->Init(config.ThreadPoolSize());
@@ -177,7 +179,8 @@ main(int argc, const char **argv)
   mdb::Tracer::InitInterpreterAndStartDebugger(eventSystem);
 
   mdb::ThreadPool::ShutdownGlobalPool();
-  exit_debug_session = true;
   mdb::Tracer::Get().KillUI();
   DBGLOG(core, "Exited...");
+  ProfilingLogger::Instance()->WriteEvents();
+  return 0;
 }

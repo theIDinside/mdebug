@@ -37,7 +37,7 @@ TEST(StringSplit, CommaSeparated)
 {
   std::string foo = "eh,dwarf,dap,";
   std::set<std::string_view> expected{"eh", "dwarf", "dap"};
-  auto res = mdb::split_string(foo, ",");
+  auto res = mdb::SplitString(foo, ",");
   EXPECT_EQ(res.size(), expected.size());
   std::set<std::string_view> res_set{res.begin(), res.end()};
   for (const auto item : res_set) {

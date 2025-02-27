@@ -85,7 +85,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
 void
 FunctionSymbolicationContext::ProcessInlinedSubroutineDie(DieReference cu_die) noexcept
 {
-  DBGLOG(core, "[symbolication]: process_inline not implemented (cu=0x{:x}, die=0x{:x})",
+  DBGLOG(core, "[symbolication]: process_inline not implemented (cu={}, die=0x{:x})",
          cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->mSectionOffset);
 }
 
@@ -318,7 +318,7 @@ TypeSymbolicationContext::process_member_variable(DieReference cu_die) noexcept
   }
 
   ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
-         "loclistx location descriptors not supported yet. cu=0x{:x}, die=0x{:x}",
+         "loclistx location descriptors not supported yet. cu={}, die=0x{:x}",
          cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->mSectionOffset);
   ASSERT(type_id, "Expected to find type attribute for die 0x{:x} ({})", cu_die.GetDie()->mSectionOffset,
          to_str(cu_die.GetDie()->mTag));

@@ -27,10 +27,14 @@ function addTest(suite, test, is_todo = false) {
     return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
 add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
 set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
-set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)`
+set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
+set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")
+set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")`
   } else {
     return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
-add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)`
+add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
+set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")
+set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")`
   }
 }
 

@@ -112,6 +112,13 @@ int
 main(int argc, const char **argv)
 {
   foo();
+  auto ptr =
+    new MiscData{.pair = {.pair = IntLangPair{.value = 42, .lang = ProgrammingLanaguage::CPP}, // A2 B3 C4 D5
+                          .value = 1337,
+                          .lang = ProgrammingLanaguage::DLang},
+                 .fpvalue = 80085.4f,
+                 .name = "The great baz",
+                 .lang = ProgrammingLanaguage::Javascript};
   MiscData val1{.pair = {.pair = IntLangPair{.value = 42, .lang = ProgrammingLanaguage::CPP}, // A2 B3 C4 D5
                          .value = 1337,
                          .lang = ProgrammingLanaguage::DLang},

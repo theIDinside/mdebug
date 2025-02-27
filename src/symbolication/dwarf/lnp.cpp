@@ -21,18 +21,19 @@ using FileIndex = u32;
 */
 
 #define LNP_ASSERT(cond, formatString, ...)                                                                       \
-  ASSERT((cond), "[object={}, lnp=0x{:x}]: " formatString, mObjectFile->GetFilePath().filename().c_str(),         \
-         sec_offset __VA_OPT__(, ) __VA_ARGS__)
+  ASSERT((cond), "[object={}, lnp={}]: " formatString, mObjectFile->GetFilePath().filename().c_str(),             \
+         mSectionOffset __VA_OPT__(, ) __VA_ARGS__)
 
 LNPHeader::LNPHeader(ObjectFile *object, u64 section_offset, u64 initial_length, const u8 *data,
                      const u8 *data_end, DwarfVersion version, u8 addr_size, u8 min_len, u8 max_ops,
                      bool default_is_stmt, i8 line_base, u8 line_range, u8 opcode_base,
                      OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
                      std::vector<FileEntry> &&file_names) noexcept
-    : sec_offset(section_offset), initial_length(initial_length), data(data), data_end(data_end), version(version),
-      addr_size(addr_size), min_len(min_len), max_ops(max_ops), default_is_stmt(default_is_stmt),
-      line_base(line_base), line_range(line_range), opcode_base(opcode_base), mObjectFile(object),
-      std_opcode_lengths(opcode_lengths), directories(std::move(directories)), mFileEntries(std::move(file_names))
+    : mSectionOffset(section_offset), mInitialLength(initial_length), mData(data), mDataEnd(data_end),
+      mVersion(version), mAddrSize(addr_size), mMinLength(min_len), mMaxOps(max_ops),
+      mDefaultIsStatement(default_is_stmt), mLineBase(line_base), mLineRange(line_range), mOpcodeBase(opcode_base),
+      mObjectFile(object), std_opcode_lengths(opcode_lengths), mDirectories(std::move(directories)),
+      mFileEntries(std::move(file_names))
 {
 }
 
@@ -44,15 +45,15 @@ LNPFilePath::LNPFilePath(Path &&path, u32 index)
 std::optional<Path>
 LNPHeader::file(u32 f_index) const noexcept
 {
-  const auto adjusted_index = version == DwarfVersion::D4 ? (f_index == 0 ? 0 : f_index - 1) : f_index;
+  const auto adjusted_index = mVersion == DwarfVersion::D4 ? (f_index == 0 ? 0 : f_index - 1) : f_index;
   if (adjusted_index >= mFileEntries.size()) {
     return {};
   }
 
   for (const auto &[i, f] : mdb::EnumerateView(mFileEntries)) {
     if (i == adjusted_index) {
-      const auto dir_index = lnp_index(f.dir_index, version);
-      return std::filesystem::path{fmt::format("{}/{}", directories[dir_index].path, f.file_name)}
+      const auto dir_index = lnp_index(f.dir_index, mVersion);
+      return std::filesystem::path{fmt::format("{}/{}", mDirectories[dir_index].path, f.file_name)}
         .lexically_normal();
     }
   }
@@ -63,8 +64,8 @@ LNPHeader::file(u32 f_index) const noexcept
 Path
 LNPHeader::CompileDirectoryJoin(const Path &p) const noexcept
 {
-  if (version == DwarfVersion::D5) {
-    return (directories[0].path / p).lexically_normal();
+  if (mVersion == DwarfVersion::D5) {
+    return (mDirectories[0].path / p).lexically_normal();
   }
   LNP_ASSERT(mCompilationUnitBuildDirectory != nullptr, "Expected build directory to not be null, p={}",
              p.c_str());
@@ -94,7 +95,7 @@ LNPHeader::CacheLNPFilePaths() noexcept
   path_buf.reserve(1024);
 
   int fileIndex = 0;
-  switch (version) {
+  switch (mVersion) {
   case DwarfVersion::D2:
   case DwarfVersion::D3:
   case DwarfVersion::D4:
@@ -106,19 +107,19 @@ LNPHeader::CacheLNPFilePaths() noexcept
 
   for (const auto &f : mFileEntries) {
     path_buf.clear();
-    const auto index = lnp_index(f.dir_index, version);
+    const auto index = lnp_index(f.dir_index, mVersion);
     // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
     // and we have not made copies.
-    if (directories.empty()) {
+    if (mDirectories.empty()) {
       auto p = FileEntryToPath(f);
       mFileToFileIndex[p].Add(fileIndex);
     } else {
       std::string_view buildDir;
-      if (std::to_underlying(version) < 5 && f.dir_index == 0) {
+      if (std::to_underlying(mVersion) < 5 && f.dir_index == 0) {
         LNP_ASSERT(mCompilationUnitBuildDirectory != nullptr, "Expected to have set build directory for LNP");
         buildDir = mCompilationUnitBuildDirectory;
       } else {
-        buildDir = directories[index].path;
+        buildDir = mDirectories[index].path;
       }
       fmt::format_to(std::back_inserter(path_buf), "{}/{}", buildDir, f.file_name);
       auto p = std::filesystem::path{path_buf}.lexically_normal();

@@ -198,7 +198,7 @@ Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 {
   auto dapClient = cmd->mDAPClient;
   auto scoped = dapClient->GetResponseArenaAllocator()->ScopeAllocation();
-  auto result = cmd->LogExecute();
+  auto result = cmd->Execute();
 
   if (result) [[likely]] {
     ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
@@ -257,6 +257,10 @@ Tracer::HandleInternalEvent(InternalEvent evt) noexcept
       sApplicationState = TracerProcess::RequestedShutdown;
     }
   } break;
+  case mdb::InternalEventDiscriminant::TerminateDebugging: {
+    sApplicationState = TracerProcess::RequestedShutdown;
+    break;
+  }
   default:
     PANIC("Unhandled internal event");
   }
@@ -739,31 +743,38 @@ Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
   if (!JS_Init()) {
     PANIC("Failed to init JS!");
   }
+  AppScriptingInstance *js = nullptr;
+  {
+    JSContext *cx = JS_NewContext(JS::DefaultHeapMaxBytes);
 
-  JSContext *cx = JS_NewContext(JS::DefaultHeapMaxBytes);
+    if (!::js::UseInternalJobQueues(cx)) {
+      PANIC("Failed to use internal job queues");
+    }
+    // We must instantiate self-hosting *after* setting up job queue.
+    if (!JS::InitSelfHostedCode(cx)) {
+      PANIC("init self hosted code failed");
+    }
+    JS::RootedObject global(cx, mdb::js::RuntimeGlobal::create(cx));
 
-  if (!::js::UseInternalJobQueues(cx)) {
-    PANIC("Failed to use internal job queues");
+    if (!global) {
+      PANIC("Failed to create debugger global object");
+    }
+
+    JS::SetWarningReporter(cx, [](JSContext *cx, JSErrorReport *report) { JS::PrintError(stderr, report, true); });
+    js = mdb::js::AppScriptingInstance::Create(cx, global);
+    js->InitRuntime();
+    JSAutoRealm ar(js->GetRuntimeContext(), js->GetRuntimeGlobal());
+    DBGLOG(core, "Javascript initialized. Starting debugger core loop.");
+    sApplicationJsContext = cx;
+    sScriptRuntime = js;
+    // It's now safe to use `ScriptRuntime`
+    MainLoop(eventSystem, js);
+    JS_MaybeGC(cx);
+    ::js::StopDrainingJobQueue(cx);
   }
-  // We must instantiate self-hosting *after* setting up job queue.
-  if (!JS::InitSelfHostedCode(cx)) {
-    PANIC("init self hosted code failed");
+  if (js) {
+    js->Shutdown();
   }
-  JS::RootedObject global(cx, mdb::js::RuntimeGlobal::create(cx));
-
-  if (!global) {
-    PANIC("Failed to create debugger global object");
-  }
-
-  JS::SetWarningReporter(cx, [](JSContext *cx, JSErrorReport *report) { JS::PrintError(stderr, report, true); });
-  AppScriptingInstance *js = mdb::js::AppScriptingInstance::Create(cx, global);
-  js->InitRuntime();
-  JSAutoRealm ar(js->GetRuntimeContext(), js->GetRuntimeGlobal());
-  DBGLOG(core, "Javascript initialized. Starting debugger core loop.");
-  sApplicationJsContext = cx;
-  sScriptRuntime = js;
-  // It's now safe to use `ScriptRuntime`
-  MainLoop(eventSystem, js);
 }
 
 void

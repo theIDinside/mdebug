@@ -141,17 +141,10 @@ private:
 
 enum class DapClientSession
 {
-  // This is the strange world we live in.
-  None,
   Launch,
   Attach,
-  LaunchedChildSession,
-  AttachedChildSession,
   RR,
-  RRChildSession
 };
-
-DapClientSession GetNewChildSessionType(DapClientSession type) noexcept;
 
 struct SupervisorEntry
 {
@@ -198,7 +191,7 @@ class DebugAdapterClient
   void InitAllocators() noexcept;
 
 public:
-  DapClientSession session_type;
+  DapClientSession mSessionType;
   ~DebugAdapterClient() noexcept;
 
   alloc::ArenaResource *GetCommandArenaAllocator() noexcept;

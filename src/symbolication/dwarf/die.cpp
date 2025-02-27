@@ -151,7 +151,7 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
   const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
 
   ASSERT(abbr_code <= dwarfUnit->mAbbreviation.size() && abbr_code != 0,
-         "[cu=0x{:x}]: Unit DIE abbreviation code {} is invalid, max={}", dwarfUnit->SectionOffset(), abbr_code,
+         "[cu={}]: Unit DIE abbreviation code {} is invalid, max={}", dwarfUnit->SectionOffset(), abbr_code,
          dwarfUnit->mAbbreviation.size());
   auto &abbreviation = dwarfUnit->mAbbreviation[abbr_code - 1];
   const auto unitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
@@ -159,7 +159,7 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
   dwarfUnit->mBuildDirectory = buildDirectory;
   dwarfUnit->mStatementListOffset = lineNumberProgramOffset;
 
-  DBGLOG(dwarf, "[cu=0x{:x}] build directory='{}' with stmt_list offset=0x{:x}", dwarfUnit->SectionOffset(),
+  DBGLOG(dwarf, "[cu={}] build directory='{}' with stmt_list offset=0x{:x}", dwarfUnit->SectionOffset(),
          dwarfUnit->mBuildDirectory ? dwarfUnit->mBuildDirectory : "could not find build directory",
          dwarfUnit->mStatementListOffset);
   return dwarfUnit;
@@ -215,7 +215,7 @@ UnitData::ClearLoadedCache() noexcept
   mFullyLoaded = false;
   std::lock_guard lock(mLoadDiesMutex);
   if (!mDieCollection.empty()) {
-    DBGLOG(dwarf, "0x{:x} clearing dies", SectionOffset())
+    DBGLOG(dwarf, "{} clearing dies", SectionOffset())
     mDieCollection.clear();
     // actually release the memory. Otherwise, what's the point?
     mDieCollection.shrink_to_fit();
@@ -234,7 +234,7 @@ UnitData::header() const noexcept
   return mUnitHeader;
 }
 
-u64
+Offset
 UnitData::SectionOffset() const noexcept
 {
   return header().DebugInfoSectionOffset();
@@ -307,7 +307,7 @@ UnitData::AddressBase() noexcept
   }
   DieReference ref{this, &GetDies()[0]};
   auto base = ref.ReadAttribute(Attribute::DW_AT_addr_base);
-  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: 0x{:x}", SectionOffset());
+  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: {}", SectionOffset());
   mAddrOffset = base.transform([](auto v) { return v.AsUnsignedValue(); });
   return mAddrOffset.value();
 }
@@ -320,7 +320,7 @@ UnitData::RangeListBase() noexcept
   }
   DieReference ref{this, &GetDies()[0]};
   auto base = ref.ReadAttribute(Attribute::DW_AT_rnglists_base);
-  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: 0x{:x}", SectionOffset());
+  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: {}", SectionOffset());
   mRngListOffset = base.transform([](auto v) { return v.AsUnsignedValue(); });
   return mRngListOffset.value();
 }
@@ -333,7 +333,7 @@ UnitData::StrOffsetBase() noexcept
   }
   DieReference ref{this, &GetDies()[0]};
   auto base = ref.ReadAttribute(Attribute::DW_AT_str_offsets_base);
-  ASSERT(base, "Could not find Attribute::DW_AT_str_offsets_base for this cu: 0x{:x}", SectionOffset());
+  ASSERT(base, "Could not find Attribute::DW_AT_str_offsets_base for this cu: {}", SectionOffset());
   mStringOffset = base.transform(AttributeValue::ToUnsignedValue);
   return mStringOffset;
 }
@@ -359,7 +359,7 @@ UnitData::LoadDieMetadata() noexcept
   const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
 
   ASSERT(abbr_code <= mAbbreviation.size() && abbr_code != 0,
-         "[cu=0x{:x}]: Unit DIE abbreviation code {} is invalid, max={}", SectionOffset(), abbr_code,
+         "[cu={}]: Unit DIE abbreviation code {} is invalid, max={}", SectionOffset(), abbr_code,
          mAbbreviation.size());
   auto &abbreviation = mAbbreviation[abbr_code - 1];
   reader.SkipAttributes(abbreviation.mAttributes);
@@ -369,7 +369,7 @@ UnitData::LoadDieMetadata() noexcept
   parent_node.push_back(0);
   sibling_node.push_back(0);
   mUnitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
-  ASSERT(mDieCollection.empty(), "Expected dies to be empty, but wasn't! (cu=0x{:x})", SectionOffset());
+  ASSERT(mDieCollection.empty(), "Expected dies to be empty, but wasn't! (cu={})", SectionOffset());
   mDieCollection.reserve(mLoadedDiesCount != 0 ? mLoadedDiesCount
                                                : guess_die_count(header().CompilationUnitSize()));
   mDieCollection.push_back(mUnitDie);
@@ -409,7 +409,7 @@ UnitData::LoadDieMetadata() noexcept
     mDieCollection.push_back(new_entry);
   }
   mLoadedDiesCount = mDieCollection.size();
-  CDLOG(true, dwarf, "[0x{:x}] loaded {} dies", SectionOffset(), mLoadedDiesCount);
+  CDLOG(true, dwarf, "[{}] loaded {} dies", SectionOffset(), mLoadedDiesCount);
 }
 
 // Function to check if the value matches any of the 5 constants

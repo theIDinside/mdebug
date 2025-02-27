@@ -1,6 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "utils/expected.h"
+#include <filesystem>
+#include <linux/limits.h>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -36,72 +38,30 @@ template <typename ConfigType> struct Setting
 };
 
 using namespace std::string_view_literals;
-struct LogConfig
-{
-  static constexpr auto LOGS = std::to_array({"eh"sv, "dwarf"sv, "mdb"sv, "dap"sv, "awaiter"sv});
-  union
-  {
-    struct
-    {
-      bool eh = false;
-      bool dwarf = false;
-      bool mdb = false;
-      bool dap = false;
-      bool awaiter = false;
-    };
-    bool arr[5];
-  };
-  bool time_log = false;
-
-  static mdb::Expected<bool, std::string_view>
-  verify_ok(const std::span<std::string_view> &parsed) noexcept
-  {
-    std::unordered_set<std::string_view> logs{LogConfig::LOGS.begin(), LogConfig::LOGS.end()};
-    for (const auto i : parsed) {
-      if (!logs.contains(i)) {
-        return mdb::unexpected(i);
-      }
-    }
-    return true;
-  }
-
-  constexpr void
-  set(std::string_view log) noexcept
-  {
-    auto it = std::ranges::find(std::cbegin(LOGS), std::cend(LOGS), log);
-    if (it != std::end(LOGS)) {
-      auto idx = std::distance(LOGS.begin(), it);
-      arr[idx] = true;
-    }
-  }
-
-  void configure_logging(bool taskgroup_log) noexcept;
-};
 
 class DebuggerConfiguration
 {
-
-  WaitSystem wait_system{WaitSystem::UseAwaiterThread};
-  std::optional<int> worker_thread_pool_size{std::nullopt};
-  LogConfig log{};
+  WaitSystem mWaitSystem{WaitSystem::UseAwaiterThread};
+  std::optional<int> mThreadPoolSize{std::nullopt};
   Path mLogDirectory;
 
 public:
-  friend mdb::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
+  friend mdb::Expected<DebuggerConfiguration, CLIError> ParseCommandLineArguments(int argc,
+                                                                                  const char **argv) noexcept;
 
   static auto
   Default() noexcept
   {
     auto res = DebuggerConfiguration{};
+    res.mLogDirectory = std::filesystem::current_path();
     return res;
   }
 
-  WaitSystem waitsystem() const noexcept;
+  WaitSystem GetWaitSystemConfig() const noexcept;
   int ThreadPoolSize() const noexcept;
-  LogConfig log_config() const noexcept;
   const Path &LogDirectory() const noexcept;
 };
 
-mdb::Expected<DebuggerConfiguration, CLIError> parse_cli(int argc, const char **argv) noexcept;
+mdb::Expected<DebuggerConfiguration, CLIError> ParseCommandLineArguments(int argc, const char **argv) noexcept;
 
 }; // namespace mdb::sys

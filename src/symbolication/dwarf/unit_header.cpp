@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "unit_header.h"
 #include <symbolication/elf.h>
-
+#include <utils/logger.h>
 namespace mdb::sym::dw {
 // Partial/Compile Unit-header constructor
 UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
@@ -53,7 +53,7 @@ UnitHeader::EndExclusive() const noexcept
   return mDieData.data() + mDieData.size();
 }
 
-u64
+Offset
 UnitHeader::DebugInfoSectionOffset() const noexcept
 {
   return mSecOffset;
@@ -79,7 +79,7 @@ UnitHeader::HeaderLen() const noexcept
     return 4 * (3 * (fmt / 4)) - ((std::to_underlying(mDwarfVersion) < 5) ? 1 : 0);
   }
   default:
-    ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at 0x{:x}", to_str(mUnitType), mSecOffset);
+    ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at {}", to_str(mUnitType), mSecOffset);
     break;
   }
 }

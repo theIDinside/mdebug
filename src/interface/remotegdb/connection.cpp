@@ -679,7 +679,7 @@ RemoteConnection::put_pending_notification(std::string_view payload) noexcept
 std::vector<GdbThread>
 protocol_parse_threads(std::string_view input) noexcept
 {
-  auto ts = mdb::split_string(input, ",");
+  auto ts = mdb::SplitString(input, ",");
   std::vector<GdbThread> threads{};
   threads.reserve(ts.size());
   for (auto t : ts) {
@@ -694,7 +694,7 @@ protocol_parse_threads(std::string_view input) noexcept
 bool
 RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept
 {
-  auto params = mdb::split_string(payload, ";");
+  auto params = mdb::SplitString(payload, ";");
   WaitEventParser parser{*this};
   parser.control_kind_is_attached = is_session_config;
   parser.signal = signal;
@@ -712,7 +712,7 @@ RemoteConnection::process_task_stop_reply_t(int signal, std::string_view payload
       const auto threads = parser.parse_threads_parameter(val);
       UpdateKnownThreads(threads);
     } else if (arg == "thread-pcs") {
-      auto pcs = mdb::split_string(val, ",");
+      auto pcs = mdb::SplitString(val, ",");
       DBGLOG(core, "parsing thread-pcs not yet implemented");
     } else if (arg == "core") {
       parser.parse_core(val);
@@ -1137,7 +1137,7 @@ RemoteConnection::parse_supported(std::string_view supported_response) noexcept
          "notice:\n{}",
          supported_response);
   supported_response.remove_prefix(1);
-  const auto supported = mdb::split_string(supported_response, ";");
+  const auto supported = mdb::SplitString(supported_response, ";");
   // This is an absolute requirement set by us.
   bool has_multiprocess = false;
   for (const auto v : supported) {

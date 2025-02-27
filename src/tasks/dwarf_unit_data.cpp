@@ -80,16 +80,11 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
 void
 UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) noexcept
 {
-  auto bytesPrepared = 0;
-  ScopedDefer scopedTiming{[start = std::chrono::high_resolution_clock::now(), this, &bytesPrepared]() {
-    const auto time = MicroSecondsSince(start);
-    DBGLOG(perf, "Unit data task for {} units ({} bytes) finished in {}us", mCompilationUnitsToParse.size(),
-           bytesPrepared, time);
-  }};
+  PROFILE_SCOPE_END_ARGS("UnitDataTask::ExecuteTask", "unitdata", PEARG("units", mCompilationUnitsToParse.size()));
+
   std::vector<UnitData *> result;
   result.reserve(mCompilationUnitsToParse.size());
   for (const auto &header : mCompilationUnitsToParse) {
-    bytesPrepared += header.CompilationUnitSize();
     auto unit_data = PrepareUnitData(obj, header);
     result.push_back(unit_data);
   }
@@ -101,7 +96,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
     UnitReader reader{dwarfUnit};
 
     if (dwarfUnit->header().GetUnitType() == DwarfUnitType::DW_UT_partial) {
-      DBGLOG(dwarf, "partial unit supported not implemented, skipped 0x{:x}", dwarfUnit->SectionOffset());
+      DBGLOG(dwarf, "partial unit supported not implemented, skipped {}", dwarfUnit->SectionOffset());
       continue;
     }
 

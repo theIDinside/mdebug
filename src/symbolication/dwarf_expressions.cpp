@@ -710,6 +710,7 @@ std::optional<u64> ExprByteCodeInterpreter::GetRegister(u64 number)
 u64
 ExprByteCodeInterpreter::Run() noexcept
 {
+  PROFILE_SCOPE("ExprByteCodeInterpreter::Run", "bytecode-interpreter");
   while (mReader.has_more()) {
     const auto op = mReader.read_byte<DwarfOp>();
     this->mLatestDecoded = op;

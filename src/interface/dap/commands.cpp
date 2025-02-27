@@ -77,15 +77,6 @@ template <> struct formatter<ui::dap::Message>
   }
 
 namespace mdb {
-ui::UIResultPtr
-ui::UICommand::LogExecute() noexcept
-{
-  auto start = std::chrono::high_resolution_clock::now();
-  auto result = Execute();
-  const auto commandExecTime = MicroSecondsSince(start);
-  DBGLOG(perf, "[command]: {} executed in {} us", name(), commandExecTime);
-  return result;
-}
 
 namespace ui {
 TraceeController *
@@ -670,7 +661,7 @@ UIResultPtr
 WriteMemory::Execute() noexcept
 {
   GetOrSendError(target);
-
+  PROFILE_SCOPE_ARGS("WriteMemory", "command", PEARG("seq", seq));
   auto response = new WriteMemoryResponse{false, this};
   response->bytes_written = 0;
   if (address) {
@@ -710,10 +701,11 @@ UIResultPtr
 ReadMemory::Execute() noexcept
 {
   if (address) {
+    PROFILE_SCOPE_ARGS("ReadMemory", "command", PEARG("seq", seq), PEARG("addr", *address), PEARG("bytes", bytes));
     GetOrSendError(target);
-    auto sv = target->ReadToVector(*address, bytes);
+    auto sv = target->ReadToVector(*address, bytes, mDAPClient->GetResponseArenaAllocator());
     auto res = new ReadMemoryResponse{true, this};
-    res->data_base64 = mdb::encode_base64(sv->span());
+    res->data_base64 = mdb::EncodeIntoBase64(sv->span(), mDAPClient->GetResponseArenaAllocator());
     res->first_readable_address = *address;
     res->success = true;
     res->unreadable_bytes = 0;
@@ -794,7 +786,7 @@ Disconnect::Execute() noexcept
   // sessions, as destroying a process would invalidate the entire application trace.
   GetOrSendError(target);
 
-  if (mTerminateTracee) {
+  if (mTerminateTracee || mDAPClient->mSessionType == DapClientSession::Launch) {
     Tracer::Get().TerminateSession();
   } else {
     target->Disconnect();
@@ -861,7 +853,7 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
   cfg_body["supportsExceptionOptions"] = false;
   cfg_body["supportsValueFormattingOptions"] = true;
   cfg_body["supportsExceptionInfoRequest"] = false;
-  cfg_body["supportTerminateDebuggee"] = true;
+  cfg_body["supportTerminateDebuggee"] = false;
   cfg_body["supportSuspendDebuggee"] = false;
   cfg_body["supportsDelayedStackTraceLoading"] = false;
   cfg_body["supportsLoadedSourcesRequest"] = false;
@@ -916,6 +908,7 @@ Launch::Launch(UICommandArg arg, SessionId &&id, bool stopOnEntry, Path &&progra
 UIResultPtr
 Launch::Execute() noexcept
 {
+  PROFILE_SCOPE_ARGS("launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{mProgramArgs}));
   const auto processId = Tracer::Launch(mDAPClient, mRequestingSessionId, mStopOnEntry, mProgram,
                                         std::move(mProgramArgs), mBreakpointBehavior);
   mDAPClient->PrepareLaunch(mRequestingSessionId, processId,
@@ -1046,7 +1039,7 @@ StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   GetOrSendError(target);
-
+  PROFILE_BEGIN_ARGS("StackTrace", "command", PEARG("seq", seq));
   auto task = target->GetTaskByTid(threadId);
   if (task == nullptr) {
     return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
@@ -1091,6 +1084,7 @@ StackTrace::Execute() noexcept
                                         .rip = fmt::format("{}", frame.FramePc())});
     }
   }
+  PROFILE_END_ARGS("StackTrace", "command", PEARG("frames", stack_frames.size()));
   return new StackTraceResponse{true, this, std::move(stack_frames)};
 }
 
@@ -1209,6 +1203,7 @@ Evaluate::Evaluate(UICommandArg arg, std::string &&expression, std::optional<int
 UIResultPtr
 Evaluate::Execute() noexcept
 {
+  PROFILE_BEGIN_ARGS("Evaluate", "command", PEARG("seq", seq));
   switch (context) {
   case EvaluationContext::Watch:
     [[fallthrough]];
@@ -1307,6 +1302,7 @@ Variables::error(std::string &&msg) noexcept
 UIResultPtr
 Variables::Execute() noexcept
 {
+  PROFILE_SCOPE_ARGS("Variables", "command", PEARG("seq", seq));
   auto requestedContext = Tracer::Get().GetVariableContext(mVariablesReferenceId);
   if (!requestedContext || !requestedContext->IsValidContext()) {
     return error(fmt::format("Could not find variable with variablesReference {}", mVariablesReferenceId));
@@ -1361,6 +1357,7 @@ VariablesResponse::~VariablesResponse() noexcept = default;
 std::pmr::string
 VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
+  PROFILE_SCOPE_ARGS("VariablesResponse", "command", PEARG("seq", int64_t{seq}));
   std::pmr::string result{arenaAllocator};
   result.reserve(256 + (256 * variables.size()));
   if (variables.empty()) {

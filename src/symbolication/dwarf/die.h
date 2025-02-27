@@ -137,7 +137,7 @@ public:
   ObjectFile *GetObjectFile() const noexcept;
   const UnitHeader &header() const noexcept;
   /// The offset from the beginning of the ELF section called .debug_info to this compilation unit.
-  u64 SectionOffset() const noexcept;
+  Offset SectionOffset() const noexcept;
   /// Size (bytes) of this compilation unit in the .debug_info ELF section
   u64 UnitSize() const noexcept;
   bool spans_across(u64 sec_offset) const noexcept;
@@ -243,10 +243,10 @@ template <> struct formatter<sym::dw::DieReference>
       if (ref.GetUnitData()->HasLoadedDies()) {
         auto die = ref.GetDie();
         ASSERT(die, "die was null!");
-        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x}, die=0x{:x} ({}) }}", cu->SectionOffset(),
+        return fmt::format_to(ctx.out(), "DieRef {{ cu={}, die=0x{:x} ({}) }}", cu->SectionOffset(),
                               die->mSectionOffset, to_str(die->mTag));
       } else {
-        return fmt::format_to(ctx.out(), "DieRef {{ cu=0x{:x} (dies not loaded) }}", cu->SectionOffset());
+        return fmt::format_to(ctx.out(), "DieRef {{ cu={} (dies not loaded) }}", cu->SectionOffset());
       }
     }
     return fmt::format_to(ctx.out(), "DieRef {{ ??? }}");

@@ -3,11 +3,8 @@
 #include "../common.h"
 #include "fmt/ranges.h"
 #include "lib/arena_allocator.h"
-#include "log.h"
 #include "thread_pool.h"
 #include "utils/logger.h"
-#include "utils/util.h"
-#include <chrono>
 
 namespace mdb {
 void
@@ -40,13 +37,7 @@ NoOp::ExecuteTask(std::pmr::memory_resource *) noexcept
 
 TaskGroup::TaskGroup(std::string_view name) noexcept : mPromise(), mName(name), mTaskLock(), mDoneTasks()
 {
-  DBGLOG(perf, "Created task group {}", name);
   mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{10000});
-}
-
-TaskGroup::~TaskGroup() noexcept
-{
-  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "Task group {} finished - destroying task group", mName);
 }
 
 void
@@ -60,10 +51,8 @@ TaskGroup::AddTask(Task *task) noexcept
 std::future<void>
 TaskGroup::ScheduleWork() noexcept
 {
-  CDLOG(mdb::log::Config::LogTaskGroup(), perf, "[TG: {}] - Scheduling {} tasks", mName, mTasks.size());
-  if (mdb::log::Config::LogTaskGroup()) {
-    mStart = std::chrono::high_resolution_clock::now();
-  }
+  mPid = gettid();
+  PROFILE_BEGIN_PID(mName, "TaskGroups", mPid);
   auto fut = mPromise.get_future();
   mDoneTasks.reserve(mTasks.size());
   ThreadPool::GetGlobalPool()->PostTasks(mTasks);
@@ -83,8 +72,7 @@ TaskGroup::TaskDone(Task *task) noexcept
   }
   mDoneTasks.push_back(task);
   if (mDoneTasks.size() == mTasks.size()) {
-    const auto time = MicroSecondsSince(mStart);
-    DBGLOG(perf, "[TG {}]: done, time={}us", mName, time);
+    PROFILE_END_PID(mName, "TaskGroups", mPid);
     mPromise.set_value();
   }
 }

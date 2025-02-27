@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "index_die_names.h"
+#include "utils/logger.h"
 // system
 #include <algorithm>
 // mdb
-#include <chrono>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/debug_info_reader.h>
 #include <symbolication/dwarf/die_ref.h>
@@ -111,13 +111,17 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 void
 IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
 {
+
   using NameSet = std::vector<NameIndex::NameDieTuple>;
   using NameTypeSet = std::vector<NameIndex::NameTypeDieTuple>;
 
-  auto sz = 0;
+  auto sz = 0ul;
   for (const auto unit : mCompUnitsToIndex) {
     sz += unit->header().CompilationUnitSize();
   }
+
+  PROFILE_SCOPE_END_ARGS("IndexingTask::ExecuteTask", "indexing", PEARG("units", mCompUnitsToIndex.size()),
+                         PEARG("unit_data_size", sz));
 
   NameSet free_functions;
   NameSet methods;
@@ -142,12 +146,12 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       cu->ClearLoadedCache();
     }
   }};
-  auto start = std::chrono::high_resolution_clock::now();
+
   for (auto comp_unit : mCompUnitsToIndex) {
     std::vector<i64> implicit_consts;
     const auto &dies = comp_unit->GetDies();
     if (dies.front().mTag == DwarfTag::DW_TAG_type_unit) {
-      DBGLOG(core, "DWARF Unit is a type unit: 0x{:x}", comp_unit->SectionOffset());
+      DBGLOG(core, "DWARF Unit is a type unit: {}", comp_unit->SectionOffset());
       type_units.push_back(comp_unit);
     }
 
@@ -344,8 +348,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       }
     }
   }
-  auto us = MicroSecondsSince(start);
-  DBGLOG(core, "indexed {} compilation units ({} bytes) in {}us", mCompUnitsToIndex.size(), sz, us);
+
   auto idx = mObjectFile->GetNameIndex();
   idx->mNamespaces.Merge(namespaces);
   idx->mFreeFunctions.Merge(free_functions);

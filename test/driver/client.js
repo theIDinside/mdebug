@@ -11,6 +11,7 @@ const { spawn, ChildProcess } = require('child_process')
 const EventEmitter = require('events')
 const { assertLog, prettyJson, allUniqueVariableReferences, TestArgs, parseTestConfiguration } = require('./utils')
 const net = require('net')
+const { randomUUID } = require('crypto')
 
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename)
@@ -438,9 +439,25 @@ class DAClient {
     return this.remoteService !== null
   }
 
+  static async CreateRemoteServer(testConfig, program, args) {
+    const remoteServerBinaryPath = testConfig.args.getServerBinary()
+    const host = 'localhost'
+    let remoteService = await checkPortAvailability(20, host).then((port) => {
+      return createRemoteService(remoteServerBinaryPath, host, port, program, args)
+    })
+
+    if (remoteService == null) {
+      throw new Error(`Failed to spawn GDB Server on ${host}:${port}`)
+    }
+
+    return remoteService
+  }
+
   constructor(mdb, mdb_args, config) {
     // for future work when we get recording in tests suites working.
     this.config = config
+    // For now we don't support multi-process testing. That is only testable manually.
+    this.processId = 0
     try {
       this.recording = process.env.hasOwnProperty('REC')
       if (this.recording) {
@@ -564,10 +581,11 @@ class DAClient {
     return breakpoints
   }
 
-  serializeRequest(req, args = {}) {
+  serializeRequest(processId, req, args = {}) {
     const json = {
       seq: this.seq,
       type: 'request',
+      processId: processId,
       command: req,
       arguments: args,
     }
@@ -656,9 +674,9 @@ class DAClient {
     ])
   }
 
-  _sendReqGetResponseImpl(req, args) {
+  _sendReqGetResponseImpl(processId, req, args) {
     return new Promise((res) => {
-      const serialized = this.serializeRequest(req, args)
+      const serialized = this.serializeRequest(processId, req, args)
       this.send_wait_res.once(req, (response) => {
         res(response)
       })
@@ -677,7 +695,7 @@ class DAClient {
   async sendReqGetResponse(req, args, failureTimeout = seconds(1), fn = this.sendReqGetResponse) {
     const ctrl = new AbortController()
     const signal = ctrl.signal
-    const req_promise = this._sendReqGetResponseImpl(req, args)
+    const req_promise = this._sendReqGetResponseImpl(this.processId, req, args)
     // we create the exception object here, to report decent stack traces for when it actually does fail.
     const err = new Error('Timed out')
     Error.captureStackTrace(err, fn)
@@ -756,76 +774,106 @@ class DAClient {
     this.buf.receive_buffer = this.buf.receive_buffer.concat(data)
   }
 
+  /**
+   * Starts a debug session in a similar fashion that what happens in a VSCode setting.
+   * `configurationRoutine` can be whatever we want during testing, in the VSCode environment
+   * this is where
+   *
+   * @param {string} startType
+   * @param {object} startArguments
+   * @param {number} timeout
+   * @param {function} configurationRoutine
+   */
+  async startSession(startType, startArguments, timeout, configurationRoutine) {
+    if (this.sessionId == null) {
+      this.sessionId = randomUUID()
+    }
+    if (startArguments.sessionId == null) {
+      startArguments.sessionId = this.sessionId
+    }
+    let initEventWaitable = this.prepareWaitForEvent('initialized').then(async (initEvent) => {
+      const { processId, sessionId } = initEvent
+      if (!processId || !sessionId) {
+        throw new Error(`Expected init event to contain process id(${processId}) and sessionId(${sessionId})`)
+      }
+      this.processId = processId
+      if (configurationRoutine) {
+        await configurationRoutine()
+      }
+      await this.sendReqGetResponse('configurationDone', {}, timeout)
+    })
+    // the init event is fired (it doesn't fire before) after attach/launch has
+    // started, and configurationDone is sent _before_ launch/attach responds
+    console.log(`${startType}ing using arguments: ${JSON.stringify(startArguments)}`)
+    let sessionRes = this.sendReqGetResponse(startType, startArguments, timeout)
+    await initEventWaitable
+    console.log(`Init completed`)
+    const sessionStartResponse = await sessionRes
+    console.log(`Attach completed`)
+    checkResponse(sessionStartResponse, startType, true)
+  }
+
   async #startRunToMainNative(launchArgs, timeout) {
     let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainNative)
-    console.log(`Starting NATIVE session: launchArguments: ${JSON.stringify(launchArgs)}`)
-    let launch_res = await this.sendReqGetResponse(
+    await this.startSession(
       'launch',
       {
         program: launchArgs['program'],
         stopOnEntry: launchArgs['stopOnEntry'],
+        sessionId: this.sessionId,
       },
-      timeout
+      1000,
+      () => console.log(`configuration completed`)
     )
-    checkResponse(launch_res, 'launch', true)
-    await this.sendReqGetResponse('configurationDone', {}, timeout)
     return stopped_promise
   }
 
   async #startRunToMainRemote(program, args, timeout) {
-    const remoteServerBinaryPath = this.config.args.getServerBinary()
-    const host = 'localhost'
-    this.remoteService = await checkPortAvailability(20, host).then((port) => {
-      return createRemoteService(remoteServerBinaryPath, host, port, program, args)
-    })
+    this.remoteService = await DAClient.CreateRemoteServer(this.config, program, args)
 
-    if (!this.isRemoteSession()) {
-      throw new Error(`Failed to spawn GDB Server on ${host}:${port}`)
+    if (this.sessionId == null) {
+      this.sessionId = randomUUID()
     }
 
-    let entry_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
-    console.log(`attach args: ${JSON.stringify(this.remoteService.attachArgs, null, 2)}`)
-    const attach_res = await this.sendReqGetResponse('attach', this.remoteService.attachArgs, timeout)
-    checkResponse(attach_res, 'attach', true)
-    const functions = ['main'].map((n) => ({ name: n }))
-
-    const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
-      breakpoints: functions,
-    })
-    await entry_stopped_promise
-    assertLog(
-      fnBreakpointResponse.success,
-      'Function breakpoints request',
-      `Response failed with contents: ${JSON.stringify(fnBreakpointResponse)}`
-    )
-    assertLog(
-      fnBreakpointResponse.body.breakpoints.length == 1,
-      'Expected 1 breakpoint returned',
-      `But received ${JSON.stringify(fnBreakpointResponse.body.breakpoints)}`
-    )
-    const thrs = await this.threads(timeout)
-    const threadId = thrs[0].id
-    await this.sendReqGetResponse('configurationDone', {}, timeout)
     let hit_main_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
-    const cont = await this.sendReqGetResponse(
-      'continue',
-      {
-        threadId: threadId,
-        singleThread: false,
-      },
-      timeout,
-      this.#startRunToMainRemote
-    )
-    checkResponse(cont, 'continue', true)
+    let attachArguments = this.remoteService.attachArgs
+    attachArguments['RRSession'] = false
+    attachArguments['sessionId'] = this.sessionId
+    console.log(`attach arguments: ${prettyJson(attachArguments)}`)
+    await this.startSession('attach', attachArguments, timeout, async () => {
+      const functions = ['main'].map((n) => ({ name: n }))
+      const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
+        breakpoints: functions,
+      })
+      assertLog(
+        fnBreakpointResponse.success,
+        'Function breakpoints request',
+        `Response failed with contents: ${JSON.stringify(fnBreakpointResponse)}`
+      )
+      assertLog(
+        fnBreakpointResponse.body.breakpoints.length == 1,
+        'Expected 1 breakpoint returned',
+        `But received ${JSON.stringify(fnBreakpointResponse.body.breakpoints)}`
+      )
+      console.log(`${prettyJson(fnBreakpointResponse)}`)
+      console.log(`configuration sequence done, waiting for attach response...`)
+    })
+
     return hit_main_stopped_promise
   }
 
   async startRunToMain(program, args = [], timeout = seconds(1)) {
-    let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
+    if (this.sessionId == null) {
+      this.sessionId = randomUUID()
+    }
+    let init_res = await this.sendReqGetResponse('initialize', { sessionId: this.sessionId }, timeout)
     checkResponse(init_res, 'initialize', true)
     switch (this.config.args.getArg('session')) {
       case 'remote': {
-        return await this.#startRunToMainRemote(program, args, timeout)
+        await this.#startRunToMainRemote(program, args, timeout)
+        const threads = await this.threads()
+        console.log(`threads: ${JSON.stringify(threads)}`)
+        await this.contNextStop(threads[0].id)
       }
       case 'native': {
         return await this.#startRunToMainNative(
@@ -844,18 +892,15 @@ class DAClient {
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = seconds(1)) {
     let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.launchToMain)
-    let init_res = await this.sendReqGetResponse('initialize', {}, timeout)
-    checkResponse(init_res, 'initialize', true)
-    let launch_res = await this.sendReqGetResponse(
+    await this.startSession(
       'launch',
       {
         program: program,
         stopOnEntry: true,
       },
-      timeout
+      timeout,
+      () => console.log('configuration done')
     )
-    checkResponse(launch_res, 'launch', true)
-    await this.sendReqGetResponse('configurationDone', {}, timeout)
     await stopped_promise
   }
 
@@ -967,8 +1012,9 @@ class DAClient {
 // dump the contents of the current logs, so that they are picked up by ctest if the tests
 // fail - otherwise the tests get overwritten by each other.
 function dump_log(testSuite) {
+  console.log(`process obj: ${process}, cwd: $${process.cwd()}`)
   const mdblog = fs.readFileSync(path.join(process.cwd(), 'core.log'))
-  fs.writeFileSync(path.join(process.cwd(), `core_${path.basename(testSuite)}.log`), mdblog)
+  fs.writeFileSync(path.join(process.cwd(), `core-ERROR.log`), mdblog)
 }
 
 function repoDirFile(filePath) {

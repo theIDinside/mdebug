@@ -99,7 +99,7 @@ NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
     }
     const auto offs = Offset{die_ref.GetDie()->mSectionOffset};
     const auto possible_size = die_ref.ReadAttribute(Attribute::DW_AT_byte_size);
-    ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu=0x{:x}, die=0x{:x}",
+    ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu={}, die=0x{:x}",
            cu->SectionOffset(), die_ref.GetDie()->mSectionOffset);
 
     auto type = typeStorage->CreateNewType(this_die->mTag, offs, IndexedDieReference{cu, idx},
@@ -108,7 +108,7 @@ NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
       UnitReader reader{cu};
       reader.SeekDie(*die_ref.GetDie());
       auto attr = die_ref.ReadAttribute(Attribute::DW_AT_encoding);
-      ASSERT(attr.has_value(), "Failed to read encoding of base type. cu=0x{:x}, die=0x{:x}", cu->SectionOffset(),
+      ASSERT(attr.has_value(), "Failed to read encoding of base type. cu={}, die=0{:x}", cu->SectionOffset(),
              die_ref.GetDie()->mSectionOffset);
       auto encoding = attr.and_then(
         [](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.AsUnsignedValue())}; });

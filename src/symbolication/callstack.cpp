@@ -459,6 +459,7 @@ CallStack::GetUnwindState(u32 level) noexcept
 void
 CallStack::Unwind(const CallStackRequest &req)
 {
+  PROFILE_SCOPE("CallStack::Unwind", "stacktrace");
   // TODO: Implement frame unwind caching.
   if (mCallstackState == CallStackState::Full) {
     return;

@@ -3,6 +3,7 @@
 #include "../dwarf_defs.h"
 #include "symbolication/block.h"
 #include "utils/immutable.h"
+#include "utils/indexing.h"
 #include <common.h>
 #include <limits>
 
@@ -124,21 +125,21 @@ struct LNPHeader
   std::optional<Path> file(u32 index) const noexcept;
   const FileEntryContainer &FileEntries();
 
-  u64 sec_offset;
-  u64 initial_length;
-  const u8 *data;
-  const u8 *data_end;
-  DwarfVersion version;
-  u8 addr_size;
-  u8 min_len;
-  u8 max_ops;
-  bool default_is_stmt;
-  i8 line_base;
-  u8 line_range;
-  u8 opcode_base;
+  mdb::Offset mSectionOffset;
+  u64 mInitialLength;
+  const u8 *mData;
+  const u8 *mDataEnd;
+  DwarfVersion mVersion;
+  u8 mAddrSize;
+  u8 mMinLength;
+  u8 mMaxOps;
+  bool mDefaultIsStatement;
+  i8 mLineBase;
+  u8 mLineRange;
+  u8 mOpcodeBase;
   ObjectFile *mObjectFile;
   std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> std_opcode_lengths;
-  std::vector<DirEntry> directories;
+  std::vector<DirEntry> mDirectories;
   std::vector<FileEntry> mFileEntries;
 
   static LNPHeader *ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffset) noexcept;

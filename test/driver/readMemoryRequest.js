@@ -64,7 +64,7 @@ async function readShouldFailFaultyArgs(DA) {
   let readMemoryResponse = await DA.sendReqGetResponse('readMemory', {})
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
   assert(
-    readMemoryResponse.message == 'Missing arguments: memoryReference, count. ',
+    readMemoryResponse.message == 'Invalid request made. Arguments missing or of invalid type.',
     `Unexpected error message seen: ${readMemoryResponse.message}`
   )
 
@@ -72,10 +72,11 @@ async function readShouldFailFaultyArgs(DA) {
     memoryReference: 123,
     count: 10,
   })
+
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
   assert(
-    readMemoryResponse.message.includes('memoryReference'),
-    `Unexpected error message seen: ${readMemoryResponse.message}`
+    readMemoryResponse.body.errors.hasOwnProperty('memoryReference'),
+    `Unexpected error message seen: ${prettyJson(readMemoryResponse.body)}`
   )
 
   readMemoryResponse = await DA.sendReqGetResponse('readMemory', {
@@ -84,10 +85,9 @@ async function readShouldFailFaultyArgs(DA) {
 
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
   assert(
-    readMemoryResponse.message.includes('Missing') &&
-      readMemoryResponse.message.includes('count') &&
-      readMemoryResponse.message.includes('memoryReference'),
-    `Unexpected error message seen: ${readMemoryResponse.message}`
+    readMemoryResponse.body.missing.includes('count') &&
+      readMemoryResponse.body.errors.hasOwnProperty('memoryReference'),
+    `Unexpected error data: ${prettyJson(readMemoryResponse.body)}`
   )
 
   readMemoryResponse = await DA.sendReqGetResponse('readMemory', {
@@ -96,7 +96,10 @@ async function readShouldFailFaultyArgs(DA) {
   })
 
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
-  assert(readMemoryResponse.message.includes('count'), `Unexpected error message seen: '${readMemoryResponse.message}'`)
+  assert(
+    readMemoryResponse.body.errors.hasOwnProperty('count'),
+    `Unexpected error message seen: '${prettyJson(readMemoryResponse.body)}'`
+  )
 
   readMemoryResponse = await DA.sendReqGetResponse('readMemory', {
     memoryReference: 'FooBar',
@@ -104,9 +107,13 @@ async function readShouldFailFaultyArgs(DA) {
   })
 
   assert(!readMemoryResponse.success, `readMemory request expected to be unsuccessful but was successful`)
+  assert(
+    readMemoryResponse.body?.errors?.hasOwnProperty('memoryReference'),
+    `Unexpected error data: ${prettyJson(readMemoryResponse.body)}`
+  )
 
   assert(
-    readMemoryResponse.message == 'Address parameter could not be parsed.',
+    readMemoryResponse.message == 'Invalid request made. Arguments missing or of invalid type.',
     `Unexpected error message seen: '${readMemoryResponse.message}'`
   )
 }

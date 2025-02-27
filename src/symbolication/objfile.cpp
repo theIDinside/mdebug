@@ -255,6 +255,8 @@ void
 ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newCompileUnits) noexcept
 {
   // TODO(simon): We do stupid sorting. implement something better optimized
+  PROFILE_SCOPE_ARGS("ObjectFile::AddInitializedCompileUnits", "symbolication",
+                     PEARG("comp_units", newCompileUnits.size()));
   std::lock_guard lock(mCompileUnitWriteLock);
   mCompilationUnits.insert(mCompilationUnits.end(), newCompileUnits.begin(), newCompileUnits.end());
   std::sort(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter());
@@ -273,7 +275,7 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
   DBG({
     if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
       for (const auto cu : mCompilationUnits) {
-        DBGLOG(core, "[cu dwarf offset=0x{:x}]: start_pc = {}, end_pc={}", cu->get_dwarf_unit()->SectionOffset(),
+        DBGLOG(core, "[cu dwarf offset={}]: start_pc = {}, end_pc={}", cu->get_dwarf_unit()->SectionOffset(),
                cu->StartPc(), cu->EndPc());
       }
       PANIC("Dumped CU contents");
@@ -845,7 +847,7 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
       if (low_pc) {
         const auto addr = low_pc->AsAddress();
         matching_symbols.emplace_back(n, addr, 0);
-        DBGLOG(core, "[{}][cu=0x{:x}, die=0x{:x}] found fn {} at low_pc of {}", obj->GetPathString(),
+        DBGLOG(core, "[{}][cu={}, die=0x{:x}] found fn {} at low_pc of {}", obj->GetPathString(),
                die_ref.GetUnitData()->SectionOffset(), die_ref.GetDie()->mSectionOffset, n, addr);
       }
     });

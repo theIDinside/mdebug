@@ -307,7 +307,6 @@ public:
   // Resolves the alias that this type def/using decl actually is, if it is one. If it's a concrete type, return
   // itself.
   Type *ResolveAlias() noexcept;
-  void AddField(std::string_view name, u64 offsetOf, dw::DieReference debugInfoEntryReference) noexcept;
   void SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept;
   bool SetProcessing() noexcept;
   NonNullPtr<Type> GetTargetType() noexcept;

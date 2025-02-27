@@ -472,7 +472,7 @@ struct ReadMemoryResponse final : public ui::UIResult
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   AddrPtr first_readable_address;
   u64 unreadable_bytes;
-  std::string data_base64;
+  std::pmr::string data_base64;
 };
 
 struct ReadMemory final : public ui::UICommand

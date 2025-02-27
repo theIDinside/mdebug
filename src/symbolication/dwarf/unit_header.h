@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "utils/indexing.h"
 #include <span>
 #include <symbolication/dwarf/common.h>
 #include <symbolication/dwarf_defs.h>
@@ -31,7 +32,7 @@ public:
   const u8 *AbbreviationData(const ElfSection *abbrev_sec) const noexcept;
   const u8 *Data() const noexcept;
   const u8 *EndExclusive() const noexcept;
-  u64 DebugInfoSectionOffset() const noexcept;
+  Offset DebugInfoSectionOffset() const noexcept;
   u8 Format() const noexcept;
   u8 HeaderLen() const noexcept;
   std::span<const u8> GetDieData() const noexcept;
@@ -44,7 +45,7 @@ public:
   u64 GetTypeOffset() const noexcept;
 
 private:
-  u64 mSecOffset;
+  Offset mSecOffset;
   u64 mUnitSize;
   std::span<const u8> mDieData;
   u64 mAbbreviationSectionOffset;

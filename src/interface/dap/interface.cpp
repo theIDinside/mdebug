@@ -13,7 +13,6 @@
 #include <filesystem>
 #include <fmt/core.h>
 #include <poll.h>
-#include <random>
 #include <supervisor.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
@@ -26,26 +25,6 @@
 #include <vector>
 namespace mdb::ui::dap {
 using namespace std::string_literals;
-
-DapClientSession
-GetNewChildSessionType(DapClientSession type) noexcept
-{
-  switch (type) {
-  case DapClientSession::None:
-    PANIC("No session type has been set.");
-  case DapClientSession::Launch:
-    return DapClientSession::LaunchedChildSession;
-  case DapClientSession::Attach:
-    return DapClientSession::AttachedChildSession;
-  case DapClientSession::RR:
-    return DapClientSession::RRChildSession;
-  case DapClientSession::LaunchedChildSession:
-  case DapClientSession::AttachedChildSession:
-  case DapClientSession::RRChildSession:
-    return type;
-  }
-  NEVER("Unknown DapClientSession type");
-}
 
 std::string_view
 ContentDescriptor::payload() const noexcept
@@ -302,7 +281,7 @@ DebugAdapterClient::GetSupervisor(Pid pid) const noexcept
 void
 DebugAdapterClient::SetDebugAdapterSessionType(DapClientSession type) noexcept
 {
-  session_type = type;
+  mSessionType = type;
 }
 
 bool
@@ -395,13 +374,13 @@ DebugAdapterClient::InitAllocators() noexcept
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
-    : socket_path(std::move(path)), in(socket), out(socket), session_type(type)
+    : socket_path(std::move(path)), in(socket), out(socket), mSessionType(type)
 {
   InitAllocators();
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, int standard_in, int standard_out) noexcept
-    : in(standard_in), out(standard_out), session_type(type)
+    : in(standard_in), out(standard_out), mSessionType(type)
 {
   InitAllocators();
 }
@@ -432,7 +411,7 @@ DebugAdapterClient *
 DebugAdapterClient::CreateStandardIOConnection() noexcept
 {
   VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
-  return new DebugAdapterClient{DapClientSession::None, STDIN_FILENO, STDOUT_FILENO};
+  return new DebugAdapterClient{DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO};
 }
 
 void
@@ -494,6 +473,7 @@ DebugAdapterClient::ConfigDone(Pid processId) noexcept
 void
 DebugAdapterClient::PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept
 {
+  mSessionType = DapClientSession::Launch;
   DBGLOG(core, "prepare initialization for session '{}' and process={}", sessionId, launchResponse->ProcessId());
   mSessionInit.push_back(InitializationState{processId, std::move(sessionId), launchResponse});
 }
@@ -501,6 +481,7 @@ DebugAdapterClient::PrepareLaunch(std::string sessionId, Pid processId, LaunchRe
 void
 DebugAdapterClient::PrepareAttach(std::string sessionId, Pid processId, AttachResponse *attachResponse) noexcept
 {
+  mSessionType = DapClientSession::Attach;
   DBGLOG(core, "prepare initialization for session '{}' and process={}", sessionId, attachResponse->ProcessId());
   mSessionInit.push_back(InitializationState{processId, std::move(sessionId), attachResponse});
 }

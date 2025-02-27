@@ -1,10 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "mdb_config.h"
 #include "fmt/core.h"
-#include "fmt/ranges.h"
-#include "log.h"
 #include "utils/logger.h"
-#include "utils/util.h"
 #include <charconv>
 #include <filesystem>
 #include <getopt.h>
@@ -30,16 +27,10 @@ parse_int(std::string_view str)
   }
 }
 
-void
-LogConfig::configure_logging(bool taskgroup_log) noexcept
-{
-  mdb::log::Config::SetLogTaskGroup(taskgroup_log);
-}
-
 WaitSystem
-DebuggerConfiguration::waitsystem() const noexcept
+DebuggerConfiguration::GetWaitSystemConfig() const noexcept
 {
-  return wait_system;
+  return mWaitSystem;
 }
 
 int
@@ -49,13 +40,7 @@ DebuggerConfiguration::ThreadPoolSize() const noexcept
     const auto cpus = std::thread::hardware_concurrency();
     return cpus > 4 ? cpus / 2 : cpus;
   };
-  return worker_thread_pool_size.value_or(get_default());
-}
-
-LogConfig
-DebuggerConfiguration::log_config() const noexcept
-{
-  return log;
+  return mThreadPoolSize.value_or(get_default());
 }
 
 const Path &
@@ -71,8 +56,6 @@ DebuggerConfiguration::LogDirectory() const noexcept
 static constexpr auto LongOptions = std::to_array<option>({{"rr", OptNoArgument, 0, 'r'},
                                                            // parameters
                                                            {"thread-pool-size", OptArgRequired, 0, 't'},
-                                                           {"log", OptArgRequired, 0, 'l'},
-                                                           {"perf", OptNoArgument, 0, 'p'},
                                                            {"log-directory", OptArgRequired, 0, 'd'}});
 
 static constexpr auto USAGE_STR =
@@ -81,7 +64,7 @@ static constexpr auto USAGE_STR =
   "-d <directory>\n"
   "\t The directory where log files should be saved.";
 mdb::Expected<DebuggerConfiguration, CLIError>
-parse_cli(int argc, const char **argv) noexcept
+ParseCommandLineArguments(int argc, const char **argv) noexcept
 {
   auto init = DebuggerConfiguration::Default();
   int option_index = 0;
@@ -106,36 +89,17 @@ parse_cli(int argc, const char **argv) noexcept
         return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
       }
     } break;
-    case 'l':
-      if (optarg) {
-        std::string_view args{optarg};
-        auto input_logs = mdb::split_string(args, ",");
-        if (const auto res = LogConfig::verify_ok(input_logs); !res.is_expected()) {
-          auto msg =
-            fmt::format("Unknown log value: {}\nSupported: ", res.error(), fmt::join(LogConfig::LOGS, ","));
-          return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = std::move(msg)});
-        }
-        for (auto i : input_logs) {
-          init.log.set(i);
-        }
-      } else {
-        return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
-      }
-      break;
-    case 'p':
-      init.log.time_log = true;
-      break;
     case 'r':
       // If '-r' is found, set the flag
-      init.wait_system = WaitSystem::UseSignalHandler;
+      init.mWaitSystem = WaitSystem::UseSignalHandler;
       break;
     case 't':
       if (optarg) {
-        init.worker_thread_pool_size = parse_int(std::string_view{optarg});
+        init.mThreadPoolSize = parse_int(std::string_view{optarg});
       }
       break;
     case '?': {
-      DBGLOG(core, "Usage: mdb [-r|-e|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]");
+      DBGLOG(core, "Usage: mdb [-r|-t <thread pool size>|-d <log output directory>]");
       auto cliErrorMessage = fmt::format("Unknown argument: {}\n\n{}", argv[optind], USAGE_STR);
       return mdb::unexpected(
         CLIError{.info = CLIErrorInfo::UnknownArgs, .msg = std::move(cliErrorMessage)}); // NOLINT

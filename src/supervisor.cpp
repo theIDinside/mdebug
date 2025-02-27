@@ -1337,10 +1337,10 @@ TraceeController::SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr, u
   return mdb::Expected<std::unique_ptr<mdb::ByteBuffer>, NonFullRead>{std::move(buffer)};
 }
 
-mdb::StaticVector<u8>::OwnPtr
-TraceeController::ReadToVector(AddrPtr addr, u64 bytes) noexcept
+std::unique_ptr<mdb::LeakVector<u8>>
+TraceeController::ReadToVector(AddrPtr addr, u64 bytes, std::pmr::memory_resource *resource) noexcept
 {
-  auto data = std::make_unique<mdb::StaticVector<u8>>(bytes);
+  auto data = mdb::LeakVector<u8>::Create(bytes, resource);
 
   auto total_read = 0ull;
   while (total_read < bytes) {
@@ -1460,6 +1460,7 @@ TraceeController::TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool
 sym::CallStack &
 TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noexcept
 {
+  PROFILE_SCOPE("TraceeController::BuildCallFrameStack", "stacktrace");
   DBGLOG(core, "stacktrace for {}", task.mTid);
   if (!task.mTaskCallstack->IsDirty() && (req.req == CallStackRequest::Type::Full ||
                                           (req.req == CallStackRequest::Type::Partial &&
@@ -1468,8 +1469,9 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
   }
   CacheRegistersFor(task);
   auto &callStack = *task.mTaskCallstack;
-
+  PROFILE_BEGIN("Unwind return addresses", "stacktrace");
   auto frame_pcs = task.UnwindReturnAddresses(this, req);
+  PROFILE_END_ARGS("Unwind return addresses", "stacktrace", PEARG("pcs", frame_pcs));
   for (const auto &[depth, i] : mdb::EnumerateView{frame_pcs}) {
     auto frame_pc = i.as_void();
     auto result = FindFunctionByPc(frame_pc);
@@ -1508,6 +1510,7 @@ TraceeController::FindObjectByPc(AddrPtr addr) noexcept
 std::optional<std::pair<sym::FunctionSymbol *, NonNullPtr<SymbolFile>>>
 TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
 {
+  PROFILE_BEGIN("TraceeController::FindFunctionByPc", "supervisor");
   const auto symbolFile = FindObjectByPc(addr);
   if (symbolFile == nullptr) {
     return std::nullopt;
@@ -1517,17 +1520,11 @@ TraceeController::FindFunctionByPc(AddrPtr addr) noexcept
 
   // TODO(simon): Massive room for optimization here. Make get_cus_from_pc return source units directly
   //  or, just make them searchable by cu (via some hashed lookup in a map or something.)
-  DBGLOG(perf, "Start fn symbol resolving in {} compilation units in {} for unreloc addr: {}",
-         cus_matching_addr.size(), symbolFile->GetObjectFilePath().filename().c_str(),
-         symbolFile->UnrelocateAddress(addr));
-  const auto start = std::chrono::high_resolution_clock::now();
   sym::FunctionSymbol *foundFn = nullptr;
-  ScopedDefer defer{[start, symbolFile = symbolFile, &foundFn, addr]() {
-    auto us = MicroSecondsSince(start);
-    DBGLOG(perf, "Parsed symbols & found function symbol {} in {} us ({}), unreloc addr={}",
-           foundFn ? foundFn->name : "<no known name>", us, symbolFile->GetObjectFilePath().filename().c_str(),
-           symbolFile->UnrelocateAddress(addr));
-  }};
+  PROFILE_AT_SCOPE_END("TraceeController::FindFunctionByPc", "supervisor",
+                       PEARG("cu_count", cus_matching_addr.size()),
+                       PEARG("unreloc_addr", symbolFile->UnrelocateAddress(addr)),
+                       PEARG("found_fn", foundFn ? foundFn->name : "not found"));
 
   using sym::CompilationUnit;
 
@@ -1743,8 +1740,8 @@ TraceeController::HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &
       GetUserBreakpoints().remove_bp(user->mId);
     }
   }
-  // If all breakpoints at @ has retired, don't add a breakpoint location status, because the next operation we can
-  // simply resume however we like from, there's no breakpoint to disable-then-enable.
+  // If all breakpoints at @ has retired, don't add a breakpoint location status, because the next operation we
+  // can simply resume however we like from, there's no breakpoint to disable-then-enable.
   if (aliveBreakpoints > 0) {
     t->AddBreakpointLocationStatus(bp_addy);
   }

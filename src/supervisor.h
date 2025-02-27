@@ -17,11 +17,12 @@
 #include "task_scheduling.h"
 #include "utils/expected.h"
 #include <mdbsys/ptrace.h>
+#include <memory_resource>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <utils/leak_vector.h>
 #include <utils/scoped_fd.h>
-#include <utils/static_vector.h>
 
 namespace mdb {
 template <typename T> using Set = std::unordered_set<T>;
@@ -312,7 +313,8 @@ public:
   Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(AddrPtr addr, u64 bytes) noexcept;
   Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr,
                                                               u64 bytes) noexcept;
-  StaticVector<u8>::OwnPtr ReadToVector(AddrPtr addr, u64 bytes) noexcept;
+  std::unique_ptr<LeakVector<u8>> ReadToVector(AddrPtr addr, u64 bytes,
+                                               std::pmr::memory_resource *resource) noexcept;
 
   void DeferEvent(Event event) noexcept;
   void ResumeEventHandling() noexcept;

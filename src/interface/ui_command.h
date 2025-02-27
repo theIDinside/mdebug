@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "lib/arena_allocator.h"
 #include "typedefs.h"
 #include <cstdint>
 #include <optional>
@@ -157,8 +158,6 @@ public:
   /** Returns either the result or nullptr. If nullptr is returned, it's because it's been queued/scheduled in the
    * delayed events queue, because some particular-to-the-DAP request ordering is required.*/
   virtual UIResultPtr Execute() noexcept = 0;
-
-  UIResultPtr LogExecute() noexcept;
 
   template <typename Derived, typename JsonArgs>
   static constexpr MissingOrInvalidResult

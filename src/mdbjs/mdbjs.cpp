@@ -15,13 +15,13 @@
 #include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
 #include "js/Warnings.h"
-#include "jsfriendapi.h"
 #include "mdbjs/event_dispatcher.h"
 #include "mdbjs/supervisorjs.h"
 #include "mdbjs/taskinfojs.h"
 #include "mdbjs/util.h"
 #include "supervisor.h"
 #include <jsapi.h>
+#include <jsfriendapi.h>
 #include <tracer.h>
 #include <utils/logger.h>
 
@@ -216,9 +216,7 @@ RuntimeGlobal::create(JSContext *cx) noexcept
 void
 MdbObject::finalize(JS::GCContext *gcx, JSObject *obj)
 {
-  PANIC("Finalizing MdbObject is a bug");
-  // delete MdbObject::fromObject(obj)->ownedBox();
-  // Do NOT delete unownedBox().
+  DBGLOG(interpreter, "Finalizing MdbObject");
 }
 
 void
@@ -289,6 +287,12 @@ AppScriptingInstance::InitRuntime() noexcept
   }
 
   mEventDispatcher = EventDispatcher::Create(this);
+}
+
+void
+AppScriptingInstance::Shutdown() noexcept
+{
+  JS_DestroyContext(mContext);
 }
 
 /* static */

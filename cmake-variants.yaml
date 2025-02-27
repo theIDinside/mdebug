@@ -24,6 +24,20 @@ tidy:
       settings:
         CLANG_TIDY_CHECK: ON
 
+profiling:
+  default: WithProfiling
+  choices:
+    NoProfiling:
+      short: profile logging turned off
+      long: Don't enable profile logging framework
+      settings:
+        MDB_PROFILE_LOGGER: OFF
+    WithProfiling:
+      short: profile logging turned on
+      long: Enable profile logging framework
+      settings:
+        MDB_PROFILE_LOGGER: ON
+
 dwarfstandard:
   default: dwarf4
   choices:

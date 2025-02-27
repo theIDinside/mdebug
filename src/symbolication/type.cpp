@@ -321,14 +321,6 @@ Type::ResolveAlias() noexcept
 }
 
 void
-Type::AddField(std::string_view name, u64 offsetOf, dw::DieReference debugInfoEntryReference) noexcept
-{
-  TODO_FMT("implement add_field for {} offset of {}, cu=0x{:x}", name, offsetOf,
-           debugInfoEntryReference.GetUnitData()->SectionOffset());
-  // fields.emplace_back(name, offset_of, Immutable<Offset>{ref.die->section_offset});
-}
-
-void
 Type::SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept
 {
   mBaseTypes = enc;

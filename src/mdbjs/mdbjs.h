@@ -163,7 +163,7 @@ class AppScriptingInstance
 public:
   static AppScriptingInstance *Create(JSContext *context, JSObject *globalObject) noexcept;
   void InitRuntime() noexcept;
-
+  void Shutdown() noexcept;
   // Register tracing via Runtime, on the MdbObject, which has a persistent root to start tracing from
   void AddTrace(RegisterTraceFunction &&fn) noexcept;
 

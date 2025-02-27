@@ -10,10 +10,8 @@
 #include "symbolication/dwarf_binary_reader.h"
 #include "symbolication/dwarf_defs.h"
 #include "utils/immutable.h"
-#include "utils/scope_defer.h"
-#include "utils/util.h"
+#include "utils/logger.h"
 #include <array>
-#include <chrono>
 #include <list>
 #include <memory_resource>
 #include <set>
@@ -27,7 +25,7 @@ public:
   SourceCodeFileLNPResolver(CompilationUnit *compilationUnit, dw::LNPHeader *header,
                             std::vector<dw::LineTableEntry> &table, std::vector<AddressRange> &sequences) noexcept
       : mLineNumberProgramHeader{header}, mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()),
-        mTable(table), mSequences(sequences), mIsStatement(header->default_is_stmt)
+        mTable(table), mSequences(sequences), mIsStatement(header->mDefaultIsStatement)
   {
   }
 
@@ -93,9 +91,9 @@ public:
   advance_pc(u64 adjust_value) noexcept
   {
     const auto address_adjust =
-      ((mOpIndex + adjust_value) / mLineNumberProgramHeader->max_ops) * mLineNumberProgramHeader->min_len;
+      ((mOpIndex + adjust_value) / mLineNumberProgramHeader->mMaxOps) * mLineNumberProgramHeader->mMinLength;
     mAddress += address_adjust;
-    mOpIndex = ((mOpIndex + adjust_value) % mLineNumberProgramHeader->max_ops);
+    mOpIndex = ((mOpIndex + adjust_value) % mLineNumberProgramHeader->mMaxOps);
   }
 
   // https://dwarfstd.org/doc/DWARF4.pdf#page=133
@@ -176,8 +174,8 @@ public:
   execute_special_opcode(u8 opcode) noexcept
   {
     special_opindex_advance(opcode);
-    const auto line_inc = mLineNumberProgramHeader->line_base + ((opcode - mLineNumberProgramHeader->opcode_base) %
-                                                                 mLineNumberProgramHeader->line_range);
+    const auto line_inc = mLineNumberProgramHeader->mLineBase + ((opcode - mLineNumberProgramHeader->mOpcodeBase) %
+                                                                 mLineNumberProgramHeader->mLineRange);
     mLine += line_inc;
     StampEntry();
   }
@@ -194,7 +192,7 @@ public:
     mColumn = {0};
     mOpIndex = {0};
     mFile = {1};
-    mIsStatement = mLineNumberProgramHeader->default_is_stmt;
+    mIsStatement = mLineNumberProgramHeader->mDefaultIsStatement;
     mBasicBlock = {false};
     mPrologueEnd = {false};
     mEpilogueBegin = {false};
@@ -249,8 +247,8 @@ private:
   {
     const auto advance = op_advance(opcode);
     const auto new_address =
-      mAddress + mLineNumberProgramHeader->min_len * ((mOpIndex + advance) / mLineNumberProgramHeader->max_ops);
-    const auto new_op_index = (mOpIndex + advance) % mLineNumberProgramHeader->max_ops;
+      mAddress + mLineNumberProgramHeader->mMinLength * ((mOpIndex + advance) / mLineNumberProgramHeader->mMaxOps);
+    const auto new_op_index = (mOpIndex + advance) % mLineNumberProgramHeader->mMaxOps;
     mAddress = new_address;
     mOpIndex = new_op_index;
   }
@@ -258,8 +256,8 @@ private:
   constexpr u64
   op_advance(u8 opcode) const noexcept
   {
-    const auto adjusted_op = opcode - mLineNumberProgramHeader->opcode_base;
-    const auto advance = adjusted_op / mLineNumberProgramHeader->line_range;
+    const auto adjusted_op = opcode - mLineNumberProgramHeader->mOpcodeBase;
+    const auto advance = adjusted_op / mLineNumberProgramHeader->mLineRange;
     return advance;
   }
 
@@ -333,7 +331,7 @@ CompilationUnit::CompilationUnit(dw::UnitData *unitData) noexcept
 void
 CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
-  DBGLOG(dwarf, "cu=0x{:x} low_pc={} .. {} ({})", mUnitData->SectionOffset(), lowest, end_exclusive,
+  DBGLOG(dwarf, "cu={} low_pc={} .. {} ({})", mUnitData->SectionOffset(), lowest, end_exclusive,
          mUnitData->GetObjectFile()->GetFilePath().filename().c_str());
   mPcStart = lowest;
   mPcEndExclusive = end_exclusive;
@@ -361,22 +359,23 @@ void
 CompilationUnit::ComputeLineTable() noexcept
 {
   std::lock_guard lock(m);
+  PROFILE_SCOPE_ARGS("ComputeLineTable", "symbolication", PEARG("compunit", mLineNumberProgram->mSectionOffset));
   if (LineTableComputed()) {
     return;
   }
 
   std::vector<dw::LineTableEntry> unique_ltes{};
 
-  DBGLOG(dwarf, "[lnp]: computing lnp at 0x{:x}", mLineNumberProgram->sec_offset);
+  DBGLOG(dwarf, "[lnp]: computing lnp at {}", mLineNumberProgram->mSectionOffset);
   using OpCode = LineNumberProgramOpCode;
   std::vector<AddressRange> sequences;
-  DwarfBinaryReader reader{mUnitData->GetObjectFile()->GetElf(), mLineNumberProgram->data,
-                           static_cast<u64>(mLineNumberProgram->data_end - mLineNumberProgram->data)};
+  DwarfBinaryReader reader{mUnitData->GetObjectFile()->GetElf(), mLineNumberProgram->mData,
+                           static_cast<u64>(mLineNumberProgram->mDataEnd - mLineNumberProgram->mData)};
 
   SourceCodeFileLNPResolver state{this, mLineNumberProgram, unique_ltes, sequences};
   while (reader.has_more()) {
     const auto opcode = reader.read_value<OpCode>();
-    if (const auto spec_op = std::to_underlying(opcode); spec_op >= mLineNumberProgram->opcode_base) {
+    if (const auto spec_op = std::to_underlying(opcode); spec_op >= mLineNumberProgram->mOpcodeBase) {
       state.execute_special_opcode(spec_op);
       continue;
     }
@@ -390,7 +389,7 @@ CompilationUnit::ComputeLineTable() noexcept
         state.SetSequenceEnded();
         break;
       case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
-        if (mLineNumberProgram->addr_size == 4) {
+        if (mLineNumberProgram->mAddrSize == 4) {
           const auto addr = reader.read_value<u32>();
           state.SetAddress(addr);
         } else {
@@ -399,7 +398,7 @@ CompilationUnit::ComputeLineTable() noexcept
         }
         break;
       case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
-        if (mLineNumberProgram->version == DwarfVersion::D4) {
+        if (mLineNumberProgram->mVersion == DwarfVersion::D4) {
           // https://dwarfstd.org/doc/DWARF4.pdf#page=136
           const auto filename = reader.read_string();
           const auto dir_index = reader.read_uleb128<u64>();
@@ -478,7 +477,7 @@ CompilationUnit::ComputeLineTable() noexcept
 
   const auto sourceCodeTableMapping = state.CreateSubFileMappings();
   // Our "hash"-function.
-  const auto hashIndex = [v = mLineNumberProgram->version](u32 index) -> u32 {
+  const auto hashIndex = [v = mLineNumberProgram->mVersion](u32 index) -> u32 {
     // u8 4-5 will overflow and we reduce it to 1.
     return index + std::min<u32>(u32{std::to_underlying(v)} - u32{std::to_underlying(DwarfVersion::D5)}, 1);
   };
@@ -504,7 +503,7 @@ CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
   mLineNumberProgram = header;
   header->SetCompilationUnitBuildDirectory(NonNull(*mUnitData->GetBuildDirectory()));
 
-  DBGLOG(dwarf, "read files from lnp=0x{}, comp unit=0x{:x} '{}'", mLineNumberProgram->sec_offset,
+  DBGLOG(dwarf, "read files from lnp=0x{}, comp unit={} '{}'", mLineNumberProgram->mSectionOffset,
          mUnitData->SectionOffset(), mCompilationUnitName);
 
   for (const auto &[fullPath, v] : mLineNumberProgram->FileEntries()) {
@@ -622,13 +621,12 @@ CompilationUnit::IsFunctionSymbolsResolved() const noexcept
 sym::FunctionSymbol *
 CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
 {
+  PROFILE_SCOPE("CompilationUnit::GetFunctionSymbolByProgramCounter", "symbolication");
   if (!IsFunctionSymbolsResolved()) {
-    ScopedDefer clockResolve{[start = std::chrono::high_resolution_clock::now(), unit_data = mUnitData,
-                              &mFunctionSymbols = mFunctionSymbols]() {
-      const auto us = MicroSecondsSince(start);
-      DBGLOG(perf, "Resolved {} function symbols for 0x{:x} in {}us ({})", mFunctionSymbols.size(),
-             unit_data->SectionOffset(), us, unit_data->GetObjectFile()->GetFilePath().filename().c_str());
-    }};
+    PROFILE_SCOPE_END_ARGS("CompilationUnit::PrepareFunctionSymbols", "symbolication",
+                           PEARG("symbols", mFunctionSymbols.size()),
+                           PEARG("comp_unit", mUnitData->SectionOffset()),
+                           PEARG("symbolfile", mUnitData->GetObjectFile()->GetFilePath().filename().c_str()));
     PrepareFunctionSymbols();
   }
 
@@ -757,7 +755,7 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
         state.lnp_file =
           src_file.get_lnp_file(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
         CDLOG(ref.GetUnitData() != src_file.get_dwarf_unit(), core,
-              "[dwarf]: Cross CU requires (?) another LNP. ref.cu = 0x{:x}, src file cu=0x{:x}",
+              "[dwarf]: Cross CU requires (?) another LNP. ref.cu = {}, src file cu={}",
               ref.GetUnitData()->SectionOffset(), src_file.get_dwarf_unit()->SectionOffset());
       }
     } break;

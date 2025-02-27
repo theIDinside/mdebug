@@ -72,7 +72,7 @@ template <typename T> struct OwningPointer
 };
 
 constexpr std::vector<std::string_view>
-split_string(std::string_view str, std::string_view delim) noexcept
+SplitString(std::string_view str, std::string_view delim) noexcept
 {
   std::vector<std::string_view> result{};
   auto last = false;

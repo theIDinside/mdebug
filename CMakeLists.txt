@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug symbols" OFF)
 option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
 option(CLANG_TIDY_CHECK "Configure clang-tidy to run during build" OFF)
+option(MDB_PROFILE_LOGGER "Configure mdb to build with profile logging" OFF)
 
 find_package(PkgConfig REQUIRED)
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
@@ -318,6 +319,10 @@ if(MIDAS_BUILD_TYPE STREQUAL "DEBUG")
   target_compile_definitions(mdb PRIVATE MDB_DEBUG=1 DEBUG)
 elseif(MIDAS_BUILD_TYPE STREQUAL "RELEASE")
   target_compile_definitions(mdb PRIVATE MDB_DEBUG=0)
+endif()
+
+if(MDB_PROFILE_LOGGER)
+  target_compile_definitions(mdb PRIVATE MDB_PROFILE_LOGGER)
 endif()
 
 target_link_options(mdb PRIVATE "-fuse-ld=lld")
