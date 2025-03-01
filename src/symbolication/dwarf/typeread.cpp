@@ -188,6 +188,8 @@ FunctionSymbolicationContext::ProcessFormalParameter(DieReference dieRef) noexce
 void
 FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
 {
+  PROFILE_SCOPE_ARGS("FunctionSymbolicationContext::ProcessSymbolInformation", "symbolication",
+                     PEARG("function", this->mFunctionSymbol->name));
   if (mFunctionSymbol->IsResolved()) {
     return;
   }

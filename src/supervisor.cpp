@@ -2026,12 +2026,11 @@ tc::ProcessedStopEvent
 TraceeController::HandleExec(const Exec &evt) noexcept
 {
   // configurationDone will resume us if we're vforking
-  const bool resumeFromExec = !mIsVForking;
   PostExec(evt.exec_file);
   mDebugAdapterClient->PostDapEvent(
     new ui::dap::CustomEvent{mTaskLeader, "setProcessName",
                              fmt::format(R"({{ "name": "{}", "processId": {} }})", evt.exec_file, mTaskLeader)});
-  return tc::ProcessedStopEvent{resumeFromExec, {}};
+  return tc::ProcessedStopEvent{true, {}};
 }
 
 ui::dap::DebugAdapterClient *

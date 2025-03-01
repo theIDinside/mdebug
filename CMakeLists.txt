@@ -280,16 +280,16 @@ if(BUILD_MDB_TESTS)
   # Unit Testing (using googletest)
   include(cmake/AddTest.cmake)
   AddTest(NAME base64_encoding
-    SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC}
+    SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC} src/utils/debugger_thread.cpp
     LIBS fmt::fmt mdb_spinlock
   )
 
   AddTest(NAME test_utils
-    SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp
+    SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp src/utils/debugger_thread.cpp
     LIBS fmt::fmt mdb_spinlock)
 
   AddTest(NAME expected_tests
-    SOURCES test/unittest/expected_tests.cpp src/common.cpp src/utils/logger.cpp
+    SOURCES test/unittest/expected_tests.cpp src/common.cpp src/utils/logger.cpp src/utils/debugger_thread.cpp
     LIBS fmt::fmt)
 
   AddTest(NAME xml_tests

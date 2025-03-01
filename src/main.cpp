@@ -33,8 +33,7 @@
 #include <unistd.h>
 #include <utils/expected.h>
 
-std::mutex m;
-std::condition_variable cv;
+// std::mutex m;
 std::string data;
 bool ready = false;
 
@@ -57,8 +56,7 @@ main(int argc, const char **argv)
   using mdb::logging::ProfilingLogger;
   signal(SIGTERM, [](int sig) {
     if (auto logger = ProfilingLogger::Instance(); logger && sig == SIGTERM) {
-      logger->WriteEvents();
-      delete logger;
+      logger->Shutdown();
     }
     mdb::EventSystem::Get().PushInternalEvent(mdb::TerminateDebugging{});
   });
@@ -84,7 +82,6 @@ main(int argc, const char **argv)
 
   const auto logEnvVar = std::getenv("LOG");
   Logger::ConfigureLogging(config.LogDirectory(), logEnvVar);
-  ProfilingLogger::ConfigureProfiling(config.LogDirectory());
 
   std::span<const char *> args(argv, argc);
   namespace logging = mdb::logging;
@@ -95,7 +92,7 @@ main(int argc, const char **argv)
 
   mdb::Tracer::Create(config);
   mdb::ThreadPool::GetGlobalPool()->Init(config.ThreadPoolSize());
-
+  ProfilingLogger::ConfigureProfiling(config.LogDirectory());
 #ifdef MDB_DEBUG
 
   // timeDelta is the last time this function was called. That way
@@ -162,7 +159,7 @@ main(int argc, const char **argv)
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;
 
-  auto ui_thread =
+  auto debugAdapterThread =
     mdb::DebuggerThread::SpawnDebuggerThread("IO-Thread", [&ui_thread_setup](std::stop_token &token) {
       mdb::ui::dap::DAP ui_interface{STDIN_FILENO, STDOUT_FILENO};
       mdb::Tracer::Get().SetUI(&ui_interface);
@@ -176,11 +173,9 @@ main(int argc, const char **argv)
   DBGLOG(core, "UI thread initialized and configured.");
 
   mdb::Tracer::InitializeDapSerializers();
-  mdb::Tracer::InitInterpreterAndStartDebugger(eventSystem);
+  mdb::Tracer::InitInterpreterAndStartDebugger(std::move(debugAdapterThread), eventSystem);
+  mdb::Tracer::Get().Shutdown();
 
-  mdb::ThreadPool::ShutdownGlobalPool();
-  mdb::Tracer::Get().KillUI();
   DBGLOG(core, "Exited...");
-  ProfilingLogger::Instance()->WriteEvents();
   return 0;
 }

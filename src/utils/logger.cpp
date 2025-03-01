@@ -11,6 +11,21 @@ using namespace std::string_view_literals;
 
 namespace mdb::logging {
 
+static void
+SerializeEvent(Pid processId, std::ostream &out, const ProfileEvent &evt) noexcept
+{
+  out << "{" << R"("name":")" << evt.mName << R"(", "cat":")" << evt.mCategory << R"(", "ph":")" << evt.mPhase
+      << R"(", "ts":)" << evt.mTimestamp << R"(, "pid":)" << processId << R"(, "tid":)" << evt.mTid;
+  if (!evt.mArgs.empty()) {
+    out << R"(, "args":{ )" << evt.mArgs[0].mSerializedArg;
+    for (const auto &arg : std::span{evt.mArgs}.subspan(1)) {
+      out << "," << arg.mSerializedArg;
+    }
+    out << "}";
+  }
+  out << "}";
+}
+
 logging::Logger *logging::Logger::sLoggerInstance = new logging::Logger{};
 logging::ProfilingLogger *logging::ProfilingLogger::sInstance = nullptr;
 
@@ -54,6 +69,42 @@ ProfileEventArg::ProfileEventArg(std::string_view name, mdb::Offset offset) noex
   mSerializedArg = fmt::format(R"("{}":"{}")", name, offset);
 }
 
+void
+ProfilingLogger::FlushAndClose() noexcept
+{
+  if (!mBufferedForSerialize.IsEmpty()) {
+    WriteEvents(mBufferedForSerialize);
+  }
+  if (!mEvents.IsEmpty()) {
+    WriteEvents(mEvents);
+  }
+  mLogFile << "\n]\n}\n";
+  mLogFile.flush();
+  mLogFile.close();
+}
+
+void
+ProfilingLogger::WriteEvents(EventArray &events) noexcept
+{
+  std::span<const ProfileEvent> span = events.Span();
+  if (events.IsEmpty()) {
+    return;
+  }
+
+  if (!mWritten) {
+    SerializeEvent(mPid, mLogFile, span.front());
+    span = span.subspan(1);
+  }
+
+  for (const auto &evt : span) {
+    mLogFile << ",\n";
+    SerializeEvent(mPid, mLogFile, evt);
+  }
+  mWritten = true;
+  mLogFile.flush();
+  events.Clear();
+}
+
 /* static */
 void
 ProfilingLogger::ConfigureProfiling(const Path &path) noexcept
@@ -65,17 +116,42 @@ ProfilingLogger::ConfigureProfiling(const Path &path) noexcept
   sInstance->mLogFile = std::fstream{profilingFile, std::ios_base::in | std::ios_base::out | std::ios_base::trunc};
   sInstance->mLogFile << "{\n" << R"("displayTimeUnit": "ns", "traceEvents": [)" << '\n';
   sInstance->mClosed = false;
-  sInstance->mEvents.Reserve(1024 * 1024);
-  atexit([]() { delete ProfilingLogger::sInstance; });
+  sInstance->mEvents.Reserve(512 * 512);
+  sInstance->mBufferedForSerialize.Reserve(512 * 512);
+  sInstance->mSerializerThread = DebuggerThread::SpawnDebuggerThread("Profiler", [&](std::stop_token &token) {
+    while (!token.stop_requested()) {
+      {
+        std::unique_lock lock(sInstance->mEventsMutex);
+        sInstance->mNotifySerializerThread.wait(lock);
+      }
+      sInstance->SerializeBuffered();
+    }
+    sInstance->FlushAndClose();
+  });
 }
 
-ProfilingLogger::~ProfilingLogger() noexcept
+void
+ProfilingLogger::SwapBuffers() noexcept
 {
-  WriteEvents();
-  if (!mClosed && mLogFile.is_open()) {
-    mLogFile << "\n]\n}\n";
+  decltype(mEvents)::Swap(mEvents, mBufferedForSerialize);
+  mNotifySerializerThread.notify_all();
+}
+
+void
+ProfilingLogger::SerializeBuffered() noexcept
+{
+  WriteEvents(mBufferedForSerialize);
+}
+
+void
+ProfilingLogger::Shutdown() noexcept
+{
+  if (!mShutdown) {
+    mShutdown = true;
+    mSerializerThread->RequestStop();
+    // in case we're stopped at the cv, tell it to wake up.
+    mNotifySerializerThread.notify_all();
   }
-  mLogFile.close();
 }
 
 /* static */
@@ -86,25 +162,32 @@ ProfilingLogger::Instance() noexcept
 }
 
 void
-ProfilingLogger::Begin(std::string_view name, std::string_view category, Pid pid) noexcept
+ProfilingLogger::Begin(std::string_view name, std::string_view category, Pid tid) noexcept
 {
+  if (mShutdown) [[unlikely]] {
+    return;
+  }
   ProfileEvent *e = GetEvent();
   e->mName = name;
   e->mPhase = 'B';
-  e->mTid = pid;
+  e->mTid = tid;
   e->mTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now().time_since_epoch())
                     .count();
   e->mArgs = {};
   e->mCategory = category;
 }
+
 void
-ProfilingLogger::End(std::string_view name, std::string_view category, Pid pid) noexcept
+ProfilingLogger::End(std::string_view name, std::string_view category, Pid tid) noexcept
 {
+  if (mShutdown) [[unlikely]] {
+    return;
+  }
   ProfileEvent *e = GetEvent();
   e->mName = name;
   e->mPhase = 'E';
-  e->mTid = pid;
+  e->mTid = tid;
   e->mTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now().time_since_epoch())
                     .count();
@@ -122,43 +205,6 @@ void
 ProfilingLogger::End(std::string_view name, std::string_view category) noexcept
 {
   End(name, category, gettid());
-}
-
-static void
-SerializeEvent(Pid processId, std::ostream &out, const ProfileEvent &evt) noexcept
-{
-  out << "{" << R"("name":")" << evt.mName << R"(", "cat":")" << evt.mCategory << R"(", "ph":")" << evt.mPhase
-      << R"(", "ts":)" << evt.mTimestamp << R"(, "pid":)" << processId << R"(, "tid":)" << evt.mTid;
-  if (!evt.mArgs.empty()) {
-    out << R"(, "args":{ )" << evt.mArgs[0].mSerializedArg;
-    for (const auto &arg : std::span{evt.mArgs}.subspan(1)) {
-      out << "," << arg.mSerializedArg;
-    }
-    out << "}";
-  }
-  out << "}";
-}
-
-void
-ProfilingLogger::WriteEvents() noexcept
-{
-  std::lock_guard lock(mEventsMutex);
-  if (mWritten) {
-    return;
-  }
-  if (mEvents.IsEmpty()) {
-    return;
-  }
-  std::span<const ProfileEvent> events = mEvents.Span();
-
-  SerializeEvent(mPid, mLogFile, events.front());
-  events = events.subspan(1);
-  for (const auto &evt : events) {
-    mLogFile << ",\n";
-    SerializeEvent(mPid, mLogFile, evt);
-  }
-  mWritten = true;
-  mLogFile.flush();
 }
 
 /* static */

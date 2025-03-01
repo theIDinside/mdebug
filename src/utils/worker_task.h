@@ -1,15 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <chrono>
 #include <future>
+#include <lib/arena_allocator.h>
 #include <memory_resource>
 #include <vector>
-
-namespace mdb {
-namespace alloc {
-class ArenaResource;
-}
-}; // namespace mdb
 
 namespace mdb {
 class TaskGroup;

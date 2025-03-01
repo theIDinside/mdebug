@@ -1203,7 +1203,7 @@ Evaluate::Evaluate(UICommandArg arg, std::string &&expression, std::optional<int
 UIResultPtr
 Evaluate::Execute() noexcept
 {
-  PROFILE_BEGIN_ARGS("Evaluate", "command", PEARG("seq", seq));
+  PROFILE_SCOPE_ARGS("Evaluate", "command", PEARG("seq", seq));
   switch (context) {
   case EvaluationContext::Watch:
     [[fallthrough]];

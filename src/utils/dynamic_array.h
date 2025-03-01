@@ -1,6 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "common.h"
+#include "utils/logger.h"
+#include "utils/macros.h"
 #include <cstring>
 #include <memory>
 #include <memory_resource>
@@ -38,9 +40,9 @@ public:
 template <typename T, RemovePolicy<T> RemovingPolicy> class DynArray
 {
   std::pmr::memory_resource *mAllocatorResource;
-  T *mData;
-  std::uint32_t mSize;
-  std::uint32_t mCapacity;
+  T *mData{nullptr};
+  std::uint32_t mSize{0};
+  std::uint32_t mCapacity{0};
 
   static consteval auto
   Alignment() noexcept -> uint32_t
@@ -75,23 +77,65 @@ template <typename T, RemovePolicy<T> RemovingPolicy> class DynArray
     }
   }
 
+  constexpr void
+  Deallocate()
+  {
+    if (mCapacity == 0) {
+      return;
+    }
+    if constexpr (!std::is_trivially_destructible_v<T>) {
+      std::destroy(mData, mData + mSize);
+    }
+    mAllocatorResource->deallocate(mData, mCapacity * sizeof(T), sizeof(T));
+  }
+
 public:
+  NO_COPY(DynArray);
   constexpr DynArray(std::pmr::memory_resource *alloc = std::pmr::new_delete_resource()) noexcept
-      : mAllocatorResource(alloc), mData(nullptr), mSize(0), mCapacity(0)
+      : mAllocatorResource(alloc)
   {
   }
 
   constexpr DynArray(std::uint32_t capacity,
                      std::pmr::memory_resource *alloc = std::pmr::new_delete_resource()) noexcept
-      : mAllocatorResource(alloc), mSize(0), mCapacity(capacity)
+      : mAllocatorResource(alloc), mCapacity(capacity)
   {
     mData = static_cast<T *>(mAllocatorResource->allocate(mCapacity * sizeof(T), Alignment()));
   }
 
-  constexpr ~DynArray() noexcept
-    requires(std::is_trivially_destructible_v<T>)
+  constexpr DynArray(DynArray &&other) noexcept
+      : mAllocatorResource(other.mAllocatorResource), mData(other.mData), mSize(other.mSize),
+        mCapacity(other.mCapacity)
   {
-    mAllocatorResource->deallocate(mData, mCapacity * sizeof(T), sizeof(T));
+    other.mData = nullptr;
+    other.mSize = 0;
+    other.mCapacity = 0;
+  }
+
+  constexpr DynArray &
+  operator=(DynArray &&rhs) noexcept
+  {
+    if (this != &rhs) {
+      Deallocate();
+      mSize = 0;
+      mCapacity = 0;
+      mData = nullptr;
+      mAllocatorResource = rhs.mAllocatorResource;
+      std::swap(mData, rhs.mData);
+      std::swap(mSize, rhs.mSize);
+      std::swap(mCapacity, rhs.mCapacity);
+    }
+    return *this;
+  }
+
+  constexpr ~DynArray() noexcept { Deallocate(); }
+
+  static constexpr void
+  Swap(DynArray &left, DynArray &right) noexcept
+  {
+    DynArray tmp{std::move(left)};
+    left = std::move(right);
+    right = std::move(tmp);
   }
 
   constexpr void
@@ -103,11 +147,20 @@ public:
     ExtendAllocationBy(capacity);
   }
 
-  constexpr ~DynArray() noexcept
-    requires(!std::is_trivially_destructible_v<T>)
+  constexpr auto
+  Size() const noexcept
   {
-    std::destroy(mData, mData + mSize);
-    mAllocatorResource->deallocate(mData, mCapacity * sizeof(T), sizeof(T));
+    return mSize;
+  }
+
+  constexpr void
+  Clear() noexcept
+  {
+    if constexpr (!std::is_trivially_destructible_v<T>) {
+      std::destroy(mData, mData + mSize);
+    }
+    std::memset(mData, 0, mSize * sizeof(T));
+    mSize = 0;
   }
 
   constexpr T *

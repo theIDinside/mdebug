@@ -1,15 +1,15 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "fmt/core.h"
-#include "lib/arena_allocator.h"
 #include "tracee_pointer.h"
+#include "utils/debugger_thread.h"
 #include "utils/dynamic_array.h"
 #include "utils/indexing.h"
 #include "utils/macros.h"
-#include "utils/scope_defer.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -17,6 +17,7 @@
 #include <string>
 #include <typedefs.h>
 #include <unistd.h>
+#include <utils/scope_defer.h>
 
 #define FOR_EACH_LOG(LOGCHANNEL)                                                                                  \
   LOGCHANNEL(core, "Debugger Core", "Messages that don't have a intuitive log channel can be logged here.")       \
@@ -116,19 +117,35 @@ class ProfilingLogger
 {
   Pid mPid;
   bool mClosed{true};
+  bool mShutdown{false};
   bool mWritten{};
   std::fstream mLogFile;
   std::mutex mEventsMutex{};
-  DynArray<ProfileEvent, DynShiftRemovePolicy> mEvents;
-
+  std::condition_variable mNotifySerializerThread{};
+  std::unique_ptr<DebuggerThread> mSerializerThread{nullptr};
+  using EventArray = DynArray<ProfileEvent, DynShiftRemovePolicy>;
+  EventArray mEvents{};
+  // These two containers are swapped out periodically by the profiler thread, which then serializes them to disk.
+  EventArray mBufferedForSerialize{};
   static ProfilingLogger *sInstance;
 
   ProfileEvent *
   GetEvent()
   {
-    std::lock_guard lock(mEventsMutex);
-    return mEvents.AddUninit();
+    ProfileEvent *newUninitEvent = nullptr;
+    {
+      std::lock_guard lock(mEventsMutex);
+      if (mEvents.Size() > 50 && mBufferedForSerialize.IsEmpty()) {
+        SwapBuffers();
+      }
+      newUninitEvent = mEvents.AddUninit();
+    }
+
+    return newUninitEvent;
   }
+
+  void FlushAndClose() noexcept;
+  void WriteEvents(EventArray &events) noexcept;
 
 public:
   ~ProfilingLogger() noexcept;
@@ -136,16 +153,22 @@ public:
   static void ConfigureProfiling(const Path &path) noexcept;
   static ProfilingLogger *Instance() noexcept;
 
-  void Begin(std::string_view name, std::string_view category, Pid pid) noexcept;
-  void End(std::string_view name, std::string_view category, Pid pid) noexcept;
+  void Begin(std::string_view name, std::string_view category, Pid tid) noexcept;
+  void End(std::string_view name, std::string_view category, Pid tid) noexcept;
 
   void Begin(std::string_view name, std::string_view category) noexcept;
   void End(std::string_view name, std::string_view category) noexcept;
+  void Shutdown() noexcept;
+  void SwapBuffers() noexcept;
+  void SerializeBuffered() noexcept;
 
   template <size_t N>
   void
   Begin(std::string_view name, std::string_view category, std::array<ProfileEventArg, N> &&args) noexcept
   {
+    if (mShutdown) [[unlikely]] {
+      return;
+    }
     ProfileEvent *e = GetEvent();
     e->mName = name;
     e->mPhase = 'B';
@@ -165,6 +188,9 @@ public:
   void
   End(std::string_view name, std::string_view category, std::array<ProfileEventArg, N> &&args) noexcept
   {
+    if (mShutdown) [[unlikely]] {
+      return;
+    }
     ProfileEvent *e = GetEvent();
     e->mName = name;
     e->mPhase = 'E';
@@ -179,8 +205,6 @@ public:
       e->mArgs.emplace_back(std::move(arg));
     }
   }
-
-  void WriteEvents() noexcept;
 };
 
 #define PASTE_HELPER(a, b) a##b

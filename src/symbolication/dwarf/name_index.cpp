@@ -2,6 +2,7 @@
 #include "name_index.h"
 #include "die.h"
 #include "symbolication/dwarf/debug_info_reader.h"
+#include "utils/logger.h"
 #include <symbolication/objfile.h>
 
 namespace mdb::sym::dw {
@@ -77,6 +78,7 @@ NameIndex::ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, Unit
 void
 NameIndex::Merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_references) noexcept
 {
+  PROFILE_SCOPE("NameIndex::Merge", "indexing");
   std::lock_guard lock(mutex);
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu] : parsed_die_name_references) {
@@ -88,6 +90,7 @@ void
 NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
                       const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept
 {
+  PROFILE_SCOPE("NameIndex::MergeTypes", "indexing");
   std::lock_guard lock(mutex);
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu, hash] : parsed_die_name_references) {

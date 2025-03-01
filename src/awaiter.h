@@ -13,9 +13,11 @@ class TraceeController;
 class WaitStatusReaderThread
 {
   std::unique_ptr<DebuggerThread> mThread;
+  int mShutdownNotifier = -1;
 
 public:
   static std::unique_ptr<WaitStatusReaderThread> Init() noexcept;
   void Start() noexcept;
+  void Shutdown() noexcept;
 };
 } // namespace mdb

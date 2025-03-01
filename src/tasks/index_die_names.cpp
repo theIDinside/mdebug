@@ -123,42 +123,43 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
   PROFILE_SCOPE_END_ARGS("IndexingTask::ExecuteTask", "indexing", PEARG("units", mCompUnitsToIndex.size()),
                          PEARG("unit_data_size", sz));
 
-  NameSet free_functions;
+  NameSet freeFunctions;
   NameSet methods;
   NameTypeSet types;
-  NameSet global_variables;
+  NameSet globalVariables;
   NameSet namespaces;
 
-  free_functions.reserve(10000);
+  freeFunctions.reserve(10000);
   methods.reserve(200000);
   types.reserve(100000);
-  global_variables.reserve(10000);
+  globalVariables.reserve(10000);
   namespaces.reserve(1000);
 
-  std::vector<sym::dw::UnitData *> followed_references{};
-  std::vector<sym::dw::UnitData *> type_units{};
+  std::vector<sym::dw::UnitData *> followedReferences{};
+  std::vector<sym::dw::UnitData *> typeUnits{};
   ScopedDefer clear_metadata{[&]() {
     for (auto &comp_unit : mCompUnitsToIndex) {
       comp_unit->ClearLoadedCache();
     }
 
-    for (auto cu : followed_references) {
+    for (auto cu : followedReferences) {
       cu->ClearLoadedCache();
     }
   }};
 
-  for (auto comp_unit : mCompUnitsToIndex) {
+  for (auto compileUnit : mCompUnitsToIndex) {
+    PROFILE_SCOPE_ARGS("Index Compilation Unit", "indexing", PEARG("cu", compileUnit->SectionOffset()));
     std::vector<i64> implicit_consts;
-    const auto &dies = comp_unit->GetDies();
+    const auto &dies = compileUnit->GetDies();
     if (dies.front().mTag == DwarfTag::DW_TAG_type_unit) {
-      DBGLOG(core, "DWARF Unit is a type unit: {}", comp_unit->SectionOffset());
-      type_units.push_back(comp_unit);
+      DBGLOG(core, "DWARF Unit is a type unit: {}", compileUnit->SectionOffset());
+      typeUnits.push_back(compileUnit);
     }
 
-    UnitReader reader{comp_unit};
-    auto die_index = -1;
+    UnitReader reader{compileUnit};
+    auto dieIndex = -1;
     for (const auto &die : dies) {
-      ++die_index;
+      ++dieIndex;
       // work only on dies, that can have a name associated (via DW_AT_name attribute)
       switch (die.mTag) {
       case DwarfTag::DW_TAG_array_type:
@@ -185,14 +186,14 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
         continue;
       }
 
-      const auto &abb = comp_unit->GetAbbreviation(die.mAbbreviationCode);
+      const auto &abb = compileUnit->GetAbbreviation(die.mAbbreviationCode);
 
       const char *name = nullptr;
-      const char *mangled_name = nullptr;
-      auto addr_representable = false;
-      auto is_decl = false;
-      auto is_super_scope_var = false;
-      auto has_loc = false;
+      const char *mangledName = nullptr;
+      auto addrRepresentable = false;
+      auto isDecl = false;
+      auto isSuperScopeVariable = false;
+      auto hasLocation = false;
       reader.SeekDie(die);
       for (const auto &value : abb.mAttributes) {
         switch (value.mName) {
@@ -209,7 +210,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
         } break;
         case Attribute::DW_AT_linkage_name: {
           auto attr = ReadAttributeValue(reader, value, abb.mImplicitConsts);
-          mangled_name = attr.AsCString();
+          mangledName = attr.AsCString();
         } break;
         // is address-representable?
         case Attribute::DW_AT_low_pc:
@@ -219,18 +220,18 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
         case Attribute::DW_AT_entry_pc:
           [[fallthrough]];
         case Attribute::DW_AT_ranges:
-          addr_representable = true;
+          addrRepresentable = true;
           reader.SkipAttribute(value);
           break;
         // is global or static value?
         case Attribute::DW_AT_location:
         case Attribute::DW_AT_const_value:
-          has_loc = true;
-          is_super_scope_var = die.IsSuperScopeVariable();
+          hasLocation = true;
+          isSuperScopeVariable = die.IsSuperScopeVariable();
           reader.SkipAttribute(value);
           break;
         case Attribute::DW_AT_declaration:
-          is_decl = true;
+          isDecl = true;
           reader.SkipAttribute(value);
           break;
         case Attribute::DW_AT_specification:
@@ -289,10 +290,10 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       switch (die.mTag) {
       case DwarfTag::DW_TAG_variable:
         // We only register global variables, everything else wouldn't make sense.
-        if (name && has_loc && is_super_scope_var) {
-          global_variables.push_back({name, die_index, comp_unit});
-          if (mangled_name && mangled_name != name) {
-            global_variables.push_back({mangled_name, die_index, comp_unit});
+        if (name && hasLocation && isSuperScopeVariable) {
+          globalVariables.push_back({name, dieIndex, compileUnit});
+          if (mangledName && mangledName != name) {
+            globalVariables.push_back({mangledName, dieIndex, compileUnit});
           }
         }
         break;
@@ -307,40 +308,40 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       case DwarfTag::DW_TAG_typedef:
       case DwarfTag::DW_TAG_union_type:
       case DwarfTag::DW_TAG_unspecified_type: {
-        if (name && !is_decl) {
-          types.push_back({name, die_index, comp_unit, 0});
+        if (name && !isDecl) {
+          types.push_back({name, dieIndex, compileUnit, 0});
         }
-        if (mangled_name && !is_decl) {
-          types.push_back({mangled_name, die_index, comp_unit, 0});
+        if (mangledName && !isDecl) {
+          types.push_back({mangledName, dieIndex, compileUnit, 0});
         }
       } break;
       case DwarfTag::DW_TAG_inlined_subroutine: // 0x1d 0x2e
       case DwarfTag::DW_TAG_subprogram: {
-        if (!addr_representable) {
+        if (!addrRepresentable) {
           break;
         }
         bool isMemberFunction = false;
         if (name) {
-          isMemberFunction = IsMethod(comp_unit, die);
+          isMemberFunction = IsMethod(compileUnit, die);
           if (isMemberFunction) {
-            methods.push_back({name, die_index, comp_unit});
+            methods.push_back({name, dieIndex, compileUnit});
           } else {
-            free_functions.push_back({name, die_index, comp_unit});
+            freeFunctions.push_back({name, dieIndex, compileUnit});
           }
         }
 
-        if (mangled_name && mangled_name != name) {
+        if (mangledName && mangledName != name) {
           if (isMemberFunction) {
-            methods.push_back({mangled_name, die_index, comp_unit});
+            methods.push_back({mangledName, dieIndex, compileUnit});
           } else {
-            free_functions.push_back({mangled_name, die_index, comp_unit});
+            freeFunctions.push_back({mangledName, dieIndex, compileUnit});
           }
         }
       } break;
       case DwarfTag::DW_TAG_namespace:
       case DwarfTag::DW_TAG_imported_declaration:
         if (name) {
-          namespaces.push_back({name, die_index, comp_unit});
+          namespaces.push_back({name, dieIndex, compileUnit});
         }
         break;
       default:
@@ -351,13 +352,13 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
 
   auto idx = mObjectFile->GetNameIndex();
   idx->mNamespaces.Merge(namespaces);
-  idx->mFreeFunctions.Merge(free_functions);
-  idx->mGlobalVariables.Merge(global_variables);
+  idx->mFreeFunctions.Merge(freeFunctions);
+  idx->mGlobalVariables.Merge(globalVariables);
   idx->mMethods.Merge(methods);
   idx->mTypes.MergeTypes(mObjectFile->GetTypeStorage(), types);
 
-  if (!type_units.empty()) {
-    mObjectFile->AddTypeUnits(type_units);
+  if (!typeUnits.empty()) {
+    mObjectFile->AddTypeUnits(typeUnits);
   }
 }
 

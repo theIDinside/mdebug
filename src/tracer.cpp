@@ -19,10 +19,8 @@
 #include "symbolication/value_visualizer.h"
 #include "task.h"
 #include "task_scheduling.h"
-#include "tracee/util.h"
 #include "utils/expected.h"
-#include "utils/macros.h"
-#include "utils/util.h"
+#include "utils/logger.h"
 #include <algorithm>
 #include <fcntl.h>
 #include <fmt/format.h>
@@ -33,7 +31,6 @@
 #include <interface/remotegdb/connection.h>
 #include <interface/tracee_command/ptrace_commander.h>
 
-#include <memory_resource>
 #include <symbolication/dwarf_frameunwinder.h>
 #include <symbolication/objfile.h>
 #include <sys/ptrace.h>
@@ -730,6 +727,24 @@ Tracer::InitializeDapSerializers() noexcept
   DBGLOG(core, "Debug Adapter serializers initialized.");
 }
 
+void
+Tracer::Shutdown() noexcept
+{
+  mdb::ThreadPool::ShutdownGlobalPool();
+  KillUI();
+  mWaiterThread->Shutdown();
+  mDebugAdapterThread->RequestStop();
+#ifdef MDB_PROFILE_LOGGER
+  ShutdownProfiling();
+#endif
+}
+
+void
+Tracer::ShutdownProfiling() noexcept
+{
+  logging::ProfilingLogger::Instance()->Shutdown();
+}
+
 u32
 Tracer::NewSupervisorId() noexcept
 {
@@ -738,8 +753,10 @@ Tracer::NewSupervisorId() noexcept
 
 /* static */
 void
-Tracer::InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept
+Tracer::InitInterpreterAndStartDebugger(std::unique_ptr<DebuggerThread> debugAdapterThread,
+                                        EventSystem *eventSystem) noexcept
 {
+  Get().mDebugAdapterThread = std::move(debugAdapterThread);
   if (!JS_Init()) {
     PANIC("Failed to init JS!");
   }

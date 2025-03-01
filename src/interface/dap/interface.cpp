@@ -135,7 +135,7 @@ DAP::StartIOPolling(std::stop_token &token) noexcept
   SetClient(DebugAdapterClient::CreateStandardIOConnection());
 
   PollState state{};
-  while (keep_running && !token.stop_requested()) {
+  while (!token.stop_requested()) {
     Poll(state);
   }
 }
@@ -339,7 +339,6 @@ void
 DAP::clean_up() noexcept
 {
   using namespace std::chrono_literals;
-  keep_running = false;
   flush_events();
 }
 

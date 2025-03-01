@@ -2,12 +2,13 @@
 #include "awaiter.h"
 #include "event_queue.h"
 #include "utils/debugger_thread.h"
+#include <sys/eventfd.h>
 #include <sys/signalfd.h>
 #include <sys/wait.h>
 #include <tracer.h>
 namespace mdb {
 static void
-SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
+SignalFileDescriptorWork(int shutdownFileDescriptor, std::stop_token &stopToken) noexcept
 {
   // Block SIGCHLD in this thread to handle it only via signalfd
   sigset_t mask;
@@ -34,8 +35,16 @@ SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
     return;
   }
 
+  epoll_event shutdownEvent{};
+  shutdownEvent.events = EPOLLIN;
+  shutdownEvent.data.fd = shutdownFileDescriptor;
+  if (epoll_ctl(epollFileDescriptor, EPOLL_CTL_ADD, shutdownFileDescriptor, &shutdownEvent) == -1) {
+    PANIC("epoll_ctl failed");
+    return;
+  }
+
   while (!stopToken.stop_requested()) {
-    epoll_event events[1];
+    epoll_event events[2];
     int nfds = epoll_wait(epollFileDescriptor, events, std::size(events), -1);
     if (nfds == -1) {
       if (errno == EINTR) {
@@ -44,6 +53,7 @@ SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
       PANIC("Failed to epoll wait");
     }
     for (int i = 0; i < nfds; ++i) {
+      // if it's a sigchld.
       if (events[i].data.fd == sfd) {
         struct signalfd_siginfo fdsi;
         ssize_t bytes_read = read(sfd, &fdsi, sizeof(fdsi));
@@ -85,8 +95,20 @@ SignalFileDescriptorWork(std::stop_token &stopToken) noexcept
 void
 WaitStatusReaderThread::Start() noexcept
 {
-  mThread = DebuggerThread::SpawnDebuggerThread("WaitStatReader",
-                                                [](std::stop_token &token) { SignalFileDescriptorWork(token); });
+  mShutdownNotifier = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  mThread = DebuggerThread::SpawnDebuggerThread(
+    "WaitStatReader", [&](std::stop_token &token) { SignalFileDescriptorWork(mShutdownNotifier, token); });
+}
+
+void
+WaitStatusReaderThread::Shutdown() noexcept
+{
+  mThread->RequestStop();
+  uint64_t value = 1;
+  const auto res = write(mShutdownNotifier, &value, sizeof(value));
+  if (res == -1) {
+    PANIC("Failed to notified waiter thread to shut down.");
+  }
 }
 
 /* static */

@@ -28,6 +28,7 @@
 #include <task.h>
 #include <tracer.h>
 #include <utility>
+#include <utils/scope_defer.h>
 #include <utils/scoped_fd.h>
 
 #include <lib/arena_allocator.h>

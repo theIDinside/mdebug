@@ -12,6 +12,7 @@
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/value.h"
 #include "symbolication/value_visualizer.h"
+#include "utils/debugger_thread.h"
 #include <mdb_config.h>
 #include <mdbsys/ptrace.h>
 #include <notify_pipe.h>
@@ -175,8 +176,11 @@ public:
 
   static mdb::js::AppScriptingInstance &GetScriptingInstance() noexcept;
   static JSContext *GetJsContext() noexcept;
-  static void InitInterpreterAndStartDebugger(EventSystem *eventSystem) noexcept;
+  static void InitInterpreterAndStartDebugger(std::unique_ptr<DebuggerThread> debugAdapterThread,
+                                              EventSystem *eventSystem) noexcept;
   static void InitializeDapSerializers() noexcept;
+  void Shutdown() noexcept;
+  void ShutdownProfiling() noexcept;
 
   template <typename DapSerializer>
   static DapSerializer *
@@ -219,6 +223,7 @@ public:
 private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
 
+  std::unique_ptr<DebuggerThread> mDebugAdapterThread{nullptr};
   std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
   std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
   ui::dap::DAP *mDAP;

@@ -293,6 +293,7 @@ void
 AppScriptingInstance::Shutdown() noexcept
 {
   JS_DestroyContext(mContext);
+  JS_ShutDown();
 }
 
 /* static */
