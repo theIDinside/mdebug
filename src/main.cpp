@@ -61,7 +61,7 @@ main(int argc, const char **argv)
     mdb::EventSystem::Get().PushInternalEvent(mdb::TerminateDebugging{});
   });
   // Sets main thread id. It's static so subsequent calls from other threads should be fine.
-  mdb::GetMainThreadId();
+  mdb::GetProcessId();
   mdb::EventSystem *eventSystem = mdb::EventSystem::Initialize();
 
   auto res = mdb::sys::ParseCommandLineArguments(argc, argv);
