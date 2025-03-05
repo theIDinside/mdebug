@@ -326,6 +326,7 @@ enum class InternalEventDiscriminant
 {
   InvalidateSupervisor,
   TerminateDebugging,
+  InitializedWaitSystem,
 };
 
 // Event sent when a supervisor for a process "dies". Was called "DestroySupervisor" before
@@ -341,6 +342,10 @@ struct TerminateDebugging
 {
 };
 
+struct InitializedWaitSystem
+{
+};
+
 struct InternalEvent
 {
   InternalEvent() noexcept = delete;
@@ -352,10 +357,12 @@ struct InternalEvent
   {
     InvalidateSupervisor uInvalidateSupervisor;
     TerminateDebugging uTerminateDebugging;
+    InitializedWaitSystem uInitializedWaitSystem;
   };
 
   UnionVariantConstructor(InternalEvent, InvalidateSupervisor);
   UnionVariantConstructor(InternalEvent, TerminateDebugging);
+  UnionVariantConstructor(InternalEvent, InitializedWaitSystem);
 };
 
 struct Event
@@ -406,8 +413,10 @@ class EventSystem
   int mDebuggerEvents[2];
   int mInitEvents[2];
   int mInternalEvents[2];
+  int mSignalFd;
 
-  pollfd mPollDescriptors[5];
+  int mCurrentPollDescriptors = 5;
+  pollfd mPollDescriptors[6];
 
   std::mutex mCommandsGuard{};
   std::mutex mTraceEventGuard{};
@@ -423,8 +432,11 @@ class EventSystem
 
   int mPollFailures = 0;
 
+  int PollDescriptorsCount() const noexcept;
+
 public:
   static EventSystem *Initialize() noexcept;
+  void InitWaitStatusManager() noexcept;
   void PushCommand(ui::dap::DebugAdapterClient *dap_client, ui::UICommand *cmd) noexcept;
   void PushDebuggerEvent(TraceEvent *event) noexcept;
   void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;

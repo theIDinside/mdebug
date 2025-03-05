@@ -1,11 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "wait_event_parser.h"
-#include "awaiter.h"
 #include "bp.h"
 #include "interface/remotegdb/connection.h"
 #include "interface/remotegdb/shared.h"
 #include "interface/tracee_command/tracee_command_interface.h"
-#include "utils/debug_value.h"
 #include <charconv>
 #include <event_queue.h>
 #include <supervisor.h>

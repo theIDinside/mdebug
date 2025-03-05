@@ -90,8 +90,11 @@ void
 NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
                       const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept
 {
-  PROFILE_SCOPE("NameIndex::MergeTypes", "indexing");
+  PROFILE_BEGIN("NameIndex::MergeTypes lock", "indexing");
   std::lock_guard lock(mutex);
+  PROFILE_END("NameIndex::MergeTypes lock", "indexing");
+
+  PROFILE_SCOPE("NameIndex::MergeTypes critical section", "indexing");
   DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
   for (const auto &[name, idx, cu, hash] : parsed_die_name_references) {
     AddName(name, idx, cu);

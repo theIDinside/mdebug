@@ -4,19 +4,16 @@
 #include "interface/dap/interface.h"
 #include "mdb_config.h"
 #include "mdbjs/mdbjs.h"
-#include "supervisor.h"
 #include "tracer.h"
 #include "utils/debugger_thread.h"
 #include "utils/thread_pool.h"
 #include <asm-generic/errno-base.h>
 #include <chrono>
-#include <condition_variable>
 #include <csignal>
 #include <cstdlib>
 #include <fcntl.h>
 #include <fmt/core.h>
 #include <linux/sched.h>
-#include <mutex>
 #include <poll.h>
 #include <sched.h>
 #include <stdlib.h>
@@ -93,68 +90,6 @@ main(int argc, const char **argv)
   mdb::Tracer::Create(config);
   mdb::ThreadPool::GetGlobalPool()->Init(config.ThreadPoolSize());
   ProfilingLogger::ConfigureProfiling(config.LogDirectory());
-#ifdef MDB_DEBUG
-
-  // timeDelta is the last time this function was called. That way
-  // The debug functions can decide if they should run or not.
-  std::vector<std::function<void(std::chrono::milliseconds)>> intervalJobs{
-    [delta = u64{0}](std::chrono::milliseconds timeDelta) mutable noexcept {
-      delta += timeDelta.count();
-      if (delta < 500) {
-        return;
-      }
-      delta = 0;
-      if (const auto &tasks = mdb::Tracer::Get().UnInitializedTasks(); !tasks.empty()) {
-        std::string res;
-        auto iter = std::back_inserter(res);
-        for (const auto &[tid, task] : tasks) {
-          iter = fmt::format_to(iter, "{}{}:{}", res.empty() ? '[' : ',', tid,
-                                task->IsStopped() ? "stopped" : "running");
-        }
-        if (!res.empty()) {
-          res.push_back(']');
-        }
-
-        DBGLOG(warning, "Tasks are still uninitialized, tasks={}", res);
-      }
-    },
-    [events = u64{0}, stallTime = u64{0}, reported = false,
-     writeBuffer = std::string{}](std::chrono::milliseconds interval) mutable noexcept {
-      if (!mdb::Tracer::Get().SeenNewEvents(events)) {
-        stallTime += interval.count();
-        if (!reported) {
-          writeBuffer.clear();
-          for (const auto &target : mdb::Tracer::Get().GetAllProcesses()) {
-            for (const auto &entry : target->GetThreads()) {
-              if (entry.mTask->CanContinue()) {
-                fmt::format_to(std::back_inserter(writeBuffer), "tid={}, stopped={}, wait={}, ?pc?=0x{:x}\n",
-                               entry.mTid, entry.mTask->IsStopped(), to_str(entry.mTask->mLastWaitStatus.ws),
-                               entry.mTask->GetRegister(16));
-              }
-            }
-          }
-          DBGLOG(warning, "Debug session task debug state:\n{}\nNo new debugger events processed in {}",
-                 writeBuffer, stallTime);
-        }
-        reported = true;
-        return;
-      }
-      stallTime = 0;
-      events = mdb::Tracer::Get().DebuggerEventCount();
-      reported = false;
-    }};
-
-  auto stateDebugThread = mdb::DebuggerThread::SpawnDebuggerThread(
-    "MdbStateMonitor", [intervalJobs = std::move(intervalJobs)](std::stop_token &token) {
-      constexpr auto intervalSetting = std::chrono::milliseconds{500};
-      while (mdb::Tracer::Get().IsRunning() && !token.stop_requested()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{intervalSetting});
-        for (auto &f : intervalJobs) {
-          f(intervalSetting);
-        }
-      }
-    });
-#endif
 
   // spawn the UI thread that runs our UI loop
   bool ui_thread_setup = false;

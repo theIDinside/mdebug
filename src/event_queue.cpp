@@ -8,6 +8,7 @@
 #include <interface/ui_command.h>
 #include <mutex>
 #include <optional>
+#include <sys/signalfd.h>
 
 namespace mdb {
 
@@ -214,6 +215,39 @@ EventSystem::EventSystem(int wait[2], int commands[2], int debugger[2], int init
   mPollDescriptors[2] = {mDebuggerEvents[0], POLLIN, 0};
   mPollDescriptors[3] = {mInitEvents[0], POLLIN, 0};
   mPollDescriptors[4] = {mInternalEvents[0], POLLIN, 0};
+
+  // Block SIGCHLD in this thread to handle it only via signalfd
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGCHLD);
+  if (sigprocmask(SIG_BLOCK, &mask, nullptr) == -1) {
+    perror("sigprocmask");
+    return;
+  }
+
+  // Create signalfd for SIGCHLD
+
+  // ScopedFd panics if fd == -1 (error value).
+  // So we don't need error checking here. This is a hard error, we don't even try here.
+  mSignalFd = signalfd(-1, &mask, 0);
+  VERIFY(mSignalFd != -1,
+         "Must be able to open signal file descriptor. WaitStatus system can't function otherwise.");
+  mPollDescriptors[5] = {mSignalFd, POLLIN, 0};
+}
+
+int
+EventSystem::PollDescriptorsCount() const noexcept
+{
+  return mCurrentPollDescriptors;
+}
+
+void
+EventSystem::InitWaitStatusManager() noexcept
+{
+  // Include the signalfd in the polling, essentially "initializing" the wait system as it will now start reporting
+  // events
+  mCurrentPollDescriptors++;
+  PushInternalEvent(InitializedWaitSystem{});
 }
 
 /* static */
@@ -337,7 +371,7 @@ EventSystem::PushInternalEvent(InternalEvent event) noexcept
 bool
 EventSystem::PollBlocking(std::vector<Event> &write) noexcept
 {
-  int ret = poll(mPollDescriptors, std::size(mPollDescriptors), -1);
+  int ret = poll(mPollDescriptors, PollDescriptorsCount(), -1);
   mPollFailures++;
   ASSERT(mPollFailures < 10, "failed to poll event system");
   if (ret == 0) {
@@ -385,6 +419,43 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
       write.reserve(write.size() + mWaitEvents.size());
       std::copy(mWaitEvents.begin(), mWaitEvents.end(), std::back_inserter(write));
       mWaitEvents.clear();
+    } else if (pfd.fd == mSignalFd) {
+      signalfd_siginfo fdsi;
+      ssize_t bytes_read = read(mSignalFd, &fdsi, sizeof(fdsi));
+      if (bytes_read != sizeof(fdsi)) {
+        PANIC("read from signalfd");
+      }
+      if (fdsi.ssi_signo == SIGCHLD) {
+        // Handle SIGCHLD: reap child processes
+        while (true) {
+          WaitResult status{};
+          status.pid = waitpid(-1, &status.stat, WNOHANG | __WALL);
+          if (status.pid <= 0) {
+            break;
+          }
+          if (WIFSTOPPED(status.stat)) {
+            const auto res = WaitResultToTaskWaitResult(status.pid, status.stat);
+            write.push_back(Event{WaitEvent{.wait = res, .core = 0}});
+          } else if (WIFEXITED(status.stat)) {
+            for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
+              for (const auto &entry : supervisor->GetThreads()) {
+                if (entry.mTid == status.pid) {
+                  write.push_back(Event{TraceEvent::CreateThreadExited(
+                    {supervisor->TaskLeaderTid(), status.pid, WEXITSTATUS(status.stat), 0}, false, {})});
+                }
+              }
+            }
+
+          } else if (WIFSIGNALED(status.stat)) {
+            const auto signaled_evt =
+              TaskWaitResult{.tid = status.pid,
+                             .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status.stat)}};
+            write.push_back(Event{WaitEvent{signaled_evt, 0}});
+          } else {
+            PANIC("Unknown wait status event");
+          }
+        }
+      }
     }
   }
   return write.size() != sizeBefore;
