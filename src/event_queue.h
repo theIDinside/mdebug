@@ -408,15 +408,14 @@ struct WaitResult
 
 class EventSystem
 {
-  int mWaitStatus[2];
   int mCommandEvents[2];
   int mDebuggerEvents[2];
   int mInitEvents[2];
   int mInternalEvents[2];
   int mSignalFd;
 
-  int mCurrentPollDescriptors = 5;
-  pollfd mPollDescriptors[6];
+  int mCurrentPollDescriptors;
+  pollfd mPollDescriptors[5];
 
   std::mutex mCommandsGuard{};
   std::mutex mTraceEventGuard{};
@@ -426,7 +425,7 @@ class EventSystem
   std::vector<Event> mWaitEvents;
   std::vector<TraceEvent *> mInitEvent;
   std::vector<InternalEvent> mInternal;
-  EventSystem(int wait[2], int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
+  EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
 
   static EventSystem *sEventSystem;
 
@@ -441,9 +440,7 @@ public:
   void PushDebuggerEvent(TraceEvent *event) noexcept;
   void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
   void PushInitEvent(TraceEvent *event) noexcept;
-  void PushWaitResult(WaitResult result) noexcept;
   void NotifyNewWaitpidResults() noexcept;
-  void PushReapedWaitResults(std::span<WaitResult> results) noexcept;
   void PushInternalEvent(InternalEvent event) noexcept;
   bool PollBlocking(std::vector<Event> &write) noexcept;
 

@@ -49,15 +49,6 @@
 
 #include <dirent.h>
 namespace mdb {
-void
-on_sigchild_handler(int)
-{
-  pid_t pid;
-  int stat;
-  while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
-    EventSystem::Get().PushWaitResult(WaitResult{pid, stat});
-  }
-}
 
 Tracer::Tracer(sys::DebuggerConfiguration init) noexcept : config(std::move(init))
 {

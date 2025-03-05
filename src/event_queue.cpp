@@ -205,16 +205,15 @@ TraceEvent::CreateEntryEvent(const EventDataParam &param, RegisterData &&reg, bo
                         std::move(reg)};
 }
 
-EventSystem::EventSystem(int wait[2], int commands[2], int debugger[2], int init[2], int internal[2]) noexcept
-    : mWaitStatus(wait[0], wait[1]), mCommandEvents(commands[0], commands[1]),
-      mDebuggerEvents(debugger[0], debugger[1]), mInitEvents(init[0], init[1]),
-      mInternalEvents(internal[0], internal[1])
+EventSystem::EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept
+    : mCommandEvents(commands[0], commands[1]), mDebuggerEvents(debugger[0], debugger[1]),
+      mInitEvents(init[0], init[1]), mInternalEvents(internal[0], internal[1])
 {
-  mPollDescriptors[0] = {mWaitStatus[0], POLLIN, 0};
-  mPollDescriptors[1] = {mCommandEvents[0], POLLIN, 0};
-  mPollDescriptors[2] = {mDebuggerEvents[0], POLLIN, 0};
-  mPollDescriptors[3] = {mInitEvents[0], POLLIN, 0};
-  mPollDescriptors[4] = {mInternalEvents[0], POLLIN, 0};
+  int i = 0;
+  mPollDescriptors[i++] = {mCommandEvents[0], POLLIN, 0};
+  mPollDescriptors[i++] = {mDebuggerEvents[0], POLLIN, 0};
+  mPollDescriptors[i++] = {mInitEvents[0], POLLIN, 0};
+  mPollDescriptors[i++] = {mInternalEvents[0], POLLIN, 0};
 
   // Block SIGCHLD in this thread to handle it only via signalfd
   sigset_t mask;
@@ -224,15 +223,13 @@ EventSystem::EventSystem(int wait[2], int commands[2], int debugger[2], int init
     perror("sigprocmask");
     return;
   }
-
-  // Create signalfd for SIGCHLD
-
-  // ScopedFd panics if fd == -1 (error value).
-  // So we don't need error checking here. This is a hard error, we don't even try here.
+  // we set `mCurrentPollDescriptors` to `i`, because to initialize the wait system when we want to
+  // we increase `mCurrentPollDescriptors` by 1, and it will be used during the poll in the main event loop.
+  mCurrentPollDescriptors = i;
   mSignalFd = signalfd(-1, &mask, 0);
   VERIFY(mSignalFd != -1,
          "Must be able to open signal file descriptor. WaitStatus system can't function otherwise.");
-  mPollDescriptors[5] = {mSignalFd, POLLIN, 0};
+  mPollDescriptors[i++] = {mSignalFd, POLLIN, 0};
 }
 
 int
@@ -254,23 +251,21 @@ EventSystem::InitWaitStatusManager() noexcept
 EventSystem *
 EventSystem::Initialize() noexcept
 {
-  int wait[2];
   int commands[2];
   int dbg[2];
   int init[2];
   int internal[2];
 
-  MUST_HOLD(pipe(wait) != -1, "Failed to open pipe");
   MUST_HOLD(pipe(commands) != -1, "Failed to open pipe");
   MUST_HOLD(pipe(dbg) != -1, "Failed to open pipe");
   MUST_HOLD(pipe(init) != -1, "Failed to open pipe")
   MUST_HOLD(pipe(internal) != -1, "Failed to open pipe")
 
-  for (auto read : {wait[0], commands[0], dbg[0], init[0], internal[0]}) {
+  for (auto read : {commands[0], dbg[0], init[0], internal[0]}) {
     ASSERT(fcntl(read, F_SETFL, O_NONBLOCK) != -1, "failed to set read as non-blocking.");
   }
 
-  EventSystem::sEventSystem = new EventSystem{wait, commands, dbg, init, internal};
+  EventSystem::sEventSystem = new EventSystem{commands, dbg, init, internal};
   return EventSystem::sEventSystem;
 }
 
@@ -313,50 +308,6 @@ EventSystem::PushInitEvent(TraceEvent *event) noexcept
   mInitEvent.push_back(event);
   int writeValue = write(mInitEvents[1], "+", 1);
   ASSERT(writeValue != -1, "Failed to write notification to pipe");
-}
-
-void
-EventSystem::PushWaitResult(WaitResult result) noexcept
-{
-  int writeValue = write(mWaitStatus[1], &result, sizeof(result));
-  ASSERT(writeValue != -1 && writeValue == sizeof(result), "Failed to write notification to pipe");
-}
-
-void
-EventSystem::NotifyNewWaitpidResults() noexcept
-{
-  constexpr char writeChar = '+';
-  int writeValue = write(mWaitStatus[1], &writeChar, sizeof(writeChar));
-  ASSERT(writeValue != -1 && writeValue == sizeof(writeChar), "Failed to write notification to pipe");
-}
-
-void
-EventSystem::PushReapedWaitResults(std::span<WaitResult> results) noexcept
-{
-  std::lock_guard lock(mInternalEventGuard);
-  for (const auto [pid, stat] : results) {
-    if (WIFSTOPPED(stat)) {
-      const auto res = WaitResultToTaskWaitResult(pid, stat);
-      mWaitEvents.push_back(Event{WaitEvent{.wait = res, .core = 0}});
-    } else if (WIFEXITED(stat)) {
-      for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
-        for (const auto &entry : supervisor->GetThreads()) {
-          if (entry.mTid == pid) {
-            mWaitEvents.push_back(Event{TraceEvent::CreateThreadExited(
-              {supervisor->TaskLeaderTid(), pid, WEXITSTATUS(stat), 0}, false, {})});
-          }
-        }
-      }
-
-    } else if (WIFSIGNALED(stat)) {
-      const auto signaled_evt =
-        TaskWaitResult{.tid = pid, .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(stat)}};
-      mWaitEvents.push_back(Event{WaitEvent{signaled_evt, 0}});
-    } else {
-      PANIC("Unknown wait status event");
-    }
-  }
-  NotifyNewWaitpidResults();
 }
 
 void
@@ -414,11 +365,6 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
       std::ranges::transform(mInternal, std::back_inserter(write),
                              [](InternalEvent event) { return Event{event}; });
       mInternal.clear();
-    } else if (pfd.fd == mWaitStatus[0]) {
-      std::lock_guard lock(mInternalEventGuard);
-      write.reserve(write.size() + mWaitEvents.size());
-      std::copy(mWaitEvents.begin(), mWaitEvents.end(), std::back_inserter(write));
-      mWaitEvents.clear();
     } else if (pfd.fd == mSignalFd) {
       signalfd_siginfo fdsi;
       ssize_t bytes_read = read(mSignalFd, &fdsi, sizeof(fdsi));
