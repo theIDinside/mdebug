@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #include "tracer.h"
-#include "awaiter.h"
 #include "bp.h"
 #include "event_queue.h"
 #include "interface/attach_args.h"
@@ -50,15 +49,6 @@
 
 #include <dirent.h>
 namespace mdb {
-void
-on_sigchild_handler(int)
-{
-  pid_t pid;
-  int stat;
-  while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
-    EventSystem::Get().PushWaitResult(WaitResult{pid, stat});
-  }
-}
 
 Tracer::Tracer(sys::DebuggerConfiguration init) noexcept : config(std::move(init))
 {
@@ -87,7 +77,6 @@ Tracer *
 Tracer::Create(sys::DebuggerConfiguration cfg) noexcept
 {
   sTracerInstance = new Tracer{std::move(cfg)};
-  sTracerInstance->mWaiterThread = WaitStatusReaderThread::Init();
   return sTracerInstance;
 }
 
@@ -137,7 +126,7 @@ Tracer::AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession sessi
     PTRACE_OR_PANIC(PTRACE_ATTACH, newProcess, 0, 0);
   }
   ConfigurePtraceSettings(newProcess);
-  mWaiterThread->Start();
+  EventSystem::Get().InitWaitStatusManager();
 }
 
 TraceeController *
@@ -256,6 +245,9 @@ Tracer::HandleInternalEvent(InternalEvent evt) noexcept
   } break;
   case mdb::InternalEventDiscriminant::TerminateDebugging: {
     sApplicationState = TracerProcess::RequestedShutdown;
+    break;
+  }
+  case mdb::InternalEventDiscriminant::InitializedWaitSystem: {
     break;
   }
   default:
@@ -732,7 +724,6 @@ Tracer::Shutdown() noexcept
 {
   mdb::ThreadPool::ShutdownGlobalPool();
   KillUI();
-  mWaiterThread->Shutdown();
   mDebugAdapterThread->RequestStop();
 #ifdef MDB_PROFILE_LOGGER
   ShutdownProfiling();

@@ -326,6 +326,7 @@ enum class InternalEventDiscriminant
 {
   InvalidateSupervisor,
   TerminateDebugging,
+  InitializedWaitSystem,
 };
 
 // Event sent when a supervisor for a process "dies". Was called "DestroySupervisor" before
@@ -341,6 +342,10 @@ struct TerminateDebugging
 {
 };
 
+struct InitializedWaitSystem
+{
+};
+
 struct InternalEvent
 {
   InternalEvent() noexcept = delete;
@@ -352,10 +357,12 @@ struct InternalEvent
   {
     InvalidateSupervisor uInvalidateSupervisor;
     TerminateDebugging uTerminateDebugging;
+    InitializedWaitSystem uInitializedWaitSystem;
   };
 
   UnionVariantConstructor(InternalEvent, InvalidateSupervisor);
   UnionVariantConstructor(InternalEvent, TerminateDebugging);
+  UnionVariantConstructor(InternalEvent, InitializedWaitSystem);
 };
 
 struct Event
@@ -401,12 +408,13 @@ struct WaitResult
 
 class EventSystem
 {
-  int mWaitStatus[2];
   int mCommandEvents[2];
   int mDebuggerEvents[2];
   int mInitEvents[2];
   int mInternalEvents[2];
+  int mSignalFd;
 
+  int mCurrentPollDescriptors;
   pollfd mPollDescriptors[5];
 
   std::mutex mCommandsGuard{};
@@ -417,21 +425,22 @@ class EventSystem
   std::vector<Event> mWaitEvents;
   std::vector<TraceEvent *> mInitEvent;
   std::vector<InternalEvent> mInternal;
-  EventSystem(int wait[2], int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
+  EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
 
   static EventSystem *sEventSystem;
 
   int mPollFailures = 0;
 
+  int PollDescriptorsCount() const noexcept;
+
 public:
   static EventSystem *Initialize() noexcept;
+  void InitWaitStatusManager() noexcept;
   void PushCommand(ui::dap::DebugAdapterClient *dap_client, ui::UICommand *cmd) noexcept;
   void PushDebuggerEvent(TraceEvent *event) noexcept;
   void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
   void PushInitEvent(TraceEvent *event) noexcept;
-  void PushWaitResult(WaitResult result) noexcept;
   void NotifyNewWaitpidResults() noexcept;
-  void PushReapedWaitResults(std::span<WaitResult> results) noexcept;
   void PushInternalEvent(InternalEvent event) noexcept;
   bool PollBlocking(std::vector<Event> &write) noexcept;
 

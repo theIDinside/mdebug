@@ -32,7 +32,6 @@ namespace mdb {
 class ObjectFile;
 class SymbolFile;
 class TraceeController;
-class WaitStatusReaderThread;
 struct LWP;
 class TaskInfo;
 
@@ -227,7 +226,6 @@ private:
   std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
   std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
   ui::dap::DAP *mDAP;
-  std::unique_ptr<WaitStatusReaderThread> mWaiterThread{nullptr};
   u32 mBreakpointID{0};
 
   // We do a monotonic increase. Unlike implementations I've previously worked on, and seen (like gdb)

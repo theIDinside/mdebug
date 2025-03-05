@@ -31,7 +31,7 @@ u32 QueryAvxSupport() noexcept;
 
 /// Return the main thread ID, used to identify if some debugger-core
 /// code should/can be executed.
-std::thread::id GetMainThreadId() noexcept;
+pid_t GetProcessId() noexcept;
 
 /// Parse `input` and return a process id as a result if successful.
 std::optional<pid_t> ParseProcessId(std::string_view input, bool hex) noexcept;

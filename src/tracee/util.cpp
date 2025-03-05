@@ -86,11 +86,15 @@ ProcessExecPath(Pid pid) noexcept
 
 // N.B. Currently does nothing. In the future will be used to be able to assert in debug mode that specific
 // functionality is sure to be executed only by the main thread.
-std::thread::id
-GetMainThreadId() noexcept
+pid_t
+GetProcessId() noexcept
 {
-  static std::thread::id gMainThreadId = std::this_thread::get_id();
-  return gMainThreadId;
+  static pid_t gProcessId = 0;
+  if (gProcessId == 0) {
+    gProcessId = getpid();
+  }
+
+  return gProcessId;
 }
 
 std::optional<pid_t>

@@ -32,8 +32,6 @@ set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
 set(MIDAS_SOURCES
   # root
-  src/awaiter.cpp
-  src/awaiter.h
   src/bp.cpp
   src/bp.h
   src/bp_spec.cpp
