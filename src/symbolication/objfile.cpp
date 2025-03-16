@@ -615,7 +615,18 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   // ObjectFile is the owner of `Elf`
   objfile->elf = new Elf{header, std::move(sectionData)};
   Elf::ParseMinimalSymbol(objfile->elf, *objfile);
-  objfile->unwinder = sym::ParseExceptionHeaderSection(objfile.get(), objfile->elf->GetSection(".eh_frame"));
+  auto unwinder = sym::ParseExceptionHeaderSection(objfile.get(), objfile->elf->GetSection(".eh_frame"));
+  if (unwinder) {
+    objfile->unwinder = std::move(unwinder);
+  } else {
+    // Create null unwinder. Probably likely that this (debug built - for release built objects everything goes out
+    // the window) binary object doesn't have code in it.
+    /// FIXME:(simon) We should probably verify that the SO doesn't have executable section/code. However, we don't
+    /// support any unwinder techniques but the ones that solely rely on .eh_frame and .debug_frame so at the
+    /// momement, *iff* the object would have a .text section (that's non-empty), we wouldn't be able to unwind any
+    /// frames in it any how.
+    objfile->unwinder = std::make_unique<sym::Unwinder>(nullptr);
+  }
   if (const auto section = objfile->elf->GetSection(".debug_frame"); section) {
     DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
     sym::ParseDwarfDebugFrame(objfile->GetElf(), objfile->unwinder.get(), section);
