@@ -1991,12 +1991,14 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
   } else {
     SetDeferEventHandler();
     newSupervisor->mIsVForking = true;
-    newSupervisor->mOnExecOrExitPublisher.Once([parent = this, self = newSupervisor, resumeTid = evt.thread_id]() {
+    newSupervisor->mOnExecOrExitPublisher.Once([parent = this, self = newSupervisor, resumeTid = evt.thread_id,
+                                                newPid = evt.child_pid]() {
       parent->ResumeEventHandling();
       self->mIsVForking = false;
       self->mConfigurationIsDone = true;
       EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateDeferToSupervisor(
         {.target = parent->TaskLeaderTid(), .tid = resumeTid, .sig_or_code = 0, .event_time = {}}, {}, {}));
+      parent->mDebugAdapterClient->PostDapEvent(new ui::dap::Process{parent->mTaskLeader, newPid, "forked", true});
     });
   }
   const bool should_resume = !evt.mIsVFork && resume;

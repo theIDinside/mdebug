@@ -54,42 +54,41 @@ class UnitData;
 
 class NameIndex
 {
+  // The sharding adds additional overhead during lookups, because we now have to do N lookups per search value
+  // instead of just 1. But it also decreases indexing time by T/N, which can be fairly substantial for large
+  // projects (like browsers, which is the test bed for this debugger). That additional overhead, which worst case
+  // is N times longer, ish, for N shards, I wager is acceptable because it won't be noticable during run time.
+  // Will the user notice a 5-25ms extra overhead for an operation that may take 150ms normally, or will the user
+  // notice the 40 sec/16 shards (down to 2.5 seconds) drop? Probably the latter.
+  struct NameIndexShard
+  {
+    std::unordered_map<std::string_view, DieNameReference> mMap{};
+    std::vector<std::vector<DieNameReference>> mCollidingNames{};
+
+    std::span<const DieNameReference> Search(std::string_view name) const noexcept;
+    void AddName(const char *name, u64 die_index, UnitData *cu) noexcept;
+    void ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept;
+  };
+
+  std::vector<std::unique_ptr<NameIndexShard>> mNameIndexShards{};
+
 public:
   using NameDieTuple = std::tuple<const char *, u64, UnitData *>;
   using NameTypeDieTuple = std::tuple<const char *, u64, UnitData *, u64>;
-  struct FindResult
-  {
-    DieNameReference *dies;
-    u32 count;
-    bool
-    is_some() const noexcept
-    {
-      return dies != nullptr;
-    }
 
-    bool
-    is_none() const noexcept
-    {
-      return dies == nullptr;
-    }
-  };
+  explicit NameIndex(std::string_view name) noexcept;
 
-  NameIndex(std::string_view name) noexcept;
-  std::optional<std::span<const DieNameReference>> Search(std::string_view name) const noexcept;
-  FindResult GetDies(std::string_view name) noexcept;
-  void Merge(const std::vector<NameDieTuple> &parsed_die_name_references) noexcept;
+  std::optional<std::vector<DieNameReference>> Search(std::string_view name) const noexcept;
+  NameIndexShard *CreateShard() noexcept;
+  void Merge(const std::vector<NameDieTuple> &nameToDieReferences) noexcept;
   void MergeTypes(NonNullPtr<TypeStorage> objfile,
-                  const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept;
+                  const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept;
 
 private:
-  void AddName(const char *name, u64 die_index, UnitData *cu) noexcept;
-  void ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept;
   // The mutex only guars insert operations, because when the user is going to use query operations (finding a die
   // by it's name) the entire name index should be fully built.
-  std::string_view index_name;
-  std::mutex mutex;
-  std::unordered_map<std::string_view, DieNameReference> mapping;
-  std::vector<std::vector<DieNameReference>> colliding_die_name_refs;
+  std::string_view mName;
+  std::mutex mMutex;
 };
 
 struct ObjectFileNameIndex

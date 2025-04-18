@@ -3,6 +3,7 @@
 #include "die.h"
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "utils/logger.h"
+#include "utils/thread_pool.h"
 #include <symbolication/objfile.h>
 
 namespace mdb::sym::dw {
@@ -42,20 +43,37 @@ DieNameReference::SetCollisionIndex(u64 index) noexcept
   collision_displacement_index = index;
 }
 
-NameIndex::NameIndex(std::string_view name) noexcept
-    : index_name(name), mutex(), mapping(), colliding_die_name_refs()
+NameIndex::NameIndex(std::string_view name) noexcept : mName(name), mMutex()
 {
+  mNameIndexShards.reserve(mdb::ThreadPool::GetGlobalPool()->WorkerCount());
+}
+
+std::span<const DieNameReference>
+NameIndex::NameIndexShard::Search(std::string_view name) const noexcept
+{
+  auto it = mMap.find(name);
+  if (it == std::end(mMap)) {
+    return {};
+  }
+
+  if (it->second.IsUnique()) {
+    return std::span{&(it->second), 1};
+  }
+
+  const auto collision_index = it->second.collision_displacement_index;
+  auto &dies = mCollidingNames[collision_index];
+  return std::span{dies};
 }
 
 void
-NameIndex::AddName(const char *name, u64 die_index, UnitData *cu) noexcept
+NameIndex::NameIndexShard::AddName(const char *name, u64 die_index, UnitData *cu) noexcept
 {
-  auto &elem = mapping[name];
+  auto &elem = mMap[name];
   if (elem.IsValid()) {
     if (elem.IsUnique()) {
       ConvertToCollisionVariant(elem, die_index, cu);
     } else {
-      auto &collisions = colliding_die_name_refs[elem.collision_displacement_index];
+      auto &collisions = mCollidingNames[elem.collision_displacement_index];
       collisions.push_back(DieNameReference{cu, die_index});
     }
   } else {
@@ -65,39 +83,45 @@ NameIndex::AddName(const char *name, u64 die_index, UnitData *cu) noexcept
 }
 
 void
-NameIndex::ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept
+NameIndex::NameIndexShard::ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept
 {
-  const auto index = colliding_die_name_refs.size();
-  colliding_die_name_refs.push_back({});
-  auto &collisions = colliding_die_name_refs.back();
+  const auto index = mCollidingNames.size();
+  mCollidingNames.push_back({});
+  auto &collisions = mCollidingNames.back();
   collisions.push_back(DieNameReference{elem.cu, elem.die_index});
   collisions.push_back(DieNameReference{cu, die_index});
   elem.SetAsCollisionVariant(index);
 }
 
+NameIndex::NameIndexShard *
+NameIndex::CreateShard() noexcept
+{
+  std::lock_guard lock(mMutex);
+  DBGLOG(core, "Creating name index shard {} for {}", mNameIndexShards.size(), mName)
+  auto &last = mNameIndexShards.emplace_back(std::make_unique<NameIndexShard>());
+  return last.get();
+}
+
 void
-NameIndex::Merge(const std::vector<NameIndex::NameDieTuple> &parsed_die_name_references) noexcept
+NameIndex::Merge(const std::vector<NameIndex::NameDieTuple> &nameToDieReferences) noexcept
 {
   PROFILE_SCOPE("NameIndex::Merge", "indexing");
-  std::lock_guard lock(mutex);
-  DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
-  for (const auto &[name, idx, cu] : parsed_die_name_references) {
-    AddName(name, idx, cu);
+  auto &shard = *CreateShard();
+  DBGLOG(dwarf, "[name index: {}] Adding {} names", mName, nameToDieReferences.size());
+  for (const auto &[name, idx, cu] : nameToDieReferences) {
+    shard.AddName(name, idx, cu);
   }
 }
 
 void
 NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
-                      const std::vector<NameTypeDieTuple> &parsed_die_name_references) noexcept
+                      const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept
 {
-  PROFILE_BEGIN("NameIndex::MergeTypes lock", "indexing");
-  std::lock_guard lock(mutex);
-  PROFILE_END("NameIndex::MergeTypes lock", "indexing");
-
-  PROFILE_SCOPE("NameIndex::MergeTypes critical section", "indexing");
-  DBGLOG(dwarf, "[name index: {}] Adding {} names", index_name, parsed_die_name_references.size());
-  for (const auto &[name, idx, cu, hash] : parsed_die_name_references) {
-    AddName(name, idx, cu);
+  PROFILE_SCOPE_ARGS("NameIndex::MergeTypes", "indexing", PEARG("types", nameToDieReferences.size()));
+  DBGLOG(dwarf, "[name index: {}] Adding {} names", mName, nameToDieReferences.size());
+  auto &shard = *CreateShard();
+  for (const auto &[name, idx, cu, hash] : nameToDieReferences) {
+    shard.AddName(name, idx, cu);
     const auto die_ref = cu->GetDieByCacheIndex(idx);
     const auto this_die = die_ref.GetDie();
     if (this_die->mTag == DwarfTag::DW_TAG_typedef || this_die->mTag == DwarfTag::DW_TAG_array_type) {
@@ -123,38 +147,20 @@ NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
   }
 }
 
-std::optional<std::span<const DieNameReference>>
+std::optional<std::vector<DieNameReference>>
 NameIndex::Search(std::string_view name) const noexcept
 {
-  auto it = mapping.find(name);
-  if (it == std::end(mapping)) {
-    return std::nullopt;
+  // TODO: Implement a least recently used caching algorithm set to some arbitrary size (32, 64, whatever)
+  //  based on an (speculation) assumption that searching for N, usually is followed by a search for N some time
+  //  later (for instance turning a function breakpoint on / off a couple of times in a row, for whatever reason)
+  std::vector<DieNameReference> result;
+
+  for (const auto &shard : mNameIndexShards) {
+    for (const auto &r : shard->Search(name)) {
+      result.push_back(r);
+    }
   }
-
-  if (it->second.IsUnique()) {
-    return std::span{&(it->second), 1};
-  }
-
-  const auto collision_index = it->second.collision_displacement_index;
-  auto &dies = colliding_die_name_refs[collision_index];
-  return std::span{dies};
-}
-
-NameIndex::FindResult
-NameIndex::GetDies(std::string_view name) noexcept
-{
-  auto it = mapping.find(name);
-  if (it == std::end(mapping)) {
-    return FindResult{nullptr, 0};
-  }
-
-  if (it->second.IsUnique()) {
-    return FindResult{&(it->second), 1};
-  }
-
-  const auto collision_index = it->second.collision_displacement_index;
-  auto &dies = colliding_die_name_refs[collision_index];
-  return FindResult{dies.data(), static_cast<u32>(dies.size())};
+  return result;
 }
 
 } // namespace mdb::sym::dw

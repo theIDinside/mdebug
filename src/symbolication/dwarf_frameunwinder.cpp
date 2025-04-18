@@ -506,6 +506,10 @@ using DebugFrameIdentifier = FrameUnwindEntryIdentifier<0xFF'FF'FF'FF>;
 std::unique_ptr<Unwinder>
 ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSection) noexcept
 {
+  if (!ehFrameSection) {
+    DBGLOG(core, "object {} does not have .eh_frame, using null unwinder", objfile->GetPathString());
+    return nullptr;
+  }
   ASSERT(ehFrameSection != nullptr, "Expected a .eh_frame section!");
   ASSERT(ehFrameSection->mName == ".eh_frame", "expected only .eh_frame section");
   DwarfBinaryReader reader{objfile->GetElf(), ehFrameSection->mSectionData};
