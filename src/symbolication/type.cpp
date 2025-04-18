@@ -223,6 +223,7 @@ sym::Type *
 TypeStorage::CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference,
                            u32 typeSize, std::string_view name) noexcept
 {
+  std::lock_guard lock(mWriteMutex);
   auto pair = mTypeStorage.emplace(typeDieOffset, new sym::Type{tag, dieReference, typeSize, name});
   if (pair.second) {
     return pair.first->second;

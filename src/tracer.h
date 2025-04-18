@@ -121,7 +121,7 @@ public:
   void TerminateSession() noexcept;
   void AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession session) noexcept;
   void LoadAndProcessObjectFile(pid_t target, const Path &objfile_path) noexcept;
-  TraceeController *get_controller(pid_t pid) noexcept;
+  TraceeController *GetController(pid_t pid) noexcept;
   TraceeController *GetProcessContainingTid(Tid tid) noexcept;
   TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;

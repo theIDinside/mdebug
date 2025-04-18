@@ -63,7 +63,7 @@ Tracer::LoadAndProcessObjectFile(pid_t target_pid, const Path &objfile_path) noe
 {
   // TODO(simon) Once "shared object symbols" (NOT to be confused with Linux' shared objects/so's!) is implemented
   //  we should check if the object file from `objfile_path` has already been loaded into memory
-  auto target = get_controller(target_pid);
+  auto target = GetController(target_pid);
   if (auto symbol_obj = Tracer::Get().LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
     auto obj = ObjectFile::CreateObjectFile(target, objfile_path);
     target->RegisterObjectFile(target, std::move(obj), true, nullptr);
@@ -141,7 +141,7 @@ Tracer::GetProcessContainingTid(Tid tid) noexcept
 }
 
 TraceeController *
-Tracer::get_controller(pid_t pid) noexcept
+Tracer::GetController(pid_t pid) noexcept
 {
   auto it = std::ranges::find_if(mTracedProcesses, [&pid](auto &t) { return t->mTaskLeader == pid; });
   ASSERT(it != std::end(mTracedProcesses), "Could not find target {} pid", pid);
@@ -258,7 +258,7 @@ Tracer::HandleInternalEvent(InternalEvent evt) noexcept
 void
 Tracer::HandleInitEvent(TraceEvent *evt) noexcept
 {
-  auto tc = get_controller(evt->target);
+  auto tc = GetController(evt->target);
   ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
   tc->HandleTracerEvent(evt);
   tc->EmitStopped(evt->tid, ui::dap::StoppedReason::Entry, "attached", true, {});

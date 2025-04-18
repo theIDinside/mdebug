@@ -72,6 +72,7 @@ ProfileEventArg::ProfileEventArg(std::string_view name, mdb::Offset offset) noex
 void
 ProfilingLogger::FlushAndClose() noexcept
 {
+  DBGLOG(core, "Profiling logger shutting down with flush & close.");
   if (!mBufferedForSerialize.IsEmpty()) {
     WriteEvents(mBufferedForSerialize);
   }
@@ -140,6 +141,7 @@ ProfilingLogger::SwapBuffers() noexcept
 void
 ProfilingLogger::SerializeBuffered() noexcept
 {
+  DBGLOG(core, "Writing {} profiling events", mBufferedForSerialize.Size());
   WriteEvents(mBufferedForSerialize);
 }
 
@@ -151,6 +153,8 @@ ProfilingLogger::Shutdown() noexcept
     mSerializerThread->RequestStop();
     // in case we're stopped at the cv, tell it to wake up.
     mNotifySerializerThread.notify_all();
+    DBGLOG(core, "Awaiting join for profiler task");
+    mSerializerThread->Join();
   }
 }
 

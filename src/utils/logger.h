@@ -135,7 +135,7 @@ class ProfilingLogger
     ProfileEvent *newUninitEvent = nullptr;
     {
       std::lock_guard lock(mEventsMutex);
-      if (mEvents.Size() > 50 && mBufferedForSerialize.IsEmpty()) {
+      if (mEvents.Size() > 100'000 && mBufferedForSerialize.IsEmpty()) {
         SwapBuffers();
       }
       newUninitEvent = mEvents.AddUninit();
@@ -213,6 +213,13 @@ public:
 
 #if defined(MDB_PROFILE_LOGGER)
 
+#define LOCK_TIME_CONTENTION(result, mutex)                                                                       \
+  const auto start = std::chrono::high_resolution_clock::now();                                                   \
+  std::lock_guard lock(mutex);                                                                                    \
+  const auto result =                                                                                             \
+    std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)      \
+      .count();
+
 #define PEARG(name, val) mdb::logging::ProfileEventArg(name, val)
 
 #define PROFILE_BEGIN(name, category) logging::ProfilingLogger::Instance()->Begin(name, category);
@@ -245,6 +252,8 @@ public:
                     __LINE__){[&]() { logging::ProfilingLogger::Instance()->End(name, category); }};
 
 #else
+
+#define LOCK_TIME_CONTENTION(result, mutex) std::lock_guard lock(mutex);
 
 #define PEARG(...)
 #define PROFILE_BEGIN(...)

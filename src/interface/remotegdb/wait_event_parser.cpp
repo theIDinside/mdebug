@@ -168,7 +168,7 @@ WaitEventParser::new_debugger_event(bool init) noexcept
   }
 
   if (!init) {
-    auto tc = Tracer::Get().get_controller(pid);
+    auto tc = Tracer::Get().GetController(pid);
     auto t = tc != nullptr ? tc->GetTaskByTid(tid) : nullptr;
 
     if (t && t->mBreakpointLocationStatus) {
