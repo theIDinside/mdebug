@@ -1,0 +1,91 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "YES",
+        "BUILD_MDB_TESTS": "ON",
+        "MDB_PROFILE_LOGGER": "ON",
+        "CLANG_TIDY_CHECK": "OFF",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      },
+      "environment": {
+        "LOG": "all"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "'Regular' debug build",
+      "inherits": ["base"],
+      "description": "Debug build",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": ["base"],
+      "description": "Release build",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "fulldebug",
+      "displayName": "Debug build with everything turned on",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+        "CLANG_TIDY_CHECK": "ON"
+      }
+    },
+    {
+      "name": "fullrelease",
+      "displayName": "Debug build with everything turned on",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+        "CLANG_TIDY_CHECK": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "description": "",
+      "displayName": "",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "fulldebug",
+      "description": "A debug build that enables all options and runs clang-tidy on the build as well.",
+      "displayName": "Kitchen sink Debug Build",
+      "configurePreset": "fulldebug"
+    },
+    {
+      "name": "fullrelease",
+      "description": "A release build that enables all options and runs clang-tidy on the build as well.",
+      "displayName": "Kitchen sink Debug Build",
+      "configurePreset": "fullrelease"
+    }
+  ]
+}
