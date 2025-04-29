@@ -15,18 +15,20 @@ string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 
 set(SPIDERMONKEY_FLAGDISABLES "-Wno-invalid-offsetof -Wno-unused-parameter")
 
-if(MIDAS_BUILD_TYPE STREQUAL "DEBUG")
-  set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey-debug/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
-elseif(MIDAS_BUILD_TYPE STREQUAL "RELEASE")
-  set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
-elseif(MIDAS_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
-  set(ENV{PKG_CONFIG_PATH} "/home/prometheus/dev/cx/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136a1")
+# Project dependencies directory
+set(MDBDEPS "${CMAKE_SOURCE_DIR}/dependencies")
+
+if(MIDAS_BUILD_TYPE STREQUAL "DEBUG" OR MIDAS_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
+  set(ENV{PKG_CONFIG_PATH} "${MDBDEPS}/spidermonkey-debug/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136")
+  message("Spidermonkey dependency path: ${MDBDEPS}/spidermonkey-debug")
+else()
+  set(ENV{PKG_CONFIG_PATH} "${MDBDEPS}/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136")
+  message("Spidermonkey dependency path: ${MDBDEPS}/spidermonkey")
 endif()
 
-message(Spidermonkey cflags: ${SPIDERMONKEY_CFLAGS})
+message("Spidermonkey cflags: ${SPIDERMONKEY_CFLAGS}")
 
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
