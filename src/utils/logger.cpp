@@ -215,6 +215,9 @@ ProfilingLogger::End(std::string_view name, std::string_view category) noexcept
 void
 Logger::ConfigureLogging(const Path &logDirectory, const char *logEnvironVariable) noexcept
 {
+  if (logEnvironVariable == nullptr) {
+    return;
+  }
   std::string_view variables{logEnvironVariable};
   std::vector<std::string_view> logList = SplitString(variables, ",");
   static constexpr auto LogModuleNames = Enum<Channel>::Names();
