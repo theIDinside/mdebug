@@ -266,8 +266,10 @@ GdbRemoteCommander::ReverseContinue(bool stepOnly) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcept
+GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action,
+                                 std::vector<Tid> *resumedThreads) noexcept
 {
+  // TODO: implement writing the resumed threads into `resumedThreads` if it's not null.
   SetCatchSyscalls(action.type == RunType::SyscallContinue);
 
   if (action.mDeliverSignal == -1) {

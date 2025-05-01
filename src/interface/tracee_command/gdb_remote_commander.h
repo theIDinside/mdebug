@@ -94,7 +94,8 @@ public:
 
   TaskExecuteResponse ReverseContinue(bool stepOnly) noexcept final;
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction type) noexcept final;
-  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run) noexcept final;
+  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run,
+                                   std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;

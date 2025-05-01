@@ -27,7 +27,8 @@ public:
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction resume) noexcept final;
-  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction action) noexcept final;
+  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run,
+                                   std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;

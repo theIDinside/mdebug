@@ -414,7 +414,7 @@ TraceeController::ReverseResumeTarget(tc::ResumeAction type) noexcept
 }
 
 bool
-TraceeController::ResumeTarget(tc::ResumeAction action) noexcept
+TraceeController::ResumeTarget(tc::ResumeAction action, std::vector<Tid> *resumedThreads) noexcept
 {
   DBGLOG(core, "[supervisor]: resume tracee {}", to_str(action.type));
   mScheduler->SetNormalScheduling();
@@ -422,7 +422,7 @@ TraceeController::ResumeTarget(tc::ResumeAction action) noexcept
   for (auto &entry : mThreads) {
     resumedAtLeastOne |= entry.mTask->mUserVisibleStop;
   }
-  return mTraceeInterface->ResumeTarget(this, action).is_ok() && resumedAtLeastOne;
+  return mTraceeInterface->ResumeTarget(this, action, resumedThreads).is_ok() && resumedAtLeastOne;
 }
 
 void

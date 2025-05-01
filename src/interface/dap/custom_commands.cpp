@@ -29,12 +29,19 @@ UIResultPtr
 ContinueAll::Execute() noexcept
 {
   auto target = GetSupervisor();
+  ASSERT(target, "Target must not be null");
   auto res = new ContinueAllResponse{true, this, target->TaskLeaderTid()};
-  auto result =
-    target->ResumeTarget(tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1});
+  std::vector<Tid> resumedThreads{};
+  // N.B: it's unfortunate that VSCode doesn't honor the "allThreadsContinued" field on a continued event
+  // because merely sending 1 continued event for a thread with that flag set, doesn't update the UI. File bug with
+  // vscode. instead we have to re-factor resume target to report the resumed threads.
+  auto result = target->ResumeTarget(
+    tc::ResumeAction{tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1}, &resumedThreads);
   res->success = result;
   if (result) {
-    mDAPClient->PushDelayedEvent(new ContinuedEvent{mPid, res->mTaskLeader, true});
+    for (const auto &tid : resumedThreads) {
+      mDAPClient->PushDelayedEvent(new ContinuedEvent{mPid, tid, true});
+    }
   }
   return res;
 }

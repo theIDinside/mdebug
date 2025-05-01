@@ -295,8 +295,11 @@ public:
   virtual TaskExecuteResponse ReverseContinue(bool onlyStep) noexcept;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction run) noexcept = 0;
+
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
-  virtual TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run) noexcept = 0;
+  /** `resumedThreads` is an optional out parameter consisting of the tids of the threads that got resumed. */
+  virtual TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run,
+                                           std::vector<Tid> *resumedThreads) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
 

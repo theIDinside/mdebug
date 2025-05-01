@@ -152,10 +152,13 @@ PtraceCommander::WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action) noexcept
+PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::vector<Tid> *resumedThreads) noexcept
 {
   for (auto &entry : tc->GetThreads()) {
     if (entry.mTask->CanContinue()) {
+      if (resumedThreads) {
+        resumedThreads->push_back(entry.mTid);
+      }
       tc->ResumeTask(*entry.mTask, action);
     } else {
       DBGLOG(core, "[{}:resume:target] {} can_continue=false", tc->TaskLeaderTid(), entry.mTid);

@@ -227,7 +227,7 @@ public:
   bool HasTask(Tid tid) noexcept;
   bool ReverseResumeTarget(tc::ResumeAction type) noexcept;
   /* Resumes all tasks in this target. */
-  bool ResumeTarget(tc::ResumeAction type) noexcept;
+  bool ResumeTarget(tc::ResumeAction type, std::vector<Tid> *resumedThreads = nullptr) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
   void ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
