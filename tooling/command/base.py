@@ -48,7 +48,7 @@ class CommandInterface(ABC):
         return cls.__name__.replace("Command", "").lower()
 
     @abstractmethod
-    def validate(self, buildMetadata: BuildMetadata, args):
+    def validate(self, buildMetadata: BuildMetadata, args) -> list:
         raise NotImplementedError
 
     @abstractmethod
@@ -57,14 +57,15 @@ class CommandInterface(ABC):
 
     def execute(self, buildMetadata: BuildMetadata, args):
         """Execute the command. Performs validation implemented by the command."""
-        self.validate(buildMetadata=buildMetadata, args=args)
-        self.run(buildMetadata=buildMetadata, args=args)
+        validArguments = self.validate(buildMetadata=buildMetadata, args=args)
+        self.run(buildMetadata=buildMetadata, args=validArguments)
 
 
 class Command(CommandInterface):
     registeredCommands: Dict[str, CommandInterface] = {}
     useMessage = "No description provided by the command."
     arguments: List[Argument] = []
+    hasFixedArguments = False
 
     def __init__(self, commandName, commandInstance):
         super().__init__()
@@ -102,7 +103,7 @@ class Command(CommandInterface):
     def name(cls):
         return cls.__name__.replace("Command", "").lower()
 
-    def validate(self, buildMetadata: BuildMetadata, args):
+    def validate(self, buildMetadata: BuildMetadata, args) -> list:
         requiredArguments = [arg for arg in self.arguments if arg.required]
 
         if len(args) < len(requiredArguments):
@@ -111,15 +112,12 @@ class Command(CommandInterface):
                 f"Missing required arguments. Expected at least {len(requiredArguments)} arguments."
             )
 
-        if len(args) > len(self.arguments):
+        if self.hasFixedArguments and len(args) > len(self.arguments):
             self.usage()
             raise ValueError(
                 f"Too many arguments. Expected at most {len(self.arguments)} arguments."
             )
-
-        for i, arg in enumerate(args):
-            expectedArgument = self.arguments[i]
-            expectedArgument.validate(arg)
+        return args
 
     @abstractmethod
     def run(self, buildMetadata: BuildMetadata, args):

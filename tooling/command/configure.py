@@ -291,6 +291,7 @@ class SetupProjectCommand(Command):
             required=False,
         )
     ]
+    hasFixedArguments = True
 
     def __init__(self):
         super().__init__("dev-setup", commandInstance=self)
@@ -363,8 +364,8 @@ class ConfigureCommand(Command):
     def __init__(self):
         super().__init__("configure", commandInstance=self)
 
-    def validate(self, buildMetadata: BuildMetadata, args):
-        pass
+    def validate(self, buildMetadata: BuildMetadata, args) -> list:
+        return args
 
     def run(self, buildMetadata: BuildMetadata, args):
         buildPreset = args[0]

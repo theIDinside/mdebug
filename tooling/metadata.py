@@ -71,10 +71,16 @@ class BuildMetadata:
             self.save()
 
     def setSelected(self, buildType):
-        if buildType not in self.meta["configured"]:
-            raise ValueError(f"Cannot select '{buildType}', it is not configured.")
-        self.meta["selected"] = buildType
-        self.save()
+        """Set selected configuration. If `buildType`=`None`, we unset the selected configuration preset."""
+        if buildType is None:
+            if self.meta.get("selected") is not None:
+                self.meta["selected"].remove()
+                self.save()
+        else:
+            if buildType not in self.meta["configured"]:
+                raise ValueError(f"Cannot select '{buildType}', it is not configured.")
+            self.meta["selected"] = buildType
+            self.save()
 
     def getSelected(self) -> str:
         if self.meta.get("selected") is None:

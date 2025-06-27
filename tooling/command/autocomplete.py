@@ -55,10 +55,11 @@ class AutoCompleteCommand(Command):
     def __init__(self):
         super().__init__("autocomplete", commandInstance=self)
 
-    def validate(self, buildMetadata: BuildMetadata, args):
+    def validate(self, buildMetadata: BuildMetadata, args) -> list:
         if args:
             self.usage()
             raise ValueError("Build command does not accept any arguments.")
+        return None
 
     def run(self, buildMetadata: BuildMetadata, args):
         optionsSource = f"""    local commands='{" ".join([x.commandName for x in Command.registeredCommands.values()])}'"""

@@ -4,6 +4,8 @@ fmt_version="11.0.0"
 json_version="v3.11.2"
 gtest_version="03597a01ee50ed33e9dfd640b249b4be3799d395"
 zydis_version="v4.0.0"
+spidermonkey_version="128.9.0esr"
+mozilla_addr="https://ftp.mozilla.org/pub/firefox/releases/$mozilla_ver/source/firefox-$mozilla_ver.source.tar.xz"
 
 # The relative path to repo root dir from where this script is executed,
 # makes it safe to run from where ever.

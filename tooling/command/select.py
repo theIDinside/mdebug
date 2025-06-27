@@ -18,8 +18,8 @@ class SelectCommand(Command):
     def __init__(self):
         super().__init__("select", commandInstance=self)
 
-    def validate(self, buildMetadata: BuildMetadata, args):
-        pass
+    def validate(self, buildMetadata: BuildMetadata, args) -> list:
+        return args
 
     def run(self, buildMetadata: BuildMetadata, args):
         buildPreset = args[0]

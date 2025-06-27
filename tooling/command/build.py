@@ -19,7 +19,7 @@ class BuildCommand(Command):
     def __init__(self):
         super().__init__("build", commandInstance=self)
 
-    def validate(self, buildMetadata: BuildMetadata, args):
+    def validate(self, buildMetadata: BuildMetadata, args) -> list:
         if args and args[0] not in presets:
             raise ValueError(f"Preset {args[0]} is not in the list of presets")
 
@@ -32,6 +32,7 @@ class BuildCommand(Command):
             raise ValueError(
                 "No preset has been configured to build. Run `mdbbuild configure <preset>` or `mdbuild list-presets` to see presets."
             )
+        return args
 
     def run(self, buildMetadata: BuildMetadata, args):
         buildDirectory = buildMetadata.getPresetBuildDir(
