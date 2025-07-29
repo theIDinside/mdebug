@@ -1,10 +1,12 @@
 /** LICENSE TEMPLATE */
 #include "objfile.h"
-#include "../so_loading.h"
 #include "./dwarf/name_index.h"
 #include "bp.h"
+#include "common.h"
 #include "dwarf/die.h"
 #include "dwarf_attribute_value.h"
+#include "jobs/dwarf_unit_data.h"
+#include "jobs/index_die_names.h"
 #include "supervisor.h"
 #include "symbolication/block.h"
 #include "symbolication/cu_symbol_info.h"
@@ -13,8 +15,6 @@
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/elf_symbols.h"
 #include "symbolication/value_visualizer.h"
-#include "tasks/dwarf_unit_data.h"
-#include "tasks/index_die_names.h"
 #include "type.h"
 #include "utils/enumerator.h"
 #include "utils/logger.h"
@@ -34,10 +34,11 @@
 #include <lib/arena_allocator.h>
 namespace mdb {
 ParsedAuxiliaryVector
-ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
+ParsedAuxiliaryVectorData(const tc::Auxv &aux, ParseAuxiliaryOptions options) noexcept
 {
   ParsedAuxiliaryVector result;
-  for (const auto [id, value] : aux.vector) {
+  ParseAuxiliaryOptions found;
+  for (const auto [id, value] : aux.mContents) {
     switch (id) {
     case AT_PHDR:
       result.mProgramHeaderPointer = value;
@@ -50,14 +51,26 @@ ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept
       break;
     case AT_BASE:
       result.mInterpreterBaseAddress = value;
+      found.requiresInterpreterBase = true;
       break;
     case AT_ENTRY:
       result.mEntry = value;
+      found.requireEntry = true;
       break;
     }
   }
+
   DBGLOG(core, "Auxiliary Vector: {{ interpreter: {}, program entry: {}, program headers: {} }}",
          result.mInterpreterBaseAddress, result.mEntry, result.mProgramHeaderPointer);
+
+  if (options.requiresInterpreterBase) {
+    VERIFY(found.requiresInterpreterBase, "Could not find interpreter base in aux vector");
+  }
+
+  if (options.requireEntry) {
+    VERIFY(found.requireEntry, "Could not find entry address in aux vector");
+  }
+
   return result;
 }
 
@@ -209,7 +222,7 @@ ObjectFile::GetCompileUnitFromOffset(u64 offset) noexcept
                                    });
 
   if (it != std::end(mCompileUnits)) {
-    ASSERT((*it)->spans_across(offset), "compilation unit does not span 0x{:x}", offset);
+    ASSERT((*it)->SpansAcrossOffset(offset), "compilation unit does not span 0x{:x}", offset);
     return *it;
   } else {
     return nullptr;
@@ -276,22 +289,22 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
   DBG({
     if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
       for (const auto cu : mCompilationUnits) {
-        DBGLOG(core, "[cu dwarf offset={}]: start_pc = {}, end_pc={}", cu->get_dwarf_unit()->SectionOffset(),
+        DBGLOG(core, "[cu dwarf offset={}]: start_pc = {}, end_pc={}", cu->GetDwarfUnitData()->SectionOffset(),
                cu->StartPc(), cu->EndPc());
       }
       PANIC("Dumped CU contents");
     }
   })
-  mAddressToCompileUnitMapping.add_cus(newCompileUnits);
+  mAddressToCompileUnitMapping.AddCompilationUnits(newCompileUnits);
 }
 
 void
 ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
 {
   for (const auto tu : tus) {
-    ASSERT(tu->header().GetUnitType() == DwarfUnitType::DW_UT_type, "Expected DWARF Unit Type but got {}",
-           to_str(tu->header().GetUnitType()));
-    mTypeToUnitDataMap[tu->header().TypeSignature()] = tu;
+    ASSERT(tu->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_type, "Expected DWARF Unit Type but got {}",
+           to_str(tu->GetHeader().GetUnitType()));
+    mTypeToUnitDataMap[tu->GetHeader().TypeSignature()] = tu;
   }
 }
 
@@ -389,21 +402,21 @@ ReadUnAligned(const u8 *start, const u8 *end, std::vector<AddressRange> &result)
 std::vector<AddressRange>
 ObjectFile::ReadDebugRanges(u64 sectionOffset) noexcept
 {
-  if (!elf->debug_ranges) {
+  if (!elf->mDebugRanges) {
     return {};
   }
-  if (elf->debug_ranges->Size() <= sectionOffset) {
+  if (elf->mDebugRanges->Size() <= sectionOffset) {
     return {};
   }
 
   std::vector<AddressRange> result;
-  auto ptr = elf->debug_ranges->GetDataAsIfAligned<u64>(sectionOffset);
+  auto ptr = elf->mDebugRanges->GetDataAsIfAligned<u64>(sectionOffset);
   if (ptr) {
-    auto count = elf->debug_ranges->mSectionData->size() / sizeof(u64);
-    ReadAligned(ptr, (elf->debug_ranges->GetDataAs<u64>().data() + count), result);
+    auto count = elf->mDebugRanges->mSectionData->size() / sizeof(u64);
+    ReadAligned(ptr, (elf->mDebugRanges->GetDataAs<u64>().data() + count), result);
     return result;
   } else {
-    ReadUnAligned(elf->debug_ranges->begin() + sectionOffset, elf->debug_ranges->end(), result);
+    ReadUnAligned(elf->mDebugRanges->begin() + sectionOffset, elf->mDebugRanges->end(), result);
     return result;
   }
 }
@@ -423,11 +436,11 @@ ObjectFile::GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept
 {
   auto typeunit = GetTypeUnit(type_signature);
   ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
-  const auto type_die_cu_offset = typeunit->header().GetTypeOffset();
-  const auto type_die_section_offset = typeunit->SectionOffset() + type_die_cu_offset;
+  const auto typeDieCuOffset = typeunit->GetHeader().GetTypeOffset();
+  const auto typeDieSectionOffset = typeunit->SectionOffset() + typeDieCuOffset;
   const auto &dies = typeunit->GetDies();
   for (const auto &d : dies) {
-    if (d.mSectionOffset == type_die_section_offset) {
+    if (d.mSectionOffset == typeDieSectionOffset) {
       return sym::dw::DieReference{typeunit, &d};
     }
   }
@@ -469,15 +482,15 @@ void
 ObjectFile::InitializeDebugSymbolInfo() noexcept
 {
   // First block of tasks need to finish before continuing with anything else.
-  mdb::TaskGroup cu_taskgroup("Compilation Unit Data");
-  auto cu_work = sym::dw::UnitDataTask::CreateParsingJobs(this, cu_taskgroup.GetTemporaryAllocator());
-  cu_taskgroup.AddTasks(std::span{cu_work});
-  cu_taskgroup.ScheduleWork().wait();
+  mdb::TaskGroup compUnitTaskGroup("Compilation Unit Data");
+  auto compUnitWork = sym::dw::UnitDataTask::CreateParsingJobs(this, compUnitTaskGroup.GetTemporaryAllocator());
+  compUnitTaskGroup.AddTasks(std::span{compUnitWork});
+  compUnitTaskGroup.ScheduleWork().wait();
 
-  mdb::TaskGroup name_index_taskgroup("Name Indexing");
-  auto ni_work = sym::dw::IndexingTask::CreateIndexingJobs(this, name_index_taskgroup.GetTemporaryAllocator());
-  name_index_taskgroup.AddTasks(std::span{ni_work});
-  name_index_taskgroup.ScheduleWork().wait();
+  mdb::TaskGroup nameIndexTaskGroup("Name Indexing");
+  auto nameIndexWork = sym::dw::IndexingTask::CreateIndexingJobs(this, nameIndexTaskGroup.GetTemporaryAllocator());
+  nameIndexTaskGroup.AddTasks(std::span{nameIndexWork});
+  nameIndexTaskGroup.ScheduleWork().wait();
 }
 
 void
@@ -531,11 +544,11 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
   // TODO(simon): Optimize. Regexing .debug_str in for instance libxul.so, takes 15 seconds (on O3, on -O0; it
   // takes 180 seconds)
   std::regex re{regex};
-  if (elf->debug_str == nullptr) {
+  if (elf->mDebugStr == nullptr) {
     return {};
   }
 
-  std::string_view dbg_str{elf->debug_str->GetDataAs<const char>()};
+  std::string_view dbg_str{elf->mDebugStr->GetDataAs<const char>()};
 
   auto it = std::regex_iterator<std::string_view::iterator>{dbg_str.cbegin(), dbg_str.cend(), re};
   std::vector<std::string> results{};
@@ -666,7 +679,7 @@ SymbolFile::Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept ->
 auto
 SymbolFile::GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
 {
-  return mObjectFile->GetProbableCompilationUnits(pc - mBaseAddress->get());
+  return mObjectFile->GetProbableCompilationUnits(pc - mBaseAddress->GetRaw());
 }
 
 auto
@@ -755,8 +768,8 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
   }
   auto type = value->GetType();
   if (!type->IsResolved()) {
-    sym::dw::TypeSymbolicationContext ts_ctx{*GetObjectFile(), *type};
-    ts_ctx.ResolveType();
+    sym::dw::TypeSymbolicationContext typeResolver{*GetObjectFile(), *type};
+    typeResolver.ResolveType();
   }
 
   auto resolver = GetStaticResolver(*value);
@@ -767,11 +780,11 @@ SymbolFile::ResolveVariable(const VariableContext &ctx, std::optional<u32> start
     result.reserve(type->MemberFields().size());
 
     for (auto &memberField : type->MemberFields()) {
-      auto variableContext = memberField.type->IsPrimitive() ? VariableContext::CloneFrom(0, ctx)
-                                                             : Tracer::Get().CloneFromVariableContext(ctx);
+      auto variableContext = memberField.mType->IsPrimitive() ? VariableContext::CloneFrom(0, ctx)
+                                                              : Tracer::Get().CloneFromVariableContext(ctx);
       auto vId = variableContext->mId;
       auto memberVariable = Ref<sym::Value>::MakeShared(
-        std::move(variableContext), memberField.name, const_cast<sym::Field &>(memberField),
+        std::move(variableContext), memberField.mName, const_cast<sym::Field &>(memberField),
         value->mMemoryContentsOffsets, value->TakeMemoryReference());
       GetObjectFile()->InitializeDataVisualizer(*memberVariable);
       if (vId > 0) {
@@ -836,57 +849,57 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
   -> std::vector<BreakpointLookup>
 {
   ASSERT(bpSpec.mKind == DapBreakpointType::function, "required type=function");
-  std::vector<MinSymbol> matching_symbols;
+  std::vector<MinSymbol> matchingSymbols;
   std::vector<BreakpointLookup> result{};
 
   auto obj = GetObjectFile();
-  std::vector<std::string> search_for{};
+  std::vector<std::string> searchFor{};
   const auto &spec = *bpSpec.uFunction;
   if (spec.mIsRegex) {
     const auto start = std::chrono::high_resolution_clock::now();
-    search_for = obj->SearchDebugSymbolStringTable(spec.mName);
+    searchFor = obj->SearchDebugSymbolStringTable(spec.mName);
     const auto elapsed = MicroSecondsSince(start);
     DBGLOG(core, "regex searched {} in {}us", obj->GetPathString(), elapsed);
   } else {
-    search_for = {spec.mName};
+    searchFor = {spec.mName};
   }
 
-  for (const auto &n : search_for) {
+  for (const auto &n : searchFor) {
     auto ni = obj->GetNameIndex();
     ni->ForEachFn(n, [&](const sym::dw::DieNameReference &ref) {
-      auto die_ref = ref.cu->GetDieByCacheIndex(ref.die_index);
-      auto low_pc = die_ref.ReadAttribute(Attribute::DW_AT_low_pc);
-      if (low_pc) {
-        const auto addr = low_pc->AsAddress();
-        matching_symbols.emplace_back(n, addr, 0);
+      auto dieReference = ref.cu->GetDieByCacheIndex(ref.die_index);
+      auto lowPc = dieReference.ReadAttribute(Attribute::DW_AT_low_pc);
+      if (lowPc) {
+        const auto addr = lowPc->AsAddress();
+        matchingSymbols.emplace_back(n, addr, 0);
         DBGLOG(core, "[{}][cu={}, die=0x{:x}] found fn {} at low_pc of {}", obj->GetPathString(),
-               die_ref.GetUnitData()->SectionOffset(), die_ref.GetDie()->mSectionOffset, n, addr);
+               dieReference.GetUnitData()->SectionOffset(), dieReference.GetDie()->mSectionOffset, n, addr);
       }
     });
   }
 
-  Set<AddrPtr> bps_set{};
-  for (const auto &sym : matching_symbols) {
+  Set<AddrPtr> bpsSet{};
+  for (const auto &sym : matchingSymbols) {
     const auto relocatedAddress = sym.address + mBaseAddress;
-    if (!bps_set.contains(relocatedAddress)) {
+    if (!bpsSet.contains(relocatedAddress)) {
       for (auto cu : GetCompilationUnits(relocatedAddress)) {
         const auto [sourceFile, lineEntry] = cu->GetLineTableEntry(sym.address);
         if (sourceFile && lineEntry) {
           result.emplace_back(relocatedAddress, LocationSourceInfo{sourceFile->mFullPath.StringView(),
                                                                    lineEntry->line, u32{lineEntry->column}});
-          bps_set.insert(relocatedAddress);
+          bpsSet.insert(relocatedAddress);
           break;
         }
       }
     }
   }
 
-  for (const auto &n : search_for) {
+  for (const auto &n : searchFor) {
     if (auto s =
           obj->FindMinimalFunctionSymbol(n).transform([&](const auto &sym) { return sym.address + mBaseAddress; });
-        s.has_value() && !bps_set.contains(s.value())) {
+        s.has_value() && !bpsSet.contains(s.value())) {
       result.emplace_back(s.value(), std::nullopt);
-      bps_set.insert(s.value());
+      bpsSet.insert(s.value());
     }
   }
 
@@ -894,11 +907,11 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
 }
 
 auto
-SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc,
+SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, TraceeController &tc,
                          sym::Frame &frame) noexcept -> std::vector<Ref<sym::Value>>
 {
   std::vector<Ref<sym::Value>> result{};
-  switch (variables_kind) {
+  switch (variablesKind) {
   case sym::FrameVariableKind::Arguments:
     result.reserve(frame.FrameParameterCounts());
     break;
@@ -908,7 +921,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variables_kind, TraceeController
   }
 
   std::vector<NonNullPtr<const sym::Symbol>> relevantSymbols;
-  frame.GetInitializedVariables(variables_kind, relevantSymbols);
+  frame.GetInitializedVariables(variablesKind, relevantSymbols);
 
   for (const sym::Symbol &symbol : relevantSymbols) {
 

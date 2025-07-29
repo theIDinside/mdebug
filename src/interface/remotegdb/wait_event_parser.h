@@ -81,59 +81,59 @@ static_assert(
 
 struct WaitEventParser
 {
-  std::optional<TraceeStopReason> stop_reason;
-  bool control_kind_is_attached;
-  int signal{0};
-  Pid pid{0};
-  Tid tid{0};
-  Pid new_pid{0};
-  Tid new_tid{0};
-  u32 core{0};
-  int syscall_no{0};
-  int event_time{};
-  AddrPtr wp_address{nullptr};
-  std::string exec_path{};
-  RegisterData registers;
-  ArchInfo arch{};
-  RemoteConnection &connection;
+  std::optional<TraceeStopReason> mStopReason;
+  bool mControlKindIsAttached;
+  int mSignal{0};
+  Pid mPid{0};
+  Tid mTid{0};
+  Pid mNewPid{0};
+  Tid mNewTid{0};
+  u32 mCore{0};
+  int mSyscallNumber{0};
+  int mEventTime{};
+  AddrPtr mWatchpointAddress{nullptr};
+  std::string mExecPath{};
+  RegisterData mRegisters;
+  ArchInfo mArch{};
+  RemoteConnection &mConnection;
 
   WaitEventParser(RemoteConnection &conn) noexcept;
 
-  EventDataParam param() const noexcept;
-  void parse_stop_reason(TraceeStopReason reason, std::string_view val) noexcept;
-  bool is_stop_reason(u32 maybeStopReason) noexcept;
-  void parse_pid_tid(std::string_view arg) noexcept;
-  void parse_core(std::string_view arg) noexcept;
+  EventDataParam Params() const noexcept;
+  void ParseStopReason(TraceeStopReason reason, std::string_view val) noexcept;
+  bool IsStopReason(u32 maybeStopReason) noexcept;
+  void ParsePidTid(std::string_view arg) noexcept;
+  void ParseCore(std::string_view arg) noexcept;
 
   // Determines PC value, from the payload sent by the remote. Returns nullopt if no PC was provided (or we
   // couldn't parse it)
-  std::optional<std::uintptr_t> determine_pc() const noexcept;
+  std::optional<std::uintptr_t> DeterminePc() const noexcept;
 
-  TraceEvent *new_debugger_event(bool init) noexcept;
+  TraceEvent *NewDebuggerEvent(bool init) noexcept;
 
-  void parse_fork(std::string_view data);
+  void ParseFork(std::string_view data);
 
-  void parse_vfork(std::string_view data);
+  void ParseVFork(std::string_view data);
 
-  void set_vfork(Pid newpid, Tid newtid) noexcept;
+  void SetVFork(Pid newpid, Tid newtid) noexcept;
 
-  void set_wp_address(AddrPtr addr) noexcept;
+  void SetWatchpointAddress(AddrPtr addr) noexcept;
 
-  void set_stop_reason(TraceeStopReason stop) noexcept;
+  void SetStopReason(TraceeStopReason stop) noexcept;
 
-  void set_pid(Pid process) noexcept;
-  void set_tid(Tid thread) noexcept;
+  void SetPid(Pid process) noexcept;
+  void SetTid(Tid thread) noexcept;
 
-  void set_execed(std::string_view exec) noexcept;
+  void SetExeced(std::string_view exec) noexcept;
 
-  void parse_clone(std::string_view data) noexcept;
-  void parse_event_time(std::string_view data) noexcept;
+  void ParseClone(std::string_view data) noexcept;
+  void ParseEventTime(std::string_view data) noexcept;
 
-  void set_syscall_exit(int number) noexcept;
+  void SetSyscallExit(int number) noexcept;
 
-  void set_syscall_entry(int number) noexcept;
+  void SetSyscallEntry(int number) noexcept;
 
-  std::vector<GdbThread> parse_threads_parameter(std::string_view input) noexcept;
+  std::vector<GdbThread> ParseThreadsParameter(std::string_view input) noexcept;
 };
 } // namespace gdb
 } // namespace mdb

@@ -58,8 +58,8 @@ TraceeCommandInterface::DoDisconnect(bool terminate) noexcept
     return TaskExecuteResponse::Ok();
   }
 
-  for (auto &user : tc->GetUserBreakpoints().AllUserBreakpoints()) {
-    tc->GetUserBreakpoints().remove_bp(user->mId);
+  for (auto &user : mControl->GetUserBreakpoints().AllUserBreakpoints()) {
+    mControl->GetUserBreakpoints().RemoveUserBreakpoint(user->mId);
   }
   Disconnect(false);
 
@@ -74,15 +74,15 @@ TraceeCommandInterface::ReadNullTerminatedString(TraceePointer<char> address) no
     return std::nullopt;
   }
   u8 buf[256];
-  auto res = ReadBytes(address.as<void>(), std::size(buf), buf);
-  while (res.success()) {
-    for (auto i = 0u; i < res.bytes_read; ++i) {
+  auto res = ReadBytes(address.As<void>(), std::size(buf), buf);
+  while (res.WasSuccessful()) {
+    for (auto i = 0u; i < res.uBytesRead; ++i) {
       if (buf[i] == 0) {
         return result;
       }
       result.push_back(buf[i]);
     }
-    res = ReadBytes(address.as<void>(), 128, buf);
+    res = ReadBytes(address.As<void>(), 128, buf);
   }
 
   if (result.empty()) {
@@ -94,8 +94,8 @@ TraceeCommandInterface::ReadNullTerminatedString(TraceePointer<char> address) no
 void
 TraceeCommandInterface::SetTarget(TraceeController *supervisor) noexcept
 {
-  ASSERT(tc == nullptr, "Target already configured with this interface!");
-  tc = supervisor;
+  ASSERT(mControl == nullptr, "Target already configured with this interface!");
+  mControl = supervisor;
 }
 
 std::string_view

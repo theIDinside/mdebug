@@ -49,15 +49,15 @@ enum class ResumeTarget : u8
 
 struct ResumeAction
 {
-  RunType type;
-  ResumeTarget target;
+  RunType mResumeType;
+  ResumeTarget mResumeTarget;
   int mDeliverSignal;
 
   constexpr
   operator __ptrace_request() const noexcept
   {
-    ASSERT(type != RunType::Unknown, "Invalid ptrace resume operation");
-    return static_cast<__ptrace_request>(type);
+    ASSERT(mResumeType != RunType::Unknown, "Invalid ptrace resume operation");
+    return static_cast<__ptrace_request>(mResumeType);
   }
 };
 
@@ -70,8 +70,8 @@ enum class ShouldProceed
 
 struct ProcessedStopEvent
 {
-  bool should_resume;
-  std::optional<tc::ResumeAction> res;
+  bool mShouldResumeAfterProcessing;
+  std::optional<tc::ResumeAction> mResumeAction;
   bool mProcessExited{false};
   bool mThreadExited{false};
   bool mVForked{false};
@@ -103,23 +103,23 @@ struct ProcessedStopEvent
 
 struct TraceeWriteResult
 {
-  bool success;
+  bool mWasSuccessful;
   union
   {
-    u32 bytes_written;
-    i32 sys_errno;
+    u32 uBytesWritten;
+    i32 uSysErrorNumber;
   };
 
   constexpr static TraceeWriteResult
   Ok(u32 bytes_written) noexcept
   {
-    return TraceeWriteResult{.success = true, .bytes_written = bytes_written};
+    return TraceeWriteResult{.mWasSuccessful = true, .uBytesWritten = bytes_written};
   }
 
   constexpr static TraceeWriteResult
   Error(int sys_error) noexcept
   {
-    return TraceeWriteResult{.success = false, .sys_errno = sys_error};
+    return TraceeWriteResult{.mWasSuccessful = false, .uSysErrorNumber = sys_error};
   }
 };
 
@@ -138,40 +138,40 @@ enum class ApplicationError : u32
 
 struct ReadResult
 {
-  ReadResultType op_result;
+  ReadResultType mResultType;
   union
   {
-    u32 bytes_read;
-    i32 sys_errno;
-    ApplicationError error;
+    u32 uBytesRead;
+    i32 uSysErrorNumber;
+    ApplicationError uError;
   };
 
   constexpr bool
-  success() const noexcept
+  WasSuccessful() const noexcept
   {
-    return op_result == ReadResultType::OK;
+    return mResultType == ReadResultType::OK;
   }
 
   constexpr static ReadResult
-  Ok(u32 bytes_read) noexcept
+  Ok(u32 bytesRead) noexcept
   {
-    return ReadResult{.op_result = ReadResultType::OK, .bytes_read = bytes_read};
+    return ReadResult{.mResultType = ReadResultType::OK, .uBytesRead = bytesRead};
   }
   constexpr static ReadResult
-  SystemError(int sys_error) noexcept
+  SystemError(int sysErrorNumber) noexcept
   {
-    return ReadResult{.op_result = ReadResultType::SystemError, .sys_errno = sys_error};
+    return ReadResult{.mResultType = ReadResultType::SystemError, .uSysErrorNumber = sysErrorNumber};
   }
 
   constexpr static ReadResult
-  AppError(ApplicationError err) noexcept
+  AppError(ApplicationError error) noexcept
   {
-    return ReadResult{.op_result = ReadResultType::DebuggerError, .error = err};
+    return ReadResult{.mResultType = ReadResultType::DebuggerError, .uError = error};
   }
   constexpr static ReadResult
   EoF() noexcept
   {
-    return ReadResult{.op_result = ReadResultType::EoF, .bytes_read = 0};
+    return ReadResult{.mResultType = ReadResultType::EoF, .uBytesRead = 0};
   }
 };
 
@@ -233,33 +233,33 @@ using InterfaceConfig = std::variant<PtraceCfg, GdbRemoteCfg>;
 
 struct WriteError
 {
-  AddrPtr address;
-  u32 bytes_written;
-  int sys_errno;
+  AddrPtr mAddress;
+  u32 mBytesWritten;
+  int mSysErrorNumber;
 };
 
 struct ObjectFileDescriptor
 {
-  std::filesystem::path path;
-  AddrPtr address;
+  std::filesystem::path mPath;
+  AddrPtr mAddress;
 };
 
 struct AuxvElement
 {
-  u64 id;
-  u64 entry;
+  u64 mId;
+  u64 mEntry;
 };
 
 struct Auxv
 {
-  std::vector<AuxvElement> vector;
+  std::vector<AuxvElement> mContents;
 };
 
 struct Error
 {
-  Immutable<std::optional<int>> sys_errno;
-  Immutable<std::string_view> err_msg;
-  Immutable<std::optional<std::string>> err{};
+  Immutable<std::optional<int>> mSysErrorNumber;
+  Immutable<std::string_view> mErrorMessage;
+  Immutable<std::optional<std::string>> mError{};
 };
 
 class TraceeCommandInterface;
@@ -277,7 +277,7 @@ enum class TraceeInterfaceType
 class TraceeCommandInterface
 {
 protected:
-  TraceeController *tc{nullptr};
+  TraceeController *mControl{nullptr};
 
 public:
   Immutable<TargetFormat> mFormat;
@@ -356,56 +356,57 @@ public:
   mdb::Expected<T, std::string_view>
   ReadType(TraceePointer<T> address) noexcept
   {
-    typename TPtr<T>::Type t_result;
-    auto total_read = 0ull;
-    constexpr auto sz = TPtr<T>::type_size();
-    u8 *ptr = static_cast<u8 *>((void *)std::addressof(t_result));
-    while (total_read < sz) {
-      auto read_result = ReadBytes(address.as_void(), sz - total_read, ptr + total_read);
-      switch (read_result.op_result) {
+    typename TPtr<T>::Type result;
+    auto totalRead = 0ull;
+    constexpr auto sz = TPtr<T>::SizeOfPointee();
+    u8 *ptr = static_cast<u8 *>((void *)std::addressof(result));
+    while (totalRead < sz) {
+      auto readResult = ReadBytes(address.AsVoid(), sz - totalRead, ptr + totalRead);
+      switch (readResult.mResultType) {
       case ReadResultType::SystemError:
-        return mdb::unexpected<std::string_view>(strerror(read_result.sys_errno));
+        return mdb::unexpected<std::string_view>(strerror(readResult.uSysErrorNumber));
       case ReadResultType::EoF:
         return mdb::unexpected<std::string_view>("End of file reported"sv);
       case ReadResultType::DebuggerError:
         TODO("implement handling of 'DebuggerError' in read_type");
       case ReadResultType::OK:
-        total_read += read_result.bytes_read;
-        if (total_read == sz) {
+        totalRead += readResult.uBytesRead;
+        if (totalRead == sz) {
           break;
         }
-        address += read_result.bytes_read;
+        address += readResult.uBytesRead;
         continue;
       }
     }
-    return mdb::expected<T>(t_result);
+    return mdb::expected<T>(result);
   }
 
   template <typename T>
   mdb::Expected<u32, WriteError>
   Write(TraceePointer<T> address, const T &value)
   {
-    auto total_written = 0ull;
-    auto sz = address.type_size();
+    auto totalWritten = 0ull;
+    auto sz = address.SizeOfPointee();
     const u8 *ptr = static_cast<u8 *>(std::addressof(value));
 
-    while (total_written < sz) {
-      const auto written = WriteBytes(address + total_written, ptr + total_written, sz - total_written);
-      if (written.success) {
-        total_written += written.bytes_written;
+    while (totalWritten < sz) {
+      const auto written = WriteBytes(address + totalWritten, ptr + totalWritten, sz - totalWritten);
+      if (written.mWasSuccessful) {
+        totalWritten += written.uBytesWritten;
       } else {
-        auto addr_value = reinterpret_cast<std::uintptr_t>(ptr) + total_written;
-        return mdb::unexpected(WriteError{
-          .address = AddrPtr{addr_value}, .bytes_written = total_written, .sys_errno = written.err.sys_error_num});
+        auto addressValue = reinterpret_cast<std::uintptr_t>(ptr) + totalWritten;
+        return mdb::unexpected(WriteError{.mAddress = AddrPtr{addressValue},
+                                          .mBytesWritten = totalWritten,
+                                          .mSysErrorNumber = written.uSysErrorNumber});
       }
     }
-    return mdb::expected(static_cast<u32>(total_written));
+    return mdb::expected(static_cast<u32>(totalWritten));
   }
 
   inline constexpr TraceeController *
   GetSupervisor() noexcept
   {
-    return tc;
+    return mControl;
   }
 
   virtual bool

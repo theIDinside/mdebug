@@ -11,85 +11,30 @@
 
 namespace mdb::tc {
 
-template <size_t N> struct CommandSerializer
-{
-  std::array<char, N> buffer;
-  u32 pos{0};
-  constexpr CommandSerializer() : buffer() {}
-
-  template <size_t CStringArrSize>
-  constexpr CommandSerializer(const char (&buf)[CStringArrSize]) : buffer({buf}), pos(CStringArrSize)
-  {
-  }
-
-  constexpr void
-  command(std::string_view v) noexcept
-  {
-    ASSERT(v.size() < N, "command name longer than buffer");
-    std::copy(v.begin(), v.end(), buffer.begin());
-    pos += v.size();
-  }
-
-  template <char Delimiter = ','>
-  constexpr void
-  write_address(AddrPtr addr) noexcept
-  {
-    buffer[pos++] = Delimiter;
-    const auto res = std::to_chars(buffer.data() + pos, buffer.data() + N, addr.get(), 16);
-    ASSERT(res.ec == std::errc(), "Expected succefull conversion of addr to string param");
-    pos = static_cast<u32>(res.ptr - buffer.data());
-  }
-
-  template <char Delimiter = ','>
-  constexpr void
-  write_number_param(u32 number) noexcept
-  {
-    buffer[pos++] = Delimiter;
-    const auto res = std::to_chars(buffer.data() + pos, buffer.data() + N, number, 16);
-    ASSERT(res.ec == std::errc(), "Expected succefull conversion of addr to string param");
-    pos = static_cast<u32>(res.ptr - buffer.data());
-  }
-
-  template <char Delimiter = ','>
-  constexpr void
-  write_char(char c) noexcept
-  {
-    buffer[pos++] = Delimiter;
-    buffer[pos++] = c;
-  }
-
-  constexpr std::string_view
-  serialize() const noexcept
-  {
-    return std::string_view{buffer.data(), buffer.data() + pos};
-  }
-};
-
 using AuxvData = std::optional<std::string>;
 
 class GdbRemoteCommander final : public TraceeCommandInterface
 {
-  std::shared_ptr<gdb::RemoteConnection> connection;
+  std::shared_ptr<gdb::RemoteConnection> mConnection;
   gdb::WriteBuffer *mWriteBuffer = gdb::WriteBuffer::Create(16);
-  Pid process_id;
-  std::optional<std::string> exec_file{};
-  Auxv auxv_data{};
-  RemoteType type;
+  Pid mProcessId;
+  std::optional<std::string> mExecFile{};
+  Auxv mAuxvData{};
+  RemoteType mRemoteType;
   // TODO(simon): allow for smart caching of thread names, by catching system call `prctl` with the parameters that
   // call the `PR_SET_NAME` request, and on SyscallExit, call qXfer:threads:read:... and update the cache.
   // This way, we don't have to potentially open N files to /proc/<pid>/task/<tid> on every `Threads` request
-  std::unordered_map<Tid, std::string> thread_names{};
+  std::unordered_map<Tid, std::string> mThreadNames{};
 
   void SetCatchSyscalls(bool on) noexcept;
   void inform_supported() noexcept;
 
 public:
   GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id,
-                     std::optional<std::string> &&exec_file,
-                     std::shared_ptr<gdb::ArchictectureInfo> &&arch) noexcept;
+                     std::optional<std::string> execFile, std::shared_ptr<gdb::ArchictectureInfo> arch) noexcept;
   ~GdbRemoteCommander() noexcept override = default;
 
-  ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
+  ReadResult ReadBytes(AddrPtr address, u32 size, u8 *readBuffer) noexcept final;
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ReverseContinue(bool stepOnly) noexcept final;
@@ -119,7 +64,7 @@ public:
   bool IsAllStopSession() noexcept final;
 
   Tid TaskLeaderTid() const noexcept final;
-  gdb::GdbThread leader_to_gdb() const noexcept;
+  gdb::GdbThread LeaderToGdb() const noexcept;
   std::optional<Path> ExecedFile() noexcept final;
   std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept final;
   std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept final;
@@ -130,7 +75,7 @@ public:
   bool
   IsReplaySession() const noexcept final
   {
-    return type == RemoteType::RR;
+    return mRemoteType == RemoteType::RR;
   }
 };
 

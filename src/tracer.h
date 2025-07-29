@@ -155,7 +155,7 @@ public:
   std::shared_ptr<gdb::RemoteConnection>
   ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
 
-  u32 GenerateNewBreakpointId() noexcept;
+  static u32 GenerateNewBreakpointId() noexcept;
   VariableReferenceId NewVariablesReference() noexcept;
   VariableReferenceId GetCurrentVariableReferenceBoundary() const noexcept;
   sym::VarContext GetVariableContext(VariableReferenceId varRefKey) noexcept;

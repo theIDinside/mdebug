@@ -25,12 +25,13 @@ ElfSection::end() const noexcept
 }
 
 const u8 *
-ElfSection::Into(AddrPtr vm_addr) const noexcept
+ElfSection::Into(AddrPtr virtualMemoryAddress) const noexcept
 {
-  ASSERT(vm_addr >= address, "Virtual Memory address {} is < {}", vm_addr, address);
-  ASSERT((vm_addr - address) < Size(), "Virtual memory address {} is > {}", vm_addr, address + Size());
-  const AddrPtr offset = (vm_addr - address);
-  return begin() + offset.get();
+  ASSERT(virtualMemoryAddress >= address, "Virtual Memory address {} is < {}", virtualMemoryAddress, address);
+  ASSERT((virtualMemoryAddress - address) < Size(), "Virtual memory address {} is > {}", virtualMemoryAddress,
+         address + Size());
+  const AddrPtr offset = (virtualMemoryAddress - address);
+  return begin() + offset.GetRaw();
 }
 
 const char *
@@ -40,11 +41,11 @@ ElfSection::GetCString(u64 offset) const noexcept
 }
 
 u64
-ElfSection::GetPointerOffset(const u8 *inside_ptr) const noexcept
+ElfSection::GetPointerOffset(const u8 *insideRangePointer) const noexcept
 {
-  ASSERT(inside_ptr >= mSectionData->data(), "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
-         (void *)inside_ptr, (void *)mSectionData->data());
-  return (inside_ptr - mSectionData->data());
+  ASSERT(insideRangePointer >= mSectionData->data(), "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
+         (void *)insideRangePointer, (void *)mSectionData->data());
+  return (insideRangePointer - mSectionData->data());
 }
 
 const u8 *
@@ -82,26 +83,26 @@ from_str(std::string_view str)
 }
 
 Elf::Elf(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept
-    : header(header), mSections(std::move(sections)), str_table{nullptr}, debug_info{nullptr},
-      debug_abbrev{nullptr}, debug_str{nullptr}, debug_ranges{nullptr}, debug_aranges{nullptr},
-      debug_line{nullptr}, debug_addr{nullptr}, debug_str_offsets{nullptr}, debug_rnglists{nullptr},
-      debug_loclist{nullptr}
+    : mElfHeader(header), mSections(std::move(sections)), mStrTable{nullptr}, mDebugInfo{nullptr},
+      mDebugAbbrev{nullptr}, mDebugStr{nullptr}, mDebugRanges{nullptr}, mDebugAranges{nullptr},
+      mDebugLine{nullptr}, mDebugAddr{nullptr}, mDebugStrOffsets{nullptr}, mDebugRnglists{nullptr},
+      mDebugLoclist{nullptr}
 {
-  str_table = GetSection(ElfSec::StringTable);
-  debug_info = GetSection(ElfSec::DebugInfo);
-  debug_abbrev = GetSection(ElfSec::DebugAbbrev);
-  debug_str = GetSection(ElfSec::DebugStr);
-  debug_line = GetSection(ElfSec::DebugLine);
-  debug_addr = GetSection(ElfSec::DebugAddr);
-  debug_ranges = GetSection(ElfSec::DebugRanges);
-  debug_line_str = GetSection(ElfSec::DebugLineStr);
-  debug_str_offsets = GetSection(ElfSec::DebugStrOffsets);
-  debug_rnglists = GetSection(ElfSec::DebugRngLists);
-  debug_loclist = GetSection(ElfSec::DebugLocLists);
-  if (!debug_loclist) {
-    debug_loclist = GetSection(ElfSec::DebugLoc);
+  mStrTable = GetSection(ElfSec::StringTable);
+  mDebugInfo = GetSection(ElfSec::DebugInfo);
+  mDebugAbbrev = GetSection(ElfSec::DebugAbbrev);
+  mDebugStr = GetSection(ElfSec::DebugStr);
+  mDebugLine = GetSection(ElfSec::DebugLine);
+  mDebugAddr = GetSection(ElfSec::DebugAddr);
+  mDebugRanges = GetSection(ElfSec::DebugRanges);
+  mDebugLineStr = GetSection(ElfSec::DebugLineStr);
+  mDebugStrOffsets = GetSection(ElfSec::DebugStrOffsets);
+  mDebugRnglists = GetSection(ElfSec::DebugRngLists);
+  mDebugLoclist = GetSection(ElfSec::DebugLocLists);
+  if (!mDebugLoclist) {
+    mDebugLoclist = GetSection(ElfSec::DebugLoc);
   }
-  debug_aranges = GetSection(ElfSec::DebugAranges);
+  mDebugAranges = GetSection(ElfSec::DebugAranges);
 }
 
 std::span<const ElfSection>
@@ -138,13 +139,13 @@ Elf::GetSectionInfallible(std::string_view name) const noexcept
 bool
 Elf::HasDWARF() const noexcept
 {
-  return debug_info != nullptr;
+  return mDebugInfo != nullptr;
 }
 
 bool
 Elf::AddressesNeedsRelocation() const noexcept
 {
-  return header->e_type == ET_DYN;
+  return mElfHeader->e_type == ET_DYN;
 }
 
 /* static */
@@ -155,26 +156,25 @@ Elf::ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept
     return;
   }
 
-  std::vector<MinSymbol> elf_fn_symbols{};
-  std::unordered_map<std::string_view, MinSymbol> elf_object_symbols{};
+  std::vector<MinSymbol> elfFunctionSymbols{};
+  std::unordered_map<std::string_view, MinSymbol> elfObjectSymbols{};
 
   if (const auto sec = elf->GetSection(ElfSec::SymbolTable); sec) {
     auto symbols = sec->GetDataAs<Elf64_Sym>();
     for (auto &symbol : symbols) {
       if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
-        std::string_view name = elf->str_table->GetCString(symbol.st_name);
+        std::string_view name = elf->mStrTable->GetCString(symbol.st_name);
         const auto res = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
-        elf_fn_symbols.push_back(res);
+        elfFunctionSymbols.push_back(res);
       } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
-        std::string_view name = elf->str_table->GetCString(symbol.st_name);
-        elf_object_symbols[name] =
-          MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+        std::string_view name = elf->mStrTable->GetCString(symbol.st_name);
+        elfObjectSymbols[name] = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
       }
     }
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
     const auto cmp = [](const auto &a, const auto &b) -> bool { return a.address < b.address; };
-    std::sort(elf_fn_symbols.begin(), elf_fn_symbols.end(), cmp);
-    objectFile.AddMinimalElfSymbols(std::move(elf_fn_symbols), std::move(elf_object_symbols));
+    std::sort(elfFunctionSymbols.begin(), elfFunctionSymbols.end(), cmp);
+    objectFile.AddMinimalElfSymbols(std::move(elfFunctionSymbols), std::move(elfObjectSymbols));
   } else {
     DBGLOG(core, "[warning]: No .symtab for {}", objectFile.GetPathString());
   }

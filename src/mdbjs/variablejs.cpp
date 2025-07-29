@@ -125,7 +125,7 @@ Variable::js_address(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::RootedObject callee(cx, &args.thisv().toObject());
   auto var = Get(callee.get());
 
-  JS::BigInt *bigInt = JS::NumberToBigInt(cx, var->Address().get());
+  JS::BigInt *bigInt = JS::NumberToBigInt(cx, var->Address().GetRaw());
   if (!bigInt) {
     JS_ReportErrorASCII(cx, "Failed to create BigInt");
     return false;

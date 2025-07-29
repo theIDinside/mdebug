@@ -4,54 +4,54 @@
 
 namespace mdb::gdb {
 StopReplyParser::StopReplyParser(const RemoteSettings &settings, std::string_view reply) noexcept
-    : received_payload(reply), parse_data(reply), mp_configured(settings.multiprocess_configured)
+    : mReceivedPayload(reply), mParseData(reply), mMultiProcessConfigured(settings.mMultiProcessIsConfigured)
 {
 }
 
 char
-StopReplyParser::stop_reply_kind() noexcept
+StopReplyParser::StopReplyKind() noexcept
 {
-  const auto ch = parse_data[0];
-  parse_data.remove_prefix(1);
+  const auto ch = mParseData[0];
+  mParseData.remove_prefix(1);
   return ch;
 }
 
 std::optional<int>
-StopReplyParser::parse_signal() noexcept
+StopReplyParser::ParseSignal() noexcept
 {
-  if (parse_data.size() > 2) {
+  if (mParseData.size() > 2) {
     constexpr auto SignalLengthInHexDigits = 2;
-    auto signal = RemoteConnection::parse_hexdigits(parse_data.substr(0, SignalLengthInHexDigits));
-    parse_data.remove_prefix(SignalLengthInHexDigits);
+    auto signal = RemoteConnection::ParseHexDigits(mParseData.substr(0, SignalLengthInHexDigits));
+    mParseData.remove_prefix(SignalLengthInHexDigits);
     return signal;
   }
   return {};
 }
 
 std::optional<int>
-StopReplyParser::parse_exitcode() noexcept
+StopReplyParser::ParseExitCode() noexcept
 {
-  if (parse_data.size() > 2) {
-    auto pos = parse_data.find(";");
-    if (pos == parse_data.npos) {
+  if (mParseData.size() > 2) {
+    auto pos = mParseData.find(";");
+    if (pos == mParseData.npos) {
       return {};
     }
-    auto signal = RemoteConnection::parse_hexdigits(parse_data.substr(0, pos));
-    parse_data.remove_prefix(pos);
+    auto signal = RemoteConnection::ParseHexDigits(mParseData.substr(0, pos));
+    mParseData.remove_prefix(pos);
     return signal;
   }
   return {};
 }
 
 std::optional<Pid>
-StopReplyParser::parse_process() noexcept
+StopReplyParser::ParseProcess() noexcept
 {
   using namespace std::string_view_literals;
   static constexpr auto ProcessParameter = ";process:"sv;
-  if (auto pos = parse_data.find(ProcessParameter); pos != std::string_view::npos) {
-    parse_data.remove_prefix(pos + ProcessParameter.size());
-    auto signal = RemoteConnection::parse_hexdigits(parse_data);
-    parse_data = "";
+  if (auto pos = mParseData.find(ProcessParameter); pos != std::string_view::npos) {
+    mParseData.remove_prefix(pos + ProcessParameter.size());
+    auto signal = RemoteConnection::ParseHexDigits(mParseData);
+    mParseData = "";
     return signal;
   } else {
     return {};
@@ -59,20 +59,20 @@ StopReplyParser::parse_process() noexcept
 }
 
 std::optional<std::tuple<Pid, Tid, int>>
-StopReplyParser::parse_thread_exited() noexcept
+StopReplyParser::ParseThreadExited() noexcept
 {
-  const auto exit_status = parse_exitcode();
-  if (!exit_status) {
-    DBGLOG(remote, "Failed to parse exit code for w packet: '{}'", received_payload);
+  const auto exitStatus = ParseExitCode();
+  if (!exitStatus) {
+    DBGLOG(remote, "Failed to parse exit code for w packet: '{}'", mReceivedPayload);
   }
 
-  if (parse_data.size() > 1 && parse_data[0] != ';') {
-    DBGLOG(remote, "Invalid 'w' packet. A thread id must be found but wasn't in '{}'", received_payload);
+  if (mParseData.size() > 1 && mParseData[0] != ';') {
+    DBGLOG(remote, "Invalid 'w' packet. A thread id must be found but wasn't in '{}'", mReceivedPayload);
     return {};
   }
-  parse_data.remove_prefix(1);
-  const auto [pid, tid] = gdb::GdbThread::parse_thread(parse_data);
+  mParseData.remove_prefix(1);
+  const auto [pid, tid] = gdb::GdbThread::parse_thread(mParseData);
 
-  return std::make_tuple(pid, tid, exit_status.value());
+  return std::make_tuple(pid, tid, exitStatus.value());
 }
 } // namespace mdb::gdb

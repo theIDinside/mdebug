@@ -118,41 +118,10 @@ ConfigurePtraceSettings(pid_t pid)
   }
 }
 
-std::uintptr_t
-PtraceSyscallInfo::stack_ptr() const noexcept
-{
-  return m_info.stack_pointer;
-}
-std::uintptr_t
-PtraceSyscallInfo::ip() const noexcept
-{
-  return m_info.instruction_pointer;
-}
-SyscallStop
-PtraceSyscallInfo::syscall_stop() const noexcept
-{
-  return (SyscallStop)m_info.op;
-}
 bool
-PtraceSyscallInfo::is_entry() const noexcept
+PtraceSyscallInfo::IsEntry() const noexcept
 {
   return m_info.op == PTRACE_SYSCALL_INFO_ENTRY;
-}
-bool
-PtraceSyscallInfo::is_exit() const noexcept
-{
-  return m_info.op == PTRACE_SYSCALL_INFO_EXIT;
-}
-bool
-PtraceSyscallInfo::is_seccomp() const noexcept
-{
-  return m_info.op == PTRACE_SYSCALL_INFO_SECCOMP;
-}
-
-bool
-PtraceSyscallInfo::is_none() const noexcept
-{
-  return m_info.op == PTRACE_SYSCALL_INFO_NONE;
 }
 
 void
@@ -209,7 +178,7 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
     PtraceSyscallInfo info;
     constexpr auto size = sizeof(PtraceSyscallInfo);
     PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, tid, size, &info);
-    if (info.is_entry()) {
+    if (info.IsEntry()) {
       kind = SyscallEntry;
     } else {
       kind = SyscallExit;

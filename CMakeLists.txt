@@ -50,8 +50,6 @@ set(MIDAS_SOURCES
   src/notify_pipe.h
   src/register_description.cpp
   src/register_description.h
-  src/so_loading.cpp
-  src/so_loading.h
   src/supervisor.cpp
   src/supervisor.h
   src/task_scheduling.cpp
@@ -68,6 +66,11 @@ set(MIDAS_SOURCES
   # events
   src/events/event.cpp
   src/events/event.h
+  # jobs
+  src/jobs/dwarf_unit_data.cpp
+  src/jobs/dwarf_unit_data.h
+  src/jobs/index_die_names.cpp
+  src/jobs/index_die_names.h
   # lib
   src/lib/arena_allocator.cpp
   src/lib/arena_allocator.h
@@ -122,11 +125,6 @@ set(MIDAS_SOURCES
   src/symbolication/value.h
   src/symbolication/variable_reference.cpp
   src/symbolication/variable_reference.h
-  # tasks
-  src/tasks/dwarf_unit_data.cpp
-  src/tasks/dwarf_unit_data.h
-  src/tasks/index_die_names.cpp
-  src/tasks/index_die_names.h
   # utils
   src/utils/base64.cpp
   src/utils/base64.h

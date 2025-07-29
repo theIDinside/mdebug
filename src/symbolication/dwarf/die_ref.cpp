@@ -11,7 +11,7 @@ namespace mdb::sym::dw {
 std::tuple<u64, const char *>
 PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
 {
-  ASSERT(cu && std::to_underlying(cu->header().Version()) < 5,
+  ASSERT(cu && std::to_underlying(cu->GetHeader().Version()) < 5,
          "Expected compillation to not be null and version <= 4");
   UnitReader reader{cu};
   reader.SeekDie(unitDie);
@@ -82,7 +82,7 @@ DieReference::MaybeResolveReference() const noexcept
 u64
 DieReference::IndexOfDie() const noexcept
 {
-  return mUnitData->index_of(mDebugInfoEntry);
+  return mUnitData->IndexOf(mDebugInfoEntry);
 }
 
 const AbbreviationInfo &
@@ -117,7 +117,7 @@ IndexedDieReference::IsValid() const noexcept
 IndexedDieReference
 DieReference::AsIndexed() const noexcept
 {
-  return IndexedDieReference{mUnitData, mUnitData->index_of(mDebugInfoEntry)};
+  return IndexedDieReference{mUnitData, mUnitData->IndexOf(mDebugInfoEntry)};
 }
 
 UnitReader

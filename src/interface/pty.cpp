@@ -10,61 +10,61 @@ namespace mdb {
 std::optional<MasterPty>
 open_pty_master() noexcept
 {
-  const auto master_fd = posix_openpt(O_RDWR | O_NOCTTY);
-  VERIFY(master_fd != -1, "Failed to open PTY");
-  VERIFY(grantpt(master_fd) != -1, "Failed to grant access to slave pty");
-  VERIFY(unlockpt(master_fd) != -1, "failed to unlock slave pty");
-  std::string pty_name = ptsname(master_fd);
+  const auto masterFile = posix_openpt(O_RDWR | O_NOCTTY);
+  VERIFY(masterFile != -1, "Failed to open PTY");
+  VERIFY(grantpt(masterFile) != -1, "Failed to grant access to slave pty");
+  VERIFY(unlockpt(masterFile) != -1, "failed to unlock slave pty");
+  std::string pty_name = ptsname(masterFile);
   VERIFY(!pty_name.empty(), "Failed to get name of Master PTY");
 
-  return MasterPty{.name = pty_name, .fd = master_fd};
+  return MasterPty{.mName = pty_name, .mFd = masterFile};
 }
 
 std::variant<pid_t, PtyParentResult, ParentResult>
-pty_fork(bool dontDuplicateStdio, const termios *slave_termios, const winsize *slave_winsize)
+ptyFork(bool dontDuplicateStdio, const termios *slaveTermios, const winsize *slave_winsize)
 {
   if (dontDuplicateStdio) {
-    auto child_pid = fork();
+    auto childPid = fork();
 
-    if (child_pid != 0) {
-      return ParentResult{.child_pid = child_pid};
+    if (childPid != 0) {
+      return ParentResult{.mChildPid = childPid};
     } else {
       return 0;
     }
   }
-  const auto mfd_res = open_pty_master();
-  VERIFY(mfd_res.has_value(), "Failed to open Master PTY");
-  auto [name, fd] = mfd_res.value();
+  const auto masterFileDescriptorResult = open_pty_master();
+  VERIFY(masterFileDescriptorResult.has_value(), "Failed to open Master PTY");
+  auto [name, fd] = masterFileDescriptorResult.value();
 
-  auto child_pid = fork();
+  auto childPid = fork();
 
-  if (child_pid != 0) {
-    return PtyParentResult{.pty_name = name, .pid = child_pid, .fd = fd};
+  if (childPid != 0) {
+    return PtyParentResult{.mPtyName = name, .mPid = childPid, .mFd = fd};
   }
 
   VERIFY(setsid() != -1, "Failed to setsid in child");
 
-  auto slave_fd = open(name.c_str(), O_RDWR);
-  VERIFY(slave_fd != -1, "Failed to open slave pty in child");
+  auto slaveFd = open(name.c_str(), O_RDWR);
+  VERIFY(slaveFd != -1, "Failed to open slave pty in child");
 
 #if defined(TIOCSCTTY)
-  VERIFY(ioctl(slave_fd, TIOCSCTTY, 0) != -1, "Failed to set TIOCSCTTY on slave fd");
+  VERIFY(ioctl(slaveFd, TIOCSCTTY, 0) != -1, "Failed to set TIOCSCTTY on slave fd");
 #endif
-  if (slave_termios != nullptr) {
-    VERIFY(tcsetattr(slave_fd, TCSANOW, slave_termios) != -1, "Failed to set TCSANOW on slave termios");
+  if (slaveTermios != nullptr) {
+    VERIFY(tcsetattr(slaveFd, TCSANOW, slaveTermios) != -1, "Failed to set TCSANOW on slave termios");
   }
 
   if (slave_winsize != nullptr) {
-    VERIFY(ioctl(slave_fd, TIOCSWINSZ, slave_winsize) != -1, "Failed to ioctl TIOCSWINSZ on slave window size");
+    VERIFY(ioctl(slaveFd, TIOCSWINSZ, slave_winsize) != -1, "Failed to ioctl TIOCSWINSZ on slave window size");
   }
 
   // Take control of STDIO on the child
-  VERIFY(dup2(slave_fd, STDIN_FILENO) == STDIN_FILENO, "failed to dup2 over stdin");
-  VERIFY(dup2(slave_fd, STDOUT_FILENO) == STDOUT_FILENO, "failed to dup2 over stdin");
-  VERIFY(dup2(slave_fd, STDERR_FILENO) == STDERR_FILENO, "failed to dup2 over stdin");
+  VERIFY(dup2(slaveFd, STDIN_FILENO) == STDIN_FILENO, "failed to dup2 over stdin");
+  VERIFY(dup2(slaveFd, STDOUT_FILENO) == STDOUT_FILENO, "failed to dup2 over stdin");
+  VERIFY(dup2(slaveFd, STDERR_FILENO) == STDERR_FILENO, "failed to dup2 over stdin");
 
-  if (slave_fd > STDERR_FILENO) {
-    close(slave_fd);
+  if (slaveFd > STDERR_FILENO) {
+    close(slaveFd);
   }
   return 0;
 }

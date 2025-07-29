@@ -25,7 +25,7 @@ protected:
   void ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept override;
 
 private:
-  ObjectFile *obj;
+  ObjectFile *objectFile;
   std::vector<UnitHeader> mCompilationUnitsToParse;
 };
 

@@ -14,26 +14,26 @@
 namespace mdb::tc {
 
 PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
-    : TraceeCommandInterface(TargetFormat::Native, nullptr, TraceeInterfaceType::Ptrace), procfs_memfd(),
-      process_id(process_space_id)
+    : TraceeCommandInterface(TargetFormat::Native, nullptr, TraceeInterfaceType::Ptrace), mProcFsMemFd(),
+      mProcessId(process_space_id)
 {
   const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
-  procfs_memfd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
-  ASSERT(procfs_memfd.IsOpen(), "failed to open memfd for {}", process_space_id);
+  mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
+  ASSERT(mProcFsMemFd.IsOpen(), "failed to open memfd for {}", process_space_id);
 }
 
 bool
 PtraceCommander::OnExec() noexcept
 {
   auto tc = GetSupervisor();
-  process_id = tc->TaskLeaderTid();
-  DBGLOG(core, "Post Exec routine for {}", process_id);
-  procfs_memfd = {};
-  const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", process_id, process_id);
-  procfs_memfd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
-  ASSERT(procfs_memfd.IsOpen(), "Failed to open proc mem fs for {}", process_id);
+  mProcessId = tc->TaskLeaderTid();
+  DBGLOG(core, "Post Exec routine for {}", mProcessId);
+  mProcFsMemFd = {};
+  const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", mProcessId, mProcessId);
+  mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
+  ASSERT(mProcFsMemFd.IsOpen(), "Failed to open proc mem fs for {}", mProcessId);
 
-  return procfs_memfd.IsOpen();
+  return mProcFsMemFd.IsOpen();
 }
 
 Interface
@@ -51,7 +51,7 @@ PtraceCommander::PostFork(TraceeController *parent) noexcept
   // by the initialize -> configDone sequence
   for (auto &user : parent->GetUserBreakpoints().AllUserBreakpoints()) {
     if (auto loc = user->GetLocation(); loc) {
-      DisableBreakpoint(process_id, *loc);
+      DisableBreakpoint(mProcessId, *loc);
     }
   }
   return true;
@@ -60,7 +60,7 @@ PtraceCommander::PostFork(TraceeController *parent) noexcept
 Tid
 PtraceCommander::TaskLeaderTid() const noexcept
 {
-  return process_id;
+  return mProcessId;
 }
 
 std::optional<Path>
@@ -79,7 +79,7 @@ PtraceCommander::ReadLibraries() noexcept
     return {};
   }
   r_debug_extended rdebug_ext = rdebug_ext_res.take_value();
-  std::vector<ObjectFileDescriptor> obj_files{};
+  std::vector<ObjectFileDescriptor> objectFiles{};
   // TODO(simon): Make this asynchronous; so that instead of creating a symbol file inside the loop
   //  instead make a function that returns a promise of a symbol file. That promise gets added to a std::vector on
   //  each loop and then when the while loop has finished, we wait on all promises, collecting them.
@@ -87,11 +87,11 @@ PtraceCommander::ReadLibraries() noexcept
     // means we've hit some "entry" point in the linker-debugger interface; we need to wait for RT_CONSISTENT to
     // safely read "link map" containing the shared objects
     if (rdebug_ext.base.r_state != rdebug_ext.base.RT_CONSISTENT) {
-      if (obj_files.empty()) {
+      if (objectFiles.empty()) {
         DBGLOG(core, "Debug state not consistent: no information about obj files read");
         return {};
       } else {
-        return obj_files;
+        return objectFiles;
       }
     }
     auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
@@ -102,13 +102,13 @@ PtraceCommander::ReadLibraries() noexcept
         return {};
       }
       auto map = map_res.take_value();
-      auto name_ptr = TPtr<char>{map.l_name};
-      const auto path = ReadNullTerminatedString(name_ptr);
+      auto namePointer = TPtr<char>{map.l_name};
+      const auto path = ReadNullTerminatedString(namePointer);
       if (!path) {
-        DBGLOG(core, "Failed to read null-terminated string from tracee at {}", name_ptr);
+        DBGLOG(core, "Failed to read null-terminated string from tracee at {}", namePointer);
         return {};
       }
-      obj_files.emplace_back(path.value(), map.l_addr);
+      objectFiles.emplace_back(path.value(), map.l_addr);
       linkmap = TPtr<link_map>{map.l_next};
     }
     const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
@@ -124,16 +124,16 @@ PtraceCommander::ReadLibraries() noexcept
     }
   }
 
-  return obj_files;
+  return objectFiles;
 }
 
 ReadResult
 PtraceCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 {
-  auto read_bytes = pread64(procfs_memfd.Get(), read_buffer, size, address.get());
-  if (read_bytes > 0) {
-    return ReadResult::Ok(static_cast<u32>(read_bytes));
-  } else if (read_bytes == 0) {
+  auto readBytes = pread64(mProcFsMemFd.Get(), read_buffer, size, address.GetRaw());
+  if (readBytes > 0) {
+    return ReadResult::Ok(static_cast<u32>(readBytes));
+  } else if (readBytes == 0) {
     return ReadResult::EoF();
   } else {
     return ReadResult::SystemError(errno);
@@ -143,7 +143,7 @@ PtraceCommander::ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
 TraceeWriteResult
 PtraceCommander::WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
 {
-  const auto result = pwrite64(procfs_memfd.Get(), buf, size, addr.get());
+  const auto result = pwrite64(mProcFsMemFd.Get(), buf, size, addr.GetRaw());
   if (result > 0) {
     return TraceeWriteResult::Ok(static_cast<u32>(result));
   } else {
@@ -195,12 +195,12 @@ PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 TaskExecuteResponse
 PtraceCommander::StopTask(TaskInfo &t) noexcept
 {
-  const auto result = tgkill(process_id, t.mTid, SIGSTOP);
+  const auto result = tgkill(mProcessId, t.mTid, SIGSTOP);
   if (result == -1) {
-    DBGLOG(awaiter, "failed to send SIGSTOP to {}.{}", process_id, t.mTid);
+    DBGLOG(awaiter, "failed to send SIGSTOP to {}.{}", mProcessId, t.mTid);
     return TaskExecuteResponse::Error(errno);
   }
-  DBGLOG(awaiter, "sent SIGSTOP to {}.{}", process_id, t.mTid);
+  DBGLOG(awaiter, "sent SIGSTOP to {}.{}", mProcessId, t.mTid);
   t.RequestedStop();
   return TaskExecuteResponse::Ok();
 }
@@ -208,20 +208,20 @@ PtraceCommander::StopTask(TaskInfo &t) noexcept
 TaskExecuteResponse
 PtraceCommander::EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  return InstallBreakpoint(tid, location.address());
+  return InstallBreakpoint(tid, location.Address());
 }
 
 TaskExecuteResponse
 PtraceCommander::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  DBGLOG(core, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.address());
-  const auto addr = location.address().get();
+  DBGLOG(core, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
+  const auto addr = location.Address().GetRaw();
   const auto read_value = ptrace(PTRACE_PEEKDATA, tid, addr, nullptr);
   if (read_value == -1) {
     return TaskExecuteResponse::Error(errno);
   }
 
-  const u8 original_byte = location.original_byte;
+  const u8 original_byte = location.mOriginalByte;
   const u64 restore = ((read_value & ~0xff) | original_byte);
 
   if (auto res = ptrace(PTRACE_POKEDATA, tid, addr, restore); res == -1) {
@@ -235,7 +235,7 @@ TaskExecuteResponse
 PtraceCommander::InstallBreakpoint(Tid tid, AddrPtr address) noexcept
 {
   constexpr u64 bkpt = 0xcc;
-  const auto addr = address.get();
+  const auto addr = address.GetRaw();
   const auto read_value = ptrace(PTRACE_PEEKDATA, tid, addr, nullptr);
 
   const u64 installed_bp = ((read_value & ~0xff) | bkpt);
@@ -267,9 +267,9 @@ PtraceCommander::WriteRegisters(const user_regs_struct &) noexcept
 TaskExecuteResponse
 PtraceCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
 {
-  constexpr auto rip_offset = offsetof(user_regs_struct, rip);
-  const auto ptrace_result = ptrace(PTRACE_POKEUSER, t.mTid, rip_offset, addr.get());
-  if (ptrace_result == -1) {
+  constexpr auto ripOffset = offsetof(user_regs_struct, rip);
+  const auto ptraceResult = ptrace(PTRACE_POKEUSER, t.mTid, ripOffset, addr.GetRaw());
+  if (ptraceResult == -1) {
     return TaskExecuteResponse::Error(errno);
   }
   t.NativeRegisters()->rip = addr;
@@ -279,8 +279,8 @@ PtraceCommander::SetProgramCounter(const TaskInfo &t, AddrPtr addr) noexcept
 std::string_view
 PtraceCommander::GetThreadName(Tid tid) noexcept
 {
-  if (thread_names.contains(tid)) {
-    return thread_names[tid];
+  if (mThreadNames.contains(tid)) {
+    return mThreadNames[tid];
   }
 
   std::array<char, 256> pathbuf{};
@@ -302,7 +302,7 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
     thrName.remove_suffix(1);
   }
   auto newThreadName = fmt::format("{}: {}", tid, thrName);
-  const auto &[iter, ok] = thread_names.emplace(tid, std::move(newThreadName));
+  const auto &[iter, ok] = mThreadNames.emplace(tid, std::move(newThreadName));
   return iter->second;
 }
 
@@ -314,13 +314,13 @@ PtraceCommander::Disconnect(bool killTarget) noexcept
     for (auto &entry : GetSupervisor()->GetThreads()) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
       // here.
-      const auto _ = tgkill(process_id, entry.mTid, SIGKILL);
+      const auto _ = tgkill(mProcessId, entry.mTid, SIGKILL);
     }
     GetSupervisor()->ExitAll(SupervisorState::Killed);
   } else if (!GetSupervisor()->IsExited()) {
-    tc->StopAllTasks(nullptr);
-    for (auto &user : tc->GetUserBreakpoints().AllUserBreakpoints()) {
-      tc->GetUserBreakpoints().remove_bp(user->mId);
+    mControl->StopAllTasks(nullptr);
+    for (auto &user : mControl->GetUserBreakpoints().AllUserBreakpoints()) {
+      mControl->GetUserBreakpoints().RemoveUserBreakpoint(user->mId);
     }
     for (auto &entry : GetSupervisor()->GetThreads()) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
@@ -359,7 +359,7 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
   while (true) {
     const auto result = pread(procfile, buffer, sizeof(u64) * Count, offset);
     if (result == -1) {
-      return Error{.sys_errno = errno, .err_msg = strerror(errno)};
+      return Error{.mSysErrorNumber = errno, .mErrorMessage = strerror(errno)};
     }
     ASSERT(result > (8 * 2),
            "Expected to read at least 1 element (last element should always be a 0, 0 pair, "
@@ -367,12 +367,12 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
            result);
     const auto item_count = result / 8;
 
-    res.vector.reserve(res.vector.size() + item_count);
+    res.mContents.reserve(res.mContents.size() + item_count);
     for (auto i = 0u; i < item_count; i += 2) {
       if (buffer[i] == 0 && buffer[i + 1] == 0) {
         return res;
       }
-      res.vector.emplace_back(buffer[i], buffer[i + 1]);
+      res.mContents.emplace_back(buffer[i], buffer[i + 1]);
     }
     std::memset(buffer, 0, sizeof(u64) * Count);
     offset += sizeof(u64) * Count;

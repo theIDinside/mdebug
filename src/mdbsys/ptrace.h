@@ -99,19 +99,12 @@ enum class SyscallStop : u8
 
 // The equivalent of "extension-functions". It's terrible. but it is what C++/C offers us. You just have to learn
 // to live with it.
-class PtraceSyscallInfo
+struct PtraceSyscallInfo
 {
-public:
-  std::uintptr_t stack_ptr() const noexcept;
-  std::uintptr_t ip() const noexcept;
-  SyscallStop syscall_stop() const noexcept;
-  bool is_entry() const noexcept;
-  bool is_exit() const noexcept;
-  bool is_seccomp() const noexcept;
-  bool is_none() const noexcept;
-
   __ptrace_syscall_info m_info;
+  bool IsEntry() const noexcept;
 };
+static_assert(sizeof(PtraceSyscallInfo) == sizeof(__ptrace_syscall_info));
 
 enum SysRegister : size_t
 {

@@ -12,10 +12,10 @@ namespace mdb::tc {
 
 class PtraceCommander final : public TraceeCommandInterface
 {
-  mdb::ScopedFd procfs_memfd;
-  Tid process_id;
+  mdb::ScopedFd mProcFsMemFd;
+  Tid mProcessId;
 
-  std::unordered_map<Tid, std::string> thread_names{};
+  std::unordered_map<Tid, std::string> mThreadNames{};
 
 public:
   NO_COPY(PtraceCommander);

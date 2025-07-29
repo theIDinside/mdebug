@@ -10,32 +10,32 @@ struct RemoteSettings;
 
 struct StopReplyParser
 {
-  std::string_view received_payload;
-  std::string_view parse_data;
-  bool mp_configured;
+  std::string_view mReceivedPayload;
+  std::string_view mParseData;
+  bool mMultiProcessConfigured;
 
 public:
   StopReplyParser(const RemoteSettings &settings, std::string_view reply) noexcept;
 
-  char stop_reply_kind() noexcept;
-  std::optional<int> parse_signal() noexcept;
-  std::optional<int> parse_exitcode() noexcept;
-  std::optional<Pid> parse_process() noexcept;
-  std::optional<std::tuple<Pid, Tid, int>> parse_thread_exited() noexcept;
+  char StopReplyKind() noexcept;
+  std::optional<int> ParseSignal() noexcept;
+  std::optional<int> ParseExitCode() noexcept;
+  std::optional<Pid> ParseProcess() noexcept;
+  std::optional<std::tuple<Pid, Tid, int>> ParseThreadExited() noexcept;
 
   template <char Packet>
   std::pair<std::optional<Pid>, std::optional<int>>
-  parse_exited() noexcept
+  ParseExited() noexcept
   {
-    const auto signal = parse_exitcode();
+    const auto signal = ParseExitCode();
     if (!signal) {
-      DBGLOG(remote, "Failed to parse signal for {} packet: '{}'", Packet, received_payload);
+      DBGLOG(remote, "Failed to parse signal for {} packet: '{}'", Packet, mReceivedPayload);
     }
-    const auto target = parse_process();
-    if (mp_configured && !target) {
+    const auto target = ParseProcess();
+    if (mMultiProcessConfigured && !target) {
       DBGLOG(remote,
              "Failed to parse process for {} packet - we expect multiprocess extension to be turned on: '{}'",
-             Packet, received_payload);
+             Packet, mReceivedPayload);
     }
     return std::make_pair(target, signal);
   }

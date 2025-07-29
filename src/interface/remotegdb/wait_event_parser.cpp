@@ -11,13 +11,13 @@
 
 namespace mdb::gdb {
 
-WaitEventParser::WaitEventParser(RemoteConnection &conn) noexcept : connection(conn) {}
+WaitEventParser::WaitEventParser(RemoteConnection &conn) noexcept : mConnection(conn) {}
 
 EventDataParam
-WaitEventParser::param() const noexcept
+WaitEventParser::Params() const noexcept
 {
-  std::optional<int> eventTime = event_time > 0 ? std::nullopt : std::optional{event_time};
-  return EventDataParam{.target = pid, .tid = tid, .sig_or_code = signal, .event_time = eventTime};
+  std::optional<int> eventTime = mEventTime > 0 ? std::nullopt : std::optional{mEventTime};
+  return EventDataParam{.target = mPid, .tid = mTid, .sig_or_code = mSignal, .event_time = eventTime};
 }
 
 static std::string
@@ -36,26 +36,26 @@ DecodeHexString(std::string_view hexString)
 }
 
 void
-WaitEventParser::parse_stop_reason(TraceeStopReason reason, std::string_view val) noexcept
+WaitEventParser::ParseStopReason(TraceeStopReason reason, std::string_view val) noexcept
 {
-  set_stop_reason(reason);
+  SetStopReason(reason);
   switch (reason) {
   case TraceeStopReason::Watch:
   case TraceeStopReason::RWatch:
   case TraceeStopReason::AWatch: {
     const auto addr = ToAddress(val);
     ASSERT(addr, "Failed to parse address for remote stub watchpoint event from: '{}'", val);
-    set_wp_address(addr.value());
+    SetWatchpointAddress(addr.value());
     break;
   }
   case TraceeStopReason::SyscallEntry: {
-    const auto sysnum = RemoteConnection::parse_hexdigits(val);
-    set_syscall_entry(*sysnum);
+    const auto sysnum = RemoteConnection::ParseHexDigits(val);
+    SetSyscallEntry(*sysnum);
     break;
   }
   case TraceeStopReason::SyscallReturn: {
-    const auto sysnum = RemoteConnection::parse_hexdigits(val);
-    set_syscall_exit(*sysnum);
+    const auto sysnum = RemoteConnection::ParseHexDigits(val);
+    SetSyscallExit(*sysnum);
     break;
   }
   case TraceeStopReason::Library:
@@ -64,18 +64,18 @@ WaitEventParser::parse_stop_reason(TraceeStopReason reason, std::string_view val
   case TraceeStopReason::HWBreak:
     break;
   case TraceeStopReason::Fork: {
-    parse_fork(val);
+    ParseFork(val);
   } break;
   case TraceeStopReason::VFork: {
-    parse_vfork(val);
+    ParseVFork(val);
   } break;
   case TraceeStopReason::VForkDone: {
   } break;
   case TraceeStopReason::Exec:
-    set_execed(val);
+    SetExeced(val);
     break;
   case TraceeStopReason::Clone: {
-    parse_clone(val);
+    ParseClone(val);
   } break;
   case TraceeStopReason::Create:
     break;
@@ -83,39 +83,39 @@ WaitEventParser::parse_stop_reason(TraceeStopReason reason, std::string_view val
 }
 
 bool
-WaitEventParser::is_stop_reason(u32 maybeStopReason) noexcept
+WaitEventParser::IsStopReason(u32 maybeStopReason) noexcept
 {
   return std::find(StopReasonTokens.begin(), StopReasonTokens.end(), maybeStopReason) !=
          std::end(StopReasonTokens);
 }
 
 void
-WaitEventParser::parse_pid_tid(std::string_view arg) noexcept
+WaitEventParser::ParsePidTid(std::string_view arg) noexcept
 {
   const auto [pid, tid] = gdb::GdbThread::parse_thread(arg);
-  set_pid(pid);
-  set_tid(tid);
+  SetPid(pid);
+  SetTid(tid);
 }
 
 void
-WaitEventParser::parse_core(std::string_view arg) noexcept
+WaitEventParser::ParseCore(std::string_view arg) noexcept
 {
-  ASSERT(core == 0, "core has already been set");
-  u32 parsed_core{0};
-  auto parse = std::from_chars(arg.data(), arg.data() + arg.size(), parsed_core, 16);
+  ASSERT(mCore == 0, "core has already been set");
+  u32 parsedCore{0};
+  auto parse = std::from_chars(arg.data(), arg.data() + arg.size(), parsedCore, 16);
   if (parse.ec != std::errc()) {
     PANIC("Failed to parse core");
   }
-  core = parsed_core;
+  mCore = parsedCore;
 }
 
 // Determines PC value, from the payload sent by the remote. Returns nullopt if no PC was provided (or we
 // couldn't parse it)
 std::optional<std::uintptr_t>
-WaitEventParser::determine_pc() const noexcept
+WaitEventParser::DeterminePc() const noexcept
 {
-  for (const auto &[no, reg] : registers) {
-    if (no == arch.regs.rip_number) {
+  for (const auto &[no, reg] : mRegisters) {
+    if (no == mArch.regs.rip_number) {
       u64 v;
       std::memcpy(&v, reg.data(), sizeof(v));
       return v;
@@ -125,174 +125,174 @@ WaitEventParser::determine_pc() const noexcept
 }
 
 TraceEvent *
-WaitEventParser::new_debugger_event(bool init) noexcept
+WaitEventParser::NewDebuggerEvent(bool init) noexcept
 {
-  if (stop_reason) {
-    switch (*stop_reason) {
+  if (mStopReason) {
+    switch (*mStopReason) {
     case TraceeStopReason::Watch:
-      return TraceEvent::CreateWriteWatchpoint(param(), wp_address, std::move(registers));
+      return TraceEvent::CreateWriteWatchpoint(Params(), mWatchpointAddress, std::move(mRegisters));
     case TraceeStopReason::RWatch:
-      return TraceEvent::CreateReadWatchpoint(param(), wp_address, std::move(registers));
+      return TraceEvent::CreateReadWatchpoint(Params(), mWatchpointAddress, std::move(mRegisters));
     case TraceeStopReason::AWatch:
-      return TraceEvent::CreateAccessWatchpoint(param(), wp_address, std::move(registers));
+      return TraceEvent::CreateAccessWatchpoint(Params(), mWatchpointAddress, std::move(mRegisters));
     case TraceeStopReason::SyscallEntry:
-      return TraceEvent::CreateSyscallEntry(param(), syscall_no, std::move(registers));
+      return TraceEvent::CreateSyscallEntry(Params(), mSyscallNumber, std::move(mRegisters));
     case TraceeStopReason::SyscallReturn:
-      return TraceEvent::CreateSyscallExit(param(), syscall_no, std::move(registers));
+      return TraceEvent::CreateSyscallExit(Params(), mSyscallNumber, std::move(mRegisters));
     case TraceeStopReason::Library:
-      return TraceEvent::CreateLibraryEvent(param(), std::move(registers));
+      return TraceEvent::CreateLibraryEvent(Params(), std::move(mRegisters));
     case TraceeStopReason::ReplayLog:
       TODO("Implement TraceeStopReason::ReplayLog");
     case TraceeStopReason::SWBreak: {
-      return TraceEvent::CreateSoftwareBreakpointHit(param(), determine_pc(), std::move(registers));
+      return TraceEvent::CreateSoftwareBreakpointHit(Params(), DeterminePc(), std::move(mRegisters));
     }
     case TraceeStopReason::HWBreak: {
-      return TraceEvent::CreateHardwareBreakpointHit(param(), determine_pc(), std::move(registers));
+      return TraceEvent::CreateHardwareBreakpointHit(Params(), DeterminePc(), std::move(mRegisters));
     }
     case TraceeStopReason::Fork:
-      return TraceEvent::CreateForkEvent_(param(), new_pid, std::move(registers));
+      return TraceEvent::CreateForkEvent_(Params(), mNewPid, std::move(mRegisters));
     case TraceeStopReason::VFork:
       TODO("Implement handling of TraceeStopReason::VFork");
     case TraceeStopReason::VForkDone:
       TODO("Implement handling of TraceeStopReason::VForkDone");
     case TraceeStopReason::Exec:
-      return TraceEvent::CreateExecEvent(param(), exec_path, std::move(registers));
+      return TraceEvent::CreateExecEvent(Params(), mExecPath, std::move(mRegisters));
     case TraceeStopReason::Clone:
       TODO("Implement handling of TraceeStopReason::Clone");
     case TraceeStopReason::Create: {
       const auto target =
-        connection.settings().is_non_stop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
-      return TraceEvent::CreateThreadCreated(param(), {tc::RunType::Continue, target, 0}, std::move(registers));
+        mConnection.GetSettings().mIsNonStop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
+      return TraceEvent::CreateThreadCreated(Params(), {tc::RunType::Continue, target, 0}, std::move(mRegisters));
     }
     }
   }
 
   if (!init) {
-    auto tc = Tracer::Get().GetController(pid);
-    auto t = tc != nullptr ? tc->GetTaskByTid(tid) : nullptr;
+    auto tc = Tracer::Get().GetController(mPid);
+    auto t = tc != nullptr ? tc->GetTaskByTid(mTid) : nullptr;
 
     if (t && t->mBreakpointLocationStatus) {
       const auto locstat = t->ClearBreakpointLocStatus();
-      return TraceEvent::CreateStepped(param(), !locstat->should_resume, locstat, std::move(t->mNextResumeAction),
-                                       std::move(registers));
+      return TraceEvent::CreateStepped(Params(), !locstat->mShouldResume, locstat, std::move(t->mNextResumeAction),
+                                       std::move(mRegisters));
     }
 
-    if (signal != SIGTRAP) {
-      return TraceEvent::CreateSignal(param(), std::move(registers));
+    if (mSignal != SIGTRAP) {
+      return TraceEvent::CreateSignal(Params(), std::move(mRegisters));
     }
   }
 
   // We got no stop reason. Defer to supervisor, let it figure it out.Nu
-  return TraceEvent::CreateDeferToSupervisor(param(), std::move(registers), control_kind_is_attached);
+  return TraceEvent::CreateDeferToSupervisor(Params(), std::move(mRegisters), mControlKindIsAttached);
 }
 
 void
-WaitEventParser::parse_fork(std::string_view data)
+WaitEventParser::ParseFork(std::string_view data)
 {
-  ASSERT(new_pid == 0, "new_pid already set");
-  ASSERT(new_tid == 0, "new_tid already set");
+  ASSERT(mNewPid == 0, "new_pid already set");
+  ASSERT(mNewTid == 0, "new_tid already set");
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
-  new_pid = pid;
-  new_tid = tid;
+  mNewPid = pid;
+  mNewTid = tid;
 }
 
 void
-WaitEventParser::parse_vfork(std::string_view data)
+WaitEventParser::ParseVFork(std::string_view data)
 {
-  ASSERT(new_pid == 0, "new_pid already set");
-  ASSERT(new_tid == 0, "new_tid already set");
+  ASSERT(mNewPid == 0, "new_pid already set");
+  ASSERT(mNewTid == 0, "new_tid already set");
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
-  new_pid = pid;
-  new_tid = tid;
+  mNewPid = pid;
+  mNewTid = tid;
 }
 
 void
-WaitEventParser::set_vfork(Pid newpid, Tid newtid) noexcept
+WaitEventParser::SetVFork(Pid newpid, Tid newtid) noexcept
 {
-  ASSERT(new_pid == 0, "new_pid already set");
-  ASSERT(new_tid == 0, "new_tid already set");
-  new_pid = newpid;
-  new_tid = newtid;
+  ASSERT(mNewPid == 0, "new_pid already set");
+  ASSERT(mNewTid == 0, "new_tid already set");
+  mNewPid = newpid;
+  mNewTid = newtid;
 }
 
 void
-WaitEventParser::set_wp_address(AddrPtr addr) noexcept
+WaitEventParser::SetWatchpointAddress(AddrPtr addr) noexcept
 {
-  ASSERT(wp_address == nullptr, "wp address already set");
-  wp_address = addr;
+  ASSERT(mWatchpointAddress == nullptr, "wp address already set");
+  mWatchpointAddress = addr;
 }
 
 void
-WaitEventParser::set_stop_reason(TraceeStopReason stop) noexcept
+WaitEventParser::SetStopReason(TraceeStopReason stop) noexcept
 {
-  ASSERT(!stop_reason.has_value(), "Expected stop reason to not be set");
-  stop_reason = stop;
+  ASSERT(!mStopReason.has_value(), "Expected stop reason to not be set");
+  mStopReason = stop;
 }
 
 void
-WaitEventParser::set_pid(Pid process) noexcept
+WaitEventParser::SetPid(Pid process) noexcept
 {
-  ASSERT(pid == 0, "pid already set");
-  pid = process;
+  ASSERT(mPid == 0, "pid already set");
+  mPid = process;
 }
 
 void
-WaitEventParser::set_tid(Tid thread) noexcept
+WaitEventParser::SetTid(Tid thread) noexcept
 {
-  ASSERT(tid == 0, "tid already set");
-  tid = thread;
+  ASSERT(mTid == 0, "tid already set");
+  mTid = thread;
 }
 
 void
-WaitEventParser::set_execed(std::string_view exec) noexcept
+WaitEventParser::SetExeced(std::string_view exec) noexcept
 {
-  exec_path = DecodeHexString(exec);
+  mExecPath = DecodeHexString(exec);
 }
 
 void
-WaitEventParser::parse_clone(std::string_view data) noexcept
+WaitEventParser::ParseClone(std::string_view data) noexcept
 {
-  ASSERT(new_pid == 0, "new_pid already set");
-  ASSERT(new_tid == 0, "new_pid already set");
+  ASSERT(mNewPid == 0, "new_pid already set");
+  ASSERT(mNewTid == 0, "new_pid already set");
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
-  new_pid = pid;
-  new_tid = tid;
+  mNewPid = pid;
+  mNewTid = tid;
 }
 
 void
-WaitEventParser::parse_event_time(std::string_view data) noexcept
+WaitEventParser::ParseEventTime(std::string_view data) noexcept
 {
-  ASSERT(event_time == 0, "Event time has already been seen?");
+  ASSERT(mEventTime == 0, "Event time has already been seen?");
   int frameTime;
   auto value = std::from_chars(data.begin(), data.end(), frameTime, 16);
   if (value.ec == std::errc()) {
-    event_time = frameTime;
+    mEventTime = frameTime;
   }
 }
 
 void
-WaitEventParser::set_syscall_exit(int number) noexcept
+WaitEventParser::SetSyscallExit(int number) noexcept
 {
-  ASSERT(syscall_no == 0, "syscall no already set");
-  syscall_no = number;
+  ASSERT(mSyscallNumber == 0, "syscall no already set");
+  mSyscallNumber = number;
 }
 
 void
-WaitEventParser::set_syscall_entry(int number) noexcept
+WaitEventParser::SetSyscallEntry(int number) noexcept
 {
-  ASSERT(syscall_no == 0, "syscall no already set");
-  syscall_no = number;
+  ASSERT(mSyscallNumber == 0, "syscall no already set");
+  mSyscallNumber = number;
 }
 
 std::vector<GdbThread>
-WaitEventParser::parse_threads_parameter(std::string_view input) noexcept
+WaitEventParser::ParseThreadsParameter(std::string_view input) noexcept
 {
-  ASSERT(pid != 0, "process id not yet parsed");
-  auto threads = protocol_parse_threads(input);
+  ASSERT(mPid != 0, "process id not yet parsed");
+  auto threads = ProtocolParseThreads(input);
 
   for (auto &t : threads) {
     if (t.pid == 0) {
-      t.pid = pid;
+      t.pid = mPid;
     }
   }
   return threads;

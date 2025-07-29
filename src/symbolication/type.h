@@ -167,9 +167,9 @@ public:
 // Fields are: member variables, member functions, etc
 struct Field
 {
-  NonNullPtr<Type> type;
-  Immutable<u32> offset_of;
-  Immutable<std::string_view> name;
+  NonNullPtr<Type> mType;
+  Immutable<u32> mObjectBaseOffset;
+  Immutable<std::string_view> mName;
 };
 
 template <typename To, typename From>
@@ -257,8 +257,8 @@ union EnumeratorConstValue
 
 struct EnumeratorValues
 {
-  bool is_signed{false};
-  std::unique_ptr<EnumeratorConstValue[]> e_values{nullptr};
+  bool mIsSigned{false};
+  std::unique_ptr<EnumeratorConstValue[]> mEnumeratorValues{nullptr};
 };
 
 // This is meant to be the interface via which we interpret a range of bytes

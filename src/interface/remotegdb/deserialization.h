@@ -68,34 +68,34 @@ DeserializeHexEncoded(std::string_view hex, std::array<u8, N> &out) noexcept
     if (i < 1) {
       // repeat count => the encoded repeat value, which is value of (char at hex of i + 2) - 29
       const auto r = repeat(hex[i + 2]);
-      const auto repeat_uneven = (r & 0b1) == 1;
-      const auto hex0_is_rep = (i == -1);
-      const auto add_sz = (repeat_uneven) ? 1 : (hex0_is_rep ? 0 : 2);
-      const auto buf_sz = r + add_sz;
-      ASSERT(buf_sz <= std::size(scratchBuffer), "scratch buffer size insufficient");
-      std::fill_n(scratchBuffer, buf_sz, *(hex.data() + i));
-      const auto add_after_0 = hex0_is_rep && repeat_uneven;
-      const auto add_after_1 = !hex0_is_rep && !repeat_uneven;
-      scratchBuffer[buf_sz - 1] =
-        add_after_0 ? *(hex.data() + 2) : (add_after_1 ? *(hex.data() + 3) : scratchBuffer[buf_sz - 1]);
+      const auto repeatUneven = (r & 0b1) == 1;
+      const auto hex0IsRep = (i == -1);
+      const auto addSize = (repeatUneven) ? 1 : (hex0IsRep ? 0 : 2);
+      const auto bufferSize = r + addSize;
+      ASSERT(bufferSize <= std::size(scratchBuffer), "scratch buffer size insufficient");
+      std::fill_n(scratchBuffer, bufferSize, *(hex.data() + i));
+      const auto addAfter0 = hex0IsRep && repeatUneven;
+      const auto addAfter1 = !hex0IsRep && !repeatUneven;
+      scratchBuffer[bufferSize - 1] =
+        addAfter0 ? *(hex.data() + 2) : (addAfter1 ? *(hex.data() + 3) : scratchBuffer[bufferSize - 1]);
       // this is safe, because we've made sure buf_sz % 2 == 0. I think.
-      std::string_view view{scratchBuffer, buf_sz};
+      std::string_view view{scratchBuffer, bufferSize};
       while (!view.empty()) {
         *p = (fromhex(view[0]) << 4) | (fromhex(view[1]));
         view.remove_prefix(2);
         ++p;
       }
-      const auto remove_count_hex_0 = add_after_0 ? 3 : 2;
-      const auto remove_count_hex_1 = add_after_1 ? 4 : 3;
-      const auto remove_count = hex0_is_rep ? remove_count_hex_0 : remove_count_hex_1;
-      hex.remove_prefix(remove_count);
+      const auto removeCountHex0 = addAfter0 ? 3 : 2;
+      const auto removeCountHex1 = addAfter1 ? 4 : 3;
+      const auto removeCount = hex0IsRep ? removeCountHex0 : removeCountHex1;
+      hex.remove_prefix(removeCount);
     } else {
       *p = (fromhex(hex[0]) << 4) | (fromhex(hex[1]));
       hex.remove_prefix(2);
       ++p;
     }
   }
-  ASSERT(p < (out.data() + out.size()), "Stack buffer overrun. Array of {} bytes overrun by {} bytes", out.size(),
+  ASSERT(p <= (out.data() + out.size()), "Stack buffer overrun. Array of {} bytes overrun by {} bytes", out.size(),
          static_cast<u64>(p - (out.data() + out.size())));
 }
 } // namespace mdb

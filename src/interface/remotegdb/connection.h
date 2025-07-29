@@ -31,12 +31,12 @@ class RemoteSessionConfigurator;
 struct RemoteSettings
 {
   // Default settings
-  bool catch_syscalls : 1 {false};
-  bool is_non_stop : 1 {false};
-  bool report_thread_events : 1 {true};
-  bool is_noack : 1 {true};
-  bool multiprocess_configured : 1 {true};
-  bool thread_events : 1 {true};
+  bool mCatchSyscalls : 1 {false};
+  bool mIsNonStop : 1 {false};
+  bool mReportThreadEvents : 1 {true};
+  bool mIsNoAck : 1 {true};
+  bool mMultiProcessIsConfigured : 1 {true};
+  bool mThreadEvents : 1 {true};
 };
 
 static constexpr char HexDigits[]{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
@@ -290,16 +290,16 @@ struct MessageElement
 // A socket that tries to buffer reads. Writes are sent immediately.
 class BufferedSocket
 {
-  mdb::ScopedFd fd_socket;
-  std::vector<char> buffer{};
+  mdb::ScopedFd mCommunicationSocket;
+  std::vector<char> mBuffer{};
   std::vector<char> mOutputBuffer{};
-  u32 head{0};
+  u32 mHead{0};
 
-  bool empty() const noexcept;
-  void clear() noexcept;
+  bool IsEmpty() const noexcept;
+  void Clear() noexcept;
 
-  mutable std::mutex write_mutex{};
-  mutable std::mutex read_mutex{};
+  mutable std::mutex mWriteMutex{};
+  mutable std::mutex mReadMutex{};
 
 public:
   using iterator = typename std::vector<char>::const_iterator;
@@ -307,69 +307,69 @@ public:
   using pointer = typename std::vector<char>::pointer;
   using value_type = typename std::vector<char>::value_type;
 
-  BufferedSocket(mdb::ScopedFd &&fd, u32 reserve_size = 4096) noexcept;
+  BufferedSocket(mdb::ScopedFd &&fd, u32 reserveCapacity = 4096) noexcept;
 
   pollfd
-  get_pollcfg() const noexcept
+  GetPollConfig() const noexcept
   {
-    return pollfd{.fd = fd_socket, .events = POLLIN, .revents = 0};
+    return pollfd{.fd = mCommunicationSocket, .events = POLLIN, .revents = 0};
   }
 
   constexpr auto
-  size() const noexcept
+  Size() const noexcept
   {
     // Head is an 0-based index so it's representation in "size" is +1
-    return buffer.empty() ? 0 : buffer.size() - (head + 1);
+    return mBuffer.empty() ? 0 : mBuffer.size() - (mHead + 1);
   }
 
   constexpr bool
-  is_open() const noexcept
+  IsOpen() const noexcept
   {
     return true;
   }
 
-  bool ready(int timeout) const noexcept;
-  SendResult write(std::string_view payload) noexcept;
-  SendResult write_cmd(std::string_view payload) noexcept;
-  char read_char() noexcept;
-  char peek_char() noexcept;
-  std::optional<std::string> read_payload() noexcept;
-  bool has_more_poll_if_empty(int timeout) const noexcept;
-  u32 buffer_n(u32 requested) noexcept;
-  u32 buffer_n_timeout(u32 requested, int timeout) noexcept;
-  void consume_n(u32 n) noexcept;
-  std::optional<MessageElement> next_message(int timeout) noexcept;
-  std::optional<u32> find(char c) const noexcept;
-  std::optional<u32> find_timeout(char ch, int timeout) noexcept;
-  std::optional<u32> find_from(char c, u32 pos) const noexcept;
+  bool PollReady(int timeout) const noexcept;
+  SendResult Write(std::string_view payload) noexcept;
+  SendResult WriteCommand(std::string_view payload) noexcept;
+  char ReadChar() noexcept;
+  char PeekChar() noexcept;
+  std::optional<std::string> ReadPayload() noexcept;
+  bool HasMorePollIfEmpty(int timeout) const noexcept;
+  u32 BufferN(u32 requested) noexcept;
+  u32 BufferNWithTimeout(u32 requested, int timeout) noexcept;
+  void ConsumeN(u32 n) noexcept;
+  std::optional<MessageElement> NextMessage(int timeout) noexcept;
+  std::optional<u32> Find(char c) const noexcept;
+  std::optional<u32> FindTimeout(char ch, int timeout) noexcept;
+  std::optional<u32> FindFrom(char c, u32 pos) const noexcept;
 
-  std::optional<std::pair<u32, bool>> find_ack() const noexcept;
-  mdb::Expected<std::pair<u32, bool>, Timeout> wait_for_ack(int timeout) noexcept;
-  std::optional<char> at(u32 index) const noexcept;
-  char at_unchecked(u32 index) const noexcept;
+  std::optional<std::pair<u32, bool>> FindAck() const noexcept;
+  mdb::Expected<std::pair<u32, bool>, Timeout> WaitForAck(int timeout) noexcept;
+  std::optional<char> At(u32 index) const noexcept;
+  char AtUnchecked(u32 index) const noexcept;
 
   auto
   cbegin() const noexcept
   {
-    return buffer.cbegin() + head;
+    return mBuffer.cbegin() + mHead;
   }
 
   auto
   cend() const noexcept
   {
-    return buffer.cend();
+    return mBuffer.cend();
   }
 
   auto
   begin() noexcept
   {
-    return buffer.begin() + head;
+    return mBuffer.begin() + mHead;
   }
 
   auto
   end() noexcept
   {
-    return buffer.end();
+    return mBuffer.end();
   }
 };
 
@@ -392,36 +392,36 @@ enum class RemotePacketError
 template <typename CompletionFnA = std::function<void()>, typename CompletionFnB = std::function<void()>>
 class ScopeSync
 {
-  std::barrier<CompletionFnA> &start;
-  std::barrier<CompletionFnB> &end;
+  std::barrier<CompletionFnA> &mStart;
+  std::barrier<CompletionFnB> &mEnd;
   // If the constructor throws an exception (due to Fn prior_arrive), we need to arrive_and_wait twice in the
   // destructor so that any other thread waiting for this one doesn't become dead locked.
-  bool first_arrive_completed{false};
+  bool mFirstArriveCompleted{false};
 
 public:
   template <typename Fn>
-  explicit ScopeSync(std::barrier<CompletionFnA> &start_point, std::barrier<CompletionFnA> &end_point,
-                     Fn prior_arrive) noexcept
-      : start(start_point), end(end_point)
+  explicit ScopeSync(std::barrier<CompletionFnA> &startPoint, std::barrier<CompletionFnA> &endPoint,
+                     Fn priorArriveFn) noexcept
+      : mStart(startPoint), mEnd(endPoint)
   {
-    prior_arrive();
-    start.arrive_and_wait();
-    first_arrive_completed = true;
+    priorArriveFn();
+    mStart.arrive_and_wait();
+    mFirstArriveCompleted = true;
   }
 
-  explicit ScopeSync(std::barrier<CompletionFnA> &start_point, std::barrier<CompletionFnA> &end_point) noexcept
-      : start(start_point), end(end_point)
+  explicit ScopeSync(std::barrier<CompletionFnA> &startPoint, std::barrier<CompletionFnA> &endPoint) noexcept
+      : mStart(startPoint), mEnd(endPoint)
   {
-    start.arrive_and_wait();
-    first_arrive_completed = true;
+    mStart.arrive_and_wait();
+    mFirstArriveCompleted = true;
   }
 
   ~ScopeSync() noexcept
   {
-    if (!first_arrive_completed) {
-      start.arrive_and_wait();
+    if (!mFirstArriveCompleted) {
+      mStart.arrive_and_wait();
     }
-    end.arrive_and_wait();
+    mEnd.arrive_and_wait();
   }
 };
 
@@ -478,11 +478,11 @@ public:
 
 struct SocketCommand
 {
-  std::string_view cmd;
-  bool is_list_response{false};
-  bool list_done{false};
-  bool response_is_stop_reply{false};
-  std::optional<std::string> result{std::nullopt};
+  std::string_view mCommand;
+  bool mIsListResponse{false};
+  bool mListDone{false};
+  bool mResponseIsStopReply{false};
+  std::optional<std::string> mResult{std::nullopt};
 };
 
 struct ConnInitError
@@ -494,10 +494,10 @@ using InitError = std::variant<ConnInitError, ConnectError>;
 
 struct qXferCommand
 {
-  std::string_view fmt;
-  u32 length{};
-  std::optional<std::string_view> annex{};
-  std::string response_buffer{};
+  std::string_view mFmt;
+  u32 mLength{};
+  std::optional<std::string_view> mAnnex{};
+  std::string mResponseBuffer{};
 };
 
 enum class qXferResponse
@@ -514,7 +514,7 @@ struct GdbThread
 
   constexpr auto operator<=>(const GdbThread &) const noexcept = default;
 
-  static std::optional<GdbThread> maybe_parse_thread(std::string_view input) noexcept;
+  static std::optional<GdbThread> MaybeParseThread(std::string_view input) noexcept;
   static GdbThread parse_thread(std::string_view input) noexcept;
 };
 
@@ -573,96 +573,96 @@ public:
 
 private:
   WriteBuffer *mBuffer = WriteBuffer::Create(16);
-  std::unordered_map<GdbThread, std::vector<GdbThread>> threads;
-  std::string host;
-  BufferedSocket socket;
-  std::thread stop_reply_and_event_listener;
-  u16 port;
-  RemoteSettings remote_settings;
+  std::unordered_map<GdbThread, std::vector<GdbThread>> mThreads;
+  std::string mHost;
+  BufferedSocket mSocket;
+  std::thread mStopReplyAndEventListeners;
+  u16 mPort;
+  RemoteSettings mRemoteSettings;
   bool mThreadsKnown : 1 {false};
-  bool is_initialized : 1 {false};
-  bool remote_configured : 1 {false};
-  bool run : 1 {true};
-  gdb::GdbThread selected_thread{0, 0};
+  bool mIsInitialized : 1 {false};
+  bool mRemoteConfigured : 1 {false};
+  bool mRun : 1 {true};
+  gdb::GdbThread mSelectedThread{0, 0};
   std::recursive_mutex mTraceeControlMutex{};
 
   // When debugger (core) wants control, it will acquire this lock
   // but it will already be in use, whereby we unlock it on the dispatcher thread
 
-  int request_command_fd[2];
-  int received_async_notif_during_core_ctrl[2];
-  int quit_fd[2];
-  std::barrier<> give_ctrl_sync{2};
-  std::barrier<> user_done_sync{2};
+  int mRequestCommandFd[2];
+  int mReceivedAsyncNotificationDuringCoreControl[2];
+  int mQuitFd[2];
+  std::barrier<> mGiveControlSynchronization{2};
+  std::barrier<> UserDoneSynchronization{2};
 
-  std::optional<std::string> pending_notification{std::nullopt};
+  std::optional<std::string> mPendingNotification{std::nullopt};
 
-  void consume_poll_events(int fd) noexcept;
-  bool process_stop_reply_payload(std::string_view payload, bool is_session_config) noexcept;
-  bool process_task_stop_reply_t(int signal, std::string_view payload, bool is_session_config) noexcept;
-  void put_pending_notification(std::string_view payload) noexcept;
+  void ConsumePollEvents(int fd) noexcept;
+  bool ProcessStopReplyPayload(std::string_view payload, bool isSessionConfig) noexcept;
+  bool ProcessTaskStopReply(int signal, std::string_view payload, bool isSessionConfig) noexcept;
+  void PutPendingNotification(std::string_view payload) noexcept;
   void UpdateKnownThreads(std::span<const GdbThread> threads) noexcept;
-  void set_query_thread(gdb::GdbThread thread) noexcept;
+  void SetQueryThread(gdb::GdbThread thread) noexcept;
 
-  static std::unordered_map<std::string_view, TraceeStopReason> StopReasonMap;
+  static std::unordered_map<std::string_view, TraceeStopReason> mStopReasonMap;
 
 public:
   RemoteConnection(std::string &&host, int port, mdb::ScopedFd &&socket, RemoteSettings settings) noexcept;
   ~RemoteConnection() noexcept;
 
   // Construction and init routines
-  static mdb::Expected<ShrPtr, ConnectError> connect(const std::string &host, int port,
-                                                     std::optional<RemoteSettings> remote_settings) noexcept;
+  static mdb::Expected<ShrPtr, ConnectError> Connect(const std::string &host, int port,
+                                                     std::optional<RemoteSettings> remoteSettings) noexcept;
 
-  static std::optional<int> parse_hexdigits(std::string_view input) noexcept;
-  std::optional<std::string> take_pending() noexcept;
-  std::optional<ConnInitError> init_stop_query() noexcept;
-  void initialize_thread() noexcept;
-  void request_control() noexcept;
-  void read_packets() noexcept;
-  void write_ack() noexcept;
-  void parse_event_consume_remaining() noexcept;
-  void relinquish_control_to_core() noexcept;
-  RemoteSettings &settings() noexcept;
-  void parse_supported(std::string_view supported) noexcept;
+  static std::optional<int> ParseHexDigits(std::string_view input) noexcept;
+  std::optional<std::string> TakePending() noexcept;
+  std::optional<ConnInitError> InitStopQuery() noexcept;
+  void InitializeThread() noexcept;
+  void RequestControl() noexcept;
+  void ReadPackets() noexcept;
+  void WriteAck() noexcept;
+  void ParseEventConsumeRemaining() noexcept;
+  void RelinquishControlToCore() noexcept;
+  RemoteSettings &GetSettings() noexcept;
+  void ParseSupported(std::string_view supported) noexcept;
 
   // Fill the comms buffer and read it and parse it's contents. If we come across stop replies (whether we are in
   // non-stop or not),
-  std::optional<std::string> read_command_response(int timeout, bool expectingStopReply) noexcept;
+  std::optional<std::string> ReadCommandResponse(int timeout, bool expectingStopReply) noexcept;
   // Returns {true} if done, {false} if not done and {} if we timeout
-  qXferResponse append_read_qXfer_response(int timeout, std::string &output) noexcept;
-  std::optional<std::pmr::string> read_command_response(MonotonicResource &arena, int timeout) noexcept;
+  qXferResponse AppendReadQXferResponse(int timeout, std::string &output) noexcept;
+  std::optional<std::pmr::string> ReadCommandResponse(MonotonicResource &arena, int timeout) noexcept;
 
   // Blocking call for `timeout` ms
   mdb::Expected<std::string, SendError> SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread,
                                                                    std::string_view command,
                                                                    std::optional<int> timeout) noexcept;
 
-  void send_interrupt_byte() noexcept;
+  void SendInterruptByte() noexcept;
 
-  mdb::Expected<std::vector<std::string>, SendError>
-  send_inorder_command_chain(std::span<std::string_view> commands, std::optional<int> timeout) noexcept;
+  mdb::Expected<std::vector<std::string>, SendError> SendInOrderCommandChain(std::span<std::string_view> commands,
+                                                                             std::optional<int> timeout) noexcept;
 
   // Make these private. These should not be called as they place *ultimate* responsibility on the caller that it
   // has done the acquire + synchronize dance.
-  bool execute_command(SocketCommand &cmd, int timeout) noexcept;
-  bool execute_command(qXferCommand &cmd, u32 offset, int timeout) noexcept;
-  std::vector<GdbThread> get_remote_threads() noexcept;
+  bool ExecuteCommand(SocketCommand &cmd, int timeout) noexcept;
+  bool ExecuteCommand(qXferCommand &cmd, u32 offset, int timeout) noexcept;
+  std::vector<GdbThread> GetRemoteThreads() noexcept;
   std::span<const GdbThread> QueryTargetThreads(GdbThread thread, bool forceFlush) noexcept;
 
   mdb::Expected<std::vector<std::string>, SendError>
-  send_commands_inorder_failfast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
-                                 std::optional<int> timeout) noexcept;
+  SendCommandsInOrderFailFast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
+                              std::optional<int> timeout) noexcept;
 
   // For some bozo reason, vCont commands don't reply with `OK` - that only happens when in noack mode. Dumbest
   // fucking "protocol" in the history of the universe.
-  std::optional<SendError> send_vcont_command(std::string_view command, std::optional<int> timeout) noexcept;
+  std::optional<SendError> SendVContCommand(std::string_view command, std::optional<int> timeout) noexcept;
 
-  bool send_qXfer_command_with_response(qXferCommand &cmd, std::optional<int> timeout) noexcept;
-  bool is_connected_to(const std::string &host, int port) noexcept;
-  void invalidate_known_threads() noexcept;
+  bool SendQXferCommandWithResponse(qXferCommand &cmd, std::optional<int> timeout) noexcept;
+  bool IsConnectedTo(const std::string &host, int port) noexcept;
+  void InvalidateKnownThreads() noexcept;
 };
 
-std::vector<GdbThread> protocol_parse_threads(std::string_view input) noexcept;
+std::vector<GdbThread> ProtocolParseThreads(std::string_view input) noexcept;
 
 } // namespace mdb::gdb

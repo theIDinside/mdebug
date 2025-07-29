@@ -17,7 +17,7 @@ using FileIndex = u32;
 
 /*
   ASSERT(buildDirectory, "Expected build directory to not be null, p={}; lnp header=0x{:x}, object={}", p.c_str(),
-         sec_offset, mObjectFile->GetObjectFileId());
+         sectionOffset, mObjectFile->GetObjectFileId());
 */
 
 #define LNP_ASSERT(cond, formatString, ...)                                                                       \
@@ -162,7 +162,7 @@ LineTableEntry
 RelocatedLteIterator::get() const noexcept
 {
   auto lte = *it;
-  lte.pc += base.get();
+  lte.pc += base.GetRaw();
   return lte;
 }
 
@@ -268,42 +268,42 @@ operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r)
 
 static LNPHeader *
 ReadLineNumberProgramHeaderPreVersion4(DwarfBinaryReader &reader, ObjectFile *objectFile, u64 debugLineOffset,
-                                       const u8 *ptr, u64 init_len, u16 version, u64 sec_offset) noexcept
+                                       const u8 *ptr, u64 init_len, u16 version, u64 sectionOffset) noexcept
 {
-  const u64 header_length = reader.dwarf_spec_read_value();
-  const auto data_ptr = reader.current_ptr() + header_length;
-  const u8 min_ins_len = reader.read_value<u8>();
-  const u8 max_ops_per_ins = 1;
-  const bool default_is_stmt = reader.read_value<u8>();
-  const i8 line_base = reader.read_value<i8>();
-  const u8 line_range = reader.read_value<u8>();
-  const u8 opcode_base = reader.read_value<u8>();
-  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opcode_lengths{};
-  reader.read_into_array(opcode_lengths);
+  const u64 headerLength = reader.DwarfSpecReadValue();
+  const auto dataPointer = reader.CurrentPtr() + headerLength;
+  const u8 minInstructionLength = reader.ReadValue<u8>();
+  const u8 maxOpsPerInstruction = 1;
+  const bool defaultIsStatement = reader.ReadValue<u8>();
+  const i8 lineBase = reader.ReadValue<i8>();
+  const u8 lineRange = reader.ReadValue<u8>();
+  const u8 opCodeBase = reader.ReadValue<u8>();
+  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opCodeLengths{};
+  reader.ReadIntoArray(opCodeLengths);
 
   const u8 addr_size = 8u;
   ASSERT(version == 2 || version == 3, "Incompatible version with reader: {}", version);
   // read include directories
   std::vector<DirEntry> dirs;
-  auto dir = reader.read_string();
+  auto dir = reader.ReadString();
   while (dir.size() > 0) {
     dirs.push_back(DirEntry{.path = dir, .md5 = {}});
-    dir = reader.read_string();
+    dir = reader.ReadString();
   }
 
   std::vector<FileEntry> files;
-  while (reader.peek_value<u8>() != 0) {
+  while (reader.PeekValue<u8>() != 0) {
     FileEntry entry;
-    entry.file_name = reader.read_string();
-    entry.dir_index = reader.read_uleb128<u64>();
-    [[gnu::unused]] const auto _timestamp = reader.read_uleb128<u64>();
-    entry.file_size = reader.read_uleb128<u64>();
+    entry.file_name = reader.ReadString();
+    entry.dir_index = reader.ReadUleb128<u64>();
+    [[gnu::unused]] const auto _timestamp = reader.ReadUleb128<u64>();
+    entry.file_size = reader.ReadUleb128<u64>();
     files.push_back(entry);
   }
-  auto header = new LNPHeader{
-    objectFile,  sec_offset,     init_len,        data_ptr,        ptr + init_len, (DwarfVersion)version,
-    addr_size,   min_ins_len,    max_ops_per_ins, default_is_stmt, line_base,      line_range,
-    opcode_base, opcode_lengths, std::move(dirs), std::move(files)};
+  auto header = new LNPHeader{objectFile,           sectionOffset,         init_len,        dataPointer,
+                              ptr + init_len,       (DwarfVersion)version, addr_size,       minInstructionLength,
+                              maxOpsPerInstruction, defaultIsStatement,    lineBase,        lineRange,
+                              opCodeBase,           opCodeLengths,         std::move(dirs), std::move(files)};
   // Another thread raced to complete it's parsing of this lnp header.
   if (!objectFile->SetLnpHeader(debugLineOffset, header)) {
     delete header;
@@ -327,69 +327,69 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
     return objectFile->GetLnpHeader(debugLineOffset);
   }
   ASSERT(elf != nullptr, "ELF must be parsed first");
-  auto debug_line = elf->debug_line;
+  auto debug_line = elf->mDebugLine;
   ASSERT(debug_line != nullptr && debug_line->GetName() == ".debug_line", "Must pass .debug_line ELF section");
   // determine header count
 
   DwarfBinaryReader reader{elf, debug_line->mSectionData};
-  reader.skip(debugLineOffset);
+  reader.Skip(debugLineOffset);
 
-  u8 addr_size = 8u;
-  const auto sec_offset = reader.bytes_read();
-  const auto init_len = reader.read_initial_length<DwarfBinaryReader::Ignore>();
-  const auto ptr = reader.current_ptr();
-  reader.bookmark();
-  const auto version = reader.peek_value<u16>();
+  u8 addrSize = 8u;
+  const auto sectionOffset = reader.BytesRead();
+  const auto initLength = reader.ReadInitialLength<DwarfBinaryReader::Ignore>();
+  const auto ptr = reader.CurrentPtr();
+  reader.Bookmark();
+  const auto version = reader.PeekValue<u16>();
 
   ASSERT(version < 6 && version >= 2,
          "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}", version,
-         reader.bytes_read());
-  reader.skip_value<u16>();
+         reader.BytesRead());
+  reader.SkipValue<u16>();
 
   if (version == 5) {
-    addr_size = reader.read_value<u8>();
+    addrSize = reader.ReadValue<u8>();
     // don't care for segment selector size
-    reader.skip(1);
+    reader.Skip(1);
   }
 
   if (version == 2 || version == 3) {
-    return ReadLineNumberProgramHeaderPreVersion4(reader, objectFile, debugLineOffset, ptr, init_len, version,
-                                                  sec_offset);
+    return ReadLineNumberProgramHeaderPreVersion4(reader, objectFile, debugLineOffset, ptr, initLength, version,
+                                                  sectionOffset);
   }
 
-  const u64 header_length = reader.dwarf_spec_read_value();
-  const auto data_ptr = reader.current_ptr() + header_length;
-  const u8 min_ins_len = reader.read_value<u8>();
-  const u8 max_ops_per_ins = reader.read_value<u8>();
-  const bool default_is_stmt = reader.read_value<u8>();
-  const i8 line_base = reader.read_value<i8>();
-  const u8 line_range = reader.read_value<u8>();
-  const u8 opcode_base = reader.read_value<u8>();
-  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opcode_lengths{};
-  reader.read_into_array(opcode_lengths);
+  const u64 headerLength = reader.DwarfSpecReadValue();
+  const auto dataPtr = reader.CurrentPtr() + headerLength;
+  const u8 minInstructionLength = reader.ReadValue<u8>();
+  const u8 maxOpsPerInstruction = reader.ReadValue<u8>();
+  const bool defaultIsStatement = reader.ReadValue<u8>();
+  const i8 lineBase = reader.ReadValue<i8>();
+  const u8 lineRange = reader.ReadValue<u8>();
+  const u8 opCodeBase = reader.ReadValue<u8>();
+  std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opCodeLengths{};
+  reader.ReadIntoArray(opCodeLengths);
 
   if (version == 4 || version == 2) {
     // read include directories
     std::vector<DirEntry> dirs;
-    auto dir = reader.read_string();
+    auto dir = reader.ReadString();
     while (dir.size() > 0) {
       dirs.push_back(DirEntry{.path = dir, .md5 = {}});
-      dir = reader.read_string();
+      dir = reader.ReadString();
     }
 
     std::vector<FileEntry> files;
-    while (reader.peek_value<u8>() != 0) {
+    while (reader.PeekValue<u8>() != 0) {
       FileEntry entry;
-      entry.file_name = reader.read_string();
-      entry.dir_index = reader.read_uleb128<u64>();
-      [[gnu::unused]] const auto _timestamp = reader.read_uleb128<u64>();
-      entry.file_size = reader.read_uleb128<u64>();
+      entry.file_name = reader.ReadString();
+      entry.dir_index = reader.ReadUleb128<u64>();
+      [[gnu::unused]] const auto _timestamp = reader.ReadUleb128<u64>();
+      entry.file_size = reader.ReadUleb128<u64>();
       files.push_back(entry);
     }
-    auto header = new LNPHeader{
-      objectFile,  sec_offset,     init_len,        data_ptr,        ptr + init_len, (DwarfVersion)version,
-      addr_size,   min_ins_len,    max_ops_per_ins, default_is_stmt, line_base,      line_range,
-      opcode_base, opcode_lengths, std::move(dirs), std::move(files)};
+    auto header = new LNPHeader{objectFile,           sectionOffset,         initLength,      dataPtr,
+                                ptr + initLength,     (DwarfVersion)version, addrSize,        minInstructionLength,
+                                maxOpsPerInstruction, defaultIsStatement,    lineBase,        lineRange,
+                                opCodeBase,           opCodeLengths,         std::move(dirs), std::move(files)};
     // Another thread raced to complete it's parsing of this lnp header.
     if (!objectFile->SetLnpHeader(debugLineOffset, header)) {
       delete header;
@@ -397,66 +397,66 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
     }
     return header;
   } else {
-    const u8 directory_entry_format_count = reader.read_value<u8>();
-    LNPHeader::DirEntFormats dir_entry_fmt{};
-    dir_entry_fmt.reserve(directory_entry_format_count);
+    const u8 directoryEntryFormatCount = reader.ReadValue<u8>();
+    LNPHeader::DirEntFormats dieEntryFormat{};
+    dieEntryFormat.reserve(directoryEntryFormatCount);
 
-    for (auto i = 0; i < directory_entry_format_count; i++) {
-      const auto content = reader.read_uleb128<LineNumberProgramContent>();
-      const auto form = reader.read_uleb128<AttributeForm>();
-      dir_entry_fmt.emplace_back(content, form);
+    for (auto i = 0; i < directoryEntryFormatCount; i++) {
+      const auto content = reader.ReadUleb128<LineNumberProgramContent>();
+      const auto form = reader.ReadUleb128<AttributeForm>();
+      dieEntryFormat.emplace_back(content, form);
     }
 
-    const u64 dir_count = reader.read_uleb128<u64>();
+    const u64 dirCount = reader.ReadUleb128<u64>();
     std::vector<DirEntry> dirs{};
-    dirs.reserve(dir_count);
-    for (auto i = 0ull; i < dir_count; i++) {
+    dirs.reserve(dirCount);
+    for (auto i = 0ull; i < dirCount; i++) {
       using enum AttributeForm;
       DirEntry ent{};
 
-      for (const auto &[content, form] : dir_entry_fmt) {
+      for (const auto &[content, form] : dieEntryFormat) {
         if (content == LineNumberProgramContent::DW_LNCT_path) {
-          ent.path = reader.read_content_str(form);
+          ent.path = reader.ReadContentStr(form);
         } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-          ent.md5.emplace(reader.read_content_datablock(form));
+          ent.md5.emplace(reader.ReadContentDatablock(form));
         } else {
-          reader.read_content(form);
+          reader.ReadContent(form);
         }
       }
       dirs.push_back(ent);
     }
 
-    const u8 file_name_entry_fmt_count = reader.read_value<u8>();
-    LNPHeader::FileNameEntFormats filename_ent_formats{};
-    filename_ent_formats.reserve(file_name_entry_fmt_count);
+    const u8 file_name_entry_fmt_count = reader.ReadValue<u8>();
+    LNPHeader::FileNameEntFormats filenameEntryFormats{};
+    filenameEntryFormats.reserve(file_name_entry_fmt_count);
 
     for (auto i = 0; i < file_name_entry_fmt_count; i++) {
-      const auto content = reader.read_uleb128<LineNumberProgramContent>();
-      const auto form = reader.read_uleb128<AttributeForm>();
-      filename_ent_formats.emplace_back(content, form);
+      const auto content = reader.ReadUleb128<LineNumberProgramContent>();
+      const auto form = reader.ReadUleb128<AttributeForm>();
+      filenameEntryFormats.emplace_back(content, form);
     }
-    const u64 file_count = reader.read_uleb128<u64>();
+    const u64 file_count = reader.ReadUleb128<u64>();
     std::vector<FileEntry> files{};
     files.reserve(file_count);
     for (auto i = 0ull; i < file_count; i++) {
       FileEntry entry;
-      for (const auto &[content, form] : filename_ent_formats) {
+      for (const auto &[content, form] : filenameEntryFormats) {
         if (content == LineNumberProgramContent::DW_LNCT_directory_index) {
-          entry.dir_index = reader.read_content_index(form);
+          entry.dir_index = reader.ReadContentIndex(form);
         } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-          entry.md5.emplace(reader.read_content_datablock(form));
+          entry.md5.emplace(reader.ReadContentDatablock(form));
         } else if (content == LineNumberProgramContent::DW_LNCT_path) {
-          entry.file_name = reader.read_content_str(form);
+          entry.file_name = reader.ReadContentStr(form);
         } else {
-          reader.read_content(form);
+          reader.ReadContent(form);
         }
       }
       files.push_back(entry);
     }
-    auto header = new LNPHeader{
-      objectFile,  sec_offset,     init_len,        data_ptr,        ptr + init_len, (DwarfVersion)version,
-      addr_size,   min_ins_len,    max_ops_per_ins, default_is_stmt, line_base,      line_range,
-      opcode_base, opcode_lengths, std::move(dirs), std::move(files)};
+    auto header = new LNPHeader{objectFile,           sectionOffset,         initLength,      dataPtr,
+                                ptr + initLength,     (DwarfVersion)version, addrSize,        minInstructionLength,
+                                maxOpsPerInstruction, defaultIsStatement,    lineBase,        lineRange,
+                                opCodeBase,           opCodeLengths,         std::move(dirs), std::move(files)};
 
     // Another thread raced to complete it's parsing of this lnp header.
     if (!objectFile->SetLnpHeader(debugLineOffset, header)) {
@@ -472,30 +472,30 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
 {
   auto elf = objectFile->GetElf();
   ASSERT(elf != nullptr, "ELF must be parsed first");
-  auto debug_line = elf->debug_line;
-  ASSERT(debug_line != nullptr && debug_line->GetName() == ".debug_line", "Must pass .debug_line ELF section");
-  auto header_count = 0u;
+  auto debugLine = elf->mDebugLine;
+  ASSERT(debugLine != nullptr && debugLine->GetName() == ".debug_line", "Must pass .debug_line ELF section");
+  auto headerCount = 0u;
   // determine header count
   {
-    DwarfBinaryReader reader{elf, debug_line->mSectionData};
-    while (reader.has_more()) {
-      header_count++;
-      const auto init_len = reader.read_initial_length<DwarfBinaryReader::Ignore>();
-      reader.skip(init_len);
+    DwarfBinaryReader reader{elf, debugLine->mSectionData};
+    while (reader.HasMore()) {
+      headerCount++;
+      const auto init_len = reader.ReadInitialLength<DwarfBinaryReader::Ignore>();
+      reader.Skip(init_len);
     }
   }
 
   std::vector<LNPHeader> headers{};
-  headers.reserve(header_count);
-  DwarfBinaryReader reader{elf, debug_line->mSectionData};
+  headers.reserve(headerCount);
+  DwarfBinaryReader reader{elf, debugLine->mSectionData};
 
   u8 addr_size = 8u;
-  for (auto i = 0u; i < header_count; ++i) {
-    const auto sec_offset = reader.bytes_read();
-    const auto init_len = reader.read_initial_length<DwarfBinaryReader::Ignore>();
-    const auto ptr = reader.current_ptr();
-    reader.bookmark();
-    const auto version = reader.peek_value<u16>();
+  for (auto i = 0u; i < headerCount; ++i) {
+    const auto sectionOffset = reader.BytesRead();
+    const auto init_len = reader.ReadInitialLength<DwarfBinaryReader::Ignore>();
+    const auto ptr = reader.CurrentPtr();
+    reader.Bookmark();
+    const auto version = reader.PeekValue<u16>();
     switch (version) {
     case 1:
       [[fallthrough]];
@@ -505,128 +505,128 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
       [[fallthrough]];
     case 6:
       DBGLOG(core, "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}", version,
-             reader.bytes_read())
-      reader.skip(init_len);
+             reader.BytesRead())
+      reader.Skip(init_len);
       continue;
     case 4:
       [[fallthrough]];
     case 5:
-      reader.skip_value<u16>();
+      reader.SkipValue<u16>();
       break;
     default:
       ASSERT(version >= 1 && version <= 6, "Invalid DWARF version value encountered: {} at offset 0x{:x}", version,
-             reader.bytes_read());
+             reader.BytesRead());
     }
 
     // TODO(simon): introduce release-build logging & warnings; this should not fail, but should log a
     // warning/error message on all builds
     ASSERT(version == 4 || version == 5, "Unsupported line number program version: {}", version);
     if (version == 5) {
-      addr_size = reader.read_value<u8>();
+      addr_size = reader.ReadValue<u8>();
       // don't care for segment selector size
-      reader.skip(1);
+      reader.Skip(1);
     }
 
-    const u64 header_length = reader.dwarf_spec_read_value();
-    const auto data_ptr = reader.current_ptr() + header_length;
-    const u8 min_ins_len = reader.read_value<u8>();
-    const u8 max_ops_per_ins = reader.read_value<u8>();
-    const bool default_is_stmt = reader.read_value<u8>();
-    const i8 line_base = reader.read_value<i8>();
-    const u8 line_range = reader.read_value<u8>();
-    const u8 opcode_base = reader.read_value<u8>();
+    const u64 headerLength = reader.DwarfSpecReadValue();
+    const auto dataPtr = reader.CurrentPtr() + headerLength;
+    const u8 minInstructionLength = reader.ReadValue<u8>();
+    const u8 maxOpsPerInstruction = reader.ReadValue<u8>();
+    const bool defaultIsStatement = reader.ReadValue<u8>();
+    const i8 lineBase = reader.ReadValue<i8>();
+    const u8 lineRange = reader.ReadValue<u8>();
+    const u8 opCodeBase = reader.ReadValue<u8>();
     std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)> opcode_lengths{};
-    reader.read_into_array(opcode_lengths);
+    reader.ReadIntoArray(opcode_lengths);
 
     if (version == 4) {
       // read include directories
       std::vector<DirEntry> dirs;
-      auto dir = reader.read_string();
+      auto dir = reader.ReadString();
       while (dir.size() > 0) {
         dirs.push_back(DirEntry{.path = dir, .md5 = {}});
-        dir = reader.read_string();
+        dir = reader.ReadString();
       }
 
       std::vector<FileEntry> files;
-      while (reader.peek_value<u8>() != 0) {
+      while (reader.PeekValue<u8>() != 0) {
         FileEntry entry;
-        entry.file_name = reader.read_string();
-        entry.dir_index = reader.read_uleb128<u64>();
-        [[gnu::unused]] const auto _timestamp = reader.read_uleb128<u64>();
-        entry.file_size = reader.read_uleb128<u64>();
+        entry.file_name = reader.ReadString();
+        entry.dir_index = reader.ReadUleb128<u64>();
+        [[gnu::unused]] const auto _timestamp = reader.ReadUleb128<u64>();
+        entry.file_size = reader.ReadUleb128<u64>();
         files.push_back(entry);
       }
-      headers.emplace_back(objectFile, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
-                           addr_size, min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range,
-                           opcode_base, opcode_lengths, std::move(dirs), std::move(files));
-      reader.skip(init_len - reader.pop_bookmark());
+      headers.emplace_back(objectFile, sectionOffset, init_len, dataPtr, ptr + init_len, (DwarfVersion)version,
+                           addr_size, minInstructionLength, maxOpsPerInstruction, defaultIsStatement, lineBase,
+                           lineRange, opCodeBase, opcode_lengths, std::move(dirs), std::move(files));
+      reader.Skip(init_len - reader.PopBookmark());
     } else {
-      const u8 directory_entry_format_count = reader.read_value<u8>();
-      LNPHeader::DirEntFormats dir_entry_fmt{};
-      dir_entry_fmt.reserve(directory_entry_format_count);
+      const u8 directory_entry_format_count = reader.ReadValue<u8>();
+      LNPHeader::DirEntFormats dirEntryFormat{};
+      dirEntryFormat.reserve(directory_entry_format_count);
 
       for (auto i = 0; i < directory_entry_format_count; i++) {
-        const auto content = reader.read_uleb128<LineNumberProgramContent>();
-        const auto form = reader.read_uleb128<AttributeForm>();
-        dir_entry_fmt.emplace_back(content, form);
+        const auto content = reader.ReadUleb128<LineNumberProgramContent>();
+        const auto form = reader.ReadUleb128<AttributeForm>();
+        dirEntryFormat.emplace_back(content, form);
       }
 
-      const u64 dir_count = reader.read_uleb128<u64>();
+      const u64 dir_count = reader.ReadUleb128<u64>();
       std::vector<DirEntry> dirs{};
       dirs.reserve(dir_count);
       for (auto i = 0ull; i < dir_count; i++) {
         using enum AttributeForm;
         DirEntry ent{};
 
-        for (const auto &[content, form] : dir_entry_fmt) {
+        for (const auto &[content, form] : dirEntryFormat) {
           if (content == LineNumberProgramContent::DW_LNCT_path) {
-            ent.path = reader.read_content_str(form);
+            ent.path = reader.ReadContentStr(form);
           } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-            ent.md5.emplace(reader.read_content_datablock(form));
+            ent.md5.emplace(reader.ReadContentDatablock(form));
           } else {
-            reader.read_content(form);
+            reader.ReadContent(form);
           }
         }
         dirs.push_back(ent);
       }
 
-      const u8 file_name_entry_fmt_count = reader.read_value<u8>();
-      LNPHeader::FileNameEntFormats filename_ent_formats{};
-      filename_ent_formats.reserve(file_name_entry_fmt_count);
+      const u8 file_name_entry_fmt_count = reader.ReadValue<u8>();
+      LNPHeader::FileNameEntFormats filenameEntryFormats{};
+      filenameEntryFormats.reserve(file_name_entry_fmt_count);
 
       for (auto i = 0; i < file_name_entry_fmt_count; i++) {
-        const auto content = reader.read_uleb128<LineNumberProgramContent>();
-        const auto form = reader.read_uleb128<AttributeForm>();
-        filename_ent_formats.emplace_back(content, form);
+        const auto content = reader.ReadUleb128<LineNumberProgramContent>();
+        const auto form = reader.ReadUleb128<AttributeForm>();
+        filenameEntryFormats.emplace_back(content, form);
       }
-      const u64 file_count = reader.read_uleb128<u64>();
+      const u64 file_count = reader.ReadUleb128<u64>();
       std::vector<FileEntry> files{};
       files.reserve(file_count);
       for (auto i = 0ull; i < file_count; i++) {
         FileEntry entry;
-        for (const auto &[content, form] : filename_ent_formats) {
+        for (const auto &[content, form] : filenameEntryFormats) {
           if (content == LineNumberProgramContent::DW_LNCT_directory_index) {
-            entry.dir_index = reader.read_content_index(form);
+            entry.dir_index = reader.ReadContentIndex(form);
           } else if (content == LineNumberProgramContent::DW_LNCT_MD5) {
-            entry.md5.emplace(reader.read_content_datablock(form));
+            entry.md5.emplace(reader.ReadContentDatablock(form));
           } else if (content == LineNumberProgramContent::DW_LNCT_path) {
-            entry.file_name = reader.read_content_str(form);
+            entry.file_name = reader.ReadContentStr(form);
           } else {
-            reader.read_content(form);
+            reader.ReadContent(form);
           }
         }
         files.push_back(entry);
       }
-      headers.emplace_back(objectFile, sec_offset, init_len, data_ptr, ptr + init_len, (DwarfVersion)version,
-                           addr_size, min_ins_len, max_ops_per_ins, default_is_stmt, line_base, line_range,
-                           opcode_base, opcode_lengths, std::move(dirs), std::move(files));
-      reader.skip(init_len - reader.pop_bookmark());
+      headers.emplace_back(objectFile, sectionOffset, init_len, dataPtr, ptr + init_len, (DwarfVersion)version,
+                           addr_size, minInstructionLength, maxOpsPerInstruction, defaultIsStatement, lineBase,
+                           lineRange, opCodeBase, opcode_lengths, std::move(dirs), std::move(files));
+      reader.Skip(init_len - reader.PopBookmark());
     }
   }
 
-  ASSERT(!reader.has_more(),
+  ASSERT(!reader.HasMore(),
          ".debug_line section is expected to have been consumed here, but {} bytes were remaining",
-         reader.remaining_size());
+         reader.RemainingSize());
   return headers;
 }
 

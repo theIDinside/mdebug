@@ -14,7 +14,7 @@ TaskInfo::js_pc(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   JS::RootedObject callee(cx, &args.thisv().toObject());
   auto task = Get(callee.get());
 
-  JS::BigInt *bigInt = JS::NumberToBigInt(cx, task->GetRegisterCache().GetPc().get());
+  JS::BigInt *bigInt = JS::NumberToBigInt(cx, task->GetRegisterCache().GetPc().GetRaw());
   if (!bigInt) {
     JS_ReportErrorASCII(cx, "Failed to create BigInt");
     return false;

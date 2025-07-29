@@ -31,8 +31,8 @@ enum class EventType
 
 struct WaitEvent
 {
-  TaskWaitResult wait;
-  int core;
+  TaskWaitResult mWaitResult;
+  int mCpuCore;
 };
 
 enum class TracerEventType : u8
@@ -58,9 +58,6 @@ enum class TracerEventType : u8
 };
 
 #define EventType(Type) static constexpr TracerEventType EvtType = TracerEventType::Type // NOLINT
-#define LogEvent(EventObject, Msg)                                                                                \
-  DBGLOG(core, "[Core Event:{}.{}] ({}): {}", mTaskLeader, task ? task->mTid : 0, EventObject.event_type,         \
-         Msg) // NOLINT
 } // namespace mdb
 namespace fmt {
 
@@ -124,7 +121,7 @@ template <> struct formatter<mdb::TracerEventType>
 namespace mdb {
 struct TaskEvent
 {
-  Tid thread_id;
+  Tid mThreadId;
 };
 
 struct WatchpointEvent : public TaskEvent
@@ -137,8 +134,8 @@ struct WatchpointEvent : public TaskEvent
     Access
   };
 
-  WatchpointType type;
-  std::uintptr_t address;
+  WatchpointType mWatchpointType;
+  std::uintptr_t mAddress;
 };
 
 struct SyscallEvent : public TaskEvent
@@ -150,48 +147,48 @@ struct SyscallEvent : public TaskEvent
     Exit
   };
 
-  Boundary boundary;
-  int syscall_no;
+  Boundary mBoundary;
+  int mSyscallNumber;
 };
 
 struct ThreadCreated : public TaskEvent
 {
   EventType(ThreadCreated);
-  tc::ResumeAction resume_action;
+  tc::ResumeAction mResumeAction;
 };
 
 struct ThreadExited : public TaskEvent
 {
   EventType(ThreadExited);
-  int code_or_signal;
-  bool process_needs_resuming;
+  int mCodeOrSignal;
+  bool mProcessNeedsResuming;
 };
 
 struct ForkEvent : public TaskEvent
 {
   EventType(Fork);
-  Pid child_pid;
+  Pid mChildPid;
   bool mIsVFork;
 };
 
 struct Clone : public TaskEvent
 {
   EventType(Clone);
-  Tid child_tid;
-  std::optional<TaskVMInfo> vm_info;
+  Tid mChildTid;
+  std::optional<TaskVMInfo> mTaskStackMetadata;
 };
 
 struct Exec : public TaskEvent
 {
   EventType(Exec);
-  std::string exec_file;
+  std::string mExecFile;
 };
 
 struct ProcessExited : public TaskEvent
 {
   EventType(ProcessExited);
-  Pid pid;
-  int exit_code;
+  Pid mProcessId;
+  int mExitCode;
 };
 
 struct LibraryEvent : public TaskEvent
@@ -208,10 +205,10 @@ struct Signal : public TaskEvent
 struct Stepped : public TaskEvent
 {
   EventType(Stepped);
-  bool stop;
-  std::optional<mdb::LocationStatus> loc_stat;
-  std::optional<tc::ResumeAction> resume_when_done{};
-  std::string_view msg{};
+  bool mStop;
+  std::optional<mdb::LocationStatus> mLocationStatus;
+  std::optional<tc::ResumeAction> mResumeWhenDone{};
+  std::string_view mMessage{};
 };
 
 struct BreakpointHitEvent : public TaskEvent
@@ -223,8 +220,8 @@ struct BreakpointHitEvent : public TaskEvent
     Hardware
   };
 
-  Immutable<BreakpointType> type;
-  Immutable<std::optional<std::uintptr_t>> address_val;
+  Immutable<BreakpointType> mBreakpointType;
+  Immutable<std::optional<std::uintptr_t>> mAddress;
 };
 
 // A never-facing-user event. used to signal that a proceed action is solely responsible for determining the next
@@ -232,13 +229,13 @@ struct BreakpointHitEvent : public TaskEvent
 struct DeferToSupervisor : public TaskEvent
 {
   EventType(DeferToSupervisor);
-  bool attached;
+  bool mAttached;
 };
 
 struct EntryEvent : public TaskEvent
 {
   EventType(Entry);
-  bool should_stop;
+  bool mShouldStop;
 };
 
 class RegisterSpec;
@@ -261,23 +258,23 @@ using CoreEventVariant =
 struct TraceEvent
 {
   // The process for which this core event was generated for
-  Immutable<Pid> target{0};
+  Immutable<Pid> mProcessId{0};
   // The thread for which this core event was generated for
-  Immutable<Tid> tid{0};
+  Immutable<Tid> mTaskId{0};
   // The payload std::variant, which holds the data and therefore determines what kind of event this is
-  Immutable<CoreEventVariant> event;
+  Immutable<CoreEventVariant> mEvent;
   // The signal generated (or the exit code returned) by the process that generated the
-  Immutable<TracerEventType> event_type;
-  Immutable<int> event_time;
+  Immutable<TracerEventType> mEventType;
+  Immutable<int> mEventTime;
   union
   {
-    int signal;
-    int exit_code;
+    int uSignal;
+    int uExitCode;
   };
   // Potential thread's register contents. When dealing with GDB Remote protocol, it can actually
   // pass some of the register contents along with it's "stop replies" (basically events that is equivalent to
   // result of the syscall waitpid(...)). If the target is native, this will always be empty.
-  Immutable<RegisterData> registers{};
+  Immutable<RegisterData> mRegisterData{};
 
   TraceEvent(int event_time, Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type, int sig_code,
              RegisterData &&regs) noexcept;
@@ -367,7 +364,7 @@ struct InternalEvent
 
 struct Event
 {
-  EventType type;
+  EventType mEventType;
   union
   {
     WaitEvent uWait;
@@ -376,14 +373,14 @@ struct Event
     InternalEvent uInternalEvent;
   };
 
-  constexpr explicit Event(ui::UICommand *command) noexcept : type(EventType::Command), uCommand(command) {}
+  constexpr explicit Event(ui::UICommand *command) noexcept : mEventType(EventType::Command), uCommand(command) {}
   constexpr explicit Event(TraceEvent *debuggerEvent, bool isInit = false) noexcept
-      : type(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent)
+      : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent)
   {
   }
-  constexpr explicit Event(WaitEvent waitEvent) noexcept : type(EventType::WaitStatus), uWait(waitEvent) {}
+  constexpr explicit Event(WaitEvent waitEvent) noexcept : mEventType(EventType::WaitStatus), uWait(waitEvent) {}
   constexpr explicit Event(InternalEvent internalEvent) noexcept
-      : type(EventType::Internal), uInternalEvent(internalEvent)
+      : mEventType(EventType::Internal), uInternalEvent(internalEvent)
   {
   }
 };
@@ -393,8 +390,8 @@ struct Event
 /// an awaiter thread, that does infinite waitpid(...)
 struct WaitResult
 {
-  pid_t pid;
-  int stat;
+  pid_t mProcessId;
+  int mStatus;
 };
 
 // TODO: implement a more generic version that dynamically can add sources

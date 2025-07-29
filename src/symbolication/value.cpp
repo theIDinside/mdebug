@@ -46,7 +46,7 @@ Value::Value(VarContext context, std::string_view name, Symbol &kind, u32 memCon
 
 Value::Value(VarContext context, std::string_view memberName, Field &kind, u32 containingStructureOffset,
              std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
-    : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.offset_of),
+    : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.mObjectBaseOffset),
       mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&kind);
@@ -84,7 +84,7 @@ Value::GetType() const noexcept
   case ValueKind::Symbol:
     return uSymbol->mType;
   case ValueKind::Field:
-    return uField->type;
+    return uField->mType;
   case ValueKind::AbsoluteAddress:
     return uType;
   default:
@@ -129,7 +129,7 @@ Value::HasMember(std::string_view memberName) noexcept
   }
 
   for (const auto &field : GetType()->MemberFields()) {
-    if (field.name == memberName) {
+    if (field.mName == memberName) {
       return true;
     }
   }
@@ -142,8 +142,9 @@ Value::GetMember(std::string_view memberName) noexcept
   auto type = GetType();
 
   if (!type->IsResolved()) {
-    sym::dw::TypeSymbolicationContext ts_ctx{*type->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *type};
-    ts_ctx.ResolveType();
+    sym::dw::TypeSymbolicationContext typeResolver{*type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+                                                   *type};
+    typeResolver.ResolveType();
   }
 
   if (!mContext) {
@@ -151,12 +152,12 @@ Value::GetMember(std::string_view memberName) noexcept
   }
 
   for (auto &mem : type->MemberFields()) {
-    if (mem.name == memberName) {
+    if (mem.mName == memberName) {
       ASSERT(mContext, "Creating member from value that has no context");
-      auto variableContext = mem.type->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
-                                                     : Tracer::Get().CloneFromVariableContext(*mContext);
+      auto variableContext = mem.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
+                                                      : Tracer::Get().CloneFromVariableContext(*mContext);
       const auto vId = variableContext->mId;
-      auto memberValue = Ref<sym::Value>::MakeShared(variableContext, mem.name, const_cast<sym::Field &>(mem),
+      auto memberValue = Ref<sym::Value>::MakeShared(variableContext, mem.mName, const_cast<sym::Field &>(mem),
                                                      mMemoryContentsOffsets, TakeMemoryReference());
       ObjectFile::InitializeDataVisualizer(*memberValue);
 
@@ -189,7 +190,7 @@ void
 Value::RegisterContext() noexcept
 {
   Tracer::Get().SetVariableContext(mContext);
-  mContext->mTask->CacheValueObject(mContext->mId, RcHandle<sym::Value>{this});
+  mContext->mTask->CacheValueObject(mContext->mId, RefPtr<sym::Value>{this});
 }
 
 bool
@@ -206,7 +207,7 @@ Value::OverwriteValueBytes(u32 offset, const std::span<const std::byte> newBytes
   const auto result = supervisor->GetInterface().WriteBytes(addr, (const u8 *)newBytes.data(), newBytes.size());
   mValueObject->Refresh(*supervisor);
 
-  return result.success;
+  return result.mWasSuccessful;
 }
 
 template <class T>
@@ -392,10 +393,10 @@ void
 LazyMemoryContentsObject::CacheMemory() noexcept
 {
   DBGLOG(dap, "[lazy transfer]: {} .. {}", start, end);
-  if (auto res = mSupervisor.SafeRead(start, end->get() - start->get()); res.is_expected()) {
+  if (auto res = mSupervisor.SafeRead(start, end->GetRaw() - start->GetRaw()); res.is_expected()) {
     mContents = std::move(res.take_value());
   } else {
-    mContents = std::move(res.take_error().bytes);
+    mContents = std::move(res.take_error().mBytes);
   }
 }
 
@@ -428,14 +429,14 @@ LazyMemoryContentsObject::View(u32 offset, u32 size) noexcept
 
 /*static*/
 MemoryContentsObject::ReadResult
-MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept
+MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 sizeOf) noexcept
 {
-  if (auto res = tc.SafeRead(address, size_of); res.is_expected()) {
+  if (auto res = tc.SafeRead(address, sizeOf); res.is_expected()) {
     return ReadResult{.info = ReadResultInfo::Success, .value = res.take_value()};
   } else {
-    const auto read_bytes = size_of - res.error().unread_bytes;
+    const auto read_bytes = sizeOf - res.error().mUnreadBytes;
     if (read_bytes != 0) {
-      return ReadResult{.info = ReadResultInfo::Partial, .value = std::move(res.take_error().bytes)};
+      return ReadResult{.info = ReadResultInfo::Partial, .value = std::move(res.take_error().mBytes)};
     } else {
       return ReadResult{.info = ReadResultInfo::Failed, .value = nullptr};
     }
@@ -531,7 +532,7 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
 
   if (!symbol.Computed()) {
     ReadInLocationList(symbol, tc.GetDebugAdapterProtocolClient()->GetCommandArenaAllocator(),
-                       *frame.GetSymbolFile()->GetObjectFile()->GetElf()->debug_loclist);
+                       *frame.GetSymbolFile()->GetObjectFile()->GetElf()->mDebugLoclist);
   }
   auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
 

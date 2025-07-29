@@ -70,7 +70,7 @@ ub(ExprByteCodeInterpreter &i) noexcept
 void
 op_addr(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<u64>());
+  i.mStack.Push(i.mReader.ReadValue<u64>());
 }
 
 void
@@ -95,7 +95,7 @@ op_reg(ExprByteCodeInterpreter &i) noexcept
 void
 op_breg(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto offset = i.mReader.read_leb128<i64>();
+  const auto offset = i.mReader.ReadLeb128<i64>();
   const auto reg_num = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_breg0);
   const auto result = i.GetRegister(reg_num).transform([&](auto v) { return v + offset; });
   MUST_HOLD(result.has_value(), "Could not get register contents");
@@ -116,7 +116,7 @@ op_deref_size(ExprByteCodeInterpreter &i) noexcept
 {
   const auto v = i.mStack.Pop();
 
-  const auto bytes = i.mReader.read_value<u8>();
+  const auto bytes = i.mReader.ReadValue<u8>();
   switch (bytes) {
   case 1: {
     const TPtr<u8> addr{v};
@@ -167,52 +167,52 @@ op_form_tls_address(ExprByteCodeInterpreter &) noexcept
 void
 op_const1u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<u8>());
+  i.mStack.Push(i.mReader.ReadValue<u8>());
 }
 void
 op_const1s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<i8>());
+  i.mStack.Push(i.mReader.ReadValue<i8>());
 }
 void
 op_const2u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<u16>());
+  i.mStack.Push(i.mReader.ReadValue<u16>());
 }
 void
 op_const2s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<i16>());
+  i.mStack.Push(i.mReader.ReadValue<i16>());
 }
 void
 op_const4u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<u32>());
+  i.mStack.Push(i.mReader.ReadValue<u32>());
 }
 void
 op_const4s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<i32>());
+  i.mStack.Push(i.mReader.ReadValue<i32>());
 }
 void
 op_const8u(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<u64>());
+  i.mStack.Push(i.mReader.ReadValue<u64>());
 }
 void
 op_const8s(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_value<i64>());
+  i.mStack.Push(i.mReader.ReadValue<i64>());
 }
 void
 op_constu(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_uleb128<u64>());
+  i.mStack.Push(i.mReader.ReadUleb128<u64>());
 }
 void
 op_consts(ExprByteCodeInterpreter &i) noexcept
 {
-  i.mStack.Push(i.mReader.read_leb128<i64>());
+  i.mStack.Push(i.mReader.ReadLeb128<i64>());
 }
 
 void
@@ -235,7 +235,7 @@ op_over(ExprByteCodeInterpreter &i) noexcept
 void
 op_pick(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto idx = i.mReader.read_value<u8>();
+  const auto idx = i.mReader.ReadValue<u8>();
   i.mStack.Copy(idx);
 }
 
@@ -337,7 +337,7 @@ void
 op_plus_uconst(ExprByteCodeInterpreter &i) noexcept
 {
   const auto a = i.mStack.Pop();
-  const auto b = i.mReader.read_uleb128<u64>();
+  const auto b = i.mReader.ReadUleb128<u64>();
   const auto res = b + a;
   i.mStack.Push(res);
 }
@@ -378,16 +378,16 @@ op_xor(ExprByteCodeInterpreter &i) noexcept
 void
 op_skip(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto skip = i.mReader.read_value<i16>();
-  i.mReader.skip(skip);
+  const auto skip = i.mReader.ReadValue<i16>();
+  i.mReader.Skip(skip);
 }
 void
 op_bra(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto skip = i.mReader.read_value<i16>();
+  const auto skip = i.mReader.ReadValue<i16>();
   auto value = i.mStack.Pop();
   if (value != 0) {
-    i.mReader.skip(skip);
+    i.mReader.Skip(skip);
   }
 }
 void
@@ -442,22 +442,22 @@ op_ne(ExprByteCodeInterpreter &i) noexcept
 void
 op_regx(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto reg_no = i.mReader.read_uleb128<u64>();
+  const auto reg_no = i.mReader.ReadUleb128<u64>();
   i.mStack.Push(reg_no);
 }
 
 void
 op_fbreg(ExprByteCodeInterpreter &i) noexcept
 {
-  const i64 offset = i.mReader.read_leb128<i64>();
+  const i64 offset = i.mReader.ReadLeb128<i64>();
   const auto frameBase = i.ComputeFrameBase();
   i.mStack.Push<u64>(frameBase + offset);
 }
 void
 op_bregx(ExprByteCodeInterpreter &i) noexcept
 {
-  const auto reg_num = i.mReader.read_uleb128<u64>();
-  const auto offset = i.mReader.read_leb128<i64>();
+  const auto reg_num = i.mReader.ReadUleb128<u64>();
+  const auto offset = i.mReader.ReadLeb128<i64>();
   const auto result = i.GetRegister(reg_num).transform([&](auto v) { return v + offset; });
   MUST_HOLD(result.has_value(), "could not get register contents");
   i.mStack.Push<u64>(result.value());
@@ -711,8 +711,8 @@ u64
 ExprByteCodeInterpreter::Run() noexcept
 {
   PROFILE_SCOPE("ExprByteCodeInterpreter::Run", "bytecode-interpreter");
-  while (mReader.has_more()) {
-    const auto op = mReader.read_byte<DwarfOp>();
+  while (mReader.HasMore()) {
+    const auto op = mReader.ReadByte<DwarfOp>();
     this->mLatestDecoded = op;
     const auto idx = std::to_underlying(op);
     ops[idx](*this);

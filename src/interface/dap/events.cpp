@@ -5,7 +5,6 @@
 #include "fmt/ranges.h"
 #include "nlohmann/json.hpp"
 #include <event_queue.h>
-#include <so_loading.h>
 #include <symbolication/objfile.h>
 
 namespace mdb::ui::dap {
@@ -31,34 +30,27 @@ TerminatedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
 }
 
 ModuleEvent::ModuleEvent(Pid pid, std::string_view id, std::string_view reason, std::string &&name, Path &&path,
-                         std::optional<std::string> &&symbol_file_path, std::optional<std::string> &&version,
-                         AddressRange range, SharedObjectSymbols so_sym_info) noexcept
-    : UIResult(pid), objfile_id(id), reason(reason), name(std::move(name)), path(std::move(path)),
-      addr_range(range), sym_info(so_sym_info), symbol_file_path(std::move(symbol_file_path)),
+                         std::optional<std::string> &&symbolFilePath, std::optional<std::string> &&version,
+                         AddressRange range, SharedObjectSymbols sharedObjects) noexcept
+    : UIResult(pid), mObjectFileId(id), mReason(reason), mName(std::move(name)), mPath(std::move(path)),
+      mAddressRange(range), mSharedObjectFiles(sharedObjects), mSymbolObjectFilePath(std::move(symbolFilePath)),
       version(std::move(version))
 {
 }
 
-ModuleEvent::ModuleEvent(Pid pid, std::string_view reason, const SharedObject &so) noexcept
-    : UIResult(pid), objfile_id(so.objfile->GetObjectFileId()), reason(reason), name(so.name()), path(so.path),
-      addr_range(so.relocated_addr_range()), sym_info(so.symbol_info), symbol_file_path(so.symbol_file_path()),
-      version(so.version())
-{
-}
-
 ModuleEvent::ModuleEvent(Pid pid, std::string_view reason, const ObjectFile &object_file) noexcept
-    : UIResult(pid), objfile_id(object_file.GetObjectFileId()), reason(reason),
-      name(object_file.GetFilePath().filename()), path(object_file.GetFilePath()),
-      addr_range(object_file.GetAddressRange()), sym_info(SharedObjectSymbols::None),
-      symbol_file_path(object_file.GetFilePath()), version()
+    : UIResult(pid), mObjectFileId(object_file.GetObjectFileId()), mReason(reason),
+      mName(object_file.GetFilePath().filename()), mPath(object_file.GetFilePath()),
+      mAddressRange(object_file.GetAddressRange()), mSharedObjectFiles(SharedObjectSymbols::None),
+      mSymbolObjectFilePath(object_file.GetFilePath()), version()
 {
 }
 
 ModuleEvent::ModuleEvent(Pid pid, std::string_view reason, const SymbolFile &symbol_file) noexcept
-    : UIResult(pid), objfile_id(symbol_file.mSymbolObjectFileId), reason(reason),
-      name(symbol_file.GetObjectFilePath().filename()), path(symbol_file.GetObjectFilePath()),
-      addr_range(symbol_file.mPcBounds), sym_info(SharedObjectSymbols::Full),
-      symbol_file_path(symbol_file.GetObjectFilePath().c_str()), version()
+    : UIResult(pid), mObjectFileId(symbol_file.mSymbolObjectFileId), mReason(reason),
+      mName(symbol_file.GetObjectFilePath().filename()), mPath(symbol_file.GetObjectFilePath()),
+      mAddressRange(symbol_file.mPcBounds), mSharedObjectFiles(SharedObjectSymbols::Full),
+      mSymbolObjectFilePath(symbol_file.GetObjectFilePath().c_str()), version()
 {
 }
 
@@ -82,24 +74,24 @@ ModuleEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
   auto it = fmt::format_to(
     std::back_inserter(result),
     R"({{"seq":{},"processId":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
-    seq, mPid, reason, objfile_id, name, path.c_str());
+    seq, mPid, mReason, mObjectFileId, mName, mPath.c_str());
 
   if (version) {
     it = fmt::format_to(it, R"(,"version":"{}")", *version);
   }
-  it = fmt::format_to(it, R"(,"symbolStatus":"{}")", so_sym_info_description(sym_info));
+  it = fmt::format_to(it, R"(,"symbolStatus":"{}")", SharedObjectSymbolInfo(mSharedObjectFiles));
 
-  if (symbol_file_path) {
-    it = fmt::format_to(it, R"(,"symbolFilePath":"{}")", *symbol_file_path);
+  if (mSymbolObjectFilePath) {
+    it = fmt::format_to(it, R"(,"symbolFilePath":"{}")", *mSymbolObjectFilePath);
   }
 
-  it = fmt::format_to(it, R"(,"addressRange":"{}:{}"}}}}}})", addr_range.low, addr_range.high);
+  it = fmt::format_to(it, R"(,"addressRange":"{}:{}"}}}}}})", mAddressRange.low, mAddressRange.high);
 
   return result;
 }
 
-ContinuedEvent::ContinuedEvent(Pid pid, Tid tid, bool all_threads) noexcept
-    : UIResult{pid}, thread_id(tid), all_threads_continued(all_threads)
+ContinuedEvent::ContinuedEvent(Pid pid, Tid tid, bool allThreads) noexcept
+    : UIResult{pid}, mThreadId(tid), mAllThreadsContinued(allThreads)
 {
 }
 
@@ -108,11 +100,11 @@ ContinuedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 {
   ReturnFormatted(
     R"({{"seq":{},"processId":{},"type":"event","event":"continued","body":{{"threadId":{},"allThreadsContinued":{}}}}})",
-    seq, mPid, thread_id, all_threads_continued);
+    seq, mPid, mThreadId, mAllThreadsContinued);
 }
 
-Process::Process(Pid parentPid, Pid pid, std::string name, bool is_local) noexcept
-    : UIResult{parentPid}, name(std::move(name)), mProcessId(pid), is_local(is_local)
+Process::Process(Pid parentPid, Pid pid, std::string name, bool isLocal) noexcept
+    : UIResult{parentPid}, mName(std::move(name)), mProcessId(pid), mIsLocal(isLocal)
 {
 }
 
@@ -128,22 +120,23 @@ Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noe
 {
   ReturnFormatted(
     R"({{"seq":{},"processId":{},"type":"event","event":"process","body":{{"name":"{}","isLocalProcess":true,"startMethod":"attach","processId":{}}}}})",
-    seq, mPid, name, mProcessId);
+    seq, mPid, mName, mProcessId);
 }
 
-ExitedEvent::ExitedEvent(Pid pid, int exit_code) noexcept : UIResult{pid}, exit_code(exit_code) {}
+ExitedEvent::ExitedEvent(Pid pid, int exitCode) noexcept : UIResult{pid}, mExitCode(exitCode) {}
 std::pmr::string
 ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event","event":"exited","body":{{"exitCode":{}}}}})", seq,
-                  mPid, exit_code);
+                  mPid, mExitCode);
 }
 
-ThreadEvent::ThreadEvent(Pid pid, ThreadReason reason, Tid tid) noexcept : UIResult{pid}, reason(reason), tid(tid)
+ThreadEvent::ThreadEvent(Pid pid, ThreadReason reason, Tid tid) noexcept
+    : UIResult{pid}, mReason(reason), mTid(tid)
 {
 }
 ThreadEvent::ThreadEvent(Pid pid, const Clone &event) noexcept
-    : UIResult{pid}, reason(ThreadReason::Started), tid(event.child_tid)
+    : UIResult{pid}, mReason(ThreadReason::Started), mTid(event.mChildTid)
 {
 }
 
@@ -152,37 +145,38 @@ ThreadEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
 {
   ReturnFormatted(
     R"({{"seq":{},"processId":{},"type":"event","event":"thread","body":{{"reason":"{}","threadId":{}}}}})", seq,
-    mPid, to_str(reason), tid);
+    mPid, to_str(mReason), mTid);
 }
 
 StoppedEvent::StoppedEvent(Pid pid, StoppedReason reason, std::string_view description, Tid tid,
-                           std::vector<int> bps, std::string_view text, bool all_stopped) noexcept
-    : UIResult{pid}, reason(reason), description(description), tid(tid), bp_ids(bps), text(text),
-      all_threads_stopped(all_stopped)
+                           std::vector<int> breakpointIds, std::string_view text, bool allStopped) noexcept
+    : UIResult{pid}, mReason(reason), mDescription(description), mTid(tid),
+      mBreakpointIds(std::move(breakpointIds)), mText(text), mAllThreadsStopped(allStopped)
 {
 }
 
 std::pmr::string
 StoppedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  nlohmann::json ensure_desc_utf8 = description;
-  const auto description_utf8 = ensure_desc_utf8.dump();
-  if (text.empty()) {
+  nlohmann::json ensure_desc_utf8 = mDescription;
+  const auto descriptionUtf8 = ensure_desc_utf8.dump();
+  if (mText.empty()) {
     ReturnFormatted(
       R"({{"seq":{},"processId":{},"type":"event","event":"stopped","body":{{"reason":"{}","threadId":{},"description":{},"text":"","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
-      seq, mPid, to_str(reason), tid, description_utf8, all_threads_stopped, fmt::join(bp_ids, ","));
+      seq, mPid, to_str(mReason), mTid, descriptionUtf8, mAllThreadsStopped, fmt::join(mBreakpointIds, ","));
   } else {
-    const nlohmann::json ensure_utf8 = text;
+    const nlohmann::json ensure_utf8 = mText;
     const auto utf8text = ensure_utf8.dump();
     ReturnFormatted(
       R"({{"seq":{},"processId":{},"type":"event","event":"stopped","body":{{ "reason":"{}","threadId":{},"description":{},"text":{},"allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
-      seq, mPid, to_str(reason), tid, description_utf8, utf8text, all_threads_stopped, fmt::join(bp_ids, ","));
+      seq, mPid, to_str(mReason), mTid, descriptionUtf8, utf8text, mAllThreadsStopped,
+      fmt::join(mBreakpointIds, ","));
   }
 }
 
 BreakpointEvent::BreakpointEvent(Pid pid, std::string_view reason, std::optional<std::string> message,
                                  const UserBreakpoint *breakpoint) noexcept
-    : UIResult{pid}, reason(reason), message(std::move(message)), breakpoint(breakpoint)
+    : UIResult{pid}, mReason(reason), mMessage(std::move(message)), mBreakpoint(breakpoint)
 {
 }
 
@@ -206,21 +200,21 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   it = fmt::format_to(
     it,
     R"({{"seq":{},"processId":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
-    seq, mPid, reason, breakpoint->mId, breakpoint->IsVerified());
+    seq, mPid, mReason, mBreakpoint->mId, mBreakpoint->IsVerified());
 
-  if (message) {
-    it = fmt::format_to(it, R"(,"message": "{}")", message.value());
+  if (mMessage) {
+    it = fmt::format_to(it, R"(,"message": "{}")", mMessage.value());
   }
-  if (auto src = breakpoint->GetSourceFile(); src) {
+  if (auto src = mBreakpoint->GetSourceFile(); src) {
     it = fmt::format_to(it, R"(,"source": {{"name":"{}", "path": "{}"}})", src.value(), src.value());
   }
-  if (const auto line = breakpoint->Line(); line) {
+  if (const auto line = mBreakpoint->Line(); line) {
     it = fmt::format_to(it, R"(,"line":{})", line.value());
   }
-  if (const auto col = breakpoint->Column(); col) {
+  if (const auto col = mBreakpoint->Column(); col) {
     it = fmt::format_to(it, R"(,"column":{})", col.value());
   }
-  if (auto addr = breakpoint->Address(); addr) {
+  if (auto addr = mBreakpoint->Address(); addr) {
     it = fmt::format_to(it, R"(,"instructionReference": "{}")", addr.value());
   }
 
@@ -229,7 +223,7 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
 }
 
 OutputEvent::OutputEvent(Pid pid, std::string_view category, std::string &&output) noexcept
-    : UIResult{pid}, category(category), output(std::move(output))
+    : UIResult{pid}, mCategory(category), mOutput(std::move(output))
 {
 }
 
@@ -237,13 +231,13 @@ std::pmr::string
 OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   nlohmann::json escape_hack;
-  escape_hack = output;
+  escape_hack = mOutput;
   const auto body = escape_hack.dump();
   std::pmr::string result{arenaAllocator};
   fmt::format_to(
     std::back_inserter(result),
     R"({{"seq":{},"processId":{},"type":"event","event":"output","body":{{"category":"{}","output":{}}}}})", seq,
-    mPid, category, body);
+    mPid, mCategory, body);
   return result;
 }
 } // namespace mdb::ui::dap

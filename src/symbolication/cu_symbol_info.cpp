@@ -302,12 +302,13 @@ private:
 };
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(dw::UnitData *data) noexcept
-    : unit_data(data), fns(), imported_units()
+    : mUnitData(data), mFunctionSymbols(), mImportedUnits()
 {
 }
 
 PartialCompilationUnitSymbolInfo::PartialCompilationUnitSymbolInfo(PartialCompilationUnitSymbolInfo &&o) noexcept
-    : unit_data(o.unit_data), fns(std::move(o.fns)), imported_units(std::move(o.imported_units))
+    : mUnitData(o.mUnitData), mFunctionSymbols(std::move(o.mFunctionSymbols)),
+      mImportedUnits(std::move(o.mImportedUnits))
 {
 }
 
@@ -317,9 +318,9 @@ PartialCompilationUnitSymbolInfo::operator=(PartialCompilationUnitSymbolInfo &&r
   if (this == &rhs) {
     return *this;
   }
-  unit_data = rhs.unit_data;
-  fns = std::move(rhs.fns);
-  imported_units = std::move(rhs.imported_units);
+  mUnitData = rhs.mUnitData;
+  mFunctionSymbols = std::move(rhs.mFunctionSymbols);
+  mImportedUnits = std::move(rhs.mImportedUnits);
   return *this;
 }
 
@@ -340,7 +341,7 @@ CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexc
 bool
 CompilationUnit::LineTableComputed() noexcept
 {
-  return computed;
+  return mComputed;
 }
 
 std::span<const dw::LineTableEntry>
@@ -358,13 +359,13 @@ CompilationUnit::AddressRanges() const noexcept
 void
 CompilationUnit::ComputeLineTable() noexcept
 {
-  std::lock_guard lock(m);
+  std::lock_guard lock(mMutex);
   PROFILE_SCOPE_ARGS("ComputeLineTable", "symbolication", PEARG("compunit", mLineNumberProgram->mSectionOffset));
   if (LineTableComputed()) {
     return;
   }
 
-  std::vector<dw::LineTableEntry> unique_ltes{};
+  std::vector<dw::LineTableEntry> uniqueLineTableEntries{};
 
   DBGLOG(dwarf, "[lnp]: computing lnp at {}", mLineNumberProgram->mSectionOffset);
   using OpCode = LineNumberProgramOpCode;
@@ -372,38 +373,38 @@ CompilationUnit::ComputeLineTable() noexcept
   DwarfBinaryReader reader{mUnitData->GetObjectFile()->GetElf(), mLineNumberProgram->mData,
                            static_cast<u64>(mLineNumberProgram->mDataEnd - mLineNumberProgram->mData)};
 
-  SourceCodeFileLNPResolver state{this, mLineNumberProgram, unique_ltes, sequences};
-  while (reader.has_more()) {
-    const auto opcode = reader.read_value<OpCode>();
+  SourceCodeFileLNPResolver state{this, mLineNumberProgram, uniqueLineTableEntries, sequences};
+  while (reader.HasMore()) {
+    const auto opcode = reader.ReadValue<OpCode>();
     if (const auto spec_op = std::to_underlying(opcode); spec_op >= mLineNumberProgram->mOpcodeBase) {
       state.execute_special_opcode(spec_op);
       continue;
     }
     if (std::to_underlying(opcode) == 0) {
       // Extended Op Codes
-      const auto len = reader.read_uleb128<u64>();
-      const auto end = reader.current_ptr() + len;
-      auto ext_op = reader.read_value<LineNumberProgramExtendedOpCode>();
-      switch (ext_op) {
+      const auto len = reader.ReadUleb128<u64>();
+      const auto end = reader.CurrentPtr() + len;
+      auto extOp = reader.ReadValue<LineNumberProgramExtendedOpCode>();
+      switch (extOp) {
       case LineNumberProgramExtendedOpCode::DW_LNE_end_sequence:
         state.SetSequenceEnded();
         break;
       case LineNumberProgramExtendedOpCode::DW_LNE_set_address:
         if (mLineNumberProgram->mAddrSize == 4) {
-          const auto addr = reader.read_value<u32>();
+          const auto addr = reader.ReadValue<u32>();
           state.SetAddress(addr);
         } else {
-          const auto addr = reader.read_value<u64>();
+          const auto addr = reader.ReadValue<u64>();
           state.SetAddress(addr);
         }
         break;
       case LineNumberProgramExtendedOpCode::DW_LNE_define_file: {
         if (mLineNumberProgram->mVersion == DwarfVersion::D4) {
           // https://dwarfstd.org/doc/DWARF4.pdf#page=136
-          const auto filename = reader.read_string();
-          const auto dir_index = reader.read_uleb128<u64>();
-          const auto last_modified = reader.read_uleb128<u64>();
-          const auto file_size = reader.read_uleb128<u64>();
+          const auto filename = reader.ReadString();
+          const auto dir_index = reader.ReadUleb128<u64>();
+          const auto last_modified = reader.ReadUleb128<u64>();
+          const auto file_size = reader.ReadUleb128<u64>();
           state.define_file(filename, dir_index, last_modified, file_size);
         } else {
           PANIC(fmt::format("DWARF V5 line tables not yet implemented"));
@@ -411,13 +412,13 @@ CompilationUnit::ComputeLineTable() noexcept
         break;
       }
       case LineNumberProgramExtendedOpCode::DW_LNE_set_discriminator: {
-        state.set_discriminator(reader.read_uleb128<u64>());
+        state.set_discriminator(reader.ReadUleb128<u64>());
         break;
       }
       default:
         // Vendor extensions
-        while (reader.current_ptr() < end) {
-          reader.read_value<u8>();
+        while (reader.CurrentPtr() < end) {
+          reader.ReadValue<u8>();
         }
         break;
       }
@@ -427,16 +428,16 @@ CompilationUnit::ComputeLineTable() noexcept
       state.StampEntry();
       break;
     case OpCode::DW_LNS_advance_pc:
-      state.advance_pc(reader.read_uleb128<u64>());
+      state.advance_pc(reader.ReadUleb128<u64>());
       break;
     case OpCode::DW_LNS_advance_line:
-      state.advance_line(reader.read_leb128<i64>());
+      state.advance_line(reader.ReadLeb128<i64>());
       break;
     case OpCode::DW_LNS_set_file:
-      state.set_file(reader.read_uleb128<u64>());
+      state.set_file(reader.ReadUleb128<u64>());
       break;
     case OpCode::DW_LNS_set_column:
-      state.set_column(reader.read_uleb128<u64>());
+      state.set_column(reader.ReadUleb128<u64>());
       break;
     case OpCode::DW_LNS_negate_stmt:
       state.negate_stmt();
@@ -448,7 +449,7 @@ CompilationUnit::ComputeLineTable() noexcept
       state.const_add_pc();
       break;
     case OpCode::DW_LNS_fixed_advance_pc:
-      state.advance_fixed_pc(reader.read_value<u16>());
+      state.advance_fixed_pc(reader.ReadValue<u16>());
       break;
     case OpCode::DW_LNS_set_prologue_end:
       state.set_prologue_end();
@@ -457,23 +458,24 @@ CompilationUnit::ComputeLineTable() noexcept
       state.set_epilogue_begin();
       break;
     case OpCode::DW_LNS_set_isa:
-      state.set_isa(reader.read_value<u64>());
+      state.set_isa(reader.ReadValue<u64>());
       break;
     }
   }
 
-  mLineTable.reserve(unique_ltes.size());
+  mLineTable.reserve(uniqueLineTableEntries.size());
 
-  std::sort(std::begin(unique_ltes), std::end(unique_ltes), [](auto &a, auto &b) { return a.pc < b.pc; });
+  std::sort(std::begin(uniqueLineTableEntries), std::end(uniqueLineTableEntries),
+            [](auto &a, auto &b) { return a.pc < b.pc; });
 
-  std::ranges::copy(unique_ltes, std::back_inserter(mLineTable));
+  std::ranges::copy(uniqueLineTableEntries, std::back_inserter(mLineTable));
   ASSERT(std::ranges::is_sorted(mLineTable, [](auto &a, auto &b) { return a.pc < b.pc; }),
          "Line Table was not sorted by Program Counter!");
   if (mLineTable.size() > 2) {
     mPcStart = std::min(mPcStart, mLineTable.front().pc);
     mPcEndExclusive = std::max(mPcEndExclusive, mLineTable.back().pc);
   }
-  computed = true;
+  mComputed = true;
 
   const auto sourceCodeTableMapping = state.CreateSubFileMappings();
   // Our "hash"-function.
@@ -607,7 +609,7 @@ CompilationUnit::EndPc() const noexcept
 }
 
 std::string_view
-CompilationUnit::name() const noexcept
+CompilationUnit::Name() const noexcept
 {
   return mCompilationUnitName;
 }
@@ -639,13 +641,13 @@ CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
 }
 
 dw::UnitData *
-CompilationUnit::get_dwarf_unit() const noexcept
+CompilationUnit::GetDwarfUnitData() const noexcept
 {
   return mUnitData;
 }
 
 std::optional<Path>
-CompilationUnit::get_lnp_file(u32 index) noexcept
+CompilationUnit::GetLineNumberProgramFile(u32 index) noexcept
 {
   // TODO(simon): we really should store a pointer to the line number program table (or header) in either UnitData
   // or SourceFileSymbolInfo directly.
@@ -658,82 +660,82 @@ using AddrOpt = std::optional<AddrPtr>;
 
 struct ResolveFnSymbolState
 {
-  CompilationUnit *symtab;
-  std::string_view name{};
-  std::string_view mangled_name{};
+  CompilationUnit *mCompilationUnit;
+  std::string_view mName{};
+  std::string_view mMangledName{};
   // a namespace or a class, so foo::foo, like a constructor, or mdb::foo for a namespace with foo as a fn, for
   // instance.
-  std::string_view namespace_ish{};
-  AddrPtr low_pc{nullptr};
-  AddrPtr high_pc{nullptr};
-  u8 maybe_count{0};
-  std::optional<std::span<const u8>> frame_base_description{};
-  sym::Type *ret_type{nullptr};
+  std::string_view mNamespaceIsh{};
+  AddrPtr mLowProgramCounter{nullptr};
+  AddrPtr mHighProgramCounter{nullptr};
+  u8 mMaybeCount{0};
+  std::optional<std::span<const u8>> mFrameBaseDescription{};
+  sym::Type *mReturnType{nullptr};
 
-  std::optional<u32> line{std::nullopt};
-  std::optional<std::string> lnp_file{std::nullopt};
+  std::optional<u32> mLine{std::nullopt};
+  std::optional<std::string> mLineNumberProgramFile{std::nullopt};
 
-  explicit ResolveFnSymbolState(CompilationUnit *symtable) noexcept : symtab(symtable) {}
+  explicit ResolveFnSymbolState(CompilationUnit *compilationUnit) noexcept : mCompilationUnit(compilationUnit) {}
 
-  std::array<dw::IndexedDieReference, 3> maybe_origin_dies{};
+  std::array<dw::IndexedDieReference, 3> mPossibleOriginDies{};
   bool
-  done(bool has_no_references) const
+  Done(bool hasNoReferences) const
   {
-    if (!name.empty()) {
-      return low_pc != nullptr && high_pc != nullptr;
-    } else if (!mangled_name.empty()) {
+    if (!mName.empty()) {
+      return mLowProgramCounter != nullptr && mHighProgramCounter != nullptr;
+    } else if (!mMangledName.empty()) {
       // if we have die references, we are not done
-      return has_no_references && low_pc != nullptr && high_pc != nullptr;
+      return hasNoReferences && mLowProgramCounter != nullptr && mHighProgramCounter != nullptr;
     } else {
       return false;
     }
   }
 
   sym::FunctionSymbol
-  complete()
+  Complete()
   {
-    std::optional<SourceCoordinate> source =
-      lnp_file.transform([&](auto &&path) { return SourceCoordinate{std::move(path), line.value_or(0), 0}; });
-    if (lnp_file) {
-      ASSERT(lnp_file.value().empty(), "Should have moved std string!");
+    std::optional<SourceCoordinate> source = mLineNumberProgramFile.transform(
+      [&](auto &&path) { return SourceCoordinate{std::move(path), mLine.value_or(0), 0}; });
+    if (mLineNumberProgramFile) {
+      ASSERT(mLineNumberProgramFile.value().empty(), "Should have moved std string!");
     }
 
-    return sym::FunctionSymbol{low_pc,
-                               high_pc,
-                               name.empty() ? mangled_name : name,
-                               namespace_ish,
-                               ret_type,
-                               maybe_origin_dies,
-                               *symtab,
-                               frame_base_description.value_or(std::span<const u8>{}),
+    return sym::FunctionSymbol{mLowProgramCounter,
+                               mHighProgramCounter,
+                               mName.empty() ? mMangledName : mName,
+                               mNamespaceIsh,
+                               mReturnType,
+                               mPossibleOriginDies,
+                               *mCompilationUnit,
+                               mFrameBaseDescription.value_or(std::span<const u8>{}),
                                std::move(source)};
   }
 
   void
-  add_maybe_origin(dw::IndexedDieReference indexed) noexcept
+  AddPossibleOrigin(dw::IndexedDieReference indexed) noexcept
   {
-    if (maybe_count < 3 && !std::any_of(maybe_origin_dies.begin(), maybe_origin_dies.begin() + maybe_count,
+    if (mMaybeCount < 3 && !std::any_of(mPossibleOriginDies.begin(), mPossibleOriginDies.begin() + mMaybeCount,
                                         [&](const auto &idr) { return idr == indexed; })) {
-      maybe_origin_dies[maybe_count++] = indexed;
+      mPossibleOriginDies[mMaybeCount++] = indexed;
     }
   }
 };
 
 static std::optional<dw::DieReference>
-follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::DieReference ref) noexcept
+FollowReference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::DieReference ref) noexcept
 {
-  std::optional<dw::DieReference> additional_die_reference = std::optional<dw::DieReference>{};
+  std::optional<dw::DieReference> additionalDieReference = std::optional<dw::DieReference>{};
   dw::UnitReader reader = ref.GetReader();
   const auto &abbreviation = ref.GetUnitData()->GetAbbreviation(ref.GetDie()->mAbbreviationCode);
   if (!abbreviation.mIsDeclaration) {
-    state.add_maybe_origin(ref.AsIndexed());
+    state.AddPossibleOrigin(ref.AsIndexed());
   }
 
   if (const auto parent = ref.GetDie()->GetParent();
-      maybe_null_any_of<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
+      MaybeNullAnyOf<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
     dw::DieReference parentReference{ref.GetUnitData(), parent};
-    if (auto class_name = parentReference.ReadAttribute(Attribute::DW_AT_name); class_name) {
-      state.namespace_ish = class_name->AsStringView();
+    if (auto className = parentReference.ReadAttribute(Attribute::DW_AT_name); className) {
+      state.mNamespaceIsh = className->AsStringView();
     }
   }
 
@@ -741,47 +743,49 @@ follow_reference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::Die
     auto value = ReadAttributeValue(reader, attr, abbreviation.mImplicitConsts);
     switch (value.name) {
     case Attribute::DW_AT_name:
-      state.name = value.AsStringView();
+      state.mName = value.AsStringView();
       break;
     case Attribute::DW_AT_linkage_name:
-      state.mangled_name = value.AsStringView();
+      state.mMangledName = value.AsStringView();
       break;
     // is address-representable?
     case Attribute::DW_AT_low_pc:
-      state.low_pc = value.AsAddress();
+      state.mLowProgramCounter = value.AsAddress();
       break;
     case Attribute::DW_AT_decl_file: {
-      if (!state.lnp_file) {
-        state.lnp_file =
-          src_file.get_lnp_file(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
-        CDLOG(ref.GetUnitData() != src_file.get_dwarf_unit(), core,
+      if (!state.mLineNumberProgramFile) {
+        state.mLineNumberProgramFile =
+          src_file.GetLineNumberProgramFile(value.AsUnsignedValue()).transform([](auto &&p) {
+            return p.string();
+          });
+        CDLOG(ref.GetUnitData() != src_file.GetDwarfUnitData(), core,
               "[dwarf]: Cross CU requires (?) another LNP. ref.cu = {}, src file cu={}",
-              ref.GetUnitData()->SectionOffset(), src_file.get_dwarf_unit()->SectionOffset());
+              ref.GetUnitData()->SectionOffset(), src_file.GetDwarfUnitData()->SectionOffset());
       }
     } break;
     case Attribute::DW_AT_decl_line:
-      if (!state.line) {
-        state.line = value.AsUnsignedValue();
+      if (!state.mLine) {
+        state.mLine = value.AsUnsignedValue();
       }
       break;
     case Attribute::DW_AT_high_pc:
       if (value.form != AttributeForm::DW_FORM_addr) {
-        state.high_pc = state.low_pc.get() + value.AsAddress();
+        state.mHighProgramCounter = state.mLowProgramCounter.GetRaw() + value.AsAddress();
       } else {
-        state.high_pc = value.AsAddress();
+        state.mHighProgramCounter = value.AsAddress();
       }
       break;
     case Attribute::DW_AT_specification:
     case Attribute::DW_AT_abstract_origin: {
       const auto declaring_die_offset = value.AsUnsignedValue();
-      additional_die_reference =
+      additionalDieReference =
         ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset);
     } break;
     default:
       break;
     }
   }
-  return additional_die_reference;
+  return additionalDieReference;
 }
 
 void
@@ -818,44 +822,45 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
     reader.SeekDie(die);
     ResolveFnSymbolState state{this};
 
-    std::pmr::list<dw::DieReference> &die_refs = *allocator.new_object<std::pmr::list<dw::DieReference>>();
+    std::pmr::list<dw::DieReference> &dieReferences = *allocator.new_object<std::pmr::list<dw::DieReference>>();
     for (const auto &attr : abbreviation.mAttributes) {
       auto value = ReadAttributeValue(reader, attr, abbreviation.mImplicitConsts);
       switch (value.name) {
       case Attribute::DW_AT_frame_base:
-        state.frame_base_description = as_span(value.AsDataBlock());
+        state.mFrameBaseDescription = as_span(value.AsDataBlock());
         break;
       case Attribute::DW_AT_name:
-        state.name = value.AsStringView();
+        state.mName = value.AsStringView();
         break;
       case Attribute::DW_AT_linkage_name:
-        state.mangled_name = value.AsStringView();
+        state.mMangledName = value.AsStringView();
         break;
       case Attribute::DW_AT_low_pc:
-        state.low_pc = value.AsAddress();
+        state.mLowProgramCounter = value.AsAddress();
         break;
       case Attribute::DW_AT_high_pc:
         if (value.form != AttributeForm::DW_FORM_addr) {
-          state.high_pc = state.low_pc.get() + value.AsAddress();
+          state.mHighProgramCounter = state.mLowProgramCounter.GetRaw() + value.AsAddress();
         } else {
-          state.high_pc = value.AsAddress();
+          state.mHighProgramCounter = value.AsAddress();
         }
         break;
       case Attribute::DW_AT_decl_file: {
-        ASSERT(!state.lnp_file.has_value(), "lnp file has been set already, to {}, new {}", state.lnp_file.value(),
-               value.AsUnsignedValue());
-        state.lnp_file = get_lnp_file(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
+        ASSERT(!state.mLineNumberProgramFile.has_value(), "lnp file has been set already, to {}, new {}",
+               state.mLineNumberProgramFile.value(), value.AsUnsignedValue());
+        state.mLineNumberProgramFile =
+          GetLineNumberProgramFile(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
       } break;
       case Attribute::DW_AT_decl_line:
-        ASSERT(!state.line.has_value(), "file line number has been set already, to {}, new {}", state.line.value(),
-               value.AsUnsignedValue());
-        state.line = value.AsUnsignedValue();
+        ASSERT(!state.mLine.has_value(), "file line number has been set already, to {}, new {}",
+               state.mLine.value(), value.AsUnsignedValue());
+        state.mLine = value.AsUnsignedValue();
         break;
       case Attribute::DW_AT_specification:
       case Attribute::DW_AT_abstract_origin: {
         const auto declaring_die_offset = value.AsUnsignedValue();
         if (auto die_ref = mUnitData->GetObjectFile()->GetDebugInfoEntryReference(declaring_die_offset); die_ref) {
-          die_refs.push_back(*die_ref);
+          dieReferences.push_back(*die_ref);
         } else {
           DBGLOG(core, "Could not find die reference");
         }
@@ -865,7 +870,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
         const auto type_id = value.AsUnsignedValue();
         auto obj = mUnitData->GetObjectFile();
         const auto ref = obj->GetDebugInfoEntryReference(type_id);
-        state.ret_type = obj->GetTypeStorage()->GetOrCreateNewType(ref->AsIndexed());
+        state.mReturnType = obj->GetTypeStorage()->GetOrCreateNewType(ref->AsIndexed());
         break;
       }
       default:
@@ -873,21 +878,21 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
       }
     }
 
-    state.add_maybe_origin(dw::IndexedDieReference{mUnitData, mUnitData->index_of(&die)});
-    if (state.done(die_refs.empty())) {
-      mFunctionSymbols.emplace_back(state.complete());
+    state.AddPossibleOrigin(dw::IndexedDieReference{mUnitData, mUnitData->IndexOf(&die)});
+    if (state.Done(dieReferences.empty())) {
+      mFunctionSymbols.emplace_back(state.Complete());
     } else {
       // reset e = end() at each iteration, because we might have extended the list during iteration.
-      for (auto it = die_refs.begin(), e = die_refs.end(); it != e; ++it) {
-        auto new_ref = follow_reference(*this, state, *it);
+      for (auto it = dieReferences.begin(), e = dieReferences.end(); it != e; ++it) {
+        auto new_ref = FollowReference(*this, state, *it);
         // we use a linked list here, *specifically* so we can push back references while iterating.
         if (new_ref) {
-          die_refs.push_back(*new_ref);
-          e = die_refs.end();
+          dieReferences.push_back(*new_ref);
+          e = dieReferences.end();
         }
 
-        if (state.done(std::distance(++auto{it}, e) == 0)) {
-          mFunctionSymbols.emplace_back(state.complete());
+        if (state.Done(std::distance(++auto{it}, e) == 0)) {
+          mFunctionSymbols.emplace_back(state.Complete());
           break;
         }
       }
@@ -896,12 +901,12 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
   std::sort(mFunctionSymbols.begin(), mFunctionSymbols.end(), FunctionSymbol::Sorter());
 }
 
-AddressToCompilationUnitMap::AddressToCompilationUnitMap() noexcept : mutex(), mapping() {}
+AddressToCompilationUnitMap::AddressToCompilationUnitMap() noexcept : mMutex(), mMapping() {}
 
 std::vector<CompilationUnit *>
 AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 {
-  if (auto res = mapping.Find(pc); res) {
+  if (auto res = mMapping.Find(pc); res) {
     auto result = std::move(res.value());
     return result;
   } else {
@@ -910,21 +915,21 @@ AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
 }
 
 void
-AddressToCompilationUnitMap::add_cus(std::span<CompilationUnit *> compUnits) noexcept
+AddressToCompilationUnitMap::AddCompilationUnits(std::span<CompilationUnit *> compUnits) noexcept
 {
-  std::lock_guard lock(mutex);
+  std::lock_guard lock(mMutex);
   for (CompilationUnit *compilationUnit : compUnits) {
     for (const auto subRange : compilationUnit->AddressRanges()) {
-      add_cu(subRange.StartPc(), subRange.EndPc(), compilationUnit);
+      AddCompilationUnit(subRange.StartPc(), subRange.EndPc(), compilationUnit);
     }
-    add_cu(compilationUnit->StartPc(), compilationUnit->EndPc(), compilationUnit);
+    AddCompilationUnit(compilationUnit->StartPc(), compilationUnit->EndPc(), compilationUnit);
   }
 }
 
 void
-AddressToCompilationUnitMap::add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept
+AddressToCompilationUnitMap::AddCompilationUnit(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept
 {
-  mapping.AddMapping(start, end, cu);
+  mMapping.AddMapping(start, end, cu);
 }
 
 } // namespace mdb::sym

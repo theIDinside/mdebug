@@ -41,8 +41,8 @@ public:
 protected:
   tc::TraceeCommandInterface &mControlInterface;
   TraceeController &mSupervisor;
-  TaskInfo &task;
-  bool cancelled;
+  TaskInfo &mTask;
+  bool mIsCancelled;
 };
 
 // A proceed-handler / stop-handler, that stops a task immediately, possibly to perform some one-time task (like
@@ -50,14 +50,14 @@ protected:
 class StopImmediately : public ThreadProceedAction
 {
 public:
-  StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
+  StopImmediately(TraceeController &control, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
   ~StopImmediately() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
   void UpdateStepped() noexcept override;
 
 private:
-  void notify_stopped() noexcept;
+  void NotifyHasStopped() noexcept;
   ui::dap::StoppedReason reason;
 };
 
@@ -71,8 +71,8 @@ public:
   void UpdateStepped() noexcept override;
 
 private:
-  int steps_requested;
-  int steps_taken;
+  int mStepsRequested;
+  int mStepsTaken;
 };
 
 class LineStep : public ThreadProceedAction
@@ -89,13 +89,13 @@ private:
   void InstallBreakpoint(AddrPtr address) noexcept;
   void MaybeSetDone(bool isDone) noexcept;
 
-  int lines_requested;
-  int lines_stepped;
+  int mRequestedStepCount;
+  int mLinesSteppedCount;
   bool mIsDone;
-  bool resumed_to_resume_addr;
-  sym::Frame startFrame;
-  sym::dw::LineTableEntry entry;
-  Ref<UserBreakpoint> resume_bp{nullptr};
+  bool mResumedToReturnAddress;
+  sym::Frame mStartFrame;
+  sym::dw::LineTableEntry mLineEntry;
+  Ref<UserBreakpoint> mPotentialBreakpointAtReturnAddress{nullptr};
 };
 
 class FinishFunction : public ThreadProceedAction
@@ -108,26 +108,9 @@ public:
   void UpdateStepped() noexcept override;
 
 private:
-  Ref<UserBreakpoint> bp;
-  bool should_cleanup;
+  Ref<UserBreakpoint> mBreakpointAtReturnAddress;
+  bool mShouldCleanup;
 };
-
-template <typename A>
-constexpr std::string_view
-action_name()
-{
-  if constexpr (std::is_same_v<A, InstructionStep>) {
-    return "Instruction Step";
-  } else if constexpr (std::is_same_v<A, LineStep>) {
-    return "Line Step";
-  } else if constexpr (std::is_same_v<A, FinishFunction>) {
-    return "Finish Function";
-  } else if constexpr (std::is_same_v<A, StopImmediately>) {
-    return "Stop Immediately";
-  } else {
-    static_assert(always_false<A>, "Unknown action type");
-  }
-}
 
 class StopHandler
 {
@@ -149,9 +132,9 @@ private:
 
 class StepInto final : public ThreadProceedAction
 {
-  sym::Frame start_frame;
-  sym::dw::LineTableEntry starting_line_info;
-  bool is_done{false};
+  sym::Frame mStartFrame;
+  sym::dw::LineTableEntry mStartingLineEntry;
+  bool mIsDone{false};
 
 public:
   StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame, sym::dw::LineTableEntry entry) noexcept;
@@ -159,10 +142,10 @@ public:
   bool HasCompleted(bool was_stopped) const noexcept final;
   void Proceed() noexcept final;
   void UpdateStepped() noexcept final;
-  bool inside_origin_frame(const sym::Frame &f) const noexcept;
-  bool is_origin_line(u32 line) const noexcept;
+  bool IsInsideOriginFrame(const sym::Frame &f) const noexcept;
+  bool IsOriginLine(u32 line) const noexcept;
 
-  static std::shared_ptr<StepInto> create(TraceeController &ctrl, TaskInfo &task) noexcept;
+  static std::shared_ptr<StepInto> Create(TraceeController &ctrl, TaskInfo &task) noexcept;
 };
 
 } // namespace ptracestop

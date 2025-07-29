@@ -4,37 +4,33 @@
 #include "symbolication/dwarf/debug_info_reader.h"
 #include "symbolication/dwarf/die.h"
 #include "symbolication/dwarf/rnglists.h"
-#include "utils/scope_defer.h"
-#include <chrono>
-#include <ranges>
-#include <ratio>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
 namespace mdb::sym::dw {
 
 UnitDataTask::UnitDataTask(ObjectFile *obj, std::span<UnitHeader> headers) noexcept
-    : obj(obj), mCompilationUnitsToParse(headers.begin(), headers.end())
+    : objectFile(obj), mCompilationUnitsToParse(headers.begin(), headers.end())
 {
 }
 
 static void
-ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::CompilationUnit &src) noexcept
+ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::CompilationUnit &src) noexcept
 {
-  auto cu = src.get_dwarf_unit();
-  const auto version = cu->header().Version();
+  auto cu = src.GetDwarfUnitData();
+  const auto version = cu->GetHeader().Version();
   ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
   auto elf = cu->GetObjectFile()->GetElf();
 
   if (version == DwarfVersion::D4) {
-    auto byte_ptr = reinterpret_cast<const u64 *>(elf->debug_ranges->GetPointer(ranges_offset.AsAddress()));
+    auto bytePtr = reinterpret_cast<const u64 *>(elf->mDebugRanges->GetPointer(rangesOffset.AsAddress()));
     auto lowest = UINTMAX_MAX;
     auto highest = 0ul;
     auto start = 0ul;
     auto end = 1ul;
-    bool found_a_range = false;
+    bool foundRange = false;
     while (true) {
-      start = *byte_ptr++;
-      end = *byte_ptr++;
+      start = *bytePtr++;
+      end = *bytePtr++;
       if (start == 0) {
         // garbage garbled DW_AT_ranges data is *super* common, and when start == 0.
         // after some research of the DWARF data (using llvm-dwarfdump), it seems to be the case that
@@ -49,22 +45,22 @@ ProcessCompilationUnitBoundary(const AttributeValue &ranges_offset, sym::Compila
         if (start != 1 && end != 1) {
           lowest = std::min(start, lowest);
           highest = std::max(end, highest);
-          found_a_range = true;
+          foundRange = true;
         }
       }
     }
-    if (found_a_range) {
+    if (foundRange) {
       src.SetAddressBoundary(lowest, highest);
     }
   } else if (version == DwarfVersion::D5) {
-    ASSERT(elf->debug_rnglists != nullptr,
+    ASSERT(elf->mDebugRnglists != nullptr,
            "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
-    if (ranges_offset.form == AttributeForm::DW_FORM_sec_offset) {
-      auto addr_range = sym::dw::read_boundaries(elf->debug_rnglists, ranges_offset.AsUnsignedValue());
-      src.SetAddressBoundary(addr_range.StartPc(), addr_range.EndPc());
+    if (rangesOffset.form == AttributeForm::DW_FORM_sec_offset) {
+      auto addressRange = sym::dw::ReadBoundaries(elf->mDebugRnglists, rangesOffset.AsUnsignedValue());
+      src.SetAddressBoundary(addressRange.StartPc(), addressRange.EndPc());
     } else {
       auto ranges =
-        sym::dw::read_boundaries(*cu, ResolvedRangeListOffset::make(*cu, ranges_offset.AsUnsignedValue()));
+        sym::dw::ReadBoundaries(*cu, ResolvedRangeListOffset::Make(*cu, rangesOffset.AsUnsignedValue()));
       AddrPtr lowpc = static_cast<u64>(-1);
       AddrPtr highpc = nullptr;
       for (const auto [low, high] : ranges) {
@@ -85,7 +81,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
   std::vector<UnitData *> result;
   result.reserve(mCompilationUnitsToParse.size());
   for (const auto &header : mCompilationUnitsToParse) {
-    auto unit_data = PrepareUnitData(obj, header);
+    auto unit_data = PrepareUnitData(objectFile, header);
     result.push_back(unit_data);
   }
 
@@ -95,7 +91,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
        result | std::views::filter([](UnitData *unit) { return unit->IsCompilationUnitLike(); })) {
     UnitReader reader{dwarfUnit};
 
-    if (dwarfUnit->header().GetUnitType() == DwarfUnitType::DW_UT_partial) {
+    if (dwarfUnit->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_partial) {
       DBGLOG(dwarf, "partial unit supported not implemented, skipped {}", dwarfUnit->SectionOffset());
       continue;
     }
@@ -112,7 +108,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
       case Attribute::DW_AT_stmt_list: {
         const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
         const auto offset = attr.AsAddress();
-        auto header = dw::LNPHeader::ReadLineNumberProgramHeader(obj, offset);
+        auto header = dw::LNPHeader::ReadLineNumberProgramHeader(objectFile, offset);
         newCompilationUnit->ProcessSourceCodeFiles(header);
         break;
       }
@@ -152,8 +148,8 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
     compilationUnits.push_back(newCompilationUnit);
   }
 
-  obj->SetCompileUnitData(result);
-  obj->AddInitializedCompileUnits(compilationUnits);
+  objectFile->SetCompileUnitData(result);
+  objectFile->AddInitializedCompileUnits(compilationUnits);
 }
 
 /* static */

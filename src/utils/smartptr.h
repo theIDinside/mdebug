@@ -12,7 +12,7 @@
 #ifndef FORWARD_DECLARE_REFPTR
 #define FORWARD_DECLARE_REFPTR
 namespace mdb {
-template <typename U> class RcHandle;
+template <typename U> class RefPtr;
 template <typename U> class Untraced;
 } // namespace mdb
 #endif
@@ -20,9 +20,9 @@ template <typename U> class Untraced;
 #define INTERNAL_REFERENCE_COUNT(Type)                                                                            \
 protected:                                                                                                        \
   /* Grant RefCountPtr access to manage reference counts */                                                       \
-  template <typename U> friend class RcHandle;                                                                    \
+  template <typename U> friend class RefPtr;                                                                      \
   template <typename U> friend class Untraced;                                                                    \
-  friend class RcHandle<Type>;                                                                                    \
+  friend class RefPtr<Type>;                                                                                      \
   friend class Untraced<Type>;                                                                                    \
                                                                                                                   \
   mutable std::atomic<int> mReferenceCount{0};                                                                    \
@@ -37,9 +37,9 @@ protected:                                                                      
 
 #define REF_COUNTED_WITH_WEAKREF_SUPPORT(Type)                                                                    \
 protected:                                                                                                        \
-  template <typename U> friend class RcHandle;                                                                    \
+  template <typename U> friend class RefPtr;                                                                      \
   template <typename U> friend class Untraced;                                                                    \
-  friend class RcHandle<Type>;                                                                                    \
+  friend class RefPtr<Type>;                                                                                      \
   friend class Untraced<Type>;                                                                                    \
   mdb::ControlBlock<Type> *mControlBlock;                                                                         \
                                                                                                                   \
@@ -95,9 +95,9 @@ template <typename T> class WeakRef
 {
   T *mPtr;
   ControlBlock<T> *mControlBlock;
-  friend class RcHandle<T>;
+  friend class RefPtr<T>;
 
-  // Should be constructed by RcHandle<T>::WeakRef()
+  // Should be constructed by RefPtr<T>::WeakRef()
   WeakRef(T *ptr, ControlBlock<T> *controlBlock) noexcept : mPtr(ptr), mControlBlock(controlBlock) {}
 
 public:
@@ -110,14 +110,14 @@ public:
     return mControlBlock->mReferenceCount > 0;
   }
 
-  RcHandle<T>
+  RefPtr<T>
   Acquire() const noexcept
   {
     if (!IsAlive()) {
       return nullptr;
     }
 
-    return RcHandle{mPtr};
+    return RefPtr{mPtr};
   }
 
   constexpr
@@ -129,8 +129,8 @@ public:
 
 template <typename T> concept HasControlBlock = requires(T t) { t.mControlBlock; };
 
-/// `RcHandle` is a handle to a internally reference counted type.
-template <typename T> class RcHandle
+/// `RefPtr` is a handle to a internally reference counted type.
+template <typename T> class RefPtr
 {
 private:
   T *mRef{nullptr};
@@ -144,7 +144,7 @@ private:
   }
 
   constexpr void
-  UserRelease() const noexcept
+  DecrementUserCount() const noexcept
   {
     if (mRef) {
       mRef->DecreaseUseCount();
@@ -153,19 +153,19 @@ private:
 
 public:
   using Type = T;
-  template <typename U> friend class RcHandle;
+  template <typename U> friend class RefPtr;
   friend class Untraced<T>;
   // Constructors
-  constexpr RcHandle() = default;
-  constexpr RcHandle(std::nullptr_t) noexcept : RcHandle() {};
+  constexpr RefPtr() = default;
+  constexpr RefPtr(std::nullptr_t) noexcept : RefPtr() {};
 
-  constexpr RcHandle(Untraced<T> &&untraced) noexcept : mRef(nullptr) { std::swap(mRef, untraced.mUnManged); }
+  constexpr RefPtr(Untraced<T> &&untraced) noexcept : mRef(nullptr) { std::swap(mRef, untraced.mUnManged); }
 
-  constexpr explicit RcHandle(T *rawPtr) noexcept : mRef(rawPtr) { IncrementUserCount(); }
+  constexpr explicit RefPtr(T *rawPtr) noexcept : mRef(rawPtr) { IncrementUserCount(); }
 
-  constexpr RcHandle(const RcHandle &other) noexcept : mRef(other.mRef) { IncrementUserCount(); }
+  constexpr RefPtr(const RefPtr &other) noexcept : mRef(other.mRef) { IncrementUserCount(); }
 
-  constexpr RcHandle(RcHandle &&other) noexcept : mRef(other.mRef) { other.mRef = nullptr; }
+  constexpr RefPtr(RefPtr &&other) noexcept : mRef(other.mRef) { other.mRef = nullptr; }
 
   WeakRef<T>
   Weak() noexcept
@@ -179,9 +179,9 @@ public:
     return WeakRef<T>{mRef, mRef->mControlBlock};
   }
 
-  // Implicit conversion operator from RcHandle<Derived> to RcHandle<Base>
+  // Implicit conversion operator from RefPtr<Derived> to RefPtr<Base>
   template <typename Derived>
-  constexpr RcHandle(const RcHandle<Derived> &other) noexcept
+  constexpr RefPtr(const RefPtr<Derived> &other) noexcept
     requires(std::is_base_of_v<T, Derived>)
       : mRef(other.mRef)
   {
@@ -189,9 +189,9 @@ public:
     IncrementUserCount();
   }
 
-  // Implicit conversion operator from RcHandle<Derived> to RcHandle<Base>
+  // Implicit conversion operator from RefPtr<Derived> to RefPtr<Base>
   template <typename Derived>
-  constexpr RcHandle(RcHandle<Derived> &&other) noexcept
+  constexpr RefPtr(RefPtr<Derived> &&other) noexcept
     requires(std::is_base_of_v<T, Derived>)
       : mRef(other.mRef)
   {
@@ -199,50 +199,50 @@ public:
   }
 
   // Destructor
-  constexpr ~RcHandle() noexcept { UserRelease(); }
+  constexpr ~RefPtr() noexcept { DecrementUserCount(); }
 
   template <typename... Args>
-  constexpr static RcHandle<T>
+  constexpr static RefPtr<T>
   MakeShared(Args &&...args) noexcept
   {
-    return RcHandle{new T{std::forward<Args>(args)...}};
+    return RefPtr{new T{std::forward<Args>(args)...}};
   }
 
   // Ref<T> constructor for types that support weak references.
   template <typename... Args>
-  constexpr static RcHandle<T>
+  constexpr static RefPtr<T>
   MakeShared(Args &&...args) noexcept
     requires HasControlBlock<T>
   {
     auto t = T::CreateForRef(std::forward<Args>(args)...);
     t->mControlBlock = new ControlBlock<T>{};
-    return RcHandle{t};
+    return RefPtr{t};
   }
 
   // Assignment operators
-  constexpr RcHandle &
-  operator=(const RcHandle &other) noexcept
+  constexpr RefPtr &
+  operator=(const RefPtr &other) noexcept
   {
     if (this != &other) {
-      UserRelease();
+      DecrementUserCount();
       mRef = other.mRef;
       IncrementUserCount();
     }
     return *this;
   }
 
-  constexpr RcHandle &
-  operator=(RcHandle &&other) noexcept
+  constexpr RefPtr &
+  operator=(RefPtr &&other) noexcept
   {
     if (this != &other) {
-      UserRelease();
+      DecrementUserCount();
       mRef = other.mRef;
       other.mRef = nullptr;
     }
     return *this;
   }
 
-  constexpr RcHandle &
+  constexpr RefPtr &
   operator=(std::nullptr_t) noexcept
   {
     Reset();
@@ -259,7 +259,7 @@ public:
   constexpr void
   Reset() noexcept
   {
-    UserRelease();
+    DecrementUserCount();
     mRef = nullptr;
   }
 
@@ -297,13 +297,13 @@ public:
 
   // Equality and inequality comparisons
   constexpr bool
-  operator==(const RcHandle &other) const noexcept
+  operator==(const RefPtr &other) const noexcept
   {
     return Get() == other.Get();
   }
 
   constexpr bool
-  operator!=(const RcHandle &other) const noexcept
+  operator!=(const RefPtr &other) const noexcept
   {
     return Get() != other.Get();
   }
@@ -321,13 +321,13 @@ public:
   }
 
   constexpr friend bool
-  operator==(const T *ptr, const RcHandle &refPtr) noexcept
+  operator==(const T *ptr, const RefPtr &refPtr) noexcept
   {
     return ptr == refPtr.Get();
   }
 
   constexpr friend bool
-  operator!=(const T *ptr, const RcHandle &refPtr) noexcept
+  operator!=(const T *ptr, const RefPtr &refPtr) noexcept
   {
     return ptr != refPtr.Get();
   }
@@ -335,7 +335,7 @@ public:
 
 template <typename T>
 concept IsRefCountable = requires(T *t) {
-  { RcHandle<T>{t} };
+  { RefPtr<T>{t} };
 };
 namespace js {
 template <typename Derived, IsRefCountable WrappedType, StringLiteral string> struct RefPtrJsObject;
@@ -345,7 +345,7 @@ template <typename T> class Untraced
 {
   T *mUnManged;
 
-  /// Drop and Forget are purposefully private metods. And the class `RefPtrJsObject` and `RcHandle` are, for
+  /// Drop and Forget are purposefully private metods. And the class `RefPtrJsObject` and `RefPtr` are, for
   /// that same reason, friend classes. RefPtrJsObject uses the forget & drop mechanism when participating in GC
   /// and automatic life time memory management by the js embedding. This is also the reason why
   /// Increase/DecreaseCount are private methods because they are not supposed to be used by any other interfaces
@@ -367,15 +367,15 @@ template <typename T> class Untraced
   }
 
   // Also only callable from RefPtrJsObject, that manually manages reference counting.
-  constexpr RcHandle<T>
+  constexpr RefPtr<T>
   CloneReference() noexcept
   {
-    return RcHandle<T>{Forget()};
+    return RefPtr<T>{Forget()};
   }
 
   using Type = T;
   template <typename Derived, IsRefCountable WrappedType, StringLiteral string> friend struct js::RefPtrJsObject;
-  friend class RcHandle<T>;
+  friend class RefPtr<T>;
 
   constexpr Untraced(T *take) noexcept : mUnManged(take) {}
 
@@ -391,19 +391,19 @@ public:
   constexpr Untraced &operator=(Untraced &&) = delete;
 
   constexpr
-  operator RcHandle<T>() noexcept
+  operator RefPtr<T>() noexcept
   {
-    return RcHandle{std::move(*this)};
+    return RefPtr{std::move(*this)};
   }
 
-  constexpr RcHandle<T>
+  constexpr RefPtr<T>
   Take() noexcept
   {
-    return RcHandle<T>{std::move(*this)};
+    return RefPtr<T>{std::move(*this)};
   }
 };
 
-template <typename T> using Ref = RcHandle<T>;
+template <typename T> using Ref = RefPtr<T>;
 
 template <typename T> struct IsRefPointerCheck : std::false_type
 {

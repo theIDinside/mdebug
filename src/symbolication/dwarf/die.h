@@ -104,7 +104,7 @@ struct DieMetaData
 
 template <DwarfTag... tags>
 constexpr bool
-maybe_null_any_of(const DieMetaData *die)
+MaybeNullAnyOf(const DieMetaData *die)
 {
   if (die == nullptr) {
     return false;
@@ -117,7 +117,7 @@ class DieReference;
 class UnitData
 {
 public:
-  UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept;
+  UnitData(ObjectFile *owningObjectFile, UnitHeader header) noexcept;
 
   /**
    * Construct UnitData object and initialize it. Initialization involves reading the unit die
@@ -135,13 +135,13 @@ public:
   void ClearLoadedCache() noexcept;
   const AbbreviationInfo &GetAbbreviation(u32 abbreviation_code) const noexcept;
   ObjectFile *GetObjectFile() const noexcept;
-  const UnitHeader &header() const noexcept;
+  const UnitHeader &GetHeader() const noexcept;
   /// The offset from the beginning of the ELF section called .debug_info to this compilation unit.
   Offset SectionOffset() const noexcept;
   /// Size (bytes) of this compilation unit in the .debug_info ELF section
   u64 UnitSize() const noexcept;
-  bool spans_across(u64 sec_offset) const noexcept;
-  u64 index_of(const DieMetaData *die) noexcept;
+  bool SpansAcrossOffset(u64 sectionOffset) const noexcept;
+  u64 IndexOf(const DieMetaData *die) noexcept;
   std::span<const DieMetaData> continue_from(const DieMetaData *die) noexcept;
 
   const char *GetBuildDirectory() const noexcept;

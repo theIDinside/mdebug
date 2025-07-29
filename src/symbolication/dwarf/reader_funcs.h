@@ -6,7 +6,7 @@
 namespace mdb::sym::dw {
 
 constexpr const u8 *
-read_initial_length(const u8 *ptr, u64 &out, u8 &init_len_len) noexcept
+ReadInitialLength(const u8 *ptr, u64 &out, u8 &init_len_len) noexcept
 {
   u32 peeked = *(u32 *)(ptr);
   if (peeked != 0xff'ff'ff'ff) {
@@ -24,7 +24,7 @@ read_initial_length(const u8 *ptr, u64 &out, u8 &init_len_len) noexcept
 }
 
 constexpr const u8 *
-read_version(const u8 *ptr, DwarfVersion &version) noexcept
+ReadVersion(const u8 *ptr, DwarfVersion &version) noexcept
 {
   u16 value = *(u16 *)ptr;
   ptr += 2;
@@ -38,24 +38,24 @@ read_version(const u8 *ptr, DwarfVersion &version) noexcept
 }
 
 constexpr const u8 *
-read_address_size(const u8 *ptr, u8 &addr_size) noexcept
+ReadAddrSize(const u8 *ptr, u8 &addrSize) noexcept
 {
-  addr_size = *ptr;
+  addrSize = *ptr;
   ++ptr;
   return ptr;
 }
 constexpr const u8 *
-read_segment_selector_size(const u8 *ptr, u8 &segment_selector_size) noexcept
+ReadSegmentSelectorSize(const u8 *ptr, u8 &segmentSelectorSize) noexcept
 {
-  segment_selector_size = *ptr;
+  segmentSelectorSize = *ptr;
   ++ptr;
   return ptr;
 }
 
 constexpr const u8 *
-read_offset_entry_count(const u8 *ptr, u32 &offset_entry_count) noexcept
+ReadOffsetEntryCount(const u8 *ptr, u32 &offsetEntryCount) noexcept
 {
-  offset_entry_count = *(u32 *)ptr;
+  offsetEntryCount = *(u32 *)ptr;
   ptr += 4;
   return ptr;
 }

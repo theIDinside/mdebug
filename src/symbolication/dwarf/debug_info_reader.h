@@ -68,8 +68,8 @@ public:
   constexpr auto
   ReadIntegralValue() noexcept
   {
-    Integral type = *(Integral *)current_ptr;
-    current_ptr += sizeof(Integral);
+    Integral type = *(Integral *)mCurrentPtr;
+    mCurrentPtr += sizeof(Integral);
     if constexpr (std::unsigned_integral<Integral>) {
       return static_cast<u64>(type);
     } else if constexpr (std::signed_integral<Integral>) {
@@ -93,8 +93,8 @@ private:
     return 8;
   }
 
-  UnitData *compilation_unit;
-  const u8 *current_ptr;
+  UnitData *mCompilationUnit;
+  const u8 *mCurrentPtr;
   u8 mFormat;
 };
 

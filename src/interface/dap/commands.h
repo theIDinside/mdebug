@@ -558,8 +558,8 @@ struct LaunchResponse final : public UIResult
 
 struct Launch final : public UICommand
 {
-  Launch(UICommandArg arg, SessionId &&id, bool stopAtEntry, Path &&program,
-         std::vector<std::string> &&program_args, std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  Launch(UICommandArg arg, SessionId &&id, bool stopAtEntry, Path program, std::vector<std::string> &&program_args,
+         std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   ~Launch() override = default;
   UIResultPtr Execute() noexcept final;
   bool mStopOnEntry;
@@ -585,7 +585,7 @@ struct AttachResponse final : public UIResult
 
 struct Attach final : public UICommand
 {
-  Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs &&args) noexcept;
+  Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs args) noexcept;
   ~Attach() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -677,10 +677,10 @@ struct StackTrace final : public UICommand
              std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
   UIResultPtr Execute() noexcept final;
-  int threadId;
-  std::optional<int> startFrame;
-  std::optional<int> levels;
-  std::optional<StackTraceFormat> format;
+  int mThreadId;
+  std::optional<int> mStartFrame;
+  std::optional<int> mLevels;
+  std::optional<StackTraceFormat> mFormat;
   DEFINE_NAME("stackTrace");
   RequiredArguments({"threadId"sv});
   DefineArgTypes({"threadId", FieldType::Int});
@@ -689,7 +689,7 @@ struct StackTrace final : public UICommand
 struct StackTraceResponse final : public UIResult
 {
   CTOR(StackTraceResponse);
-  StackTraceResponse(bool success, StackTrace *cmd, std::vector<StackFrame> &&stack_frames) noexcept;
+  StackTraceResponse(bool success, StackTrace *cmd, std::vector<StackFrame> stack_frames) noexcept;
   ~StackTraceResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   std::vector<StackFrame> stack_frames;
@@ -700,7 +700,7 @@ struct Scopes final : public UICommand
   Scopes(UICommandArg arg, int frameId) noexcept;
   ~Scopes() override = default;
   UIResultPtr Execute() noexcept final;
-  int frameId;
+  int mFrameId;
   DEFINE_NAME("scopes");
   RequiredArguments({"frameId"sv});
   DefineArgTypes({"frameId", FieldType::Int});
@@ -726,7 +726,7 @@ enum class EvaluationContext
 
 struct Evaluate final : public UICommand
 {
-  Evaluate(UICommandArg arg, std::string &&expression, std::optional<int> frameId,
+  Evaluate(UICommandArg arg, std::string expression, std::optional<int> frameId,
            std::optional<EvaluationContext> context) noexcept;
   ~Evaluate() noexcept final = default;
   UIResultPtr Execute() noexcept final;
@@ -739,7 +739,7 @@ struct Evaluate final : public UICommand
   RequiredArguments({"expression"sv, "context"sv});
   DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int}, {"context", FieldType::String});
 
-  static EvaluationContext parse_context(std::string_view input) noexcept;
+  static EvaluationContext ParseContext(std::string_view input) noexcept;
   static UICommand *PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args);
 };
 
@@ -750,22 +750,22 @@ struct EvaluateResponse final : public UIResult
   ~EvaluateResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 
-  std::pmr::string *result;
-  std::optional<std::string> type;
-  int variablesReference;
-  std::optional<std::string> memoryReference;
+  std::pmr::string *mResult;
+  std::optional<std::string> mType;
+  int mVariablesReference;
+  std::optional<std::string> mMemoryReference;
 };
 
 struct Variables final : public UICommand
 {
-  Variables(UICommandArg arg, VariableReferenceId var_ref, std::optional<u32> start,
+  Variables(UICommandArg arg, VariableReferenceId varRef, std::optional<u32> start,
             std::optional<u32> count) noexcept;
   ~Variables() override = default;
   UIResultPtr Execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
   VariableReferenceId mVariablesReferenceId;
-  std::optional<u32> start;
-  std::optional<u32> count;
+  std::optional<u32> mStart;
+  std::optional<u32> mCount;
   DEFINE_NAME("variables");
   RequiredArguments({"variablesReference"sv});
   DefineArgTypes({"variablesReference", FieldType::Int}, {"start", FieldType::Int}, {"count", FieldType::Int});
@@ -776,8 +776,8 @@ struct VariablesResponse final : public UIResult
   VariablesResponse(bool success, Variables *cmd, std::vector<Ref<sym::Value>> &&vars) noexcept;
   ~VariablesResponse() noexcept override;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  int requested_reference;
-  std::vector<Ref<sym::Value>> variables;
+  int mRequestedReference;
+  std::vector<Ref<sym::Value>> mVariables;
 };
 
 struct DisassembleResponse final : public UIResult
@@ -785,21 +785,21 @@ struct DisassembleResponse final : public UIResult
   CTOR(DisassembleResponse);
   ~DisassembleResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  std::vector<sym::Disassembly> instructions;
+  std::vector<sym::Disassembly> mInstructions;
 };
 
 struct Disassemble final : public UICommand
 {
-  Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byte_offset, int ins_offset, int ins_count,
-              bool resolve_symbols) noexcept;
+  Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byteOffset, int instructionOffset,
+              int instructionCount, bool resolveSymbols) noexcept;
   ~Disassemble() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 
-  std::optional<AddrPtr> address;
-  int byte_offset;
-  int ins_offset;
+  std::optional<AddrPtr> mAddress;
+  int mByteOffset;
+  int mInstructionOffset;
   int ins_count;
-  bool resolve_symbols;
+  bool mResolveSymbols;
   DEFINE_NAME("disassemble");
   RequiredArguments({"memoryReference", "instructionCount"});
   DefineArgTypes({"memoryReference", FieldType::String}, {"instructionCount", FieldType::Int},

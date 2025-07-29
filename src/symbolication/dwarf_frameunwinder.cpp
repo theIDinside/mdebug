@@ -164,7 +164,7 @@ CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindSt
     return reg.uValue;
   case sym::RegisterRule::Offset: {
     const AddrPtr cfa_record = mCanonicalFrameAddressValue + reg.uOffset;
-    const auto res = mTraceeController.ReadType(cfa_record.as<u64>());
+    const auto res = mTraceeController.ReadType(cfa_record.As<u64>());
     return res;
   }
   case sym::RegisterRule::ValueOffset: {
@@ -240,8 +240,8 @@ int
 decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
 {
   auto count = 0;
-  while (reader.has_more() && state.mFrameDescriptionEntryPc <= state.mEndPc) {
-    auto op = reader.read_value<u8>();
+  while (reader.HasMore() && state.mFrameDescriptionEntryPc <= state.mEndPc) {
+    auto op = reader.ReadValue<u8>();
     ++count;
     switch (op & 0b1100'0000) {
     case 0b0100'0000: { // DW_CFA_advance_loc
@@ -250,7 +250,7 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
     }
     case 0b1000'0000: { // I::DW_CFA_offset
       const auto reg_num = (op & BOTTOM6_BITS);
-      const auto offset = reader.read_uleb128<u64>();
+      const auto offset = reader.ReadUleb128<u64>();
       const auto n = static_cast<i64>(offset) * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
       state.mRuleTable[reg_num].SetOffset(static_cast<i64>(n));
       break;
@@ -263,44 +263,44 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       case 0: // I::DW_CFA_nop
         break;
       case 0x01: { // I::DW_CFA_set_loc
-        state.mFrameDescriptionEntryPc = reader.read_value<u64>();
+        state.mFrameDescriptionEntryPc = reader.ReadValue<u64>();
       } break;
       case 0x02: { // I::DW_CFA_advance_loc1
-        const auto delta = reader.read_value<u8>();
+        const auto delta = reader.ReadValue<u8>();
         state.mFrameDescriptionEntryPc += delta * cfi->mPointerToCommonInfoEntry->mCodeAlignFactor;
       } break;
       case 0x03: { // I::DW_CFA_advance_loc2
-        const auto delta = reader.read_value<u16>();
+        const auto delta = reader.ReadValue<u16>();
         state.mFrameDescriptionEntryPc += delta * cfi->mPointerToCommonInfoEntry->mCodeAlignFactor;
       } break;
       case 0x04: { // I::DW_CFA_advance_loc4
-        const auto delta = reader.read_value<u16>();
+        const auto delta = reader.ReadValue<u16>();
         state.mFrameDescriptionEntryPc += delta * cfi->mPointerToCommonInfoEntry->mCodeAlignFactor;
       } break;
       case 0x05: { // I::DW_CFA_offset_extended
-        const auto reg = reader.read_uleb128<u64>();
-        const auto offset = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto offset = reader.ReadUleb128<u64>();
         const auto n = offset * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
         state.mRuleTable[reg].SetOffset(n);
       } break;
       case 0x06: { // I::DW_CFA_restore_extended
-        const auto reg = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
         TODO_FMT("I::DW_CFA_restore_extended not implemented, reg={}", reg);
       } break;
       case 0x07: { // I::DW_CFA_undefined
-        const auto reg = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
         state.mRuleTable[reg].mRule = RegisterRule::Undefined;
         if (reg == 16) {
           state.SetNoKnownResumeAddress();
         }
       } break;
       case 0x08: { // I::DW_CFA_same_value
-        const auto reg = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
         state.mRuleTable[reg].mRule = RegisterRule::SameValue;
       } break;
       case 0x09: { // I::DW_CFA_register
-        const auto reg1 = reader.read_uleb128<u64>();
-        const auto reg2 = reader.read_uleb128<u64>();
+        const auto reg1 = reader.ReadUleb128<u64>();
+        const auto reg2 = reader.ReadUleb128<u64>();
         state.mRuleTable[reg1].SetRegister(reg2);
       } break;
       case 0x0a: { // I::DW_CFA_remember_state
@@ -310,62 +310,62 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         state.RestoreState();
       } break;
       case 0x0c: { // I::DW_CFA_def_cfa
-        const auto reg = reader.read_uleb128<u64>();
-        const auto offset = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto offset = reader.ReadUleb128<u64>();
         state.mCanonicalFrameAddressData.SetRegister(reg, offset);
       } break;
       case 0x0d: { // I::DW_CFA_def_cfa_register
-        const auto reg = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
         state.mCanonicalFrameAddressData.SetRegister(reg);
       } break;
       case 0x0e: { // I::DW_CFA_def_cfa_offset
-        const auto offset = reader.read_uleb128<u64>();
+        const auto offset = reader.ReadUleb128<u64>();
         state.mCanonicalFrameAddressData.SetOffset(static_cast<i64>(offset));
       } break;
       case 0x0f: { // I::DW_CFA_def_cfa_expression
-        const auto length = reader.read_uleb128<u64>();
-        const auto block = reader.read_block(length);
+        const auto length = reader.ReadUleb128<u64>();
+        const auto block = reader.ReadBlock(length);
         state.mCanonicalFrameAddressData.SetExpression(std::span{block.ptr, block.size});
       } break;
       case 0x10: { // I::DW_CFA_expression
-        const auto reg = reader.read_uleb128<u64>();
-        const auto length = reader.read_uleb128<u64>();
-        const auto block = reader.read_block(length);
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto length = reader.ReadUleb128<u64>();
+        const auto block = reader.ReadBlock(length);
         state.mRuleTable[reg].SetExpression(std::span<const u8>{block.ptr, block.size});
       } break;
       case 0x11: { // I::DW_CFA_offset_extended_sf
-        const auto reg = reader.read_uleb128<u64>();
-        const auto offset = reader.read_leb128<i64>();
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto offset = reader.ReadLeb128<i64>();
         const auto n = offset * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
         state.mRuleTable[reg].SetOffset(n);
       } break;
       case 0x12: { // I::DW_CFA_def_cfa_sf
-        const auto reg = reader.read_uleb128<u64>();
-        const auto offset = reader.read_leb128<i64>();
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto offset = reader.ReadLeb128<i64>();
         const auto n = offset * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
         state.mCanonicalFrameAddressData.SetRegister(reg, n);
       } break;
       case 0x13: { // I::DW_CFA_def_cfa_offset_sf
-        const auto offset = reader.read_leb128<i64>();
+        const auto offset = reader.ReadLeb128<i64>();
         const auto n = offset * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
         state.mCanonicalFrameAddressData.SetOffset(n);
       } break;
       case 0x14: { // I::DW_CFA_val_offset
-        const auto reg = reader.read_uleb128<u64>();
-        const auto offset = reader.read_uleb128<u64>();
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto offset = reader.ReadUleb128<u64>();
         const auto n = offset * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
         state.mRuleTable[reg].SetValueOffset(n);
       } break;
       case 0x15: { // I::DW_CFA_val_offset_sf
-        const auto reg = reader.read_uleb128<u64>();
-        const auto offset = reader.read_leb128<i64>();
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto offset = reader.ReadLeb128<i64>();
         const auto n = offset * cfi->mPointerToCommonInfoEntry->mDataAlignFactor;
         state.mRuleTable[reg].SetValueOffset(n);
       } break;
       case 0x16: { // I::DW_CFA_val_expression
-        const auto reg = reader.read_uleb128<u64>();
-        const auto length = reader.read_uleb128<u64>();
-        const auto block = reader.read_block(length);
+        const auto reg = reader.ReadUleb128<u64>();
+        const auto length = reader.ReadUleb128<u64>();
+        const auto block = reader.ReadBlock(length);
         state.mRuleTable[reg].SetValueExpression({block.ptr, block.size});
       } break;
       case 0x1c:
@@ -374,7 +374,7 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         TODO("DW_CFA_hi_user not supported");
       default: {
         PANIC(fmt::format("Could not decode byte code: {:x} == {:b} at position {}, cie offset: 0x{:x}", op, op,
-                          reader.bytes_read() - 1, cfi->mPointerToCommonInfoEntry->mSectionOffset));
+                          reader.BytesRead() - 1, cfi->mPointerToCommonInfoEntry->mSectionOffset));
       }
       }
     }
@@ -394,46 +394,46 @@ using ExprOperation = AddrPtr (*)(ElfSection *, DwarfBinaryReader &);
 std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
 CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept
 {
-  auto cie_count = 0;
-  auto fde_count = 0;
-  while (reader.has_more()) {
-    auto len = reader.read_value<u32>();
+  auto cieCount = 0;
+  auto fdeCount = 0;
+  while (reader.HasMore()) {
+    auto len = reader.ReadValue<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
     if (len == 0) {
-      return {cie_count, fde_count};
+      return {cieCount, fdeCount};
     }
-    auto id = reader.read_value<u32>();
+    auto id = reader.ReadValue<u32>();
     if (id == 0) {
-      ++cie_count;
+      ++cieCount;
     } else {
-      ++fde_count;
+      ++fdeCount;
     }
-    reader.skip(len - 4);
+    reader.Skip(len - 4);
   }
-  return {cie_count, fde_count};
+  return {cieCount, fdeCount};
 }
 
 std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
 CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept
 {
-  auto cie_count = 0;
-  auto fde_count = 0;
-  while (reader.has_more()) {
-    auto len = reader.read_value<u32>();
+  auto cieCount = 0;
+  auto fdeCount = 0;
+  while (reader.HasMore()) {
+    auto len = reader.ReadValue<u32>();
     // apparently .debug_frame does *not* have a 0-length entry as a terminator. Great. Amazing.
     if (len == 0) {
-      return {cie_count, fde_count};
+      return {cieCount, fdeCount};
     }
-    auto id = reader.read_value<u32>();
+    auto id = reader.ReadValue<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
     if (id == 0xff'ff'ff'ff) {
-      ++cie_count;
+      ++cieCount;
     } else {
-      ++fde_count;
+      ++fdeCount;
     }
-    reader.skip(len - 4);
+    reader.Skip(len - 4);
   }
-  return {cie_count, fde_count};
+  return {cieCount, fdeCount};
 }
 
 AddrPtr
@@ -449,16 +449,16 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
       break;
     // clang-format on
     case DW_EH_PE_udata4:
-      return pc + reader.read_value<u32>();
+      return pc + reader.ReadValue<u32>();
       break;
     case DW_EH_PE_udata8:
-      return pc + reader.read_value<u64>();
+      return pc + reader.ReadValue<u64>();
       break;
     case DW_EH_PE_sdata4:
-      return pc + reader.read_value<i32>();
+      return pc + reader.ReadValue<i32>();
       break;
     case DW_EH_PE_sdata8:
-      return pc + reader.read_value<i64>();
+      return pc + reader.ReadValue<i64>();
       break;
     }
   } else if (cie->mLanguageSpecificDataAreaEncoding.mLocationFormat ==
@@ -471,16 +471,16 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
       break;
     // clang-format on
     case DW_EH_PE_udata4:
-      return reader.read_value<u32>();
+      return reader.ReadValue<u32>();
       break;
     case DW_EH_PE_udata8:
-      return reader.read_value<u64>();
+      return reader.ReadValue<u64>();
       break;
     case DW_EH_PE_sdata4:
-      return reader.read_value<i32>();
+      return reader.ReadValue<i32>();
       break;
     case DW_EH_PE_sdata8:
-      return reader.read_value<i64>();
+      return reader.ReadValue<i64>();
       break;
     }
   } else {
@@ -514,61 +514,61 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
   ASSERT(ehFrameSection->mName == ".eh_frame", "expected only .eh_frame section");
   DwarfBinaryReader reader{objfile->GetElf(), ehFrameSection->mSectionData};
   DBGLOG(eh, "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->GetPathString(),
-         reader.remaining_size(), ehFrameSection->file_offset.Cast());
-  auto unwinder_db = std::make_unique<Unwinder>(objfile);
+         reader.RemainingSize(), ehFrameSection->file_offset.Cast());
+  auto unwinderHandle = std::make_unique<Unwinder>(objfile);
 
   using CieId = u64;
   using CieIdx = u64;
   std::unordered_map<CieId, CieIdx> cies{};
 
-  const auto [cie_count, fdes_count] = CountTotalEntriesInElfSection(DwarfBinaryReader{reader});
-  unwinder_db->mElfEhCies.reserve(cie_count);
-  unwinder_db->mElfEhUnwindInfos.reserve(fdes_count);
+  const auto [cieCount, fdes_count] = CountTotalEntriesInElfSection(DwarfBinaryReader{reader});
+  unwinderHandle->mElfEhCies.reserve(cieCount);
+  unwinderHandle->mElfEhUnwindInfos.reserve(fdes_count);
   AddrPtr low{std::uintptr_t{UINTMAX_MAX}};
   AddrPtr high{nullptr};
-  const auto total = cie_count + fdes_count;
+  const auto total = cieCount + fdes_count;
   for (auto i = 0u; i < total; ++i) {
     constexpr auto len_field_len = 4;
-    const auto eh_offset = reader.bytes_read();
-    const auto entry_length = reader.read_value<u32>();
+    const auto eh_offset = reader.BytesRead();
+    const auto entry_length = reader.ReadValue<u32>();
     ASSERT(entry_length != 0xff'ff'ff'ff, "GCC and clang do not support 64-bit .eh_frame; so why should we?");
-    const auto current_offset = reader.bytes_read();
+    const auto current_offset = reader.BytesRead();
     if (entry_length == 0) {
-      ASSERT(unwinder_db->mElfEhCies.capacity() == cie_count,
-             "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet", cie_count);
-      unwinder_db->SetHighAddress(high);
-      unwinder_db->SetLowAddress(low);
-      return unwinder_db;
+      ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
+             "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet", cieCount);
+      unwinderHandle->SetHighAddress(high);
+      unwinderHandle->SetLowAddress(low);
+      return unwinderHandle;
     }
 
-    reader.bookmark();
-    const auto cieId = reader.read_value<EHIdentifier>();
+    reader.Bookmark();
+    const auto cieId = reader.ReadValue<EHIdentifier>();
     if (cieId.IsCommonInfoEntry()) { // this is a CIE
-      unwinder_db->mElfEhCies.push_back(ReadCommonInformationEntry(entry_length, eh_offset, reader));
-      cies[current_offset - len_field_len] = unwinder_db->mElfEhCies.size() - 1;
+      unwinderHandle->mElfEhCies.push_back(ReadCommonInformationEntry(entry_length, eh_offset, reader));
+      cies[current_offset - len_field_len] = unwinderHandle->mElfEhCies.size() - 1;
     } else {
       auto cie_idx = cies[current_offset - cieId.mId];
-      auto &cie = unwinder_db->mElfEhCies[cie_idx];
-      auto initial_loc = reader.read_value<i32>();
-      AddrPtr begin = (ehFrameSection->address + reader.bytes_read() - len_field_len) + initial_loc;
-      AddrPtr end = begin + reader.read_value<u32>();
+      auto &cie = unwinderHandle->mElfEhCies[cie_idx];
+      auto initial_loc = reader.ReadValue<i32>();
+      AddrPtr begin = (ehFrameSection->address + reader.BytesRead() - len_field_len) + initial_loc;
+      AddrPtr end = begin + reader.ReadValue<u32>();
       u8 aug_data_length = 0u;
       AddrPtr lsda{nullptr};
       auto augment = cie.GetAugmentation();
       if (augment.HasAugmentDataField) {
         // it's *going* to be less than 255 bytes. So we cast it here
-        aug_data_length = static_cast<u8>(reader.read_uleb128<u64>());
+        aug_data_length = static_cast<u8>(reader.ReadUleb128<u64>());
       }
       if (augment.HasLanguageSpecificDataArea) {
         lsda = read_lsda(&cie, begin, reader);
       }
-      const auto bytes_remaining = entry_length - reader.pop_bookmark();
-      const auto ins = reader.get_span(bytes_remaining);
-      ASSERT(reader.bytes_read() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
-             reader.bytes_read() - current_offset, entry_length);
+      const auto bytes_remaining = entry_length - reader.PopBookmark();
+      const auto ins = reader.GetSpan(bytes_remaining);
+      ASSERT(reader.BytesRead() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
+             reader.BytesRead() - current_offset, entry_length);
       low = std::min(low, begin);
       high = std::max(high, end);
-      unwinder_db->mElfEhUnwindInfos.push_back(UnwindInfo{
+      unwinderHandle->mElfEhUnwindInfos.push_back(UnwindInfo{
         .mStart = begin,
         .mEnd = end,
         .mCodeAlignFactor = static_cast<u8>(cie.mCodeAlignFactor),
@@ -580,11 +580,11 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
       });
     }
   }
-  ASSERT(unwinder_db->mElfEhCies.capacity() == cie_count,
-         "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet", cie_count);
-  unwinder_db->SetHighAddress(high);
-  unwinder_db->SetLowAddress(low);
-  return unwinder_db;
+  ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
+         "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet", cieCount);
+  unwinderHandle->SetHighAddress(high);
+  unwinderHandle->SetLowAddress(low);
+  return unwinderHandle;
 }
 
 void
@@ -596,48 +596,48 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
   using CieIdx = u64;
   std::unordered_map<CieId, CieIdx> cies{};
 
-  const auto [cie_count, fdes_count] = CountTotalEntriesInDwarfSection(DwarfBinaryReader{reader});
-  unwinderDb->mDwarfDebugCies.reserve(unwinderDb->mElfEhCies.size() + cie_count);
+  const auto [cieCount, fdes_count] = CountTotalEntriesInDwarfSection(DwarfBinaryReader{reader});
+  unwinderDb->mDwarfDebugCies.reserve(unwinderDb->mElfEhCies.size() + cieCount);
   unwinderDb->mDwarfUnwindInfos.reserve(unwinderDb->mElfEhUnwindInfos.size() + fdes_count);
   AddrPtr low{std::uintptr_t{UINTMAX_MAX}};
   AddrPtr high{nullptr};
-  while (reader.has_more()) {
+  while (reader.HasMore()) {
     constexpr auto len_field_len = 4;
-    const auto eh_offset = reader.bytes_read();
-    const auto entry_length = reader.read_value<u32>();
+    const auto eh_offset = reader.BytesRead();
+    const auto entry_length = reader.ReadValue<u32>();
     ASSERT(entry_length != 0xff'ff'ff'ff, "GCC and clang do not support 64-bit .eh_frame; so why should we?");
-    const auto current_offset = reader.bytes_read();
+    const auto current_offset = reader.BytesRead();
     if (entry_length == 0) {
       unwinderDb->SetHighAddress(high);
       unwinderDb->SetLowAddress(low);
       return;
     }
 
-    reader.bookmark();
-    auto cieId = reader.read_value<DebugFrameIdentifier>();
+    reader.Bookmark();
+    auto cieId = reader.ReadValue<DebugFrameIdentifier>();
     if (cieId.IsCommonInfoEntry()) { // this is a CIE
       unwinderDb->mDwarfDebugCies.push_back(ReadCommonInformationEntry(entry_length, eh_offset, reader));
       cies[current_offset - len_field_len] = unwinderDb->mDwarfDebugCies.size() - 1;
     } else {
       auto cie_idx = cies[current_offset - cieId.mId];
       auto &cie = unwinderDb->mDwarfDebugCies[cie_idx];
-      auto initial_loc = reader.read_value<i32>();
-      AddrPtr begin = (debugFrame->address + reader.bytes_read() - len_field_len) + initial_loc;
-      AddrPtr end = begin + reader.read_value<u32>();
+      auto initial_loc = reader.ReadValue<i32>();
+      AddrPtr begin = (debugFrame->address + reader.BytesRead() - len_field_len) + initial_loc;
+      AddrPtr end = begin + reader.ReadValue<u32>();
       u8 aug_data_length = 0u;
       const auto augstr = cie.mAugmentationString.value_or("");
       if (augstr.contains("z")) {
-        aug_data_length = static_cast<u8>(reader.read_uleb128<u64>());
+        aug_data_length = static_cast<u8>(reader.ReadUleb128<u64>());
       }
       AddrPtr lsda{nullptr};
       auto augment = cie.GetAugmentation();
       if (augment.HasLanguageSpecificDataArea) {
         lsda = read_lsda(&cie, begin, reader);
       }
-      const auto bytes_remaining = entry_length - reader.pop_bookmark();
-      auto ins = reader.get_span(bytes_remaining);
-      ASSERT(reader.bytes_read() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
-             reader.bytes_read() - current_offset, entry_length);
+      const auto bytes_remaining = entry_length - reader.PopBookmark();
+      auto ins = reader.GetSpan(bytes_remaining);
+      ASSERT(reader.BytesRead() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
+             reader.BytesRead() - current_offset, entry_length);
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinderDb->mDwarfUnwindInfos.push_back(UnwindInfo{
@@ -663,43 +663,43 @@ ReadCommonInformationEntry(u64 commonInfoEntryLength, u64 commonInfoEntryOffset,
   CIE cie;
   cie.mSectionOffset = commonInfoEntryOffset;
   cie.mLength = commonInfoEntryLength;
-  cie.mVersion = entryReader.read_value<u8>();
-  const auto has_augment = entryReader.peek_value<i8>();
+  cie.mVersion = entryReader.ReadValue<u8>();
+  const auto has_augment = entryReader.PeekValue<i8>();
   if ((bool)has_augment) {
-    cie.mAugmentationString = entryReader.read_string();
+    cie.mAugmentationString = entryReader.ReadString();
     // this is a UTF-8 string, but, I'm going out on a limb and say that's moronic. It's always zR, zPLR, so
     // seemingly ASCII-characters, this should be safe.
   } else {
-    entryReader.read_value<u8>();
+    entryReader.ReadValue<u8>();
   }
 
   if (cie.mVersion >= 4) {
-    cie.mAddrSize = entryReader.read_value<u8>();
-    cie.mSegmentSize = entryReader.read_value<u8>();
+    cie.mAddrSize = entryReader.ReadValue<u8>();
+    cie.mSegmentSize = entryReader.ReadValue<u8>();
   }
 
-  cie.mCodeAlignFactor = entryReader.read_uleb128<u64>();
-  cie.mDataAlignFactor = entryReader.read_leb128<i64>();
-  cie.mReturnAddressRegister = entryReader.read_uleb128<u64>();
+  cie.mCodeAlignFactor = entryReader.ReadUleb128<u64>();
+  cie.mDataAlignFactor = entryReader.ReadLeb128<i64>();
+  cie.mReturnAddressRegister = entryReader.ReadUleb128<u64>();
   for (auto c : cie.mAugmentationString.value_or("")) {
     if (c == 'z') {
       // we don't care about auglength.
-      entryReader.read_uleb128<u64>();
+      entryReader.ReadUleb128<u64>();
     }
     if (c == 'R') {
-      auto fde_encoding = parse_encoding(entryReader.read_value<u8>());
+      auto fde_encoding = parse_encoding(entryReader.ReadValue<u8>());
       cie.mFrameDescriptionEntryEncoding = fde_encoding;
     }
     if (c == 'P') {
-      auto [fmt, val] = parse_encoding(entryReader.read_value<u8>());
+      auto [fmt, val] = parse_encoding(entryReader.ReadValue<u8>());
       cie.mExceptionHeaderApplication = fmt;
       using enum DwarfExceptionHeaderEncoding;
       switch (val) {
       case DW_EH_PE_udata4:
-        cie.mPersonalityAddress = entryReader.read_value<u32>();
+        cie.mPersonalityAddress = entryReader.ReadValue<u32>();
         break;
       case DW_EH_PE_sdata4:
-        cie.mPersonalityAddress = entryReader.read_value<i32>();
+        cie.mPersonalityAddress = entryReader.ReadValue<i32>();
         break;
         // clang-format off
       case DW_EH_PE_sdata8: case DW_EH_PE_udata8: case DW_EH_PE_sleb128:
@@ -710,12 +710,12 @@ ReadCommonInformationEntry(u64 commonInfoEntryLength, u64 commonInfoEntryOffset,
       }
     }
     if (c == 'L') {
-      auto lsda = parse_encoding(entryReader.read_value<u8>());
+      auto lsda = parse_encoding(entryReader.ReadValue<u8>());
       cie.mLanguageSpecificDataAreaEncoding = lsda;
     }
   }
-  const auto bytes_remaining = commonInfoEntryLength - entryReader.pop_bookmark();
-  cie.mInstructionByteStream = entryReader.get_span(bytes_remaining);
+  const auto bytes_remaining = commonInfoEntryLength - entryReader.PopBookmark();
+  cie.mInstructionByteStream = entryReader.GetSpan(bytes_remaining);
 
   return cie;
 }

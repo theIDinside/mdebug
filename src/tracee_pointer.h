@@ -22,7 +22,7 @@ public:
   constexpr
   operator std::uintptr_t() const
   {
-    return get();
+    return GetRaw();
   }
   constexpr TraceePointer(std::uintptr_t addr) noexcept : mRemoteAddress(addr) {}
   constexpr TraceePointer(T *t) noexcept : mRemoteAddress(reinterpret_cast<std::uintptr_t>(t)) {}
@@ -39,7 +39,7 @@ public:
   constexpr TraceePointer
   operator+(OffsetT offset) const noexcept
   {
-    const auto res = mRemoteAddress + (offset * type_size());
+    const auto res = mRemoteAddress + (offset * SizeOfPointee());
     return TraceePointer{res};
   }
 
@@ -48,7 +48,7 @@ public:
   constexpr TraceePointer
   operator-(OffsetT offset) const noexcept
   {
-    const auto res = mRemoteAddress - (offset * type_size());
+    const auto res = mRemoteAddress - (offset * SizeOfPointee());
     return TraceePointer{res};
   }
 
@@ -56,7 +56,7 @@ public:
   constexpr TraceePointer &
   operator+=(OffsetT offset) noexcept
   {
-    mRemoteAddress += (offset * type_size());
+    mRemoteAddress += (offset * SizeOfPointee());
     return *this;
   }
 
@@ -64,14 +64,14 @@ public:
   constexpr TraceePointer &
   operator-=(OffsetT offset) noexcept
   {
-    mRemoteAddress -= (offset * type_size());
+    mRemoteAddress -= (offset * SizeOfPointee());
     return *this;
   }
 
   constexpr TraceePointer &
   operator++() noexcept
   {
-    mRemoteAddress += type_size();
+    mRemoteAddress += SizeOfPointee();
     return *this;
   }
 
@@ -79,14 +79,14 @@ public:
   operator++(int) noexcept
   {
     const auto current = mRemoteAddress;
-    mRemoteAddress += type_size();
+    mRemoteAddress += SizeOfPointee();
     return TraceePointer{current};
   }
 
   constexpr TraceePointer &
   operator--() noexcept
   {
-    mRemoteAddress -= type_size();
+    mRemoteAddress -= SizeOfPointee();
     return *this;
   }
 
@@ -94,12 +94,12 @@ public:
   operator--(int) noexcept
   {
     const auto current = mRemoteAddress;
-    mRemoteAddress -= type_size();
+    mRemoteAddress -= SizeOfPointee();
     return TraceePointer{current};
   }
 
   uintptr_t
-  get() const noexcept
+  GetRaw() const noexcept
   {
     return mRemoteAddress;
   }
@@ -107,7 +107,7 @@ public:
   // Returns the size of the pointed-to type so we can do pointer arithmetics on it.
   // We handle the edge case of void pointers, by assuming an Architecture's "word size" (32-bit/64-bit)
   static constexpr unsigned long long
-  type_size() noexcept
+  SizeOfPointee() noexcept
   {
     if constexpr (std::is_void_v<T>) {
       return 1;
@@ -123,60 +123,60 @@ public:
    */
   template <typename U>
   constexpr TraceePointer<U>
-  as() const noexcept
+  As() const noexcept
   {
-    return TraceePointer<U>{get()};
+    return TraceePointer<U>{GetRaw()};
   }
 
   // Utility that could get called a lot when we want to do arbitrary
   // things with a TraceePointer<T> that doesn't involve the type T it's pointing to, like for instance comparing
   // if a ptr lands inside an address range. Use `as_void` for this (or the templated member function)
   constexpr TraceePointer<void>
-  as_void() const noexcept
+  AsVoid() const noexcept
   {
-    return as<void>();
+    return As<void>();
   }
 
   template <typename U = T>
   constexpr friend bool
   operator<(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() < r.get();
+    return l.GetRaw() < r.GetRaw();
   }
 
   template <typename U = T>
   constexpr friend bool
   operator<=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() <= r.get();
+    return l.GetRaw() <= r.GetRaw();
   }
 
   template <typename U = T>
   constexpr friend bool
   operator>(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() > r.get();
+    return l.GetRaw() > r.GetRaw();
   }
 
   template <typename U = T>
   constexpr friend bool
   operator>=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() >= r.get();
+    return l.GetRaw() >= r.GetRaw();
   }
 
   template <typename U = T>
   constexpr friend bool
   operator==(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() == r.get();
+    return l.GetRaw() == r.GetRaw();
   }
 
   template <typename U = T>
   constexpr friend bool
   operator!=(const TraceePointer<T> &l, const TraceePointer<U> &r) noexcept
   {
-    return l.get() != r.get();
+    return l.GetRaw() != r.GetRaw();
   }
 
   static constexpr auto
@@ -203,7 +203,7 @@ template <typename T> struct std::hash<TraceePointer<T>>
   result_type
   operator()(const argument_type &m) const
   {
-    return m.get();
+    return m.GetRaw();
   }
 };
 
@@ -221,7 +221,7 @@ template <typename T> struct formatter<TraceePointer<T>>
   auto
   format(TraceePointer<T> const &tptr, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "0x{:x}", tptr.get());
+    return fmt::format_to(ctx.out(), "0x{:x}", tptr.GetRaw());
   }
 };
 

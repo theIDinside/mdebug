@@ -77,8 +77,6 @@ public:
   u32 mSessionId{0};
   WaitStatus mLastWaitStatus;
   TargetFormat mTargetFormat;
-  bool firstResume{true};
-  SupervisorState mState{SupervisorState::Traced};
   tc::ResumeAction mLastResumeAction;
   std::optional<tc::ResumeAction> mNextResumeAction{};
 
@@ -191,7 +189,6 @@ public:
   Ref<sym::Value> GetVariablesReference(u32 ref) noexcept;
   void RequestedStop() noexcept;
   void ClearRequestedStopFlag() noexcept;
-  void SetTracerState(SupervisorState state) noexcept;
   std::optional<Pid> GetTaskLeaderTid() const noexcept;
   void SetSessionId(u32 sessionId) noexcept;
 };

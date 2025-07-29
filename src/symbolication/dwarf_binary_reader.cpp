@@ -4,68 +4,68 @@
 #include <utils/logger.h>
 namespace mdb {
 u64
-DwarfBinaryReader::dwarf_spec_read_value() noexcept
+DwarfBinaryReader::DwarfSpecReadValue() noexcept
 {
-  switch (offset_size) {
+  switch (mOffsetSize) {
   case 4:
-    return read_value<u32>();
+    return ReadValue<u32>();
   case 8:
-    return read_value<u64>();
+    return ReadValue<u64>();
   default:
-    PANIC(fmt::format("Unsupported offset size {}", offset_size));
+    PANIC(fmt::format("Unsupported offset size {}", mOffsetSize));
   }
 }
 
 std::span<const u8>
-DwarfBinaryReader::get_span(u64 size) noexcept
+DwarfBinaryReader::GetSpan(u64 size) noexcept
 {
-  ASSERT(size <= remaining_size(), "Not enough bytes left in reader. Requested {}, remaining {}", size,
-         remaining_size());
-  const auto span = std::span{head, size};
-  head += size;
+  ASSERT(size <= RemainingSize(), "Not enough bytes left in reader. Requested {}, remaining {}", size,
+         RemainingSize());
+  const auto span = std::span{mHead, size};
+  mHead += size;
   return span;
 }
 
 std::string_view
-DwarfBinaryReader::read_string() noexcept
+DwarfBinaryReader::ReadString() noexcept
 {
-  std::string_view str{(const char *)(head)};
-  head += str.size() + 1;
+  std::string_view str{(const char *)(mHead)};
+  mHead += str.size() + 1;
   return str;
 }
 
 void
-DwarfBinaryReader::skip_string() noexcept
+DwarfBinaryReader::SkipString() noexcept
 {
-  std::string_view str{(const char *)(head)};
-  head += str.size() + 1;
+  std::string_view str{(const char *)(mHead)};
+  mHead += str.size() + 1;
 }
 
 DataBlock
-DwarfBinaryReader::read_block(u64 size) noexcept
+DwarfBinaryReader::ReadBlock(u64 size) noexcept
 {
-  const auto ptr = head;
-  head += size;
+  const auto ptr = mHead;
+  mHead += size;
   return {.ptr = ptr, .size = size};
 }
 
 u64
-DwarfBinaryReader::read_offset() noexcept
+DwarfBinaryReader::ReadOffset() noexcept
 {
-  switch (offset_size) {
+  switch (mOffsetSize) {
   case 8:
-    return read_value<u64>();
+    return ReadValue<u64>();
   case 4:
-    return read_value<u32>();
+    return ReadValue<u32>();
   default:
-    TODO_FMT("Reading offsets/addresses of size {} not yet supported", offset_size);
+    TODO_FMT("Reading offsets/addresses of size {} not yet supported", mOffsetSize);
   }
 }
 
 const u8 *
-DwarfBinaryReader::current_ptr() const noexcept
+DwarfBinaryReader::CurrentPtr() const noexcept
 {
-  return head;
+  return mHead;
 }
 
 DwarfBinaryReader::DwarfBinaryReader(std::span<const u8> data) noexcept
@@ -74,98 +74,98 @@ DwarfBinaryReader::DwarfBinaryReader(std::span<const u8> data) noexcept
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const Elf *elf, const u8 *buffer, u64 size) noexcept
-    : buffer(buffer), head(buffer), end(buffer + size), size(size), bookmarks(), elf(elf)
+    : mBuffer(buffer), mHead(buffer), mEnd(buffer + size), mSize(size), mBookmarks(), mElf(elf)
 {
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const Elf *elf, std::span<const u8> data) noexcept
-    : buffer(data.data()), head(data.data()), end(buffer + data.size()), bookmarks(), elf(elf)
+    : mBuffer(data.data()), mHead(data.data()), mEnd(mBuffer + data.size()), mBookmarks(), mElf(elf)
 {
 }
 
 DwarfBinaryReader::DwarfBinaryReader(const DwarfBinaryReader &reader) noexcept
-    : buffer(reader.buffer), head(reader.head), end(reader.end), size(reader.size), bookmarks(reader.bookmarks),
-      elf(reader.elf)
+    : mBuffer(reader.mBuffer), mHead(reader.mHead), mEnd(reader.mEnd), mSize(reader.mSize),
+      mBookmarks(reader.mBookmarks), mElf(reader.mElf)
 {
 }
 
 bool
-DwarfBinaryReader::has_more() noexcept
+DwarfBinaryReader::HasMore() noexcept
 {
-  return head < end;
+  return mHead < mEnd;
 }
 
 u64
-DwarfBinaryReader::remaining_size() const noexcept
+DwarfBinaryReader::RemainingSize() const noexcept
 {
-  return (end - head);
+  return (mEnd - mHead);
 }
 
 u64
-DwarfBinaryReader::bytes_read() const noexcept
+DwarfBinaryReader::BytesRead() const noexcept
 {
-  return head - buffer;
+  return mHead - mBuffer;
 }
 
 void
-DwarfBinaryReader::skip(i64 bytes) noexcept
+DwarfBinaryReader::Skip(i64 bytes) noexcept
 {
-  ASSERT(static_cast<u64>(bytes) <= remaining_size() && head + bytes >= buffer,
-         "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, remaining_size());
-  head += bytes;
+  ASSERT(static_cast<u64>(bytes) <= RemainingSize() && mHead + bytes >= mBuffer,
+         "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, RemainingSize());
+  mHead += bytes;
 }
 
 void
-DwarfBinaryReader::bookmark() noexcept
+DwarfBinaryReader::Bookmark() noexcept
 {
-  bookmarks.push_back(bytes_read());
+  mBookmarks.push_back(BytesRead());
 }
 
 u64
-DwarfBinaryReader::pop_bookmark() noexcept
+DwarfBinaryReader::PopBookmark() noexcept
 {
-  const auto bookmark = bookmarks.back();
-  bookmarks.pop_back();
-  return bytes_read() - bookmark;
+  const auto bookmark = mBookmarks.back();
+  mBookmarks.pop_back();
+  return BytesRead() - bookmark;
 }
 
 DwarfBinaryReader
-sub_reader(const DwarfBinaryReader &reader) noexcept
+SubReader(const DwarfBinaryReader &reader) noexcept
 {
-  return DwarfBinaryReader{reader.elf, reader.head, reader.size - (reader.head - reader.buffer)};
+  return DwarfBinaryReader{reader.mElf, reader.mHead, reader.mSize - (reader.mHead - reader.mBuffer)};
 }
 
 u64
-DwarfBinaryReader::read_content_index(AttributeForm form) noexcept
+DwarfBinaryReader::ReadContentIndex(AttributeForm form) noexcept
 {
-  ASSERT(elf != nullptr, "No ELF passed to this binary reader");
+  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_udata:
-    return read_uleb128<u64>();
+    return ReadUleb128<u64>();
   case DW_FORM_data1:
-    return read_value<u8>();
+    return ReadValue<u8>();
   case DW_FORM_data2:
-    return read_value<u16>();
+    return ReadValue<u16>();
   default:
     PANIC(fmt::format("Unsupported form for dir index {}", to_str(form)));
   }
 }
 
 std::string_view
-DwarfBinaryReader::read_content_str(AttributeForm form) noexcept
+DwarfBinaryReader::ReadContentStr(AttributeForm form) noexcept
 {
-  ASSERT(elf != nullptr, "No ELF passed to this binary reader");
+  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_string:
-    return read_string();
+    return ReadString();
   case DW_FORM_line_strp:
-    ASSERT(elf->debug_line_str != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
-    return elf->debug_line_str->GetCString(read_offset());
+    ASSERT(mElf->mDebugLineStr != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
+    return mElf->mDebugLineStr->GetCString(ReadOffset());
   case DW_FORM_strp:
-    ASSERT(elf->debug_str != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
-    return elf->debug_str->GetCString(read_offset());
+    ASSERT(mElf->mDebugStr != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
+    return mElf->mDebugStr->GetCString(ReadOffset());
   case DW_FORM_strp_sup:
   case DW_FORM_strx:
   case DW_FORM_strx1:
@@ -178,15 +178,15 @@ DwarfBinaryReader::read_content_str(AttributeForm form) noexcept
 }
 
 DataBlock
-DwarfBinaryReader::read_content_datablock(AttributeForm form) noexcept
+DwarfBinaryReader::ReadContentDatablock(AttributeForm form) noexcept
 {
-  ASSERT(elf != nullptr, "No ELF passed to this binary reader");
+  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   switch (form) {
   case AttributeForm::DW_FORM_data16:
-    return read_block(16);
+    return ReadBlock(16);
   case AttributeForm::DW_FORM_block: {
-    const auto sz = read_uleb128<u64>();
-    return read_block(sz);
+    const auto sz = ReadUleb128<u64>();
+    return ReadBlock(sz);
   }
   default:
     PANIC(fmt::format("Unsupported block form {}", to_str(form)));
@@ -194,34 +194,34 @@ DwarfBinaryReader::read_content_datablock(AttributeForm form) noexcept
 }
 
 std::variant<std::string_view, u64, DataBlock>
-DwarfBinaryReader::read_content(AttributeForm form) noexcept
+DwarfBinaryReader::ReadContent(AttributeForm form) noexcept
 {
-  ASSERT(elf != nullptr, "No ELF passed to this binary reader");
+  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_string:
-    return read_string();
+    return ReadString();
   case DW_FORM_line_strp:
     [[fallthrough]];
   case DW_FORM_strp:
     [[fallthrough]];
   case DW_FORM_strp_sup:
-    return dwarf_spec_read_value();
+    return DwarfSpecReadValue();
   case DW_FORM_udata:
-    return read_uleb128<u64>();
+    return ReadUleb128<u64>();
   case DW_FORM_data1:
-    return read_value<u8>();
+    return ReadValue<u8>();
   case DW_FORM_data2:
-    return read_value<u16>();
+    return ReadValue<u16>();
   case DW_FORM_data4:
-    return read_value<u32>();
+    return ReadValue<u32>();
   case DW_FORM_data8:
-    return read_value<u64>();
+    return ReadValue<u64>();
   case DW_FORM_data16:
-    return read_block(16);
+    return ReadBlock(16);
   case DW_FORM_block: {
-    const auto sz = read_uleb128<u64>();
-    return read_block(sz);
+    const auto sz = ReadUleb128<u64>();
+    return ReadBlock(sz);
   }
   default:
     PANIC(fmt::format("Unacceptable form {} while reading LNP content description", to_str(form)));
@@ -229,9 +229,9 @@ DwarfBinaryReader::read_content(AttributeForm form) noexcept
 }
 
 void
-DwarfBinaryReader::set_wrapped_buffer_size(u64 new_size) noexcept
+DwarfBinaryReader::SetWrappedBufferSize(u64 new_size) noexcept
 {
-  end = buffer + new_size;
-  size = new_size;
+  mEnd = mBuffer + new_size;
+  mSize = new_size;
 }
 } // namespace mdb

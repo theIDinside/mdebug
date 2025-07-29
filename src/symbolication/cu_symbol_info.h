@@ -21,9 +21,9 @@ class UnitData;
 
 class PartialCompilationUnitSymbolInfo
 {
-  dw::UnitData *unit_data;
-  std::vector<sym::FunctionSymbol> fns;
-  std::vector<u32> imported_units;
+  dw::UnitData *mUnitData;
+  std::vector<sym::FunctionSymbol> mFunctionSymbols;
+  std::vector<u32> mImportedUnits;
 
 public:
   PartialCompilationUnitSymbolInfo(dw::UnitData *data) noexcept;
@@ -48,8 +48,8 @@ class CompilationUnit
   std::vector<AddressRange> mAddressRanges;
 
   std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>> mSourceCodeFileMappings{};
-  mutable std::mutex m{};
-  mutable bool computed{false};
+  mutable std::mutex mMutex{};
+  mutable bool mComputed{false};
 
 public:
   NO_COPY(CompilationUnit);
@@ -71,11 +71,11 @@ public:
   bool HasKnownAddressBoundary() const noexcept;
   AddrPtr StartPc() const noexcept;
   AddrPtr EndPc() const noexcept;
-  std::string_view name() const noexcept;
+  std::string_view Name() const noexcept;
   bool IsFunctionSymbolsResolved() const noexcept;
   sym::FunctionSymbol *GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept;
-  dw::UnitData *get_dwarf_unit() const noexcept;
-  std::optional<Path> get_lnp_file(u32 index) noexcept;
+  dw::UnitData *GetDwarfUnitData() const noexcept;
+  std::optional<Path> GetLineNumberProgramFile(u32 index) noexcept;
   static constexpr auto
   Sorter() noexcept
   {
@@ -95,12 +95,12 @@ class AddressToCompilationUnitMap
 public:
   AddressToCompilationUnitMap() noexcept;
   std::vector<CompilationUnit *> find_by_pc(AddrPtr pc) noexcept;
-  void add_cus(std::span<CompilationUnit *> cus) noexcept;
+  void AddCompilationUnits(std::span<CompilationUnit *> cus) noexcept;
 
 private:
-  void add_cu(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept;
-  std::mutex mutex;
-  mdb::IntervalMapping<AddrPtr, CompilationUnit *> mapping;
+  void AddCompilationUnit(AddrPtr start, AddrPtr end, CompilationUnit *cu) noexcept;
+  std::mutex mMutex;
+  mdb::IntervalMapping<AddrPtr, CompilationUnit *> mMapping;
 };
 } // namespace sym
 } // namespace mdb

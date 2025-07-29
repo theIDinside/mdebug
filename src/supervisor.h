@@ -7,11 +7,11 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/remotegdb/connection.h"
-#include "so_loading.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf.h"
 #include "symbolication/fnsymbol.h"
+#include "symbolication/objfile.h"
 #include "task.h"
 #include "task_scheduling.h"
 #include "utils/expected.h"
@@ -49,9 +49,9 @@ class StopObserver;
 
 struct NonFullRead
 {
-  std::unique_ptr<ByteBuffer> bytes;
-  u32 unread_bytes;
-  int err_no;
+  std::unique_ptr<ByteBuffer> mBytes;
+  u32 mUnreadBytes;
+  int mErrorNumber;
 };
 
 /// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
@@ -101,8 +101,6 @@ class TraceeController
   std::unordered_map<pid_t, TaskVMInfo> mThreadInfos;
   // The breakpoints set by the user
   UserBreakpoints mUserBreakpoints;
-  // The shared objects / dynamic libraries used by this process
-  SharedObjectMap mSharedObjects;
   // Emits "all stopped" event to all subscribers
   Publisher<void> mAllStopPublisher{};
   // Emits "new module/new dynamic library" event to all subscribers
@@ -120,14 +118,7 @@ class TraceeController
 
   // Monotonically increasing "variable reference" as defined by the debug adapter protocol.
   int mNextVariableReference = 0;
-  // The base address that defines the interpreter that we use. It gives us the system path to where we can load
-  // and parse debug symbol information from the system linker, so that we can install breakpoints in specific
-  // places when the linker loads libraries. This is how we track what dynamic libraries is being used by a process
-  // P
-  std::optional<TPtr<void>> mInterpreterBase;
-  // The entry point of an executable (usually the first instruction of the function `_start` for c-run time/posix
-  // applications on Linux)
-  std::optional<TPtr<void>> mEntry;
+
   // Is Attach/Launch session?
   TargetSession mSessionKind;
   // The currently installed Stop handler
@@ -139,9 +130,17 @@ class TraceeController
   // system, where it's something like gdbserver controlling the tracee/debuggee and we commmunicate with that
   // instead. This is how rr works for instance, gdb sends GdbServer commands to it.
   std::unique_ptr<tc::TraceeCommandInterface> mTraceeInterface;
+
   // The auxilliary vector of the application/process being debugged. Contains things like entry, interpreter base,
-  // what the executable file was etc.
-  tc::Auxv mAuxiliaryVector{};
+  // what the executable file was etc:
+
+  // The base address that defines the interpreter that we use. It gives us the system path to where we can load
+  // and parse debug symbol information from the system linker, so that we can install breakpoints in specific
+  // places when the linker loads libraries. This is how we track what dynamic libraries is being used by a process
+
+  // The entry point of an executable (usually the first instruction of the function `_start` for c-run time/posix
+  // applications on Linux)
+  ParsedAuxiliaryVector mParsedAuxiliaryVector;
 
   bool mConfigurationIsDone : 1 {false};
   // Whether this is the very first stop wait status we have seen
@@ -252,34 +251,34 @@ public:
   bool IsOnEntry() const noexcept;
 
   // Emit event FOO at stop
-  void EmitStoppedAtBreakpoints(LWP lwp, u32 bp_id, bool all_stopped) noexcept;
+  void EmitStoppedAtBreakpoints(LWP lwp, u32 breakpointId, bool allStopped) noexcept;
   void EmitSteppedStop(LWP lwp) noexcept;
-  void EmitSteppedStop(LWP lwp, std::string_view message, bool all_stopped) noexcept;
+  void EmitSteppedStop(LWP lwp, std::string_view message, bool allStopped) noexcept;
   void EmitSignalEvent(LWP lwp, int signal) noexcept;
-  void EmitStopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool all_stopped,
-                   std::vector<int> bps_hit) noexcept;
+  void EmitStopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool allStopped,
+                   std::vector<int> breakpointsHit) noexcept;
   void EmitBreakpointEvent(std::string_view reason, const UserBreakpoint &bp,
                            std::optional<std::string> message) noexcept;
   tc::ProcessedStopEvent ProcessDeferredStopEvent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   // Get (&& ||) Create breakpoint locations
-  Expected<Ref<BreakpointLocation>, BpErr> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
-  Expected<Ref<BreakpointLocation>, BpErr>
+  Expected<Ref<BreakpointLocation>, BreakpointError> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
+  Expected<Ref<BreakpointLocation>, BreakpointError>
   GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile,
                                 const sym::dw::LineTableEntry &lte) noexcept;
 
-  Expected<Ref<BreakpointLocation>, BpErr>
+  Expected<Ref<BreakpointLocation>, BreakpointError>
   GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
                                              std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
-  void SetSourceBreakpoints(const std::filesystem::path &source_filepath,
+  void SetSourceBreakpoints(const std::filesystem::path &sourceFilePath,
                             const Set<BreakpointSpecification> &bps) noexcept;
-  void UpdateSourceBreakpoints(const std::filesystem::path &source_filepath,
+  void UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
                                std::vector<BreakpointSpecification> &&add,
                                const std::vector<BreakpointSpecification> &remove) noexcept;
 
-  void SetInstructionBreakpoints(const Set<BreakpointSpecification> &bps) noexcept;
-  void SetFunctionBreakpoints(const Set<BreakpointSpecification> &bps) noexcept;
-  void RemoveBreakpoint(u32 bp_id) noexcept;
+  void SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
+  void SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
+  void RemoveBreakpoint(u32 breakpointId) noexcept;
 
   // Right now, I don't think we care or empathize at all with anything - we just abort/panic, more or less.
   bool TryTerminateGracefully() noexcept;
@@ -305,7 +304,7 @@ public:
   // because we actually need to be at the *first* position on the stack, which, if we do at any other time we
   // might (very likely) not be.
   void ReadAuxiliaryVector(TaskInfo &task);
-  void ParseAuxiliaryVectorInfo(tc::Auxv &&aux) noexcept;
+  void SetAuxiliaryVector(ParsedAuxiliaryVector data) noexcept;
 
   TargetSession GetSessionType() const noexcept;
 
@@ -333,15 +332,16 @@ public:
   {
     typename TPtr<T>::Type result;
     u8 *ptr = static_cast<u8 *>(static_cast<void *>(&result));
-    auto total_read = 0ull;
-    constexpr auto sz = TPtr<T>::type_size();
-    while (total_read < sz) {
-      const auto read_address = address.as_void() += total_read;
-      const auto read_result = mTraceeInterface->ReadBytes(read_address, sz - total_read, ptr + total_read);
-      if (!read_result.success()) {
-        PANIC(fmt::format("Failed to proc_fs read from {:p} because {}", (void *)address.get(), strerror(errno)));
+    auto totalRead = 0ull;
+    constexpr auto sz = TPtr<T>::SizeOfPointee();
+    while (totalRead < sz) {
+      const auto readAddress = address.AsVoid() += totalRead;
+      const auto readResult = mTraceeInterface->ReadBytes(readAddress, sz - totalRead, ptr + totalRead);
+      if (!readResult.WasSuccessful()) {
+        PANIC(
+          fmt::format("Failed to proc_fs read from {:p} because {}", (void *)address.GetRaw(), strerror(errno)));
       }
-      total_read += read_result.bytes_read;
+      totalRead += readResult.uBytesRead;
     }
     return result;
   }
@@ -352,15 +352,15 @@ public:
   {
     typename TPtr<T>::Type result;
     auto ptr = static_cast<u8 *>(static_cast<void *>(&result));
-    auto total_read = 0ull;
-    constexpr auto sz = TPtr<T>::type_size();
-    while (total_read < sz) {
-      const auto read_address = addr.as_void() += total_read;
-      const auto read_result = mTraceeInterface->ReadBytes(read_address, sz - total_read, ptr + total_read);
-      if (!read_result.success()) {
+    auto totalRead = 0ull;
+    constexpr auto sz = TPtr<T>::SizeOfPointee();
+    while (totalRead < sz) {
+      const auto readAddress = addr.as_void() += totalRead;
+      const auto readResult = mTraceeInterface->ReadBytes(readAddress, sz - totalRead, ptr + totalRead);
+      if (!readResult.WasSuccessful()) {
         return std::nullopt;
       }
-      total_read += read_result.bytes_read;
+      totalRead += readResult.uBytesRead;
     }
     return result;
   }
@@ -371,7 +371,7 @@ public:
   {
     auto write_res = mTraceeInterface->Write(address, value);
     if (!write_res.is_expected()) {
-      PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.get()));
+      PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.GetRaw()));
     }
   }
 
@@ -419,17 +419,9 @@ public:
 private:
   void ShutDownDebugAdapterClient() noexcept;
   // Writes breakpoint point and returns the original value found at that address
-  Expected<u8, BpErr> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
+  Expected<u8, BreakpointError> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
   SupervisorEventHandlerAction mAction{SupervisorEventHandlerAction::Default};
   std::vector<TraceEvent *> mDeferredEvents;
   TraceeController *mVForkedSupervisor{nullptr};
 };
-
-struct ProbeInfo
-{
-  AddrPtr address;
-  std::string name;
-};
-
-std::vector<ProbeInfo> parse_stapsdt_note(const Elf *elf, const ElfSection *section) noexcept;
 } // namespace mdb

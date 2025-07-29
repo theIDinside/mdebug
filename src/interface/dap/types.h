@@ -4,7 +4,6 @@
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
 #include "utils/macros.h"
-#include "utils/smartptr.h"
 #include <fmt/format.h>
 #include <string_view>
 #include <symbolication/value.h>
@@ -29,44 +28,44 @@ struct Source
 struct Breakpoint
 {
   // id
-  u32 id;
+  u32 mId;
   // verified
-  bool verified;
+  bool mVerified;
   // instructionReference
-  AddrPtr addr;
+  AddrPtr mAddress;
 
-  std::optional<u32> line;
-  std::optional<u32> col;
-  std::optional<std::string_view> source_path;
-  std::optional<std::string> error_message;
+  std::optional<u32> mLine;
+  std::optional<u32> mColumn;
+  std::optional<std::string_view> mSourcePath;
+  std::optional<std::string> mErrorMessage;
 
-  std::pmr::string serialize(std::pmr::memory_resource *memoryResource) const noexcept;
-  static Breakpoint non_verified(u32 id, std::string_view msg) noexcept;
-  static Breakpoint from_user_bp(const UserBreakpoint &user_bp) noexcept;
+  std::pmr::string Serialize(std::pmr::memory_resource *memoryResource) const noexcept;
+  static Breakpoint CreateNonVerified(u32 id, std::string_view msg) noexcept;
+  static Breakpoint CreateFromUserBreakpoint(const UserBreakpoint &userBreakpoint) noexcept;
 };
 
 struct DataBreakpoint
 {
-  std::string data_id;
-  std::string_view access_type;
-  std::string condition;
-  std::string hit_condition;
+  std::string mDataBreakpointId;
+  std::string_view mAccessType;
+  std::string mCondition;
+  std::string mHitCondition;
 };
 
 struct Thread
 {
-  int id;
-  std::string_view name;
+  int mThreadId;
+  std::string_view mName;
 };
 
 struct StackFrame
 {
-  VariableReferenceId id;
-  std::string_view name;
-  std::optional<Source> source;
-  int line;
-  int column;
-  std::string rip;
+  VariableReferenceId mVariablesReference;
+  std::string_view mName;
+  std::optional<Source> mSource;
+  int mLine;
+  int mColumn;
+  std::string mProgramCounter;
 };
 
 struct StackTraceFormat
@@ -93,7 +92,7 @@ struct Scope
   VariableReferenceId variables_reference{};
 
   constexpr std::string_view
-  name() const noexcept
+  Name() const noexcept
   {
     switch (type) {
     case ScopeType::Arguments:
@@ -109,7 +108,7 @@ struct Scope
   }
 
   constexpr std::string_view
-  presentation_hint() const noexcept
+  PresentationHint() const noexcept
   {
     switch (type) {
     case ScopeType::Arguments:
@@ -135,38 +134,38 @@ enum class EntityType
 class VariablesReference
 {
 public:
-  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent,
+  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frameId, int parent,
                      EntityType type) noexcept;
-  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent, EntityType type,
+  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frameId, int parent, EntityType type,
                      ScopeType scopeType) noexcept;
   VariablesReference &operator=(const VariablesReference &) = default;
   VariablesReference &operator=(VariablesReference &&) = default;
   VariablesReference(VariablesReference &&) = default;
   VariablesReference(const VariablesReference &) = default;
 
-  bool has_parent() const noexcept;
-  std::optional<int> parent() const noexcept;
+  bool HasParent() const noexcept;
+  std::optional<int> ParentVariablesReference() const noexcept;
 
   // actual variablesReference value
-  Immutable<int> id;
+  Immutable<int> mId;
   // The execution context (Task) that this variable reference exists in
-  Immutable<int> thread_id;
+  Immutable<int> mThreadId;
   // The frame id this variable reference exists in
-  Immutable<int> frame_id;
+  Immutable<int> mFrameId;
   // (Possible) parent reference. A scope has a frame as it's parent. A variable has a scope or another variable as
   // it's parent. To walk up the hierarchy, one would read the variables reference map using the parent key
-  Immutable<int> parent_;
+  Immutable<int> mParentId;
   // The reference type
-  Immutable<EntityType> type;
+  Immutable<EntityType> mType;
   // TODO(simon): INCREDIBLE HACK. We should refactor VariablesReferences. See "our own" implementation in Midas
   // (though written in Python). That is a better solution than having to carry this extra field for a WHOLE BUNCH
   // of variables references that aren't of "scope type"
-  Immutable<std::optional<ScopeType>> scope_type;
+  Immutable<std::optional<ScopeType>> mScopeType;
 
   // The "symbol context" for this variable reference.
   // Keep it a NonNullPtr<ObjectFile> instead of a reference, because we want pointer comparison for equality /
   // identify. Because only 1 objectfile of some binary will *ever* be loaded into memory.
-  Immutable<NonNullPtr<SymbolFile>> object_file;
+  Immutable<NonNullPtr<SymbolFile>> mObjectFile;
 };
 }; // namespace ui::dap
 } // namespace mdb
@@ -188,7 +187,7 @@ template <> struct formatter<ui::dap::Scope>
   format(const ui::dap::Scope &scope, FormatContext &ctx) const
   {
     return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": {} }})",
-                          scope.name(), scope.presentation_hint(), scope.variables_reference);
+                          scope.Name(), scope.PresentationHint(), scope.variables_reference);
   }
 };
 
@@ -206,7 +205,7 @@ template <> struct formatter<ui::dap::Thread>
   auto
   format(ui::dap::Thread const &task, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "{{ \"id\": {}, \"name\": \"{}\" }}", task.id, task.name);
+    return fmt::format_to(ctx.out(), "{{ \"id\": {}, \"name\": \"{}\" }}", task.mThreadId, task.mName);
   }
 };
 
@@ -268,7 +267,7 @@ template <> struct formatter<ui::dap::StackFrame>
     return fmt::format_to(
       ctx.out(),
       R"({{ "id": {}, "name": "{}", "source": {}, "line": {}, "column": {}, "instructionPointerReference": "{}" }})",
-      frame.id, frame.name, frame.source, frame.line, frame.column, frame.rip);
+      frame.mVariablesReference, frame.mName, frame.mSource, frame.mLine, frame.mColumn, frame.mProgramCounter);
   }
 };
 

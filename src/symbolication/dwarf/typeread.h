@@ -51,7 +51,7 @@ class TypeSymbolicationContext
   sym::Type *mEnumerationType{nullptr};
   bool mEnumIsSigned{false};
   std::vector<EnumeratorConstValue> mConstValues{};
-  void process_member_variable(DieReference die) noexcept;
+  void ProcessMemberVariable(DieReference die) noexcept;
   void ProcessInheritanceDie(DieReference die) noexcept;
   void ProcessEnumDie(DieReference die) noexcept;
 

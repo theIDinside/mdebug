@@ -53,7 +53,7 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   fmt::format_to(
     std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"continueAll","body":{{"threadId":{}}}}})",
-    seq, request_seq, success, mTaskLeader);
+    seq, requestSeq, success, mTaskLeader);
   return result;
 }
 
@@ -75,7 +75,7 @@ PauseAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   std::pmr::string result{arenaAllocator};
   fmt::format_to(std::back_inserter(result),
                  R"({{"seq":{},"request_seq":{},"type":"response","success":{},"command":"pauseAll"}})", seq,
-                 request_seq, success);
+                 requestSeq, success);
   return result;
 }
 
@@ -102,12 +102,12 @@ ImportScriptResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocat
     fmt::format_to(
       std::back_inserter(result),
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"importScript","body":{{"evaluatedOk":true}}}})",
-      seq, request_seq);
+      seq, requestSeq);
   } else {
     fmt::format_to(
       std::back_inserter(result),
       R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"importScript","body":{{"evaluatedOk":false, "error": {}}}}})",
-      seq, request_seq, mEvaluateResult.error());
+      seq, requestSeq, mEvaluateResult.error());
   }
   return result;
 }
@@ -130,7 +130,7 @@ GetProcessesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocat
   fmt::format_to(
     std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"type":"response","success":true,"command":"getProcesses","body":{{ "processes": [{}] }}}})",
-    seq, request_seq, fmt::join(mProcesses, ", "));
+    seq, requestSeq, fmt::join(mProcesses, ", "));
   return result;
 }
 

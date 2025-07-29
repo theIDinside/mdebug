@@ -2,7 +2,6 @@
 #pragma once
 #include "utils/debugger_thread.h"
 #include "worker_task.h"
-#include <numeric>
 #include <queue>
 #include <typedefs.h>
 #include <vector>

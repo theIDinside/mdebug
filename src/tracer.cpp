@@ -208,14 +208,14 @@ Tracer::InvalidateSessions(int frameTime) noexcept
 void
 Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
 {
-  auto task = Tracer::Get().GetTask(evt->tid);
+  auto task = GetTask(evt->mTaskId);
   TraceeController *supervisor = task->GetSupervisor();
-  if ((evt->event_time >= 0) && evt->event_time < sLastTraceEventTime) {
-    InvalidateSessions(evt->event_time);
+  if ((evt->mEventTime >= 0) && evt->mEventTime < sLastTraceEventTime) {
+    InvalidateSessions(evt->mEventTime);
   }
-  ASSERT(supervisor->mCreationEventTime >= evt->event_time,
+  ASSERT(supervisor->mCreationEventTime >= evt->mEventTime,
          "Event time is before the creation of this supervisor?");
-  sLastTraceEventTime = std::max<int>(0, evt->event_time);
+  sLastTraceEventTime = std::max<int>(0, evt->mEventTime);
   if (!supervisor) {
     // out-of-order wait status; defer & wait for complete initilization of new supervisor
     TODO("not impl");
@@ -258,10 +258,10 @@ Tracer::HandleInternalEvent(InternalEvent evt) noexcept
 void
 Tracer::HandleInitEvent(TraceEvent *evt) noexcept
 {
-  auto tc = GetController(evt->target);
-  ASSERT(tc, "Expected to have tracee controller for {}", evt->target);
+  auto tc = GetController(evt->mProcessId);
+  ASSERT(tc, "Expected to have tracee controller for {}", evt->mProcessId);
   tc->HandleTracerEvent(evt);
-  tc->EmitStopped(evt->tid, ui::dap::StoppedReason::Entry, "attached", true, {});
+  tc->EmitStopped(evt->mTaskId, ui::dap::StoppedReason::Entry, "attached", true, {});
 }
 
 #define ReturnEvalExprError(errorCondition, msg, ...)                                                             \
@@ -294,15 +294,15 @@ Tracer::KillUI() noexcept
 }
 
 static int
-exec(const Path &program, std::span<const std::string> prog_args, char **env)
+exec(const Path &program, std::span<const std::string> programArguments, char **env)
 {
-  const auto arg_size = prog_args.size() + 2;
+  const auto arg_size = programArguments.size() + 2;
   std::vector<const char *> args;
   args.resize(arg_size, nullptr);
   const char *cmd = program.c_str();
   args[0] = cmd;
   auto idx = 1;
-  for (const auto &arg : prog_args) {
+  for (const auto &arg : programArguments) {
     args[idx++] = arg.c_str();
   }
   environ = env;
@@ -391,13 +391,13 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId
               }
             };
 
-            auto main_connection = mDAP->Get();
-            hookupDapWithRemote(std::move(it->tc), main_connection, false);
-            main_connection->SetDebugAdapterSessionType(
+            auto mainConnection = mDAP->Get();
+            hookupDapWithRemote(std::move(it->tc), mainConnection, false);
+            mainConnection->SetDebugAdapterSessionType(
               (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
             ++it;
             for (; it != std::end(res); ++it) {
-              hookupDapWithRemote(std::move(it->tc), main_connection, true);
+              hookupDapWithRemote(std::move(it->tc), mainConnection, true);
             }
             return firstAttachedId;
           }},
@@ -418,11 +418,11 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::strin
                const Path &program, std::span<const std::string> prog_args,
                std::optional<BreakpointBehavior> breakpointBehavior) noexcept
 {
-  termios original_tty;
+  termios originalTty;
   winsize ws;
 
-  bool could_set_term_settings = (tcgetattr(STDIN_FILENO, &original_tty) != -1);
-  if (could_set_term_settings) {
+  bool couldSetTermSettings = (tcgetattr(STDIN_FILENO, &originalTty) != -1);
+  if (couldSetTermSettings) {
     VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
   }
 
@@ -441,12 +441,12 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::strin
       DBGLOG(core, "env={}", env);
     }
   }
-  const auto fork_result =
-    pty_fork(false, could_set_term_settings ? &original_tty : nullptr, could_set_term_settings ? &ws : nullptr);
+  const auto forkResult =
+    ptyFork(false, couldSetTermSettings ? &originalTty : nullptr, couldSetTermSettings ? &ws : nullptr);
   // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process
   //  I'd much rather like a "stub" process to exec from, that gets handed to us by some "Fork server" thing,
   //  but the logic for that is way more complex and I'm not really interested in solving that problem right now.
-  switch (fork_result.index()) {
+  switch (forkResult.index()) {
   case 0: // child
   {
     if (personality(ADDR_NO_RANDOMIZE) == -1) {
@@ -477,13 +477,13 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::strin
   default: {
     pid_t childPid = 0;
     std::optional<int> ttyFd = std::nullopt;
-    if (fork_result.index() == 1) {
-      const auto res = get<PtyParentResult>(fork_result);
-      childPid = res.pid;
-      ttyFd = res.fd;
+    if (forkResult.index() == 1) {
+      const auto res = get<PtyParentResult>(forkResult);
+      childPid = res.mPid;
+      ttyFd = res.mFd;
     } else {
-      const auto res = get<ParentResult>(fork_result);
-      childPid = res.child_pid;
+      const auto res = get<ParentResult>(forkResult);
+      childPid = res.mChildPid;
     }
 
     const auto leader = childPid;
@@ -538,12 +538,11 @@ Tracer::ConnectToRemoteGdb(const tc::GdbRemoteCfg &config,
                            const std::optional<gdb::RemoteSettings> &settings) noexcept
 {
   for (auto &t : mTracedProcesses) {
-    if (auto conn = t->GetInterface().RemoteConnection();
-        conn && conn->is_connected_to(config.host, config.port)) {
+    if (auto conn = t->GetInterface().RemoteConnection(); conn && conn->IsConnectedTo(config.host, config.port)) {
       return conn;
     }
   }
-  auto connection = gdb::RemoteConnection::connect(config.host, config.port, settings);
+  auto connection = gdb::RemoteConnection::Connect(config.host, config.port, settings);
   if (connection.is_error()) {
     DBGLOG(core, "failed to connect to {}:{}", config.host, config.port);
     PANIC("Exiting after hard failure");
@@ -551,10 +550,11 @@ Tracer::ConnectToRemoteGdb(const tc::GdbRemoteCfg &config,
   return connection.take_value();
 }
 
-u32
+/*static */ u32
 Tracer::GenerateNewBreakpointId() noexcept
 {
-  return ++mBreakpointID;
+  Get().mBreakpointID++;
+  return Get().mBreakpointID;
 }
 
 VariableReferenceId
@@ -799,10 +799,10 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *script
 #ifdef MDB_DEBUG
         Tracer::Get().DebuggerEventCount()++;
 #endif
-        switch (evt.type) {
+        switch (evt.mEventType) {
         case EventType::WaitStatus: {
-          DBGLOG(awaiter, "stop for {}: {}", evt.uWait.wait.tid, to_str(evt.uWait.wait.ws.ws));
-          if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.wait); dbg_evt) {
+          DBGLOG(awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, to_str(evt.uWait.mWaitResult.ws.ws));
+          if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.mWaitResult); dbg_evt) {
             Tracer::Get().HandleTracerEvent(dbg_evt);
           }
         } break;

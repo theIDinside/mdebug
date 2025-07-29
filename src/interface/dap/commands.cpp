@@ -129,21 +129,21 @@ ErrorResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{"error":{}}}}})",
-      seq, request_seq, mPid, command, *short_message, m);
+      seq, requestSeq, mPid, command, *short_message, m);
   } else if (short_message && !message) {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
-      seq, request_seq, mPid, command, *short_message);
+      seq, requestSeq, mPid, command, *short_message);
   } else if (!short_message && message) {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
-      seq, request_seq, mPid, command, *message);
+      seq, requestSeq, mPid, command, *message);
   } else {
     fmt::format_to(
       outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}"}})",
-      seq, request_seq, mPid, command);
+      seq, requestSeq, mPid, command);
   }
   return result;
 }
@@ -156,12 +156,12 @@ PauseResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) con
   if (success) {
     fmt::format_to(
       outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"pause"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   } else {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   }
   return result;
 }
@@ -190,12 +190,12 @@ ReverseContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllo
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
-      seq, request_seq, mPid, continue_all);
+      seq, requestSeq, mPid, continue_all);
   } else {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   }
   return result;
 }
@@ -212,8 +212,9 @@ ReverseContinue::Execute() noexcept
   // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
   // _any_ target, and use that to resume backwards (since RR is the controller.).
   ASSERT(target, "must have target.");
-  auto ok = target->ReverseResumeTarget(tc::ResumeAction{
-    .type = tc::RunType::Continue, .target = tc::ResumeTarget::AllNonRunningInProcess, .mDeliverSignal = 0});
+  auto ok = target->ReverseResumeTarget(tc::ResumeAction{.mResumeType = tc::RunType::Continue,
+                                                         .mResumeTarget = tc::ResumeTarget::AllNonRunningInProcess,
+                                                         .mDeliverSignal = 0});
   res->success = ok;
   return res;
 }
@@ -227,12 +228,12 @@ ContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
-      seq, request_seq, mPid, continue_all);
+      seq, requestSeq, mPid, continue_all);
   } else {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   }
   return result;
 }
@@ -277,12 +278,12 @@ NextResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
   if (success) {
     fmt::format_to(
       outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"next"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   } else {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   }
   return result;
 }
@@ -324,7 +325,7 @@ StepBackResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepBack"}})", seq,
-      request_seq, mPid);
+      requestSeq, mPid);
   } else {
     std::string_view error;
     switch (mResult) {
@@ -340,7 +341,7 @@ StepBackResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepBack","message":"{}"}})",
-      seq, request_seq, mPid, error);
+      seq, requestSeq, mPid, error);
   }
   return result;
 }
@@ -359,8 +360,9 @@ StepBack::Execute() noexcept
     return new StepBackResponse{StepBackResponse::Result::NotStopped, this};
   }
 
-  target->ReverseResumeTarget(tc::ResumeAction{
-    .type = tc::RunType::Step, .target = tc::ResumeTarget::AllNonRunningInProcess, .mDeliverSignal = 0});
+  target->ReverseResumeTarget(tc::ResumeAction{.mResumeType = tc::RunType::Step,
+                                               .mResumeTarget = tc::ResumeTarget::AllNonRunningInProcess,
+                                               .mDeliverSignal = 0});
   return new StepBackResponse{StepBackResponse::Result::Success, this};
 }
 
@@ -373,12 +375,12 @@ StepInResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   if (success) {
     fmt::format_to(
       outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepIn"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   } else {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   }
   return result;
 }
@@ -394,7 +396,7 @@ StepIn::Execute() noexcept
     return new StepInResponse{false, this};
   }
 
-  auto proceeder = ptracestop::StepInto::create(*target, *task);
+  auto proceeder = ptracestop::StepInto::Create(*target, *task);
 
   if (!proceeder) {
     return new ErrorResponse{
@@ -417,12 +419,12 @@ StepOutResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepOut"}})", seq,
-      request_seq, mPid);
+      requestSeq, mPid);
   } else {
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
   }
   return result;
 }
@@ -444,8 +446,8 @@ StepOut::Execute() noexcept
   if (!loc.is_expected()) {
     return new StepOutResponse{false, this};
   }
-  auto user = target->GetUserBreakpoints().create_loc_user<FinishBreakpoint>(*target, std::move(loc), task->mTid,
-                                                                             task->mTid);
+  auto user = target->GetUserBreakpoints().CreateBreakpointLocationUser<FinishBreakpoint>(*target, std::move(loc),
+                                                                                          task->mTid, task->mTid);
   bool success = target->SetAndCallRunAction(
     task->mTid, std::make_shared<ptracestop::FinishFunction>(*target, *task, user, false));
   return new StepOutResponse{success, this};
@@ -466,32 +468,32 @@ SetBreakpointsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAlloc
   std::pmr::vector<std::pmr::string> serialized_bkpts{arenaAllocator};
   serialized_bkpts.reserve(mBreakpoints.size());
   for (auto &bp : mBreakpoints) {
-    serialized_bkpts.push_back(bp.serialize(arenaAllocator));
+    serialized_bkpts.push_back(bp.Serialize(arenaAllocator));
   }
   switch (this->mType) {
   case BreakpointRequestKind::source:
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, mPid, fmt::join(serialized_bkpts, ","));
+      seq, requestSeq, mPid, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::function:
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, mPid, fmt::join(serialized_bkpts, ","));
+      seq, requestSeq, mPid, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::instruction:
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, mPid, fmt::join(serialized_bkpts, ","));
+      seq, requestSeq, mPid, fmt::join(serialized_bkpts, ","));
     break;
   case BreakpointRequestKind::exception:
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
-      seq, request_seq, mPid, success, fmt::join(serialized_bkpts, ","));
+      seq, requestSeq, mPid, success, fmt::join(serialized_bkpts, ","));
     break;
   default:
     PANIC("DAP doesn't expect Tracer breakpoints");
@@ -539,10 +541,10 @@ SetBreakpoints::Execute() noexcept
 
   using BP = ui::dap::Breakpoint;
 
-  for (const auto &[bp, ids] : target->GetUserBreakpoints().bps_for_source(file)) {
+  for (const auto &[bp, ids] : target->GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
     for (const auto id : ids) {
       const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
-      res->AddBreakpoint(BP::from_user_bp(*user));
+      res->AddBreakpoint(BP::CreateFromUserBreakpoint(*user));
     }
   }
 
@@ -589,10 +591,10 @@ SetInstructionBreakpoints::Execute() noexcept
 
   auto res = new SetBreakpointsResponse{true, this, BreakpointRequestKind::instruction};
   auto &userBreakpoints = target->GetUserBreakpoints();
-  res->mBreakpoints.reserve(userBreakpoints.instruction_breakpoints.size());
+  res->mBreakpoints.reserve(userBreakpoints.mInstructionBreakpoints.size());
 
-  for (const auto &[k, id] : userBreakpoints.instruction_breakpoints) {
-    res->AddBreakpoint(BP::from_user_bp(*userBreakpoints.GetUserBreakpoint(id)));
+  for (const auto &[k, id] : userBreakpoints.mInstructionBreakpoints) {
+    res->AddBreakpoint(BP::CreateFromUserBreakpoint(*userBreakpoints.GetUserBreakpoint(id)));
   }
 
   res->success = true;
@@ -631,7 +633,7 @@ SetFunctionBreakpoints::Execute() noexcept
   target->SetFunctionBreakpoints(bkpts);
   for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
     if (user->mKind == LocationUserKind::Function) {
-      res->AddBreakpoint(BP::from_user_bp(*user));
+      res->AddBreakpoint(BP::CreateFromUserBreakpoint(*user));
     }
   }
   res->success = true;
@@ -647,7 +649,7 @@ WriteMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
-    seq, request_seq, mPid, success, bytes_written);
+    seq, requestSeq, mPid, success, bytes_written);
   return result;
 }
 
@@ -666,9 +668,9 @@ WriteMemory::Execute() noexcept
   response->bytes_written = 0;
   if (address) {
     const auto result = target->GetInterface().WriteBytes(address.value(), bytes.data(), bytes.size());
-    response->success = result.success;
-    if (result.success) {
-      response->bytes_written = result.bytes_written;
+    response->success = result.mWasSuccessful;
+    if (result.mWasSuccessful) {
+      response->bytes_written = result.uBytesWritten;
     }
   }
 
@@ -685,7 +687,7 @@ ReadMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
     fmt::format_to(
       outIt,
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
-      seq, request_seq, mPid, first_readable_address, unreadable_bytes, data_base64);
+      seq, requestSeq, mPid, first_readable_address, unreadable_bytes, data_base64);
   } else {
     TODO("non-success for ReadMemory");
   }
@@ -724,7 +726,7 @@ ConfigurationDoneResponse::Serialize(int seq, std::pmr::memory_resource *arenaAl
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"configurationDone"}})",
-    seq, request_seq, mPid);
+    seq, requestSeq, mPid);
   return result;
 }
 
@@ -769,12 +771,12 @@ DisconnectResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disconnect"}})", seq,
-    request_seq, mPid);
+    requestSeq, mPid);
   return result;
 }
 
-Disconnect::Disconnect(UICommandArg arg, bool restart, bool terminate_debuggee, bool suspend_debuggee) noexcept
-    : UICommand{arg}, restart(restart), mTerminateTracee(terminate_debuggee), mSuspendTracee(suspend_debuggee)
+Disconnect::Disconnect(UICommandArg arg, bool restart, bool terminateDebuggee, bool suspendDebuggee) noexcept
+    : UICommand{arg}, restart(restart), mTerminateTracee(terminateDebuggee), mSuspendTracee(suspendDebuggee)
 {
 }
 
@@ -877,7 +879,7 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
   fmt::format_to(
     std::back_inserter(res),
     R"({{"seq":0,"request_seq":{},"processId":"{}","type":"response","success":true,"command":"initialize","body":{}}})",
-    request_seq, mSessionId, cfg_body.dump());
+    requestSeq, mSessionId, cfg_body.dump());
   return res;
 }
 
@@ -890,13 +892,13 @@ LaunchResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {}}}}})",
-    seq, request_seq, mPid,
+    seq, requestSeq, mPid,
     mProcessId.and_then([](pid_t value) -> std::optional<std::string> { return fmt::format("{}", value); })
       .value_or("null"));
   return result;
 }
 
-Launch::Launch(UICommandArg arg, SessionId &&id, bool stopOnEntry, Path &&program,
+Launch::Launch(UICommandArg arg, SessionId &&id, bool stopOnEntry, Path program,
                std::vector<std::string> &&program_args,
                std::optional<BreakpointBehavior> breakpointBehavior) noexcept
     : UICommand{arg}, mStopOnEntry{stopOnEntry}, mProgram{std::move(program)},
@@ -926,11 +928,11 @@ AttachResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   auto outIt = std::back_inserter(result);
   fmt::format_to(
     outIt, R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"attach"}})",
-    seq, request_seq, mPid);
+    seq, requestSeq, mPid);
   return result;
 }
 
-Attach::Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs &&args) noexcept
+Attach::Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs args) noexcept
     : UICommand{arg}, mRequestingSessionId{std::move(sessionId)}, attachArgs{std::move(args)}
 {
 }
@@ -953,7 +955,7 @@ TerminateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"terminate"}})", seq,
-    request_seq, mPid);
+    requestSeq, mPid);
   return result;
 }
 
@@ -973,7 +975,7 @@ ThreadsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
-    seq, request_seq, mPid, fmt::join(threads, ","));
+    seq, requestSeq, mPid, fmt::join(threads, ","));
   return result;
 }
 
@@ -1001,19 +1003,19 @@ Threads::Execute() noexcept
 
   for (const auto &entry : target->GetThreads()) {
     const auto tid = entry.mTid;
-    response->threads.push_back(Thread{.id = tid, .name = it.GetThreadName(tid)});
+    response->threads.push_back(Thread{.mThreadId = tid, .mName = it.GetThreadName(tid)});
   }
   return response;
 }
 
 StackTrace::StackTrace(UICommandArg arg, int threadId, std::optional<int> startFrame, std::optional<int> levels,
                        std::optional<StackTraceFormat> format) noexcept
-    : UICommand{arg}, threadId(threadId), startFrame(startFrame), levels(levels), format(format)
+    : UICommand{arg}, mThreadId(threadId), mStartFrame(startFrame), mLevels(levels), mFormat(format)
 {
 }
 
 StackTraceResponse::StackTraceResponse(bool success, StackTrace *cmd,
-                                       std::vector<StackFrame> &&stack_frames) noexcept
+                                       std::vector<StackFrame> stack_frames) noexcept
     : UIResult(success, cmd), stack_frames(std::move(stack_frames))
 {
 }
@@ -1030,7 +1032,7 @@ StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
-    seq, request_seq, mPid, fmt::join(stack_frames, ","));
+    seq, requestSeq, mPid, fmt::join(stack_frames, ","));
   return result;
 }
 
@@ -1040,55 +1042,55 @@ StackTrace::Execute() noexcept
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   GetOrSendError(target);
   PROFILE_BEGIN_ARGS("StackTrace", "command", PEARG("seq", seq));
-  auto task = target->GetTaskByTid(threadId);
+  auto task = target->GetTaskByTid(mThreadId);
   if (task == nullptr) {
-    return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", threadId), {}};
+    return new ErrorResponse{StackTrace::Request, this, fmt::format("Thread with ID {} not found", mThreadId), {}};
   }
   auto &cfs = target->BuildCallFrameStack(*task, CallStackRequest::full());
-  std::vector<StackFrame> stack_frames{};
-  stack_frames.reserve(cfs.FramesCount());
+  std::vector<StackFrame> stackFrames{};
+  stackFrames.reserve(cfs.FramesCount());
   for (auto &frame : cfs.GetFrames()) {
     if (frame.GetFrameType() == sym::FrameType::Full) {
       const auto [src, lte] = frame.GetLineTableEntry();
       if (src && lte) {
-        stack_frames.push_back(
-          StackFrame{.id = frame.FrameId(),
-                     .name = frame.Name().value_or("unknown"),
-                     .source = Source{.name = src->mFullPath.StringView(), .path = src->mFullPath.StringView()},
-                     .line = static_cast<int>(lte->line),
-                     .column = static_cast<int>(lte->column),
-                     .rip = fmt::format("{}", frame.FramePc())});
+        stackFrames.push_back(
+          StackFrame{.mVariablesReference = frame.FrameId(),
+                     .mName = frame.Name().value_or("unknown"),
+                     .mSource = Source{.name = src->mFullPath.StringView(), .path = src->mFullPath.StringView()},
+                     .mLine = static_cast<int>(lte->line),
+                     .mColumn = static_cast<int>(lte->column),
+                     .mProgramCounter = fmt::format("{}", frame.FramePc())});
       } else if (src) {
-        stack_frames.push_back(
-          StackFrame{.id = frame.FrameId(),
-                     .name = frame.Name().value_or("unknown"),
-                     .source = Source{.name = src->mFullPath.StringView(), .path = src->mFullPath.StringView()},
-                     .line = 0,
-                     .column = 0,
-                     .rip = fmt::format("{}", frame.FramePc())});
+        stackFrames.push_back(
+          StackFrame{.mVariablesReference = frame.FrameId(),
+                     .mName = frame.Name().value_or("unknown"),
+                     .mSource = Source{.name = src->mFullPath.StringView(), .path = src->mFullPath.StringView()},
+                     .mLine = 0,
+                     .mColumn = 0,
+                     .mProgramCounter = fmt::format("{}", frame.FramePc())});
       } else {
-        stack_frames.push_back(StackFrame{.id = frame.FrameId(),
-                                          .name = frame.Name().value_or("unknown"),
-                                          .source = std::nullopt,
-                                          .line = 0,
-                                          .column = 0,
-                                          .rip = fmt::format("{}", frame.FramePc())});
+        stackFrames.push_back(StackFrame{.mVariablesReference = frame.FrameId(),
+                                         .mName = frame.Name().value_or("unknown"),
+                                         .mSource = std::nullopt,
+                                         .mLine = 0,
+                                         .mColumn = 0,
+                                         .mProgramCounter = fmt::format("{}", frame.FramePc())});
       }
 
     } else {
-      stack_frames.push_back(StackFrame{.id = frame.FrameId(),
-                                        .name = frame.Name().value_or("unknown"),
-                                        .source = std::nullopt,
-                                        .line = 0,
-                                        .column = 0,
-                                        .rip = fmt::format("{}", frame.FramePc())});
+      stackFrames.push_back(StackFrame{.mVariablesReference = frame.FrameId(),
+                                       .mName = frame.Name().value_or("unknown"),
+                                       .mSource = std::nullopt,
+                                       .mLine = 0,
+                                       .mColumn = 0,
+                                       .mProgramCounter = fmt::format("{}", frame.FramePc())});
     }
   }
-  PROFILE_END_ARGS("StackTrace", "command", PEARG("frames", stack_frames.size()));
-  return new StackTraceResponse{true, this, std::move(stack_frames)};
+  PROFILE_END_ARGS("StackTrace", "command", PEARG("frames", stackFrames.size()));
+  return new StackTraceResponse{true, this, std::move(stackFrames)};
 }
 
-Scopes::Scopes(UICommandArg arg, int frameId) noexcept : UICommand{arg}, frameId(frameId) {}
+Scopes::Scopes(UICommandArg arg, int frameId) noexcept : UICommand{arg}, mFrameId(frameId) {}
 
 std::pmr::string
 ScopesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
@@ -1099,7 +1101,7 @@ ScopesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
-    seq, request_seq, mPid, fmt::join(scopes, ","));
+    seq, requestSeq, mPid, fmt::join(scopes, ","));
   return result;
 }
 
@@ -1111,11 +1113,11 @@ ScopesResponse::ScopesResponse(bool success, Scopes *cmd, std::array<Scope, 3> s
 UIResultPtr
 Scopes::Execute() noexcept
 {
-  auto ctx = Tracer::Get().GetVariableContext(frameId);
+  auto ctx = Tracer::Get().GetVariableContext(mFrameId);
   if (!ctx || !ctx->IsValidContext() || ctx->mType != ContextType::Frame) {
-    return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", frameId), {}};
+    return new ErrorResponse{Request, this, fmt::format("Invalid variable context for {}", mFrameId), {}};
   }
-  auto frame = ctx->GetFrame(frameId);
+  auto frame = ctx->GetFrame(mFrameId);
   if (!frame) {
     return new ScopesResponse{false, this, {}};
   }
@@ -1123,47 +1125,47 @@ Scopes::Execute() noexcept
   return new ScopesResponse{true, this, scopes};
 }
 
-Disassemble::Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byte_offset, int ins_offset,
-                         int ins_count, bool resolve_symbols) noexcept
-    : UICommand{arg}, address(address), byte_offset(byte_offset), ins_offset(ins_offset), ins_count(ins_count),
-      resolve_symbols(resolve_symbols)
+Disassemble::Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byteOffset, int instructionOffset,
+                         int instructionCount, bool resolveSymbols) noexcept
+    : UICommand{arg}, mAddress(address), mByteOffset(byteOffset), mInstructionOffset(instructionOffset),
+      ins_count(instructionCount), mResolveSymbols(resolveSymbols)
 {
 }
 
 UIResultPtr
 Disassemble::Execute() noexcept
 {
-  if (address) {
+  if (mAddress) {
     GetOrSendError(target);
     auto res = new DisassembleResponse{true, this};
-    res->instructions.reserve(ins_count);
+    res->mInstructions.reserve(ins_count);
     int remaining = ins_count;
-    if (ins_offset < 0) {
-      const int negative_offset = std::abs(ins_offset);
-      sym::zydis_disasm_backwards(target, address.value(), static_cast<u32>(negative_offset), res->instructions);
+    if (mInstructionOffset < 0) {
+      const int negative_offset = std::abs(mInstructionOffset);
+      sym::zydis_disasm_backwards(target, mAddress.value(), static_cast<u32>(negative_offset), res->mInstructions);
       if (negative_offset < ins_count) {
-        for (auto i = 0u; i < res->instructions.size(); i++) {
-          if (res->instructions[i].address == address) {
-            keep_range(res->instructions, i - negative_offset, i);
+        for (auto i = 0u; i < res->mInstructions.size(); i++) {
+          if (res->mInstructions[i].address == mAddress) {
+            keep_range(res->mInstructions, i - negative_offset, i);
             break;
           }
         }
       } else {
-        for (auto i = 0u; i < res->instructions.size(); i++) {
-          if (res->instructions[i].address == address) {
-            keep_range(res->instructions, i - negative_offset, i - negative_offset + ins_count);
+        for (auto i = 0u; i < res->mInstructions.size(); i++) {
+          if (res->mInstructions[i].address == mAddress) {
+            keep_range(res->mInstructions, i - negative_offset, i - negative_offset + ins_count);
             break;
           }
         }
         return res;
       }
-      remaining -= res->instructions.size();
-      ins_offset = 0;
+      remaining -= res->mInstructions.size();
+      mInstructionOffset = 0;
     }
 
     if (remaining > 0) {
-      sym::zydis_disasm(target, address.value(), static_cast<u32>(std::abs(ins_offset)), remaining,
-                        res->instructions);
+      sym::zydis_disasm(target, mAddress.value(), static_cast<u32>(std::abs(mInstructionOffset)), remaining,
+                        res->mInstructions);
     }
     return res;
   } else {
@@ -1175,14 +1177,14 @@ std::pmr::string
 DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   std::pmr::string result{arenaAllocator};
-  result.reserve(256 + (256 * instructions.size()));
+  result.reserve(256 + (256 * mInstructions.size()));
   auto outIt = std::back_inserter(result);
   auto it = fmt::format_to(
     outIt,
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[)",
-    seq, request_seq, mPid);
+    seq, requestSeq, mPid);
   auto count = 0;
-  for (const auto &inst : instructions) {
+  for (const auto &inst : mInstructions) {
     if (count > 0) {
       *it++ = ',';
     }
@@ -1193,7 +1195,7 @@ DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   return result;
 }
 
-Evaluate::Evaluate(UICommandArg arg, std::string &&expression, std::optional<int> frameId,
+Evaluate::Evaluate(UICommandArg arg, std::string expression, std::optional<int> frameId,
                    std::optional<EvaluationContext> context) noexcept
     : UICommand{arg}, expr(std::move(expression)), frameId(frameId),
       context(context.value_or(EvaluationContext::Watch))
@@ -1222,7 +1224,7 @@ Evaluate::Execute() noexcept
 }
 
 EvaluationContext
-Evaluate::parse_context(std::string_view input) noexcept
+Evaluate::ParseContext(std::string_view input) noexcept
 {
 
   static constexpr auto contexts = {
@@ -1254,7 +1256,7 @@ Evaluate::PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args)
 
   std::string_view context;
   args.at("context").get_to(context);
-  ctx = Evaluate::parse_context(context);
+  ctx = Evaluate::ParseContext(context);
 
   return new ui::dap::Evaluate{arg, std::move(expr), frameId, ctx};
 }
@@ -1262,8 +1264,8 @@ Evaluate::PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args)
 EvaluateResponse::EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference,
                                    std::pmr::string *evalResult, std::optional<std::string> &&type,
                                    std::optional<std::string> &&memoryReference) noexcept
-    : UIResult(success, cmd), result(evalResult), type(std::move(type)),
-      variablesReference(variablesReference.value_or(0)), memoryReference(std::move(memoryReference))
+    : UIResult(success, cmd), mResult(evalResult), mType(std::move(type)),
+      mVariablesReference(variablesReference.value_or(0)), mMemoryReference(std::move(memoryReference))
 {
 }
 
@@ -1276,19 +1278,19 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
     fmt::format_to(
       std::back_inserter(evalResponseResult),
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
-      seq, request_seq, mPid, DebugAdapterProtocolString{*result}, variablesReference);
+      seq, requestSeq, mPid, DebugAdapterProtocolString{*mResult}, mVariablesReference);
   } else {
     fmt::format_to(
       std::back_inserter(evalResponseResult),
       R"({{"seq":0,"request_seq":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
-      request_seq, success, DebugAdapterProtocolString{*result});
+      requestSeq, success, DebugAdapterProtocolString{*mResult});
   }
   return evalResponseResult;
 }
 
 Variables::Variables(UICommandArg arg, VariableReferenceId var_ref, std::optional<u32> start,
                      std::optional<u32> count) noexcept
-    : UICommand{arg}, mVariablesReferenceId(var_ref), start(start), count(count)
+    : UICommand{arg}, mVariablesReferenceId(var_ref), mStart(start), mCount(count)
 {
 }
 
@@ -1337,7 +1339,7 @@ Variables::Execute() noexcept
     }
   } break;
   case ContextType::Variable:
-    return new VariablesResponse{true, this, context.mSymbolFile->ResolveVariable(context, start, count)};
+    return new VariablesResponse{true, this, context.mSymbolFile->ResolveVariable(context, mStart, mCount)};
   case ContextType::Global:
     TODO("Global variables not yet implemented support for");
     break;
@@ -1347,8 +1349,8 @@ Variables::Execute() noexcept
 }
 
 VariablesResponse::VariablesResponse(bool success, Variables *cmd, std::vector<Ref<sym::Value>> &&vars) noexcept
-    : UIResult(success, cmd), requested_reference(cmd != nullptr ? cmd->mVariablesReferenceId : 0),
-      variables(std::move(vars))
+    : UIResult(success, cmd), mRequestedReference(cmd != nullptr ? cmd->mVariablesReferenceId : 0),
+      mVariables(std::move(vars))
 {
 }
 
@@ -1359,18 +1361,18 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
 {
   PROFILE_SCOPE_ARGS("VariablesResponse", "command", PEARG("seq", int64_t{seq}));
   std::pmr::string result{arenaAllocator};
-  result.reserve(256 + (256 * variables.size()));
-  if (variables.empty()) {
+  result.reserve(256 + (256 * mVariables.size()));
+  if (mVariables.empty()) {
     fmt::format_to(
       std::back_inserter(result),
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
-      seq, request_seq, mPid);
+      seq, requestSeq, mPid);
     return result;
   }
   std::pmr::string variables_contents{arenaAllocator};
   variables_contents.reserve(256 * variables_contents.size());
   auto it = std::back_inserter(variables_contents);
-  for (const auto &v : variables) {
+  for (const auto &v : mVariables) {
     if (auto datvis = v->GetVisualizer(); datvis != nullptr) {
 
       auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), arenaAllocator);
@@ -1380,7 +1382,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
         fmt::format_to(
           std::back_inserter(result),
           R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
-          seq, request_seq, mPid, v->mName);
+          seq, requestSeq, mPid, v->mName);
         return result;
       }
     } else {
@@ -1405,7 +1407,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   fmt::format_to(
     std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
-    seq, request_seq, mPid, variables_contents);
+    seq, requestSeq, mPid, variables_contents);
   return result;
 }
 
@@ -1489,18 +1491,18 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     IfInvalidArgsReturn(Disconnect);
 
     bool restart = false;
-    bool terminate_debuggee = false;
-    bool suspend_debuggee = false;
+    bool terminateDebuggee = false;
+    bool suspendDebuggee = false;
     if (args.contains("restart")) {
       restart = args.at("restart");
     }
     if (args.contains("terminateDebuggee")) {
-      terminate_debuggee = args.at("terminateDebuggee");
+      terminateDebuggee = args.at("terminateDebuggee");
     }
     if (args.contains("suspendDebuggee")) {
-      suspend_debuggee = args.at("suspendDebuggee");
+      suspendDebuggee = args.at("suspendDebuggee");
     }
-    return new Disconnect{arg, restart, terminate_debuggee, suspend_debuggee};
+    return new Disconnect{arg, restart, terminateDebuggee, suspendDebuggee};
   }
   case CommandType::Evaluate: {
     return Evaluate::PrepareEvaluateCommand(arg, args);
@@ -1559,30 +1561,30 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::Next: {
     IfInvalidArgsReturn(Next);
 
-    int thread_id = args["threadId"];
-    bool single_thread = false;
-    SteppingGranularity step_type = SteppingGranularity::Line;
+    int threadId = args["threadId"];
+    bool singleThread = false;
+    SteppingGranularity stepType = SteppingGranularity::Line;
     if (args.contains("granularity")) {
       std::string_view str_arg;
       args["granularity"].get_to(str_arg);
-      step_type = from_str(str_arg);
+      stepType = from_str(str_arg);
     }
     if (args.contains("singleThread")) {
-      single_thread = args["singleThread"];
+      singleThread = args["singleThread"];
     }
-    return new Next{arg, thread_id, !single_thread, step_type};
+    return new Next{arg, threadId, !singleThread, stepType};
   }
   case CommandType::Pause: {
     IfInvalidArgsReturn(Pause);
-    int thread_id = args["threadId"];
-    return new Pause(arg, Pause::Args{thread_id});
+    int threadId = args["threadId"];
+    return new Pause(arg, Pause::Args{threadId});
   }
   case CommandType::ReadMemory: {
     IfInvalidArgsReturn(ReadMemory);
 
-    std::string_view addr_str;
-    args.at("memoryReference").get_to(addr_str);
-    const auto addr = ToAddress(addr_str);
+    std::string_view addrString;
+    args.at("memoryReference").get_to(addrString);
+    const auto addr = ToAddress(addrString);
     const auto offset = args.value("offset", 0);
     const u64 count = args.at("count");
     return new ui::dap::ReadMemory{arg, addr, offset, count};
@@ -1593,8 +1595,8 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     TODO("Command::RestartFrame");
   case CommandType::ReverseContinue: {
     IfInvalidArgsReturn(ReverseContinue);
-    int thread_id = args["threadId"];
-    return new ui::dap::ReverseContinue{arg, thread_id};
+    int threadId = args["threadId"];
+    return new ui::dap::ReverseContinue{arg, threadId};
   }
   case CommandType::Scopes: {
     IfInvalidArgsReturn(Scopes);
@@ -1657,8 +1659,8 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::StepIn: {
     IfInvalidArgsReturn(StepIn);
 
-    int thread_id = args["threadId"];
-    bool single_thread = false;
+    int threadId = args["threadId"];
+    bool singleThread = false;
     SteppingGranularity step_type = SteppingGranularity::Line;
     if (args.contains("granularity")) {
       std::string_view str_arg;
@@ -1666,22 +1668,22 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
       step_type = from_str(str_arg);
     }
     if (args.contains("singleThread")) {
-      single_thread = args["singleThread"];
+      singleThread = args["singleThread"];
     }
 
-    return new StepIn{arg, thread_id, single_thread, step_type};
+    return new StepIn{arg, threadId, singleThread, step_type};
   }
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
   case CommandType::StepOut: {
     IfInvalidArgsReturn(StepOut);
 
-    int thread_id = args["threadId"];
-    bool single_thread = false;
+    int threadId = args["threadId"];
+    bool singleThread = false;
     if (args.contains("singleThread")) {
-      single_thread = args["singleThread"];
+      singleThread = args["singleThread"];
     }
-    return new ui::dap::StepOut{arg, thread_id, !single_thread};
+    return new ui::dap::StepOut{arg, threadId, !singleThread};
   }
   case CommandType::Terminate:
     IfInvalidArgsReturn(Terminate);

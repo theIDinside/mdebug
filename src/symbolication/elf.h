@@ -108,22 +108,21 @@ public:
   static void ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept;
   bool AddressesNeedsRelocation() const noexcept;
 
-  Elf64Header *header;
+  Elf64Header *mElfHeader;
   Immutable<std::vector<ElfSection>> mSections;
-  // ObjectFile &obj_file;
 
-  const ElfSection *str_table;
+  const ElfSection *mStrTable;
   // Dwarf Sections, might as well keep direct pointers to them
-  const ElfSection *debug_info;
-  const ElfSection *debug_abbrev;
-  const ElfSection *debug_str;
-  const ElfSection *debug_line_str;
-  const ElfSection *debug_ranges;
-  const ElfSection *debug_aranges;
-  const ElfSection *debug_line;
-  const ElfSection *debug_addr;
-  const ElfSection *debug_str_offsets;
-  const ElfSection *debug_rnglists;
-  const ElfSection *debug_loclist;
+  const ElfSection *mDebugInfo;
+  const ElfSection *mDebugAbbrev;
+  const ElfSection *mDebugStr;
+  const ElfSection *mDebugLineStr;
+  const ElfSection *mDebugRanges;
+  const ElfSection *mDebugAranges;
+  const ElfSection *mDebugLine;
+  const ElfSection *mDebugAddr;
+  const ElfSection *mDebugStrOffsets;
+  const ElfSection *mDebugRnglists;
+  const ElfSection *mDebugLoclist;
 };
 } // namespace mdb

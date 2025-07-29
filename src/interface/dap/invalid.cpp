@@ -16,7 +16,7 @@ std::pmr::string
 InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   std::pmr::vector<std::string_view> missing{arenaAllocator};
-  std::pmr::vector<const InvalidArg *> parsed_and_invalid{arenaAllocator};
+  std::pmr::vector<const InvalidArg *> parsedAndInvalid{arenaAllocator};
   missing.reserve(missing_or_invalid.size());
   for (const auto &pair : missing_or_invalid) {
     const auto &[k, v] = pair;
@@ -25,7 +25,7 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
       missing.push_back(v);
       break;
     case ArgumentErrorKind::InvalidInput:
-      parsed_and_invalid.push_back(&pair);
+      parsedAndInvalid.push_back(&pair);
       break;
     }
   }
@@ -34,7 +34,7 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   auto formatIter = fmt::format_to(
     std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"Invalid request made. Arguments missing or of invalid type.", "body": {{)",
-    seq, request_seq, mProcessId, command);
+    seq, requestSeq, mProcessId, command);
 
   bool wrote = false;
   if (!missing.empty()) {
@@ -49,13 +49,13 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
     *formatIter++ = ']';
   }
 
-  if (!parsed_and_invalid.empty()) {
+  if (!parsedAndInvalid.empty()) {
     if (wrote) {
       *formatIter++ = ',';
     }
     wrote = false;
     formatIter = fmt::format_to(formatIter, R"("errors": {{)");
-    for (auto ref : parsed_and_invalid) {
+    for (auto ref : parsedAndInvalid) {
       if (wrote) {
         *formatIter++ = ',';
       }

@@ -22,187 +22,197 @@ EventSystem *EventSystem::sEventSystem = nullptr;
 //  param.tid.value_or(-1) __VA_OPT__(, ) __VA_ARGS__)
 
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
-TraceEvent::TraceEvent(int event_time, Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type,
-                       int sig_code, RegisterData &&reg) noexcept
-    : target(target), tid(tid), event(std::move(p)), event_type(type), signal(sig_code), registers(std::move(reg))
+TraceEvent::TraceEvent(int eventTime, Pid target, Tid tid, CoreEventVariant &&eventVariant,
+                       TracerEventType eventType, int sig_code, RegisterData &&reg) noexcept
+    : mProcessId(target), mTaskId(tid), mEvent(std::move(eventVariant)), mEventType(eventType), uSignal(sig_code),
+      mRegisterData(std::move(reg))
 {
 }
 
-TraceEvent::TraceEvent(const EventDataParam &param, CoreEventVariant &&p, TracerEventType type,
+TraceEvent::TraceEvent(const EventDataParam &param, CoreEventVariant &&eventVariant, TracerEventType eventType,
                        RegisterData &&regs) noexcept
-    : TraceEvent{param.event_time.value_or(-1), param.target,   param.tid.value(), std::move(p), type,
-                 param.sig_or_code.value_or(0), std::move(regs)}
+    : TraceEvent{
+        param.event_time.value_or(-1), param.target,   param.tid.value(), std::move(eventVariant), eventType,
+        param.sig_or_code.value_or(0), std::move(regs)}
 {
 }
 
 TraceEvent *
-TraceEvent::CreateLibraryEvent(const EventDataParam &param, RegisterData &&reg) noexcept
+TraceEvent::CreateLibraryEvent(const EventDataParam &param, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event LibraryEvent");
   return new TraceEvent{param, LibraryEvent{param.tid.value_or(param.target)}, TracerEventType::LibraryEvent,
-                        std::move(reg)};
+                        std::move(registerData)};
 }
 TraceEvent *
-TraceEvent::CreateSoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
-                                        RegisterData &&reg) noexcept
+TraceEvent::CreateSoftwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> address,
+                                        RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event SoftwareBreakpointHit");
   return new TraceEvent{
-    param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Software, addr},
-    TracerEventType::BreakpointHitEvent, std::move(reg)};
+    param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Software, address},
+    TracerEventType::BreakpointHitEvent, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateHardwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> addr,
-                                        RegisterData &&reg) noexcept
+TraceEvent::CreateHardwareBreakpointHit(const EventDataParam &param, std::optional<std::uintptr_t> address,
+                                        RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event HardwareBreakpointHit");
   return new TraceEvent{
-    param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Hardware, addr},
-    TracerEventType::BreakpointHitEvent, std::move(reg)};
+    param, BreakpointHitEvent{{param.tid.value_or(-1)}, BreakpointHitEvent::BreakpointType::Hardware, address},
+    TracerEventType::BreakpointHitEvent, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateSyscallEntry(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept
+TraceEvent::CreateSyscallEntry(const EventDataParam &param, int syscall, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event SyscallEntry");
   return new TraceEvent{param, SyscallEvent{{param.tid.value_or(-1)}, SyscallEvent::Boundary::Entry, syscall},
-                        TracerEventType::SyscallEvent, std::move(reg)};
+                        TracerEventType::SyscallEvent, std::move(registerData)};
 }
 TraceEvent *
-TraceEvent::CreateSyscallExit(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept
+TraceEvent::CreateSyscallExit(const EventDataParam &param, int syscall, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event SyscallExit");
   return new TraceEvent{param, SyscallEvent{{param.tid.value_or(-1)}, SyscallEvent::Boundary::Exit, syscall},
-                        TracerEventType::SyscallEvent, std::move(reg)};
+                        TracerEventType::SyscallEvent, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateThreadCreated(const EventDataParam &param, tc::ResumeAction resume_action,
-                                RegisterData &&reg) noexcept
+TraceEvent::CreateThreadCreated(const EventDataParam &param, tc::ResumeAction resumeAction,
+                                RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event ThreadCreated");
-  return new TraceEvent{param, ThreadCreated{{param.tid.value_or(-1)}, resume_action},
-                        TracerEventType::ThreadCreated, std::move(reg)};
+  return new TraceEvent{param, ThreadCreated{{param.tid.value_or(-1)}, resumeAction},
+                        TracerEventType::ThreadCreated, std::move(registerData)};
 }
 TraceEvent *
-TraceEvent::CreateThreadExited(const EventDataParam &param, bool process_needs_resuming,
-                               RegisterData &&reg) noexcept
+TraceEvent::CreateThreadExited(const EventDataParam &param, bool processNeedsResuming,
+                               RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event ThreadExited for pid={},tid={}", param.target, param.tid.value_or(-1));
   return new TraceEvent{
-    param, ThreadExited{{param.tid.value_or(-1)}, param.sig_or_code.value_or(-1), process_needs_resuming},
-    TracerEventType::ThreadExited, std::move(reg)};
+    param, ThreadExited{{param.tid.value_or(-1)}, param.sig_or_code.value_or(-1), processNeedsResuming},
+    TracerEventType::ThreadExited, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateWriteWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
+TraceEvent::CreateWriteWatchpoint(const EventDataParam &param, std::uintptr_t address,
+                                  RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event WriteWatchpoint");
   return new TraceEvent{
-    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Write, addr},
-    TracerEventType::WatchpointEvent, std::move(reg)};
+    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Write, address},
+    TracerEventType::WatchpointEvent, std::move(registerData)};
 }
 TraceEvent *
-TraceEvent::CreateReadWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
+TraceEvent::CreateReadWatchpoint(const EventDataParam &param, std::uintptr_t address,
+                                 RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event ReadWatchpoint");
   return new TraceEvent{
-    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Read, addr},
-    TracerEventType::WatchpointEvent, std::move(reg)};
+    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Read, address},
+    TracerEventType::WatchpointEvent, std::move(registerData)};
 }
 TraceEvent *
-TraceEvent::CreateAccessWatchpoint(const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept
+TraceEvent::CreateAccessWatchpoint(const EventDataParam &param, std::uintptr_t address,
+                                   RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event AccessWatchpoint");
   return new TraceEvent{
-    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Access, addr},
-    TracerEventType::WatchpointEvent, std::move(reg)};
+    param, WatchpointEvent{{param.tid.value_or(param.target)}, WatchpointEvent::WatchpointType::Access, address},
+    TracerEventType::WatchpointEvent, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
+TraceEvent::CreateForkEvent_(const EventDataParam &param, Pid newProcessId, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event ForkEvent");
-  return new TraceEvent{param, ForkEvent{{param.target}, new_pid, false}, TracerEventType::Fork, std::move(reg)};
+  return new TraceEvent{param, ForkEvent{{param.target}, newProcessId, false}, TracerEventType::Fork,
+                        std::move(registerData)};
 }
 
 /* static */
 TraceEvent *
-TraceEvent::CreateVForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept
+TraceEvent::CreateVForkEvent_(const EventDataParam &param, Pid newProcessId, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event ForkEvent");
   ASSERT(param.tid.has_value(), "param must have tid value");
-  return new TraceEvent{param, ForkEvent{{.thread_id = param.tid.value()}, new_pid, true}, TracerEventType::VFork,
-                        std::move(reg)};
+  return new TraceEvent{param, ForkEvent{{.mThreadId = param.tid.value()}, newProcessId, true},
+                        TracerEventType::VFork, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateCloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> vm_info, Tid new_tid,
-                             RegisterData &&reg) noexcept
+TraceEvent::CreateCloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> taskStackMetadata,
+                             Tid newTaskId, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event CloneEvent, new task: {}", new_tid);
-  return new TraceEvent{param, Clone{{param.target}, new_tid, vm_info}, TracerEventType::Clone, std::move(reg)};
+  return new TraceEvent{param, Clone{{param.target}, newTaskId, taskStackMetadata}, TracerEventType::Clone,
+                        std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateExecEvent(const EventDataParam &param, std::string_view exec_file, RegisterData &&reg) noexcept
+TraceEvent::CreateExecEvent(const EventDataParam &param, std::string_view execFile,
+                            RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event ExecEvent");
-  return new TraceEvent{param, Exec{{param.target}, std::string{exec_file}}, TracerEventType::Exec,
-                        std::move(reg)};
+  return new TraceEvent{param, Exec{{param.target}, std::string{execFile}}, TracerEventType::Exec,
+                        std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept
+TraceEvent::CreateProcessExitEvent(Pid processId, Tid taskId, int exitCode, RegisterData &&registerData) noexcept
 {
-  DBGLOG(core, "[Core Event]: creating event ProcessExitEvent for {}:{}", pid, tid);
-  EventDataParam param{.target = pid, .tid = tid, .sig_or_code = exit_code, .event_time = {}};
-  return new TraceEvent{param, ProcessExited{{tid}, pid, exit_code}, TracerEventType::ProcessExited,
-                        std::move(reg)};
+  DBGLOG(core, "[Core Event]: creating event ProcessExitEvent for {}:{}", processId, taskId);
+  EventDataParam param{.target = processId, .tid = taskId, .sig_or_code = exitCode, .event_time = {}};
+  return new TraceEvent{param, ProcessExited{{taskId}, processId, exitCode}, TracerEventType::ProcessExited,
+                        std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateSignal(const EventDataParam &param, RegisterData &&reg) noexcept
+TraceEvent::CreateSignal(const EventDataParam &param, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event Signal {}={}", param.sig_or_code.value_or(0),
                  param.sig_or_code.transform([](auto sig) -> std::string_view { return strsignal(sig); })
                    .value_or("unknown signal"));
   ASSERT(param.sig_or_code.has_value(), "Expecting a terminating signal to have a signal value");
   return new TraceEvent{param, Signal{{param.target}, param.sig_or_code.value()}, TracerEventType::Signal,
-                        std::move(reg)};
+                        std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateStepped(const EventDataParam &param, bool stop, std::optional<LocationStatus> bploc,
-                          std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept
+TraceEvent::CreateStepped(const EventDataParam &param, bool stop, std::optional<LocationStatus> locationStatus,
+                          std::optional<tc::ResumeAction> maybeResumeAction, RegisterData &&registerData) noexcept
 {
   CORE_EVENT_LOG("creating event Stepped");
-  return new TraceEvent{param, Stepped{{param.tid.value()}, stop, bploc, mayresume}, TracerEventType::Stepped,
-                        std::move(reg)};
+  return new TraceEvent{param, Stepped{{param.tid.value()}, stop, locationStatus, maybeResumeAction},
+                        TracerEventType::Stepped, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateSteppingDone(const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept
+TraceEvent::CreateSteppingDone(const EventDataParam &param, std::string_view message,
+                               RegisterData &&registerData) noexcept
 {
-  return new TraceEvent{param, Stepped{{param.tid.value()}, true, {}, {}, msg}, TracerEventType::Stepped,
-                        std::move(reg)};
+  return new TraceEvent{param, Stepped{{param.tid.value()}, true, {}, {}, message}, TracerEventType::Stepped,
+                        std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateDeferToSupervisor(const EventDataParam &param, RegisterData &&reg, bool attached) noexcept
+TraceEvent::CreateDeferToSupervisor(const EventDataParam &param, RegisterData &&registerData,
+                                    bool attached) noexcept
 {
   CORE_EVENT_LOG("creating event DeferToSupervisor");
   return new TraceEvent{param, DeferToSupervisor{{param.tid.value()}, attached},
-                        TracerEventType::DeferToSupervisor, std::move(reg)};
+                        TracerEventType::DeferToSupervisor, std::move(registerData)};
 }
 
 TraceEvent *
-TraceEvent::CreateEntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept
+TraceEvent::CreateEntryEvent(const EventDataParam &param, RegisterData &&registerData, bool shouldStop) noexcept
 {
   CORE_EVENT_LOG("creating event EntryEvent");
-  return new TraceEvent{param, EntryEvent{{param.tid.value()}, should_stop}, TracerEventType::Entry,
-                        std::move(reg)};
+  return new TraceEvent{param, EntryEvent{{param.tid.value()}, shouldStop}, TracerEventType::Entry,
+                        std::move(registerData)};
 }
 
 EventSystem::EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept
@@ -339,64 +349,64 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
     }
     char buffer[128];
     if (pfd.fd == mCommandEvents[0]) {
-      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mCommandsGuard);
       std::ranges::transform(mCommands, std::back_inserter(write), [](ui::UICommand *cmd) { return Event{cmd}; });
       mCommands.clear();
     } else if (pfd.fd == mDebuggerEvents[0]) {
-      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(mTraceEvents, std::back_inserter(write),
                              [](TraceEvent *event) { return Event{event}; });
       mTraceEvents.clear();
     } else if (pfd.fd == mInitEvents[0]) {
-      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(mInitEvent, std::back_inserter(write),
                              [](TraceEvent *event) { return Event{event, true}; });
       mInitEvent.clear();
     } else if (pfd.fd == mInternalEvents[0]) {
-      ssize_t bytes_read = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytes_read != -1, "Failed to flush notification pipe");
+      const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
+      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mInternalEventGuard);
       std::ranges::transform(mInternal, std::back_inserter(write),
                              [](InternalEvent event) { return Event{event}; });
       mInternal.clear();
     } else if (pfd.fd == mSignalFd) {
-      signalfd_siginfo fdsi;
-      ssize_t bytes_read = read(mSignalFd, &fdsi, sizeof(fdsi));
-      if (bytes_read != sizeof(fdsi)) {
+      signalfd_siginfo signalInfoFd;
+      const ssize_t bytesRead = read(mSignalFd, &signalInfoFd, sizeof(signalInfoFd));
+      if (bytesRead != sizeof(signalInfoFd)) {
         PANIC("read from signalfd");
       }
-      if (fdsi.ssi_signo == SIGCHLD) {
+      if (signalInfoFd.ssi_signo == SIGCHLD) {
         // Handle SIGCHLD: reap child processes
         while (true) {
           WaitResult status{};
-          status.pid = waitpid(-1, &status.stat, WNOHANG | __WALL);
-          if (status.pid <= 0) {
+          status.mProcessId = waitpid(-1, &status.mStatus, WNOHANG | __WALL);
+          if (status.mProcessId <= 0) {
             break;
           }
-          if (WIFSTOPPED(status.stat)) {
-            const auto res = WaitResultToTaskWaitResult(status.pid, status.stat);
-            write.push_back(Event{WaitEvent{.wait = res, .core = 0}});
-          } else if (WIFEXITED(status.stat)) {
+          if (WIFSTOPPED(status.mStatus)) {
+            const auto res = WaitResultToTaskWaitResult(status.mProcessId, status.mStatus);
+            write.push_back(Event{WaitEvent{.mWaitResult = res, .mCpuCore = 0}});
+          } else if (WIFEXITED(status.mStatus)) {
             for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
               for (const auto &entry : supervisor->GetThreads()) {
-                if (entry.mTid == status.pid) {
+                if (entry.mTid == status.mProcessId) {
                   write.push_back(Event{TraceEvent::CreateThreadExited(
-                    {supervisor->TaskLeaderTid(), status.pid, WEXITSTATUS(status.stat), 0}, false, {})});
+                    {supervisor->TaskLeaderTid(), status.mProcessId, WEXITSTATUS(status.mStatus), 0}, false, {})});
                 }
               }
             }
 
-          } else if (WIFSIGNALED(status.stat)) {
-            const auto signaled_evt =
-              TaskWaitResult{.tid = status.pid,
-                             .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status.stat)}};
-            write.push_back(Event{WaitEvent{signaled_evt, 0}});
+          } else if (WIFSIGNALED(status.mStatus)) {
+            const auto signalledEvent = TaskWaitResult{
+              .tid = status.mProcessId,
+              .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status.mStatus)}};
+            write.push_back(Event{WaitEvent{signalledEvent, 0}});
           } else {
             PANIC("Unknown wait status event");
           }

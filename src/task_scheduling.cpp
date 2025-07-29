@@ -21,41 +21,41 @@ namespace ptracestop {
 using sym::dw::LineTableEntry;
 
 ThreadProceedAction::ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept
-    : mControlInterface(ctrl.GetInterface()), mSupervisor(ctrl), task(task), cancelled(false)
+    : mControlInterface(ctrl.GetInterface()), mSupervisor(ctrl), mTask(task), mIsCancelled(false)
 {
 }
 
 void
 ThreadProceedAction::cancel() noexcept
 {
-  cancelled = true;
+  mIsCancelled = true;
 }
 
 FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp,
                                bool should_clean_up) noexcept
-    : ThreadProceedAction(ctrl, t), bp(std::move(bp)), should_cleanup(should_clean_up)
+    : ThreadProceedAction(ctrl, t), mBreakpointAtReturnAddress(std::move(bp)), mShouldCleanup(should_clean_up)
 {
 }
 
 FinishFunction::~FinishFunction() noexcept
 {
-  if (!cancelled) {
-    task.SetStop();
+  if (!mIsCancelled) {
+    mTask.SetStop();
   }
-  mSupervisor.RemoveBreakpoint(bp->mId);
+  mSupervisor.RemoveBreakpoint(mBreakpointAtReturnAddress->mId);
 }
 
 bool
 FinishFunction::HasCompleted(bool stopped_by_user) const noexcept
 {
 
-  return mSupervisor.CacheAndGetPcFor(task) == bp->Address() || stopped_by_user;
+  return mSupervisor.CacheAndGetPcFor(mTask) == mBreakpointAtReturnAddress->Address() || stopped_by_user;
 }
 
 void
 FinishFunction::Proceed() noexcept
 {
-  mSupervisor.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task, 0});
+  mSupervisor.ResumeTask(mTask, {tc::RunType::Continue, tc::ResumeTarget::Task, 0});
 }
 
 void
@@ -65,67 +65,68 @@ FinishFunction::UpdateStepped() noexcept
 }
 
 InstructionStep::InstructionStep(TraceeController &ctrl, TaskInfo &thread, int steps) noexcept
-    : ThreadProceedAction(ctrl, thread), steps_requested(steps), steps_taken(0)
+    : ThreadProceedAction(ctrl, thread), mStepsRequested(steps), mStepsTaken(0)
 {
 }
 
 bool
 InstructionStep::HasCompleted(bool stopped_by_user) const noexcept
 {
-  return steps_taken == steps_requested || stopped_by_user;
+  return mStepsTaken == mStepsRequested || stopped_by_user;
 }
 
 void
 InstructionStep::Proceed() noexcept
 {
-  DBGLOG(core, "[InstructionStep] stepping 1 instruction for {}", task.mTid);
-  mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
+  DBGLOG(core, "[InstructionStep] stepping 1 instruction for {}", mTask.mTid);
+  mSupervisor.ResumeTask(mTask, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
 }
 
 void
 InstructionStep::UpdateStepped() noexcept
 {
-  ++steps_taken;
+  ++mStepsTaken;
 }
 
 InstructionStep::~InstructionStep()
 {
-  if (!cancelled) {
-    DBGLOG(core, "[inst step]: instruction step for {} ended", task.mTid);
-    mSupervisor.EmitSteppedStop(LWP{.pid = mSupervisor.TaskLeaderTid(), .tid = task.mTid},
+  if (!mIsCancelled) {
+    DBGLOG(core, "[inst step]: instruction step for {} ended", mTask.mTid);
+    mSupervisor.EmitSteppedStop(LWP{.pid = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid},
                                 "Instruction stepping finished", false);
   }
 }
 
 LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
-    : ThreadProceedAction(ctrl, task), lines_requested(lines), lines_stepped(0), mIsDone(false),
-      resumed_to_resume_addr(false), startFrame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr}, entry()
+    : ThreadProceedAction(ctrl, task), mRequestedStepCount(lines), mLinesSteppedCount(0), mIsDone(false),
+      mResumedToReturnAddress(false), mStartFrame{nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr},
+      mLineEntry()
 {
   using sym::dw::SourceCodeFile;
 
   auto &callstack = mSupervisor.BuildCallFrameStack(task, CallStackRequest::partial(1));
   // First/bottommost/last/current frame always exists.
-  startFrame = *callstack.GetFrameAtLevel(0);
-  const auto fpc = startFrame.FramePc();
+  mStartFrame = *callstack.GetFrameAtLevel(0);
+  const auto fpc = mStartFrame.FramePc();
   SymbolFile *symbolFile = mSupervisor.FindObjectByPc(fpc);
   ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", fpc);
 
-  auto src_infos = symbolFile->GetCompilationUnits(fpc);
+  auto compilationUnits = symbolFile->GetCompilationUnits(fpc);
   bool found = false;
   const auto unrelocatedPc = symbolFile->UnrelocateAddress(fpc);
-  for (auto compilationUnit : src_infos) {
+  for (auto compilationUnit : compilationUnits) {
 
     const auto [sourceCodeFile, lineTableEntry] = compilationUnit->GetLineTableEntry(unrelocatedPc);
 
     if (sourceCodeFile && lineTableEntry &&
-        startFrame.IsInside(lineTableEntry->pc.as_void()) == sym::InsideRange::Yes) {
+        mStartFrame.IsInside(lineTableEntry->pc.AsVoid()) == sym::InsideRange::Yes) {
 
       if (lineTableEntry->RelocateProgramCounter(symbolFile->mBaseAddress) == fpc) {
         found = true;
-        entry = *lineTableEntry;
+        mLineEntry = *lineTableEntry;
       } else {
         found = true;
-        entry = *(lineTableEntry - 1);
+        mLineEntry = *(lineTableEntry - 1);
       }
       break;
     }
@@ -136,14 +137,14 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
 
 LineStep::~LineStep() noexcept
 {
-  if (!cancelled) {
-    DBGLOG(core, "[line step]: line step for {} ended", task.mTid);
+  if (!mIsCancelled) {
+    DBGLOG(core, "[line step]: line step for {} ended", mTask.mTid);
     EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateSteppingDone(
-      {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0, .event_time = {}},
+      {.target = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid, .sig_or_code = 0, .event_time = {}},
       "Line stepping finished", {}));
   } else {
-    if (resume_bp) {
-      mSupervisor.RemoveBreakpoint(resume_bp->mId);
+    if (mPotentialBreakpointAtReturnAddress) {
+      mSupervisor.RemoveBreakpoint(mPotentialBreakpointAtReturnAddress->mId);
     }
   }
 }
@@ -157,22 +158,23 @@ LineStep::HasCompleted(bool stopped_by_user) const noexcept
 void
 LineStep::Proceed() noexcept
 {
-  if (resume_bp && !resumed_to_resume_addr) {
-    DBGLOG(core, "[line step]: continuing sub frame for {}", task.mTid);
-    mSupervisor.ResumeTask(task, {tc::RunType::Continue, tc::ResumeTarget::Task, 0});
-    resumed_to_resume_addr = true;
+  if (mPotentialBreakpointAtReturnAddress && !mResumedToReturnAddress) {
+    DBGLOG(core, "[line step]: continuing sub frame for {}", mTask.mTid);
+    mSupervisor.ResumeTask(mTask, {tc::RunType::Continue, tc::ResumeTarget::Task, 0});
+    mResumedToReturnAddress = true;
   } else {
     DBGLOG(core, "[line step]: no resume address set, keep istepping");
-    mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
+    mSupervisor.ResumeTask(mTask, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
   }
 }
 
 void
 LineStep::InstallBreakpoint(AddrPtr address) noexcept
 {
-  resume_bp = mSupervisor.GetUserBreakpoints().create_loc_user<ResumeToBreakpoint>(
-    mSupervisor, mSupervisor.GetOrCreateBreakpointLocation(address.as_void()), task.mTid, task.mTid);
-  resumed_to_resume_addr = false;
+  mPotentialBreakpointAtReturnAddress =
+    mSupervisor.GetUserBreakpoints().CreateBreakpointLocationUser<ResumeToBreakpoint>(
+      mSupervisor, mSupervisor.GetOrCreateBreakpointLocation(address.AsVoid()), mTask.mTid, mTask.mTid);
+  mResumedToReturnAddress = false;
 }
 
 void
@@ -184,19 +186,19 @@ LineStep::MaybeSetDone(bool isDone) noexcept
 void
 LineStep::UpdateStepped() noexcept
 {
-  auto frame = mSupervisor.GetCurrentFrame(task);
+  auto frame = mSupervisor.GetCurrentFrame(mTask);
   // if we're in the same frame, we single step
 
-  if (frame.GetFrameType() == sym::FrameType::Full && SameSymbol(frame, startFrame)) {
-    ASSERT(frame.FrameLevel() == startFrame.FrameLevel(),
+  if (frame.GetFrameType() == sym::FrameType::Full && SameSymbol(frame, mStartFrame)) {
+    ASSERT(frame.FrameLevel() == mStartFrame.FrameLevel(),
            "We haven't implemented support where recursion actually creates multiple frames that look the same.");
     auto result = frame.GetLineTableEntry();
     const LineTableEntry *lte = result.second;
-    MaybeSetDone((!lte || lte->line != entry.line));
+    MaybeSetDone((!lte || lte->line != mLineEntry.line));
   } else {
-    auto &callstack = mSupervisor.BuildCallFrameStack(task, CallStackRequest::full());
+    auto &callstack = mSupervisor.BuildCallFrameStack(mTask, CallStackRequest::full());
     const auto resumeAddress =
-      callstack.FindFrame(startFrame).transform([](const auto &f) -> AddrPtr { return f.FramePc(); });
+      callstack.FindFrame(mStartFrame).transform([](const auto &f) -> AddrPtr { return f.FramePc(); });
     if (resumeAddress) {
       InstallBreakpoint(resumeAddress.value());
     } else {
@@ -212,16 +214,16 @@ StopImmediately::StopImmediately(TraceeController &ctrl, TaskInfo &task, ui::dap
 
 StopImmediately::~StopImmediately() noexcept
 {
-  if (!cancelled) {
-    notify_stopped();
+  if (!mIsCancelled) {
+    NotifyHasStopped();
   }
 }
 
 void
-StopImmediately::notify_stopped() noexcept
+StopImmediately::NotifyHasStopped() noexcept
 {
-  task.SetStop();
-  mSupervisor.EmitStopped(task.mTid, reason, "stopped", false, {});
+  mTask.SetStop();
+  mSupervisor.EmitStopped(mTask.mTid, reason, "stopped", false, {});
 }
 
 bool
@@ -233,9 +235,9 @@ StopImmediately::HasCompleted(bool) const noexcept
 void
 StopImmediately::Proceed() noexcept
 {
-  const auto res = mControlInterface.StopTask(task);
+  const auto res = mControlInterface.StopTask(mTask);
   if (!res.is_ok()) {
-    PANIC(fmt::format("Failed to stop task {}: {}", task.mTid, strerror(res.sys_errno)));
+    PANIC(fmt::format("Failed to stop task {}: {}", mTask.mTid, strerror(res.sys_errno)));
   }
 }
 
@@ -246,15 +248,15 @@ StopImmediately::UpdateStepped() noexcept
 
 StepInto::StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame,
                    sym::dw::LineTableEntry entry) noexcept
-    : ThreadProceedAction(ctrl, task), start_frame(start_frame), starting_line_info(entry)
+    : ThreadProceedAction(ctrl, task), mStartFrame(start_frame), mStartingLineEntry(entry)
 {
 }
 
 StepInto::~StepInto() noexcept
 {
-  if (!cancelled) {
+  if (!mIsCancelled) {
     EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateSteppingDone(
-      {.target = mSupervisor.TaskLeaderTid(), .tid = task.mTid, .sig_or_code = 0, .event_time = {}},
+      {.target = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid, .sig_or_code = 0, .event_time = {}},
       "Step in done", {}));
   }
 }
@@ -262,67 +264,67 @@ StepInto::~StepInto() noexcept
 bool
 StepInto::HasCompleted(bool stopped_by_user) const noexcept
 {
-  return is_done || stopped_by_user;
+  return mIsDone || stopped_by_user;
 }
 
 void
 StepInto::Proceed() noexcept
 {
-  mSupervisor.ResumeTask(task, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
+  mSupervisor.ResumeTask(mTask, {tc::RunType::Step, tc::ResumeTarget::Task, 0});
 }
 
 bool
-StepInto::is_origin_line(u32 line) const noexcept
+StepInto::IsOriginLine(u32 line) const noexcept
 {
-  return line == starting_line_info.line;
+  return line == mStartingLineEntry.line;
 }
 
 bool
-StepInto::inside_origin_frame(const sym::Frame &f) const noexcept
+StepInto::IsInsideOriginFrame(const sym::Frame &f) const noexcept
 {
-  return f.GetFrameType() == sym::FrameType::Full && SameSymbol(f, start_frame);
+  return f.GetFrameType() == sym::FrameType::Full && SameSymbol(f, mStartFrame);
 }
 
 void
 StepInto::UpdateStepped() noexcept
 {
-  auto frame = mSupervisor.GetCurrentFrame(task);
+  auto frame = mSupervisor.GetCurrentFrame(mTask);
   // if we're in the same frame, we single step
-  if (inside_origin_frame(frame)) {
+  if (IsInsideOriginFrame(frame)) {
     auto result = frame.GetLineTableEntry();
     const LineTableEntry *lte = result.second;
     if (!lte) {
-      is_done = true;
-    } else if (!is_origin_line(lte->line)) {
-      is_done = true;
+      mIsDone = true;
+    } else if (!IsOriginLine(lte->line)) {
+      mIsDone = true;
     }
   } else {
     // means we've left the original frame
-    is_done = true;
+    mIsDone = true;
   }
 }
 
 std::shared_ptr<StepInto>
-StepInto::create(TraceeController &ctrl, TaskInfo &task) noexcept
+StepInto::Create(TraceeController &ctrl, TaskInfo &task) noexcept
 {
   auto &callstack = ctrl.BuildCallFrameStack(task, CallStackRequest::partial(1));
-  const auto start_frame = *callstack.GetFrameAtLevel(0);
-  const auto fpc = start_frame.FramePc();
-  SymbolFile *symbol_file = ctrl.FindObjectByPc(fpc);
-  ASSERT(symbol_file, "Expected to find a ObjectFile from pc: {}", fpc);
+  const auto startFrame = *callstack.GetFrameAtLevel(0);
+  const auto framePc = startFrame.FramePc();
+  SymbolFile *symbolFile = ctrl.FindObjectByPc(framePc);
+  ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", framePc);
 
-  auto compilationUnits = symbol_file->GetCompilationUnits(fpc);
+  auto compilationUnits = symbolFile->GetCompilationUnits(framePc);
 
   for (auto compilationUnit : compilationUnits) {
     const auto [sourceCodeFile, lineTableEntry] =
-      compilationUnit->GetLineTableEntry(symbol_file->UnrelocateAddress(fpc));
+      compilationUnit->GetLineTableEntry(symbolFile->UnrelocateAddress(framePc));
     if (sourceCodeFile && lineTableEntry) {
-      const auto relocPc = lineTableEntry->RelocateProgramCounter(symbol_file->mBaseAddress);
-      if (start_frame.IsInside(relocPc) == sym::InsideRange::Yes) {
-        if (relocPc == fpc) {
-          return std::make_shared<StepInto>(ctrl, task, start_frame, *lineTableEntry);
+      const auto relocPc = lineTableEntry->RelocateProgramCounter(symbolFile->mBaseAddress);
+      if (startFrame.IsInside(relocPc) == sym::InsideRange::Yes) {
+        if (relocPc == framePc) {
+          return std::make_shared<StepInto>(ctrl, task, startFrame, *lineTableEntry);
         } else {
-          return std::make_shared<StepInto>(ctrl, task, start_frame, *(lineTableEntry - 1));
+          return std::make_shared<StepInto>(ctrl, task, startFrame, *(lineTableEntry - 1));
         }
       }
     }
@@ -424,16 +426,16 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
   auto individualScheduler = mIndividualScheduler[task.mTid];
   if (individualScheduler) {
     individualScheduler->UpdateStepped();
-    const auto stopped_by_user = !eventProceedResult.should_resume;
+    const auto stopped_by_user = !eventProceedResult.mShouldResumeAfterProcessing;
     if (individualScheduler->HasCompleted(stopped_by_user)) {
       RemoveIndividualScheduler(task.mTid);
     } else {
       individualScheduler->Proceed();
     }
   } else {
-    const auto kind = eventProceedResult.res.value_or(
-      tc::ResumeAction{.type = tc::RunType::Continue, .target = tc::ResumeTarget::Task, .mDeliverSignal = 0});
-    if (task.CanContinue() && eventProceedResult.should_resume) {
+    const auto kind = eventProceedResult.mResumeAction.value_or(tc::ResumeAction{
+      .mResumeType = tc::RunType::Continue, .mResumeTarget = tc::ResumeTarget::Task, .mDeliverSignal = 0});
+    if (task.CanContinue() && eventProceedResult.mShouldResumeAfterProcessing) {
       mSupervisor->ResumeTask(task, kind);
     } else {
       task.SetStop();

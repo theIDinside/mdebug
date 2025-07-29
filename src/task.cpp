@@ -99,7 +99,7 @@ Ref<TaskInfo>
 TaskInfo::CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept
 {
   DBGLOG(core, "creating task {}.{}: running={}", supervisor.TaskLeaderTid(), newTaskTid, isRunning);
-  return RcHandle<TaskInfo>::MakeShared(supervisor, newTaskTid, !isRunning);
+  return RefPtr<TaskInfo>::MakeShared(supervisor, newTaskTid, !isRunning);
 }
 
 /** static */
@@ -258,12 +258,6 @@ TaskInfo::ClearRequestedStopFlag() noexcept
   bfRequestedStop = false;
 }
 
-void
-TaskInfo::SetTracerState(SupervisorState state) noexcept
-{
-  mState = state;
-}
-
 std::optional<Pid>
 TaskInfo::GetTaskLeaderTid() const noexcept
 {
@@ -285,19 +279,19 @@ TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::ResumeAction resume) noex
 {
   ASSERT(mBreakpointLocationStatus.has_value(), "Requires a valid bpstat");
 
-  auto loc = tc->GetUserBreakpoints().location_at(mBreakpointLocationStatus->loc);
-  auto user_ids = loc->loc_users();
-  DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", mTid, fmt::join(user_ids, ", "), loc->address());
+  auto loc = tc->GetUserBreakpoints().GetLocationAt(mBreakpointLocationStatus->mAddress);
+  auto user_ids = loc->GetUserIds();
+  DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", mTid, fmt::join(user_ids, ", "), loc->Address());
 
   auto &control = tc->GetInterface();
-  loc->disable(mTid, control);
-  mBreakpointLocationStatus->stepped_over = true;
-  mBreakpointLocationStatus->re_enable_bp = true;
-  mBreakpointLocationStatus->should_resume = resume.type != tc::RunType::None;
+  loc->Disable(mTid, control);
+  mBreakpointLocationStatus->mIsSteppedOver = true;
+  mBreakpointLocationStatus->mShouldReEnableBreakpoint = true;
+  mBreakpointLocationStatus->mShouldResume = resume.mResumeType != tc::RunType::None;
 
   mNextResumeAction = resume;
 
-  const auto result = control.ResumeTask(*this, tc::ResumeAction{tc::RunType::Step, resume.target, 0});
+  const auto result = control.ResumeTask(*this, tc::ResumeAction{tc::RunType::Step, resume.mResumeTarget, 0});
   ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 
@@ -349,8 +343,8 @@ TaskInfo::SetUpdated() noexcept
 void
 TaskInfo::AddBreakpointLocationStatus(AddrPtr address) noexcept
 {
-  mBreakpointLocationStatus =
-    LocationStatus{.loc = address, .should_resume = false, .stepped_over = false, .re_enable_bp = false};
+  mBreakpointLocationStatus = LocationStatus{
+    .mAddress = address, .mShouldResume = false, .mIsSteppedOver = false, .mShouldReEnableBreakpoint = false};
 }
 
 std::optional<LocationStatus>

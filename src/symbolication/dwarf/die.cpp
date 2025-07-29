@@ -141,7 +141,7 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
   // `SourceCodeFile` with a full path, by joining the build directory with the relative directory and the file
   // names. In this regard, DWARF5 is infinitely better, although this cost is just paid 1, up front for our Dwarf4
   // implementation.
-  if (!dwarfUnit->IsCompilationUnitLike() || dwarfUnit->header().Version() == DwarfVersion::D5) {
+  if (!dwarfUnit->IsCompilationUnitLike() || dwarfUnit->GetHeader().Version() == DwarfVersion::D5) {
     return dwarfUnit;
   }
 
@@ -229,7 +229,7 @@ UnitData::GetObjectFile() const noexcept
 }
 
 const UnitHeader &
-UnitData::header() const noexcept
+UnitData::GetHeader() const noexcept
 {
   return mUnitHeader;
 }
@@ -237,23 +237,23 @@ UnitData::header() const noexcept
 Offset
 UnitData::SectionOffset() const noexcept
 {
-  return header().DebugInfoSectionOffset();
+  return GetHeader().DebugInfoSectionOffset();
 }
 
 u64
 UnitData::UnitSize() const noexcept
 {
-  return header().CompilationUnitSize();
+  return GetHeader().CompilationUnitSize();
 }
 
 bool
-UnitData::spans_across(u64 offset) const noexcept
+UnitData::SpansAcrossOffset(u64 offset) const noexcept
 {
-  return header().SpansAcross(offset);
+  return GetHeader().SpansAcross(offset);
 }
 
 u64
-UnitData::index_of(const DieMetaData *die) noexcept
+UnitData::IndexOf(const DieMetaData *die) noexcept
 {
   ASSERT(die != nullptr && !mDieCollection.empty(),
          "You passed a nullptr or DIE's for this unit has not been loaded");
@@ -264,7 +264,7 @@ UnitData::index_of(const DieMetaData *die) noexcept
 std::span<const DieMetaData>
 UnitData::continue_from(const DieMetaData *die) noexcept
 {
-  const auto index = index_of(die);
+  const auto index = IndexOf(die);
   return std::span{mDieCollection.begin() + index, mDieCollection.end()};
 }
 
@@ -371,7 +371,7 @@ UnitData::LoadDieMetadata() noexcept
   mUnitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
   ASSERT(mDieCollection.empty(), "Expected dies to be empty, but wasn't! (cu={})", SectionOffset());
   mDieCollection.reserve(mLoadedDiesCount != 0 ? mLoadedDiesCount
-                                               : guess_die_count(header().CompilationUnitSize()));
+                                               : guess_die_count(GetHeader().CompilationUnitSize()));
   mDieCollection.push_back(mUnitDie);
   bool new_level = true;
   while (reader.HasMore()) {
@@ -440,7 +440,7 @@ HasAddressAttribute(uint16_t value1, uint16_t value2)
 UnitData *
 PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
 {
-  const auto abbrev_sec = obj->GetElf()->debug_abbrev;
+  const auto abbrev_sec = obj->GetElf()->mDebugAbbrev;
 
   AbbreviationInfo::Table result{};
   const u8 *abbr_ptr = header.AbbreviationData(abbrev_sec);
@@ -449,14 +449,14 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
     AbbreviationInfo &info = result.emplace_back();
     info.mIsDeclaration = false;
     info.mAbstractOrigin = false;
-    abbr_ptr = decode_uleb128(abbr_ptr, info.mCode);
+    abbr_ptr = DecodeUleb128(abbr_ptr, info.mCode);
 
     // we've reached the end of this abbrev sub-section.
     if (info.mCode == 0) {
       break;
     }
 
-    abbr_ptr = decode_uleb128(abbr_ptr, info.mTag);
+    abbr_ptr = DecodeUleb128(abbr_ptr, info.mTag);
     info.mHasChildren = *abbr_ptr;
     abbr_ptr++;
 
@@ -466,13 +466,13 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
     auto count = 0u;
     for (;; ++count) {
       Abbreviation abbr;
-      abbr_ptr = decode_uleb128(abbr_ptr, attributes[count]);
-      abbr_ptr = decode_uleb128(abbr_ptr, abbr.mForm);
+      abbr_ptr = DecodeUleb128(abbr_ptr, attributes[count]);
+      abbr_ptr = DecodeUleb128(abbr_ptr, abbr.mForm);
       if (abbr.mForm == AttributeForm::DW_FORM_implicit_const) {
         ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
         abbr.IMPLICIT_CONST_INDEX = info.mImplicitConsts.size();
         i64 value = 0;
-        abbr_ptr = decode_leb128(abbr_ptr, value);
+        abbr_ptr = DecodeLeb128(abbr_ptr, value);
       } else {
         abbr.IMPLICIT_CONST_INDEX = -1;
       }
@@ -508,8 +508,8 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
     // read declarations
     for (;;) {
       Abbreviation abbr;
-      abbr_ptr = decode_uleb128(abbr_ptr, abbr.mName);
-      abbr_ptr = decode_uleb128(abbr_ptr, abbr.mForm);
+      abbr_ptr = DecodeUleb128(abbr_ptr, abbr.mName);
+      abbr_ptr = DecodeUleb128(abbr_ptr, abbr.mForm);
       switch (abbr.mName) {
       case Attribute::DW_AT_declaration:
         info.mIsDeclaration = true;
@@ -525,7 +525,7 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
         ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
         abbr.IMPLICIT_CONST_INDEX = info.mImplicitConsts.size();
         info.mImplicitConsts.push_back(0);
-        abbr_ptr = decode_leb128(abbr_ptr, info.mImplicitConsts.back());
+        abbr_ptr = DecodeLeb128(abbr_ptr, info.mImplicitConsts.back());
       } else {
         abbr.IMPLICIT_CONST_INDEX = -1;
       }
@@ -576,60 +576,60 @@ void
 UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
 {
   CDLOG(DwarfLog, dwarf, "Reading {} obfile compilation unit headers", obj->GetPathString());
-  const auto dbg_info = obj->GetElf()->debug_info;
+  const auto dbg_info = obj->GetElf()->mDebugInfo;
   DwarfBinaryReader reader{obj->GetElf(), dbg_info->mSectionData};
   auto unit_index = 0u;
-  while (reader.has_more()) {
-    const auto sec_offset = reader.bytes_read();
-    u64 unit_len = reader.peek_value<u32>();
+  while (reader.HasMore()) {
+    const auto sec_offset = reader.BytesRead();
+    u64 unit_len = reader.PeekValue<u32>();
     u8 format = 4u;
     auto init_len = 4;
     if ((unit_len & 0xff'ff'ff'ff) == 0xff'ff'ff'ff) {
-      reader.skip(4);
-      unit_len = reader.read_value<u64>();
+      reader.Skip(4);
+      unit_len = reader.ReadValue<u64>();
       format = 8;
       init_len = 12;
     } else {
-      reader.skip(4);
+      reader.Skip(4);
     }
     const auto total_unit_size = unit_len + init_len;
-    reader.bookmark();
-    const auto version = reader.read_value<u16>();
+    reader.Bookmark();
+    const auto version = reader.ReadValue<u16>();
     auto unit_type = DwarfUnitType::DW_UT_compile;
     u8 addr_size = 8;
     if (version == 5) {
-      unit_type = reader.read_value<DwarfUnitType>();
-      addr_size = reader.read_value<u8>();
+      unit_type = reader.ReadValue<DwarfUnitType>();
+      addr_size = reader.ReadValue<u8>();
     }
 
     u64 abb_offs = 0u;
     switch (format) {
     case 4:
-      abb_offs = reader.read_value<u32>();
+      abb_offs = reader.ReadValue<u32>();
       break;
     case 8:
-      abb_offs = reader.read_value<u64>();
+      abb_offs = reader.ReadValue<u64>();
       break;
     }
 
     if (version < 5) {
-      addr_size = reader.read_value<u8>();
+      addr_size = reader.ReadValue<u8>();
     }
 
     switch (unit_type) {
     case DwarfUnitType::DW_UT_type: {
-      const auto type_sig = reader.read_value<u64>();
-      const u64 type_offset = format == 4 ? reader.read_value<u32>() : reader.read_value<u64>();
-      const auto header_len = reader.pop_bookmark();
+      const auto type_sig = reader.ReadValue<u64>();
+      const u64 type_offset = format == 4 ? reader.ReadValue<u32>() : reader.ReadValue<u64>();
+      const auto header_len = reader.PopBookmark();
       const auto die_data_len = unit_len - header_len;
       ASSERT(header_len == 20 || header_len == 28, "Unexpected header length: {}", header_len);
-      AddTypeUnitHeader({unit_index}, sec_offset, total_unit_size, reader.get_span(die_data_len), abb_offs,
+      AddTypeUnitHeader({unit_index}, sec_offset, total_unit_size, reader.GetSpan(die_data_len), abb_offs,
                         addr_size, format, type_sig, type_offset);
     } break;
     case DwarfUnitType::DW_UT_compile:
       [[fallthrough]];
     case DwarfUnitType::DW_UT_partial: {
-      const auto header_len = reader.pop_bookmark();
+      const auto header_len = reader.PopBookmark();
       if (version == 4 || version == 3) {
         ASSERT((header_len == 7 || header_len == 11), "Unexpected compilation unit header size: {}", header_len);
       } else {
@@ -637,7 +637,7 @@ UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
                "Unexpected compilation unit header size: {}", header_len);
       }
       const auto die_data_len = unit_len - header_len;
-      AddUnitHeader(SymbolInfoId{unit_index}, sec_offset, total_unit_size, reader.get_span(die_data_len), abb_offs,
+      AddUnitHeader(SymbolInfoId{unit_index}, sec_offset, total_unit_size, reader.GetSpan(die_data_len), abb_offs,
                     addr_size, format, (DwarfVersion)version, unit_type);
     } break;
     default:
@@ -645,9 +645,9 @@ UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
       break;
     }
     ++unit_index;
-    ASSERT(reader.bytes_read() == sec_offset + unit_len + init_len,
+    ASSERT(reader.BytesRead() == sec_offset + unit_len + init_len,
            "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,
-           reader.bytes_read());
+           reader.BytesRead());
   }
   CDLOG(DwarfLog, dwarf, "Read {} compilation unit headers", mUnitHeaders.size());
 }

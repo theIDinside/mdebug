@@ -8,7 +8,7 @@
 namespace mdb::ui::dap {
 
 std::pmr::string
-Breakpoint::serialize(std::pmr::memory_resource *memoryResource) const noexcept
+Breakpoint::Serialize(std::pmr::memory_resource *memoryResource) const noexcept
 {
   std::pmr::string buf{memoryResource};
   // TODO(simon): Here we really should be using some form of arena allocation for the DAP interpreter
@@ -17,22 +17,22 @@ Breakpoint::serialize(std::pmr::memory_resource *memoryResource) const noexcept
   //  manually de/allocated by us. But that's the future.
   buf.reserve(256);
   auto it = std::back_inserter(buf);
-  it = fmt::format_to(it, R"({{"id":{},"verified":{})", id, verified);
-  if (verified) {
-    it = fmt::format_to(it, R"(,"instructionReference": "{}")", addr);
+  it = fmt::format_to(it, R"({{"id":{},"verified":{})", mId, mVerified);
+  if (mVerified) {
+    it = fmt::format_to(it, R"(,"instructionReference": "{}")", mAddress);
   } else {
-    it = fmt::format_to(it, R"(,"message": "{}")", error_message.value());
+    it = fmt::format_to(it, R"(,"message": "{}")", mErrorMessage.value());
   }
 
-  if (line) {
-    it = fmt::format_to(it, R"(,"line": {})", *line);
+  if (mLine) {
+    it = fmt::format_to(it, R"(,"line": {})", *mLine);
   }
 
-  if (col) {
-    it = fmt::format_to(it, R"(,"column": {})", *col);
+  if (mColumn) {
+    it = fmt::format_to(it, R"(,"column": {})", *mColumn);
   }
-  if (source_path) {
-    it = fmt::format_to(it, R"(,"source": {{ "name": "{}", "path": "{}" }})", *source_path, *source_path);
+  if (mSourcePath) {
+    it = fmt::format_to(it, R"(,"source": {{ "name": "{}", "path": "{}" }})", *mSourcePath, *mSourcePath);
   }
   it = fmt::format_to(it, R"(}})");
   return buf;
@@ -40,63 +40,64 @@ Breakpoint::serialize(std::pmr::memory_resource *memoryResource) const noexcept
 
 /*static*/
 Breakpoint
-Breakpoint::non_verified(u32 id, std::string_view msg) noexcept
+Breakpoint::CreateNonVerified(u32 id, std::string_view msg) noexcept
 {
-  return Breakpoint{.id = id,
-                    .verified = false,
-                    .addr = nullptr,
-                    .line = {},
-                    .col = {},
-                    .source_path = {},
-                    .error_message = std::string{msg}};
+  return Breakpoint{.mId = id,
+                    .mVerified = false,
+                    .mAddress = nullptr,
+                    .mLine = {},
+                    .mColumn = {},
+                    .mSourcePath = {},
+                    .mErrorMessage = std::string{msg}};
 }
 
 Breakpoint
-Breakpoint::from_user_bp(const UserBreakpoint &user_bp) noexcept
+Breakpoint::CreateFromUserBreakpoint(const UserBreakpoint &userBreakpoint) noexcept
 {
-  if (const auto addr = user_bp.Address(); addr) {
-    return Breakpoint{.id = user_bp.mId,
-                      .verified = true,
-                      .addr = addr.value(),
-                      .line = user_bp.Line(),
-                      .col = user_bp.Column(),
-                      .source_path = user_bp.GetSourceFile(),
-                      .error_message = {}};
+  if (const auto addr = userBreakpoint.Address(); addr) {
+    return Breakpoint{.mId = userBreakpoint.mId,
+                      .mVerified = true,
+                      .mAddress = addr.value(),
+                      .mLine = userBreakpoint.Line(),
+                      .mColumn = userBreakpoint.Column(),
+                      .mSourcePath = userBreakpoint.GetSourceFile(),
+                      .mErrorMessage = {}};
   } else {
-    return Breakpoint{.id = user_bp.mId,
-                      .verified = false,
-                      .addr = nullptr,
-                      .line = {},
-                      .col = {},
-                      .source_path = {},
-                      .error_message = user_bp.GetErrorMessage()};
+    return Breakpoint{.mId = userBreakpoint.mId,
+                      .mVerified = false,
+                      .mAddress = nullptr,
+                      .mLine = {},
+                      .mColumn = {},
+                      .mSourcePath = {},
+                      .mErrorMessage = userBreakpoint.GetErrorMessage()};
   }
 }
 
-VariablesReference::VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent,
-                                       EntityType type) noexcept
-    : id(ref), thread_id(thread), frame_id(frame_id), parent_(parent), type(type), scope_type(), object_file(obj)
+VariablesReference::VariablesReference(NonNullPtr<SymbolFile> objectFile, int ref, int thread, int frameId,
+                                       int parent, EntityType type) noexcept
+    : mId(ref), mThreadId(thread), mFrameId(frameId), mParentId(parent), mType(type), mScopeType(),
+      mObjectFile(objectFile)
 {
 }
 
-VariablesReference::VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frame_id, int parent,
-                                       EntityType type, ScopeType scope_type) noexcept
-    : id(ref), thread_id(thread), frame_id(frame_id), parent_(parent), type(type), scope_type(scope_type),
-      object_file(obj)
+VariablesReference::VariablesReference(NonNullPtr<SymbolFile> objectFile, int ref, int thread, int frameId,
+                                       int parent, EntityType type, ScopeType scopeType) noexcept
+    : mId(ref), mThreadId(thread), mFrameId(frameId), mParentId(parent), mType(type), mScopeType(scopeType),
+      mObjectFile(objectFile)
 {
 }
 
 bool
-VariablesReference::has_parent() const noexcept
+VariablesReference::HasParent() const noexcept
 {
-  return 0 != *parent_;
+  return 0 != *mParentId;
 }
 
 std::optional<int>
-VariablesReference::parent() const noexcept
+VariablesReference::ParentVariablesReference() const noexcept
 {
-  if (has_parent()) {
-    return parent_;
+  if (HasParent()) {
+    return mParentId;
   } else {
     return std::nullopt;
   }

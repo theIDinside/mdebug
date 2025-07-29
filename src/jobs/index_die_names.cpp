@@ -117,7 +117,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
 
   auto sz = 0ul;
   for (const auto unit : mCompUnitsToIndex) {
-    sz += unit->header().CompilationUnitSize();
+    sz += unit->GetHeader().CompilationUnitSize();
   }
 
   PROFILE_SCOPE_END_ARGS("IndexingTask::ExecuteTask", "indexing", PEARG("units", mCompUnitsToIndex.size()),

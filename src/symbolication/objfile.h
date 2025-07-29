@@ -66,7 +66,14 @@ struct ParsedAuxiliaryVector
   AddrPtr mInterpreterBaseAddress{nullptr};
 };
 
-ParsedAuxiliaryVector ParsedAuxiliaryVectorData(const tc::Auxv &aux) noexcept;
+// Asserts if required entries are not found.
+struct ParseAuxiliaryOptions
+{
+  bool requireEntry{true};
+  bool requiresInterpreterBase{true};
+};
+
+ParsedAuxiliaryVector ParsedAuxiliaryVectorData(const tc::Auxv &aux, ParseAuxiliaryOptions options = {}) noexcept;
 
 /**
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant

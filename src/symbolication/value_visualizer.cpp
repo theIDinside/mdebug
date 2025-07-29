@@ -147,7 +147,7 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
 {
   auto &enums = t.GetEnumerations();
   EnumeratorConstValue value;
-  if (enums.is_signed) {
+  if (enums.mIsSigned) {
     switch (t.size_of) {
     case 1:
       value.i = BitCopy<i8>(span);
@@ -180,20 +180,20 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
   }
 
   const auto &fields = t.MemberFields();
-  if (enums.is_signed) {
+  if (enums.mIsSigned) {
     for (auto i = 0u; i < fields.size(); ++i) {
-      if (enums.e_values[i].i == value.i) {
+      if (enums.mEnumeratorValues[i].i == value.i) {
         std::pmr::string result{allocator};
-        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
     std::pmr::string result{allocator};
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
   } else {
     for (auto i = 0u; i < fields.size(); ++i) {
-      if (enums.e_values[i].u == value.u) {
+      if (enums.mEnumeratorValues[i].u == value.u) {
         std::pmr::string result{allocator};
-        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
     std::pmr::string result{allocator};
@@ -424,7 +424,7 @@ FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
 {
   auto &enums = t.GetEnumerations();
   EnumeratorConstValue value;
-  if (enums.is_signed) {
+  if (enums.mIsSigned) {
     switch (t.size_of) {
     case 1:
       value.i = BitCopy<i8>(span);
@@ -457,17 +457,17 @@ FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
   }
 
   const auto &fields = t.MemberFields();
-  if (enums.is_signed) {
+  if (enums.mIsSigned) {
     for (auto i = 0u; i < fields.size(); ++i) {
-      if (enums.e_values[i].i == value.i) {
-        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
+      if (enums.mEnumeratorValues[i].i == value.i) {
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
   } else {
     for (auto i = 0u; i < fields.size(); ++i) {
-      if (enums.e_values[i].u == value.u) {
-        FormatAndReturn(result, "{}::{}", t.mName, fields[i].name);
+      if (enums.mEnumeratorValues[i].u == value.u) {
+        FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
@@ -647,7 +647,7 @@ JavascriptValueSerializer::Serialize(Value *value, FmtIterator fmtIterator, cons
     it = fmt::format_to(it, "\n");
   }
   for (const auto &m : value->GetType()->MemberFields()) {
-    auto v = value->GetMember(m.name);
+    auto v = value->GetMember(m.mName);
     it = Serialize(v, it, options, currentDepth - 1);
   }
   fmt::format_to(it, "{}}}", indent);
@@ -680,7 +680,7 @@ JavascriptValueSerializer::Serialize(Value *value, StringType &outputBuffer,
   }
 
   for (const auto &m : value->GetType()->MemberFields()) {
-    auto v = value->GetMember(m.name);
+    auto v = value->GetMember(m.mName);
     it = Serialize(v, it, options, options.mDepth - 1);
   }
   fmt::format_to(std::back_inserter(outputBuffer), "}}");
