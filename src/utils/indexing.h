@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <typedefs.h>
+#include <common/typedefs.h>
 namespace mdb {
 // TODO(simon): Re-name & refactor this to mean "section offset"?
 struct Offset

@@ -1,10 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../../common.h"
-#include "dap_defs.h"
-#include <memory_resource>
+// mdb
+#include <common.h>
+#include <common/typedefs.h>
+#include <interface/dap/dap_defs.h>
+
+// stdlib
 #include <regex>
-#include <typedefs.h>
 #include <utility>
 
 namespace mdb::ui::dap {
@@ -13,7 +15,7 @@ using namespace std::string_view_literals;
  * lookup by a *LARGE* margin. As such I see no good reason at all to change this as the DA-protocol is well
  * defined when it comes to it's commands. Any change to the spec will trivially be changed here. */
 constexpr CommandType
-parse_command_type(const std::string_view view) noexcept
+ParseCommandType(const std::string_view view) noexcept
 {
   using namespace std::literals::string_view_literals;
   switch (view.size()) {

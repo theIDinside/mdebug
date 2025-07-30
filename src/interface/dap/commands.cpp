@@ -1441,7 +1441,7 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   const Pid processId = obj["processId"];
   UICommandArg arg{seq, processId};
 
-  const auto cmd = parse_command_type(cmd_name);
+  const auto cmd = ParseCommandType(cmd_name);
   auto &&args = std::move(obj["arguments"]);
   switch (cmd) {
   case CommandType::Attach: {

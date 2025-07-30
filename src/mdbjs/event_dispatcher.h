@@ -4,10 +4,10 @@
 #include "events/stop_event.h"
 #include "js/Class.h"
 #include "js/RootingAPI.h"
-#include "typedefs.h"
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <jsapi.h>
 #include <string>
-#include <utils/macros.h>
 
 class TraceeController;
 class TaskInfo;

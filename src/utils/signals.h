@@ -1,10 +1,16 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../common.h"
-#include "utils/logger.h"
+// mdb
+#include <common.h>
+#include <common/panic.h>
+#include <utils/logger.h>
+
+// stdlib
 #include <array>
 #include <csignal>
 #include <cstring>
+
+// system
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>

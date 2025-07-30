@@ -1,10 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "utils/indexing.h"
+#include <common/typedefs.h>
 #include <span>
 #include <symbolication/dwarf/common.h>
 #include <symbolication/dwarf_defs.h>
-#include <typedefs.h>
 namespace mdb {
 struct ElfSection;
 }

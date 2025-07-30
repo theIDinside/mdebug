@@ -1,6 +1,8 @@
 /** LICENSE TEMPLATE */
 #include "bp.h"
 
+#include <common/panic.h>
+
 #include "events/stop_event.h"
 #include "interface/dap/events.h"
 #include "js/TracingAPI.h"

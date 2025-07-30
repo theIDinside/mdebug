@@ -1,6 +1,8 @@
 /** LICENSE TEMPLATE */
-#include "dwarf_binary_reader.h"
-#include "elf.h"
+// mdb
+#include <common/panic.h>
+#include <symbolication/dwarf_binary_reader.h>
+#include <symbolication/elf.h>
 #include <utils/logger.h>
 namespace mdb {
 u64

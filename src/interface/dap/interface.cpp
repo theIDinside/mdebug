@@ -211,7 +211,7 @@ DebugAdapterClient::ReadPendingCommands() noexcept
   const auto request_headers = parse_headers_from(parse_swapbuffer.take_view(), &no_partials);
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
-      const auto cd = maybe_unwrap<ContentDescriptor>(hdr);
+      const auto *cd = std::get_if<ContentDescriptor>(&hdr);
       const auto cmd = ParseDebugAdapterCommand(*this, std::string{cd->payload()});
       EventSystem::Get().PushCommand(this, cmd);
     }
@@ -220,12 +220,13 @@ DebugAdapterClient::ReadPendingCommands() noexcept
   } else {
     if (request_headers.size() > 1) {
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
-        const auto cd = maybe_unwrap<ContentDescriptor>(request_headers[i]);
+        const auto cd = std::get_if<ContentDescriptor>(&request_headers[i]);
         const auto cmd = ParseDebugAdapterCommand(*this, std::string{cd->payload()});
         EventSystem::Get().PushCommand(this, cmd);
       }
 
-      auto rd = maybe_unwrap<RemainderData>(request_headers.back());
+      auto rd = std::get_if<RemainderData>(&request_headers.back());
+      ASSERT(rd, "Parsed communication was not of type RemainderData");
       parse_swapbuffer.swap(rd->offset);
       ASSERT(parse_swapbuffer.current_size() == rd->length,
              "Parse Swap Buffer operation failed; expected length {} but got {}", rd->length,

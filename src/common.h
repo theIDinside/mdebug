@@ -1,21 +1,27 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "typedefs.h"
+// mdb
+#include <common/macros.h>
+#include <common/typedefs.h>
+
+// stdlib
 #include <algorithm>
 #include <bit>
 #include <charconv>
 #include <concepts>
 #include <filesystem>
-#include <fmt/core.h>
 #include <numeric>
 #include <optional>
 #include <source_location>
+
+// system
 #include <sys/mman.h>
 #include <sys/user.h>
 #include <type_traits>
-#include <utils/macros.h>
-#include <variant>
 #include <vector>
+
+// dependecy
+#include <fmt/core.h>
 
 namespace mdb {
 
@@ -76,7 +82,6 @@ struct SourceCoordinate
   std::string path;
   std::uint32_t line;
   std::uint32_t column;
-  SourceCoordinate(std::string path, u32 line, u32 col = 0) noexcept;
 };
 
 struct SourceCoordinateRef
@@ -118,12 +123,6 @@ template <class... T> constexpr bool always_false = false;
  * Get name for `syscall_number`
  */
 std::string_view syscall_name(unsigned long long syscall_number);
-
-#define PANIC(err_msg)                                                                                            \
-  {                                                                                                               \
-    auto loc = std::source_location::current();                                                                   \
-    mdb::panic(err_msg, loc, 1);                                                                                  \
-  }
 
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \
@@ -190,42 +189,6 @@ IgnoreArgs(const Args &...)
 #else
 #define DBG(x)
 #endif
-
-template <typename T, typename... Args>
-constexpr const T *
-unwrap(const std::variant<Args...> &variant) noexcept
-{
-  const T *r = nullptr;
-  std::visit(
-    [&r](auto &&item) {
-      using var_t = ActualType<decltype(item)>;
-      if constexpr (std::is_same_v<var_t, T>) {
-        r = &item;
-      } else {
-        PANIC("Unexpected type in variant");
-      }
-    },
-    variant);
-  return r;
-}
-
-template <typename T, typename... Args>
-constexpr const T *
-maybe_unwrap(const std::variant<Args...> &variant) noexcept
-{
-  const T *r = nullptr;
-  std::visit(
-    [&r](auto &&item) {
-      using var_t = ActualType<decltype(item)>;
-      if constexpr (std::is_same_v<var_t, T>) {
-        r = &item;
-      } else {
-        r = nullptr;
-      }
-    },
-    variant);
-  return r;
-}
 
 template <typename T>
 T *

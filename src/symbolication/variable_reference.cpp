@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "variable_reference.h"
 #include "symbolication/value.h"
-#include "utils/macros.h"
+#include <common/macros.h>
 #include <task.h>
 
 namespace mdb {

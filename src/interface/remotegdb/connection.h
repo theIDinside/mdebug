@@ -1,20 +1,28 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "wait_event_parser.h"
+// mdb
+#include <common/typedefs.h>
+#include <interface/remotegdb/wait_event_parser.h>
+#include <utils/expected.h>
+#include <utils/scoped_fd.h>
+
+// stdlib
 #include <barrier>
-#include <fmt/core.h>
 #include <functional>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
+
+// system
 #include <sys/mman.h>
 #include <sys/poll.h>
-#include <thread>
-#include <typedefs.h>
-#include <utils/expected.h>
-#include <utils/scoped_fd.h>
+
+// dependency
+#include <fmt/core.h>
+
 using MonotonicResource = std::pmr::monotonic_buffer_resource;
 
 namespace mdb {

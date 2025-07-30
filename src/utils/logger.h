@@ -5,17 +5,17 @@
 #include "utils/debugger_thread.h"
 #include "utils/dynamic_array.h"
 #include "utils/indexing.h"
-#include "utils/macros.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <mutex>
 #include <string>
-#include <typedefs.h>
 #include <unistd.h>
 #include <utils/scope_defer.h>
 

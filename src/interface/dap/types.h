@@ -1,13 +1,18 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "symbolication/variable_reference.h"
-#include "tracee_pointer.h"
-#include "utils/immutable.h"
-#include "utils/macros.h"
-#include <fmt/format.h>
-#include <string_view>
+// mdb
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <symbolication/value.h>
-#include <typedefs.h>
+#include <symbolication/variable_reference.h>
+#include <tracee_pointer.h>
+#include <utils/immutable.h>
+
+// stdlib
+#include <string_view>
+
+// dependency
+#include <fmt/format.h>
 
 namespace std::pmr {
 class memory_resource;

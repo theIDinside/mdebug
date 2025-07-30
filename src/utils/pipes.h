@@ -3,7 +3,7 @@
 #include "common.h"
 #include "utils/enumerator.h"
 #include "utils/logger.h"
-#include "utils/macros.h"
+#include <common/macros.h>
 #include <cstring>
 #include <fcntl.h>
 #include <list>

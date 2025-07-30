@@ -1,12 +1,16 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "./shared.h"
-#include "tracee_pointer.h"
-#include <algorithm>
+// mdb
+#include <common/typedefs.h>
 #include <event_queue_event_param.h>
+#include <interface/remotegdb/shared.h>
+#include <tracee_pointer.h>
+
+// stdlib
+#include <algorithm>
 #include <optional>
 #include <string_view>
-#include <typedefs.h>
+
 namespace mdb {
 struct TraceEvent;
 class TraceeController;

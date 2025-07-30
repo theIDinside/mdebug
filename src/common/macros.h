@@ -1,20 +1,17 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "typedefs.h"
-#include <optional>
-// Needed for the macro that uses to_array
-#include <array>
+// mdb
+#include <common/typedefs.h>
 #include <utils/util.h>
+
+// stdlib
+#include <optional>
 
 #if defined(__clang__)
 #define MIDAS_UNREACHABLE std::unreachable();
 #elif defined(__GNUC__) || defined(__GNUG__)
 #define MIDAS_UNREACHABLE __builtin_unreachable();
 #endif
-
-#define NEVER(msg)                                                                                                \
-  PANIC(msg);                                                                                                     \
-  MIDAS_UNREACHABLE
 
 #ifndef NO_COPY
 /// Types that use NO_COPY in this codebase tend to be created and used via pointers, both raw and smart alike

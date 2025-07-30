@@ -1,5 +1,9 @@
 /** LICENSE TEMPLATE */
-#include "notify_pipe.h"
+// mdb
+#include <common/panic.h>
+#include <notify_pipe.h>
+
+// system
 #include <fcntl.h>
 #include <unistd.h>
 

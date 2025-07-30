@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <typedefs.h>
+#include <common/typedefs.h>
 
 namespace mdb::sym {
 struct SymbolInfoId

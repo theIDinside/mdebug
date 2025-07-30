@@ -8,8 +8,8 @@
 #include "symbolication/value.h"
 #include "tracer.h"
 #include "utils/immutable.h"
-#include "utils/macros.h"
 #include <algorithm>
+#include <common/macros.h>
 #include <iterator>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>

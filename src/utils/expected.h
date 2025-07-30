@@ -1,6 +1,11 @@
 /** LICENSE TEMPLATE */
 #pragma once
+
+// mdb
 #include "common.h"
+#include <common/panic.h>
+
+// stdlib
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -278,6 +283,60 @@ public:
   }
 };
 
+struct Ok
+{
+};
+struct None
+{
+};
+
+// This type is just for the simpler types, where T and E are simple data types (POD basically). or "value types".
+// Other way to say it is these types must neither be managing resources nor unique; they must be trivially
+// copyable.
+template <typename T, typename E> class Result
+{
+  static_assert(std::is_standard_layout_v<T>, "T must be plain old datatype");
+  static_assert(std::is_standard_layout_v<E>, "E must be plain old datatype");
+
+  static_assert(!std::is_same_v<T, void>, "Use types Ok or None to signal void instead");
+  static_assert(!std::is_same_v<E, void>, "Use types Ok or None to signal void instead");
+
+  union
+  {
+    T uValue;
+    E uError;
+  };
+
+  bool mHasValue;
+
+public:
+  constexpr Result(T &&value) noexcept : mHasValue(true), uValue(value) {}
+  constexpr Result(E &&error) noexcept : mHasValue(false), uError(error) {}
+
+  constexpr auto
+  Value(this auto &&self)
+  {
+    ASSERT(self.mHasValue, "Expected holds an error, not a value!");
+    return self.uValue;
+  }
+
+  constexpr auto
+  Error(this auto &&self)
+  {
+    ASSERT(!self.mHasValue, "Expected holds an error, not a value!");
+    return self.uError;
+  }
+
+  template <typename Fn>
+  constexpr auto
+  Map(this auto &&self, Fn &&fn) -> std::optional<std::invoke_result_t<Fn, T>>
+  {
+    if (self.mHasValue) {
+      return std::optional{fn(self.uValue)};
+    }
+    return std::nullopt;
+  }
+};
 // auto EXPECT(result, expectedObject);
 
 #define EXPECT_REF(expr, exp)                                                                                     \

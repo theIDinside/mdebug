@@ -2,10 +2,10 @@
 #pragma once
 #include "tracee_pointer.h"
 #include "utils/smartptr.h"
+#include <common/typedefs.h>
 #include <memory>
 #include <memory_resource>
 #include <optional>
-#include <typedefs.h>
 #include <vector>
 
 namespace mdb {

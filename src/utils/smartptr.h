@@ -2,9 +2,9 @@
 #pragma once
 
 // Base class / mixin for internal reference counting
-#include "typedefs.h"
 #include <atomic>
 #include <common.h>
+#include <common/typedefs.h>
 #include <memory>
 #include <type_traits>
 

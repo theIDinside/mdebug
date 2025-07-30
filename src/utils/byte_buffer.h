@@ -1,11 +1,11 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "macros.h"
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
 #include <span>
-#include <typedefs.h>
 
 namespace mdb {
 /**

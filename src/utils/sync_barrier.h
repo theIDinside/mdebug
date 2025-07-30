@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/macros.h"
+#include <common/macros.h>
 #include <memory>
 
 namespace mdb {

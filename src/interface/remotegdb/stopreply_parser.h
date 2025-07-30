@@ -1,9 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/logger.h"
+// mdb
+#include <common/typedefs.h>
+#include <utils/logger.h>
+
+// stdlib
 #include <optional>
 #include <string_view>
-#include <typedefs.h>
 
 namespace mdb::gdb {
 struct RemoteSettings;

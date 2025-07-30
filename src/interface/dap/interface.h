@@ -1,22 +1,26 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "../../notify_pipe.h"
-#include "dap_defs.h"
-#include "lib/arena_allocator.h"
-#include "utils/logger.h"
-#include "utils/util.h"
+// mdb
+#include <common/typedefs.h>
+#include <interface/dap/dap_defs.h>
+#include <lib/arena_allocator.h>
+#include <notify_pipe.h>
+#include <tracee/util.h>
+#include <utils/logger.h>
+#include <utils/util.h>
+
+// stdlib
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <deque>
-#include <nlohmann/json.hpp>
-#include <ranges>
 #include <string_view>
-#include <tracee/util.h>
-#include <typedefs.h>
-#include <unordered_set>
+
 #include <vector>
+
+// dependency
+#include <nlohmann/json.hpp>
 
 namespace mdb {
 class Tracer;

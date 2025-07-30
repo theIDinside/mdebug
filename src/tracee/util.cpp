@@ -1,13 +1,21 @@
 /** LICENSE TEMPLATE */
-#include "util.h"
-#include "common.h"
+
+// mdb
+#include <common.h>
+#include <common/panic.h>
+#include <tracee/util.h>
+
+// stdlib
 #include <charconv>
 #include <cstddef>
 #include <string_view>
+
+// system
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+
 namespace mdb {
 u32
 QueryAvxSupport() noexcept

@@ -92,17 +92,17 @@ main(int argc, const char **argv)
   ProfilingLogger::ConfigureProfiling(config.LogDirectory());
 
   // spawn the UI thread that runs our UI loop
-  bool ui_thread_setup = false;
+  bool uiThreadSetup = false;
 
   auto debugAdapterThread =
-    mdb::DebuggerThread::SpawnDebuggerThread("IO-Thread", [&ui_thread_setup](std::stop_token &token) {
-      mdb::ui::dap::DAP ui_interface{STDIN_FILENO, STDOUT_FILENO};
-      mdb::Tracer::Get().SetUI(&ui_interface);
-      ui_thread_setup = true;
-      ui_interface.StartIOPolling(token);
+    mdb::DebuggerThread::SpawnDebuggerThread("IO-Thread", [&uiThreadSetup](std::stop_token &token) {
+      mdb::ui::dap::DAP uiInterface{STDIN_FILENO, STDOUT_FILENO};
+      mdb::Tracer::Get().SetUI(&uiInterface);
+      uiThreadSetup = true;
+      uiInterface.StartIOPolling(token);
     });
 
-  while (!ui_thread_setup) {
+  while (!uiThreadSetup) {
     std::this_thread::sleep_for(std::chrono::milliseconds{1});
   }
   DBGLOG(core, "UI thread initialized and configured.");

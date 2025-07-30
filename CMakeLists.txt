@@ -59,6 +59,10 @@ set(MIDAS_SOURCES
   src/tracer.cpp
   src/tracer.h
 
+  # common
+  src/common/panic.cpp
+  src/common/panic.h
+
   #sys
   src/mdbsys/ptrace.cpp
   src/mdbsys/ptrace.h
@@ -71,10 +75,12 @@ set(MIDAS_SOURCES
   src/jobs/dwarf_unit_data.h
   src/jobs/index_die_names.cpp
   src/jobs/index_die_names.h
+
   # lib
   src/lib/arena_allocator.cpp
   src/lib/arena_allocator.h
   src/lib/lockguard.h
+
   # symbolication
   src/symbolication/block.cpp
   src/symbolication/block.h
@@ -125,6 +131,7 @@ set(MIDAS_SOURCES
   src/symbolication/value.h
   src/symbolication/variable_reference.cpp
   src/symbolication/variable_reference.h
+
   # utils
   src/utils/base64.cpp
   src/utils/base64.h
@@ -211,7 +218,7 @@ set(MIDAS_SOURCES
   src/mdbjs/variablejs.h
 )
 
-set(COMMON_SRC src/common.cpp src/common.h)
+set(COMMON_SRC src/common.cpp src/common.h src/common/panic.cpp src/common/panic.h)
 
 set(MIDAS_SPINLOCK src/lib/spinlock.cpp src/lib/spinlock.h)
 add_library(mdb_spinlock STATIC ${MIDAS_SPINLOCK})
@@ -283,11 +290,11 @@ if(BUILD_MDB_TESTS)
   )
 
   AddTest(NAME test_utils
-    SOURCES test/unittest/util_testing.cpp src/common.cpp src/utils/logger.cpp src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp src/utils/debugger_thread.cpp
+    SOURCES test/unittest/util_testing.cpp src/utils/logger.cpp ${COMMON_SRC} src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp src/utils/debugger_thread.cpp
     LIBS fmt::fmt mdb_spinlock)
 
   AddTest(NAME expected_tests
-    SOURCES test/unittest/expected_tests.cpp src/common.cpp src/utils/logger.cpp src/utils/debugger_thread.cpp
+    SOURCES test/unittest/expected_tests.cpp src/utils/logger.cpp ${COMMON_SRC} src/utils/debugger_thread.cpp
     LIBS fmt::fmt)
 
   AddTest(NAME xml_tests

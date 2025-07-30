@@ -1,9 +1,11 @@
 #pragma once
 
-#include "typedefs.h"
-#include <algorithm>
-#include <alloca.h>
+// mdb
 #include <common.h>
+#include <common/typedefs.h>
+
+// stdlib
+#include <algorithm>
 #include <string_view>
 
 namespace mdb {

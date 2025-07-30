@@ -1,10 +1,13 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "tracee_command_interface.h"
-#include "utils/macros.h"
-#include <link.h>
+// mdb
+#include <common/macros.h>
+#include <interface/tracee_command/tracee_command_interface.h>
 #include <utils/scoped_fd.h>
+
+// system
+#include <link.h>
 
 class TraceeController;
 

@@ -1,8 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include <common/typedefs.h>
 #include <string>
 #include <thread>
-#include <typedefs.h>
 
 struct user_regs_struct;
 

@@ -1,9 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "interface/remotegdb/target_description.h"
-#include "tracee_pointer.h"
-#include "utils/macros.h"
-#include <typedefs.h>
+// mdb
+#include <common/macros.h>
+#include <common/typedefs.h>
+#include <interface/remotegdb/target_description.h>
+#include <tracee_pointer.h>
 namespace mdb {
 
 enum class TargetFormat : u8

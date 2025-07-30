@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/macros.h"
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <optional>
 #include <source_location>
 #include <string_view>
@@ -8,7 +9,6 @@
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
-#include <typedefs.h>
 namespace mdb {
 class TaskInfo;
 

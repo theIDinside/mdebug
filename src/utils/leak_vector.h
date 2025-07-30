@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "typedefs.h"
 #include <cmath>
+#include <common/typedefs.h>
 #include <cstring>
 #include <immintrin.h>
 #include <memory>

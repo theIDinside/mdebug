@@ -4,8 +4,8 @@
 #include "mdbjs/jsobject.h"
 #include "symbolication/callstack.h"
 #include "task.h"
-#include "typedefs.h"
 #include "utils/smartptr.h"
+#include <common/typedefs.h>
 #include <cstring>
 
 namespace mdb {

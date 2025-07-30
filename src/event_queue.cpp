@@ -330,7 +330,7 @@ EventSystem::PushInternalEvent(InternalEvent event) noexcept
 }
 
 bool
-EventSystem::PollBlocking(std::vector<Event> &write) noexcept
+EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
 {
   int ret = poll(mPollDescriptors, PollDescriptorsCount(), -1);
   mPollFailures++;
@@ -352,28 +352,29 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mCommandsGuard);
-      std::ranges::transform(mCommands, std::back_inserter(write), [](ui::UICommand *cmd) { return Event{cmd}; });
+      std::ranges::transform(mCommands, std::back_inserter(write),
+                             [](ui::UICommand *cmd) { return ApplicationEvent{cmd}; });
       mCommands.clear();
     } else if (pfd.fd == mDebuggerEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(mTraceEvents, std::back_inserter(write),
-                             [](TraceEvent *event) { return Event{event}; });
+                             [](TraceEvent *event) { return ApplicationEvent{event}; });
       mTraceEvents.clear();
     } else if (pfd.fd == mInitEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(mInitEvent, std::back_inserter(write),
-                             [](TraceEvent *event) { return Event{event, true}; });
+                             [](TraceEvent *event) { return ApplicationEvent{event, true}; });
       mInitEvent.clear();
     } else if (pfd.fd == mInternalEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mInternalEventGuard);
       std::ranges::transform(mInternal, std::back_inserter(write),
-                             [](InternalEvent event) { return Event{event}; });
+                             [](InternalEvent event) { return ApplicationEvent{event}; });
       mInternal.clear();
     } else if (pfd.fd == mSignalFd) {
       signalfd_siginfo signalInfoFd;
@@ -391,12 +392,12 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
           }
           if (WIFSTOPPED(status.mStatus)) {
             const auto res = WaitResultToTaskWaitResult(status.mProcessId, status.mStatus);
-            write.push_back(Event{WaitEvent{.mWaitResult = res, .mCpuCore = 0}});
+            write.push_back(ApplicationEvent{WaitEvent{.mWaitResult = res, .mCpuCore = 0}});
           } else if (WIFEXITED(status.mStatus)) {
             for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
               for (const auto &entry : supervisor->GetThreads()) {
                 if (entry.mTid == status.mProcessId) {
-                  write.push_back(Event{TraceEvent::CreateThreadExited(
+                  write.push_back(ApplicationEvent{TraceEvent::CreateThreadExited(
                     {supervisor->TaskLeaderTid(), status.mProcessId, WEXITSTATUS(status.mStatus), 0}, false, {})});
                 }
               }
@@ -406,7 +407,7 @@ EventSystem::PollBlocking(std::vector<Event> &write) noexcept
             const auto signalledEvent = TaskWaitResult{
               .tid = status.mProcessId,
               .ws = WaitStatus{.ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status.mStatus)}};
-            write.push_back(Event{WaitEvent{signalledEvent, 0}});
+            write.push_back(ApplicationEvent{WaitEvent{signalledEvent, 0}});
           } else {
             PANIC("Unknown wait status event");
           }

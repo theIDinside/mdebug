@@ -1,6 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "typedefs.h"
+
+// mdb
+#include <common/typedefs.h>
+
+// stdlib
 #include <functional>
 #include <memory>
 #include <memory_resource>

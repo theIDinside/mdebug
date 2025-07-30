@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include <common/typedefs.h>
 #include <symbolication/dwarf_defs.h>
-#include <typedefs.h>
 #include <vector>
 
 namespace mdb::sym::dw {

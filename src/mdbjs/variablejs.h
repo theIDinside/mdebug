@@ -4,8 +4,8 @@
 #include "js/TypeDecls.h"
 #include "mdbjs/jsobject.h"
 #include "symbolication/value.h"
-#include "typedefs.h"
 #include "utils/smartptr.h"
+#include <common/typedefs.h>
 #include <cstring>
 
 namespace mdb::js {

@@ -1,11 +1,11 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <cstdint>
 #include <fmt/core.h>
 #include <span>
 #include <string_view>
-#include <typedefs.h>
-#include <utils/macros.h>
 
 namespace mdb {
 template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;

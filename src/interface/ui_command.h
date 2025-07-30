@@ -1,7 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "lib/arena_allocator.h"
-#include "typedefs.h"
+// mdb
+#include <common/typedefs.h>
+
+// stdlib
 #include <cstdint>
 #include <optional>
 #include <string>

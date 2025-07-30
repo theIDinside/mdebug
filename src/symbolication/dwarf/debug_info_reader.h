@@ -3,7 +3,7 @@
 #include "../dwarf_defs.h"
 #include "die.h"
 #include <common.h>
-#include <typedefs.h>
+#include <common/typedefs.h>
 
 namespace mdb {
 class Elf;

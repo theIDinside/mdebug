@@ -1,13 +1,14 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/expected.h"
+// mdb
+#include <common/typedefs.h>
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
-
-// NOLINTNEXTLINE
 #include <lib/arena_allocator.h>
+#include <utils/expected.h>
+
+// dependency
 #include <nlohmann/json.hpp>
-#include <typedefs.h>
 
 namespace mdb {
 namespace fmt = ::fmt;

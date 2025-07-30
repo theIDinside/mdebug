@@ -1,53 +1,55 @@
 /** LICENSE TEMPLATE */
+// mdb
 #include "tracer.h"
-#include "bp.h"
-#include "event_queue.h"
-#include "interface/attach_args.h"
-#include "interface/console_command.h"
-#include "interface/dap/interface.h"
-#include "interface/tracee_command/tracee_command_interface.h"
-#include "js/Context.h"
-#include "js/ErrorReport.h"
-#include "js/Initialization.h"
-#include "js/Warnings.h"
-#include "jsfriendapi.h"
-#include "mdbjs/event_dispatcher.h"
-#include "mdbjs/mdbjs.h"
-#include "supervisor.h"
-#include "symbolication/value.h"
-#include "symbolication/value_visualizer.h"
-#include "task.h"
-#include "task_scheduling.h"
-#include "utils/expected.h"
-#include "utils/logger.h"
-#include <algorithm>
-#include <fcntl.h>
-#include <fmt/format.h>
-
+#include <bp.h>
+#include <event_queue.h>
+#include <interface/attach_args.h>
+#include <interface/console_command.h>
 #include <interface/dap/dap_defs.h>
 #include <interface/dap/events.h>
+#include <interface/dap/interface.h>
 #include <interface/pty.h>
 #include <interface/remotegdb/connection.h>
 #include <interface/tracee_command/ptrace_commander.h>
-
+#include <lib/arena_allocator.h>
+#include <lib/lockguard.h>
+#include <lib/spinlock.h>
+#include <lib/stack.h>
+#include <mdbjs/event_dispatcher.h>
+#include <mdbjs/mdbjs.h>
+#include <supervisor.h>
 #include <symbolication/dwarf_frameunwinder.h>
 #include <symbolication/objfile.h>
+#include <symbolication/value.h>
+#include <symbolication/value_visualizer.h>
 #include <sys/ptrace.h>
-#include <utility>
-
+#include <task.h>
+#include <task_scheduling.h>
+#include <utils/expected.h>
+#include <utils/logger.h>
 #include <utils/scope_defer.h>
 #include <utils/scoped_fd.h>
 #include <utils/thread_pool.h>
 
-#include <lib/arena_allocator.h>
-#include <lib/lockguard.h>
-#include <lib/spinlock.h>
+// stdlib
+#include <algorithm>
+#include <utility>
 
+// system
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/personality.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <dirent.h>
+// dependency
+#include <fmt/format.h>
+#include <js/Context.h>
+#include <js/ErrorReport.h>
+#include <js/Initialization.h>
+#include <js/Warnings.h>
+#include <jsfriendapi.h>
+
 namespace mdb {
 
 Tracer::Tracer(sys::DebuggerConfiguration init) noexcept : config(std::move(init))
@@ -200,19 +202,15 @@ Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 }
 
 void
-Tracer::InvalidateSessions(int frameTime) noexcept
-{
-  DBGLOG(core, "implement handling of reverse-execution across thread/process births");
-}
-
-void
 Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
 {
+#ifdef MDB_DEBUG
+  IncrementDebuggerTime();
+#endif
   auto task = GetTask(evt->mTaskId);
   TraceeController *supervisor = task->GetSupervisor();
-  if ((evt->mEventTime >= 0) && evt->mEventTime < sLastTraceEventTime) {
-    InvalidateSessions(evt->mEventTime);
-  }
+  // TODO(simon): When we implement RR support (somehow, god knows), we need to be able to tell if we've travelled
+  // back in time, or gone forward. This should potentially save us work.
   ASSERT(supervisor->mCreationEventTime >= evt->mEventTime,
          "Event time is before the creation of this supervisor?");
   sLastTraceEventTime = std::max<int>(0, evt->mEventTime);
@@ -785,38 +783,59 @@ Tracer::InitInterpreterAndStartDebugger(std::unique_ptr<DebuggerThread> debugAda
   }
 }
 
+constexpr bool
+EventHandlerStack::HasEventHandler() const noexcept
+{
+  return !mEventHandlerStack.Empty();
+}
+
+constexpr bool
+EventHandlerStack::ProcessEvent(Tracer &debugger, const ApplicationEvent &evt)
+{
+  if (mEventHandlerStack.Empty()) {
+    return false;
+  }
+
+  return mEventHandlerStack.Top()(debugger, evt);
+}
+
 void
 Tracer::MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *scriptRuntime) noexcept
 {
-  auto &appInstance = Get();
-  appInstance.sScriptRuntime = scriptRuntime;
+  auto &dbgInstance = Get();
+  dbgInstance.sScriptRuntime = scriptRuntime;
 
-  std::vector<Event> readInEvents{};
+  std::vector<ApplicationEvent> readInEvents{};
   readInEvents.reserve(128);
-  while (appInstance.IsRunning()) {
+
+  EventHandlerStack eventHandlerStack{};
+  dbgInstance.mEventHandlerStack = &eventHandlerStack;
+
+  while (dbgInstance.IsRunning()) {
     if (eventSystem->PollBlocking(readInEvents)) {
       for (auto evt : readInEvents) {
-#ifdef MDB_DEBUG
-        Tracer::Get().DebuggerEventCount()++;
-#endif
+        const bool handled = eventHandlerStack.ProcessEvent(dbgInstance, evt);
+        if (handled) {
+          continue;
+        }
         switch (evt.mEventType) {
         case EventType::WaitStatus: {
           DBGLOG(awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, to_str(evt.uWait.mWaitResult.ws.ws));
           if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.mWaitResult); dbg_evt) {
-            Tracer::Get().HandleTracerEvent(dbg_evt);
+            dbgInstance.HandleTracerEvent(dbg_evt);
           }
         } break;
         case EventType::Command: {
-          Tracer::Get().ExecuteCommand(evt.uCommand);
+          dbgInstance.ExecuteCommand(evt.uCommand);
         } break;
         case EventType::TraceeEvent: {
-          Tracer::Get().HandleTracerEvent(evt.uDebugger);
+          dbgInstance.HandleTracerEvent(evt.uDebugger);
         } break;
         case EventType::Initialization:
-          Tracer::Get().HandleInitEvent(evt.uDebugger);
+          dbgInstance.HandleInitEvent(evt.uDebugger);
           break;
         case EventType::Internal: {
-          Tracer::Get().HandleInternalEvent(evt.uInternalEvent);
+          dbgInstance.HandleInternalEvent(evt.uInternalEvent);
           break;
         }
         }

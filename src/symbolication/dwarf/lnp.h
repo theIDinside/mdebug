@@ -1,10 +1,14 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../dwarf_defs.h"
-#include "symbolication/block.h"
-#include "utils/immutable.h"
-#include "utils/indexing.h"
+// mdb
 #include <common.h>
+#include <common/panic.h>
+#include <symbolication/block.h>
+#include <symbolication/dwarf_defs.h>
+#include <utils/immutable.h>
+#include <utils/indexing.h>
+
+// stdlib
 #include <limits>
 
 namespace mdb {
@@ -79,7 +83,7 @@ struct FileEntryIndexVector
   constexpr FileEntryIndexVector &operator=(const FileEntryIndexVector &o) noexcept = default;
   constexpr FileEntryIndexVector &operator=(FileEntryIndexVector &&o) noexcept = default;
 
-  void
+  constexpr void
   Add(u32 fileIndex) noexcept
   {
     for (auto &e : mIndices) {
@@ -93,7 +97,7 @@ struct FileEntryIndexVector
           "different file index numbers) in the line number program. Terrible.");
   }
 
-  std::span<const u32>
+  constexpr std::span<const u32>
   FileIndices() const noexcept
   {
     const auto sz = std::size(mIndices);

@@ -12,13 +12,10 @@
 #include <type_traits>
 #include <utility>
 
+#include <common/panic.h>
+
 namespace mdb::sym::dw {
 using FileIndex = u32;
-
-/*
-  ASSERT(buildDirectory, "Expected build directory to not be null, p={}; lnp header=0x{:x}, object={}", p.c_str(),
-         sectionOffset, mObjectFile->GetObjectFileId());
-*/
 
 #define LNP_ASSERT(cond, formatString, ...)                                                                       \
   ASSERT((cond), "[object={}, lnp={}]: " formatString, mObjectFile->GetFilePath().filename().c_str(),             \

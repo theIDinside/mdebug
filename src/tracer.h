@@ -1,26 +1,35 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "bp.h"
-#include "common.h"
-#include "event_queue.h"
-#include "events/event.h"
-#include "interface/attach_args.h"
-#include "interface/console_command.h"
-#include "interface/dap/interface.h"
-#include "interface/tracee_command/gdb_remote_commander.h"
-#include "interface/tracee_command/tracee_command_interface.h"
-#include "symbolication/value.h"
-#include "symbolication/value_visualizer.h"
-#include "utils/debugger_thread.h"
+// mdb
+#include <bp.h>
+#include <common.h>
+#include <event_queue.h>
+#include <events/event.h>
+#include <interface/attach_args.h>
+#include <interface/console_command.h>
+#include <interface/dap/interface.h>
+#include <interface/tracee_command/gdb_remote_commander.h>
+#include <interface/tracee_command/tracee_command_interface.h>
+#include <lib/stack.h>
 #include <mdb_config.h>
 #include <mdbsys/ptrace.h>
+
 #include <notify_pipe.h>
+#include <symbolication/value.h>
+#include <symbolication/value_visualizer.h>
 #include <symbolication/variable_reference.h>
+
+#include <utils/debugger_thread.h>
+#include <utils/immutable.h>
+
+// stdlib
+#include <memory>
+#include <unordered_map>
+
+// system
 #include <sys/ioctl.h>
 #include <termios.h>
-#include <unordered_map>
-#include <utils/immutable.h>
 
 struct JSContext;
 
@@ -78,9 +87,23 @@ enum class TracerProcess
   Shutdown
 };
 
+using ApplicationEventHandler = std::function<bool(Tracer &, const ApplicationEvent &evt)>;
+
+class EventHandlerStack
+{
+public:
+  using HandlerStack = InlineStack<ApplicationEventHandler, 16>;
+  constexpr bool HasEventHandler() const noexcept;
+  constexpr bool ProcessEvent(Tracer &debugger, const ApplicationEvent &evt);
+
+private:
+  HandlerStack mEventHandlerStack{};
+};
+
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
+
   static TracerProcess sApplicationState;
   static termios sOriginalTty;
   static winsize sTerminalWindowSize;
@@ -106,6 +129,14 @@ public:
     return mDebuggerEvents;
   }
 
+#ifdef MDB_DEBUG
+  constexpr void
+  IncrementDebuggerTime() noexcept
+  {
+    mDebuggerEvents++;
+  }
+#endif
+
 private:
 #endif
 public:
@@ -125,11 +156,12 @@ public:
   TraceeController *GetProcessContainingTid(Tid tid) noexcept;
   TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
+
   void ExecuteCommand(ui::UICommand *cmd) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
-  void InvalidateSessions(int frameTime) noexcept;
+
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
                                                    Allocator *allocator) noexcept;
 
@@ -178,6 +210,7 @@ public:
   static void InitInterpreterAndStartDebugger(std::unique_ptr<DebuggerThread> debugAdapterThread,
                                               EventSystem *eventSystem) noexcept;
   static void InitializeDapSerializers() noexcept;
+
   void Shutdown() noexcept;
   void ShutdownProfiling() noexcept;
 
@@ -265,5 +298,7 @@ private:
   sym::ResolveReference *mResolveReference{nullptr};
   sym::ResolveCString *mResolveCString{nullptr};
   sym::ResolveArray *mResolveArray{nullptr};
+
+  EventHandlerStack *mEventHandlerStack{};
 };
 } // namespace mdb

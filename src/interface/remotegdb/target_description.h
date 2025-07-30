@@ -1,7 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/immutable.h"
-#include <typedefs.h>
+// mdb
+#include <common/typedefs.h>
+#include <utils/immutable.h>
+
+// stdlib
 #include <vector>
 
 namespace mdb::xml {

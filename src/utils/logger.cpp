@@ -2,7 +2,6 @@
 #include "logger.h"
 #include "../common.h"
 #include "fmt/base.h"
-#include "lib/arena_allocator.h"
 #include "utils/util.h"
 #include <algorithm>
 #include <ranges>

@@ -2,8 +2,8 @@
 #pragma once
 #include "utils/debugger_thread.h"
 #include "worker_task.h"
+#include <common/typedefs.h>
 #include <queue>
-#include <typedefs.h>
 #include <vector>
 
 namespace mdb {

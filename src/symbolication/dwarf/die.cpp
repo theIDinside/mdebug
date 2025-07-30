@@ -4,9 +4,9 @@
 #include "debug_info_reader.h"
 #include "symbolication/dwarf/die_ref.h"
 #include "symbolication/dwarf_attribute_value.h"
-#include "typedefs.h"
 #include "utils/logger.h"
 #include "utils/util.h"
+#include <common/typedefs.h>
 #include <emmintrin.h>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>

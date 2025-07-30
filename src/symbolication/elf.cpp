@@ -111,6 +111,23 @@ Elf::GetSections() const noexcept
   return mSections;
 }
 
+static constexpr std::string_view
+SectionName(ElfSec ident) noexcept
+{
+  using enum ElfSec;
+#define SECTION(Ident, Name)                                                                                      \
+  case Ident:                                                                                                     \
+    return #Name;
+  switch (ident) {
+#include "../defs/elf.defs"
+#undef SECTION
+  case ElfSec::COUNT:
+    return "ERROR_SECTION";
+    break;
+  }
+  NEVER("Unknown elf section identifier");
+}
+
 constexpr const ElfSection *
 Elf::GetSection(ElfSec section) const noexcept
 {

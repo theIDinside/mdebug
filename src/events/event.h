@@ -1,15 +1,20 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "events/stop_event.h"
-#include "utils/macros.h"
+// mdb
+#include <common/macros.h>
+#include <events/stop_event.h>
+#include <utils/algorithm.h>
+
+// stdlib
 #include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <sys/types.h>
-#include <utils/algorithm.h>
 #include <vector>
+
+// system
+#include <sys/types.h>
 
 namespace mdb {
 class TraceeController;

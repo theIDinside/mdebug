@@ -362,7 +362,7 @@ struct InternalEvent
   UnionVariantConstructor(InternalEvent, InitializedWaitSystem);
 };
 
-struct Event
+struct ApplicationEvent
 {
   EventType mEventType;
   union
@@ -373,13 +373,19 @@ struct Event
     InternalEvent uInternalEvent;
   };
 
-  constexpr explicit Event(ui::UICommand *command) noexcept : mEventType(EventType::Command), uCommand(command) {}
-  constexpr explicit Event(TraceEvent *debuggerEvent, bool isInit = false) noexcept
+  constexpr explicit ApplicationEvent(ui::UICommand *command) noexcept
+      : mEventType(EventType::Command), uCommand(command)
+  {
+  }
+  constexpr explicit ApplicationEvent(TraceEvent *debuggerEvent, bool isInit = false) noexcept
       : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent)
   {
   }
-  constexpr explicit Event(WaitEvent waitEvent) noexcept : mEventType(EventType::WaitStatus), uWait(waitEvent) {}
-  constexpr explicit Event(InternalEvent internalEvent) noexcept
+  constexpr explicit ApplicationEvent(WaitEvent waitEvent) noexcept
+      : mEventType(EventType::WaitStatus), uWait(waitEvent)
+  {
+  }
+  constexpr explicit ApplicationEvent(InternalEvent internalEvent) noexcept
       : mEventType(EventType::Internal), uInternalEvent(internalEvent)
   {
   }
@@ -419,7 +425,7 @@ class EventSystem
   std::mutex mInternalEventGuard{};
   std::vector<TraceEvent *> mTraceEvents;
   std::vector<ui::UICommand *> mCommands;
-  std::vector<Event> mWaitEvents;
+  std::vector<ApplicationEvent> mWaitEvents;
   std::vector<TraceEvent *> mInitEvent;
   std::vector<InternalEvent> mInternal;
   EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
@@ -439,7 +445,7 @@ public:
   void PushInitEvent(TraceEvent *event) noexcept;
   void NotifyNewWaitpidResults() noexcept;
   void PushInternalEvent(InternalEvent event) noexcept;
-  bool PollBlocking(std::vector<Event> &write) noexcept;
+  bool PollBlocking(std::vector<ApplicationEvent> &write) noexcept;
 
   static EventSystem &Get() noexcept;
 };

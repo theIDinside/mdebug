@@ -2,7 +2,7 @@
 #pragma once
 #include "bp.h"
 #include "mdbjs/jsobject.h"
-#include "typedefs.h"
+#include <common/typedefs.h>
 #include <cstring>
 
 namespace mdb::js {

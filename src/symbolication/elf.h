@@ -2,12 +2,12 @@
 #pragma once
 #include "tracee_pointer.h"
 #include "utils/immutable.h"
-#include "utils/macros.h"
 #include <common.h>
+#include <common/macros.h>
+#include <common/typedefs.h>
 #include <elf.h>
 #include <span>
 #include <string_view>
-#include <typedefs.h>
 
 namespace mdb {
 constexpr static u8 ELF_MAGIC[4]{0x7F, 0x45, 0x4C, 0x46};
@@ -26,23 +26,6 @@ enum class ElfSec : u8
 ElfSec from_str(std::string_view str);
 
 std::optional<ElfSec> to_identifier(std::string_view str);
-
-constexpr std::string_view
-SectionName(ElfSec ident) noexcept
-{
-  using enum ElfSec;
-#define SECTION(Ident, Name)                                                                                      \
-  case Ident:                                                                                                     \
-    return #Name;
-  switch (ident) {
-#include "../defs/elf.defs"
-#undef SECTION
-  case ElfSec::COUNT:
-    return "ERROR_SECTION";
-    break;
-  }
-  NEVER("Unknown elf section identifier");
-}
 
 struct ElfSection
 {

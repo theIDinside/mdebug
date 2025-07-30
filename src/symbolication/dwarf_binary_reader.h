@@ -2,8 +2,8 @@
 #pragma once
 #include "../common.h"
 #include "dwarf_defs.h"
+#include <common/typedefs.h>
 #include <type_traits>
-#include <typedefs.h>
 namespace mdb {
 class Elf;
 

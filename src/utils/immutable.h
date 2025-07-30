@@ -370,19 +370,19 @@ template <typename T> struct NonNullPtr
 {
   T *ptr;
 
-  T &
+  constexpr T &
   operator*() noexcept
   {
     return *ptr;
   }
 
-  [[gnu::returns_nonnull]] T *
+  [[gnu::returns_nonnull]] constexpr T *
   operator->() noexcept
   {
     return ptr;
   }
 
-  [[gnu::returns_nonnull]] const T *
+  [[gnu::returns_nonnull]] constexpr const T *
   operator->() const noexcept
   {
     return ptr;
@@ -400,9 +400,17 @@ template <typename T> struct NonNullPtr
     return *ptr;
   }
 
-  [[gnu::returns_nonnull]] operator T *() noexcept { return ptr; }
+  [[gnu::returns_nonnull]] constexpr
+  operator T *() noexcept
+  {
+    return ptr;
+  }
 
-  [[gnu::returns_nonnull]] operator const T *() const noexcept { return ptr; }
+  [[gnu::returns_nonnull]] constexpr
+  operator const T *() const noexcept
+  {
+    return ptr;
+  }
 };
 
 template <typename U>

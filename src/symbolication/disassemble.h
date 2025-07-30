@@ -2,7 +2,7 @@
 #pragma once
 #include "tracee_pointer.h"
 #include <common.h>
-#include <typedefs.h>
+#include <common/typedefs.h>
 namespace mdb {
 class TraceeController;
 struct ElfSection;

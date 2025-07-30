@@ -1,8 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include <common/typedefs.h>
 #include <cstdint>
 #include <string_view>
-#include <typedefs.h>
 
 using PtrVal = std::uintptr_t;
 

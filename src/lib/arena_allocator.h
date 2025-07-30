@@ -1,9 +1,15 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "typedefs.h"
-#include "utils/macros.h"
+// mdb
+#include <common/macros.h>
+#include <common/typedefs.h>
+#include <utils/util.h>
+
+// stdlib
 #include <memory>
 #include <memory_resource>
+
+// system
 #include <sys/user.h>
 
 namespace mdb::alloc {
@@ -16,7 +22,7 @@ struct Page
   constexpr u64
   SizeBytes() const noexcept
   {
-    return count * PAGE_SIZE;
+    return SystemPagesInBytes(count);
   }
 };
 

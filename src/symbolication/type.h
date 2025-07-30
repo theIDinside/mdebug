@@ -1,14 +1,15 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common.h"
-#include "symbolication/block.h"
-#include "symbolication/dwarf/die_ref.h"
-#include "tracee_pointer.h"
-#include "utils/immutable.h"
-#include "utils/indexing.h"
-#include "utils/macros.h"
-#include "utils/util.h"
+#include <common.h>
+#include <common/macros.h>
 #include <mutex>
+#include <symbolication/block.h>
+#include <symbolication/dwarf/die_ref.h>
+#include <tracee_pointer.h>
+#include <utils/expected.h>
+#include <utils/immutable.h>
+#include <utils/indexing.h>
+#include <utils/util.h>
 
 using namespace std::string_view_literals;
 
@@ -216,37 +217,37 @@ enum class Modifier : i8
   Shared,
 };
 
-static constexpr std::string_view
+static constexpr mdb::Result<std::string_view, None>
 ModifierToString(Modifier mod)
 {
   switch (mod) {
   case Modifier::Const:
-    return "const";
+    return "const"sv;
   case Modifier::Volatile:
-    return "volatile";
+    return "volatile"sv;
   case Modifier::None:
-    return "";
+    return ""sv;
   case Modifier::Pointer:
-    return "*";
+    return "*"sv;
   case Modifier::Reference:
-    return "&";
+    return "&"sv;
   case Modifier::RValueReference:
-    return "&&";
+    return "&&"sv;
   case Modifier::Array:
-    return "[";
+    return "["sv;
   // these needs updating. it's not how they are supposed to look. This is language dependent too.
   case Modifier::Atomic:
-    return "atomic";
+    return "atomic"sv;
   case Modifier::Immutable:
-    return "immutable";
+    return "immutable"sv;
   case Modifier::Packed:
-    return "packed";
+    return "packed"sv;
   case Modifier::Restrict:
-    return "restrict";
+    return "restrict"sv;
   case Modifier::Shared:
-    return "shared";
+    return "shared"sv;
   }
-  NEVER("Unknown modifier");
+  return None{};
 }
 
 union EnumeratorConstValue
@@ -553,7 +554,7 @@ template <> struct formatter<sym::Type>
     auto type_span = std::span{types.begin(), types.begin() + idx};
     for (const auto t : type_span) {
       if (t->mModifier != sym::Modifier::None) {
-        out = fmt::format_to(out, "{}", ModifierToString(t->mModifier));
+        out = fmt::format_to(out, "{}", ModifierToString(t->mModifier).Value());
         if (t->mModifier == sym::Modifier::Array) {
           out = fmt::format_to(out, "{}]", t->mArrayBounds);
         }

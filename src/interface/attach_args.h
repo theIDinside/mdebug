@@ -1,9 +1,13 @@
 /** LICENSE TEMPLATE */
 #pragma once
+// mdb
+#include <common/typedefs.h>
+
+// stdlib
 #include <optional>
 #include <string>
-#include <typedefs.h>
 #include <variant>
+
 namespace mdb {
 enum class RemoteType
 {

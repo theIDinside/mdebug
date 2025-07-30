@@ -1,7 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
+// mdb
+#include <common/typedefs.h>
+
+// stdlib
 #include <string_view>
-#include <typedefs.h>
 
 namespace mdb::gdb {
 

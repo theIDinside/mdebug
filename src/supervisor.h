@@ -314,7 +314,7 @@ public:
   std::unique_ptr<LeakVector<u8>> ReadToVector(AddrPtr addr, u64 bytes,
                                                std::pmr::memory_resource *resource) noexcept;
 
-  void DeferEvent(Event event) noexcept;
+  void DeferEvent(ApplicationEvent event) noexcept;
   void ResumeEventHandling() noexcept;
   void InvalidateThreads(int eventTime) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;

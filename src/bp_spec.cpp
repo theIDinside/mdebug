@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "bp_spec.h"
+#include <common/panic.h>
 
 namespace mdb {
 
@@ -164,4 +165,37 @@ BreakpointSpecification::Clone() const noexcept
 {
   return std::unique_ptr<BreakpointSpecification>{Clone(this)};
 }
+
 }; // namespace mdb
+
+std::hash<mdb::BreakpointSpecification>::result_type
+std::hash<mdb::BreakpointSpecification>::operator()(const argument_type &m) const noexcept
+{
+  using enum mdb::DapBreakpointType;
+  ASSERT(m.mKind == source || m.mKind == function || m.mKind == instruction, "Unexpected spec type: {}",
+         std::to_underlying(m.mKind));
+  const auto u32Hasher = std::hash<u32>{};
+
+  auto res = u32Hasher(static_cast<u32>(std::to_underlying(m.mKind)));
+  const auto strHasher = std::hash<std::string_view>{};
+  if (m.mCondition) {
+    res = res ^ strHasher(*m.mCondition);
+  }
+
+  if (m.mHitCondition) {
+    res = res ^ strHasher(*m.mHitCondition);
+  }
+
+  switch (m.mKind) {
+  case source:
+    return res ^ std::hash<mdb::SourceBreakpointSpec>{}(m.uSource->mSpec);
+  case function:
+    return res ^ std::hash<mdb::FunctionBreakpointSpec>{}(*m.uFunction);
+  case instruction:
+    return res ^ std::hash<mdb::InstructionBreakpointSpec>{}(*m.uInstruction);
+  default:
+    break;
+  }
+  PANIC("Unexpected type");
+  return res;
+}

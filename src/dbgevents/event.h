@@ -1,7 +1,12 @@
 /** LICENSE TEMPLATE */
 
-#include "utils/macros.h"
+// mdb
+#include <common/macros.h>
+
+// stdlib
 #include <cstdint>
+
+// system
 #include <sys/user.h>
 namespace mdb {
 

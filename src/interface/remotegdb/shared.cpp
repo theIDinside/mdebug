@@ -1,6 +1,9 @@
 /** LICENSE TEMPLATE */
+
+// mdb
 #include "shared.h"
 #include <common.h>
+#include <common/panic.h>
 
 namespace mdb::gdb {
 

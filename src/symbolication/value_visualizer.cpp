@@ -23,7 +23,7 @@ namespace mdb::sym {
 std::vector<Ref<Value>>
 ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
-  std::vector<Ref<Value>> mResults;
+  std::vector<Ref<Value>> results;
   auto value = *context.GetValue();
   if (const auto address = value.ToRemotePointer(); address.is_expected()) {
     auto adjusted_address = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
@@ -32,9 +32,9 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
       sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjusted_address, requested_length);
     if (!memory.is_ok()) {
       auto t = value.GetType()->TypeDescribingLayoutOfThis();
-      mResults.push_back(
+      results.push_back(
         Ref<Value>::MakeShared(nullptr, *t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
-      return mResults;
+      return results;
     }
     auto mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
@@ -46,27 +46,27 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
                                                     : Tracer::Get().CloneFromVariableContext(context);
 
     if (layout_type->IsArrayType()) {
-      mResults.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
-                                                Tracer::GetSerializer<sym::ArrayVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
+                                               Tracer::GetSerializer<sym::ArrayVisualizer>()));
     } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
-      mResults.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
-                                                Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
+                                               Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
     } else {
-      mResults.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
-                                                Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
+                                               Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
     }
-    ObjectFile::InitializeDataVisualizer(*mResults.back());
+    ObjectFile::InitializeDataVisualizer(*results.back());
     if (clonedContext->mId > 0) {
-      clonedContext->mTask->CacheValueObject(clonedContext->mId, mResults.back());
+      clonedContext->mTask->CacheValueObject(clonedContext->mId, results.back());
     }
   }
-  return mResults;
+  return results;
 }
 
 std::vector<Ref<Value>>
 ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
 {
-  std::vector<Ref<Value>> mResults;
+  std::vector<Ref<Value>> results;
   auto &value = *context.GetValue();
   if (const auto address = value.ToRemotePointer(); address.is_expected()) {
     auto adjustedAddress = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
@@ -75,9 +75,9 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
       sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjustedAddress, requestedLength);
     if (!referencedMemory.is_ok()) {
       auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
-      mResults.push_back(Ref<Value>::MakeShared(nullptr, *layoutType, 0u, nullptr,
-                                                Tracer::GetSerializer<InvalidValueVisualizer>()));
-      return mResults;
+      results.push_back(Ref<Value>::MakeShared(nullptr, *layoutType, 0u, nullptr,
+                                               Tracer::GetSerializer<InvalidValueVisualizer>()));
+      return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
@@ -88,9 +88,9 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
       Ref<sym::Value>::MakeShared(VariableContext::CloneFrom(0, context), *layoutType, 0u, indirectValueObject,
                                   Tracer::GetSerializer<CStringVisualizer>());
 
-    mResults.push_back(std::move(stringValue));
+    results.push_back(std::move(stringValue));
   }
-  return mResults;
+  return results;
 }
 
 std::vector<Ref<Value>>
@@ -98,7 +98,7 @@ ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, Va
 {
   auto &value = *context.GetValue();
   ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
-  std::vector<Ref<Value>> mResults;
+  std::vector<Ref<Value>> results;
   const auto arraySize = value.GetType()->ArraySize();
   Type *elementsType = value.GetType()->TypeDescribingLayoutOfThis();
 
@@ -124,16 +124,16 @@ ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, Va
     const auto memoryObjectOffset = i * elementTypeSize;
     auto varContext = elementsType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
                                                   : Tracer::Get().CloneFromVariableContext(context);
-    mResults.emplace_back(
+    results.emplace_back(
       Ref<Value>::MakeShared(varContext, std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
 
-    ObjectFile::InitializeDataVisualizer(*mResults.back());
+    ObjectFile::InitializeDataVisualizer(*results.back());
     if (varContext->mId > 0) {
-      context.mTask->CacheValueObject(varContext->mId, mResults.back());
+      context.mTask->CacheValueObject(varContext->mId, results.back());
     }
   }
 
-  return mResults;
+  return results;
 }
 
 std::vector<Ref<Value>>

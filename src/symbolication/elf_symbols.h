@@ -1,8 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "../common.h"
+#include <common/typedefs.h>
 #include <string_view>
-#include <typedefs.h>
 
 namespace mdb {
 
