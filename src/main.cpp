@@ -29,6 +29,8 @@
 #include <unistd.h>
 #include <utils/expected.h>
 
+#include <json/json.h>
+
 // std::mutex m;
 std::string data;
 bool ready = false;

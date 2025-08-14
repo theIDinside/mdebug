@@ -239,21 +239,7 @@ message("Build type for project: ${CMAKE_BUILD_TYPE}")
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(mdb ${MIDAS_SOURCES})
-set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
-
-# Add the json library
-set(JSON_Install OFF CACHE INTERNAL "")
-add_subdirectory(dependencies/nlohmann_json)
-add_subdirectory(dependencies/quickjs)
-
-target_link_libraries(mdb mdb_spinlock nlohmann_json::nlohmann_json zydis libquickjs)
-# Link the libraries to your target
-
-target_include_directories(mdb PUBLIC ./dependencies)
-target_include_directories(mdb PUBLIC ./src)
-
+# Define this _before_ we add_subdirectory, so that any sub projects can check "do we have gtest?"
 message("Test & building test subjects has been configured to ${BUILD_MDB_TESTS}")
 if(BUILD_MDB_TESTS)
   message("Testing enabled...")
@@ -295,6 +281,22 @@ if(BUILD_MDB_TESTS)
     endif()
   endif()
 endif()
+
+add_executable(mdb ${MIDAS_SOURCES})
+set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
+
+# Add the json library
+set(JSON_Install OFF CACHE INTERNAL "")
+add_subdirectory(dependencies/nlohmann_json)
+add_subdirectory(dependencies/quickjs)
+add_subdirectory(lib/json)
+
+target_link_libraries(mdb PRIVATE mdb_spinlock nlohmann_json::nlohmann_json zydis libquickjs mdbjson)
+# Link the libraries to your target
+
+target_include_directories(mdb PUBLIC ./dependencies)
+target_include_directories(mdb PUBLIC ./src)
 
 # To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)
