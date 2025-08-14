@@ -4,7 +4,6 @@
 #include "event_queue.h"
 #include <common.h>
 #include <common/macros.h>
-
 #include <interface/dap/events.h>
 #include <interface/dap/interface.h>
 #include <interface/dap/types.h>
