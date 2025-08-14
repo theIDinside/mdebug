@@ -17,7 +17,7 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
     : TraceeCommandInterface(TargetFormat::Native, nullptr, TraceeInterfaceType::Ptrace), mProcFsMemFd(),
       mProcessId(process_space_id)
 {
-  const auto procfs_path = fmt::format("/proc/{}/mem", process_space_id);
+  const auto procfs_path = std::format("/proc/{}/mem", process_space_id);
   mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
   ASSERT(mProcFsMemFd.IsOpen(), "failed to open memfd for {}", process_space_id);
 }
@@ -29,7 +29,7 @@ PtraceCommander::OnExec() noexcept
   mProcessId = tc->TaskLeaderTid();
   DBGLOG(core, "Post Exec routine for {}", mProcessId);
   mProcFsMemFd = {};
-  const auto procfs_path = fmt::format("/proc/{}/task/{}/mem", mProcessId, mProcessId);
+  const auto procfs_path = std::format("/proc/{}/task/{}/mem", mProcessId, mProcessId);
   mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
   ASSERT(mProcFsMemFd.IsOpen(), "Failed to open proc mem fs for {}", mProcessId);
 
@@ -37,7 +37,7 @@ PtraceCommander::OnExec() noexcept
 }
 
 Interface
-PtraceCommander::OnFork(Pid pid) noexcept
+PtraceCommander::OnFork(SessionId pid) noexcept
 {
   return std::make_unique<PtraceCommander>(pid);
 }
@@ -94,7 +94,7 @@ PtraceCommander::ReadLibraries() noexcept
         return objectFiles;
       }
     }
-    auto linkmap = TPtr<link_map>{rdebug_ext.base.r_map};
+    auto linkmap = TPtr<link_map>{ rdebug_ext.base.r_map };
     while (linkmap != nullptr) {
       auto map_res = ReadType(linkmap);
       if (!map_res.is_expected()) {
@@ -102,16 +102,16 @@ PtraceCommander::ReadLibraries() noexcept
         return {};
       }
       auto map = map_res.take_value();
-      auto namePointer = TPtr<char>{map.l_name};
+      auto namePointer = TPtr<char>{ map.l_name };
       const auto path = ReadNullTerminatedString(namePointer);
       if (!path) {
         DBGLOG(core, "Failed to read null-terminated string from tracee at {}", namePointer);
         return {};
       }
       objectFiles.emplace_back(path.value(), map.l_addr);
-      linkmap = TPtr<link_map>{map.l_next};
+      linkmap = TPtr<link_map>{ map.l_next };
     }
-    const auto next = TPtr<r_debug_extended>{rdebug_ext.r_next};
+    const auto next = TPtr<r_debug_extended>{ rdebug_ext.r_next };
     if (next != nullptr) {
       const auto next_rdebug = ReadType(next);
       if (next_rdebug.is_error()) {
@@ -170,8 +170,10 @@ PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::ve
 TaskExecuteResponse
 PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 {
-  ASSERT(t.mUserVisibleStop || t.mTracerVisibleStop, "Was in neither user_stop ({}) or tracer_stop ({})",
-         bool{t.mUserVisibleStop}, bool{t.mTracerVisibleStop});
+  ASSERT(t.mUserVisibleStop || t.mTracerVisibleStop,
+    "Was in neither user_stop ({}) or tracer_stop ({})",
+    bool{ t.mUserVisibleStop },
+    bool{ t.mTracerVisibleStop });
   if (t.mTracerVisibleStop) {
     action.mDeliverSignal = t.mLastWaitStatus.signal == SIGTRAP ? 0 : t.mLastWaitStatus.signal;
     if (t.bfRequestedStop) {
@@ -185,8 +187,10 @@ PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
       return TaskExecuteResponse::Error(errno);
     }
   } else {
-    DBGLOG(awaiter, "[{}.{}:resume]: did not resume, not recorded signal delivery stop.",
-           t.GetSupervisor()->TaskLeaderTid(), t.mTid);
+    DBGLOG(awaiter,
+      "[{}.{}:resume]: did not resume, not recorded signal delivery stop.",
+      t.GetSupervisor()->TaskLeaderTid(),
+      t.mTid);
   }
   t.SetCurrentResumeAction(action);
   return TaskExecuteResponse::Ok();
@@ -208,6 +212,7 @@ PtraceCommander::StopTask(TaskInfo &t) noexcept
 TaskExecuteResponse
 PtraceCommander::EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
+  DBGLOG(core, "[{}.{}:bkpt]: enabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
   return InstallBreakpoint(tid, location.Address());
 }
 
@@ -251,7 +256,7 @@ TaskExecuteResponse
 PtraceCommander::ReadRegisters(TaskInfo &t) noexcept
 {
   if (const auto ptrace_result = ptrace(PTRACE_GETREGS, t.mTid, nullptr, t.NativeRegisters());
-      ptrace_result == -1) {
+    ptrace_result == -1) {
     return TaskExecuteResponse::Error(errno);
   } else {
     return TaskExecuteResponse::Ok();
@@ -284,10 +289,10 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
   }
 
   std::array<char, 256> pathbuf{};
-  auto it = fmt::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
-  std::string_view path{pathbuf.data(), it};
+  auto it = std::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
+  std::string_view path{ pathbuf.data(), it };
   auto file = mdb::ScopedFd::OpenFileReadOnly(path);
-  char namebuf[16]{0};
+  char namebuf[16]{ 0 };
   auto len = ::read(file, namebuf, 16);
 
   if (len == -1) {
@@ -297,11 +302,11 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
     }
     len = static_cast<u32>(res.ptr - namebuf);
   }
-  std::string_view thrName{namebuf, static_cast<std::string::size_type>(len)};
+  std::string_view thrName{ namebuf, static_cast<std::string::size_type>(len) };
   if (thrName.back() == '\n') {
     thrName.remove_suffix(1);
   }
-  auto newThreadName = fmt::format("{}: {}", tid, thrName);
+  auto newThreadName = std::format("{}: {}", tid, thrName);
   const auto &[iter, ok] = mThreadNames.emplace(tid, std::move(newThreadName));
   return iter->second;
 }
@@ -348,7 +353,7 @@ PtraceCommander::RemoteConnection() noexcept
 mdb::Expected<Auxv, Error>
 PtraceCommander::ReadAuxiliaryVector() noexcept
 {
-  auto path = fmt::format("/proc/{}/auxv", TaskLeaderTid());
+  auto path = std::format("/proc/{}/auxv", TaskLeaderTid());
   DBGLOG(core, "Reading auxv for {} at {}", TaskLeaderTid(), path);
   mdb::ScopedFd procfile = mdb::ScopedFd::OpenFileReadOnly(path);
   // we can read 256 elements at a time (id + value = u64 * 2)
@@ -359,12 +364,12 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
   while (true) {
     const auto result = pread(procfile, buffer, sizeof(u64) * Count, offset);
     if (result == -1) {
-      return Error{.mSysErrorNumber = errno, .mErrorMessage = strerror(errno)};
+      return Error{ .mSysErrorNumber = errno, .mErrorMessage = strerror(errno) };
     }
     ASSERT(result > (8 * 2),
-           "Expected to read at least 1 element (last element should always be a 0, 0 pair, "
-           "thus one element should always exist at the minimum) but read {}",
-           result);
+      "Expected to read at least 1 element (last element should always be a 0, 0 pair, "
+      "thus one element should always exist at the minimum) but read {}",
+      result);
     const auto item_count = result / 8;
 
     res.mContents.reserve(res.mContents.size() + item_count);

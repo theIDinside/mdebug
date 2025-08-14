@@ -1,12 +1,12 @@
 const { assert, assertLog, prettyJson } = require('./utils')
 /**
  *
- * @param {import("./client").DAClient } DA
+ * @param {import("./client").DebugAdapterClient } DA
  */
 async function see9ThreadExits(DA) {
   await DA.startRunToMain(DA.buildDirFile('threads_shared'))
   const threads = await DA.threads()
-  const EXPECTED_THREAD_EVENTS = 17;
+  const EXPECTED_THREAD_EVENTS = 17
   let p = DA.prepareWaitForEventN('thread', EXPECTED_THREAD_EVENTS, 2500)
   let pexited = DA.prepareWaitForEventN('exited', 1, 1000)
   for (let i = 0; i < 3; i++) {
@@ -22,7 +22,7 @@ async function see9ThreadExits(DA) {
     }
   }
   let r = await p
-  assertLog(r.length == EXPECTED_THREAD_EVENTS, `Expected ${EXPECTED_THREAD_EVENTS} thread events`);
+  assertLog(r.length == EXPECTED_THREAD_EVENTS, `Expected ${EXPECTED_THREAD_EVENTS} thread events`)
   let re = (await pexited)[0]
 
   let threads_started = 0

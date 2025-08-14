@@ -51,7 +51,7 @@ struct Request
 struct ParseBuffer
 {
 public:
-  ParseBuffer(size_t size) noexcept : size{0, 0}, buffer_size(size)
+  ParseBuffer(size_t size) noexcept : size{ 0, 0 }, buffer_size(size)
   {
     swap_buffers[0] = mmap_buffer<const char>(size);
     swap_buffers[1] = mmap_buffer<const char>(size);
@@ -68,13 +68,19 @@ public:
     const auto duration_ms = MilliSecondsSince(start);
     ASSERT(duration_ms < 1500, "Read took *way* too long");
     if (read_bytes == -1) {
-      CDLOG(errno != EWOULDBLOCK && errno != EAGAIN, core, "command buffer read error: {} for fd {}",
-            strerror(errno), fd);
+      CDLOG(errno != EWOULDBLOCK && errno != EAGAIN,
+        core,
+        "command buffer read error: {} for fd {}",
+        strerror(errno),
+        fd);
       return false;
     }
     VERIFY(read_bytes >= 0,
-           "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: '{}'",
-           buffer_size - current_size(), buffer_size, strerror(errno), take_view());
+      "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: '{}'",
+      buffer_size - current_size(),
+      buffer_size,
+      strerror(errno),
+      take_view());
     if (read_bytes >= 0) {
       size[current_buffer_index] += read_bytes;
     }
@@ -84,7 +90,7 @@ public:
   std::string_view
   take_view() const noexcept
   {
-    return std::string_view{swap_buffers[current_buffer_index], current_size()};
+    return std::string_view{ swap_buffers[current_buffer_index], current_size() };
   }
 
   // takes data from start .. end, copies it to the swap buffer and swaps buffers
@@ -96,8 +102,8 @@ public:
     size[current_buffer_index] = 0;
     current_buffer_index = next_buffer_index();
     const auto dst = buffer_ptr();
-    ASSERT(next_buffer_used < buffer_size, "Offset into buffer outside of {} bytes: {}", buffer_size,
-           next_buffer_used);
+    ASSERT(
+      next_buffer_used < buffer_size, "Offset into buffer outside of {} bytes: {}", buffer_size, next_buffer_used);
     if (next_buffer_used > 0) {
       std::memcpy(dst, src, next_buffer_used);
     }
@@ -152,7 +158,7 @@ enum class DapClientSession
 
 struct SupervisorEntry
 {
-  Pid mSupervisorId;
+  SessionId mSupervisorId;
   TraceeController *mSupervisor;
 
   constexpr auto operator<=>(const SupervisorEntry &) const = default;
@@ -160,7 +166,7 @@ struct SupervisorEntry
 
 struct InitializationState
 {
-  Pid mPid;
+  SessionId mPid;
   std::string mSessionId;
   UIResult *mLaunchOrAttachResponse;
 };
@@ -170,8 +176,8 @@ class DebugAdapterClient
   std::filesystem::path socket_path{};
   int in{};
   int out{};
-  ParseBuffer parse_swapbuffer{MDB_PAGE_SIZE * 16};
-  int tty_fd{-1};
+  ParseBuffer parse_swapbuffer{ MDB_PAGE_SIZE * 16 };
+  int tty_fd{ -1 };
   std::vector<SupervisorEntry> mSupervisors;
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
@@ -208,19 +214,18 @@ public:
   int ReadFileDescriptor() const noexcept;
   int WriteFileDescriptor() const noexcept;
 
-  void PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept;
-  void PrepareAttach(std::string sessionId, Pid processId, AttachResponse *attachResponse) noexcept;
-  void ConfigDone(Pid processId) noexcept;
+  void ConfigDone(SessionId processId) noexcept;
 
   bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;
   void ReadPendingCommands() noexcept;
-  void SetTtyOut(int fd, Pid pid) noexcept;
+  void SetTtyOut(int fd, SessionId pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
-  TraceeController *GetSupervisor(Pid pid) const noexcept;
+  TraceeController *GetSupervisor(SessionId pid) const noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
   void FlushEvents() noexcept;
   bool IsClosed() noexcept;
+  bool SessionConfigurationDone(SessionId sessionId) noexcept;
 };
 
 enum class InterfaceNotificationSource
@@ -235,14 +240,14 @@ using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterCli
 struct DapNotification
 {
   InterfaceNotificationSource mSource;
-  Pid mPid{0};
+  SessionId mPid{ 0 };
 };
 
 struct StandardIo
 {
   int mFd;
   // The process ID that outputs to it's standard IO
-  Pid mPid;
+  SessionId mPid;
 };
 
 struct PollState
@@ -266,21 +271,21 @@ struct PollState
   constexpr void
   AddCommandSource(int fd) noexcept
   {
-    fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
-    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::DebugAdapterClient};
+    fds.push_back({ .fd = fd, .events = POLLIN, .revents = 0 });
+    map[fd] = DapNotification{ .mSource = InterfaceNotificationSource::DebugAdapterClient };
   }
 
   constexpr void
-  AddStandardIOSource(int fd, Pid processId) noexcept
+  AddStandardIOSource(int fd, SessionId processId) noexcept
   {
-    fds.push_back({.fd = fd, .events = POLLIN, .revents = 0});
-    map[fd] = DapNotification{.mSource = InterfaceNotificationSource::ClientStdout, .mPid = processId};
+    fds.push_back({ .fd = fd, .events = POLLIN, .revents = 0 });
+    map[fd] = DapNotification{ .mSource = InterfaceNotificationSource::ClientStdout, .mPid = processId };
   }
 
   constexpr auto
   ClientFds() noexcept
   {
-    return std::span{fds.begin(), fds.end()};
+    return std::span{ fds.begin(), fds.end() };
   }
 
   constexpr DapNotification
@@ -316,7 +321,7 @@ public:
   void StartIOPolling(std::stop_token &token) noexcept;
   void SetClient(DebugAdapterClient *client) noexcept;
   void Poll(PollState &state) noexcept;
-  void AddStandardIOSource(int fd, Pid pid) noexcept;
+  void AddStandardIOSource(int fd, SessionId pid) noexcept;
 
   void clean_up() noexcept;
   void flush_events() noexcept;

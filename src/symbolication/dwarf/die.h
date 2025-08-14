@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "common/formatter.h"
 #include "die_ref.h"
 #include "symbolication/cu_symbol_info.h"
 #include "unit_header.h"
@@ -98,8 +99,8 @@ struct DieMetaData
   // thus, giving the ability to calculate next sibling by saying DebugInfoEntry* sib = (this + next_sibling);
   void SetSiblingId(u32 sib_id) noexcept;
 
-  static DieMetaData CreateDie(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset,
-                               u64 next_sibling) noexcept;
+  static DieMetaData CreateDie(
+    u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset, u64 next_sibling) noexcept;
 };
 
 template <DwarfTag... tags>
@@ -124,8 +125,8 @@ public:
    * and (possibly) reading build directory and unit name, if the unit is of COMPILE_TYPE or PARTIAL_TYPE (i.e. a
    * compilation unit of some sort.)
    */
-  static UnitData *CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
-                                      AbbreviationInfo::Table &&abbreviations) noexcept;
+  static UnitData *CreateInitUnitData(
+    ObjectFile *owningObject, UnitHeader header, AbbreviationInfo::Table &&abbreviations) noexcept;
   bool IsCompilationUnitLike() const noexcept;
 
   void SetAbbreviations(AbbreviationInfo::Table &&table) noexcept;
@@ -178,8 +179,8 @@ private:
   std::optional<u32> mRngListOffset{};
   std::optional<u32> mAddrOffset{};
   mutable std::mutex mLoadDiesMutex;
-  const char *mBuildDirectory{nullptr};
-  u64 mStatementListOffset{std::numeric_limits<u64>::max()};
+  const char *mBuildDirectory{ nullptr };
+  u64 mStatementListOffset{ std::numeric_limits<u64>::max() };
 };
 
 /* Creates a `UnitData` with it's abbreviations pre-processed and ready to be interpreted. */
@@ -187,16 +188,29 @@ UnitData *PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept;
 
 class UnitHeadersRead
 {
-  u64 mTotalSize{0};
-  u64 mMaxUnitSize{0};
+  u64 mTotalSize{ 0 };
+  u64 mMaxUnitSize{ 0 };
   std::vector<UnitHeader> mUnitHeaders;
   void Accumulate(u64 unitSize) noexcept;
   u64 AverageUnitSize() noexcept;
-  void AddUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
-                     u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
-                     DwarfUnitType unit_type) noexcept;
-  void AddTypeUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
-                         u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept;
+  void AddUnitHeader(SymbolInfoId id,
+    u64 sec_offset,
+    u64 unit_size,
+    std::span<const u8> die_data,
+    u64 abbrev_offset,
+    u8 addr_size,
+    u8 format,
+    DwarfVersion version,
+    DwarfUnitType unit_type) noexcept;
+  void AddTypeUnitHeader(SymbolInfoId id,
+    u64 sec_offset,
+    u64 unit_size,
+    std::span<const u8> die_data,
+    u64 abbrev_offset,
+    u8 addr_size,
+    u8 format,
+    u64 type_signature,
+    u64 type_offset) noexcept;
 
 public:
   void ReadUnitHeaders(ObjectFile *obj) noexcept;
@@ -205,35 +219,23 @@ public:
 
 } // namespace mdb::sym::dw
 
-namespace fmt {
 namespace sym = mdb::sym;
-template <> struct formatter<sym::dw::UnitData>
+template <> struct std::formatter<sym::dw::UnitData>
 {
-
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const sym::dw::UnitData &cu, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "CompilationUnit {{ cu=0x{:x} }}", cu.SectionOffset());
+    return std::format_to(ctx.out(), "CompilationUnit {{ cu=0x{:x} }}", cu.SectionOffset());
   }
 };
 
-template <> struct formatter<sym::dw::DieReference>
+template <> struct std::formatter<sym::dw::DieReference>
 {
 
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
@@ -243,36 +245,32 @@ template <> struct formatter<sym::dw::DieReference>
       if (ref.GetUnitData()->HasLoadedDies()) {
         auto die = ref.GetDie();
         ASSERT(die, "die was null!");
-        return fmt::format_to(ctx.out(), "DieRef {{ cu={}, die=0x{:x} ({}) }}", cu->SectionOffset(),
-                              die->mSectionOffset, to_str(die->mTag));
+        return std::format_to(ctx.out(),
+          "DieRef {{ cu={}, die=0x{:x} ({}) }}",
+          cu->SectionOffset(),
+          die->mSectionOffset,
+          to_str(die->mTag));
       } else {
-        return fmt::format_to(ctx.out(), "DieRef {{ cu={} (dies not loaded) }}", cu->SectionOffset());
+        return std::format_to(ctx.out(), "DieRef {{ cu={} (dies not loaded) }}", cu->SectionOffset());
       }
     }
-    return fmt::format_to(ctx.out(), "DieRef {{ ??? }}");
+    return std::format_to(ctx.out(), "DieRef {{ ??? }}");
   }
 };
 
-template <> struct formatter<sym::dw::IndexedDieReference>
+template <> struct std::formatter<sym::dw::IndexedDieReference>
 {
 
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const sym::dw::IndexedDieReference &ref, FormatContext &ctx) const
   {
     if (ref.GetUnitData()) {
-      return fmt::format_to(ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}",
-                            ref.GetUnitData()->SectionOffset(), ref.GetIndex());
+      return std::format_to(
+        ctx.out(), "IndexedDieRef {{ cu=0x{:x}, die #{} }}", ref.GetUnitData()->SectionOffset(), ref.GetIndex());
     }
-    return fmt::format_to(ctx.out(), "IndexedDieRef {{ ??? }}");
+    return std::format_to(ctx.out(), "IndexedDieRef {{ ??? }}");
   }
 };
-
-} // namespace fmt

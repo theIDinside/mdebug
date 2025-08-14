@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "common/formatter.h"
 #include "interface/dap/types.h"
 // #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf_symbols.h"
@@ -63,7 +64,7 @@ private:
     sym::FunctionSymbol *uFullSymbol;
     const MinSymbol *uMinSymbol;
     std::nullptr_t uNull;
-  } mSymbolUnion = {nullptr};
+  } mSymbolUnion = { nullptr };
 
   u32 mFrameLevel = -1;
   FrameType mFrameType = FrameType::Unknown;
@@ -75,23 +76,27 @@ public:
   Immutable<NonNullPtr<TaskInfo>> mTask;
 
   template <typename T>
-  explicit Frame(SymbolFile *symbol_file, TaskInfo &task, u32 level, VariableReferenceId frame_id, AddrPtr pc,
-                 T sym_info) noexcept
+  explicit Frame(SymbolFile *symbol_file,
+    TaskInfo &task,
+    u32 level,
+    VariableReferenceId frame_id,
+    AddrPtr pc,
+    T sym_info) noexcept
       : mFramePc(pc), mFrameLevel(level), mFrameId(frame_id), mOwningSymbolFile(symbol_file), mTask(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
     static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::nullptr_t>,
-                  "Frame expects either FunctionSymbol or MinSymbol pointers (or a nullptr)");
+      "Frame expects either FunctionSymbol or MinSymbol pointers (or a nullptr)");
     if constexpr (std::is_same_v<Type, sym::FunctionSymbol> || std::is_same_v<Type, const sym::FunctionSymbol>) {
       mFrameType = FrameType::Full;
       mSymbolUnion.uFullSymbol = sym_info;
       ASSERT(mSymbolUnion.uFullSymbol != nullptr,
-             "Setting to nullptr when expecting full symbol information to exist.");
+        "Setting to nullptr when expecting full symbol information to exist.");
     } else if constexpr (std::is_same_v<Type, MinSymbol> || std::is_same_v<Type, const MinSymbol>) {
       mFrameType = FrameType::ElfSymbol;
       mSymbolUnion.uMinSymbol = sym_info;
-      ASSERT(mSymbolUnion.uMinSymbol != nullptr,
-             "Setting to nullptr when expecting ELF symbol information to exist.");
+      ASSERT(
+        mSymbolUnion.uMinSymbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
     } else if constexpr (std::is_null_pointer_v<T>) {
       mFrameType = FrameType::Unknown;
       mSymbolUnion.uNull = std::nullptr_t{};
@@ -124,8 +129,8 @@ public:
 
   IterateFrameSymbols BlockSymbolIterator(FrameVariableKind variable_set) noexcept;
 
-  u32 GetInitializedVariables(FrameVariableKind variableSet,
-                              std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept;
+  u32 GetInitializedVariables(
+    FrameVariableKind variableSet, std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept;
 
   u32 FrameLocalVariablesCount() noexcept;
   u32 FrameParameterCounts() noexcept;
@@ -270,7 +275,7 @@ public:
   void
   PushFrame(Args &&...args)
   {
-    mStackFrames.push_back(sym::Frame{args...});
+    mStackFrames.push_back(sym::Frame{ args... });
   }
 
 private:
@@ -285,30 +290,26 @@ private:
 
   TaskInfo *mTask; // the task associated with this call stack
   TraceeController *mSupervisor;
-  CallStackState mCallstackState{CallStackState::Invalidated};
+  CallStackState mCallstackState{ CallStackState::Invalidated };
   std::vector<Frame> mStackFrames{}; // the call stack
   std::vector<AddrPtr> mFrameProgramCounters{};
   std::vector<FrameUnwindState> mUnwoundRegister{};
 };
 } // namespace sym
 } // namespace mdb
-namespace fmt {
 namespace sym = mdb::sym;
-template <> struct formatter<sym::Frame>
+template <> struct std::formatter<sym::Frame>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const sym::Frame &frame, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "{{ pc: {}, level: {}, fn: {} }}", frame.FramePc(), frame.FrameLevel(),
-                          frame.GetFunctionName().value_or("Unknown"));
+    return std::format_to(ctx.out(),
+      "{{ pc: {}, level: {}, fn: {} }}",
+      frame.FramePc(),
+      frame.FrameLevel(),
+      frame.GetFunctionName().value_or("Unknown"));
   }
 };
-} // namespace fmt

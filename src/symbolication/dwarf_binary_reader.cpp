@@ -14,16 +14,16 @@ DwarfBinaryReader::DwarfSpecReadValue() noexcept
   case 8:
     return ReadValue<u64>();
   default:
-    PANIC(fmt::format("Unsupported offset size {}", mOffsetSize));
+    PANIC(std::format("Unsupported offset size {}", mOffsetSize));
   }
 }
 
 std::span<const u8>
 DwarfBinaryReader::GetSpan(u64 size) noexcept
 {
-  ASSERT(size <= RemainingSize(), "Not enough bytes left in reader. Requested {}, remaining {}", size,
-         RemainingSize());
-  const auto span = std::span{mHead, size};
+  ASSERT(
+    size <= RemainingSize(), "Not enough bytes left in reader. Requested {}, remaining {}", size, RemainingSize());
+  const auto span = std::span{ mHead, size };
   mHead += size;
   return span;
 }
@@ -31,7 +31,7 @@ DwarfBinaryReader::GetSpan(u64 size) noexcept
 std::string_view
 DwarfBinaryReader::ReadString() noexcept
 {
-  std::string_view str{(const char *)(mHead)};
+  std::string_view str{ (const char *)(mHead) };
   mHead += str.size() + 1;
   return str;
 }
@@ -39,7 +39,7 @@ DwarfBinaryReader::ReadString() noexcept
 void
 DwarfBinaryReader::SkipString() noexcept
 {
-  std::string_view str{(const char *)(mHead)};
+  std::string_view str{ (const char *)(mHead) };
   mHead += str.size() + 1;
 }
 
@@ -48,7 +48,7 @@ DwarfBinaryReader::ReadBlock(u64 size) noexcept
 {
   const auto ptr = mHead;
   mHead += size;
-  return {.ptr = ptr, .size = size};
+  return { .ptr = ptr, .size = size };
 }
 
 u64
@@ -113,7 +113,9 @@ void
 DwarfBinaryReader::Skip(i64 bytes) noexcept
 {
   ASSERT(static_cast<u64>(bytes) <= RemainingSize() && mHead + bytes >= mBuffer,
-         "Can't skip outside of buffer. Requested {}, remaining size: {}", bytes, RemainingSize());
+    "Can't skip outside of buffer. Requested {}, remaining size: {}",
+    bytes,
+    RemainingSize());
   mHead += bytes;
 }
 
@@ -134,7 +136,7 @@ DwarfBinaryReader::PopBookmark() noexcept
 DwarfBinaryReader
 SubReader(const DwarfBinaryReader &reader) noexcept
 {
-  return DwarfBinaryReader{reader.mElf, reader.mHead, reader.mSize - (reader.mHead - reader.mBuffer)};
+  return DwarfBinaryReader{ reader.mElf, reader.mHead, reader.mSize - (reader.mHead - reader.mBuffer) };
 }
 
 u64
@@ -150,7 +152,7 @@ DwarfBinaryReader::ReadContentIndex(AttributeForm form) noexcept
   case DW_FORM_data2:
     return ReadValue<u16>();
   default:
-    PANIC(fmt::format("Unsupported form for dir index {}", to_str(form)));
+    PANIC(std::format("Unsupported form for dir index {}", to_str(form)));
   }
 }
 
@@ -175,7 +177,7 @@ DwarfBinaryReader::ReadContentStr(AttributeForm form) noexcept
   case DW_FORM_strx3:
   case DW_FORM_strx4:
   default:
-    PANIC(fmt::format("Reading string of form {} not yet supported", to_str(form)));
+    PANIC(std::format("Reading string of form {} not yet supported", to_str(form)));
   }
 }
 
@@ -191,7 +193,7 @@ DwarfBinaryReader::ReadContentDatablock(AttributeForm form) noexcept
     return ReadBlock(sz);
   }
   default:
-    PANIC(fmt::format("Unsupported block form {}", to_str(form)));
+    PANIC(std::format("Unsupported block form {}", to_str(form)));
   }
 }
 
@@ -226,7 +228,7 @@ DwarfBinaryReader::ReadContent(AttributeForm form) noexcept
     return ReadBlock(sz);
   }
   default:
-    PANIC(fmt::format("Unacceptable form {} while reading LNP content description", to_str(form)));
+    PANIC(std::format("Unacceptable form {} while reading LNP content description", to_str(form)));
   }
 }
 

@@ -13,22 +13,8 @@ option(MDB_PROFILE_LOGGER "Configure mdb to build with profile logging" OFF)
 find_package(PkgConfig REQUIRED)
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 
-set(SPIDERMONKEY_FLAGDISABLES "-Wno-invalid-offsetof -Wno-unused-parameter")
-
 # Project dependencies directory
 set(MDBDEPS "${CMAKE_SOURCE_DIR}/dependencies")
-
-if(MIDAS_BUILD_TYPE STREQUAL "DEBUG" OR MIDAS_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
-  set(ENV{PKG_CONFIG_PATH} "${MDBDEPS}/spidermonkey-debug/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136")
-  message("Spidermonkey dependency path: ${MDBDEPS}/spidermonkey-debug")
-else()
-  set(ENV{PKG_CONFIG_PATH} "${MDBDEPS}/spidermonkey/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-  pkg_check_modules(SPIDERMONKEY REQUIRED "mozjs-136")
-  message("Spidermonkey dependency path: ${MDBDEPS}/spidermonkey")
-endif()
-
-message("Spidermonkey cflags: ${SPIDERMONKEY_CFLAGS}")
 
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
@@ -201,8 +187,6 @@ set(MIDAS_SOURCES
   # Interpreter
   src/mdbjs/bpjs.cpp
   src/mdbjs/bpjs.h
-  src/mdbjs/event_dispatcher.cpp
-  src/mdbjs/event_dispatcher.h
   src/mdbjs/framejs.cpp
   src/mdbjs/framejs.h
   src/mdbjs/jsobject.h
@@ -240,11 +224,10 @@ endif()
 
 # Check if the compiler name contains gcc or clang
 if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
-  message("Compiler is GNU, and it gives false positives on dangling references for libfmt, making release builds impossible. Therefore gcc uses -Wno-error=dangling-reference")
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference ${SPIDERMONKEY_FLAGDISABLES} -Wno-exceptions")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference -Wno-exceptions")
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   # clang using GNU's stdlib ranges, is.... iffy at the moment.
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto ${SPIDERMONKEY_FLAGDISABLES} -Wno-exceptions")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-exceptions")
 else ()
   error("Unknown compiler")
 endif ()
@@ -256,8 +239,6 @@ message("Build type for project: ${CMAKE_BUILD_TYPE}")
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Add the fantastic libfmt library
-add_subdirectory(dependencies/fmt)
 add_executable(mdb ${MIDAS_SOURCES})
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
@@ -265,12 +246,9 @@ set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 # Add the json library
 set(JSON_Install OFF CACHE INTERNAL "")
 add_subdirectory(dependencies/nlohmann_json)
+add_subdirectory(dependencies/quickjs)
 
-target_link_libraries(mdb fmt::fmt mdb_spinlock nlohmann_json::nlohmann_json zydis ${SPIDERMONKEY_LIBRARIES})
-# Add the include directories
-target_include_directories(mdb PRIVATE ${SPIDERMONKEY_INCLUDE_DIRS})
-# Add the library directories
-target_link_directories(mdb PRIVATE ${SPIDERMONKEY_LIBRARY_DIRS})
+target_link_libraries(mdb mdb_spinlock nlohmann_json::nlohmann_json zydis libquickjs)
 # Link the libraries to your target
 
 target_include_directories(mdb PUBLIC ./dependencies)
@@ -286,20 +264,20 @@ if(BUILD_MDB_TESTS)
   include(cmake/AddTest.cmake)
   AddTest(NAME base64_encoding
     SOURCES test/unittest/base64.cpp src/utils/base64.cpp src/utils/logger.cpp ${COMMON_SRC} src/utils/debugger_thread.cpp
-    LIBS fmt::fmt mdb_spinlock
+    LIBS mdb_spinlock
   )
 
   AddTest(NAME test_utils
     SOURCES test/unittest/util_testing.cpp src/utils/logger.cpp ${COMMON_SRC} src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp src/utils/debugger_thread.cpp
-    LIBS fmt::fmt mdb_spinlock)
+    LIBS mdb_spinlock)
 
   AddTest(NAME expected_tests
     SOURCES test/unittest/expected_tests.cpp src/utils/logger.cpp ${COMMON_SRC} src/utils/debugger_thread.cpp
-    LIBS fmt::fmt)
+    LIBS)
 
   AddTest(NAME xml_tests
     SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
-    LIBS fmt::fmt)
+    LIBS)
 
   # The Driver Test Suite
   find_program(NODEJS "node")
@@ -334,13 +312,12 @@ target_link_options(mdb PRIVATE "-fuse-ld=lld")
 
 # Check if the compiler name contains gcc or clang
 if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
-  message("Compiler is GNU, and it gives false positives on dangling references for libfmt, making release builds impossible. Therefore gcc uses -Wno-error=dangling-reference")
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference ${SPIDERMONKEY_FLAGDISABLES}")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
   target_compile_definitions(mdb PRIVATE COMPILERUSED_GCC)
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   # clang using GNU's stdlib ranges, is.... iffy at the moment.
   target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto ${SPIDERMONKEY_FLAGDISABLES}")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
 else ()
   error("Unknown compiler")
 endif ()

@@ -34,15 +34,6 @@ struct RemoteSettings;
 /// Tracee Control
 namespace mdb::tc {
 
-enum class RunType : u8
-{
-  Unknown = 0b0000,
-  None = Unknown,
-  Step = PTRACE_SINGLESTEP,
-  Continue = PTRACE_CONT,
-  SyscallContinue = PTRACE_SYSCALL,
-};
-
 enum class ResumeTarget : u8
 {
   None = 0,
@@ -53,8 +44,8 @@ enum class ResumeTarget : u8
 struct ResumeAction
 {
   RunType mResumeType;
-  ResumeTarget mResumeTarget;
-  int mDeliverSignal;
+  ResumeTarget mResumeTarget{ ResumeTarget::Task };
+  int mDeliverSignal{ 0 };
 
   constexpr
   operator __ptrace_request() const noexcept
@@ -74,33 +65,33 @@ enum class ShouldProceed
 struct ProcessedStopEvent
 {
   bool mShouldResumeAfterProcessing;
-  std::optional<tc::ResumeAction> mResumeAction;
-  bool mProcessExited{false};
-  bool mThreadExited{false};
-  bool mVForked{false};
+  std::optional<tc::ResumeAction> mResumeAction{};
+  bool mProcessExited{ false };
+  bool mThreadExited{ false };
+  bool mVForked{ false };
   // TODO: right now, we post stop events a little here and there
   //  we should try to congregate these notifications to happen in a more stream lined fashion
   //  it probably won't be possible to have *all* stop events notified from the same place, but we should
   //  strive to do so, for readability and debuggability. When that refactor should happen, use either this flag,
   //  or remove it and do something else.
-  bool mNotifyUser{false};
+  bool mNotifyUser{ false };
 
   constexpr static auto
   ResumeAny() noexcept
   {
-    return ProcessedStopEvent{true, {}};
+    return ProcessedStopEvent{ true, {} };
   }
 
   constexpr static auto
   ProcessExited() noexcept
   {
-    return ProcessedStopEvent{false, std::nullopt, true};
+    return ProcessedStopEvent{ false, std::nullopt, true };
   }
 
   constexpr static auto
   ThreadExited() noexcept
   {
-    return ProcessedStopEvent{false, std::nullopt, false, true};
+    return ProcessedStopEvent{ false, std::nullopt, false, true };
   }
 };
 
@@ -116,13 +107,13 @@ struct TraceeWriteResult
   constexpr static TraceeWriteResult
   Ok(u32 bytes_written) noexcept
   {
-    return TraceeWriteResult{.mWasSuccessful = true, .uBytesWritten = bytes_written};
+    return TraceeWriteResult{ .mWasSuccessful = true, .uBytesWritten = bytes_written };
   }
 
   constexpr static TraceeWriteResult
   Error(int sys_error) noexcept
   {
-    return TraceeWriteResult{.mWasSuccessful = false, .uSysErrorNumber = sys_error};
+    return TraceeWriteResult{ .mWasSuccessful = false, .uSysErrorNumber = sys_error };
   }
 };
 
@@ -158,23 +149,23 @@ struct ReadResult
   constexpr static ReadResult
   Ok(u32 bytesRead) noexcept
   {
-    return ReadResult{.mResultType = ReadResultType::OK, .uBytesRead = bytesRead};
+    return ReadResult{ .mResultType = ReadResultType::OK, .uBytesRead = bytesRead };
   }
   constexpr static ReadResult
   SystemError(int sysErrorNumber) noexcept
   {
-    return ReadResult{.mResultType = ReadResultType::SystemError, .uSysErrorNumber = sysErrorNumber};
+    return ReadResult{ .mResultType = ReadResultType::SystemError, .uSysErrorNumber = sysErrorNumber };
   }
 
   constexpr static ReadResult
   AppError(ApplicationError error) noexcept
   {
-    return ReadResult{.mResultType = ReadResultType::DebuggerError, .uError = error};
+    return ReadResult{ .mResultType = ReadResultType::DebuggerError, .uError = error };
   }
   constexpr static ReadResult
   EoF() noexcept
   {
-    return ReadResult{.mResultType = ReadResultType::EoF, .uBytesRead = 0};
+    return ReadResult{ .mResultType = ReadResultType::EoF, .uBytesRead = 0 };
   }
 };
 
@@ -208,13 +199,13 @@ struct TaskExecuteResponse
   constexpr static TaskExecuteResponse
   Error(int sys_error) noexcept
   {
-    return TaskExecuteResponse{.kind = TaskExecuteResult::Error, .sys_errno = sys_error};
+    return TaskExecuteResponse{ .kind = TaskExecuteResult::Error, .sys_errno = sys_error };
   }
 
   constexpr static TaskExecuteResponse
   Ok(u32 data = 0) noexcept
   {
-    return TaskExecuteResponse{.kind = TaskExecuteResult::Ok, .data = data};
+    return TaskExecuteResponse{ .kind = TaskExecuteResult::Ok, .data = data };
   }
 
   constexpr bool
@@ -280,20 +271,27 @@ enum class TraceeInterfaceType
 class TraceeCommandInterface
 {
 protected:
-  TraceeController *mControl{nullptr};
+  TraceeController *mControl{ nullptr };
 
 public:
   Immutable<TargetFormat> mFormat;
   Immutable<std::shared_ptr<gdb::ArchictectureInfo>> mArchInfo;
   TraceeInterfaceType mType;
-  TPtr<r_debug_extended> tracee_r_debug{nullptr};
+  TPtr<r_debug_extended> tracee_r_debug{ nullptr };
 
   NO_COPY(TraceeCommandInterface);
-  TraceeCommandInterface(TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info,
-                         TraceeInterfaceType type) noexcept;
+  TraceeCommandInterface(
+    TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info, TraceeInterfaceType type) noexcept;
   virtual ~TraceeCommandInterface() noexcept = default;
   virtual ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
   virtual TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept = 0;
+
+  constexpr TraceeWriteResult
+  WriteBytes(AddrPtr addr, std::span<u8> bytes) noexcept
+  {
+    return WriteBytes(addr, bytes.data(), bytes.size_bytes());
+  }
+
   // Reverse execute. `onlyStep` if we should be stepping. If false, do reverse execution.
   virtual TaskExecuteResponse ReverseContinue(bool onlyStep) noexcept;
   // Can (possibly) modify state in `t`
@@ -301,8 +299,8 @@ public:
 
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
   /** `resumedThreads` is an optional out parameter consisting of the tids of the threads that got resumed. */
-  virtual TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run,
-                                           std::vector<Tid> *resumedThreads) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTarget(
+    TraceeController *tc, ResumeAction run, std::vector<Tid> *resumedThreads) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
 
@@ -327,7 +325,7 @@ public:
   virtual bool OnExec() noexcept = 0;
 
   // Called after a fork for the creation of a new process supervisor
-  virtual Interface OnFork(Pid pid) noexcept = 0;
+  virtual Interface OnFork(SessionId pid) noexcept = 0;
   // Returns true|false if the process that forked, should be resumed immediately.
   // In cases like RR, where we control the entire application across many processes, we don't actually want to let
   // the process resume. Because we need to do a full configuration first (and set potential breakpoints, according
@@ -398,9 +396,9 @@ public:
         totalWritten += written.uBytesWritten;
       } else {
         auto addressValue = reinterpret_cast<std::uintptr_t>(ptr) + totalWritten;
-        return mdb::unexpected(WriteError{.mAddress = AddrPtr{addressValue},
-                                          .mBytesWritten = totalWritten,
-                                          .mSysErrorNumber = written.uSysErrorNumber});
+        return mdb::unexpected(WriteError{ .mAddress = AddrPtr{ addressValue },
+          .mBytesWritten = totalWritten,
+          .mSysErrorNumber = written.uSysErrorNumber });
       }
     }
     return mdb::expected(static_cast<u32>(totalWritten));
@@ -421,16 +419,9 @@ public:
 
 } // namespace mdb::tc
 
-namespace fmt {
-
-template <> struct formatter<mdb::tc::RunType>
+template <> struct std::formatter<mdb::tc::RunType>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
@@ -439,25 +430,20 @@ template <> struct formatter<mdb::tc::RunType>
     using enum mdb::tc::RunType;
     switch (type) {
     case Step:
-      return fmt::format_to(ctx.out(), "RunType::Step");
+      return std::format_to(ctx.out(), "RunType::Step");
     case Continue:
-      return fmt::format_to(ctx.out(), "RunType::Continue");
+      return std::format_to(ctx.out(), "RunType::Continue");
     case SyscallContinue:
-      return fmt::format_to(ctx.out(), "RunType::SyscallContinue");
+      return std::format_to(ctx.out(), "RunType::SyscallContinue");
     case Unknown:
-      return fmt::format_to(ctx.out(), "RunType::UNKNOWN");
+      return std::format_to(ctx.out(), "RunType::UNKNOWN");
     }
   }
 };
 
-template <> struct formatter<mdb::tc::ResumeTarget>
+template <> struct std::formatter<mdb::tc::ResumeTarget>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   constexpr auto
@@ -466,15 +452,13 @@ template <> struct formatter<mdb::tc::ResumeTarget>
 
     switch (tgt) {
     case mdb::tc::ResumeTarget::Task:
-      return fmt::format_to(ctx.out(), "ResumeTarget::Task");
+      return std::format_to(ctx.out(), "ResumeTarget::Task");
     case mdb::tc::ResumeTarget::AllNonRunningInProcess:
-      return fmt::format_to(ctx.out(), "ResumeTarget::AllNonRunningInProcess");
+      return std::format_to(ctx.out(), "ResumeTarget::AllNonRunningInProcess");
     case mdb::tc::ResumeTarget::None:
-      return fmt::format_to(ctx.out(), "ResumeTarget::None");
+      return std::format_to(ctx.out(), "ResumeTarget::None");
     default:
       static_assert(mdb::always_false<FormatContext>, "All cases not handled");
     }
   }
 };
-
-} // namespace fmt

@@ -20,9 +20,6 @@
 #include <sys/mman.h>
 #include <sys/poll.h>
 
-// dependency
-#include <fmt/core.h>
-
 using MonotonicResource = std::pmr::monotonic_buffer_resource;
 
 namespace mdb {
@@ -39,15 +36,17 @@ class RemoteSessionConfigurator;
 struct RemoteSettings
 {
   // Default settings
-  bool mCatchSyscalls : 1 {false};
-  bool mIsNonStop : 1 {false};
-  bool mReportThreadEvents : 1 {true};
-  bool mIsNoAck : 1 {true};
-  bool mMultiProcessIsConfigured : 1 {true};
-  bool mThreadEvents : 1 {true};
+  bool mCatchSyscalls : 1 { false };
+  bool mIsNonStop : 1 { false };
+  bool mReportThreadEvents : 1 { true };
+  bool mIsNoAck : 1 { true };
+  bool mMultiProcessIsConfigured : 1 { true };
+  bool mThreadEvents : 1 { true };
 };
 
-static constexpr char HexDigits[]{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+static constexpr char HexDigits[]{
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+};
 
 enum class MessageType
 {
@@ -104,19 +103,19 @@ struct SocketResult
   inline static constexpr SocketResult
   Ok(i32 bytes) noexcept
   {
-    return SocketResult{.value = bytes, .success = SocketResultKind::Ok};
+    return SocketResult{ .value = bytes, .success = SocketResultKind::Ok };
   }
 
   inline static constexpr SocketResult
   Error(i32 sys_errno) noexcept
   {
-    return SocketResult{.value = sys_errno, .success = SocketResultKind::Error};
+    return SocketResult{ .value = sys_errno, .success = SocketResultKind::Error };
   }
 
   inline static constexpr SocketResult
   Timeout() noexcept
   {
-    return SocketResult{.value = 0, .success = SocketResultKind::DataUnavailable};
+    return SocketResult{ .value = 0, .success = SocketResultKind::DataUnavailable };
   }
 };
 
@@ -182,7 +181,7 @@ struct SendResult
       break;
     case SocketResultKind::Error:
       kind = SendResultKind::SystemError;
-      error = SystemError{.syserrno = socket_result.error_number()};
+      error = SystemError{ .syserrno = socket_result.error_number() };
       break;
     }
   }
@@ -242,13 +241,13 @@ template <size_t N> struct CommandSerializationBuffer
 
   template <typename... Args>
   void
-  write_packet(fmt::format_string<Args...> fmt, Args &&...args)
+  write_packet(std::format_string<Args...> fmt, Args &&...args)
   {
     buf[0] = '$';
-    auto ptr = fmt::format_to(buf + 1, fmt, args...);
+    auto ptr = std::format_to(buf + 1, fmt, args...);
     size = ptr - buf;
     buf[size] = '#';
-    auto [a, b] = gdb::checksum({buf, buf + size});
+    auto [a, b] = gdb::checksum({ buf, buf + size });
     buf[size + 1] = a;
     buf[size + 2] = b;
     size += 2;
@@ -257,7 +256,7 @@ template <size_t N> struct CommandSerializationBuffer
   constexpr auto
   contents() const noexcept
   {
-    return std::string_view{buf, buf + size};
+    return std::string_view{ buf, buf + size };
   }
 
   auto
@@ -301,7 +300,7 @@ class BufferedSocket
   mdb::ScopedFd mCommunicationSocket;
   std::vector<char> mBuffer{};
   std::vector<char> mOutputBuffer{};
-  u32 mHead{0};
+  u32 mHead{ 0 };
 
   bool IsEmpty() const noexcept;
   void Clear() noexcept;
@@ -320,7 +319,7 @@ public:
   pollfd
   GetPollConfig() const noexcept
   {
-    return pollfd{.fd = mCommunicationSocket, .events = POLLIN, .revents = 0};
+    return pollfd{ .fd = mCommunicationSocket, .events = POLLIN, .revents = 0 };
   }
 
   constexpr auto
@@ -404,12 +403,12 @@ class ScopeSync
   std::barrier<CompletionFnB> &mEnd;
   // If the constructor throws an exception (due to Fn prior_arrive), we need to arrive_and_wait twice in the
   // destructor so that any other thread waiting for this one doesn't become dead locked.
-  bool mFirstArriveCompleted{false};
+  bool mFirstArriveCompleted{ false };
 
 public:
   template <typename Fn>
-  explicit ScopeSync(std::barrier<CompletionFnA> &startPoint, std::barrier<CompletionFnA> &endPoint,
-                     Fn priorArriveFn) noexcept
+  explicit ScopeSync(
+    std::barrier<CompletionFnA> &startPoint, std::barrier<CompletionFnA> &endPoint, Fn priorArriveFn) noexcept
       : mStart(startPoint), mEnd(endPoint)
   {
     priorArriveFn();
@@ -487,10 +486,10 @@ public:
 struct SocketCommand
 {
   std::string_view mCommand;
-  bool mIsListResponse{false};
-  bool mListDone{false};
-  bool mResponseIsStopReply{false};
-  std::optional<std::string> mResult{std::nullopt};
+  bool mIsListResponse{ false };
+  bool mListDone{ false };
+  bool mResponseIsStopReply{ false };
+  std::optional<std::string> mResult{ std::nullopt };
 };
 
 struct ConnInitError
@@ -517,7 +516,7 @@ enum class qXferResponse
 
 struct GdbThread
 {
-  Pid pid;
+  SessionId pid;
   Tid tid;
 
   constexpr auto operator<=>(const GdbThread &) const noexcept = default;
@@ -536,8 +535,8 @@ template <> struct std::hash<mdb::gdb::GdbThread>
   result_type
   operator()(const argument_type &m) const
   {
-    u64 pid{static_cast<u64>(m.pid)};
-    u64 tid{static_cast<u64>(m.tid)};
+    u64 pid{ static_cast<u64>(m.pid) };
+    u64 tid{ static_cast<u64>(m.tid) };
 
     return pid << 32 | tid;
   }
@@ -558,7 +557,7 @@ public:
   {
     auto ptr = (char *)mmap(nullptr, pages * 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     MUST_HOLD(ptr != MAP_FAILED && ptr != nullptr, "mmap failed");
-    return new WriteBuffer{ptr, pages * 4096};
+    return new WriteBuffer{ ptr, pages * 4096 };
   }
 
   std::span<char>
@@ -567,7 +566,7 @@ public:
     if (size > mSize) {
       PANIC("Max size reached");
     }
-    return std::span{mPtr, size};
+    return std::span{ mPtr, size };
   }
 };
 
@@ -587,11 +586,11 @@ private:
   std::thread mStopReplyAndEventListeners;
   u16 mPort;
   RemoteSettings mRemoteSettings;
-  bool mThreadsKnown : 1 {false};
-  bool mIsInitialized : 1 {false};
-  bool mRemoteConfigured : 1 {false};
-  bool mRun : 1 {true};
-  gdb::GdbThread mSelectedThread{0, 0};
+  bool mThreadsKnown : 1 { false };
+  bool mIsInitialized : 1 { false };
+  bool mRemoteConfigured : 1 { false };
+  bool mRun : 1 { true };
+  gdb::GdbThread mSelectedThread{ 0, 0 };
   std::recursive_mutex mTraceeControlMutex{};
 
   // When debugger (core) wants control, it will acquire this lock
@@ -600,10 +599,10 @@ private:
   int mRequestCommandFd[2];
   int mReceivedAsyncNotificationDuringCoreControl[2];
   int mQuitFd[2];
-  std::barrier<> mGiveControlSynchronization{2};
-  std::barrier<> UserDoneSynchronization{2};
+  std::barrier<> mGiveControlSynchronization{ 2 };
+  std::barrier<> UserDoneSynchronization{ 2 };
 
-  std::optional<std::string> mPendingNotification{std::nullopt};
+  std::optional<std::string> mPendingNotification{ std::nullopt };
 
   void ConsumePollEvents(int fd) noexcept;
   bool ProcessStopReplyPayload(std::string_view payload, bool isSessionConfig) noexcept;
@@ -619,8 +618,8 @@ public:
   ~RemoteConnection() noexcept;
 
   // Construction and init routines
-  static mdb::Expected<ShrPtr, ConnectError> Connect(const std::string &host, int port,
-                                                     std::optional<RemoteSettings> remoteSettings) noexcept;
+  static mdb::Expected<ShrPtr, ConnectError> Connect(
+    const std::string &host, int port, std::optional<RemoteSettings> remoteSettings) noexcept;
 
   static std::optional<int> ParseHexDigits(std::string_view input) noexcept;
   std::optional<std::string> TakePending() noexcept;
@@ -642,14 +641,13 @@ public:
   std::optional<std::pmr::string> ReadCommandResponse(MonotonicResource &arena, int timeout) noexcept;
 
   // Blocking call for `timeout` ms
-  mdb::Expected<std::string, SendError> SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread,
-                                                                   std::string_view command,
-                                                                   std::optional<int> timeout) noexcept;
+  mdb::Expected<std::string, SendError> SendCommandWaitForResponse(
+    std::optional<gdb::GdbThread> thread, std::string_view command, std::optional<int> timeout) noexcept;
 
   void SendInterruptByte() noexcept;
 
-  mdb::Expected<std::vector<std::string>, SendError> SendInOrderCommandChain(std::span<std::string_view> commands,
-                                                                             std::optional<int> timeout) noexcept;
+  mdb::Expected<std::vector<std::string>, SendError> SendInOrderCommandChain(
+    std::span<std::string_view> commands, std::optional<int> timeout) noexcept;
 
   // Make these private. These should not be called as they place *ultimate* responsibility on the caller that it
   // has done the acquire + synchronize dance.
@@ -658,9 +656,8 @@ public:
   std::vector<GdbThread> GetRemoteThreads() noexcept;
   std::span<const GdbThread> QueryTargetThreads(GdbThread thread, bool forceFlush) noexcept;
 
-  mdb::Expected<std::vector<std::string>, SendError>
-  SendCommandsInOrderFailFast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
-                              std::optional<int> timeout) noexcept;
+  mdb::Expected<std::vector<std::string>, SendError> SendCommandsInOrderFailFast(
+    std::vector<std::variant<SocketCommand, qXferCommand>> &&commands, std::optional<int> timeout) noexcept;
 
   // For some bozo reason, vCont commands don't reply with `OK` - that only happens when in noack mode. Dumbest
   // fucking "protocol" in the history of the universe.

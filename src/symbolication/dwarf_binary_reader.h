@@ -1,8 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../common.h"
-#include "dwarf_defs.h"
+// mdb
+#include <common.h>
 #include <common/typedefs.h>
+#include <symbolication/dwarf_defs.h>
+
+// system
+#include <cstring>
 #include <type_traits>
 namespace mdb {
 class Elf;
@@ -121,7 +125,9 @@ public:
   ReadValue() noexcept
   {
     ASSERT(RemainingSize() >= sizeof(T),
-           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T), RemainingSize());
+      "Buffer has not enough data left to read value of size {} (bytes left={})",
+      sizeof(T),
+      RemainingSize());
     using Type = typename std::remove_cv_t<T>;
     constexpr auto sz = sizeof(Type);
     Type value = *(Type *)mHead;
@@ -135,7 +141,9 @@ public:
   SkipValue() noexcept
   {
     ASSERT(RemainingSize() >= sizeof(T),
-           "Buffer has not enough data left to read value of size {} (bytes left={})", sizeof(T), RemainingSize());
+      "Buffer has not enough data left to read value of size {} (bytes left={})",
+      sizeof(T),
+      RemainingSize());
     using Type = typename std::remove_cv_t<T>;
     constexpr auto sz = sizeof(Type);
     mHead += sz;

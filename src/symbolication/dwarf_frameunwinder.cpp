@@ -49,18 +49,21 @@ Reg::SetRegister(u64 reg) noexcept
 
 Reg::Reg() noexcept : uValue(0), mRule(RegisterRule::Undefined) {}
 
-CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
-                                 AddrPtr pc) noexcept
+CFAStateMachine::CFAStateMachine(
+  TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
     : mTraceeController(tc), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
-      mCanonicalFrameAddressData({.mIsExpression = false, .reg = {0, 0}}), mRuleTable()
+      mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { 0, 0 } }), mRuleTable()
 {
   mRuleTable.fill(Reg{});
 }
 
-CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frameBelow,
-                                 UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
+CFAStateMachine::CFAStateMachine(TraceeController &tc,
+  TaskInfo &task,
+  const RegisterValues &frameBelow,
+  UnwindInfoSymbolFilePair cfi,
+  AddrPtr pc) noexcept
     : mTraceeController(tc), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
-      mCanonicalFrameAddressData({.mIsExpression = false, .reg = {0, 0}})
+      mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { 0, 0 } })
 {
   for (auto i = 0u; i < mRuleTable.size(); ++i) {
     mRuleTable[i].mRule = RegisterRule::Undefined;
@@ -69,12 +72,12 @@ CFAStateMachine::CFAStateMachine(TraceeController &tc, TaskInfo &task, const Reg
 }
 
 void
-CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters,
-                       AddrPtr pc) noexcept
+CFAStateMachine::Reset(
+  UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters, AddrPtr pc) noexcept
 {
   mFrameDescriptionEntryPc = cfi.start();
   mEndPc = pc;
-  mCanonicalFrameAddressData = {.mIsExpression = false, .reg = {0, 0}};
+  mCanonicalFrameAddressData = { .mIsExpression = false, .reg = { 0, 0 } };
   auto i = 0;
   for (auto &r : mRuleTable) {
     r.mRule = RegisterRule::Undefined;
@@ -97,7 +100,7 @@ CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame
 {
   mFrameDescriptionEntryPc = cfi.start();
   mEndPc = pc;
-  mCanonicalFrameAddressData = {.mIsExpression = false, .reg = {0, 0}};
+  mCanonicalFrameAddressData = { .mIsExpression = false, .reg = { 0, 0 } };
   auto i = 0;
   for (auto &r : mRuleTable) {
     r.mRule = RegisterRule::Undefined;
@@ -113,7 +116,7 @@ CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame
 CFAStateMachine
 CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
 {
-  auto cfa_sm = CFAStateMachine{tc, task, cfi, pc};
+  auto cfa_sm = CFAStateMachine{ tc, task, cfi, pc };
   const auto &cache = task.GetRegisterCache();
   for (auto i = 0; i <= 16; i++) {
     cfa_sm.mRuleTable[i].mRule = RegisterRule::Undefined;
@@ -126,7 +129,7 @@ u64
 CFAStateMachine::ComputeExpression(std::span<const u8> bytes, int frameLevel) noexcept
 {
   DBGLOG(eh, "compute_expression of dwarf expression of {} bytes", bytes.size());
-  auto intepreter = ExprByteCodeInterpreter{frameLevel, mTraceeController, mTask, bytes};
+  auto intepreter = ExprByteCodeInterpreter{ frameLevel, mTraceeController, mTask, bytes };
   return intepreter.Run();
 }
 
@@ -154,8 +157,8 @@ CFAStateMachine::RestoreState() noexcept
 }
 
 u64
-CFAStateMachine::ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame,
-                                         int frameLevel) noexcept
+CFAStateMachine::ResolveRegisterContents(
+  u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel) noexcept
 {
   auto &reg = mRuleTable[registerNumber];
   switch (reg.mRule) {
@@ -325,13 +328,13 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       case 0x0f: { // I::DW_CFA_def_cfa_expression
         const auto length = reader.ReadUleb128<u64>();
         const auto block = reader.ReadBlock(length);
-        state.mCanonicalFrameAddressData.SetExpression(std::span{block.ptr, block.size});
+        state.mCanonicalFrameAddressData.SetExpression(std::span{ block.ptr, block.size });
       } break;
       case 0x10: { // I::DW_CFA_expression
         const auto reg = reader.ReadUleb128<u64>();
         const auto length = reader.ReadUleb128<u64>();
         const auto block = reader.ReadBlock(length);
-        state.mRuleTable[reg].SetExpression(std::span<const u8>{block.ptr, block.size});
+        state.mRuleTable[reg].SetExpression(std::span<const u8>{ block.ptr, block.size });
       } break;
       case 0x11: { // I::DW_CFA_offset_extended_sf
         const auto reg = reader.ReadUleb128<u64>();
@@ -366,15 +369,18 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
         const auto reg = reader.ReadUleb128<u64>();
         const auto length = reader.ReadUleb128<u64>();
         const auto block = reader.ReadBlock(length);
-        state.mRuleTable[reg].SetValueExpression({block.ptr, block.size});
+        state.mRuleTable[reg].SetValueExpression({ block.ptr, block.size });
       } break;
       case 0x1c:
         TODO("DW_CFA_lo_user not supported");
       case 0x3f:
         TODO("DW_CFA_hi_user not supported");
       default: {
-        PANIC(fmt::format("Could not decode byte code: {:x} == {:b} at position {}, cie offset: 0x{:x}", op, op,
-                          reader.BytesRead() - 1, cfi->mPointerToCommonInfoEntry->mSectionOffset));
+        PANIC(std::format("Could not decode byte code: {:x} == {:b} at position {}, cie offset: 0x{:x}",
+          op,
+          op,
+          reader.BytesRead() - 1,
+          cfi->mPointerToCommonInfoEntry->mSectionOffset));
       }
       }
     }
@@ -385,8 +391,8 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
 constexpr auto
 parse_encoding(u8 value)
 {
-  return Enc{.mLocationFormat = (DwarfExceptionHeaderApplication)(0b0111'0000 & value),
-             .mValueFormat = (DwarfExceptionHeaderEncoding)(0b0000'1111 & value)};
+  return Enc{ .mLocationFormat = (DwarfExceptionHeaderApplication)(0b0111'0000 & value),
+    .mValueFormat = (DwarfExceptionHeaderEncoding)(0b0000'1111 & value) };
 }
 
 using ExprOperation = AddrPtr (*)(ElfSection *, DwarfBinaryReader &);
@@ -400,7 +406,7 @@ CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept
     auto len = reader.ReadValue<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
     if (len == 0) {
-      return {cieCount, fdeCount};
+      return { cieCount, fdeCount };
     }
     auto id = reader.ReadValue<u32>();
     if (id == 0) {
@@ -410,7 +416,7 @@ CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept
     }
     reader.Skip(len - 4);
   }
-  return {cieCount, fdeCount};
+  return { cieCount, fdeCount };
 }
 
 std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
@@ -422,7 +428,7 @@ CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept
     auto len = reader.ReadValue<u32>();
     // apparently .debug_frame does *not* have a 0-length entry as a terminator. Great. Amazing.
     if (len == 0) {
-      return {cieCount, fdeCount};
+      return { cieCount, fdeCount };
     }
     auto id = reader.ReadValue<u32>();
     // stupid .debug_frame uses u32.max as CIE identifier when 0 is to clearly be used.
@@ -433,7 +439,7 @@ CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept
     }
     reader.Skip(len - 4);
   }
-  return {cieCount, fdeCount};
+  return { cieCount, fdeCount };
 }
 
 AddrPtr
@@ -484,8 +490,9 @@ read_lsda(CIE *cie, AddrPtr pc, DwarfBinaryReader &reader)
       break;
     }
   } else {
-    DBGLOG(eh, "Unsupported LSDA application encoding: 0x{:x}",
-           std::to_underlying(cie->mLanguageSpecificDataAreaEncoding.mLocationFormat));
+    DBGLOG(eh,
+      "Unsupported LSDA application encoding: 0x{:x}",
+      std::to_underlying(cie->mLanguageSpecificDataAreaEncoding.mLocationFormat));
   }
   PANIC("reading lsda failed");
 }
@@ -512,20 +519,23 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
   }
   ASSERT(ehFrameSection != nullptr, "Expected a .eh_frame section!");
   ASSERT(ehFrameSection->mName == ".eh_frame", "expected only .eh_frame section");
-  DwarfBinaryReader reader{objfile->GetElf(), ehFrameSection->mSectionData};
-  DBGLOG(eh, "reading .eh_frame section [{}] of {} bytes. Offset {:x}", objfile->GetPathString(),
-         reader.RemainingSize(), ehFrameSection->file_offset.Cast());
+  DwarfBinaryReader reader{ objfile->GetElf(), ehFrameSection->mSectionData };
+  DBGLOG(eh,
+    "reading .eh_frame section [{}] of {} bytes. Offset {:x}",
+    objfile->GetPathString(),
+    reader.RemainingSize(),
+    ehFrameSection->file_offset.Cast());
   auto unwinderHandle = std::make_unique<Unwinder>(objfile);
 
   using CieId = u64;
   using CieIdx = u64;
   std::unordered_map<CieId, CieIdx> cies{};
 
-  const auto [cieCount, fdes_count] = CountTotalEntriesInElfSection(DwarfBinaryReader{reader});
+  const auto [cieCount, fdes_count] = CountTotalEntriesInElfSection(DwarfBinaryReader{ reader });
   unwinderHandle->mElfEhCies.reserve(cieCount);
   unwinderHandle->mElfEhUnwindInfos.reserve(fdes_count);
-  AddrPtr low{std::uintptr_t{UINTMAX_MAX}};
-  AddrPtr high{nullptr};
+  AddrPtr low{ std::uintptr_t{ UINTMAX_MAX } };
+  AddrPtr high{ nullptr };
   const auto total = cieCount + fdes_count;
   for (auto i = 0u; i < total; ++i) {
     constexpr auto len_field_len = 4;
@@ -535,7 +545,8 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
     const auto current_offset = reader.BytesRead();
     if (entry_length == 0) {
       ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
-             "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet", cieCount);
+        "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet",
+        cieCount);
       unwinderHandle->SetHighAddress(high);
       unwinderHandle->SetLowAddress(low);
       return unwinderHandle;
@@ -553,7 +564,7 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
       AddrPtr begin = (ehFrameSection->address + reader.BytesRead() - len_field_len) + initial_loc;
       AddrPtr end = begin + reader.ReadValue<u32>();
       u8 aug_data_length = 0u;
-      AddrPtr lsda{nullptr};
+      AddrPtr lsda{ nullptr };
       auto augment = cie.GetAugmentation();
       if (augment.HasAugmentDataField) {
         // it's *going* to be less than 255 bytes. So we cast it here
@@ -564,8 +575,10 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
       }
       const auto bytes_remaining = entry_length - reader.PopBookmark();
       const auto ins = reader.GetSpan(bytes_remaining);
-      ASSERT(reader.BytesRead() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
-             reader.BytesRead() - current_offset, entry_length);
+      ASSERT(reader.BytesRead() - current_offset == entry_length,
+        "Unexpected difference in length: {} != {}",
+        reader.BytesRead() - current_offset,
+        entry_length);
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinderHandle->mElfEhUnwindInfos.push_back(UnwindInfo{
@@ -581,7 +594,8 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
     }
   }
   ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
-         "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet", cieCount);
+    "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet",
+    cieCount);
   unwinderHandle->SetHighAddress(high);
   unwinderHandle->SetLowAddress(low);
   return unwinderHandle;
@@ -590,17 +604,17 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
 void
 ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *debugFrame) noexcept
 {
-  DwarfBinaryReader reader{elf, debugFrame->mSectionData};
+  DwarfBinaryReader reader{ elf, debugFrame->mSectionData };
 
   using CieId = u64;
   using CieIdx = u64;
   std::unordered_map<CieId, CieIdx> cies{};
 
-  const auto [cieCount, fdes_count] = CountTotalEntriesInDwarfSection(DwarfBinaryReader{reader});
+  const auto [cieCount, fdes_count] = CountTotalEntriesInDwarfSection(DwarfBinaryReader{ reader });
   unwinderDb->mDwarfDebugCies.reserve(unwinderDb->mElfEhCies.size() + cieCount);
   unwinderDb->mDwarfUnwindInfos.reserve(unwinderDb->mElfEhUnwindInfos.size() + fdes_count);
-  AddrPtr low{std::uintptr_t{UINTMAX_MAX}};
-  AddrPtr high{nullptr};
+  AddrPtr low{ std::uintptr_t{ UINTMAX_MAX } };
+  AddrPtr high{ nullptr };
   while (reader.HasMore()) {
     constexpr auto len_field_len = 4;
     const auto eh_offset = reader.BytesRead();
@@ -629,15 +643,17 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
       if (augstr.contains("z")) {
         aug_data_length = static_cast<u8>(reader.ReadUleb128<u64>());
       }
-      AddrPtr lsda{nullptr};
+      AddrPtr lsda{ nullptr };
       auto augment = cie.GetAugmentation();
       if (augment.HasLanguageSpecificDataArea) {
         lsda = read_lsda(&cie, begin, reader);
       }
       const auto bytes_remaining = entry_length - reader.PopBookmark();
       auto ins = reader.GetSpan(bytes_remaining);
-      ASSERT(reader.BytesRead() - current_offset == entry_length, "Unexpected difference in length: {} != {}",
-             reader.BytesRead() - current_offset, entry_length);
+      ASSERT(reader.BytesRead() - current_offset == entry_length,
+        "Unexpected difference in length: {} != {}",
+        reader.BytesRead() - current_offset,
+        entry_length);
       low = std::min(low, begin);
       high = std::max(high, end);
       unwinderDb->mDwarfUnwindInfos.push_back(UnwindInfo{
@@ -657,8 +673,8 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
 }
 
 CommonInformationEntry
-ReadCommonInformationEntry(u64 commonInfoEntryLength, u64 commonInfoEntryOffset,
-                           DwarfBinaryReader &entryReader) noexcept
+ReadCommonInformationEntry(
+  u64 commonInfoEntryLength, u64 commonInfoEntryOffset, DwarfBinaryReader &entryReader) noexcept
 {
   CIE cie;
   cie.mSectionOffset = commonInfoEntryOffset;
@@ -780,7 +796,7 @@ UnwinderSymbolFilePair::GetUnwinderInfo(AddrPtr pc) noexcept
   if (!info) {
     return std::nullopt;
   }
-  return UnwindInfoSymbolFilePair{.mInfo = info, .mSymbolFile = mSymbolFile};
+  return UnwindInfoSymbolFilePair{ .mInfo = info, .mSymbolFile = mSymbolFile };
 }
 
 std::optional<UnwindInfoSymbolFilePair>

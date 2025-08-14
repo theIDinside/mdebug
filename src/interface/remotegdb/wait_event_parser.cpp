@@ -16,8 +16,8 @@ WaitEventParser::WaitEventParser(RemoteConnection &conn) noexcept : mConnection(
 EventDataParam
 WaitEventParser::Params() const noexcept
 {
-  std::optional<int> eventTime = mEventTime > 0 ? std::nullopt : std::optional{mEventTime};
-  return EventDataParam{.target = mPid, .tid = mTid, .sig_or_code = mSignal, .event_time = eventTime};
+  std::optional<int> eventTime = mEventTime > 0 ? std::nullopt : std::optional{ mEventTime };
+  return EventDataParam{ .target = mPid, .tid = mTid, .sig_or_code = mSignal, .event_time = eventTime };
 }
 
 static std::string
@@ -101,7 +101,7 @@ void
 WaitEventParser::ParseCore(std::string_view arg) noexcept
 {
   ASSERT(mCore == 0, "core has already been set");
-  u32 parsedCore{0};
+  u32 parsedCore{ 0 };
   auto parse = std::from_chars(arg.data(), arg.data() + arg.size(), parsedCore, 16);
   if (parse.ec != std::errc()) {
     PANIC("Failed to parse core");
@@ -127,63 +127,86 @@ WaitEventParser::DeterminePc() const noexcept
 TraceEvent *
 WaitEventParser::NewDebuggerEvent(bool init) noexcept
 {
+  // TODO: Refactor function. It's been refactored once with this ugly hack, because other changes happened
+  // and this was the change with least friction to solve it.
+  TraceEvent *traceEvent = nullptr;
   if (mStopReason) {
+    traceEvent = new TraceEvent{};
     switch (*mStopReason) {
     case TraceeStopReason::Watch:
-      return TraceEvent::CreateWriteWatchpoint(Params(), mWatchpointAddress, std::move(mRegisters));
+      TraceEvent::InitWriteWatchpoint(traceEvent, Params(), mWatchpointAddress, std::move(mRegisters));
+      break;
     case TraceeStopReason::RWatch:
-      return TraceEvent::CreateReadWatchpoint(Params(), mWatchpointAddress, std::move(mRegisters));
+      TraceEvent::InitReadWatchpoint(traceEvent, Params(), mWatchpointAddress, std::move(mRegisters));
+      break;
     case TraceeStopReason::AWatch:
-      return TraceEvent::CreateAccessWatchpoint(Params(), mWatchpointAddress, std::move(mRegisters));
+      TraceEvent::InitAccessWatchpoint(traceEvent, Params(), mWatchpointAddress, std::move(mRegisters));
+      break;
     case TraceeStopReason::SyscallEntry:
-      return TraceEvent::CreateSyscallEntry(Params(), mSyscallNumber, std::move(mRegisters));
+      TraceEvent::InitSyscallEntry(traceEvent, Params(), mSyscallNumber, std::move(mRegisters));
+      break;
     case TraceeStopReason::SyscallReturn:
-      return TraceEvent::CreateSyscallExit(Params(), mSyscallNumber, std::move(mRegisters));
+      TraceEvent::InitSyscallExit(traceEvent, Params(), mSyscallNumber, std::move(mRegisters));
+      break;
     case TraceeStopReason::Library:
-      return TraceEvent::CreateLibraryEvent(Params(), std::move(mRegisters));
+      TraceEvent::InitLibraryEvent(traceEvent, Params(), std::move(mRegisters));
+      break;
     case TraceeStopReason::ReplayLog:
       TODO("Implement TraceeStopReason::ReplayLog");
     case TraceeStopReason::SWBreak: {
-      return TraceEvent::CreateSoftwareBreakpointHit(Params(), DeterminePc(), std::move(mRegisters));
+      TraceEvent::InitSoftwareBreakpointHit(traceEvent, Params(), DeterminePc(), std::move(mRegisters));
+      break;
     }
     case TraceeStopReason::HWBreak: {
-      return TraceEvent::CreateHardwareBreakpointHit(Params(), DeterminePc(), std::move(mRegisters));
+      TraceEvent::InitHardwareBreakpointHit(traceEvent, Params(), DeterminePc(), std::move(mRegisters));
+      break;
     }
     case TraceeStopReason::Fork:
-      return TraceEvent::CreateForkEvent_(Params(), mNewPid, std::move(mRegisters));
+      TraceEvent::InitForkEvent_(traceEvent, Params(), mNewPid, std::move(mRegisters));
+      break;
     case TraceeStopReason::VFork:
       TODO("Implement handling of TraceeStopReason::VFork");
     case TraceeStopReason::VForkDone:
       TODO("Implement handling of TraceeStopReason::VForkDone");
     case TraceeStopReason::Exec:
-      return TraceEvent::CreateExecEvent(Params(), mExecPath, std::move(mRegisters));
+      TraceEvent::InitExecEvent(traceEvent, Params(), mExecPath, std::move(mRegisters));
+      break;
     case TraceeStopReason::Clone:
       TODO("Implement handling of TraceeStopReason::Clone");
     case TraceeStopReason::Create: {
       const auto target =
         mConnection.GetSettings().mIsNonStop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
-      return TraceEvent::CreateThreadCreated(Params(), {tc::RunType::Continue, target, 0}, std::move(mRegisters));
-    }
+      TraceEvent::InitThreadCreated(
+        traceEvent, Params(), { tc::RunType::Continue, target, 0 }, std::move(mRegisters));
+    } break;
+    default:
+      TODO("Default handling should fail");
     }
   }
 
-  if (!init) {
+  // If traceEvent, it's already pre-processed
+  if (!init && !traceEvent) {
     auto tc = Tracer::Get().GetController(mPid);
     auto t = tc != nullptr ? tc->GetTaskByTid(mTid) : nullptr;
 
-    if (t && t->mBreakpointLocationStatus) {
-      const auto locstat = t->ClearBreakpointLocStatus();
-      return TraceEvent::CreateStepped(Params(), !locstat->mShouldResume, locstat, std::move(t->mNextResumeAction),
-                                       std::move(mRegisters));
-    }
-
-    if (mSignal != SIGTRAP) {
-      return TraceEvent::CreateSignal(Params(), std::move(mRegisters));
+    if (t && t->mBreakpointLocationStatus.IsValid()) {
+      TraceEvent::InitStepped(traceEvent = new TraceEvent{ *t },
+        Params(),
+        t->mBreakpointLocationStatus.ShouldBeStopped(),
+        tc::ResumeAction{ t->mBreakpointLocationStatus.mSteppingOverState.mResumeActionUponCompletion },
+        std::move(mRegisters));
+    } else if (mSignal != SIGTRAP) {
+      TraceEvent::InitSignal(traceEvent = new TraceEvent{}, Params(), std::move(mRegisters));
     }
   }
 
-  // We got no stop reason. Defer to supervisor, let it figure it out.Nu
-  return TraceEvent::CreateDeferToSupervisor(Params(), std::move(mRegisters), mControlKindIsAttached);
+  if (!traceEvent) {
+    traceEvent = new TraceEvent{};
+    // We got no stop reason. Defer to supervisor, let it figure it out.Nu
+    TraceEvent::InitDeferToSupervisor(traceEvent, Params(), std::move(mRegisters), mControlKindIsAttached);
+  }
+
+  return traceEvent;
 }
 
 void
@@ -207,7 +230,7 @@ WaitEventParser::ParseVFork(std::string_view data)
 }
 
 void
-WaitEventParser::SetVFork(Pid newpid, Tid newtid) noexcept
+WaitEventParser::SetVFork(SessionId newpid, Tid newtid) noexcept
 {
   ASSERT(mNewPid == 0, "new_pid already set");
   ASSERT(mNewTid == 0, "new_tid already set");
@@ -230,7 +253,7 @@ WaitEventParser::SetStopReason(TraceeStopReason stop) noexcept
 }
 
 void
-WaitEventParser::SetPid(Pid process) noexcept
+WaitEventParser::SetPid(SessionId process) noexcept
 {
   ASSERT(mPid == 0, "pid already set");
   mPid = process;

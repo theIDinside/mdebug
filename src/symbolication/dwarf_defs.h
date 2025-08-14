@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "common/formatter.h"
 #include <common/macros.h>
 #include <common/typedefs.h>
 #include <cstdint>
-#include <fmt/core.h>
 #include <span>
 #include <string_view>
 
@@ -26,7 +26,7 @@ struct DataBlock
 constexpr std::span<const u8>
 as_span(DataBlock block) noexcept
 {
-  return std::span{block.ptr, block.ptr + block.size};
+  return std::span{ block.ptr, block.ptr + block.size };
 }
 
 enum class DwarfVersion : std::uint8_t
@@ -412,56 +412,38 @@ is_class_type(DwarfTag tag) noexcept
 }
 } // namespace mdb
 
-namespace fmt {
-template <> struct formatter<mdb::Attribute>
+template <> struct std::formatter<mdb::Attribute>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(mdb::Attribute const &attribute, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(), "{}", to_str(attribute));
+    return std::format_to(ctx.out(), "{}", to_str(attribute));
   }
 };
 
-template <> struct formatter<mdb::AttributeForm>
+template <> struct std::formatter<mdb::AttributeForm>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(mdb::AttributeForm form, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(), "{}", to_str(form));
+    return std::format_to(ctx.out(), "{}", to_str(form));
   }
 };
 
-template <> struct formatter<mdb::DwarfTag>
+template <> struct std::formatter<mdb::DwarfTag>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(mdb::DwarfTag const &tag, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(), "{}", to_str(tag));
+    return std::format_to(ctx.out(), "{}", to_str(tag));
   }
 };
-
-} // namespace fmt

@@ -1,41 +1,32 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "js/ErrorReport.h"
-#include "js/SourceText.h"
-#include "js/TypeDecls.h"
-#include <utils/expected.h>
-#include <utils/util.h>
+#include "quickjs/quickjs.h"
+#include <expected>
+#include <span>
+
 namespace mdb::js {
-mdb::Expected<JS::SourceText<mozilla::Utf8Unit>, std::string> SourceFromString(JSContext *context,
-                                                                               std::string_view str) noexcept;
 
-mdb::Expected<JS::UniqueChars, std::string_view> ToString(JSContext *cx,
-                                                          JS::Handle<JSString *> stringObject) noexcept;
-
-bool ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) noexcept;
-bool ToStdString(JSContext *cx, JS::HandleString string, std::pmr::string &writeBuffer) noexcept;
-
-JSString *PrepareString(JSContext *cx, std::string_view string) noexcept;
-
-} // namespace mdb::js
-template <> struct fmt::formatter<JSErrorReport> : public Default<JSErrorReport>
+struct QuickJsString
 {
-  template <typename FormatContext>
-  auto
-  format(const JSErrorReport &report, FormatContext &ctx) const
-  {
-    auto it = ctx.out();
-    if (report.errorMessageName) {
-      it = fmt::format_to(it, "[{}] ", report.errorMessageName);
-    }
-    if (report.filename) {
-      it = fmt::format_to(it, "{}:", report.filename);
-    }
-    if (report.lineno) {
-      it = fmt::format_to(it, "{}:{}", report.lineno, report.column.oneOriginValue());
-    }
+  JSContext *mContext;
+  const char *mString;
 
-    return fmt::format_to(it, "{}", report.message().c_str());
-  }
+  QuickJsString(JSContext *context, const char *string) noexcept;
+  QuickJsString(QuickJsString &&) noexcept;
+
+  QuickJsString(const QuickJsString &) = delete;
+
+  QuickJsString &operator=(const QuickJsString &) = delete;
+  QuickJsString &operator=(QuickJsString &&) = delete;
+
+  ~QuickJsString() noexcept;
+
+  static QuickJsString FromValue(JSContext *context, JSValue value) noexcept;
 };
+
+/** Calls function `functionValue` and then frees the arguments in `arguments`. */
+std::expected<JSValue, QuickJsString> CallFunction(
+  JSContext *context, JSValue functionValue, JSValue thisValue, std::span<JSValue> consumedArguments);
+
+}; // namespace mdb::js

@@ -4,6 +4,7 @@
 #include "common.h"
 #include "event_queue.h"
 #include "events/event.h"
+#include "interface/dap/commands.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/remotegdb/connection.h"
@@ -69,19 +70,13 @@ enum class ObserverType
   AllStop
 };
 
-enum class SupervisorEventHandlerAction
-{
-  Default,
-  Defer
-};
-
 // Controller for one process
 class TraceeController
 {
   friend class Tracer;
   friend struct ui::UICommand;
   // The id given to this process by the debugger
-  u32 mSessionId;
+  SessionId mSessionId;
   // This process' parent pid
   pid_t mParentPid;
   // The process pid, or the initial task that was spawned for this process
@@ -92,9 +87,9 @@ class TraceeController
   std::shared_ptr<SymbolFile> mMainExecutable;
   // The tasks that exist in this "process space". Since tasks often are looked up by tid, before we want to do
   // something with it we save an indirection by storing the tid inline here, same goes for mExitedThreads.
-  std::vector<TaskInfo::TaskInfoEntry> mThreads;
+  std::vector<TaskInfo::InlinedTid> mThreads;
   // Tasks that have exited.
-  std::vector<TaskInfo::TaskInfoEntry> mExitedThreads;
+  std::vector<TaskInfo::InlinedTid> mExitedThreads;
   // More low level information about tasks's. The idea (maybe?) is that at some point we will be able
   // to restore a process space, by doing some manual cloning of tasks, making checkpoint-like debugging possible
   // note: not as powerful as rr, in any sense of the word, but may be neat.
@@ -114,7 +109,7 @@ class TraceeController
   // Debug Adapter implementation.
   // TODO: at some point it should be configurable, to use other channels than just stdio. Should be fairly
   // trivial.
-  ui::dap::DebugAdapterClient *mDebugAdapterClient{nullptr};
+  ui::dap::DebugAdapterClient *mDebugAdapterClient{ nullptr };
 
   // Monotonically increasing "variable reference" as defined by the debug adapter protocol.
   int mNextVariableReference = 0;
@@ -142,32 +137,37 @@ class TraceeController
   // applications on Linux)
   ParsedAuxiliaryVector mParsedAuxiliaryVector;
 
-  bool mConfigurationIsDone : 1 {false};
+  bool mConfigurationIsDone : 1 { false };
   // Whether this is the very first stop wait status we have seen
-  bool mOnEntry : 1 {false};
+  bool mOnEntry : 1 { false };
   // Whether or not a process exit has been seen for this process.
-  bool mIsExited : 1 {false};
+  bool mIsExited : 1 { false };
   // If this process was vforked it needs special attention/massaging until it performs an EXEC. It can't do the
   // normal fork/clone/exec dances, as this would affect the caller of vfork's process space as well. This flag is
   // set by the comment-labled FORK constructor of TraceeController.
-  bool mIsVForking : 1 {false};
+  bool mIsVForking : 1 { false };
   // Signals whether any stop that is encounted should signal to the debug adapter that everything stopped at the
   // same time.
-  bool mAllStopSession : 1 {false};
+  bool mAllStopSession : 1 { false };
 
-  int mCreationEventTime{0};
-  int mCurrentEventTime{0};
+  int mCreationEventTime{ 0 };
+  int mCurrentEventTime{ 0 };
 
-  BreakpointBehavior mBreakpointBehavior{BreakpointBehavior::StopAllThreadsWhenHit};
+  BreakpointBehavior mBreakpointBehavior{ BreakpointBehavior::StopAllThreadsWhenHit };
 
   // FORK constructor
   TraceeController(u32 sessionId, TraceeController &parent, tc::Interface &&interface, bool isVFork) noexcept;
   // Constructors
   TraceeController(u32 sessionId, TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
+  explicit TraceeController(SessionId sessionId) noexcept;
+
+  void InitializeSupervisor(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
 
 public:
-  static std::unique_ptr<TraceeController> create(u32 sessionId, TargetSession session, tc::Interface &&interface,
-                                                  InterfaceType type);
+  using SessionId = i32;
+  static std::unique_ptr<TraceeController> create(
+    u32 sessionId, TargetSession session, tc::Interface &&interface, InterfaceType type);
+  static std::unique_ptr<TraceeController> CreateDetached(SessionId sessionId) noexcept;
   ~TraceeController() noexcept;
 
   TraceeController(const TraceeController &) = delete;
@@ -191,6 +191,7 @@ public:
   // Called when a ("this") process forks
   std::unique_ptr<TraceeController> Fork(tc::Interface &&interface, bool isVFork) noexcept;
 
+  std::span<std::shared_ptr<SymbolFile>> GetSymbolFiles() noexcept;
   // Look up if the debugger has parsed symbol object file with `path` and return it. Otherwise returns nullptr
   std::shared_ptr<SymbolFile> LookupSymbolFile(const Path &path) noexcept;
   // Return the entry address (usually address of _start) for this executable
@@ -200,8 +201,8 @@ public:
   // Called when a new dynamic library has been loaded into the process vm space
   void OnSharedObjectEvent() noexcept;
   // Check if new breakpoint locations need to be installed, because of a new symbol file being loaded.
-  bool CheckBreakpointLocationsForSymbolFile(SymbolFile &symbolFile, UserBreakpoint &userBreakpoint,
-                                             std::vector<Ref<BreakpointLocation>> &locs) noexcept;
+  bool CheckBreakpointLocationsForSymbolFile(
+    SymbolFile &symbolFile, UserBreakpoint &userBreakpoint, std::vector<Ref<BreakpointLocation>> &locs) noexcept;
   // Check if new breakpoint locations need to be installed, because of a new symbol file being loaded.
   void DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&newSymbolFiles) noexcept;
 
@@ -211,16 +212,19 @@ public:
   // thread also; it also means when for instance { thread: 9 } hits a breakpoint, all threads are stopped in their
   // track.
   bool IsIndividualTaskControlConfigured() noexcept;
-  std::span<TaskInfo::TaskInfoEntry> GetThreads() noexcept;
-  std::span<TaskInfo::TaskInfoEntry> GetExitedThreads() noexcept;
+  std::span<TaskInfo::InlinedTid> GetThreads() noexcept;
+  std::span<TaskInfo::InlinedTid> GetExitedThreads() noexcept;
 
   void AddTask(Ref<TaskInfo> &&task) noexcept;
   u32 RemoveTasksNotInSet(std::span<const gdb::GdbThread> set) noexcept;
   Tid TaskLeaderTid() const noexcept;
-  u32 SessionId() const noexcept;
+  SessionId GetSessionId() const noexcept;
   void SetExitSeen() noexcept;
   TaskInfo *GetTaskByTid(pid_t pid) noexcept;
   UserBreakpoints &GetUserBreakpoints() noexcept;
+  /* For remote sessions it's harder for us to manage state or predict it in any good ways. It just becomes a
+   * hassle, unfortunately, due to how the protocol is defined.*/
+  TaskInfo *GetOrCreateNewTask(Tid tid, bool running) noexcept;
   /* Create new task meta data for `tid` */
   void CreateNewTask(Tid tid, bool running) noexcept;
   bool HasTask(Tid tid) noexcept;
@@ -234,7 +238,7 @@ public:
   void StopAllTasks(TaskInfo *requestingTask, std::function<void()> &&callback) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
-  TaskInfo *RegisterTaskWaited(TaskWaitResult wait) noexcept;
+  TaskInfo *RegisterTaskWaited(WaitPidResult wait) noexcept;
 
   // Cache the register contents for `task` and return the program counter.
   AddrPtr CacheAndGetPcFor(TaskInfo &task) noexcept;
@@ -252,29 +256,30 @@ public:
 
   // Emit event FOO at stop
   void EmitStoppedAtBreakpoints(LWP lwp, u32 breakpointId, bool allStopped) noexcept;
-  void EmitSteppedStop(LWP lwp) noexcept;
+  void EmitStepNotification(LWP lwp) noexcept;
   void EmitSteppedStop(LWP lwp, std::string_view message, bool allStopped) noexcept;
   void EmitSignalEvent(LWP lwp, int signal) noexcept;
-  void EmitStopped(Tid tid, ui::dap::StoppedReason reason, std::string_view message, bool allStopped,
-                   std::vector<int> breakpointsHit) noexcept;
-  void EmitBreakpointEvent(std::string_view reason, const UserBreakpoint &bp,
-                           std::optional<std::string> message) noexcept;
+  void EmitStopped(Tid tid,
+    ui::dap::StoppedReason reason,
+    std::string_view message,
+    bool allStopped,
+    std::vector<int> breakpointsHit) noexcept;
+  void EmitBreakpointEvent(
+    std::string_view reason, const UserBreakpoint &bp, std::optional<std::string> message) noexcept;
   tc::ProcessedStopEvent ProcessDeferredStopEvent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   // Get (&& ||) Create breakpoint locations
   Expected<Ref<BreakpointLocation>, BreakpointError> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
-  Expected<Ref<BreakpointLocation>, BreakpointError>
-  GetOrCreateBreakpointLocation(AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile,
-                                const sym::dw::LineTableEntry &lte) noexcept;
+  Expected<Ref<BreakpointLocation>, BreakpointError> GetOrCreateBreakpointLocation(
+    AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile, const sym::dw::LineTableEntry &lte) noexcept;
 
-  Expected<Ref<BreakpointLocation>, BreakpointError>
-  GetOrCreateBreakpointLocationWithSourceLoc(AddrPtr addr,
-                                             std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
-  void SetSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-                            const Set<BreakpointSpecification> &bps) noexcept;
+  Expected<Ref<BreakpointLocation>, BreakpointError> GetOrCreateBreakpointLocationWithSourceLoc(
+    AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
+  void SetSourceBreakpoints(
+    const std::filesystem::path &sourceFilePath, const Set<BreakpointSpecification> &bps) noexcept;
   void UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-                               std::vector<BreakpointSpecification> &&add,
-                               const std::vector<BreakpointSpecification> &remove) noexcept;
+    std::vector<BreakpointSpecification> &&add,
+    const std::vector<BreakpointSpecification> &remove) noexcept;
 
   void SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
   void SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
@@ -295,8 +300,10 @@ public:
   bool SomeTaskCanBeResumed() const noexcept;
 
   // Debug Symbols Related Logic
-  void RegisterObjectFile(TraceeController *tc, std::shared_ptr<ObjectFile> &&obj, bool isMainExecutable,
-                          AddrPtr relocatedBase) noexcept;
+  void RegisterObjectFile(TraceeController *tc,
+    std::shared_ptr<ObjectFile> &&obj,
+    bool isMainExecutable,
+    AddrPtr relocatedBase) noexcept;
 
   void RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept;
 
@@ -309,13 +316,13 @@ public:
   TargetSession GetSessionType() const noexcept;
 
   Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(AddrPtr addr, u64 bytes) noexcept;
-  Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr,
-                                                              u64 bytes) noexcept;
-  std::unique_ptr<LeakVector<u8>> ReadToVector(AddrPtr addr, u64 bytes,
-                                               std::pmr::memory_resource *resource) noexcept;
+  Expected<std::unique_ptr<ByteBuffer>, NonFullRead> SafeRead(
+    std::pmr::memory_resource *allocator, AddrPtr addr, u64 bytes) noexcept;
+  std::unique_ptr<LeakVector<u8>> ReadToVector(
+    AddrPtr addr, u64 bytes, std::pmr::memory_resource *resource) noexcept;
 
   void DeferEvent(ApplicationEvent event) noexcept;
-  void ResumeEventHandling() noexcept;
+  void PopHandlerStack(bool consumePotentiallyDeferred) noexcept;
   void InvalidateThreads(int eventTime) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void OnTearDown() noexcept;
@@ -323,7 +330,6 @@ public:
 
 private:
   void DefaultHandler(TraceEvent *evt) noexcept;
-  void SetDeferEventHandler() noexcept;
 
 public:
   template <typename T>
@@ -339,7 +345,7 @@ public:
       const auto readResult = mTraceeInterface->ReadBytes(readAddress, sz - totalRead, ptr + totalRead);
       if (!readResult.WasSuccessful()) {
         PANIC(
-          fmt::format("Failed to proc_fs read from {:p} because {}", (void *)address.GetRaw(), strerror(errno)));
+          std::format("Failed to proc_fs read from {:p} because {}", (void *)address.GetRaw(), strerror(errno)));
       }
       totalRead += readResult.uBytesRead;
     }
@@ -365,13 +371,15 @@ public:
     return result;
   }
 
+  bool WriteBytes(AddrPtr address, std::span<u8> bytes) noexcept;
+
   template <typename T>
   void
   Write(TraceePointer<T> address, const T &value)
   {
     auto write_res = mTraceeInterface->Write(address, value);
     if (!write_res.is_expected()) {
-      PANIC(fmt::format("Failed to proc_fs write to {:p}", (void *)address.GetRaw()));
+      PANIC(std::format("Failed to proc_fs write to {:p}", (void *)address.GetRaw()));
     }
   }
 
@@ -392,9 +400,9 @@ public:
   void EmitAllStopped() noexcept;
   bool IsAllStopped() const noexcept;
   bool IsSessionAllStopMode() const noexcept;
-  TaskInfo *SetPendingWaitstatus(TaskWaitResult wait_result) noexcept;
+  TaskInfo *SetPendingWaitstatus(WaitPidResult wait_result) noexcept;
 
-  void CacheRegistersFor(TaskInfo &t) noexcept;
+  void CacheRegistersFor(TaskInfo &t, bool forceRefresh = false) noexcept;
   tc::TraceeCommandInterface &GetInterface() noexcept;
 
   void TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool notify) noexcept;
@@ -404,8 +412,8 @@ public:
   tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;
   tc::ProcessedStopEvent HandleStepped(TaskInfo *task, const Stepped &event) noexcept;
   tc::ProcessedStopEvent HandleEntry(TaskInfo *task, const EntryEvent &e) noexcept;
-  tc::ProcessedStopEvent HandleThreadCreated(TaskInfo *task, const ThreadCreated &evt,
-                                             const RegisterData &register_data) noexcept;
+  tc::ProcessedStopEvent HandleThreadCreated(
+    TaskInfo *task, const ThreadCreated &evt, const RegisterData &register_data) noexcept;
   bool OneRemainingTask() noexcept;
   tc::ProcessedStopEvent HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &evt) noexcept;
   tc::ProcessedStopEvent HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
@@ -416,12 +424,19 @@ public:
 
   ui::dap::DebugAdapterClient *GetDebugAdapterProtocolClient() const noexcept;
 
+  template <typename Fn>
+  void
+  InstallTraceEventHandler(Fn &&fn) noexcept
+  {
+    mEventHandlerStack.PushEventHandler(fn);
+  }
+
 private:
   void ShutDownDebugAdapterClient() noexcept;
   // Writes breakpoint point and returns the original value found at that address
   Expected<u8, BreakpointError> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
-  SupervisorEventHandlerAction mAction{SupervisorEventHandlerAction::Default};
   std::vector<TraceEvent *> mDeferredEvents;
-  TraceeController *mVForkedSupervisor{nullptr};
+  TraceeController *mVForkedSupervisor{ nullptr };
+  EventHandlerStack<TraceEvent> mEventHandlerStack{};
 };
 } // namespace mdb

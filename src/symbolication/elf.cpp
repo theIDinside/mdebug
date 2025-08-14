@@ -28,8 +28,10 @@ const u8 *
 ElfSection::Into(AddrPtr virtualMemoryAddress) const noexcept
 {
   ASSERT(virtualMemoryAddress >= address, "Virtual Memory address {} is < {}", virtualMemoryAddress, address);
-  ASSERT((virtualMemoryAddress - address) < Size(), "Virtual memory address {} is > {}", virtualMemoryAddress,
-         address + Size());
+  ASSERT((virtualMemoryAddress - address) < Size(),
+    "Virtual memory address {} is > {}",
+    virtualMemoryAddress,
+    address + Size());
   const AddrPtr offset = (virtualMemoryAddress - address);
   return begin() + offset.GetRaw();
 }
@@ -43,24 +45,30 @@ ElfSection::GetCString(u64 offset) const noexcept
 u64
 ElfSection::GetPointerOffset(const u8 *insideRangePointer) const noexcept
 {
-  ASSERT(insideRangePointer >= mSectionData->data(), "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
-         (void *)insideRangePointer, (void *)mSectionData->data());
+  ASSERT(insideRangePointer >= mSectionData->data(),
+    "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
+    (void *)insideRangePointer,
+    (void *)mSectionData->data());
   return (insideRangePointer - mSectionData->data());
 }
 
 const u8 *
 ElfSection::GetPointer(u64 offset) const noexcept
 {
-  ASSERT(offset < mSectionData->size_bytes(), "Offset {} is outside of section of size {}", offset,
-         mSectionData->size_bytes());
+  ASSERT(offset < mSectionData->size_bytes(),
+    "Offset {} is outside of section of size {}",
+    offset,
+    mSectionData->size_bytes());
   return mSectionData->data() + offset;
 }
 
 u64
 ElfSection::RemainingBytes(const u8 *ptr) const noexcept
 {
-  ASSERT(ptr >= mSectionData->data(), "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})", (void *)ptr,
-         (void *)mSectionData->data());
+  ASSERT(ptr >= mSectionData->data(),
+    "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
+    (void *)ptr,
+    (void *)mSectionData->data());
   const auto offset_bytes = GetPointerOffset(ptr);
   return Size() - offset_bytes;
 }
@@ -79,14 +87,14 @@ from_str(std::string_view str)
     return DwarfSectionIdent::Ident;                                                                              \
   else
 #undef SECTION
-  PANIC(fmt::format("Failed to parse section name {}", str))
+  PANIC(std::format("Failed to parse section name {}", str))
 }
 
 Elf::Elf(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept
-    : mElfHeader(header), mSections(std::move(sections)), mStrTable{nullptr}, mDebugInfo{nullptr},
-      mDebugAbbrev{nullptr}, mDebugStr{nullptr}, mDebugRanges{nullptr}, mDebugAranges{nullptr},
-      mDebugLine{nullptr}, mDebugAddr{nullptr}, mDebugStrOffsets{nullptr}, mDebugRnglists{nullptr},
-      mDebugLoclist{nullptr}
+    : mElfHeader(header), mSections(std::move(sections)), mStrTable{ nullptr }, mDebugInfo{ nullptr },
+      mDebugAbbrev{ nullptr }, mDebugStr{ nullptr }, mDebugRanges{ nullptr }, mDebugAranges{ nullptr },
+      mDebugLine{ nullptr }, mDebugAddr{ nullptr }, mDebugStrOffsets{ nullptr }, mDebugRnglists{ nullptr },
+      mDebugLoclist{ nullptr }
 {
   mStrTable = GetSection(ElfSec::StringTable);
   mDebugInfo = GetSection(ElfSec::DebugInfo);
@@ -181,11 +189,12 @@ Elf::ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept
     for (auto &symbol : symbols) {
       if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
         std::string_view name = elf->mStrTable->GetCString(symbol.st_name);
-        const auto res = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+        const auto res = MinSymbol{ .name = name, .address = symbol.st_value, .maybe_size = symbol.st_size };
         elfFunctionSymbols.push_back(res);
       } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
         std::string_view name = elf->mStrTable->GetCString(symbol.st_name);
-        elfObjectSymbols[name] = MinSymbol{.name = name, .address = symbol.st_value, .maybe_size = symbol.st_size};
+        elfObjectSymbols[name] =
+          MinSymbol{ .name = name, .address = symbol.st_value, .maybe_size = symbol.st_size };
       }
     }
     // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.

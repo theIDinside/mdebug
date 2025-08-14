@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "worker_task.h"
 #include "../common.h"
-#include "fmt/ranges.h"
 #include "lib/arena_allocator.h"
 #include "thread_pool.h"
+#include "utils/fmt_join.h"
 #include "utils/logger.h"
 
 namespace mdb {
@@ -37,7 +37,7 @@ NoOp::ExecuteTask(std::pmr::memory_resource *) noexcept
 
 TaskGroup::TaskGroup(std::string_view name) noexcept : mPromise(), mName(name), mTaskLock(), mDoneTasks()
 {
-  mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{10000});
+  mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{ 10000 });
 }
 
 void
@@ -65,10 +65,12 @@ TaskGroup::TaskDone(Task *task) noexcept
   std::lock_guard lock(mTaskLock);
   if (std::ranges::any_of(mDoneTasks, [task](auto t) { return t == task; })) {
     std::vector<std::uintptr_t> tasks_{};
-    std::transform(mDoneTasks.begin(), mDoneTasks.end(), std::back_inserter(tasks_),
-                   [](auto t) { return std::uintptr_t(t); });
-    ASSERT(false, "Task 0x{:x} has already been added to done list: [0x{:x}]", std::uintptr_t(task),
-           fmt::join(tasks_, ", "));
+    std::transform(
+      mDoneTasks.begin(), mDoneTasks.end(), std::back_inserter(tasks_), [](auto t) { return std::uintptr_t(t); });
+    ASSERT(false,
+      "Task 0x{:x} has already been added to done list: [{}]",
+      std::uintptr_t(task),
+      HexJoinFormatIterator{ tasks_, ", " });
   }
   mDoneTasks.push_back(task);
   if (mDoneTasks.size() == mTasks.size()) {

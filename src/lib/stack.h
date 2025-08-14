@@ -8,6 +8,7 @@
 // stdlib
 #include <cstddef>
 #include <memory>
+#include <ranges>
 #include <utility>
 
 template <typename T, std::size_t N> class InlineStack
@@ -80,7 +81,19 @@ public:
     std::destroy(mData, mData + mSize);
   }
 
+  constexpr auto
+  Capacity() const noexcept
+  {
+    return N;
+  }
+
+  constexpr auto
+  StackWalkDown(this auto &&self) noexcept
+  {
+    return std::ranges::subrange(self.mData, self.mData + self.mSize) | std::views::reverse;
+  }
+
 private:
   alignas(T) T mData[N];
-  std::size_t mSize{0};
+  std::size_t mSize{ 0 };
 };

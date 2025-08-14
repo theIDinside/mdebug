@@ -6,12 +6,12 @@
 #include "commands.h"
 #include "common.h"
 #include "events.h"
+#include "events/event.h"
 #include "lib/arena_allocator.h"
 #include "parse_buffer.h"
 #include <algorithm>
 #include <fcntl.h>
 #include <filesystem>
-#include <fmt/core.h>
 #include <poll.h>
 #include <supervisor.h>
 #include <sys/epoll.h>
@@ -29,7 +29,7 @@ using namespace std::string_literals;
 std::string_view
 ContentDescriptor::payload() const noexcept
 {
-  return std::string_view{payload_begin, payload_begin + payload_length};
+  return std::string_view{ payload_begin, payload_begin + payload_length };
 }
 /*
 // Ordered by size, not alphabetically
@@ -93,7 +93,7 @@ DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
   posted_event_notifier = w;
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
-  mTemporaryArena = alloc::ArenaResource::Create(alloc::Page{16});
+  mTemporaryArena = alloc::ArenaResource::Create(alloc::Page{ 16 });
 }
 
 DAP::~DAP() noexcept {}
@@ -102,7 +102,7 @@ UIResultPtr
 DAP::pop_event() noexcept
 {
   VERIFY(!events_queue.empty(), "Can't pop events from an empty list!");
-  std::lock_guard lock{mUIResultLock};
+  std::lock_guard lock{ mUIResultLock };
   UIResultPtr evt = events_queue.front();
   events_queue.pop_front();
   return evt;
@@ -111,14 +111,16 @@ DAP::pop_event() noexcept
 void
 DAP::WriteProtocolMessage(std::string_view msg) noexcept
 {
-  const auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
+  const auto header = std::format("Content-Length: {}\r\n\r\n", msg.size());
   CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
   const auto headerWrite = write(mTracerOutputFileDescriptor, header.data(), header.size());
   VERIFY(headerWrite != -1 && headerWrite == static_cast<ssize_t>(header.size()),
-         "Did not write entire header or some other error occured: {}", headerWrite);
+    "Did not write entire header or some other error occured: {}",
+    headerWrite);
   const auto msgWrite = write(mTracerOutputFileDescriptor, msg.data(), msg.size());
   VERIFY(msgWrite != -1 && msgWrite == static_cast<ssize_t>(msg.size()),
-         "Did not write entire message or some other error occured: {}", msgWrite);
+    "Did not write entire message or some other error occured: {}",
+    msgWrite);
 }
 
 void
@@ -130,7 +132,7 @@ DAP::SetClient(DebugAdapterClient *client) noexcept
 void
 DAP::StartIOPolling(std::stop_token &token) noexcept
 {
-  mdb::ScopedBlockedSignals blocked_sigs{std::array{SIGCHLD}};
+  mdb::ScopedBlockedSignals blocked_sigs{ std::array{ SIGCHLD } };
   // TODO: Implement support to spawn the DAP client for a socket etc, instead of stdio
   SetClient(DebugAdapterClient::CreateStandardIOConnection());
 
@@ -141,9 +143,9 @@ DAP::StartIOPolling(std::stop_token &token) noexcept
 }
 
 void
-DAP::AddStandardIOSource(int fd, Pid pid) noexcept
+DAP::AddStandardIOSource(int fd, SessionId pid) noexcept
 {
-  mStandardIo.push_back({fd, pid});
+  mStandardIo.push_back({ fd, pid });
 }
 
 bool
@@ -165,7 +167,7 @@ DAP::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexc
   }
 
   for (const auto pollResult :
-       state.ClientFds() | std::views::filter([](auto pfd) { return (pfd.revents & POLLIN) == POLLIN; })) {
+    state.ClientFds() | std::views::filter([](auto pfd) { return (pfd.revents & POLLIN) == POLLIN; })) {
     events.push_back(state.Get(pollResult.fd));
   }
 
@@ -188,9 +190,9 @@ DAP::Poll(PollState &state) noexcept
         if (bytes_read == -1) {
           continue;
         }
-        std::string_view data{tracee_stdout_buffer, static_cast<u64>(bytes_read)};
+        std::string_view data{ tracee_stdout_buffer, static_cast<u64>(bytes_read) };
         mClient->WriteSerializedProtocolMessage(
-          ui::dap::OutputEvent{event.mPid, "stdout", std::string{data}}.Serialize(
+          ui::dap::OutputEvent{ event.mPid, "stdout", std::string{ data } }.Serialize(
             0, mTemporaryArena->ScopeAllocation().GetAllocator()));
       } break;
       }
@@ -212,7 +214,7 @@ DebugAdapterClient::ReadPendingCommands() noexcept
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
       const auto *cd = std::get_if<ContentDescriptor>(&hdr);
-      const auto cmd = ParseDebugAdapterCommand(*this, std::string{cd->payload()});
+      const auto cmd = ParseDebugAdapterCommand(*this, std::string{ cd->payload() });
       EventSystem::Get().PushCommand(this, cmd);
     }
     // since there's no partials left in the buffer, we reset it
@@ -221,7 +223,7 @@ DebugAdapterClient::ReadPendingCommands() noexcept
     if (request_headers.size() > 1) {
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
         const auto cd = std::get_if<ContentDescriptor>(&request_headers[i]);
-        const auto cmd = ParseDebugAdapterCommand(*this, std::string{cd->payload()});
+        const auto cmd = ParseDebugAdapterCommand(*this, std::string{ cd->payload() });
         EventSystem::Get().PushCommand(this, cmd);
       }
 
@@ -229,8 +231,9 @@ DebugAdapterClient::ReadPendingCommands() noexcept
       ASSERT(rd, "Parsed communication was not of type RemainderData");
       parse_swapbuffer.swap(rd->offset);
       ASSERT(parse_swapbuffer.current_size() == rd->length,
-             "Parse Swap Buffer operation failed; expected length {} but got {}", rd->length,
-             parse_swapbuffer.current_size());
+        "Parse Swap Buffer operation failed; expected length {} but got {}",
+        rd->length,
+        parse_swapbuffer.current_size());
     }
   }
 }
@@ -250,7 +253,7 @@ SetNonBlocking(int fd)
 }
 
 void
-DebugAdapterClient::SetTtyOut(int fd, Pid pid) noexcept
+DebugAdapterClient::SetTtyOut(int fd, SessionId pid) noexcept
 {
   ASSERT(tty_fd == -1, "TTY fd was already set!");
   tty_fd = fd;
@@ -269,10 +272,10 @@ DebugAdapterClient::GetTtyFileDescriptor() const noexcept
 }
 
 TraceeController *
-DebugAdapterClient::GetSupervisor(Pid pid) const noexcept
+DebugAdapterClient::GetSupervisor(SessionId sessionId) const noexcept
 {
   for (const auto entry : mSupervisors) {
-    if (entry.mSupervisorId == pid) {
+    if (entry.mSupervisorId == sessionId) {
       return entry.mSupervisor;
     }
   }
@@ -317,7 +320,7 @@ DebugAdapterClient::FlushEvents() noexcept
     }
   }
 
-  for (auto evt : std::span{tmp, count}) {
+  for (auto evt : std::span{ tmp, count }) {
     auto result = evt->Serialize(0, mEventsAllocator.get());
     WriteSerializedProtocolMessage(result);
     delete evt;
@@ -368,9 +371,9 @@ DebugAdapterClient::InitAllocators() noexcept
   using alloc::Page;
 
   // Create a 1 megabyte arena allocator.
-  mCommandsAllocator = ArenaResource::Create(Page{16});
-  mCommandResponseAllocator = ArenaResource::Create(Page{128});
-  mEventsAllocator = ArenaResource::Create(Page{16});
+  mCommandsAllocator = ArenaResource::Create(Page{ 16 });
+  mCommandResponseAllocator = ArenaResource::Create(Page{ 128 });
+  mEventsAllocator = ArenaResource::Create(Page{ 16 });
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
@@ -411,20 +414,23 @@ DebugAdapterClient *
 DebugAdapterClient::CreateStandardIOConnection() noexcept
 {
   VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
-  return new DebugAdapterClient{DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO};
+  return new DebugAdapterClient{ DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO };
 }
 
 void
-DebugAdapterClient::AddSupervisor(TraceeController *supervisor) noexcept
+DebugAdapterClient::AddSupervisor(TraceeController *newSupervisor) noexcept
 {
-  mSupervisors.push_back({supervisor->TaskLeaderTid(), supervisor});
-  supervisor->ConfigureDapClient(this);
+  ASSERT(none_of(mSupervisors,
+           [newSupervisor](const auto &supervisorEntry) { return supervisorEntry.mSupervisor == newSupervisor; }),
+    "Already added suprervisor.");
+  mSupervisors.push_back({ newSupervisor->GetSessionId(), newSupervisor });
+  newSupervisor->ConfigureDapClient(this);
 }
 
 void
 DebugAdapterClient::RemoveSupervisor(TraceeController *supervisor) noexcept
 {
-  SupervisorEntry entry{supervisor->TaskLeaderTid(), supervisor};
+  SupervisorEntry entry{ supervisor->TaskLeaderTid(), supervisor };
   auto it = std::find(mSupervisors.begin(), mSupervisors.end(), entry);
   mSupervisors.erase(it);
 }
@@ -455,10 +461,10 @@ DebugAdapterClient::WriteFileDescriptor() const noexcept
 }
 
 void
-DebugAdapterClient::ConfigDone(Pid processId) noexcept
+DebugAdapterClient::ConfigDone(SessionId processId) noexcept
 {
-  auto it = std::find_if(mSessionInit.begin(), mSessionInit.end(),
-                         [processId](const auto &e) { return e.mPid == processId; });
+  auto it = std::find_if(
+    mSessionInit.begin(), mSessionInit.end(), [processId](const auto &e) { return e.mPid == processId; });
 
   ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared for {}?", processId);
   if (it != std::end(mSessionInit)) {
@@ -470,28 +476,12 @@ DebugAdapterClient::ConfigDone(Pid processId) noexcept
   mSessionInit.erase(it);
 }
 
-void
-DebugAdapterClient::PrepareLaunch(std::string sessionId, Pid processId, LaunchResponse *launchResponse) noexcept
-{
-  mSessionType = DapClientSession::Launch;
-  DBGLOG(core, "prepare initialization for session '{}' and process={}", sessionId, launchResponse->ProcessId());
-  mSessionInit.push_back(InitializationState{processId, std::move(sessionId), launchResponse});
-}
-
-void
-DebugAdapterClient::PrepareAttach(std::string sessionId, Pid processId, AttachResponse *attachResponse) noexcept
-{
-  mSessionType = DapClientSession::Attach;
-  DBGLOG(core, "prepare initialization for session '{}' and process={}", sessionId, attachResponse->ProcessId());
-  mSessionInit.push_back(InitializationState{processId, std::move(sessionId), attachResponse});
-}
-
 static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
 
 bool
 DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) const noexcept
 {
-  char header_buffer[128]{"Content-Length: "};
+  char header_buffer[128]{ "Content-Length: " };
   static constexpr auto header_end = "\r\n\r\n"sv;
 
   auto begin = header_buffer + ContentLengthHeaderLength;
@@ -507,14 +497,16 @@ DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) cons
   iov[1].iov_base = (void *)output.data();
   iov[1].iov_len = output.size();
 
-  const auto header = fmt::format("Content-Length: {}\r\n\r\n", output.size());
+  const auto header = std::format("Content-Length: {}\r\n\r\n", output.size());
 #ifdef DEBUG
   DBGLOG(dap, "WRITING -->{}{}<---", header, output);
 #endif
 
   const auto result = ::writev(out, iov, 2);
   VERIFY(result == (header_length + static_cast<ssize_t>(output.size())),
-         "Required flush-write but wrote partial content: {} out of {}", result, header_length + output.size());
+    "Required flush-write but wrote partial content: {} out of {}",
+    result,
+    header_length + output.size());
   VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", out, output);
   return result >= static_cast<ssize_t>(output.size());
 }

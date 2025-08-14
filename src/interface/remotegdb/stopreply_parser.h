@@ -23,11 +23,11 @@ public:
   char StopReplyKind() noexcept;
   std::optional<int> ParseSignal() noexcept;
   std::optional<int> ParseExitCode() noexcept;
-  std::optional<Pid> ParseProcess() noexcept;
-  std::optional<std::tuple<Pid, Tid, int>> ParseThreadExited() noexcept;
+  std::optional<SessionId> ParseProcess() noexcept;
+  std::optional<std::tuple<SessionId, Tid, int>> ParseThreadExited() noexcept;
 
   template <char Packet>
-  std::pair<std::optional<Pid>, std::optional<int>>
+  std::pair<std::optional<SessionId>, std::optional<int>>
   ParseExited() noexcept
   {
     const auto signal = ParseExitCode();
@@ -37,8 +37,9 @@ public:
     const auto target = ParseProcess();
     if (mMultiProcessConfigured && !target) {
       DBGLOG(remote,
-             "Failed to parse process for {} packet - we expect multiprocess extension to be turned on: '{}'",
-             Packet, mReceivedPayload);
+        "Failed to parse process for {} packet - we expect multiprocess extension to be turned on: '{}'",
+        Packet,
+        mReceivedPayload);
     }
     return std::make_pair(target, signal);
   }

@@ -1,306 +1,327 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include <concepts>
+#include <expected>
+#include <quickjs/quickjs.h>
+#include <span>
+#include <utils/scope_defer.h>
+#include <utils/smartptr.h>
 
-#include "js/Class.h"
-#include "js/GCTypeMacros.h"
-#include "js/Object.h"
-#include "js/PropertyAndElement.h"
-#include "js/PropertySpec.h"
-#include "js/RootingAPI.h"
-#include "js/TypeDecls.h"
-#include "jsapi.h"
-#include "utils/smartptr.h"
-namespace mdb::js {
+#define GetThisOrReturnException(variable, msg)                                                                   \
+  GetNative(context, thisValue);                                                                                  \
+  if (!variable) {                                                                                                \
+    return JS_ThrowTypeError(context, msg);                                                                       \
+  }
 
-#define GET_THIS(name)                                                                                            \
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);                                                               \
-  JS::RootedObject callee(cx, &args.thisv().toObject());                                                          \
-  auto name = Get(callee.get());
+#define FOR_EACH_TYPE(EACH_TYPE)                                                                                  \
+  EACH_TYPE(Variable)                                                                                             \
+  EACH_TYPE(Frame)                                                                                                \
+  EACH_TYPE(Breakpoint)                                                                                           \
+  EACH_TYPE(BreakpointStatus)                                                                                     \
+  EACH_TYPE(Supervisor)                                                                                           \
+  EACH_TYPE(TaskInfo)
 
-template <typename DerivedJsObject> concept HasJsLayout = requires { DerivedJsObject::ThisPointer; };
-
-template <typename T> concept HasTraceFunction = requires(T t, JSTracer *trc) { t.trace(trc); };
-template <typename T>
-concept HasResolve =
-  requires(T t, JSContext *cx, JS::HandleId id, bool *resolved) { t.resolve(cx, id, resolved); };
-
-template <typename T>
-concept DefinesProperties = requires(JSContext *cx, JSObject *obj) { T::DefineProperties(cx, obj); };
-
-template <typename T>
-concept DefinesFunctions = requires(JSContext *cx, JSObject *obj) { T::DefinesFunctions(cx, obj); };
-
-// Eventually we'll life this constraint IsRefPointer<T>, and instead specialize internally for cases where
-// T is IsRefPointer and where it's not (and also rename the class).
-template <typename Derived, IsRefCountable WrappedType, StringLiteral string> struct RefPtrJsObject
+enum class JavascriptClasses : JSClassID
 {
-  // Unfortunately we can't pass WrappedType via Derived. Oh my lord meta programming and compile time programming
-  // in C++ is trash, 40 years later.
-  using Self = RefPtrJsObject<Derived, WrappedType, string>;
-  using SelfJs = Derived;
-  using Reference = Ref<WrappedType>;
+  // The actual init start as of the version used for mdb is 56.
+  START = 70,
+  FOR_EACH_TYPE(DEFAULT_ENUM)
+};
 
-  static constexpr const char *Name = string.CString();
+PREDEFINED_ENUM_TYPE_METADATA(JavascriptClasses, FOR_EACH_TYPE, DEFAULT_ENUM)
 
-  // When a CustomObject is traced, it must trace the stored box.
-  static constexpr void
-  TraceSubobjects(JSTracer *trc, JSObject *obj) noexcept
-    requires(HasTraceFunction<Derived>)
+namespace mdb {
+
+struct JSBindingLeakHelper
+{
+  static constexpr mdb::RefPtrLeakAccessKey
+  Key() noexcept
   {
-    FromObject(obj)->trace(trc);
-  }
-
-  static constexpr bool
-  ResolveProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *resolved) noexcept
-  {
-    JS::Rooted<JSObject *> object{cx, obj};
-    return FromObject(object)->resolve(cx, id, resolved);
-  }
-
-  static constexpr void
-  RefPtrFinalize(JS::GCContext *gcx, JSObject *thisJs) noexcept
-  {
-    Untraced<WrappedType>{JS::GetMaybePtrFromReservedSlot<WrappedType>(thisJs, Derived::ThisPointer)}.Drop();
-  }
-
-  static consteval auto
-  DetermineFinalizeOp()
-  {
-    static_assert(Derived::ThisPointer == 0, "This pointer slot must exist");
-    return RefPtrFinalize;
-  }
-
-  static consteval auto
-  DetermineTraceFunction() noexcept
-  {
-    if constexpr (HasTraceFunction<Derived>) {
-      return TraceSubobjects;
-    }
-    return nullptr;
-  }
-
-  static consteval JSClassOps
-  ClassOps() noexcept
-  {
-    JSClassOps result{};
-    if constexpr (HasResolve<Derived>) {
-      result.resolve = &ResolveProperty;
-    }
-    result.finalize = DetermineFinalizeOp();
-    result.trace = DetermineTraceFunction();
-    return result;
-  }
-
-  static constexpr JSClassOps classOps = ClassOps();
-
-  static constexpr JSClass clasp = []() {
-    JSClass result{};
-    result.name = Name;
-    result.flags = JSCLASS_HAS_RESERVED_SLOTS(Derived::SlotCount) | JSCLASS_FOREGROUND_FINALIZE;
-    result.cOps = &classOps;
-    return result;
-  }();
-
-  template <typename... Args>
-  static JSObject *
-  Make(JSContext *cx, Args &&...args) noexcept
-  {
-    Create(cx, Ref<WrappedType>::MakeShared(std::forward<Args>(args)...));
-  }
-
-  template <typename... Args>
-  static JSObject *
-  CustomCreate(JSContext *cx, WrappedType *coreObject, Args &&...args) noexcept
-  {
-    JS::Rooted<JSObject *> jsObject{cx, Create(cx, Reference{coreObject})};
-    Derived::Finalize(cx, jsObject, coreObject, std::forward<Args>(args)...);
-    return jsObject;
-  }
-
-  static JSObject *
-  Create(JSContext *cx, const Reference &object) noexcept
-  {
-    // we take and hold a reference to this object, keeping it alive
-    auto tmp = Reference{object};
-    return Create(cx, std::move(tmp));
-  }
-
-  static JSObject *
-  Create(JSContext *cx, Reference &&object) noexcept
-  {
-    JS::Rooted<JSObject *> obj(cx, JS_NewObject(cx, &clasp));
-    if (!obj) {
-      return nullptr;
-    }
-
-    WrappedType *ptr = object.Get();
-    JS_SetReservedSlot(obj, Derived::ThisPointer, JS::PrivateValue(std::move(object).DisOwn().Forget()));
-
-    // Types with additional (more complex) setup/config opts into that, by exposing the static function Configure
-    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj, WrappedType *t) {
-                    Derived::Configure(cx, obj, t);
-                  }) {
-      Derived::Configure(cx, obj, ptr);
-    }
-
-    // Types with properties exposes a static JSPropertySpec[] and it gets defined here
-    if constexpr (requires { Derived::PropertiesSpec; }) {
-      JS_DefineProperties(cx, obj, Derived::PropertiesSpec);
-    }
-
-    // Types with methods exposes a static JSFunctionSpec[] and it gets defined here
-    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::FunctionSpec; }) {
-      JS_DefineFunctions(cx, obj, Derived::FunctionSpec);
-    }
-
-    return obj;
-  }
-
-  static Derived *
-  GetThis(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-  {
-    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-    return Get(args.thisv().toObject());
-  }
-
-  // Hand out a new reference to the debugger core object
-  constexpr Reference
-  Get() noexcept
-  {
-    JSObject *thisJs = Self::AsObject(static_cast<Derived *>(this));
-    Untraced<WrappedType> pObj{JS::GetMaybePtrFromReservedSlot<WrappedType>(thisJs, Derived::ThisPointer)};
-    return pObj.CloneReference();
-  }
-
-  // Hand out a new reference to the debugger core object
-  static constexpr Reference
-  Get(JSObject *This) noexcept
-  {
-    Untraced<WrappedType> pObj{JS::GetMaybePtrFromReservedSlot<WrappedType>(This, Derived::ThisPointer)};
-    return pObj.CloneReference();
-  }
-
-  // Full type of JSObject is not known, so we can't inherit.
-  static Derived *
-  FromObject(JSObject *obj)
-  {
-    return reinterpret_cast<Derived *>(obj);
-  }
-
-  static JSObject *
-  AsObject(Derived *obj)
-  {
-    return reinterpret_cast<JSObject *>(obj);
+    return {};
   }
 };
 
-// Implement a Javascript type for `WrappedType`. The pointed to core object is a raw pointer type, unlike
-// `RefPtrJsObject` which works on `Ref<T>` instead of `T*`. For some types this is safe; like TraceeController,
-// which is a type for objects, when created will never be destroyed.
-template <typename Derived, typename WrappedType, StringLiteral string> struct PtrJsObject
+namespace js {
+// Helper to concatenate arrays at compile time
+template <typename T, std::size_t N, std::size_t M, std::size_t... I1, std::size_t... I2>
+constexpr std::array<T, N + M>
+ConcatenateImplementation(
+  const std::array<T, N> &a1, const std::array<T, M> &a2, std::index_sequence<I1...>, std::index_sequence<I2...>)
 {
-  // Unfortunately we can't pass WrappedType via Derived. Oh my lord meta programming and compile time programming
-  // in C++ is trash, 40 years later.
-  using Self = RefPtrJsObject<Derived, WrappedType, string>;
-  using Reference = WrappedType *;
+  return { a1[I1]..., a2[I2]... };
+}
 
-  static constexpr const char *Name = string.CString();
+template <typename T, std::size_t N, std::size_t M>
+constexpr std::array<T, N + M>
+ArrayConcat(const std::array<T, N> &a1, const std::array<T, M> &a2)
+{
+  return ConcatenateImplementation(a1, a2, std::make_index_sequence<N>{}, std::make_index_sequence<M>{});
+}
 
-  // When a CustomObject is traced, it must trace the stored box.
-  static constexpr void
-  TraceSubobjects(JSTracer *trc, JSObject *obj) noexcept
-    requires(HasTraceFunction<Derived>)
-  {
-    FromObject(obj)->trace(trc);
-  }
+template <typename T>
+concept HasFinalizer = requires(JSRuntime *runTime, JSValue value) { T::Finalizer(runTime, value); };
 
-  static constexpr bool
-  ResolveProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *resolved) noexcept
-  {
-    JS::Rooted<JSObject *> object{cx, obj};
-    return FromObject(object)->resolve(cx, id, resolved);
-  }
+template <typename T>
+concept HasFactory = requires(JSRuntime *runTime, JSValue value) { T::Factory(runTime, value); };
 
-  static consteval JSClassOps
-  ClassOps() noexcept
-  {
-    // This type will never have a `finalize` method because it will never actually own the object.
-    JSClassOps result{};
-    if constexpr (HasResolve<Derived>) {
-      result.resolve = &ResolveProperty;
-    }
-    result.trace = &TraceSubobjects;
-    return result;
-  }
-
-  static constexpr JSClassOps classOps = ClassOps();
-
-  static constexpr JSClass clasp = {.name = Name,
-                                    .flags =
-                                      JSCLASS_HAS_RESERVED_SLOTS(Derived::SlotCount) | JSCLASS_FOREGROUND_FINALIZE,
-                                    .cOps = &classOps};
-
-  template <typename... Args>
-  static JSObject *
-  CustomCreate(JSContext *cx, Reference coreObject, Args &&...args) noexcept
-  {
-    JS::Rooted<JSObject *> jsObject{cx, Create(cx, coreObject)};
-    Derived::Finalize(cx, jsObject, coreObject, std::forward<Args>(args)...);
-    return jsObject;
-  }
-
-  static JSObject *
-  Create(JSContext *cx, const Reference object) noexcept
-  {
-    JS::Rooted<JSObject *> obj(cx, JS_NewObject(cx, &clasp));
-    if (!obj) {
-      return nullptr;
-    }
-
-    JS_SetReservedSlot(obj, Derived::ThisPointer, JS::PrivateValue(object));
-
-    // Types with properties exposes a static JSPropertySpec[] and it gets defined here
-    if constexpr (requires { Derived::PropertiesSpec; }) {
-      JS_DefineProperties(cx, obj, Derived::PropertiesSpec);
-    }
-
-    // Types with methods exposes a static JSFunctionSpec[] and it gets defined here
-    if constexpr (requires(Derived d, JSContext *cx, JSObject *obj) { Derived::FunctionSpec; }) {
-      JS_DefineFunctions(cx, obj, Derived::FunctionSpec);
-    }
-
-    return obj;
-  }
-
-  // Hand out a new reference to the debugger core object
-  constexpr Reference
-  Get() noexcept
-  {
-    JSObject *thisJs = Self::AsObject(static_cast<Derived *>(this));
-    return Get(thisJs);
-  }
-
-  // Hand out a new reference to the debugger core object
-  static constexpr Reference
-  Get(JSObject *This) noexcept
-  {
-    return JS::GetMaybePtrFromReservedSlot<WrappedType>(This, Derived::ThisPointer);
-  }
-
-  // Full type of JSObject is not known, so we can't inherit.
-  static Derived *
-  FromObject(JSObject *obj)
-  {
-    return reinterpret_cast<Derived *>(obj);
-  }
-
-  static JSObject *
-  AsObject(Derived *obj)
-  {
-    return reinterpret_cast<JSObject *>(obj);
-  }
+template <typename T>
+concept Bindable = requires(T t) {
+  { T::PrototypeFunctions() } -> std::convertible_to<std::span<JSCFunctionListEntry>>;
+  { T::JavascriptName() } -> std::convertible_to<const char *>;
 };
 
-} // namespace mdb::js
+#define ClassArgs() (JSContext * context, JSValueConst thisValue, int argCount, JSValueConst *argv)->JSValue
 
-#define JS_METHOD(METHOD_NAME) static bool METHOD_NAME(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+#define ClassMethodSig(name, ...)                                                                                 \
+  static auto name(JSContext *context, JSValueConst thisValue, int argCount, JSValueConst *argv) -> JSValue;
+
+#define ClassMethodImpl(type, name) auto type::name ClassArgs()
+
+#define ClassMethodTodo(Method)                                                                                   \
+  {                                                                                                               \
+    return JS_ThrowTypeError(context, #Method " method not implemented");                                         \
+  }
+
+#define ClassMethodImplTodo(type, method) ClassMethodImpl(type, method) ClassMethodTodo(method)
+
+#define DefaultInterface(Name)                                                                                    \
+  static std::span<const JSCFunctionListEntry> PrototypeFunctions() noexcept;                                     \
+                                                                                                                  \
+  constexpr static const char *JavascriptName() { return #Name; }
+
+#define ClassMethod
+
+consteval auto
+FunctionEntry(const char *name, u8 argCount, auto fn) -> JSCFunctionListEntry
+{
+  return { name, (1 << 1) | (1 << 0), 0, 0, { .func = { argCount, JS_CFUNC_generic, { .generic = fn } } } };
+}
+
+constexpr auto
+ToStringTag(const char *name) -> JSCFunctionListEntry
+{
+  return { "[Symbol.toStringTag]", (1 << 0), 3, 0, { .str = name } };
+}
+
+constexpr auto
+ToStringTag(std::string_view name) -> JSCFunctionListEntry
+{
+  return { "[Symbol.toStringTag]", (1 << 0), 3, 0, { .str = name.data() } };
+}
+
+enum class PropertyReadError : u8
+{
+  ValueNotAnObject,
+  ValueUndefined,
+  NoPropertyWithThatName
+};
+
+template <class T, class U> inline constexpr bool Is = std::is_same_v<T, U>;
+
+template <typename T>
+std::expected<T, PropertyReadError>
+GetProperty(JSContext *context, JSValueConst obj, const char *propertyName)
+{
+
+  if (JS_IsUndefined(obj)) {
+    return std::unexpected(PropertyReadError::ValueNotAnObject);
+  }
+
+  JSValue value = JS_GetPropertyStr(context, obj, propertyName);
+  ScopedDefer defer{ [&]() { JS_FreeValue(context, value); } };
+
+  if (JS_IsUndefined(value)) {
+    return std::unexpected(PropertyReadError::ValueUndefined);
+  }
+
+  T result;
+  if constexpr (Is<T, double>) {
+    JS_ToFloat64(context, &result, value);
+  } else if constexpr (Is<T, int>) {
+    JS_ToInt32(context, &result, value);
+  } else if constexpr (Is<T, std::string>) {
+    auto str = JS_ToCString(context, value);
+    result = str ? str : "";
+    JS_FreeCString(context, str);
+  } else if constexpr (Is<T, u32>) {
+    JS_ToUint32(context, &result, value);
+  } else if constexpr (Is<T, i64>) {
+    JS_ToInt64(context, &result, value);
+  } else if constexpr (Is<T, bool>) {
+    result = JS_ToBool(context, value);
+  } else {
+    static_assert(always_false<T>, "Unsupported property type");
+  }
+
+  return result;
+}
+
+template <typename T, typename NativeType>
+concept HasExoticMethods = requires(JSContext *context, NativeType *nativeType) {
+  { T::ExoticMethods() } -> std::same_as<JSClassExoticMethods>; // member variable 'value' of type int
+  { T::CacheLayout(context, nativeType) };
+};
+
+template <typename BindingType, typename NativeType, JavascriptClasses ClassId> struct JSBinding
+{
+  static_assert(ClassId > static_cast<JavascriptClasses>(56));
+#ifdef MDB_DEBUG
+  static bool sClassInitialized;
+#endif
+
+  JSContext *mContext;
+  JSValue mValue;
+
+  void
+  Reset() noexcept
+  {
+    if (!JS_IsUndefined(mValue)) {
+      // Javascript types never get to manage memory manually.
+      // For now, only RefPtr is allowed as any form of memory management, and so, memory management is delegated
+      // to it. But in the future, I'll also add std::shared_ptr. Javascript objects that use a T*
+      // and that also can get created in native code (for instance, createa JSBinding object on the stack because
+      // it needs to passed in as a function argument to js code) will have it's native pointer set to nullptr,
+      // when ~JSBinding runs, that way js can safely hold on to the JSValue, but it will not have access to the
+      // native data no more. This way we protect ourselves from JS trying to reach memory it can't/shouldn't reach
+      if constexpr (!IsRefCountable<NativeType>) {
+        JS_SetOpaque(mValue, nullptr);
+      }
+      JS_FreeValue(mContext, mValue);
+    }
+  }
+
+public:
+  constexpr ~JSBinding() noexcept { Reset(); }
+
+  JSValue &
+  GetValue(this auto &&self) noexcept
+  {
+    return self.mValue;
+  }
+
+  consteval static auto
+  GetClassId() noexcept
+  {
+    return std::to_underlying(ClassId);
+  }
+
+  constexpr static auto
+  JavascriptName() noexcept -> std::string_view
+  {
+    return Enum<JavascriptClasses>::ToString(ClassId);
+  }
+
+  static void
+  SetExoticMethods(JSClassDef &def)
+    requires(HasExoticMethods<BindingType, NativeType>)
+  {
+    def.exotic = &BindingType::ExoticMethods();
+  }
+
+  static void
+  Register(JSContext *context)
+  {
+    static_assert(Bindable<BindingType>, "BindingType must satisfy Bindable concept");
+    if (sClassInitialized) {
+      std::terminate();
+    }
+
+    JSClassDef definition;
+
+    definition.class_name = JavascriptName().data();
+
+    SetExoticMethods(definition);
+
+    if constexpr (HasFinalizer<BindingType>) {
+      definition.finalizer = BindingType::Finalizer;
+    } else {
+      definition.finalizer = nullptr;
+    }
+
+    JS_NewClass(JS_GetRuntime(context), GetClassId(), &definition);
+
+    JSValue prototype = JS_NewObject(context);
+
+    JS_SetPropertyFunctionList(
+      context, prototype, BindingType::PrototypeFunctions().data(), BindingType::PrototypeFunctions().size());
+
+    JS_SetClassProto(context, GetClassId(), prototype);
+
+    if constexpr (HasFactory<BindingType>) {
+      JSValue globalObject = JS_GetGlobalObject(context);
+      JS_SetPropertyStr(context,
+        globalObject,
+        BindingType::FactoryName(),
+        JS_NewCFunction(
+          context, BindingType::Factory(), BindingType::FactoryName(), BindingType::FactoryArgumentsCount()));
+      JS_FreeValue(context, globalObject);
+    }
+    sClassInitialized = true;
+  }
+
+  static NativeType *
+  GetNative(JSContext *context, JSValueConst object) noexcept
+  {
+    auto *pointer = JS_GetOpaque2(context, object, GetClassId());
+    return pointer ? static_cast<NativeType *>(pointer) : nullptr;
+  }
+
+  // The created object which is used in the javascript code
+  static JSValue
+  CreateValue(JSContext *context, NativeType *value) noexcept
+  {
+    if constexpr (HasExoticMethods<BindingType, NativeType>) {
+      BindingType::CacheLayout(context, value);
+    }
+
+    JSValue object = JS_NewObjectClass(context, GetClassId());
+    if (JS_IsException(object)) {
+      return object;
+    }
+    JS_SetOpaque(object, static_cast<void *>(value));
+    return object;
+  }
+
+  static JSValue
+  CreateValue(JSContext *context, RefPtr<NativeType> value)
+    requires(IsRefCountable<NativeType>)
+  {
+    if constexpr (HasExoticMethods<BindingType, NativeType>) {
+      BindingType::CacheLayout(context, value);
+    }
+
+    JSValue object = JS_NewObjectClass(context, GetClassId());
+    if (JS_IsException(object)) {
+      return object;
+    }
+    // We've taken a RefPtr, and we leak it, so now a Javascript object holds that reference instead.
+
+    LeakedRef<NativeType> res = value.Leak(JSBindingLeakHelper::Key());
+    JS_SetOpaque(object, static_cast<void *>(res.Forget()));
+    return object;
+  }
+
+  /** Creates an object of type `BindingType` to live on the stack. When that object's destructor is ran,
+   * the native data associated with that JSValue, will be set to nullptr, so that the JS engine can't access it.
+   * This is a poor mans version of a "stack rooted" native value. */
+  static BindingType
+  CreateStackBoundValue(JSContext *context, NativeType *value)
+  {
+    return BindingType{ JSBinding{ .mContext = context, .mValue = CreateValue(context, value) } };
+  }
+
+  static void
+  Finalize(JSRuntime *rt, JSValue val)
+  {
+    void *ptr = JS_GetOpaque(val, std::to_underlying(ClassId));
+    if (!ptr) {
+      return;
+    }
+
+    if constexpr (IsRefCountable<NativeType>) {
+      static_cast<LeakedRef<NativeType> *>(ptr)->Drop();
+    }
+  }
+};
+} // namespace js
+} // namespace mdb

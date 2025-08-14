@@ -1,10 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#ifdef MDB_DEBUG
-#include <fmt/core.h>
-#endif
-
+#include "common/formatter.h"
 namespace mdb {
 template <typename T> class DebugValue
 {
@@ -72,23 +69,16 @@ public:
 } // namespace mdb
 
 #ifdef MDB_DEBUG
-namespace fmt {
-template <typename T> struct formatter<mdb::DebugValue<T>>
+template <typename T> struct std::formatter<mdb::DebugValue<T>>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const mdb::DebugValue<T> &debugValue, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "{}", debugValue.GetValue());
+    return std::format_to(ctx.out(), "{}", debugValue.GetValue());
   }
 };
 
-} // namespace fmt
 #endif

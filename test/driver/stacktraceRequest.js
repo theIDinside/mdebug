@@ -1,33 +1,40 @@
 const { checkResponse, getLineOf, readFileContents, repoDirFile, seconds } = require('./client')
 const { objdump, hexStrAddressesEquals, assert, assertLog, prettyJson, getPrintfPlt } = require('./utils')
 
-async function unwindFromSharedObject(DA) {
-  const sharedObjectsCount = 6
+/**
+ * @param { import("./client").DebugAdapterClient } client
+ * @param {string} source - relative path to source file from source root of project.
+ * @param {string[]} bps - identifiers to search for in the search file, to get a line in the file
+ * @returns - returns the Debug Adapter Protocol response object
+ */
+async function setBreakpoints(client, source, bps) {
+  const file = readFileContents(repoDirFile(source))
+  const lineNumbers = bps
+    .map((ident) => getLineOf(file, ident))
+    .filter((item) => item != null)
+    .map((l) => ({ line: l }))
+  return client.sendReqGetResponse('setBreakpoints', {
+    source: {
+      name: repoDirFile(source),
+      path: repoDirFile(source),
+    },
+    breakpoints: lineNumbers,
+  })
+}
 
-  async function set_bp(source, bps) {
-    const file = readFileContents(repoDirFile(source))
-    const bp_lines = bps
-      .map((ident) => getLineOf(file, ident))
-      .filter((item) => item != null)
-      .map((l) => ({ line: l }))
-    return DA.sendReqGetResponse('setBreakpoints', {
-      source: {
-        name: repoDirFile(source),
-        path: repoDirFile(source),
-      },
-      breakpoints: bp_lines,
-    })
-  }
+/** @param { import("./client").DebugAdapterClient } client */
+async function unwindFromSharedObject(client) {
+  const sharedObjectsCount = 6
 
   async function setFnBp(fn) {
     const bps = fn.map((name) => ({ name: name }))
-    return DA.sendReqGetResponse('setFunctionBreakpoints', {
+    return client.sendReqGetResponse('setFunctionBreakpoints', {
       breakpoints: bps,
     })
   }
 
-  let modules_event_promise = DA.prepareWaitForEventN('module', 6, seconds(1))
-  await DA.startRunToMain(DA.buildDirFile('stupid_shared'), [], seconds(1))
+  let modules_event_promise = client.prepareWaitForEventN('module', 6, seconds(1))
+  await client.startRunToMain(client.buildDirFile('stupid_shared'), [], seconds(1))
   const res = await modules_event_promise
 
   const bp_res = await setFnBp(['convert_kilometers_to_miles'])
@@ -38,16 +45,18 @@ async function unwindFromSharedObject(DA) {
     `Expected to see >= 6 module events for shared objects, saw ${res.length}`
   )
 
-  const threads = await DA.threads()
-  const bps = await set_bp('test/todo.cpp', ['BP1'])
+  const threads = await client.threads()
+  const bps = await client.setBreakpointsRequest({}, { source: 'test/todo.cpp', identifiers: ['BP1'] })
+
   assertLog(bps.body.breakpoints.length == 1, 'Expected 1 breakpoint')
-  const bps2 = await set_bp('test/dynamic_lib.cpp', ['BPKM'])
+  const bps2 = await client.setBreakpointsRequest({}, { source: 'test/dynamic_lib.cpp', identifiers: ['BPKM'] })
+
   assertLog(bps2.body.breakpoints.length == 1, 'Expected 1 breakpoint')
   // hit breakpoint in todo.cpp
   // await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-  await DA.contNextStop()
-  await DA.contNextStop()
-  const frames = await DA.stackTrace(threads[0].id, seconds(1)).then((res) => {
+  await client.contNextStop()
+  await client.contNextStop()
+  const frames = await client.stackTrace(threads[0].id, seconds(1)).then((res) => {
     checkResponse(res, 'stackTrace', true)
     const { stackFrames } = res.body
     return stackFrames
@@ -60,8 +69,9 @@ async function unwindFromSharedObject(DA) {
   )
 }
 
-function parse_prologue_and_epilogue(DA) {
-  const objdumped = objdump(DA.buildDirFile('stackframes')).split('\n')
+/** @param { import("./client").DebugAdapterClient } client */
+function parse_prologue_and_epilogue(client) {
+  const objdumped = objdump(client.buildDirFile('stackframes')).split('\n')
   let lineNumber = 0
   let found = false
   let res = { prologue: null, epilogue: null }
@@ -91,12 +101,13 @@ function verifyFrameIs(frame, name) {
   assertLog(frame.name == name, `Expected frame ${name} but got ${frame.name}`)
 }
 
-async function insidePrologueTest(DA) {
-  const { prologue, epilogue } = parse_prologue_and_epilogue(DA)
-  await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
-  await DA.setInsBreakpoint(prologue)
-  await DA.contNextStop()
-  const frames = await DA.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
+/** @param { import("./client").DebugAdapterClient } client */
+async function insidePrologueTest(client) {
+  const { prologue, epilogue } = parse_prologue_and_epilogue(client)
+  await client.startRunToMain(client.buildDirFile('stackframes'), [], seconds(1))
+  await client.setInsBreakpoint(prologue)
+  await client.contNextStop()
+  const frames = await client.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
     checkResponse({ type, success, command }, 'stackTrace', true)
     let application_frames = 0
     for (const f of stackFrames) {
@@ -119,12 +130,13 @@ async function insidePrologueTest(DA) {
   verifyFrameIs(frames[2], 'main')
 }
 
-async function insideEpilogueTest(DA) {
-  const { prologue, epilogue } = parse_prologue_and_epilogue(DA)
-  await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
-  await DA.setInsBreakpoint(epilogue)
-  await DA.contNextStop()
-  const frames = await DA.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
+/** @param { import("./client").DebugAdapterClient } client */
+async function insideEpilogueTest(client) {
+  const { prologue, epilogue } = parse_prologue_and_epilogue(client)
+  await client.startRunToMain(client.buildDirFile('stackframes'), [], seconds(1))
+  await client.setInsBreakpoint(epilogue)
+  await client.contNextStop()
+  const frames = await client.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
     checkResponse({ type, success, command }, 'stackTrace', true)
     let application_frames = 0
     for (const f of stackFrames) {
@@ -147,7 +159,7 @@ async function insideEpilogueTest(DA) {
   verifyFrameIs(frames[2], 'main')
 }
 
-function createExpectedStacktraces(debugAdapter) {
+function createExpectedStacktraces() {
   const sourceFileContents = readFileContents(repoDirFile('test/stackframes.cpp'))
 
   const callstack = (idents) =>
@@ -177,31 +189,32 @@ function createExpectedStacktraces(debugAdapter) {
   return cs
 }
 
-async function normalTest(DA) {
-  const expectedStackTraces = createExpectedStacktraces(DA)
+/** @param { import("./client").DebugAdapterClient } client */
+async function normalTest(client) {
+  const expectedStackTraces = createExpectedStacktraces(client)
 
-  await DA.startRunToMain(DA.buildDirFile('stackframes'), [], seconds(1))
+  await client.startRunToMain(client.buildDirFile('stackframes'), [], seconds(1))
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
   if (bp_lines.length != 4) throw new Error(`Expected to find 4 breakpoint locations but found ${bp_lines.length}`)
-  const bpResponse = await DA.sendReqGetResponse('setBreakpoints', {
+  const bpResponse = await client.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/stackframes.cpp'),
       path: repoDirFile('test/stackframes.cpp'),
     },
     breakpoints: bp_lines,
   })
-  const threads = await DA.threads()
+  const threads = await client.threads()
   {
-    const frames = await DA.stackTrace(threads[0].id).then(
-      ({ response_seq, command, type, success, body: { stackFrames } }) => {
+    const frames = await client
+      .stackTrace(threads[0].id)
+      .then(({ response_seq, command, type, success, body: { stackFrames } }) => {
         checkResponse({ type, success, command }, 'stackTrace', true)
         return stackFrames
-      }
-    )
+      })
     assert(
       frames.length == 4,
       () =>
@@ -212,14 +225,14 @@ async function normalTest(DA) {
 
     const scopes = []
     for (const frame of frames) {
-      scopes.push(await DA.sendReqGetResponse('scopes', { frameId: frame.id }))
+      scopes.push(await client.sendReqGetResponse('scopes', { frameId: frame.id }))
     }
     if (scopes.length != frames.length) throw new Error(`Expected ${frames.length} scopes but got ${scopes.length}`)
   }
   const total = 5
   for (let i = total; i < 9; i++) {
-    await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-    await DA.stackTrace(threads[0].id).then((res) => {
+    await client.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
+    await client.stackTrace(threads[0].id).then((res) => {
       checkResponse(res, 'stackTrace', true)
       const { stackFrames } = res.body
       if (stackFrames.length != i) {
@@ -256,29 +269,32 @@ function* walk_expected_frames(frames) {
   for (let i = 1; i < frames.length; i++) yield frames[i]
 }
 
-async function unwindWithDwarfExpression(DA) {
-  const printf_plt_addr = getPrintfPlt(DA, 'next')
+/** @param { import("./client").DebugAdapterClient } client */
+async function unwindWithDwarfExpression(client) {
+  const printf_plt_addr = getPrintfPlt(client, 'next')
   console.log(`printf@plt address: ${printf_plt_addr}`)
-  await DA.startRunToMain(DA.buildDirFile('next'), [], seconds(1))
-  await DA.sendReqGetResponse('setInstructionBreakpoints', {
-    breakpoints: [{ instructionReference: printf_plt_addr }],
-  }).then((res) => {
-    console.log(prettyJson(res))
-    checkResponse(res, 'setInstructionBreakpoints', true)
-    assert(
-      res.body.breakpoints.length == 1,
-      `Expected bkpts 1 but got ${res.body.breakpoints.length}: ${prettyJson(res)}`
-    )
+  await client.startRunToMain(client.buildDirFile('next'), [], seconds(1))
+  await client
+    .sendReqGetResponse('setInstructionBreakpoints', {
+      breakpoints: [{ instructionReference: printf_plt_addr }],
+    })
+    .then((res) => {
+      console.log(prettyJson(res))
+      checkResponse(res, 'setInstructionBreakpoints', true)
+      assert(
+        res.body.breakpoints.length == 1,
+        `Expected bkpts 1 but got ${res.body.breakpoints.length}: ${prettyJson(res)}`
+      )
 
-    const { id, verified, instructionReference } = res.body.breakpoints[0]
-    assert(verified, 'Expected breakpoint to be verified and exist!')
-    assert(
-      hexStrAddressesEquals(instructionReference, printf_plt_addr),
-      `Attempted to set ins breakpoint at ${printf_plt_addr} but it was set at ${instructionReference}`
-    )
-  })
-  const threads = await DA.threads()
-  await DA.contNextStop(threads[0].id)
+      const { id, verified, instructionReference } = res.body.breakpoints[0]
+      assert(verified, 'Expected breakpoint to be verified and exist!')
+      assert(
+        hexStrAddressesEquals(instructionReference, printf_plt_addr),
+        `Attempted to set ins breakpoint at ${printf_plt_addr} but it was set at ${instructionReference}`
+      )
+    })
+  const threads = await client.threads()
+  await client.contNextStop(threads[0].id)
 
   const verify_correct_stacktrace = (frames, expected) => {
     let idx = 0
@@ -292,14 +308,14 @@ async function unwindWithDwarfExpression(DA) {
   {
     const {
       body: { stackFrames },
-    } = await DA.stackTrace(threads[0].id)
+    } = await client.stackTrace(threads[0].id)
     verify_correct_stacktrace(stackFrames, [{ name: 'print' }, { name: 'main' }])
   }
-  await DA.contNextStop(threads[0].id)
+  await client.contNextStop(threads[0].id)
   {
     const {
       body: { stackFrames },
-    } = await DA.stackTrace(threads[0].id)
+    } = await client.stackTrace(threads[0].id)
     verify_correct_stacktrace(stackFrames, [{ name: 'print' }, { name: 'bar' }, { name: 'foo' }, { name: 'main' }])
   }
 }

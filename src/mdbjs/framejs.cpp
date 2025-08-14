@@ -1,12 +1,9 @@
 #include "framejs.h"
-#include "js/AllocPolicy.h"
-#include "js/Array.h"
-#include "js/ErrorReport.h"
-#include "js/TypeDecls.h"
-#include "mdbjs/util.h"
+#include "mdbjs/jsobject.h"
 #include "mdbjs/variablejs.h"
-#include "utils/debug_value.h"
-#include "utils/logger.h"
+#include "quickjs/quickjs.h"
+#include "supervisor.h"
+#include "symbolication/callstack.h"
 #include <symbolication/objfile.h>
 
 namespace mdb {
@@ -20,95 +17,89 @@ FrameLookupHandle::IsValid() noexcept
 } // namespace mdb
 
 namespace mdb::js {
-/* static */
-bool
-Frame::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+
+static inline constexpr JSValue
+ThrowFrameNotAlive(JSContext *context)
 {
-  JS ::CallArgs args = JS ::CallArgsFromVp(argc, vp);
-  JS ::RootedObject callee(cx, &args.thisv().toObject());
-  auto frameJs = Get(callee.get());
-  args.rval().setInt32(static_cast<int>(frameJs->mFrame.FrameId()));
-  return true;
+  return JS_ThrowTypeError(context, "Frame handle was null (frame no longer alive)");
 }
 
-/* static */
-bool
-Frame::js_locals(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+static constexpr auto FrameNotAliveErrorMessage = "Frame handle was null (frame no longer alive)";
+
+JSValue
+Frame::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
-  JS ::CallArgs args = JS ::CallArgsFromVp(argc, vp);
-  JS ::RootedObject callee(cx, &args.thisv().toObject());
-  auto frameJs = Get(callee.get());
-  if (!frameJs->IsValid()) {
-    JS_ReportErrorASCII(cx, "frame liveness not guaranteed for %s. Request new stack frames & variables.",
-                        frameJs->mFrame.CStringName().value_or("<unknown frame name>"));
-    return false;
-  }
-  auto symbolFile = frameJs->mFrame.GetSymbolFile();
-  auto variables =
-    symbolFile->GetVariables(*frameJs->mTask->GetSupervisor(), frameJs->mFrame, sym::VariableSet::Locals);
-
-  JS::Rooted<JSObject *> arrayObject{cx, JS::NewArrayObject(cx, variables.size())};
-
-  for (auto i = 0u; i < variables.size(); ++i) {
-    JS::Rooted<JSObject *> jsVariable{cx, mdb::js::Variable::Create(cx, variables[i])};
-    JS_SetElement(cx, arrayObject, i, jsVariable);
-  }
-
-  args.rval().setObject(*arrayObject);
-  return true;
+  auto *handle = GetThisOrReturnException(handle, FrameNotAliveErrorMessage);
+  return JS_NewUint32(context, static_cast<u32>(handle->mFrame.FrameId()));
 }
 
-/* static */
-bool
-Frame::js_arguments(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+static JSValue
+GetArrayOfVariables(JSContext *context,
+  SymbolFile *symbolFile,
+  TraceeController *supervisor,
+  sym::Frame &frame,
+  sym::VariableSet set)
 {
-  JS ::CallArgs args = JS ::CallArgsFromVp(argc, vp);
-  JS ::RootedObject callee(cx, &args.thisv().toObject());
-  auto frameJs = Get(callee.get());
+  auto arrayObject = JS_NewArray(context);
 
-  auto symbolFile = frameJs->mFrame.GetSymbolFile();
-  auto variables =
-    symbolFile->GetVariables(*frameJs->mTask->GetSupervisor(), frameJs->mFrame, sym::VariableSet::Arguments);
-
-  JS::Rooted<JSObject *> arrayObject{cx, JS::NewArrayObject(cx, variables.size())};
-
-  for (auto i = 0u; i < variables.size(); ++i) {
-    JS::Rooted<JSObject *> jsVariable{cx, mdb::js::Variable::Create(cx, variables[i])};
-    JS_SetElement(cx, arrayObject, i, jsVariable);
+  auto variables = symbolFile->GetVariables(*supervisor, frame, set);
+  for (auto &&[index, variable] : std::ranges::views::enumerate(variables)) {
+    auto jsValue = JsVariable::CreateValue(context, std::move(variable));
+    JS_SetPropertyUint32(context, arrayObject, index, jsValue);
   }
 
-  args.rval().setObject(*arrayObject);
-  return true;
+  return arrayObject;
 }
 
-/* static */
-bool
-Frame::js_caller(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+JSValue
+Frame::Locals(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
-  TODO(__PRETTY_FUNCTION__);
-}
+  auto *frame = GetThisOrReturnException(frame, "Could not retrieve frame handle");
 
-/* static */
-bool
-Frame::js_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS ::CallArgs args = JS ::CallArgsFromVp(argc, vp);
-  JS ::RootedObject callee(cx, &args.thisv().toObject());
-  auto frameJs = Get(callee.get());
-  auto frameName = frameJs->mFrame.Name().and_then([cx](auto view) -> std::optional<JSString *> {
-    auto js = PrepareString(cx, view);
-    if (js) {
-      return std::optional{js};
-    }
-    return {};
-  });
-
-  if (!frameName) {
-    JS_ReportOutOfMemory(cx);
-    return false;
+  if (!frame->IsValid()) {
+    return JS_ThrowReferenceError(context,
+      "Frame is no longer valid for %s. Request new stack frames adn variables",
+      frame->mFrame.CStringName().value_or("<unknown frame name>"));
   }
-  args.rval().setString(frameName.value());
-  return true;
+  auto symbolFile = frame->mFrame.GetSymbolFile();
+  ASSERT(symbolFile, "No symbol file for frame!");
+  auto supervisor = frame->mTask->GetSupervisor();
+  ASSERT(supervisor, "Could not get supervisor from task!");
+
+  return GetArrayOfVariables(context, symbolFile, supervisor, frame->mFrame, sym::VariableSet::Locals);
+};
+
+JSValue
+Frame::Arguments(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *frame = GetThisOrReturnException(frame, "Could not retrieve frame handle");
+
+  if (!frame->IsValid()) {
+    return JS_ThrowReferenceError(context,
+      "Frame is no longer valid for %s. Request new stack frames adn variables",
+      frame->mFrame.CStringName().value_or("<unknown frame name>"));
+  }
+  auto symbolFile = frame->mFrame.GetSymbolFile();
+  ASSERT(symbolFile, "No symbol file for frame!");
+  auto supervisor = frame->mTask->GetSupervisor();
+  ASSERT(supervisor, "Could not get supervisor from task!");
+
+  return GetArrayOfVariables(context, symbolFile, supervisor, frame->mFrame, sym::VariableSet::Arguments);
+};
+
+JSValue
+Frame::Caller(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  return JS_ThrowTypeError(context,
+    "Caller"
+    " method not implemented");
+};
+
+JSValue
+Frame::Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *frame = GetThisOrReturnException(frame, "Could not retrieve frame handle");
+  return JS_NewStringLen(context, frame->mFrame.Name()->data(), frame->mFrame.Name()->length());
 }
 
 } // namespace mdb::js

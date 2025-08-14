@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "fmt/core.h"
+#include "common/formatter.h"
 #include "tracee_pointer.h"
 #include "utils/debugger_thread.h"
 #include "utils/dynamic_array.h"
@@ -22,19 +22,19 @@
 #define FOR_EACH_LOG(LOGCHANNEL)                                                                                  \
   LOGCHANNEL(core, "Debugger Core", "Messages that don't have a intuitive log channel can be logged here.")       \
   LOGCHANNEL(dap, "Debug Adapter Protocol", "Log messages involving the DA protocol should be logged here.")      \
-  LOGCHANNEL(dwarf, "DWARF Debug Symbol Information",                                                             \
-             "Log messages involving symbol parsing and value evaluation")                                        \
-  LOGCHANNEL(awaiter, "Wait Status Reading",                                                                      \
-             "Log messages involving the wait status or wait-status adjacent systems")                            \
-  LOGCHANNEL(eh, "Exception Frame Header",                                                                        \
-             "Log messages that involve unwinding and parsing unwind symbol information")                         \
+  LOGCHANNEL(                                                                                                     \
+    dwarf, "DWARF Debug Symbol Information", "Log messages involving symbol parsing and value evaluation")        \
+  LOGCHANNEL(                                                                                                     \
+    awaiter, "Wait Status Reading", "Log messages involving the wait status or wait-status adjacent systems")     \
+  LOGCHANNEL(                                                                                                     \
+    eh, "Exception Frame Header", "Log messages that involve unwinding and parsing unwind symbol information")    \
   LOGCHANNEL(remote, "GDB Remote Protocol", "Log messages related to the GDB Remote Protocol")                    \
   LOGCHANNEL(warning, "Warnings", "Unexpected behaviors should be logged to this chanel")                         \
   LOGCHANNEL(interpreter, "Debugger script interpreter", "Log interpreter related messages here")
 
 ENUM_TYPE_METADATA(Channel, FOR_EACH_LOG, DEFAULT_ENUM)
 
-template <typename T> concept Formattable = requires(T t) { fmt::format("{}", t); };
+template <typename T> concept Formattable = requires(T t) { std::format("{}", t); };
 
 namespace mdb::logging {
 struct QuoteStringsInList
@@ -43,8 +43,8 @@ struct QuoteStringsInList
 };
 } // namespace mdb::logging
 
-namespace fmt {
-template <> struct formatter<mdb::logging::QuoteStringsInList> : public Default<mdb::logging::QuoteStringsInList>
+template <>
+struct std::formatter<mdb::logging::QuoteStringsInList> : public Default<mdb::logging::QuoteStringsInList>
 {
   template <typename FormatContext>
   constexpr auto
@@ -55,15 +55,14 @@ template <> struct formatter<mdb::logging::QuoteStringsInList> : public Default<
       return it;
     }
     auto span = list.mStrings;
-    it = fmt::format_to(it, R"("{}")", span.front());
+    it = std::format_to(it, R"("{}")", span.front());
     span = span.subspan(1);
     for (const auto &str : span) {
-      it = fmt::format_to(it, R"(,"{}")", str);
+      it = std::format_to(it, R"(,"{}")", str);
     }
     return it;
   }
 };
-} // namespace fmt
 
 namespace mdb::logging {
 
@@ -76,6 +75,7 @@ struct LogChannel
   void Log(std::string_view msg) noexcept;
 };
 
+// TODO: Make this PMR-able
 /* Profile event arg. Gets added to the `args` field in a profiling event. All integral values are formatted in
  * hex. */
 struct ProfileEventArg
@@ -97,12 +97,15 @@ struct ProfileEventArg
   {
     std::vector<std::string> args;
     args.reserve(listOfFormattableValues.size());
-    std::transform(listOfFormattableValues.begin(), listOfFormattableValues.end(), std::back_inserter(args),
-                   [](auto &&value) { return fmt::format("{}", value); });
-    mSerializedArg = fmt::format(R"("{}": [{}])", name, QuoteStringsInList{args});
+    std::transform(
+      listOfFormattableValues.begin(), listOfFormattableValues.end(), std::back_inserter(args), [](auto &&value) {
+        return std::format("{}", value);
+      });
+    mSerializedArg = std::format(R"("{}": [{}])", name, QuoteStringsInList{ args });
   }
 };
 
+// TODO: Make this PMR-able
 struct ProfileEvent
 {
   std::string_view mName;
@@ -113,16 +116,17 @@ struct ProfileEvent
   std::vector<ProfileEventArg> mArgs;
 };
 
+// TODO: Make this PMR-able
 class ProfilingLogger
 {
-  Pid mPid;
-  bool mClosed{true};
-  bool mShutdown{false};
+  SessionId mPid;
+  bool mClosed{ true };
+  bool mShutdown{ false };
   bool mWritten{};
   std::fstream mLogFile;
   std::mutex mEventsMutex{};
   std::condition_variable mNotifySerializerThread{};
-  std::unique_ptr<DebuggerThread> mSerializerThread{nullptr};
+  std::unique_ptr<DebuggerThread> mSerializerThread{ nullptr };
   using EventArray = DynArray<ProfileEvent, DynShiftRemovePolicy>;
   EventArray mEvents{};
   // These two containers are swapped out periodically by the profiler thread, which then serializes them to disk.
@@ -153,8 +157,8 @@ public:
   static void ConfigureProfiling(const Path &path) noexcept;
   static ProfilingLogger *Instance() noexcept;
 
-  void Begin(std::string_view name, std::string_view category, Pid tid) noexcept;
-  void End(std::string_view name, std::string_view category, Pid tid) noexcept;
+  void Begin(std::string_view name, std::string_view category, SessionId tid) noexcept;
+  void End(std::string_view name, std::string_view category, SessionId tid) noexcept;
 
   void Begin(std::string_view name, std::string_view category) noexcept;
   void End(std::string_view name, std::string_view category) noexcept;
@@ -174,7 +178,7 @@ public:
     e->mPhase = 'B';
     e->mTid = gettid();
     e->mTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                      std::chrono::high_resolution_clock::now().time_since_epoch())
+      std::chrono::high_resolution_clock::now().time_since_epoch())
                       .count();
     e->mCategory = category;
     e->mArgs = std::vector<ProfileEventArg>{};
@@ -196,7 +200,7 @@ public:
     e->mPhase = 'E';
     e->mTid = gettid();
     e->mTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                      std::chrono::high_resolution_clock::now().time_since_epoch())
+      std::chrono::high_resolution_clock::now().time_since_epoch())
                       .count();
     e->mCategory = category;
     e->mArgs = std::vector<ProfileEventArg>{};
@@ -229,18 +233,18 @@ public:
 #define PROFILE_END_PID(name, category, PID) logging::ProfilingLogger::Instance()->End(name, category, PID);
 
 #define PROFILE_BEGIN_ARGS(name, category, ...)                                                                   \
-  logging::ProfilingLogger::Instance()->Begin(name, category, std::to_array<PEArg>({__VA_ARGS__}));
+  logging::ProfilingLogger::Instance()->Begin(name, category, std::to_array<PEArg>({ __VA_ARGS__ }));
 
 #define PROFILE_END_ARGS(name, category, ...)                                                                     \
-  logging::ProfilingLogger::Instance()->End(name, category, std::to_array<PEArg>({__VA_ARGS__}));
+  logging::ProfilingLogger::Instance()->End(name, category, std::to_array<PEArg>({ __VA_ARGS__ }));
 
 #define PROFILE_AT_SCOPE_END(name, category, ...)                                                                 \
-  ScopedDefer PASTE(endProfileEvent, __LINE__){[&]() { PROFILE_END_ARGS(name, category, __VA_ARGS__) }};
+  ScopedDefer PASTE(endProfileEvent, __LINE__){ [&]() { PROFILE_END_ARGS(name, category, __VA_ARGS__) } };
 
 #define PROFILE_SCOPE_ARGS(name, category, ...)                                                                   \
   PROFILE_BEGIN_ARGS(name, category, __VA_ARGS__)                                                                 \
-  ScopedDefer PASTE(endProfileEvent,                                                                              \
-                    __LINE__){[&]() { logging::ProfilingLogger::Instance()->End(name, category); }};
+  ScopedDefer PASTE(                                                                                              \
+    endProfileEvent, __LINE__){ [&]() { logging::ProfilingLogger::Instance()->End(name, category); } };
 
 #define PROFILE_SCOPE_END_ARGS(name, category, ...)                                                               \
   PROFILE_BEGIN(name, category)                                                                                   \
@@ -248,8 +252,8 @@ public:
 
 #define PROFILE_SCOPE(name, category)                                                                             \
   PROFILE_BEGIN(name, category)                                                                                   \
-  ScopedDefer PASTE(endProfileEvent,                                                                              \
-                    __LINE__){[&]() { logging::ProfilingLogger::Instance()->End(name, category); }};
+  ScopedDefer PASTE(                                                                                              \
+    endProfileEvent, __LINE__){ [&]() { logging::ProfilingLogger::Instance()->End(name, category); } };
 
 #else
 
@@ -298,21 +302,21 @@ LogChannel *GetLogChannel(Channel id) noexcept;
   if ((condition)) {                                                                                              \
     auto LOC = std::source_location::current();                                                                   \
     if (auto channel = logging::GetLogChannel(Channel::channel_name); channel) {                                  \
-      channel->LogMessage(LOC.file_name(), LOC.line() - 1, LOC.column() - 2, fmt::format(__VA_ARGS__));           \
+      channel->LogMessage(LOC.file_name(), LOC.line() - 1, LOC.column() - 2, std::format(__VA_ARGS__));           \
     }                                                                                                             \
   }
 
 #define DBGLOG(channel, ...)                                                                                      \
   if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::fmt::format(__VA_ARGS__));  \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::std::format(__VA_ARGS__));  \
   }
 #else
 #define DLOG(...)
 #define DBGLOG(channel, ...)                                                                                      \
   if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::fmt::format(__VA_ARGS__));  \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::std::format(__VA_ARGS__));  \
   }
 #define CDLOG(...)
 #endif
@@ -321,28 +325,19 @@ LogChannel *GetLogChannel(Channel id) noexcept;
 
 using PEArg = mdb::logging::ProfileEventArg;
 
-namespace fmt {
-
 // Make this the debug formatter in the future.
 template <typename T> struct DebugFormatter
 {
-  bool mDebug{false};
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &context)
-  {
-    return context.begin();
-  }
+  bool mDebug{ false };
+  BASIC_PARSE
 };
 
-template <> struct formatter<mdb::Offset> : public Default<mdb::Offset>
+template <> struct std::formatter<mdb::Offset> : public Default<mdb::Offset>
 {
   template <typename FormatContext>
   constexpr auto
   format(const mdb::Offset &offset, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "0x{:x}", offset.value());
+    return std::format_to(ctx.out(), "0x{:x}", offset.value());
   }
 };
-
-} // namespace fmt

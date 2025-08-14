@@ -18,14 +18,27 @@ namespace mdb::sym::dw {
 using FileIndex = u32;
 
 #define LNP_ASSERT(cond, formatString, ...)                                                                       \
-  ASSERT((cond), "[object={}, lnp={}]: " formatString, mObjectFile->GetFilePath().filename().c_str(),             \
-         mSectionOffset __VA_OPT__(, ) __VA_ARGS__)
+  ASSERT((cond),                                                                                                  \
+    "[object={}, lnp={}]: " formatString,                                                                         \
+    mObjectFile->GetFilePath().filename().c_str(),                                                                \
+    mSectionOffset __VA_OPT__(, ) __VA_ARGS__)
 
-LNPHeader::LNPHeader(ObjectFile *object, u64 section_offset, u64 initial_length, const u8 *data,
-                     const u8 *data_end, DwarfVersion version, u8 addr_size, u8 min_len, u8 max_ops,
-                     bool default_is_stmt, i8 line_base, u8 line_range, u8 opcode_base,
-                     OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
-                     std::vector<FileEntry> &&file_names) noexcept
+LNPHeader::LNPHeader(ObjectFile *object,
+  u64 section_offset,
+  u64 initial_length,
+  const u8 *data,
+  const u8 *data_end,
+  DwarfVersion version,
+  u8 addr_size,
+  u8 min_len,
+  u8 max_ops,
+  bool default_is_stmt,
+  i8 line_base,
+  u8 line_range,
+  u8 opcode_base,
+  OpCodeLengths opcode_lengths,
+  std::vector<DirEntry> &&directories,
+  std::vector<FileEntry> &&file_names) noexcept
     : mSectionOffset(section_offset), mInitialLength(initial_length), mData(data), mDataEnd(data_end),
       mVersion(version), mAddrSize(addr_size), mMinLength(min_len), mMaxOps(max_ops),
       mDefaultIsStatement(default_is_stmt), mLineBase(line_base), mLineRange(line_range), mOpcodeBase(opcode_base),
@@ -50,7 +63,7 @@ LNPHeader::file(u32 f_index) const noexcept
   for (const auto &[i, f] : mdb::EnumerateView(mFileEntries)) {
     if (i == adjusted_index) {
       const auto dir_index = lnp_index(f.dir_index, mVersion);
-      return std::filesystem::path{fmt::format("{}/{}", mDirectories[dir_index].path, f.file_name)}
+      return std::filesystem::path{ std::format("{}/{}", mDirectories[dir_index].path, f.file_name) }
         .lexically_normal();
     }
   }
@@ -64,20 +77,20 @@ LNPHeader::CompileDirectoryJoin(const Path &p) const noexcept
   if (mVersion == DwarfVersion::D5) {
     return (mDirectories[0].path / p).lexically_normal();
   }
-  LNP_ASSERT(mCompilationUnitBuildDirectory != nullptr, "Expected build directory to not be null, p={}",
-             p.c_str());
+  LNP_ASSERT(
+    mCompilationUnitBuildDirectory != nullptr, "Expected build directory to not be null, p={}", p.c_str());
   return (mCompilationUnitBuildDirectory / p).lexically_normal();
 }
 
 Path
 LNPHeader::FileEntryToPath(const FileEntry &fileEntry) noexcept
 {
-  auto p = std::filesystem::path{fileEntry.file_name};
+  auto p = std::filesystem::path{ fileEntry.file_name };
   if (p.is_relative()) {
     p = CompileDirectoryJoin(p);
   }
-  LNP_ASSERT(p.is_absolute(), "No directories in LNP file paths must be absolute according to spec, but was={}",
-             p.c_str());
+  LNP_ASSERT(
+    p.is_absolute(), "No directories in LNP file paths must be absolute according to spec, but was={}", p.c_str());
   return p;
 }
 
@@ -118,8 +131,8 @@ LNPHeader::CacheLNPFilePaths() noexcept
       } else {
         buildDir = mDirectories[index].path;
       }
-      fmt::format_to(std::back_inserter(path_buf), "{}/{}", buildDir, f.file_name);
-      auto p = std::filesystem::path{path_buf}.lexically_normal();
+      std::format_to(std::back_inserter(path_buf), "{}/{}", buildDir, f.file_name);
+      auto p = std::filesystem::path{ path_buf }.lexically_normal();
       if (p.is_relative()) {
         p = CompileDirectoryJoin(p);
       }
@@ -264,8 +277,13 @@ operator>=(const RelocatedLteIterator &l, const RelocatedLteIterator &r)
 }
 
 static LNPHeader *
-ReadLineNumberProgramHeaderPreVersion4(DwarfBinaryReader &reader, ObjectFile *objectFile, u64 debugLineOffset,
-                                       const u8 *ptr, u64 init_len, u16 version, u64 sectionOffset) noexcept
+ReadLineNumberProgramHeaderPreVersion4(DwarfBinaryReader &reader,
+  ObjectFile *objectFile,
+  u64 debugLineOffset,
+  const u8 *ptr,
+  u64 init_len,
+  u16 version,
+  u64 sectionOffset) noexcept
 {
   const u64 headerLength = reader.DwarfSpecReadValue();
   const auto dataPointer = reader.CurrentPtr() + headerLength;
@@ -284,7 +302,7 @@ ReadLineNumberProgramHeaderPreVersion4(DwarfBinaryReader &reader, ObjectFile *ob
   std::vector<DirEntry> dirs;
   auto dir = reader.ReadString();
   while (dir.size() > 0) {
-    dirs.push_back(DirEntry{.path = dir, .md5 = {}});
+    dirs.push_back(DirEntry{ .path = dir, .md5 = {} });
     dir = reader.ReadString();
   }
 
@@ -297,10 +315,22 @@ ReadLineNumberProgramHeaderPreVersion4(DwarfBinaryReader &reader, ObjectFile *ob
     entry.file_size = reader.ReadUleb128<u64>();
     files.push_back(entry);
   }
-  auto header = new LNPHeader{objectFile,           sectionOffset,         init_len,        dataPointer,
-                              ptr + init_len,       (DwarfVersion)version, addr_size,       minInstructionLength,
-                              maxOpsPerInstruction, defaultIsStatement,    lineBase,        lineRange,
-                              opCodeBase,           opCodeLengths,         std::move(dirs), std::move(files)};
+  auto header = new LNPHeader{ objectFile,
+    sectionOffset,
+    init_len,
+    dataPointer,
+    ptr + init_len,
+    (DwarfVersion)version,
+    addr_size,
+    minInstructionLength,
+    maxOpsPerInstruction,
+    defaultIsStatement,
+    lineBase,
+    lineRange,
+    opCodeBase,
+    opCodeLengths,
+    std::move(dirs),
+    std::move(files) };
   // Another thread raced to complete it's parsing of this lnp header.
   if (!objectFile->SetLnpHeader(debugLineOffset, header)) {
     delete header;
@@ -328,7 +358,7 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
   ASSERT(debug_line != nullptr && debug_line->GetName() == ".debug_line", "Must pass .debug_line ELF section");
   // determine header count
 
-  DwarfBinaryReader reader{elf, debug_line->mSectionData};
+  DwarfBinaryReader reader{ elf, debug_line->mSectionData };
   reader.Skip(debugLineOffset);
 
   u8 addrSize = 8u;
@@ -339,8 +369,9 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
   const auto version = reader.PeekValue<u16>();
 
   ASSERT(version < 6 && version >= 2,
-         "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}", version,
-         reader.BytesRead());
+    "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}",
+    version,
+    reader.BytesRead());
   reader.SkipValue<u16>();
 
   if (version == 5) {
@@ -350,8 +381,8 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
   }
 
   if (version == 2 || version == 3) {
-    return ReadLineNumberProgramHeaderPreVersion4(reader, objectFile, debugLineOffset, ptr, initLength, version,
-                                                  sectionOffset);
+    return ReadLineNumberProgramHeaderPreVersion4(
+      reader, objectFile, debugLineOffset, ptr, initLength, version, sectionOffset);
   }
 
   const u64 headerLength = reader.DwarfSpecReadValue();
@@ -370,7 +401,7 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
     std::vector<DirEntry> dirs;
     auto dir = reader.ReadString();
     while (dir.size() > 0) {
-      dirs.push_back(DirEntry{.path = dir, .md5 = {}});
+      dirs.push_back(DirEntry{ .path = dir, .md5 = {} });
       dir = reader.ReadString();
     }
 
@@ -383,10 +414,22 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
       entry.file_size = reader.ReadUleb128<u64>();
       files.push_back(entry);
     }
-    auto header = new LNPHeader{objectFile,           sectionOffset,         initLength,      dataPtr,
-                                ptr + initLength,     (DwarfVersion)version, addrSize,        minInstructionLength,
-                                maxOpsPerInstruction, defaultIsStatement,    lineBase,        lineRange,
-                                opCodeBase,           opCodeLengths,         std::move(dirs), std::move(files)};
+    auto header = new LNPHeader{ objectFile,
+      sectionOffset,
+      initLength,
+      dataPtr,
+      ptr + initLength,
+      (DwarfVersion)version,
+      addrSize,
+      minInstructionLength,
+      maxOpsPerInstruction,
+      defaultIsStatement,
+      lineBase,
+      lineRange,
+      opCodeBase,
+      opCodeLengths,
+      std::move(dirs),
+      std::move(files) };
     // Another thread raced to complete it's parsing of this lnp header.
     if (!objectFile->SetLnpHeader(debugLineOffset, header)) {
       delete header;
@@ -450,10 +493,22 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
       }
       files.push_back(entry);
     }
-    auto header = new LNPHeader{objectFile,           sectionOffset,         initLength,      dataPtr,
-                                ptr + initLength,     (DwarfVersion)version, addrSize,        minInstructionLength,
-                                maxOpsPerInstruction, defaultIsStatement,    lineBase,        lineRange,
-                                opCodeBase,           opCodeLengths,         std::move(dirs), std::move(files)};
+    auto header = new LNPHeader{ objectFile,
+      sectionOffset,
+      initLength,
+      dataPtr,
+      ptr + initLength,
+      (DwarfVersion)version,
+      addrSize,
+      minInstructionLength,
+      maxOpsPerInstruction,
+      defaultIsStatement,
+      lineBase,
+      lineRange,
+      opCodeBase,
+      opCodeLengths,
+      std::move(dirs),
+      std::move(files) };
 
     // Another thread raced to complete it's parsing of this lnp header.
     if (!objectFile->SetLnpHeader(debugLineOffset, header)) {
@@ -474,7 +529,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
   auto headerCount = 0u;
   // determine header count
   {
-    DwarfBinaryReader reader{elf, debugLine->mSectionData};
+    DwarfBinaryReader reader{ elf, debugLine->mSectionData };
     while (reader.HasMore()) {
       headerCount++;
       const auto init_len = reader.ReadInitialLength<DwarfBinaryReader::Ignore>();
@@ -484,7 +539,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
 
   std::vector<LNPHeader> headers{};
   headers.reserve(headerCount);
-  DwarfBinaryReader reader{elf, debugLine->mSectionData};
+  DwarfBinaryReader reader{ elf, debugLine->mSectionData };
 
   u8 addr_size = 8u;
   for (auto i = 0u; i < headerCount; ++i) {
@@ -501,8 +556,10 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
     case 3:
       [[fallthrough]];
     case 6:
-      DBGLOG(core, "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}", version,
-             reader.BytesRead())
+      DBGLOG(core,
+        "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}",
+        version,
+        reader.BytesRead())
       reader.Skip(init_len);
       continue;
     case 4:
@@ -511,8 +568,10 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
       reader.SkipValue<u16>();
       break;
     default:
-      ASSERT(version >= 1 && version <= 6, "Invalid DWARF version value encountered: {} at offset 0x{:x}", version,
-             reader.BytesRead());
+      ASSERT(version >= 1 && version <= 6,
+        "Invalid DWARF version value encountered: {} at offset 0x{:x}",
+        version,
+        reader.BytesRead());
     }
 
     // TODO(simon): introduce release-build logging & warnings; this should not fail, but should log a
@@ -540,7 +599,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
       std::vector<DirEntry> dirs;
       auto dir = reader.ReadString();
       while (dir.size() > 0) {
-        dirs.push_back(DirEntry{.path = dir, .md5 = {}});
+        dirs.push_back(DirEntry{ .path = dir, .md5 = {} });
         dir = reader.ReadString();
       }
 
@@ -553,9 +612,22 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
         entry.file_size = reader.ReadUleb128<u64>();
         files.push_back(entry);
       }
-      headers.emplace_back(objectFile, sectionOffset, init_len, dataPtr, ptr + init_len, (DwarfVersion)version,
-                           addr_size, minInstructionLength, maxOpsPerInstruction, defaultIsStatement, lineBase,
-                           lineRange, opCodeBase, opcode_lengths, std::move(dirs), std::move(files));
+      headers.emplace_back(objectFile,
+        sectionOffset,
+        init_len,
+        dataPtr,
+        ptr + init_len,
+        (DwarfVersion)version,
+        addr_size,
+        minInstructionLength,
+        maxOpsPerInstruction,
+        defaultIsStatement,
+        lineBase,
+        lineRange,
+        opCodeBase,
+        opcode_lengths,
+        std::move(dirs),
+        std::move(files));
       reader.Skip(init_len - reader.PopBookmark());
     } else {
       const u8 directory_entry_format_count = reader.ReadValue<u8>();
@@ -614,16 +686,29 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
         }
         files.push_back(entry);
       }
-      headers.emplace_back(objectFile, sectionOffset, init_len, dataPtr, ptr + init_len, (DwarfVersion)version,
-                           addr_size, minInstructionLength, maxOpsPerInstruction, defaultIsStatement, lineBase,
-                           lineRange, opCodeBase, opcode_lengths, std::move(dirs), std::move(files));
+      headers.emplace_back(objectFile,
+        sectionOffset,
+        init_len,
+        dataPtr,
+        ptr + init_len,
+        (DwarfVersion)version,
+        addr_size,
+        minInstructionLength,
+        maxOpsPerInstruction,
+        defaultIsStatement,
+        lineBase,
+        lineRange,
+        opCodeBase,
+        opcode_lengths,
+        std::move(dirs),
+        std::move(files));
       reader.Skip(init_len - reader.PopBookmark());
     }
   }
 
   ASSERT(!reader.HasMore(),
-         ".debug_line section is expected to have been consumed here, but {} bytes were remaining",
-         reader.RemainingSize());
+    ".debug_line section is expected to have been consumed here, but {} bytes were remaining",
+    reader.RemainingSize());
   return headers;
 }
 
@@ -633,18 +718,22 @@ SourceCodeFile::GetOwningCompilationUnit() const noexcept
   return mCompilationUnit;
 }
 
-SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
-                               FileEntryIndexVector fileIndices) noexcept
+SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit,
+  const Elf *elf,
+  std::filesystem::path &&path,
+  FileEntryIndexVector fileIndices) noexcept
     : mCompilationUnit(compilationUnit), elf(elf), mLineInfoFileIndices(fileIndices), mFullPath(std::move(path))
 {
 }
 
 /* static */
 SourceCodeFile::Ref
-SourceCodeFile::Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::string path,
-                       FileEntryIndexVector fileIndices) noexcept
+SourceCodeFile::Create(sym::CompilationUnit *compilationUnit,
+  const Elf *elf,
+  std::string path,
+  FileEntryIndexVector fileIndices) noexcept
 {
-  return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{compilationUnit, elf, std::move(path), fileIndices});
+  return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{ compilationUnit, elf, std::move(path), fileIndices });
 }
 
 AddressRange
@@ -669,7 +758,7 @@ void
 SourceCodeFile::AddLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept
 {
   for (const auto [start, end] : ranges) {
-    mLineTableRanges.push_back({start, end});
+    mLineTableRanges.push_back({ start, end });
   }
 }
 

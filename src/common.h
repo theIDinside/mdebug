@@ -15,17 +15,15 @@
 #include <source_location>
 
 // system
+#include <print>
 #include <sys/mman.h>
 #include <sys/user.h>
 #include <type_traits>
 #include <vector>
 
 // dependecy
-#include <fmt/core.h>
 
 namespace mdb {
-
-namespace fmt = ::fmt;
 
 namespace fs = std::filesystem;
 using Path = fs::path;
@@ -115,8 +113,8 @@ template <typename T> using ActualType = std::remove_cvref_t<T>;
 
 template <class... T> constexpr bool always_false = false;
 
-[[noreturn]] void panic(std::string_view err_msg, const char *functionName, const char *file, int line,
-                        int strip_levels = 0);
+[[noreturn]] void panic(
+  std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels = 0);
 [[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
 
 /**
@@ -127,8 +125,8 @@ std::string_view syscall_name(unsigned long long syscall_number);
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
-    const auto todo_msg = fmt::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
-    fmt::println("{}", todo_msg);                                                                                 \
+    const auto todo_msg = std::format("[TODO]: {}\nin {}:{}", abort_msg, loc.file_name(), loc.line());            \
+    std::println("{}", todo_msg);                                                                                 \
     mdb::logging::Logger::GetLogger()->GetLogChannel(Channel::core)->Log(todo_msg);                               \
     mdb::logging::Logger::GetLogger()->OnAbort();                                                                 \
     std::terminate(); /** Silence moronic GCC warnings. */                                                        \
@@ -151,10 +149,10 @@ IgnoreArgs(const Args &...)
   {                                                                                                               \
     auto loc = std::source_location::current();                                                                   \
     const auto todo_msg_hdr =                                                                                     \
-      fmt::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                        \
-    const auto todo_msg = fmt::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
-    fmt::println("{}", todo_msg_hdr);                                                                             \
-    fmt::println("{}", todo_msg);                                                                                 \
+      std::format("[TODO {}] in {}:{}", loc.function_name(), loc.file_name(), loc.line());                        \
+    const auto todo_msg = std::format(fmt_str __VA_OPT__(, ) __VA_ARGS__);                                        \
+    std::println("{}", todo_msg_hdr);                                                                             \
+    std::println("{}", todo_msg);                                                                                 \
     mdb::logging::GetLogChannel(Channel::core)->Log(todo_msg_hdr);                                                \
     mdb::logging::GetLogChannel(Channel::core)->Log(todo_msg);                                                    \
     mdb::logging::Logger::GetLogger()->OnAbort();                                                                 \
@@ -165,14 +163,17 @@ IgnoreArgs(const Args &...)
 #define MUST_HOLD(cond, msg)                                                                                      \
   if (!(cond)) [[unlikely]] {                                                                                     \
     const std::source_location loc = std::source_location::current();                                             \
-    mdb::panic(fmt::format("{}: assertion failed: {}", msg, #cond), loc.function_name(), loc.file_name(),         \
-               loc.line() - 2, 3);                                                                                \
+    mdb::panic(std::format("{}: assertion failed: {}", msg, #cond),                                               \
+      loc.function_name(),                                                                                        \
+      loc.file_name(),                                                                                            \
+      loc.line() - 2,                                                                                             \
+      3);                                                                                                         \
   }
 
 // clang-format off
-// Identical to ASSERT, but doesn't care about build type
+// VERIFY does what ASSERT does but regardless of build type. Is expected to uphold hard invariants.
 #define VERIFY(cond, msg, ...) if (!(cond)) [[unlikely]] { std::source_location loc = std::source_location::current(); \
-    mdb::panic(fmt::format("{} FAILED {}", #cond, fmt::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);               \
+    mdb::panic(std::format("{} FAILED {}", #cond, std::format(msg __VA_OPT__(, ) __VA_ARGS__)), loc, 1);               \
   }
 // clang-format on
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1

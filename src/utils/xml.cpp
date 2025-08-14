@@ -1,13 +1,12 @@
 /** LICENSE TEMPLATE */
 #include "xml.h"
-#include "fmt/base.h"
 #include "utils/util.h"
 #include <algorithm>
 #include <cctype>
 
 #define PANIC_LOG(cond, str, ...)                                                                                 \
   if (cond) {                                                                                                     \
-    fmt::println(str __VA_OPT__(, ) __VA_ARGS__);                                                                 \
+    std::println(str __VA_OPT__(, ) __VA_ARGS__);                                                                 \
     exit(-1);                                                                                                     \
   }
 
@@ -84,15 +83,15 @@ XMLParser::parse_element() noexcept
 
   // Consume the closing '>'
   const auto closing_bracket = eat_char();
-  PANIC_LOG(closing_bracket != '>', "Expected a closing '>' but saw '{}' ({}:{})", closing_bracket, __FILE__,
-            __LINE__);
+  PANIC_LOG(
+    closing_bracket != '>', "Expected a closing '>' but saw '{}' ({}:{})", closing_bracket, __FILE__, __LINE__);
 
   // Parse content or child elements
   auto start = pbuf.front() != '<' ? pbuf.data() : nullptr;
   while (pbuf.size() > 2) {
     if (pbuf.front() == '<') {
       if (start) {
-        element.content = std::string_view{start, pbuf.data()};
+        element.content = std::string_view{ start, pbuf.data() };
         if (std::ranges::all_of(element.content, [](auto ch) { return isspace(ch); })) {
           element.content = {};
         }
@@ -118,7 +117,7 @@ XMLParser::parse_name() noexcept
 {
   std::string name;
   auto it = std::ranges::find_if(pbuf, [](const auto ch) { return !(isalnum(ch) || ch == '-' || ch == ':'); });
-  const auto result = std::string_view{pbuf.begin(), it};
+  const auto result = std::string_view{ pbuf.begin(), it };
   pbuf.remove_prefix(result.size());
   return result;
 }
@@ -155,7 +154,7 @@ XMLParser::parse_attr_value() noexcept
     pbuf.remove_prefix(pbuf.size());
     return res;
   }
-  const std::string_view res{pbuf.begin(), pos};
+  const std::string_view res{ pbuf.begin(), pos };
   pbuf.remove_prefix(std::min(pos + 1, pbuf.size()));
 
   return res;
@@ -177,7 +176,7 @@ XMLParser::take_n(size_t count) noexcept
     pbuf.remove_prefix(pbuf.size());
     return copy;
   }
-  const std::string_view res{pbuf.begin(), pbuf.begin() + count};
+  const std::string_view res{ pbuf.begin(), pbuf.begin() + count };
   pbuf.remove_prefix(count);
   return res;
 }
@@ -195,8 +194,10 @@ XMLParser::skip_whitespace() noexcept
 }
 
 static void
-collect_by_name_impl(std::vector<const XMLElementView *> &cache, const XMLElementView &root, std::string_view name,
-                     bool can_contain_children) noexcept
+collect_by_name_impl(std::vector<const XMLElementView *> &cache,
+  const XMLElementView &root,
+  std::string_view name,
+  bool can_contain_children) noexcept
 {
   if (root.name == name) {
     cache.push_back(&root);
@@ -213,8 +214,8 @@ collect_by_name_impl(std::vector<const XMLElementView *> &cache, const XMLElemen
 }
 
 std::vector<const XMLElementView *>
-collect_by_name(const XMLElementView &root, std::string_view name, bool can_contain_children,
-                u32 guess_total) noexcept
+collect_by_name(
+  const XMLElementView &root, std::string_view name, bool can_contain_children, u32 guess_total) noexcept
 {
   std::vector<const XMLElementView *> result{};
   result.reserve(guess_total);

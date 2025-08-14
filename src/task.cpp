@@ -1,12 +1,12 @@
 /** LICENSE TEMPLATE */
 #include "task.h"
-#include "fmt/ranges.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "register_description.h"
 #include "supervisor.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf_frameunwinder.h"
 #include "symbolication/value.h"
+#include "utils/fmt_join.h"
 #include "utils/logger.h"
 #include "utils/util.h"
 #include <mdbsys/ptrace.h>
@@ -24,7 +24,7 @@ TaskRegisters::TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archIn
     break;
   case TargetFormat::Remote:
     ASSERT(archInfo, "Architecture info must be present for remote targets!");
-    registerFile = new RegisterDescription{archInfo};
+    registerFile = new RegisterDescription{ archInfo };
     break;
   }
 }
@@ -82,15 +82,17 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
   mInstructionPointerDirty = true;
   exited = false;
   reaped = false;
-  regs = {tc.mFormat, tc.mArchInfo.Cast().get()};
+  regs = { tc.mFormat, tc.mArchInfo.Cast().get() };
   mBreakpointLocationStatus = {};
   mTaskCallstack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
   mSupervisor = tc.GetSupervisor();
   ASSERT(mSupervisor != nullptr, "must have supervisor");
   DBGLOG(core, "Deferred initializing of thread {} completed", mTid);
   if (restart) {
-    EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateThreadCreated(
-      {tc.TaskLeaderTid(), mTid, 5, 0}, {tc::RunType::Continue, tc::ResumeTarget::Task, 0}, {}));
+    auto *traceEvent = new TraceEvent{ *this };
+    TraceEvent::InitThreadCreated(
+      traceEvent, { tc.TaskLeaderTid(), mTid, 5, 0 }, { tc::RunType::Continue, tc::ResumeTarget::Task, 0 }, {});
+    EventSystem::Get().PushDebuggerEvent(traceEvent);
   }
 }
 
@@ -104,9 +106,9 @@ TaskInfo::CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, b
 
 /** static */
 Ref<TaskInfo>
-TaskInfo::CreateUnInitializedTask(TaskWaitResult wait) noexcept
+TaskInfo::CreateUnInitializedTask(WaitPidResult wait) noexcept
 {
-  auto task = Ref<TaskInfo>{new TaskInfo{wait.tid}};
+  auto task = RefPtr<TaskInfo>::MakeShared(wait.tid);
   Tracer::Get().RegisterTracedTask(task);
   task->mLastWaitStatus = wait.ws;
   return task;
@@ -159,6 +161,12 @@ TaskInfo::StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>
   regs.registerFile->Store(data);
 }
 
+void
+TaskInfo::RefreshRegisterCache() noexcept
+{
+  mSupervisor->CacheRegistersFor(*this);
+}
+
 #define RETURN_RET_ADDR_IF(cond)                                                                                  \
   if ((cond))                                                                                                     \
     return mTaskCallstack->ReturnAddresses();
@@ -194,7 +202,7 @@ TaskInfo::GetSupervisor() const noexcept
 }
 
 void
-TaskInfo::set_taskwait(TaskWaitResult wait) noexcept
+TaskInfo::SetTaskWait(WaitPidResult wait) noexcept
 {
   mLastWaitStatus = wait.ws;
 }
@@ -275,28 +283,28 @@ TaskInfo::SetSessionId(u32 sessionId) noexcept
 }
 
 void
-TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::ResumeAction resume) noexcept
+TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexcept
 {
-  ASSERT(mBreakpointLocationStatus.has_value(), "Requires a valid bpstat");
+  ASSERT(mBreakpointLocationStatus.IsValid(), "Requires a valid bpstat");
 
-  auto loc = tc->GetUserBreakpoints().GetLocationAt(mBreakpointLocationStatus->mAddress);
-  auto user_ids = loc->GetUserIds();
-  DBGLOG(core, "[TaskInfo {}] Stepping over bps {} at {}", mTid, fmt::join(user_ids, ", "), loc->Address());
+  auto userBreakpointIds = mBreakpointLocationStatus.mBreakpointLocation->GetUserIds();
+  DBGLOG(core,
+    "[TaskInfo {}] Stepping over bps {} at {}",
+    mTid,
+    JoinFormatIterator{ userBreakpointIds, ", " },
+    mBreakpointLocationStatus.mBreakpointLocation->Address());
 
   auto &control = tc->GetInterface();
-  loc->Disable(mTid, control);
-  mBreakpointLocationStatus->mIsSteppedOver = true;
-  mBreakpointLocationStatus->mShouldReEnableBreakpoint = true;
-  mBreakpointLocationStatus->mShouldResume = resume.mResumeType != tc::RunType::None;
+  mBreakpointLocationStatus.mBreakpointLocation->Disable(mTid, control);
+  mBreakpointLocationStatus.SetSteppingOver(resumeType);
 
-  mNextResumeAction = resume;
+  const auto result = control.ResumeTask(*this, tc::ResumeAction{ tc::RunType::Step, tc::ResumeTarget::Task, 0 });
 
-  const auto result = control.ResumeTask(*this, tc::ResumeAction{tc::RunType::Step, resume.mResumeTarget, 0});
   ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 
 void
-TaskInfo::SetStop() noexcept
+TaskInfo::SetUserVisibleStop() noexcept
 {
   mUserVisibleStop = true;
   mTracerVisibleStop = true;
@@ -341,18 +349,17 @@ TaskInfo::SetUpdated() noexcept
 }
 
 void
-TaskInfo::AddBreakpointLocationStatus(AddrPtr address) noexcept
+TaskInfo::AddBreakpointLocationStatus(BreakpointLocation *breakpointLocation) noexcept
 {
-  mBreakpointLocationStatus = LocationStatus{
-    .mAddress = address, .mShouldResume = false, .mIsSteppedOver = false, .mShouldReEnableBreakpoint = false};
+  ASSERT(!mBreakpointLocationStatus.IsValid(), "Overwriting breakpoint location status breaks the invariant");
+  mBreakpointLocationStatus.Clear();
+  mBreakpointLocationStatus.mBreakpointLocation = RefPtr{ breakpointLocation };
 }
 
-std::optional<LocationStatus>
+void
 TaskInfo::ClearBreakpointLocStatus() noexcept
 {
-  const auto copy = mBreakpointLocationStatus;
-  mBreakpointLocationStatus = std::nullopt;
-  return copy;
+  mBreakpointLocationStatus.Clear();
 }
 
 bool
@@ -377,18 +384,18 @@ TaskInfo::CollectStop() noexcept
 TaskVMInfo
 TaskVMInfo::from_clone_args(const clone_args &cl_args) noexcept
 {
-  return {.stack_low = cl_args.stack, .stack_size = cl_args.stack_size, .tls = cl_args.tls};
+  return { .stack_low = cl_args.stack, .stack_size = cl_args.stack_size, .tls = cl_args.tls };
 }
 
 /*static*/ CallStackRequest
 CallStackRequest::partial(int count) noexcept
 {
-  return CallStackRequest{.req = Type::Partial, .count = count};
+  return CallStackRequest{ .req = Type::Partial, .count = count };
 }
 
 /*static*/ CallStackRequest
 CallStackRequest::full() noexcept
 {
-  return CallStackRequest{.req = Type::Full, .count = 0};
+  return CallStackRequest{ .req = Type::Full, .count = 0 };
 }
 } // namespace mdb

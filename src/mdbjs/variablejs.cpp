@@ -1,287 +1,214 @@
 /** LICENSE TEMPLATE */
 #include "variablejs.h"
-#include "js/ArrayBuffer.h"
-#include "js/ArrayBufferMaybeShared.h"
-#include "js/BigInt.h"
-#include "js/CompilationAndEvaluation.h"
-#include "js/Conversions.h"
-#include "js/EnvironmentChain.h"
-#include "js/ErrorReport.h"
-#include "js/GCVector.h"
-#include "js/Modules.h"
-#include "js/PropertyAndElement.h"
-#include "js/PropertyDescriptor.h"
-#include "js/RootingAPI.h"
-#include "js/Symbol.h"
-#include "js/Value.h"
-#include "jsapi.h"
-#include "mdbjs/util.h"
-#include "symbolication/value_visualizer.h"
-#include "utils/logger.h"
-#include <js/ArrayBuffer.h> // For JS_NewArrayBuffer and JS_GetArrayBufferData
-#include <js/experimental/TypedData.h>
+#include "utils/scope_defer.h"
 
+// mdb
+#include <lib/arena_allocator.h>
+#include <mdbjs/jsobject.h>
 #include <symbolication/objfile.h>
 #include <symbolication/type.h>
+#include <symbolication/value_visualizer.h>
+
+// dependencies
+#include <quickjs/quickjs.h>
 
 namespace mdb::js {
 
-/*static*/ bool
-Variable::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+static constexpr auto JsVariableOpaqueDataErrorMessage = "Could not read sym::Value*";
+
+static constexpr auto IsCurrentValue = [](const sym::Value &v) { return v.IsValidValue() && v.IsLive(); };
+
+#define GetNativeSelf() GetThisOrReturnException(self, JsVariableOpaqueDataErrorMessage)
+
+/* static */ JSValue
+JsVariable::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-  args.rval().setBigInt(JS::NumberToBigInt(cx, var->ReferenceId()));
-  return true;
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  return JS_NewUint32(context, pointer->ReferenceId());
 }
 
-/*static*/ bool
-Variable::js_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+/* static */ JSValue
+JsVariable::Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-  auto str = PrepareString(cx, var->mName);
-  if (!str) {
-    JS_ReportOutOfMemory(cx);
-    return false;
-  }
-  args.rval().setString(str);
-  return true;
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  return JS_NewStringLen(context, pointer->mName.StringView().data(), pointer->mName.StringView().size());
 }
 
-// Function to extract "depth" and "nl" properties from a JSObject*
-static bool
-GetSerializeOptions(JSContext *cx, JS::HandleObject obj, sym::SerializeOptions &options)
+static inline std::optional<sym::SerializeOptions>
+GetSerializeOptionsFromJsArg(JSContext *context, int argCount, JSValue *argv) noexcept
 {
-  JS::RootedValue val(cx);
-
-  // Check for "depth" property
-  if (JS_GetProperty(cx, obj, "depth", &val) && val.isInt32()) {
-    options.mDepth = val.toInt32();
+  if (argCount < 1) {
+    return {};
   }
 
-  // Check for "nl" property
-  if (JS_GetProperty(cx, obj, "nl", &val) && val.isBoolean()) {
-    options.mNewLineAfterMember = val.toBoolean();
+  const auto val = argv[0];
+
+  if (JS_IsUndefined(val) || !JS_IsObject(val)) {
+    return {};
   }
 
-  return true;
-}
+  auto depth = JS_GetPropertyStr(context, val, sym::SerializeOptions::JsDepthPropertyString);
+  auto newLine = JS_GetPropertyStr(context, val, sym::SerializeOptions::JsNewlinePropertyString);
 
-/*static*/ bool
-Variable::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  sym::SerializeOptions options{};
-  if (args.length() == 1) {
-    if (!args[0].isObject() && !args[0].isString()) {
-      JS_ReportErrorASCII(cx, "options to toString must be an object { depth: int, nl: boolean } that describes "
-                              "levels to print and if newlines should be printed after fields");
-      return false;
-    } else if (args[0].isObject()) {
-      JS::Rooted<JSObject *> obj{cx, &args[0].toObject()};
-      // options are default, if no opts are passed in.
-      GetSerializeOptions(cx, obj, options);
+  sym::SerializeOptions opts;
+
+  if (!JS_IsUndefined(depth)) {
+    JS_ToInt32(context, &opts.mDepth, depth);
+    // Don't let the user do something stupid.
+    if (opts.mDepth < 2) {
+      opts.mDepth = 2;
     }
   }
 
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-
-  std::string string;
-  sym::JavascriptValueSerializer::Serialize(var, string, options);
-  auto str = PrepareString(cx, string);
-  if (!str) {
-    JS_ReportOutOfMemory(cx);
-    return false;
+  if (!JS_IsUndefined(newLine)) {
+    opts.mNewLineAfterMember = JS_ToBool(context, newLine);
   }
-  ASSERT(!JS_IsExceptionPending(cx), "Exception left unhandled");
-  args.rval().setString(str);
-  return true;
+
+  return opts;
+}
+
+/* static */ JSValue
+JsVariable::ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+{
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  auto serializeOptions = GetSerializeOptionsFromJsArg(context, argCount, argv).value_or({});
+
+  mdb::alloc::StackBufferResource<4096> alloc{};
+  std::pmr::string buffer{ &alloc };
+  buffer.reserve(alloc.GetCapacity());
+  sym::JavascriptValueSerializer::Serialize(pointer, buffer, serializeOptions);
+
+  return JS_NewStringLen(context, buffer.data(), buffer.size());
+}
+
+/* static */ JSValue
+JsVariable::TypeName(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+{
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  return JS_NewStringLen(context, pointer->GetType()->mName->data(), pointer->GetType()->mName->size());
+}
+
+/* static */ JSValue
+JsVariable::Address(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+{
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  return JS_NewInt64(context, pointer->Address().GetRaw());
+}
+
+/* static */ JSValue
+JsVariable::Dereference(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+{
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  return JS_ThrowTypeError(context, "Variable::Dereference not yet implemented.");
+}
+
+/* static */ JSValue
+JsVariable::Bytes(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+{
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+
+  const auto sizeBytes = pointer->MemoryView().size_bytes();
+  auto bytes = new u8[sizeBytes];
+  std::memcpy(bytes, pointer->MemoryView().data(), sizeBytes);
+  return JS_NewArrayBuffer(
+    context, bytes, sizeBytes, [](JSRuntime *rt, void *opaque, void *ptr) { delete (u8 *)ptr; }, nullptr, false);
+}
+
+/* static */ JSValue
+JsVariable::IsLive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+{
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  return JS_NewBool(context, pointer->IsLive());
 }
 
 /* static */
-bool
-Variable::js_type_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+JSValue
+JsVariable::SetValue(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-  auto str = PrepareString(cx, var->GetType()->mName);
-  if (!str) {
-    JS_ReportOutOfMemory(cx);
-    return false;
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
+  if (!IsCurrentValue(*pointer)) {
+    return JS_ThrowTypeError(context, "Can't set the value of a variable that no longer is alive.");
   }
-  args.rval().setString(str);
-  return true;
+
+  if (argCount != 1) {
+    return JS_ThrowTypeError(
+      context, "method takes 1 argument, the contents that shall be written to the variable's backing storage.");
+  }
+
+  const auto arg = argv[0];
+  const auto argTag = JS_VALUE_GET_TAG(arg);
+
+  switch (argTag) {
+  case JS_TAG_INT: {
+    int32_t value = 0;
+    JS_ToInt32(context, &value, arg);
+    if (!pointer->WritePrimitive(value)) {
+      return JS_ThrowTypeError(context, "Failed to set value of variable");
+    }
+  } break;
+  case JS_TAG_BIG_INT: {
+    int64_t value = 0;
+    JS_ToBigInt64(context, &value, arg);
+    if (!pointer->WritePrimitive(value)) {
+      return JS_ThrowTypeError(context, "Failed to set value of variable");
+    }
+  } break;
+  case JS_TAG_FLOAT64: {
+    double value = 0;
+    JS_ToFloat64(context, &value, arg);
+    if (!pointer->WritePrimitive(value)) {
+      return JS_ThrowTypeError(context, "Failed to set value of variable");
+    }
+  } break;
+  case JS_TAG_BOOL: {
+    bool value = JS_ToBool(context, arg);
+    if (!pointer->WritePrimitive(value)) {
+      return JS_ThrowTypeError(context, "Failed to set value of variable");
+    }
+  } break;
+  case JS_TAG_STRING: // TODO: Implement
+    [[fallthrough]];
+  case JS_TAG_STRING_ROPE: // TODO: Implement
+    [[fallthrough]];
+  default:
+    break;
+  }
+  return JS_ThrowTypeError(
+    context, "Unsupported JS Value tag for this operation (Variable::SetValue): %d", argTag);
 }
 
-/* static */ bool
-Variable::js_address(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+/* static */ void
+JsVariable::CacheLayout(JSContext *context, sym::Value *value) noexcept
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-
-  JS::BigInt *bigInt = JS::NumberToBigInt(cx, var->Address().GetRaw());
-  if (!bigInt) {
-    JS_ReportErrorASCII(cx, "Failed to create BigInt");
-    return false;
-  }
-
-  // Return the BigInt to JavaScript
-  args.rval().setBigInt(bigInt);
-  return true;
+  // TODO
 }
 
-/* static */ bool
-Variable::js_bytes(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+/* static */ JSValue
+JsVariable::GetMemberVariable(
+  JSContext *context, JSValueConst thisValue, JSAtom prop, JSValueConst receiverValue) noexcept
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-  const auto bytesSize = var->MemoryView().size_bytes();
+  auto pointer = GetThisOrReturnException(pointer, "Could not read sym::Value*");
 
-  mozilla::UniquePtr<uint8_t[], JS::FreePolicy> buffer(static_cast<uint8_t *>(JS_malloc(cx, bytesSize)));
-  std::copy_n(var->MemoryView().data(), bytesSize, buffer.get());
-  JS::Rooted<JSObject *> arrayBuffer(cx, JS::NewArrayBufferWithContents(cx, bytesSize, std::move(buffer)));
-  auto arrayObject = JS_NewUint8ArrayWithBuffer(cx, arrayBuffer, 0, static_cast<int64_t>(bytesSize));
-  args.rval().setObject(*arrayObject);
+  // TODO: Implement our own DebuggerAtom type, which we can share with QuickJs, this will make future
+  // lookups/comparisons between strings faster. This todo has duplicates.
 
-  return true;
-}
+  const char *propertyName = JS_AtomToCString(context, prop);
+  ScopedDefer defer{ [&]() {
+    if (propertyName) {
+      JS_FreeCString(context, propertyName);
+    }
+  } };
 
-/* static */
-bool
-Variable::js_is_live(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
+  auto member = pointer->GetMember(propertyName);
 
-  args.rval().setBoolean(var->IsLive());
-  return true;
-}
-
-/* static */
-bool
-Variable::js_set_value(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  if (args.length() != 1) {
-    JS_ReportErrorASCII(cx, "Function expects a value that the variable can be overwritten with.");
-    return false;
+  if (!member) {
+    return JS_ThrowTypeError(
+      context, "Type %s doesn't have a member called %s", pointer->GetType()->mName->data(), propertyName);
   }
 
-  auto var = Get(callee.get());
-  if (args[0].isInt32()) {
-    int value = args[0].toInt32();
-    if (!var->WritePrimitive(value)) {
-      JS_ReportErrorASCII(cx, "Failed to set value");
-      return false;
-    }
-  } else if (args[0].isDouble()) {
-    double value;
-    if (!JS::ToNumber(cx, args[0], &value)) {
-      JS_ReportErrorASCII(cx, "Conversion to number failed");
-      return false;
-    }
-    if (!var->WritePrimitive(value)) {
-      JS_ReportErrorASCII(cx, "Failed to set value");
-      return false;
-    }
-  } else if (args[0].isBigInt()) {
-    auto bigInt = args[0].toBigInt();
-    if (JS::BigIntIsNegative(bigInt)) {
-      int64_t value = JS::ToBigInt64(bigInt);
-      if (!var->WritePrimitive(value)) {
-        JS_ReportErrorASCII(cx, "Failed to set value");
-        return false;
-      }
-    } else {
-      uint64_t value = JS::ToBigUint64(bigInt);
-      if (!var->WritePrimitive(value)) {
-        JS_ReportErrorASCII(cx, "Failed to set value");
-        return false;
-      }
-    }
-  } else {
-    JS_ReportErrorASCII(cx, "Over-write value type unsupported at the moment");
-    return false;
-  }
-
-  return true;
-}
-
-/* static */
-bool
-Variable::js_dereference(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto var = Get(callee.get());
-  if (!var->GetType()->IsReference()) {
-    JS_ReportErrorASCII(cx, "value is not a reference");
-    return false;
-  }
-
-  JS_ReportErrorASCII(cx, "dereference not implemented yet");
-  return false;
-}
-
-void
-Variable::Configure(JSContext *cx, JSObject *obj, sym::Value *t)
-{
-  JSFunction *func = JS_NewFunction(cx, Variable::js_to_string, 0, 0, "toPrimitive");
-  if (func) {
-    JSObject *funcObj = JS_GetFunctionObject(func);
-    if (funcObj) {
-      JS::RootedValue funcVal(cx, JS::ObjectValue(*funcObj));
-      JS::Rooted<JSObject *> rootedObj{cx, obj};
-      JS::Symbol *sym = JS::GetWellKnownSymbol(cx, JS::SymbolCode::toPrimitive);
-      JS::RootedId symId(cx, JS::PropertyKey::Symbol(sym)); // Convert to jsid
-      // Define `Symbol.toPrimitive`
-      JS_DefinePropertyById(cx, rootedObj, symId, funcVal, JSPROP_ENUMERATE);
-    }
-  }
-}
-
-bool
-Variable::resolve(JSContext *cx, JS::HandleId id, bool *resolved) noexcept
-{
-  JS::Rooted<JS::Value> idValue{cx};
-  *resolved = false;
-  if (!JS_IdToValue(cx, id, &idValue)) {
-    return false;
-  }
-
-  if (idValue.isString()) {
-    JS::Rooted<JSString *> str{cx, idValue.toString()};
-    std::string propertyName;
-    if (!ToStdString(cx, str, propertyName)) {
-      return false;
-    }
-    auto value = Get();
-    if (!value->HasMember(propertyName)) {
-      return true;
-    }
-    auto member = value->GetMember(propertyName);
-    if (member) {
-      JS::Rooted<JSObject *> memberObject{cx, Create(cx, member)};
-      if (!memberObject) {
-        return false;
-      }
-      JS::Rooted<JSObject *> thisObject{cx, AsObject(this)};
-      JS_DefinePropertyById(cx, thisObject, id, memberObject, JSPROP_ENUMERATE);
-      *resolved = true;
-    }
-    return true;
-  }
-
-  return true;
+  return JsVariable::CreateValue(context, member);
 }
 
 } // namespace mdb::js
+
+#undef GetThis

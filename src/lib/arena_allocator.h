@@ -79,11 +79,64 @@ public:
   bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override;
 };
 
+template <std::size_t N> class StackBufferResource : public std::pmr::memory_resource
+{
+public:
+  void
+  release() noexcept
+  {
+    mMemoryOffset = 0;
+  }
+
+  constexpr std::size_t
+  GetCapacity() noexcept
+  {
+    return N;
+  }
+
+protected:
+  void *
+  do_allocate(std::size_t bytes, std::size_t alignment) override
+  {
+    VERIFY(alignment != 0 && (alignment & (alignment - 1)) == 0, "Bad alignment by stack allocator.");
+
+    std::uintptr_t base = reinterpret_cast<std::uintptr_t>(mByteStorage) + mMemoryOffset;
+    std::size_t space = N - mMemoryOffset;
+
+    std::uintptr_t aligned = (base + (alignment - 1)) & ~(alignment - 1);
+    std::size_t adjustment = aligned - base;
+
+    VERIFY(adjustment + bytes < space,
+      "Stack allocator memory exhausted! Requested {} bytes, available: {}",
+      bytes,
+      space);
+
+    mMemoryOffset += adjustment + bytes;
+    return reinterpret_cast<void *>(aligned);
+  }
+
+  void
+  do_deallocate(void *, std::size_t, std::size_t) noexcept override
+  {
+    // no-op
+  }
+
+  bool
+  do_is_equal(const std::pmr::memory_resource &other) const noexcept override
+  {
+    return this == &other;
+  }
+
+private:
+  alignas(std::max_align_t) std::byte mByteStorage[N];
+  std::size_t mMemoryOffset{ 0 };
+};
+
 template <size_t StackSize> class StackAllocator
 {
   std::array<u8, StackSize> mMemory;
-  std::pmr::monotonic_buffer_resource mMemoryResource{mMemory.data(), mMemory.size() * sizeof(unsigned)};
-  std::pmr::polymorphic_allocator<> mUsingStackAllocator{&mMemoryResource};
+  std::pmr::monotonic_buffer_resource mMemoryResource{ mMemory.data(), mMemory.size() * sizeof(unsigned) };
+  std::pmr::polymorphic_allocator<> mUsingStackAllocator{ &mMemoryResource };
 
 public:
   std::pmr::monotonic_buffer_resource &Resource() noexcept;

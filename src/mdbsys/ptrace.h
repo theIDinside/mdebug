@@ -44,7 +44,7 @@ struct WaitStatus
   };
 };
 
-struct TaskWaitResult
+struct WaitPidResult
 {
   Tid tid;
   WaitStatus ws;
@@ -252,5 +252,5 @@ IS_TRACE_EVENT(auto stopsig, auto ptrace_event) noexcept -> bool
   return stopsig >> 8 == (SIGTRAP | (ptrace_event << 8));
 }
 
-TaskWaitResult WaitResultToTaskWaitResult(Tid tid, int status) noexcept;
+WaitPidResult WaitResultToTaskWaitResult(Tid tid, int status) noexcept;
 } // namespace mdb

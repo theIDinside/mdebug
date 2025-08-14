@@ -1,59 +1,56 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "js/TypeDecls.h"
 #include "mdbjs/jsobject.h"
 #include "symbolication/value.h"
-#include "utils/smartptr.h"
 #include <common/typedefs.h>
-#include <cstring>
 
 namespace mdb::js {
-struct Variable : public RefPtrJsObject<mdb::js::Variable, sym::Value, StringLiteral{"Variable"}>
+
+struct JsVariable : public JSBinding<JsVariable, sym::Value, JavascriptClasses::Variable>
 {
-  enum Slots
+  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto TypeName(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Address(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Dereference(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Bytes(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto IsLive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto SetValue(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto CacheLayout(JSContext *context, sym::Value *value) noexcept -> void;
+
+  /** Gets member variable when user does foo.mMember or foo.value, foo.blah, etc. As such, when user reads
+   * property, it uses the get_property functionality in QuickJS. If the backing sym::Type* does not have a member
+   * called .bar, we throw an exception because the idea is that the user probably expected to read a type it
+   * thought and now it's not having that member, it's better to make noise than silently fail with JS_UNDEFINED.*/
+  static auto GetMemberVariable(
+    JSContext *context, JSValueConst thisValue, JSAtom prop, JSValueConst receiverValue) noexcept -> JSValue;
+
+  static constexpr std::span<const JSCFunctionListEntry>
+  PrototypeFunctions() noexcept
   {
-    ThisPointer,
-    TypeTransform,
-    SlotCount
-  };
+    static constexpr auto fns = std::to_array({ /** Method definitions */
+      FunctionEntry("id", 0, &Id),
+      FunctionEntry("name", 0, &Name),
+      FunctionEntry("toString", 1, &ToString),
+      FunctionEntry("typeName", 0, &TypeName),
+      FunctionEntry("address", 0, &Address),
+      FunctionEntry("dereference", 0, &Dereference),
+      FunctionEntry("bytes", 0, &Bytes),
+      FunctionEntry("isLive", 0, &IsLive),
+      FunctionEntry("setValue", 1, &SetValue),
+      ToStringTag("Variable") });
+    return fns;
+  }
 
-  static void Configure(JSContext *cx, JSObject *obj, sym::Value *t);
-
-  bool resolve(JSContext *cx, JS::HandleId id, bool *resolved) noexcept;
-
-  /** Return the variables reference (id) for this variable*/
-  static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the name of this variable (if it has any). */
-  static bool js_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the printable for this variable. */
-  static bool js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the type name for this variable as a string. */
-  static bool js_type_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the address that this value was read from. */
-  static bool js_address(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Dereference this value if it's a reference type. Throws an exception if it can't. */
-  static bool js_dereference(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the bytes that constitute this value. Returned as an Uint8Array. */
-  static bool js_bytes(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Returns `true` if this variable is known to be live (because it was created at "this" stop). */
-  static bool js_is_live(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-
-  /** Attempts to set the value with the contents of the passed in value. Throws exception if the value this object
-   * represents isn't a primitive that matches the input value. */
-  static bool js_set_value(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-
-  static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0),
-                                                    JS_FN("name", &js_name, 0, 0),
-                                                    JS_FN("toString", &js_to_string, 1, 0),
-                                                    JS_FN("address", &js_address, 0, 0),
-                                                    JS_FN("bytes", &js_bytes, 0, 0),
-                                                    JS_FN("dereference", &js_dereference, 0, 0),
-                                                    JS_FN("typeName", &js_type_name, 0, 0),
-                                                    JS_FN("isLive", &js_is_live, 0, 0),
-                                                    JS_FN("setValue", &js_set_value, 1, 0),
-                                                    JS_FS_END};
-  // Uncomment when you want to define properties
-  // static constexpr JSPropertySpec PropertiesSpec[]{JS_PS_END};
+  static consteval auto
+  ExoticMethods() noexcept -> JSClassExoticMethods
+  {
+    JSClassExoticMethods v{};
+    v.get_property = &GetMemberVariable;
+    return v;
+  }
 };
+
 } // namespace mdb::js

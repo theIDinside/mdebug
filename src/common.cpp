@@ -24,6 +24,6 @@ syscall_name(u64 syscall_number)
 #include "defs/syscalls.def"
   }
 #undef SYSCALL
-  panic(fmt::format("UNKNOWN SYSCALL NUMBER {}", syscall_number), std::source_location::current(), 1);
+  panic(std::format("UNKNOWN SYSCALL NUMBER {}", syscall_number), std::source_location::current(), 1);
 }
 } // namespace mdb

@@ -27,7 +27,7 @@ public:
     sigemptyset(&mNewlySet);
     std::string signalNames;
     for (int signal : signalsToBlock) {
-      fmt::format_to(std::back_inserter(signalNames), "{}", strsignal(signal));
+      std::format_to(std::back_inserter(signalNames), "{}", strsignal(signal));
       if (signal != signalsToBlock.back()) {
         signalNames.push_back(',');
       }
@@ -35,7 +35,7 @@ public:
     DBGLOG(core, "{} Configuring to block signals: {}", gettid(), signalNames);
     for (const auto sig : signalsToBlock) {
       if (-1 == sigaddset(&mNewlySet, sig)) {
-        PANIC(fmt::format("Adding signal {} to set failed", sig));
+        PANIC(std::format("Adding signal {} to set failed", sig));
       }
     }
     if (-1 == pthread_sigmask(SIG_BLOCK, &mNewlySet, &mRestoreTo)) {

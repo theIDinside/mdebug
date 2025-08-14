@@ -11,9 +11,9 @@
 #include <vector>
 
 #define ReqArg(TypeName, ...)                                                                                     \
-  enum class TypeName##Args : u8{__VA_ARGS__};                                                                    \
+  enum class TypeName##Args : u8{ __VA_ARGS__ };                                                                  \
   static constexpr std::array<std::string_view, count_tuple(#__VA_ARGS__)> ArgNames =                             \
-    std::to_array({#__VA_ARGS__});
+    std::to_array({ #__VA_ARGS__ });
 
 #define RequiredArguments(...)                                                                                    \
   static constexpr const auto ReqArgs = std::to_array(__VA_ARGS__);                                               \
@@ -43,7 +43,7 @@ template <typename... Args>
 consteval auto
 count_tuple(Args... args)
 {
-  return std::tuple_size<decltype(std::make_tuple(std::string_view{args}...))>::value;
+  return std::tuple_size<decltype(std::make_tuple(std::string_view{ args }...))>::value;
 }
 
 } // namespace dap
@@ -65,51 +65,50 @@ struct ArgumentError
   constexpr static ArgumentError
   Missing(std::string_view description)
   {
-    return ArgumentError{.kind = ArgumentErrorKind::Missing,
-                         .description = std::make_optional<std::string>(description)};
+    return ArgumentError{ .kind = ArgumentErrorKind::Missing,
+      .description = std::make_optional<std::string>(description) };
   }
 
   constexpr static ArgumentError
   Invalid(std::string_view desc) noexcept
   {
-    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput, .description = std::string{desc}};
+    return ArgumentError{ .kind = ArgumentErrorKind::InvalidInput, .description = std::string{ desc } };
   }
 
   constexpr static ArgumentError
   RequiredNumberType() noexcept
   {
-    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                         .description = "Argument required to be a number"};
+    return ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
+      .description = "Argument required to be a number" };
   }
 
   constexpr static ArgumentError
   RequiredStringType() noexcept
   {
-    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                         .description = "Argument required to be a string"};
+    return ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
+      .description = "Argument required to be a string" };
   }
 
   constexpr static ArgumentError
   RequiredAddressType() noexcept
   {
-    return ArgumentError{
-      .kind = ArgumentErrorKind::InvalidInput,
+    return ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
       .description =
-        "Argument required to be a string in the format of a hexadecimal address (0x can be omitted)."};
+        "Argument required to be a string in the format of a hexadecimal address (0x can be omitted)." };
   }
 
   constexpr static ArgumentError
   RequiredBooleanType() noexcept
   {
-    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                         .description = "Argument required to be a boolean"};
+    return ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
+      .description = "Argument required to be a boolean" };
   }
 
   constexpr static ArgumentError
   RequiredArrayType() noexcept
   {
-    return ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                         .description = "Argument required to be an array"};
+    return ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
+      .description = "Argument required to be an array" };
   }
 };
 
@@ -126,7 +125,7 @@ using MissingOrInvalidResult = std::optional<MissingOrInvalidArgs>;
  */
 
 #define DEFINE_NAME(Name)                                                                                         \
-  static constexpr std::string_view Request{Name};                                                                \
+  static constexpr std::string_view Request{ Name };                                                              \
   constexpr std::string_view name() const noexcept final { return Request; }
 
 template <typename DerivedCommand, typename Json>
@@ -136,23 +135,23 @@ concept HasValidation = requires(const Json &json) {
 
 struct UICommandArg
 {
-  u64 seq;
-  Pid pid;
+  u64 mSeq;
+  SessionId mSessionId;
 };
 
 struct UICommand
 {
   dap::DebugAdapterClient *mDAPClient;
-  Pid mPid;
+  SessionId mSessionId;
 
 public:
-  explicit UICommand(UICommandArg arg) noexcept : mPid(arg.pid), seq(arg.seq) {}
+  explicit UICommand(UICommandArg arg) noexcept : mSessionId(arg.mSessionId), mSeq(arg.mSeq) {}
   virtual ~UICommand() noexcept = default;
 
   constexpr void
-  SetDebugAdapterClient(dap::DebugAdapterClient &da) noexcept
+  SetDebugAdapterClient(dap::DebugAdapterClient &debugAdapter) noexcept
   {
-    mDAPClient = &da;
+    mDAPClient = &debugAdapter;
   }
 
   TraceeController *GetSupervisor() noexcept;
@@ -166,37 +165,37 @@ public:
   CheckArguments(const JsonArgs &args)
   {
     constexpr auto expectedCommandArgs = Derived::Arguments();
-    MissingOrInvalidArgs faulty_args;
+    MissingOrInvalidArgs faultyArgs;
     for (const auto &arg : expectedCommandArgs) {
       if (auto r = CheckArgumentContains(args, arg); r) {
-        faulty_args.push_back(r.value());
+        faultyArgs.push_back(r.value());
       } else if constexpr (HasValidation<Derived, decltype(args[arg])>) {
         if (auto processed = Derived::ValidateArg(arg, args[arg]); processed) {
-          faulty_args.emplace_back(processed.value());
+          faultyArgs.emplace_back(processed.value());
         }
       }
     }
 
-    if (faulty_args.empty()) {
+    if (faultyArgs.empty()) {
       return std::nullopt;
     } else {
-      return MissingOrInvalidResult{faulty_args};
+      return MissingOrInvalidResult{ faultyArgs };
     }
   }
 
   template <typename JsonArgs, typename CommandArg>
   static auto
-  CheckArgumentContains(const JsonArgs &args,
-                        const CommandArg &cmd_arg) -> std::optional<std::pair<ArgumentError, std::string>>
+  CheckArgumentContains(const JsonArgs &args, const CommandArg &commandArg)
+    -> std::optional<std::pair<ArgumentError, std::string>>
   {
-    if (!args.contains(cmd_arg)) {
+    if (!args.contains(commandArg)) {
       return std::make_pair<ArgumentError, std::string>(
-        {ArgumentErrorKind::Missing, "Required argument is missing"}, std::string{cmd_arg});
+        { ArgumentErrorKind::Missing, "Required argument is missing" }, std::string{ commandArg });
     }
     return std::nullopt;
   }
 
-  std::uint64_t seq;
+  std::uint64_t mSeq;
   constexpr virtual std::string_view name() const noexcept = 0;
 };
 

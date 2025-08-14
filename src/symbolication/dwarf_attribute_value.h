@@ -2,6 +2,7 @@
 #pragma once
 
 #include "tracee_pointer.h"
+#include <cstring>
 #include <symbolication/dwarf_defs.h>
 
 template <typename T> concept UnsignedWord = std::is_same_v<T, u32> || std::is_same_v<T, u64>;
@@ -19,7 +20,7 @@ struct StrSlice
 
 #define ATTR_CTOR(DataType, field)                                                                                \
   constexpr AttributeValue(DataType data, AttributeForm form, Attribute name) noexcept                            \
-      : form{form}, name{name}, value{data}                                                                       \
+      : form{ form }, name{ name }, value{ data }                                                                 \
   {                                                                                                               \
   }
 
@@ -33,7 +34,7 @@ struct AttributeValue
 {
   template <AttributeValueType T>
   constexpr AttributeValue(T value, AttributeForm form, Attribute name) noexcept
-      : form{form}, name{name}, value{value}
+      : form{ form }, name{ name }, value{ value }
   {
   }
 
@@ -42,7 +43,7 @@ struct AttributeValue
   operator=(const AttributeValue &other)
   {
     if (this != &other) {
-      std::memcpy(this, &other, sizeof(AttributeValue));
+      std::memcpy((void *)this, &other, sizeof(AttributeValue));
     }
     return *this;
   }
@@ -145,7 +146,7 @@ struct AttributeValue
 private:
   union _value
   { // Size = 16 bytes
-    constexpr _value(const char *str) noexcept : str{str} {}
+    constexpr _value(const char *str) noexcept : str{ str } {}
     constexpr _value(DataBlock block) noexcept : block(block) {}
     constexpr _value(u64 u) noexcept : u(u) {}
     constexpr _value(i64 i) noexcept : i(i) {}
@@ -155,14 +156,14 @@ private:
       if (this == &other) {
         return;
       }
-      std::memcpy(this, &other, sizeof(_value));
+      std::memcpy((void *)this, &other, sizeof(_value));
     }
 
     constexpr _value &
     operator=(const _value &other)
     {
       if (this != &other) {
-        std::memcpy(this, &other, sizeof(_value));
+        std::memcpy((void *)this, &other, sizeof(_value));
       }
       return *this;
     }

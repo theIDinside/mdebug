@@ -1,11 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+#include "common/formatter.h"
 #include <charconv>
 #include <cstdint>
-#include <fmt/core.h>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 
 template <typename T> concept Integral = std::is_integral_v<T>;
@@ -14,8 +15,8 @@ template <typename T> class TraceePointer
 {
 public:
   using Type = typename std::remove_cv_t<T>;
-  constexpr TraceePointer() noexcept : mRemoteAddress{0} {}
-  constexpr TraceePointer(std::nullptr_t) noexcept : mRemoteAddress{0} {}
+  constexpr TraceePointer() noexcept : mRemoteAddress{ 0 } {}
+  constexpr TraceePointer(std::nullptr_t) noexcept : mRemoteAddress{ 0 } {}
   constexpr TraceePointer &operator=(const TraceePointer &) = default;
   constexpr TraceePointer(const TraceePointer &) = default;
   constexpr TraceePointer(TraceePointer &&) = default;
@@ -40,7 +41,7 @@ public:
   operator+(OffsetT offset) const noexcept
   {
     const auto res = mRemoteAddress + (offset * SizeOfPointee());
-    return TraceePointer{res};
+    return TraceePointer{ res };
   }
 
   // `offset` is in N of T, not in bytes (unless T, of course, is a byte-like type)
@@ -49,7 +50,7 @@ public:
   operator-(OffsetT offset) const noexcept
   {
     const auto res = mRemoteAddress - (offset * SizeOfPointee());
-    return TraceePointer{res};
+    return TraceePointer{ res };
   }
 
   template <Integral OffsetT>
@@ -80,7 +81,7 @@ public:
   {
     const auto current = mRemoteAddress;
     mRemoteAddress += SizeOfPointee();
-    return TraceePointer{current};
+    return TraceePointer{ current };
   }
 
   constexpr TraceePointer &
@@ -95,7 +96,7 @@ public:
   {
     const auto current = mRemoteAddress;
     mRemoteAddress -= SizeOfPointee();
-    return TraceePointer{current};
+    return TraceePointer{ current };
   }
 
   uintptr_t
@@ -125,7 +126,7 @@ public:
   constexpr TraceePointer<U>
   As() const noexcept
   {
-    return TraceePointer<U>{GetRaw()};
+    return TraceePointer<U>{ GetRaw() };
   }
 
   // Utility that could get called a lot when we want to do arbitrary
@@ -182,13 +183,13 @@ public:
   static constexpr auto
   Max() noexcept
   {
-    return TraceePointer{UINTMAX_MAX};
+    return TraceePointer{ UINTMAX_MAX };
   }
 
   static constexpr auto
   Min() noexcept
   {
-    return TraceePointer{nullptr};
+    return TraceePointer{ nullptr };
   }
 
 private:
@@ -207,25 +208,17 @@ template <typename T> struct std::hash<TraceePointer<T>>
   }
 };
 
-namespace fmt {
-template <typename T> struct formatter<TraceePointer<T>>
+template <typename T> struct std::formatter<TraceePointer<T>>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(TraceePointer<T> const &tptr, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "0x{:x}", tptr.GetRaw());
+    return std::format_to(ctx.out(), "0x{:x}", tptr.GetRaw());
   }
 };
-
-} // namespace fmt
 
 using AddrPtr = TraceePointer<void>;
 template <typename T> using TPtr = TraceePointer<T>;
@@ -242,7 +235,7 @@ ToAddress(std::string_view s) noexcept
   uint64_t value;
   auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value, 16);
   if (ec == std::errc() && ptr == s.data() + s.size()) {
-    return AddrPtr{value};
+    return AddrPtr{ value };
   } else {
     return std::nullopt;
   }

@@ -6,10 +6,10 @@
 
 /// ConsoleCommandRegistry implementation
 namespace mdb {
-namespace fmt = ::fmt;
+
 void
-ConsoleCommandRegistry::RegisterConsoleCommand(std::string_view name,
-                                               std::shared_ptr<ConsoleCommand> command) noexcept
+ConsoleCommandRegistry::RegisterConsoleCommand(
+  std::string_view name, std::shared_ptr<ConsoleCommand> command) noexcept
 {
   mCommands[name] = std::move(command);
 }
@@ -38,8 +38,8 @@ ConsoleCommandRegistry::GetCommandNameList() const noexcept
 
 /// ConsoleCommandInterpreter Implementations
 void
-ConsoleCommandInterpreter::RegisterConsoleCommand(std::string_view name,
-                                                  std::shared_ptr<ConsoleCommand> command) noexcept
+ConsoleCommandInterpreter::RegisterConsoleCommand(
+  std::string_view name, std::shared_ptr<ConsoleCommand> command) noexcept
 {
   registry.RegisterConsoleCommand(name, std::move(command));
 }
@@ -47,8 +47,8 @@ ConsoleCommandInterpreter::RegisterConsoleCommand(std::string_view name,
 ConsoleCommandResult
 ConsoleCommandInterpreter::Interpret(const std::string &input, Allocator *allocator) noexcept
 {
-  auto result = Tracer::GetScriptingInstance().ReplEvaluate(input, allocator);
-  return ConsoleCommandResult{true, result};
+  auto result = js::Scripting::Get().ReplEvaluate(allocator, input);
+  return ConsoleCommandResult{ true, result };
 }
 
 GenericCommand::GenericCommand(std::string functionName, Function &&function) noexcept
@@ -60,7 +60,7 @@ GenericCommand::GenericCommand(std::string functionName, Function &&function) no
 std::shared_ptr<GenericCommand>
 GenericCommand::CreateCommand(std::string name, GenericCommand::Function &&function) noexcept
 {
-  return std::shared_ptr<GenericCommand>(new GenericCommand{std::move(name), std::move(function)});
+  return std::shared_ptr<GenericCommand>(new GenericCommand{ std::move(name), std::move(function) });
 }
 
 ConsoleCommandResult

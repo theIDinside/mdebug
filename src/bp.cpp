@@ -1,28 +1,27 @@
 /** LICENSE TEMPLATE */
 #include "bp.h"
 
+// mdb
 #include <common/panic.h>
-
-#include "events/stop_event.h"
-#include "interface/dap/events.h"
-#include "js/TracingAPI.h"
-#include <algorithm>
+#include <events/stop_event.h>
+#include <interface/dap/events.h>
+#include <mdbjs/bpjs.h>
+#include <mdbjs/mdbjs.h>
 #include <mdbsys/ptrace.h>
 #include <supervisor.h>
 #include <symbolication/objfile.h>
 #include <tracer.h>
+#include <utils/logger.h>
+
+// system
+#include <algorithm>
 #include <type_traits>
 
-#include <mdbjs/bpjs.h>
-#include <mdbjs/mdbjs.h>
-
 #define BP_KEEP(STOP)                                                                                             \
-  BreakpointHitEventResult { STOP, BreakpointOp::Keep }
+  BreakpointHitEventResult { this, STOP }
 #define BP_RETIRE(STOP)                                                                                           \
-  BreakpointHitEventResult { STOP, BreakpointOp::Retire }
+  BreakpointHitEventResult { this, STOP, BreakpointOp::Retire }
 namespace mdb {
-
-namespace fmt = ::fmt;
 
 BreakpointLocation::BreakpointLocation(AddrPtr address, u8 original) noexcept
     : mAddress(address), mSourceLocation(), mOriginalByte(original)
@@ -30,8 +29,8 @@ BreakpointLocation::BreakpointLocation(AddrPtr address, u8 original) noexcept
   DBGLOG(core, "[breakpoint loc]: Constructed breakpoint location at {}", address);
 }
 
-BreakpointLocation::BreakpointLocation(AddrPtr address, u8 original,
-                                       std::unique_ptr<LocationSourceInfo> sourceLocationInfo) noexcept
+BreakpointLocation::BreakpointLocation(
+  AddrPtr address, u8 original, std::unique_ptr<LocationSourceInfo> sourceLocationInfo) noexcept
     : mAddress(address), mSourceLocation(std::move(sourceLocationInfo)), mOriginalByte(original)
 {
   DBGLOG(core, "[breakpoint loc]: Constructed breakpoint location at {}", address);
@@ -41,7 +40,7 @@ BreakpointLocation::~BreakpointLocation() noexcept
 {
   ASSERT(!mInstalled, "Breakpoint location was enabled while being destroyed - this is a hard error");
   ASSERT(mUserMapping.empty(),
-         "This breakpoint location was destroyed when having active (but destroyed) users registered to it");
+    "This breakpoint location was destroyed when having active (but destroyed) users registered to it");
   DBGLOG(core, "[breakpoint loc]: Destroying breakpoint location at {}", mAddress);
 }
 
@@ -51,8 +50,8 @@ BreakpointLocation::CreateLocation(AddrPtr address, u8 original) noexcept
   return RefPtr<BreakpointLocation>::MakeShared(address, original);
 }
 /*static*/ BreakpointLocation::Ref
-BreakpointLocation::CreateLocationWithSource(AddrPtr address, u8 original,
-                                             std::unique_ptr<LocationSourceInfo> sourceLocationInfo) noexcept
+BreakpointLocation::CreateLocationWithSource(
+  AddrPtr address, u8 original, std::unique_ptr<LocationSourceInfo> sourceLocationInfo) noexcept
 {
   return RefPtr<BreakpointLocation>::MakeShared(address, original, std::move(sourceLocationInfo));
 }
@@ -119,8 +118,10 @@ BreakpointLocation::Disable(Tid taskId, tc::TraceeCommandInterface &controlInter
 {
   if (mInstalled) {
     const auto result = controlInterface.DisableBreakpoint(taskId, *this);
-    VERIFY(result.kind == tc::TaskExecuteResult::Ok, "[tracer:{}.{}] Failed to disable breakpoint",
-           controlInterface.TaskLeaderTid(), taskId);
+    VERIFY(result.kind == tc::TaskExecuteResult::Ok,
+      "[tracer:{}.{}] Failed to disable breakpoint",
+      controlInterface.TaskLeaderTid(),
+      taskId);
     mInstalled = false;
   }
 }
@@ -146,7 +147,7 @@ BreakpointLocation::AddUser(tc::TraceeCommandInterface &controlInterface, UserBr
 
 UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind locationUserKind) noexcept
     : mId(param.mBreakpointId), mTid(param.mTaskId), mKind(locationUserKind),
-      mHitCondition(param.mTimesToHit.value_or(0))
+      mHitCondition(param.mTimesToHit.value_or(0)), mProcessId(param.mControl.TaskLeaderTid())
 {
 
   if (param.mBreakpointLocationResult.is_expected()) {
@@ -202,14 +203,24 @@ UserBreakpoint::GetTid() noexcept
   return mTid;
 }
 
-EventResult
+std::optional<Tid>
+UserBreakpoint::GetProcessId() const noexcept
+{
+  return mProcessId;
+}
+
+std::optional<BreakpointHitEventResult>
 UserBreakpoint::EvaluateStopCondition(TaskInfo &t) noexcept
 {
   if (!mExpression) {
-    return EventResult::None;
+    return {};
   }
 
-  return mExpression->EvaluateCondition(Tracer::GetJsContext(), &t, this).value_or(EventResult::None);
+  TODO("Must implement BreakpointStatus first");
+  BreakpointHitEventResult result{ this };
+  if (!mExpression->Run(&result)) {
+    return result;
+  }
 }
 
 std::optional<AddrPtr>
@@ -263,7 +274,7 @@ UserBreakpoint::GetSourceFile() const noexcept
   }
 
   if (auto src = mBreakpointLocation->GetSourceLocationInfo(); src) {
-    return std::optional{std::string_view{src->mSourceFile}};
+    return std::optional{ std::string_view{ src->mSourceFile } };
   } else {
     return {};
   }
@@ -279,13 +290,13 @@ UserBreakpoint::GetErrorMessage() const noexcept
       [t, &it](const auto &e) {
         using T = std::remove_cvref_t<decltype(e)>;
         if constexpr (std::is_same_v<T, MemoryError>) {
-          fmt::format_to(it, "Could not write to {} ({})", e.mRequestedAddress, strerror(e.mErrorNumber));
+          std::format_to(it, "Could not write to {} ({})", e.mRequestedAddress, strerror(e.mErrorNumber));
         } else if constexpr (std::is_same_v<T, ResolveError>) {
           auto spec = t->UserProvidedSpec();
           if (spec) {
-            fmt::format_to(it, "Could not resolve using spec: {}", *spec);
+            std::format_to(it, "Could not resolve using spec: {}", *spec);
           } else {
-            fmt::format_to(it, "Could not resolve breakpoint using spec");
+            std::format_to(it, "Could not resolve breakpoint using spec");
           }
         } else {
           static_assert(always_false<T>, "Should be unreachable");
@@ -303,17 +314,9 @@ UserBreakpoint::UpdateLocation(Ref<BreakpointLocation> breakpointLocation) noexc
 }
 
 void
-UserBreakpoint::SetExpression(std::unique_ptr<js::CompileBreakpointCallable> expression) noexcept
+UserBreakpoint::SetExpression(std::unique_ptr<js::JsBreakpointFunction> expression) noexcept
 {
   mExpression = std::move(expression);
-}
-
-void
-UserBreakpoint::TraceJs(JSTracer *trace) noexcept
-{
-  if (mExpression) {
-    mExpression->trace(trace, "breakpoint condition");
-  }
 }
 
 /* virtual */
@@ -325,23 +328,23 @@ UserBreakpoint::UserProvidedSpec() const noexcept
 
 /* virtual */
 Ref<UserBreakpoint>
-UserBreakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &tc,
-                                Ref<BreakpointLocation>) noexcept
+UserBreakpoint::CloneBreakpoint(
+  UserBreakpoints &breakpointStorage, TraceeController &tc, Ref<BreakpointLocation>) noexcept
 {
   PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
 }
 
-Breakpoint::Breakpoint(RequiredUserParameters param, LocationUserKind kind,
-                       std::unique_ptr<BreakpointSpecification> spec) noexcept
+Breakpoint::Breakpoint(
+  RequiredUserParameters param, LocationUserKind kind, std::unique_ptr<BreakpointSpecification> spec) noexcept
     : UserBreakpoint(std::move(param), kind), mBreakpointSpec(std::move(spec))
 {
   if (mBreakpointSpec->mCondition) {
-    auto res = Tracer::GetScriptingInstance().SourceBreakpointCondition(mId, *mBreakpointSpec->mCondition);
-    if (res.is_error()) {
-      DBGLOG(core, "failed to source breakpoint condition: {}", res.error());
+    auto res = js::JsBreakpointFunction::CreateJsBreakpointFunction(
+      js::Scripting::Get().GetContext(), *mBreakpointSpec->mCondition);
+    if (res.has_value()) {
+      SetExpression(std::move(*res));
     }
-    SetExpression(std::make_unique<js::CompileBreakpointCallable>(JS::Heap{res.value()}));
   }
 }
 
@@ -370,24 +373,24 @@ Breakpoint::OnHit(TraceeController &controller, TaskInfo &t) noexcept
   DBGLOG(core, "[{}:bkpt]: bp {} hit", t.mTid, mId);
   IncrementHitCount();
 
-  const auto evaluatedResult = EvaluateStopCondition(t);
+  const auto evaluatedResult = EvaluateStopCondition(t).value_or(BreakpointHitEventResult{ this });
 
-  if (HookRequestedResume(evaluatedResult)) {
-    return BP_KEEP(evaluatedResult);
+  if (HookRequestedResume(evaluatedResult.mResult)) {
+    return evaluatedResult;
   };
 
-  if (DetermineBehavior(evaluatedResult, controller) == BreakpointBehavior::StopAllThreadsWhenHit) {
+  if (DetermineBehavior(evaluatedResult.mResult, controller) == BreakpointBehavior::StopAllThreadsWhenHit) {
     const auto all_stopped = controller.IsAllStopped();
     if (all_stopped) {
-      controller.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, mId, true);
+      controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true);
     } else {
       controller.StopAllTasks(&t);
       controller.GetPublisher(ObserverType::AllStop).Once([&]() {
-        controller.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, mId, true);
+        controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true);
       });
     }
   } else {
-    controller.EmitStoppedAtBreakpoints({.pid = 0, .tid = t.mTid}, mId, false);
+    controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, false);
   }
   return BP_KEEP(EventResult::Stop);
 }
@@ -399,26 +402,28 @@ Breakpoint::UserProvidedSpec() const noexcept
 }
 
 Ref<UserBreakpoint>
-Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage, TraceeController &controller,
-                            Ref<BreakpointLocation> breakpointLocation) noexcept
+Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage,
+  TraceeController &controller,
+  Ref<BreakpointLocation> breakpointLocation) noexcept
 {
 
-  auto breakpoint =
-    Ref<Breakpoint>::MakeShared(RequiredUserParameters{.mTaskId = mTid,
-                                                       .mBreakpointId = breakpointStorage.NewBreakpointId(),
-                                                       .mBreakpointLocationResult = std::move(breakpointLocation),
-                                                       .mTimesToHit = {},
-                                                       .mControl = controller},
-                                mKind, mBreakpointSpec->Clone());
+  auto breakpoint = Ref<Breakpoint>::MakeShared(RequiredUserParameters{ .mTaskId = mTid,
+                                                  .mBreakpointId = breakpointStorage.NewBreakpointId(),
+                                                  .mBreakpointLocationResult = std::move(breakpointLocation),
+                                                  .mTimesToHit = {},
+                                                  .mControl = controller },
+    mKind,
+    mBreakpointSpec->Clone());
 
   breakpointStorage.AddUser(breakpoint);
   ASSERT(!breakpoint->GetLocation()->GetUserIds().empty(), "Breakpoint location should have user now!");
   return breakpoint;
 }
 
-TemporaryBreakpoint::TemporaryBreakpoint(
-  RequiredUserParameters param, LocationUserKind kind, std::optional<Tid> stopOnlyTaskTid,
-  std::unique_ptr<js::CompileBreakpointCallable> conditionEvaluator) noexcept
+TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param,
+  LocationUserKind kind,
+  std::optional<Tid> stopOnlyTaskTid,
+  std::unique_ptr<js::JsBreakpointFunction> conditionEvaluator) noexcept
     : Breakpoint(std::move(param), kind, nullptr)
 {
 }
@@ -451,14 +456,26 @@ FinishBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
   if (all_stopped) {
-    tc.EmitSteppedStop({tc.TaskLeaderTid(), mTid}, "Finished function", true);
+    tc.EmitSteppedStop({ tc.TaskLeaderTid(), mTid }, "Finished function", true);
   } else {
     tc.StopAllTasks(&t);
     tc.GetPublisher(ObserverType::AllStop).Once([&tc, tid = mTid]() {
-      tc.EmitSteppedStop({tc.TaskLeaderTid(), tid}, "Finished function", true);
+      tc.EmitSteppedStop({ tc.TaskLeaderTid(), tid }, "Finished function", true);
     });
   }
   return BP_RETIRE(Stop);
+}
+
+CodeInjectionBoundaryBreakpoint::CodeInjectionBoundaryBreakpoint(RequiredUserParameters param) noexcept
+    : UserBreakpoint(std::move(param), LocationUserKind::Address)
+{
+}
+
+BreakpointHitEventResult
+CodeInjectionBoundaryBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
+{
+  DBGLOG(core, "Task {} hit code injection boundary breakpoint at {}", t.mTid, Address().value());
+  return BP_KEEP(None);
 }
 
 ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) noexcept
@@ -477,17 +494,18 @@ ResumeToBreakpoint::OnHit(TraceeController &, TaskInfo &t) noexcept
   }
 }
 
-Logpoint::Logpoint(RequiredUserParameters param, std::string_view logExpression,
-                   std::unique_ptr<BreakpointSpecification> specification) noexcept
+Logpoint::Logpoint(RequiredUserParameters param,
+  std::string_view logExpression,
+  std::unique_ptr<BreakpointSpecification> specification) noexcept
     : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::move(specification))
 {
   ASSERT(!mBreakpointSpec->mCondition, "logpoint should not have condition!");
   prepareExpression(logExpression);
-  auto res = Tracer::GetScriptingInstance().SourceBreakpointCondition(mId, mExpressionString);
-  if (res.is_error()) {
-    DBGLOG(core, "failed to source breakpoint condition: {}", res.error());
-  } else {
-    SetExpression(std::make_unique<js::CompileBreakpointCallable>(JS::Heap{res.value()}));
+  auto res =
+    js::JsBreakpointFunction::CreateJsBreakpointFunction(js::Scripting::Get().GetContext(), mExpressionString);
+  // auto res = Tracer::GetScriptingInstance().SourceBreakpointCondition(mId, mExpressionString);
+  if (res.has_value()) {
+    SetExpression(std::move(*res));
   }
 }
 
@@ -528,9 +546,10 @@ Logpoint::EvaluateLog(TaskInfo &t) noexcept
   if (!mExpression) {
     return;
   }
-  auto result = mExpression->EvaluateLog(Tracer::GetJsContext(), &t, this);
-  t.GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(
-    new ui::dap::OutputEvent{t.GetSupervisor()->TaskLeaderTid(), "console", std::move(result.value())});
+  TODO("Implement this");
+  auto result = mExpression->EvaluateLog(&t, this);
+  // t.GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(new ui::dap::OutputEvent{
+  // t.GetSupervisor()->TaskLeaderTid(), "console", std::move(result.value()) });
 }
 
 BreakpointHitEventResult
@@ -550,18 +569,10 @@ SOLoadingBreakpoint::OnHit(TraceeController &tc, TaskInfo &) noexcept
 {
   tc.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints
-  return BreakpointHitEventResult{EventResult::Resume, BreakpointOp::Keep};
+  return BreakpointHitEventResult{ this, EventResult::Resume, BreakpointOp::Keep };
 }
 
-UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : mControl(tc)
-{
-  Tracer::GetScriptingInstance().AddTrace([this](JSTracer *trc) {
-    DBGLOG(interpreter, "[GC]: tracing UserBreakpoints::UserBreakpoints");
-    for (const auto &user : AllUserBreakpoints()) {
-      user->TraceJs(trc);
-    }
-  });
-}
+UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : mControl(tc) {}
 
 u16
 UserBreakpoints::NewBreakpointId() noexcept
@@ -695,17 +706,24 @@ UserBreakpoints::GetBreakpointsFromSourceFile(const SourceCodeFileName &sourceCo
 UserBreakpoints::SourceFileBreakpointMap &
 UserBreakpoints::GetBreakpointsFromSourceFile(std::string_view sourceCodeFileName) noexcept
 {
-  return mSourceCodeBreakpoints[std::string{sourceCodeFileName}];
+  return mSourceCodeBreakpoints[std::string{ sourceCodeFileName }];
 }
 
 std::vector<std::string_view>
 UserBreakpoints::GetSourceFilesWithBreakpointSpecs() const noexcept
 {
-  std::vector<std::string_view> result{15};
+  std::vector<std::string_view> result{ 15 };
   result.reserve(mSourceCodeBreakpoints.size());
   for (const auto &[source, _] : mSourceCodeBreakpoints) {
-    result.emplace_back(std::string_view{source});
+    result.emplace_back(std::string_view{ source });
   }
   return result;
+}
+
+/* static */
+Expected<Ref<BreakpointLocation>, BreakpointError>
+UserBreakpoints::CreateBreakpointLocation(TraceeController &ctrl, AddrPtr address) noexcept
+{
+  return ctrl.GetOrCreateBreakpointLocation(address);
 }
 } // namespace mdb

@@ -17,7 +17,7 @@ class GdbRemoteCommander final : public TraceeCommandInterface
 {
   std::shared_ptr<gdb::RemoteConnection> mConnection;
   gdb::WriteBuffer *mWriteBuffer = gdb::WriteBuffer::Create(16);
-  Pid mProcessId;
+  SessionId mProcessId;
   std::optional<std::string> mExecFile{};
   Auxv mAuxvData{};
   RemoteType mRemoteType;
@@ -30,8 +30,11 @@ class GdbRemoteCommander final : public TraceeCommandInterface
   void inform_supported() noexcept;
 
 public:
-  GdbRemoteCommander(RemoteType type, std::shared_ptr<gdb::RemoteConnection> conn, Pid process_id,
-                     std::optional<std::string> execFile, std::shared_ptr<gdb::ArchictectureInfo> arch) noexcept;
+  GdbRemoteCommander(RemoteType type,
+    std::shared_ptr<gdb::RemoteConnection> conn,
+    SessionId process_id,
+    std::optional<std::string> execFile,
+    std::shared_ptr<gdb::ArchictectureInfo> arch) noexcept;
   ~GdbRemoteCommander() noexcept override = default;
 
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *readBuffer) noexcept final;
@@ -39,8 +42,8 @@ public:
 
   TaskExecuteResponse ReverseContinue(bool stepOnly) noexcept final;
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction type) noexcept final;
-  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run,
-                                   std::vector<Tid> *resumedThreads = nullptr) noexcept final;
+  TaskExecuteResponse ResumeTarget(
+    TraceeController *tc, ResumeAction run, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
@@ -59,7 +62,7 @@ public:
 
   bool OnExec() noexcept final;
   // Called after a fork for the creation of a new process supervisor
-  Interface OnFork(Pid pid) noexcept final;
+  Interface OnFork(SessionId pid) noexcept final;
   bool PostFork(TraceeController *parent) noexcept final;
   bool IsAllStopSession() noexcept final;
 
@@ -88,7 +91,7 @@ struct Thread
 struct ProcessInfo
 {
   std::string exe;
-  Pid pid;
+  SessionId pid;
   std::vector<Thread> threads;
   std::shared_ptr<gdb::ArchictectureInfo> arch;
 };

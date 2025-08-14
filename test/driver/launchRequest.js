@@ -1,19 +1,34 @@
 const { checkResponse } = require('./client')
 const { assert } = require('./utils')
+const { randomUUID } = require('crypto')
 
-async function launch(DA) {
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
+async function launch(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
-  await DA.sendReqGetResponse('initialize', {}, 1000).then((res) => checkResponse(res, 'initialize', true))
-  await DA.sendReqGetResponse('launch', {
-    program: DA.buildDirFile('stackframes'),
-    stopOnEntry: true,
-  }).then((res) => checkResponse(res, 'launch', true))
+  let initEvent = debugAdapter.initializedEventPromise()
+  await Promise.all([debugAdapter.initializeRequest().then((res) => checkResponse(res, 'initialize', true)), initEvent])
+  console.log('Init complete.')
+  await debugAdapter.configurationDoneRequest().then((res) => {
+    checkResponse(res, 'configurationDone', true)
+    console.log('Configuration done')
+  })
+  await debugAdapter
+    .launchRequest({
+      program: debugAdapter.buildDirFile('stackframes'),
+      stopOnEntry: true,
+    })
+    .then((res) => {
+      checkResponse(res, 'launch')
+      console.log('Launched.')
+    })
 }
 
-async function launchToMain(DA) {
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
+async function launchToMain(debugAdapter) {
+  await debugAdapter.launchToMain(debugAdapter.buildDirFile('stackframes'))
 }
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function launchThenDisconnect(DA) {
   await DA.launchToMain(DA.buildDirFile('stackframes'))
   const response = await DA.disconnect('terminate')

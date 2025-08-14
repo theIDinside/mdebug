@@ -34,36 +34,36 @@ struct ValueRange
 class IValueResolve
 {
 public:
-  virtual std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
-                                          ValueRange valueRange = {}) noexcept = 0;
+  virtual std::vector<Ref<Value>> Resolve(
+    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept = 0;
 };
 
 class ResolveReference final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
-                                  ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(
+    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveCString final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
-                                  ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(
+    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveArray final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
-                                  ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(
+    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveRange final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(const VariableContext &context, SymbolFile *symbolFile,
-                                  ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(
+    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
 };
 
 // The `value` visualizer - it formats a `Value` so that it can be displayed in the `value` field of a Variable
@@ -76,65 +76,79 @@ class DebugAdapterSerializer
 {
 public:
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  virtual std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name,
-                                                    int variablesReference,
-                                                    std::pmr::memory_resource *allocator) noexcept = 0;
+  virtual std::optional<std::pmr::string> Serialize(const Value &value,
+    std::string_view name,
+    int variablesReference,
+    std::pmr::memory_resource *allocator) noexcept = 0;
 };
 
 class PrimitiveVisualizer final : public DebugAdapterSerializer
 {
   std::optional<std::pmr::string> FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept;
-  std::optional<std::pmr::string> FormatEnum(Type &t, std::span<const u8> span,
-                                             std::pmr::memory_resource *allocator) noexcept;
+  std::optional<std::pmr::string> FormatEnum(
+    Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept;
 
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name, int variablesReference,
-                                            std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> Serialize(const Value &value,
+    std::string_view name,
+    int variablesReference,
+    std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class DefaultStructVisualizer final : public DebugAdapterSerializer
 {
 public:
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name, int variablesReference,
-                                            std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> Serialize(const Value &value,
+    std::string_view name,
+    int variablesReference,
+    std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class InvalidValueVisualizer final : public DebugAdapterSerializer
 {
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name, int variablesReference,
-                                            std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> Serialize(const Value &value,
+    std::string_view name,
+    int variablesReference,
+    std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class ArrayVisualizer final : public DebugAdapterSerializer
 {
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name, int variablesReference,
-                                            std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> Serialize(const Value &value,
+    std::string_view name,
+    int variablesReference,
+    std::pmr::memory_resource *allocator) noexcept final;
 };
 
 class CStringVisualizer final : public DebugAdapterSerializer
 {
-  std::optional<std::pmr::string> FormatValue(const Value &value, std::optional<u32> null_terminator,
-                                              std::pmr::memory_resource *allocator) noexcept;
+  std::optional<std::pmr::string> FormatValue(
+    const Value &value, std::optional<u32> null_terminator, std::pmr::memory_resource *allocator) noexcept;
 
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value, std::string_view name, int variablesReference,
-                                            std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> Serialize(const Value &value,
+    std::string_view name,
+    int variablesReference,
+    std::pmr::memory_resource *allocator) noexcept final;
 };
 
 struct SerializeOptions
 {
-  int mDepth{2};
-  bool mNewLineAfterMember{false};
+  static auto constexpr JsDepthPropertyString = "depth";
+  static auto constexpr JsNewlinePropertyString = "nl";
+
+  int mDepth{ 2 };
+  bool mNewLineAfterMember{ false };
 };
 
 class JavascriptValueSerializer
 {
   template <typename FmtIterator>
-  static FmtIterator Serialize(Value *value, FmtIterator fmtIterator, const SerializeOptions &options,
-                               int currentDepth) noexcept;
+  static FmtIterator Serialize(
+    Value *value, FmtIterator fmtIterator, const SerializeOptions &options, int currentDepth) noexcept;
 
 public:
   template <typename StringType>

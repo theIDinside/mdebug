@@ -1,4 +1,4 @@
-/** @typedef { import("./client").DAClient } MDB */
+/** @typedef { import("./client").DebugAdapterClient } MDB */
 
 const {
   launchToGetFramesAndScopes,

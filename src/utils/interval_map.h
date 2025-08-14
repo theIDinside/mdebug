@@ -38,8 +38,8 @@ public:
   // The default range is 0 .. u64::max which is the entirety of the span of addressable memory (not exactly the
   // truth, but whatever). Inserting these two sentinel values simplifies things alot.
   IntervalMapping() noexcept
-      : interval({IntervalNode<MapDatum, A>{.addr = std::numeric_limits<A>::min(), .values = {}},
-                  IntervalNode<MapDatum, A>{.addr = std::numeric_limits<A>::max(), .values = {}}})
+      : interval({ IntervalNode<MapDatum, A>{ .addr = std::numeric_limits<A>::min(), .values = {} },
+          IntervalNode<MapDatum, A>{ .addr = std::numeric_limits<A>::max(), .values = {} } })
   {
   }
 
@@ -55,9 +55,9 @@ public:
     auto it_b = MaybePartitionAt<EndpointType::End>(FindIndexOf<false>(end), end);
 
     for (; it_a < it_b; ++it_a) {
-      it_a->values.push_back({false, value});
+      it_a->values.push_back({ false, value });
     }
-    it_a->values.push_back({true, value});
+    it_a->values.push_back({ true, value });
   }
 
   /**
@@ -117,6 +117,16 @@ private:
   constexpr bool
   NodeAddressEquals(size_t index, A addr) noexcept
   {
+    // index was produced by not finding a range in the interval container that can fit `addr`, as such it (most
+    // likely) points to .size() (i.e. one beyond last). Therefore, also ASSERT on that, lest it be misused (we
+    // will then find out if the index value is getting produced in odd ways.)
+    if (!(index < interval.size())) {
+      ASSERT(index == interval.size(),
+        "unexpected index value has been prodcued: {}, size of interval container: {}",
+        index,
+        interval.size());
+      return false;
+    }
     return interval[index].addr == addr;
   }
 
@@ -187,11 +197,11 @@ private:
 
     if constexpr (type == EndpointType::Start) {
       auto it =
-        interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
+        interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{ .addr = with_addr, .values = {} });
       CopyTo(interval[index - 1].values, it->values);
     } else {
       auto it =
-        interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{.addr = with_addr, .values = {}});
+        interval.insert(interval.begin() + index, IntervalNode<MapDatum, A>{ .addr = with_addr, .values = {} });
       if (index < interval.size() - 1) {
         TransformCopyTo(interval[index + 1].values, it->values, [](auto it) {
           auto copy = it;

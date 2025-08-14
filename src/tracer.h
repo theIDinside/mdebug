@@ -34,7 +34,7 @@
 struct JSContext;
 
 namespace mdb::js {
-class AppScriptingInstance;
+class Scripting;
 }
 namespace mdb {
 
@@ -87,14 +87,58 @@ enum class TracerProcess
   Shutdown
 };
 
-using ApplicationEventHandler = std::function<bool(Tracer &, const ApplicationEvent &evt)>;
+enum class EventState : u8
+{
+  Unhandled,
+  Handled,
+  Defer,
+};
 
-class EventHandlerStack
+template <typename Evt> using EventHandler = std::function<EventState(const Evt &evt)>;
+
+template <typename Evt> class EventHandlerStack
 {
 public:
-  using HandlerStack = InlineStack<ApplicationEventHandler, 16>;
-  constexpr bool HasEventHandler() const noexcept;
-  constexpr bool ProcessEvent(Tracer &debugger, const ApplicationEvent &evt);
+  using Handler = EventHandler<Evt>;
+  using HandlerStack = InlineStack<Handler, 16>;
+
+  constexpr bool
+  HasEventHandler() const noexcept
+  {
+    return !mEventHandlerStack.Empty();
+  }
+
+  constexpr EventState
+  ProcessEvent(const Evt &evt) noexcept
+  {
+    if (mEventHandlerStack.Empty()) {
+      return EventState::Unhandled;
+    }
+
+    for (const auto &handler : mEventHandlerStack.StackWalkDown()) {
+      if (const auto result = handler(evt); result != EventState::Unhandled) {
+        return result;
+      }
+    }
+
+    return EventState::Unhandled;
+  }
+
+  constexpr bool
+  PushEventHandler(Handler &&handler) noexcept
+  {
+    if (mEventHandlerStack.Size() == mEventHandlerStack.Capacity()) {
+      PANIC("Event handler stack can't hold more handlers");
+    }
+    mEventHandlerStack.Push(std::move(handler));
+    return true;
+  }
+
+  constexpr void
+  Pop() noexcept
+  {
+    mEventHandlerStack.Pop();
+  }
 
 private:
   HandlerStack mEventHandlerStack{};
@@ -108,11 +152,13 @@ class Tracer
   static termios sOriginalTty;
   static winsize sTerminalWindowSize;
   static Tracer *sTracerInstance;
-  static mdb::js::AppScriptingInstance *sScriptRuntime;
+  static mdb::js::Scripting *sScriptRuntime;
   // same as sScriptRuntime::mContext. But it's used so often that having direct access to it, is sensible.
   static JSContext *sApplicationJsContext;
   static bool sUsePTraceMe;
   static int sLastTraceEventTime;
+  std::vector<std::pair<SessionId, std::unique_ptr<TraceeController>>> mUnInitializedSupervisor{};
+
 #ifdef MDB_DEBUG
   u64 mDebuggerEvents;
 
@@ -148,13 +194,14 @@ public:
   static bool IsRunning() noexcept;
   static bool UsingTraceMe() noexcept;
   static Tracer &Get() noexcept;
+  static TraceeController *PrepareNewSupervisorWithId(SessionId sessionId) noexcept;
 
   void TerminateSession() noexcept;
-  void AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession session) noexcept;
+  void AddLaunchedTarget(SessionId sessionId, const tc::InterfaceConfig &config, TargetSession session) noexcept;
   void LoadAndProcessObjectFile(pid_t target, const Path &objfile_path) noexcept;
   TraceeController *GetController(pid_t pid) noexcept;
   TraceeController *GetProcessContainingTid(Tid tid) noexcept;
-  TraceEvent *ConvertWaitEvent(TaskWaitResult wait_res) noexcept;
+  TraceEvent *ConvertWaitEvent(WaitPidResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
 
   void ExecuteCommand(ui::UICommand *cmd) noexcept;
@@ -162,16 +209,19 @@ public:
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
 
-  std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
-                                                   Allocator *allocator) noexcept;
+  std::pmr::string *EvaluateDebugConsoleExpression(
+    const std::string &expression, bool escapeOutput, Allocator *allocator) noexcept;
 
   void SetUI(ui::dap::DAP *dap) noexcept;
   void KillUI() noexcept;
 
   TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
-  static pid_t Launch(ui::dap::DebugAdapterClient *client, const std::string &sessionId, bool stopAtEntry,
-                      const Path &program, std::span<const std::string> prog_args,
-                      std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  static pid_t Launch(ui::dap::DebugAdapterClient *client,
+    SessionId sessionId,
+    bool stopAtEntry,
+    const Path &program,
+    std::span<const std::string> prog_args,
+    std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   // Returns the PID we've attached to; if we've attached to a remote target, there's a chance
   // that we may have in fact really attached to multiple processes. In this case, this is just the "first" process
   // id that we return - the remainder of the processes will get auto attached (via attach requests using the
@@ -179,13 +229,13 @@ public:
   // processes. In the future, when we've written a new Callstack UI, we can remove all this nonsense, because
   // then, one session can be responsible for multiple processes. Until then, we're stuck with this 1979 version of
   // a protocol.
-  Pid Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept;
+  Pid Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const AttachArgs &args) noexcept;
   bool RemoteAttachInit(tc::GdbRemoteCommander &tc) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
 
-  std::shared_ptr<gdb::RemoteConnection>
-  ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
+  std::shared_ptr<gdb::RemoteConnection> ConnectToRemoteGdb(
+    const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
 
   static u32 GenerateNewBreakpointId() noexcept;
   VariableReferenceId NewVariablesReference() noexcept;
@@ -198,17 +248,16 @@ public:
 
   std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
   void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
-  Ref<TaskInfo> GetTask(Tid tid) noexcept;
+  Ref<TaskInfo> GetTaskReference(Tid tid) noexcept;
+  TaskInfo *GetTaskPointer(Tid tid) noexcept;
   Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
   static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;
   TraceeController *GetSupervisorBySessionId(u32 sessionId) noexcept;
   std::vector<TraceeController *> GetAllProcesses() const noexcept;
   ui::dap::DAP *GetDap() const noexcept;
 
-  static mdb::js::AppScriptingInstance &GetScriptingInstance() noexcept;
-  static JSContext *GetJsContext() noexcept;
-  static void InitInterpreterAndStartDebugger(std::unique_ptr<DebuggerThread> debugAdapterThread,
-                                              EventSystem *eventSystem) noexcept;
+  static void InitInterpreterAndStartDebugger(
+    std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept;
   static void InitializeDapSerializers() noexcept;
 
   void Shutdown() noexcept;
@@ -253,13 +302,13 @@ public:
   u32 NewSupervisorId() noexcept;
 
 private:
-  static void MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *interpreterInstance) noexcept;
+  static void MainLoop(EventSystem *eventSystem, mdb::js::Scripting *interpreterInstance) noexcept;
 
-  std::unique_ptr<DebuggerThread> mDebugAdapterThread{nullptr};
+  std::unique_ptr<DebuggerThread> mDebugAdapterThread{ nullptr };
   std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
   std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
   ui::dap::DAP *mDAP;
-  u32 mBreakpointID{0};
+  u32 mBreakpointID{ 0 };
 
   // We do a monotonic increase. Unlike implementations I've previously worked on, and seen (like gdb)
   // We will _never_ reset the variables reference value. It's in fact used to determine "liveness" of variable
@@ -270,9 +319,9 @@ private:
   // Now - just because it's determined that the value is not live, does not mean it's invalid (or even the wrong
   // value!). It just means we can't guarantee it anymore. To guarantee, we need to `refresh` the backing memory
   // (and update the `Value`'s `mVariableReference`)
-  VariableReferenceId mVariablesReferenceCounter{0};
+  VariableReferenceId mVariablesReferenceCounter{ 0 };
   std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
-  bool already_launched{false};
+  bool already_launched{ false };
   sys::DebuggerConfiguration config;
 
   // Apparently, due to the lovely way of the universe, if a thread clones or forks
@@ -283,22 +332,20 @@ private:
   // up before their wait status of their clone parent has been seen. This should work.
   std::unordered_map<Tid, Ref<TaskInfo>> mUnInitializedThreads{};
   std::unordered_map<Tid, Ref<TaskInfo>> mDebugSessionTasks;
-  u32 mSessionThreadId{1};
-  u32 mSessionProcessId{1};
+  u32 mSessionThreadId{ 1 };
+  u32 mSessionProcessId{ 1 };
   std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
   std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;
 
-  sym::InvalidValueVisualizer *mInvalidValueDapSerializer{nullptr};
-  sym::ArrayVisualizer *mArrayValueDapSerializer{nullptr};
-  sym::PrimitiveVisualizer *mPrimitiveValueDapSerializer{nullptr};
-  sym::DefaultStructVisualizer *mDefaultStructDapSerializer{nullptr};
-  sym::CStringVisualizer *mCStringDapSerializer{nullptr};
+  sym::InvalidValueVisualizer *mInvalidValueDapSerializer{ nullptr };
+  sym::ArrayVisualizer *mArrayValueDapSerializer{ nullptr };
+  sym::PrimitiveVisualizer *mPrimitiveValueDapSerializer{ nullptr };
+  sym::DefaultStructVisualizer *mDefaultStructDapSerializer{ nullptr };
+  sym::CStringVisualizer *mCStringDapSerializer{ nullptr };
 
-  sym::ResolveReference *mResolveReference{nullptr};
-  sym::ResolveCString *mResolveCString{nullptr};
-  sym::ResolveArray *mResolveArray{nullptr};
-
-  EventHandlerStack *mEventHandlerStack{};
+  sym::ResolveReference *mResolveReference{ nullptr };
+  sym::ResolveCString *mResolveCString{ nullptr };
+  sym::ResolveArray *mResolveArray{ nullptr };
 };
 } // namespace mdb

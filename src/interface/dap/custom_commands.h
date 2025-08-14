@@ -11,7 +11,6 @@
 #include <nlohmann/json.hpp>
 
 namespace mdb {
-namespace fmt = ::fmt;
 
 using namespace std::string_view_literals;
 enum class BreakpointType : std::uint8_t;
@@ -21,8 +20,10 @@ using ui::UICommand;
 using ui::UIResult;
 using ui::UIResultPtr;
 
-ui::UICommand *ParseCustomRequestCommand(const DebugAdapterClient &client, UICommandArg arg,
-                                         const std::string &cmd_name, const nlohmann::basic_json<> &json) noexcept;
+ui::UICommand *ParseCustomRequestCommand(const DebugAdapterClient &client,
+  UICommandArg arg,
+  const std::string &cmd_name,
+  const nlohmann::basic_json<> &json) noexcept;
 
 // Resume all (currently stopped) processes and their tasks
 struct ContinueAll final : public ui::UICommand
@@ -61,7 +62,7 @@ struct PauseAllResponse final : UIResult
 
 struct ProcessId
 {
-  Pid mPid;
+  SessionId mPid;
   u32 mDebugSessionId;
 };
 
@@ -117,15 +118,13 @@ struct ImportScriptResponse final : public UIResult
 } // namespace ui::dap
 } // namespace mdb
 
-namespace fmt {
-template <> struct formatter<mdb::ui::dap::ProcessId> : Default<mdb::ui::dap::ProcessId>
+template <> struct std::formatter<mdb::ui::dap::ProcessId> : Default<mdb::ui::dap::ProcessId>
 {
   template <typename FormatContext>
   constexpr auto
   format(const mdb::ui::dap::ProcessId &processId, FormatContext &ctx) const
   {
     auto it = ctx.out();
-    return fmt::format_to(it, R"({{ "pid": {}, "sessionId": {} }})", processId.mPid, processId.mDebugSessionId);
+    return std::format_to(it, R"({{ "pid": {}, "sessionId": {} }})", processId.mPid, processId.mDebugSessionId);
   }
 };
-} // namespace fmt

@@ -10,7 +10,7 @@ namespace mdb {
 
 struct PidTid
 {
-  std::optional<Pid> mPid;
+  std::optional<SessionId> mPid;
   std::optional<Tid> mTid;
 
   constexpr
@@ -24,7 +24,7 @@ u64 *register_by_number(user_regs_struct *regs, int reg_number) noexcept;
 u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
 
 /// Returns the path that process with `pid` used to `exec`
-std::string ProcessExecPath(Pid pid) noexcept;
+std::string ProcessExecPath(SessionId pid) noexcept;
 
 /// Returns the largest vector register size on your system
 u32 QueryAvxSupport() noexcept;

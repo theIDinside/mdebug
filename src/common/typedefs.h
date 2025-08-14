@@ -11,6 +11,7 @@
 #include <type_traits>
 
 // system
+#include <sys/ptrace.h>
 #include <sys/types.h>
 
 using u64 = std::uint64_t;
@@ -68,7 +69,7 @@ template <std::size_t N> struct StringLiteral
   consteval std::string_view
   StringView() const
   {
-    return std::string_view{value, N};
+    return std::string_view{ value, N };
   }
 };
 
@@ -90,3 +91,20 @@ template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<Re
   using FnArgs = std::tuple<Args...>;
   static constexpr inline auto ArgSize = std::tuple_size_v<FnArgs>;
 };
+
+#define KiloBytes(KB) 1024 * KB
+#define MegaBytes(MB) 1024 * 1024 * MB
+
+using SessionId = i32;
+static constexpr auto kSessionId = std::string_view{ "sessionId" };
+
+namespace mdb::tc {
+enum class RunType : u8
+{
+  Unknown = 0b0000,
+  None = Unknown,
+  Step = PTRACE_SINGLESTEP,
+  Continue = PTRACE_CONT,
+  SyscallContinue = PTRACE_SYSCALL,
+};
+}

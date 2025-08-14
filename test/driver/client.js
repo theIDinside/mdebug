@@ -1,5 +1,8 @@
 /** COPYRIGHT TEMPLATE */
 
+/** @import "./types" as Types */
+/** @typedef {import('./types')} DbgTypes */
+
 /**
  * The DA Client driver. This file contains no tests but is included by the test to be able to spawn
  * a new mdb session. It emulates that of an Inline DA in VSCode (look at the extension `Midas` for examples)
@@ -11,7 +14,17 @@ const { spawn, ChildProcess } = require('child_process')
 const EventEmitter = require('events')
 const { assertLog, prettyJson, allUniqueVariableReferences, TestArgs, parseTestConfiguration } = require('./utils')
 const net = require('net')
-const { randomUUID } = require('crypto')
+
+if (!global.__sessionId__) {
+  global.__sessionId__ = 0
+}
+
+if (!global.getNextSessionId) {
+  global.getNextSessionId = function () {
+    global.__sessionId__ += 1
+    return global.__sessionId__
+  }
+}
 
 // Environment setup
 const DRIVER_DIR = path.dirname(__filename)
@@ -265,7 +278,7 @@ class Thread {
  */
 
 class Variable {
-  /** @type {DAClient} */
+  /** @type {DebugAdapterClient} */
   #client
   /** @type { DAPVariable } */
   dap
@@ -274,7 +287,7 @@ class Variable {
   cache = null
 
   /**
-   * @param {DAClient} client
+   * @param {DebugAdapterClient} client
    * @param {DAPVariable} dap
    */
   constructor(client, dap) {
@@ -331,7 +344,7 @@ class Variable {
 }
 const ScopeNames = ['Arguments', 'Locals', 'Registers']
 class StackFrame {
-  /** @type { DAClient } */
+  /** @type { DebugAdapterClient } */
   #client
   /** @type { number } */
   id
@@ -416,7 +429,7 @@ class StackFrame {
 }
 
 const regex = /Content-Length: (\d+)\s{4}/gm
-class DAClient {
+class DebugAdapterClient {
   /** @type {EventEmitter} */
   send_wait_res
   /** @type {EventEmitter} */
@@ -457,7 +470,7 @@ class DAClient {
     // for future work when we get recording in tests suites working.
     this.config = config
     // For now we don't support multi-process testing. That is only testable manually.
-    this.processId = 0
+    this.sessionId = getNextSessionId()
     try {
       this.recording = process.env.hasOwnProperty('REC')
       if (this.recording) {
@@ -549,6 +562,11 @@ class DAClient {
     })
   }
 
+  /** Creates a new DebugAdapterClient, from `this`. Since MDB utilizes a server approach (i.e. we communicate only with 1 instance of mdb, but it multiplexes the sessions on a `sessionId` parameter.) we want to create new sessions re-using the already spawned binary.*/
+  forkSession() {
+    throw new Error('TODO')
+  }
+
   requestedUseOfRemote() {
     return this.config.remote
   }
@@ -581,11 +599,11 @@ class DAClient {
     return breakpoints
   }
 
-  serializeRequest(processId, req, args = {}) {
+  serializeRequest(sessionId, req, args = {}) {
     const json = {
       seq: this.seq,
       type: 'request',
-      processId: processId,
+      sessionId: sessionId,
       command: req,
       arguments: args,
     }
@@ -637,6 +655,8 @@ class DAClient {
    * Calling this after, may or may not work, as the event handler might not be set up in time,
    * before the actual event comes across the wire.*/
   prepareWaitForEventN(evt, n, timeout, fn = this.prepareWaitForEventN) {
+    if (n <= 0) throw Error('N must be a value larger than 0')
+
     const ctrl = new AbortController()
     const signal = ctrl.signal
     const timeOut = setTimeout(() => {
@@ -648,16 +668,27 @@ class DAClient {
     const err = new Error('Timed out')
     Error.captureStackTrace(err, fn)
     let p = new Promise((res, rej) => {
-      let evts = []
+      const evts = []
+      const onShouldResolve = (body) => {
+        this.events.removeListener(evt, listener)
+        res(body)
+      }
+
       const listener = (body) => {
         eventCount++
         evts.push(body)
         if (evts.length == n) {
-          this.events.removeListener(evt, listener)
-          res(evts)
+          onShouldResolve(evts)
         }
       }
-      this.events.on(evt, listener)
+
+      // if n == 1, use this directly as the listener. that way users don't have to
+      // let res = foo[0], and instead just use it directly.
+      if (n == 1) {
+        this.events.on(evt, onShouldResolve)
+      } else {
+        this.events.on(evt, listener)
+      }
     })
 
     return Promise.race([
@@ -674,9 +705,9 @@ class DAClient {
     ])
   }
 
-  _sendReqGetResponseImpl(processId, req, args) {
+  _sendReqGetResponseImpl(sessionId, req, args) {
     return new Promise((res) => {
-      const serialized = this.serializeRequest(processId, req, args)
+      const serialized = this.serializeRequest(sessionId, req, args)
       this.send_wait_res.once(req, (response) => {
         res(response)
       })
@@ -695,7 +726,7 @@ class DAClient {
   async sendReqGetResponse(req, args, failureTimeout = seconds(1), fn = this.sendReqGetResponse) {
     const ctrl = new AbortController()
     const signal = ctrl.signal
-    const req_promise = this._sendReqGetResponseImpl(this.processId, req, args)
+    const req_promise = this._sendReqGetResponseImpl(this.sessionId, req, args)
     // we create the exception object here, to report decent stack traces for when it actually does fail.
     const err = new Error('Timed out')
     Error.captureStackTrace(err, fn)
@@ -785,36 +816,29 @@ class DAClient {
    * @param {function} configurationRoutine
    */
   async startSession(startType, startArguments, timeout, configurationRoutine) {
-    if (this.sessionId == null) {
-      this.sessionId = randomUUID()
-    }
-    if (startArguments.sessionId == null) {
-      startArguments.sessionId = this.sessionId
-    }
-    let initEventWaitable = this.prepareWaitForEvent('initialized').then(async (initEvent) => {
-      const { processId, sessionId } = initEvent
-      if (!processId || !sessionId) {
-        throw new Error(`Expected init event to contain process id(${processId}) and sessionId(${sessionId})`)
-      }
-      this.processId = processId
+    let initEventWaitable = this.initializedEventPromise().then(async (initEvent) => {
       if (configurationRoutine) {
         await configurationRoutine()
       }
-      await this.sendReqGetResponse('configurationDone', {}, timeout)
+      await this.configurationDoneRequest()
     })
+
+    for (const p of [
+      this.initializeRequest().then((res) => checkResponse(res, 'initialize', true)),
+      initEventWaitable,
+    ]) {
+      await p
+    }
+
     // the init event is fired (it doesn't fire before) after attach/launch has
     // started, and configurationDone is sent _before_ launch/attach responds
     console.log(`${startType}ing using arguments: ${JSON.stringify(startArguments)}`)
-    let sessionRes = this.sendReqGetResponse(startType, startArguments, timeout)
-    await initEventWaitable
-    console.log(`Init completed`)
-    const sessionStartResponse = await sessionRes
-    console.log(`Attach completed`)
-    checkResponse(sessionStartResponse, startType, true)
+    await this.launchRequest(startArguments).then((res) => checkResponse(res, startType, true))
+    console.log(`${startType} completed`)
   }
 
   async #startRunToMainNative(launchArgs, timeout) {
-    let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainNative)
+    let stoppedPromise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainNative)
     await this.startSession(
       'launch',
       {
@@ -825,22 +849,18 @@ class DAClient {
       1000,
       () => console.log(`configuration completed`)
     )
-    return stopped_promise
+    return stoppedPromise
   }
 
   async #startRunToMainRemote(program, args, timeout) {
-    this.remoteService = await DAClient.CreateRemoteServer(this.config, program, args)
-
-    if (this.sessionId == null) {
-      this.sessionId = randomUUID()
-    }
+    this.remoteService = await DebugAdapterClient.CreateRemoteServer(this.config, program, args)
 
     let hit_main_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
     let attachArguments = this.remoteService.attachArgs
     attachArguments['RRSession'] = false
-    attachArguments['sessionId'] = this.sessionId
+
     console.log(`attach arguments: ${prettyJson(attachArguments)}`)
-    await this.startSession('attach', attachArguments, timeout, async () => {
+    const doConfig = async () => {
       const functions = ['main'].map((n) => ({ name: n }))
       const fnBreakpointResponse = await this.sendReqGetResponse('setFunctionBreakpoints', {
         breakpoints: functions,
@@ -857,23 +877,35 @@ class DAClient {
       )
       console.log(`${prettyJson(fnBreakpointResponse)}`)
       console.log(`configuration sequence done, waiting for attach response...`)
+    }
+
+    let initEventWaitable = this.initializedEventPromise().then(async (initEvent) => {
+      console.log(`Run config sequence`)
+      await doConfig()
+      console.log(`Done.`)
+      await this.configurationDoneRequest()
     })
+
+    for (const p of [
+      this.initializeRequest().then((res) => checkResponse(res, 'initialize', true)),
+      initEventWaitable.then(),
+    ]) {
+      await p
+    }
+    console.log(`attaching with args ${prettyJson(attachArguments)}`)
+    await this.attachRequest(attachArguments)
 
     return hit_main_stopped_promise
   }
 
   async startRunToMain(program, args = [], timeout = seconds(1)) {
-    if (this.sessionId == null) {
-      this.sessionId = randomUUID()
-    }
-    let init_res = await this.sendReqGetResponse('initialize', { sessionId: this.sessionId }, timeout)
-    checkResponse(init_res, 'initialize', true)
     switch (this.config.args.getArg('session')) {
       case 'remote': {
         await this.#startRunToMainRemote(program, args, timeout)
         const threads = await this.threads()
         console.log(`threads: ${JSON.stringify(threads)}`)
         await this.contNextStop(threads[0].id)
+        break
       }
       case 'native': {
         return await this.#startRunToMainNative(
@@ -901,7 +933,7 @@ class DAClient {
       timeout,
       () => console.log('configuration done')
     )
-    await stopped_promise
+    await stopped_promise.then((evt) => console.log(`Stopped event seen: ${JSON.stringify(evt)}`))
   }
 
   async remoteAttach(attachArgs, init, timeout = seconds(1)) {
@@ -952,7 +984,7 @@ class DAClient {
       },
       timeout,
       this.contNextStop
-    )
+    ).then((res) => checkResponse(res, 'continue', true))
     return await stopped_promise
   }
 
@@ -1006,6 +1038,119 @@ class DAClient {
       }),
     ])
   }
+
+  setDefaultRequestTimeout(timeoutValue) {
+    this.defaultTimeout = timeoutValue
+    return this.defaultTimeout
+  }
+
+  initializedEventPromise() {
+    return this.prepareWaitForEventN('initialized', 1, 1000, this.initializedEventPromise)
+  }
+
+  async initializeRequest() {
+    this.sessionId = getNextSessionId()
+    return this.sendReqGetResponse(
+      'initialize',
+      { sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+  }
+
+  async configurationDoneRequest() {
+    return this.sendReqGetResponse(
+      'configurationDone',
+      { sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+  }
+
+  async attachRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'attach',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
+
+  async launchRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'launch',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
+
+  async continueRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'continue',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+
+    return response
+  }
+
+  async pauseRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'pause',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+
+    return response
+  }
+
+  /**
+   * @param { import('./types').SetBreakpointsArguments } args
+   * @param { import('./types').SetBreakpointsExtensionArguments } [extensionArgs]
+   *   Optional extension arguments.
+   *   - `source`: A string identifying the source file.
+   *   - `identifiers`: An array of string identifiers for breakpoints.
+   * @returns
+   */
+  async setBreakpointsRequest(args, extensionArgs = null) {
+    if (extensionArgs) {
+      const { source, identifiers } = extensionArgs
+      if (
+        !(typeof source === 'string' && Array.isArray(identifiers) && identifiers.every((id) => typeof id === 'string'))
+      ) {
+        throw new Error(
+          `extensionArgs must be of type: { source: string, identifiers: string[] }, was: ${typeof source}, ${typeof identifiers}`
+        )
+      }
+
+      const file = readFileContents(repoDirFile(source))
+      const lineNumbers = identifiers
+        .map((ident) => getLineOf(file, ident))
+        .filter((item) => item != null)
+        .map((l) => ({ line: l }))
+
+      args.source = {
+        name: repoDirFile(source),
+        path: repoDirFile(source),
+      }
+
+      args.breakpoints = lineNumbers
+    }
+    const response = await this.sendReqGetResponse(
+      'setBreakpoints',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
+
+  async setFunctionBreakpointsRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'setFunctionBreakpoints',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
 }
 
 // Since we're running in a test suite, we want individual tests to
@@ -1021,7 +1166,7 @@ function repoDirFile(filePath) {
   return path.join(REPO_DIR, filePath)
 }
 
-function checkResponse(response, command, expected_success = true, fn = checkResponse) {
+function checkResponse(response, command = null, expected_success = true, fn = checkResponse) {
   if (response.type != 'response') {
     dump_log()
     const err = new Error()
@@ -1081,12 +1226,12 @@ async function runTestSuite(config, tests) {
   for (const testName in tests) {
     if (config.args.test != undefined) {
       if (config.args.test == testName) {
-        const DA = new DAClient(config.mdb, [], config)
+        const DA = new DebugAdapterClient(config.mdb, [], config)
         const testFn = tests[testName]()
         await runTest(DA, testFn)
       }
     } else {
-      const DA = new DAClient(config.mdb, [], config)
+      const DA = new DebugAdapterClient(config.mdb, [], config)
       const testFn = tests[testName]()
       await runTest(DA, testFn)
     }
@@ -1145,6 +1290,7 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
     },
     breakpoints: bp_lines,
   }
+  console.log(`setting breakpoints in: ${prettyJson(args)}`)
   const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', args)
   assertLog(
     bkpt_res.body.breakpoints.length == bpIdentifiers.length,
@@ -1160,21 +1306,19 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
  * with a `scopes` request for the first frame in the stack trace.
  *
  * Returns the threads, stacktrace and the scopes of the newest frame
- * @param { DAClient } DA
+ * @param { DebugAdapterClient } debugAdapter
  * @param { string } filePath - path to .cpp file that we are testing against
  * @param { string[] } bpIdentifiers - list of string identifiers that can be found in the .cpp file, where we set breakpoints
  * @param { string } expectedFrameName - frame name we expect to see on first stop.
  * @param { string } exeFile - the binary to execute
  * @returns { { threads: object[], frames: object[], scopes: object[], bpres: object[] } }
  */
-async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedFrameName, exeFile) {
-  await DA.startRunToMain(DA.buildDirFile(exeFile), [], 5000)
-  const bpres = await SetBreakpoints(DA, filePath, bpIdentifiers)
-  console.log(`bpres: ${JSON.stringify(bpres)}`)
-  const threads = await DA.threads()
-  console.log(`threads: ${JSON.stringify(threads)}`)
-  await DA.contNextStop(threads[0].id)
-  const fres = await DA.stackTrace(threads[0].id, 1000)
+async function launchToGetFramesAndScopes(debugAdapter, filePath, bpIdentifiers, expectedFrameName, exeFile) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile(exeFile), [], 5000)
+  const bpres = await SetBreakpoints(debugAdapter, filePath, bpIdentifiers)
+  const threads = await debugAdapter.threads()
+  await debugAdapter.contNextStop(threads[0].id)
+  const fres = await debugAdapter.stackTrace(threads[0].id, 1000)
   const frames = fres.body.stackFrames
   assertLog(
     frames[0].name == expectedFrameName,
@@ -1182,7 +1326,7 @@ async function launchToGetFramesAndScopes(DA, filePath, bpIdentifiers, expectedF
     () => `Actual frame=${frames[0].name}. Stacktrace:\n${prettyJson(frames)}`
   )
 
-  const scopes_res = await DA.sendReqGetResponse('scopes', { frameId: frames[0].id })
+  const scopes_res = await debugAdapter.sendReqGetResponse('scopes', { frameId: frames[0].id })
   const scopes = scopes_res.body.scopes
   assertLog(
     scopes.length == 3,
@@ -1218,7 +1362,7 @@ const SubjectSourceFiles = {
 
 module.exports = {
   MDB_PATH,
-  DAClient,
+  DebugAdapterClient,
   SubjectSourceFiles,
   allBreakpointIdentifiers,
   getLineOf,

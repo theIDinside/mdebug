@@ -2,7 +2,7 @@ const { readFileContents, repoDirFile, getLineOf, SubjectSourceFiles } = require
 const { assertLog, prettyJson } = require('./utils')
 /**
  *
- * @param { import("./client").DAClient } debugAdapter
+ * @param { import("./client").DebugAdapterClient } debugAdapter
  */
 async function pokeTimesToZero(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)

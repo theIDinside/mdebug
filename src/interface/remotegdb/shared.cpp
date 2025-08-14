@@ -7,15 +7,15 @@
 
 namespace mdb::gdb {
 
-std::pair<Pid, Tid>
+std::pair<SessionId, Tid>
 ParseThreadId(std::string_view arg) noexcept
 {
   ASSERT(arg[0] == 'p', "expected the multiprocess thread-id syntax.");
   arg.remove_prefix(1);
   const auto sep = arg.find('.');
   ASSERT(sep != arg.npos, "Expected thread-id syntax p<pid>.<tid>");
-  Pid pid{0};
-  Tid tid{0};
+  SessionId pid{ 0 };
+  Tid tid{ 0 };
   const auto res = std::from_chars(arg.data(), arg.data() + sep, pid, 16);
   if (res.ec != std::errc()) {
     PANIC("Failed to parse pid");
@@ -66,7 +66,7 @@ std::string_view
 DecodeRunLengthEncToStringView(std::string_view v, char *buf, u32 size) noexcept
 {
   const auto length = DecodeRunLengthEncoding(v, buf, size);
-  return std::string_view{buf, buf + length};
+  return std::string_view{ buf, buf + length };
 }
 
 } // namespace mdb::gdb

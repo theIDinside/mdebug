@@ -43,7 +43,7 @@ StopReplyParser::ParseExitCode() noexcept
   return {};
 }
 
-std::optional<Pid>
+std::optional<SessionId>
 StopReplyParser::ParseProcess() noexcept
 {
   using namespace std::string_view_literals;
@@ -58,7 +58,7 @@ StopReplyParser::ParseProcess() noexcept
   }
 }
 
-std::optional<std::tuple<Pid, Tid, int>>
+std::optional<std::tuple<SessionId, Tid, int>>
 StopReplyParser::ParseThreadExited() noexcept
 {
   const auto exitStatus = ParseExitCode();

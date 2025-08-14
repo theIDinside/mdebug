@@ -1,6 +1,5 @@
 /** LICENSE TEMPLATE */
 #include "mdb_config.h"
-#include "fmt/core.h"
 #include "utils/logger.h"
 #include <charconv>
 #include <filesystem>
@@ -53,10 +52,10 @@ DebuggerConfiguration::LogDirectory() const noexcept
   return mLogDirectory;
 }
 
-static constexpr auto LongOptions = std::to_array<option>({{"rr", OptNoArgument, 0, 'r'},
-                                                           // parameters
-                                                           {"thread-pool-size", OptArgRequired, 0, 't'},
-                                                           {"log-directory", OptArgRequired, 0, 'd'}});
+static constexpr auto LongOptions = std::to_array<option>({ { "rr", OptNoArgument, 0, 'r' },
+  // parameters
+  { "thread-pool-size", OptArgRequired, 0, 't' },
+  { "log-directory", OptArgRequired, 0, 'd' } });
 
 static constexpr auto USAGE_STR =
   "Usage: mdb <communication path> [-r|-t <thread pool size>|-l <eh,dwarf,mdb,dap,awaiter>]\n"
@@ -71,22 +70,25 @@ ParseCommandLineArguments(int argc, const char **argv) noexcept
   int opt; // NOLINT
 
   // Using getopt to parse command line options
-  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "rt:l:d:p", LongOptions.data(), // NOLINT
-                            &option_index)) != -1) {
+  while ((opt = getopt_long(argc,
+            const_cast<char *const *>(argv),
+            "rt:l:d:p",
+            LongOptions.data(), // NOLINT
+            &option_index)) != -1) {
     switch (opt) {
     case 0:
       break;
     case 'd': {
       if (optarg) {
-        std::string_view args{optarg};
-        Path pathArg = Path{args}.lexically_normal();
+        std::string_view args{ optarg };
+        Path pathArg = Path{ args }.lexically_normal();
         if (pathArg.is_relative()) {
           init.mLogDirectory = (std::filesystem::current_path() / pathArg).lexically_normal();
         } else {
           init.mLogDirectory = std::move(pathArg);
         }
       } else {
-        return mdb::unexpected(CLIError{.info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR});
+        return mdb::unexpected(CLIError{ .info = CLIErrorInfo::BadArgValue, .msg = USAGE_STR });
       }
     } break;
     case 'r':
@@ -95,14 +97,14 @@ ParseCommandLineArguments(int argc, const char **argv) noexcept
       break;
     case 't':
       if (optarg) {
-        init.mThreadPoolSize = parse_int(std::string_view{optarg});
+        init.mThreadPoolSize = parse_int(std::string_view{ optarg });
       }
       break;
     case '?': {
       DBGLOG(core, "Usage: mdb [-r|-t <thread pool size>|-d <log output directory>]");
-      auto cliErrorMessage = fmt::format("Unknown argument: {}\n\n{}", argv[optind], USAGE_STR);
+      auto cliErrorMessage = std::format("Unknown argument: {}\n\n{}", argv[optind], USAGE_STR);
       return mdb::unexpected(
-        CLIError{.info = CLIErrorInfo::UnknownArgs, .msg = std::move(cliErrorMessage)}); // NOLINT
+        CLIError{ .info = CLIErrorInfo::UnknownArgs, .msg = std::move(cliErrorMessage) }); // NOLINT
     }
     default:
       continue;

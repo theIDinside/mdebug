@@ -18,7 +18,7 @@ async function programExit(DA) {
 }
 
 /**
- * @param { import("./client").DAClient } DA
+ * @param { import("./client").DebugAdapterClient } DA
  */
 async function readExitCode(DA) {
   await DA.startRunToMain(DA.buildDirFile('stackframes'))

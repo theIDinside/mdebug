@@ -25,7 +25,7 @@ struct InvalidArgs final : public UICommand
   UIResultPtr
   Execute() noexcept final
   {
-    return new InvalidArgsResponse{mPid, command, std::move(missing_arguments)};
+    return new InvalidArgsResponse{ mSessionId, command, std::move(missing_arguments) };
   }
 
   ArgumentErrorKind kind;
@@ -44,7 +44,7 @@ constexpr auto
 Validate(UICommandArg arg, const JsonArgs &args) -> InvalidArgs *
 {
   if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {
-    return new ui::dap::InvalidArgs{arg, Derived::Request, std::move(missing.value())};
+    return new ui::dap::InvalidArgs{ arg, Derived::Request, std::move(missing.value()) };
   } else {
     return nullptr;
   }

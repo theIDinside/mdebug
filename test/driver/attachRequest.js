@@ -1,6 +1,7 @@
 const { checkResponse, createRemoteService } = require('./client')
 const { findAvailablePort, assertLog, todo } = require('./utils')
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
   const attachArgs = {
     type: 'INVALID TYPE FOR SURE',
@@ -37,17 +38,17 @@ async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
   )
 }
 
-/**
- * @param {import("./client").DAClient} debugAdapter
- */
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function attachInit(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('next'), [], 1000)
 }
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function attachContinue(debugAdapter) {
   throw new Error('remoteAttachContinue not implemented')
 }
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function ptraceAttach(debugAdapter) {
   throw new Error('ptraceAttach not implemented')
 }

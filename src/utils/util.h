@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <common/typedefs.h>
-#include <fmt/core.h>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -15,6 +14,43 @@
 #include <vector>
 
 namespace mdb {
+
+template <typename T>
+constexpr bool
+WithinRange(T value, T startInclusive, T endInclusive) noexcept
+  requires(std::is_trivially_copyable_v<T> && sizeof(T) < 8)
+{
+  return startInclusive <= value && endInclusive >= value;
+}
+
+template <typename T>
+constexpr bool
+WithinRange(const T &value, const T &startInclusive, const T &endInclusive) noexcept
+  requires(!std::is_trivially_copyable_v<T> || sizeof(T) >= 8)
+{
+  return startInclusive <= value && endInclusive >= value;
+}
+
+template <typename T, auto Low, auto High>
+constexpr bool
+WithinRange(const T &value) noexcept
+{
+  static_assert(Low <= High, "You've passed an invalid range, low is larger than high");
+  return WithinRange(value, Low, High);
+}
+
+template <typename ContainerType, typename ValueType>
+constexpr bool
+ContainsValue(const ContainerType &container, const ValueType &b) noexcept
+{
+  for (const auto &element : container) {
+    if (element == b) {
+      return true;
+    }
+  }
+  return false;
+}
+
 template <typename... Args>
 constexpr auto
 FilterNullptr()
@@ -22,10 +58,10 @@ FilterNullptr()
   return std::ranges::views::filter([](auto ptr) { return ptr != nullptr; });
 }
 
-constexpr std::optional<Pid>
+constexpr std::optional<SessionId>
 StrToPid(std::string_view str, bool hex) noexcept
 {
-  Pid p;
+  SessionId p;
   auto res = std::from_chars(str.begin(), str.end(), p, hex ? 16 : 10);
   if (res.ec == std::errc()) {
     return p;
@@ -116,7 +152,7 @@ accumulate(Range &r, Fn &&fn) noexcept -> decltype(fn({}, decltype(*std::begin(r
 {
   using T = decltype(fn({}, decltype(*std::begin(r)){}));
   // using T = std::invoke_result_t<Fn, AccT, decltype(*std::begin(r))>;
-  return std::accumulate(std::begin(r), std::end(r), T{0}, std::forward<Fn>(fn));
+  return std::accumulate(std::begin(r), std::end(r), T{ 0 }, std::forward<Fn>(fn));
 }
 template <typename T>
 constexpr auto
@@ -238,7 +274,7 @@ struct DebugAdapterProtocolString
   }
 };
 
-template <> struct fmt::formatter<DebugAdapterProtocolString>
+template <> struct std::formatter<DebugAdapterProtocolString>
 {
   template <typename ParseContext>
   constexpr auto

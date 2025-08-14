@@ -2,7 +2,7 @@ const { getLineOf, readFileContents, repoDirFile, seconds } = require('./client'
 const { assert, prettyJson, assertLog } = require('./utils')
 
 /**
- * @param {import("./client").DAClient } debugAdapter
+ * @param {import("./client").DebugAdapterClient } debugAdapter
  */
 async function threads(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('threads_shared'), [], seconds(1))
@@ -20,7 +20,7 @@ async function threads(debugAdapter) {
     breakpoints: bp_lines,
   })
 
-  assertLog(breakpointsResponse[0].verified, "Expected breakpoint to be ok", "Breakpoint could not be verified");
+  assertLog(breakpointsResponse[0].verified, 'Expected breakpoint to be ok', 'Breakpoint could not be verified')
 
   await debugAdapter.contNextStop(threads[0].id)
   threads = await debugAdapter.threads()

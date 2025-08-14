@@ -40,9 +40,9 @@ public:
 template <typename T, RemovePolicy<T> RemovingPolicy> class DynArray
 {
   std::pmr::memory_resource *mAllocatorResource;
-  T *mData{nullptr};
-  std::uint32_t mSize{0};
-  std::uint32_t mCapacity{0};
+  T *mData{ nullptr };
+  std::uint32_t mSize{ 0 };
+  std::uint32_t mCapacity{ 0 };
 
   static consteval auto
   Alignment() noexcept -> uint32_t
@@ -96,8 +96,8 @@ public:
   {
   }
 
-  constexpr DynArray(std::uint32_t capacity,
-                     std::pmr::memory_resource *alloc = std::pmr::new_delete_resource()) noexcept
+  constexpr DynArray(
+    std::uint32_t capacity, std::pmr::memory_resource *alloc = std::pmr::new_delete_resource()) noexcept
       : mAllocatorResource(alloc), mCapacity(capacity)
   {
     mData = static_cast<T *>(mAllocatorResource->allocate(mCapacity * sizeof(T), Alignment()));
@@ -133,7 +133,7 @@ public:
   static constexpr void
   Swap(DynArray &left, DynArray &right) noexcept
   {
-    DynArray tmp{std::move(left)};
+    DynArray tmp{ std::move(left) };
     left = std::move(right);
     right = std::move(tmp);
   }
@@ -159,6 +159,7 @@ public:
     if constexpr (!std::is_trivially_destructible_v<T>) {
       std::destroy(mData, mData + mSize);
     }
+
     std::memset(mData, 0, mSize * sizeof(T));
     mSize = 0;
   }
@@ -212,13 +213,13 @@ public:
   constexpr std::span<T>
   Span() noexcept
   {
-    return std::span{mData, mSize};
+    return std::span{ mData, mSize };
   }
 
   constexpr std::span<const T>
   Span() const noexcept
   {
-    return std::span{mData, mSize};
+    return std::span{ mData, mSize };
   }
 
   constexpr bool

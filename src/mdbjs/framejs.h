@@ -2,11 +2,11 @@
 #pragma once
 
 #include "mdbjs/jsobject.h"
+#include "quickjs/quickjs.h"
 #include "symbolication/callstack.h"
 #include "task.h"
 #include "utils/smartptr.h"
 #include <common/typedefs.h>
-#include <cstring>
 
 namespace mdb {
 struct FrameLookupHandle
@@ -27,29 +27,28 @@ public:
 }; // namespace mdb
 
 namespace mdb::js {
-struct Frame : public RefPtrJsObject<mdb::js::Frame, mdb::FrameLookupHandle, StringLiteral{"Frame"}>
+
+struct Frame : public JSBinding<Frame, mdb::FrameLookupHandle, JavascriptClasses::Frame>
 {
-  enum Slots
+  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Locals(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Arguments(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Caller(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+
+  static constexpr std::span<const JSCFunctionListEntry>
+  PrototypeFunctions() noexcept
   {
-    ThisPointer,
-    SlotCount
-  };
-
-  /** Return the variables reference (id) for this frame object. */
-  static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the local variables of this frame. */
-  static bool js_locals(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the arguments passed to this frame. */
-  static bool js_arguments(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return frame object that called this frame. */
-  static bool js_caller(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  /** Return the name of the function (if it has any). */
-  static bool js_name(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-
-  static constexpr JSFunctionSpec FunctionSpec[] = {
-    JS_FN("id", &js_id, 0, 0),         JS_FN("locals", &js_locals, 0, 0), JS_FN("arguments", &js_arguments, 0, 0),
-    JS_FN("caller", &js_caller, 0, 0), JS_FN("name", &js_name, 0, 0),     JS_FS_END};
-  // Uncomment when you want to define properties
-  // static constexpr JSPropertySpec PropertiesSpec[]{JS_PS_END};
+    static constexpr JSCFunctionListEntry funcs[]{ /** Method definitions */
+      FunctionEntry("id", 0, &Id),
+      FunctionEntry("locals", 0, &Locals),
+      FunctionEntry("arguments", 0, &Arguments),
+      FunctionEntry("caller", 0, &Caller),
+      FunctionEntry("name", 0, &Name),
+      ToStringTag("Frame")
+    };
+    return funcs;
+  }
 };
+
 } // namespace mdb::js

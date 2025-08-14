@@ -1,7 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+#include "common/formatter.h"
 #include <common/macros.h>
+#include <common/panic.h>
 #include <common/typedefs.h>
 #include <symbolication/value.h>
 #include <symbolication/variable_reference.h>
@@ -10,9 +12,6 @@
 
 // stdlib
 #include <string_view>
-
-// dependency
-#include <fmt/format.h>
 
 namespace std::pmr {
 class memory_resource;
@@ -139,10 +138,15 @@ enum class EntityType
 class VariablesReference
 {
 public:
-  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frameId, int parent,
-                     EntityType type) noexcept;
-  VariablesReference(NonNullPtr<SymbolFile> obj, int ref, int thread, int frameId, int parent, EntityType type,
-                     ScopeType scopeType) noexcept;
+  VariablesReference(
+    NonNullPtr<SymbolFile> obj, int ref, int thread, int frameId, int parent, EntityType type) noexcept;
+  VariablesReference(NonNullPtr<SymbolFile> obj,
+    int ref,
+    int thread,
+    int frameId,
+    int parent,
+    EntityType type,
+    ScopeType scopeType) noexcept;
   VariablesReference &operator=(const VariablesReference &) = default;
   VariablesReference &operator=(VariablesReference &&) = default;
   VariablesReference(VariablesReference &&) = default;
@@ -175,72 +179,51 @@ public:
 }; // namespace ui::dap
 } // namespace mdb
 
-namespace fmt {
 namespace ui = mdb::ui;
 
-template <> struct formatter<ui::dap::Scope>
+template <> struct std::formatter<ui::dap::Scope>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const ui::dap::Scope &scope, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": {} }})",
-                          scope.Name(), scope.PresentationHint(), scope.variables_reference);
+    return std::format_to(ctx.out(),
+      R"({{ "name": "{}", "presentationHint": "{}", "variablesReference": {} }})",
+      scope.Name(),
+      scope.PresentationHint(),
+      scope.variables_reference);
   }
 };
 
-template <> struct formatter<ui::dap::Thread>
+template <> struct std::formatter<ui::dap::Thread>
 {
-
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(ui::dap::Thread const &task, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "{{ \"id\": {}, \"name\": \"{}\" }}", task.mThreadId, task.mName);
+    return std::format_to(ctx.out(), "{{ \"id\": {}, \"name\": \"{}\" }}", task.mThreadId, task.mName);
   }
 };
 
-template <> struct formatter<ui::dap::Source>
+template <> struct std::formatter<ui::dap::Source>
 {
-
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const ui::dap::Source &source, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), R"({{ "name": "{}", "path": "{}" }})", source.name, source.path);
+    return std::format_to(ctx.out(), R"({{ "name": "{}", "path": "{}" }})", source.name, source.path);
   }
 };
 using SourceField = std::optional<ui::dap::Source>;
-template <> struct formatter<SourceField>
+template <> struct std::formatter<SourceField>
 {
-
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
@@ -248,32 +231,28 @@ template <> struct formatter<SourceField>
   {
     if (source.has_value()) {
       const auto &src = *source;
-      return fmt::format_to(ctx.out(), R"({{ "name": "{}", "path": "{}" }})", src.name, src.path);
+      return std::format_to(ctx.out(), R"({{ "name": "{}", "path": "{}" }})", src.name, src.path);
     } else {
-      return fmt::format_to(ctx.out(), R"(null)");
+      return std::format_to(ctx.out(), R"(null)");
     }
   }
 };
 
-template <> struct formatter<ui::dap::StackFrame>
+template <> struct std::formatter<ui::dap::StackFrame>
 {
-
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const ui::dap::StackFrame &frame, FormatContext &ctx) const
   {
-    return fmt::format_to(
-      ctx.out(),
+    return std::format_to(ctx.out(),
       R"({{ "id": {}, "name": "{}", "source": {}, "line": {}, "column": {}, "instructionPointerReference": "{}" }})",
-      frame.mVariablesReference, frame.mName, frame.mSource, frame.mLine, frame.mColumn, frame.mProgramCounter);
+      frame.mVariablesReference,
+      frame.mName,
+      frame.mSource,
+      frame.mLine,
+      frame.mColumn,
+      frame.mProgramCounter);
   }
 };
-
-} // namespace fmt

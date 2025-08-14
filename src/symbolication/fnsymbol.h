@@ -35,9 +35,9 @@ private:
 
   // Private members
   NonNullPtr<CompilationUnit> mDeclaringCompilationUnit;
-  bool mFullyParsed{false};
-  bool mIsMethod{false};
-  u32 mFrameLocalVariableCount{0};
+  bool mFullyParsed{ false };
+  bool mIsMethod{ false };
+  u32 mFrameLocalVariableCount{ 0 };
   SymbolBlock mFormalParametersBlock;
   std::vector<SymbolBlock> mFunctionSymbolBlocks;
   Immutable<std::array<dw::IndexedDieReference, 3>> mMaybeOriginDies;
@@ -45,10 +45,15 @@ private:
   sym::Type *mFunctionReturnType;
 
   // Private member functions
-  FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
-                 sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                 CompilationUnit &decl_file, std::span<const u8> fb_expr,
-                 std::optional<SourceCoordinate> &&source_coord) noexcept;
+  FunctionSymbol(AddrPtr start,
+    AddrPtr end,
+    std::string_view name,
+    std::string_view member_of,
+    sym::Type *return_type,
+    std::array<dw::IndexedDieReference, 3> maybe_origin,
+    CompilationUnit &decl_file,
+    std::span<const u8> fb_expr,
+    std::optional<SourceCoordinate> &&source_coord) noexcept;
 
 public:
   // Only really used when constructing the full function symbols for a compilation unit, as std::vector grows, it
@@ -110,22 +115,14 @@ bool IsSame(const FunctionSymbol &l, const FunctionSymbol &r) noexcept;
 bool IsSame(const FunctionSymbol *l, const FunctionSymbol *r) noexcept;
 } // namespace mdb::sym
 
-namespace fmt {
-
-template <> struct formatter<sym::FunctionSymbol>
+template <> struct std::formatter<sym::FunctionSymbol>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const sym::FunctionSymbol &var, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "fn={}, [{} .. {}]", var.name, var.StartPc(), var.EndPc());
+    return std::format_to(ctx.out(), "fn={}, [{} .. {}]", var.name, var.StartPc(), var.EndPc());
   }
 };
-} // namespace fmt

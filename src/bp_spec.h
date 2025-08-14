@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include <common/typedefs.h>
+#include <format>
 
 #include <memory>
 #include <optional>
@@ -57,8 +58,8 @@ struct FunctionBreakpointSpec
 struct InstructionBreakpointSpec
 {
   std::string mInstructionReference;
-  friend constexpr auto operator<=>(const InstructionBreakpointSpec &l,
-                                    const InstructionBreakpointSpec &r) = default;
+  friend constexpr auto operator<=>(
+    const InstructionBreakpointSpec &l, const InstructionBreakpointSpec &r) = default;
   friend constexpr auto
   operator==(const InstructionBreakpointSpec &l, const InstructionBreakpointSpec &r)
   {
@@ -96,8 +97,9 @@ struct BreakpointSpecification
   }
 
 private:
-  BreakpointSpecification(DapBreakpointType kind, std::optional<std::string> condition,
-                          std::optional<std::string> hitCondition) noexcept;
+  BreakpointSpecification(DapBreakpointType kind,
+    std::optional<std::string> condition,
+    std::optional<std::string> hitCondition) noexcept;
   void DestroyUnion() noexcept;
 
 public:
@@ -107,14 +109,17 @@ public:
   }
   ~BreakpointSpecification() noexcept;
 
-  BreakpointSpecification(std::optional<std::string> condition, std::optional<std::string> hitCondition,
-                          SourceBreakpointSpecPair *src) noexcept;
+  BreakpointSpecification(std::optional<std::string> condition,
+    std::optional<std::string> hitCondition,
+    SourceBreakpointSpecPair *src) noexcept;
 
-  BreakpointSpecification(std::optional<std::string> condition, std::optional<std::string> hitCondition,
-                          FunctionBreakpointSpec *fun) noexcept;
+  BreakpointSpecification(std::optional<std::string> condition,
+    std::optional<std::string> hitCondition,
+    FunctionBreakpointSpec *fun) noexcept;
 
-  BreakpointSpecification(std::optional<std::string> condition, std::optional<std::string> hitCondition,
-                          InstructionBreakpointSpec *ins) noexcept;
+  BreakpointSpecification(std::optional<std::string> condition,
+    std::optional<std::string> hitCondition,
+    InstructionBreakpointSpec *ins) noexcept;
 
   BreakpointSpecification(BreakpointSpecification &&moveFrom) noexcept;
 
@@ -137,8 +142,9 @@ public:
     requires std::is_same_v<T, SourceBreakpointSpecPair> || std::is_same_v<T, FunctionBreakpointSpec> ||
              std::is_same_v<T, InstructionBreakpointSpec>
   {
-    return BreakpointSpecification{std::move(condition), std::move(hitCondition),
-                                   new T{std::forward<Args>(args)...}};
+    return BreakpointSpecification{
+      std::move(condition), std::move(hitCondition), new T{ std::forward<Args>(args)... }
+    };
   }
 
   std::optional<u32> Column() const noexcept;
@@ -170,7 +176,7 @@ template <> struct std::hash<mdb::SourceBreakpointSpec>
 
     const auto line_col_hash =
       m.column.transform([&h = u32_hasher, line = m.line](auto col) { return h(col) ^ h(line); })
-        .or_else([&h = u32_hasher, line = m.line]() { return std::optional{h(line)}; })
+        .or_else([&h = u32_hasher, line = m.line]() { return std::optional{ h(line) }; })
         .value();
 
     if (m.log_message) {
@@ -212,8 +218,7 @@ template <> struct std::hash<mdb::BreakpointSpecification>
   result_type operator()(const argument_type &m) const noexcept;
 };
 
-namespace fmt {
-template <> struct formatter<mdb::SourceBreakpointSpecPair>
+template <> struct std::formatter<mdb::SourceBreakpointSpecPair>
 {
   template <typename ParseContext>
   constexpr auto
@@ -227,20 +232,20 @@ template <> struct formatter<mdb::SourceBreakpointSpecPair>
   format(const mdb::SourceBreakpointSpecPair &source_spec, FormatContext &ctx) const
   {
 
-    auto out = fmt::format_to(ctx.out(), R"(Source = {}:{})", source_spec.mFilePath, source_spec.mSpec.line);
+    auto out = std::format_to(ctx.out(), R"(Source = {}:{})", source_spec.mFilePath, source_spec.mSpec.line);
     if (source_spec.mSpec.column) {
-      out = fmt::format_to(out, R"(:{})", *source_spec.mSpec.column);
+      out = std::format_to(out, R"(:{})", *source_spec.mSpec.column);
     }
 
     if (source_spec.mSpec.log_message) {
-      out = fmt::format_to(out, R"( and a evaluated log message)", *source_spec.mSpec.log_message);
+      out = std::format_to(out, R"( and a evaluated log message)", *source_spec.mSpec.log_message);
     }
 
     return out;
   }
 };
 
-template <> struct formatter<mdb::FunctionBreakpointSpec>
+template <> struct std::formatter<mdb::FunctionBreakpointSpec>
 {
   template <typename ParseContext>
   constexpr auto
@@ -254,13 +259,13 @@ template <> struct formatter<mdb::FunctionBreakpointSpec>
   format(const mdb::FunctionBreakpointSpec &spec, FormatContext &ctx) const
   {
     const auto &[name, regex] = spec;
-    auto out = fmt::format_to(ctx.out(), R"(Function={}, searched using regex={})", name, regex);
+    auto out = std::format_to(ctx.out(), R"(Function={}, searched using regex={})", name, regex);
 
     return out;
   }
 };
 
-template <> struct formatter<mdb::InstructionBreakpointSpec>
+template <> struct std::formatter<mdb::InstructionBreakpointSpec>
 {
   template <typename ParseContext>
   constexpr auto
@@ -274,7 +279,7 @@ template <> struct formatter<mdb::InstructionBreakpointSpec>
   format(const mdb::InstructionBreakpointSpec &spec, FormatContext &ctx) const
   {
     const auto &[insReference] = spec;
-    auto out = fmt::format_to(ctx.out(), R"(Instruction Address={})", insReference);
+    auto out = std::format_to(ctx.out(), R"(Instruction Address={})", insReference);
 
     return out;
   }
@@ -309,7 +314,7 @@ FormatEscaped(OutIter it, std::string_view string) noexcept
   return it;
 }
 
-template <> struct formatter<mdb::BreakpointSpecification>
+template <> struct std::formatter<mdb::BreakpointSpecification>
 {
   template <typename ParseContext>
   constexpr auto
@@ -326,21 +331,20 @@ template <> struct formatter<mdb::BreakpointSpecification>
     using enum mdb::DapBreakpointType;
     switch (spec.mKind) {
     case source:
-      iterator = fmt::format_to(iterator, "{}", *spec.uSource);
+      iterator = std::format_to(iterator, "{}", *spec.uSource);
       break;
     case function:
-      iterator = fmt::format_to(iterator, "{}", *spec.uFunction);
+      iterator = std::format_to(iterator, "{}", *spec.uFunction);
       break;
     case instruction:
-      iterator = fmt::format_to(iterator, "{}", *spec.uInstruction);
+      iterator = std::format_to(iterator, "{}", *spec.uInstruction);
       break;
     }
 
     if (spec.mCondition) {
-      return FormatEscaped(iterator, fmt::format(R"(, with hit condition = "{}")", *spec.mCondition));
+      return FormatEscaped(iterator, std::format(R"(, with hit condition = "{}")", *spec.mCondition));
     }
 
     return iterator;
   }
 };
-}; // namespace fmt

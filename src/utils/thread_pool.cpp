@@ -51,7 +51,7 @@ ThreadPool::Init(u32 pool_size) noexcept
   mThreadPool.reserve(pool_size);
   for (auto i = 0u; i < pool_size; ++i) {
     mThreadPool.emplace_back(DebuggerThread::SpawnDebuggerThread(
-      fmt::format("PoolWorker-{}", i), [&](std::stop_token &token) { WorkerLoop(token); }));
+      std::format("PoolWorker-{}", i), [&](std::stop_token &token) { WorkerLoop(token); }));
   }
 }
 

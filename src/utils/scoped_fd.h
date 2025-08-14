@@ -26,20 +26,21 @@ struct ConnectError
   static ConnectError
   AddrInfo(int sys)
   {
-    return ConnectError{.kind = Kind::GetAddressInfo, .msg = "getaddrinfo failed", .sys_errno = sys};
+    return ConnectError{ .kind = Kind::GetAddressInfo, .msg = "getaddrinfo failed", .sys_errno = sys };
   }
 
   static ConnectError
   Socket(int sys) noexcept
   {
-    return ConnectError{.kind = Kind::Socket, .msg = "Failed to open socket", .sys_errno = sys};
+    return ConnectError{ .kind = Kind::Socket, .msg = "Failed to open socket", .sys_errno = sys };
   }
 
   static ConnectError
   Connect(const std::string &host, int port, int sys) noexcept
   {
     return ConnectError{
-      .kind = Kind::Connect, .msg = fmt::format("Failed to connect to {}:{}", host, port), .sys_errno = sys};
+      .kind = Kind::Connect, .msg = std::format("Failed to connect to {}:{}", host, port), .sys_errno = sys
+    };
   }
 };
 
@@ -72,7 +73,7 @@ public:
     return ptr;
   }
 
-  static ScopedFd Open(const Path &p, int flags, mode_t mode = mode_t{0}) noexcept;
+  static ScopedFd Open(const Path &p, int flags, mode_t mode = mode_t{ 0 }) noexcept;
   static mdb::Expected<ScopedFd, ConnectError> OpenSocketConnectTo(const std::string &host, int port) noexcept;
   static ScopedFd OpenFileReadOnly(const Path &p) noexcept;
   static ScopedFd TakeFileDescriptorOwnership(int fd) noexcept;

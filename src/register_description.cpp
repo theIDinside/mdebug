@@ -4,6 +4,9 @@
 #include <interface/remotegdb/deserialization.h>
 #include <register_description.h>
 
+// system
+#include <cstring>
+
 namespace mdb {
 constexpr void
 RegisterDescription::RegisterBuffer::Swap(RegisterBuffer &other) noexcept

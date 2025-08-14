@@ -95,7 +95,7 @@ sym::ToTypeModifierWillPanic(DwarfTag tag) noexcept
   default:
     break;
   }
-  PANIC(fmt::format("DwarfTag not convertable to Type::Modifier: {}", to_str(tag)));
+  PANIC(std::format("DwarfTag not convertable to Type::Modifier: {}", to_str(tag)));
 }
 
 /* static */
@@ -104,7 +104,7 @@ TypeStorage::Create() noexcept
 {
   auto storage = std::make_unique<TypeStorage>();
   // TODO(simon): Technically there exists a world where a pointer is 4 bytes. I don't live in that world.
-  storage->mTypeStorage[0] = new sym::Type{"void", 8};
+  storage->mTypeStorage[0] = new sym::Type{ "void", 8 };
   return storage;
 }
 
@@ -128,9 +128,9 @@ ResolveArrayBounds(sym::dw::DieReference array_die) noexcept
 {
   ASSERT(array_die.GetDie()->mHasChildren, "expected die {} to have children", array_die);
 
-  for (const auto child : sym::dw::IterateSiblings{array_die.GetUnitData(), array_die.GetDie()->GetChildren()}) {
+  for (const auto child : sym::dw::IterateSiblings{ array_die.GetUnitData(), array_die.GetDie()->GetChildren() }) {
     if (child.mTag == DwarfTag::DW_TAG_subrange_type) {
-      const sym::dw::DieReference ref{array_die.GetUnitData(), &child};
+      const sym::dw::DieReference ref{ array_die.GetUnitData(), &child };
       u64 count{};
       sym::dw::ProcessDie(ref, [&](sym::dw::UnitReader &reader, sym::dw::Abbreviation &attr, const auto &info) {
         switch (attr.mName) {
@@ -153,7 +153,7 @@ ResolveArrayBounds(sym::dw::DieReference array_die) noexcept
 sym::Type *
 TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
 {
-  const sym::dw::DieReference this_ref{die_ref.GetUnitData(), die_ref.GetDie()};
+  const sym::dw::DieReference this_ref{ die_ref.GetUnitData(), die_ref.GetDie() };
   const auto type_id = this_ref.GetDie()->mSectionOffset;
 
   if (mTypeStorage.contains(type_id)) {
@@ -183,8 +183,9 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
       size = base_type->Size();
     }
 
-    auto type = new sym::Type{this_ref.GetDie()->mTag, die_ref, size, base_type,
-                              this_ref.GetDie()->mTag == DwarfTag::DW_TAG_typedef};
+    auto type = new sym::Type{
+      this_ref.GetDie()->mTag, die_ref, size, base_type, this_ref.GetDie()->mTag == DwarfTag::DW_TAG_typedef
+    };
     type->SetArrayBounds(array_bounds);
     mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
     return type;
@@ -201,7 +202,7 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
       const auto name = tu_die_ref.ReadAttribute(Attribute::DW_AT_name)
                           .transform(AttributeValue::ToStringView)
                           .value_or("<no name>");
-      auto type = new sym::Type{this_ref.GetDie()->mTag, tu_die_ref.AsIndexed(), sz, name};
+      auto type = new sym::Type{ this_ref.GetDie()->mTag, tu_die_ref.AsIndexed(), sz, name };
       mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
       return type;
     } else {
@@ -212,7 +213,7 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
                           .value_or("lambda");
       const u32 sz =
         this_ref.ReadAttribute(Attribute::DW_AT_byte_size).transform(AttributeValue::AsUnsigned).value_or(0);
-      auto type = new sym::Type{this_ref.GetDie()->mTag, die_ref, sz, name};
+      auto type = new sym::Type{ this_ref.GetDie()->mTag, die_ref, sz, name };
       mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
       return type;
     }
@@ -220,11 +221,14 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
 }
 
 sym::Type *
-TypeStorage::CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference,
-                           u32 typeSize, std::string_view name) noexcept
+TypeStorage::CreateNewType(DwarfTag tag,
+  Offset typeDieOffset,
+  sym::dw::IndexedDieReference dieReference,
+  u32 typeSize,
+  std::string_view name) noexcept
 {
   std::lock_guard lock(mWriteMutex);
-  auto pair = mTypeStorage.emplace(typeDieOffset, new sym::Type{tag, dieReference, typeSize, name});
+  auto pair = mTypeStorage.emplace(typeDieOffset, new sym::Type{ tag, dieReference, typeSize, name });
   if (pair.second) {
     return pair.first->second;
   }
@@ -273,22 +277,27 @@ LocationList::LocationList(std::vector<LocationListEntry> &&entries) noexcept : 
 std::span<const LocationListEntry>
 LocationList::Get() noexcept
 {
-  return std::span{mLocationList};
+  return std::span{ mLocationList };
 }
 
-Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target,
-           bool isTypedef) noexcept
+Type::Type(DwarfTag debugInfoEntryTag,
+  dw::IndexedDieReference debugInfoEntryReference,
+  u32 sizeOf,
+  Type *target,
+  bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
-      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag)}, mIsTypedef(isTypedef),
+      mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(isTypedef),
       size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target), mFields(), mBaseTypes(),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
 
-Type::Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf,
-           std::string_view name) noexcept
+Type::Type(DwarfTag debugInfoEntryTag,
+  dw::IndexedDieReference debugInfoEntryReference,
+  u32 sizeOf,
+  std::string_view name) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
-      mModifier{ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag)}, mIsTypedef(false),
+      mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(false),
       size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes(),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {

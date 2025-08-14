@@ -12,7 +12,6 @@
 #include <csignal>
 #include <cstdlib>
 #include <fcntl.h>
-#include <fmt/core.h>
 #include <linux/sched.h>
 #include <poll.h>
 #include <sched.h>
@@ -35,7 +34,7 @@ std::string data;
 bool ready = false;
 
 mdb::Tracer *mdb::Tracer::sTracerInstance = nullptr;
-mdb::js::AppScriptingInstance *mdb::Tracer::sScriptRuntime = nullptr;
+mdb::js::Scripting *mdb::Tracer::sScriptRuntime = nullptr;
 JSContext *mdb::Tracer::sApplicationJsContext = nullptr;
 int mdb::Tracer::sLastTraceEventTime = 0;
 
@@ -66,10 +65,10 @@ main(int argc, const char **argv)
     auto &&err = res.error();
     switch (err.info) {
     case mdb::sys::CLIErrorInfo::BadArgValue:
-      fmt::println("Bad CLI argument value");
+      std::println("Bad CLI argument value");
       break;
     case mdb::sys::CLIErrorInfo::UnknownArgs:
-      fmt::println("Unknown CLI argument");
+      std::println("Unknown CLI argument");
       break;
     }
     exit(-1);
@@ -96,14 +95,14 @@ main(int argc, const char **argv)
 
   auto debugAdapterThread =
     mdb::DebuggerThread::SpawnDebuggerThread("IO-Thread", [&uiThreadSetup](std::stop_token &token) {
-      mdb::ui::dap::DAP uiInterface{STDIN_FILENO, STDOUT_FILENO};
+      mdb::ui::dap::DAP uiInterface{ STDIN_FILENO, STDOUT_FILENO };
       mdb::Tracer::Get().SetUI(&uiInterface);
       uiThreadSetup = true;
       uiInterface.StartIOPolling(token);
     });
 
   while (!uiThreadSetup) {
-    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    std::this_thread::sleep_for(std::chrono::milliseconds{ 1 });
   }
   DBGLOG(core, "UI thread initialized and configured.");
 

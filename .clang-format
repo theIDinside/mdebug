@@ -2,7 +2,6 @@
 Language: Cpp
 # BasedOnStyle:  LLVM
 AccessModifierOffset: -2
-AlignAfterOpenBracket: Align
 AlignArrayOfStructures: None
 AlignConsecutiveAssignments:
   Enabled: false
@@ -46,8 +45,15 @@ AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: MultiLine
 AttributeMacros:
   - __capability
-BinPackArguments: true
-BinPackParameters: true
+# These are set so that when initializing arrays, it doesn't cram things on one line
+# or indent the living hell out of the format either.
+AllowAllConstructorInitializersOnNextLine: false
+Cpp11BracedListStyle: false
+BinPackArguments: false
+BinPackParameters: false
+AlignAfterOpenBracket: DontAlign
+# End of ^
+
 # Set to custom, we can define BraceWrapping-values
 BreakBeforeBraces: Custom
 BraceWrapping:
@@ -85,7 +91,6 @@ QualifierAlignment: Leave
 CompactNamespaces: false
 ConstructorInitializerIndentWidth: 4
 ContinuationIndentWidth: 2
-Cpp11BracedListStyle: true
 DeriveLineEnding: true
 DerivePointerAlignment: false
 DisableFormat: false
@@ -95,12 +100,12 @@ ExperimentalAutoDetectBinPacking: false
 PackConstructorInitializers: BinPack
 BasedOnStyle: ''
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
-AllowAllConstructorInitializersOnNextLine: true
 FixNamespaceComments: true
 ForEachMacros:
   - foreach
   - Q_FOREACH
   - BOOST_FOREACH
+  - FOR_EACH_FN
 IfMacros:
   - KJ_IF_MAYBE
 IncludeBlocks: Preserve

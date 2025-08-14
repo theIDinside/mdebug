@@ -36,21 +36,22 @@ namespace mdb::gdb {
 using Connection = RemoteConnection::ShrPtr;
 
 std::unordered_map<std::string_view, TraceeStopReason> RemoteConnection::mStopReasonMap{
-  {{"watch", TraceeStopReason{valueOf("watch")}},
-   {"rwatch", TraceeStopReason{valueOf("rwatch")}},
-   {"awatch", TraceeStopReason{valueOf("awatch")}},
-   {"syscall_entry", TraceeStopReason{valueOf("syscall_entry")}},
-   {"syscall_return", TraceeStopReason{valueOf("syscall_return")}},
-   {"library", TraceeStopReason{valueOf("library")}},
-   {"replaylog", TraceeStopReason{valueOf("replaylog")}},
-   {"swbreak", TraceeStopReason{valueOf("swbreak")}},
-   {"hwbreak", TraceeStopReason{valueOf("hwbreak")}},
-   {"fork", TraceeStopReason{valueOf("fork")}},
-   {"vfork", TraceeStopReason{valueOf("vfork")}},
-   {"vforkdone", TraceeStopReason{valueOf("vforkdone")}},
-   {"exec", TraceeStopReason{valueOf("exec")}},
-   {"clone", TraceeStopReason{valueOf("clone")}},
-   {"create", TraceeStopReason{valueOf("create")}}}};
+  { { "watch", TraceeStopReason{ valueOf("watch") } },
+    { "rwatch", TraceeStopReason{ valueOf("rwatch") } },
+    { "awatch", TraceeStopReason{ valueOf("awatch") } },
+    { "syscall_entry", TraceeStopReason{ valueOf("syscall_entry") } },
+    { "syscall_return", TraceeStopReason{ valueOf("syscall_return") } },
+    { "library", TraceeStopReason{ valueOf("library") } },
+    { "replaylog", TraceeStopReason{ valueOf("replaylog") } },
+    { "swbreak", TraceeStopReason{ valueOf("swbreak") } },
+    { "hwbreak", TraceeStopReason{ valueOf("hwbreak") } },
+    { "fork", TraceeStopReason{ valueOf("fork") } },
+    { "vfork", TraceeStopReason{ valueOf("vfork") } },
+    { "vforkdone", TraceeStopReason{ valueOf("vforkdone") } },
+    { "exec", TraceeStopReason{ valueOf("exec") } },
+    { "clone", TraceeStopReason{ valueOf("clone") } },
+    { "create", TraceeStopReason{ valueOf("create") } } }
+};
 
 static constexpr SendError
 send_err(const SendResult &res) noexcept
@@ -68,17 +69,18 @@ std::pair<char, char>
 checksum(std::string_view payload) noexcept
 {
   // we don't increase `size` here, because we don't want '#' to be counted in the checksum
-  u64 checksum_acc = static_cast<u64>(std::accumulate(payload.begin(), payload.end(), i64{0},
-                                                      [](auto acc, char c) { return acc + i64{c}; })) %
-                     256;
+  u64 checksum_acc =
+    static_cast<u64>(
+      std::accumulate(payload.begin(), payload.end(), i64{ 0 }, [](auto acc, char c) { return acc + i64{ c }; })) %
+    256;
   ASSERT(checksum_acc <= UINT8_MAX, "Checksum incorrect");
 
   const auto [FirstIndex, SecondIndex] = HexIndices(static_cast<u8>(checksum_acc));
   return std::make_pair(HexDigits[FirstIndex], HexDigits[SecondIndex]);
 }
 
-RemoteConnection::RemoteConnection(std::string &&host, int port, mdb::ScopedFd &&socket,
-                                   RemoteSettings settings) noexcept
+RemoteConnection::RemoteConnection(
+  std::string &&host, int port, mdb::ScopedFd &&socket, RemoteSettings settings) noexcept
     : mHost(std::move(host)), mSocket(std::move(socket)), mPort(port), mRemoteSettings(settings)
 {
   auto r = ::pipe(mRequestCommandFd);
@@ -148,7 +150,7 @@ BufferedSocket::Write(std::string_view payload) noexcept
     const auto success = send_res != -1;
     if (!success) {
       DBGLOG(remote, "failed sending {}", payload);
-      return SystemError{.syserrno = errno};
+      return SystemError{ .syserrno = errno };
     }
     bytes_sent += send_res;
   } while (bytes_sent < payload.size());
@@ -178,15 +180,17 @@ BufferedSocket::WriteCommand(std::string_view payload) noexcept
   u8 csum = acc;
   mOutputBuffer.push_back(HexDigits[(csum & 0xf0) >> 4]);
   mOutputBuffer.push_back(HexDigits[(csum & 0xf)]);
-  ASSERT(mOutputBuffer.size() == payload.size() + 4, "Unexpected buffer length: {} == {}", mOutputBuffer.size(),
-         payload.size() + 4);
+  ASSERT(mOutputBuffer.size() == payload.size() + 4,
+    "Unexpected buffer length: {} == {}",
+    mOutputBuffer.size(),
+    payload.size() + 4);
 
   do {
     const auto sendResult = send(mCommunicationSocket, mOutputBuffer.data(), mOutputBuffer.size(), 0);
     const auto success = sendResult != -1;
     if (!success) {
       DBGLOG(remote, "failed sending {}", payload);
-      return SystemError{.syserrno = errno};
+      return SystemError{ .syserrno = errno };
     }
     sentBytes += sendResult;
   } while (sentBytes < payload.size());
@@ -326,7 +330,7 @@ BufferedSocket::NextMessage(int timeout) noexcept
     }
   }
 
-  return MessageElement{.pos = pos, .data = static_cast<MessageData>(ch)};
+  return MessageElement{ .pos = pos, .data = static_cast<MessageData>(ch) };
 }
 
 std::optional<u32>
@@ -405,7 +409,7 @@ BufferedSocket::WaitForAck(int timeout) noexcept
     }
   }
 
-  return Timeout{.msg = "Waiting for ACK timed out"};
+  return Timeout{ .msg = "Waiting for ACK timed out" };
 }
 
 std::optional<char>
@@ -432,7 +436,7 @@ RemoteConnection::Connect(const std::string &host, int port, std::optional<Remot
   return mdb::ScopedFd::OpenSocketConnectTo(host, port)
     .and_then<InitError>([&](auto &&socket) -> mdb::Expected<Connection, InitError> {
       std::shared_ptr<RemoteConnection> connection = std::make_shared<RemoteConnection>(
-        std::string{host}, port, std::move(socket), remoteSettings.value_or(RemoteSettings{}));
+        std::string{ host }, port, std::move(socket), remoteSettings.value_or(RemoteSettings{}));
 
       return connection;
     });
@@ -442,7 +446,7 @@ void
 RemoteConnection::ConsumePollEvents(int fd) noexcept
 {
   ASSERT(fd == mRequestCommandFd[0] || fd == mReceivedAsyncNotificationDuringCoreControl[0],
-         "File descriptor not expected");
+    "File descriptor not expected");
   char buf[128];
   const auto bytes_read = ::read(fd, buf, 128);
   if (bytes_read == -1) {
@@ -487,10 +491,10 @@ public:
   PollSetup(int conn_socket, int cmds, int async, int quit_pipe) noexcept
       : mSocket(conn_socket), mCommandRequest(cmds), mAsyncPending(async), mQuit(quit_pipe)
   {
-    mPollFds[0] = {mSocket, POLLIN, 0};
-    mPollFds[1] = {mAsyncPending, POLLIN, 0};
-    mPollFds[2] = {mCommandRequest, POLLIN, 0};
-    mPollFds[3] = {mQuit, POLLIN, 0};
+    mPollFds[0] = { mSocket, POLLIN, 0 };
+    mPollFds[1] = { mAsyncPending, POLLIN, 0 };
+    mPollFds[2] = { mCommandRequest, POLLIN, 0 };
+    mPollFds[3] = { mQuit, POLLIN, 0 };
   }
 
   constexpr auto
@@ -502,9 +506,9 @@ public:
   PolledEvent
   Poll(std::optional<int> timeout) noexcept
   {
-    static constexpr auto Channels = std::to_array<std::string_view>({"IO", "Async", "User command request"});
+    static constexpr auto Channels = std::to_array<std::string_view>({ "IO", "Async", "User command request" });
     static constexpr auto Event = std::to_array<PolledEvent>(
-      {PolledEvent::HasIo, PolledEvent::AsyncPending, PolledEvent::CmdRequested, PolledEvent::Quit});
+      { PolledEvent::HasIo, PolledEvent::AsyncPending, PolledEvent::CmdRequested, PolledEvent::Quit });
 
     const auto pullEvent = [&](auto pollfd) {
       if (pollfd.fd == mPollFds[0].fd) {
@@ -635,7 +639,7 @@ RemoteConnection::UpdateKnownThreads(std::span<const GdbThread> threads_) noexce
   mThreads.clear();
   for (const auto gdb_thread : threads_) {
     // pid.pid == process/task leader of pid.tid(s), but it is a task too, not something special.
-    mThreads[{gdb_thread.pid, gdb_thread.pid}].push_back(gdb_thread);
+    mThreads[{ gdb_thread.pid, gdb_thread.pid }].push_back(gdb_thread);
   }
   mThreadsKnown = true;
 }
@@ -646,9 +650,9 @@ RemoteConnection::SetQueryThread(gdb::GdbThread thread) noexcept
   if (mSelectedThread != thread) {
     mSelectedThread = thread;
     char buf[64];
-    auto end = fmt::format_to(buf, "Hgp{:x}.{:x}", thread.pid, thread.tid);
+    auto end = std::format_to(buf, "Hgp{:x}.{:x}", thread.pid, thread.tid);
 
-    SocketCommand cmd{{buf, end}, false, false, false, {}};
+    SocketCommand cmd{ { buf, end }, false, false, false, {} };
     if (!ExecuteCommand(cmd, 100)) {
       TODO_FMT("Failed to configure controlling query thread to p{:x}.{:x}", thread.tid, thread.pid);
     }
@@ -688,7 +692,7 @@ bool
 RemoteConnection::ProcessTaskStopReply(int signal, std::string_view payload, bool isSessionConfig) noexcept
 {
   auto params = mdb::SplitString(payload, ";");
-  WaitEventParser parser{*this};
+  WaitEventParser parser{ *this };
   parser.mControlKindIsAttached = isSessionConfig;
   parser.mSignal = signal;
 
@@ -749,7 +753,7 @@ RemoteConnection::ProcessStopReplyPayload(std::string_view receivedPayload, bool
     receivedPayload.remove_prefix(1);
   }
 
-  StopReplyParser parser{GetSettings(), receivedPayload};
+  StopReplyParser parser{ GetSettings(), receivedPayload };
   const auto kind = parser.StopReplyKind();
   switch (kind) {
   case 'S': {
@@ -770,8 +774,9 @@ RemoteConnection::ProcessStopReplyPayload(std::string_view receivedPayload, bool
     if (!exit_code || !target) {
       return false;
     }
-    EventSystem::Get().PushDebuggerEvent(
-      TraceEvent::CreateProcessExitEvent(target.value(), target.value(), exit_code.value(), {}));
+    auto *traceEvent = new TraceEvent{};
+    TraceEvent::InitProcessExitEvent(traceEvent, target.value(), target.value(), exit_code.value(), {});
+    EventSystem::Get().PushDebuggerEvent(traceEvent);
     break;
   }
   case 'X': {
@@ -780,8 +785,9 @@ RemoteConnection::ProcessStopReplyPayload(std::string_view receivedPayload, bool
       return false;
     }
     TODO("Add Terminated event or make ProcessExit have two variants (i like this better)");
-    EventSystem::Get().PushDebuggerEvent(
-      TraceEvent::CreateProcessExitEvent(target.value(), target.value(), signal.value(), {}));
+    auto *traceEvent = new TraceEvent{};
+    TraceEvent::InitProcessExitEvent(traceEvent, target.value(), target.value(), signal.value(), {});
+    EventSystem::Get().PushDebuggerEvent(traceEvent);
     break;
   }
   case 'w': {
@@ -789,8 +795,10 @@ RemoteConnection::ProcessStopReplyPayload(std::string_view receivedPayload, bool
       const auto &[pid, tid, code] = res.value();
       // If we're not non-stop, this will stop the entire process
       const auto processNeedsResuming = !mRemoteSettings.mIsNonStop;
-      EventSystem::Get().PushDebuggerEvent(TraceEvent::CreateThreadExited(
-        {.target = pid, .tid = tid, .sig_or_code = code, .event_time = 0}, processNeedsResuming, {}));
+      auto *traceEvent = new TraceEvent{};
+      TraceEvent::InitThreadExited(
+        traceEvent, { .target = pid, .tid = tid, .sig_or_code = code, .event_time = 0 }, processNeedsResuming, {});
+      EventSystem::Get().PushDebuggerEvent(traceEvent);
       return true;
     } else {
       return false;
@@ -811,22 +819,23 @@ RemoteConnection::ParseEventConsumeRemaining() noexcept
   auto pending = TakePending();
   ASSERT(pending.has_value(), "No pending notification has been read");
   if (!mRemoteSettings.mIsNonStop) {
-    auto payload = std::string_view{pending.value()};
+    auto payload = std::string_view{ pending.value() };
     ASSERT(payload[0] == '$', "Expected 'synchronous non-stop' stop reply but got {}", payload[0]);
     payload.remove_prefix(1);
     ProcessStopReplyPayload(payload, false);
     // We are done. We are not in non-stop mode, there will be no further rapports.
     return;
   }
-  auto payload = std::string_view{pending.value()};
+  auto payload = std::string_view{ pending.value() };
   ASSERT(payload[0] == '%', "Expected Notification Header");
+
   payload.remove_prefix(1);
   ASSERT(payload.substr(0, 5) == "Stop:", "Only 'Stop' notifications are defined by the protocol as of yet");
   payload.remove_prefix(5);
 
   const auto sendRes = mSocket.WriteCommand("vStopped");
   if (!sendRes.is_ok()) {
-    PANIC(fmt::format("Failed to acknowledge asynchronous notification: {}", payload));
+    PANIC(std::format("Failed to acknowledge asynchronous notification: {}", payload));
   }
 
   ProcessStopReplyPayload(payload, false);
@@ -839,7 +848,7 @@ RemoteConnection::ParseEventConsumeRemaining() noexcept
     ProcessStopReplyPayload(payload, false);
     const auto sendRes = mSocket.Write("vStopped");
     if (!sendRes.is_ok()) {
-      PANIC(fmt::format("Failed to acknowledge asynchronous notification: {}", payload));
+      PANIC(std::format("Failed to acknowledge asynchronous notification: {}", payload));
     }
   } while (mSocket.HasMorePollIfEmpty(10));
 }
@@ -897,7 +906,7 @@ RemoteConnection::AppendReadQXferResponse(int timeout, std::string &output) noex
       if (!packet_end) {
         return {};
       }
-      std::string_view packet{mSocket.cbegin() + start->pos + 1, mSocket.cbegin() + packet_end.value()};
+      std::string_view packet{ mSocket.cbegin() + start->pos + 1, mSocket.cbegin() + packet_end.value() };
       if (!mRemoteSettings.mIsNoAck && message_type(packet) == MessageType::StopReply) {
         TODO("Implement dispatch of incoming stop reply (that is *not* an async notification event, used in "
              "non-stop) during wait/read/parse for command response");
@@ -916,7 +925,7 @@ RemoteConnection::AppendReadQXferResponse(int timeout, std::string &output) noex
       if (!packet_end) {
         return {};
       }
-      const auto packet = std::string_view{mSocket.cbegin(), mSocket.cbegin() + packet_end.value()};
+      const auto packet = std::string_view{ mSocket.cbegin(), mSocket.cbegin() + packet_end.value() };
       PutPendingNotification(packet);
       mSocket.ConsumeN(packet_end.value() + 3);
       break;
@@ -951,7 +960,7 @@ RemoteConnection::ReadCommandResponse(int timeout, bool expectingStopReply) noex
       if (!packetEnd) {
         return {};
       }
-      const auto packet = std::string_view{mSocket.cbegin() + start->pos, mSocket.cbegin() + packetEnd.value()};
+      const auto packet = std::string_view{ mSocket.cbegin() + start->pos, mSocket.cbegin() + packetEnd.value() };
       if (!mRemoteSettings.mIsNoAck) {
         TODO("we don't support ack-mode, we only support no-ack mode for now.");
       }
@@ -960,7 +969,7 @@ RemoteConnection::ReadCommandResponse(int timeout, bool expectingStopReply) noex
         mSocket.ConsumeN(packetEnd.value() + 3);
         continue;
       } else {
-        std::string result{packet};
+        std::string result{ packet };
         mSocket.ConsumeN(packetEnd.value() + 3);
         return result;
       }
@@ -970,7 +979,7 @@ RemoteConnection::ReadCommandResponse(int timeout, bool expectingStopReply) noex
       if (!packetEnd) {
         return {};
       }
-      const auto packet = std::string_view{mSocket.cbegin(), mSocket.cbegin() + packetEnd.value()};
+      const auto packet = std::string_view{ mSocket.cbegin(), mSocket.cbegin() + packetEnd.value() };
       PutPendingNotification(packet);
       mSocket.ConsumeN(packetEnd.value() + 3);
       break;
@@ -1021,7 +1030,7 @@ RemoteConnection::QueryTargetThreads(GdbThread thread, bool forceFlush) noexcept
   }
   const auto threadsResults = GetRemoteThreads();
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() { mTraceeControlMutex.unlock(); }};
+  ScopedDefer fn{ [&]() { mTraceeControlMutex.unlock(); } };
 
   UpdateKnownThreads(threadsResults);
 
@@ -1032,21 +1041,21 @@ std::vector<GdbThread>
 RemoteConnection::GetRemoteThreads() noexcept
 {
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
 
   RequestControl();
 
   std::vector<GdbThread> threads{};
 
-  SocketCommand read_threads{"qfThreadInfo"};
+  SocketCommand read_threads{ "qfThreadInfo" };
   if (!ExecuteCommand(read_threads, 1000)) {
     return {};
   }
 
-  std::string_view thr_result{read_threads.mResult.value()};
+  std::string_view thr_result{ read_threads.mResult.value() };
   thr_result.remove_prefix("$m"sv.size());
   const auto parsed = ProtocolParseThreads(thr_result);
   threads.reserve(parsed.size());
@@ -1054,11 +1063,11 @@ RemoteConnection::GetRemoteThreads() noexcept
     threads.emplace_back(pid, tid);
   }
   for (;;) {
-    SocketCommand continue_read_threads{"qsThreadInfo"};
+    SocketCommand continue_read_threads{ "qsThreadInfo" };
     if (!ExecuteCommand(continue_read_threads, 1000)) {
       return {};
     }
-    std::string_view res{continue_read_threads.mResult.value()};
+    std::string_view res{ continue_read_threads.mResult.value() };
     if (res == "$l") {
       break;
     } else {
@@ -1076,9 +1085,9 @@ bool
 RemoteConnection::ExecuteCommand(qXferCommand &cmd, u32 offset, int timeout) noexcept
 {
   ASSERT(cmd.mFmt[cmd.mFmt.size() - 1] == ':' && cmd.mFmt[cmd.mFmt.size() - 2] != ':',
-         "qXferCommand ill-formatted. Should always only end with one ':' even when the command has no annex. We "
-         "add the additional ':' in this function: '{}'",
-         cmd.mFmt);
+    "qXferCommand ill-formatted. Should always only end with one ':' even when the command has no annex. We "
+    "add the additional ':' in this function: '{}'",
+    cmd.mFmt);
   if (cmd.mResponseBuffer.capacity() == 0) {
     cmd.mResponseBuffer.reserve(cmd.mLength);
   }
@@ -1104,7 +1113,7 @@ RemoteConnection::ExecuteCommand(qXferCommand &cmd, u32 offset, int timeout) noe
     if (ptr == nullptr) {
       return false;
     }
-    std::string_view formattedCommand{buf.data(), ptr};
+    std::string_view formattedCommand{ buf.data(), ptr };
     const auto writeResult = mSocket.WriteCommand(formattedCommand);
     ASSERT(writeResult, "Failed to execute command '{}'", formattedCommand);
 
@@ -1126,9 +1135,9 @@ void
 RemoteConnection::ParseSupported(std::string_view supportedResponse) noexcept
 {
   DBGLOG(remote,
-         "Currently we don't really care. We support what we support and expect what we expect until further "
-         "notice:\n{}",
-         supportedResponse);
+    "Currently we don't really care. We support what we support and expect what we expect until further "
+    "notice:\n{}",
+    supportedResponse);
   supportedResponse.remove_prefix(1);
   const auto supported = mdb::SplitString(supportedResponse, ";");
   // This is an absolute requirement set by us.
@@ -1148,10 +1157,10 @@ bool
 RemoteConnection::SendQXferCommandWithResponse(qXferCommand &cmd, std::optional<int> timeout) noexcept
 {
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
 
   RequestControl();
   if (!ExecuteCommand(cmd, 0, timeout.value_or(0))) {
@@ -1169,16 +1178,16 @@ RemoteConnection::SendQXferCommandWithResponse(qXferCommand &cmd, std::optional<
     var)
 
 mdb::Expected<std::vector<std::string>, SendError>
-RemoteConnection::SendCommandsInOrderFailFast(std::vector<std::variant<SocketCommand, qXferCommand>> &&commands,
-                                              std::optional<int> timeout) noexcept
+RemoteConnection::SendCommandsInOrderFailFast(
+  std::vector<std::variant<SocketCommand, qXferCommand>> &&commands, std::optional<int> timeout) noexcept
 {
   std::vector<std::string> results{};
   results.reserve(commands.size());
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
 
   RequestControl();
   using MatchResult = bool;
@@ -1203,21 +1212,21 @@ RemoteConnection::SendCommandsInOrderFailFast(std::vector<std::variant<SocketCom
       c);
     // clang-format on
     if (!commandResult) {
-      return SendError{SystemError{0}};
+      return SendError{ SystemError{ 0 } };
     }
   }
   return results;
 }
 
 mdb::Expected<std::vector<std::string>, SendError>
-RemoteConnection::SendInOrderCommandChain(std::span<std::string_view> commands,
-                                          std::optional<int> timeout) noexcept
+RemoteConnection::SendInOrderCommandChain(
+  std::span<std::string_view> commands, std::optional<int> timeout) noexcept
 {
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
   RequestControl();
   std::vector<std::string> result{};
   result.reserve(commands.size());
@@ -1237,10 +1246,10 @@ RemoteConnection::SendInOrderCommandChain(std::span<std::string_view> commands,
     if (ack) {
       auto ack = mSocket.WaitForAck(timeout.value_or(-1));
       if (ack.is_error()) {
-        return SendError{Timeout{.msg = "Connection timed out waiting for ack"}};
+        return SendError{ Timeout{ .msg = "Connection timed out waiting for ack" } };
       }
       if (!ack->second) {
-        return SendError{NAck{}};
+        return SendError{ NAck{} };
       }
       ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
       mSocket.ConsumeN(ack->first + 1);
@@ -1249,9 +1258,9 @@ RemoteConnection::SendInOrderCommandChain(std::span<std::string_view> commands,
     std::optional<std::string> response = ReadCommandResponse(timeout.value_or(-1), false);
     if (!response) {
       if (mSocket.Size() > 0) {
-        return SendError{NAck{}};
+        return SendError{ NAck{} };
       } else {
-        return SendError{Timeout{.msg = "Timed out waiting for response to command"}};
+        return SendError{ Timeout{ .msg = "Timed out waiting for response to command" } };
       }
     }
     result.emplace_back(std::move(response).value());
@@ -1263,22 +1272,22 @@ void
 RemoteConnection::SendInterruptByte() noexcept
 {
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
 
   RequestControl();
-  char Int[1] = {3};
-  const auto writeResult = mSocket.Write({Int, 1});
+  char Int[1] = { 3 };
+  const auto writeResult = mSocket.Write({ Int, 1 });
   if (!writeResult.is_ok()) {
     PANIC("Failed to sent interrupt byte");
   }
 }
 
 mdb::Expected<std::string, SendError>
-RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> thread, std::string_view command,
-                                             std::optional<int> timeout) noexcept
+RemoteConnection::SendCommandWaitForResponse(
+  std::optional<gdb::GdbThread> thread, std::string_view command, std::optional<int> timeout) noexcept
 {
   // the actual dance of requesting and receiving control, also needs mutually exclusive access.
   // because otherwise, two "control threads", might actually arrive here, and hit the barrier's arrive_and_wait
@@ -1286,10 +1295,10 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
   // other through". Which would be... pretty bad.
   // when this returns, we have control
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
 
   RequestControl();
   if (thread) {
@@ -1309,10 +1318,10 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
   if (ack) {
     auto ack = mSocket.WaitForAck(timeout.value_or(-1));
     if (ack.is_error()) {
-      return SendError{Timeout{.msg = "Connection timed out waiting for ack"}};
+      return SendError{ Timeout{ .msg = "Connection timed out waiting for ack" } };
     }
     if (!ack->second) {
-      return SendError{NAck{}};
+      return SendError{ NAck{} };
     }
     ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
     mSocket.ConsumeN(ack->first + 1);
@@ -1321,14 +1330,14 @@ RemoteConnection::SendCommandWaitForResponse(std::optional<gdb::GdbThread> threa
   auto response = ReadCommandResponse(timeout.value_or(-1), false);
   if (!response) {
     if (mSocket.Size() > 0) {
-      return SendError{NAck{}};
+      return SendError{ NAck{} };
     } else {
-      return SendError{Timeout{.msg = "Timed out waiting for response to command"}};
+      return SendError{ Timeout{ .msg = "Timed out waiting for response to command" } };
     }
   }
   const auto &ref = response.value();
   if (ref[0] == '$' && ref[1] == 'E') {
-    return SendError{SystemError{.syserrno = 0}};
+    return SendError{ SystemError{ .syserrno = 0 } };
   }
 
   return mdb::expected(std::move(response.value()));
@@ -1344,10 +1353,10 @@ RemoteConnection::SendVContCommand(std::string_view command, std::optional<int> 
   // other through". Which would be... pretty bad.
   // when this returns, we have control
   mTraceeControlMutex.lock();
-  ScopedDefer fn{[&]() {
+  ScopedDefer fn{ [&]() {
     UserDoneSynchronization.arrive_and_wait();
     mTraceeControlMutex.unlock();
-  }};
+  } };
 
   RequestControl();
   for (auto retries = 10;; --retries) {
@@ -1366,7 +1375,7 @@ RemoteConnection::SendVContCommand(std::string_view command, std::optional<int> 
       if (mSocket.Size() > 0) {
         return NAck{};
       } else {
-        return Timeout{.msg = "Timed out waiting for response to command"};
+        return Timeout{ .msg = "Timed out waiting for response to command" };
       }
     }
     if (response != "$OK") {
@@ -1393,17 +1402,16 @@ static std::mutex InitMutex{};
 std::optional<ConnInitError>
 RemoteConnection::InitStopQuery() noexcept
 {
-  SocketCommand currentStopReply{"?"};
+  SocketCommand currentStopReply{ "?" };
   currentStopReply.mResponseIsStopReply = true;
   if (mRemoteSettings.mIsNonStop) {
     if (!ExecuteCommand(currentStopReply, 5000)) {
-      return ConnInitError{.msg = "Failed to request current stop info"};
+      return ConnInitError{ .msg = "Failed to request current stop info" };
     }
-    PutPendingNotification(currentStopReply.mResult.value());
-    ParseEventConsumeRemaining();
+    ProcessStopReplyPayload(currentStopReply.mResult.value(), true);
   } else {
     if (!ExecuteCommand(currentStopReply, 5000)) {
-      return ConnInitError{.msg = "Failed to request current stop info"};
+      return ConnInitError{ .msg = "Failed to request current stop info" };
     }
     ProcessStopReplyPayload(currentStopReply.mResult.value(), true);
   }
@@ -1418,8 +1426,10 @@ RemoteConnection::InitializeThread() noexcept
     mStopReplyAndEventListeners = std::thread{
       [this]() {
         for (; mRun;) {
-          PollSetup polling{mSocket.GetPollConfig().fd, mRequestCommandFd[0],
-                            mReceivedAsyncNotificationDuringCoreControl[0], mQuitFd[0]};
+          PollSetup polling{ mSocket.GetPollConfig().fd,
+            mRequestCommandFd[0],
+            mReceivedAsyncNotificationDuringCoreControl[0],
+            mQuitFd[0] };
           switch (polling.Poll(None())) {
           case PollSetup::PolledEvent::None:
             break;
@@ -1452,7 +1462,7 @@ GdbThread::parse_thread(std::string_view input) noexcept
     Tid tid;
     const auto tidResult = std::from_chars(parse.begin(), parse.end(), tid, 16);
     ASSERT(tidResult.ec == std::errc(), "failed to parse pid from {}", input);
-    return gdb::GdbThread{0, tid};
+    return gdb::GdbThread{ 0, tid };
   } else {
     ASSERT(parse[0] == 'p', "Expected multiprocess thread syntax");
     parse.remove_prefix(1);
@@ -1471,7 +1481,7 @@ GdbThread::parse_thread(std::string_view input) noexcept
     const auto tidResult = std::from_chars(parse.begin(), parse.end(), tid, 16);
     ASSERT(tidResult.ec == std::errc(), "failed to parse pid from {}", input);
 
-    return gdb::GdbThread{pid, tid};
+    return gdb::GdbThread{ pid, tid };
   }
 }
 
@@ -1486,7 +1496,7 @@ GdbThread::MaybeParseThread(std::string_view input) noexcept
     if (tidResult.ec != std::errc()) {
       return {};
     }
-    return gdb::GdbThread{0, tid};
+    return gdb::GdbThread{ 0, tid };
   } else {
     if (parse[0] != 'p') {
       return {};
@@ -1509,7 +1519,7 @@ GdbThread::MaybeParseThread(std::string_view input) noexcept
       return {};
     }
 
-    return gdb::GdbThread{pid, tid};
+    return gdb::GdbThread{ pid, tid };
   }
 }
 

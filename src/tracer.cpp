@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 // mdb
 #include "tracer.h"
+#include "common/typedefs.h"
 #include <bp.h>
 #include <event_queue.h>
 #include <interface/attach_args.h>
@@ -15,7 +16,6 @@
 #include <lib/lockguard.h>
 #include <lib/spinlock.h>
 #include <lib/stack.h>
-#include <mdbjs/event_dispatcher.h>
 #include <mdbjs/mdbjs.h>
 #include <supervisor.h>
 #include <symbolication/dwarf_frameunwinder.h>
@@ -31,6 +31,8 @@
 #include <utils/scoped_fd.h>
 #include <utils/thread_pool.h>
 
+#include <quickjs/quickjs.h>
+
 // stdlib
 #include <algorithm>
 #include <utility>
@@ -42,21 +44,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// dependency
-#include <fmt/format.h>
-#include <js/Context.h>
-#include <js/ErrorReport.h>
-#include <js/Initialization.h>
-#include <js/Warnings.h>
-#include <jsfriendapi.h>
-
 namespace mdb {
 
 Tracer::Tracer(sys::DebuggerConfiguration init) noexcept : config(std::move(init))
 {
   ASSERT(Tracer::sTracerInstance == nullptr,
-         "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
-         (uintptr_t)this, (uintptr_t)sTracerInstance);
+    "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
+    (uintptr_t)this,
+    (uintptr_t)sTracerInstance);
   mConsoleCommandInterpreter = new ConsoleCommandInterpreter{};
 }
 
@@ -78,7 +73,7 @@ Tracer::LoadAndProcessObjectFile(pid_t target_pid, const Path &objfile_path) noe
 Tracer *
 Tracer::Create(sys::DebuggerConfiguration cfg) noexcept
 {
-  sTracerInstance = new Tracer{std::move(cfg)};
+  sTracerInstance = new Tracer{ std::move(cfg) };
   return sTracerInstance;
 }
 
@@ -103,24 +98,42 @@ Tracer::Get() noexcept
   return *sTracerInstance;
 }
 
+/* static */
+TraceeController *
+Tracer::PrepareNewSupervisorWithId(SessionId sessionId) noexcept
+{
+  static SessionId latestSessionId = 0;
+  ASSERT(sessionId > latestSessionId, "Preparing a new session with a previously used ID is not supported.");
+  latestSessionId = sessionId;
+  auto &instance = Tracer::Get();
+  instance.mUnInitializedSupervisor.push_back(
+    std::make_pair(sessionId, TraceeController::CreateDetached(sessionId)));
+  return instance.mUnInitializedSupervisor.back().second.get();
+}
+
 void
 Tracer::TerminateSession() noexcept
 {
   for (auto &t : mTracedProcesses) {
     t->GetInterface().DoDisconnect(true);
     t->GetPublisher(ObserverType::AllStop).Once([sv = t.get()]() {
-      EventSystem::Get().PushInternalEvent(InvalidateSupervisor{sv});
+      EventSystem::Get().PushInternalEvent(InvalidateSupervisor{ sv });
     });
   }
   EventSystem::Get().PushInternalEvent(TerminateDebugging{});
 }
 
 void
-Tracer::AddLaunchedTarget(const tc::InterfaceConfig &config, TargetSession session) noexcept
+Tracer::AddLaunchedTarget(SessionId sessionId, const tc::InterfaceConfig &config, TargetSession session) noexcept
 {
-  mTracedProcesses.push_back(TraceeController::create(mSessionProcessId++, session,
-                                                      tc::TraceeCommandInterface::CreateCommandInterface(config),
-                                                      InterfaceType::Ptrace));
+  std::unique_ptr<TraceeController> preparedSupervisor{ nullptr };
+  auto it = find_if(mUnInitializedSupervisor, [&](const auto &info) { return info.first == sessionId; });
+  VERIFY(it.has_value(), "Failed to find prepared supervisor with id {}", sessionId);
+
+  std::unique_ptr supervisor = std::move(it.value()->second);
+  supervisor->InitializeSupervisor(
+    session, tc::TraceeCommandInterface::CreateCommandInterface(config), InterfaceType::Ptrace);
+  mTracedProcesses.push_back(std::move(supervisor));
 
   const auto newProcess = mTracedProcesses.back()->GetInterface().TaskLeaderTid();
 
@@ -163,12 +176,12 @@ Tracer::TakeUninitializedTask(Tid tid) noexcept
 }
 
 TraceEvent *
-Tracer::ConvertWaitEvent(TaskWaitResult wait_res) noexcept
+Tracer::ConvertWaitEvent(WaitPidResult waitPid) noexcept
 {
-  auto tc = GetProcessContainingTid(wait_res.tid);
+  auto tc = GetProcessContainingTid(waitPid.tid);
   if (!tc) {
-    DBGLOG(core, "Task {} left unitialized, seen before clone event in parent?", wait_res.tid);
-    mUnInitializedThreads.emplace(wait_res.tid, TaskInfo::CreateUnInitializedTask(wait_res));
+    DBGLOG(core, "Task {} left unitialized, seen before clone event in parent?", waitPid.tid);
+    mUnInitializedThreads.emplace(waitPid.tid, TaskInfo::CreateUnInitializedTask(waitPid));
     return nullptr;
   }
 
@@ -176,8 +189,8 @@ Tracer::ConvertWaitEvent(TaskWaitResult wait_res) noexcept
     DBGLOG(core, "Configuration for newly execed process {} not completed", tc->TaskLeaderTid());
     return nullptr;
   }
-  ASSERT(tc != nullptr, "Could not find process that task {} belongs to", wait_res.tid);
-  auto task = tc->SetPendingWaitstatus(wait_res);
+  ASSERT(tc != nullptr, "Could not find process that task {} belongs to", waitPid.tid);
+  auto task = tc->SetPendingWaitstatus(waitPid);
   return tc->CreateTraceEventFromWaitStatus(*task);
 }
 
@@ -207,12 +220,15 @@ Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
 #ifdef MDB_DEBUG
   IncrementDebuggerTime();
 #endif
-  auto task = GetTask(evt->mTaskId);
-  TraceeController *supervisor = task->GetSupervisor();
-  // TODO(simon): When we implement RR support (somehow, god knows), we need to be able to tell if we've travelled
-  // back in time, or gone forward. This should potentially save us work.
-  ASSERT(supervisor->mCreationEventTime >= evt->mEventTime,
-         "Event time is before the creation of this supervisor?");
+  if (!evt->mTask) {
+    evt->mTask = GetTaskPointer(evt->mTaskId);
+  }
+
+  TraceeController *supervisor = evt->mTask->GetSupervisor();
+  // TODO(simon): When we implement RR support (somehow, god knows), we need to be able to tell if we've
+  // travelled back in time, or gone forward. This should potentially save us work.
+  ASSERT(
+    supervisor->mCreationEventTime >= evt->mEventTime, "Event time is before the creation of this supervisor?");
   sLastTraceEventTime = std::max<int>(0, evt->mEventTime);
   if (!supervisor) {
     // out-of-order wait status; defer & wait for complete initilization of new supervisor
@@ -228,8 +244,8 @@ Tracer::HandleInternalEvent(InternalEvent evt) noexcept
   switch (evt.mType) {
   case InternalEventDiscriminant::InvalidateSupervisor: {
     auto sv = evt.uInvalidateSupervisor.mSupervisor;
-    auto it = std::find_if(mTracedProcesses.begin(), mTracedProcesses.end(),
-                           [sv](const auto &t) { return t.get() == sv; });
+    auto it = std::find_if(
+      mTracedProcesses.begin(), mTracedProcesses.end(), [sv](const auto &t) { return t.get() == sv; });
     if (it != std::end(mTracedProcesses)) {
       sv->OnTearDown();
       std::unique_ptr<TraceeController> swap = std::move(*it);
@@ -264,16 +280,16 @@ Tracer::HandleInitEvent(TraceEvent *evt) noexcept
 
 #define ReturnEvalExprError(errorCondition, msg, ...)                                                             \
   if ((errorCondition)) {                                                                                         \
-    fmt::format_to(std::back_inserter(evalResult), msg __VA_OPT__(, ) __VA_ARGS__);                               \
-    return ConsoleCommandResult{false, evalResult};                                                               \
+    std::format_to(std::back_inserter(evalResult), msg __VA_OPT__(, ) __VA_ARGS__);                               \
+    return ConsoleCommandResult{ false, evalResult };                                                             \
   }
 
 #define OK_RESULT(res)                                                                                            \
   ConsoleCommandResult { true, std::move(res) }
 
 std::pmr::string *
-Tracer::EvaluateDebugConsoleExpression(const std::string &expression, bool escapeOutput,
-                                       Allocator *allocator) noexcept
+Tracer::EvaluateDebugConsoleExpression(
+  const std::string &expression, bool escapeOutput, Allocator *allocator) noexcept
 {
   auto res = mConsoleCommandInterpreter->Interpret(expression, allocator);
   return res.mContents;
@@ -309,16 +325,29 @@ exec(const Path &program, std::span<const std::string> programArguments, char **
 }
 
 Pid
-Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId, const AttachArgs &args) noexcept
+Tracer::Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const AttachArgs &args) noexcept
 {
   using MatchResult = Pid;
 
+  const auto getUnInitializedSupervisor = [&](SessionId sessionId) -> std::unique_ptr<TraceeController> {
+    std::unique_ptr<TraceeController> preparedSupervisor{ nullptr };
+    auto it = find_if(mUnInitializedSupervisor, [&](const auto &info) { return info.first == sessionId; });
+    VERIFY(it.has_value(), "Failed to find prepared supervisor with id {}", sessionId);
+
+    preparedSupervisor = std::move(it.value()->second);
+    return preparedSupervisor;
+  };
+
   return std::visit(
-    Match{[&](const PtraceAttachArgs &ptrace) -> MatchResult {
+    Match{ [&](const PtraceAttachArgs &ptrace) -> MatchResult {
             auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
-            mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
-                                                                TargetSession::Attached, std::move(interface),
-                                                                InterfaceType::Ptrace));
+
+            auto preparedSupervisor = getUnInitializedSupervisor(sessionId);
+            preparedSupervisor->InitializeSupervisor(
+              TargetSession::Attached, std::move(interface), InterfaceType::Ptrace);
+
+            mTracedProcesses.push_back(std::move(preparedSupervisor));
+
             auto *supervisor = mTracedProcesses.back().get();
             if (const std::optional<Path> execFile = supervisor->GetInterface().ExecedFile(); execFile) {
               const Tid newProcess = supervisor->GetInterface().TaskLeaderTid();
@@ -326,79 +355,85 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, const std::string &sessionId
             }
             return ptrace.pid;
           },
-          [&](const AutoArgs &child) -> MatchResult {
-            DBGLOG(core, "Configuring new supervisor for DAP session");
-            client->PostDapEvent(new ui::dap::InitializedEvent{sessionId, child.mExistingProcessId});
-            return child.mExistingProcessId;
-          },
-          [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
-            DBGLOG(core, "Initializing remote protocol interface...");
-            // Since we may connect to a remote that is not connected to nuthin,
-            // we need an extra step here (via the RemoteSessionConfiguirator), before
-            // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
-            // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
-            // 1 process, that's it. But the remote target might actually be attached to many, and
-            // we want our design to be consistent (1 commander / process. Otherwise we turn into
-            // gdb hell hole.)
-            auto remote_init = tc::RemoteSessionConfigurator{
-              Tracer::Get().ConnectToRemoteGdb({.host = gdb.host, .port = gdb.port}, {})};
+      [&](const AutoArgs &child) -> MatchResult {
+        DBGLOG(core, "Configuring new supervisor for DAP session");
+        client->PostDapEvent(new ui::dap::InitializedEvent{ sessionId, child.mExistingProcessId });
+        return child.mExistingProcessId;
+      },
+      [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
+        DBGLOG(core, "Initializing remote protocol interface...");
+        // Since we may connect to a remote that is not connected to nuthin,
+        // we need an extra step here (via the RemoteSessionConfiguirator), before
+        // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
+        // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
+        // 1 process, that's it. But the remote target might actually be attached to many, and
+        // we want our design to be consistent (1 commander / process. Otherwise we turn into
+        // gdb hell hole.)
+        auto remote_init = tc::RemoteSessionConfigurator{ Tracer::Get().ConnectToRemoteGdb(
+          { .host = gdb.host, .port = gdb.port }, {}) };
 
-            std::vector<tc::RemoteProcess> res;
+        std::vector<tc::RemoteProcess> res;
 
-            switch (gdb.type) {
-            case RemoteType::RR: {
-              auto result = remote_init.configure_rr_session();
-              if (result.is_expected()) {
-                res = std::move(result.take_value());
-              } else {
-                PANIC("Failed to configure session");
-              }
-            } break;
-            case RemoteType::GDB: {
-              auto result = remote_init.configure_session();
-              if (result.is_expected()) {
-                res = std::move(result.take_value());
-              } else {
-                PANIC("Failed to configure session");
-              }
-            } break;
+        switch (gdb.type) {
+        case RemoteType::RR: {
+          auto result = remote_init.configure_rr_session();
+          if (result.is_expected()) {
+            res = std::move(result.take_value());
+          } else {
+            PANIC("Failed to configure session");
+          }
+        } break;
+        case RemoteType::GDB: {
+          auto result = remote_init.configure_session();
+          if (result.is_expected()) {
+            res = std::move(result.take_value());
+          } else {
+            PANIC("Failed to configure session");
+          }
+        } break;
+        }
+
+        auto it = res.begin();
+        const auto firstAttachedId = it->tc->TaskLeaderTid();
+        bool alreadyAdded = true;
+
+        const auto hookupDapWithRemote =
+          [&](auto &&newSupervisor, ui::dap::DebugAdapterClient *client, bool newProc) {
+            mTracedProcesses.push_back(std::move(newSupervisor));
+            auto *supervisor = mTracedProcesses.back().get();
+            auto &ti = supervisor->GetInterface();
+            alreadyAdded = false;
+            ti.OnExec();
+            for (const auto &t : it->threads) {
+              supervisor->CreateNewTask(t.tid, false);
             }
-
-            auto it = res.begin();
-            const auto firstAttachedId = it->tc->TaskLeaderTid();
-            mDAP->Get()->PostDapEvent(new ui::dap::InitializedEvent{sessionId, firstAttachedId});
-            bool alreadyAdded = true;
-            const auto hookupDapWithRemote = [&](auto &&tc, ui::dap::DebugAdapterClient *client, bool newProc) {
-              mTracedProcesses.push_back(TraceeController::create(Tracer::Get().NewSupervisorId(),
-                                                                  TargetSession::Attached, std::move(tc),
-                                                                  InterfaceType::GdbRemote));
-              auto *supervisor = mTracedProcesses.back().get();
-              auto &ti = supervisor->GetInterface();
-              client->AddSupervisor(supervisor);
-              alreadyAdded = false;
-              ti.OnExec();
-              for (const auto &t : it->threads) {
-                supervisor->CreateNewTask(t.tid, false);
-              }
-              for (auto &entry : supervisor->GetThreads()) {
-                entry.mTask->SetStop();
-              };
-
-              if (newProc) {
-                client->PostDapEvent(new ui::dap::Process{0, supervisor->TaskLeaderTid(), "process", false});
-              }
+            for (auto &entry : supervisor->GetThreads()) {
+              entry.mTask->SetUserVisibleStop();
             };
 
-            auto mainConnection = mDAP->Get();
-            hookupDapWithRemote(std::move(it->tc), mainConnection, false);
-            mainConnection->SetDebugAdapterSessionType(
-              (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
-            ++it;
-            for (; it != std::end(res); ++it) {
-              hookupDapWithRemote(std::move(it->tc), mainConnection, true);
+            if (newProc) {
+              client->PostDapEvent(new ui::dap::Process{ 0, supervisor->TaskLeaderTid(), "process", false });
             }
-            return firstAttachedId;
-          }},
+          };
+
+        auto mainConnection = mDAP->Get();
+        auto unInitializedSupervisor = getUnInitializedSupervisor(sessionId);
+        unInitializedSupervisor->InitializeSupervisor(
+          TargetSession::Attached, std::move(it->tc), InterfaceType::GdbRemote);
+        hookupDapWithRemote(std::move(unInitializedSupervisor), mainConnection, false);
+        mainConnection->SetDebugAdapterSessionType(
+          (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
+        ++it;
+        for (; it != std::end(res); ++it) {
+          hookupDapWithRemote(TraceeController::create(Tracer::Get().NewSupervisorId(),
+                                TargetSession::Attached,
+                                std::move(it->tc),
+                                InterfaceType::GdbRemote),
+            mainConnection,
+            true);
+        }
+        return firstAttachedId;
+      } },
     args);
 }
 
@@ -412,9 +447,12 @@ Tracer::AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept
 
 /* static */
 pid_t
-Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::string &sessionId, bool stopOnEntry,
-               const Path &program, std::span<const std::string> prog_args,
-               std::optional<BreakpointBehavior> breakpointBehavior) noexcept
+Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient,
+  SessionId sessionId,
+  bool stopOnEntry,
+  const Path &program,
+  std::span<const std::string> prog_args,
+  std::optional<BreakpointBehavior> breakpointBehavior) noexcept
 {
   termios originalTty;
   winsize ws;
@@ -467,7 +505,7 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::strin
     PTRACE_OR_PANIC(PTRACE_TRACEME, 0, 0, 0);
 
     if (exec(program, prog_args, environment.data()) == -1) {
-      PANIC(fmt::format("EXECV Failed for {}", program.c_str()));
+      PANIC(std::format("EXECV Failed for {}", program.c_str()));
     }
     _exit(0);
     break;
@@ -486,19 +524,14 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::strin
 
     const auto leader = childPid;
 
-    Get().AddLaunchedTarget(tc::PtraceCfg{leader}, TargetSession::Launched);
+    Get().AddLaunchedTarget(sessionId, tc::PtraceCfg{ leader }, TargetSession::Launched);
     auto supervisor = Get().mTracedProcesses.back().get();
 
-    // Inform the debug adater supporting client, that we can now start a configuration init cycle.
-    // We also pass along the extension `processId` in the initilization event, so that the debug adapter
-    // supporting client can map a debug adapter client to a process id, hence forth.
-    debugAdapterClient->PostDapEvent(new ui::dap::InitializedEvent{sessionId, leader});
-    debugAdapterClient->AddSupervisor(supervisor);
     debugAdapterClient->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
     supervisor->ConfigureBreakpointBehavior(
       breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
 
-    TaskWaitResult twr{.tid = leader, .ws = {.ws = WaitStatusKind::Execed, .exit_code = 0}};
+    WaitPidResult twr{ .tid = leader, .ws = { .ws = WaitStatusKind::Execed, .exit_code = 0 } };
     auto task = supervisor->RegisterTaskWaited(twr);
     if (task == nullptr) {
       PANIC("Expected a task but could not find one for that wait status");
@@ -511,8 +544,8 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient, const std::strin
     }
 
     if (stopOnEntry) {
-      Set<BreakpointSpecification> fns{
-        BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, "main", false)};
+      Set<BreakpointSpecification> fns{ BreakpointSpecification::Create<FunctionBreakpointSpec>(
+        {}, {}, "main", false) };
       supervisor->SetFunctionBreakpoints(fns);
     }
     return childPid;
@@ -532,8 +565,8 @@ Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
 }
 
 std::shared_ptr<gdb::RemoteConnection>
-Tracer::ConnectToRemoteGdb(const tc::GdbRemoteCfg &config,
-                           const std::optional<gdb::RemoteSettings> &settings) noexcept
+Tracer::ConnectToRemoteGdb(
+  const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept
 {
   for (auto &t : mTracedProcesses) {
     if (auto conn = t->GetInterface().RemoteConnection(); conn && conn->IsConnectedTo(config.host, config.port)) {
@@ -599,7 +632,13 @@ Tracer::RegisterTracedTask(Ref<TaskInfo> newTask) noexcept
 }
 
 Ref<TaskInfo>
-Tracer::GetTask(Tid tid) noexcept
+Tracer::GetTaskReference(Tid tid) noexcept
+{
+  return RefPtr{ GetTaskPointer(tid) };
+}
+
+TaskInfo *
+Tracer::GetTaskPointer(Tid tid) noexcept
 {
   if (const auto it = mDebugSessionTasks.find(tid); it != std::end(mDebugSessionTasks)) {
     return it->second;
@@ -611,7 +650,7 @@ Tracer::GetTask(Tid tid) noexcept
 Ref<TaskInfo>
 Tracer::GetThreadByTidOrDebugId(Tid tid) noexcept
 {
-  auto t = Tracer::Get().GetTask(tid);
+  auto t = Tracer::Get().GetTaskReference(tid);
   if (t) {
     return t;
   }
@@ -686,20 +725,6 @@ Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
 }
 
 /* static */
-mdb::js::AppScriptingInstance &
-Tracer::GetScriptingInstance() noexcept
-{
-  return *sScriptRuntime;
-}
-
-/* static */
-JSContext *
-Tracer::GetJsContext() noexcept
-{
-  return sApplicationJsContext;
-}
-
-/* static */
 void
 Tracer::InitializeDapSerializers() noexcept
 {
@@ -742,65 +767,18 @@ Tracer::NewSupervisorId() noexcept
 
 /* static */
 void
-Tracer::InitInterpreterAndStartDebugger(std::unique_ptr<DebuggerThread> debugAdapterThread,
-                                        EventSystem *eventSystem) noexcept
+Tracer::InitInterpreterAndStartDebugger(
+  std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept
 {
   Get().mDebugAdapterThread = std::move(debugAdapterThread);
-  if (!JS_Init()) {
-    PANIC("Failed to init JS!");
-  }
-  AppScriptingInstance *js = nullptr;
-  {
-    JSContext *cx = JS_NewContext(JS::DefaultHeapMaxBytes);
 
-    if (!::js::UseInternalJobQueues(cx)) {
-      PANIC("Failed to use internal job queues");
-    }
-    // We must instantiate self-hosting *after* setting up job queue.
-    if (!JS::InitSelfHostedCode(cx)) {
-      PANIC("init self hosted code failed");
-    }
-    JS::RootedObject global(cx, mdb::js::RuntimeGlobal::create(cx));
-
-    if (!global) {
-      PANIC("Failed to create debugger global object");
-    }
-
-    JS::SetWarningReporter(cx, [](JSContext *cx, JSErrorReport *report) { JS::PrintError(stderr, report, true); });
-    js = mdb::js::AppScriptingInstance::Create(cx, global);
-    js->InitRuntime();
-    JSAutoRealm ar(js->GetRuntimeContext(), js->GetRuntimeGlobal());
-    DBGLOG(core, "Javascript initialized. Starting debugger core loop.");
-    sApplicationJsContext = cx;
-    sScriptRuntime = js;
-    // It's now safe to use `ScriptRuntime`
-    MainLoop(eventSystem, js);
-    JS_MaybeGC(cx);
-    ::js::StopDrainingJobQueue(cx);
-  }
-  if (js) {
-    js->Shutdown();
-  }
-}
-
-constexpr bool
-EventHandlerStack::HasEventHandler() const noexcept
-{
-  return !mEventHandlerStack.Empty();
-}
-
-constexpr bool
-EventHandlerStack::ProcessEvent(Tracer &debugger, const ApplicationEvent &evt)
-{
-  if (mEventHandlerStack.Empty()) {
-    return false;
-  }
-
-  return mEventHandlerStack.Top()(debugger, evt);
+  auto interpreter = js::Scripting::Create();
+  MainLoop(eventSystem, interpreter);
+  interpreter->Shutdown();
 }
 
 void
-Tracer::MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *scriptRuntime) noexcept
+Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) noexcept
 {
   auto &dbgInstance = Get();
   dbgInstance.sScriptRuntime = scriptRuntime;
@@ -808,16 +786,9 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::AppScriptingInstance *script
   std::vector<ApplicationEvent> readInEvents{};
   readInEvents.reserve(128);
 
-  EventHandlerStack eventHandlerStack{};
-  dbgInstance.mEventHandlerStack = &eventHandlerStack;
-
   while (dbgInstance.IsRunning()) {
     if (eventSystem->PollBlocking(readInEvents)) {
       for (auto evt : readInEvents) {
-        const bool handled = eventHandlerStack.ProcessEvent(dbgInstance, evt);
-        if (handled) {
-          continue;
-        }
         switch (evt.mEventType) {
         case EventType::WaitStatus: {
           DBGLOG(awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, to_str(evt.uWait.mWaitResult.ws.ws));

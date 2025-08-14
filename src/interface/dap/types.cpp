@@ -10,31 +10,31 @@ namespace mdb::ui::dap {
 std::pmr::string
 Breakpoint::Serialize(std::pmr::memory_resource *memoryResource) const noexcept
 {
-  std::pmr::string buf{memoryResource};
+  std::pmr::string buf{ memoryResource };
   // TODO(simon): Here we really should be using some form of arena allocation for the DAP interpreter
   // communication
   //  so that all these allocations can be "blinked" out of existence, i.e. all serialized command results, will be
   //  manually de/allocated by us. But that's the future.
   buf.reserve(256);
   auto it = std::back_inserter(buf);
-  it = fmt::format_to(it, R"({{"id":{},"verified":{})", mId, mVerified);
+  it = std::format_to(it, R"({{"id":{},"verified":{})", mId, mVerified);
   if (mVerified) {
-    it = fmt::format_to(it, R"(,"instructionReference": "{}")", mAddress);
+    it = std::format_to(it, R"(,"instructionReference": "{}")", mAddress);
   } else {
-    it = fmt::format_to(it, R"(,"message": "{}")", mErrorMessage.value());
+    it = std::format_to(it, R"(,"message": "{}")", mErrorMessage.value());
   }
 
   if (mLine) {
-    it = fmt::format_to(it, R"(,"line": {})", *mLine);
+    it = std::format_to(it, R"(,"line": {})", *mLine);
   }
 
   if (mColumn) {
-    it = fmt::format_to(it, R"(,"column": {})", *mColumn);
+    it = std::format_to(it, R"(,"column": {})", *mColumn);
   }
   if (mSourcePath) {
-    it = fmt::format_to(it, R"(,"source": {{ "name": "{}", "path": "{}" }})", *mSourcePath, *mSourcePath);
+    it = std::format_to(it, R"(,"source": {{ "name": "{}", "path": "{}" }})", *mSourcePath, *mSourcePath);
   }
-  it = fmt::format_to(it, R"(}})");
+  it = std::format_to(it, R"(}})");
   return buf;
 }
 
@@ -42,46 +42,51 @@ Breakpoint::Serialize(std::pmr::memory_resource *memoryResource) const noexcept
 Breakpoint
 Breakpoint::CreateNonVerified(u32 id, std::string_view msg) noexcept
 {
-  return Breakpoint{.mId = id,
-                    .mVerified = false,
-                    .mAddress = nullptr,
-                    .mLine = {},
-                    .mColumn = {},
-                    .mSourcePath = {},
-                    .mErrorMessage = std::string{msg}};
+  return Breakpoint{ .mId = id,
+    .mVerified = false,
+    .mAddress = nullptr,
+    .mLine = {},
+    .mColumn = {},
+    .mSourcePath = {},
+    .mErrorMessage = std::string{ msg } };
 }
 
 Breakpoint
 Breakpoint::CreateFromUserBreakpoint(const UserBreakpoint &userBreakpoint) noexcept
 {
   if (const auto addr = userBreakpoint.Address(); addr) {
-    return Breakpoint{.mId = userBreakpoint.mId,
-                      .mVerified = true,
-                      .mAddress = addr.value(),
-                      .mLine = userBreakpoint.Line(),
-                      .mColumn = userBreakpoint.Column(),
-                      .mSourcePath = userBreakpoint.GetSourceFile(),
-                      .mErrorMessage = {}};
+    return Breakpoint{ .mId = userBreakpoint.mId,
+      .mVerified = true,
+      .mAddress = addr.value(),
+      .mLine = userBreakpoint.Line(),
+      .mColumn = userBreakpoint.Column(),
+      .mSourcePath = userBreakpoint.GetSourceFile(),
+      .mErrorMessage = {} };
   } else {
-    return Breakpoint{.mId = userBreakpoint.mId,
-                      .mVerified = false,
-                      .mAddress = nullptr,
-                      .mLine = {},
-                      .mColumn = {},
-                      .mSourcePath = {},
-                      .mErrorMessage = userBreakpoint.GetErrorMessage()};
+    return Breakpoint{ .mId = userBreakpoint.mId,
+      .mVerified = false,
+      .mAddress = nullptr,
+      .mLine = {},
+      .mColumn = {},
+      .mSourcePath = {},
+      .mErrorMessage = userBreakpoint.GetErrorMessage() };
   }
 }
 
-VariablesReference::VariablesReference(NonNullPtr<SymbolFile> objectFile, int ref, int thread, int frameId,
-                                       int parent, EntityType type) noexcept
+VariablesReference::VariablesReference(
+  NonNullPtr<SymbolFile> objectFile, int ref, int thread, int frameId, int parent, EntityType type) noexcept
     : mId(ref), mThreadId(thread), mFrameId(frameId), mParentId(parent), mType(type), mScopeType(),
       mObjectFile(objectFile)
 {
 }
 
-VariablesReference::VariablesReference(NonNullPtr<SymbolFile> objectFile, int ref, int thread, int frameId,
-                                       int parent, EntityType type, ScopeType scopeType) noexcept
+VariablesReference::VariablesReference(NonNullPtr<SymbolFile> objectFile,
+  int ref,
+  int thread,
+  int frameId,
+  int parent,
+  EntityType type,
+  ScopeType scopeType) noexcept
     : mId(ref), mThreadId(thread), mFrameId(frameId), mParentId(parent), mType(type), mScopeType(scopeType),
       mObjectFile(objectFile)
 {

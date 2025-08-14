@@ -30,8 +30,8 @@ public:
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction resume) noexcept final;
-  TaskExecuteResponse ResumeTarget(TraceeController *tc, ResumeAction run,
-                                   std::vector<Tid> *resumedThreads = nullptr) noexcept final;
+  TaskExecuteResponse ResumeTarget(
+    TraceeController *tc, ResumeAction run, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
@@ -52,7 +52,7 @@ public:
   /// Re-open proc fs mem file descriptor. Configure
   bool OnExec() noexcept final;
   // Called after a fork for the creation of a new process supervisor
-  Interface OnFork(Pid pid) noexcept final;
+  Interface OnFork(SessionId pid) noexcept final;
   bool PostFork(TraceeController *parent) noexcept final;
 
   Tid TaskLeaderTid() const noexcept final;

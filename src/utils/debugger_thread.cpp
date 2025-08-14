@@ -26,7 +26,7 @@ std::unique_ptr<DebuggerThread>
 DebuggerThread::SpawnDebuggerThread(std::function<void(std::stop_token &)> task) noexcept
 {
   auto thread = std::unique_ptr<DebuggerThread>(
-    new DebuggerThread{fmt::format("mdb-{}", GetNextDebuggerThreadNumber()), std::move(task)});
+    new DebuggerThread{ std::format("mdb-{}", GetNextDebuggerThreadNumber()), std::move(task) });
   thread->Start();
   return thread;
 }
@@ -35,7 +35,7 @@ DebuggerThread::SpawnDebuggerThread(std::function<void(std::stop_token &)> task)
 std::unique_ptr<DebuggerThread>
 DebuggerThread::SpawnDebuggerThread(std::string name, std::function<void(std::stop_token &)> task) noexcept
 {
-  auto thread = std::unique_ptr<DebuggerThread>(new DebuggerThread{std::move(name), std::move(task)});
+  auto thread = std::unique_ptr<DebuggerThread>(new DebuggerThread{ std::move(name), std::move(task) });
   thread->Start();
   return thread;
 }

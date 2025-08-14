@@ -1,14 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "bp.h"
-#include "js/CallArgs.h"
-#include "js/PropertySpec.h"
-#include "js/RootingAPI.h"
-#include "mdbjs/jsobject.h"
-#include "task.h"
-#include "utils/smartptr.h"
 #include <common/typedefs.h>
-#include <cstring>
+#include <mdbjs/jsobject.h>
+#include <task.h>
 
 namespace mdb::js {
 
@@ -16,34 +10,33 @@ template <typename Out, typename TaskT>
 constexpr Out
 ToString(Out iteratorLike, const TaskT &task)
 {
-  return fmt::format_to(iteratorLike, "thread {}.{}, dbg id={}: stopped={}", task.GetTaskLeaderTid().value_or(-1),
-                        task.mTid, task.mSessionId, task.IsStopped());
+  return std::format_to(iteratorLike,
+    "thread {}.{}, dbg id={}: stopped={}",
+    task.GetTaskLeaderTid().value_or(-1),
+    task.mTid,
+    task.mSessionId,
+    task.IsStopped());
 }
 
-class TaskInfo : public RefPtrJsObject<mdb::js::TaskInfo, mdb::TaskInfo, StringLiteral{"Task"}>
+struct JsTaskInfo : public JSBinding<JsTaskInfo, TaskInfo, JavascriptClasses::TaskInfo>
 {
-public:
-  enum Slots
+  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Pc(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+
+  static constexpr std::span<const JSCFunctionListEntry>
+  PrototypeFunctions() noexcept
   {
-    ThisPointer,
-    SlotCount
-  };
-
-  static bool js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  static bool js_pc(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  static bool js_frame(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  static bool js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-
-  static constexpr JSFunctionSpec FunctionSpec[] = {JS_FN("id", &js_id, 0, 0), JS_FN("pc", &js_pc, 0, 0),
-                                                    JS_FN("frame", &js_frame, 1, 0),
-                                                    JS_FN("toString", &js_to_string, 0, 0), JS_FS_END};
-
-  // Uncomment when you want to define properties
-  // static constexpr JSPropertySpec PropertiesSpec[]{JS_PS_END};
+    static constexpr JSCFunctionListEntry funcs[]{ /** Method definitions */
+      FunctionEntry("id", 0, &Id),
+      FunctionEntry("pc", 0, &Pc),
+      FunctionEntry("frame", 1, &Frame),
+      FunctionEntry("toString", 0, &ToString),
+      ToStringTag("TaskInfo")
+    };
+    return funcs;
+  }
 };
 
 } // namespace mdb::js
-
-namespace mdb {
-using JSTaskInfo = mdb::js::TaskInfo;
-}

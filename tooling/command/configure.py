@@ -4,7 +4,7 @@ from .base import Command, Argument, presets, runCommand
 from tooling.metadata import BuildMetadata
 import zipfile, tarfile
 from pathlib import Path
-from shutil import rmtree
+from shutil import rmtree, copy2
 
 
 def download(url, destination):
@@ -96,6 +96,11 @@ class Dependency:
     def __init__(self, declaration, file):
         self.declaration: DependencyDeclaration = declaration
         self.file: str = file
+        self.doConfigure = (
+            lambda buildMetadata, extractedTo: self.declaration.configureStep(
+                self, buildMetadata, extractedTo
+            )
+        )
 
     def extract(self, extractTo: str):
         print(f"Decompress file {self.file} to {extractTo}")
@@ -105,99 +110,20 @@ class Dependency:
             print(
                 f"Directory {extractTo} exists already, assuming that archive already has been extracted."
             )
-        self.configure(extractedTo=extractTo)
-
-    def configure(self, extractedTo):
-        pass
 
 
-class SpidermonkeyDependency(Dependency):
-    def __init__(self, declaration, file):
-        super().__init__(declaration, file)
+def defaultConfigure(dependency: Dependency, buildMetaData: BuildMetadata, extractedTo):
+    pass
 
-    def makeScriptsExecutable(self, sourceDir):
-        cargoLinkerScript = path.join(
-            sourceDir, f"firefox-{self.declaration.version}/build/cargo-linker"
-        )
-        configureFile = path.join(
-            sourceDir, f"firefox-{self.declaration.version}/js/src/configure"
-        )
 
-        if not Path(cargoLinkerScript).exists():
-            raise Exception("Cargo linker script could not be found.")
-
-        if not Path(configureFile).exists():
-            raise Exception("Spidermonkey ./configure file not found")
-
-        runCommand(["chmod", "+x", cargoLinkerScript])
-        runCommand(["chmod", "+x", configureFile])
-
-    def buildSpiderMonkey(self, extractedTo: str, debugBuild: bool):
-        spidermonkeyInstallDir = path.join(
-            extractedTo.removesuffix("/firefox"),
-            "spidermonkey" if not debugBuild else "spidermonkey-debug",
-        )
-
-        print(f"Building spidermonkey. Will install to {spidermonkeyInstallDir}")
-        # Certain Mozilla build scripts and Rust cargo-linker script needs to be chmod +x'ed.
-        self.makeScriptsExecutable(extractedTo)
-
-        spidermonkeySourceDir = Path(
-            path.join(extractedTo, f"firefox-{self.declaration.version}/js/src/")
-        )
-
-        spidermonkeyBuildDir = Path(
-            "/tmp/spidermonkey-build"
-            if not debugBuild
-            else "/tmp/spidermonkey-build-debug"
-        )
-        if spidermonkeyBuildDir.exists():
-            try:
-                rmtree(spidermonkeyBuildDir)
-            except Exception as e:
-                print(
-                    f"Exception: {e}\nFailed to remove temporary build directory {spidermonkeyBuildDir}; configuration can not continue. Remove it manually and try again."
-                )
-                return
-
-        spidermonkeySourceDir.mkdir(parents=True, exist_ok=True)
-        spidermonkeyBuildDir.mkdir(parents=True, exist_ok=True)
-
-        configureFile = path.join(spidermonkeySourceDir, "configure")
-
-        env = environ.copy()
-        # For now we use gcc while compiling because I've seen clang fail but never seen gcc fail even once. Which is unfortunate.
-        # ../configure --disable-jemalloc --with-system-zlib --with-intl-api --enable-optimize --disable-debug --prefix=
-        command = [
-            configureFile,
-            "--disable-jemalloc",
-            "--with-system-zlib",
-            "--with-intl-api",
-            "--enable-optimize",
-            f"--prefix={spidermonkeyInstallDir}",
-        ]
-
-        if debugBuild:
-            command.append("--enable-debug")
-        else:
-            command.append("--disable-debug")
-
-        runCommand(
-            cmd=command,
-            cwd=spidermonkeyBuildDir,
-            env=env,
-        )
-
-        runCommand(["make", "-j"], spidermonkeyBuildDir)
-        runCommand(["make", "install"], spidermonkeyBuildDir)
-        # Sigh... we don't want 500mb * 2, for js-shell of release and debug builds. Kill them.
-        runCommand(["rm", f"{spidermonkeyInstallDir}/bin", "-rf"])
-        # We remove spidermonkey's version of libfmt. It's old as the mountain for no good reason it's also included in the build.
-        runCommand(["rm", f"{spidermonkeyInstallDir}/include/mozjs-136/fmt", "-rf"])
-
-    def configure(self, extractedTo: str):
-        self.buildSpiderMonkey(extractedTo=extractedTo, debugBuild=False)
-        self.buildSpiderMonkey(extractedTo=extractedTo, debugBuild=True)
+def configureQuickJs(
+    dependency: Dependency, buildMetaData: BuildMetadata, extractedTo: str
+):
+    outputFile = f"{extractedTo}/CMakeLists.txt"
+    print(
+        f"copying {buildMetaData.getProjectPath("cmake/QuickJs.cmake")} to {outputFile}"
+    )
+    copy2(src=buildMetaData.getProjectPath("cmake/QuickJs.cmake"), dst=outputFile)
 
 
 class DependencyDeclaration:
@@ -208,6 +134,7 @@ class DependencyDeclaration:
         urlTemplate: str,
         archiveKind,
         DependencyType=Dependency,
+        configureStep=defaultConfigure,
         localName=None,
     ):
         """`lib` represents the library name. `localName` is an optional rename"""
@@ -217,6 +144,7 @@ class DependencyDeclaration:
         self.downloadUrl = urlTemplate.replace("$(VERSION)", self.version)
         self.archiveKind = archiveKind
         self.producedDependencyType: Dependency = DependencyType
+        self.configureStep = configureStep
 
     def getDependencyFileName(self):
         return f"{self.lib}.{self.archiveKind}"
@@ -246,12 +174,11 @@ class DependencyDeclaration:
 class SetupProjectCommand(Command):
     projectDependencies = [
         DependencyDeclaration(
-            lib="libfmt",
-            version="11.0.0",
-            urlTemplate="https://github.com/fmtlib/fmt/releases/download/$(VERSION)/fmt-$(VERSION).zip",
-            archiveKind="zip",
-            DependencyType=Dependency,
-            localName="fmt",
+            lib="quickjs",
+            version="2025-04-26",
+            urlTemplate="https://bellard.org/quickjs/quickjs-$(VERSION).tar.xz",
+            archiveKind="tar.xz",
+            configureStep=configureQuickJs,
         ),
         DependencyDeclaration(
             lib="nlohmann_json",
@@ -270,13 +197,6 @@ class SetupProjectCommand(Command):
             version="v4.0.0",
             urlTemplate="https://github.com/zyantific/zydis/releases/download/$(VERSION)/zydis-amalgamated.tar.gz",
             archiveKind="tar.gz",
-        ),
-        DependencyDeclaration(
-            lib="firefox",
-            version="136.0",
-            urlTemplate="https://ftp.mozilla.org/pub/firefox/releases/$(VERSION)/source/firefox-$(VERSION).source.tar.xz",
-            archiveKind="tar.xz",
-            DependencyType=SpidermonkeyDependency,
         ),
     ]
 
@@ -307,15 +227,17 @@ class SetupProjectCommand(Command):
             dependency = declaration.download(directory=downloadDirectory)
             if dependency is not None:
                 try:
-                    dependency.extract(
-                        extractTo=path.join(
-                            downloadDirectory,
-                            (
-                                dependency.declaration.lib
-                                if dependency.declaration.localName is None
-                                else dependency.declaration.localName
-                            ),
-                        )
+                    extractTo = path.join(
+                        downloadDirectory,
+                        (
+                            dependency.declaration.lib
+                            if dependency.declaration.localName is None
+                            else dependency.declaration.localName
+                        ),
+                    )
+                    dependency.extract(extractTo=extractTo)
+                    dependency.doConfigure(
+                        buildMetadata=buildMetadata, extractedTo=extractTo
                     )
                 except Exception as e:
                     print(f"extracting file {dependency.file} failed: {e}")

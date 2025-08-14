@@ -1,26 +1,21 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "js/Class.h"
-#include "js/PropertyDescriptor.h"
-#include "js/PropertySpec.h"
-#include "js/RootingAPI.h"
-#include "js/String.h"
-#include "js/TracingAPI.h"
-#include "js/TypeDecls.h"
-#include "js/Value.h"
-#include "mdbjs/event_dispatcher.h"
-#include "mdbjs/util.h"
-#include "utils/expected.h"
-#include "utils/logger.h"
-#include <limits>
+
+// mdb
+#include <common/macros.h>
+#include <mdbjs/util.h>
 #include <memory_resource>
+#include <quickjs/quickjs.h>
+#include <utility>
+#include <utils/expected.h>
+#include <utils/logger.h>
+
+// system
+#include <limits>
 #include <optional>
 #include <string>
 
-struct JSContext;
 class Tracer;
-
-extern const JSClassOps DefaultGlobalClassOps;
 
 namespace mdb::js {
 
@@ -32,222 +27,88 @@ bool ConsumePendingException(JSContext *context, std::pmr::string &writeToBuffer
 
 class EventDispatcher;
 
-class RuntimeGlobal
-{
-  enum Slots
-  {
-    GlobalSlot,
-    SlotCount
-  };
+#define FN_SPAN(...) std::span<std::string_view>({ __VA_ARGS__ })
 
-  RuntimeGlobal() noexcept = default;
-
-  static RuntimeGlobal *priv(JSObject *global) noexcept;
-  static const JSClass klass;
-
-#define FN_ARGS(...) std::to_array<std::string_view>({__VA_ARGS__})
+#define FN_ARGS(...) std::to_array<std::string_view>({ __VA_ARGS__ })
 #define EMPTY_ARGS()                                                                                              \
-  std::array<std::string_view, 0> {}
+  std::span<std::string_view> {}
 
-#define FOR_EACH_GLOBAL_FN(FN)                                                                                    \
-  FN(Log, "log", FN_ARGS("channel", "message"), 0, "Log to one of the debug logging channels", "usage")           \
-  FN(GetSupervisor, "getSupervisor", FN_ARGS("pid"), 0, "Get the supervisor that has the provided pid", "usage")  \
-  FN(GetTask, "getThread", FN_ARGS("tid | dbgId", "useDbgId"), 0,                                                 \
-     "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId", "usage")                         \
-  FN(PrintThreads, "listThreads", EMPTY_ARGS(), 0, "List all threads in this debug session", "usage")             \
-  FN(PrintProcesses, "procs", EMPTY_ARGS(), 0, "List all processes supervisor info", "usage")                     \
-  FN(Help, "help", FN_ARGS("functionName"), 0, "Show this help message.", "usage")
+#define FOR_EACH_GLOBAL_FN(FNDESC)                                                                                \
+  FNDESC(Log, "log", 2, "Log to one of the debug logging channels")                                               \
+  FNDESC(GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid")                       \
+  FNDESC(GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId")     \
+  FNDESC(PrintThreads, "listThreads", 0, "List all threads in this debug session")                                \
+  FNDESC(PrintProcesses, "procs", 0, "List all processes supervisor info")                                        \
+  FNDESC(Help, "help", 1, "Show this help message.")
 
-#define DEFINE_FN(FUNC, ...) static bool FUNC(JSContext *cx, unsigned argc, JS::Value *vp) noexcept;
-  FOR_EACH_GLOBAL_FN(DEFINE_FN);
+using JsFunction = JSValue (*)(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv);
 
-#define FN(FUNC, NAME, ARGS, FLAGS, ...) JS_FN(NAME, &RuntimeGlobal::FUNC, std::size(ARGS), FLAGS),
-
-  static constexpr JSFunctionSpec sRuntimeFunctions[] = {FOR_EACH_GLOBAL_FN(FN) JS_FS_END};
-
-#undef DEFINE_FN
-#undef FN
-
-public:
-  static JSObject *create(JSContext *cx) noexcept;
+struct FunctionDescriptor
+{
+  JsFunction mFn;
+  std::string_view mName;
+  int mArgCount;
+  std::string_view mHelpMessage;
 };
 
-class AppScriptingInstance;
+#define Desc(Fn, Name, ArgCount, HelpMessage) FunctionDescriptor{ &Fn, Name, ArgCount, HelpMessage },
 
-using RegisterTraceFunction = std::function<void(JSTracer *trc)>;
-
-// MDB Object. Assigned to the global object, so it will have at the minimum 1 reference count
-// until the end of the application.
-// Responsible for memory management, the public mdb API (functions found on mdb.foo(), mdb.bar())
-// as well as where the subsystems can be reached from.
-
-// You want to add a listener for some event, e.g. clone? it's mdb.events.on(mdb.events.clone, (pid, tid) => {
-// ...
-// })
-class MdbObject
+class Scripting
 {
-  std::vector<RegisterTraceFunction> mSubSystemTracing;
-
-public:
-  enum Slots
-  {
-    ThisPointer,
-    ScriptRuntimePointer,
-    SlotCount
-  };
-
-#define CHANNEL_ITEM(VARIANT, ...)                                                                                \
-  JS_INT32_PS(#VARIANT, static_cast<int>(Channel::VARIANT), JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY),
-
-#define EVENT_ITEM(VARIANT, ...)                                                                                  \
-  JS_INT32_PS(#VARIANT, static_cast<int>(EventResult::VARIANT),                                                   \
-              JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY),
-
-  static constexpr JSPropertySpec ReadOnlyPropertySpecs[]{FOR_EACH_LOG(CHANNEL_ITEM)
-                                                            FOR_EACH_EVENT_RESULT(EVENT_ITEM) JS_PS_END};
-#undef CHANNEL_ITEM
-#undef EVENT_ITEM
-
-  // When the MdbObject is collected, delete the stored box.
-  static void finalize(JS::GCContext *gcx, JSObject *obj);
-
-  // When a MdbObject is traced, it must trace the stored box.
-  static void TraceSubsystems(JSTracer *trc, JSObject *obj);
-
-  static constexpr JSClassOps classOps = []() {
-    JSClassOps result{};
-    result.finalize = finalize;
-    result.trace = TraceSubsystems;
-    return result;
-  }();
-
-  static constexpr JSClass clasp = []() {
-    JSClass result{};
-    result.name = "mdb";
-    result.flags = JSCLASS_HAS_RESERVED_SLOTS(SlotCount) | JSCLASS_FOREGROUND_FINALIZE;
-    result.cOps = &classOps;
-    return result;
-  }();
-
-  static JSObject *CreateAndBindToJsObject(AppScriptingInstance *runtime, MdbObject *handle) noexcept;
-  void AddTrace(RegisterTraceFunction &&fn) noexcept;
-};
-
-static consteval auto
-ComputeEnumNames()
-{
-  u8 max = std::numeric_limits<u8>::max();
-  JS::ValueType tMax = static_cast<JS::ValueType>(max);
-  return tMax;
-}
-
-// `AppScriptingInstance` the interface between the debugger and the scripting mechanics/embedding of
-// SpiderMonkey Responsible for sourcing javascsript code into objects and state that we can manipulate in a
-// fashion that best suits us.
-class AppScriptingInstance
-{
-  friend RuntimeGlobal;
-  EventDispatcher *mEventDispatcher;
-  MdbObject mMdbObject{};
-
-  // A RootedValue of this must live on the stack before init of `Interpreter` and must not go out of scope
+private:
+  static Scripting *sInstance;
+  JSRuntime *mRuntime;
   JSContext *mContext;
-  JSObject *mGlobalObject;
-  bool DefineDebuggerObject(JS::HandleObject global) noexcept;
 
-  AppScriptingInstance(JSContext *context, JSObject *globalObject) noexcept
-      : mContext(context), mGlobalObject(globalObject)
+  Scripting(JSRuntime *runtime, JSContext *context) noexcept : mRuntime(runtime), mContext(context) {}
+
+  static JSValue GetSupervisor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  static JSValue Log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  static JSValue GetTask(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  static JSValue PrintThreads(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  static JSValue PrintProcesses(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  static JSValue Help(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+
+  void InitializeMdbModule() noexcept;
+
+  static constexpr auto
+  FunctionDescriptors() noexcept -> std::span<const FunctionDescriptor>
   {
+    static constexpr auto descriptors = std::to_array<const FunctionDescriptor>({
+      FunctionDescriptor{ &Log, "log", 2, "Log to one of the debug logging channels" },
+      FunctionDescriptor{ &GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid" },
+      FunctionDescriptor{
+        &GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId" },
+      FunctionDescriptor{ &PrintThreads, "listThreads", 0, "List all threads in this debug session" },
+      FunctionDescriptor{ &PrintProcesses, "procs", 0, "List all processes supervisor info" },
+      FunctionDescriptor{ &Help, "help", 1, "Show this help message." },
+    });
+    return std::span<const FunctionDescriptor>{ descriptors };
   }
 
 public:
-  static AppScriptingInstance *Create(JSContext *context, JSObject *globalObject) noexcept;
-  void InitRuntime() noexcept;
-  void Shutdown() noexcept;
-  // Register tracing via Runtime, on the MdbObject, which has a persistent root to start tracing from
-  void AddTrace(RegisterTraceFunction &&fn) noexcept;
+  static Scripting *Create() noexcept;
+  static Scripting &Get() noexcept;
 
-  EventDispatcher *GetEventDispatcher() noexcept;
-  JSContext *GetRuntimeContext() noexcept;
-  JSObject *GetRuntimeGlobal() noexcept;
-
-  template <typename ErrType> struct CallError
+  constexpr JSContext *
+  GetContext() noexcept
   {
-    ErrType mError;
-    std::string_view mErrorMessage;
-  };
-
-  /// Call function `compiledFunction` expecting template parameter `ExpectedReturnType` as return type.
-  /// If `ExpectedReturnType` is int, but the return type from the javascript function is a boolean, we convert
-  /// the boolean to an integer result (0 = false). std::string maps to JSString for now. No other string can
-  /// therefore be used yet.
-  template <typename ReturnType>
-  std::optional<ReturnType>
-  CallFunction(JS::Handle<JSFunction *> compiledFun, JS::HandleValueArray arguments,
-               std::string &errorMessage) noexcept
-  {
-    JS::Rooted<JSFunction *> fn{mContext, compiledFun};
-    JS::RootedValue rval(mContext);
-    JS::Rooted<JSObject *> global(mContext, mGlobalObject);
-
-    constexpr auto writeError = [](std::string &msg, std::string_view type) {
-      fmt::format_to(std::back_inserter(msg), "Function had the wrong return type, expected: {}", type);
-    };
-
-    if (!JS_CallFunction(mContext, global, fn, arguments, &rval)) {
-      auto exception = ConsumePendingException(mContext);
-      fmt::format_to(std::back_inserter(errorMessage), "Failed to call function: {}",
-                     exception.value_or("No exception found"));
-      return {};
-    }
-
-    if constexpr (std::is_integral_v<ReturnType>) {
-      bool isBool = rval.isBoolean();
-      if (!rval.isInt32() && !isBool) {
-        writeError(errorMessage, "int");
-        return {};
-      }
-      // For the bozos who use < 0 for falsy.
-      return !isBool ? rval.toInt32() : std::abs(static_cast<int>(rval.toBoolean()));
-    } else if constexpr (std::is_same_v<ReturnType, std::string>) {
-      if (!rval.isString()) {
-        writeError(errorMessage, "string");
-        return {};
-      }
-      JS::Rooted<JSString *> string{mContext, rval.toString()};
-      std::string result;
-      bool ok = ToStdString(mContext, string, result);
-      if (!ok) {
-        fmt::format_to(std::back_inserter(errorMessage), "Failed to copy string result");
-        return {};
-      }
-      return std::make_optional<std::string>(std::move(result));
-    } else if constexpr (std::is_same_v<ReturnType, JSObject>) {
-      if (!rval.isObject()) {
-        writeError(errorMessage, "object");
-        return {};
-      }
-      return rval.toObjectOrNull();
-    } else if constexpr (std::is_same_v<ReturnType, bool>) {
-      if (!rval.isBoolean()) {
-        writeError(errorMessage, "boolean");
-        return {};
-      }
-      return rval.toBoolean();
-    } else {
-      static_assert(always_false<ReturnType>, "Unsupported type for this function");
-    }
+    return mContext;
   }
+  void Shutdown() noexcept;
 
-  Expected<JSFunction *, std::string> SourceBreakpointCondition(u32 breakpointId,
-                                                                std::string_view condition) noexcept;
-  std::pmr::string *ReplEvaluate(std::string_view input, Allocator *allocator) noexcept;
-  std::string ReplEvaluate(std::string_view input) noexcept;
-  Expected<void, std::string> EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept;
-  Expected<void, std::string> EvaluateJavascriptFileView(std::string_view filePath) noexcept;
-  Expected<void, std::string> EvaluateJavascriptString(const std::string &javascriptSource) noexcept;
-  Expected<void, std::string> EvaluateJavascriptFile(const std::string &filePath) noexcept;
+  std::pmr::string *ReplEvaluate(Allocator *allocator, std::string_view input) noexcept;
+
+  static constexpr auto
+  HelpMessage(std::string_view fn) noexcept -> std::string_view
+  {
+    for (const auto &desc : FunctionDescriptors()) {
+      if (desc.mName == fn) {
+        return desc.mHelpMessage;
+      }
+    }
+
+    std::unreachable();
+  }
 };
 } // namespace mdb::js
-
-using AppScriptingInstance = mdb::js::AppScriptingInstance;

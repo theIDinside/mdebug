@@ -13,7 +13,7 @@
 #define FORWARD_DECLARE_REFPTR
 namespace mdb {
 template <typename U> class RefPtr;
-template <typename U> class Untraced;
+template <typename U> class LeakedRef;
 } // namespace mdb
 #endif
 
@@ -21,11 +21,11 @@ template <typename U> class Untraced;
 protected:                                                                                                        \
   /* Grant RefCountPtr access to manage reference counts */                                                       \
   template <typename U> friend class RefPtr;                                                                      \
-  template <typename U> friend class Untraced;                                                                    \
+  template <typename U> friend class LeakedRef;                                                                   \
   friend class RefPtr<Type>;                                                                                      \
-  friend class Untraced<Type>;                                                                                    \
+  friend class LeakedRef<Type>;                                                                                   \
                                                                                                                   \
-  mutable std::atomic<int> mReferenceCount{0};                                                                    \
+  mutable std::atomic<int> mReferenceCount{ 0 };                                                                  \
   constexpr void IncreaseUseCount() const noexcept { mReferenceCount.fetch_add(1, std::memory_order_relaxed); }   \
                                                                                                                   \
   constexpr void DecreaseUseCount() const noexcept                                                                \
@@ -38,9 +38,9 @@ protected:                                                                      
 #define REF_COUNTED_WITH_WEAKREF_SUPPORT(Type)                                                                    \
 protected:                                                                                                        \
   template <typename U> friend class RefPtr;                                                                      \
-  template <typename U> friend class Untraced;                                                                    \
+  template <typename U> friend class LeakedRef;                                                                   \
   friend class RefPtr<Type>;                                                                                      \
-  friend class Untraced<Type>;                                                                                    \
+  friend class LeakedRef<Type>;                                                                                   \
   mdb::ControlBlock<Type> *mControlBlock;                                                                         \
                                                                                                                   \
 public:                                                                                                           \
@@ -52,7 +52,8 @@ public:                                                                         
   }
 
 namespace mdb {
-template <typename T> class Untraced;
+
+template <typename T> class LeakedRef;
 
 template <typename T> struct ControlBlock
 {
@@ -117,7 +118,7 @@ public:
       return nullptr;
     }
 
-    return RefPtr{mPtr};
+    return RefPtr{ mPtr };
   }
 
   constexpr
@@ -129,11 +130,21 @@ public:
 
 template <typename T> concept HasControlBlock = requires(T t) { t.mControlBlock; };
 
+// Access to RefPtr internals.
+// Add friends that is allowed access directly into the type.
+struct RefPtrLeakAccessKey
+{
+private:
+  // Only this helper can create keys
+  friend struct JSBindingLeakHelper;
+  constexpr RefPtrLeakAccessKey() noexcept = default;
+};
+
 /// `RefPtr` is a handle to a internally reference counted type.
 template <typename T> class RefPtr
 {
 private:
-  T *mRef{nullptr};
+  T *mRef{ nullptr };
 
   constexpr void
   IncrementUserCount() const noexcept
@@ -154,12 +165,12 @@ private:
 public:
   using Type = T;
   template <typename U> friend class RefPtr;
-  friend class Untraced<T>;
+  friend class LeakedRef<T>;
   // Constructors
   constexpr RefPtr() = default;
   constexpr RefPtr(std::nullptr_t) noexcept : RefPtr() {};
 
-  constexpr RefPtr(Untraced<T> &&untraced) noexcept : mRef(nullptr) { std::swap(mRef, untraced.mUnManged); }
+  constexpr RefPtr(LeakedRef<T> &&leakedref) noexcept : mRef(nullptr) { std::swap(mRef, leakedref.mUnManged); }
 
   constexpr explicit RefPtr(T *rawPtr) noexcept : mRef(rawPtr) { IncrementUserCount(); }
 
@@ -176,7 +187,15 @@ public:
     }
     mRef->mControlBlock->IncreaseWeakReference();
 
-    return WeakRef<T>{mRef, mRef->mControlBlock};
+    return WeakRef<T>{ mRef, mRef->mControlBlock };
+  }
+
+  constexpr LeakedRef<T>
+  Leak(RefPtrLeakAccessKey) noexcept
+  {
+    T *swap = nullptr;
+    std::swap(mRef, swap);
+    return LeakedRef<T>{ swap };
   }
 
   // Implicit conversion operator from RefPtr<Derived> to RefPtr<Base>
@@ -205,7 +224,7 @@ public:
   constexpr static RefPtr<T>
   MakeShared(Args &&...args) noexcept
   {
-    return RefPtr{new T{std::forward<Args>(args)...}};
+    return RefPtr{ new T{ std::forward<Args>(args)... } };
   }
 
   // Ref<T> constructor for types that support weak references.
@@ -216,7 +235,7 @@ public:
   {
     auto t = T::CreateForRef(std::forward<Args>(args)...);
     t->mControlBlock = new ControlBlock<T>{};
-    return RefPtr{t};
+    return RefPtr{ t };
   }
 
   // Assignment operators
@@ -261,14 +280,6 @@ public:
   {
     DecrementUserCount();
     mRef = nullptr;
-  }
-
-  constexpr Untraced<T>
-  DisOwn() && noexcept
-  {
-    T *swap = nullptr;
-    std::swap(mRef, swap);
-    return Untraced{swap};
   }
 
   constexpr T &
@@ -335,16 +346,18 @@ public:
 
 template <typename T>
 concept IsRefCountable = requires(T *t) {
-  { RefPtr<T>{t} };
+  { RefPtr<T>{ t } };
 };
-namespace js {
-template <typename Derived, IsRefCountable WrappedType, StringLiteral string> struct RefPtrJsObject;
-}
 
-template <typename T> class Untraced
+template <typename T> class LeakedRef
 {
   T *mUnManged;
 
+  friend class RefPtr<T>;
+
+  constexpr LeakedRef(T *take) noexcept : mUnManged(take) {}
+
+public:
   /// Drop and Forget are purposefully private metods. And the class `RefPtrJsObject` and `RefPtr` are, for
   /// that same reason, friend classes. RefPtrJsObject uses the forget & drop mechanism when participating in GC
   /// and automatic life time memory management by the js embedding. This is also the reason why
@@ -354,14 +367,14 @@ template <typename T> class Untraced
   Drop() noexcept
   {
     mUnManged->DecreaseUseCount();
-    T *result{nullptr};
+    T *result{ nullptr };
     std::swap(result, mUnManged);
   }
 
   constexpr T *
   Forget() noexcept
   {
-    T *result{nullptr};
+    T *result{ nullptr };
     std::swap(result, mUnManged);
     return result;
   }
@@ -370,36 +383,29 @@ template <typename T> class Untraced
   constexpr RefPtr<T>
   CloneReference() noexcept
   {
-    return RefPtr<T>{Forget()};
+    return RefPtr<T>{ Forget() };
   }
 
-  using Type = T;
-  template <typename Derived, IsRefCountable WrappedType, StringLiteral string> friend struct js::RefPtrJsObject;
-  friend class RefPtr<T>;
+  // It's fine to move LeakedRef and it's ok to destroy LeakedRef in non-friend contexts (because in those
+  // contexts, you transform the leakedref to a ref counted pointer via .Take() or direct conversion)
+  constexpr ~LeakedRef() noexcept { ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
+  constexpr LeakedRef(LeakedRef &&other) noexcept : mUnManged(nullptr) { std::swap(mUnManged, other.mUnManged); }
 
-  constexpr Untraced(T *take) noexcept : mUnManged(take) {}
-
-public:
-  // It's fine to move Untraced and it's ok to destroy Untraced in non-friend contexts (because in those
-  // contexts, you transform the untraced to a ref counted pointer via .Take() or direct conversion)
-  constexpr ~Untraced() noexcept { ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
-  constexpr Untraced(Untraced &&other) noexcept : mUnManged(nullptr) { std::swap(mUnManged, other.mUnManged); }
-
-  constexpr Untraced(const Untraced &) noexcept = delete;
-  constexpr Untraced(Untraced &) noexcept = delete;
-  constexpr Untraced &operator=(const Untraced &) = delete;
-  constexpr Untraced &operator=(Untraced &&) = delete;
+  constexpr LeakedRef(const LeakedRef &) noexcept = delete;
+  constexpr LeakedRef(LeakedRef &) noexcept = delete;
+  constexpr LeakedRef &operator=(const LeakedRef &) = delete;
+  constexpr LeakedRef &operator=(LeakedRef &&) = delete;
 
   constexpr
   operator RefPtr<T>() noexcept
   {
-    return RefPtr{std::move(*this)};
+    return RefPtr{ std::move(*this) };
   }
 
   constexpr RefPtr<T>
   Take() noexcept
   {
-    return RefPtr<T>{std::move(*this)};
+    return RefPtr<T>{ std::move(*this) };
   }
 };
 

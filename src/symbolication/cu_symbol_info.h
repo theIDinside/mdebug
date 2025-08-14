@@ -38,9 +38,9 @@ class CompilationUnit
 {
   friend class dw::SourceCodeFile;
   dw::UnitData *mUnitData;
-  AddrPtr mPcStart{nullptr};
-  AddrPtr mPcEndExclusive{nullptr};
-  dw::LNPHeader *mLineNumberProgram{nullptr};
+  AddrPtr mPcStart{ nullptr };
+  AddrPtr mPcEndExclusive{ nullptr };
+  dw::LNPHeader *mLineNumberProgram{ nullptr };
   std::vector<dw::LineTableEntry> mLineTable;
   std::string_view mCompilationUnitName;
   std::vector<sym::FunctionSymbol> mFunctionSymbols;
@@ -49,7 +49,7 @@ class CompilationUnit
 
   std::unordered_map<u32, std::shared_ptr<dw::SourceCodeFile>> mSourceCodeFileMappings{};
   mutable std::mutex mMutex{};
-  mutable bool mComputed{false};
+  mutable bool mComputed{ false };
 
 public:
   NO_COPY(CompilationUnit);
@@ -82,8 +82,8 @@ public:
     return AddressableSorter<CompilationUnit, false>{};
   }
 
-  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>
-  GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept;
+  std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *> GetLineTableEntry(
+    AddrPtr unrelocatedAddress) noexcept;
   dw::SourceCodeFile *GetFileByLineProgramIndex(u32 index) noexcept;
 
 private:

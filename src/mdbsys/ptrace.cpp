@@ -96,7 +96,7 @@ request_name(__ptrace_request req)
   case PTRACE_GET_SYSCALL_USER_DISPATCH_CONFIG:
     return "PTRACE_GET_SYSCALL_USER_DISPATCH_CONFIG";
   }
-  PANIC(fmt::format("Unknown PTRACE request {}", std::to_underlying(req)));
+  PANIC(std::format("Unknown PTRACE request {}", std::to_underlying(req)));
 }
 
 void
@@ -113,7 +113,7 @@ ConfigurePtraceSettings(pid_t pid)
       PANIC("Exiting");
     }
     if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
-      PANIC(fmt::format("Failed to set PTRACE options for {}: {}", pid, strerror(errno)));
+      PANIC(std::format("Failed to set PTRACE options for {}: {}", pid, strerror(errno)));
     }
   }
 }
@@ -127,7 +127,7 @@ PtraceSyscallInfo::IsEntry() const noexcept
 void
 ptrace_panic(__ptrace_request req, pid_t pid, const std::source_location &loc)
 {
-  panic(fmt::format("{} FAILED for {} ({}) errno: {}", request_name(req), pid, strerror(errno), errno), loc, 3);
+  panic(std::format("{} FAILED for {} ({}) errno: {}", request_name(req), pid, strerror(errno), errno), loc, 3);
 }
 
 SyscallArguments::SyscallArguments(const user_regs_struct &regs) : regs(&regs) {}
@@ -138,16 +138,31 @@ SyscallArguments::debug_print(bool flush, bool pretty)
 {
   using enum SysRegister;
   if (pretty) {
-    fmt::print("{{\n  arg1 0x{:x} ({}),\n  arg2 0x{:x} ({}),\n  arg3 0x{:x} ({}),\n  arg4 0x{:x} ({}),\n  arg5 "
+    std::print("{{\n  arg1 0x{:x} ({}),\n  arg2 0x{:x} ({}),\n  arg3 0x{:x} ({}),\n  arg4 0x{:x} ({}),\n  arg5 "
                "0x{:x} ({}),\n  arg6 0x{:x} ({})\n}}",
-               arg_n<1>(), arg<RDI>(), arg_n<2>(), arg<RSI>(), arg_n<3>(), arg<RDX>(), arg_n<4>(), arg<R10>(),
-               arg_n<5>(), arg<R8>(), arg_n<6>(), arg<R9>());
+      arg_n<1>(),
+      arg<RDI>(),
+      arg_n<2>(),
+      arg<RSI>(),
+      arg_n<3>(),
+      arg<RDX>(),
+      arg_n<4>(),
+      arg<R10>(),
+      arg_n<5>(),
+      arg<R8>(),
+      arg_n<6>(),
+      arg<R9>());
   } else {
-    fmt::print("{{ arg1 0x{:x}, arg2 0x{:x}, arg3 0x{:x}, arg4 0x{:x}, arg5 0x{:x}, arg6 0x{:x} }}", arg_n<1>(),
-               arg_n<2>(), arg_n<3>(), arg_n<4>(), arg_n<5>(), arg_n<6>());
+    std::print("{{ arg1 0x{:x}, arg2 0x{:x}, arg3 0x{:x}, arg4 0x{:x}, arg5 0x{:x}, arg6 0x{:x} }}",
+      arg_n<1>(),
+      arg_n<2>(),
+      arg_n<3>(),
+      arg_n<4>(),
+      arg_n<5>(),
+      arg_n<6>());
   }
   if (flush) {
-    fmt::println("");
+    std::println("");
   }
 }
 #else
@@ -167,7 +182,7 @@ from_register(u64 syscall_number)
   return WaitStatusKind::Stopped;
 }
 
-TaskWaitResult
+WaitPidResult
 WaitResultToTaskWaitResult(Tid tid, int status) noexcept
 {
   WaitStatusKind kind = WaitStatusKind::NotKnown;
@@ -205,7 +220,7 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
   } else {
     kind = Stopped;
   }
-  return TaskWaitResult{.tid = tid, .ws = {.ws = kind, .signal = signal}};
+  return WaitPidResult{ .tid = tid, .ws = { .ws = kind, .signal = signal } };
 }
 
 std::optional<WaitPid>
@@ -220,7 +235,7 @@ waitpid_peek(pid_t tid) noexcept
     return {};
   }
 
-  return WaitPid{.tid = waited_pid, .status = status};
+  return WaitPid{ .tid = waited_pid, .status = status };
 }
 
 std::optional<WaitPid>
@@ -231,7 +246,7 @@ waitpid_nonblock(pid_t tid) noexcept
   if (waited_pid == 0 || waited_pid == -1) {
     return Option<WaitPid>{};
   }
-  return WaitPid{waited_pid, status};
+  return WaitPid{ waited_pid, status };
 }
 
 std::optional<WaitPid>
@@ -242,6 +257,6 @@ waitpid_block(pid_t tid) noexcept
   if (waited_pid == 0 || waited_pid == -1) {
     return Option<WaitPid>{};
   }
-  return WaitPid{waited_pid, status};
+  return WaitPid{ waited_pid, status };
 }
 } // namespace mdb

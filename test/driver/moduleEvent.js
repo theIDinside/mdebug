@@ -2,9 +2,10 @@ const { launchToGetFramesAndScopes, readFileContents, repoDirFile, getLineOf, Se
 const { assert, assertLog, prettyJson } = require('./utils')
 const sharedObjectsCount = 6
 
-async function expect6NewModuleEvents(DA) {
-  let modules_event_promise = DA.prepareWaitForEventN('module', 6, 2000)
-  await DA.startRunToMain(DA.buildDirFile('threads_shared'))
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
+async function expect6NewModuleEvents(debugAdapter) {
+  let modules_event_promise = debugAdapter.prepareWaitForEventN('module', 6, 2000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('threads_shared'))
   const res = await modules_event_promise
   assert(
     res.length >= sharedObjectsCount,
@@ -12,6 +13,7 @@ async function expect6NewModuleEvents(DA) {
   )
 }
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function assert1Pending(debugAdapter) {
   const dynamic_so_file = 'test/dynamic_lib.cpp'
   const file = readFileContents(repoDirFile(dynamic_so_file))
@@ -39,6 +41,7 @@ async function assert1Pending(debugAdapter) {
   return bp
 }
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function seeModuleEventFromDLOpenCall(debugAdapter) {
   let { threads, frames, scopes, bpres } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -60,7 +63,7 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
     `Bp Args: ${prettyJson(bp_args)}.\n Response ${prettyJson(templateBpRes)}`
   )
 
-  console.log(`breakpoints: ${prettyJson(templateBpRes.body.breakpoints)}`);
+  console.log(`breakpoints: ${prettyJson(templateBpRes.body.breakpoints)}`)
 
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
@@ -109,6 +112,7 @@ async function seeModuleEventFromDLOpenCall(debugAdapter) {
   )
 }
 
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function newFunctionBreakpointAfterLoadedSharedObject(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -119,12 +123,19 @@ async function newFunctionBreakpointAfterLoadedSharedObject(debugAdapter) {
   )
 
   let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 5000)
-  const fnBreakpointResponse = await debugAdapter.sendReqGetResponse('setFunctionBreakpoints', {
+
+  const fnBreakpointResponse = await debugAdapter.setFunctionBreakpointsRequest({
     breakpoints: [{ name: 'less_than<\\w+>', regex: true }],
   })
+  assertLog(
+    fnBreakpointResponse.body.breakpoints.length == 3,
+    'Expected 3 breakpoints',
+    ` but saw ${fnBreakpointResponse.body.breakpoints.length}`
+  )
+
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
-  const bp = res[0].breakpoint
+  const bp = res.breakpoint
   assertLog(bp.verified, 'Expected breakpoint to be verified', `Breakpoint: ${JSON.stringify(res)}`)
   assertLog(bp.line == 9, 'Expected to see a new breakpoint at line 9', `Breakpoint: ${JSON.stringify(res)}`)
   assertLog(

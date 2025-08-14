@@ -50,31 +50,38 @@ enum ChangeEvent : u8
 
 struct InitializedEvent final : public ui::UIResult
 {
-  InitializedEvent(std::string sessionId, Pid pid) noexcept : ui::UIResult(pid), mSessionUUID(std::move(sessionId))
+  InitializedEvent(SessionId sessionId, std::optional<SessionId> processId) noexcept
+      : ui::UIResult(sessionId), mProcessId(processId)
   {
   }
   ~InitializedEvent() noexcept final = default;
-  std::string mSessionUUID;
+  std::optional<SessionId> mProcessId;
   std::pmr::string Serialize(int monotonicId, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct TerminatedEvent final : public ui::UIResult
 {
-  TerminatedEvent(Pid pid) noexcept : ui::UIResult(pid) {}
+  TerminatedEvent(SessionId pid) noexcept : ui::UIResult(pid) {}
   ~TerminatedEvent() noexcept final = default;
   std::pmr::string Serialize(int monotonicId, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
-static constexpr std::string_view reasons[3]{"new", "changed", "removed"};
+static constexpr std::string_view reasons[3]{ "new", "changed", "removed" };
 // Module event: https://microsoft.github.io/debug-adapter-protocol/specification#Events_Module
 struct ModuleEvent final : public ui::UIResult
 {
-  ModuleEvent(Pid pid, std::string_view id, std::string_view reason, std::string &&name, Path &&path,
-              std::optional<std::string> &&symbolFilePath, std::optional<std::string> &&version,
-              AddressRange range, SharedObjectSymbols sharedObjects) noexcept;
+  ModuleEvent(SessionId sessionId,
+    std::string_view id,
+    std::string_view reason,
+    std::string &&name,
+    Path &&path,
+    std::optional<std::string> &&symbolFilePath,
+    std::optional<std::string> &&version,
+    AddressRange range,
+    SharedObjectSymbols sharedObjects) noexcept;
 
-  ModuleEvent(Pid pid, std::string_view reason, const ObjectFile &objectFile) noexcept;
-  ModuleEvent(Pid pid, std::string_view reason, const SymbolFile &symbolFile) noexcept;
+  ModuleEvent(SessionId sessionId, std::string_view reason, const ObjectFile &objectFile) noexcept;
+  ModuleEvent(SessionId sessionId, std::string_view reason, const SymbolFile &symbolFile) noexcept;
   std::string_view mObjectFileId;
   std::string_view mReason;
   std::string mName;
@@ -93,7 +100,7 @@ struct ContinuedEvent final : public ui::UIResult
   int mThreadId;
   // allThreadsContinued
   bool mAllThreadsContinued;
-  ContinuedEvent(Pid pid, Tid tid, bool allThreads) noexcept;
+  ContinuedEvent(SessionId pid, Tid tid, bool allThreads) noexcept;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
@@ -102,7 +109,7 @@ struct CustomEvent final : public ui::UIResult
   std::string mCustomEventName;
   std::string mSerializedBody;
   /// `serializedBodyContents`, must contain the brackets around the JSON object, so must be `{ ... }`
-  CustomEvent(Pid pid, std::string name, std::string serializedBodyContents) noexcept
+  CustomEvent(SessionId pid, std::string name, std::string serializedBodyContents) noexcept
       : ui::UIResult(pid), mCustomEventName(std::move(name)), mSerializedBody(std::move(serializedBodyContents))
   {
   }
@@ -114,7 +121,7 @@ struct Process final : public ui::UIResult
   std::string mName;
   Pid mProcessId;
   bool mIsLocal;
-  Process(Pid parentPid, Pid pid, std::string name, bool isLocal) noexcept;
+  Process(SessionId parentSessionId, Pid pid, std::string name, bool isLocal) noexcept;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
@@ -122,14 +129,14 @@ struct ExitedEvent final : public ui::UIResult
 {
   // exitCode
   int mExitCode;
-  ExitedEvent(Pid pid, int exitCode) noexcept;
+  ExitedEvent(SessionId pid, int exitCode) noexcept;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct ThreadEvent final : public ui::UIResult
 {
-  ThreadEvent(Pid pid, ThreadReason reason, Tid tid) noexcept;
-  ThreadEvent(Pid pid, const Clone &event) noexcept;
+  ThreadEvent(SessionId pid, ThreadReason reason, Tid tid) noexcept;
+  ThreadEvent(SessionId pid, const Clone &event) noexcept;
   ~ThreadEvent() noexcept override = default;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
   ThreadReason mReason;
@@ -139,8 +146,13 @@ struct ThreadEvent final : public ui::UIResult
 struct StoppedEvent final : public ui::UIResult
 {
   ~StoppedEvent() noexcept override = default;
-  StoppedEvent(Pid pid, StoppedReason reason, std::string_view description, Tid tid, std::vector<int> bps,
-               std::string_view text, bool allStopped) noexcept;
+  StoppedEvent(SessionId sessionId,
+    StoppedReason reason,
+    std::string_view description,
+    Tid tid,
+    std::vector<int> bps,
+    std::string_view text,
+    bool allStopped) noexcept;
   StoppedReason mReason;
   // static description
   std::string_view mDescription;
@@ -157,8 +169,10 @@ struct BreakpointEvent final : public ui::UIResult
   std::string_view mReason;
   std::optional<std::string> mMessage;
   const UserBreakpoint *mBreakpoint;
-  BreakpointEvent(Pid pid, std::string_view reason, std::optional<std::string> message,
-                  const UserBreakpoint *breakpoint) noexcept;
+  BreakpointEvent(SessionId pid,
+    std::string_view reason,
+    std::optional<std::string> message,
+    const UserBreakpoint *breakpoint) noexcept;
   ~BreakpointEvent() override = default;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
@@ -166,7 +180,7 @@ struct BreakpointEvent final : public ui::UIResult
 struct OutputEvent final : public ui::UIResult
 {
   ~OutputEvent() noexcept override = default;
-  OutputEvent(Pid pid, std::string_view category, std::string &&output) noexcept;
+  OutputEvent(SessionId pid, std::string_view category, std::string &&output) noexcept;
 
   std::string_view mCategory; // static category strings exist, we always pass literals to this
   std::string mOutput;

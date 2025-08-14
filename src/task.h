@@ -8,6 +8,7 @@
 #include "symbolication/callstack.h"
 #include "symbolication/variable_reference.h"
 #include "utils/smartptr.h"
+#include <common/formatter.h>
 #include <linux/sched.h>
 #include <mdbsys/ptrace.h>
 #include <sys/user.h>
@@ -32,7 +33,7 @@ struct CallStackRequest
   } req;
   int count;
 
-  bool create_frame_ref_ids{true};
+  bool create_frame_ref_ids{ true };
 
   static CallStackRequest partial(int count) noexcept;
   static CallStackRequest full() noexcept;
@@ -42,8 +43,6 @@ struct TaskRegisters
 {
   Immutable<ArchType> arch;
   Immutable<TargetFormat> mRegisterFormat;
-  bool rip_dirty : 1 {true};
-  bool cache_dirty : 1 {true};
 
   TaskRegisters() noexcept = default;
   TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo);
@@ -74,7 +73,7 @@ public:
 
   friend class TraceeController;
   pid_t mTid;
-  u32 mSessionId{0};
+  u32 mSessionId{ 0 };
   WaitStatus mLastWaitStatus;
   TargetFormat mTargetFormat;
   tc::ResumeAction mLastResumeAction;
@@ -95,12 +94,14 @@ public:
                                 // *all* threads get set to true on each stop (and false on each continue)
                                 // regardless of what thread the user is operating on. It's "all stop mode".
       bool initialized : 1;     // fully initialized task. after a clone syscall some setup is required
-      bool mRegisterCacheDirty : 1 {true};      // register is dirty and requires refetching
-      bool mInstructionPointerDirty : 1 {true}; // rip requires fetching FIXME(simon): Is this even needed anymore?
-      bool exited : 1;                          // task has exited
-      bool reaped : 1;                          // task has been reaped after exit
-      bool killed : 1 {false};
-      bool bfRequestedStop : 1 {false};
+      bool mRegisterCacheDirty : 1 { true }; // register is dirty and requires refetching
+      bool mInstructionPointerDirty : 1 {
+        true
+      }; // rip requires fetching FIXME(simon): Is this even needed anymore?
+      bool exited : 1; // task has exited
+      bool reaped : 1; // task has been reaped after exit
+      bool killed : 1 { false };
+      bool bfRequestedStop : 1 { false };
     };
   };
 
@@ -118,13 +119,13 @@ private:
 public:
   using Ptr = Ref<TaskInfo>;
 
-  using TaskInfoEntry = struct
+  using InlinedTid = struct
   {
     Tid mTid;
     Ptr mTask;
   };
 
-  std::optional<LocationStatus> mBreakpointLocationStatus;
+  LocationStatus mBreakpointLocationStatus;
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
   TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
@@ -141,7 +142,7 @@ public:
 
   static Ptr CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept;
 
-  static Ptr CreateUnInitializedTask(TaskWaitResult wait) noexcept;
+  static Ptr CreateUnInitializedTask(WaitPidResult wait) noexcept;
 
   user_regs_struct *NativeRegisters() const noexcept;
   RegisterDescription *RemoteX86Registers() const noexcept;
@@ -150,22 +151,24 @@ public:
   u64 GetRegister(u64 reg_num) noexcept;
   u64 UnwindBufferRegister(u8 level, u16 register_number) const noexcept;
   void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
+  void RefreshRegisterCache() noexcept;
 
   std::span<const AddrPtr> UnwindReturnAddresses(TraceeController *tc, CallStackRequest req) noexcept;
   sym::FrameUnwindState *GetUnwindState(int frameLevel) noexcept;
   TraceeController *GetSupervisor() const noexcept;
 
-  void set_taskwait(TaskWaitResult wait) noexcept;
+  void SetTaskWait(WaitPidResult wait) noexcept;
 
-  void StepOverBreakpoint(TraceeController *tc, tc::ResumeAction resume_action) noexcept;
-  void SetStop() noexcept;
+  void StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexcept;
+  void SetUserVisibleStop() noexcept;
   void SetCurrentResumeAction(tc::ResumeAction type) noexcept;
   void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
   bool CanContinue() noexcept;
   void SetInvalidCache() noexcept;
   void SetUpdated() noexcept;
-  void AddBreakpointLocationStatus(AddrPtr address) noexcept;
-  std::optional<LocationStatus> ClearBreakpointLocStatus() noexcept;
+  void AddBreakpointLocationStatus(BreakpointLocation *breakpointLocation) noexcept;
+  void ClearBreakpointLocStatus() noexcept;
+
   /*
    * Checks if this task is stopped, either `stopped_by_tracer` or `stopped` by some execution event, like a signal
    * being delivered, etc.
@@ -209,26 +212,20 @@ struct ExecutionContext
 };
 } // namespace mdb
 
-namespace fmt {
-template <> struct formatter<mdb::TaskVMInfo>
+template <> struct std::formatter<mdb::TaskVMInfo>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(mdb::TaskVMInfo const &vm_info, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low,
-                          vm_info.stack_size, vm_info.tls);
+    return std::format_to(
+      ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low, vm_info.stack_size, vm_info.tls);
   }
 };
 // CallStackRequest
-template <> struct formatter<mdb::CallStackRequest>
+template <> struct std::formatter<mdb::CallStackRequest>
 {
 
   template <typename ParseContext>
@@ -243,14 +240,14 @@ template <> struct formatter<mdb::CallStackRequest>
   format(mdb::CallStackRequest const &req, FormatContext &ctx) const
   {
     if (req.req == mdb::CallStackRequest::Type::Full) {
-      return fmt::format_to(ctx.out(), "all");
+      return std::format_to(ctx.out(), "all");
     } else {
-      return fmt::format_to(ctx.out(), "{}", req.count);
+      return std::format_to(ctx.out(), "{}", req.count);
     }
   }
 };
 
-template <> struct formatter<mdb::TaskInfo>
+template <> struct std::formatter<mdb::TaskInfo>
 {
 
   template <typename ParseContext>
@@ -270,12 +267,16 @@ template <> struct formatter<mdb::TaskInfo>
       wait_status = to_str(task.mLastWaitStatus.ws);
     }
 
-    return fmt::format_to(ctx.out(), "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}", task.mTid,
-                          task.mUserVisibleStop, task.mTracerVisibleStop, wait_status);
+    return std::format_to(ctx.out(),
+      "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}",
+      task.mTid,
+      task.mUserVisibleStop,
+      task.mTracerVisibleStop,
+      wait_status);
   }
 };
 
-template <> struct formatter<user_regs_struct>
+template <> struct std::formatter<user_regs_struct>
 {
   template <typename ParseContext>
   constexpr auto
@@ -288,14 +289,37 @@ template <> struct formatter<user_regs_struct>
   auto
   format(user_regs_struct const &ur, FormatContext &ctx)
   {
-    return fmt::format_to(ctx.out(),
-                          "{{ r15: 0x{:x} r14: 0x{:x} r13: 0x{:x} r12: 0x{:x} rbp: 0x{:x} rbx: 0x{:x} r11: 0x{:x} "
-                          "r10: 0x{:x} r9: 0x{:x} r8: 0x{:x} rax: 0x{:x} rcx: 0x{:x} rdx: 0x{:x} rsi: 0x{:x} rdi: "
-                          "0x{:x} orig_rax: 0x{:x} rip: 0x{:x} cs: {} eflags: {} rsp: 0x{:x} ss: {} fs_base: "
-                          "0x{:x} gs_base: 0x{:x} ds: 0x{:x} es: 0x{:x} fs: 0x{:x} gs: 0x{:x} }}",
-                          ur.r15, ur.r14, ur.r13, ur.r12, ur.rbp, ur.rbx, ur.r11, ur.r10, ur.r9, ur.r8, ur.rax,
-                          ur.rcx, ur.rdx, ur.rsi, ur.rdi, ur.orig_rax, ur.rip, ur.cs, ur.eflags, ur.rsp, ur.ss,
-                          ur.fs_base, ur.gs_base, ur.ds, ur.es, ur.fs, ur.gs);
+    return std::format_to(ctx.out(),
+      "{{ r15: 0x{:x} r14: 0x{:x} r13: 0x{:x} r12: 0x{:x} rbp: 0x{:x} rbx: 0x{:x} r11: 0x{:x} "
+      "r10: 0x{:x} r9: 0x{:x} r8: 0x{:x} rax: 0x{:x} rcx: 0x{:x} rdx: 0x{:x} rsi: 0x{:x} rdi: "
+      "0x{:x} orig_rax: 0x{:x} rip: 0x{:x} cs: {} eflags: {} rsp: 0x{:x} ss: {} fs_base: "
+      "0x{:x} gs_base: 0x{:x} ds: 0x{:x} es: 0x{:x} fs: 0x{:x} gs: 0x{:x} }}",
+      ur.r15,
+      ur.r14,
+      ur.r13,
+      ur.r12,
+      ur.rbp,
+      ur.rbx,
+      ur.r11,
+      ur.r10,
+      ur.r9,
+      ur.r8,
+      ur.rax,
+      ur.rcx,
+      ur.rdx,
+      ur.rsi,
+      ur.rdi,
+      ur.orig_rax,
+      ur.rip,
+      ur.cs,
+      ur.eflags,
+      ur.rsp,
+      ur.ss,
+      ur.fs_base,
+      ur.gs_base,
+      ur.ds,
+      ur.es,
+      ur.fs,
+      ur.gs);
   }
 };
-}; // namespace fmt

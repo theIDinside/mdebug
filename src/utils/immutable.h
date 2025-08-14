@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "common.h"
+#include "common/formatter.h"
 #include <type_traits>
 #include <utility>
 
@@ -46,7 +47,7 @@ public:
   constexpr
   operator std::optional<T>() const
   {
-    return std::optional<T>{mData};
+    return std::optional<T>{ mData };
   }
 
   constexpr const T *
@@ -221,7 +222,7 @@ public:
   constexpr const std::string_view
   operator*() const & noexcept
   {
-    return std::string_view{mData};
+    return std::string_view{ mData };
   }
 
   constexpr
@@ -264,7 +265,7 @@ public:
       return StringView();
     }
 
-    return std::string_view{mData}.substr(index + 1);
+    return std::string_view{ mData }.substr(index + 1);
   }
 };
 
@@ -346,25 +347,18 @@ operator+(const Immutable<T> &l, const Immutable<U> &r)
 }
 } // namespace mdb
 
-namespace fmt {
 template <typename T> using Immutable = mdb::Immutable<T>;
-template <typename T> struct formatter<Immutable<T>>
+template <typename T> struct std::formatter<Immutable<T>>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
   format(const Immutable<T> &var, FormatContext &ctx) const
   {
-    return fmt::format_to(ctx.out(), "{}", *var);
+    return std::format_to(ctx.out(), "{}", *var);
   }
 };
-} // namespace fmt
 namespace mdb {
 template <typename T> struct NonNullPtr
 {
@@ -417,7 +411,7 @@ template <typename U>
 static constexpr auto
 NonNull(U &ref) noexcept
 {
-  return NonNullPtr<U>{.ptr = &ref};
+  return NonNullPtr<U>{ .ptr = &ref };
 }
 
 template <typename T> using ImmutablePtr = Immutable<NonNullPtr<T>>;

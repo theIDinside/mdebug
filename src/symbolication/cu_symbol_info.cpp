@@ -22,9 +22,11 @@ namespace mdb::sym {
 class SourceCodeFileLNPResolver
 {
 public:
-  SourceCodeFileLNPResolver(CompilationUnit *compilationUnit, dw::LNPHeader *header,
-                            std::vector<dw::LineTableEntry> &table, std::vector<AddressRange> &sequences) noexcept
-      : mLineNumberProgramHeader{header}, mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()),
+  SourceCodeFileLNPResolver(CompilationUnit *compilationUnit,
+    dw::LNPHeader *header,
+    std::vector<dw::LineTableEntry> &table,
+    std::vector<AddressRange> &sequences) noexcept
+      : mLineNumberProgramHeader{ header }, mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()),
         mTable(table), mSequences(sequences), mIsStatement(header->mDefaultIsStatement)
   {
   }
@@ -39,7 +41,7 @@ public:
     auto current_file = mTable.front().file;
     auto currentIndex = 0;
 
-    result[current_file].push_back({0, 0});
+    result[current_file].push_back({ 0, 0 });
 
     for (const auto &lte : mTable) {
       if (lte.file != current_file) {
@@ -71,14 +73,14 @@ public:
     // usually lines with value = 0, probably can be given the same value as the previous entry into the table
     // but why even bother? It can't be recorded with 0, because it produces weird behaviors.
     if (ShouldRecord() && (mLine != 0 || mSequenceEnded)) {
-      mTable.push_back(dw::LineTableEntry{.pc = mAddress,
-                                          .line = mLine,
-                                          .column = mColumn,
-                                          .file = static_cast<u16>(mFile),
-                                          .is_stmt = mIsStatement,
-                                          .prologue_end = mPrologueEnd,
-                                          .epilogue_begin = mEpilogueBegin,
-                                          .IsEndOfSequence = (mSequenceEnded || (mLine == 0))});
+      mTable.push_back(dw::LineTableEntry{ .pc = mAddress,
+        .line = mLine,
+        .column = mColumn,
+        .file = static_cast<u16>(mFile),
+        .is_stmt = mIsStatement,
+        .prologue_end = mPrologueEnd,
+        .epilogue_begin = mEpilogueBegin,
+        .IsEndOfSequence = (mSequenceEnded || (mLine == 0)) });
     }
     mDiscriminator = 0;
     mBasicBlock = false;
@@ -175,7 +177,7 @@ public:
   {
     special_opindex_advance(opcode);
     const auto line_inc = mLineNumberProgramHeader->mLineBase + ((opcode - mLineNumberProgramHeader->mOpcodeBase) %
-                                                                 mLineNumberProgramHeader->mLineRange);
+                                                                  mLineNumberProgramHeader->mLineRange);
     mLine += line_inc;
     StampEntry();
   }
@@ -187,18 +189,18 @@ public:
     RecordSequence();
     StampEntry();
     // When a sequence ends, state is reset
-    mAddress = {0};
-    mLine = {1};
-    mColumn = {0};
-    mOpIndex = {0};
-    mFile = {1};
+    mAddress = { 0 };
+    mLine = { 1 };
+    mColumn = { 0 };
+    mOpIndex = { 0 };
+    mFile = { 1 };
     mIsStatement = mLineNumberProgramHeader->mDefaultIsStatement;
-    mBasicBlock = {false};
-    mPrologueEnd = {false};
-    mEpilogueBegin = {false};
-    mSequenceEnded = {false};
-    mISA = {0};
-    mDiscriminator = {0};
+    mBasicBlock = { false };
+    mPrologueEnd = { false };
+    mEpilogueBegin = { false };
+    mSequenceEnded = { false };
+    mISA = { 0 };
+    mDiscriminator = { 0 };
   }
 
   // Records the [begin, end] addressess of the contigous line table entries that we just parsed
@@ -232,7 +234,7 @@ public:
   define_file(std::string_view filename, u64 dir_index, u64 last_modified, u64 file_size) noexcept
   {
     mLineNumberProgramHeader->mFileEntries.push_back(
-      dw::FileEntry{filename, dir_index, file_size, {}, last_modified});
+      dw::FileEntry{ filename, dir_index, file_size, {}, last_modified });
   }
 
   constexpr void
@@ -286,18 +288,18 @@ private:
   std::vector<dw::LineTableEntry> &mTable;
   std::vector<AddressRange> &mSequences;
   // State machine register
-  u64 mAddress{0};
-  u32 mLine{1};
-  u32 mColumn{0};
-  u16 mOpIndex{0};
-  u32 mFile{1};
+  u64 mAddress{ 0 };
+  u32 mLine{ 1 };
+  u32 mColumn{ 0 };
+  u16 mOpIndex{ 0 };
+  u32 mFile{ 1 };
   bool mIsStatement;
-  bool mBasicBlock{false};
-  bool mSequenceEnded{false};
-  bool mPrologueEnd{false};
-  bool mEpilogueBegin{false};
-  u8 mISA{0};
-  u32 mDiscriminator{0};
+  bool mBasicBlock{ false };
+  bool mSequenceEnded{ false };
+  bool mPrologueEnd{ false };
+  bool mEpilogueBegin{ false };
+  u8 mISA{ 0 };
+  u32 mDiscriminator{ 0 };
   AddressRange mCurrentSequence;
 };
 
@@ -332,8 +334,12 @@ CompilationUnit::CompilationUnit(dw::UnitData *unitData) noexcept
 void
 CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexcept
 {
-  DBGLOG(dwarf, "cu={} low_pc={} .. {} ({})", mUnitData->SectionOffset(), lowest, end_exclusive,
-         mUnitData->GetObjectFile()->GetFilePath().filename().c_str());
+  DBGLOG(dwarf,
+    "cu={} low_pc={} .. {} ({})",
+    mUnitData->SectionOffset(),
+    lowest,
+    end_exclusive,
+    mUnitData->GetObjectFile()->GetFilePath().filename().c_str());
   mPcStart = lowest;
   mPcEndExclusive = end_exclusive;
 }
@@ -370,10 +376,11 @@ CompilationUnit::ComputeLineTable() noexcept
   DBGLOG(dwarf, "[lnp]: computing lnp at {}", mLineNumberProgram->mSectionOffset);
   using OpCode = LineNumberProgramOpCode;
   std::vector<AddressRange> sequences;
-  DwarfBinaryReader reader{mUnitData->GetObjectFile()->GetElf(), mLineNumberProgram->mData,
-                           static_cast<u64>(mLineNumberProgram->mDataEnd - mLineNumberProgram->mData)};
+  DwarfBinaryReader reader{ mUnitData->GetObjectFile()->GetElf(),
+    mLineNumberProgram->mData,
+    static_cast<u64>(mLineNumberProgram->mDataEnd - mLineNumberProgram->mData) };
 
-  SourceCodeFileLNPResolver state{this, mLineNumberProgram, uniqueLineTableEntries, sequences};
+  SourceCodeFileLNPResolver state{ this, mLineNumberProgram, uniqueLineTableEntries, sequences };
   while (reader.HasMore()) {
     const auto opcode = reader.ReadValue<OpCode>();
     if (const auto spec_op = std::to_underlying(opcode); spec_op >= mLineNumberProgram->mOpcodeBase) {
@@ -407,7 +414,7 @@ CompilationUnit::ComputeLineTable() noexcept
           const auto file_size = reader.ReadUleb128<u64>();
           state.define_file(filename, dir_index, last_modified, file_size);
         } else {
-          PANIC(fmt::format("DWARF V5 line tables not yet implemented"));
+          PANIC(std::format("DWARF V5 line tables not yet implemented"));
         }
         break;
       }
@@ -465,12 +472,13 @@ CompilationUnit::ComputeLineTable() noexcept
 
   mLineTable.reserve(uniqueLineTableEntries.size());
 
-  std::sort(std::begin(uniqueLineTableEntries), std::end(uniqueLineTableEntries),
-            [](auto &a, auto &b) { return a.pc < b.pc; });
+  std::sort(std::begin(uniqueLineTableEntries), std::end(uniqueLineTableEntries), [](auto &a, auto &b) {
+    return a.pc < b.pc;
+  });
 
   std::ranges::copy(uniqueLineTableEntries, std::back_inserter(mLineTable));
   ASSERT(std::ranges::is_sorted(mLineTable, [](auto &a, auto &b) { return a.pc < b.pc; }),
-         "Line Table was not sorted by Program Counter!");
+    "Line Table was not sorted by Program Counter!");
   if (mLineTable.size() > 2) {
     mPcStart = std::min(mPcStart, mLineTable.front().pc);
     mPcEndExclusive = std::max(mPcEndExclusive, mLineTable.back().pc);
@@ -481,7 +489,7 @@ CompilationUnit::ComputeLineTable() noexcept
   // Our "hash"-function.
   const auto hashIndex = [v = mLineNumberProgram->mVersion](u32 index) -> u32 {
     // u8 4-5 will overflow and we reduce it to 1.
-    return index + std::min<u32>(u32{std::to_underlying(v)} - u32{std::to_underlying(DwarfVersion::D5)}, 1);
+    return index + std::min<u32>(u32{ std::to_underlying(v) } - u32{ std::to_underlying(DwarfVersion::D5) }, 1);
   };
 
   for (auto i = 0u; i < sourceCodeTableMapping.size() - 1; ++i) {
@@ -505,8 +513,11 @@ CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
   mLineNumberProgram = header;
   header->SetCompilationUnitBuildDirectory(NonNull(*mUnitData->GetBuildDirectory()));
 
-  DBGLOG(dwarf, "read files from lnp=0x{}, comp unit={} '{}'", mLineNumberProgram->mSectionOffset,
-         mUnitData->SectionOffset(), mCompilationUnitName);
+  DBGLOG(dwarf,
+    "read files from lnp=0x{}, comp unit={} '{}'",
+    mLineNumberProgram->mSectionOffset,
+    mUnitData->SectionOffset(),
+    mCompilationUnitName);
 
   for (const auto &[fullPath, v] : mLineNumberProgram->FileEntries()) {
     auto ptr = dw::SourceCodeFile::Create(this, objectFile->GetElf(), fullPath, v);
@@ -549,18 +560,20 @@ CompilationUnit::GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept
   }
 
   if (unrelocatedAddress < mLineTable.front().pc || mLineTable.back().pc < unrelocatedAddress) {
-    return {nullptr, nullptr};
+    return { nullptr, nullptr };
   }
 
-  auto it = std::lower_bound(std::cbegin(mLineTable), std::cend(mLineTable), unrelocatedAddress,
-                             [](const dw::LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
+  auto it = std::lower_bound(std::cbegin(mLineTable),
+    std::cend(mLineTable),
+    unrelocatedAddress,
+    [](const dw::LineTableEntry &lte, AddrPtr pc) { return lte.pc < pc; });
 
   if (it == std::cend(mLineTable)) {
-    return std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>{nullptr, nullptr};
+    return std::pair<dw::SourceCodeFile *, const dw::LineTableEntry *>{ nullptr, nullptr };
   }
 
   if (it->pc == unrelocatedAddress) {
-    return std::pair{GetFileByLineProgramIndex(it->file), it.base()};
+    return std::pair{ GetFileByLineProgramIndex(it->file), it.base() };
   } else {
     --it;
     // clang-format off
@@ -574,12 +587,13 @@ CompilationUnit::GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept
 
     // We found no address that is spanned by 2 consecutive LTE's
     if (it->IsEndOfSequence) {
-      return {GetFileByLineProgramIndex(it->file), nullptr};
+      return { GetFileByLineProgramIndex(it->file), nullptr };
     }
     ASSERT(it->pc <= unrelocatedAddress && (it + 1)->pc > unrelocatedAddress && !it->IsEndOfSequence,
-           "Line table is not ordered by PC - table in bad state (end of sequence={})", it->IsEndOfSequence);
+      "Line table is not ordered by PC - table in bad state (end of sequence={})",
+      it->IsEndOfSequence);
 
-    return std::pair{GetFileByLineProgramIndex(it->file), it.base()};
+    return std::pair{ GetFileByLineProgramIndex(it->file), it.base() };
   }
 }
 
@@ -625,15 +639,17 @@ CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
 {
   PROFILE_SCOPE("CompilationUnit::GetFunctionSymbolByProgramCounter", "symbolication");
   if (!IsFunctionSymbolsResolved()) {
-    PROFILE_SCOPE_END_ARGS("CompilationUnit::PrepareFunctionSymbols", "symbolication",
-                           PEARG("symbols", mFunctionSymbols.size()),
-                           PEARG("comp_unit", mUnitData->SectionOffset()),
-                           PEARG("symbolfile", mUnitData->GetObjectFile()->GetFilePath().filename().c_str()));
+    PROFILE_SCOPE_END_ARGS("CompilationUnit::PrepareFunctionSymbols",
+      "symbolication",
+      PEARG("symbols", mFunctionSymbols.size()),
+      PEARG("comp_unit", mUnitData->SectionOffset()),
+      PEARG("symbolfile", mUnitData->GetObjectFile()->GetFilePath().filename().c_str()));
     PrepareFunctionSymbols();
   }
 
-  auto iter = std::find_if(mFunctionSymbols.begin(), mFunctionSymbols.end(),
-                           [pc](sym::FunctionSymbol &fn) { return fn.StartPc() <= pc && pc < fn.EndPc(); });
+  auto iter = std::find_if(mFunctionSymbols.begin(), mFunctionSymbols.end(), [pc](sym::FunctionSymbol &fn) {
+    return fn.StartPc() <= pc && pc < fn.EndPc();
+  });
   if (iter != std::end(mFunctionSymbols)) {
     return iter.base();
   }
@@ -666,14 +682,14 @@ struct ResolveFnSymbolState
   // a namespace or a class, so foo::foo, like a constructor, or mdb::foo for a namespace with foo as a fn, for
   // instance.
   std::string_view mNamespaceIsh{};
-  AddrPtr mLowProgramCounter{nullptr};
-  AddrPtr mHighProgramCounter{nullptr};
-  u8 mMaybeCount{0};
+  AddrPtr mLowProgramCounter{ nullptr };
+  AddrPtr mHighProgramCounter{ nullptr };
+  u8 mMaybeCount{ 0 };
   std::optional<std::span<const u8>> mFrameBaseDescription{};
-  sym::Type *mReturnType{nullptr};
+  sym::Type *mReturnType{ nullptr };
 
-  std::optional<u32> mLine{std::nullopt};
-  std::optional<std::string> mLineNumberProgramFile{std::nullopt};
+  std::optional<u32> mLine{ std::nullopt };
+  std::optional<std::string> mLineNumberProgramFile{ std::nullopt };
 
   explicit ResolveFnSymbolState(CompilationUnit *compilationUnit) noexcept : mCompilationUnit(compilationUnit) {}
 
@@ -695,27 +711,29 @@ struct ResolveFnSymbolState
   Complete()
   {
     std::optional<SourceCoordinate> source = mLineNumberProgramFile.transform(
-      [&](auto &&path) { return SourceCoordinate{std::move(path), mLine.value_or(0), 0}; });
+      [&](auto &&path) { return SourceCoordinate{ std::move(path), mLine.value_or(0), 0 }; });
     if (mLineNumberProgramFile) {
       ASSERT(mLineNumberProgramFile.value().empty(), "Should have moved std string!");
     }
 
-    return sym::FunctionSymbol{mLowProgramCounter,
-                               mHighProgramCounter,
-                               mName.empty() ? mMangledName : mName,
-                               mNamespaceIsh,
-                               mReturnType,
-                               mPossibleOriginDies,
-                               *mCompilationUnit,
-                               mFrameBaseDescription.value_or(std::span<const u8>{}),
-                               std::move(source)};
+    return sym::FunctionSymbol{ mLowProgramCounter,
+      mHighProgramCounter,
+      mName.empty() ? mMangledName : mName,
+      mNamespaceIsh,
+      mReturnType,
+      mPossibleOriginDies,
+      *mCompilationUnit,
+      mFrameBaseDescription.value_or(std::span<const u8>{}),
+      std::move(source) };
   }
 
   void
   AddPossibleOrigin(dw::IndexedDieReference indexed) noexcept
   {
-    if (mMaybeCount < 3 && !std::any_of(mPossibleOriginDies.begin(), mPossibleOriginDies.begin() + mMaybeCount,
-                                        [&](const auto &idr) { return idr == indexed; })) {
+    if (mMaybeCount < 3 && !std::any_of(
+                             mPossibleOriginDies.begin(),
+                             mPossibleOriginDies.begin() + mMaybeCount,
+                             [&](const auto &idr) { return idr == indexed; })) {
       mPossibleOriginDies[mMaybeCount++] = indexed;
     }
   }
@@ -732,8 +750,8 @@ FollowReference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::DieR
   }
 
   if (const auto parent = ref.GetDie()->GetParent();
-      MaybeNullAnyOf<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
-    dw::DieReference parentReference{ref.GetUnitData(), parent};
+    MaybeNullAnyOf<DwarfTag::DW_TAG_class_type, DwarfTag::DW_TAG_structure_type>(parent)) {
+    dw::DieReference parentReference{ ref.GetUnitData(), parent };
     if (auto className = parentReference.ReadAttribute(Attribute::DW_AT_name); className) {
       state.mNamespaceIsh = className->AsStringView();
     }
@@ -758,9 +776,11 @@ FollowReference(CompilationUnit &src_file, ResolveFnSymbolState &state, dw::DieR
           src_file.GetLineNumberProgramFile(value.AsUnsignedValue()).transform([](auto &&p) {
             return p.string();
           });
-        CDLOG(ref.GetUnitData() != src_file.GetDwarfUnitData(), core,
-              "[dwarf]: Cross CU requires (?) another LNP. ref.cu = {}, src file cu={}",
-              ref.GetUnitData()->SectionOffset(), src_file.GetDwarfUnitData()->SectionOffset());
+        CDLOG(ref.GetUnitData() != src_file.GetDwarfUnitData(),
+          core,
+          "[dwarf]: Cross CU requires (?) another LNP. ref.cu = {}, src file cu={}",
+          ref.GetUnitData()->SectionOffset(),
+          src_file.GetDwarfUnitData()->SectionOffset());
       }
     } break;
     case Attribute::DW_AT_decl_line:
@@ -793,13 +813,13 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
 {
   const auto &dies = mUnitData->GetDies();
 
-  dw::UnitReader reader{mUnitData};
+  dw::UnitReader reader{ mUnitData };
   // For a function symbol, we want to record a DIE, from which we can reach all it's (possible) references.
   // Unfortunately DWARF doesn't seem to define a "OWNING" die. Which is... unfortunate. So we have to guess. But
   // 2-3 should be enough.
   std::array<u8, 512> buf;
-  std::pmr::monotonic_buffer_resource rsrc{&buf, std::size(buf), std::pmr::null_memory_resource()};
-  std::pmr::polymorphic_allocator<u8> allocator{&rsrc};
+  std::pmr::monotonic_buffer_resource rsrc{ &buf, std::size(buf), std::pmr::null_memory_resource() };
+  std::pmr::polymorphic_allocator<u8> allocator{ &rsrc };
   for (const auto &die : dies) {
     switch (die.mTag) {
     case DwarfTag::DW_TAG_subprogram:
@@ -820,7 +840,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
 
     rsrc.release();
     reader.SeekDie(die);
-    ResolveFnSymbolState state{this};
+    ResolveFnSymbolState state{ this };
 
     std::pmr::list<dw::DieReference> &dieReferences = *allocator.new_object<std::pmr::list<dw::DieReference>>();
     for (const auto &attr : abbreviation.mAttributes) {
@@ -846,14 +866,18 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
         }
         break;
       case Attribute::DW_AT_decl_file: {
-        ASSERT(!state.mLineNumberProgramFile.has_value(), "lnp file has been set already, to {}, new {}",
-               state.mLineNumberProgramFile.value(), value.AsUnsignedValue());
+        ASSERT(!state.mLineNumberProgramFile.has_value(),
+          "lnp file has been set already, to {}, new {}",
+          state.mLineNumberProgramFile.value(),
+          value.AsUnsignedValue());
         state.mLineNumberProgramFile =
           GetLineNumberProgramFile(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
       } break;
       case Attribute::DW_AT_decl_line:
-        ASSERT(!state.mLine.has_value(), "file line number has been set already, to {}, new {}",
-               state.mLine.value(), value.AsUnsignedValue());
+        ASSERT(!state.mLine.has_value(),
+          "file line number has been set already, to {}, new {}",
+          state.mLine.value(),
+          value.AsUnsignedValue());
         state.mLine = value.AsUnsignedValue();
         break;
       case Attribute::DW_AT_specification:
@@ -878,7 +902,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
       }
     }
 
-    state.AddPossibleOrigin(dw::IndexedDieReference{mUnitData, mUnitData->IndexOf(&die)});
+    state.AddPossibleOrigin(dw::IndexedDieReference{ mUnitData, mUnitData->IndexOf(&die) });
     if (state.Done(dieReferences.empty())) {
       mFunctionSymbols.emplace_back(state.Complete());
     } else {
@@ -891,7 +915,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
           e = dieReferences.end();
         }
 
-        if (state.Done(std::distance(++auto{it}, e) == 0)) {
+        if (state.Done(std::distance(++auto{ it }, e) == 0)) {
           mFunctionSymbols.emplace_back(state.Complete());
           break;
         }

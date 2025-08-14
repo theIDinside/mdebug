@@ -36,32 +36,47 @@ Value::SetKind(Type *type) noexcept
   uType = type;
 }
 
-Value::Value(VarContext context, std::string_view name, Symbol &kind, u32 memContentsOffset,
-             std::shared_ptr<MemoryContentsObject> &&valueObject, DebugAdapterSerializer *serializer) noexcept
+Value::Value(VarContext context,
+  std::string_view name,
+  Symbol &kind,
+  u32 memContentsOffset,
+  std::shared_ptr<MemoryContentsObject> &&valueObject,
+  DebugAdapterSerializer *serializer) noexcept
     : mName(name), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
       mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&kind);
 }
 
-Value::Value(VarContext context, std::string_view memberName, Field &kind, u32 containingStructureOffset,
-             std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
+Value::Value(VarContext context,
+  std::string_view memberName,
+  Field &kind,
+  u32 containingStructureOffset,
+  std::shared_ptr<MemoryContentsObject> valueObject,
+  DebugAdapterSerializer *serializer) noexcept
     : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.mObjectBaseOffset),
       mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&kind);
 }
 
-Value::Value(VarContext context, Type &type, u32 memContentsOffset,
-             std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
+Value::Value(VarContext context,
+  Type &type,
+  u32 memContentsOffset,
+  std::shared_ptr<MemoryContentsObject> valueObject,
+  DebugAdapterSerializer *serializer) noexcept
     : mName("value"), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
       mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&type);
 }
 
-Value::Value(VarContext context, std::string &&name, Type &type, u32 memContentsOffset,
-             std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer) noexcept
+Value::Value(VarContext context,
+  std::string &&name,
+  Type &type,
+  u32 memContentsOffset,
+  std::shared_ptr<MemoryContentsObject> valueObject,
+  DebugAdapterSerializer *serializer) noexcept
     : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
       mVisualizer(serializer), mContext(std::move(context))
 {
@@ -92,16 +107,16 @@ Value::GetType() const noexcept
   }
 }
 
-mdb::Expected<AddrPtr, ValueError>
+std::expected<AddrPtr, ValueError>
 Value::ToRemotePointer() noexcept
 {
   const auto bytes = MemoryView();
   if (bytes.size_bytes() != 8) {
-    return mdb::unexpected(ValueError::InvalidSize);
+    return std::unexpected(ValueError::InvalidSize);
   }
   std::uintptr_t ptr{};
   std::memcpy(&ptr, bytes.data(), 8);
-  return AddrPtr{ptr};
+  return AddrPtr{ ptr };
 }
 
 bool
@@ -124,7 +139,8 @@ bool
 Value::HasMember(std::string_view memberName) noexcept
 {
   if (auto type = GetType(); !type->IsResolved()) {
-    sym::dw::TypeSymbolicationContext ts_ctx{*type->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *type};
+    sym::dw::TypeSymbolicationContext ts_ctx{ *type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+      *type };
     ts_ctx.ResolveType();
   }
 
@@ -142,8 +158,8 @@ Value::GetMember(std::string_view memberName) noexcept
   auto type = GetType();
 
   if (!type->IsResolved()) {
-    sym::dw::TypeSymbolicationContext typeResolver{*type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
-                                                   *type};
+    sym::dw::TypeSymbolicationContext typeResolver{ *type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+      *type };
     typeResolver.ResolveType();
   }
 
@@ -157,8 +173,8 @@ Value::GetMember(std::string_view memberName) noexcept
       auto variableContext = mem.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
                                                       : Tracer::Get().CloneFromVariableContext(*mContext);
       const auto vId = variableContext->mId;
-      auto memberValue = Ref<sym::Value>::MakeShared(variableContext, mem.mName, const_cast<sym::Field &>(mem),
-                                                     mMemoryContentsOffsets, TakeMemoryReference());
+      auto memberValue = Ref<sym::Value>::MakeShared(
+        variableContext, mem.mName, const_cast<sym::Field &>(mem), mMemoryContentsOffsets, TakeMemoryReference());
       ObjectFile::InitializeDataVisualizer(*memberValue);
 
       if (vId > 0) {
@@ -190,7 +206,13 @@ void
 Value::RegisterContext() noexcept
 {
   Tracer::Get().SetVariableContext(mContext);
-  mContext->mTask->CacheValueObject(mContext->mId, RefPtr<sym::Value>{this});
+  mContext->mTask->CacheValueObject(mContext->mId, RefPtr<sym::Value>{ this });
+}
+
+bool
+Value::OverwriteDataThroughReference(u32 offset, const std::span<const std::byte> newBytes) noexcept
+{
+  ToRemotePointer();
 }
 
 bool
@@ -214,7 +236,7 @@ template <class T>
 static constexpr auto
 ByteViewOf(const T &t) -> std::span<const std::byte>
 {
-  return std::as_bytes(std::span<const T>{std::addressof(t), 1});
+  return std::as_bytes(std::span<const T>{ std::addressof(t), 1 });
 }
 
 template <typename Primitive>
@@ -317,6 +339,7 @@ Value::WritePrimitive(Primitive value) noexcept
   return false;
 }
 
+template bool Value::WritePrimitive<bool>(bool value) noexcept;
 template bool Value::WritePrimitive<i8>(i8 value) noexcept;
 template bool Value::WritePrimitive<i16>(i16 value) noexcept;
 template bool Value::WritePrimitive<i32>(i32 value) noexcept;
@@ -356,14 +379,14 @@ Value::FullMemoryView() const noexcept
 
 MemoryContentsObject::MemoryContentsObject(AddrPtr start, AddrPtr end) noexcept : start(start), end(end) {}
 
-EagerMemoryContentsObject::EagerMemoryContentsObject(AddrPtr start, AddrPtr end,
-                                                     MemoryContentBytes &&data) noexcept
+EagerMemoryContentsObject::EagerMemoryContentsObject(
+  AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept
     : MemoryContentsObject(start, end), mContents(std::move(data))
 {
 }
 
-LazyMemoryContentsObject::LazyMemoryContentsObject(TraceeController &supervisor, AddrPtr start,
-                                                   AddrPtr end) noexcept
+LazyMemoryContentsObject::LazyMemoryContentsObject(
+  TraceeController &supervisor, AddrPtr start, AddrPtr end) noexcept
     : MemoryContentsObject(start, end), mSupervisor(supervisor)
 {
 }
@@ -432,21 +455,21 @@ MemoryContentsObject::ReadResult
 MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 sizeOf) noexcept
 {
   if (auto res = tc.SafeRead(address, sizeOf); res.is_expected()) {
-    return ReadResult{.info = ReadResultInfo::Success, .value = res.take_value()};
+    return ReadResult{ .info = ReadResultInfo::Success, .value = res.take_value() };
   } else {
     const auto read_bytes = sizeOf - res.error().mUnreadBytes;
     if (read_bytes != 0) {
-      return ReadResult{.info = ReadResultInfo::Partial, .value = std::move(res.take_error().mBytes)};
+      return ReadResult{ .info = ReadResultInfo::Partial, .value = std::move(res.take_error().mBytes) };
     } else {
-      return ReadResult{.info = ReadResultInfo::Failed, .value = nullptr};
+      return ReadResult{ .info = ReadResultInfo::Failed, .value = nullptr };
     }
   }
 }
 
 /*static*/
 MemoryContentsObject::ReadResult
-MemoryContentsObject::ReadMemory(std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address,
-                                 u32 size_of) noexcept
+MemoryContentsObject::ReadMemory(
+  std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address, u32 size_of) noexcept
 {
   TODO("implement MemoryContentsObject that uses custom allocation strategies.");
 }
@@ -487,10 +510,10 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
     }
   };
 
-  span s{.ptr = loclist.data(), .size = loclist.size()};
+  span s{ .ptr = loclist.data(), .size = loclist.size() };
 
   auto arena = allocator->ScopeAllocation();
-  std::pmr::vector<LocationListEntry> parsed{arena.GetAllocator()};
+  std::pmr::vector<LocationListEntry> parsed{ arena.GetAllocator() };
   parsed.reserve(512);
   std::vector<LocationListEntry> result;
 
@@ -507,7 +530,7 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
     u16 dwarfExpressionLength;
     s.CopyTo(dwarfExpressionLength);
     parsed.push_back(LocationListEntry{
-      .mStart = start + base, .mEnd = end + base, .mDwarfExpression = {s.ptr, dwarfExpressionLength}});
+      .mStart = start + base, .mEnd = end + base, .mDwarfExpression = { s.ptr, dwarfExpressionLength } });
     s.Move(dwarfExpressionLength);
   }
   result.reserve(parsed.size());
@@ -518,8 +541,8 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
 
 /*static*/
 Ref<Value>
-MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
-                                          bool lazy) noexcept
+MemoryContentsObject::CreateFrameVariable(
+  TraceeController &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept
 {
   const auto requested_byte_size = symbol.mType->Size();
 
@@ -531,16 +554,18 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
   }
 
   if (!symbol.Computed()) {
-    ReadInLocationList(symbol, tc.GetDebugAdapterProtocolClient()->GetCommandArenaAllocator(),
-                       *frame.GetSymbolFile()->GetObjectFile()->GetElf()->mDebugLoclist);
+    ReadInLocationList(symbol,
+      tc.GetDebugAdapterProtocolClient()->GetCommandArenaAllocator(),
+      *frame.GetSymbolFile()->GetObjectFile()->GetElf()->mDebugLoclist);
   }
   auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
 
   if (dwarfExpression.empty()) {
     return Ref<Value>::MakeShared(nullptr, symbol.mName, symbol, 0u, nullptr);
   }
-  auto interp = ExprByteCodeInterpreter{frame.FrameLevel(), tc, *frame.mTask, dwarfExpression,
-                                        fnSymbol->GetFrameBaseDwarfExpression()};
+  auto interp = ExprByteCodeInterpreter{
+    frame.FrameLevel(), tc, *frame.mTask, dwarfExpression, fnSymbol->GetFrameBaseDwarfExpression()
+  };
 
   auto variableContext =
     symbol.mType->IsPrimitive()
@@ -551,8 +576,8 @@ MemoryContentsObject::CreateFrameVariable(TraceeController &tc, const sym::Frame
 
   if (lazy) {
     auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
-    return Ref<sym::Value>::MakeShared(std::move(variableContext), symbol.mName, symbol, 0u,
-                                       std::move(memory_object));
+    return Ref<sym::Value>::MakeShared(
+      std::move(variableContext), symbol.mName, symbol, 0u, std::move(memory_object));
   }
 
   auto res = tc.SafeRead(address, requested_byte_size);

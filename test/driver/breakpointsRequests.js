@@ -4,7 +4,7 @@ const { findDisasmFunction, assert, assertLog, assert_eq, prettyJson, getPrintfP
 const bpRequest = 'setBreakpoints'
 
 /**
- * @param {import("./client").DAClient } debugAdapter
+ * @param {import("./client").DebugAdapterClient } debugAdapter
  * @param {string} exe
  */
 async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
@@ -36,7 +36,7 @@ async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
   }
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setInstructionBreakpoint(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
@@ -61,7 +61,7 @@ async function setInstructionBreakpoint(debugAdapter) {
     })
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function set4InSameCompUnit(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
@@ -92,7 +92,7 @@ async function set4InSameCompUnit(debugAdapter) {
   )
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function set2InDifferentCompUnit(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
   const files = ['test/stackframes.cpp', 'test/templated_code/template.h']
@@ -121,7 +121,7 @@ async function set2InDifferentCompUnit(debugAdapter) {
   }
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setFunctionBreakpoint(debugAdapter) {
   await initLaunchToMain(debugAdapter, 'functionBreakpoints')
   const functions = ['Person', 'sayHello'].map((n) => ({ name: n }))
@@ -137,7 +137,7 @@ async function setFunctionBreakpoint(debugAdapter) {
   console.log(prettyJson(fnBreakpointResponse))
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setFunctionBreakpointUsingRegex(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -154,14 +154,15 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
     'Expected 3 breakpoints',
     ` but saw ${response.body.breakpoints.length}`
   )
-  console.log(`now wait for 1 breakpoint event`);
+  console.log(`now wait for 1 breakpoint event`)
   let breakpoint_events = debugAdapter.prepareWaitForEventN('breakpoint', 1, 1000)
+  await debugAdapter.contNextStop(threads[0].id)
   await debugAdapter.contNextStop(threads[0].id)
   const res = await breakpoint_events
   console.log(prettyJson(res))
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setBreakpointsThatArePending(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
@@ -194,7 +195,7 @@ async function setBreakpointsThatArePending(debugAdapter) {
     })
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setNonExistingSourceBp(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -222,7 +223,7 @@ async function setNonExistingSourceBp(debugAdapter) {
   )
 }
 
-/** @param {import("./client").DAClient } debugAdapter */
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function set4ThenSet2(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))

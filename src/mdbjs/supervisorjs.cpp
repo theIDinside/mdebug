@@ -1,65 +1,71 @@
 /** LICENSE TEMPLATE */
 #include "supervisorjs.h"
-#include "js/Array.h"
-#include "js/GCVector.h"
-#include "js/PropertyAndElement.h"
 #include "mdbjs/bpjs.h"
+#include "mdbjs/jsobject.h"
+#include "quickjs/quickjs.h"
 
 namespace mdb::js {
 
-/* static */
-bool
-Supervisor::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto supervisor = Get(callee.get());
+static constexpr auto OpaqueDataErrorMessage = "Could not retrieve supervisor";
 
-  args.rval().setInt32(supervisor->TaskLeaderTid());
-  return true;
+/* static */
+JSValue
+JsSupervisor::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *native = GetThisOrReturnException(native, OpaqueDataErrorMessage);
+
+  return JS_NewInt32(context, native->TaskLeaderTid());
 }
-
 /* static */
-bool
-Supervisor::js_to_string(JSContext *cx, unsigned argc, JS ::Value *vp) noexcept
+JSValue
+JsSupervisor::ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto supervisor = Get(callee);
+  auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
+
   char buf[512];
-  auto it = ToString(buf, supervisor);
-  *it = 0;
-  auto length = std::distance(buf, it + 1);
-  // Define your custom string representation
-  JSString *str = JS_NewStringCopyN(cx, buf, length);
-  if (!str) {
-    return false;
-  }
+  auto ptr = std::format_to(buf,
+    "supervisor {}: threads={}, exited={}",
+    supervisor->TaskLeaderTid(),
+    supervisor->GetThreads().size(),
+    supervisor->IsExited());
+  auto len = std::distance(buf, ptr);
+  auto strValue = JS_NewStringLen(context, buf, len);
 
-  args.rval().setString(str);
-  return true;
+  return strValue;
 }
 
-/* static */
-bool
-Supervisor::js_breakpoints(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+template <typename T> struct Foo
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto supervisor = Get(callee);
+  static int
+  Create(T *t)
+  {
+    return 1;
+  }
+};
+
+/* static */
+JSValue
+JsSupervisor::Breakpoints(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
 
   auto bps = supervisor->GetUserBreakpoints().AllUserBreakpoints();
+  auto arrayObject = JS_NewArray(context);
 
-  JS::Rooted<JSObject *> resultArray{cx, JS::NewArrayObject(cx, bps.size())};
-
-  auto index = 0u;
-  for (auto bp : bps) {
-    JS::Rooted<JSObject *> jsBp{cx, js::Breakpoint::Create(cx, std::move(bp))};
-    JS_SetElement(cx, resultArray, index++, jsBp);
+  if (JS_IsUndefined(arrayObject)) {
+    return JS_ThrowTypeError(context, "Created array was undefined");
   }
 
-  args.rval().setObject(*resultArray);
-  return true;
+  if (JS_IsException(arrayObject)) {
+    return JS_Throw(context, arrayObject);
+  }
+
+  for (const auto &[idx, bp] : std::ranges::enumerate_view{ bps }) {
+    auto res = JsBreakpoint::CreateValue(context, bp);
+    JS_SetPropertyUint32(context, arrayObject, idx, res);
+  }
+
+  return arrayObject;
 }
 
 } // namespace mdb::js

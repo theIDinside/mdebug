@@ -2,7 +2,7 @@ const { seconds } = require('./client')
 const { assertLog, prettyJson } = require('./utils')
 
 /**
- * @param { import("./client").DAClient } debugAdapter
+ * @param { import("./client").DebugAdapterClient } debugAdapter
  */
 async function terminate(debugAdapter) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'))

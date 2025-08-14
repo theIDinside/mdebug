@@ -1,14 +1,20 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+#include "bp.h"
+#include "common/formatter.h"
+#include "common/typedefs.h"
 #include "event_queue_event_param.h"
+#include "mdbjs/bpjs.h"
 #include "task.h"
+#include <format>
 #include <mdbsys/ptrace.h>
+#include <optional>
 #include <string>
 #include <sys/poll.h>
-#include <variant>
+
 namespace mdb {
-namespace fmt = ::fmt;
+
 class TraceeController;
 
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
@@ -31,93 +37,92 @@ enum class EventType
 
 struct WaitEvent
 {
-  TaskWaitResult mWaitResult;
+  WaitPidResult mWaitResult;
   int mCpuCore;
 };
 
 enum class TracerEventType : u8
 {
-  Stop,
-  LibraryEvent,
   BreakpointHitEvent,
+  Clone,
+  DeferToSupervisor,
+  Entry,
+  Exec,
+  Fork,
+  LibraryEvent,
+  ProcessExited,
+  ProcessTerminated,
+  Signal,
+  Stepped,
+  Stop,
   SyscallEvent,
   ThreadCreated,
   ThreadExited,
-  WatchpointEvent,
-  ProcessExited,
-  ProcessTerminated,
-  Fork,
   VFork,
   VForkDone,
-  Exec,
-  Clone,
-  DeferToSupervisor,
-  Signal,
-  Stepped,
-  Entry
+  WatchpointEvent,
 };
 
 #define EventType(Type) static constexpr TracerEventType EvtType = TracerEventType::Type // NOLINT
 } // namespace mdb
-namespace fmt {
 
-template <> struct formatter<mdb::TracerEventType>
+template <> struct std::formatter<mdb::TracerEventType>
 {
+
   template <typename ParseContext>
   constexpr auto
-  parse(ParseContext &ctx)
+  parse(ParseContext &context)
   {
-    return ctx.begin();
+    return context.begin();
   }
 
   template <typename FormatContext>
   auto
-  format(const mdb::TracerEventType &evt, FormatContext &ctx) const
+  format(const ::mdb::TracerEventType &evt, FormatContext &ctx) const
   {
-    using enum mdb::TracerEventType;
+    using enum ::mdb::TracerEventType;
     switch (evt) {
     case Stop:
-      return fmt::format_to(ctx.out(), "TracerEventType::Stop");
+      return std::format_to(ctx.out(), "TracerEventType::Stop");
     case LibraryEvent:
-      return fmt::format_to(ctx.out(), "TracerEventType::LibraryEvent");
+      return std::format_to(ctx.out(), "TracerEventType::LibraryEvent");
     case BreakpointHitEvent:
-      return fmt::format_to(ctx.out(), "TracerEventType::BreakpointHitEvent");
+      return std::format_to(ctx.out(), "TracerEventType::BreakpointHitEvent");
     case SyscallEvent:
-      return fmt::format_to(ctx.out(), "TracerEventType::SyscallEvent");
+      return std::format_to(ctx.out(), "TracerEventType::SyscallEvent");
     case ThreadCreated:
-      return fmt::format_to(ctx.out(), "TracerEventType::ThreadCreated");
+      return std::format_to(ctx.out(), "TracerEventType::ThreadCreated");
     case ThreadExited:
-      return fmt::format_to(ctx.out(), "TracerEventType::ThreadExited");
+      return std::format_to(ctx.out(), "TracerEventType::ThreadExited");
     case WatchpointEvent:
-      return fmt::format_to(ctx.out(), "TracerEventType::WatchpointEvent");
+      return std::format_to(ctx.out(), "TracerEventType::WatchpointEvent");
     case ProcessExited:
-      return fmt::format_to(ctx.out(), "TracerEventType::ProcessExited");
+      return std::format_to(ctx.out(), "TracerEventType::ProcessExited");
     case ProcessTerminated:
-      return fmt::format_to(ctx.out(), "TracerEventType::ProcessTerminated");
+      return std::format_to(ctx.out(), "TracerEventType::ProcessTerminated");
     case Fork:
-      return fmt::format_to(ctx.out(), "TracerEventType::Fork");
+      return std::format_to(ctx.out(), "TracerEventType::Fork");
     case VFork:
-      return fmt::format_to(ctx.out(), "TracerEventType::VFork");
+      return std::format_to(ctx.out(), "TracerEventType::VFork");
     case VForkDone:
-      return fmt::format_to(ctx.out(), "TracerEventType::VForkDone");
+      return std::format_to(ctx.out(), "TracerEventType::VForkDone");
     case Exec:
-      return fmt::format_to(ctx.out(), "TracerEventType::Exec");
+      return std::format_to(ctx.out(), "TracerEventType::Exec");
     case Clone:
-      return fmt::format_to(ctx.out(), "TracerEventType::Clone");
+      return std::format_to(ctx.out(), "TracerEventType::Clone");
     case DeferToSupervisor:
-      return fmt::format_to(ctx.out(), "TracerEventType::DeferToProceed");
+      return std::format_to(ctx.out(), "TracerEventType::DeferToProceed");
     case Signal:
-      return fmt::format_to(ctx.out(), "TracerEventType::Signal");
+      return std::format_to(ctx.out(), "TracerEventType::Signal");
     case Stepped:
-      return fmt::format_to(ctx.out(), "TracerEventType::Stepped");
+      return std::format_to(ctx.out(), "TracerEventType::Stepped");
     case Entry:
-      return fmt::format_to(ctx.out(), "TracerEventType::Entry");
+      return std::format_to(ctx.out(), "TracerEventType::Entry");
     }
     NEVER("Unknown Core event type");
   }
 };
 
-} // namespace fmt
 namespace mdb {
 struct TaskEvent
 {
@@ -127,7 +132,7 @@ struct TaskEvent
 struct WatchpointEvent : public TaskEvent
 {
   EventType(WatchpointEvent);
-  enum class WatchpointType
+  enum class WatchpointType : u8
   {
     Read,
     Write,
@@ -206,7 +211,6 @@ struct Stepped : public TaskEvent
 {
   EventType(Stepped);
   bool mStop;
-  std::optional<mdb::LocationStatus> mLocationStatus;
   std::optional<tc::ResumeAction> mResumeWhenDone{};
   std::string_view mMessage{};
 };
@@ -246,9 +250,20 @@ class RegisterSpec;
 // cap and size, instead of three pointers head, end, current, which is std::vec implementation)
 using RegisterData = std::vector<std::pair<u32, std::vector<u8>>>;
 
-using CoreEventVariant =
-  std::variant<WatchpointEvent, SyscallEvent, ThreadCreated, ThreadExited, BreakpointHitEvent, ForkEvent, Clone,
-               Exec, ProcessExited, LibraryEvent, Signal, Stepped, DeferToSupervisor, EntryEvent>;
+using CoreEventVariant = std::variant<BreakpointHitEvent,
+  Clone,
+  DeferToSupervisor,
+  EntryEvent,
+  Exec,
+  ForkEvent,
+  LibraryEvent,
+  ProcessExited,
+  Signal,
+  Stepped,
+  SyscallEvent,
+  ThreadCreated,
+  ThreadExited,
+  WatchpointEvent>;
 
 /**
  * Core events are events generated by the the debugger core
@@ -257,15 +272,37 @@ using CoreEventVariant =
  */
 struct TraceEvent
 {
+private:
+  constexpr void SetGeneralEventData(const EventDataParam &param, RegisterData &&regs) noexcept;
+  // The register data for this task during this event (can be empty)
+
+public:
+  RegisterData mRegisterData{};
   // The process for which this core event was generated for
-  Immutable<Pid> mProcessId{0};
+  Pid mProcessId{ 0 };
   // The thread for which this core event was generated for
-  Immutable<Tid> mTaskId{0};
+  Tid mTaskId{ 0 };
+  // If task is already known to exist, set a reference to it directly.
+  TaskInfo *mTask{ nullptr };
   // The payload std::variant, which holds the data and therefore determines what kind of event this is
-  Immutable<CoreEventVariant> mEvent;
+  CoreEventVariant mEvent;
   // The signal generated (or the exit code returned) by the process that generated the
-  Immutable<TracerEventType> mEventType;
-  Immutable<int> mEventTime;
+  TracerEventType mEventType{ TracerEventType::DeferToSupervisor };
+  // For sessions where a "time" can be determined (only record & replay)
+  int mEventTime{ 0 };
+  // The current decision the task should take when having processed this tracer event.
+  std::optional<tc::RunType> mPostBreakpointOverStep{ std::nullopt };
+
+  // Safe to pass in a reference: pointers to TaskInfo are stable for their entire existence (which last the entire
+  // session. We never actually destroy TaskInfos);
+  constexpr explicit TraceEvent() noexcept = default;
+  explicit TraceEvent(TaskInfo &task) noexcept;
+  constexpr ~TraceEvent() noexcept = default;
+
+  void SetSteppedOverBreakpointNeedsResume(tc::RunType resumeType) noexcept;
+  constexpr bool HasRegisterData() noexcept;
+  const RegisterData &GetRegisterData() noexcept;
+
   union
   {
     int uSignal;
@@ -274,49 +311,56 @@ struct TraceEvent
   // Potential thread's register contents. When dealing with GDB Remote protocol, it can actually
   // pass some of the register contents along with it's "stop replies" (basically events that is equivalent to
   // result of the syscall waitpid(...)). If the target is native, this will always be empty.
-  Immutable<RegisterData> mRegisterData{};
 
-  TraceEvent(int event_time, Pid target, Tid tid, CoreEventVariant &&p, TracerEventType type, int sig_code,
-             RegisterData &&regs) noexcept;
+  static void InitLibraryEvent(TraceEvent *event, const EventDataParam &param, RegisterData &&reg) noexcept;
+  static void InitSoftwareBreakpointHit(TraceEvent *event,
+    const EventDataParam &param,
+    std::optional<std::uintptr_t> address,
+    RegisterData &&reg) noexcept;
+  static void InitHardwareBreakpointHit(TraceEvent *event,
+    const EventDataParam &param,
+    std::optional<std::uintptr_t> address,
+    RegisterData &&reg) noexcept;
+  static void InitSyscallEntry(
+    TraceEvent *event, const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
+  static void InitSyscallExit(
+    TraceEvent *event, const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
+  static void InitThreadCreated(
+    TraceEvent *event, const EventDataParam &param, tc::ResumeAction resume_action, RegisterData &&reg) noexcept;
+  static void InitThreadExited(
+    TraceEvent *event, const EventDataParam &param, bool process_needs_resuming, RegisterData &&reg) noexcept;
+  static void InitWriteWatchpoint(
+    TraceEvent *event, const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
+  static void InitReadWatchpoint(
+    TraceEvent *event, const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
+  static void InitAccessWatchpoint(
+    TraceEvent *event, const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
+  static void InitForkEvent_(
+    TraceEvent *event, const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
+  static void InitVForkEvent_(
+    TraceEvent *event, const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
+  static void InitCloneEvent(TraceEvent *event,
+    const EventDataParam &param,
+    std::optional<TaskVMInfo> vm_info,
+    Tid new_tid,
+    RegisterData &&reg) noexcept;
+  static void InitExecEvent(
+    TraceEvent *event, const EventDataParam &param, std::string_view exec_file, RegisterData &&reg) noexcept;
+  static void InitProcessExitEvent(
+    TraceEvent *event, Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept;
+  static void InitSignal(TraceEvent *event, const EventDataParam &param, RegisterData &&reg) noexcept;
+  static void InitStepped(TraceEvent *event,
+    const EventDataParam &param,
+    bool stop,
+    std::optional<tc::ResumeAction> mayresume,
+    RegisterData &&reg) noexcept;
 
-  TraceEvent(const EventDataParam &param, CoreEventVariant &&p, TracerEventType type,
-             RegisterData &&regs) noexcept;
-
-  static TraceEvent *CreateLibraryEvent(const EventDataParam &param, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateSoftwareBreakpointHit(const EventDataParam &param,
-                                                 std::optional<std::uintptr_t> address,
-                                                 RegisterData &&reg) noexcept;
-  static TraceEvent *CreateHardwareBreakpointHit(const EventDataParam &param,
-                                                 std::optional<std::uintptr_t> address,
-                                                 RegisterData &&reg) noexcept;
-  static TraceEvent *CreateSyscallEntry(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateSyscallExit(const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateThreadCreated(const EventDataParam &param, tc::ResumeAction resume_action,
-                                         RegisterData &&reg) noexcept;
-  static TraceEvent *CreateThreadExited(const EventDataParam &param, bool process_needs_resuming,
-                                        RegisterData &&reg) noexcept;
-  static TraceEvent *CreateWriteWatchpoint(const EventDataParam &param, std::uintptr_t addr,
-                                           RegisterData &&reg) noexcept;
-  static TraceEvent *CreateReadWatchpoint(const EventDataParam &param, std::uintptr_t addr,
-                                          RegisterData &&reg) noexcept;
-  static TraceEvent *CreateAccessWatchpoint(const EventDataParam &param, std::uintptr_t addr,
-                                            RegisterData &&reg) noexcept;
-  static TraceEvent *CreateForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateVForkEvent_(const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateCloneEvent(const EventDataParam &param, std::optional<TaskVMInfo> vm_info, Tid new_tid,
-                                      RegisterData &&reg) noexcept;
-  static TraceEvent *CreateExecEvent(const EventDataParam &param, std::string_view exec_file,
-                                     RegisterData &&reg) noexcept;
-  static TraceEvent *CreateProcessExitEvent(Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateSignal(const EventDataParam &param, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateStepped(const EventDataParam &param, bool stop,
-                                   std::optional<mdb::LocationStatus> bploc,
-                                   std::optional<tc::ResumeAction> mayresume, RegisterData &&reg) noexcept;
-  static TraceEvent *CreateSteppingDone(const EventDataParam &param, std::string_view msg,
-                                        RegisterData &&reg) noexcept;
-  static TraceEvent *CreateDeferToSupervisor(const EventDataParam &param, RegisterData &&reg,
-                                             bool attached) noexcept;
-  static TraceEvent *CreateEntryEvent(const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept;
+  static void InitSteppingDone(
+    TraceEvent *event, const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept;
+  static void InitDeferToSupervisor(
+    TraceEvent *event, const EventDataParam &param, RegisterData &&reg, bool attached) noexcept;
+  static void InitEntryEvent(
+    TraceEvent *event, const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept;
 };
 
 enum class InternalEventDiscriminant
@@ -365,6 +409,7 @@ struct InternalEvent
 struct ApplicationEvent
 {
   EventType mEventType;
+  Tid mPidOrTid;
   union
   {
     WaitEvent uWait;
@@ -374,15 +419,16 @@ struct ApplicationEvent
   };
 
   constexpr explicit ApplicationEvent(ui::UICommand *command) noexcept
-      : mEventType(EventType::Command), uCommand(command)
+      : mEventType(EventType::Command), uCommand(command), mPidOrTid(0)
   {
   }
   constexpr explicit ApplicationEvent(TraceEvent *debuggerEvent, bool isInit = false) noexcept
-      : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent)
+      : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent),
+        mPidOrTid(debuggerEvent->mProcessId)
   {
   }
   constexpr explicit ApplicationEvent(WaitEvent waitEvent) noexcept
-      : mEventType(EventType::WaitStatus), uWait(waitEvent)
+      : mEventType(EventType::WaitStatus), uWait(waitEvent), mPidOrTid(waitEvent.mWaitResult.tid)
   {
   }
   constexpr explicit ApplicationEvent(InternalEvent internalEvent) noexcept

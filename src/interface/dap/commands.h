@@ -12,6 +12,7 @@
 #include <interface/ui_result.h>
 #include <lib/arena_allocator.h>
 #include <symbolication/disassemble.h>
+#include <utils/fmt_join.h>
 
 // stdlib
 #include <cctype>
@@ -19,11 +20,9 @@
 #include <span>
 
 // dependency
-#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
 namespace mdb {
-namespace fmt = ::fmt;
 
 using namespace std::string_view_literals;
 enum class BreakpointType : std::uint8_t;
@@ -67,9 +66,9 @@ struct VerifyField
   static constexpr auto CurrentEnumMax = 5;
   std::string_view name;
   FieldType type;
-  std::string_view err_msg{""};
+  std::string_view err_msg{ "" };
   std::array<std::string_view, CurrentEnumMax> enum_values{};
-  u8 enum_variants{0};
+  u8 enum_variants{ 0 };
 
   constexpr std::span<const std::string_view>
   get_enum_values() const noexcept
@@ -86,8 +85,9 @@ struct VerifyField
   {
   }
 
-  consteval VerifyField(std::string_view fieldName, FieldType fieldType,
-                        std::array<std::string_view, CurrentEnumMax> enumerations) noexcept
+  consteval VerifyField(std::string_view fieldName,
+    FieldType fieldType,
+    std::array<std::string_view, CurrentEnumMax> enumerations) noexcept
       : name(fieldName), type(fieldType), enum_values(enumerations),
         enum_variants(enumerations.size() - std::count(enumerations.begin(), enumerations.end(), ""))
   {
@@ -118,11 +118,11 @@ template <size_t Size> struct VerifyMap
   {
     if (const auto it =
           std::find_if(fields.cbegin(), fields.cend(), [&](const auto &f) { return fieldName == f.name; });
-        it != std::cend(fields)) {
+      it != std::cend(fields)) {
       switch (it->type) {
       case FieldType::Address:
         if (!j.is_string()) {
-          return VerifyResult{std::make_pair(ArgumentError::RequiredStringType(), fieldName)};
+          return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
         } else {
           std::string_view s;
           j.get_to(s);
@@ -131,68 +131,68 @@ template <size_t Size> struct VerifyMap
           }
           for (auto ch : s) {
             if (!std::isxdigit(ch)) {
-              return VerifyResult{std::make_pair(ArgumentError::RequiredAddressType(), fieldName)};
+              return VerifyResult{ std::make_pair(ArgumentError::RequiredAddressType(), fieldName) };
             }
           }
-          return VerifyResult{std::nullopt};
+          return VerifyResult{ std::nullopt };
         }
       case FieldType::String:
         if (!j.is_string()) {
-          return VerifyResult{std::make_pair(ArgumentError::RequiredStringType(), fieldName)};
+          return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
         }
         break;
       case FieldType::Float:
         if (!j.is_number_float()) {
-          return VerifyResult{std::make_pair(ArgumentError::RequiredNumberType(), fieldName)};
+          return VerifyResult{ std::make_pair(ArgumentError::RequiredNumberType(), fieldName) };
         }
         break;
       case FieldType::Int:
         if (!j.is_number_integer()) {
-          return VerifyResult{std::make_pair(ArgumentError::RequiredNumberType(), fieldName)};
+          return VerifyResult{ std::make_pair(ArgumentError::RequiredNumberType(), fieldName) };
         }
         break;
       case FieldType::Boolean:
         if (!j.is_boolean()) {
-          return VerifyResult{std::make_pair(ArgumentError::RequiredBooleanType(), fieldName)};
+          return VerifyResult{ std::make_pair(ArgumentError::RequiredBooleanType(), fieldName) };
         }
         break;
       case FieldType::Enumeration: {
         if (!j.is_string()) {
-          return VerifyResult{
-            std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                                         .description = "Config enumeration values must be of string type"},
-                           fieldName)};
+          return VerifyResult{ std::make_pair(
+            ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
+              .description = "Config enumeration values must be of string type" },
+            fieldName) };
         }
         std::string_view value;
         j.get_to(value);
         if (!it->has_enum_variant(value)) {
-          return VerifyResult{
-            std::make_pair(ArgumentError{.kind = ArgumentErrorKind::InvalidInput,
-                                         .description = fmt::format("Invalid variant: '{}'. Valid: {}", value,
-                                                                    fmt::join(it->get_enum_values(), "|"))},
-                           fieldName)};
+          return VerifyResult{ std::make_pair(
+            ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
+              .description = std::format(
+                "Invalid variant: '{}'. Valid: {}", value, JoinFormatIterator{ it->get_enum_values(), "|" }) },
+            fieldName) };
         }
         break;
       }
       case FieldType::Array:
         if (!j.is_array()) {
-          return VerifyResult{std::make_pair(ArgumentError::RequiredArrayType(), fieldName)};
+          return VerifyResult{ std::make_pair(ArgumentError::RequiredArrayType(), fieldName) };
         }
         break;
       }
-      return VerifyResult{std::nullopt};
+      return VerifyResult{ std::nullopt };
     } else {
-      return VerifyResult{std::nullopt};
+      return VerifyResult{ std::nullopt };
     }
   }
 };
 
 #define DefineArgTypes(...)                                                                                       \
-  static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({__VA_ARGS__});                              \
-  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ArgsFieldsArray};                                   \
+  static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({ __VA_ARGS__ });                            \
+  static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ ArgsFieldsArray };                                 \
   template <typename Json>                                                                                        \
-  constexpr static auto ValidateArg(std::string_view arg_name,                                                    \
-                                    const Json &arg_contents) noexcept -> std::optional<InvalidArg>               \
+  constexpr static auto ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept                 \
+    -> std::optional<InvalidArg>                                                                                  \
   {                                                                                                               \
     if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {                                                  \
       return std::move(err).take();                                                                               \
@@ -204,18 +204,20 @@ struct Message
 {
   std::string format;
   std::unordered_map<std::string, std::string> variables{};
-  bool show_user{true};
+  bool show_user{ true };
   std::optional<int> id{};
 };
 
 struct ErrorResponse final : ui::UIResult
 {
-  ErrorResponse(std::string_view command, ui::UICommandPtr cmd, std::optional<std::string> &&short_message,
-                std::optional<Message> &&message) noexcept;
+  ErrorResponse(std::string_view command,
+    ui::UICommandPtr cmd,
+    std::optional<std::string> &&short_message,
+    std::optional<Message> &&message) noexcept;
   ~ErrorResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 
-  Pid mPid;
+  SessionId mPid;
   std::string_view command;
   std::optional<std::string> short_message;
   std::optional<Message> message;
@@ -238,8 +240,8 @@ struct ReverseContinue final : ui::UICommand
   UIResultPtr Execute() noexcept final;
 
   DEFINE_NAME("reverseContinue");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 struct ContinueResponse final : ui::UIResult
@@ -260,8 +262,8 @@ struct Continue final : public ui::UICommand
   UIResultPtr Execute() noexcept final;
 
   DEFINE_NAME("continue");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int }, { "sessionId", FieldType::Int });
 };
 
 struct PauseResponse final : ui::UIResult
@@ -284,8 +286,8 @@ struct Pause final : public ui::UICommand
 
   Args pauseArgs;
   DEFINE_NAME("pause");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 enum class SteppingGranularity
@@ -315,8 +317,8 @@ struct Next final : public ui::UICommand
   ~Next() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("next");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 struct StepBackResponse final : ui::UIResult
@@ -343,8 +345,8 @@ struct StepBack final : public ui::UICommand
   ~StepBack() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepBack");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 struct StepInResponse final : ui::UIResult
@@ -368,8 +370,8 @@ struct StepIn final : public ui::UICommand
   ~StepIn() noexcept final = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepIn");
-  RequiredArguments({"threadId"});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId" });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 struct StepOutResponse final : ui::UIResult
@@ -388,8 +390,8 @@ struct StepOut final : public ui::UICommand
   ~StepOut() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepOut");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 // This response looks the same for all breakpoints, InstructionBreakpoint, FunctionBreakpoint and SourceBreakpoint
@@ -411,7 +413,7 @@ struct SetBreakpoints final : public ui::UICommand
   nlohmann::json args;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setBreakpoints");
-  RequiredArguments({"source"sv});
+  RequiredArguments({ "source"sv });
 };
 
 struct SetExceptionBreakpoints final : public ui::UICommand
@@ -423,8 +425,8 @@ struct SetExceptionBreakpoints final : public ui::UICommand
   Immutable<nlohmann::json> args;
 
   DEFINE_NAME("setExceptionBreakpoints");
-  RequiredArguments({"filters"sv});
-  DefineArgTypes({"filters", FieldType::Array});
+  RequiredArguments({ "filters"sv });
+  DefineArgTypes({ "filters", FieldType::Array });
 };
 
 struct SetInstructionBreakpoints final : public ui::UICommand
@@ -434,7 +436,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   nlohmann::json args;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setInstructionBreakpoints");
-  RequiredArguments({"breakpoints"sv});
+  RequiredArguments({ "breakpoints"sv });
 };
 
 struct SetFunctionBreakpoints final : public ui::UICommand
@@ -444,7 +446,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   nlohmann::json args;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setFunctionBreakpoints");
-  RequiredArguments({"breakpoints"sv});
+  RequiredArguments({ "breakpoints"sv });
 };
 
 struct WriteMemoryResponse final : public ui::UIResult
@@ -466,8 +468,9 @@ struct WriteMemory final : public ui::UICommand
   std::vector<u8> bytes;
 
   DEFINE_NAME("writeMemory");
-  RequiredArguments({"memoryReference"sv, "data"sv});
-  DefineArgTypes({"memoryReference", FieldType::String}, {"data", FieldType::String}, {"offset", FieldType::Int});
+  RequiredArguments({ "memoryReference"sv, "data"sv });
+  DefineArgTypes(
+    { "memoryReference", FieldType::String }, { "data", FieldType::String }, { "offset", FieldType::Int });
 };
 
 struct ReadMemoryResponse final : public ui::UIResult
@@ -491,8 +494,9 @@ struct ReadMemory final : public ui::UICommand
   u64 bytes;
 
   DEFINE_NAME("readMemory");
-  RequiredArguments({"memoryReference"sv, "count"sv});
-  DefineArgTypes({"memoryReference", FieldType::Address}, {"count", FieldType::Int}, {"offset", FieldType::Int});
+  RequiredArguments({ "memoryReference"sv, "count"sv });
+  DefineArgTypes(
+    { "memoryReference", FieldType::Address }, { "count", FieldType::Int }, { "offset", FieldType::Int });
 };
 
 struct ConfigurationDoneResponse final : public ui::UIResult
@@ -505,6 +509,7 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 struct ConfigurationDone final : public ui::UICommand
 {
   ConfigurationDone(UICommandArg arg) noexcept : UICommand(arg) {}
+
   ~ConfigurationDone() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -515,7 +520,7 @@ struct ConfigurationDone final : public ui::UICommand
 struct InitializeResponse final : public ui::UIResult
 {
   CTOR(InitializeResponse);
-  InitializeResponse(std::string sessionId, bool rrsession, bool ok, UICommandPtr cmd) noexcept;
+  InitializeResponse(bool rrsession, bool ok, UICommandPtr cmd) noexcept;
   ~InitializeResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   std::string mSessionId;
@@ -529,7 +534,7 @@ struct Initialize final : public ui::UICommand
   UIResultPtr Execute() noexcept final;
   nlohmann::json args;
   DEFINE_NAME("initialize");
-  RequiredArguments({"sessionId"sv});
+  NoRequiredArgs();
 };
 
 struct DisconnectResponse final : public UIResult
@@ -549,22 +554,24 @@ struct Disconnect final : public UICommand
   NoRequiredArgs();
 };
 
-using SessionId = std::string;
-
 struct LaunchResponse final : public UIResult
 {
-  LaunchResponse(SessionId &&sessionId, std::optional<Pid> newProcess, bool success, UICommandPtr cmd) noexcept
-      : UIResult{success, cmd}, mProcessId{newProcess}, mRequestingSessionId{std::move(sessionId)} {};
+  LaunchResponse(SessionId sessionId, std::optional<SessionId> newProcess, bool success, UICommandPtr cmd) noexcept
+      : UIResult{ success, cmd }, mProcessId{ newProcess }, mRequestingSessionId{ sessionId } {};
   ~LaunchResponse() noexcept override;
-  std::optional<Pid> mProcessId;
+  std::optional<SessionId> mProcessId;
   SessionId mRequestingSessionId;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 };
 
 struct Launch final : public UICommand
 {
-  Launch(UICommandArg arg, SessionId &&id, bool stopAtEntry, Path program, std::vector<std::string> &&program_args,
-         std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  Launch(UICommandArg arg,
+    SessionId &&id,
+    bool stopAtEntry,
+    Path program,
+    std::vector<std::string> &&program_args,
+    std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   ~Launch() override = default;
   UIResultPtr Execute() noexcept final;
   bool mStopOnEntry;
@@ -573,18 +580,18 @@ struct Launch final : public UICommand
   std::optional<BreakpointBehavior> mBreakpointBehavior;
   SessionId mRequestingSessionId;
   DEFINE_NAME("launch");
-  RequiredArguments({"program"sv, "sessionId"sv});
-  DefineArgTypes({"program", FieldType::String}, {"sessionId", FieldType::String});
+  RequiredArguments({ "program"sv });
+  DefineArgTypes({ "program", FieldType::String });
 };
 
 struct AttachResponse final : public UIResult
 {
-  AttachResponse(Pid processId, bool success, UICommandPtr cmd) noexcept
+  AttachResponse(SessionId processId, bool success, UICommandPtr cmd) noexcept
       : UIResult(success, cmd), mProcessId(processId)
   {
   }
   ~AttachResponse() noexcept override = default;
-  Pid mProcessId;
+  SessionId mProcessId;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 };
 
@@ -597,15 +604,16 @@ struct Attach final : public UICommand
   SessionId mRequestingSessionId;
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
-  RequiredArguments({"type"sv, "sessionId"sv});
+  RequiredArguments({ "type"sv });
 
-  DefineArgTypes({"port", FieldType::Int}, {"host", FieldType::String}, {"pid", FieldType::Int},
-                 {
-                   "type",
-                   FieldType::Enumeration,
-                   {"ptrace"sv, "gdbremote"sv, "rr"sv, "auto"sv},
-                 },
-                 {"sessionId"sv, FieldType::String});
+  DefineArgTypes({ "port", FieldType::Int },
+    { "host", FieldType::String },
+    { "pid", FieldType::Int },
+    {
+      "type",
+      FieldType::Enumeration,
+      { "ptrace"sv, "gdbremote"sv, "rr"sv, "auto"sv },
+    });
 
   // Attach gets a `create` function because in the future, constructing this command will be much more complex
   // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
@@ -618,16 +626,17 @@ struct Attach final : public UICommand
     args.at("type").get_to(type);
     ASSERT(args.contains("sessionId"), "Attach arguments had no 'sessionId' field.");
     if (type == "ptrace") {
-      Pid pid = args.at("pid");
-      return new Attach{arg, args.at("sessionId"), PtraceAttachArgs{.pid = pid}};
+      SessionId pid = args.at("pid");
+      return new Attach{ arg, args.at("sessionId"), PtraceAttachArgs{ .pid = pid } };
     } else if (type == "auto") {
-      Pid processId;
+      SessionId processId;
       if (args.contains("processId")) {
         args.at("processId").get_to(processId);
-        return new Attach{arg, args.at("sessionId"), AutoArgs{processId}};
+        return new Attach{ arg, args.at("sessionId"), AutoArgs{ processId } };
       }
-      return new ui::dap::InvalidArgs{
-        arg, "attach", std::vector<InvalidArg>{{ArgumentError::Missing("Required for auto attach"), "processId"}}};
+      return new ui::dap::InvalidArgs{ arg,
+        "attach",
+        std::vector<InvalidArg>{ { ArgumentError::Missing("Required for auto attach"), "processId" } } };
     } else {
       int port = args.at("port");
       std::string host = args.at("host");
@@ -637,8 +646,9 @@ struct Attach final : public UICommand
       }
       RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
 
-      return new Attach{arg, args.at("sessionId"),
-                        GdbRemoteAttachArgs{.host = host, .port = port, .allstop = allstop, .type = remote_type}};
+      return new Attach{ arg,
+        args.at("sessionId"),
+        GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type } };
     };
   }
 };
@@ -678,8 +688,11 @@ struct Threads final : public UICommand
 
 struct StackTrace final : public UICommand
 {
-  StackTrace(UICommandArg arg, int threadId, std::optional<int> startFrame, std::optional<int> levels,
-             std::optional<StackTraceFormat> format) noexcept;
+  StackTrace(UICommandArg arg,
+    int threadId,
+    std::optional<int> startFrame,
+    std::optional<int> levels,
+    std::optional<StackTraceFormat> format) noexcept;
   ~StackTrace() override = default;
   UIResultPtr Execute() noexcept final;
   int mThreadId;
@@ -687,8 +700,8 @@ struct StackTrace final : public UICommand
   std::optional<int> mLevels;
   std::optional<StackTraceFormat> mFormat;
   DEFINE_NAME("stackTrace");
-  RequiredArguments({"threadId"sv});
-  DefineArgTypes({"threadId", FieldType::Int});
+  RequiredArguments({ "threadId"sv });
+  DefineArgTypes({ "threadId", FieldType::Int });
 };
 
 struct StackTraceResponse final : public UIResult
@@ -707,8 +720,8 @@ struct Scopes final : public UICommand
   UIResultPtr Execute() noexcept final;
   int mFrameId;
   DEFINE_NAME("scopes");
-  RequiredArguments({"frameId"sv});
-  DefineArgTypes({"frameId", FieldType::Int});
+  RequiredArguments({ "frameId"sv });
+  DefineArgTypes({ "frameId", FieldType::Int });
 };
 
 struct ScopesResponse final : public UIResult
@@ -731,8 +744,10 @@ enum class EvaluationContext
 
 struct Evaluate final : public UICommand
 {
-  Evaluate(UICommandArg arg, std::string expression, std::optional<int> frameId,
-           std::optional<EvaluationContext> context) noexcept;
+  Evaluate(UICommandArg arg,
+    std::string expression,
+    std::optional<int> frameId,
+    std::optional<EvaluationContext> context) noexcept;
   ~Evaluate() noexcept final = default;
   UIResultPtr Execute() noexcept final;
 
@@ -741,8 +756,9 @@ struct Evaluate final : public UICommand
   Immutable<EvaluationContext> context;
 
   DEFINE_NAME("evaluate");
-  RequiredArguments({"expression"sv, "context"sv});
-  DefineArgTypes({"expression", FieldType::String}, {"frameId", FieldType::Int}, {"context", FieldType::String});
+  RequiredArguments({ "expression"sv, "context"sv });
+  DefineArgTypes(
+    { "expression", FieldType::String }, { "frameId", FieldType::Int }, { "context", FieldType::String });
 
   static EvaluationContext ParseContext(std::string_view input) noexcept;
   static UICommand *PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args);
@@ -750,8 +766,12 @@ struct Evaluate final : public UICommand
 
 struct EvaluateResponse final : public UIResult
 {
-  EvaluateResponse(bool success, Evaluate *cmd, std::optional<int> variablesReference, std::pmr::string *result,
-                   std::optional<std::string> &&type, std::optional<std::string> &&memoryReference) noexcept;
+  EvaluateResponse(bool success,
+    Evaluate *cmd,
+    std::optional<int> variablesReference,
+    std::pmr::string *result,
+    std::optional<std::string> &&type,
+    std::optional<std::string> &&memoryReference) noexcept;
   ~EvaluateResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
 
@@ -763,8 +783,8 @@ struct EvaluateResponse final : public UIResult
 
 struct Variables final : public UICommand
 {
-  Variables(UICommandArg arg, VariableReferenceId varRef, std::optional<u32> start,
-            std::optional<u32> count) noexcept;
+  Variables(
+    UICommandArg arg, VariableReferenceId varRef, std::optional<u32> start, std::optional<u32> count) noexcept;
   ~Variables() override = default;
   UIResultPtr Execute() noexcept final;
   ErrorResponse *error(std::string &&msg) noexcept;
@@ -772,8 +792,9 @@ struct Variables final : public UICommand
   std::optional<u32> mStart;
   std::optional<u32> mCount;
   DEFINE_NAME("variables");
-  RequiredArguments({"variablesReference"sv});
-  DefineArgTypes({"variablesReference", FieldType::Int}, {"start", FieldType::Int}, {"count", FieldType::Int});
+  RequiredArguments({ "variablesReference"sv });
+  DefineArgTypes(
+    { "variablesReference", FieldType::Int }, { "start", FieldType::Int }, { "count", FieldType::Int });
 };
 
 struct VariablesResponse final : public UIResult
@@ -795,8 +816,12 @@ struct DisassembleResponse final : public UIResult
 
 struct Disassemble final : public UICommand
 {
-  Disassemble(UICommandArg arg, std::optional<AddrPtr> address, int byteOffset, int instructionOffset,
-              int instructionCount, bool resolveSymbols) noexcept;
+  Disassemble(UICommandArg arg,
+    std::optional<AddrPtr> address,
+    int byteOffset,
+    int instructionOffset,
+    int instructionCount,
+    bool resolveSymbols) noexcept;
   ~Disassemble() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -806,9 +831,11 @@ struct Disassemble final : public UICommand
   int ins_count;
   bool mResolveSymbols;
   DEFINE_NAME("disassemble");
-  RequiredArguments({"memoryReference", "instructionCount"});
-  DefineArgTypes({"memoryReference", FieldType::String}, {"instructionCount", FieldType::Int},
-                 {"instructionOffset", FieldType::Int}, {"offset", FieldType::Int});
+  RequiredArguments({ "memoryReference", "instructionCount" });
+  DefineArgTypes({ "memoryReference", FieldType::String },
+    { "instructionCount", FieldType::Int },
+    { "instructionOffset", FieldType::Int },
+    { "offset", FieldType::Int });
 };
 
 template <typename T>

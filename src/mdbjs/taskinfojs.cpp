@@ -1,80 +1,74 @@
 /** LICENSE TEMPLATE */
 #include "taskinfojs.h"
-#include "framejs.h"
-#include "js/BigInt.h"
+
+#include <mdbjs/framejs.h>
+#include <mdbjs/jsobject.h>
+#include <quickjs/quickjs.h>
 #include <supervisor.h>
 
 namespace mdb::js {
 
-/* static */
-bool
-TaskInfo::js_pc(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto task = Get(callee.get());
+static constexpr auto TaskInfoOpaqueDataErrorMessage = "Could not retrieve task info";
 
-  JS::BigInt *bigInt = JS::NumberToBigInt(cx, task->GetRegisterCache().GetPc().GetRaw());
-  if (!bigInt) {
-    JS_ReportErrorASCII(cx, "Failed to create BigInt");
-    return false;
+/*static*/ JSValue
+JsTaskInfo::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
+
+  auto id = JS_NewInt32(context, taskInfo->mTid);
+  return id;
+}
+
+/*static*/ JSValue
+JsTaskInfo::Pc(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
+
+  return JS_NewBigUint64(context, taskInfo->GetRegisterCache().GetPc().GetRaw());
+}
+/*static*/ JSValue
+JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
+
+  auto supervisor = taskInfo->GetSupervisor();
+
+  if (!supervisor) {
+    return JS_ThrowTypeError(context, "Could not retrieve supervisor for task");
   }
 
-  args.rval().setBigInt(bigInt);
-  return true;
+  i64 frameLevel = 0;
+
+  if (argCount != 0) {
+    if (!JS_ToInt64(context, &frameLevel, argv[0])) {
+      return JS_ThrowTypeError(context, "Argument to .frame() must be an integer (or no argument, for level 0)");
+    }
+    if (frameLevel < 0) {
+      return JS_ThrowTypeError(context, "Valid frame values are 0 .. N");
+    }
+  }
+
+  auto &callStack = supervisor->BuildCallFrameStack(*taskInfo, CallStackRequest::full());
+  auto frame = callStack.GetFrameAtLevel(static_cast<u32>(frameLevel));
+  const auto result = Frame::CreateValue(context, RefPtr{ new FrameLookupHandle{ RefPtr{ taskInfo }, *frame } });
+  return result;
 }
 
-bool
-TaskInfo::js_frame(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+/*static*/ JSValue
+JsTaskInfo::ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto task = Get(callee.get());
-  auto &callStack = task->GetSupervisor()->BuildCallFrameStack(*task, CallStackRequest::full());
-  auto frame = callStack.GetFrameAtLevel(0);
+  auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
-  JS::Rooted<JSObject *> frameJs{
-    cx, mdb::js::Frame::Create(cx, Ref<FrameLookupHandle>{new FrameLookupHandle{task, *frame}})};
-  args.rval().setObject(*frameJs);
-
-  return true;
-}
-
-/* static */
-bool
-TaskInfo::js_to_string(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
   char buf[512];
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto task = Get(callee.get());
-  auto it = ToString(buf, *task);
-  *it = 0;
-  auto length = std::distance(buf, it + 1);
-  // Define your custom string representation
-  JSString *str = JS_NewStringCopyN(cx, buf, length);
-  if (!str) {
-    return false;
-  }
-
-  args.rval().setString(str);
-  return true;
-}
-
-/* static */
-bool
-TaskInfo::js_id(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JS::RootedObject callee(cx, &args.thisv().toObject());
-  auto bp = Get(callee.get());
-  if (bp) {
-    args.rval().setInt32(bp->mTid);
-    return true;
-  } else {
-    JS_ReportErrorASCII(cx, "Breakpoint was undefined");
-    return false;
-  }
+  auto ptr = std::format_to(buf,
+    "thread {}.{}, dbg id={}: stopped={}",
+    taskInfo->GetTaskLeaderTid().value_or(-1),
+    taskInfo->mTid,
+    taskInfo->mSessionId,
+    taskInfo->IsStopped());
+  auto len = std::distance(buf, ptr);
+  auto strValue = JS_NewStringLen(context, buf, len);
+  return strValue;
 }
 
 } // namespace mdb::js

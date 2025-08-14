@@ -9,26 +9,28 @@ namespace mdb::ui {
 struct UIResult
 {
   // Events contruct UIResult like so:
-  constexpr UIResult(Pid processId) noexcept : mPid(processId), success(true), requestSeq(0) {}
+  constexpr UIResult(SessionId sessionId) noexcept : mSessionId(sessionId), mSuccess(true), mRequestSeq(0) {}
 
   // Responses from commands construct UIResult:
   constexpr UIResult(bool success, UICommandPtr cmd) noexcept
-      : mPid(cmd->mPid), success(success), requestSeq(cmd->seq), client(cmd->mDAPClient)
+      : mSessionId(cmd->mSessionId), mSuccess(success), mRequestSeq(cmd->mSeq), mClient(cmd->mDAPClient)
   {
   }
+
   virtual ~UIResult() = default;
-  virtual std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource *allocator) const noexcept = 0;
 
-  Pid
-  ProcessId() const noexcept
+  virtual std::pmr::string Serialize(int monotonicId, std::pmr::memory_resource *allocator) const noexcept = 0;
+
+  SessionId
+  GetSessionId() const noexcept
   {
-    return mPid;
+    return mSessionId;
   }
 
-  Pid mPid;
-  bool success;
-  std::uint64_t requestSeq;
-  ui::dap::DebugAdapterClient *client;
+  SessionId mSessionId;
+  bool mSuccess;
+  std::uint64_t mRequestSeq;
+  ui::dap::DebugAdapterClient *mClient;
 };
 
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here

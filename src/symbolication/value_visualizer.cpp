@@ -13,11 +13,12 @@
 #include <supervisor.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
+#include <utility>
 
 namespace mdb::sym {
 
 #define FormatAndReturn(result, formatString, ...)                                                                \
-  fmt::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
+  std::format_to(std::back_inserter(result), formatString __VA_OPT__(, ) __VA_ARGS__);                            \
   return result
 
 std::vector<Ref<Value>>
@@ -25,7 +26,7 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
 {
   std::vector<Ref<Value>> results;
   auto value = *context.GetValue();
-  if (const auto address = value.ToRemotePointer(); address.is_expected()) {
+  if (const auto address = value.ToRemotePointer(); address.has_value()) {
     auto adjusted_address = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
     const auto requested_length = valueRange.count.value_or(32);
     auto memory =
@@ -46,14 +47,17 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
                                                     : Tracer::Get().CloneFromVariableContext(context);
 
     if (layout_type->IsArrayType()) {
-      results.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
-                                               Tracer::GetSerializer<sym::ArrayVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(
+        clonedContext, *layout_type, 0u, mIndirectValueObject, Tracer::GetSerializer<sym::ArrayVisualizer>()));
     } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
-      results.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
-                                               Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(
+        clonedContext, *layout_type, 0u, mIndirectValueObject, Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
     } else {
-      results.push_back(Ref<Value>::MakeShared(clonedContext, *layout_type, 0u, mIndirectValueObject,
-                                               Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(clonedContext,
+        *layout_type,
+        0u,
+        mIndirectValueObject,
+        Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
     }
     ObjectFile::InitializeDataVisualizer(*results.back());
     if (clonedContext->mId > 0) {
@@ -68,15 +72,15 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
 {
   std::vector<Ref<Value>> results;
   auto &value = *context.GetValue();
-  if (const auto address = value.ToRemotePointer(); address.is_expected()) {
+  if (const auto address = value.ToRemotePointer(); address.has_value()) {
     auto adjustedAddress = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
     const auto requestedLength = valueRange.count.value_or(256);
     auto referencedMemory =
       sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjustedAddress, requestedLength);
     if (!referencedMemory.is_ok()) {
       auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
-      results.push_back(Ref<Value>::MakeShared(nullptr, *layoutType, 0u, nullptr,
-                                               Tracer::GetSerializer<InvalidValueVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(
+        nullptr, *layoutType, 0u, nullptr, Tracer::GetSerializer<InvalidValueVisualizer>()));
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
@@ -84,9 +88,11 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
 
     // actual `char` type
     auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
-    auto stringValue =
-      Ref<sym::Value>::MakeShared(VariableContext::CloneFrom(0, context), *layoutType, 0u, indirectValueObject,
-                                  Tracer::GetSerializer<CStringVisualizer>());
+    auto stringValue = Ref<sym::Value>::MakeShared(VariableContext::CloneFrom(0, context),
+      *layoutType,
+      0u,
+      indirectValueObject,
+      Tracer::GetSerializer<CStringVisualizer>());
 
     results.push_back(std::move(stringValue));
   }
@@ -183,20 +189,20 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
   if (enums.mIsSigned) {
     for (auto i = 0u; i < fields.size(); ++i) {
       if (enums.mEnumeratorValues[i].i == value.i) {
-        std::pmr::string result{allocator};
+        std::pmr::string result{ allocator };
         FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
-    std::pmr::string result{allocator};
+    std::pmr::string result{ allocator };
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
   } else {
     for (auto i = 0u; i < fields.size(); ++i) {
       if (enums.mEnumeratorValues[i].u == value.u) {
-        std::pmr::string result{allocator};
+        std::pmr::string result{ allocator };
         FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
-    std::pmr::string result{allocator};
+    std::pmr::string result{ allocator };
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
   }
 }
@@ -212,7 +218,7 @@ PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *
   auto type = value.GetType();
   const auto size_of = type->size_of;
 
-  std::pmr::string result{allocator};
+  std::pmr::string result{ allocator };
 
   if (type->IsReference()) {
     const std::uintptr_t ptr = BitCopy<std::uintptr_t>(span);
@@ -222,8 +228,8 @@ PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *
   auto target_type = type->GetTargetType();
   if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
     if (!target_type->IsResolved()) {
-      dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
-                                       *target_type.ptr};
+      dw::TypeSymbolicationContext ctx{ *target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+        *target_type.ptr };
       ctx.ResolveType();
     }
 
@@ -318,8 +324,8 @@ PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *
 }
 
 std::optional<std::pmr::string>
-PrimitiveVisualizer::Serialize(const Value &value, std::string_view name, int variablesReference,
-                               std::pmr::memory_resource *allocator) noexcept
+PrimitiveVisualizer::Serialize(
+  const Value &value, std::string_view name, int variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto byte_span = value.MemoryView();
@@ -328,68 +334,80 @@ PrimitiveVisualizer::Serialize(const Value &value, std::string_view name, int va
   }
 
   auto value_field =
-    FormatValue(value, allocator).value_or(std::pmr::string{"could not serialize value", allocator});
-  std::pmr::string result{allocator};
+    FormatValue(value, allocator).value_or(std::pmr::string{ "could not serialize value", allocator });
+  std::pmr::string result{ allocator };
 
-  FormatAndReturn(
-    result,
-    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
-    value_field, *(value.GetType()), variablesReference, value.Address());
+  FormatAndReturn(result,
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
+    name,
+    value_field,
+    *(value.GetType()),
+    variablesReference,
+    value.Address());
 }
 
 std::optional<std::pmr::string>
-DefaultStructVisualizer::Serialize(const Value &value, std::string_view name, int variablesReference,
-                                   std::pmr::memory_resource *allocator) noexcept
+DefaultStructVisualizer::Serialize(
+  const Value &value, std::string_view name, int variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
 
   ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto &t = *value.GetType();
-  std::pmr::string result{allocator};
-  FormatAndReturn(
-    result,
-    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})", name,
-    t, t, variablesReference, value.Address());
-}
-
-std::optional<std::pmr::string>
-InvalidValueVisualizer::Serialize(const Value &value, std::string_view, int,
-                                  std::pmr::memory_resource *allocator) noexcept
-{
-  std::pmr::string result{allocator};
+  std::pmr::string result{ allocator };
   FormatAndReturn(result,
-                  R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})",
-                  value.mName, value.mName, *value.GetType());
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
+    name,
+    t,
+    t,
+    variablesReference,
+    value.Address());
 }
 
 std::optional<std::pmr::string>
-ArrayVisualizer::Serialize(const Value &value, std::string_view, int variablesReference,
-                           std::pmr::memory_resource *allocator) noexcept
+InvalidValueVisualizer::Serialize(
+  const Value &value, std::string_view, int, std::pmr::memory_resource *allocator) noexcept
+{
+  std::pmr::string result{ allocator };
+  FormatAndReturn(result,
+    R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})",
+    value.mName,
+    value.mName,
+    *value.GetType());
+}
+
+std::optional<std::pmr::string>
+ArrayVisualizer::Serialize(
+  const Value &value, std::string_view, int variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   auto &t = *value.GetType();
   const auto no_alias = t.ResolveAlias();
-  std::pmr::string result{allocator};
-  FormatAndReturn(
-    result,
+  std::pmr::string result{ allocator };
+  FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-    value.mName, t, t, variablesReference, value.Address(), no_alias->ArraySize());
+    value.mName,
+    t,
+    t,
+    variablesReference,
+    value.Address(),
+    no_alias->ArraySize());
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::FormatValue(const Value &ptr, std::optional<u32> null_terminator,
-                               std::pmr::memory_resource *allocator) noexcept
+CStringVisualizer::FormatValue(
+  const Value &ptr, std::optional<u32> null_terminator, std::pmr::memory_resource *allocator) noexcept
 {
   const auto byte_span = ptr.FullMemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
-  std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
-  std::pmr::string result{allocator};
+  std::string_view cast{ (const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes()) };
+  std::pmr::string result{ allocator };
   FormatAndReturn(result, "{}", cast);
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::Serialize(const Value &value, std::string_view name, int,
-                             std::pmr::memory_resource *allocator) noexcept
+CStringVisualizer::Serialize(
+  const Value &value, std::string_view name, int, std::pmr::memory_resource *allocator) noexcept
 {
   const auto byte_span = value.FullMemoryView();
   if (byte_span.empty()) {
@@ -403,12 +421,14 @@ CStringVisualizer::Serialize(const Value &value, std::string_view name, int,
     }
   }
 
-  std::string_view cast{(const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes())};
-  std::pmr::string result{allocator};
-  FormatAndReturn(
-    result,
+  std::string_view cast{ (const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes()) };
+  std::pmr::string result{ allocator };
+  FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-    name, DAPStringView{cast}, 0, value.Address());
+    name,
+    DAPStringView{ cast },
+    0,
+    value.Address());
 }
 
 #undef FormatAndReturn
@@ -416,7 +436,7 @@ CStringVisualizer::Serialize(const Value &value, std::string_view name, int,
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 
 #define FormatAndReturn(result, formatString, ...)                                                                \
-  return fmt::format_to(result, formatString __VA_OPT__(, ) __VA_ARGS__);
+  return std::format_to(result, formatString __VA_OPT__(, ) __VA_ARGS__);
 
 template <typename Iterator>
 static Iterator
@@ -480,7 +500,7 @@ FormatValue(Value &value, Iterator iter) noexcept
 {
   const auto span = value.MemoryView();
   if (span.empty()) {
-    return fmt::format_to(iter, "<err:value had no memory contents>");
+    return std::format_to(iter, "<err:value had no memory contents>");
   }
   auto type = value.GetType();
   const auto size_of = type->size_of;
@@ -493,8 +513,8 @@ FormatValue(Value &value, Iterator iter) noexcept
   auto target_type = type->GetTargetType();
   if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
     if (!target_type->IsResolved()) {
-      dw::TypeSymbolicationContext ctx{*target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
-                                       *target_type.ptr};
+      dw::TypeSymbolicationContext ctx{ *target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
+        *target_type.ptr };
       ctx.ResolveType();
     }
 
@@ -596,75 +616,78 @@ IndentString() noexcept
   for (auto &c : buf.value) {
     c = ' ';
   }
-  return StringLiteral<N>{buf};
+  return StringLiteral<N>{ buf };
 }
 
 static constexpr std::array<char, 257> IndentStringArray{
   "                                                                                                               "
   "                                                                                                               "
-  "                                  "};
+  "                                  "
+};
 
 static constexpr std::string_view
 GetIndent(uint64_t level) noexcept
 {
-  return std::string_view{IndentStringArray.data(), level * 2};
+  return std::string_view{ IndentStringArray.data(), level * 2 };
 }
 
 /* static */
 template <typename FmtIterator>
 FmtIterator
-JavascriptValueSerializer::Serialize(Value *value, FmtIterator fmtIterator, const SerializeOptions &options,
-                                     int currentDepth) noexcept
+JavascriptValueSerializer::Serialize(
+  Value *value, FmtIterator fmtIterator, const SerializeOptions &options, int currentDepth) noexcept
 {
   static constexpr auto finalizeField = [](auto it, const auto &opts) noexcept {
     if (opts.mNewLineAfterMember) {
-      return fmt::format_to(it, ",\n");
+      return std::format_to(it, ",\n");
     } else {
-      return fmt::format_to(it, ", ");
+      return std::format_to(it, ", ");
     }
   };
   auto valueType = value->GetType();
   if (!valueType->IsResolved()) {
     sym::dw::TypeSymbolicationContext symbolicationContext{
-      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType};
+      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType
+    };
     symbolicationContext.ResolveType();
   }
 
   auto indentLevel = options.mDepth - currentDepth;
   auto indent = GetIndent(options.mNewLineAfterMember ? indentLevel : 0);
   if (value->GetType()->IsPrimitive()) {
-    auto it = fmt::format_to(fmtIterator, "{}{} : ", indent, value->mName);
+    auto it = std::format_to(fmtIterator, "{}{} : ", indent, value->mName);
     it = FormatValue(*value, it);
     return finalizeField(it, options);
   } else if (currentDepth == 0) {
     auto it =
-      fmt::format_to(fmtIterator, "{}{} : struct {}{{ .. }}", indent, value->mName, value->GetType()->mName);
+      std::format_to(fmtIterator, "{}{} : struct {}{{ .. }}", indent, value->mName, value->GetType()->mName);
     return finalizeField(it, options);
   }
   // This is a struct/class
-  auto it = fmt::format_to(fmtIterator, "{}{} : {}{{", indent, value->mName, valueType->mName);
+  auto it = std::format_to(fmtIterator, "{}{} : {}{{", indent, value->mName, valueType->mName);
   if (options.mNewLineAfterMember) {
-    it = fmt::format_to(it, "\n");
+    it = std::format_to(it, "\n");
   }
   for (const auto &m : value->GetType()->MemberFields()) {
     auto v = value->GetMember(m.mName);
     it = Serialize(v, it, options, currentDepth - 1);
   }
-  fmt::format_to(it, "{}}}", indent);
+  std::format_to(it, "{}}}", indent);
   return finalizeField(it, options);
 }
 
 /* static */
 template <typename StringType>
 bool
-JavascriptValueSerializer::Serialize(Value *value, StringType &outputBuffer,
-                                     const SerializeOptions &options) noexcept
+JavascriptValueSerializer::Serialize(
+  Value *value, StringType &outputBuffer, const SerializeOptions &options) noexcept
 {
   auto it = std::back_inserter(outputBuffer);
   auto valueType = value->GetType();
   if (!valueType->IsResolved()) {
     sym::dw::TypeSymbolicationContext symbolicationContext{
-      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType};
+      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType
+    };
     symbolicationContext.ResolveType();
   }
 
@@ -674,24 +697,24 @@ JavascriptValueSerializer::Serialize(Value *value, StringType &outputBuffer,
   }
 
   if (options.mNewLineAfterMember) {
-    it = fmt::format_to(it, "{{\n");
+    it = std::format_to(it, "{{\n");
   } else {
-    it = fmt::format_to(it, "{{ ");
+    it = std::format_to(it, "{{ ");
   }
 
   for (const auto &m : value->GetType()->MemberFields()) {
     auto v = value->GetMember(m.mName);
     it = Serialize(v, it, options, options.mDepth - 1);
   }
-  fmt::format_to(std::back_inserter(outputBuffer), "}}");
+  std::format_to(std::back_inserter(outputBuffer), "}}");
 
   return true;
 }
 
-template bool JavascriptValueSerializer::Serialize(Value *value, std::string &fmtIterator,
-                                                   const SerializeOptions &options) noexcept;
+template bool JavascriptValueSerializer::Serialize(
+  Value *value, std::string &fmtIterator, const SerializeOptions &options) noexcept;
 
-template bool JavascriptValueSerializer::Serialize(Value *value, std::pmr::string &fmtIterator,
-                                                   const SerializeOptions &options) noexcept;
+template bool JavascriptValueSerializer::Serialize(
+  Value *value, std::pmr::string &fmtIterator, const SerializeOptions &options) noexcept;
 
 } // namespace mdb::sym

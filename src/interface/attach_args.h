@@ -24,7 +24,7 @@ struct GdbRemoteAttachArgs
 {
   std::string host;
   int port;
-  std::optional<Pid> pid{std::nullopt};
+  std::optional<Pid> pid{ std::nullopt };
   bool allstop;
   RemoteType type;
 };

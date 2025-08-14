@@ -46,16 +46,18 @@ DwarfStack::Swap() noexcept
   mStack[mStackSize - 2] = tmp;
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
-                                                 std::span<const u8> byteStream) noexcept
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(
+  int frameLevel, TraceeController &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept
     : mFrameLevel(frameLevel), mStack(), mTraceeController(tc), mTask(t), mByteStream(byteStream),
       mReader(nullptr, byteStream.data(), byteStream.size())
 {
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
-                                                 std::span<const u8> byteStream,
-                                                 std::span<const u8> frameBaseCode) noexcept
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel,
+  TraceeController &tc,
+  TaskInfo &t,
+  std::span<const u8> byteStream,
+  std::span<const u8> frameBaseCode) noexcept
     : mFrameLevel(frameLevel), mStack(), mTraceeController(tc), mTask(t), mByteStream(byteStream),
       mFrameBaseProgram(frameBaseCode), mReader(this->mByteStream)
 {
@@ -64,7 +66,7 @@ ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel, TraceeControlle
 void
 ub(ExprByteCodeInterpreter &i) noexcept
 {
-  PANIC(fmt::format("UNDEFINED OPCODE 0x{:x}", std::to_underlying(i.mLatestDecoded)));
+  PANIC(std::format("UNDEFINED OPCODE 0x{:x}", std::to_underlying(i.mLatestDecoded)));
 }
 
 void
@@ -83,9 +85,9 @@ void
 op_reg(ExprByteCodeInterpreter &i) noexcept
 {
   const auto bytecode = std::to_underlying(i.mLatestDecoded);
-  ASSERT(bytecode >= std::to_underlying(DwarfOp::DW_OP_reg0) &&
-           bytecode <= std::to_underlying(DwarfOp::DW_OP_reg31),
-         "Byte code for DW_OP_reg<n> out of range");
+  ASSERT(
+    bytecode >= std::to_underlying(DwarfOp::DW_OP_reg0) && bytecode <= std::to_underlying(DwarfOp::DW_OP_reg31),
+    "Byte code for DW_OP_reg<n> out of range");
   const auto reg_no = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_reg0);
   const auto reg_contents = i.GetRegister(reg_no);
   MUST_HOLD(reg_contents.has_value(), "Could not get register value");
@@ -106,7 +108,7 @@ void
 op_deref(ExprByteCodeInterpreter &i) noexcept
 {
   const auto v = i.mStack.Pop();
-  const TPtr<std::uintptr_t> addr{v};
+  const TPtr<std::uintptr_t> addr{ v };
   const auto deref = i.mTraceeController.ReadType(addr);
   i.mStack.Push(deref);
 }
@@ -119,22 +121,22 @@ op_deref_size(ExprByteCodeInterpreter &i) noexcept
   const auto bytes = i.mReader.ReadValue<u8>();
   switch (bytes) {
   case 1: {
-    const TPtr<u8> addr{v};
+    const TPtr<u8> addr{ v };
     const auto deref = i.mTraceeController.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   case 2: {
-    const TPtr<u16> addr{v};
+    const TPtr<u16> addr{ v };
     const auto deref = i.mTraceeController.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   case 4: {
-    const TPtr<u32> addr{v};
+    const TPtr<u32> addr{ v };
     const auto deref = i.mTraceeController.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   case 8: {
-    const TPtr<u64> addr{v};
+    const TPtr<u64> addr{ v };
     const auto deref = i.mTraceeController.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
@@ -466,7 +468,7 @@ op_bregx(ExprByteCodeInterpreter &i) noexcept
 void
 op_piece(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_piece {}", i.mStack.mStackSize));
+  TODO(std::format("op_piece {}", i.mStack.mStackSize));
 }
 
 void
@@ -477,24 +479,23 @@ op_nop(ExprByteCodeInterpreter &) noexcept
 void
 op_call2(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_call2 {}", i.mStack.mStackSize));
+  TODO(std::format("op_call2 {}", i.mStack.mStackSize));
 }
 void
 op_call4(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_call4 {}", i.mStack.mStackSize));
+  TODO(std::format("op_call4 {}", i.mStack.mStackSize));
 }
 void
 op_call_ref(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(fmt::format("op_call_ref {}", i.mStack.mStackSize));
+  TODO(std::format("op_call_ref {}", i.mStack.mStackSize));
 }
 
 void
 op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 {
-  ASSERT(
-    i.mFrameLevel != -1,
+  ASSERT(i.mFrameLevel != -1,
     "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
   auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel);
   ASSERT(unwindState, "The interpreter can not know the CFA value.");

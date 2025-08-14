@@ -5,11 +5,10 @@
 #include "utils/immutable.h"
 #include "utils/smartptr.h"
 #include <common.h>
-#include <fmt/core.h>
+#include <expected>
 #include <memory_resource>
 #include <span>
 #include <utils/byte_buffer.h>
-#include <utils/expected.h>
 
 namespace mdb {
 using Bytes = std::span<const u8>;
@@ -48,30 +47,44 @@ using VarContext = std::shared_ptr<VariableContext>;
 class Value
 {
   REF_COUNTED_WITH_WEAKREF_SUPPORT(Value);
-  friend struct fmt::formatter<sym::Value>;
+  friend struct std::formatter<sym::Value>;
   friend class IValueResolve;
   friend class ResolveReference;
   // contructor for `Values` that represent a block symbol (so a frame argument, stack variable, static / global
   // variable)
 
-  Value(VarContext context, std::string_view name, Symbol &kind, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> &&valueObject,
-        DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VarContext context,
+    std::string_view name,
+    Symbol &kind,
+    u32 memContentsOffset,
+    std::shared_ptr<MemoryContentsObject> &&valueObject,
+    DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   // constructor for `Value`s that represent a member variable (possibly of some other `Value`)
-  Value(VarContext context, std::string_view memberName, Field &kind, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VarContext context,
+    std::string_view memberName,
+    Field &kind,
+    u32 memContentsOffset,
+    std::shared_ptr<MemoryContentsObject> valueObject,
+    DebugAdapterSerializer *serializer = nullptr) noexcept;
 
-  Value(VarContext context, Type &type, u32 memContentsOffset, std::shared_ptr<MemoryContentsObject> valueObject,
-        DebugAdapterSerializer *serializer = nullptr) noexcept;
-  Value(VarContext context, std::string &&name, Type &type, u32 memContentsOffset,
-        std::shared_ptr<MemoryContentsObject> valueObject, DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VarContext context,
+    Type &type,
+    u32 memContentsOffset,
+    std::shared_ptr<MemoryContentsObject> valueObject,
+    DebugAdapterSerializer *serializer = nullptr) noexcept;
+  Value(VarContext context,
+    std::string &&name,
+    Type &type,
+    u32 memContentsOffset,
+    std::shared_ptr<MemoryContentsObject> valueObject,
+    DebugAdapterSerializer *serializer = nullptr) noexcept;
 
   template <typename... Args>
   static Value *
   CreateForRef(Args &&...args) noexcept
   {
-    return new Value{std::forward<Args>(args)...};
+    return new Value{ std::forward<Args>(args)... };
   }
 
   // Union constructors
@@ -93,7 +106,7 @@ public:
   std::span<const u8> MemoryView() const noexcept;
   std::span<const u8> FullMemoryView() const noexcept;
   SharedPtr<MemoryContentsObject> TakeMemoryReference() noexcept;
-  mdb::Expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
+  std::expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
   bool HasVisualizer() const noexcept;
   DebugAdapterSerializer *GetVisualizer() noexcept;
   bool IsValidValue() const noexcept;
@@ -103,6 +116,7 @@ public:
   bool IsLive() const noexcept;
   void RegisterContext() noexcept;
 
+  bool OverwriteDataThroughReference(u32 offset, const std::span<const std::byte> newBytes) noexcept;
   bool OverwriteValueBytes(u32 offset, const std::span<const std::byte> newBytes) noexcept;
 
   template <typename Primitive> bool WritePrimitive(Primitive value) noexcept;
@@ -135,7 +149,7 @@ private:
   //  and instead have both the raw data read from the tracee as well as the UI results, managed by a local arena
   //  allocator. PMR galore!
   std::shared_ptr<MemoryContentsObject> mValueObject;
-  DebugAdapterSerializer *mVisualizer{nullptr};
+  DebugAdapterSerializer *mVisualizer{ nullptr };
   VarContext mContext;
 };
 
@@ -185,12 +199,12 @@ public:
   // shit in computer time - reading the entire chunk is faster than managing sub parts here and there. Just pull
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
-  static Ref<Value> CreateFrameVariable(TraceeController &tc, const sym::Frame &frame, Symbol &symbol,
-                                        bool lazy) noexcept;
+  static Ref<Value> CreateFrameVariable(
+    TraceeController &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept;
 
   static ReadResult ReadMemory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
-  static ReadResult ReadMemory(std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address,
-                               u32 size_of) noexcept;
+  static ReadResult ReadMemory(
+    std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
 };
 
 class EagerMemoryContentsObject final : public MemoryContentsObject
@@ -208,7 +222,7 @@ public:
 class LazyMemoryContentsObject final : public MemoryContentsObject
 {
   TraceeController &mSupervisor;
-  MemoryContentBytes mContents{nullptr};
+  MemoryContentBytes mContents{ nullptr };
   void CacheMemory() noexcept;
 
 public:

@@ -1,94 +1,64 @@
 /** LICENSE TEMPLATE */
 #include "mdbjs.h"
-#include "common.h"
-#include "js/CallAndConstruct.h"
-#include "js/CompilationAndEvaluation.h"
-#include "js/CompileOptions.h"
-#include "js/Conversions.h"
-#include "js/EnvironmentChain.h"
-#include "js/ErrorReport.h"
-#include "js/Exception.h"
-#include "js/Initialization.h"
-#include "js/Object.h"
-#include "js/PropertyAndElement.h"
-#include "js/RootingAPI.h"
-#include "js/TracingAPI.h"
-#include "js/TypeDecls.h"
-#include "js/Warnings.h"
-#include "mdbjs/event_dispatcher.h"
-#include "mdbjs/supervisorjs.h"
-#include "mdbjs/taskinfojs.h"
-#include "mdbjs/util.h"
-#include "supervisor.h"
-#include <jsapi.h>
-#include <jsfriendapi.h>
+#include "lib/arena_allocator.h"
+
+// mdb
+#include <common.h>
+#include <mdbjs/supervisorjs.h>
+#include <mdbjs/taskinfojs.h>
+#include <mdbjs/util.h>
+#include <memory_resource>
+#include <supervisor.h>
 #include <tracer.h>
 #include <utils/logger.h>
 
+// system
+// dependecy
+#include <quickjs/quickjs.h>
+
 namespace mdb::js {
 
-void
-AppScriptingInstance::AddTrace(RegisterTraceFunction &&fn) noexcept
+Scripting *Scripting::sInstance = nullptr;
+
+/* static */ JSValue
+Scripting::GetSupervisor(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
 {
-  mMdbObject.AddTrace(std::move(fn));
+  return JS_UNDEFINED;
 }
 
-EventDispatcher *
-AppScriptingInstance::GetEventDispatcher() noexcept
+/* static */ JSValue
+Scripting::Log(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
 {
-  return mEventDispatcher;
+  return JS_UNDEFINED;
 }
 
-/* The class of the global object. */
-const JSClass RuntimeGlobal::klass = []() {
-  JSClass result;
-  result.name = "RuntimeGlobal";
-  result.flags = JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_RESERVED_SLOTS(RuntimeGlobal::SlotCount);
-  result.cOps = &JS::DefaultGlobalClassOps;
-  return result;
-}();
-
-constexpr JSFunctionSpec RuntimeGlobal::sRuntimeFunctions[];
-
-/* static */
-RuntimeGlobal *
-RuntimeGlobal::priv(JSObject *global) noexcept
+/* static */ JSValue
+Scripting::GetTask(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
 {
-  auto *retval = JS::GetMaybePtrFromReservedSlot<RuntimeGlobal>(global, GlobalSlot);
-  VERIFY(retval, "Failed JS::GetMaybePtrFromReservedSlot");
-  return retval;
-}
-
-bool
-RuntimeGlobal::GetSupervisor(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  TODO("Implement RuntimeGlobal::GetSupervisor");
-}
-
-bool
-RuntimeGlobal::GetTask(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  if (!args[0].isInt32()) {
-    JS_ReportErrorASCII(cx, "Argument to get_task must be an int32.");
-    return false;
+  Scripting *interp = (Scripting *)JS_GetContextOpaque(ctx);
+  if (argCount < 0 || !JS_IsNumber(argv[0])) {
+    return JS_ThrowTypeError(ctx, Scripting::HelpMessage("getThread").data());
   }
-  auto taskInfo = Tracer::GetThreadByTidOrDebugId(args[0].toInt32());
+
+  i32 tid;
+  if (!JS_ToInt32(ctx, &tid, argv[0])) {
+    return JS_ThrowTypeError(ctx, "number conversion failed.");
+  }
+
+  auto taskInfo = Tracer::GetThreadByTidOrDebugId(tid);
   if (!taskInfo) {
-    args.rval().setNull();
-    return true;
+    JS_UNDEFINED;
   }
-  JS::Rooted<JSObject *> task(cx, JSTaskInfo::Create(cx, taskInfo));
-  args.rval().setObject(*task);
-  return true;
+
+  return JsTaskInfo::CreateValue(ctx, taskInfo);
 }
 
-bool
-RuntimeGlobal::PrintThreads(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+/* static */ JSValue
+Scripting::PrintThreads(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  alloc::StackBufferResource<4096> alloc;
+  std::pmr::string buffer{ &alloc };
 
-  std::string buffer;
   buffer.reserve(4096);
   // Define your custom string representation
 
@@ -101,14 +71,110 @@ RuntimeGlobal::PrintThreads(JSContext *cx, unsigned argc, JS::Value *vp) noexcep
       iterator = ToString(iterator, *t.mTask);
       *iterator++ = '\n';
     }
-    iterator = fmt::format_to(iterator, "----------\n");
+    iterator = std::format_to(iterator, "----------\n");
   }
 
-  JS::Rooted<JSString *> str{cx, JS_NewStringCopyN(cx, buffer.data(), buffer.size())};
-  args.rval().setString(str);
-  return true;
+  auto v = JS_NewStringLen(ctx, buffer.data(), buffer.size());
+  return v;
 }
 
+/* static */ JSValue
+Scripting::PrintProcesses(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+{
+  return JS_UNDEFINED;
+}
+
+/* static */ JSValue
+Scripting::Help(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+{
+  alloc::StackBufferResource<4096> rsrc;
+  std::pmr::polymorphic_allocator alloc{ &rsrc };
+  std::pmr::string &buffer = *alloc.new_object<std::pmr::string>();
+  buffer.reserve(4096);
+  auto it = std::back_inserter(buffer);
+  it = std::format_to(it, "Global functions\n");
+  for (const auto &[_, name, argCount, helpInfo] : FunctionDescriptors()) {
+    it = std::format_to(it, "{}, arg count: {} - {}\n", name, argCount, helpInfo);
+  }
+
+  return JS_NewStringLen(ctx, buffer.data(), buffer.size());
+}
+
+void
+Scripting::InitializeMdbModule() noexcept
+{
+  JSValue mdbObject = JS_NewObject(mContext);
+
+  JSValue fn;
+
+  for (const FunctionDescriptor &descriptor : FunctionDescriptors()) {
+    fn = JS_NewCFunction(mContext, descriptor.mFn, descriptor.mName.data(), descriptor.mArgCount);
+    JS_SetPropertyStr(mContext, mdbObject, descriptor.mName.data(), fn);
+  }
+
+  JSValue global_obj = JS_GetGlobalObject(mContext);
+  JS_SetPropertyStr(mContext, global_obj, "mdb", mdbObject);
+  JS_FreeValue(mContext, global_obj);
+}
+
+/* static */
+Scripting *
+Scripting::Create() noexcept
+{
+  VERIFY(sInstance == nullptr, "InterpreterInstance already created.");
+
+  JSRuntime *runtime = JS_NewRuntime();
+  JS_SetMemoryLimit(runtime, MegaBytes(128));
+  JS_SetMaxStackSize(runtime, MegaBytes(2));
+
+  JSContext *context = JS_NewContext(runtime);
+  VERIFY(context, "Failed to create context");
+  sInstance = new Scripting{ runtime, context };
+  JS_SetContextOpaque(context, sInstance);
+  sInstance->InitializeMdbModule();
+  return sInstance;
+}
+
+/* static */
+Scripting &
+Scripting::Get() noexcept
+{
+  return *sInstance;
+}
+
+void
+Scripting::Shutdown() noexcept
+{
+  JS_FreeContext(mContext);
+  JS_FreeRuntime(mRuntime);
+}
+
+std::pmr::string *
+Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
+{
+  static int ReplLineNumber = 1;
+  std::pmr::string *res = allocator->new_object<std::pmr::string>();
+
+  JSValue evalRes = JS_Eval(mContext, input.data(), input.size(), "<eval>", 0);
+
+  auto jsString = JS_ToString(mContext, evalRes);
+  auto string = JS_ToCString(mContext, jsString);
+
+  ScopedDefer defer{ [&]() {
+    JS_FreeValue(mContext, jsString);
+    JS_FreeCString(mContext, string);
+    JS_FreeValue(mContext, evalRes);
+  } };
+
+  std::string_view view{ string };
+  res->reserve(view.size());
+
+  std::copy(view.begin(), view.end(), std::back_inserter(*res));
+
+  return res;
+}
+
+/*
 bool
 RuntimeGlobal::PrintProcesses(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
 {
@@ -129,34 +195,6 @@ RuntimeGlobal::PrintProcesses(JSContext *cx, unsigned argc, JS::Value *vp) noexc
   return true;
 }
 
-static consteval auto
-GlobalFunctionsInfo() noexcept
-{
-#ifdef FN
-#undef FN
-#endif
-#define FN(FUNC, NAME, ARGS, FLAGS, INFO, USAGE) std::tuple{NAME, std::size(ARGS), INFO##sv},
-  return std::to_array({FOR_EACH_GLOBAL_FN(FN)});
-#undef FN
-}
-
-bool
-RuntimeGlobal::Help(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  auto globalFns = GlobalFunctionsInfo();
-  std::string buffer;
-  buffer.reserve(4096);
-  auto it = std::back_inserter(buffer);
-  it = fmt::format_to(it, "Global functions\n");
-  for (const auto &[name, argCount, helpInfo] : globalFns) {
-    it = fmt::format_to(it, "{}, arg count: {} - {}\n", name, argCount, helpInfo);
-  }
-
-  JSString *str = JS_NewStringCopyN(cx, buffer.data(), buffer.size());
-  args.rval().setString(str);
-  return true;
-}
 
 bool
 RuntimeGlobal::Log(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
@@ -181,7 +219,7 @@ RuntimeGlobal::Log(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
       JS::UniqueChars exceptionCString = ::JS_EncodeStringToUTF8(cx, exceptionString);
       if (exceptionCString) {
         auto channel = logging::GetLogChannel(parsedChannelId.value());
-        channel->Log(std::string_view{exceptionCString.get()});
+        channel->Log(std::string_view{ exceptionCString.get() });
       }
     }
   }
@@ -189,379 +227,43 @@ RuntimeGlobal::Log(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
   return true;
 }
 
-JSObject *
-RuntimeGlobal::create(JSContext *cx) noexcept
-{
-  JS::RealmOptions options;
-  JS::RootedObject global(
-    cx, JS_NewGlobalObject(cx, &RuntimeGlobal::klass, nullptr, JS::FireOnNewGlobalHook, options));
-
-  RuntimeGlobal *priv = new RuntimeGlobal();
-  JS_SetReservedSlot(global, GlobalSlot, JS::PrivateValue(priv));
-
-  // Define any extra global functions that we want in our environment.
-  JSAutoRealm ar(cx, global);
-  if (!JS_DefineFunctions(cx, global, RuntimeGlobal::sRuntimeFunctions)) {
-    return nullptr;
-  }
-
-  if (!JS::InitRealmStandardClasses(cx)) {
-    PANIC("JS::InitRealmStandardClasses failed");
-  }
-
-  return global;
-}
-
-/* static */
-void
-MdbObject::finalize(JS::GCContext *gcx, JSObject *obj)
-{
-  DBGLOG(interpreter, "Finalizing MdbObject");
-}
-
-void
-MdbObject::TraceSubsystems(JSTracer *trc, JSObject *obj)
-{
-  MdbObject *object = reinterpret_cast<MdbObject *>(obj);
-  for (auto &t : object->mSubSystemTracing) {
-    t(trc);
-  }
-}
-
-/* static */
-JSObject *
-MdbObject::CreateAndBindToJsObject(AppScriptingInstance *runtime, MdbObject *handle) noexcept
-{
-  JSContext *cx = runtime->GetRuntimeContext();
-  JS::Rooted<JSObject *> obj(cx, JS_NewObject(cx, &clasp));
-  if (!obj) {
-    PANIC("Failed to create mdb object");
-  }
-
-  JS_SetReservedSlot(obj, ThisPointer, JS::PrivateValue(handle));
-  JS_SetReservedSlot(obj, ScriptRuntimePointer, JS::PrivateValue(runtime));
-  if (!JS_DefineProperties(cx, obj, ReadOnlyPropertySpecs)) {
-    PANIC("Failed to set read only properties");
-  }
-
-  return obj;
-}
-
-void
-MdbObject::AddTrace(RegisterTraceFunction &&fn) noexcept
-{
-  DBGLOG(interpreter, "Adding subsystem to be traced.");
-  mSubSystemTracing.emplace_back(std::move(fn));
-}
-
-// Define the "debugger" object and its "on" method
-bool
-AppScriptingInstance::DefineDebuggerObject(JS::HandleObject global) noexcept
-{
-  // Create the "debugger" object
-
-  JS::RootedObject debuggerObj(mContext, MdbObject::CreateAndBindToJsObject(this, &mMdbObject));
-  if (!debuggerObj) {
-    PANIC("Failed to create new (plain) object");
-    return false;
-  }
-
-  // Add the "debugger" object to the global scope
-  if (!JS_DefineProperty(mContext, global, "mdb", debuggerObj,
-                         JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY)) {
-    PANIC("Failed to add 'debugger' property on the global 'this' variable");
-    return false;
-  }
-
-  return true;
-}
-
-void
-AppScriptingInstance::InitRuntime() noexcept
-{
-  JSAutoRealm ar(mContext, mGlobalObject);
-
-  JS::RootedObject global{mContext, mGlobalObject};
-  if (!DefineDebuggerObject(global)) {
-    PANIC("Failed to create mdb object");
-  }
-
-  mEventDispatcher = EventDispatcher::Create(this);
-}
-
-void
-AppScriptingInstance::Shutdown() noexcept
-{
-  JS_DestroyContext(mContext);
-  JS_ShutDown();
-}
-
-/* static */
-AppScriptingInstance *
-AppScriptingInstance::Create(JSContext *context, JSObject *globalObject) noexcept
-{
-  return new AppScriptingInstance{context, globalObject};
-}
-
-JSContext *
-AppScriptingInstance::GetRuntimeContext() noexcept
-{
-  return mContext;
-}
-
-JSObject *
-AppScriptingInstance::GetRuntimeGlobal() noexcept
-{
-  return mGlobalObject;
-}
 
 Expected<JSFunction *, std::string>
 AppScriptingInstance::SourceBreakpointCondition(u32 breakpointId, std::string_view condition) noexcept
 {
   JSAutoRealm ar(mContext, GetRuntimeGlobal());
   ASSERT(::js::GetContextRealm(mContext), "Context realm retrieval failed.");
-  JS::EnvironmentChain envChain{mContext, JS::SupportUnscopables::Yes};
+  JS::EnvironmentChain envChain{ mContext, JS::SupportUnscopables::Yes };
   if (envChain.length() != 0) {
-    ASSERT(::js::IsObjectInContextCompartment(envChain.chain()[0], mContext),
-           "Object is not in context compartment.");
+    ASSERT(
+      ::js::IsObjectInContextCompartment(envChain.chain()[0], mContext), "Object is not in context compartment.");
   }
 
   // Do the junk Gecko is supposed to do before calling into JSAPI.
   for (size_t i = 0; i < envChain.length(); ++i) {
     JS::ExposeObjectToActiveJS(envChain.chain()[i]);
   }
-  constexpr auto argNames = std::to_array({"tc", "task", "bp"});
-  auto file = fmt::format("breakpoint:{}", breakpointId);
-  auto fnName = fmt::format("bpCondition_{}", breakpointId);
+  constexpr auto argNames = std::to_array({ "tc", "task", "bp" });
+  auto file = std::format("breakpoint:{}", breakpointId);
+  auto fnName = std::format("bpCondition_{}", breakpointId);
   auto src = SourceFromString(mContext, condition);
   ASSERT(src.is_expected(), "expected source to have been constructed");
   DBGLOG(core, "source constructed: {} bytes", src.value().length());
   JS::RootedObject global(mContext, mGlobalObject);
-  JS::CompileOptions options{mContext};
+  JS::CompileOptions options{ mContext };
 
   options.setFileAndLine("inline", breakpointId);
 
-  JS::Rooted<JSFunction *> func{mContext, JS::CompileFunction(mContext, envChain, options, fnName.c_str(),
-                                                              argNames.size(), argNames.data(), src.value())};
+  JS::Rooted<JSFunction *> func{ mContext,
+    JS::CompileFunction(
+      mContext, envChain, options, fnName.c_str(), argNames.size(), argNames.data(), src.value()) };
   if (!func) {
     DBGLOG(core, "failed to compile event handler: {}", condition);
     return ConsumePendingException(mContext)
       .transform([](auto &&str) -> mdb::Unexpected<std::string> { return mdb::unexpected(std::move(str)); })
-      .value_or(mdb::Unexpected{std::string{"Failed"}});
+      .value_or(mdb::Unexpected{ std::string{ "Failed" } });
   }
   return expected<JSFunction *>(func.get());
 }
-
-template <typename StdString>
-static bool
-FormatResult(JSContext *cx, JS::HandleValue value, StdString &writeBuffer)
-{
-  JS::RootedString str(cx);
-
-  /* Special case format for strings */
-  if (value.isString()) {
-    str = value.toString();
-    return ToStdString(cx, str, writeBuffer);
-  }
-
-  str = JS::ToString(cx, value);
-
-  if (!str) {
-    JS_ClearPendingException(cx);
-    str = JS_ValueToSource(cx, value);
-  }
-
-  if (!str) {
-    JS_ClearPendingException(cx);
-    if (value.isObject()) {
-      const JSClass *klass = JS::GetClass(&value.toObject());
-      if (klass) {
-        str = JS_NewStringCopyZ(cx, klass->name);
-      } else {
-        writeBuffer.append("[unknown object]");
-        return true;
-      }
-    } else {
-      writeBuffer.append("[unknown non-object]");
-      return true;
-    }
-  }
-
-  if (!str) {
-    JS_ClearPendingException(cx);
-    writeBuffer.append("[invalid class]");
-    return true;
-  }
-
-  if (!ToStdString(cx, str, writeBuffer)) {
-    JS_ClearPendingException(cx);
-    writeBuffer.clear();
-    writeBuffer.append("[invalid string]");
-    return false;
-  }
-
-  return true;
-}
-
-std::pmr::string *
-AppScriptingInstance::ReplEvaluate(std::string_view input, Allocator *allocator) noexcept
-{
-  static int ReplLineNumber = 1;
-  std::pmr::string *res = allocator->new_object<std::pmr::string>();
-  JS::CompileOptions options(mContext);
-  options.setFileAndLine("repl", ReplLineNumber++);
-
-  auto src = SourceFromString(mContext, input);
-
-  if (src.is_error()) {
-    auto &e = src.error();
-    std::copy(e.begin(), e.end(), std::back_inserter(*res));
-    return res;
-  }
-
-  JS::RootedValue result(mContext);
-  if (!JS::Evaluate(mContext, options, src.value(), &result)) {
-    auto exception = ConsumePendingException(mContext);
-    if (exception) {
-      fmt::format_to(std::back_inserter(*res), "{}", exception.value());
-    } else {
-      fmt::format_to(std::back_inserter(*res), "Failed to evaluate {}", input);
-    }
-    return res;
-  }
-
-  if (result.isUndefined()) {
-    return res;
-  }
-
-  if (!FormatResult(mContext, result, *res)) {
-    DBGLOG(interpreter, "repl evaluation unsuccesful for '{}'", input);
-  }
-  return res;
-}
-
-std::string
-AppScriptingInstance::ReplEvaluate(std::string_view input) noexcept
-{
-  static int ReplLineNumber = 1;
-  JS::CompileOptions options(mContext);
-  options.setFileAndLine("repl", ReplLineNumber);
-
-  auto src = SourceFromString(mContext, input);
-
-  if (src.is_error()) {
-    return src.error();
-  }
-
-  JS::RootedValue result(mContext);
-  if (!JS::Evaluate(mContext, options, src.value(), &result)) {
-    return fmt::format("Failed to evaluate: {}", input);
-  }
-
-  JS_MaybeGC(mContext);
-
-  if (result.isUndefined()) {
-    return "";
-  }
-  std::string res{};
-  if (!FormatResult(mContext, result, res)) {
-    DBGLOG(interpreter, "repl evaluation unsuccesful for '{}'", input);
-  }
-  return res;
-}
-
-mdb::Expected<void, std::string>
-AppScriptingInstance::EvaluateJavascriptStringView(std::string_view javascriptSource) noexcept
-{
-  auto ctx = GetRuntimeContext();
-  JS::RootedValue result(ctx);
-  JS::CompileOptions options(ctx);
-  options.setFileAndLine("inline", 1); // Set file name and line number for debugging purposes
-
-  auto src = SourceFromString(ctx, javascriptSource);
-
-  EXPECT_REF(auto &source, src);
-
-  if (!JS::Evaluate(ctx, options, source, &result)) {
-    if (auto exMessage = mdb::js::ConsumePendingException(ctx); exMessage) {
-      return mdb::unexpected(fmt::format("Exception during script evaluation: {}", exMessage.value()));
-    }
-  }
-
-  DBGLOG(interpreter, "Successfully sourced javascript");
-
-  return {};
-}
-
-mdb::Expected<void, std::string>
-AppScriptingInstance::EvaluateJavascriptFileView(std::string_view filePath) noexcept
-{
-  ScopedFd f = ScopedFd::OpenFileReadOnly(filePath);
-  auto sz = f.FileSize();
-  std::string mFileContents;
-  mFileContents.resize(sz);
-
-  auto leftOfRead = sz;
-  while (leftOfRead > 0) {
-    auto res = read(f, mFileContents.data() + (sz - leftOfRead), leftOfRead);
-    if (res == -1) {
-      return mdb::unexpected<std::string>(
-        fmt::format("failed to read source code file {}. Error: {}", filePath, strerror(errno)));
-    }
-    leftOfRead -= res;
-  }
-
-  return EvaluateJavascriptString(mFileContents);
-}
-
-mdb::Expected<void, std::string>
-AppScriptingInstance::EvaluateJavascriptString(const std::string &javascriptSource) noexcept
-{
-  return EvaluateJavascriptStringView(javascriptSource);
-}
-
-mdb::Expected<void, std::string>
-AppScriptingInstance::EvaluateJavascriptFile(const std::string &filePath) noexcept
-{
-  return EvaluateJavascriptFileView(filePath);
-}
-
-std::optional<std::string>
-ConsumePendingException(JSContext *cx) noexcept
-{
-  if (JS_IsExceptionPending(cx)) {
-    JS::RootedValue exception(cx);
-    if (JS_GetPendingException(cx, &exception)) {
-      JS_ClearPendingException(cx);
-
-      JS::RootedString exceptionString(cx, JS::ToString(cx, exception));
-      if (exceptionString) {
-        JS::UniqueChars exceptionCString = ::JS_EncodeStringToUTF8(cx, exceptionString);
-        if (exceptionCString) {
-          return fmt::format("{}", exceptionCString.get());
-        }
-      }
-    }
-    return "JavaScript Exception: <failed to get pending exception>";
-  } else {
-    return std::nullopt;
-  }
-}
-
-bool
-ConsumePendingException(JSContext *ctx, std::pmr::string &writeToBuffer) noexcept
-{
-  if (JS_IsExceptionPending(ctx)) {
-    JS::RootedValue exception(ctx);
-    if (JS_GetPendingException(ctx, &exception)) {
-      JS_ClearPendingException(ctx);
-
-      JS::RootedString exceptionString(ctx, JS::ToString(ctx, exception));
-      return ToStdString(ctx, exceptionString, writeToBuffer);
-    }
-    return false;
-  } else {
-    return false;
-  }
-}
+*/
 } // namespace mdb::js

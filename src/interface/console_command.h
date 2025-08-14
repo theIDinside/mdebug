@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <memory_resource>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -15,7 +16,7 @@
 #define ConsoleLine(FORMAT_STR) FORMAT_STR "\\r\\n"
 
 #define WriteConsoleLine(WRITE_BUFFER, FORMAT_STRING, ...)                                                        \
-  fmt::format_to(std::back_inserter(WRITE_BUFFER), FORMAT_STRING "\\r\\n" __VA_OPT__(, ) __VA_ARGS__)
+  std::format_to(std::back_inserter(WRITE_BUFFER), FORMAT_STRING "\\r\\n" __VA_OPT__(, ) __VA_ARGS__)
 
 namespace mdb {
 struct ConsoleCommandResult
@@ -29,8 +30,8 @@ class ConsoleCommand
 {
 public:
   virtual ~ConsoleCommand() = default;
-  virtual ConsoleCommandResult execute(std::span<std::string_view> args,
-                                       std::pmr::memory_resource *allocator) noexcept = 0;
+  virtual ConsoleCommandResult execute(
+    std::span<std::string_view> args, std::pmr::memory_resource *allocator) noexcept = 0;
 };
 
 // Console Command Registry to store and retrieve commands
@@ -78,7 +79,7 @@ public:
   {
     return mFunctionName;
   }
-  ConsoleCommandResult execute(std::span<std::string_view> args,
-                               std::pmr::memory_resource *allocator) noexcept override;
+  ConsoleCommandResult execute(
+    std::span<std::string_view> args, std::pmr::memory_resource *allocator) noexcept override;
 };
 } // namespace mdb

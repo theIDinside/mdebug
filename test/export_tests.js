@@ -41,7 +41,7 @@ set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "
 // Test names should match file names (but without .js extension)
 // As such each file should expose a `tests` object containing { "name": theTestFunction },
 // See the other files for an example.
-// Test function must accept 1 parameter, DA of type `DAClient` defined in client.js
+// Test function must accept 1 parameter, DA of type `DebugAdapterClient` defined in client.js
 // A test that manages to execute until the end without exiting the program with a non-zero value is a passed test.
 
 // This file will create the necessary CMake file and setup to be able to say `ctest -R breakpoints` for instance.

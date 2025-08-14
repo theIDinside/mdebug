@@ -51,18 +51,41 @@ enum class TraceeStopReason : u32
   Create = valueOf("create"),
 };
 
-static constexpr std::string_view StopReasons[]{
-  "watch",   "rwatch", "awatch", "syscall_entry", "syscall_return", "library", "replaylog", "swbreak",
-  "hwbreak", "fork",   "vfork",  "vforkdone",     "exec",           "clone",   "create"};
+static constexpr std::string_view StopReasons[]{ "watch",
+  "rwatch",
+  "awatch",
+  "syscall_entry",
+  "syscall_return",
+  "library",
+  "replaylog",
+  "swbreak",
+  "hwbreak",
+  "fork",
+  "vfork",
+  "vforkdone",
+  "exec",
+  "clone",
+  "create" };
 
 consteval std::array<u32, 15>
 StopReasonTokenFactory()
 {
   static constexpr std::array<u32, 15> StopReasonTokens{
-    valueOf("watch"),          valueOf("rwatch"),  valueOf("awatch"),    valueOf("syscall_entry"),
-    valueOf("syscall_return"), valueOf("library"), valueOf("replaylog"), valueOf("swbreak"),
-    valueOf("hwbreak"),        valueOf("fork"),    valueOf("vfork"),     valueOf("vforkdone"),
-    valueOf("exec"),           valueOf("clone"),   valueOf("create"),
+    valueOf("watch"),
+    valueOf("rwatch"),
+    valueOf("awatch"),
+    valueOf("syscall_entry"),
+    valueOf("syscall_return"),
+    valueOf("library"),
+    valueOf("replaylog"),
+    valueOf("swbreak"),
+    valueOf("hwbreak"),
+    valueOf("fork"),
+    valueOf("vfork"),
+    valueOf("vforkdone"),
+    valueOf("exec"),
+    valueOf("clone"),
+    valueOf("create"),
   };
   auto tmp = StopReasonTokens;
   std::sort(tmp.begin(), tmp.end());
@@ -87,15 +110,15 @@ struct WaitEventParser
 {
   std::optional<TraceeStopReason> mStopReason;
   bool mControlKindIsAttached;
-  int mSignal{0};
-  Pid mPid{0};
-  Tid mTid{0};
-  Pid mNewPid{0};
-  Tid mNewTid{0};
-  u32 mCore{0};
-  int mSyscallNumber{0};
+  int mSignal{ 0 };
+  SessionId mPid{ 0 };
+  Tid mTid{ 0 };
+  SessionId mNewPid{ 0 };
+  Tid mNewTid{ 0 };
+  u32 mCore{ 0 };
+  int mSyscallNumber{ 0 };
   int mEventTime{};
-  AddrPtr mWatchpointAddress{nullptr};
+  AddrPtr mWatchpointAddress{ nullptr };
   std::string mExecPath{};
   RegisterData mRegisters;
   ArchInfo mArch{};
@@ -119,13 +142,13 @@ struct WaitEventParser
 
   void ParseVFork(std::string_view data);
 
-  void SetVFork(Pid newpid, Tid newtid) noexcept;
+  void SetVFork(SessionId newpid, Tid newtid) noexcept;
 
   void SetWatchpointAddress(AddrPtr addr) noexcept;
 
   void SetStopReason(TraceeStopReason stop) noexcept;
 
-  void SetPid(Pid process) noexcept;
+  void SetPid(SessionId process) noexcept;
   void SetTid(Tid thread) noexcept;
 
   void SetExeced(std::string_view exec) noexcept;

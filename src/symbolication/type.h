@@ -1,7 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "common/formatter.h"
 #include <common.h>
 #include <common/macros.h>
+#include <cstring>
 #include <mutex>
 #include <symbolication/block.h>
 #include <symbolication/dwarf/die_ref.h>
@@ -47,8 +49,11 @@ public:
    * before we return Foo* here, because the target type will be defined by Foo. */
   sym::Type *GetOrCreateNewType(sym::dw::IndexedDieReference dieReference) noexcept;
   sym::Type *GetUnitType() noexcept;
-  sym::Type *CreateNewType(DwarfTag tag, Offset typeDieOffset, sym::dw::IndexedDieReference dieReference,
-                           u32 typeSize, std::string_view name) noexcept;
+  sym::Type *CreateNewType(DwarfTag tag,
+    Offset typeDieOffset,
+    sym::dw::IndexedDieReference dieReference,
+    u32 typeSize,
+    std::string_view name) noexcept;
 };
 
 namespace sym {
@@ -111,7 +116,7 @@ public:
   operator=(SymbolLocation &&rhs) noexcept
   {
     if (this != &rhs) {
-      std::memcpy(this, &rhs, sizeof(SymbolLocation));
+      std::memcpy((void *)this, &rhs, sizeof(SymbolLocation));
     }
     if (rhs.mKind == LocKind::LocationList) {
       rhs.uLocationList = nullptr;
@@ -121,7 +126,7 @@ public:
 
   SymbolLocation(SymbolLocation &&o) noexcept
   {
-    std::memcpy(this, &o, sizeof(SymbolLocation));
+    std::memcpy((void *)this, &o, sizeof(SymbolLocation));
     if (o.mKind == LocKind::LocationList) {
       o.uLocationList = nullptr;
     }
@@ -130,19 +135,19 @@ public:
   static constexpr auto
   UnreadLocationList(u32 value)
   {
-    return SymbolLocation{value};
+    return SymbolLocation{ value };
   }
 
   static auto
   CreateLocationList(std::vector<LocationListEntry> &&entries)
   {
-    return SymbolLocation{new LocationList{std::move(entries)}};
+    return SymbolLocation{ new LocationList{ std::move(entries) } };
   }
 
   static constexpr auto
   Expression(std::span<const u8> expr) noexcept
   {
-    return SymbolLocation{expr};
+    return SymbolLocation{ expr };
   }
 
   constexpr ~SymbolLocation() noexcept
@@ -192,8 +197,10 @@ To
 BitCopy(std::span<const FromRepr> from)
 {
   static_assert(std::is_trivial_v<To>, "Target of bit copy must be trivially constructible.");
-  ASSERT(from.size_bytes() >= sizeof(To), "Span must contain {} bytes but only contained {}", sizeof(To),
-         from.size_bytes());
+  ASSERT(from.size_bytes() >= sizeof(To),
+    "Span must contain {} bytes but only contained {}",
+    sizeof(To),
+    from.size_bytes());
   To to;
   std::memcpy(&to, from.data(), sizeof(To));
   return to;
@@ -258,8 +265,8 @@ union EnumeratorConstValue
 
 struct EnumeratorValues
 {
-  bool mIsSigned{false};
-  std::unique_ptr<EnumeratorConstValue[]> mEnumeratorValues{nullptr};
+  bool mIsSigned{ false };
+  std::unique_ptr<EnumeratorConstValue[]> mEnumeratorValues{ nullptr };
 };
 
 // This is meant to be the interface via which we interpret a range of bytes
@@ -267,7 +274,7 @@ class Type
 {
   static constexpr auto ModifierNameStrSize = "const"sv.size() + "volatile"sv.size() + " *"sv.size();
   friend sym::dw::TypeSymbolicationContext;
-  friend fmt::formatter<sym::Type>;
+  friend std::formatter<sym::Type>;
 
 public:
   Immutable<std::string_view> mName;
@@ -288,18 +295,23 @@ private:
   // A disengaged optional, means this type does *not* represent one of the primitives (what DWARF calls "base
   // types").
   std::optional<BaseTypeEncoding> mBaseTypes;
-  u32 mArrayBounds{0};
+  u32 mArrayBounds{ 0 };
   EnumeratorValues mEnumValues{};
   DwarfTag mDebugInfoEntryTag;
 
 public:
   // Qualified, i.e. some variant of cvref-types or type defs
-  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf, Type *target,
-       bool isTypedef) noexcept;
+  Type(DwarfTag debugInfoEntryTag,
+    dw::IndexedDieReference debugInfoEntryReference,
+    u32 sizeOf,
+    Type *target,
+    bool isTypedef) noexcept;
 
   // "Normal" type constructor
-  Type(DwarfTag debugInfoEntryTag, dw::IndexedDieReference debugInfoEntryReference, u32 sizeOf,
-       std::string_view name) noexcept;
+  Type(DwarfTag debugInfoEntryTag,
+    dw::IndexedDieReference debugInfoEntryReference,
+    u32 sizeOf,
+    std::string_view name) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
   Type(std::string_view name, size_t size = 0) noexcept;
@@ -387,9 +399,9 @@ struct SymbolBlock
   AddressBounds() const noexcept
   {
     if (mRanges.empty()) {
-      return {nullptr, nullptr};
+      return { nullptr, nullptr };
     }
-    return {mRanges.front().low, mRanges.back().high};
+    return { mRanges.front().low, mRanges.back().high };
   }
 
   AddrPtr
@@ -422,26 +434,27 @@ struct BlockSymbolIterator
   static BlockSymbolIterator
   Begin(const std::vector<SymbolBlock> &blocks) noexcept
   {
-    return BlockSymbolIterator{.blocks_data = blocks.data(),
-                               .mBlockCount = static_cast<u32>(blocks.size()),
-                               .mCurrentBlockIndex = 0,
-                               .mSymbolIndex = 0};
+    return BlockSymbolIterator{ .blocks_data = blocks.data(),
+      .mBlockCount = static_cast<u32>(blocks.size()),
+      .mCurrentBlockIndex = 0,
+      .mSymbolIndex = 0 };
   }
 
   static BlockSymbolIterator
   End(const std::vector<SymbolBlock> &blocks) noexcept
   {
-    return BlockSymbolIterator{.blocks_data = blocks.data(),
-                               .mBlockCount = static_cast<u32>(blocks.size()),
-                               .mCurrentBlockIndex = static_cast<u32>(blocks.size()),
-                               .mSymbolIndex = 0};
+    return BlockSymbolIterator{ .blocks_data = blocks.data(),
+      .mBlockCount = static_cast<u32>(blocks.size()),
+      .mCurrentBlockIndex = static_cast<u32>(blocks.size()),
+      .mSymbolIndex = 0 };
   }
 
   static BlockSymbolIterator
   Begin(const SymbolBlock *blocks, u32 count) noexcept
   {
     return BlockSymbolIterator{
-      .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = 0, .mSymbolIndex = 0};
+      .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = 0, .mSymbolIndex = 0
+    };
   }
 
   static BlockSymbolIterator
@@ -449,10 +462,12 @@ struct BlockSymbolIterator
   {
     if (count == 1 && blocks[0].mSymbols.empty()) {
       return BlockSymbolIterator{
-        .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = 0, .mSymbolIndex = 0};
+        .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = 0, .mSymbolIndex = 0
+      };
     } else {
       return BlockSymbolIterator{
-        .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = count, .mSymbolIndex = 0};
+        .blocks_data = blocks, .mBlockCount = count, .mCurrentBlockIndex = count, .mSymbolIndex = 0
+      };
     }
   }
 
@@ -460,7 +475,7 @@ struct BlockSymbolIterator
   operator==(const BlockSymbolIterator &l, const BlockSymbolIterator &r) noexcept
   {
     ASSERT(l.blocks_data == r.blocks_data && l.mBlockCount == r.mBlockCount,
-           "Expected iterators to be built from the same underlying data. If not, you're a moron.");
+      "Expected iterators to be built from the same underlying data. If not, you're a moron.");
     return l.mCurrentBlockIndex == r.mCurrentBlockIndex && l.mSymbolIndex == r.mSymbolIndex;
   }
 
@@ -520,16 +535,10 @@ struct BlockSymbolIterator
 
 } // namespace sym
 } // namespace mdb
-namespace fmt {
 namespace sym = mdb::sym;
-template <> struct formatter<sym::Type>
+template <> struct std::formatter<sym::Type>
 {
-  template <typename ParseContext>
-  constexpr auto
-  parse(ParseContext &ctx)
-  {
-    return ctx.begin();
-  }
+  BASIC_PARSE
 
   template <typename FormatContext>
   auto
@@ -551,21 +560,20 @@ template <> struct formatter<sym::Type>
 
     auto index = 0u;
     auto out = ctx.out();
-    auto type_span = std::span{types.begin(), types.begin() + idx};
+    auto type_span = std::span{ types.begin(), types.begin() + idx };
     for (const auto t : type_span) {
       if (t->mModifier != sym::Modifier::None) {
-        out = fmt::format_to(out, "{}", ModifierToString(t->mModifier).Value());
+        out = std::format_to(out, "{}", ModifierToString(t->mModifier).Value());
         if (t->mModifier == sym::Modifier::Array) {
-          out = fmt::format_to(out, "{}]", t->mArrayBounds);
+          out = std::format_to(out, "{}]", t->mArrayBounds);
         }
       } else {
-        out = fmt::format_to(out, "{}", t->mName.Cast());
+        out = std::format_to(out, "{}", t->mName.Cast());
       }
       if (++index != type_span.size()) {
-        out = fmt::format_to(out, " ");
+        out = std::format_to(out, " ");
       }
     }
     return out;
   }
 };
-} // namespace fmt

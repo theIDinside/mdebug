@@ -1,84 +1,50 @@
 /** LICENSE TEMPLATE */
 #include "./util.h"
-#include "js/Conversions.h"
-#include "js/String.h"
-#include "js/Value.h"
+#include "quickjs/quickjs.h"
+#include <expected>
+
 namespace mdb::js {
-mdb::Expected<JS::SourceText<mozilla::Utf8Unit>, std::string>
-SourceFromString(JSContext *context, std::string_view str) noexcept
-{
-  JS::SourceText<mozilla::Utf8Unit> source;
-  if (!source.init(context, str.data(), str.length(), JS::SourceOwnership::Borrowed)) {
-    return mdb::unexpected<std::string>("Failed to initialize source text.");
-  }
 
-  return mdb::expected(std::move(source));
+QuickJsString::QuickJsString(JSContext *context, const char *string) noexcept : mContext(context), mString(string)
+{
 }
 
-mdb::Expected<JS::UniqueChars, std::string_view>
-ToString(JSContext *cx, JS::Handle<JS::Value> stringObject) noexcept
+QuickJsString::QuickJsString(QuickJsString &&other) noexcept : mContext(other.mContext), mString(nullptr)
 {
-  JS::RootedString rootedJsString(cx, JS::ToString(cx, stringObject));
-  if (rootedJsString) {
-    JS::UniqueChars utf8String = ::JS_EncodeStringToUTF8(cx, rootedJsString);
-
-    if (utf8String) {
-      return expected(std::move(utf8String));
-    }
-  }
-  return mdb::unexpected<std::string_view>("failed to convert to string");
+  std::swap(mString, other.mString);
 }
 
-bool
-ToStdString(JSContext *cx, JS::HandleString string, std::pmr::string &writeBuffer) noexcept
+QuickJsString::~QuickJsString() noexcept
 {
-  bool success = false;
-  if (string) {
-    success = true;
-    JS::Rooted<JSString *> str{cx, string};
-    auto stringLength = JS_GetStringEncodingLength(cx, str);
-
-    writeBuffer.resize_and_overwrite(stringLength, [cx, &str, &success](char *ptr, size_t size) -> size_t {
-      if (!JS_EncodeStringToBuffer(cx, str, ptr, size)) {
-        success = false;
-      }
-      for (auto it = ptr; it < ptr + size; ++it) {
-        if (*it == 0) {
-          return std::distance(ptr, it);
-        }
-      }
-      return size;
-    });
+  if (mString) {
+    JS_FreeCString(mContext, mString);
   }
-  return success;
 }
 
-bool
-ToStdString(JSContext *cx, JS::HandleString string, std::string &writeBuffer) noexcept
+/* static */
+QuickJsString
+QuickJsString::FromValue(JSContext *context, JSValue value) noexcept
 {
-  bool success = false;
-  if (string) {
-    success = true;
-    auto stringLength = JS_GetStringEncodingLength(cx, string);
-
-    writeBuffer.resize_and_overwrite(stringLength, [cx, string, &success](char *ptr, size_t size) {
-      if (!JS_EncodeStringToBuffer(cx, string, ptr, size)) {
-        success = false;
-      }
-      return size;
-    });
-  }
-  return success;
+  return QuickJsString{ context, JS_ToCString(context, value) };
 }
 
-JSString *
-PrepareString(JSContext *cx, std::string_view string) noexcept
+std::expected<JSValue, QuickJsString>
+CallFunction(JSContext *context, JSValue functionValue, JSValue thisValue, std::span<JSValue> arguments)
 {
-  JSString *jsString = JS_NewStringCopyN(cx, string.data(), string.size());
-
-  if (!jsString) {
-    return nullptr;
+  JSValue returnValue = JS_Call(context, functionValue, thisValue, arguments.size(), arguments.data());
+  for (const auto &v : arguments) {
+    JS_FreeValue(context, v);
   }
-  return jsString;
+
+  if (JS_IsException(returnValue)) {
+    JSValue exception = JS_GetException(context);
+    auto qjsString = QuickJsString::FromValue(context, exception);
+    JS_FreeValue(context, exception);
+    JS_FreeValue(context, returnValue);
+    return std::unexpected{ std::move(qjsString) };
+  }
+
+  return std::expected<JSValue, QuickJsString>{ returnValue };
 }
+
 } // namespace mdb::js
