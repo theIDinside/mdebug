@@ -5,6 +5,8 @@
 // system headers
 #include <expected>
 #include <format>
+#include <limits>
+#include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -154,7 +156,7 @@ public:
   constexpr std::expected<JsonValue *, ParseError>
   Parse() noexcept
   {
-    JsonValue *value = Allocate<JsonValue>();
+    JsonValue *value = Allocate<JsonValue>(1);
     ParseError error;
 
     if (ParseValue(value, error)) [[likely]] {
@@ -169,11 +171,17 @@ private:
   std::string_view mInput;
   size_t mPos{ 0 };
 
+  constexpr bool
+  CanReadMore() const noexcept
+  {
+    return mPos < mInput.size();
+  }
+
   bool
   ParseValue(JsonValue *value, ParseError &error)
   {
     SkipWhitespace();
-    if (mPos >= mInput.size()) {
+    if (!CanReadMore()) {
       PARSE_ERROR_RETURN(UnexpectedEndOfInput, mPos);
     }
 
@@ -181,21 +189,21 @@ private:
 
     switch (head) {
     case 'n':
-      PROPAGATE_RESULT(ParseNull(value, error));
+      return ParseNull(value, error);
     case 't':
       [[fallthrough]];
     case 'f':
-      PROPAGATE_RESULT(ParseBoolean(value, error));
+      return ParseBoolean(value, error);
     case '-':
       [[fallthrough]];
     case '0' ... '9':
-      PROPAGATE_RESULT(ParseNumber(value, error));
+      return ParseNumber(value, error);
     case '"':
-      PROPAGATE_RESULT(ParseString(value, error));
+      return ParseString(value, error);
     case '[':
-      PROPAGATE_RESULT(ParseArray(value, error));
+      return ParseArray(value, error);
     case '{':
-      PROPAGATE_RESULT(ParseObject(value, error));
+      return ParseObject(value, error);
     default:
       PARSE_ERROR_RETURN(UnexpectedCharacter, mPos);
     }
@@ -204,8 +212,7 @@ private:
   void
   SkipWhitespace()
   {
-    while (mPos < mInput.size() &&
-           (mInput[mPos] == ' ' || mInput[mPos] == '\t' || mInput[mPos] == '\n' || mInput[mPos] == '\r')) {
+    while (CanReadMore() && std::isspace(mInput[mPos])) {
       ++mPos;
     }
   }
@@ -225,6 +232,8 @@ private:
   constexpr bool
   ParseBoolean(JsonValue *value, ParseError &error) noexcept
   {
+    // MAYBE_TODO(simon) can we use SWAR here? (true / false is just 4 or 5 bytes, so using SIMD here is not giving
+    // us anything. probably even slower)
     if (mInput.substr(mPos, 4) == "true"sv) {
       mPos += 4;
       value->mType = Type::Boolean;
@@ -239,48 +248,37 @@ private:
     PARSE_ERROR_RETURN(InvalidToken, mPos);
   }
 
+  // Create a (absolutely) compile time lookup table/array
+  static consteval std::array<bool, std::numeric_limits<char>::max()>
+  ValidCharactersArray() noexcept
+  {
+    std::array<bool, std::numeric_limits<char>::max()> lookupTable{};
+    for (auto &v : lookupTable) {
+      v = false;
+    }
+
+    for (const auto ch : { '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', 'e', 'E' }) {
+      lookupTable[static_cast<u8>(ch)] = true;
+    }
+    return lookupTable;
+  }
+
   constexpr bool
   ParseNumber(JsonValue *value, ParseError &error) noexcept
   {
     size_t start = mPos;
-    if (mInput[mPos] == '-') {
+
+    constexpr auto isJsonNumberChar = [](const char ch) noexcept {
+      static constexpr auto lookupTable = ValidCharactersArray();
+      return lookupTable[ch];
+    };
+
+    while (CanReadMore() && isJsonNumberChar(mInput[mPos])) {
       ++mPos;
-    }
-    if (mPos >= mInput.size()) {
-      PARSE_ERROR_RETURN(InvalidNumber, mPos);
-    }
-    if (mInput[mPos] == '0') {
-      ++mPos;
-    } else if (mInput[mPos] >= '1' && mInput[mPos] <= '9') {
-      while (mPos < mInput.size() && mInput[mPos] >= '0' && mInput[mPos] <= '9') {
-        ++mPos;
-      }
-    } else {
-      PARSE_ERROR_RETURN(InvalidNumber, mPos);
-    }
-    if (mPos < mInput.size() && mInput[mPos] == '.') {
-      ++mPos;
-      if (mPos >= mInput.size() || !(mInput[mPos] >= '0' && mInput[mPos] <= '9')) {
-        PARSE_ERROR_RETURN(InvalidNumber, mPos);
-      }
-      while (mPos < mInput.size() && mInput[mPos] >= '0' && mInput[mPos] <= '9') {
-        ++mPos;
-      }
-    }
-    if (mPos < mInput.size() && (mInput[mPos] == 'e' || mInput[mPos] == 'E')) {
-      ++mPos;
-      if (mPos < mInput.size() && (mInput[mPos] == '+' || mInput[mPos] == '-')) {
-        ++mPos;
-      }
-      if (mPos >= mInput.size() || !(mInput[mPos] >= '0' && mInput[mPos] <= '9')) {
-        PARSE_ERROR_RETURN(InvalidNumber, mPos);
-      }
-      while (mPos < mInput.size() && mInput[mPos] >= '0' && mInput[mPos] <= '9') {
-        ++mPos;
-      }
     }
 
     double number;
+    // TODO: from_chars I'm expecting to be half decent actually. But perhaps this is not the case.
     auto [ptr, ec] = std::from_chars(mInput.data() + start, mInput.data() + mPos, number);
     if (ec != std::errc()) {
       PARSE_ERROR_RETURN(InvalidNumber, start);
@@ -299,22 +297,23 @@ private:
     }
     ++mPos;
     value->mType = Type::String;
-    // Create a polymorphic allocator for strings
-    std::pmr::polymorphic_allocator<std::pmr::string> obj_alloc(mArena);
-
-    // Allocate the string itself using the allocator
-    std::pmr::string *myStr = obj_alloc.allocate_object<std::pmr::string>(1);
+    std::pmr::string *myStr = Allocate<std::pmr::string>(1);
 
     value->mData.string = myStr;
     std::pmr::string &str = *value->mData.string;
 
-    while (mPos < mInput.size()) {
-      char c = mInput[mPos++];
+    // TODO: When two-phase parse has been written, pre-allocate the size of the entire string
+    // and copy it. Escaping must happen regardless though. but a Token { Type::String, start, end, mChildCount }
+    // can tuck away the unescaped character/byte count into it's "child cound" value, like how Array and
+    // Object tokens will do.
+
+    while (CanReadMore()) {
+      const char c = mInput[mPos++];
       if (c == '"') {
         break;
       }
       if (c == '\\') {
-        if (mPos >= mInput.size()) {
+        if (!CanReadMore()) {
           PARSE_ERROR_RETURN(InvalidStringEscape, mPos);
         }
         char esc = mInput[mPos++];
@@ -362,14 +361,10 @@ private:
     }
     ++mPos;
 
-    // Create a polymorphic allocator for strings
-    std::pmr::polymorphic_allocator<std::pmr::vector<JsonValue>> obj_alloc(mArena);
-
-    // Allocate the string itself using the allocator
-    auto *arr = obj_alloc.allocate_object<std::pmr::vector<JsonValue>>(1);
+    auto *arr = Allocate<std::pmr::vector<JsonValue>>(1);
 
     SkipWhitespace();
-    if (mPos < mInput.size() && mInput[mPos] == ']') {
+    if (CanReadMore() && mInput[mPos] == ']') {
       ++mPos;
       value->mType = Type::Array;
       value->mData.array = arr;
@@ -383,7 +378,7 @@ private:
       }
 
       SkipWhitespace();
-      if (mPos >= mInput.size()) {
+      if (!CanReadMore()) {
         PARSE_ERROR_RETURN(UnexpectedEndOfInput, mPos);
       }
       if (mInput[mPos] == ',') {
@@ -412,7 +407,7 @@ private:
     }
     ++mPos;
     auto keyStart = mPos;
-    while (mPos < mInput.size() && mInput[mPos] != '"') {
+    while (CanReadMore() && mInput[mPos] != '"') {
       ++mPos;
       if (mInput[mPos] == '\\') [[unlikely]] {
         ++mPos;
@@ -420,7 +415,7 @@ private:
       }
     }
 
-    if (mPos >= mInput.size()) {
+    if (!CanReadMore()) {
       error = ParseError{ ParseError::ErrorKind::UnexpectedEndOfInput, i64(mPos) };
     }
 
@@ -440,13 +435,10 @@ private:
     ++mPos;
 
     // Create a polymorphic allocator for strings
-    std::pmr::polymorphic_allocator<ObjectType> obj_alloc(mArena);
-
-    // Allocate the string itself using the allocator
-    ObjectType *obj = obj_alloc.allocate_object<ObjectType>(1);
+    ObjectType *obj = Allocate<ObjectType>(1);
 
     SkipWhitespace();
-    if (mPos < mInput.size() && mInput[mPos] == '}') {
+    if (CanReadMore() && mInput[mPos] == '}') {
       ++mPos;
       value->mType = Type::Object;
       value->mData.object = obj;
@@ -461,7 +453,7 @@ private:
       }
 
       SkipWhitespace();
-      if (mPos >= mInput.size() || mInput[mPos] != ':') {
+      if (!CanReadMore() || mInput[mPos] != ':') {
         PARSE_ERROR_RETURN(ExpectedColon, mPos);
       }
       ++mPos;
@@ -474,7 +466,7 @@ private:
       }
 
       SkipWhitespace();
-      if (mPos >= mInput.size()) {
+      if (!CanReadMore()) {
         PARSE_ERROR_RETURN(UnexpectedEndOfInput, mPos);
       }
       if (mInput[mPos] == ',') {
@@ -495,14 +487,15 @@ private:
 
   template <typename T, typename... Args>
   constexpr T *
-  Allocate(Args &&...args)
+  Allocate(size_t count, Args &&...args)
   {
     if constexpr (std::is_same_v<T, JsonValue>) {
       void *mem = mArena->allocate(sizeof(T), alignof(T));
       return new (mem) T(std::forward<Args>(args)...);
     } else {
-      void *mem = mArena->allocate(sizeof(T), alignof(T));
-      return new (mem) T(std::forward<Args>(args)..., mArena);
+      std::pmr::polymorphic_allocator<T> allocator(mArena);
+      T *obj = allocator.template allocate_object<T>(count);
+      return std::construct_at(obj, std::forward<Args>(args)..., std::pmr::polymorphic_allocator<T>(mArena));
     }
   }
 };
@@ -518,8 +511,10 @@ private:
 std::pmr::string
 ParseError::ToString(std::pmr::memory_resource *memoryResource, ParseError error) noexcept
 {
-  char posBuf[64];
-  auto it = std::format_to(posBuf, "Position {{ {} }}", error.mPosition);
+  static constexpr auto BaseTenDigitsFor64BitValue = 20;
+  static constexpr auto PositionFormatString = "Position {{ {} }}"sv;
+  char posBuf[PositionFormatString.size() + BaseTenDigitsFor64BitValue];
+  auto it = std::format_to(posBuf, PositionFormatString, error.mPosition);
   const auto len = std::distance(posBuf, it);
   std::string_view pos{ posBuf, it };
 
@@ -533,6 +528,10 @@ ParseError::ToString(std::pmr::memory_resource *memoryResource, ParseError error
 std::expected<JsonValue *, ParseError>
 Parse(std::pmr::memory_resource *jsonAllocator, std::string_view input)
 {
+  // TODO(simon): Introduce a two-phase parse. We do in-line allocations which means we're reallocating some times
+  // when it comes to array elements or string buffers. That's not amazing. By introducing a two-phase parse we can
+  // first lex then also store the metadata of how many elements things contain and allocate exactly, ahead of time
+  // in phase-2 of parsing.
   Parser parser(jsonAllocator, input);
   return parser.Parse();
 }
