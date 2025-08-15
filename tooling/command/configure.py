@@ -308,6 +308,9 @@ class ConfigureCommand(Command):
             f"-B {buildDirectory}",
             f"-S {buildMetadata.getProjectPath()}",
         ]
+        for arg in args[1:]:
+            cmakeCommand.append(arg)
+
         runCommand(cmakeCommand, cwd=buildDirectory)
         buildMetadata.addConfigured(buildType=buildPreset)
 
