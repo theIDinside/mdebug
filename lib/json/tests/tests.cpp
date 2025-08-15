@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 #include <json/json.h>
 #include <memory_resource>
+#include <print>
 #include <string_view>
+
+static std::byte BigChunkArray[4096 * 32];
 
 struct TestMemoryResource : public std::pmr::memory_resource
 {
-  std::pmr::monotonic_buffer_resource upstream{};
+  std::pmr::monotonic_buffer_resource upstream{ BigChunkArray, std::size(BigChunkArray) };
 
 protected:
   void *
@@ -87,6 +90,75 @@ TEST(JsonParseTests, ParseObjectAndGetProperty)
   ASSERT_NE(propNum, nullptr);
   EXPECT_TRUE(propNum->IsNumber());
   EXPECT_DOUBLE_EQ(*propNum->GetNumber(), 123.0);
+}
+
+TEST(JsonParseTests, ParseAndCheckSubProperties)
+{
+  TestMemoryResource mem;
+  auto result = mdbjson::Parse(&mem,
+    R"({
+      "key": "value",
+      "num": 123,
+      "subObjectOne": {
+        "array": [
+          "The world is a dark and very cruel place to live in.\nThis should be on a new line.",
+          42,
+          "mixed strings and numbers in an array? Is that not crazy work?"
+        ],
+        "success": true
+      },
+      "subObjectTwo": {
+        "value": null,
+        "wasOk": false,
+        "message": "This is a public service announcement, brought to you, in part, by Slim Shady. The views and events expressed here are totally fucked (Yeah) and are not necessarily the views of anyone."
+      }
+    })");
+  if (!result.has_value()) {
+  }
+  ASSERT_TRUE(result.has_value());
+  mdbjson::JsonValue *val = result.value();
+  EXPECT_TRUE(val->IsObject());
+
+  auto keyProperty = val->GetProperty("key");
+  ASSERT_NE(keyProperty, nullptr);
+  EXPECT_TRUE(keyProperty->IsString());
+  EXPECT_EQ(*keyProperty->GetString(), "value");
+
+  auto numProperty = val->GetProperty("num");
+  ASSERT_NE(numProperty, nullptr);
+  EXPECT_TRUE(numProperty->IsNumber());
+  EXPECT_DOUBLE_EQ(*numProperty->GetNumber(), 123.0);
+
+  // Sub object 1
+  {
+    auto subObj1 = val->GetProperty("subObjectOne");
+    ASSERT_NE(subObj1, nullptr);
+    EXPECT_TRUE(subObj1->IsObject());
+
+    auto s1ArrayJson = subObj1->GetProperty("array");
+    ASSERT_NE(s1ArrayJson, nullptr);
+    EXPECT_TRUE(s1ArrayJson->IsArray());
+    const auto &s1Array = *s1ArrayJson->GetArray();
+    EXPECT_EQ(s1Array.size(), 3);
+    EXPECT_TRUE(s1Array[0].IsString());
+    EXPECT_TRUE(s1Array[1].IsNumber());
+    EXPECT_TRUE(s1Array[2].IsString());
+
+    EXPECT_EQ(*s1Array[0].GetString(),
+      "The world is a dark and very cruel place to live in.\nThis should be on a new line.");
+    std::print("string={}\n", *s1Array[0].GetString());
+    EXPECT_EQ(*s1Array[1].GetNumber(), 42);
+    EXPECT_EQ(*s1Array[2].GetString(), "mixed strings and numbers in an array? Is that not crazy work?");
+
+    auto successProp = subObj1->GetProperty("success");
+    auto success = successProp->GetBoolean();
+    EXPECT_NE(success, nullptr);
+    EXPECT_TRUE(*success);
+  }
+
+  auto subObj2 = val->GetProperty("subObjectTwo");
+  ASSERT_NE(subObj2, nullptr);
+  EXPECT_TRUE(subObj2->IsObject());
 }
 
 TEST(JsonParseTests, ParseInvalidJson)
