@@ -181,12 +181,6 @@ class SetupProjectCommand(Command):
             configureStep=configureQuickJs,
         ),
         DependencyDeclaration(
-            lib="nlohmann_json",
-            version="v3.11.2",
-            urlTemplate="https://github.com/nlohmann/json/releases/download/$(VERSION)/json.tar.xz",
-            archiveKind="tar.xz",
-        ),
-        DependencyDeclaration(
             lib="googletest",
             version="03597a01ee50ed33e9dfd640b249b4be3799d395",
             urlTemplate="https://github.com/google/googletest/archive/$(VERSION).zip",

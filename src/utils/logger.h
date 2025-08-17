@@ -37,18 +37,20 @@ ENUM_TYPE_METADATA(Channel, FOR_EACH_LOG, DEFAULT_ENUM)
 template <typename T> concept Formattable = requires(T t) { std::format("{}", t); };
 
 namespace mdb::logging {
-struct QuoteStringsInList
+
+template <typename StringType> struct QuoteStringsInList
 {
-  std::span<const std::string> mStrings;
+  std::span<const StringType> mStrings;
 };
 } // namespace mdb::logging
 
-template <>
-struct std::formatter<mdb::logging::QuoteStringsInList> : public Default<mdb::logging::QuoteStringsInList>
+template <typename StringType>
+struct std::formatter<mdb::logging::QuoteStringsInList<StringType>>
+    : public Default<mdb::logging::QuoteStringsInList<StringType>>
 {
   template <typename FormatContext>
   constexpr auto
-  format(const mdb::logging::QuoteStringsInList &list, FormatContext &ctx) const
+  format(const mdb::logging::QuoteStringsInList<StringType> &list, FormatContext &ctx) const
   {
     auto it = ctx.out();
     if (list.mStrings.empty()) {
@@ -89,6 +91,7 @@ struct ProfileEventArg
   ProfileEventArg(std::string_view name, const char *value) noexcept;
   ProfileEventArg(std::string_view name, const std::string &value) noexcept;
   ProfileEventArg(std::string_view name, std::span<std::string> args) noexcept;
+  ProfileEventArg(std::string_view name, std::span<std::pmr::string> args) noexcept;
   ProfileEventArg(std::string_view name, mdb::Offset offset) noexcept;
 
   template <typename T>
@@ -101,7 +104,7 @@ struct ProfileEventArg
       listOfFormattableValues.begin(), listOfFormattableValues.end(), std::back_inserter(args), [](auto &&value) {
         return std::format("{}", value);
       });
-    mSerializedArg = std::format(R"("{}": [{}])", name, QuoteStringsInList{ args });
+    mSerializedArg = std::format(R"("{}": [{}])", name, QuoteStringsInList<std::string>{ args });
   }
 };
 

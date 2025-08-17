@@ -3,7 +3,6 @@
 
 // system
 #include <format>
-#include <span>
 #include <string_view>
 
 template <typename C> struct JoinFormatIterator
@@ -36,7 +35,7 @@ template <typename C> struct std::formatter<HexJoinFormatIterator<C>>
   {
     auto out = ctx.out();
     const auto *ptr = self.mContainer.data();
-    // const std::span span{ self.mContainer };
+
     if (self.mContainer.empty()) {
       return out;
     }
@@ -58,6 +57,55 @@ template <typename C> struct std::formatter<HexJoinFormatIterator<C>>
   }
 };
 
+struct EscapeFormatter
+{
+  std::string_view mString;
+};
+
+template <typename OutIter>
+constexpr OutIter
+FormatEscaped(OutIter it, std::string_view string) noexcept
+{
+  for (auto ch : string) {
+    switch (ch) {
+    case '\n':
+      *it++ = '\\';
+      *it++ = 'n';
+      break;
+    case '\r':
+      *it++ = '\\';
+      *it++ = 'r';
+      break;
+    case '\t':
+      *it++ = '\\';
+      *it++ = 't';
+      break;
+    case '"':
+      *it++ = '\\';
+      *it++ = '"';
+      break;
+    default:
+      *it++ = ch;
+    }
+  }
+  return it;
+}
+
+template <> struct std::formatter<EscapeFormatter>
+{
+  constexpr auto
+  parse(auto &ctx)
+  {
+    return ctx.begin();
+  }
+
+  auto
+  format(const auto &self, auto &ctx) const noexcept
+  {
+    return FormatEscaped(ctx.out(), self.mString);
+  }
+};
+
 template <typename C> struct std::formatter<JoinFormatIterator<C>>
 {
   using SelfType = JoinFormatIterator<C>;
@@ -74,7 +122,7 @@ template <typename C> struct std::formatter<JoinFormatIterator<C>>
   {
     auto out = ctx.out();
     const auto *ptr = self.mContainer.data();
-    // const std::span span{ self.mContainer };
+
     if (self.mContainer.empty()) {
       return out;
     }

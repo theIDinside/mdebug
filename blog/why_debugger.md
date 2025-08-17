@@ -10,9 +10,7 @@ What other constraints should the project have? I'd like to keep it as loose as 
 
 For this to be fun, it has to be kept to a minimum. Besides, I've seen some projects for chat applications, where the amount of dependencies are staggering, for applications that more or less are a solved problem. If they can do funny things, so can we, we just do it in the other direction.
 
-I'm allowing the project to begin with at most 3 dependencies - one, because it's just _so_ amazing from a C++ perspective. If you have a bit of experience using C++, I think you should probably be able to guess which one it is and that's [`libfmt`](https://fmt.dev/latest/index.html) - C++, welcome to the 21st century. The second dependency is an arbitrary JSON library, for now it'll be [`nlohmann_json`](https://json.nlohmann.me/). Why? We'll get to that later.
-
-Another dependency added for now is for disassembly - without disassembly we are not a real debugger! Thing is though - I know nothing about disassembly and i can't find any "scrapeable" instruction set resources that we can somehow use for parsing instructions - so we will resort (with some heart ache) to a depepdency here. This depedency does however follow our motto of minimalism; it's a fairly small library doing _one_ thing. It's not the entire kitchen sink. The library we will be using is a neat C-library called [zydis](https://github.com/zyantific/zydis)
+Project has two dependencies, [zydis](https://github.com/zyantific/zydis) (for disassembling byte streams to instructions) and `quickjs` (for embedding a javascript engine).
 
 So where would someone who knows next to nothing about debuggers start? What features are needed? What exactly does a debugger do? We know they set some breakpoints, step through some code. If we only had some guiding spec, that we could emulate or fulfill. Aha!
 

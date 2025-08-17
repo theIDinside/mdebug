@@ -1,10 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "common.h"
+// mdb
+#include <common.h>
 #include <common/typedefs.h>
-#include <format>
+#include <utils/format_utils.h>
 
+// std
 #include <memory>
 #include <optional>
 #include <string>
@@ -284,35 +286,6 @@ template <> struct std::formatter<mdb::InstructionBreakpointSpec>
     return out;
   }
 };
-
-template <typename OutIter>
-static constexpr OutIter
-FormatEscaped(OutIter it, std::string_view string) noexcept
-{
-  for (auto ch : string) {
-    switch (ch) {
-    case '\n':
-      *it++ = '\\';
-      *it++ = 'n';
-      break;
-    case '\r':
-      *it++ = '\\';
-      *it++ = 'r';
-      break;
-    case '\t':
-      *it++ = '\\';
-      *it++ = 't';
-      break;
-    case '"':
-      *it++ = '\\';
-      *it++ = '"';
-      break;
-    default:
-      *it++ = ch;
-    }
-  }
-  return it;
-}
 
 template <> struct std::formatter<mdb::BreakpointSpecification>
 {

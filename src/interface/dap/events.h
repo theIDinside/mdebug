@@ -7,9 +7,6 @@
 #include <interface/ui_result.h>
 #include <symbolication/block.h>
 
-// Dependency
-#include <nlohmann/json_fwd.hpp>
-
 namespace mdb {
 enum class SharedObjectSymbols : u8;
 struct SharedObject;

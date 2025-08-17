@@ -5,25 +5,25 @@
 #include "invalid.h"
 #include "supervisor.h"
 #include "tracer.h"
-#include "utils/fmt_join.h"
+#include "utils/format_utils.h"
 
 namespace mdb::ui::dap {
 ui::UICommand *
 ParseCustomRequestCommand(const DebugAdapterClient &client,
   UICommandArg arg,
-  const std::string &cmd_name,
-  const nlohmann::basic_json<> &json) noexcept
+  std::string_view cmd_name,
+  const mdbjson::JsonValue &json) noexcept
 {
   if (cmd_name == "continueAll") {
-    return new ContinueAll{ arg };
+    return new ContinueAll{ std::move(arg) };
   }
   if (cmd_name == "pauseAll") {
-    return new PauseAll{ arg };
+    return new PauseAll{ std::move(arg) };
   }
   if (cmd_name == "getProcesses") {
-    return new GetProcesses{ arg };
+    return new GetProcesses{ std::move(arg) };
   }
-  return new InvalidArgs{ arg, cmd_name, {} };
+  return new InvalidArgs{ std::move(arg), cmd_name, {} };
 }
 
 UIResultPtr
@@ -87,7 +87,7 @@ PauseAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
 }
 
 ImportScript::ImportScript(UICommandArg arg, std::string &&scriptSource) noexcept
-    : UICommand(arg), mSource(std::move(scriptSource))
+    : UICommand(std::move(arg)), mSource(std::move(scriptSource))
 {
 }
 

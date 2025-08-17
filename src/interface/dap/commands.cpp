@@ -1,26 +1,22 @@
 /** LICENSE TEMPLATE */
-#include "commands.h"
-#include "common/formatter.h"
-#include "custom_commands.h"
-#include "invalid.h"
 
-#include "bp.h"
-#include "common.h"
-#include "event_queue.h"
-#include "events/event.h"
-#include "interface/dap/dap_defs.h"
-#include "interface/dap/events.h"
-#include "interface/tracee_command/tracee_command_interface.h"
-#include "parse_buffer.h"
-#include "symbolication/callstack.h"
-#include "utils/fmt_join.h"
-#include "utils/logger.h"
-#include "utils/util.h"
-#include <algorithm>
-#include <iterator>
-#include <optional>
-#include <string>
+#include "commands.h"
+
+// mdb
+#include <bp.h>
+#include <common.h>
+#include <common/formatter.h>
+#include <common/typedefs.h>
+#include <event_queue.h>
+#include <events/event.h>
+#include <interface/dap/custom_commands.h>
+#include <interface/dap/dap_defs.h>
+#include <interface/dap/events.h>
+#include <interface/dap/invalid.h>
+#include <interface/dap/parse_buffer.h>
+#include <interface/tracee_command/tracee_command_interface.h>
 #include <supervisor.h>
+#include <symbolication/callstack.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
 #include <symbolication/value.h>
@@ -28,6 +24,21 @@
 #include <task_scheduling.h>
 #include <tracer.h>
 #include <utils/base64.h>
+#include <utils/format_utils.h>
+#include <utils/logger.h>
+#include <utils/util.h>
+
+// mdblib
+#include <json/json.h>
+
+// system
+
+// std
+#include <algorithm>
+#include <iterator>
+#include <memory_resource>
+#include <optional>
+#include <string>
 
 namespace ui = mdb::ui;
 template <> struct std::formatter<ui::dap::Message>
@@ -84,8 +95,8 @@ template <typename Res, typename JsonObj>
 inline std::optional<Res>
 get(const JsonObj &obj, std::string_view field)
 {
-  if (obj.contains(field)) {
-    return obj[field];
+  if (obj.Contains(field)) {
+    return Res{ obj[field] };
   }
   return std::nullopt;
 }
@@ -213,7 +224,8 @@ ReverseContinueResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllo
   return result;
 }
 
-ReverseContinue::ReverseContinue(UICommandArg arg, int thread_id) noexcept : UICommand(arg), thread_id(thread_id)
+ReverseContinue::ReverseContinue(UICommandArg arg, int thread_id) noexcept
+    : UICommand(std::move(arg)), thread_id(thread_id)
 {
 }
 
@@ -543,10 +555,10 @@ SetBreakpointsResponse::AddBreakpoint(Breakpoint &&bp) noexcept
   mBreakpoints.push_back(std::move(bp));
 }
 
-SetBreakpoints::SetBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept
-    : ui::UICommand(arg), args(std::move(arguments))
+SetBreakpoints::SetBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
+    : ui::UICommand(std::move(arg)), args(arguments)
 {
-  ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
+  ASSERT(args.Contains("breakpoints") && args.UncheckedGetProperty("breakpoints")->IsArray(),
     "Arguments did not contain 'breakpoints' field or wasn't an array");
 }
 
@@ -556,21 +568,27 @@ SetBreakpoints::Execute() noexcept
   GetOrSendError(target);
   auto res = new SetBreakpointsResponse{ true, this, BreakpointRequestKind::source };
 
-  ASSERT(args.contains("source"), "setBreakpoints request requires a 'source' field");
-  ASSERT(args.at("source").contains("path"), "source field requires a 'path' field");
-  const std::string file = args["source"]["path"];
+  ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
+  ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
+  std::string_view file =
+    args.UncheckedGetProperty("source")->UncheckedGetProperty("path")->UncheckedGetStringView();
+
   Set<BreakpointSpecification> srcBpSpecs;
-  for (const auto &src_bp : args.at("breakpoints")) {
-    ASSERT(src_bp.contains("line"), "Source breakpoint requires a 'line' field");
-    const u32 line = src_bp["line"];
-    auto column = get<u32>(src_bp, "column");
-    auto hitCondition = get<std::string>(src_bp, "hitCondition");
-    auto logMessage = get<std::string>(src_bp, "logMessage");
-    auto condition = get<std::string>(src_bp, "condition");
+
+  for (const auto &sourceBreakpoint : args.AsSpan("breakpoints")) {
+    if (!sourceBreakpoint.Contains("line")) {
+      DBGLOG(dap, "Source breakpoint requires a 'line' field");
+      continue;
+    }
+    const u32 line = sourceBreakpoint["line"];
+    auto column = get<u32>(sourceBreakpoint, "column");
+    auto hitCondition = get<std::string>(sourceBreakpoint, "hitCondition");
+    auto logMessage = get<std::string>(sourceBreakpoint, "logMessage");
+    auto condition = get<std::string>(sourceBreakpoint, "condition");
 
     srcBpSpecs.insert(BreakpointSpecification::Create<SourceBreakpointSpecPair>(std::move(condition),
       std::move(hitCondition),
-      file,
+      std::string{ file },
       SourceBreakpointSpec{ .line = line, .column = column, .log_message = std::move(logMessage) }));
   }
 
@@ -588,8 +606,8 @@ SetBreakpoints::Execute() noexcept
   return res;
 }
 
-SetExceptionBreakpoints::SetExceptionBreakpoints(UICommandArg arg, nlohmann::json &&args) noexcept
-    : ui::UICommand{ arg }, args(std::move(args))
+SetExceptionBreakpoints::SetExceptionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
+    : ui::UICommand{ std::move(arg) }, args(args)
 {
 }
 
@@ -601,10 +619,11 @@ SetExceptionBreakpoints::Execute() noexcept
   return res;
 }
 
-SetInstructionBreakpoints::SetInstructionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept
-    : UICommand{ arg }, args(std::move(arguments))
+SetInstructionBreakpoints::SetInstructionBreakpoints(
+  UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
+    : UICommand{ std::move(arg) }, args(arguments)
 {
-  ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
+  ASSERT(args.Contains("breakpoints") && args.At("breakpoints")->IsArray(),
     "Arguments did not contain 'breakpoints' field or wasn't an array");
 }
 
@@ -615,13 +634,12 @@ SetInstructionBreakpoints::Execute() noexcept
 
   using BP = ui::dap::Breakpoint;
   Set<BreakpointSpecification> bps{};
-  const auto ibps = args.at("breakpoints");
-  for (const auto &ibkpt : ibps) {
-    ASSERT(ibkpt.contains("instructionReference") && ibkpt["instructionReference"].is_string(),
+  const auto ibps = args.AsSpan("breakpoints");
+  for (const auto &insBreakpoint : ibps) {
+    ASSERT(insBreakpoint.Contains("instructionReference") && insBreakpoint.At("instructionReference")->IsString(),
       "instructionReference field not in args or wasn't of type string");
-    std::string_view addr_str;
-    ibkpt["instructionReference"].get_to(addr_str);
-    bps.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{ addr_str }));
+    std::string_view addrString = insBreakpoint["instructionReference"];
+    bps.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{ addrString }));
   }
 
   target->SetInstructionBreakpoints(bps);
@@ -639,10 +657,10 @@ SetInstructionBreakpoints::Execute() noexcept
   return res;
 }
 
-SetFunctionBreakpoints::SetFunctionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept
-    : UICommand{ arg }, args(std::move(arguments))
+SetFunctionBreakpoints::SetFunctionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
+    : UICommand{ std::move(arg) }, args(arguments)
 {
-  ASSERT(args.contains("breakpoints") && args.at("breakpoints").is_array(),
+  ASSERT(args.Contains("breakpoints") && args.At("breakpoints")->IsArray(),
     "Arguments did not contain 'breakpoints' field or wasn't an array");
 }
 
@@ -655,16 +673,16 @@ SetFunctionBreakpoints::Execute() noexcept
   Set<BreakpointSpecification> bkpts{};
   std::vector<std::string_view> new_ones{};
   auto res = new SetBreakpointsResponse{ true, this, BreakpointRequestKind::function };
-  for (const auto &fnbkpt : args.at("breakpoints")) {
-    ASSERT(fnbkpt.contains("name") && fnbkpt["name"].is_string(),
+  for (const auto &fnbkpt : args.AsSpan("breakpoints")) {
+    ASSERT(fnbkpt.Contains("name") && fnbkpt["name"]->IsString(),
       "instructionReference field not in args or wasn't of type string");
-    std::string fn_name = fnbkpt["name"];
-    bool is_regex = false;
-    if (fnbkpt.contains("regex")) {
-      is_regex = fnbkpt["regex"];
+    std::string functionName = fnbkpt["name"];
+    bool isRegex = false;
+    if (fnbkpt.Contains("regex")) {
+      isRegex = fnbkpt["regex"];
     }
 
-    bkpts.insert(BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, fn_name, is_regex));
+    bkpts.insert(BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, functionName, isRegex));
   }
 
   target->SetFunctionBreakpoints(bkpts);
@@ -695,7 +713,7 @@ WriteMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 
 WriteMemory::WriteMemory(
   UICommandArg arg, std::optional<AddrPtr> address, int offset, std::vector<u8> &&bytes) noexcept
-    : ui::UICommand(arg), address(address), offset(offset), bytes(std::move(bytes))
+    : ui::UICommand(std::move(arg)), address(address), offset(offset), bytes(std::move(bytes))
 {
 }
 
@@ -739,7 +757,7 @@ ReadMemoryResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
 }
 
 ReadMemory::ReadMemory(UICommandArg arg, std::optional<AddrPtr> address, int offset, u64 bytes) noexcept
-    : UICommand{ arg }, address(address), offset(offset), bytes(bytes)
+    : UICommand{ std::move(arg) }, address(address), offset(offset), bytes(bytes)
 {
 }
 
@@ -797,7 +815,8 @@ DisconnectResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
 }
 
 Disconnect::Disconnect(UICommandArg arg, bool restart, bool terminateDebuggee, bool suspendDebuggee) noexcept
-    : UICommand{ arg }, restart(restart), mTerminateTracee(terminateDebuggee), mSuspendTracee(suspendDebuggee)
+    : UICommand{ std::move(arg) }, restart(restart), mTerminateTracee(terminateDebuggee),
+      mSuspendTracee(suspendDebuggee)
 {
 }
 
@@ -819,8 +838,8 @@ Disconnect::Execute() noexcept
   return nullptr;
 }
 
-Initialize::Initialize(UICommandArg arg, nlohmann::json &&arguments) noexcept
-    : UICommand{ arg }, args(std::move(arguments))
+Initialize::Initialize(UICommandArg arg, mdbjson::JsonValue arguments) noexcept
+    : UICommand{ std::move(arg) }, args(arguments)
 {
 }
 
@@ -829,8 +848,8 @@ Initialize::Execute() noexcept
 {
   DBGLOG(core, "Executing initialize request, session id={}", mSessionId);
   bool RRSession = false;
-  if (args.contains("RRSession")) {
-    RRSession = args.at("RRSession");
+  if (args.Contains("RRSession") && args["RRSession"]->IsBoolean()) {
+    RRSession = args["RRSession"];
   }
 
   mDAPClient->AddSupervisor(Tracer::PrepareNewSupervisorWithId(mSessionId));
@@ -848,61 +867,53 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
 {
   // "this _must_ be 1, the first response"
 
-  nlohmann::json cfg;
-  auto &cfg_body = cfg["body"];
-  std::array<nlohmann::json, 3> arrs{};
-  arrs[0] = nlohmann::json::object(
-    { { "filter", "throw" }, { "label", "Thrown exceptions" }, { "supportsCondition", false } });
-  arrs[1] = nlohmann::json::object(
-    { { "filter", "rethrow" }, { "label", "Re-thrown exceptions" }, { "supportsCondition", false } });
-  arrs[2] = nlohmann::json::object(
-    { { "filter", "catch" }, { "label", "Caught exceptions" }, { "supportsCondition", false } });
-
-  cfg_body["supportsConfigurationDoneRequest"] = true;
-  cfg_body["supportsFunctionBreakpoints"] = true;
-  cfg_body["supportsConditionalBreakpoints"] = true;
-  cfg_body["supportsHitConditionalBreakpoints"] = true;
-  cfg_body["supportsEvaluateForHovers"] = false;
-  cfg_body["supportsStepBack"] = RRSession;
-  cfg_body["supportsSingleThreadExecutionRequests"] = !RRSession;
-  cfg_body["supportsSetVariable"] = false;
-  cfg_body["supportsRestartFrame"] = false;
-  cfg_body["supportsGotoTargetsRequest"] = false;
-  cfg_body["supportsStepInTargetsRequest"] = false;
-  cfg_body["supportsCompletionsRequest"] = false;
-  cfg_body["completionTriggerCharacters"] = { ".", "[" };
-  cfg_body["supportsModulesRequest"] = false;
-  cfg_body["additionalModuleColumns"] = false;
-  cfg_body["supportedChecksumAlgorithms"] = false;
-  cfg_body["supportsRestartRequest"] = false;
-  cfg_body["supportsExceptionOptions"] = false;
-  cfg_body["supportsValueFormattingOptions"] = true;
-  cfg_body["supportsExceptionInfoRequest"] = false;
-  cfg_body["supportTerminateDebuggee"] = false;
-  cfg_body["supportSuspendDebuggee"] = false;
-  cfg_body["supportsDelayedStackTraceLoading"] = false;
-  cfg_body["supportsLoadedSourcesRequest"] = false;
-  cfg_body["supportsLogPoints"] = true;
-  cfg_body["supportsTerminateThreadsRequest"] = true;
-  cfg_body["supportsVariableType"] = true;
-  cfg_body["supportsSetExpression"] = false;
-  cfg_body["supportsTerminateRequest"] = true;
-  cfg_body["supportsDataBreakpoints"] = false;
-  cfg_body["supportsReadMemoryRequest"] = true;
-  cfg_body["supportsWriteMemoryRequest"] = true;
-  cfg_body["supportsDisassembleRequest"] = true;
-  cfg_body["supportsCancelRequest"] = false;
-  cfg_body["supportsBreakpointLocationsRequest"] = false;
-  cfg_body["supportsSteppingGranularity"] = true;
-  cfg_body["supportsInstructionBreakpoints"] = true;
-  cfg_body["supportsExceptionFilterOptions"] = false;
+  auto body = std::format(R"({{ "supportsConfigurationDoneRequest": true,
+  "supportsFunctionBreakpoints": true,
+  "supportsConditionalBreakpoints": true,
+  "supportsHitConditionalBreakpoints": true,
+  "supportsEvaluateForHovers": false,
+  "supportsStepBack": {},
+  "supportsSingleThreadExecutionRequests": {},
+  "supportsSetVariable": false,
+  "supportsRestartFrame": false,
+  "supportsGotoTargetsRequest": false,
+  "supportsStepInTargetsRequest": false,
+  "supportsCompletionsRequest": false,
+  "completionTriggerCharacters": [ ".", "[" ],
+  "supportsModulesRequest": false,
+  "additionalModuleColumns": false,
+  "supportedChecksumAlgorithms": false,
+  "supportsRestartRequest": false,
+  "supportsExceptionOptions": false,
+  "supportsValueFormattingOptions": true,
+  "supportsExceptionInfoRequest": false,
+  "supportTerminateDebuggee": false,
+  "supportSuspendDebuggee": false,
+  "supportsDelayedStackTraceLoading": false,
+  "supportsLoadedSourcesRequest": false,
+  "supportsLogPoints": true,
+  "supportsTerminateThreadsRequest": true,
+  "supportsVariableType": true,
+  "supportsSetExpression": false,
+  "supportsTerminateRequest": true,
+  "supportsDataBreakpoints": false,
+  "supportsReadMemoryRequest": true,
+  "supportsWriteMemoryRequest": true,
+  "supportsDisassembleRequest": true,
+  "supportsCancelRequest": false,
+  "supportsBreakpointLocationsRequest": false,
+  "supportsSteppingGranularity": true,
+  "supportsInstructionBreakpoints": true,
+  "supportsExceptionFilterOptions": false }})",
+    RRSession,
+    !RRSession);
 
   std::pmr::string res{ arenaAllocator };
 
   std::format_to(std::back_inserter(res),
-    R"({{"seq":0,"request_seq":{},"sessionId":0,"type":"response","success":true,"command":"initialize","body":{}}})",
+    R"({{"seq":0,"request_seq":{},"sessionId":0,"type":"response","success":true,"command":"initialize","body": {} }})",
     mRequestSeq,
-    cfg_body.dump());
+    body);
   return res;
 }
 
@@ -924,12 +935,12 @@ LaunchResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
 }
 
 Launch::Launch(UICommandArg arg,
-  SessionId &&id,
+  SessionId id,
   bool stopOnEntry,
   Path program,
-  std::vector<std::string> &&program_args,
+  std::pmr::vector<std::pmr::string> &&program_args,
   std::optional<BreakpointBehavior> breakpointBehavior) noexcept
-    : UICommand{ arg }, mStopOnEntry{ stopOnEntry }, mProgram{ std::move(program) },
+    : UICommand{ std::move(arg) }, mStopOnEntry{ stopOnEntry }, mProgram{ std::move(program) },
       mProgramArgs{ std::move(program_args) }, mBreakpointBehavior{ breakpointBehavior },
       mRequestingSessionId{ id }
 {
@@ -940,8 +951,8 @@ Launch::Execute() noexcept
 {
   PROFILE_SCOPE_ARGS(
     "launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{ mProgramArgs }));
-  const auto processId = Tracer::Launch(
-    mDAPClient, mRequestingSessionId, mStopOnEntry, mProgram, std::move(mProgramArgs), mBreakpointBehavior);
+  const auto processId =
+    Tracer::Launch(mDAPClient, mRequestingSessionId, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
   GetOrSendError(supervisor);
   supervisor->ConfigurationDone();
   DBGLOG(core, "Responding to launch request, resuming target {}", supervisor->TaskLeaderTid());
@@ -965,9 +976,44 @@ AttachResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) co
   return result;
 }
 
-Attach::Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs args) noexcept
-    : UICommand{ arg }, mRequestingSessionId{ std::move(sessionId) }, attachArgs{ std::move(args) }
+Attach::Attach(UICommandArg arg, SessionId sessionId, AttachArgs args) noexcept
+    : UICommand{ std::move(arg) }, mRequestingSessionId{ sessionId }, attachArgs{ args }
 {
+}
+
+// Attach gets a `create` function because in the future, constructing this command will be much more complex
+// than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
+// bat shit crazy in 2024.
+/* static*/ ui::UICommand *
+Attach::create(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
+{
+  auto type = args.At("type")->UncheckedGetStringView();
+  ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
+  if (type == "ptrace") {
+    SessionId pid = args["pid"];
+    return new Attach{ std::move(arg), args["sessionId"], PtraceAttachArgs{ .pid = pid } };
+  } else if (type == "auto") {
+    SessionId processId;
+    if (args.Contains("processId")) {
+      processId = args["processId"];
+      return new Attach{ std::move(arg), args["sessionId"], AutoArgs{ processId } };
+    }
+    return new ui::dap::InvalidArgs{ std::move(arg),
+      "attach",
+      std::vector<InvalidArg>{ { ArgumentError::Missing("Required for auto attach"), "processId" } } };
+  } else {
+    int port = args["port"];
+    std::string_view host = args["host"];
+    bool allstop = true;
+    if (auto allStopVal = args.At("allstop"); allStopVal && allStopVal->IsBoolean()) {
+      allstop = allStopVal->UncheckedGetBoolean();
+    }
+    RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
+
+    return new Attach{ std::move(arg),
+      args["sessionId"],
+      GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type } };
+  };
 }
 
 UIResultPtr
@@ -1054,7 +1100,7 @@ StackTrace::StackTrace(UICommandArg arg,
   std::optional<int> startFrame,
   std::optional<int> levels,
   std::optional<StackTraceFormat> format) noexcept
-    : UICommand{ arg }, mThreadId(threadId), mStartFrame(startFrame), mLevels(levels), mFormat(format)
+    : UICommand{ std::move(arg) }, mThreadId(threadId), mStartFrame(startFrame), mLevels(levels), mFormat(format)
 {
 }
 
@@ -1136,7 +1182,7 @@ StackTrace::Execute() noexcept
   return new StackTraceResponse{ true, this, std::move(stackFrames) };
 }
 
-Scopes::Scopes(UICommandArg arg, int frameId) noexcept : UICommand{ arg }, mFrameId(frameId) {}
+Scopes::Scopes(UICommandArg arg, int frameId) noexcept : UICommand{ std::move(arg) }, mFrameId(frameId) {}
 
 std::pmr::string
 ScopesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
@@ -1179,8 +1225,8 @@ Disassemble::Disassemble(UICommandArg arg,
   int instructionOffset,
   int instructionCount,
   bool resolveSymbols) noexcept
-    : UICommand{ arg }, mAddress(address), mByteOffset(byteOffset), mInstructionOffset(instructionOffset),
-      ins_count(instructionCount), mResolveSymbols(resolveSymbols)
+    : UICommand{ std::move(arg) }, mAddress(address), mByteOffset(byteOffset),
+      mInstructionOffset(instructionOffset), ins_count(instructionCount), mResolveSymbols(resolveSymbols)
 {
 }
 
@@ -1252,7 +1298,7 @@ Evaluate::Evaluate(UICommandArg arg,
   std::string expression,
   std::optional<int> frameId,
   std::optional<EvaluationContext> context) noexcept
-    : UICommand{ arg }, expr(std::move(expression)), frameId(frameId),
+    : UICommand{ std::move(arg) }, expr(std::move(expression)), frameId(frameId),
       context(context.value_or(EvaluationContext::Watch))
 {
 }
@@ -1299,22 +1345,21 @@ Evaluate::ParseContext(std::string_view input) noexcept
 
 /*static*/
 UICommand *
-Evaluate::PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args)
+Evaluate::PrepareEvaluateCommand(UICommandArg arg, const mdbjson::JsonValue &args)
 {
   IfInvalidArgsReturn(Evaluate);
 
-  std::string expr = args.at("expression");
+  std::string expr = args["expression"];
   std::optional<int> frameId{};
   EvaluationContext ctx{};
-  if (args.contains("frameId")) {
-    frameId = args.at("frameId");
+  if (args.Contains("frameId")) {
+    frameId = args["frameId"];
   }
 
-  std::string_view context;
-  args.at("context").get_to(context);
+  std::string_view context = args["context"];
   ctx = Evaluate::ParseContext(context);
 
-  return new ui::dap::Evaluate{ arg, std::move(expr), frameId, ctx };
+  return new ui::dap::Evaluate{ std::move(arg), std::move(expr), frameId, ctx };
 }
 
 EvaluateResponse::EvaluateResponse(bool success,
@@ -1354,7 +1399,7 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
 
 Variables::Variables(
   UICommandArg arg, VariableReferenceId var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
-    : UICommand{ arg }, mVariablesReferenceId(var_ref), mStart(start), mCount(count)
+    : UICommand{ std::move(arg) }, mVariablesReferenceId(var_ref), mStart(start), mCount(count)
 {
 }
 
@@ -1485,42 +1530,60 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   return result;
 }
 
-std::optional<std::string_view>
-PullStringValue(std::string_view name, const nlohmann::json &value) noexcept
+static bool
+ValidateRequestFormat(const mdbjson::JsonValue &req) noexcept
 {
-  if (value.contains(name) && value[name].is_string()) {
-    std::string_view contents;
-    value[name].get_to(contents);
-    return std::optional<std::string_view>{ contents };
+  const auto missingFields = req.Contains("command") && req.Contains("type") && req.Contains("seq") &&
+                             req.Contains("arguments") && req.Contains(kSessionId);
+  if (!missingFields) {
+    DBGLOG(core, "Request missing fields. Request: {}", req);
+    return false;
   }
-  return {};
+
+  const auto correctTypes = req["command"]->IsString() && req["seq"]->IsNumber() && req[kSessionId]->IsNumber();
+
+  if (!correctTypes) {
+    DBGLOG(dap, "Base protocol request fields of incorrect type. Request: {}", req);
+    return false;
+  }
+
+  return true;
 }
 
 ui::UICommand *
-ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) noexcept
+ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) noexcept
 {
   using namespace ui::dap;
 
-  auto obj = nlohmann::json::parse(packet, nullptr, false);
-  std::string_view cmd_name;
-  const std::string req = obj.dump();
-  DBGLOG(core, "[dap]: parsed request: {}", req);
-  obj["command"].get_to(cmd_name);
-  ASSERT(obj.contains("arguments"), "Request did not contain an 'arguments' field: {}", packet);
-  ASSERT(obj.contains(kSessionId) && obj[kSessionId].is_number(),
-    "Request '{}' did not contain 'processId' field which is a DAP-extension requirement for MDB. It makes "
-    "multiprocess debugging under DAP actually function in a non-catastrophically bad way.",
-    cmd_name);
-  const u64 seq = obj["seq"];
-  const SessionId sessionId = obj["sessionId"];
-  UICommandArg arg{ seq, sessionId };
+  UICommandArg arg{ 0, 0, client.AcquireArena() };
+  std::pmr::string *str = arg.allocator->Allocate<std::pmr::string>();
+  str->reserve(packet.size());
+  // now we've stored the data in the block. it'll live as long as the allocator is alive.
+  str->append(packet);
 
-  const auto cmd = ParseCommandType(cmd_name);
-  auto &&args = std::move(obj["arguments"]);
+  const auto jsonResult = mdbjson::Parse(*arg.allocator, *str);
+
+  if (!jsonResult) {
+    return nullptr;
+  }
+
+  const auto &obj = jsonResult.value();
+  if (!ValidateRequestFormat(obj)) {
+    return nullptr;
+  }
+
+  DBGLOG(core, "[dap]: parsed request: {}", obj);
+  std::string_view commandName = obj["command"];
+
+  arg.mSeq = obj["seq"];
+  arg.mSessionId = obj["sessionId"];
+
+  const auto cmd = ParseCommandType(commandName);
+  const mdbjson::JsonValue &args = obj["arguments"];
   switch (cmd) {
   case CommandType::Attach: {
     IfInvalidArgsReturn(Attach);
-    return Attach::create(arg, args);
+    return Attach::create(std::move(arg), args);
   }
   case CommandType::BreakpointLocations:
     TODO("Command::BreakpointLocations");
@@ -1528,39 +1591,37 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     TODO("Command::Completions");
   case CommandType::ConfigurationDone: {
     IfInvalidArgsReturn(ConfigurationDone);
-    return new ConfigurationDone{ arg };
+    return new ConfigurationDone{ std::move(arg) };
   } break;
   case CommandType::Continue: {
     IfInvalidArgsReturn(Continue);
 
     bool all_threads = false;
-    if (args.contains("singleThread")) {
+    if (args.Contains("singleThread")) {
       const bool b = args["singleThread"];
       all_threads = !b;
     }
 
-    return new Continue{ arg, args.at("threadId"), all_threads };
+    return new Continue{ std::move(arg), args["threadId"], all_threads };
   }
   case CommandType::CustomRequest: {
-    if (args.contains("command") && args.contains("arguments")) {
-      std::string customCommand;
-      args["command"].get_to(customCommand);
-      return ParseCustomRequestCommand(client, arg, customCommand, args["arguments"]);
+    if (args.Contains("command") && args.Contains("arguments")) {
+      std::string_view customCommand = args["command"];
+      return ParseCustomRequestCommand(client, std::move(arg), customCommand, args["arguments"]);
     }
-    return new InvalidArgs{ arg, "customRequest", {} };
+    return new InvalidArgs{ std::move(arg), "customRequest", {} };
   }
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
   case CommandType::Disassemble: {
     IfInvalidArgsReturn(Disassemble);
 
-    std::string_view addr_str;
-    args["memoryReference"].get_to(addr_str);
-    const auto addr = ToAddress(addr_str);
-    int offset = args.at("offset");
-    int instructionOffset = args.at("instructionOffset");
-    int instructionCount = args.at("instructionCount");
-    return new ui::dap::Disassemble{ arg, addr, offset, instructionOffset, instructionCount, false };
+    std::string_view addrString = args["memoryReference"];
+    const auto addr = ToAddress(addrString);
+    int offset = args["offset"];
+    int instructionOffset = args["instructionOffset"];
+    int instructionCount = args["instructionCount"];
+    return new ui::dap::Disassemble{ std::move(arg), addr, offset, instructionOffset, instructionCount, false };
   }
   case CommandType::Disconnect: {
     IfInvalidArgsReturn(Disconnect);
@@ -1568,19 +1629,19 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     bool restart = false;
     bool terminateDebuggee = false;
     bool suspendDebuggee = false;
-    if (args.contains("restart")) {
-      restart = args.at("restart");
+    if (args.Contains("restart")) {
+      restart = args["restart"];
     }
-    if (args.contains("terminateDebuggee")) {
-      terminateDebuggee = args.at("terminateDebuggee");
+    if (args.Contains("terminateDebuggee")) {
+      terminateDebuggee = args["terminateDebuggee"];
     }
-    if (args.contains("suspendDebuggee")) {
-      suspendDebuggee = args.at("suspendDebuggee");
+    if (args.Contains("suspendDebuggee")) {
+      suspendDebuggee = args["suspendDebuggee"];
     }
-    return new Disconnect{ arg, restart, terminateDebuggee, suspendDebuggee };
+    return new Disconnect{ std::move(arg), restart, terminateDebuggee, suspendDebuggee };
   }
   case CommandType::Evaluate: {
-    return Evaluate::PrepareEvaluateCommand(arg, args);
+    return Evaluate::PrepareEvaluateCommand(std::move(arg), args);
   }
   case CommandType::ExceptionInfo:
     TODO("Command::ExceptionInfo");
@@ -1590,44 +1651,48 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     TODO("Command::GotoTargets");
   case CommandType::Initialize:
     IfInvalidArgsReturn(Initialize);
-    return new Initialize{ arg, std::move(args) };
+    return new Initialize{ std::move(arg), args };
   case CommandType::Launch: {
     IfInvalidArgsReturn(Launch);
 
-    SessionId sessionId = args.at("sessionId");
-    Path path = args.at("program");
+    SessionId sessionId = args["sessionId"];
+    Path path{ args["program"]->UncheckedGetStringView() };
     Path cwd;
-    std::vector<std::string> prog_args;
-    if (args.contains("args")) {
-      prog_args = args.at("args");
+    std::pmr::vector<std::pmr::string> prog_args{ arg.allocator->GetAllocator() };
+    if (args.Contains("args")) {
+      for (const auto &v : args.AsSpan("args")) {
+        std::pmr::string arg;
+        std::format_to(std::back_inserter(arg), "{}", v);
+        prog_args.push_back(std::move(arg));
+      }
     }
 
     bool stopOnEntry = false;
-    if (args.contains("stopOnEntry")) {
+    if (args.Contains("stopOnEntry")) {
       stopOnEntry = args["stopOnEntry"];
     }
 
-    if (args.contains("env")) {
+    if (args.Contains("env")) {
     }
 
-    if (args.contains("cwd")) {
+    if (args.Contains("cwd")) {
     }
 
-    const auto behaviorSetting =
-      PullStringValue("breakpointBehavior", args)
-        .and_then([](const std::string_view &behavior) -> std::optional<BreakpointBehavior> {
-          if (behavior == "Stop all threads") {
-            return BreakpointBehavior::StopAllThreadsWhenHit;
-          } else if (behavior == "Stop single thread") {
-            return BreakpointBehavior::StopOnlyThreadThatHit;
-          } else {
-            return std::nullopt;
-          }
-        })
-        .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
+    const auto behaviorSetting = args.Get("breakpointBehavior")
+                                   .and_then([](const auto &json) { return json.GetStringView(); })
+                                   .transform([](const std::string_view &behavior) {
+                                     if (behavior == "Stop all threads") {
+                                       return BreakpointBehavior::StopAllThreadsWhenHit;
+                                     } else if (behavior == "Stop single thread") {
+                                       return BreakpointBehavior::StopOnlyThreadThatHit;
+                                     } else {
+                                       return BreakpointBehavior::StopAllThreadsWhenHit;
+                                     }
+                                   })
+                                   .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
 
     return new Launch{
-      arg, std::move(sessionId), stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting
+      std::move(arg), sessionId, stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting
     };
   }
   case CommandType::LoadedSources:
@@ -1640,30 +1705,29 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     int threadId = args["threadId"];
     bool singleThread = false;
     SteppingGranularity stepType = SteppingGranularity::Line;
-    if (args.contains("granularity")) {
-      std::string_view str_arg;
-      args["granularity"].get_to(str_arg);
+    if (args.Contains("granularity")) {
+      std::string_view str_arg = args["granularity"];
       stepType = from_str(str_arg);
     }
-    if (args.contains("singleThread")) {
+    if (args.Contains("singleThread")) {
       singleThread = args["singleThread"];
     }
-    return new Next{ arg, threadId, !singleThread, stepType };
+    return new Next{ std::move(arg), threadId, !singleThread, stepType };
   }
   case CommandType::Pause: {
     IfInvalidArgsReturn(Pause);
     int threadId = args["threadId"];
-    return new Pause(arg, Pause::Args{ threadId });
+    return new Pause(std::move(arg), Pause::Args{ threadId });
   }
   case CommandType::ReadMemory: {
     IfInvalidArgsReturn(ReadMemory);
 
-    std::string_view addrString;
-    args.at("memoryReference").get_to(addrString);
+    std::string_view addrString = args["memoryReference"];
     const auto addr = ToAddress(addrString);
-    const auto offset = args.value("offset", 0);
-    const u64 count = args.at("count");
-    return new ui::dap::ReadMemory{ arg, addr, offset, count };
+
+    const auto offset = args.Contains("offset") ? i32{ args["offset"] } : 0;
+    const u64 count = args["count"];
+    return new ui::dap::ReadMemory{ std::move(arg), addr, offset, count };
   }
   case CommandType::Restart:
     TODO("Command::Restart");
@@ -1672,34 +1736,34 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
   case CommandType::ReverseContinue: {
     IfInvalidArgsReturn(ReverseContinue);
     int threadId = args["threadId"];
-    return new ui::dap::ReverseContinue{ arg, threadId };
+    return new ui::dap::ReverseContinue{ std::move(arg), threadId };
   }
   case CommandType::Scopes: {
     IfInvalidArgsReturn(Scopes);
 
-    const int frame_id = args.at("frameId");
-    return new ui::dap::Scopes{ arg, frame_id };
+    const int frame_id = args["frameId"];
+    return new ui::dap::Scopes{ std::move(arg), frame_id };
   }
   case CommandType::SetBreakpoints:
     IfInvalidArgsReturn(SetBreakpoints);
 
-    return new SetBreakpoints{ arg, std::move(args) };
+    return new SetBreakpoints{ std::move(arg), args };
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
   case CommandType::SetExceptionBreakpoints: {
     IfInvalidArgsReturn(SetExceptionBreakpoints);
-    return new SetExceptionBreakpoints{ arg, std::move(args) };
+    return new SetExceptionBreakpoints{ std::move(arg), std::move(args) };
   }
   case CommandType::SetExpression:
     TODO("Command::SetExpression");
   case CommandType::SetFunctionBreakpoints:
     IfInvalidArgsReturn(SetFunctionBreakpoints);
 
-    return new SetFunctionBreakpoints{ arg, std::move(args) };
+    return new SetFunctionBreakpoints{ std::move(arg), std::move(args) };
   case CommandType::SetInstructionBreakpoints:
     IfInvalidArgsReturn(SetInstructionBreakpoints);
 
-    return new SetInstructionBreakpoints{ arg, std::move(args) };
+    return new SetInstructionBreakpoints{ std::move(arg), std::move(args) };
   case CommandType::SetVariable:
     TODO("Command::SetVariable");
   case CommandType::Source:
@@ -1710,25 +1774,25 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     std::optional<int> startFrame;
     std::optional<int> levels;
     std::optional<StackTraceFormat> format_;
-    if (args.contains("startFrame")) {
-      startFrame = args.at("startFrame");
+    if (args.Contains("startFrame")) {
+      startFrame = args["startFrame"];
     }
-    if (args.contains("levels")) {
-      levels = args.at("levels");
+    if (args.Contains("levels")) {
+      levels = args["levels"];
     }
-    if (args.contains("format")) {
-      auto &fmt = args["format"];
+    if (args.Contains("format")) {
+      mdbjson::JsonValue fmt = args["format"];
       StackTraceFormat format;
-      format.parameters = fmt.value("parameters", true);
-      format.parameterTypes = fmt.value("parameterTypes", true);
-      format.parameterNames = fmt.value("parameterNames", true);
-      format.parameterValues = fmt.value("parameterValues", true);
-      format.line = fmt.value("line", true);
-      format.module = fmt.value("module", false);
-      format.includeAll = fmt.value("includeAll", true);
+      format.parameters = fmt.Value("parameters", true);
+      format.parameterTypes = fmt.Value("parameterTypes", true);
+      format.parameterNames = fmt.Value("parameterNames", true);
+      format.parameterValues = fmt.Value("parameterValues", true);
+      format.line = fmt.Value("line", true);
+      format.module = fmt.Value("module", false);
+      format.includeAll = fmt.Value("includeAll", true);
       format_ = format;
     }
-    return new ui::dap::StackTrace{ arg, args.at("threadId"), startFrame, levels, format_ };
+    return new ui::dap::StackTrace{ std::move(arg), args["threadId"], startFrame, levels, format_ };
   }
   case CommandType::StepBack:
     TODO("Command::StepBack");
@@ -1738,16 +1802,15 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
     int threadId = args["threadId"];
     bool singleThread = false;
     SteppingGranularity step_type = SteppingGranularity::Line;
-    if (args.contains("granularity")) {
-      std::string_view str_arg;
-      args["granularity"].get_to(str_arg);
+    if (args.Contains("granularity")) {
+      std::string_view str_arg = args["granularity"];
       step_type = from_str(str_arg);
     }
-    if (args.contains("singleThread")) {
+    if (args.Contains("singleThread")) {
       singleThread = args["singleThread"];
     }
 
-    return new StepIn{ arg, threadId, singleThread, step_type };
+    return new StepIn{ std::move(arg), threadId, singleThread, step_type };
   }
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
@@ -1756,52 +1819,50 @@ ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) n
 
     int threadId = args["threadId"];
     bool singleThread = false;
-    if (args.contains("singleThread")) {
+    if (args.Contains("singleThread")) {
       singleThread = args["singleThread"];
     }
-    return new ui::dap::StepOut{ arg, threadId, !singleThread };
+    return new ui::dap::StepOut{ std::move(arg), threadId, !singleThread };
   }
   case CommandType::Terminate:
     IfInvalidArgsReturn(Terminate);
 
-    return new Terminate{ arg };
+    return new Terminate{ std::move(arg) };
   case CommandType::TerminateThreads:
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
     IfInvalidArgsReturn(Threads);
 
-    return new Threads{ arg };
+    return new Threads{ std::move(arg) };
   case CommandType::Variables: {
     IfInvalidArgsReturn(Variables);
 
     VariableReferenceId variablesReference = args["variablesReference"];
     std::optional<u32> start{};
     std::optional<u32> count{};
-    if (args.contains("start")) {
-      start = args.at("start");
+    if (args.Contains("start")) {
+      start = args["start"];
     }
-    if (args.contains("count")) {
-      count = args.at("count");
+    if (args.Contains("count")) {
+      count = args["count"];
     }
-    return new Variables{ arg, variablesReference, start, count };
+    return new Variables{ std::move(arg), variablesReference, start, count };
   }
   case CommandType::WriteMemory: {
     IfInvalidArgsReturn(WriteMemory);
-    std::string_view addrString;
-    args["memoryReference"].get_to(addrString);
+    std::string_view addrString = args["memoryReference"];
     const auto addr = ToAddress(addrString);
     int offset = 0;
-    if (args.contains("offset")) {
-      args.at("offset").get_to(offset);
+    if (args.Contains("offset")) {
+      offset = args["offset"];
     }
 
-    std::string_view data{};
-    args.at("data").get_to(data);
+    std::string_view data = args["data"];
 
     if (auto bytes = mdb::decode_base64(data); bytes) {
-      return new WriteMemory{ arg, addr, offset, std::move(bytes.value()) };
+      return new WriteMemory{ std::move(arg), addr, offset, std::move(bytes.value()) };
     } else {
-      return new InvalidArgs{ arg, "writeMemory", {} };
+      return new InvalidArgs{ std::move(arg), "writeMemory", {} };
     }
   }
   case CommandType::ImportScript:

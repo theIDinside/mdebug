@@ -1,12 +1,15 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "json/json.h"
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
 
 namespace mdb::ui::dap {
+struct InvalidArgs;
 struct InvalidArgsResponse final : public UIResult
 {
-  InvalidArgsResponse(Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept;
+  InvalidArgsResponse(
+    Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args, InvalidArgs *cmd) noexcept;
   ~InvalidArgsResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   Pid mProcessId;
@@ -17,7 +20,7 @@ struct InvalidArgsResponse final : public UIResult
 struct InvalidArgs final : public UICommand
 {
   InvalidArgs(UICommandArg arg, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-      : UICommand(arg), command(command), missing_arguments(std::move(missing_args))
+      : UICommand(std::move(arg)), command(command), missing_arguments(std::move(missing_args))
   {
   }
   ~InvalidArgs() override = default;
@@ -25,7 +28,7 @@ struct InvalidArgs final : public UICommand
   UIResultPtr
   Execute() noexcept final
   {
-    return new InvalidArgsResponse{ mSessionId, command, std::move(missing_arguments) };
+    return new InvalidArgsResponse{ mSessionId, command, std::move(missing_arguments), this };
   }
 
   ArgumentErrorKind kind;
@@ -39,12 +42,12 @@ struct InvalidArgs final : public UICommand
   };
 };
 
-template <typename Derived, typename JsonArgs>
+template <typename Derived>
 constexpr auto
-Validate(UICommandArg arg, const JsonArgs &args) -> InvalidArgs *
+Validate(UICommandArg &arg, const mdbjson::JsonValue &args) -> InvalidArgs *
 {
   if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {
-    return new ui::dap::InvalidArgs{ arg, Derived::Request, std::move(missing.value()) };
+    return new ui::dap::InvalidArgs{ std::move(arg), Derived::Request, std::move(missing.value()) };
   } else {
     return nullptr;
   }

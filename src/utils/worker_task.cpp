@@ -3,7 +3,7 @@
 #include "../common.h"
 #include "lib/arena_allocator.h"
 #include "thread_pool.h"
-#include "utils/fmt_join.h"
+#include "utils/format_utils.h"
 #include "utils/logger.h"
 
 namespace mdb {
@@ -37,7 +37,7 @@ NoOp::ExecuteTask(std::pmr::memory_resource *) noexcept
 
 TaskGroup::TaskGroup(std::string_view name) noexcept : mPromise(), mName(name), mTaskLock(), mDoneTasks()
 {
-  mGroupTemporaryAllocator = alloc::ArenaResource::Create(alloc::Page{ 10000 });
+  mGroupTemporaryAllocator = alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 10000 });
 }
 
 void

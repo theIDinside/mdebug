@@ -220,7 +220,7 @@ public:
     SessionId sessionId,
     bool stopAtEntry,
     const Path &program,
-    std::span<const std::string> prog_args,
+    std::span<std::pmr::string> prog_args,
     std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   // Returns the PID we've attached to; if we've attached to a remote target, there's a chance
   // that we may have in fact really attached to multiple processes. In this case, this is just the "first" process

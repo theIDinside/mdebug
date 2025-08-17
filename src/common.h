@@ -2,7 +2,6 @@
 #pragma once
 // mdb
 #include <common/macros.h>
-#include <common/typedefs.h>
 
 // stdlib
 #include <algorithm>
@@ -15,7 +14,7 @@
 #include <source_location>
 
 // system
-#include <print>
+
 #include <sys/mman.h>
 #include <sys/user.h>
 #include <type_traits>

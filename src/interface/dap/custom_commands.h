@@ -4,11 +4,9 @@
 #include <common/typedefs.h>
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
+#include <json/json.h>
 #include <lib/arena_allocator.h>
 #include <utils/expected.h>
-
-// dependency
-#include <nlohmann/json.hpp>
 
 namespace mdb {
 
@@ -22,14 +20,14 @@ using ui::UIResultPtr;
 
 ui::UICommand *ParseCustomRequestCommand(const DebugAdapterClient &client,
   UICommandArg arg,
-  const std::string &cmd_name,
-  const nlohmann::basic_json<> &json) noexcept;
+  std::string_view cmd_name,
+  const mdbjson::JsonValue &json) noexcept;
 
 // Resume all (currently stopped) processes and their tasks
 struct ContinueAll final : public ui::UICommand
 {
   DEFINE_NAME("continueAll");
-  ContinueAll(UICommandArg arg) noexcept : UICommand(arg) {}
+  ContinueAll(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~ContinueAll() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };
@@ -48,7 +46,7 @@ struct ContinueAllResponse final : UIResult
 struct PauseAll final : UICommand
 {
   DEFINE_NAME("pauseAll");
-  PauseAll(UICommandArg arg) noexcept : UICommand(arg) {}
+  PauseAll(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~PauseAll() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };
@@ -70,7 +68,7 @@ struct GetProcesses final : public UICommand
 {
   using IdContainer = std::vector<ProcessId>;
   DEFINE_NAME("getProcesses");
-  GetProcesses(UICommandArg arg) noexcept : UICommand(arg) {}
+  GetProcesses(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~GetProcesses() noexcept override = default;
   UIResultPtr Execute() noexcept final;
 };

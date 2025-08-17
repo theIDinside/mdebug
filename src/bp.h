@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+#include <bp_defs.h>
 #include <bp_spec.h>
 #include <common/typedefs.h>
 #include <events/event.h>
@@ -27,33 +28,6 @@ class SymbolFile;
 
 namespace tc {
 class TraceeCommandInterface;
-};
-enum class BreakpointBehavior
-{
-  StopAllThreadsWhenHit,
-  StopOnlyThreadThatHit
-};
-
-enum class BreakpointRequestKind : u8
-{
-  source,
-  function,
-  instruction,
-  data,
-  exception,
-};
-
-enum class LocationUserKind : u8
-{
-  Address,
-  Source,
-  Function,
-  FinishFunction,
-  LogPoint,
-  ResumeTo,
-  SharedObjectLoaded,
-  Exception,
-  LongJump
 };
 
 struct UserRequestedBreakpoint

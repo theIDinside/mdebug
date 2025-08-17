@@ -59,7 +59,12 @@ ProfileEventArg::ProfileEventArg(std::string_view name, const char *value) noexc
 
 ProfileEventArg::ProfileEventArg(std::string_view name, std::span<std::string> args) noexcept
 {
-  mSerializedArg = std::format(R"("{}": [{}])", name, logging::QuoteStringsInList{ args });
+  mSerializedArg = std::format(R"("{}": [{}])", name, logging::QuoteStringsInList<std::string>{ args });
+}
+
+ProfileEventArg::ProfileEventArg(std::string_view name, std::span<std::pmr::string> args) noexcept
+{
+  mSerializedArg = std::format(R"("{}": [{}])", name, logging::QuoteStringsInList<std::pmr::string>{ args });
 }
 
 ProfileEventArg::ProfileEventArg(std::string_view name, mdb::Offset offset) noexcept

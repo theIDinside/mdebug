@@ -1,29 +1,42 @@
 /** LICENSE TEMPLATE */
 #include "arena_allocator.h"
 #include "common.h"
+#include "events/event.h"
 #include <cstdlib>
 #include <memory_resource>
 #include <sys/mman.h>
 namespace mdb::alloc {
-ScopedArenaAllocator::ScopedArenaAllocator(ArenaResource *allocator) noexcept : mAllocator(allocator)
+ArenaResource::ScopedArenaAllocator::ScopedArenaAllocator(ArenaResource *allocator) noexcept
+    : mAllocator(allocator)
 {
   mStartOffset = mAllocator->CurrentlyAllocated();
 }
 
-ScopedArenaAllocator::~ScopedArenaAllocator() noexcept
+ArenaResource::ScopedArenaAllocator::ScopedArenaAllocator(
+  ArenaResource *allocator, ArenaAllocatorPool *containingPool) noexcept
+    : mAllocator(allocator), mContainingPool(containingPool)
+{
+}
+
+ArenaResource::ScopedArenaAllocator::~ScopedArenaAllocator() noexcept
 {
   if (mAllocator) {
     mAllocator->Reset(mStartOffset);
+    const auto CompareAllocator = [alloc = mAllocator](auto *allocator) { return allocator == alloc; };
+    if (mContainingPool && none_of(*mContainingPool, std::move(CompareAllocator))) {
+      mContainingPool->push_back(mAllocator);
+    }
   }
 }
 
-ScopedArenaAllocator::ScopedArenaAllocator(ScopedArenaAllocator &&move) noexcept : mAllocator(nullptr)
+ArenaResource::ScopedArenaAllocator::ScopedArenaAllocator(ScopedArenaAllocator &&move) noexcept
+    : mAllocator(nullptr)
 {
   std::swap(mAllocator, move.mAllocator);
 }
 
 ArenaResource *
-ScopedArenaAllocator::GetAllocator() const noexcept
+ArenaResource::ScopedArenaAllocator::GetAllocator() const noexcept
 {
   return mAllocator;
 }
@@ -41,8 +54,12 @@ bool
 ArenaResource::ExtendAllocation(Page pageCount) noexcept
 {
   auto address = mAllocatedBuffer + mArenaCapacity;
-  auto result = mmap(address, pageCount.SizeBytes(), PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+  auto result = mmap(address,
+    pageCount.SizeBytes(),
+    PROT_READ | PROT_WRITE,
+    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+    -1,
+    0);
   if (result == MAP_FAILED) {
     return false;
   }
@@ -52,18 +69,24 @@ ArenaResource::ExtendAllocation(Page pageCount) noexcept
   return true;
 }
 
-/*static*/
-ArenaResource::UniquePtr
+/* static */ ArenaResource *
 ArenaResource::Create(Page pagesToAllocate) noexcept
 {
-  return std::unique_ptr<ArenaResource>(new ArenaResource{pagesToAllocate.SizeBytes()});
+  return new ArenaResource{ pagesToAllocate.SizeBytes() };
+}
+
+/*static*/
+ArenaResource::UniquePtr
+ArenaResource::CreateUniquePtr(Page pagesToAllocate) noexcept
+{
+  return std::unique_ptr<ArenaResource>(Create(pagesToAllocate));
 }
 
 /*static*/
 ArenaResource::SharedPtr
 ArenaResource::CreateShared(Page pagesToAllocate) noexcept
 {
-  return std::shared_ptr<ArenaResource>(new ArenaResource{pagesToAllocate.SizeBytes()});
+  return std::shared_ptr<ArenaResource>(Create(pagesToAllocate));
 }
 
 u64
@@ -88,7 +111,7 @@ ArenaResource::Reset(u64 previousOffset) noexcept
 ScopedArenaAllocator
 ArenaResource::ScopeAllocation() noexcept
 {
-  return ScopedArenaAllocator{this};
+  return ScopedArenaAllocator{ this };
 }
 
 void *
@@ -96,8 +119,8 @@ ArenaResource::do_allocate(std::size_t bytes, std::size_t alignment)
 {
   const std::size_t possiblyAdjustedOffset = (mAllocated + alignment - 1) & ~(alignment - 1);
   MUST_HOLD(possiblyAdjustedOffset + bytes < mArenaCapacity,
-            "Extending Arena Allocator size not yet implemented/supported fully. ArenaAllocator::ExtendAllocation "
-            "is what needs additional work.");
+    "Extending Arena Allocator size not yet implemented/supported fully. ArenaAllocator::ExtendAllocation "
+    "is what needs additional work.");
   void *p = mAllocatedBuffer + possiblyAdjustedOffset;
   mAllocated = possiblyAdjustedOffset + bytes;
   return p;
@@ -107,7 +130,7 @@ void
 ArenaResource::do_deallocate(void *p, std::size_t, std::size_t)
 {
   MUST_HOLD(p < (mAllocatedBuffer + mArenaCapacity),
-            "The arena allocator doesn't support dynamic allocations when memory runs out, yet");
+    "The arena allocator doesn't support dynamic allocations when memory runs out, yet");
 }
 
 bool

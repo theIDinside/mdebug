@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <fcntl.h>
 #include <filesystem>
+#include <memory>
 #include <poll.h>
 #include <supervisor.h>
 #include <sys/epoll.h>
@@ -81,8 +82,6 @@ static constexpr std::string_view strings[]{
 };
 */
 
-using json = nlohmann::json;
-
 DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
     : mTracerInputFileDescriptor(tracerInputFileDescriptor),
       mTracerOutputFileDescriptor(tracerOutputFileDescriptor), keep_running(true), mUIResultLock{}, events_queue{},
@@ -93,7 +92,7 @@ DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
   posted_event_notifier = w;
   posted_evt_listener = r;
   tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
-  mTemporaryArena = alloc::ArenaResource::Create(alloc::Page{ 16 });
+  mTemporaryArena = alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 16 });
 }
 
 DAP::~DAP() noexcept {}
@@ -210,7 +209,7 @@ DebugAdapterClient::ReadPendingCommands() noexcept
     return;
   }
   bool no_partials = false;
-  const auto request_headers = parse_headers_from(parse_swapbuffer.take_view(), &no_partials);
+  const auto request_headers = ParseHeadersFromBuffer(parse_swapbuffer.take_view(), &no_partials);
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
       const auto *cd = std::get_if<ContentDescriptor>(&hdr);
@@ -308,11 +307,15 @@ DebugAdapterClient::FlushEvents() noexcept
     return;
   }
 
-  UIResultPtr tmp[32];
-  const auto count = std::min(mDelayedEvents.size(), std::size(tmp));
+  auto scope = mEventsAllocator->ScopeAllocation();
+
+  std::pmr::vector<UIResultPtr> tmp{ scope.GetAllocator() };
+  constexpr auto maxToFlush = 64ul;
+  tmp.reserve(maxToFlush);
+  const auto count = std::min(mDelayedEvents.size(), maxToFlush);
   {
     std::lock_guard lock(m);
-    std::copy(mDelayedEvents.begin(), mDelayedEvents.begin() + count, tmp);
+    std::copy(mDelayedEvents.begin(), mDelayedEvents.begin() + count, std::back_inserter(tmp));
     if (count == mDelayedEvents.size()) {
       mDelayedEvents.clear();
     } else {
@@ -320,8 +323,8 @@ DebugAdapterClient::FlushEvents() noexcept
     }
   }
 
-  for (auto evt : std::span{ tmp, count }) {
-    auto result = evt->Serialize(0, mEventsAllocator.get());
+  for (auto evt : tmp) {
+    auto result = evt->Serialize(0, scope.GetAllocator());
     WriteSerializedProtocolMessage(result);
     delete evt;
   }
@@ -371,9 +374,12 @@ DebugAdapterClient::InitAllocators() noexcept
   using alloc::Page;
 
   // Create a 1 megabyte arena allocator.
-  mCommandsAllocator = ArenaResource::Create(Page{ 16 });
-  mCommandResponseAllocator = ArenaResource::Create(Page{ 128 });
-  mEventsAllocator = ArenaResource::Create(Page{ 16 });
+  mCommandsAllocator = ArenaResource::CreateUniquePtr(Page{ 16 });
+  mCommandResponseAllocator = ArenaResource::CreateUniquePtr(Page{ 128 });
+  mEventsAllocator = ArenaResource::CreateUniquePtr(Page{ 16 });
+  for (auto i = 0; i < 32; ++i) {
+    mCommandAllocatorPool.push_back(ArenaResource::Create(Page{ 512 }));
+  }
 }
 
 DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
@@ -415,6 +421,15 @@ DebugAdapterClient::CreateStandardIOConnection() noexcept
 {
   VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
   return new DebugAdapterClient{ DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO };
+}
+
+std::unique_ptr<alloc::ScopedArenaAllocator>
+DebugAdapterClient::AcquireArena() noexcept
+{
+  ASSERT(!mCommandAllocatorPool.empty(), "No more allocators to take from the pool");
+  auto alloc = mCommandAllocatorPool.back();
+  mCommandAllocatorPool.pop_back();
+  return std::make_unique<alloc::ScopedArenaAllocator>(alloc, &mCommandAllocatorPool);
 }
 
 void

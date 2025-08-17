@@ -22,7 +22,7 @@ struct PtraceAttachArgs
 
 struct GdbRemoteAttachArgs
 {
-  std::string host;
+  std::string_view host;
   int port;
   std::optional<Pid> pid{ std::nullopt };
   bool allstop;
