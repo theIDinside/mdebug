@@ -203,14 +203,14 @@ Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 
   if (result) [[likely]] {
     ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
-    auto data = result->Serialize(0, scoped.GetAllocator());
+    auto data = result->Serialize(0);
     if (!data.empty()) {
       dapClient->WriteSerializedProtocolMessage(data);
     }
 
-    delete cmd;
     delete result;
   }
+  delete cmd;
   dapClient->FlushEvents();
 }
 
@@ -308,7 +308,7 @@ Tracer::KillUI() noexcept
 }
 
 static int
-exec(const Path &program, std::span<const std::string> programArguments, char **env)
+exec(const Path &program, std::span<const std::pmr::string> programArguments, char **env)
 {
   const auto arg_size = programArguments.size() + 2;
   std::vector<const char *> args;
@@ -370,7 +370,7 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const A
         // we want our design to be consistent (1 commander / process. Otherwise we turn into
         // gdb hell hole.)
         auto remote_init = tc::RemoteSessionConfigurator{ Tracer::Get().ConnectToRemoteGdb(
-          { .host = gdb.host, .port = gdb.port }, {}) };
+          { .host = std::string{ gdb.host }, .port = gdb.port }, {}) };
 
         std::vector<tc::RemoteProcess> res;
 
@@ -451,7 +451,7 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient,
   SessionId sessionId,
   bool stopOnEntry,
   const Path &program,
-  std::span<const std::string> prog_args,
+  std::span<std::pmr::string> prog_args,
   std::optional<BreakpointBehavior> breakpointBehavior) noexcept
 {
   termios originalTty;
@@ -464,7 +464,9 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient,
 
   std::vector<std::string> execvpArgs{};
   execvpArgs.push_back(program.c_str());
-  std::copy(prog_args.begin(), prog_args.end(), std::back_inserter(execvpArgs));
+  for (const auto &arg : prog_args) {
+    execvpArgs.push_back(std::string{ arg });
+  }
 
   std::vector<char *> environment;
   for (auto i = 0; environ[i] != nullptr; ++i) {

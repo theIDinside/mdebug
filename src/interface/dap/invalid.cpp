@@ -7,8 +7,8 @@
 
 namespace mdb::ui::dap {
 InvalidArgsResponse::InvalidArgsResponse(
-  Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-    : UIResult(processId), mProcessId(processId), command(command), missing_or_invalid(std::move(missing_args))
+  Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args, InvalidArgs *cmd) noexcept
+    : UIResult(false, cmd), mProcessId(processId), command(command), missing_or_invalid(std::move(missing_args))
 {
 }
 

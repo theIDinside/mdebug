@@ -33,9 +33,9 @@ TEST(JsonParseTests, ParseBooleanTrue)
   TestMemoryResource mem;
   auto result = mdbjson::Parse(&mem, "true");
   ASSERT_TRUE(result.has_value());
-  mdbjson::JsonValue *val = result.value();
-  EXPECT_TRUE(val->IsBoolean());
-  EXPECT_EQ(*val->GetBoolean(), true);
+  mdbjson::JsonValue val = result.value();
+  EXPECT_TRUE(val.IsBoolean());
+  EXPECT_EQ(*val.GetBoolean(), true);
 }
 
 TEST(JsonParseTests, ParseNumber)
@@ -43,9 +43,9 @@ TEST(JsonParseTests, ParseNumber)
   TestMemoryResource mem;
   auto result = mdbjson::Parse(&mem, "42");
   ASSERT_TRUE(result.has_value());
-  mdbjson::JsonValue *val = result.value();
-  EXPECT_TRUE(val->IsNumber());
-  EXPECT_DOUBLE_EQ(*val->GetNumber(), 42.0);
+  mdbjson::JsonValue val = result.value();
+  EXPECT_TRUE(val.IsNumber());
+  EXPECT_DOUBLE_EQ(*val.GetNumber(), 42.0);
 }
 
 TEST(JsonParseTests, ParseString)
@@ -53,9 +53,9 @@ TEST(JsonParseTests, ParseString)
   TestMemoryResource mem;
   auto result = mdbjson::Parse(&mem, "\"hello\"");
   ASSERT_TRUE(result.has_value());
-  mdbjson::JsonValue *val = result.value();
-  EXPECT_TRUE(val->IsString());
-  EXPECT_EQ(*val->GetString(), "hello");
+  mdbjson::JsonValue val = result.value();
+  EXPECT_TRUE(val.IsString());
+  EXPECT_EQ(*val.GetString(), "hello");
 }
 
 TEST(JsonParseTests, ParseArray)
@@ -63,9 +63,9 @@ TEST(JsonParseTests, ParseArray)
   TestMemoryResource mem;
   auto result = mdbjson::Parse(&mem, "[1,2,3]");
   ASSERT_TRUE(result.has_value());
-  mdbjson::JsonValue *val = result.value();
-  EXPECT_TRUE(val->IsArray());
-  auto arr = val->GetArray();
+  mdbjson::JsonValue val = result.value();
+  EXPECT_TRUE(val.IsArray());
+  auto arr = val.GetArray();
   ASSERT_NE(arr, nullptr);
   ASSERT_EQ(arr->size(), 3u);
   EXPECT_DOUBLE_EQ(*(*arr)[0].GetNumber(), 1.0);
@@ -78,15 +78,15 @@ TEST(JsonParseTests, ParseObjectAndGetProperty)
   TestMemoryResource mem;
   auto result = mdbjson::Parse(&mem, R"({"key": "value", "num": 123})");
   ASSERT_TRUE(result.has_value());
-  mdbjson::JsonValue *val = result.value();
-  EXPECT_TRUE(val->IsObject());
+  mdbjson::JsonValue val = result.value();
+  EXPECT_TRUE(val.IsObject());
 
-  auto propStr = val->GetProperty("key");
+  auto propStr = val.At("key");
   ASSERT_NE(propStr, nullptr);
   EXPECT_TRUE(propStr->IsString());
   EXPECT_EQ(*propStr->GetString(), "value");
 
-  auto propNum = val->GetProperty("num");
+  auto propNum = val.At("num");
   ASSERT_NE(propNum, nullptr);
   EXPECT_TRUE(propNum->IsNumber());
   EXPECT_DOUBLE_EQ(*propNum->GetNumber(), 123.0);
@@ -116,26 +116,26 @@ TEST(JsonParseTests, ParseAndCheckSubProperties)
   if (!result.has_value()) {
   }
   ASSERT_TRUE(result.has_value());
-  mdbjson::JsonValue *val = result.value();
-  EXPECT_TRUE(val->IsObject());
+  mdbjson::JsonValue val = result.value();
+  EXPECT_TRUE(val.IsObject());
 
-  auto keyProperty = val->GetProperty("key");
+  auto keyProperty = val.At("key");
   ASSERT_NE(keyProperty, nullptr);
   EXPECT_TRUE(keyProperty->IsString());
   EXPECT_EQ(*keyProperty->GetString(), "value");
 
-  auto numProperty = val->GetProperty("num");
+  auto numProperty = val.At("num");
   ASSERT_NE(numProperty, nullptr);
   EXPECT_TRUE(numProperty->IsNumber());
   EXPECT_DOUBLE_EQ(*numProperty->GetNumber(), 123.0);
 
   // Sub object 1
   {
-    auto subObj1 = val->GetProperty("subObjectOne");
+    auto subObj1 = val.At("subObjectOne");
     ASSERT_NE(subObj1, nullptr);
     EXPECT_TRUE(subObj1->IsObject());
 
-    auto s1ArrayJson = subObj1->GetProperty("array");
+    auto s1ArrayJson = subObj1->At("array");
     ASSERT_NE(s1ArrayJson, nullptr);
     EXPECT_TRUE(s1ArrayJson->IsArray());
     const auto &s1Array = *s1ArrayJson->GetArray();
@@ -150,13 +150,13 @@ TEST(JsonParseTests, ParseAndCheckSubProperties)
     EXPECT_EQ(*s1Array[1].GetNumber(), 42);
     EXPECT_EQ(*s1Array[2].GetString(), "mixed strings and numbers in an array? Is that not crazy work?");
 
-    auto successProp = subObj1->GetProperty("success");
+    auto successProp = subObj1->At("success");
     auto success = successProp->GetBoolean();
     EXPECT_NE(success, nullptr);
     EXPECT_TRUE(*success);
   }
 
-  auto subObj2 = val->GetProperty("subObjectTwo");
+  auto subObj2 = val.At("subObjectTwo");
   ASSERT_NE(subObj2, nullptr);
   EXPECT_TRUE(subObj2->IsObject());
 }

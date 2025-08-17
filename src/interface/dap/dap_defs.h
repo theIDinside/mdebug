@@ -9,6 +9,33 @@
 
 namespace mdb::ui::dap {
 
+enum class SteppingGranularity : std::uint8_t
+{
+  Instruction,
+  Line,
+  LogicalBreakpointLocation
+};
+
+enum class EvaluationContext : std::uint8_t
+{
+  Watch,
+  Repl,
+  Hover,
+  Clipboard,
+  Variables
+};
+
+enum class FieldType : std::uint8_t
+{
+  String,
+  Float,
+  Int,
+  Boolean,
+  Enumeration,
+  Array,
+  Address
+};
+
 enum class CommandType : std::uint8_t
 {
 #define DAP_COMMANDS

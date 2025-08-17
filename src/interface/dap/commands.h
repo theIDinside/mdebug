@@ -2,7 +2,8 @@
 #pragma once
 
 // mdb
-#include <bp.h>
+// #include <bp.h>
+#include <bp_defs.h>
 #include <common/typedefs.h>
 #include <interface/attach_args.h>
 #include <interface/dap/interface.h>
@@ -10,17 +11,15 @@
 #include <interface/dap/types.h>
 #include <interface/ui_command.h>
 #include <interface/ui_result.h>
+#include <json/json.h>
 #include <lib/arena_allocator.h>
 #include <symbolication/disassemble.h>
-#include <utils/fmt_join.h>
+#include <utils/format_utils.h>
 
 // stdlib
 #include <cctype>
 #include <memory_resource>
 #include <span>
-
-// dependency
-#include <nlohmann/json.hpp>
 
 namespace mdb {
 
@@ -32,17 +31,6 @@ namespace ui::dap {
 struct Breakpoint;
 
 using namespace std::string_view_literals;
-
-enum class FieldType
-{
-  String,
-  Float,
-  Int,
-  Boolean,
-  Enumeration,
-  Array,
-  Address
-};
 
 struct VerifyResult
 {
@@ -85,9 +73,8 @@ struct VerifyField
   {
   }
 
-  consteval VerifyField(std::string_view fieldName,
-    FieldType fieldType,
-    std::array<std::string_view, CurrentEnumMax> enumerations) noexcept
+  consteval VerifyField(
+    std::string_view fieldName, FieldType fieldType, std::array<std::string_view, CurrentEnumMax> enumerations)
       : name(fieldName), type(fieldType), enum_values(enumerations),
         enum_variants(enumerations.size() - std::count(enumerations.begin(), enumerations.end(), ""))
   {
@@ -112,20 +99,19 @@ template <size_t Size> struct VerifyMap
 {
   std::array<VerifyField, Size> fields;
 
-  template <typename Json>
+  template <typename JsonValueType>
   constexpr VerifyResult
-  isOK(const Json &j, std::string_view fieldName) const noexcept
+  isOK(const JsonValueType &j, std::string_view fieldName) const noexcept
   {
     if (const auto it =
           std::find_if(fields.cbegin(), fields.cend(), [&](const auto &f) { return fieldName == f.name; });
       it != std::cend(fields)) {
       switch (it->type) {
       case FieldType::Address:
-        if (!j.is_string()) {
+        if (!j.IsString()) {
           return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
         } else {
-          std::string_view s;
-          j.get_to(s);
+          std::string_view s = j.UncheckedGetStringView();
           if (s.starts_with("0x")) {
             s.remove_prefix(2);
           }
@@ -137,34 +123,30 @@ template <size_t Size> struct VerifyMap
           return VerifyResult{ std::nullopt };
         }
       case FieldType::String:
-        if (!j.is_string()) {
+        if (!j.IsString()) {
           return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
         }
         break;
       case FieldType::Float:
-        if (!j.is_number_float()) {
-          return VerifyResult{ std::make_pair(ArgumentError::RequiredNumberType(), fieldName) };
-        }
-        break;
+        [[fallthrough]];
       case FieldType::Int:
-        if (!j.is_number_integer()) {
+        if (!j.IsNumber()) {
           return VerifyResult{ std::make_pair(ArgumentError::RequiredNumberType(), fieldName) };
         }
         break;
       case FieldType::Boolean:
-        if (!j.is_boolean()) {
+        if (!j.IsBoolean()) {
           return VerifyResult{ std::make_pair(ArgumentError::RequiredBooleanType(), fieldName) };
         }
         break;
       case FieldType::Enumeration: {
-        if (!j.is_string()) {
+        if (!j.IsString()) {
           return VerifyResult{ std::make_pair(
             ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
               .description = "Config enumeration values must be of string type" },
             fieldName) };
         }
-        std::string_view value;
-        j.get_to(value);
+        std::string_view value = j.UncheckedGetStringView();
         if (!it->has_enum_variant(value)) {
           return VerifyResult{ std::make_pair(
             ArgumentError{ .kind = ArgumentErrorKind::InvalidInput,
@@ -175,7 +157,7 @@ template <size_t Size> struct VerifyMap
         break;
       }
       case FieldType::Array:
-        if (!j.is_array()) {
+        if (!j.IsArray()) {
           return VerifyResult{ std::make_pair(ArgumentError::RequiredArrayType(), fieldName) };
         }
         break;
@@ -191,10 +173,10 @@ template <size_t Size> struct VerifyMap
   static constexpr auto ArgsFieldsArray = std::to_array<VerifyField>({ __VA_ARGS__ });                            \
   static constexpr VerifyMap<ArgsFieldsArray.size()> ArgTypes{ ArgsFieldsArray };                                 \
   template <typename Json>                                                                                        \
-  constexpr static auto ValidateArg(std::string_view arg_name, const Json &arg_contents) noexcept                 \
+  constexpr static auto ValidateArg(std::string_view argName, const Json &argContents) noexcept                   \
     -> std::optional<InvalidArg>                                                                                  \
   {                                                                                                               \
-    if (auto err = ArgTypes.isOK(arg_contents, arg_name); err) {                                                  \
+    if (auto err = ArgTypes.isOK(argContents, argName); err) {                                                    \
       return std::move(err).take();                                                                               \
     }                                                                                                             \
     return std::nullopt;                                                                                          \
@@ -257,7 +239,10 @@ struct Continue final : public ui::UICommand
   int thread_id;
   bool continue_all;
 
-  Continue(UICommandArg arg, int tid, bool all) noexcept : UICommand(arg), thread_id(tid), continue_all(all) {}
+  Continue(UICommandArg arg, int tid, bool all) noexcept
+      : UICommand(std::move(arg)), thread_id(tid), continue_all(all)
+  {
+  }
   ~Continue() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -280,7 +265,7 @@ struct Pause final : public ui::UICommand
     int threadId;
   };
 
-  Pause(UICommandArg arg, Args args) noexcept : UICommand(arg), pauseArgs(args) {}
+  Pause(UICommandArg arg, Args args) noexcept : UICommand(std::move(arg)), pauseArgs(args) {}
   ~Pause() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -288,13 +273,6 @@ struct Pause final : public ui::UICommand
   DEFINE_NAME("pause");
   RequiredArguments({ "threadId"sv });
   DefineArgTypes({ "threadId", FieldType::Int });
-};
-
-enum class SteppingGranularity
-{
-  Instruction,
-  Line,
-  LogicalBreakpointLocation
 };
 
 struct NextResponse final : ui::UIResult
@@ -311,7 +289,7 @@ struct Next final : public ui::UICommand
   SteppingGranularity granularity;
 
   Next(UICommandArg arg, int tid, bool all, SteppingGranularity granularity) noexcept
-      : UICommand(arg), thread_id(tid), continue_all(all), granularity(granularity)
+      : UICommand(std::move(arg)), thread_id(tid), continue_all(all), granularity(granularity)
   {
   }
   ~Next() override = default;
@@ -341,7 +319,7 @@ struct StepBack final : public ui::UICommand
 {
   int thread_id;
 
-  StepBack(UICommandArg arg, int tid, bool all) noexcept : UICommand(arg), thread_id(tid) {}
+  StepBack(UICommandArg arg, int tid, bool all) noexcept : UICommand(std::move(arg)), thread_id(tid) {}
   ~StepBack() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepBack");
@@ -363,7 +341,7 @@ struct StepIn final : public ui::UICommand
   SteppingGranularity granularity;
 
   StepIn(UICommandArg arg, int thread_id, bool singleThread, SteppingGranularity granularity) noexcept
-      : UICommand(arg), thread_id(thread_id), singleThread(singleThread), granularity(granularity)
+      : UICommand(std::move(arg)), thread_id(thread_id), singleThread(singleThread), granularity(granularity)
   {
   }
 
@@ -386,7 +364,10 @@ struct StepOut final : public ui::UICommand
   int thread_id;
   bool continue_all;
 
-  StepOut(UICommandArg arg, int tid, bool all) noexcept : UICommand(arg), thread_id(tid), continue_all(all) {}
+  StepOut(UICommandArg arg, int tid, bool all) noexcept
+      : UICommand(std::move(arg)), thread_id(tid), continue_all(all)
+  {
+  }
   ~StepOut() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("stepOut");
@@ -408,9 +389,9 @@ struct SetBreakpointsResponse final : ui::UIResult
 
 struct SetBreakpoints final : public ui::UICommand
 {
-  SetBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept;
+  SetBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept;
   ~SetBreakpoints() override = default;
-  nlohmann::json args;
+  mdbjson::JsonValue args;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setBreakpoints");
   RequiredArguments({ "source"sv });
@@ -418,11 +399,11 @@ struct SetBreakpoints final : public ui::UICommand
 
 struct SetExceptionBreakpoints final : public ui::UICommand
 {
-  SetExceptionBreakpoints(UICommandArg arguence, nlohmann::json &&args) noexcept;
+  SetExceptionBreakpoints(UICommandArg arguence, const mdbjson::JsonValue &args) noexcept;
   ~SetExceptionBreakpoints() override = default;
   UIResultPtr Execute() noexcept final;
 
-  Immutable<nlohmann::json> args;
+  mdbjson::JsonValue args;
 
   DEFINE_NAME("setExceptionBreakpoints");
   RequiredArguments({ "filters"sv });
@@ -431,9 +412,9 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
-  SetInstructionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept;
+  SetInstructionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept;
   ~SetInstructionBreakpoints() override = default;
-  nlohmann::json args;
+  mdbjson::JsonValue args;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({ "breakpoints"sv });
@@ -441,9 +422,9 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 
 struct SetFunctionBreakpoints final : public ui::UICommand
 {
-  SetFunctionBreakpoints(UICommandArg arg, nlohmann::json &&arguments) noexcept;
+  SetFunctionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept;
   ~SetFunctionBreakpoints() override = default;
-  nlohmann::json args;
+  mdbjson::JsonValue args;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({ "breakpoints"sv });
@@ -508,7 +489,7 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 
 struct ConfigurationDone final : public ui::UICommand
 {
-  ConfigurationDone(UICommandArg arg) noexcept : UICommand(arg) {}
+  ConfigurationDone(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
 
   ~ConfigurationDone() override = default;
   UIResultPtr Execute() noexcept final;
@@ -529,10 +510,10 @@ struct InitializeResponse final : public ui::UIResult
 
 struct Initialize final : public ui::UICommand
 {
-  Initialize(UICommandArg arg, nlohmann::json &&arguments) noexcept;
+  Initialize(UICommandArg arg, mdbjson::JsonValue arguments) noexcept;
   ~Initialize() override = default;
   UIResultPtr Execute() noexcept final;
-  nlohmann::json args;
+  mdbjson::JsonValue args;
   DEFINE_NAME("initialize");
   NoRequiredArgs();
 };
@@ -567,16 +548,16 @@ struct LaunchResponse final : public UIResult
 struct Launch final : public UICommand
 {
   Launch(UICommandArg arg,
-    SessionId &&id,
+    SessionId id,
     bool stopAtEntry,
     Path program,
-    std::vector<std::string> &&program_args,
+    std::pmr::vector<std::pmr::string> &&program_args,
     std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
   ~Launch() override = default;
   UIResultPtr Execute() noexcept final;
   bool mStopOnEntry;
   Path mProgram;
-  std::vector<std::string> mProgramArgs;
+  std::pmr::vector<std::pmr::string> mProgramArgs;
   std::optional<BreakpointBehavior> mBreakpointBehavior;
   SessionId mRequestingSessionId;
   DEFINE_NAME("launch");
@@ -597,7 +578,7 @@ struct AttachResponse final : public UIResult
 
 struct Attach final : public UICommand
 {
-  Attach(UICommandArg arg, SessionId &&sessionId, AttachArgs args) noexcept;
+  Attach(UICommandArg arg, SessionId sessionId, AttachArgs args) noexcept;
   ~Attach() override = default;
   UIResultPtr Execute() noexcept final;
 
@@ -615,42 +596,7 @@ struct Attach final : public UICommand
       { "ptrace"sv, "gdbremote"sv, "rr"sv, "auto"sv },
     });
 
-  // Attach gets a `create` function because in the future, constructing this command will be much more complex
-  // than most other commands, due to the fact that gdbs remote protocol has a ton of settings, some of which are
-  // bat shit crazy in 2024.
-  static ui::UICommand *
-  create(UICommandArg arg, const nlohmann::basic_json<> &args)
-  {
-    std::string_view type;
-
-    args.at("type").get_to(type);
-    ASSERT(args.contains("sessionId"), "Attach arguments had no 'sessionId' field.");
-    if (type == "ptrace") {
-      SessionId pid = args.at("pid");
-      return new Attach{ arg, args.at("sessionId"), PtraceAttachArgs{ .pid = pid } };
-    } else if (type == "auto") {
-      SessionId processId;
-      if (args.contains("processId")) {
-        args.at("processId").get_to(processId);
-        return new Attach{ arg, args.at("sessionId"), AutoArgs{ processId } };
-      }
-      return new ui::dap::InvalidArgs{ arg,
-        "attach",
-        std::vector<InvalidArg>{ { ArgumentError::Missing("Required for auto attach"), "processId" } } };
-    } else {
-      int port = args.at("port");
-      std::string host = args.at("host");
-      bool allstop = true;
-      if (args.contains("allstop") && args.at("allstop").is_boolean()) {
-        allstop = args.at("allstop");
-      }
-      RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
-
-      return new Attach{ arg,
-        args.at("sessionId"),
-        GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type } };
-    };
-  }
+  static ui::UICommand *create(UICommandArg arg, const mdbjson::JsonValue &args) noexcept;
 };
 
 struct TerminateResponse final : public UIResult
@@ -662,7 +608,7 @@ struct TerminateResponse final : public UIResult
 
 struct Terminate final : public UICommand
 {
-  Terminate(UICommandArg arg) noexcept : UICommand(arg) {}
+  Terminate(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~Terminate() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("terminate");
@@ -679,7 +625,7 @@ struct ThreadsResponse final : public UIResult
 
 struct Threads final : public UICommand
 {
-  Threads(UICommandArg arg) noexcept : UICommand(arg) {}
+  Threads(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~Threads() override = default;
   UIResultPtr Execute() noexcept final;
   DEFINE_NAME("threads");
@@ -733,15 +679,6 @@ struct ScopesResponse final : public UIResult
   std::array<Scope, 3> scopes;
 };
 
-enum class EvaluationContext
-{
-  Watch,
-  Repl,
-  Hover,
-  Clipboard,
-  Variables
-};
-
 struct Evaluate final : public UICommand
 {
   Evaluate(UICommandArg arg,
@@ -761,7 +698,7 @@ struct Evaluate final : public UICommand
     { "expression", FieldType::String }, { "frameId", FieldType::Int }, { "context", FieldType::String });
 
   static EvaluationContext ParseContext(std::string_view input) noexcept;
-  static UICommand *PrepareEvaluateCommand(UICommandArg arg, const nlohmann::json &args);
+  static UICommand *PrepareEvaluateCommand(UICommandArg arg, const mdbjson::JsonValue &args);
 };
 
 struct EvaluateResponse final : public UIResult
@@ -843,7 +780,7 @@ concept HasName = requires(T t) {
   { T::Request } -> std::convertible_to<std::string_view>;
 };
 
-ui::UICommand *ParseDebugAdapterCommand(const DebugAdapterClient &client, std::string packet) noexcept;
+ui::UICommand *ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) noexcept;
 
 }; // namespace ui::dap
 } // namespace mdb

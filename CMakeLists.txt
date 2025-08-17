@@ -287,12 +287,10 @@ set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OU
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 
 # Add the json library
-set(JSON_Install OFF CACHE INTERNAL "")
-add_subdirectory(dependencies/nlohmann_json)
 add_subdirectory(dependencies/quickjs)
 add_subdirectory(lib/json)
 
-target_link_libraries(mdb PRIVATE mdb_spinlock nlohmann_json::nlohmann_json zydis libquickjs mdbjson)
+target_link_libraries(mdb PRIVATE mdb_spinlock zydis libquickjs mdbjson)
 # Link the libraries to your target
 
 target_include_directories(mdb PUBLIC ./dependencies)

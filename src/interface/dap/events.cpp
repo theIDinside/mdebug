@@ -1,9 +1,8 @@
 /** LICENSE TEMPLATE */
 #include "events.h"
-#include "nlohmann/json.hpp"
-#include "utils/fmt_join.h"
 #include <event_queue.h>
 #include <symbolication/objfile.h>
+#include <utils/format_utils.h>
 
 namespace mdb::ui::dap {
 #define ReturnFormatted(formatString, ...)                                                                        \
@@ -197,29 +196,25 @@ StoppedEvent::StoppedEvent(SessionId pid,
 std::pmr::string
 StoppedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  nlohmann::json ensure_desc_utf8 = mDescription;
-  const auto descriptionUtf8 = ensure_desc_utf8.dump();
   if (mText.empty()) {
     ReturnFormatted(
-      R"({{"seq":{},"sessionId":{},"type":"event","event":"stopped","body":{{"reason":"{}","threadId":{},"description":{},"text":"","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
+      R"({{"seq":{},"sessionId":{},"type":"event","event":"stopped","body":{{"reason":"{}","threadId":{},"description":"{}","text":"","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
       seq,
       mSessionId,
       to_str(mReason),
       mTid,
-      descriptionUtf8,
+      mDescription,
       mAllThreadsStopped,
       JoinFormatIterator{ mBreakpointIds, "," });
   } else {
-    const nlohmann::json ensure_utf8 = mText;
-    const auto utf8text = ensure_utf8.dump();
     ReturnFormatted(
-      R"({{"seq":{},"sessionId":{},"type":"event","event":"stopped","body":{{ "reason":"{}","threadId":{},"description":{},"text":{},"allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
+      R"({{"seq":{},"sessionId":{},"type":"event","event":"stopped","body":{{ "reason":"{}","threadId":{},"description":"{}","text":"{}","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
       seq,
       mSessionId,
       to_str(mReason),
       mTid,
-      descriptionUtf8,
-      utf8text,
+      mDescription,
+      mText,
       mAllThreadsStopped,
       JoinFormatIterator{ mBreakpointIds, "," });
   }
@@ -286,16 +281,13 @@ OutputEvent::OutputEvent(SessionId pid, std::string_view category, std::string &
 std::pmr::string
 OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  nlohmann::json escape_hack;
-  escape_hack = mOutput;
-  const auto body = escape_hack.dump();
   std::pmr::string result{ arenaAllocator };
   std::format_to(std::back_inserter(result),
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"output","body":{{"category":"{}","output":{}}}}})",
+    R"({{"seq":{},"sessionId":{},"type":"event","event":"output","body":{{"category":"{}","output":"{}"}}}})",
     seq,
     mSessionId,
     mCategory,
-    body);
+    EscapeFormatter{ mOutput });
   return result;
 }
 } // namespace mdb::ui::dap

@@ -13,6 +13,9 @@
 #include <link.h>
 #include <sys/ptrace.h>
 
+// std
+#include <print>
+
 using namespace std::string_view_literals;
 namespace mdb {
 class TraceeController;

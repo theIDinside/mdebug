@@ -4,6 +4,7 @@
 // mdb
 #include <common/typedefs.h>
 #include <interface/dap/dap_defs.h>
+#include <json/json.h>
 #include <lib/arena_allocator.h>
 #include <notify_pipe.h>
 #include <tracee/util.h>
@@ -18,9 +19,6 @@
 #include <string_view>
 
 #include <vector>
-
-// dependency
-#include <nlohmann/json.hpp>
 
 namespace mdb {
 class Tracer;
@@ -186,6 +184,8 @@ class DebugAdapterClient
   std::unique_ptr<alloc::ArenaResource> mCommandResponseAllocator;
   std::unique_ptr<alloc::ArenaResource> mEventsAllocator;
 
+  std::vector<alloc::ArenaResource *> mCommandAllocatorPool;
+
   DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
   // be.)
@@ -207,6 +207,8 @@ public:
   alloc::ArenaResource *GetCommandArenaAllocator() noexcept;
   alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *CreateStandardIOConnection() noexcept;
+  std::unique_ptr<alloc::ScopedArenaAllocator> AcquireArena() noexcept;
+
   void AddSupervisor(TraceeController *tc) noexcept;
   void RemoveSupervisor(TraceeController *supervisor) noexcept;
   void PostDapEvent(ui::UIResultPtr event);

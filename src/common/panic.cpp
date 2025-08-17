@@ -4,6 +4,7 @@
 #include <utils/logger.h>
 
 // stdlib
+#include <print>
 #include <regex>
 
 // system

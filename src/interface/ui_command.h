@@ -1,10 +1,16 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+
 #include <common/typedefs.h>
+#include <lib/arena_allocator.h>
+
+// mdblib
+#include <json/json.h>
 
 // stdlib
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -32,6 +38,7 @@
   }
 
 namespace mdb {
+
 class Tracer;
 class TraceeController;
 namespace ui {
@@ -137,15 +144,25 @@ struct UICommandArg
 {
   u64 mSeq;
   SessionId mSessionId;
+  std::unique_ptr<alloc::ScopedArenaAllocator> allocator;
 };
 
 struct UICommand
 {
+  using RequestResponseAllocator = std::unique_ptr<alloc::ScopedArenaAllocator>;
   dap::DebugAdapterClient *mDAPClient;
   SessionId mSessionId;
+  std::unique_ptr<alloc::ScopedArenaAllocator> mCommandAllocator;
+  friend class UIResult;
 
 public:
-  explicit UICommand(UICommandArg arg) noexcept : mSessionId(arg.mSessionId), mSeq(arg.mSeq) {}
+  std::uint64_t mSeq;
+
+  explicit UICommand(UICommandArg arg) noexcept
+      : mSessionId(arg.mSessionId), mCommandAllocator(std::move(arg.allocator)), mSeq(arg.mSeq)
+  {
+  }
+
   virtual ~UICommand() noexcept = default;
 
   constexpr void
@@ -169,8 +186,8 @@ public:
     for (const auto &arg : expectedCommandArgs) {
       if (auto r = CheckArgumentContains(args, arg); r) {
         faultyArgs.push_back(r.value());
-      } else if constexpr (HasValidation<Derived, decltype(args[arg])>) {
-        if (auto processed = Derived::ValidateArg(arg, args[arg]); processed) {
+      } else if constexpr (HasValidation<Derived, const mdbjson::JsonValue &>) {
+        if (auto processed = Derived::ValidateArg(arg, *args.At(arg)); processed) {
           faultyArgs.emplace_back(processed.value());
         }
       }
@@ -188,14 +205,13 @@ public:
   CheckArgumentContains(const JsonArgs &args, const CommandArg &commandArg)
     -> std::optional<std::pair<ArgumentError, std::string>>
   {
-    if (!args.contains(commandArg)) {
+    if (!args.Contains(commandArg)) {
       return std::make_pair<ArgumentError, std::string>(
         { ArgumentErrorKind::Missing, "Required argument is missing" }, std::string{ commandArg });
     }
     return std::nullopt;
   }
 
-  std::uint64_t mSeq;
   constexpr virtual std::string_view name() const noexcept = 0;
 };
 

@@ -38,19 +38,6 @@ else
   echo "libfmt dependency already met"
 fi
 
-# Setup nlohmann_json dependencies
-if [ ! -e "$relative_repo_root_dir/dependencies/nlohmann_json" ]; then
-  echo "Downloading nlohmann_json ..."
-  wget -q -P $relative_repo_root_dir/dependencies "https://github.com/nlohmann/json/releases/download/$json_version/json.tar.xz"
-  echo "Done!"
-  tar xf $relative_repo_root_dir/dependencies/json.tar.xz -C $relative_repo_root_dir/dependencies/
-  mv $relative_repo_root_dir/dependencies/json $relative_repo_root_dir/dependencies/nlohmann_json
-  rm $relative_repo_root_dir/dependencies/json.tar.xz
-  echo "json dependency configured"
-else
-  echo "json already dependency met"
-fi
-
 # Setup google test for unit testing capabilities
 if [ ! -e "$relative_repo_root_dir/dependencies/googletest" ]; then
   echo "Downloading googletest ..."

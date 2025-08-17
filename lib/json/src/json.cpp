@@ -9,6 +9,7 @@
 #include <memory>
 #include <memory_resource>
 #include <optional>
+
 #include <span>
 
 using namespace std::string_view_literals;
@@ -63,6 +64,12 @@ JsonValue::UncheckedGetString() const noexcept
   return mData.string;
 }
 
+std::string_view
+JsonValue::UncheckedGetStringView() const noexcept
+{
+  return std::string_view{ *mData.string };
+}
+
 const double *
 JsonValue::UncheckedGetNumber() const noexcept
 {
@@ -89,6 +96,27 @@ JsonValue::UncheckedGetProperty(std::string_view property) const noexcept
   return nullptr;
 }
 
+std::span<const JsonValue>
+JsonValue::AsSpan() const noexcept
+{
+  if (!IsArray()) {
+    return std::span<const JsonValue>{};
+  }
+
+  return std::span{ *mData.array };
+}
+
+std::span<const JsonValue>
+JsonValue::AsSpan(std::string_view property) const noexcept
+{
+  if (!IsObject()) {
+    return {};
+  }
+
+  const auto *prop = UncheckedGetProperty(property);
+  return prop ? prop->AsSpan() : std::span<const JsonValue>{};
+}
+
 const BooleanType *
 JsonValue::GetBoolean() const noexcept
 {
@@ -107,6 +135,16 @@ JsonValue::GetString() const noexcept
   }
 
   return UncheckedGetString();
+}
+
+std::optional<std::string_view>
+JsonValue::GetStringView() const noexcept
+{
+  const auto *str = GetString();
+  if (!str) {
+    return {};
+  }
+  return std::string_view{ *str };
 }
 
 const double *
@@ -128,13 +166,32 @@ JsonValue::GetArray() const noexcept
 }
 
 const JsonValue *
-JsonValue::GetProperty(std::string_view property) const noexcept
+JsonValue::At(std::string_view property) const noexcept
 {
   if (!IsObject()) [[unlikely]] {
     return nullptr;
   }
 
   return UncheckedGetProperty(property);
+}
+
+std::optional<const JsonValue>
+JsonValue::Get(std::string_view property) const noexcept
+{
+  if (!IsObject()) [[unlikely]] {
+    return {};
+  }
+
+  if (auto prop = UncheckedGetProperty(property); prop) {
+    return *prop;
+  }
+  return {};
+}
+
+bool
+JsonValue::Contains(std::string_view property) const noexcept
+{
+  return IsObject() ? mData.object->contains(property) : false;
 }
 
 static bool
@@ -151,15 +208,21 @@ Lex(std::string_view input, std::pmr::vector<Token> &outBuffer, ParseError &erro
 class Parser
 {
 public:
-  Parser(std::pmr::memory_resource *arena, std::string_view input) noexcept : mArena(arena), mInput(input) {}
+  Parser(std::pmr::memory_resource *arena, std::string_view input) noexcept : mArena(arena), mInput(mArena)
+  {
+    mInput.reserve(input.size());
+    // The serialized JSON data is copied into the allocator's memory blocks, and will now live as long as the JSON
+    // that gets parsed from it.
+    std::copy(input.begin(), input.end(), std::back_inserter(mInput));
+  }
 
-  constexpr std::expected<JsonValue *, ParseError>
+  constexpr std::expected<JsonValue, ParseError>
   Parse() noexcept
   {
-    JsonValue *value = Allocate<JsonValue>(1);
+    JsonValue value;
     ParseError error;
 
-    if (ParseValue(value, error)) [[likely]] {
+    if (ParseValue(&value, error)) [[likely]] {
       return value;
     }
 
@@ -168,7 +231,7 @@ public:
 
 private:
   std::pmr::memory_resource *mArena;
-  std::string_view mInput;
+  std::pmr::string mInput;
   size_t mPos{ 0 };
 
   constexpr bool
@@ -423,7 +486,7 @@ private:
     // move past the '"'
     ++mPos;
 
-    return mInput.substr(keyStart, keyLength);
+    return std::string_view{ mInput }.substr(keyStart, keyLength);
   }
 
   constexpr bool
@@ -500,6 +563,20 @@ private:
   }
 };
 
+consteval auto
+LengthOfError(ParseError::ErrorKind kind)
+{
+#define CASE_OF(Kind)                                                                                             \
+  case ParseError::ErrorKind::Kind:                                                                               \
+    return std::string_view{ #Kind }.size();
+  switch (kind) {
+    FOR_EACH_PARSE_ERROR(CASE_OF)
+  }
+#undef CASE_OF
+
+  return std::string_view{ "Could not determine error" }.size();
+}
+
 #define ERROR_CASE(Kind)                                                                                          \
   case ErrorKind::Kind: {                                                                                         \
     std::pmr::string r{ memoryResource };                                                                         \
@@ -525,8 +602,8 @@ ParseError::ToString(std::pmr::memory_resource *memoryResource, ParseError error
   return "";
 }
 
-std::expected<JsonValue *, ParseError>
-Parse(std::pmr::memory_resource *jsonAllocator, std::string_view input)
+std::expected<JsonValue, ParseError>
+Parse(std::pmr::memory_resource *jsonAllocator, std::string_view input) noexcept
 {
   // TODO(simon): Introduce a two-phase parse. We do in-line allocations which means we're reallocating some times
   // when it comes to array elements or string buffers. That's not amazing. By introducing a two-phase parse we can
