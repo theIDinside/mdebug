@@ -11,6 +11,7 @@
 #include <string_view>
 
 // system
+#include <linux/limits.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>

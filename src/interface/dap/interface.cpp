@@ -1,29 +1,35 @@
 /** LICENSE TEMPLATE */
 #include "interface.h"
-#include "../../event_queue.h"
-#include "../../tracer.h"
-#include "../ui_result.h"
-#include "commands.h"
-#include "common.h"
-#include "events.h"
-#include "events/event.h"
-#include "lib/arena_allocator.h"
-#include "parse_buffer.h"
+
+// mdb
+#include <common.h>
+#include <event_queue.h>
+#include <events/event.h>
+#include <interface/dap/commands.h>
+#include <interface/dap/events.h>
+#include <interface/dap/parse_buffer.h>
+#include <interface/ui_result.h>
+#include <lib/arena_allocator.h>
+#include <supervisor.h>
+#include <tracer.h>
+#include <utils/signals.h>
+
+// std
 #include <algorithm>
-#include <fcntl.h>
 #include <filesystem>
 #include <memory>
+#include <unordered_map>
+
+// system
+#include <fcntl.h>
 #include <poll.h>
-#include <supervisor.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <unordered_map>
-#include <utils/signals.h>
-#include <vector>
+
 namespace mdb::ui::dap {
 using namespace std::string_literals;
 

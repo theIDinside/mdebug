@@ -2,7 +2,6 @@
 #pragma once
 #include <common/typedefs.h>
 #include <string>
-#include <thread>
 
 struct user_regs_struct;
 

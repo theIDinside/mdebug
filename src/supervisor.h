@@ -4,7 +4,6 @@
 #include "common.h"
 #include "event_queue.h"
 #include "events/event.h"
-#include "interface/dap/commands.h"
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/remotegdb/connection.h"
