@@ -364,6 +364,7 @@ private:
 
     value->mData.string = myStr;
     std::pmr::string &str = *value->mData.string;
+    str.reserve(512);
 
     // TODO: When two-phase parse has been written, pre-allocate the size of the entire string
     // and copy it. Escaping must happen regardless though. but a Token { Type::String, start, end, mChildCount }
