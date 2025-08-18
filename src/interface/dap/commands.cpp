@@ -87,12 +87,13 @@ UICommand::GetSupervisor() noexcept
 
 namespace ui::dap {
 
-template <typename Res, typename JsonObj>
+template <typename Res>
 inline std::optional<Res>
-get(const JsonObj &obj, std::string_view field)
+get(const mdbjson::JsonValue &obj, std::string_view field)
 {
   if (obj.Contains(field)) {
-    return Res{ obj[field] };
+    Res result = obj[field];
+    return std::move(result);
   }
   return std::nullopt;
 }
@@ -417,7 +418,7 @@ struct Next final : public ui::UICommand
         target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::InstructionStep>(*target, *task, 1));
       break;
     case SteppingGranularity::Line:
-      success = target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::LineStep>(*target, *task, 1));
+      success = target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::LineStep>(*target, *task));
       break;
     case SteppingGranularity::LogicalBreakpointLocation:
       TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -483,7 +484,7 @@ struct StepBack final : public ui::UICommand
 {
   int mThreadId;
 
-  StepBack(UICommandArg arg, int tid, bool all) noexcept : UICommand(std::move(arg)), mThreadId(tid) {}
+  StepBack(UICommandArg arg, int tid) noexcept : UICommand(std::move(arg)), mThreadId(tid) {}
   ~StepBack() override = default;
 
   UIResultPtr
@@ -637,8 +638,8 @@ struct StepOut final : public ui::UICommand
     }
     auto user = target->GetUserBreakpoints().CreateBreakpointLocationUser<FinishBreakpoint>(
       *target, std::move(loc), task->mTid, task->mTid);
-    bool success = target->SetAndCallRunAction(
-      task->mTid, std::make_shared<ptracestop::FinishFunction>(*target, *task, user, false));
+    bool success =
+      target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::FinishFunction>(*target, *task, user));
     return new StepOutResponse{ success, this };
   }
   DEFINE_NAME("stepOut");
@@ -1688,7 +1689,7 @@ Disassemble::Execute() noexcept
     int remaining = ins_count;
     if (mInstructionOffset < 0) {
       const int negative_offset = std::abs(mInstructionOffset);
-      sym::zydis_disasm_backwards(target, mAddress.value(), static_cast<u32>(negative_offset), res->mInstructions);
+      sym::DisassembleBackwards(target, mAddress.value(), static_cast<u32>(negative_offset), res->mInstructions);
       if (negative_offset < ins_count) {
         for (auto i = 0u; i < res->mInstructions.size(); i++) {
           if (res->mInstructions[i].address == mAddress) {
@@ -1710,7 +1711,7 @@ Disassemble::Execute() noexcept
     }
 
     if (remaining > 0) {
-      sym::zydis_disasm(
+      sym::Disassemble(
         target, mAddress.value(), static_cast<u32>(std::abs(mInstructionOffset)), remaining, res->mInstructions);
     }
     return res;
@@ -1799,7 +1800,7 @@ Evaluate::Execute() noexcept
     [[fallthrough]];
   case EvaluationContext::Repl: {
     Allocator alloc{ mDAPClient->GetResponseArenaAllocator() };
-    auto result = Tracer::Get().EvaluateDebugConsoleExpression(expr, true, &alloc);
+    auto result = Tracer::Get().EvaluateDebugConsoleExpression(expr, &alloc);
     return new EvaluateResponse{ true, this, {}, result, {}, {} };
   }
   case EvaluationContext::Hover:

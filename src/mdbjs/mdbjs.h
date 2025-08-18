@@ -4,18 +4,44 @@
 // mdb
 #include <common/macros.h>
 #include <mdbjs/util.h>
-#include <memory_resource>
-#include <quickjs/quickjs.h>
-#include <utility>
 #include <utils/expected.h>
 #include <utils/logger.h>
+
+// std
+#include <expected>
+#include <memory_resource>
+#include <mutex>
+#include <utility>
 
 // system
 #include <limits>
 #include <optional>
 #include <string>
 
+// dependency
+#include <mdbjs/include-quickjs.h>
+
 class Tracer;
+
+template <std::size_t N>
+consteval std::array<char, N>
+ToUppercase(const char (&str)[N])
+{
+  std::array<char, N> result{};
+  for (std::size_t i = 0; i < N; ++i) {
+    result[i] = std::toupper(static_cast<unsigned char>(str[i]));
+  }
+  return result;
+}
+
+enum class StaticAtom : JSAtom
+{
+  __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS##name,
+#include "quickjs-atom.h"
+#undef DEF
+  JS_ATOM_END,
+};
 
 namespace mdb::js {
 
@@ -34,7 +60,7 @@ class EventDispatcher;
   std::span<std::string_view> {}
 
 #define FOR_EACH_GLOBAL_FN(FNDESC)                                                                                \
-  FNDESC(Log, "log", 2, "Log to one of the debug logging channels")                                               \
+  FNDESC(Log, "log", 1, "Log message to the 'interpreter' channel (interpreter.log file output).")                \
   FNDESC(GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid")                       \
   FNDESC(GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId")     \
   FNDESC(PrintThreads, "listThreads", 0, "List all threads in this debug session")                                \
@@ -53,6 +79,18 @@ struct FunctionDescriptor
 
 #define Desc(Fn, Name, ArgCount, HelpMessage) FunctionDescriptor{ &Fn, Name, ArgCount, HelpMessage },
 
+struct JavascriptException
+{
+  std::string mExceptionMessage;
+  std::string mStackTrace;
+  std::string mFileName;
+  // -1 = has no information
+  i32 mLineNumber{ -1 };
+  i32 mColumn{ -1 };
+
+  static std::optional<JavascriptException> GetException(JSContext *context) noexcept;
+};
+
 class Scripting
 {
 private:
@@ -69,7 +107,9 @@ private:
   static JSValue PrintProcesses(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue Help(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
 
+  void InitializeTypes() noexcept;
   void InitializeMdbModule() noexcept;
+  void InitModuleConstants(JSValue globalObject) noexcept;
 
   static constexpr auto
   FunctionDescriptors() noexcept -> std::span<const FunctionDescriptor>
@@ -111,4 +151,8 @@ public:
     std::unreachable();
   }
 };
+
+/** Calls function `functionValue` and then frees the arguments in `arguments`. */
+std::expected<JSValue, JavascriptException> CallFunction(
+  JSContext *context, JSValue functionValue, JSValue thisValue, std::span<JSValue> consumedArguments);
 } // namespace mdb::js

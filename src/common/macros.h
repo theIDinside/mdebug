@@ -94,11 +94,18 @@ template <typename T> struct Enum
 #define PREDEFINED_ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN)                                               \
   namespace detail {                                                                                              \
   using enum ENUM_TYPE;                                                                                           \
-  static constinit auto ENUM_TYPE##Ids = std::to_array({ FOR_EACH(EACH_FN) });                                    \
-  static constinit auto ENUM_TYPE##Names = std::to_array<std::string_view>({ FOR_EACH(STRINGIFY_VAL) });          \
+  static constexpr auto ENUM_TYPE##Ids = std::to_array<ENUM_TYPE>({ FOR_EACH(DEFAULT_ENUM) });                    \
+  static constexpr auto ENUM_TYPE##Names = std::to_array<std::string_view>({ FOR_EACH(STRINGIFY_VAL) });          \
   }                                                                                                               \
   template <> struct Enum<ENUM_TYPE>                                                                              \
   {                                                                                                               \
+    static consteval auto                                                                                         \
+    EnumBaseOffset() noexcept                                                                                     \
+    {                                                                                                             \
+      using enum ENUM_TYPE;                                                                                       \
+      return std::to_underlying(detail::ENUM_TYPE##Ids[0]);                                                       \
+    }                                                                                                             \
+                                                                                                                  \
     static constexpr u32                                                                                          \
     Count() noexcept                                                                                              \
     {                                                                                                             \
@@ -106,7 +113,7 @@ template <typename T> struct Enum
     }                                                                                                             \
                                                                                                                   \
     static constexpr std::optional<ENUM_TYPE>                                                                     \
-    FromInt(int value) noexcept                                                                                   \
+    FromInt(auto value) noexcept                                                                                  \
     {                                                                                                             \
       using enum ENUM_TYPE;                                                                                       \
       if (value < std::to_underlying(detail::ENUM_TYPE##Ids.front()) ||                                           \
@@ -120,16 +127,20 @@ template <typename T> struct Enum
       }                                                                                                           \
       MIDAS_UNREACHABLE                                                                                           \
     }                                                                                                             \
+                                                                                                                  \
     static constexpr std::span<const ENUM_TYPE>                                                                   \
     Variants()                                                                                                    \
     {                                                                                                             \
       return std::span{ detail::ENUM_TYPE##Ids };                                                                 \
     }                                                                                                             \
+                                                                                                                  \
     static constexpr std::string_view                                                                             \
     ToString(ENUM_TYPE value) noexcept                                                                            \
     {                                                                                                             \
-      return detail::ENUM_TYPE##Names[std::to_underlying(value)];                                                 \
+      static constexpr auto INDEX_OFFSET = EnumBaseOffset();                                                      \
+      return detail::ENUM_TYPE##Names[std::to_underlying(value) - INDEX_OFFSET];                                  \
     }                                                                                                             \
+                                                                                                                  \
     static constexpr std::span<const std::string_view>                                                            \
     Names() noexcept                                                                                              \
     {                                                                                                             \

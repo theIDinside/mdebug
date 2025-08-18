@@ -209,8 +209,7 @@ public:
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
 
-  std::pmr::string *EvaluateDebugConsoleExpression(
-    const std::string &expression, bool escapeOutput, Allocator *allocator) noexcept;
+  std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept;
 
   void SetUI(ui::dap::DAP *dap) noexcept;
   void KillUI() noexcept;
@@ -252,7 +251,7 @@ public:
   TaskInfo *GetTaskPointer(Tid tid) noexcept;
   Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
   static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;
-  TraceeController *GetSupervisorBySessionId(u32 sessionId) noexcept;
+  TraceeController *GetSupervisorBySessionId(SessionId sessionId) noexcept;
   std::vector<TraceeController *> GetAllProcesses() const noexcept;
   ui::dap::DAP *GetDap() const noexcept;
 

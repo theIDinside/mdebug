@@ -1,32 +1,35 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "quickjs/quickjs.h"
-#include <expected>
-#include <span>
+// std
+#include <string_view>
+
+struct JSContext;
+struct JSValue;
 
 namespace mdb::js {
 
 struct QuickJsString
 {
-  JSContext *mContext;
-  const char *mString;
 
+  JSContext *mContext{ nullptr };
+  std::string_view mString{};
+
+  QuickJsString() noexcept = default;
   QuickJsString(JSContext *context, const char *string) noexcept;
   QuickJsString(QuickJsString &&) noexcept;
+  QuickJsString &operator=(QuickJsString &&) noexcept;
 
   QuickJsString(const QuickJsString &) = delete;
 
   QuickJsString &operator=(const QuickJsString &) = delete;
-  QuickJsString &operator=(QuickJsString &&) = delete;
 
   ~QuickJsString() noexcept;
 
   static QuickJsString FromValue(JSContext *context, JSValue value) noexcept;
-};
 
-/** Calls function `functionValue` and then frees the arguments in `arguments`. */
-std::expected<JSValue, QuickJsString> CallFunction(
-  JSContext *context, JSValue functionValue, JSValue thisValue, std::span<JSValue> consumedArguments);
+private:
+  void Release() noexcept;
+};
 
 }; // namespace mdb::js

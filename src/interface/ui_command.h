@@ -153,7 +153,7 @@ struct UICommand
   dap::DebugAdapterClient *mDAPClient;
   SessionId mSessionId;
   std::unique_ptr<alloc::ScopedArenaAllocator> mCommandAllocator;
-  friend class UIResult;
+  friend struct UIResult;
 
 public:
   std::uint64_t mSeq;

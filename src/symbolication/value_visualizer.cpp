@@ -22,7 +22,7 @@ namespace mdb::sym {
   return result
 
 std::vector<Ref<Value>>
-ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange) noexcept
 {
   std::vector<Ref<Value>> results;
   auto value = *context.GetValue();
@@ -68,7 +68,7 @@ ResolveReference::Resolve(const VariableContext &context, SymbolFile *symbolFile
 }
 
 std::vector<Ref<Value>>
-ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+ResolveCString::Resolve(const VariableContext &context, ValueRange valueRange) noexcept
 {
   std::vector<Ref<Value>> results;
   auto &value = *context.GetValue();
@@ -100,7 +100,7 @@ ResolveCString::Resolve(const VariableContext &context, SymbolFile *symbolFile, 
 }
 
 std::vector<Ref<Value>>
-ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noexcept
 {
   auto &value = *context.GetValue();
   ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
@@ -143,9 +143,11 @@ ResolveArray::Resolve(const VariableContext &context, SymbolFile *symbolFile, Va
 }
 
 std::vector<Ref<Value>>
-ResolveRange::Resolve(const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange) noexcept
+ResolveRange::Resolve(const VariableContext &context, ValueRange valueRange) noexcept
 {
   TODO(__PRETTY_FUNCTION__);
+  (void)context;
+  (void)valueRange;
 }
 
 std::optional<std::pmr::string>

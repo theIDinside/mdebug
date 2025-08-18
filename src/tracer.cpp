@@ -31,7 +31,8 @@
 #include <utils/scoped_fd.h>
 #include <utils/thread_pool.h>
 
-#include <quickjs/quickjs.h>
+// dependency
+#include <mdbjs/include-quickjs.h>
 
 // stdlib
 #include <algorithm>
@@ -288,8 +289,7 @@ Tracer::HandleInitEvent(TraceEvent *evt) noexcept
   ConsoleCommandResult { true, std::move(res) }
 
 std::pmr::string *
-Tracer::EvaluateDebugConsoleExpression(
-  const std::string &expression, bool escapeOutput, Allocator *allocator) noexcept
+Tracer::EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept
 {
   auto res = mConsoleCommandInterpreter->Interpret(expression, allocator);
   return res.mContents;
@@ -671,7 +671,7 @@ Tracer::GetTaskBySessionId(u32 sessionId) noexcept
 }
 
 TraceeController *
-Tracer::GetSupervisorBySessionId(u32 sessionId) noexcept
+Tracer::GetSupervisorBySessionId(SessionId sessionId) noexcept
 {
   for (auto &t : mTracedProcesses) {
     if (t->mSessionId == sessionId) {

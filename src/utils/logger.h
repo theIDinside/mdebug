@@ -258,6 +258,9 @@ public:
   ScopedDefer PASTE(                                                                                              \
     endProfileEvent, __LINE__){ [&]() { logging::ProfilingLogger::Instance()->End(name, category); } };
 
+static constexpr auto kInterpreter = "js-interpreter";
+static constexpr auto kSymbolication = "symbolication";
+
 #else
 
 #define LOCK_TIME_CONTENTION(result, mutex) std::lock_guard lock(mutex);
@@ -314,6 +317,12 @@ LogChannel *GetLogChannel(Channel id) noexcept;
     std::source_location srcLoc = std::source_location::current();                                                \
     channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::std::format(__VA_ARGS__));  \
   }
+
+#define DBGLOG_STR(channel, str)                                                                                  \
+  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
+    std::source_location srcLoc = std::source_location::current();                                                \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, str);                         \
+  }
 #else
 #define DLOG(...)
 #define DBGLOG(channel, ...)                                                                                      \
@@ -322,6 +331,11 @@ LogChannel *GetLogChannel(Channel id) noexcept;
     channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::std::format(__VA_ARGS__));  \
   }
 #define CDLOG(...)
+#define DBGLOG_STR(channel, str)                                                                                  \
+  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
+    std::source_location srcLoc = std::source_location::current();                                                \
+    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, str);                         \
+  }
 #endif
 
 } // namespace mdb::logging

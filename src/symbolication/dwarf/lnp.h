@@ -74,8 +74,9 @@ struct FileEntryIndexVector
   using lim32 = std::numeric_limits<u32>;
   IndexArray mIndices;
   static constexpr auto EMPTY_VALUE = lim32::max();
-  static constexpr IndexArray EMPTY_ARRAY{lim32::max(), lim32::max(), lim32::max(),
-                                          lim32::max(), lim32::max(), lim32::max()};
+  static constexpr IndexArray EMPTY_ARRAY{
+    lim32::max(), lim32::max(), lim32::max(), lim32::max(), lim32::max(), lim32::max()
+  };
 
   constexpr FileEntryIndexVector() noexcept : mIndices(EMPTY_ARRAY) {}
   constexpr FileEntryIndexVector(const FileEntryIndexVector &o) noexcept = default;
@@ -103,7 +104,7 @@ struct FileEntryIndexVector
     const auto sz = std::size(mIndices);
     for (auto i = 0ul; i < sz; ++i) {
       if (mIndices[i] == EMPTY_VALUE) {
-        return std::span<const u32>{mIndices.data(), i};
+        return std::span<const u32>{ mIndices.data(), i };
       }
     }
     return mIndices;
@@ -121,10 +122,22 @@ struct LNPHeader
   using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;
   using DirEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
   using FileNameEntFormats = std::vector<std::pair<LineNumberProgramContent, AttributeForm>>;
-  LNPHeader(ObjectFile *object, u64 section_offset, u64 initial_length, const u8 *data, const u8 *data_end,
-            DwarfVersion version, u8 addr_size, u8 min_len, u8 max_ops, bool default_is_stmt, i8 line_base,
-            u8 line_range, u8 opcode_base, OpCodeLengths opcode_lengths, std::vector<DirEntry> &&directories,
-            std::vector<FileEntry> &&file_names) noexcept;
+  LNPHeader(ObjectFile *object,
+    u64 section_offset,
+    u64 initial_length,
+    const u8 *data,
+    const u8 *data_end,
+    DwarfVersion version,
+    u8 addr_size,
+    u8 min_len,
+    u8 max_ops,
+    bool default_is_stmt,
+    i8 line_base,
+    u8 line_range,
+    u8 opcode_base,
+    OpCodeLengths opcode_lengths,
+    std::vector<DirEntry> &&directories,
+    std::vector<FileEntry> &&file_names) noexcept;
 
   std::optional<Path> file(u32 index) const noexcept;
   const FileEntryContainer &FileEntries();
@@ -156,7 +169,7 @@ private:
   Path FileEntryToPath(const FileEntry &fileEntry) noexcept;
   std::vector<LNPFilePath> mFilePaths;
   FileEntryContainer mFileToFileIndex;
-  const char *mCompilationUnitBuildDirectory{nullptr};
+  const char *mCompilationUnitBuildDirectory{ nullptr };
 };
 
 struct LineTableEntry
@@ -168,7 +181,7 @@ struct LineTableEntry
   bool is_stmt : 1;
   bool prologue_end : 1;
   bool epilogue_begin : 1;
-  bool IsEndOfSequence : 1 {false};
+  bool IsEndOfSequence : 1 { false };
 
   AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
 };
@@ -212,7 +225,7 @@ public:
   void
   Push(const LineTableEntry &lte)
   {
-    mEntryAddress.push_back({lte.pc});
+    mEntryAddress.push_back({ lte.pc });
     mEntryInfo.push_back({});
   }
 };
@@ -307,21 +320,20 @@ private:
   // Contains <offset, count> pairs into the complete linetable, which are the ranges that are mapped (have the
   // file index = this one) to this source code file
   std::vector<LineTableRange> mLineTableRanges;
-  AddressRange mSpan{nullptr, nullptr};
-  const Elf *elf;
+  AddressRange mSpan{ nullptr, nullptr };
   FileEntryIndexVector mLineInfoFileIndices;
 
   bool IsComputed() const noexcept;
   void ComputeLineTableForThis() noexcept;
-  SourceCodeFile(CompilationUnit *compilationUnit, const Elf *elf, std::filesystem::path &&path,
-                 FileEntryIndexVector fileIndices) noexcept;
+  SourceCodeFile(
+    CompilationUnit *compilationUnit, std::filesystem::path &&path, FileEntryIndexVector fileIndices) noexcept;
 
 public:
   Immutable<std::string> mFullPath;
-  static SourceCodeFile::Ref Create(sym::CompilationUnit *compilationUnit, const Elf *elf, std::string path,
-                                    FileEntryIndexVector fileIndices) noexcept;
+  static SourceCodeFile::Ref Create(
+    sym::CompilationUnit *compilationUnit, std::string path, FileEntryIndexVector fileIndices) noexcept;
   sym::CompilationUnit *GetOwningCompilationUnit() const noexcept;
-  auto address_bounds() noexcept -> AddressRange;
+  AddressRange AddressBounds() noexcept;
   bool HasAddressRange() noexcept;
   void ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) noexcept;
   void AddLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept;

@@ -129,7 +129,6 @@ ToReadResult(const gdb::SendError &err) noexcept
 ReadResult
 GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *readBuffer) noexcept
 {
-  const auto &settings = mConnection->GetSettings();
   std::array<char, 64> buf{};
   const auto cmd = SerializeCommand(buf, "m{:x},{}", address.GetRaw(), size);
   const auto pid = TaskLeaderTid();
@@ -265,8 +264,7 @@ GdbRemoteCommander::ReverseContinue(bool stepOnly) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ResumeTarget(
-  TraceeController *tc, ResumeAction action, std::vector<Tid> *resumedThreads) noexcept
+GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::vector<Tid> *) noexcept
 {
   // TODO: implement writing the resumed threads into `resumedThreads` if it's not null.
   SetCatchSyscalls(action.mResumeType == RunType::SyscallContinue);
@@ -544,7 +542,7 @@ GdbRemoteCommander::OnFork(SessionId newProcess) noexcept
 }
 
 bool
-GdbRemoteCommander::PostFork(TraceeController *parent) noexcept
+GdbRemoteCommander::PostFork(TraceeController *) noexcept
 {
   // RR manages process creation entirely (more or less). It doesn't just copy
   // address space willy nilly. Therefore we need to actually install

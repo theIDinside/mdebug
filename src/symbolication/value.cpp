@@ -210,13 +210,7 @@ Value::RegisterContext() noexcept
 }
 
 bool
-Value::OverwriteDataThroughReference(u32 offset, const std::span<const std::byte> newBytes) noexcept
-{
-  TODO("Implement");
-}
-
-bool
-Value::OverwriteValueBytes(u32 offset, const std::span<const std::byte> newBytes) noexcept
+Value::OverwriteValueBytes(const std::span<const std::byte> newBytes) noexcept
 {
   auto oldSpan = MemoryView();
   if (newBytes.size() > oldSpan.size()) {
@@ -250,7 +244,7 @@ Value::WritePrimitive(Primitive value) noexcept
       return false;
     }
     auto cast = static_cast<u64>(value);
-    return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+    return OverwriteValueBytes(ByteViewOf(cast));
   }
 
   // if *not* a reference, or *is* array type, get layout describing type
@@ -274,11 +268,11 @@ Value::WritePrimitive(Primitive value) noexcept
     switch (sz) {
     case 4: {
       auto cast = static_cast<f32>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 8: {
       auto cast = static_cast<f64>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     }
   } break;
@@ -291,19 +285,19 @@ Value::WritePrimitive(Primitive value) noexcept
     switch (sz) {
     case 1: {
       auto cast = static_cast<i8>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 2: {
       auto cast = static_cast<i16>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 4: {
       auto cast = static_cast<i32>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 8: {
       auto cast = static_cast<i64>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     }
   } break;
@@ -316,19 +310,19 @@ Value::WritePrimitive(Primitive value) noexcept
     switch (sz) {
     case 1: {
       auto cast = static_cast<u8>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 2: {
       auto cast = static_cast<u16>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 4: {
       auto cast = static_cast<u32>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     case 8: {
       auto cast = static_cast<u64>(value);
-      return OverwriteValueBytes(mMemoryContentsOffsets, ByteViewOf(cast));
+      return OverwriteValueBytes(ByteViewOf(cast));
     } break;
     }
   } break;
@@ -424,7 +418,7 @@ LazyMemoryContentsObject::CacheMemory() noexcept
 }
 
 bool
-LazyMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
+LazyMemoryContentsObject::Refresh(TraceeController &) noexcept
 {
   CacheMemory();
   return true;
@@ -468,8 +462,7 @@ MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 size
 
 /*static*/
 MemoryContentsObject::ReadResult
-MemoryContentsObject::ReadMemory(
-  std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address, u32 size_of) noexcept
+MemoryContentsObject::ReadMemory(std::pmr::memory_resource *, TraceeController &, AddrPtr, u32) noexcept
 {
   TODO("implement MemoryContentsObject that uses custom allocation strategies.");
 }

@@ -146,8 +146,8 @@ BreakpointLocation::AddUser(tc::TraceeCommandInterface &controlInterface, UserBr
 }
 
 UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind locationUserKind) noexcept
-    : mId(param.mBreakpointId), mTid(param.mTaskId), mKind(locationUserKind),
-      mHitCondition(param.mTimesToHit.value_or(0)), mProcessId(param.mControl.TaskLeaderTid())
+    : mProcessId(param.mControl.TaskLeaderTid()), mId(param.mBreakpointId), mTid(param.mTaskId),
+      mKind(locationUserKind), mHitCondition(param.mTimesToHit.value_or(0))
 {
 
   if (param.mBreakpointLocationResult.is_expected()) {
@@ -216,11 +216,12 @@ UserBreakpoint::EvaluateStopCondition(TaskInfo &t) noexcept
     return {};
   }
 
-  TODO("Must implement BreakpointStatus first");
   BreakpointHitEventResult result{ this };
-  if (!mExpression->Run(&result)) {
+  result.mResult = EventResult::Resume;
+  if (!mExpression->Run(&result, t)) {
     return result;
   }
+  return result;
 }
 
 std::optional<AddrPtr>
@@ -328,8 +329,7 @@ UserBreakpoint::UserProvidedSpec() const noexcept
 
 /* virtual */
 Ref<UserBreakpoint>
-UserBreakpoint::CloneBreakpoint(
-  UserBreakpoints &breakpointStorage, TraceeController &tc, Ref<BreakpointLocation>) noexcept
+UserBreakpoint::CloneBreakpoint(UserBreakpoints &, TraceeController &, Ref<BreakpointLocation>) noexcept
 {
   PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
@@ -384,10 +384,8 @@ Breakpoint::OnHit(TraceeController &controller, TaskInfo &t) noexcept
     if (all_stopped) {
       controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true);
     } else {
-      controller.StopAllTasks(&t);
-      controller.GetPublisher(ObserverType::AllStop).Once([&]() {
-        controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true);
-      });
+      controller.StopAllTasks(
+        [&]() { controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true); });
     }
   } else {
     controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, false);
@@ -420,26 +418,6 @@ Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage,
   return breakpoint;
 }
 
-TemporaryBreakpoint::TemporaryBreakpoint(RequiredUserParameters param,
-  LocationUserKind kind,
-  std::optional<Tid> stopOnlyTaskTid,
-  std::unique_ptr<js::JsBreakpointFunction> conditionEvaluator) noexcept
-    : Breakpoint(std::move(param), kind, nullptr)
-{
-}
-
-BreakpointHitEventResult
-TemporaryBreakpoint::OnHit(TraceeController &controller, TaskInfo &task) noexcept
-{
-  const auto res = Breakpoint::OnHit(controller, task);
-  if (res.ShouldStop()) {
-    DBGLOG(core, "Hit temporary_breakpoint_t {}", mId);
-    return BP_RETIRE(res.mResult);
-  } else {
-    return BP_KEEP(None);
-  }
-}
-
 FinishBreakpoint::FinishBreakpoint(RequiredUserParameters param, Tid stopOnlyTaskTid) noexcept
     : UserBreakpoint(std::move(param), LocationUserKind::FinishFunction), mStopOnlyTid(stopOnlyTaskTid)
 {
@@ -458,10 +436,8 @@ FinishBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
   if (all_stopped) {
     tc.EmitSteppedStop({ tc.TaskLeaderTid(), mTid }, "Finished function", true);
   } else {
-    tc.StopAllTasks(&t);
-    tc.GetPublisher(ObserverType::AllStop).Once([&tc, tid = mTid]() {
-      tc.EmitSteppedStop({ tc.TaskLeaderTid(), tid }, "Finished function", true);
-    });
+    tc.StopAllTasks(
+      [&tc, tid = mTid]() { tc.EmitSteppedStop({ tc.TaskLeaderTid(), tid }, "Finished function", true); });
   }
   return BP_RETIRE(Stop);
 }
@@ -475,6 +451,8 @@ BreakpointHitEventResult
 CodeInjectionBoundaryBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 {
   DBGLOG(core, "Task {} hit code injection boundary breakpoint at {}", t.mTid, Address().value());
+  (void)tc;
+  (void)t;
   return BP_KEEP(None);
 }
 
@@ -546,7 +524,7 @@ Logpoint::EvaluateLog(TaskInfo &t) noexcept
   if (!mExpression) {
     return;
   }
-  TODO("Implement this");
+
   auto result = mExpression->EvaluateLog(&t, this);
   // t.GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(new ui::dap::OutputEvent{
   // t.GetSupervisor()->TaskLeaderTid(), "console", std::move(result.value()) });
@@ -555,6 +533,9 @@ Logpoint::EvaluateLog(TaskInfo &t) noexcept
 BreakpointHitEventResult
 Logpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 {
+  TODO("Implement this");
+  (void)tc;
+  (void)t;
   EvaluateLog(t);
   return BP_KEEP(Resume);
 }

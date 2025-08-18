@@ -46,7 +46,7 @@ template <typename C> struct std::formatter<HexJoinFormatIterator<C>>
       return std::format_to(out, "{:x}", *ptr);
     }
 
-    for (auto i = 0; i < size - 1; ++i) {
+    for (auto i = 0u; i < size - 1; ++i) {
       out = std::format_to(out, "{:x}", ptr[i]);
       for (const auto &ch : self.mDelimiter) {
         *out++ = ch;
@@ -133,7 +133,7 @@ template <typename C> struct std::formatter<JoinFormatIterator<C>>
       return std::format_to(out, "{}", *ptr);
     }
 
-    for (auto i = 0; i < size - 1; ++i) {
+    for (auto i = 0u; i < size - 1; ++i) {
       out = std::format_to(out, "{}", ptr[i]);
       for (const auto &ch : self.mDelimiter) {
         *out++ = ch;

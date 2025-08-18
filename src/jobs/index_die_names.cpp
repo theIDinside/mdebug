@@ -28,13 +28,13 @@ IndexingTask::IndexingTask(ObjectFile *objectFile, std::span<UnitData *> compUni
 /*static*/ std::vector<IndexingTask *>
 IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *taskGroupAllocator)
 {
-  std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{taskGroupAllocator};
+  std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{ taskGroupAllocator };
 
-  std::pmr::vector<sym::dw::UnitData *> sortedBySize{taskGroupAllocator};
+  std::pmr::vector<sym::dw::UnitData *> sortedBySize{ taskGroupAllocator };
   mdb::CopyTo(obj->GetAllCompileUnits(), sortedBySize);
 
-  std::sort(sortedBySize.begin(), sortedBySize.end(),
-            [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
+  std::sort(
+    sortedBySize.begin(), sortedBySize.end(), [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
 
   std::vector<IndexingTask *> tasks;
   std::vector<u64> taskSize;
@@ -57,7 +57,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   for (auto &w : works) {
     if (!w.empty()) {
       acc += w.size();
-      tasks.push_back(new IndexingTask{obj, w});
+      tasks.push_back(new IndexingTask{ obj, w });
     }
   }
 
@@ -69,7 +69,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
 static bool
 IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 {
-  DieReference ref{compilationUnit, &die};
+  DieReference ref{ compilationUnit, &die };
   auto objectFile = compilationUnit->GetObjectFile();
   while (ref.IsValid()) {
     const auto &abbreviations = ref.GetAbbreviation();
@@ -77,7 +77,8 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
     bool consideredComplete = true;
 
     for (auto it = std::cbegin(abbreviations.mAttributes);
-         it != std::cend(abbreviations.mAttributes) && consideredComplete; ++it) {
+      it != std::cend(abbreviations.mAttributes) && consideredComplete;
+      ++it) {
       switch (it->mName) {
       case Attribute::DW_AT_specification:
         [[fallthrough]];
@@ -109,7 +110,7 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 }
 
 void
-IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
+IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
 {
 
   using NameSet = std::vector<NameIndex::NameDieTuple>;
@@ -120,8 +121,10 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
     sz += unit->GetHeader().CompilationUnitSize();
   }
 
-  PROFILE_SCOPE_END_ARGS("IndexingTask::ExecuteTask", "indexing", PEARG("units", mCompUnitsToIndex.size()),
-                         PEARG("unit_data_size", sz));
+  PROFILE_SCOPE_END_ARGS("IndexingTask::ExecuteTask",
+    "indexing",
+    PEARG("units", mCompUnitsToIndex.size()),
+    PEARG("unit_data_size", sz));
 
   NameSet freeFunctions;
   NameSet methods;
@@ -137,7 +140,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
 
   std::vector<sym::dw::UnitData *> followedReferences{};
   std::vector<sym::dw::UnitData *> typeUnits{};
-  ScopedDefer clear_metadata{[&]() {
+  ScopedDefer clear_metadata{ [&]() {
     for (auto &comp_unit : mCompUnitsToIndex) {
       comp_unit->ClearLoadedCache();
     }
@@ -145,7 +148,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
     for (auto cu : followedReferences) {
       cu->ClearLoadedCache();
     }
-  }};
+  } };
 
   for (auto compileUnit : mCompUnitsToIndex) {
     PROFILE_SCOPE_ARGS("Index Compilation Unit", "indexing", PEARG("cu", compileUnit->SectionOffset()));
@@ -156,7 +159,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       typeUnits.push_back(compileUnit);
     }
 
-    UnitReader reader{compileUnit};
+    UnitReader reader{ compileUnit };
     auto dieIndex = -1;
     for (const auto &die : dies) {
       ++dieIndex;
@@ -245,7 +248,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
             auto ref = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
             while (!name) {
               auto refUnit = mObjectFile->GetCompileUnitFromOffset(ref);
-              UnitReader innerReader{refUnit, ref};
+              UnitReader innerReader{ refUnit, ref };
               const auto [abbr_code, uleb_sz] = innerReader.DecodeULEB128();
               const auto &remoteAbbrev = refUnit->GetAbbreviation(abbr_code);
               u64 newRef = 0;
@@ -291,9 +294,9 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       case DwarfTag::DW_TAG_variable:
         // We only register global variables, everything else wouldn't make sense.
         if (name && hasLocation && isSuperScopeVariable) {
-          globalVariables.push_back({name, dieIndex, compileUnit});
+          globalVariables.push_back({ name, dieIndex, compileUnit });
           if (mangledName && mangledName != name) {
-            globalVariables.push_back({mangledName, dieIndex, compileUnit});
+            globalVariables.push_back({ mangledName, dieIndex, compileUnit });
           }
         }
         break;
@@ -309,10 +312,10 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
       case DwarfTag::DW_TAG_union_type:
       case DwarfTag::DW_TAG_unspecified_type: {
         if (name && !isDecl) {
-          types.push_back({name, dieIndex, compileUnit, 0});
+          types.push_back({ name, dieIndex, compileUnit, 0 });
         }
         if (mangledName && !isDecl) {
-          types.push_back({mangledName, dieIndex, compileUnit, 0});
+          types.push_back({ mangledName, dieIndex, compileUnit, 0 });
         }
       } break;
       case DwarfTag::DW_TAG_inlined_subroutine: // 0x1d 0x2e
@@ -324,24 +327,24 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcep
         if (name) {
           isMemberFunction = IsMethod(compileUnit, die);
           if (isMemberFunction) {
-            methods.push_back({name, dieIndex, compileUnit});
+            methods.push_back({ name, dieIndex, compileUnit });
           } else {
-            freeFunctions.push_back({name, dieIndex, compileUnit});
+            freeFunctions.push_back({ name, dieIndex, compileUnit });
           }
         }
 
         if (mangledName && mangledName != name) {
           if (isMemberFunction) {
-            methods.push_back({mangledName, dieIndex, compileUnit});
+            methods.push_back({ mangledName, dieIndex, compileUnit });
           } else {
-            freeFunctions.push_back({mangledName, dieIndex, compileUnit});
+            freeFunctions.push_back({ mangledName, dieIndex, compileUnit });
           }
         }
       } break;
       case DwarfTag::DW_TAG_namespace:
       case DwarfTag::DW_TAG_imported_declaration:
         if (name) {
-          namespaces.push_back({name, dieIndex, compileUnit});
+          namespaces.push_back({ name, dieIndex, compileUnit });
         }
         break;
       default:
@@ -366,6 +369,6 @@ sym::PartialCompilationUnitSymbolInfo
 IndexingTask::InitPartialCompilationUnit(UnitData *partial_cu, const DieMetaData &) noexcept
 {
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
-  return sym::PartialCompilationUnitSymbolInfo{partial_cu};
+  return sym::PartialCompilationUnitSymbolInfo{ partial_cu };
 }
 }; // namespace mdb::sym::dw

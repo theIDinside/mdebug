@@ -1,8 +1,7 @@
 /** LICENSE TEMPLATE */
 
-#include "mdbjs/jsobject.h"
-#include "quickjs/quickjs.h"
-#include "supervisor.h"
+#include <mdbjs/jsobject.h>
+#include <supervisor.h>
 
 namespace mdb::js {
 

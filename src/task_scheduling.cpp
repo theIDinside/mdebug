@@ -31,9 +31,8 @@ ThreadProceedAction::cancel() noexcept
   mIsCancelled = true;
 }
 
-FinishFunction::FinishFunction(
-  TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp, bool should_clean_up) noexcept
-    : ThreadProceedAction(ctrl, t), mBreakpointAtReturnAddress(std::move(bp)), mShouldCleanup(should_clean_up)
+FinishFunction::FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp) noexcept
+    : ThreadProceedAction(ctrl, t), mBreakpointAtReturnAddress(std::move(bp))
 {
 }
 
@@ -97,10 +96,9 @@ InstructionStep::~InstructionStep()
   }
 }
 
-LineStep::LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept
-    : ThreadProceedAction(ctrl, task), mRequestedStepCount(lines), mLinesSteppedCount(0), mIsDone(false),
-      mResumedToReturnAddress(false), mStartFrame{ nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr },
-      mLineEntry()
+LineStep::LineStep(TraceeController &ctrl, TaskInfo &task) noexcept
+    : ThreadProceedAction(ctrl, task), mIsDone(false), mResumedToReturnAddress(false),
+      mStartFrame{ nullptr, task, static_cast<u32>(-1), 0, nullptr, nullptr }, mLineEntry()
 {
   using sym::dw::SourceCodeFile;
 
@@ -413,7 +411,7 @@ TaskScheduler::Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResul
     NormalScheduleTask(task, eventProceedResult);
     break;
   case SchedulingConfig::StopAll:
-    StopAllScheduleTask(task);
+    EmitStopWhenAllTasksHalted();
     break;
   }
 }
@@ -455,7 +453,7 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
 }
 
 void
-TaskScheduler::StopAllScheduleTask(TaskInfo &task) noexcept
+TaskScheduler::EmitStopWhenAllTasksHalted() noexcept
 {
   if (mSupervisor->IsAllStopped()) {
     mSupervisor->EmitAllStopped();

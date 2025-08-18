@@ -34,36 +34,31 @@ struct ValueRange
 class IValueResolve
 {
 public:
-  virtual std::vector<Ref<Value>> Resolve(
-    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept = 0;
+  virtual std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept = 0;
 };
 
 class ResolveReference final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(
-    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveCString final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(
-    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveArray final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(
-    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
 class ResolveRange final : public IValueResolve
 {
 public:
-  std::vector<Ref<Value>> Resolve(
-    const VariableContext &context, SymbolFile *symbolFile, ValueRange valueRange = {}) noexcept final;
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
 // The `value` visualizer - it formats a `Value` so that it can be displayed in the `value` field of a Variable

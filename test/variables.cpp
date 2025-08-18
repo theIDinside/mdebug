@@ -25,8 +25,9 @@ variants()
 void
 heap_allocated_variant()
 {
-  auto p = new Person{1, 2, "Three"};
-  auto theLastOfUs = new NPC{.kind = NPCKind::Friend, .payload = {.buddy = {"Dina", 10000}}}; // VARIANT_POINTER
+  auto p = new Person{ 1, 2, "Three" };
+  auto theLastOfUs =
+    new NPC{ .kind = NPCKind::Friend, .payload = { .buddy = { "Dina", 10000 } } }; // VARIANT_POINTER
   printf("Heap allocated objects get printed correctly.");
 }
 
@@ -52,25 +53,26 @@ check_if_employee(const Person &p, const Employee *employee, int employee_count)
 Person
 person(int id, int age, const char *name)
 {
-  return Person{id, age, name}; // ARGS_BP
+  return Person{ id, age, name }; // ARGS_BP
 }
 
 // test to see if we can parse and understand a C-array[3] of a structured type
 bool
 test(const Person &p)
 {
-  Employee employees[3] = {Employee{{0, 42, "John"}, 1}, Employee{{0, 24, "Jane"}, 2},
-                           Employee{{0, 67, "Connor"}, 3}};
+  Employee employees[3] = {
+    Employee{ { 0, 42, "John" }, 1 }, Employee{ { 0, 24, "Jane" }, 2 }, Employee{ { 0, 67, "Connor" }, 3 }
+  };
 
-  const auto employees_array =
-    std::to_array({Employee{{0, 42, "John"}, 1}, Employee{{0, 24, "Jane"}, 2}, Employee{{0, 67, "Connor"}, 3}});
+  const auto employees_array = std::to_array(
+    { Employee{ { 0, 42, "John" }, 1 }, Employee{ { 0, 24, "Jane" }, 2 }, Employee{ { 0, 67, "Connor" }, 3 } });
   return check_if_employee(p, employees, std::size(employees)); // ARRAY_VARS_BP
 }
 
 void
 optionals()
 {
-  std::optional<Employee> hasValue = Employee{{0, 42, "John"}, 1};
+  std::optional<Employee> hasValue = Employee{ { 0, 42, "John" }, 1 };
   std::optional<Employee> none = std::nullopt;
 
   std::optional<int> intHasValue = 42;
@@ -82,7 +84,7 @@ optionals()
 void
 derived()
 {
-  Derived derived{1, 2, 3};
+  Derived derived{ 1, 2, 3 };
   printf("Inheritance yay\n"); // INHERITANCE_BP
 }
 
@@ -100,9 +102,18 @@ enums()
   const auto b = Enum::Bar;
   const auto c = Enum::Baz;
 
-  std::array<Enum, 3> arr{Enum::Baz, Enum::Bar, Enum::Foo};
+  std::array<Enum, 3> arr{ Enum::Baz, Enum::Bar, Enum::Foo };
 
   printf("Support for enums \n"); // ENUM_BP
+}
+
+void
+forloop()
+{
+  printf("forloop start:\n"); // FOR_LOOP_START_BREAKPOINT
+  for (auto i = 0; i < 10; ++i) {
+    printf("i=%d\n", i); // COND_BREAKPOINT
+  }
 }
 
 int
@@ -116,15 +127,16 @@ main(int argc, const char **argv)
   variants();
   derived();
   optionals();
+  forloop();
   // Check if we can do a variablesRequest for locals, and get `personId`, `age`, `p`, `p2`, `pcheck_one` and
   // `pcheck_two`
   int personId = 0;
   int age = 42;
-  Person p{personId, 42, "John"};
+  Person p{ personId, 42, "John" };
   age = 1337; // LOCALS_BP
   printf("Hello John. Goodbye John.\n");
-  Person p2{1337, age, "Jane"};
+  Person p2{ 1337, age, "Jane" };
   bool pcheck_one = test(p);
   bool pcheck_two = test(p2);
-  test({1337, age, "Jane"}); // MAIN_END
+  test({ 1337, age, "Jane" }); // MAIN_END
 }

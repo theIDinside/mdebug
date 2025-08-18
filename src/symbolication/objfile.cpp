@@ -787,7 +787,7 @@ SymbolFile::ResolveVariable(
 
   auto resolver = GetStaticResolver(*value);
   if (resolver != nullptr) {
-    return resolver->Resolve(ctx, this, { start, count });
+    return resolver->Resolve(ctx, { start, count });
   } else {
     std::vector<Ref<sym::Value>> result{};
     result.reserve(type->MemberFields().size());
@@ -930,6 +930,7 @@ auto
 SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, TraceeController &tc, sym::Frame &frame) noexcept
   -> std::vector<Ref<sym::Value>>
 {
+  PROFILE_SCOPE("SymbolFile::GetVariables", logging::kSymbolication);
   std::vector<Ref<sym::Value>> result{};
   switch (variablesKind) {
   case sym::FrameVariableKind::Arguments:

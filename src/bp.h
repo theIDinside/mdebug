@@ -263,17 +263,6 @@ public:
   }
 };
 
-class TemporaryBreakpoint : public Breakpoint
-{
-public:
-  explicit TemporaryBreakpoint(RequiredUserParameters param,
-    LocationUserKind kind,
-    std::optional<Tid> stop_only,
-    std::unique_ptr<js::JsBreakpointFunction> cond) noexcept;
-  ~TemporaryBreakpoint() noexcept override = default;
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept override;
-};
-
 class FinishBreakpoint : public UserBreakpoint
 {
   Tid mStopOnlyTid;

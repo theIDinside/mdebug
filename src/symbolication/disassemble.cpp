@@ -24,7 +24,7 @@ struct SourceInfo
 };
 
 SourceInfo
-GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compilationUnits, AddrPtr addr)
+GetSourceInfo(const std::vector<sym::CompilationUnit *> &compilationUnits, AddrPtr addr)
 {
   for (auto cu : compilationUnits) {
     const auto res = cu->GetLineTableEntry(addr);
@@ -36,7 +36,7 @@ GetSourceInfo(SymbolFile *obj, const std::vector<sym::CompilationUnit *> &compil
 }
 
 static sym::Disassembly
-create_disasm_entry(TraceeController *target,
+CreateDisassemblyEntry(TraceeController *target,
   AddrPtr vm_address,
   const ZydisDisassembledInstruction &ins,
   const u8 *exec_data_ptr) noexcept
@@ -51,7 +51,7 @@ create_disasm_entry(TraceeController *target,
   auto obj = target->FindObjectByPc(vm_address);
   auto cus = obj->GetCompilationUnits(vm_address);
   if (!cus.empty()) {
-    SourceInfo sourceInfo = GetSourceInfo(obj, cus, vm_address);
+    SourceInfo sourceInfo = GetSourceInfo(cus, vm_address);
     if (sourceInfo) {
       return sym::Disassembly{ .address = vm_address,
         .opcode = std::move(machine_code),
@@ -81,7 +81,7 @@ create_disasm_entry(TraceeController *target,
 }
 
 void
-zydis_disasm_backwards(
+DisassembleBackwards(
   TraceeController *target, AddrPtr addr, i32 ins_offset, std::vector<sym::Disassembly> &output) noexcept
 {
   const auto objfile = target->FindObjectByPc(addr);
@@ -104,7 +104,7 @@ zydis_disasm_backwards(
           ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr, text->RemainingBytes(exec_data_ptr), &instruction)) &&
         add <= addr) {
         if (!disassembled_addresses.contains(add)) {
-          result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
+          result.push_back(CreateDisassemblyEntry(target, add, instruction, exec_data_ptr));
         }
         disassembled_addresses.insert(add);
         add = offset(add, instruction.info.length);
@@ -127,7 +127,7 @@ zydis_disasm_backwards(
              ZYDIS_MACHINE_MODE_LONG_64, add, exec_data_ptr, text->RemainingBytes(exec_data_ptr), &instruction)) &&
            add <= addr) {
       if (!disassembled_addresses.contains(add)) {
-        result.push_back(create_disasm_entry(target, add, instruction, exec_data_ptr));
+        result.push_back(CreateDisassemblyEntry(target, add, instruction, exec_data_ptr));
       }
       disassembled_addresses.insert(add);
       add = offset(add, instruction.info.length);
@@ -148,7 +148,7 @@ zydis_disasm_backwards(
 }
 
 void
-zydis_disasm(TraceeController *target,
+Disassemble(TraceeController *target,
   AddrPtr addr,
   u32 ins_offset,
   u32 total,
@@ -178,7 +178,7 @@ zydis_disasm(TraceeController *target,
     ZYAN_SUCCESS(ZydisDisassembleATT(
       ZYDIS_MACHINE_MODE_LONG_64, vm_address, exec_data_ptr, text->RemainingBytes(exec_data_ptr), &instruction)) &&
     total != 0) {
-    output.push_back(create_disasm_entry(target, vm_address, instruction, exec_data_ptr));
+    output.push_back(CreateDisassemblyEntry(target, vm_address, instruction, exec_data_ptr));
     vm_address = offset(vm_address, instruction.info.length);
     exec_data_ptr += instruction.info.length;
     --total;

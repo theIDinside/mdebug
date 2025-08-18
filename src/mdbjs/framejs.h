@@ -1,12 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "mdbjs/jsobject.h"
-#include "quickjs/quickjs.h"
-#include "symbolication/callstack.h"
-#include "task.h"
-#include "utils/smartptr.h"
+// mdb
 #include <common/typedefs.h>
+#include <mdbjs/jsobject.h>
+#include <symbolication/callstack.h>
+#include <task.h>
+#include <utils/smartptr.h>
 
 namespace mdb {
 struct FrameLookupHandle

@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "common/formatter.h"
+#include "symbolication/dwarf_defs.h"
 #include <common.h>
 #include <common/macros.h>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <symbolication/block.h>
 #include <symbolication/dwarf/die_ref.h>
 #include <tracee_pointer.h>
+#include <utility>
 #include <utils/expected.h>
 #include <utils/immutable.h>
 #include <utils/indexing.h>
@@ -224,7 +226,7 @@ enum class Modifier : i8
   Shared,
 };
 
-static constexpr mdb::Result<std::string_view, None>
+static constexpr std::string_view
 ModifierToString(Modifier mod)
 {
   switch (mod) {
@@ -254,7 +256,7 @@ ModifierToString(Modifier mod)
   case Modifier::Shared:
     return "shared"sv;
   }
-  return None{};
+  std::unreachable();
 }
 
 union EnumeratorConstValue
@@ -294,7 +296,7 @@ private:
 
   // A disengaged optional, means this type does *not* represent one of the primitives (what DWARF calls "base
   // types").
-  std::optional<BaseTypeEncoding> mBaseTypes;
+  std::optional<BaseTypeEncoding> mBaseType;
   u32 mArrayBounds{ 0 };
   EnumeratorValues mEnumValues{};
   DwarfTag mDebugInfoEntryTag;
@@ -329,6 +331,7 @@ public:
   bool IsReference() const noexcept;
   bool IsResolved() const noexcept;
   bool IsPrimitive() const noexcept;
+  std::optional<BaseTypeEncoding> GetBaseTypeIfPrimitive() const noexcept;
   bool IsCharType() const noexcept;
   bool IsArrayType() const noexcept;
 
@@ -360,8 +363,8 @@ public:
   {
     auto it = this;
     while (it != nullptr) {
-      if (it->mBaseTypes) {
-        return it->mBaseTypes;
+      if (it->mBaseType) {
+        return it->mBaseType;
       }
       it = it->mTypeChain;
     }
@@ -563,7 +566,7 @@ template <> struct std::formatter<sym::Type>
     auto type_span = std::span{ types.begin(), types.begin() + idx };
     for (const auto t : type_span) {
       if (t->mModifier != sym::Modifier::None) {
-        out = std::format_to(out, "{}", ModifierToString(t->mModifier).Value());
+        out = std::format_to(out, "{}", ModifierToString(t->mModifier));
         if (t->mModifier == sym::Modifier::Array) {
           out = std::format_to(out, "{}]", t->mArrayBounds);
         }

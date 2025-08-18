@@ -1151,6 +1151,45 @@ class DebugAdapterClient {
     )
     return response
   }
+
+  /**
+   * @param { import("./types").StackTraceArguments } args
+   * @returns { Promise<import("./types").StackTraceResponse> }
+   */
+  async stackTraceRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'stackTrace',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
+
+  /**
+   * @param { import("./types").ScopesArguments } args
+   * @returns { Promise<import("./types").ScopesResponse> }
+   */
+  async scopesRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'scopes',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
+
+  /**
+   * @param { import("./types").VariablesArguments } args
+   * @returns { Promise<import("./types").VariablesResponse> }
+   */
+  async variablesRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'variables',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
 }
 
 // Since we're running in a test suite, we want individual tests to
@@ -1301,6 +1340,30 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
 }
 
 /**
+ *
+ * @param {*} filePath
+ * @param {*} bpIdentifers
+ * @returns { { source: { name: string, path: string }, breakpoints: import("./types").SourceBreakpoint[] }}
+ */
+async function PrepareBreakpointArguments(filePath, bpIdentifers) {
+  const file = readFileContents(repoDirFile(filePath))
+
+  const breakpoints = bpIdentifers
+    .map((ident) => getLineOf(file, ident))
+    .filter((item) => item != null)
+    .map((l) => {
+      return { line: l, condition: null }
+    })
+  return {
+    source: {
+      name: repoDirFile(filePath),
+      path: repoDirFile(filePath),
+    },
+    breakpoints,
+  }
+}
+
+/**
  * Launch tracee to main, then set breakpoints at lines where `bpIdentifiers` can be found, issue a `threads` request
  * and issue 1 `continue` request stopping at first breakpoint. Issue a `stackTrace` request and a follow that
  * with a `scopes` request for the first frame in the stack trace.
@@ -1361,29 +1424,30 @@ const SubjectSourceFiles = {
 }
 
 module.exports = {
-  MDB_PATH,
-  DebugAdapterClient,
-  SubjectSourceFiles,
   allBreakpointIdentifiers,
-  getLineOf,
-  getStackFramePc,
-  readFileContents,
-  repoDirFile,
-  seconds,
-  testException,
-  testSuccess,
-  runTestSuite,
-  getRequestedTest,
+  checkPortAvailability,
   checkResponse,
+  createRemoteService,
+  DebugAdapterClient,
   doSomethingDelayed,
   getExecutorArgs,
-  launchToGetFramesAndScopes,
-  SetBreakpoints,
-  checkPortAvailability,
+  getLineOf,
   getRandomNumber: randomSeqGenerator,
-  createRemoteService,
+  getRequestedTest,
+  getStackFramePc,
+  launchToGetFramesAndScopes,
+  MDB_PATH,
+  PrepareBreakpointArguments,
+  readFileContents,
   RemoteService,
-  Thread,
+  repoDirFile,
+  runTestSuite,
+  seconds,
+  SetBreakpoints,
   StackFrame,
+  SubjectSourceFiles,
+  testException,
+  testSuccess,
+  Thread,
   Variable,
 }

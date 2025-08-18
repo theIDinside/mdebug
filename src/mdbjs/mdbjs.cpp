@@ -1,41 +1,127 @@
 /** LICENSE TEMPLATE */
 #include "mdbjs.h"
-#include "lib/arena_allocator.h"
 
 // mdb
 #include <common.h>
+#include <lib/arena_allocator.h>
 #include <mdbjs/supervisorjs.h>
 #include <mdbjs/taskinfojs.h>
 #include <mdbjs/util.h>
-#include <memory_resource>
 #include <supervisor.h>
 #include <tracer.h>
 #include <utils/logger.h>
 
 // system
-// dependecy
-#include <quickjs/quickjs.h>
+// dependency
+#include <mdbjs/include-quickjs.h>
+
+// std
+#include <memory_resource>
+
+#define STATIC_INIT_CHECK(Message)                                                                                \
+  static bool constantsInitialized = false;                                                                       \
+  ScopedDefer defer = []() { constantsInitialized = true; };                                                      \
+  ASSERT(!constantsInitialized, Message)
 
 namespace mdb::js {
 
 Scripting *Scripting::sInstance = nullptr;
 
-/* static */ JSValue
-Scripting::GetSupervisor(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+/* static */
+std::optional<JavascriptException>
+JavascriptException::GetException(JSContext *context) noexcept
 {
+  if (!context) {
+    return std::nullopt;
+  }
+
+  if (!JS_HasException(context)) {
+    return std::nullopt;
+  }
+
+  JSValue exceptionValue = JS_GetException(context);
+  if (JS_IsUndefined(exceptionValue)) {
+    return std::nullopt;
+  }
+
+  JavascriptException ex;
+
+  // Error message
+  const auto *exceptionMsg = JS_ToCString(context, exceptionValue);
+  if (exceptionMsg) {
+    ex.mExceptionMessage = exceptionMsg;
+    JS_FreeCString(context, exceptionMsg);
+  }
+
+  // Stack trace
+  auto stackValue = JS_GetProperty(context, exceptionValue, (JSAtom)StaticAtom::JSstack);
+  if (!JS_IsUndefined(stackValue)) {
+    const auto *stackTraceString = JS_ToCString(context, stackValue);
+    if (stackTraceString) {
+      ex.mStackTrace = stackTraceString;
+      JS_FreeCString(context, stackTraceString);
+    }
+    JS_FreeValue(context, stackValue);
+  }
+
+  // File name
+  auto fileValue = JS_GetProperty(context, exceptionValue, (JSAtom)StaticAtom::JSfileName);
+  if (!JS_IsUndefined(fileValue)) {
+    const auto *fileNameString = JS_ToCString(context, fileValue);
+    if (fileNameString) {
+      ex.mFileName = fileNameString;
+      JS_FreeCString(context, fileNameString);
+    }
+    JS_FreeValue(context, fileValue);
+  }
+
+  // Line number
+  auto lineValue = JS_GetProperty(context, exceptionValue, (JSAtom)StaticAtom::JSlineNumber);
+  if (JS_IsNumber(lineValue)) {
+    JS_ToInt32(context, &ex.mLineNumber, lineValue);
+  }
+  JS_FreeValue(context, lineValue);
+
+  // Column number
+  auto columnValue = JS_GetProperty(context, exceptionValue, (JSAtom)StaticAtom::JScolumnNumber);
+  if (JS_IsNumber(columnValue)) {
+    JS_ToInt32(context, &ex.mColumn, columnValue);
+  }
+  JS_FreeValue(context, columnValue);
+  JS_FreeValue(context, exceptionValue);
+
+  return ex;
+}
+
+/* static */ JSValue
+Scripting::GetSupervisor(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  (void)ctx;
+  (void)thisValue;
+  (void)argCount;
+  (void)argv;
   return JS_UNDEFINED;
 }
 
 /* static */ JSValue
-Scripting::Log(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+Scripting::Log(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
+  if (argCount < 1) {
+    return JS_UNDEFINED;
+  }
+  if (JS_IsString(argv[0])) {
+    QuickJsString string = QuickJsString::FromValue(ctx, argv[0]);
+    DBGLOG_STR(interpreter, string.mString);
+  } else {
+    DBGLOG(warning, "Discarding parameter to log. It must be a string.");
+  }
   return JS_UNDEFINED;
 }
 
 /* static */ JSValue
-Scripting::GetTask(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+Scripting::GetTask(
+  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
-  Scripting *interp = (Scripting *)JS_GetContextOpaque(ctx);
   if (argCount < 0 || !JS_IsNumber(argv[0])) {
     return JS_ThrowTypeError(ctx, Scripting::HelpMessage("getThread").data());
   }
@@ -54,7 +140,8 @@ Scripting::GetTask(JSContext *ctx, JSValueConst this_val, int argCount, JSValueC
 }
 
 /* static */ JSValue
-Scripting::PrintThreads(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+Scripting::PrintThreads(
+  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   alloc::StackBufferResource<4096> alloc;
   std::pmr::string buffer{ &alloc };
@@ -79,13 +166,25 @@ Scripting::PrintThreads(JSContext *ctx, JSValueConst thisValue, int argCount, JS
 }
 
 /* static */ JSValue
-Scripting::PrintProcesses(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+Scripting::PrintProcesses(
+  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
-  return JS_UNDEFINED;
+  alloc::StackBufferResource<4096> alloc;
+  std::pmr::string buffer{ &alloc };
+  buffer.reserve(4096);
+
+  auto iterator = std::back_inserter(buffer);
+  for (auto supervisor : Tracer::Get().GetAllProcesses()) {
+    iterator = ToString(iterator, supervisor);
+    *iterator++ = '\n';
+  }
+
+  auto v = JS_NewStringLen(ctx, buffer.data(), buffer.size());
+  return v;
 }
 
 /* static */ JSValue
-Scripting::Help(JSContext *ctx, JSValueConst this_val, int argCount, JSValueConst *argv) noexcept
+Scripting::Help(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   alloc::StackBufferResource<4096> rsrc;
   std::pmr::polymorphic_allocator alloc{ &rsrc };
@@ -101,8 +200,35 @@ Scripting::Help(JSContext *ctx, JSValueConst this_val, int argCount, JSValueCons
 }
 
 void
+Scripting::InitializeTypes() noexcept
+{
+  STATIC_INIT_CHECK("Double initialization of types");
+
+  for (const auto &metaData : MdbJavascriptTypes::GetAll()) {
+    DBGLOG(core, "Initializing JS Type {}", metaData.mType);
+    metaData.mRegister(mContext);
+  }
+}
+
+void
+Scripting::InitModuleConstants(JSValue moduleObject) noexcept
+{
+  STATIC_INIT_CHECK("Double initialization of constants");
+
+  for (const auto channel : Enum<Channel>::Variants()) {
+    JS_DefinePropertyValueStr(mContext,
+      moduleObject,
+      Enum<Channel>::ToString(channel).data(),
+      JS_NewInt32(mContext, std::to_underlying(channel)),
+      JS_PROP_C_W_E);
+  }
+}
+
+void
 Scripting::InitializeMdbModule() noexcept
 {
+  STATIC_INIT_CHECK("Double initialization of module");
+
   JSValue mdbObject = JS_NewObject(mContext);
 
   JSValue fn;
@@ -112,9 +238,11 @@ Scripting::InitializeMdbModule() noexcept
     JS_SetPropertyStr(mContext, mdbObject, descriptor.mName.data(), fn);
   }
 
-  JSValue global_obj = JS_GetGlobalObject(mContext);
-  JS_SetPropertyStr(mContext, global_obj, "mdb", mdbObject);
-  JS_FreeValue(mContext, global_obj);
+  JSValue globalObject = JS_GetGlobalObject(mContext);
+  JS_SetPropertyStr(mContext, globalObject, "mdb", mdbObject);
+  InitModuleConstants(mdbObject);
+  JS_FreeValue(mContext, globalObject);
+  constantsInitialized = true;
 }
 
 /* static */
@@ -132,6 +260,7 @@ Scripting::Create() noexcept
   sInstance = new Scripting{ runtime, context };
   JS_SetContextOpaque(context, sInstance);
   sInstance->InitializeMdbModule();
+  sInstance->InitializeTypes();
   return sInstance;
 }
 
@@ -152,7 +281,6 @@ Scripting::Shutdown() noexcept
 std::pmr::string *
 Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
 {
-  static int ReplLineNumber = 1;
   std::pmr::string *res = allocator->new_object<std::pmr::string>();
 
   JSValue evalRes = JS_Eval(mContext, input.data(), input.size(), "<eval>", 0);
@@ -174,96 +302,17 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
   return res;
 }
 
-/*
-bool
-RuntimeGlobal::PrintProcesses(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
+std::expected<JSValue, JavascriptException>
+CallFunction(JSContext *context, JSValue functionValue, JSValue thisValue, std::span<JSValue> arguments)
 {
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  JSValue returnValue = JS_Call(context, functionValue, thisValue, arguments.size(), arguments.data());
 
-  std::string buffer;
-  buffer.reserve(4096);
-  // Define your custom string representation
-
-  auto iterator = std::back_inserter(buffer);
-  for (auto supervisor : Tracer::Get().GetAllProcesses()) {
-    iterator = ToString(iterator, supervisor);
-    *iterator++ = '\n';
+  if (auto ex = JavascriptException::GetException(context); ex) {
+    JS_FreeValue(context, returnValue);
+    DBGLOG(core, "exception in js engine: {}\nStack trace:\n{}", ex->mExceptionMessage, ex->mStackTrace);
+    return std::unexpected(std::move(ex.value()));
   }
 
-  JSString *str = JS_NewStringCopyN(cx, buffer.data(), buffer.size());
-  args.rval().setString(str);
-  return true;
+  return returnValue;
 }
-
-
-bool
-RuntimeGlobal::Log(JSContext *cx, unsigned argc, JS::Value *vp) noexcept
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-  if (args.length() < 2 || ((!args[0].isNumber() && !args[0].isInt32()) || !args[1].isString())) {
-    DBGLOG(interpreter, "mdb.log() called with the wrong parameters: {}", args.length());
-    // TODO: set pending exception so that client code knows something went wrong.
-    JS_ReportErrorASCII(cx, "log requires arguments (channel: int, message: string).");
-    return false;
-  } else {
-    auto channelId = args[0].toInt32();
-    auto parsedChannelId = Enum<Channel>::FromInt(channelId);
-    if (!parsedChannelId) {
-      JS_ReportErrorASCII(cx, "Unknown channel id %d", channelId);
-      return false;
-    }
-
-    JS::RootedString exceptionString(cx, JS::ToString(cx, args[1]));
-    if (exceptionString) {
-      JS::UniqueChars exceptionCString = ::JS_EncodeStringToUTF8(cx, exceptionString);
-      if (exceptionCString) {
-        auto channel = logging::GetLogChannel(parsedChannelId.value());
-        channel->Log(std::string_view{ exceptionCString.get() });
-      }
-    }
-  }
-  args.rval().setNull();
-  return true;
-}
-
-
-Expected<JSFunction *, std::string>
-AppScriptingInstance::SourceBreakpointCondition(u32 breakpointId, std::string_view condition) noexcept
-{
-  JSAutoRealm ar(mContext, GetRuntimeGlobal());
-  ASSERT(::js::GetContextRealm(mContext), "Context realm retrieval failed.");
-  JS::EnvironmentChain envChain{ mContext, JS::SupportUnscopables::Yes };
-  if (envChain.length() != 0) {
-    ASSERT(
-      ::js::IsObjectInContextCompartment(envChain.chain()[0], mContext), "Object is not in context compartment.");
-  }
-
-  // Do the junk Gecko is supposed to do before calling into JSAPI.
-  for (size_t i = 0; i < envChain.length(); ++i) {
-    JS::ExposeObjectToActiveJS(envChain.chain()[i]);
-  }
-  constexpr auto argNames = std::to_array({ "tc", "task", "bp" });
-  auto file = std::format("breakpoint:{}", breakpointId);
-  auto fnName = std::format("bpCondition_{}", breakpointId);
-  auto src = SourceFromString(mContext, condition);
-  ASSERT(src.is_expected(), "expected source to have been constructed");
-  DBGLOG(core, "source constructed: {} bytes", src.value().length());
-  JS::RootedObject global(mContext, mGlobalObject);
-  JS::CompileOptions options{ mContext };
-
-  options.setFileAndLine("inline", breakpointId);
-
-  JS::Rooted<JSFunction *> func{ mContext,
-    JS::CompileFunction(
-      mContext, envChain, options, fnName.c_str(), argNames.size(), argNames.data(), src.value()) };
-  if (!func) {
-    DBGLOG(core, "failed to compile event handler: {}", condition);
-    return ConsumePendingException(mContext)
-      .transform([](auto &&str) -> mdb::Unexpected<std::string> { return mdb::unexpected(std::move(str)); })
-      .value_or(mdb::Unexpected{ std::string{ "Failed" } });
-  }
-  return expected<JSFunction *>(func.get());
-}
-*/
 } // namespace mdb::js

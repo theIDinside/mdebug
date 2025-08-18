@@ -47,6 +47,8 @@ mdb::TracerProcess mdb::Tracer::sApplicationState = TracerProcess::Running;
 
 mdb::ThreadPool *mdb::ThreadPool::sGlobalThreadPool = new mdb::ThreadPool{};
 
+#include <mdbjs/js.init.h>
+
 int
 main(int argc, const char **argv)
 {

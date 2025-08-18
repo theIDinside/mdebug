@@ -1,4 +1,11 @@
-const { checkResponse, getLineOf, readFileContents, repoDirFile, launchToGetFramesAndScopes } = require('./client')
+const {
+  checkResponse,
+  getLineOf,
+  readFileContents,
+  repoDirFile,
+  launchToGetFramesAndScopes,
+  PrepareBreakpointArguments,
+} = require('./client')
 const { findDisasmFunction, assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
 
 const bpRequest = 'setBreakpoints'
@@ -294,6 +301,51 @@ async function set4ThenSet2(debugAdapter) {
   )
 }
 
+/** @param {import("./client").DebugAdapterClient } debugAdapter */
+async function testConditionShouldStopOn5(debugAdapter) {
+  let { threads, frames, scopes } = await launchToGetFramesAndScopes(
+    debugAdapter,
+    'test/variables.cpp',
+    ['FOR_LOOP_START_BREAKPOINT'],
+    'forloop',
+    'variables'
+  )
+
+  const args = await PrepareBreakpointArguments('test/variables.cpp', ['COND_BREAKPOINT'])
+
+  let conditionLines = [
+    'let frame = task.frame();', //1
+    'let variable = frame.locals().find(v => v.name() == "i");',
+    "if(variable.name() == 'i') {", //9
+    '  if(variable == 5) {', //10
+    '    mdb.log("Stop ye old cunt");',
+    '    bpstat.stop();', //11
+    '    return;', //12
+    '  } else {', //13
+    "    mdb.log('variable is: ' + variable);", //14
+    '  }', //15
+    '}', //16
+  ]
+
+  args.breakpoints[0].condition = conditionLines.join('\n')
+
+  let res = await debugAdapter.setBreakpointsRequest(args)
+  checkResponse(res, 'setBreakpoints', true)
+  await debugAdapter.contNextStop()
+  {
+    const stackTrace = await debugAdapter.stackTraceRequest({ threadId: threads[0].id })
+    const scopes = await debugAdapter.scopesRequest({ frameId: stackTrace.body.stackFrames[0].id })
+    const variables = await debugAdapter.variablesRequest({
+      variablesReference: scopes.body.scopes[1].variablesReference,
+    })
+    assertLog(
+      variables.body.variables[0].value == 5,
+      `Breakpoint stopped succesfully with condition`,
+      () => `Expected value of variable to be 5, was ${variables.body.variables[0].value}`
+    )
+  }
+}
+
 const tests = {
   setNonExistingSourceBp: () => setNonExistingSourceBp,
   set4InSameCompUnit: () => set4InSameCompUnit,
@@ -303,6 +355,7 @@ const tests = {
   setBreakpointsThatArePending: () => setBreakpointsThatArePending,
   setUsingRegexFunctionBreakpoint: () => setFunctionBreakpointUsingRegex,
   set4ThenSet2: () => set4ThenSet2,
+  testCondtionThatShouldNeverStop: () => testConditionShouldStopOn5,
 }
 
 module.exports = {

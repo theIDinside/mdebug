@@ -255,12 +255,6 @@ public:
       static_assert(always_false<T>, "Unsupported type to get");
     }
   }
-
-  template <typename T>
-  T
-  Get(std::size_t property) const noexcept
-  {
-  }
 };
 
 #define FOR_EACH_PARSE_ERROR(ERR)                                                                                 \

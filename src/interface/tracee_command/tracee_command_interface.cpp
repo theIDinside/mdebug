@@ -8,9 +8,8 @@
 
 namespace mdb::tc {
 
-TraceeCommandInterface::TraceeCommandInterface(TargetFormat format,
-                                               std::shared_ptr<gdb::ArchictectureInfo> &&arch_info,
-                                               TraceeInterfaceType type) noexcept
+TraceeCommandInterface::TraceeCommandInterface(
+  TargetFormat format, std::shared_ptr<gdb::ArchictectureInfo> &&arch_info, TraceeInterfaceType type) noexcept
     : mFormat(format), mArchInfo(std::move(arch_info)), mType(type)
 {
 }
@@ -41,7 +40,7 @@ TraceeCommandInterface::TargetManagesBreakpoints() noexcept
 }
 
 TaskExecuteResponse
-TraceeCommandInterface::ReverseContinue(bool onlyStep) noexcept
+TraceeCommandInterface::ReverseContinue(bool) noexcept
 {
   // In the future, when we're 100% certain that everything works as intended, we can change this
   // to just return a TaskExecuteResponse::Error. But for now, we want it to be a hard error, so that we catch when

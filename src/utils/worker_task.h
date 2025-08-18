@@ -21,7 +21,7 @@ protected:
 
 private:
   bool IsGroupJob() const noexcept;
-  TaskGroup *mOwningGroup{nullptr};
+  TaskGroup *mOwningGroup{ nullptr };
 };
 
 class NoOp final : public Task

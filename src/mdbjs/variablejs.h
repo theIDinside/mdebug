@@ -1,9 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "mdbjs/jsobject.h"
-#include "symbolication/value.h"
+// mdb
 #include <common/typedefs.h>
+#include <mdbjs/jsobject.h>
+#include <symbolication/value.h>
 
 namespace mdb::js {
 
@@ -18,7 +19,7 @@ struct JsVariable : public JSBinding<JsVariable, sym::Value, JavascriptClasses::
   static auto Bytes(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   static auto IsLive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   static auto SetValue(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto CacheLayout(JSContext *context, sym::Value *value) noexcept -> void;
+  static auto ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
 
   /** Gets member variable when user does foo.mMember or foo.value, foo.blah, etc. As such, when user reads
    * property, it uses the get_property functionality in QuickJS. If the backing sym::Type* does not have a member
@@ -44,12 +45,26 @@ struct JsVariable : public JSBinding<JsVariable, sym::Value, JavascriptClasses::
     return fns;
   }
 
-  static consteval auto
-  ExoticMethods() noexcept -> JSClassExoticMethods
+  static constexpr auto
+  ExoticMethods() noexcept -> JSClassExoticMethods *
   {
-    JSClassExoticMethods v{};
+    static JSClassExoticMethods v{};
     v.get_property = &GetMemberVariable;
-    return v;
+    return &v;
+  }
+
+  static constexpr auto
+  DefineToPrimitive(JSContext *context, JSValue prototype, JSAtom toPrimitiveAtom)
+  {
+    ASSERT(toPrimitiveAtom != 0, "toPrimitive atom must be passed to function");
+    JSValue func = JS_NewCFunction(context, &ToPrimitive, "[[toPrimitive]]", 1);
+    int rc = JS_DefinePropertyValue(context,
+      prototype,
+      toPrimitiveAtom,
+      func,
+      JS_PROP_C_W_E); // Configurable + Writeable + Enumerable
+    ASSERT(rc != -1 && rc > 0, "Defining the toPrimitive property failed.");
+    JS_FreeAtom(context, toPrimitiveAtom);
   }
 };
 

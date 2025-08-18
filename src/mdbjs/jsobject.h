@@ -1,11 +1,17 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include <concepts>
-#include <expected>
-#include <quickjs/quickjs.h>
-#include <span>
+
+// mdb
 #include <utils/scope_defer.h>
 #include <utils/smartptr.h>
+
+// dependency
+#include <mdbjs/include-quickjs.h>
+
+// std
+#include <concepts>
+#include <expected>
+#include <span>
 
 #define GetThisOrReturnException(variable, msg)                                                                   \
   GetNative(context, thisValue);                                                                                  \
@@ -21,6 +27,7 @@
   EACH_TYPE(Supervisor)                                                                                           \
   EACH_TYPE(TaskInfo)
 
+// NOLINTNEXTLINE(performance-enum-size): It's an actual drop-in replacement for JSClassId
 enum class JavascriptClasses : JSClassID
 {
   // The actual init start as of the version used for mdb is 56.
@@ -42,6 +49,44 @@ struct JSBindingLeakHelper
 };
 
 namespace js {
+
+#define REGISTER_TYPE(Type)                                                                                       \
+  inline bool Type##Registered = []() {                                                                           \
+    MdbJavascriptTypes::Register(#Type, Type::Register);                                                          \
+    return true;                                                                                                  \
+  }()
+
+class MdbJavascriptTypes
+{
+public:
+  using FuncType = std::function<void(JSContext *context)>;
+  struct MetaData
+  {
+    const char *mType;
+    FuncType mRegister;
+  };
+
+  static constexpr void
+  Register(const char *typeName, FuncType &&fn)
+  {
+    GetFunctions().push_back(MetaData{ typeName, fn });
+  }
+
+  static constexpr const std::vector<MetaData> &
+  GetAll()
+  {
+    return GetFunctions();
+  }
+
+private:
+  static constexpr std::vector<MetaData> &
+  GetFunctions()
+  {
+    static std::vector<MetaData> functions;
+    return functions;
+  }
+};
+
 // Helper to concatenate arrays at compile time
 template <typename T, std::size_t N, std::size_t M, std::size_t... I1, std::size_t... I2>
 constexpr std::array<T, N + M>
@@ -66,8 +111,7 @@ concept HasFactory = requires(JSRuntime *runTime, JSValue value) { T::Factory(ru
 
 template <typename T>
 concept Bindable = requires(T t) {
-  { T::PrototypeFunctions() } -> std::convertible_to<std::span<JSCFunctionListEntry>>;
-  { T::JavascriptName() } -> std::convertible_to<const char *>;
+  { T::PrototypeFunctions() } -> std::convertible_to<std::span<const JSCFunctionListEntry>>;
 };
 
 #define ClassArgs() (JSContext * context, JSValueConst thisValue, int argCount, JSValueConst *argv)->JSValue
@@ -156,12 +200,7 @@ GetProperty(JSContext *context, JSValueConst obj, const char *propertyName)
   return result;
 }
 
-template <typename T, typename NativeType>
-concept HasExoticMethods = requires(JSContext *context, NativeType *nativeType) {
-  { T::ExoticMethods() } -> std::same_as<JSClassExoticMethods>; // member variable 'value' of type int
-  { T::CacheLayout(context, nativeType) };
-};
-
+// Classes that implement JSBinding, must also add themselves to js.init.h!
 template <typename BindingType, typename NativeType, JavascriptClasses ClassId> struct JSBinding
 {
   static_assert(ClassId > static_cast<JavascriptClasses>(56));
@@ -191,6 +230,14 @@ template <typename BindingType, typename NativeType, JavascriptClasses ClassId> 
   }
 
 public:
+  JSBinding(const JSBinding &) noexcept = delete;
+  JSBinding &operator=(const JSBinding &) noexcept = delete;
+
+  JSBinding(JSBinding &&move) noexcept : mContext(move.mContext), mValue(JS_UNDEFINED)
+  {
+    std::swap(mValue, move.mValue);
+  }
+
   constexpr ~JSBinding() noexcept { Reset(); }
 
   JSValue &
@@ -212,13 +259,6 @@ public:
   }
 
   static void
-  SetExoticMethods(JSClassDef &def)
-    requires(HasExoticMethods<BindingType, NativeType>)
-  {
-    def.exotic = &BindingType::ExoticMethods();
-  }
-
-  static void
   Register(JSContext *context)
   {
     static_assert(Bindable<BindingType>, "BindingType must satisfy Bindable concept");
@@ -226,21 +266,27 @@ public:
       std::terminate();
     }
 
-    JSClassDef definition;
+    JSClassDef definition{};
 
     definition.class_name = JavascriptName().data();
 
-    SetExoticMethods(definition);
-
-    if constexpr (HasFinalizer<BindingType>) {
-      definition.finalizer = BindingType::Finalizer;
-    } else {
-      definition.finalizer = nullptr;
-    }
+    definition.finalizer = &Finalize;
 
     JS_NewClass(JS_GetRuntime(context), GetClassId(), &definition);
 
     JSValue prototype = JS_NewObject(context);
+
+    if constexpr (requires { BindingType::DefineToPrimitive(context, JSValue{}, JSAtom{}); }) {
+      JSValue global = JS_GetGlobalObject(context);
+      JSValue symbol = JS_GetPropertyStr(context, global, "Symbol");
+      JSValue toPrimitive = JS_GetPropertyStr(context, symbol, "toPrimitive");
+
+      ASSERT(!JS_IsUndefined(toPrimitive), "Failed to configure toPrimitive");
+      BindingType::DefineToPrimitive(context, prototype, JS_ValueToAtom(context, toPrimitive));
+      JS_FreeValue(context, global);
+      JS_FreeValue(context, symbol);
+      JS_FreeValue(context, toPrimitive);
+    }
 
     JS_SetPropertyFunctionList(
       context, prototype, BindingType::PrototypeFunctions().data(), BindingType::PrototypeFunctions().size());
@@ -270,9 +316,6 @@ public:
   static JSValue
   CreateValue(JSContext *context, NativeType *value) noexcept
   {
-    if constexpr (HasExoticMethods<BindingType, NativeType>) {
-      BindingType::CacheLayout(context, value);
-    }
 
     JSValue object = JS_NewObjectClass(context, GetClassId());
     if (JS_IsException(object)) {
@@ -286,9 +329,6 @@ public:
   CreateValue(JSContext *context, RefPtr<NativeType> value)
     requires(IsRefCountable<NativeType>)
   {
-    if constexpr (HasExoticMethods<BindingType, NativeType>) {
-      BindingType::CacheLayout(context, value);
-    }
 
     JSValue object = JS_NewObjectClass(context, GetClassId());
     if (JS_IsException(object)) {
@@ -310,18 +350,23 @@ public:
     return BindingType{ JSBinding{ .mContext = context, .mValue = CreateValue(context, value) } };
   }
 
+  // We don't even use JSRuntime*
   static void
-  Finalize(JSRuntime *rt, JSValue val)
+  Finalize(JSRuntime *, JSValue val)
   {
     void *ptr = JS_GetOpaque(val, std::to_underlying(ClassId));
     if (!ptr) {
       return;
     }
 
-    if constexpr (IsRefCountable<NativeType>) {
+    if constexpr (requires { NativeType::DecreaseUseCount(); }) {
       static_cast<LeakedRef<NativeType> *>(ptr)->Drop();
     }
   }
 };
+
+template <typename BindingType, typename NativeType, JavascriptClasses ClassId>
+bool JSBinding<BindingType, NativeType, ClassId>::sClassInitialized = false;
+
 } // namespace js
 } // namespace mdb

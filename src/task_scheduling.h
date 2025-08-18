@@ -78,7 +78,7 @@ private:
 class LineStep : public ThreadProceedAction
 {
 public:
-  LineStep(TraceeController &ctrl, TaskInfo &task, int lines) noexcept;
+  LineStep(TraceeController &ctrl, TaskInfo &task) noexcept;
   ~LineStep() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -89,19 +89,17 @@ private:
   void InstallBreakpoint(AddrPtr address) noexcept;
   void MaybeSetDone(bool isDone) noexcept;
 
-  int mRequestedStepCount;
-  int mLinesSteppedCount;
   bool mIsDone;
   bool mResumedToReturnAddress;
   sym::Frame mStartFrame;
   sym::dw::LineTableEntry mLineEntry;
-  Ref<UserBreakpoint> mPotentialBreakpointAtReturnAddress{nullptr};
+  Ref<UserBreakpoint> mPotentialBreakpointAtReturnAddress{ nullptr };
 };
 
 class FinishFunction : public ThreadProceedAction
 {
 public:
-  FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp, bool should_clean_up) noexcept;
+  FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp) noexcept;
   ~FinishFunction() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -109,7 +107,6 @@ public:
 
 private:
   Ref<UserBreakpoint> mBreakpointAtReturnAddress;
-  bool mShouldCleanup;
 };
 
 class StopHandler
@@ -134,7 +131,7 @@ class StepInto final : public ThreadProceedAction
 {
   sym::Frame mStartFrame;
   sym::dw::LineTableEntry mStartingLineEntry;
-  bool mIsDone{false};
+  bool mIsDone{ false };
 
 public:
   StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame, sym::dw::LineTableEntry entry) noexcept;
@@ -174,7 +171,7 @@ public:
   bool SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualScheduler, bool resume) noexcept;
   void Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
   void NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
-  void StopAllScheduleTask(TaskInfo &task) noexcept;
+  void EmitStopWhenAllTasksHalted() noexcept;
 
   void SetNormalScheduling() noexcept;
   void SetStopAllScheduling() noexcept;

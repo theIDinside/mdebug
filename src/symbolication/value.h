@@ -116,8 +116,7 @@ public:
   bool IsLive() const noexcept;
   void RegisterContext() noexcept;
 
-  bool OverwriteDataThroughReference(u32 offset, const std::span<const std::byte> newBytes) noexcept;
-  bool OverwriteValueBytes(u32 offset, const std::span<const std::byte> newBytes) noexcept;
+  bool OverwriteValueBytes(const std::span<const std::byte> newBytes) noexcept;
 
   template <typename Primitive> bool WritePrimitive(Primitive value) noexcept;
 
