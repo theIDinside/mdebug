@@ -1,9 +1,11 @@
+/** LICENSE TEMPLATE */
 #include "framejs.h"
-#include "mdbjs/jsobject.h"
-#include "mdbjs/variablejs.h"
-#include "quickjs/quickjs.h"
-#include "supervisor.h"
-#include "symbolication/callstack.h"
+
+// mdb
+#include <mdbjs/jsobject.h>
+#include <mdbjs/variablejs.h>
+#include <supervisor.h>
+#include <symbolication/callstack.h>
 #include <symbolication/objfile.h>
 
 namespace mdb {
@@ -18,16 +20,10 @@ FrameLookupHandle::IsValid() noexcept
 
 namespace mdb::js {
 
-static inline constexpr JSValue
-ThrowFrameNotAlive(JSContext *context)
-{
-  return JS_ThrowTypeError(context, "Frame handle was null (frame no longer alive)");
-}
-
 static constexpr auto FrameNotAliveErrorMessage = "Frame handle was null (frame no longer alive)";
 
 JSValue
-Frame::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+Frame::Id(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *handle = GetThisOrReturnException(handle, FrameNotAliveErrorMessage);
   return JS_NewUint32(context, static_cast<u32>(handle->mFrame.FrameId()));
@@ -41,7 +37,7 @@ GetArrayOfVariables(JSContext *context,
   sym::VariableSet set)
 {
   auto arrayObject = JS_NewArray(context);
-
+  ASSERT(JS_IsArray(context, arrayObject), "wtf");
   auto variables = symbolFile->GetVariables(*supervisor, frame, set);
   for (auto &&[index, variable] : std::ranges::views::enumerate(variables)) {
     auto jsValue = JsVariable::CreateValue(context, std::move(variable));
@@ -52,8 +48,9 @@ GetArrayOfVariables(JSContext *context,
 }
 
 JSValue
-Frame::Locals(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+Frame::Locals(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
+  PROFILE_SCOPE("Frame::Arguments", logging::kInterpreter);
   auto *frame = GetThisOrReturnException(frame, "Could not retrieve frame handle");
 
   if (!frame->IsValid()) {
@@ -70,8 +67,9 @@ Frame::Locals(JSContext *context, JSValue thisValue, int argCount, JSValue *argv
 };
 
 JSValue
-Frame::Arguments(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+Frame::Arguments(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
+  PROFILE_SCOPE("Frame::Arguments", logging::kInterpreter);
   auto *frame = GetThisOrReturnException(frame, "Could not retrieve frame handle");
 
   if (!frame->IsValid()) {
@@ -88,7 +86,7 @@ Frame::Arguments(JSContext *context, JSValue thisValue, int argCount, JSValue *a
 };
 
 JSValue
-Frame::Caller(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+Frame::Caller(JSContext *context, [[maybe_unused]] JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   return JS_ThrowTypeError(context,
     "Caller"
@@ -96,7 +94,7 @@ Frame::Caller(JSContext *context, JSValue thisValue, int argCount, JSValue *argv
 };
 
 JSValue
-Frame::Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+Frame::Name(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *frame = GetThisOrReturnException(frame, "Could not retrieve frame handle");
   return JS_NewStringLen(context, frame->mFrame.Name()->data(), frame->mFrame.Name()->length());

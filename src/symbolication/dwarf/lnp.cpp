@@ -718,26 +718,22 @@ SourceCodeFile::GetOwningCompilationUnit() const noexcept
   return mCompilationUnit;
 }
 
-SourceCodeFile::SourceCodeFile(sym::CompilationUnit *compilationUnit,
-  const Elf *elf,
-  std::filesystem::path &&path,
-  FileEntryIndexVector fileIndices) noexcept
-    : mCompilationUnit(compilationUnit), elf(elf), mLineInfoFileIndices(fileIndices), mFullPath(std::move(path))
+SourceCodeFile::SourceCodeFile(
+  sym::CompilationUnit *compilationUnit, std::filesystem::path &&path, FileEntryIndexVector fileIndices) noexcept
+    : mCompilationUnit(compilationUnit), mLineInfoFileIndices(fileIndices), mFullPath(std::move(path))
 {
 }
 
 /* static */
 SourceCodeFile::Ref
-SourceCodeFile::Create(sym::CompilationUnit *compilationUnit,
-  const Elf *elf,
-  std::string path,
-  FileEntryIndexVector fileIndices) noexcept
+SourceCodeFile::Create(
+  sym::CompilationUnit *compilationUnit, std::string path, FileEntryIndexVector fileIndices) noexcept
 {
-  return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{ compilationUnit, elf, std::move(path), fileIndices });
+  return std::shared_ptr<SourceCodeFile>(new SourceCodeFile{ compilationUnit, std::move(path), fileIndices });
 }
 
 AddressRange
-SourceCodeFile::address_bounds() noexcept
+SourceCodeFile::AddressBounds() noexcept
 {
   if (IsComputed()) {
     return mSpan;
@@ -749,7 +745,7 @@ SourceCodeFile::address_bounds() noexcept
 bool
 SourceCodeFile::HasAddressRange() noexcept
 {
-  auto range = address_bounds();
+  auto range = AddressBounds();
 
   return range.IsValid();
 }

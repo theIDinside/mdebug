@@ -287,7 +287,7 @@ Type::Type(DwarfTag debugInfoEntryTag,
   bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(isTypedef),
-      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target), mFields(), mBaseTypes(),
+      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target), mFields(), mBaseType(),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
@@ -298,21 +298,21 @@ Type::Type(DwarfTag debugInfoEntryTag,
   std::string_view name) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(false),
-      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes(),
+      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseType(),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
 
 Type::Type(std::string_view name, size_t size) noexcept
     : mName(name), mCompUnitDieReference(), mModifier(Modifier::None), mIsTypedef(false), size_of(size),
-      mIsResolved(true), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseTypes()
+      mIsResolved(true), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseType()
 {
 }
 
 Type::Type(Type &&o) noexcept
     : mName(o.mName), mCompUnitDieReference(o.mCompUnitDieReference), mModifier(o.mModifier), size_of(o.size_of),
       mIsResolved(o.mIsResolved), mIsProcessing(o.mIsProcessing), mTypeChain(o.mTypeChain),
-      mFields(std::move(o.mFields)), mBaseTypes(o.mBaseTypes)
+      mFields(std::move(o.mFields)), mBaseType(o.mBaseType)
 {
   ASSERT(!mIsProcessing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }
@@ -333,7 +333,7 @@ Type::ResolveAlias() noexcept
 void
 Type::SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept
 {
-  mBaseTypes = enc;
+  mBaseType = enc;
 }
 
 NonNullPtr<Type>
@@ -399,10 +399,31 @@ Type::SizeBytes() noexcept
   }
 }
 
+std::optional<BaseTypeEncoding>
+Type::GetBaseTypeIfPrimitive() const noexcept
+{
+  if (mBaseType.has_value() || mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+    return mBaseType;
+  }
+
+  if (IsReference()) {
+    return {};
+  }
+
+  auto it = mTypeChain;
+  while (it != nullptr) {
+    if (it->mBaseType.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+      return it->mBaseType;
+    }
+    it = it->mTypeChain;
+  }
+  return {};
+}
+
 bool
 Type::IsPrimitive() const noexcept
 {
-  if (mBaseTypes.has_value() || mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+  if (mBaseType.has_value() || mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
     return true;
   }
 
@@ -412,7 +433,7 @@ Type::IsPrimitive() const noexcept
 
   auto it = mTypeChain;
   while (it != nullptr) {
-    if (it->mBaseTypes.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+    if (it->mBaseType.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
       return true;
     }
     it = it->mTypeChain;
@@ -423,7 +444,7 @@ Type::IsPrimitive() const noexcept
 bool
 Type::IsCharType() const noexcept
 {
-  return mBaseTypes
+  return mBaseType
     .transform([](auto v) {
       switch (v) {
       case BaseTypeEncoding::DW_ATE_signed_char:

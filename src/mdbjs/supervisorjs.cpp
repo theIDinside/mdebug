@@ -1,8 +1,13 @@
 /** LICENSE TEMPLATE */
+
 #include "supervisorjs.h"
-#include "mdbjs/bpjs.h"
-#include "mdbjs/jsobject.h"
-#include "quickjs/quickjs.h"
+
+// mdb
+#include <mdbjs/bpjs.h>
+#include <mdbjs/jsobject.h>
+
+// dependency
+#include <mdbjs/include-quickjs.h>
 
 namespace mdb::js {
 
@@ -10,15 +15,14 @@ static constexpr auto OpaqueDataErrorMessage = "Could not retrieve supervisor";
 
 /* static */
 JSValue
-JsSupervisor::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsSupervisor::Id(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *native = GetThisOrReturnException(native, OpaqueDataErrorMessage);
-
   return JS_NewInt32(context, native->TaskLeaderTid());
 }
 /* static */
 JSValue
-JsSupervisor::ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsSupervisor::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
 
@@ -34,18 +38,9 @@ JsSupervisor::ToString(JSContext *context, JSValue thisValue, int argCount, JSVa
   return strValue;
 }
 
-template <typename T> struct Foo
-{
-  static int
-  Create(T *t)
-  {
-    return 1;
-  }
-};
-
 /* static */
 JSValue
-JsSupervisor::Breakpoints(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsSupervisor::Breakpoints(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
 

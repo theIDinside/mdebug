@@ -233,8 +233,8 @@ public:
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
   void ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept;
   /* Interrupts/stops all threads in this process space */
-  void StopAllTasks(TaskInfo *requestingTask) noexcept;
-  void StopAllTasks(TaskInfo *requestingTask, std::function<void()> &&callback) noexcept;
+  void StopAllTasks() noexcept;
+  void StopAllTasks(std::function<void()> &&callback) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *RegisterTaskWaited(WaitPidResult wait) noexcept;
@@ -404,13 +404,13 @@ public:
   void CacheRegistersFor(TaskInfo &t, bool forceRefresh = false) noexcept;
   tc::TraceeCommandInterface &GetInterface() noexcept;
 
-  void TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool notify) noexcept;
-  void ExitAll(TaskInfo::SupervisorState state) noexcept;
+  void TaskExit(TaskInfo &task, bool notify) noexcept;
+  void ExitAll() noexcept;
 
   // Core event handlers
   tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;
   tc::ProcessedStopEvent HandleStepped(TaskInfo *task, const Stepped &event) noexcept;
-  tc::ProcessedStopEvent HandleEntry(TaskInfo *task, const EntryEvent &e) noexcept;
+  tc::ProcessedStopEvent HandleEntry(const EntryEvent &e) noexcept;
   tc::ProcessedStopEvent HandleThreadCreated(
     TaskInfo *task, const ThreadCreated &evt, const RegisterData &register_data) noexcept;
   bool OneRemainingTask() noexcept;

@@ -419,20 +419,20 @@ struct ApplicationEvent
   };
 
   constexpr explicit ApplicationEvent(ui::UICommand *command) noexcept
-      : mEventType(EventType::Command), uCommand(command), mPidOrTid(0)
+      : mEventType(EventType::Command), mPidOrTid(0), uCommand(command)
   {
   }
   constexpr explicit ApplicationEvent(TraceEvent *debuggerEvent, bool isInit = false) noexcept
-      : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization), uDebugger(debuggerEvent),
-        mPidOrTid(debuggerEvent->mProcessId)
+      : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization),
+        mPidOrTid(debuggerEvent->mProcessId), uDebugger(debuggerEvent)
   {
   }
   constexpr explicit ApplicationEvent(WaitEvent waitEvent) noexcept
-      : mEventType(EventType::WaitStatus), uWait(waitEvent), mPidOrTid(waitEvent.mWaitResult.tid)
+      : mEventType(EventType::WaitStatus), mPidOrTid(waitEvent.mWaitResult.tid), uWait(waitEvent)
   {
   }
   constexpr explicit ApplicationEvent(InternalEvent internalEvent) noexcept
-      : mEventType(EventType::Internal), uInternalEvent(internalEvent)
+      : mEventType(EventType::Internal), mPidOrTid(0), uInternalEvent(internalEvent)
   {
   }
 };

@@ -314,16 +314,15 @@ PtraceCommander::GetThreadName(Tid tid) noexcept
 TaskExecuteResponse
 PtraceCommander::Disconnect(bool killTarget) noexcept
 {
-  using SupervisorState = TaskInfo::SupervisorState;
   if (killTarget && !GetSupervisor()->IsExited()) {
     for (auto &entry : GetSupervisor()->GetThreads()) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
       // here.
       const auto _ = tgkill(mProcessId, entry.mTid, SIGKILL);
     }
-    GetSupervisor()->ExitAll(SupervisorState::Killed);
+    GetSupervisor()->ExitAll();
   } else if (!GetSupervisor()->IsExited()) {
-    mControl->StopAllTasks(nullptr);
+    mControl->StopAllTasks();
     for (auto &user : mControl->GetUserBreakpoints().AllUserBreakpoints()) {
       mControl->GetUserBreakpoints().RemoveUserBreakpoint(user->mId);
     }
@@ -332,7 +331,7 @@ PtraceCommander::Disconnect(bool killTarget) noexcept
       // here.
       ptrace(PTRACE_DETACH, entry.mTid, nullptr, nullptr);
     }
-    GetSupervisor()->ExitAll(SupervisorState::Detached);
+    GetSupervisor()->ExitAll();
   }
   PerformShutdown();
   return TaskExecuteResponse::Ok();

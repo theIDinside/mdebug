@@ -8,11 +8,11 @@
 #include "utils/format_utils.h"
 
 namespace mdb::ui::dap {
+// TODO: ParseCustomRequestCommand will almost certainly take DebugAdapterClient at some point (to get an
+// allocator.)
 ui::UICommand *
-ParseCustomRequestCommand(const DebugAdapterClient &client,
-  UICommandArg arg,
-  std::string_view cmd_name,
-  const mdbjson::JsonValue &json) noexcept
+ParseCustomRequestCommand(
+  const DebugAdapterClient &, UICommandArg arg, std::string_view cmd_name, const mdbjson::JsonValue &) noexcept
 {
   if (cmd_name == "continueAll") {
     return new ContinueAll{ std::move(arg) };
@@ -65,11 +65,10 @@ PauseAll::Execute() noexcept
 {
   auto target = GetSupervisor();
   auto tid = target->TaskLeaderTid();
-  target->StopAllTasks(
-    target->GetTaskByTid(target->TaskLeaderTid()), [client = mDAPClient, tid, sessionId = mSessionId]() {
-      client->PostDapEvent(
-        new StoppedEvent{ sessionId, StoppedReason::Pause, "Paused", tid, {}, "Paused all", true });
-    });
+  target->StopAllTasks([client = mDAPClient, tid, sessionId = mSessionId]() {
+    client->PostDapEvent(
+      new StoppedEvent{ sessionId, StoppedReason::Pause, "Paused", tid, {}, "Paused all", true });
+  });
   auto res = new PauseAllResponse{ true, this };
   return res;
 }

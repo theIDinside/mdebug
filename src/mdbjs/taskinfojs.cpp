@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "taskinfojs.h"
 
+// mdb
 #include <mdbjs/framejs.h>
 #include <mdbjs/jsobject.h>
-#include <quickjs/quickjs.h>
 #include <supervisor.h>
 
 namespace mdb::js {
@@ -11,7 +11,7 @@ namespace mdb::js {
 static constexpr auto TaskInfoOpaqueDataErrorMessage = "Could not retrieve task info";
 
 /*static*/ JSValue
-JsTaskInfo::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsTaskInfo::Id(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
@@ -20,7 +20,7 @@ JsTaskInfo::Id(JSContext *context, JSValue thisValue, int argCount, JSValue *arg
 }
 
 /*static*/ JSValue
-JsTaskInfo::Pc(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsTaskInfo::Pc(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
@@ -29,6 +29,7 @@ JsTaskInfo::Pc(JSContext *context, JSValue thisValue, int argCount, JSValue *arg
 /*static*/ JSValue
 JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
+  PROFILE_SCOPE("JsTaskInfo::Frame", logging::kInterpreter);
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
   auto supervisor = taskInfo->GetSupervisor();
@@ -55,7 +56,7 @@ JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *
 }
 
 /*static*/ JSValue
-JsTaskInfo::ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsTaskInfo::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 

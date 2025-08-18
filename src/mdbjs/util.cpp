@@ -1,50 +1,51 @@
 /** LICENSE TEMPLATE */
 #include "./util.h"
-#include "quickjs/quickjs.h"
-#include <expected>
+
+// mdb
+#include <utils/logger.h>
+#include <utils/scope_defer.h>
+
+// dependency
+#include <mdbjs/include-quickjs.h>
 
 namespace mdb::js {
+
+void
+QuickJsString::Release() noexcept
+{
+  if (!mString.empty()) {
+    JS_FreeCString(mContext, mString.data());
+  }
+  mString = std::string_view{};
+}
 
 QuickJsString::QuickJsString(JSContext *context, const char *string) noexcept : mContext(context), mString(string)
 {
 }
 
-QuickJsString::QuickJsString(QuickJsString &&other) noexcept : mContext(other.mContext), mString(nullptr)
+QuickJsString::QuickJsString(QuickJsString &&other) noexcept : mContext(other.mContext), mString()
 {
   std::swap(mString, other.mString);
 }
 
-QuickJsString::~QuickJsString() noexcept
+QuickJsString &
+QuickJsString::operator=(QuickJsString &&rhs) noexcept
 {
-  if (mString) {
-    JS_FreeCString(mContext, mString);
+  if (this != &rhs) {
+    Release();
+    mContext = rhs.mContext;
+    std::swap(mString, rhs.mString);
   }
+  return *this;
 }
+
+QuickJsString::~QuickJsString() noexcept { Release(); }
 
 /* static */
 QuickJsString
 QuickJsString::FromValue(JSContext *context, JSValue value) noexcept
 {
   return QuickJsString{ context, JS_ToCString(context, value) };
-}
-
-std::expected<JSValue, QuickJsString>
-CallFunction(JSContext *context, JSValue functionValue, JSValue thisValue, std::span<JSValue> arguments)
-{
-  JSValue returnValue = JS_Call(context, functionValue, thisValue, arguments.size(), arguments.data());
-  for (const auto &v : arguments) {
-    JS_FreeValue(context, v);
-  }
-
-  if (JS_IsException(returnValue)) {
-    JSValue exception = JS_GetException(context);
-    auto qjsString = QuickJsString::FromValue(context, exception);
-    JS_FreeValue(context, exception);
-    JS_FreeValue(context, returnValue);
-    return std::unexpected{ std::move(qjsString) };
-  }
-
-  return std::expected<JSValue, QuickJsString>{ returnValue };
 }
 
 } // namespace mdb::js

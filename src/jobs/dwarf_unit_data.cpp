@@ -54,7 +54,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::Compilat
     }
   } else if (version == DwarfVersion::D5) {
     ASSERT(elf->mDebugRnglists != nullptr,
-           "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
+      "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
     if (rangesOffset.form == AttributeForm::DW_FORM_sec_offset) {
       auto addressRange = sym::dw::ReadBoundaries(elf->mDebugRnglists, rangesOffset.AsUnsignedValue());
       src.SetAddressBoundary(addressRange.StartPc(), addressRange.EndPc());
@@ -74,7 +74,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::Compilat
 }
 
 void
-UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) noexcept
+UnitDataTask::ExecuteTask(std::pmr::memory_resource *) noexcept
 {
   PROFILE_SCOPE_END_ARGS("UnitDataTask::ExecuteTask", "unitdata", PEARG("units", mCompilationUnitsToParse.size()));
 
@@ -88,8 +88,8 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
   std::vector<sym::CompilationUnit *> compilationUnits;
 
   for (auto dwarfUnit :
-       result | std::views::filter([](UnitData *unit) { return unit->IsCompilationUnitLike(); })) {
-    UnitReader reader{dwarfUnit};
+    result | std::views::filter([](UnitData *unit) { return unit->IsCompilationUnitLike(); })) {
+    UnitReader reader{ dwarfUnit };
 
     if (dwarfUnit->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_partial) {
       DBGLOG(dwarf, "partial unit supported not implemented, skipped {}", dwarfUnit->SectionOffset());
@@ -98,7 +98,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *mGroupTemporaryAllocator) n
 
     const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
     auto &abbrs = dwarfUnit->GetAbbreviation(abbr_code);
-    auto *newCompilationUnit = new sym::CompilationUnit{dwarfUnit};
+    auto *newCompilationUnit = new sym::CompilationUnit{ dwarfUnit };
 
     std::optional<AddrPtr> low;
     std::optional<AddrPtr> high;
@@ -158,9 +158,9 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
 {
   UnitHeadersRead headerRead;
   headerRead.ReadUnitHeaders(obj);
-  std::pmr::vector<std::pmr::vector<sym::dw::UnitHeader>> works{allocator};
+  std::pmr::vector<std::pmr::vector<sym::dw::UnitHeader>> works{ allocator };
 
-  std::pmr::vector<sym::dw::UnitHeader> sortedBySize{allocator};
+  std::pmr::vector<sym::dw::UnitHeader> sortedBySize{ allocator };
   mdb::CopyTo(headerRead.Headers(), sortedBySize);
 
   std::sort(sortedBySize.begin(), sortedBySize.end(), [](const UnitHeader &a, const UnitHeader &b) {
@@ -168,7 +168,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
   });
 
   std::vector<UnitDataTask *> tasks;
-  std::pmr::vector<u64> taskSize{allocator};
+  std::pmr::vector<u64> taskSize{ allocator };
 
   const auto workerCount = mdb::ThreadPool::GetGlobalPool()->WorkerCount();
   works.resize(workerCount, {});
@@ -188,7 +188,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
   for (auto &w : works) {
     if (!w.empty()) {
       acc += w.size();
-      tasks.push_back(new UnitDataTask{obj, std::span{w}});
+      tasks.push_back(new UnitDataTask{ obj, std::span{ w } });
     }
   }
 

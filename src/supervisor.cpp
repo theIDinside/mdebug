@@ -177,7 +177,7 @@ TraceeController::ConfigureDapClient(ui::dap::DebugAdapterClient *client) noexce
 void
 TraceeController::Disconnect() noexcept
 {
-  StopAllTasks(nullptr);
+  StopAllTasks();
   const auto ok = GetInterface().DoDisconnect(false);
   VERIFY(ok.is_ok(), "Failed to disconnect: {}", strerror(ok.sys_errno));
 }
@@ -279,7 +279,6 @@ TraceeController::InstallDynamicLoaderBreakpoints() noexcept
   auto interpreterPath = interpreter_path(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
   auto tempObjectFile = ObjectFile::CreateObjectFile(this, interpreterPath);
   ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
-  const auto system_tap_sec = tempObjectFile->GetElf()->GetSection(".note.stapsdt");
 
   const auto interpreterBase = mParsedAuxiliaryVector.mInterpreterBaseAddress;
 
@@ -475,25 +474,23 @@ TraceeController::ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept
 }
 
 void
-TraceeController::StopAllTasks(TaskInfo *requestingTask, std::function<void()> &&callback) noexcept
+TraceeController::StopAllTasks(std::function<void()> &&callback) noexcept
 {
   mAllStopPublisher.Once(std::move(callback));
-  StopAllTasks(requestingTask);
+  StopAllTasks();
 }
 
 void
-TraceeController::StopAllTasks(TaskInfo *requestingTask) noexcept
+TraceeController::StopAllTasks() noexcept
 {
   DBGLOG(core, "Stopping all threads")
   // If all threads were at a signal-delivery stop, then we will not receive new wait status events
   // and we will never report to the user that everyone has stopped. We need to track that, and possibly emit a
   // stopped event immediately.
-  bool actuallyStoppedChild = false;
   mScheduler->SetStopAllScheduling();
   for (auto &entry : mThreads) {
     auto &t = *entry.mTask;
     if (!t.mUserVisibleStop && !t.mTracerVisibleStop) {
-      actuallyStoppedChild = true;
       DBGLOG(core, "Halting {}", t.mTid);
       const auto response = mTraceeInterface->StopTask(t);
       ASSERT(response.is_ok(), "Failed to stop {}: {}", t.mTid, strerror(response.sys_errno));
@@ -1100,7 +1097,7 @@ TraceeController::TryTerminateGracefully() noexcept
 {
   DBGLOG(core, "[TraceeController]: terminate gracefully");
   if (IsRunning()) {
-    StopAllTasks(nullptr);
+    StopAllTasks();
   }
 
   return ::kill(mTaskLeader, SIGKILL) == 0;
@@ -1510,15 +1507,15 @@ TraceeController::GetInterface() noexcept
 }
 
 void
-TraceeController::ExitAll(TaskInfo::SupervisorState state) noexcept
+TraceeController::ExitAll() noexcept
 {
   while (!mThreads.empty()) {
-    TaskExit(*mThreads[0].mTask, state, false);
+    TaskExit(*mThreads[0].mTask, false);
   }
 }
 
 void
-TraceeController::TaskExit(TaskInfo &task, TaskInfo::SupervisorState state, bool notify) noexcept
+TraceeController::TaskExit(TaskInfo &task, bool notify) noexcept
 {
   Tid tid = task.mTid;
   auto it = FindByTid(mThreads, tid);
@@ -1731,7 +1728,7 @@ TraceeController::HandleStepped(TaskInfo *task, const Stepped &event) noexcept
 }
 
 tc::ProcessedStopEvent
-TraceeController::HandleEntry(TaskInfo *task, const EntryEvent &event) noexcept
+TraceeController::HandleEntry(const EntryEvent &event) noexcept
 {
   SetIsOnEntry(false);
   // apply session breakpoints to new process space
@@ -1815,11 +1812,11 @@ tc::ProcessedStopEvent
 TraceeController::HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept
 {
   if (OneRemainingTask()) {
-    TaskExit(*task, TaskInfo::SupervisorState::Exited, true);
+    TaskExit(*task, true);
     return HandleProcessExit(ProcessExited{ .mProcessId = mTaskLeader, .mExitCode = evt.mCodeOrSignal });
   }
 
-  TaskExit(*task, TaskInfo::SupervisorState::Exited, true);
+  TaskExit(*task, true);
   return tc::ProcessedStopEvent{ false, {}, false, true };
 }
 
@@ -1910,7 +1907,6 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
   // facing events", that we also can collect values from (perhaps the user wants to stop for a reason, as such
   // their subscribed event handlers will return `false`).
   using tc::ProcessedStopEvent;
-  using MatchResult = ProcessedStopEvent;
 
   ASSERT(!mIsExited, "Supervisor exited already.");
 
@@ -1971,7 +1967,7 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
                  },
                  [&](const Signal &e) noexcept { return HandleTerminatedBySignal(e); },
                  [&](const Stepped &e) noexcept { return HandleStepped(task, e); },
-                 [&](const EntryEvent &e) noexcept { return HandleEntry(task, e); },
+                 [&](const EntryEvent &e) noexcept { return HandleEntry(e); },
                  [&](const DeferToSupervisor &e) noexcept {
                    // And if there is no Proceed action installed, default action is taken (RESUME)
                    return ProcessedStopEvent{ true && !e.mAttached, {} };
@@ -2020,7 +2016,7 @@ TraceeController::PopHandlerStack(bool consumePotentiallyDeferred) noexcept
 }
 
 void
-TraceeController::InvalidateThreads(int eventTime) noexcept
+TraceeController::InvalidateThreads([[maybe_unused]] int eventTime) noexcept
 {
   DBGLOG(core, "implement handling of reverse-execution across thread/process births");
 }
@@ -2075,7 +2071,7 @@ TraceeController::HandleFork(const ForkEvent &evt) noexcept
     resume = newSupervisor->GetInterface().PostFork(this);
     mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mTaskLeader, evt.mChildPid, "forked", true });
   } else {
-    mEventHandlerStack.PushEventHandler([this](const auto &) { return EventState::Defer; });
+    mEventHandlerStack.PushEventHandler([](const auto &) { return EventState::Defer; });
     newSupervisor->mIsVForking = true;
     newSupervisor->mOnExecOrExitPublisher.Once(
       [parent = this, self = newSupervisor, resumeTid = evt.mThreadId, newPid = evt.mChildPid]() {

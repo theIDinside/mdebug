@@ -22,10 +22,10 @@ struct Disassembly
   u32 column;
 };
 
-void zydis_disasm_backwards(
+void DisassembleBackwards(
   TraceeController *target, AddrPtr addr, i32 ins_offset, std::vector<sym::Disassembly> &output) noexcept;
 
-void zydis_disasm(TraceeController *target,
+void Disassemble(TraceeController *target,
   AddrPtr addr,
   u32 ins_offset,
   u32 total,

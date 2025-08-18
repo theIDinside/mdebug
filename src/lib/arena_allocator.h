@@ -48,7 +48,7 @@ public:
   class ScopedArenaAllocator
   {
     ArenaResource *mAllocator;
-    u64 mStartOffset;
+    u64 mStartOffset{ 0 };
 
     ArenaAllocatorPool *mContainingPool{ nullptr };
 

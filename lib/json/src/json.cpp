@@ -194,12 +194,6 @@ JsonValue::Contains(std::string_view property) const noexcept
   return IsObject() ? mData.object->contains(property) : false;
 }
 
-static bool
-Lex(std::string_view input, std::pmr::vector<Token> &outBuffer, ParseError &error) noexcept
-{
-  return true;
-}
-
 #define PARSE_ERROR_RETURN(Error, Position)                                                                       \
   error = ParseError{ ParseError::ErrorKind::Error, i64(Position) };                                              \
   return false;

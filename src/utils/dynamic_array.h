@@ -158,9 +158,9 @@ public:
   {
     if constexpr (!std::is_trivially_destructible_v<T>) {
       std::destroy(mData, mData + mSize);
+    } else {
+      std::memset(mData, 0, mSize * sizeof(T));
     }
-
-    std::memset(mData, 0, mSize * sizeof(T));
     mSize = 0;
   }
 

@@ -38,28 +38,28 @@ template <typename Err>
 auto
 unexpected(const Err &err) noexcept
 {
-  return Unexpected<Err>{err};
+  return Unexpected<Err>{ err };
 }
 
 template <typename Err>
 auto
 unexpected(Err &&err) noexcept
 {
-  return Unexpected<Err>{std::forward<Err>(err)};
+  return Unexpected<Err>{ std::forward<Err>(err) };
 }
 
 template <typename T>
 constexpr auto
 expected(T &&value) noexcept
 {
-  return ExpectedValue<T>{std::move(value)};
+  return ExpectedValue<T>{ std::move(value) };
 }
 
 template <typename T>
 constexpr auto
 expected(const T &value) noexcept
 {
-  return ExpectedValue<T>{value};
+  return ExpectedValue<T>{ value };
 }
 
 // Base template for the variadic template
@@ -75,7 +75,7 @@ template <typename T, typename First, typename... Rest> struct IsFirstTypeSame<T
 template <typename ActualT, typename Err> class Expected
 {
   static_assert(!std::is_same_v<Err, void>,
-                "Expected types where err is void is not supported. Why use expected at all, at that point?");
+    "Expected types where err is void is not supported. Why use expected at all, at that point?");
 
   using T = std::conditional_t<std::is_same_v<ActualT, void>, bool, ActualT>;
 
@@ -129,7 +129,7 @@ public:
   template <typename ConvertErr> Expected(Expected<T, ConvertErr> &&ExpectedWithValueRequiringConversion) noexcept
   {
     ASSERT(ExpectedWithValueRequiringConversion.is_expected(),
-           "Conversion from expected that had a value, but was expected to be an error");
+      "Conversion from expected that had a value, but was expected to be an error");
     val_or_err = std::move(ExpectedWithValueRequiringConversion.take_value());
     mHasExpectedValue = true;
   }
@@ -244,7 +244,7 @@ public:
     using Return = FnResult<Transform, T>;
     if (mHasExpectedValue) {
       auto &&res = fn(take_value());
-      return mdb::Expected<Return, Err>{res};
+      return mdb::Expected<Return, Err>{ res };
     } else {
       return unexpected(take_error());
     }
@@ -257,7 +257,7 @@ public:
     if (mHasExpectedValue) {
       return fn(take_value());
     } else {
-      return unexpected(NewErr{take_error()});
+      return unexpected(NewErr{ take_error() });
     }
   }
 
@@ -289,55 +289,6 @@ struct Ok
 struct None
 {
 };
-
-// This type is just for the simpler types, where T and E are simple data types (POD basically). or "value types".
-// Other way to say it is these types must neither be managing resources nor unique; they must be trivially
-// copyable.
-template <typename T, typename E> class Result
-{
-  static_assert(std::is_standard_layout_v<T>, "T must be plain old datatype");
-  static_assert(std::is_standard_layout_v<E>, "E must be plain old datatype");
-
-  static_assert(!std::is_same_v<T, void>, "Use types Ok or None to signal void instead");
-  static_assert(!std::is_same_v<E, void>, "Use types Ok or None to signal void instead");
-
-  union
-  {
-    T uValue;
-    E uError;
-  };
-
-  bool mHasValue;
-
-public:
-  constexpr Result(T &&value) noexcept : mHasValue(true), uValue(value) {}
-  constexpr Result(E &&error) noexcept : mHasValue(false), uError(error) {}
-
-  constexpr auto
-  Value(this auto &&self)
-  {
-    ASSERT(self.mHasValue, "Expected holds an error, not a value!");
-    return self.uValue;
-  }
-
-  constexpr auto
-  Error(this auto &&self)
-  {
-    ASSERT(!self.mHasValue, "Expected holds an error, not a value!");
-    return self.uError;
-  }
-
-  template <typename Fn>
-  constexpr auto
-  Map(this auto &&self, Fn &&fn) -> std::optional<std::invoke_result_t<Fn, T>>
-  {
-    if (self.mHasValue) {
-      return std::optional{fn(self.uValue)};
-    }
-    return std::nullopt;
-  }
-};
-// auto EXPECT(result, expectedObject);
 
 #define EXPECT_REF(expr, exp)                                                                                     \
   if (!exp) {                                                                                                     \

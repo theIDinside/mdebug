@@ -12,6 +12,28 @@
 #ifndef FORWARD_DECLARE_REFPTR
 #define FORWARD_DECLARE_REFPTR
 namespace mdb {
+template <typename T> class RefCountControl
+{
+public:
+  static void
+  IncRefCount(const T &t) noexcept
+  {
+    t.IncreaseUseCount();
+  }
+
+  static void
+  DecRefCount(const T &t) noexcept
+  {
+    t.DecreaseUseCount();
+  }
+};
+
+template <typename T>
+concept RefCountable = requires(T *t) {
+  RefCountControl<T>::IncRefCount(*t);
+  RefCountControl<T>::DecRefCount(*t);
+};
+
 template <typename U> class RefPtr;
 template <typename U> class LeakedRef;
 } // namespace mdb

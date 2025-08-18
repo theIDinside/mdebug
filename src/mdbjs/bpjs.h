@@ -1,10 +1,15 @@
 /** LICENSE TEMPLATE */
 #pragma once
 #include "bp.h"
-#include "mdbjs/jsobject.h"
-#include "mdbjs/util.h"
-#include "quickjs/quickjs.h"
+
+// mdb
 #include <common/typedefs.h>
+#include <mdbjs/jsobject.h>
+#include <mdbjs/mdbjs.h>
+#include <mdbjs/util.h>
+
+// system
+// std
 #include <span>
 
 #define CFunctionEntry(Type, Fn, Name, ArgCount) JS_CFUNC_DEF(Name, ArgCount, JsBreakpoint::Fn)
@@ -23,7 +28,7 @@ struct JsBreakpointFunction
    * source code, called `bpstat` which is a breakpoint status that can be manipulated to decide if a task should
    * stop (or if all tasks should stop, etc)
    */
-  static std::expected<std::unique_ptr<JsBreakpointFunction>, QuickJsString> CreateJsBreakpointFunction(
+  static std::expected<std::unique_ptr<JsBreakpointFunction>, JavascriptException> CreateJsBreakpointFunction(
     JSContext *mContext, std::string_view sourceCode) noexcept;
 
   /**
@@ -32,7 +37,7 @@ struct JsBreakpointFunction
    * interface.
    * @returns - whether or not evaluation succeeeded.
    */
-  bool Run(BreakpointHitEventResult *breakpointStatus) noexcept;
+  bool Run(BreakpointHitEventResult *breakpointStatus, TaskInfo &task) noexcept;
 
   std::unique_ptr<QuickJsString> EvaluateLog(TaskInfo *taskInfo, UserBreakpoint *breakpoint) noexcept;
 };
@@ -67,12 +72,12 @@ struct JsBreakpointEvent
   {
     static constexpr JSCFunctionListEntry funcs[] = {
       /** Method definitions */
-      FunctionEntry("stop", 1, &JsBreakpointEvent::Stop),
-      FunctionEntry("retire", 0, &JsBreakpointEvent::Retire),
+      FunctionEntry("stop", 1, &Stop),
+      FunctionEntry("retire", 0, &Retire),
       ToStringTag("BreakpointStatus"),
     };
 
-    return std::span<const JSCFunctionListEntry>{ funcs };
+    return funcs;
   }
 };
 

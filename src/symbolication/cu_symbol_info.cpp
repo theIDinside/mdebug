@@ -22,10 +22,8 @@ namespace mdb::sym {
 class SourceCodeFileLNPResolver
 {
 public:
-  SourceCodeFileLNPResolver(CompilationUnit *compilationUnit,
-    dw::LNPHeader *header,
-    std::vector<dw::LineTableEntry> &table,
-    std::vector<AddressRange> &sequences) noexcept
+  SourceCodeFileLNPResolver(
+    dw::LNPHeader *header, std::vector<dw::LineTableEntry> &table, std::vector<AddressRange> &sequences) noexcept
       : mLineNumberProgramHeader{ header }, mCurrentObjectFileAddressRange(header->mObjectFile->GetAddressRange()),
         mTable(table), mSequences(sequences), mIsStatement(header->mDefaultIsStatement)
   {
@@ -380,7 +378,7 @@ CompilationUnit::ComputeLineTable() noexcept
     mLineNumberProgram->mData,
     static_cast<u64>(mLineNumberProgram->mDataEnd - mLineNumberProgram->mData) };
 
-  SourceCodeFileLNPResolver state{ this, mLineNumberProgram, uniqueLineTableEntries, sequences };
+  SourceCodeFileLNPResolver state{ mLineNumberProgram, uniqueLineTableEntries, sequences };
   while (reader.HasMore()) {
     const auto opcode = reader.ReadValue<OpCode>();
     if (const auto spec_op = std::to_underlying(opcode); spec_op >= mLineNumberProgram->mOpcodeBase) {
@@ -509,7 +507,6 @@ CompilationUnit::ComputeLineTable() noexcept
 void
 CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
 {
-  auto objectFile = mUnitData->GetObjectFile();
   mLineNumberProgram = header;
   header->SetCompilationUnitBuildDirectory(NonNull(*mUnitData->GetBuildDirectory()));
 
@@ -520,7 +517,7 @@ CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
     mCompilationUnitName);
 
   for (const auto &[fullPath, v] : mLineNumberProgram->FileEntries()) {
-    auto ptr = dw::SourceCodeFile::Create(this, objectFile->GetElf(), fullPath, v);
+    auto ptr = dw::SourceCodeFile::Create(this, fullPath, v);
     for (auto index : v.FileIndices()) {
       ASSERT(!mSourceCodeFileMappings.contains(index), "index {} already added!", index);
       mSourceCodeFileMappings[index] = ptr;
