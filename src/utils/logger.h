@@ -289,8 +289,26 @@ public:
   void SetupChannel(const std::filesystem::path &logDirectory, Channel id) noexcept;
   void Log(Channel id, std::string_view log_msg) noexcept;
   static Logger *GetLogger() noexcept;
+
   void OnAbort() noexcept;
   LogChannel *GetLogChannel(Channel id) noexcept;
+  void LogMessage() noexcept;
+
+  static void
+  LogIf(Channel id, const char *file, u32 line, u32 column, std::string_view message) noexcept
+  {
+    if (auto *channel = GetLogger()->GetLogChannel(id); channel) {
+      channel->LogMessage(file, line, column, message);
+    }
+  }
+
+  static void
+  LogIf(Channel id, std::string_view message) noexcept
+  {
+    if (auto *channel = GetLogger()->GetLogChannel(id); channel) {
+      channel->Log(message);
+    }
+  }
 
   static void ConfigureLogging(const Path &logDirectory, const char *logEnvironVariable) noexcept;
 
