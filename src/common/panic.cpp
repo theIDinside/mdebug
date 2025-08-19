@@ -57,14 +57,13 @@ panic_exit()
 panic(std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels)
 {
   using enum Channel;
-#define PLOG(msg) logging::Logger::GetLogger()->GetLogChannel(Channel::core)->Log(msg)
+  constexpr auto logIf = [](std::string_view msg) { logging::Logger::LogIf(core, msg); };
   constexpr auto BT_BUF_SIZE = 100;
   int nptrs;
   void *buffer[BT_BUF_SIZE];
   char **strings;
-
   nptrs = backtrace(buffer, BT_BUF_SIZE);
-  PLOG(std::format("backtrace() returned {} addresses\n", nptrs));
+  logIf(std::format("backtrace() returned {} addresses\n", nptrs));
   std::println("backtrace() returned {} addresses\n", nptrs);
 
   /* The call backtrace_symbols_fd(buffer, nptrs, STDOUT_FILENO)
@@ -87,12 +86,12 @@ panic(std::string_view err_msg, const char *functionName, const char *file, int 
       if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
         std::string copy{ res };
         sanitize(copy);
-        PLOG(copy);
+        logIf(copy);
         std::println("{}", copy);
         continue;
       }
     }
-    PLOG(strings[j]);
+    logIf(strings[j]);
     std::println("{}", strings[j]);
   }
 
@@ -107,11 +106,10 @@ ifbacktrace_failed:
       err_msg,
       errno,
       strerr);
-  PLOG(message);
+  logIf(message);
   std::println("{}", message);
   delete logging::Logger::GetLogger();
   panic_exit();
-#undef PLOG
 }
 
 void
