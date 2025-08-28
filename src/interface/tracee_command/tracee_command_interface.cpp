@@ -93,7 +93,7 @@ TraceeCommandInterface::ReadNullTerminatedString(TraceePointer<char> address) no
 void
 TraceeCommandInterface::SetTarget(TraceeController *supervisor) noexcept
 {
-  ASSERT(mControl == nullptr, "Target already configured with this interface!");
+  MDB_ASSERT(mControl == nullptr, "Target already configured with this interface!");
   mControl = supervisor;
 }
 

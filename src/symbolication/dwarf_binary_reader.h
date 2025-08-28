@@ -22,7 +22,7 @@ DecodeUleb128(const u8 *data, IsBitsType auto &value) noexcept
   for (;;) {
     u8 byte = data[index];
     res |= ((byte & LEB128_MASK) << shift);
-    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x1), "Decoding of ULEB128 failed at index {}", index);
+    MDB_ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x1), "Decoding of ULEB128 failed at index {}", index);
     ++index;
     if ((byte & ~LEB128_MASK) == 0) {
       // We don't want C++ to set a "good" enum value
@@ -44,7 +44,7 @@ DecodeLeb128(const u8 *data, IsBitsType auto &value) noexcept
   u8 byte;
   for (;;) {
     byte = data[index];
-    ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x7f), "Decoding of LEB128 failed at index {}", index);
+    MDB_ASSERT(!(shift == 63 && byte != 0x0 && byte != 0x7f), "Decoding of LEB128 failed at index {}", index);
     res |= ((byte & LEB128_MASK) << shift);
     shift += 7;
     ++index;
@@ -124,7 +124,7 @@ public:
   constexpr T
   ReadValue() noexcept
   {
-    ASSERT(RemainingSize() >= sizeof(T),
+    MDB_ASSERT(RemainingSize() >= sizeof(T),
       "Buffer has not enough data left to read value of size {} (bytes left={})",
       sizeof(T),
       RemainingSize());
@@ -140,7 +140,7 @@ public:
   constexpr void
   SkipValue() noexcept
   {
-    ASSERT(RemainingSize() >= sizeof(T),
+    MDB_ASSERT(RemainingSize() >= sizeof(T),
       "Buffer has not enough data left to read value of size {} (bytes left={})",
       sizeof(T),
       RemainingSize());

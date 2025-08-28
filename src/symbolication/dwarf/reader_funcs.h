@@ -28,7 +28,7 @@ ReadVersion(const u8 *ptr, DwarfVersion &version) noexcept
 {
   u16 value = *(u16 *)ptr;
   ptr += 2;
-  ASSERT(value == 4 || value == 5, "Only DWARF 4 or 5 is supported");
+  MDB_ASSERT(value == 4 || value == 5, "Only DWARF 4 or 5 is supported");
   if (value == 4) {
     version = DwarfVersion::D4;
   } else {

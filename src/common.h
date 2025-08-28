@@ -176,11 +176,11 @@ IgnoreArgs(const Args &...)
   }
 // clang-format on
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
-#define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
+#define MDB_ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 /* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
 #define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
 #else
-#define ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
+#define MDB_ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 #define PERFORM_ASSERT(op, msg, ...) op
 #endif
 
@@ -195,7 +195,7 @@ T *
 mmap_buffer(unsigned long long size) noexcept
 {
   auto ptr = (T *)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {}", size);
+  MDB_ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {}", size);
   return ptr;
 }
 
@@ -297,7 +297,7 @@ template <typename Container>
 void
 keep_range(Container &c, unsigned long start_idx, unsigned long end_idx) noexcept
 {
-  ASSERT(start_idx <= end_idx, "Invalid parameters start {} end {}", start_idx, end_idx);
+  MDB_ASSERT(start_idx <= end_idx, "Invalid parameters start {} end {}", start_idx, end_idx);
   const auto start = c.begin() + start_idx;
   const auto end = c.begin() + std::min(end_idx, c.size());
   // erase from end to c.end() first to keep iterators valid

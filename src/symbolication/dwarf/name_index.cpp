@@ -28,7 +28,7 @@ DieNameReference::SetAsCollisionVariant(u64 index) noexcept
 {
   unique = 0xff'ff'ff'ff;
   collision_displacement_index = index;
-  ASSERT(IsValid(), "We fucked up our own invariants");
+  MDB_ASSERT(IsValid(), "We fucked up our own invariants");
 }
 
 void
@@ -57,12 +57,12 @@ NameIndex::NameIndexShard::Search(std::string_view name) const noexcept
   }
 
   if (it->second.IsUnique()) {
-    return std::span{&(it->second), 1};
+    return std::span{ &(it->second), 1 };
   }
 
   const auto collision_index = it->second.collision_displacement_index;
   auto &dies = mCollidingNames[collision_index];
-  return std::span{dies};
+  return std::span{ dies };
 }
 
 void
@@ -74,7 +74,7 @@ NameIndex::NameIndexShard::AddName(const char *name, u64 die_index, UnitData *cu
       ConvertToCollisionVariant(elem, die_index, cu);
     } else {
       auto &collisions = mCollidingNames[elem.collision_displacement_index];
-      collisions.push_back(DieNameReference{cu, die_index});
+      collisions.push_back(DieNameReference{ cu, die_index });
     }
   } else {
     elem.cu = cu;
@@ -88,8 +88,8 @@ NameIndex::NameIndexShard::ConvertToCollisionVariant(DieNameReference &elem, u64
   const auto index = mCollidingNames.size();
   mCollidingNames.push_back({});
   auto &collisions = mCollidingNames.back();
-  collisions.push_back(DieNameReference{elem.cu, elem.die_index});
-  collisions.push_back(DieNameReference{cu, die_index});
+  collisions.push_back(DieNameReference{ elem.cu, elem.die_index });
+  collisions.push_back(DieNameReference{ cu, die_index });
   elem.SetAsCollisionVariant(index);
 }
 
@@ -114,8 +114,8 @@ NameIndex::Merge(const std::vector<NameIndex::NameDieTuple> &nameToDieReferences
 }
 
 void
-NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
-                      const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept
+NameIndex::MergeTypes(
+  NonNullPtr<TypeStorage> typeStorage, const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept
 {
   PROFILE_SCOPE_ARGS("NameIndex::MergeTypes", "indexing", PEARG("types", nameToDieReferences.size()));
   DBGLOG(dwarf, "[name index: {}] Adding {} names", mName, nameToDieReferences.size());
@@ -127,21 +127,25 @@ NameIndex::MergeTypes(NonNullPtr<TypeStorage> typeStorage,
     if (this_die->mTag == DwarfTag::DW_TAG_typedef || this_die->mTag == DwarfTag::DW_TAG_array_type) {
       continue;
     }
-    const auto offs = Offset{die_ref.GetDie()->mSectionOffset};
+    const auto offs = Offset{ die_ref.GetDie()->mSectionOffset };
     const auto possible_size = die_ref.ReadAttribute(Attribute::DW_AT_byte_size);
-    ASSERT(possible_size.has_value(), "Expected a 'root' die for a type to have a byte size cu={}, die=0x{:x}",
-           cu->SectionOffset(), die_ref.GetDie()->mSectionOffset);
+    MDB_ASSERT(possible_size.has_value(),
+      "Expected a 'root' die for a type to have a byte size cu={}, die=0x{:x}",
+      cu->SectionOffset(),
+      die_ref.GetDie()->mSectionOffset);
 
-    auto type = typeStorage->CreateNewType(this_die->mTag, offs, IndexedDieReference{cu, idx},
-                                           possible_size->AsUnsignedValue(), name);
+    auto type = typeStorage->CreateNewType(
+      this_die->mTag, offs, IndexedDieReference{ cu, idx }, possible_size->AsUnsignedValue(), name);
     if (die_ref.GetDie()->mTag == DwarfTag::DW_TAG_base_type) {
-      UnitReader reader{cu};
+      UnitReader reader{ cu };
       reader.SeekDie(*die_ref.GetDie());
       auto attr = die_ref.ReadAttribute(Attribute::DW_AT_encoding);
-      ASSERT(attr.has_value(), "Failed to read encoding of base type. cu={}, die=0{:x}", cu->SectionOffset(),
-             die_ref.GetDie()->mSectionOffset);
+      MDB_ASSERT(attr.has_value(),
+        "Failed to read encoding of base type. cu={}, die=0{:x}",
+        cu->SectionOffset(),
+        die_ref.GetDie()->mSectionOffset);
       auto encoding = attr.and_then(
-        [](auto val) { return std::optional{static_cast<BaseTypeEncoding>(val.AsUnsignedValue())}; });
+        [](auto val) { return std::optional{ static_cast<BaseTypeEncoding>(val.AsUnsignedValue()) }; });
       type->SetBaseTypeEncoding(encoding.value());
     }
   }

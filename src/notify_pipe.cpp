@@ -87,7 +87,7 @@ Notifier::ReadEnd::consume_expected() noexcept
 {
   char ch[10]; // NOLINT
   [[maybe_unused]] const auto res = ::read(fd, &ch, sizeof(ch));
-  ASSERT(res != -1, "Failed to consume posted event token due to error {}", std::strerror(errno));
+  MDB_ASSERT(res != -1, "Failed to consume posted event token due to error {}", std::strerror(errno));
   return true;
 }
 

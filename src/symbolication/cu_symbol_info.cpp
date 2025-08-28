@@ -475,7 +475,7 @@ CompilationUnit::ComputeLineTable() noexcept
   });
 
   std::ranges::copy(uniqueLineTableEntries, std::back_inserter(mLineTable));
-  ASSERT(std::ranges::is_sorted(mLineTable, [](auto &a, auto &b) { return a.pc < b.pc; }),
+  MDB_ASSERT(std::ranges::is_sorted(mLineTable, [](auto &a, auto &b) { return a.pc < b.pc; }),
     "Line Table was not sorted by Program Counter!");
   if (mLineTable.size() > 2) {
     mPcStart = std::min(mPcStart, mLineTable.front().pc);
@@ -519,7 +519,7 @@ CompilationUnit::ProcessSourceCodeFiles(dw::LNPHeader *header) noexcept
   for (const auto &[fullPath, v] : mLineNumberProgram->FileEntries()) {
     auto ptr = dw::SourceCodeFile::Create(this, fullPath, v);
     for (auto index : v.FileIndices()) {
-      ASSERT(!mSourceCodeFileMappings.contains(index), "index {} already added!", index);
+      MDB_ASSERT(!mSourceCodeFileMappings.contains(index), "index {} already added!", index);
       mSourceCodeFileMappings[index] = ptr;
     }
   }
@@ -586,7 +586,7 @@ CompilationUnit::GetLineTableEntry(AddrPtr unrelocatedAddress) noexcept
     if (it->IsEndOfSequence) {
       return { GetFileByLineProgramIndex(it->file), nullptr };
     }
-    ASSERT(it->pc <= unrelocatedAddress && (it + 1)->pc > unrelocatedAddress && !it->IsEndOfSequence,
+    MDB_ASSERT(it->pc <= unrelocatedAddress && (it + 1)->pc > unrelocatedAddress && !it->IsEndOfSequence,
       "Line table is not ordered by PC - table in bad state (end of sequence={})",
       it->IsEndOfSequence);
 
@@ -710,7 +710,7 @@ struct ResolveFnSymbolState
     std::optional<SourceCoordinate> source = mLineNumberProgramFile.transform(
       [&](auto &&path) { return SourceCoordinate{ std::move(path), mLine.value_or(0), 0 }; });
     if (mLineNumberProgramFile) {
-      ASSERT(mLineNumberProgramFile.value().empty(), "Should have moved std string!");
+      MDB_ASSERT(mLineNumberProgramFile.value().empty(), "Should have moved std string!");
     }
 
     return sym::FunctionSymbol{ mLowProgramCounter,
@@ -863,7 +863,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
         }
         break;
       case Attribute::DW_AT_decl_file: {
-        ASSERT(!state.mLineNumberProgramFile.has_value(),
+        MDB_ASSERT(!state.mLineNumberProgramFile.has_value(),
           "lnp file has been set already, to {}, new {}",
           state.mLineNumberProgramFile.value(),
           value.AsUnsignedValue());
@@ -871,7 +871,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
           GetLineNumberProgramFile(value.AsUnsignedValue()).transform([](auto &&p) { return p.string(); });
       } break;
       case Attribute::DW_AT_decl_line:
-        ASSERT(!state.mLine.has_value(),
+        MDB_ASSERT(!state.mLine.has_value(),
           "file line number has been set already, to {}, new {}",
           state.mLine.value(),
           value.AsUnsignedValue());

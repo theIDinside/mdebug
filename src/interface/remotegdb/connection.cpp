@@ -73,7 +73,7 @@ checksum(std::string_view payload) noexcept
     static_cast<u64>(
       std::accumulate(payload.begin(), payload.end(), i64{ 0 }, [](auto acc, char c) { return acc + i64{ c }; })) %
     256;
-  ASSERT(checksum_acc <= UINT8_MAX, "Checksum incorrect");
+  MDB_ASSERT(checksum_acc <= UINT8_MAX, "Checksum incorrect");
 
   const auto [FirstIndex, SecondIndex] = HexIndices(static_cast<u8>(checksum_acc));
   return std::make_pair(HexDigits[FirstIndex], HexDigits[SecondIndex]);
@@ -137,7 +137,7 @@ BufferedSocket::PollReady(int timeout) const noexcept
   pfd[0].fd = mCommunicationSocket;
   pfd[0].events = POLLIN;
   auto ready = poll(pfd, 1, timeout);
-  ASSERT(ready != -1, "poll system call failed on socket fd");
+  MDB_ASSERT(ready != -1, "poll system call failed on socket fd");
   return (pfd[0].revents & POLLIN) == POLLIN;
 }
 
@@ -180,7 +180,7 @@ BufferedSocket::WriteCommand(std::string_view payload) noexcept
   u8 csum = acc;
   mOutputBuffer.push_back(HexDigits[(csum & 0xf0) >> 4]);
   mOutputBuffer.push_back(HexDigits[(csum & 0xf)]);
-  ASSERT(mOutputBuffer.size() == payload.size() + 4,
+  MDB_ASSERT(mOutputBuffer.size() == payload.size() + 4,
     "Unexpected buffer length: {} == {}",
     mOutputBuffer.size(),
     payload.size() + 4);
@@ -256,7 +256,7 @@ BufferedSocket::PeekChar() noexcept
 u32
 BufferedSocket::BufferN(u32 requested) noexcept
 {
-  ASSERT(requested <= 4096, "Maximally a page can be buffered on the stack.");
+  MDB_ASSERT(requested <= 4096, "Maximally a page can be buffered on the stack.");
   char buf[4096];
   const bool canRead = PollReady(1);
   if (!canRead) {
@@ -278,7 +278,7 @@ BufferedSocket::BufferNWithTimeout(u32 requested, int timeout) noexcept
     return 0;
   } else {
     char buf[4096];
-    ASSERT(requested <= std::size(buf), "Requested size larger than stack buffer.");
+    MDB_ASSERT(requested <= std::size(buf), "Requested size larger than stack buffer.");
     if (const auto res = read(mCommunicationSocket, buf, requested); res != -1) {
       std::copy(buf, buf + res, std::back_inserter(mBuffer));
       return res;
@@ -297,7 +297,8 @@ BufferedSocket::HasMorePollIfEmpty(int timeout) const noexcept
 void
 BufferedSocket::ConsumeN(u32 n) noexcept
 {
-  ASSERT(n + mHead <= mBuffer.size(), "Consuming n={} bytes when there's only {} left", n, mBuffer.size() - mHead);
+  MDB_ASSERT(
+    n + mHead <= mBuffer.size(), "Consuming n={} bytes when there's only {} left", n, mBuffer.size() - mHead);
   if (mHead + n == mBuffer.size()) {
     Clear();
   } else {
@@ -445,7 +446,7 @@ RemoteConnection::Connect(const std::string &host, int port, std::optional<Remot
 void
 RemoteConnection::ConsumePollEvents(int fd) noexcept
 {
-  ASSERT(fd == mRequestCommandFd[0] || fd == mReceivedAsyncNotificationDuringCoreControl[0],
+  MDB_ASSERT(fd == mRequestCommandFd[0] || fd == mReceivedAsyncNotificationDuringCoreControl[0],
     "File descriptor not expected");
   char buf[128];
   const auto bytes_read = ::read(fd, buf, 128);
@@ -662,7 +663,7 @@ RemoteConnection::SetQueryThread(gdb::GdbThread thread) noexcept
 void
 RemoteConnection::PutPendingNotification(std::string_view payload) noexcept
 {
-  ASSERT(!mPendingNotification.has_value(), "Pending notification has not been consumed");
+  MDB_ASSERT(!mPendingNotification.has_value(), "Pending notification has not been consumed");
   mPendingNotification.emplace(payload);
   auto retries = 0;
   while (write(mReceivedAsyncNotificationDuringCoreControl[1], "+", 1) == -1 && retries < 10) {
@@ -748,7 +749,7 @@ bool
 RemoteConnection::ProcessStopReplyPayload(std::string_view receivedPayload, bool isSessionConfig) noexcept
 {
   DBGLOG(remote, "Stop reply payload: {}", receivedPayload);
-  ASSERT(!receivedPayload.empty(), "Expected a non-empty payload!");
+  MDB_ASSERT(!receivedPayload.empty(), "Expected a non-empty payload!");
   if (receivedPayload.front() == '$') {
     receivedPayload.remove_prefix(1);
   }
@@ -761,7 +762,7 @@ RemoteConnection::ProcessStopReplyPayload(std::string_view receivedPayload, bool
   }
   case 'T': {
     const auto signal = parser.ParseSignal();
-    ASSERT(signal.has_value(), "Expected to have at least the signal data");
+    MDB_ASSERT(signal.has_value(), "Expected to have at least the signal data");
     if (!signal) {
       DBGLOG(remote, "Failed to parse signal for T packet: '{}'", receivedPayload);
       return false;
@@ -817,20 +818,20 @@ void
 RemoteConnection::ParseEventConsumeRemaining() noexcept
 {
   auto pending = TakePending();
-  ASSERT(pending.has_value(), "No pending notification has been read");
+  MDB_ASSERT(pending.has_value(), "No pending notification has been read");
   if (!mRemoteSettings.mIsNonStop) {
     auto payload = std::string_view{ pending.value() };
-    ASSERT(payload[0] == '$', "Expected 'synchronous non-stop' stop reply but got {}", payload[0]);
+    MDB_ASSERT(payload[0] == '$', "Expected 'synchronous non-stop' stop reply but got {}", payload[0]);
     payload.remove_prefix(1);
     ProcessStopReplyPayload(payload, false);
     // We are done. We are not in non-stop mode, there will be no further rapports.
     return;
   }
   auto payload = std::string_view{ pending.value() };
-  ASSERT(payload[0] == '%', "Expected Notification Header");
+  MDB_ASSERT(payload[0] == '%', "Expected Notification Header");
 
   payload.remove_prefix(1);
-  ASSERT(payload.substr(0, 5) == "Stop:", "Only 'Stop' notifications are defined by the protocol as of yet");
+  MDB_ASSERT(payload.substr(0, 5) == "Stop:", "Only 'Stop' notifications are defined by the protocol as of yet");
   payload.remove_prefix(5);
 
   const auto sendRes = mSocket.WriteCommand("vStopped");
@@ -1003,7 +1004,7 @@ bool
 RemoteConnection::ExecuteCommand(SocketCommand &cmd, int timeout) noexcept
 {
   const auto writeResult = mSocket.WriteCommand(cmd.mCommand);
-  ASSERT(writeResult, "Failed to execute command '{}'", cmd.mCommand);
+  MDB_ASSERT(writeResult, "Failed to execute command '{}'", cmd.mCommand);
   cmd.mResult = ReadCommandResponse(timeout, cmd.mResponseIsStopReply);
   return cmd.mResult.has_value();
 }
@@ -1083,7 +1084,7 @@ RemoteConnection::GetRemoteThreads() noexcept
 bool
 RemoteConnection::ExecuteCommand(qXferCommand &cmd, u32 offset, int timeout) noexcept
 {
-  ASSERT(cmd.mFmt[cmd.mFmt.size() - 1] == ':' && cmd.mFmt[cmd.mFmt.size() - 2] != ':',
+  MDB_ASSERT(cmd.mFmt[cmd.mFmt.size() - 1] == ':' && cmd.mFmt[cmd.mFmt.size() - 2] != ':',
     "qXferCommand ill-formatted. Should always only end with one ':' even when the command has no annex. We "
     "add the additional ':' in this function: '{}'",
     cmd.mFmt);
@@ -1114,7 +1115,7 @@ RemoteConnection::ExecuteCommand(qXferCommand &cmd, u32 offset, int timeout) noe
     }
     std::string_view formattedCommand{ buf.data(), ptr };
     const auto writeResult = mSocket.WriteCommand(formattedCommand);
-    ASSERT(writeResult, "Failed to execute command '{}'", formattedCommand);
+    MDB_ASSERT(writeResult, "Failed to execute command '{}'", formattedCommand);
 
     switch (AppendReadQXferResponse(timeout, cmd.mResponseBuffer)) {
     case qXferResponse::Done:
@@ -1250,7 +1251,7 @@ RemoteConnection::SendInOrderCommandChain(
       if (!ack->second) {
         return SendError{ NAck{} };
       }
-      ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
+      MDB_ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
       mSocket.ConsumeN(ack->first + 1);
     }
 
@@ -1322,7 +1323,7 @@ RemoteConnection::SendCommandWaitForResponse(
     if (!ack->second) {
       return SendError{ NAck{} };
     }
-    ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
+    MDB_ASSERT(ack->first == 0, "Expected to see ack (whether ack/nack) at first position");
     mSocket.ConsumeN(ack->first + 1);
   }
 
@@ -1460,10 +1461,10 @@ GdbThread::parse_thread(std::string_view input) noexcept
   if (parse[0] != 'p') {
     Tid tid;
     const auto tidResult = std::from_chars(parse.begin(), parse.end(), tid, 16);
-    ASSERT(tidResult.ec == std::errc(), "failed to parse pid from {}", input);
+    MDB_ASSERT(tidResult.ec == std::errc(), "failed to parse pid from {}", input);
     return gdb::GdbThread{ 0, tid };
   } else {
-    ASSERT(parse[0] == 'p', "Expected multiprocess thread syntax");
+    MDB_ASSERT(parse[0] == 'p', "Expected multiprocess thread syntax");
     parse.remove_prefix(1);
     auto sep = parse.find('.');
     if (sep == parse.npos) {
@@ -1475,10 +1476,10 @@ GdbThread::parse_thread(std::string_view input) noexcept
     Pid pid;
     Tid tid;
     const auto pidResult = std::from_chars(first.begin(), first.end(), pid, 16);
-    ASSERT(pidResult.ec == std::errc(), "failed to parse pid from {}", input);
+    MDB_ASSERT(pidResult.ec == std::errc(), "failed to parse pid from {}", input);
 
     const auto tidResult = std::from_chars(parse.begin(), parse.end(), tid, 16);
-    ASSERT(tidResult.ec == std::errc(), "failed to parse pid from {}", input);
+    MDB_ASSERT(tidResult.ec == std::errc(), "failed to parse pid from {}", input);
 
     return gdb::GdbThread{ pid, tid };
   }

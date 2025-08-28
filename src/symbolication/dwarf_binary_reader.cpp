@@ -26,7 +26,7 @@ DwarfBinaryReader::DwarfSpecReadValue() noexcept
 std::span<const u8>
 DwarfBinaryReader::GetSpan(u64 size) noexcept
 {
-  ASSERT(
+  MDB_ASSERT(
     size <= RemainingSize(), "Not enough bytes left in reader. Requested {}, remaining {}", size, RemainingSize());
   const auto span = std::span{ mHead, size };
   mHead += size;
@@ -117,7 +117,7 @@ DwarfBinaryReader::BytesRead() const noexcept
 void
 DwarfBinaryReader::Skip(i64 bytes) noexcept
 {
-  ASSERT(static_cast<u64>(bytes) <= RemainingSize() && mHead + bytes >= mBuffer,
+  MDB_ASSERT(static_cast<u64>(bytes) <= RemainingSize() && mHead + bytes >= mBuffer,
     "Can't skip outside of buffer. Requested {}, remaining size: {}",
     bytes,
     RemainingSize());
@@ -147,7 +147,7 @@ SubReader(const DwarfBinaryReader &reader) noexcept
 u64
 DwarfBinaryReader::ReadContentIndex(AttributeForm form) noexcept
 {
-  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
+  MDB_ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_udata:
@@ -164,16 +164,17 @@ DwarfBinaryReader::ReadContentIndex(AttributeForm form) noexcept
 std::string_view
 DwarfBinaryReader::ReadContentStr(AttributeForm form) noexcept
 {
-  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
+  MDB_ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_string:
     return ReadString();
   case DW_FORM_line_strp:
-    ASSERT(mElf->mDebugLineStr != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
+    MDB_ASSERT(
+      mElf->mDebugLineStr != nullptr, "Reading value of form DW_FORM_line_strp requires .debug_line section");
     return mElf->mDebugLineStr->GetCString(ReadOffset());
   case DW_FORM_strp:
-    ASSERT(mElf->mDebugStr != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
+    MDB_ASSERT(mElf->mDebugStr != nullptr, "Reading value of form DW_FORM_strp requires .debug_str section");
     return mElf->mDebugStr->GetCString(ReadOffset());
   case DW_FORM_strp_sup:
   case DW_FORM_strx:
@@ -189,7 +190,7 @@ DwarfBinaryReader::ReadContentStr(AttributeForm form) noexcept
 DataBlock
 DwarfBinaryReader::ReadContentDatablock(AttributeForm form) noexcept
 {
-  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
+  MDB_ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   switch (form) {
   case AttributeForm::DW_FORM_data16:
     return ReadBlock(16);
@@ -205,7 +206,7 @@ DwarfBinaryReader::ReadContentDatablock(AttributeForm form) noexcept
 std::variant<std::string_view, u64, DataBlock>
 DwarfBinaryReader::ReadContent(AttributeForm form) noexcept
 {
-  ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
+  MDB_ASSERT(mElf != nullptr, "No ELF passed to this binary reader");
   using enum AttributeForm;
   switch (form) {
   case DW_FORM_string:

@@ -50,7 +50,7 @@ class RegisterDescription
     u8 *
     Data(this Self &&self, u32 offset) noexcept
     {
-      ASSERT(offset <= self.mSize, "Offset {} beyond boundary of buffer of size {}", offset, self.mSize);
+      MDB_ASSERT(offset <= self.mSize, "Offset {} beyond boundary of buffer of size {}", offset, self.mSize);
       return self.mBuffer + offset;
     }
 
@@ -58,7 +58,7 @@ class RegisterDescription
     std::span<const u8>
     Span(this Self &&self, u32 offset, u32 length) noexcept
     {
-      return std::span<const u8>{self.mBuffer + offset, length};
+      return std::span<const u8>{ self.mBuffer + offset, length };
     }
   };
   // Only three real "interesting" registers from a debugger perspective

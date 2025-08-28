@@ -20,7 +20,7 @@ template <typename Iterator> struct SpanResult
   std::pair<ref, ref>
   result() const noexcept
   {
-    ASSERT(has_value(), "Result was not found!");
+    MDB_ASSERT(has_value(), "Result was not found!");
     return std::pair(*begin, *end);
   }
 

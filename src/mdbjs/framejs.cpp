@@ -37,7 +37,7 @@ GetArrayOfVariables(JSContext *context,
   sym::VariableSet set)
 {
   auto arrayObject = JS_NewArray(context);
-  ASSERT(JS_IsArray(context, arrayObject), "wtf");
+  MDB_ASSERT(JS_IsArray(context, arrayObject), "wtf");
   auto variables = symbolFile->GetVariables(*supervisor, frame, set);
   for (auto &&[index, variable] : std::ranges::views::enumerate(variables)) {
     auto jsValue = JsVariable::CreateValue(context, std::move(variable));
@@ -59,9 +59,9 @@ Frame::Locals(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, ar
       frame->mFrame.CStringName().value_or("<unknown frame name>"));
   }
   auto symbolFile = frame->mFrame.GetSymbolFile();
-  ASSERT(symbolFile, "No symbol file for frame!");
+  MDB_ASSERT(symbolFile, "No symbol file for frame!");
   auto supervisor = frame->mTask->GetSupervisor();
-  ASSERT(supervisor, "Could not get supervisor from task!");
+  MDB_ASSERT(supervisor, "Could not get supervisor from task!");
 
   return GetArrayOfVariables(context, symbolFile, supervisor, frame->mFrame, sym::VariableSet::Locals);
 };
@@ -78,9 +78,9 @@ Frame::Arguments(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount,
       frame->mFrame.CStringName().value_or("<unknown frame name>"));
   }
   auto symbolFile = frame->mFrame.GetSymbolFile();
-  ASSERT(symbolFile, "No symbol file for frame!");
+  MDB_ASSERT(symbolFile, "No symbol file for frame!");
   auto supervisor = frame->mTask->GetSupervisor();
-  ASSERT(supervisor, "Could not get supervisor from task!");
+  MDB_ASSERT(supervisor, "Could not get supervisor from task!");
 
   return GetArrayOfVariables(context, symbolFile, supervisor, frame->mFrame, sym::VariableSet::Arguments);
 };

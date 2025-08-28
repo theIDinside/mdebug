@@ -22,13 +22,13 @@ read_arch_info(const xml::XMLElementView &root, int *registerNumber) noexcept
         r.name = v;
       } else if (k == "bitsize") {
         const auto res = std::from_chars(v.data(), v.data() + v.size(), r.bit_size);
-        ASSERT(res.ec == std::errc(), "Failed to parse bit size from target description for register");
+        MDB_ASSERT(res.ec == std::errc(), "Failed to parse bit size from target description for register");
       } else if (k == "type") {
         r.type = v;
       } else if (k == "regnum") {
         const auto res = std::from_chars(v.data(), v.data() + v.size(), r.regnum);
-        ASSERT(res.ec == std::errc(), "Failed to parse reg num from target description for register");
-        ASSERT(r.regnum == *registerNumber, "Target description is no longer contiguous.");
+        MDB_ASSERT(res.ec == std::errc(), "Failed to parse reg num from target description for register");
+        MDB_ASSERT(r.regnum == *registerNumber, "Target description is no longer contiguous.");
       }
     }
     if (r.regnum == 0) {
@@ -60,7 +60,7 @@ ArchictectureInfo::CreateArchInfo(const std::vector<ArchReg> &registers)
 
   auto registerNumber = 0u;
   for (const auto &r : registers) {
-    metaData.push_back({r.bit_size, byteOffset});
+    metaData.push_back({ r.bit_size, byteOffset });
     if (r.name == "rip") {
       mRIPOffset = byteOffset;
       mRIPNumber = registerNumber;
@@ -71,17 +71,16 @@ ArchictectureInfo::CreateArchInfo(const std::vector<ArchReg> &registers)
       mRBPOffset = byteOffset;
       mRBPNumber = registerNumber;
     }
-    regNames.push_back({r.name, r.type});
+    regNames.push_back({ r.name, r.type });
     byteOffset += (r.bit_size / 8);
     registerNumber += 1;
   }
-  return std::make_shared<ArchictectureInfo>(
-    RegisterInfo{std::move(metaData), std::move(regNames)},
-    DebuggerContextRegisters{mRIPOffset, mRIPNumber, mRSPOffset, mRSPNumber, mRBPOffset, mRBPNumber});
+  return std::make_shared<ArchictectureInfo>(RegisterInfo{ std::move(metaData), std::move(regNames) },
+    DebuggerContextRegisters{ mRIPOffset, mRIPNumber, mRSPOffset, mRSPNumber, mRBPOffset, mRBPNumber });
 }
 
-ArchictectureInfo::ArchictectureInfo(RegisterInfo &&registers,
-                                     const DebuggerContextRegisters &debugRegisters) noexcept
+ArchictectureInfo::ArchictectureInfo(
+  RegisterInfo &&registers, const DebuggerContextRegisters &debugRegisters) noexcept
     : mRegisters(std::move(registers)), mDebugContextRegisters(debugRegisters)
 {
 }
@@ -89,8 +88,8 @@ ArchictectureInfo::ArchictectureInfo(RegisterInfo &&registers,
 u32
 ArchictectureInfo::register_bytes() const noexcept
 {
-  return mdb::accumulate(mRegisters->mRegisterMetaData,
-                         [](u32 acc, auto &reg) -> u32 { return acc + (reg.bit_size / 8); });
+  return mdb::accumulate(
+    mRegisters->mRegisterMetaData, [](u32 acc, auto &reg) -> u32 { return acc + (reg.bit_size / 8); });
 }
 
 } // namespace mdb::gdb

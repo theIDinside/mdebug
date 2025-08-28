@@ -19,7 +19,7 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
 {
   const auto procfs_path = std::format("/proc/{}/mem", process_space_id);
   mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
-  ASSERT(mProcFsMemFd.IsOpen(), "failed to open memfd for {}", process_space_id);
+  MDB_ASSERT(mProcFsMemFd.IsOpen(), "failed to open memfd for {}", process_space_id);
 }
 
 bool
@@ -31,7 +31,7 @@ PtraceCommander::OnExec() noexcept
   mProcFsMemFd = {};
   const auto procfs_path = std::format("/proc/{}/task/{}/mem", mProcessId, mProcessId);
   mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
-  ASSERT(mProcFsMemFd.IsOpen(), "Failed to open proc mem fs for {}", mProcessId);
+  MDB_ASSERT(mProcFsMemFd.IsOpen(), "Failed to open proc mem fs for {}", mProcessId);
 
   return mProcFsMemFd.IsOpen();
 }
@@ -170,7 +170,7 @@ PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::ve
 TaskExecuteResponse
 PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 {
-  ASSERT(t.mUserVisibleStop || t.mTracerVisibleStop,
+  MDB_ASSERT(t.mUserVisibleStop || t.mTracerVisibleStop,
     "Was in neither user_stop ({}) or tracer_stop ({})",
     bool{ t.mUserVisibleStop },
     bool{ t.mTracerVisibleStop });
@@ -365,7 +365,7 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
     if (result == -1) {
       return Error{ .mSysErrorNumber = errno, .mErrorMessage = strerror(errno) };
     }
-    ASSERT(result > (8 * 2),
+    MDB_ASSERT(result > (8 * 2),
       "Expected to read at least 1 element (last element should always be a 0, 0 pair, "
       "thus one element should always exist at the minimum) but read {}",
       result);

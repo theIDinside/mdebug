@@ -51,7 +51,7 @@ convert_to_target(std::array<char, 16> &outbuf, Value value) noexcept
   auto ptr = outbuf.data();
   for (const auto byte : bytes) {
     auto res = std::to_chars(ptr, ptr + 2, byte, 16);
-    ASSERT(res.ec == std::errc(), "to_chars conversion failed");
+    MDB_ASSERT(res.ec == std::errc(), "to_chars conversion failed");
     ptr = res.ptr;
   }
   return std::string_view{ outbuf.data(), ptr };
@@ -79,10 +79,10 @@ template <size_t N>
 static ViewOfParameter<char[], std::string_view>
 append_checksum(char (&buf)[N], std::string_view payload)
 {
-  ASSERT(
+  MDB_ASSERT(
     payload.size() < N, "Alotted buffer of size N={} too small to handle payload's size {}", N, payload.size());
 
-  ASSERT(buf[1 + payload.size()] == '#',
+  MDB_ASSERT(buf[1 + payload.size()] == '#',
     "Expected a packet end '#' at {} but found {}",
     1 + payload.size(),
     buf[1 + payload.size()]);
@@ -144,7 +144,7 @@ GdbRemoteCommander::ReadBytes(AddrPtr address, u32 size, u8 *readBuffer) noexcep
   auto decodeBuffer = mWriteBuffer->TakeSpan(size * 2);
   const auto len = gdb::DecodeRunLengthEncoding(str, decodeBuffer.data(), decodeBuffer.size_bytes());
   std::string_view decoded{ decodeBuffer.data(), len };
-  ASSERT((decoded.size() & 0b1) == 0, "Expected buffer to be divisible by 2");
+  MDB_ASSERT((decoded.size() & 0b1) == 0, "Expected buffer to be divisible by 2");
   while (!decoded.empty()) {
     *ptr = fromhex(decoded[0]) * 16 + fromhex(decoded[1]);
     ++ptr;
@@ -192,13 +192,13 @@ GdbRemoteCommander::SetCatchSyscalls(bool on) noexcept
     if (response.is_error()) {
       PANIC("failed to set catch syscalls");
     }
-    ASSERT(response.value() == "OK", "Response for command was not 'OK'");
+    MDB_ASSERT(response.value() == "OK", "Response for command was not 'OK'");
   } else if (!on && catch_syscall) {
     const auto response = mConnection->SendCommandWaitForResponse(LeaderToGdb(), "QCatchSyscalls:0", {});
     if (response.is_error()) {
       PANIC("failed to set catch syscalls");
     }
-    ASSERT(response.value() == "OK", "Response for command was not 'OK'");
+    MDB_ASSERT(response.value() == "OK", "Response for command was not 'OK'");
   }
 
   mConnection->GetSettings().mCatchSyscalls = on;
@@ -237,7 +237,7 @@ GdbRemoteCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
   }
 
   const auto resumeError = mConnection->SendVContCommand(resumeCommand, {});
-  ASSERT(!resumeError.has_value(), "vCont resume command failed");
+  MDB_ASSERT(!resumeError.has_value(), "vCont resume command failed");
   t.SetCurrentResumeAction(action);
   mConnection->InvalidateKnownThreads();
   return TaskExecuteResponse::Ok();
@@ -252,7 +252,7 @@ GdbRemoteCommander::ReverseContinue(bool stepOnly) noexcept
 
   auto reverse = stepOnly ? "bs" : "bc";
   const auto resumeError = mConnection->SendVContCommand(reverse, 1000);
-  ASSERT(!resumeError.has_value(), "reverse continue failed");
+  MDB_ASSERT(!resumeError.has_value(), "reverse continue failed");
 
   for (auto &entry : mControl->GetThreads()) {
     entry.mTask->SetCurrentResumeAction({ .mResumeType = RunType::Continue,
@@ -307,7 +307,7 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std:
   }
 
   const auto resumeError = mConnection->SendVContCommand(resumecommand, {});
-  ASSERT(!resumeError.has_value(), "vCont resume command failed");
+  MDB_ASSERT(!resumeError.has_value(), "vCont resume command failed");
   for (auto &entry : tc->GetThreads()) {
     entry.mTask->SetCurrentResumeAction(action);
   }
@@ -387,7 +387,7 @@ GdbRemoteCommander::ReadRegisters(TaskInfo &t) noexcept
 
   std::string_view payload{ register_contents };
 
-  ASSERT(payload.front() == '$', "Expected OK response");
+  MDB_ASSERT(payload.front() == '$', "Expected OK response");
   payload.remove_prefix(1);
 
   t.RemoteFromHexdigitEncoding(payload);
@@ -509,7 +509,7 @@ bool
 GdbRemoteCommander::OnExec() noexcept
 {
   auto auxv = ReadAuxiliaryVector();
-  ASSERT(auxv.is_expected(), "Failed to read auxiliary vector");
+  MDB_ASSERT(auxv.is_expected(), "Failed to read auxiliary vector");
   GetSupervisor()->SetAuxiliaryVector(ParsedAuxiliaryVectorData(auxv.take_value()));
 
   if (auto symbol_obj = Tracer::Get().LookupSymbolfile(*mExecFile); symbol_obj == nullptr) {
@@ -782,7 +782,7 @@ RemoteSessionConfigurator::configure_rr_session() noexcept
       for (const auto &child : rootElement->children) {
         if (child->name == "xi:include") {
           const auto include = child->attribute("href");
-          ASSERT(include.has_value(), "Expected xi:include to have href attribute");
+          MDB_ASSERT(include.has_value(), "Expected xi:include to have href attribute");
           gdb::qXferCommand included{ "qXfer:features:read:", 0x1000, include.value() };
           if (!conn->ExecuteCommand(included, 0, 1000)) {
             return ConnInitError{ .msg = "Failed to get exec file of process" };

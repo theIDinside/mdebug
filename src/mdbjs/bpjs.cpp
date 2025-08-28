@@ -42,7 +42,7 @@ JsBreakpointFunction::CreateJsBreakpointFunction(JSContext *context, std::string
 
   std::string_view fnString{ buf, end };
   DBGLOG(core, "Evaluating source code: '{}'", fnString);
-  ASSERT(!JS_HasException(context), "Context must not have pending exception before evaluating new script.");
+  MDB_ASSERT(!JS_HasException(context), "Context must not have pending exception before evaluating new script.");
   JSValue eval = JS_Eval(context, fnString.data(), fnString.size(), "<bpcondition>", JS_EVAL_TYPE_GLOBAL);
 
   JSValue global = JS_GetGlobalObject(context);
@@ -61,7 +61,8 @@ JsBreakpointFunction::CreateJsBreakpointFunction(JSContext *context, std::string
     return std::unexpected(std::move(exception.value()));
   }
 
-  ASSERT(JS_IsFunction(context, compiledValue), "Must become a function but evaluation produced something else");
+  MDB_ASSERT(
+    JS_IsFunction(context, compiledValue), "Must become a function but evaluation produced something else");
   return std::make_unique<JsBreakpointFunction>(context, compiledValue);
 }
 

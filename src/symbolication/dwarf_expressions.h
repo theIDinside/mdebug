@@ -24,13 +24,13 @@ public:
   static constexpr FrameBaseExpression
   Empty() noexcept
   {
-    return FrameBaseExpression{{}};
+    return FrameBaseExpression{ {} };
   }
 
   static constexpr FrameBaseExpression
   Take(std::optional<std::span<const u8>> byteCode) noexcept
   {
-    return FrameBaseExpression{byteCode.value_or(std::span<const u8>{})};
+    return FrameBaseExpression{ byteCode.value_or(std::span<const u8>{}) };
   }
 
   std::span<const u8>
@@ -68,7 +68,7 @@ struct DwarfStack
   void
   Push(T t) noexcept
   {
-    ASSERT(mStackSize < mStack.size(), "Attempting to push value to stack when it's full");
+    MDB_ASSERT(mStackSize < mStack.size(), "Attempting to push value to stack when it's full");
     mStack[mStackSize] = static_cast<u64>(t);
     ++mStackSize;
   }
@@ -86,10 +86,13 @@ struct DwarfStack
 // already "there".
 struct ExprByteCodeInterpreter
 {
-  explicit ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
-                                   std::span<const u8> byteStream) noexcept;
-  explicit ExprByteCodeInterpreter(int frameLevel, TraceeController &tc, TaskInfo &t,
-                                   std::span<const u8> byteStream, std::span<const u8> frameBaseCode) noexcept;
+  explicit ExprByteCodeInterpreter(
+    int frameLevel, TraceeController &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept;
+  explicit ExprByteCodeInterpreter(int frameLevel,
+    TraceeController &tc,
+    TaskInfo &t,
+    std::span<const u8> byteStream,
+    std::span<const u8> frameBaseCode) noexcept;
   AddrPtr ComputeFrameBase() noexcept;
   // Read contents of register, at frame level `mFrameLevel` - if registers hasn't been unwound, or if that
   // register for some reason could not be determined, returns nullopt.

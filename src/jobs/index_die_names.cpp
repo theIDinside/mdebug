@@ -61,7 +61,7 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
     }
   }
 
-  ASSERT(acc == sortedBySize.size(), "Work splitting algorithm incorrect");
+  MDB_ASSERT(acc == sortedBySize.size(), "Work splitting algorithm incorrect");
 
   return tasks;
 }

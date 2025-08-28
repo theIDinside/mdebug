@@ -29,7 +29,7 @@ DecodeHexString(std::string_view hexString)
   for (auto it = hexString.begin(); it != end; it += 2) {
     char character = 0;
     const auto res = std::from_chars(it, it + 2, character, 16);
-    ASSERT(res.ec == std::errc(), "Failed to convert hexstring char bytes to char");
+    MDB_ASSERT(res.ec == std::errc(), "Failed to convert hexstring char bytes to char");
     result.push_back(character);
   }
   return result;
@@ -44,7 +44,7 @@ WaitEventParser::ParseStopReason(TraceeStopReason reason, std::string_view val) 
   case TraceeStopReason::RWatch:
   case TraceeStopReason::AWatch: {
     const auto addr = ToAddress(val);
-    ASSERT(addr, "Failed to parse address for remote stub watchpoint event from: '{}'", val);
+    MDB_ASSERT(addr, "Failed to parse address for remote stub watchpoint event from: '{}'", val);
     SetWatchpointAddress(addr.value());
     break;
   }
@@ -100,7 +100,7 @@ WaitEventParser::ParsePidTid(std::string_view arg) noexcept
 void
 WaitEventParser::ParseCore(std::string_view arg) noexcept
 {
-  ASSERT(mCore == 0, "core has already been set");
+  MDB_ASSERT(mCore == 0, "core has already been set");
   u32 parsedCore{ 0 };
   auto parse = std::from_chars(arg.data(), arg.data() + arg.size(), parsedCore, 16);
   if (parse.ec != std::errc()) {
@@ -212,8 +212,8 @@ WaitEventParser::NewDebuggerEvent(bool init) noexcept
 void
 WaitEventParser::ParseFork(std::string_view data)
 {
-  ASSERT(mNewPid == 0, "new_pid already set");
-  ASSERT(mNewTid == 0, "new_tid already set");
+  MDB_ASSERT(mNewPid == 0, "new_pid already set");
+  MDB_ASSERT(mNewTid == 0, "new_tid already set");
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   mNewPid = pid;
   mNewTid = tid;
@@ -222,8 +222,8 @@ WaitEventParser::ParseFork(std::string_view data)
 void
 WaitEventParser::ParseVFork(std::string_view data)
 {
-  ASSERT(mNewPid == 0, "new_pid already set");
-  ASSERT(mNewTid == 0, "new_tid already set");
+  MDB_ASSERT(mNewPid == 0, "new_pid already set");
+  MDB_ASSERT(mNewTid == 0, "new_tid already set");
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   mNewPid = pid;
   mNewTid = tid;
@@ -232,8 +232,8 @@ WaitEventParser::ParseVFork(std::string_view data)
 void
 WaitEventParser::SetVFork(SessionId newpid, Tid newtid) noexcept
 {
-  ASSERT(mNewPid == 0, "new_pid already set");
-  ASSERT(mNewTid == 0, "new_tid already set");
+  MDB_ASSERT(mNewPid == 0, "new_pid already set");
+  MDB_ASSERT(mNewTid == 0, "new_tid already set");
   mNewPid = newpid;
   mNewTid = newtid;
 }
@@ -241,28 +241,28 @@ WaitEventParser::SetVFork(SessionId newpid, Tid newtid) noexcept
 void
 WaitEventParser::SetWatchpointAddress(AddrPtr addr) noexcept
 {
-  ASSERT(mWatchpointAddress == nullptr, "wp address already set");
+  MDB_ASSERT(mWatchpointAddress == nullptr, "wp address already set");
   mWatchpointAddress = addr;
 }
 
 void
 WaitEventParser::SetStopReason(TraceeStopReason stop) noexcept
 {
-  ASSERT(!mStopReason.has_value(), "Expected stop reason to not be set");
+  MDB_ASSERT(!mStopReason.has_value(), "Expected stop reason to not be set");
   mStopReason = stop;
 }
 
 void
 WaitEventParser::SetPid(SessionId process) noexcept
 {
-  ASSERT(mPid == 0, "pid already set");
+  MDB_ASSERT(mPid == 0, "pid already set");
   mPid = process;
 }
 
 void
 WaitEventParser::SetTid(Tid thread) noexcept
 {
-  ASSERT(mTid == 0, "tid already set");
+  MDB_ASSERT(mTid == 0, "tid already set");
   mTid = thread;
 }
 
@@ -275,8 +275,8 @@ WaitEventParser::SetExeced(std::string_view exec) noexcept
 void
 WaitEventParser::ParseClone(std::string_view data) noexcept
 {
-  ASSERT(mNewPid == 0, "new_pid already set");
-  ASSERT(mNewTid == 0, "new_pid already set");
+  MDB_ASSERT(mNewPid == 0, "new_pid already set");
+  MDB_ASSERT(mNewTid == 0, "new_pid already set");
   const auto [pid, tid] = gdb::GdbThread::parse_thread(data);
   mNewPid = pid;
   mNewTid = tid;
@@ -285,7 +285,7 @@ WaitEventParser::ParseClone(std::string_view data) noexcept
 void
 WaitEventParser::ParseEventTime(std::string_view data) noexcept
 {
-  ASSERT(mEventTime == 0, "Event time has already been seen?");
+  MDB_ASSERT(mEventTime == 0, "Event time has already been seen?");
   int frameTime;
   auto value = std::from_chars(data.begin(), data.end(), frameTime, 16);
   if (value.ec == std::errc()) {
@@ -296,21 +296,21 @@ WaitEventParser::ParseEventTime(std::string_view data) noexcept
 void
 WaitEventParser::SetSyscallExit(int number) noexcept
 {
-  ASSERT(mSyscallNumber == 0, "syscall no already set");
+  MDB_ASSERT(mSyscallNumber == 0, "syscall no already set");
   mSyscallNumber = number;
 }
 
 void
 WaitEventParser::SetSyscallEntry(int number) noexcept
 {
-  ASSERT(mSyscallNumber == 0, "syscall no already set");
+  MDB_ASSERT(mSyscallNumber == 0, "syscall no already set");
   mSyscallNumber = number;
 }
 
 std::vector<GdbThread>
 WaitEventParser::ParseThreadsParameter(std::string_view input) noexcept
 {
-  ASSERT(mPid != 0, "process id not yet parsed");
+  MDB_ASSERT(mPid != 0, "process id not yet parsed");
   auto threads = ProtocolParseThreads(input);
 
   for (auto &t : threads) {

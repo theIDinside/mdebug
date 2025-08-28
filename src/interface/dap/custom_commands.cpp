@@ -30,7 +30,7 @@ UIResultPtr
 ContinueAll::Execute() noexcept
 {
   auto target = GetSupervisor();
-  ASSERT(target, "Target must not be null");
+  MDB_ASSERT(target, "Target must not be null");
   auto res = new ContinueAllResponse{ true, this, target->TaskLeaderTid() };
   std::vector<Tid> resumedThreads{};
   // N.B: it's unfortunate that VSCode doesn't honor the "allThreadsContinued" field on a continued event

@@ -179,7 +179,7 @@ public:
     if (mSize == mCapacity) {
       ExtendAllocation();
     }
-    ASSERT(mSize != mCapacity, "Allocation was not extended.");
+    MDB_ASSERT(mSize != mCapacity, "Allocation was not extended.");
     const auto i = mSize++;
     return mData + i;
   }

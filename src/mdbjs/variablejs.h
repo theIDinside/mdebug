@@ -56,14 +56,14 @@ struct JsVariable : public JSBinding<JsVariable, sym::Value, JavascriptClasses::
   static constexpr auto
   DefineToPrimitive(JSContext *context, JSValue prototype, JSAtom toPrimitiveAtom)
   {
-    ASSERT(toPrimitiveAtom != 0, "toPrimitive atom must be passed to function");
+    MDB_ASSERT(toPrimitiveAtom != 0, "toPrimitive atom must be passed to function");
     JSValue func = JS_NewCFunction(context, &ToPrimitive, "[[toPrimitive]]", 1);
     int rc = JS_DefinePropertyValue(context,
       prototype,
       toPrimitiveAtom,
       func,
       JS_PROP_C_W_E); // Configurable + Writeable + Enumerable
-    ASSERT(rc != -1 && rc > 0, "Defining the toPrimitive property failed.");
+    MDB_ASSERT(rc != -1 && rc > 0, "Defining the toPrimitive property failed.");
     JS_FreeAtom(context, toPrimitiveAtom);
   }
 };
