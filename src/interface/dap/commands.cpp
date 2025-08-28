@@ -1265,6 +1265,51 @@ struct Launch final : public UICommand
       tc::ResumeAction{ tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, 0 });
     return new LaunchResponse{ mRequestingSessionId, processId, true, this };
   }
+
+  static ui::UICommand *
+  CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args)
+  {
+    SessionId sessionId = args["sessionId"];
+    Path path{ args["program"]->UncheckedGetStringView() };
+    Path cwd;
+    std::pmr::vector<std::pmr::string> prog_args{ arg.allocator->GetAllocator() };
+    if (args.Contains("args")) {
+      for (const auto &v : args.AsSpan("args")) {
+        std::pmr::string arg;
+        std::format_to(std::back_inserter(arg), "{}", v);
+        prog_args.push_back(std::move(arg));
+      }
+    }
+
+    bool stopOnEntry = false;
+    if (args.Contains("stopOnEntry")) {
+      stopOnEntry = args["stopOnEntry"];
+    }
+
+    if (args.Contains("env")) {
+    }
+
+    if (args.Contains("cwd")) {
+    }
+
+    const auto behaviorSetting = args.Get("breakpointBehavior")
+                                   .and_then([](const auto &json) { return json.GetStringView(); })
+                                   .transform([](const std::string_view &behavior) {
+                                     if (behavior == "Stop all threads") {
+                                       return BreakpointBehavior::StopAllThreadsWhenHit;
+                                     } else if (behavior == "Stop single thread") {
+                                       return BreakpointBehavior::StopOnlyThreadThatHit;
+                                     } else {
+                                       return BreakpointBehavior::StopAllThreadsWhenHit;
+                                     }
+                                   })
+                                   .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
+
+    return new Launch{
+      std::move(arg), sessionId, stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting
+    };
+  }
+
   bool mStopOnEntry;
   Path mProgram;
   std::pmr::vector<std::pmr::string> mProgramArgs;
@@ -1337,7 +1382,7 @@ struct Attach final : public UICommand
     });
 
   static ui::UICommand *
-  create(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
+  CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   {
     auto type = args.At("type")->UncheckedGetStringView();
     MDB_ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
@@ -2096,7 +2141,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
   switch (cmd) {
   case CommandType::Attach: {
     IfInvalidArgsReturn(Attach);
-    return Attach::create(std::move(arg), args);
+    return Attach::CreateRequest(std::move(arg), args);
   }
   case CommandType::BreakpointLocations:
     TODO("Command::BreakpointLocations");
@@ -2167,46 +2212,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     return new Initialize{ std::move(arg), args };
   case CommandType::Launch: {
     IfInvalidArgsReturn(Launch);
-
-    SessionId sessionId = args["sessionId"];
-    Path path{ args["program"]->UncheckedGetStringView() };
-    Path cwd;
-    std::pmr::vector<std::pmr::string> prog_args{ arg.allocator->GetAllocator() };
-    if (args.Contains("args")) {
-      for (const auto &v : args.AsSpan("args")) {
-        std::pmr::string arg;
-        std::format_to(std::back_inserter(arg), "{}", v);
-        prog_args.push_back(std::move(arg));
-      }
-    }
-
-    bool stopOnEntry = false;
-    if (args.Contains("stopOnEntry")) {
-      stopOnEntry = args["stopOnEntry"];
-    }
-
-    if (args.Contains("env")) {
-    }
-
-    if (args.Contains("cwd")) {
-    }
-
-    const auto behaviorSetting = args.Get("breakpointBehavior")
-                                   .and_then([](const auto &json) { return json.GetStringView(); })
-                                   .transform([](const std::string_view &behavior) {
-                                     if (behavior == "Stop all threads") {
-                                       return BreakpointBehavior::StopAllThreadsWhenHit;
-                                     } else if (behavior == "Stop single thread") {
-                                       return BreakpointBehavior::StopOnlyThreadThatHit;
-                                     } else {
-                                       return BreakpointBehavior::StopAllThreadsWhenHit;
-                                     }
-                                   })
-                                   .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
-
-    return new Launch{
-      std::move(arg), sessionId, stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting
-    };
+    return Launch::CreateRequest(std::move(arg), args);
   }
   case CommandType::LoadedSources:
     TODO("Command::LoadedSources");
