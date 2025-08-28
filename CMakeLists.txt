@@ -323,8 +323,6 @@ if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
   set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
   target_compile_definitions(mdb PRIVATE COMPILERUSED_GCC)
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-  # clang using GNU's stdlib ranges, is.... iffy at the moment.
-  target_compile_definitions(mdb PUBLIC JSON_HAS_RANGES=0)
   set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
 else ()
   error("Unknown compiler")
