@@ -3,16 +3,6 @@
 #include "common.h"
 #include <common/panic.h>
 #include <common/typedefs.h>
-// stdlib
-#include <csignal>
-// system
-#include <cxxabi.h>
-#include <execinfo.h>
-#include <fcntl.h>
-#include <ranges>
-#include <sys/ptrace.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
 
 namespace mdb {
 std::string_view
