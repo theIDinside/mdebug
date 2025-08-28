@@ -115,7 +115,7 @@ ProfilingLogger::WriteEvents(EventArray &events) noexcept
 void
 ProfilingLogger::ConfigureProfiling(const Path &path) noexcept
 {
-  ASSERT(!sInstance, "Profiler already instantiated.");
+  MDB_ASSERT(!sInstance, "Profiler already instantiated.");
   sInstance = new logging::ProfilingLogger{};
   const auto profilingFile = path / "profiling.log";
   sInstance->mPid = getpid();
@@ -245,7 +245,7 @@ Logger::~Logger() noexcept
 void
 Logger::SetupChannel(const Path &logDirectory, Channel id) noexcept
 {
-  ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} ({}) already created", 1, id);
+  MDB_ASSERT(LogChannels[std::to_underlying(id)] == nullptr, "Channel {} ({}) already created", 1, id);
   Path p = logDirectory / std::format("{}.log", id);
   auto channel = new LogChannel{ .mChannelMutex = {},
     .mFileStream = std::fstream{ p, std::ios_base::in | std::ios_base::out | std::ios_base::trunc } };

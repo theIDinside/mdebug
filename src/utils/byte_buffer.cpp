@@ -24,7 +24,7 @@ ByteBuffer::size() const noexcept
 void
 ByteBuffer::set_size(u32 new_size) noexcept
 {
-  ASSERT(new_size <= capacity, "Setting size beyond capacity is illogical");
+  MDB_ASSERT(new_size <= capacity, "Setting size beyond capacity is illogical");
   value_size = new_size;
 }
 
@@ -32,13 +32,13 @@ void
 ByteBuffer::wrote_bytes(u32 bytes) noexcept
 {
   value_size += bytes;
-  ASSERT(value_size <= capacity, "Recorded size exceeded capacity");
+  MDB_ASSERT(value_size <= capacity, "Recorded size exceeded capacity");
 }
 
 std::span<u8>
 ByteBuffer::span() const noexcept
 {
-  return std::span{buffer, value_size};
+  return std::span{ buffer, value_size };
 }
 
 u8 *

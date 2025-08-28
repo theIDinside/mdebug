@@ -18,7 +18,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::Compilat
 {
   auto cu = src.GetDwarfUnitData();
   const auto version = cu->GetHeader().Version();
-  ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
+  MDB_ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
   auto elf = cu->GetObjectFile()->GetElf();
 
   if (version == DwarfVersion::D4) {
@@ -53,7 +53,7 @@ ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::Compilat
       src.SetAddressBoundary(lowest, highest);
     }
   } else if (version == DwarfVersion::D5) {
-    ASSERT(elf->mDebugRnglists != nullptr,
+    MDB_ASSERT(elf->mDebugRnglists != nullptr,
       "DWARF Version 5 requires DW_AT_ranges in a .debug_aranges but no such section has been found");
     if (rangesOffset.form == AttributeForm::DW_FORM_sec_offset) {
       auto addressRange = sym::dw::ReadBoundaries(elf->mDebugRnglists, rangesOffset.AsUnsignedValue());
@@ -192,7 +192,7 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
     }
   }
 
-  ASSERT(acc == sortedBySize.size(), "Work splitting algorithm incorrect");
+  MDB_ASSERT(acc == sortedBySize.size(), "Work splitting algorithm incorrect");
 
   return tasks;
 }

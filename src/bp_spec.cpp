@@ -4,8 +4,8 @@
 
 namespace mdb {
 
-BreakpointSpecification::BreakpointSpecification(DapBreakpointType kind, std::optional<std::string> condition,
-                                                 std::optional<std::string> hitCondition) noexcept
+BreakpointSpecification::BreakpointSpecification(
+  DapBreakpointType kind, std::optional<std::string> condition, std::optional<std::string> hitCondition) noexcept
     : mKind(kind), mCondition(std::move(condition)), mHitCondition(std::move(hitCondition)), uSource(nullptr)
 {
 }
@@ -33,24 +33,24 @@ BreakpointSpecification::DestroyUnion() noexcept
 BreakpointSpecification::~BreakpointSpecification() noexcept { DestroyUnion(); }
 
 BreakpointSpecification::BreakpointSpecification(std::optional<std::string> condition,
-                                                 std::optional<std::string> hitCondition,
-                                                 SourceBreakpointSpecPair *src) noexcept
+  std::optional<std::string> hitCondition,
+  SourceBreakpointSpecPair *src) noexcept
     : mKind(DapBreakpointType::source), mCondition(std::move(condition)), mHitCondition(std::move(hitCondition)),
       uSource(src)
 {
 }
 
 BreakpointSpecification::BreakpointSpecification(std::optional<std::string> condition,
-                                                 std::optional<std::string> hitCondition,
-                                                 FunctionBreakpointSpec *fun) noexcept
+  std::optional<std::string> hitCondition,
+  FunctionBreakpointSpec *fun) noexcept
     : mKind(DapBreakpointType::function), mCondition(std::move(condition)), mHitCondition(std::move(hitCondition)),
       uFunction(fun)
 {
 }
 
 BreakpointSpecification::BreakpointSpecification(std::optional<std::string> condition,
-                                                 std::optional<std::string> hitCondition,
-                                                 InstructionBreakpointSpec *ins) noexcept
+  std::optional<std::string> hitCondition,
+  InstructionBreakpointSpec *ins) noexcept
     : mKind(DapBreakpointType::instruction), mCondition(std::move(condition)),
       mHitCondition(std::move(hitCondition)), uInstruction(ins)
 {
@@ -100,7 +100,7 @@ BreakpointSpecification::Line() const noexcept
 {
   switch (mKind) {
   case DapBreakpointType::source:
-    return uSource ? std::optional{uSource->mSpec.line} : std::nullopt;
+    return uSource ? std::optional{ uSource->mSpec.line } : std::nullopt;
   case DapBreakpointType::function:
     [[fallthrough]];
   case DapBreakpointType::instruction:
@@ -131,15 +131,15 @@ BreakpointSpecification::CloneVariant(BreakpointSpecification *out, const Breakp
 {
   switch (spec->mKind) {
   case DapBreakpointType::source: {
-    out->uSource = new SourceBreakpointSpecPair{*spec->uSource};
+    out->uSource = new SourceBreakpointSpecPair{ *spec->uSource };
     break;
   }
   case DapBreakpointType::function: {
-    out->uFunction = new FunctionBreakpointSpec{*spec->uFunction};
+    out->uFunction = new FunctionBreakpointSpec{ *spec->uFunction };
     break;
   }
   case DapBreakpointType::instruction: {
-    out->uInstruction = new InstructionBreakpointSpec{*spec->uInstruction};
+    out->uInstruction = new InstructionBreakpointSpec{ *spec->uInstruction };
     break;
   }
   default:
@@ -155,7 +155,7 @@ BreakpointSpecification::Clone(const BreakpointSpecification *spec) noexcept
   if (!spec) {
     return nullptr;
   }
-  auto res = new BreakpointSpecification{spec->mKind, spec->mCondition, spec->mHitCondition};
+  auto res = new BreakpointSpecification{ spec->mKind, spec->mCondition, spec->mHitCondition };
   CloneVariant(res, spec);
   return res;
 }
@@ -163,7 +163,7 @@ BreakpointSpecification::Clone(const BreakpointSpecification *spec) noexcept
 std::unique_ptr<BreakpointSpecification>
 BreakpointSpecification::Clone() const noexcept
 {
-  return std::unique_ptr<BreakpointSpecification>{Clone(this)};
+  return std::unique_ptr<BreakpointSpecification>{ Clone(this) };
 }
 
 }; // namespace mdb
@@ -172,8 +172,9 @@ std::hash<mdb::BreakpointSpecification>::result_type
 std::hash<mdb::BreakpointSpecification>::operator()(const argument_type &m) const noexcept
 {
   using enum mdb::DapBreakpointType;
-  ASSERT(m.mKind == source || m.mKind == function || m.mKind == instruction, "Unexpected spec type: {}",
-         std::to_underlying(m.mKind));
+  MDB_ASSERT(m.mKind == source || m.mKind == function || m.mKind == instruction,
+    "Unexpected spec type: {}",
+    std::to_underlying(m.mKind));
   const auto u32Hasher = std::hash<u32>{};
 
   auto res = u32Hasher(static_cast<u32>(std::to_underlying(m.mKind)));

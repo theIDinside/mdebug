@@ -18,7 +18,7 @@ DeserializeHexEncoded(std::string_view hex, Container &out) noexcept
 {
   auto p = out.Data();
   char scratchBuffer[512];
-  constexpr auto repeat = [](char c) noexcept -> u32 { return static_cast<u32>(c - char{29}); };
+  constexpr auto repeat = [](char c) noexcept -> u32 { return static_cast<u32>(c - char{ 29 }); };
   while (!hex.empty()) {
     // at what position `i` is the to-be-repeated-character
     auto i = hex[0] == '*' ? -1 : (hex[1] == '*' ? 0 : 1);
@@ -32,11 +32,11 @@ DeserializeHexEncoded(std::string_view hex, Container &out) noexcept
       std::fill_n(scratchBuffer, buf_sz, *(hex.data() + i));
       const auto add_after_0 = hex0_is_rep && repeat_uneven;
       const auto add_after_1 = !hex0_is_rep && !repeat_uneven;
-      ASSERT(buf_sz <= std::size(scratchBuffer), "RLE too large for scratch buffer");
+      MDB_ASSERT(buf_sz <= std::size(scratchBuffer), "RLE too large for scratch buffer");
       scratchBuffer[buf_sz - 1] =
         add_after_0 ? *(hex.data() + 2) : (add_after_1 ? *(hex.data() + 3) : scratchBuffer[buf_sz - 1]);
       // this is safe, because we've made sure buf_sz % 2 == 0. I think.
-      std::string_view view{scratchBuffer, buf_sz};
+      std::string_view view{ scratchBuffer, buf_sz };
       while (!view.empty()) {
         *p = (fromhex(view[0]) << 4) | (fromhex(view[1]));
         view.remove_prefix(2);
@@ -52,8 +52,10 @@ DeserializeHexEncoded(std::string_view hex, Container &out) noexcept
       ++p;
     }
   }
-  ASSERT(p <= (out.Data(out.Size())), "Stack buffer overrun. Array of {} bytes overrun by {} bytes", out.Size(),
-         static_cast<u64>(p - (out.Data(out.Size()))));
+  MDB_ASSERT(p <= (out.Data(out.Size())),
+    "Stack buffer overrun. Array of {} bytes overrun by {} bytes",
+    out.Size(),
+    static_cast<u64>(p - (out.Data(out.Size()))));
 }
 
 template <size_t N>
@@ -62,7 +64,7 @@ DeserializeHexEncoded(std::string_view hex, std::array<u8, N> &out) noexcept
 {
   auto p = out.data();
 
-  constexpr auto repeat = [](char c) noexcept -> u32 { return static_cast<u32>(c - char{29}); };
+  constexpr auto repeat = [](char c) noexcept -> u32 { return static_cast<u32>(c - char{ 29 }); };
   char scratchBuffer[512];
   while (!hex.empty()) {
     // at what position `i` is the to-be-repeated-character
@@ -74,14 +76,14 @@ DeserializeHexEncoded(std::string_view hex, std::array<u8, N> &out) noexcept
       const auto hex0IsRep = (i == -1);
       const auto addSize = (repeatUneven) ? 1 : (hex0IsRep ? 0 : 2);
       const auto bufferSize = r + addSize;
-      ASSERT(bufferSize <= std::size(scratchBuffer), "scratch buffer size insufficient");
+      MDB_ASSERT(bufferSize <= std::size(scratchBuffer), "scratch buffer size insufficient");
       std::fill_n(scratchBuffer, bufferSize, *(hex.data() + i));
       const auto addAfter0 = hex0IsRep && repeatUneven;
       const auto addAfter1 = !hex0IsRep && !repeatUneven;
       scratchBuffer[bufferSize - 1] =
         addAfter0 ? *(hex.data() + 2) : (addAfter1 ? *(hex.data() + 3) : scratchBuffer[bufferSize - 1]);
       // this is safe, because we've made sure buf_sz % 2 == 0. I think.
-      std::string_view view{scratchBuffer, bufferSize};
+      std::string_view view{ scratchBuffer, bufferSize };
       while (!view.empty()) {
         *p = (fromhex(view[0]) << 4) | (fromhex(view[1]));
         view.remove_prefix(2);
@@ -97,7 +99,9 @@ DeserializeHexEncoded(std::string_view hex, std::array<u8, N> &out) noexcept
       ++p;
     }
   }
-  ASSERT(p <= (out.data() + out.size()), "Stack buffer overrun. Array of {} bytes overrun by {} bytes", out.size(),
-         static_cast<u64>(p - (out.data() + out.size())));
+  MDB_ASSERT(p <= (out.data() + out.size()),
+    "Stack buffer overrun. Array of {} bytes overrun by {} bytes",
+    out.size(),
+    static_cast<u64>(p - (out.data() + out.size())));
 }
 } // namespace mdb

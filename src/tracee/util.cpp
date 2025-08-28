@@ -101,7 +101,7 @@ static constexpr std::array<std::pair<u8, u16>, 24> UserRegsMapping = { { { 8, o
 u64
 get_register(user_regs_struct *regs, int reg_number) noexcept
 {
-  ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
+  MDB_ASSERT(reg_number <= 16, "Register number {} not supported", reg_number);
   return *(u64 *)(((std::uintptr_t)regs) + RegNumToX86_64Offsets[reg_number]);
 }
 

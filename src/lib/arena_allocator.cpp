@@ -104,7 +104,7 @@ ArenaResource::Reset() noexcept
 void
 ArenaResource::Reset(u64 previousOffset) noexcept
 {
-  ASSERT(previousOffset <= mAllocated, "Previous offset is not less than or equal to current alloc offset");
+  MDB_ASSERT(previousOffset <= mAllocated, "Previous offset is not less than or equal to current alloc offset");
   mAllocated = previousOffset;
 }
 

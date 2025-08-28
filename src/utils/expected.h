@@ -88,7 +88,7 @@ public:
     requires(!IsFirstTypeSame<Err, Args...>::value)
       : val_or_err(args...), mHasExpectedValue(true)
   {
-    ASSERT(val_or_err.index() == 0, "You've broken the invariant");
+    MDB_ASSERT(val_or_err.index() == 0, "You've broken the invariant");
   }
 
   constexpr Expected(T &&value) noexcept
@@ -128,7 +128,7 @@ public:
 
   template <typename ConvertErr> Expected(Expected<T, ConvertErr> &&ExpectedWithValueRequiringConversion) noexcept
   {
-    ASSERT(ExpectedWithValueRequiringConversion.is_expected(),
+    MDB_ASSERT(ExpectedWithValueRequiringConversion.is_expected(),
       "Conversion from expected that had a value, but was expected to be an error");
     val_or_err = std::move(ExpectedWithValueRequiringConversion.take_value());
     mHasExpectedValue = true;
@@ -151,14 +151,14 @@ public:
   T *
   operator->() noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(mHasExpectedValue, "Expected did not have a value");
     return std::get_if<T>(&val_or_err);
   }
 
   auto &
   operator*() & noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(mHasExpectedValue, "Expected did not have a value");
     return *std::get_if<T>(&val_or_err);
   }
 
@@ -175,28 +175,28 @@ public:
   constexpr auto &&
   value(this Self &&self)
   {
-    ASSERT(self.mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(self.mHasExpectedValue, "Expected did not have a value");
     return std::get<T>(std::forward<Self>(self).val_or_err);
   }
 
   T &
   value() & noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(mHasExpectedValue, "Expected did not have a value");
     return *std::get_if<T>(&val_or_err);
   }
 
   T &&
   value() && noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(mHasExpectedValue, "Expected did not have a value");
     return std::get<T>(std::move(val_or_err));
   }
 
   const T &
   value() const & noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(mHasExpectedValue, "Expected did not have a value");
     return std::get<T>(val_or_err);
   }
 
@@ -204,7 +204,7 @@ public:
   T &&
   take_value() noexcept
   {
-    ASSERT(mHasExpectedValue, "Expected did not have a value");
+    MDB_ASSERT(mHasExpectedValue, "Expected did not have a value");
     mHasExpectedValue = false;
     return std::get<T>(std::move(val_or_err));
   }
@@ -212,28 +212,28 @@ public:
   Err &&
   take_error() noexcept
   {
-    ASSERT(!mHasExpectedValue, "Expected have a value");
+    MDB_ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(std::move(val_or_err));
   }
 
   Err &
   error() & noexcept
   {
-    ASSERT(!mHasExpectedValue, "Expected have a value");
+    MDB_ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(val_or_err);
   }
 
   Err &&
   error() && noexcept
   {
-    ASSERT(!mHasExpectedValue, "Expected have a value");
+    MDB_ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(std::move(val_or_err));
   }
 
   const Err &
   error() const & noexcept
   {
-    ASSERT(!mHasExpectedValue, "Expected have a value");
+    MDB_ASSERT(!mHasExpectedValue, "Expected have a value");
     return std::get<Err>(val_or_err);
   }
 

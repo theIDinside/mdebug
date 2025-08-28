@@ -19,7 +19,7 @@ ParseHeadersFromBuffer(const std::string_view buffer_view, bool *all_msgs_ok) no
       std::sub_match<std::string_view::const_iterator> base_sub_match = base_match[1];
       std::string_view len_str{ base_sub_match.first, base_sub_match.second };
       const auto res = to_integral<u64>(len_str);
-      ASSERT(res.has_value(), "Failed to parse length from Content-Length header");
+      MDB_ASSERT(res.has_value(), "Failed to parse length from Content-Length header");
       const auto len = res.value();
       if (base_match.position() + base_match.length() + len <= internal_view.size()) {
         const auto header_begin_ptr = internal_view.data() + base_match.position();

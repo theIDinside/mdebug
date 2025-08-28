@@ -11,7 +11,7 @@ fromhex(char a) noexcept
   } else if (a == 'x') {
     return 0;
   } else {
-    ASSERT(false, "unexpected character");
+    MDB_ASSERT(false, "unexpected character");
     return 0;
   }
 }

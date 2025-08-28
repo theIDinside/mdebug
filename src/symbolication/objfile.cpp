@@ -85,7 +85,7 @@ ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loade
       mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), mCompileUnitWriteLock(),
       mCompilationUnits(), mAddressToCompileUnitMapping()
 {
-  ASSERT(size > 0, "Loaded Object File is invalid");
+  MDB_ASSERT(size > 0, "Loaded Object File is invalid");
 }
 
 ObjectFile::~ObjectFile() noexcept
@@ -205,7 +205,7 @@ void
 ObjectFile::SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data) noexcept
 {
   using sym::dw::UnitData;
-  ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
+  MDB_ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
   std::lock_guard lock(mUnitDataWriteLock);
   mCompileUnits.insert(mCompileUnits.begin(), unit_data.begin(), unit_data.end());
   std::sort(mCompileUnits.begin(), mCompileUnits.end(), [](UnitData *a, UnitData *b) {
@@ -229,7 +229,7 @@ ObjectFile::GetCompileUnitFromOffset(u64 offset) noexcept
     });
 
   if (it != std::end(mCompileUnits)) {
-    ASSERT((*it)->SpansAcrossOffset(offset), "compilation unit does not span 0x{:x}", offset);
+    MDB_ASSERT((*it)->SpansAcrossOffset(offset), "compilation unit does not span 0x{:x}", offset);
     return *it;
   } else {
     return nullptr;
@@ -312,7 +312,7 @@ void
 ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
 {
   for (const auto tu : tus) {
-    ASSERT(tu->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_type,
+    MDB_ASSERT(tu->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_type,
       "Expected DWARF Unit Type but got {}",
       to_str(tu->GetHeader().GetUnitType()));
     mTypeToUnitDataMap[tu->GetHeader().TypeSignature()] = tu;
@@ -446,7 +446,7 @@ sym::dw::DieReference
 ObjectFile::GetTypeUnitTypeDebugInfoEntry(u64 type_signature) noexcept
 {
   auto typeunit = GetTypeUnit(type_signature);
-  ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
+  MDB_ASSERT(typeunit != nullptr, "expected typeunit with signature 0x{:x}", type_signature);
   const auto typeDieCuOffset = typeunit->GetHeader().GetTypeOffset();
   const auto typeDieSectionOffset = typeunit->SectionOffset() + typeDieCuOffset;
   const auto &dies = typeunit->GetDies();
@@ -601,7 +601,7 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
 
   DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
   const auto header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
-  ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0,
+  MDB_ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0,
     "ELF Magic not correct, expected {} got {}",
     *(u32 *)(ELF_MAGIC),
     *(u32 *)(header->e_ident));
@@ -676,7 +676,7 @@ SymbolFile::SymbolFile(
 SymbolFile::shr_ptr
 SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
 {
-  ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
+  MDB_ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
   return std::make_shared<SymbolFile>(
     tc, std::format("{}:{}", tc->TaskLeaderTid(), binary->GetPathString()), std::move(binary), relocated_base);
@@ -704,7 +704,7 @@ SymbolFile::ContainsProgramCounter(AddrPtr pc) const noexcept -> bool
 auto
 SymbolFile::UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr
 {
-  ASSERT(pc > mBaseAddress, "PC={} is below base address {}.", pc, mBaseAddress);
+  MDB_ASSERT(pc > mBaseAddress, "PC={} is below base address {}.", pc, mBaseAddress);
   return pc - mBaseAddress;
 }
 
@@ -864,7 +864,7 @@ auto
 SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec) noexcept
   -> std::vector<BreakpointLookup>
 {
-  ASSERT(bpSpec.mKind == DapBreakpointType::function, "required type=function");
+  MDB_ASSERT(bpSpec.mKind == DapBreakpointType::function, "required type=function");
   std::vector<MinSymbol> matchingSymbols;
   std::vector<BreakpointLookup> result{};
 

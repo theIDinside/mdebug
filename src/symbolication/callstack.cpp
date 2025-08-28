@@ -143,19 +143,19 @@ Frame::MaybeGetFullSymbolInfo() const noexcept
 const MinSymbol *
 Frame::MaybeGetMinimalSymbol() const noexcept
 {
-  ASSERT(mFrameType == FrameType::ElfSymbol, "Frame has no ELF symbol info");
+  MDB_ASSERT(mFrameType == FrameType::ElfSymbol, "Frame has no ELF symbol info");
   return mSymbolUnion.uMinSymbol;
 }
 
 IterateFrameSymbols
 Frame::BlockSymbolIterator(FrameVariableKind variables_kind) noexcept
 {
-  return IterateFrameSymbols{*this, variables_kind};
+  return IterateFrameSymbols{ *this, variables_kind };
 }
 
 u32
-Frame::GetInitializedVariables(FrameVariableKind variableSet,
-                               std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept
+Frame::GetInitializedVariables(
+  FrameVariableKind variableSet, std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept
 {
   switch (variableSet) {
   case FrameVariableKind::Arguments: {
@@ -297,7 +297,7 @@ CallStack::GetFrameAtLevel(u32 level) noexcept
 u64
 CallStack::UnwindRegister(u8 level, u16 register_number) noexcept
 {
-  ASSERT(level < mUnwoundRegister.size(), "out of bounds");
+  MDB_ASSERT(level < mUnwoundRegister.size(), "out of bounds");
   return mUnwoundRegister[level].GetRegister(register_number);
 }
 
@@ -390,7 +390,7 @@ CallStack::FindFrame(const Frame &frame) const noexcept
 AddrPtr
 CallStack::GetTopMostPc() const noexcept
 {
-  ASSERT(!mUnwoundRegister.empty(), "No unwound registers!");
+  MDB_ASSERT(!mUnwoundRegister.empty(), "No unwound registers!");
   return mUnwoundRegister.back().GetPc();
 }
 
@@ -398,10 +398,10 @@ std::pair<FrameUnwindState *, FrameUnwindState *>
 CallStack::GetCurrent() noexcept
 {
   if (mUnwoundRegister.size() < 2) {
-    return {nullptr, nullptr};
+    return { nullptr, nullptr };
   }
-  auto span = std::span{mUnwoundRegister}.subspan(mUnwoundRegister.size() - 2, 2);
-  return {&span[0], &span[1]};
+  auto span = std::span{ mUnwoundRegister }.subspan(mUnwoundRegister.size() - 2, 2);
+  return { &span[0], &span[1] };
 }
 
 bool
@@ -439,10 +439,10 @@ decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state)
   // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
-  DwarfBinaryReader reader{info.GetCommonInformationEntryData()};
+  DwarfBinaryReader reader{ info.GetCommonInformationEntryData() };
   const int decodedInstructions = sym::decode(reader, state, info.mInfo);
   DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
-  DwarfBinaryReader fde{info.GetFrameDescriptionEntryData()};
+  DwarfBinaryReader fde{ info.GetFrameDescriptionEntryData() };
   sym::decode(fde, state, info.mInfo);
 }
 
@@ -464,14 +464,14 @@ CallStack::Unwind(const CallStackRequest &req)
     return;
   }
   const auto pc = mTask->GetRegisterCache().GetPc();
-  sym::UnwindIterator it{mSupervisor, pc};
+  sym::UnwindIterator it{ mSupervisor, pc };
   auto uninfo = it.GetInfo(pc);
   bool initialized = false;
   if (!uninfo) {
     constexpr auto STACK_POINTER_NUMBER = 7;
     // we may be in a plt entry. Try sniffing out this frame before throwing away the entire call stack
     // a call instruction automatically pushes rip onto the stack at $rsp
-    const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{mTask->GetRegister(STACK_POINTER_NUMBER)});
+    const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{ mTask->GetRegister(STACK_POINTER_NUMBER) });
     uninfo = it.GetInfo(resumeAddress);
     if (uninfo) {
       Initialize();

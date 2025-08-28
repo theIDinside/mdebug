@@ -99,14 +99,14 @@ struct SubscriberIdentity
   static constexpr SubscriberIdentity
   Of(T *t) noexcept
   {
-    return SubscriberIdentity{t};
+    return SubscriberIdentity{ t };
   }
 
   template <typename T>
   static constexpr SubscriberIdentity
   Of(const T *t) noexcept
   {
-    return SubscriberIdentity{t};
+    return SubscriberIdentity{ t };
   }
 
   std::uintptr_t addr;
@@ -155,17 +155,18 @@ public:
   void
   Subscribe(SubscriberIdentity identity, SubscriberAction &&fn) noexcept
   {
-    ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
-           "Expected Identity to be a unique value");
+    MDB_ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
+      "Expected Identity to be a unique value");
     subscribers.emplace_back(identity, std::move(fn));
   }
 
   void
   Unsubscribe(SubscriberIdentity identity) noexcept
   {
-    if (auto it = std::find_if(subscribers.begin(), subscribers.end(),
-                               [&identity](const auto &sub) { return sub.identity == identity; });
-        it != std::end(subscribers)) {
+    if (auto it = std::find_if(subscribers.begin(),
+          subscribers.end(),
+          [&identity](const auto &sub) { return sub.identity == identity; });
+      it != std::end(subscribers)) {
       subscribers.erase(it);
     }
   }
@@ -210,16 +211,16 @@ public:
   void
   Subscribe(SubscriberIdentity identity, Fn &&fn) noexcept
   {
-    ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
-           "Expected Identity to be a unique value");
+    MDB_ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
+      "Expected Identity to be a unique value");
     subscribers.emplace_back(identity, std::move(fn));
   }
 
   void
   Unsubscribe(SubscriberIdentity identity) noexcept
   {
-    auto it = std::find_if(subscribers.begin(), subscribers.end(),
-                           [&identity](auto &sub) { return sub.identity == identity; });
+    auto it = std::find_if(
+      subscribers.begin(), subscribers.end(), [&identity](auto &sub) { return sub.identity == identity; });
     if (it != std::end(subscribers)) {
       subscribers.erase(it);
     }

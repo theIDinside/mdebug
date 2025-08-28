@@ -11,11 +11,16 @@ DetermineArchitectureReturnClass(sym::Type *type) noexcept
   return ReturnValueClass::Unknown;
 }
 
-FunctionSymbol::FunctionSymbol(AddrPtr start, AddrPtr end, std::string_view name, std::string_view member_of,
-                               sym::Type *return_type, std::array<dw::IndexedDieReference, 3> maybe_origin,
-                               CompilationUnit &decl_file, std::span<const u8> fb_expr,
-                               std::optional<SourceCoordinate> &&source) noexcept
-    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock({{start, end}}, {}),
+FunctionSymbol::FunctionSymbol(AddrPtr start,
+  AddrPtr end,
+  std::string_view name,
+  std::string_view member_of,
+  sym::Type *return_type,
+  std::array<dw::IndexedDieReference, 3> maybe_origin,
+  CompilationUnit &decl_file,
+  std::span<const u8> fb_expr,
+  std::optional<SourceCoordinate> &&source) noexcept
+    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock({ { start, end } }, {}),
       mFunctionSymbolBlocks(), mMaybeOriginDies(maybe_origin), mFrameBaseDwarfExpression(fb_expr),
       mFunctionReturnType(return_type), pc_start(start), pc_end_exclusive(end), member_of(member_of), name(name),
       source(std::move(source))
@@ -55,7 +60,7 @@ FunctionSymbol::OriginDebugInfoEntries() const noexcept
   auto &dies = *mMaybeOriginDies;
   for (auto i = 0u; i < dies.size(); ++i) {
     if (!dies[i].IsValid()) {
-      return std::span{dies.begin(), dies.begin() + i};
+      return std::span{ dies.begin(), dies.begin() + i };
     }
   }
   return dies;
@@ -98,14 +103,14 @@ FunctionSymbolSearchResult::FunctionSymbolSearchResult(FunctionSymbol *fn) noexc
 FunctionSymbol &
 FunctionSymbolSearchResult::value() const noexcept
 {
-  ASSERT(has_value(), "Search result had no value");
+  MDB_ASSERT(has_value(), "Search result had no value");
   return *fn;
 }
 
 FunctionSymbol *
 FunctionSymbolSearchResult::operator->() const noexcept
 {
-  ASSERT(has_value(), "Search result had no value");
+  MDB_ASSERT(has_value(), "Search result had no value");
   return fn;
 }
 

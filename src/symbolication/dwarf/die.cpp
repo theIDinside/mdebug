@@ -114,24 +114,24 @@ DieMetaData::SetSiblingId(u32 sib_id) noexcept
 }
 
 /*static*/ DieMetaData
-DieMetaData::CreateDie(u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset,
-                       u64 next_sibling) noexcept
+DieMetaData::CreateDie(
+  u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset, u64 next_sibling) noexcept
 {
-  return DieMetaData{.mSectionOffset = sec_offset,
-                     .mParentId = parent_id,
-                     .mDieDataOffset = die_data_offset,
-                     .mNextSibling = static_cast<u32>(next_sibling),
-                     .mHasChildren = abbr.mHasChildren,
-                     .mAbbreviationCode = static_cast<u16>(abbr.mCode),
-                     .mTag = abbr.mTag};
+  return DieMetaData{ .mSectionOffset = sec_offset,
+    .mParentId = parent_id,
+    .mDieDataOffset = die_data_offset,
+    .mNextSibling = static_cast<u32>(next_sibling),
+    .mHasChildren = abbr.mHasChildren,
+    .mAbbreviationCode = static_cast<u16>(abbr.mCode),
+    .mTag = abbr.mTag };
 }
 
 /* static */
 UnitData *
-UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
-                             AbbreviationInfo::Table &&abbreviations) noexcept
+UnitData::CreateInitUnitData(
+  ObjectFile *owningObject, UnitHeader header, AbbreviationInfo::Table &&abbreviations) noexcept
 {
-  auto dwarfUnit = new UnitData{owningObject, header};
+  auto dwarfUnit = new UnitData{ owningObject, header };
   dwarfUnit->SetAbbreviations(std::move(abbreviations));
 
   // No further init needed. If it's not a compilation unit, we don't need build directory or name
@@ -145,23 +145,27 @@ UnitData::CreateInitUnitData(ObjectFile *owningObject, UnitHeader header,
     return dwarfUnit;
   }
 
-  UnitReader reader{dwarfUnit};
+  UnitReader reader{ dwarfUnit };
 
   const auto die_sec_offset = reader.SectionOffset();
   const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
 
-  ASSERT(abbr_code <= dwarfUnit->mAbbreviation.size() && abbr_code != 0,
-         "[cu={}]: Unit DIE abbreviation code {} is invalid, max={}", dwarfUnit->SectionOffset(), abbr_code,
-         dwarfUnit->mAbbreviation.size());
+  MDB_ASSERT(abbr_code <= dwarfUnit->mAbbreviation.size() && abbr_code != 0,
+    "[cu={}]: Unit DIE abbreviation code {} is invalid, max={}",
+    dwarfUnit->SectionOffset(),
+    abbr_code,
+    dwarfUnit->mAbbreviation.size());
   auto &abbreviation = dwarfUnit->mAbbreviation[abbr_code - 1];
   const auto unitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
   auto [lineNumberProgramOffset, buildDirectory] = PrepareCompileUnitPreDwarf5(dwarfUnit, unitDie);
   dwarfUnit->mBuildDirectory = buildDirectory;
   dwarfUnit->mStatementListOffset = lineNumberProgramOffset;
 
-  DBGLOG(dwarf, "[cu={}] build directory='{}' with stmt_list offset=0x{:x}", dwarfUnit->SectionOffset(),
-         dwarfUnit->mBuildDirectory ? dwarfUnit->mBuildDirectory : "could not find build directory",
-         dwarfUnit->mStatementListOffset);
+  DBGLOG(dwarf,
+    "[cu={}] build directory='{}' with stmt_list offset=0x{:x}",
+    dwarfUnit->SectionOffset(),
+    dwarfUnit->mBuildDirectory ? dwarfUnit->mBuildDirectory : "could not find build directory",
+    dwarfUnit->mStatementListOffset);
   return dwarfUnit;
 }
 
@@ -187,8 +191,10 @@ const AbbreviationInfo &
 UnitData::GetAbbreviation(u32 abbreviation_code) const noexcept
 {
   const auto adjusted = abbreviation_code - 1;
-  ASSERT(adjusted < mAbbreviation.size(), "Abbreviation code was {} but we only have {}", abbreviation_code,
-         mAbbreviation.size());
+  MDB_ASSERT(adjusted < mAbbreviation.size(),
+    "Abbreviation code was {} but we only have {}",
+    abbreviation_code,
+    mAbbreviation.size());
   return mAbbreviation[adjusted];
 }
 
@@ -255,8 +261,8 @@ UnitData::SpansAcrossOffset(u64 offset) const noexcept
 u64
 UnitData::IndexOf(const DieMetaData *die) noexcept
 {
-  ASSERT(die != nullptr && !mDieCollection.empty(),
-         "You passed a nullptr or DIE's for this unit has not been loaded");
+  MDB_ASSERT(
+    die != nullptr && !mDieCollection.empty(), "You passed a nullptr or DIE's for this unit has not been loaded");
   auto begin = mDieCollection.data();
   return die - begin;
 }
@@ -265,7 +271,7 @@ std::span<const DieMetaData>
 UnitData::continue_from(const DieMetaData *die) noexcept
 {
   const auto index = IndexOf(die);
-  return std::span{mDieCollection.begin() + index, mDieCollection.end()};
+  return std::span{ mDieCollection.begin() + index, mDieCollection.end() };
 }
 
 const char *
@@ -279,24 +285,28 @@ UnitData::GetDebugInfoEntry(u64 offset) noexcept
 {
   LoadDieMetadata();
 
-  auto it = std::lower_bound(mDieCollection.begin(), mDieCollection.end(), offset,
-                             [](const dw::DieMetaData &die, u64 offset) { return die.mSectionOffset < offset; });
+  auto it = std::lower_bound(
+    mDieCollection.begin(), mDieCollection.end(), offset, [](const dw::DieMetaData &die, u64 offset) {
+      return die.mSectionOffset < offset;
+    });
 
-  ASSERT(it->mSectionOffset == offset, "failed to find die with offset 0x{:x}, found 0x{:x}", offset,
-         u64{it->mSectionOffset})
+  MDB_ASSERT(it->mSectionOffset == offset,
+    "failed to find die with offset 0x{:x}, found 0x{:x}",
+    offset,
+    u64{ it->mSectionOffset })
   return &(*it);
 }
 
 DieReference
 UnitData::GetDieReferenceByOffset(u64 offset) noexcept
 {
-  return DieReference{this, GetDebugInfoEntry(offset)};
+  return DieReference{ this, GetDebugInfoEntry(offset) };
 }
 
 DieReference
 UnitData::GetDieByCacheIndex(u64 index) noexcept
 {
-  return DieReference{this, &GetDies()[index]};
+  return DieReference{ this, &GetDies()[index] };
 }
 
 u32
@@ -305,9 +315,9 @@ UnitData::AddressBase() noexcept
   if (mAddrOffset) {
     return mAddrOffset.value();
   }
-  DieReference ref{this, &GetDies()[0]};
+  DieReference ref{ this, &GetDies()[0] };
   auto base = ref.ReadAttribute(Attribute::DW_AT_addr_base);
-  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: {}", SectionOffset());
+  MDB_ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: {}", SectionOffset());
   mAddrOffset = base.transform([](auto v) { return v.AsUnsignedValue(); });
   return mAddrOffset.value();
 }
@@ -318,9 +328,9 @@ UnitData::RangeListBase() noexcept
   if (mRngListOffset) {
     return mRngListOffset.value();
   }
-  DieReference ref{this, &GetDies()[0]};
+  DieReference ref{ this, &GetDies()[0] };
   auto base = ref.ReadAttribute(Attribute::DW_AT_rnglists_base);
-  ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: {}", SectionOffset());
+  MDB_ASSERT(base, "Could not find Attribute::DW_AT_rnglists_base for this cu: {}", SectionOffset());
   mRngListOffset = base.transform([](auto v) { return v.AsUnsignedValue(); });
   return mRngListOffset.value();
 }
@@ -331,9 +341,9 @@ UnitData::StrOffsetBase() noexcept
   if (mStringOffset) {
     return mStringOffset;
   }
-  DieReference ref{this, &GetDies()[0]};
+  DieReference ref{ this, &GetDies()[0] };
   auto base = ref.ReadAttribute(Attribute::DW_AT_str_offsets_base);
-  ASSERT(base, "Could not find Attribute::DW_AT_str_offsets_base for this cu: {}", SectionOffset());
+  MDB_ASSERT(base, "Could not find Attribute::DW_AT_str_offsets_base for this cu: {}", SectionOffset());
   mStringOffset = base.transform(AttributeValue::ToUnsignedValue);
   return mStringOffset;
 }
@@ -353,14 +363,16 @@ UnitData::LoadDieMetadata() noexcept
   }
 
   mFullyLoaded = true;
-  UnitReader reader{this};
+  UnitReader reader{ this };
 
   const auto die_sec_offset = reader.SectionOffset();
   const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
 
-  ASSERT(abbr_code <= mAbbreviation.size() && abbr_code != 0,
-         "[cu={}]: Unit DIE abbreviation code {} is invalid, max={}", SectionOffset(), abbr_code,
-         mAbbreviation.size());
+  MDB_ASSERT(abbr_code <= mAbbreviation.size() && abbr_code != 0,
+    "[cu={}]: Unit DIE abbreviation code {} is invalid, max={}",
+    SectionOffset(),
+    abbr_code,
+    mAbbreviation.size());
   auto &abbreviation = mAbbreviation[abbr_code - 1];
   reader.SkipAttributes(abbreviation.mAttributes);
   // Siblings and parent ids stored here
@@ -369,16 +381,18 @@ UnitData::LoadDieMetadata() noexcept
   parent_node.push_back(0);
   sibling_node.push_back(0);
   mUnitDie = DieMetaData::CreateDie(die_sec_offset, abbreviation, NONE_INDEX, uleb_sz, NONE_INDEX);
-  ASSERT(mDieCollection.empty(), "Expected dies to be empty, but wasn't! (cu={})", SectionOffset());
-  mDieCollection.reserve(mLoadedDiesCount != 0 ? mLoadedDiesCount
-                                               : guess_die_count(GetHeader().CompilationUnitSize()));
+  MDB_ASSERT(mDieCollection.empty(), "Expected dies to be empty, but wasn't! (cu={})", SectionOffset());
+  mDieCollection.reserve(
+    mLoadedDiesCount != 0 ? mLoadedDiesCount : guess_die_count(GetHeader().CompilationUnitSize()));
   mDieCollection.push_back(mUnitDie);
   bool new_level = true;
   while (reader.HasMore()) {
     const auto die_sec_offset = reader.SectionOffset();
     const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
-    ASSERT(abbr_code <= mAbbreviation.size(), "Abbreviation code {} is invalid. Dies processed={}", abbr_code,
-           mDieCollection.size());
+    MDB_ASSERT(abbr_code <= mAbbreviation.size(),
+      "Abbreviation code {} is invalid. Dies processed={}",
+      abbr_code,
+      mDieCollection.size());
     if (abbr_code == 0) {
       if (parent_node.empty()) {
         break;
@@ -397,8 +411,8 @@ UnitData::LoadDieMetadata() noexcept
     }
 
     auto &abbreviation = mAbbreviation[abbr_code - 1];
-    auto new_entry = DieMetaData::CreateDie(die_sec_offset, abbreviation,
-                                            mDieCollection.size() - parent_node.back(), uleb_sz, NONE_INDEX);
+    auto new_entry = DieMetaData::CreateDie(
+      die_sec_offset, abbreviation, mDieCollection.size() - parent_node.back(), uleb_sz, NONE_INDEX);
 
     reader.SkipAttributes(abbreviation.mAttributes);
     new_level = abbreviation.mHasChildren;
@@ -417,11 +431,14 @@ static inline bool
 HasAddressAttribute(uint16_t value1, uint16_t value2)
 {
   // Load the constants into a SIMD register (pad to 8 elements)
-  alignas(16) constexpr uint16_t padded_constants[8] = {
-    std::to_underlying(Attribute::DW_AT_low_pc),   std::to_underlying(Attribute::DW_AT_high_pc),
-    std::to_underlying(Attribute::DW_AT_entry_pc), std::to_underlying(Attribute::DW_AT_ranges),
-    std::to_underlying(Attribute::DW_AT_low_pc),   std::to_underlying(Attribute::DW_AT_high_pc),
-    std::to_underlying(Attribute::DW_AT_entry_pc), std::to_underlying(Attribute::DW_AT_ranges)};
+  alignas(16) constexpr uint16_t padded_constants[8] = { std::to_underlying(Attribute::DW_AT_low_pc),
+    std::to_underlying(Attribute::DW_AT_high_pc),
+    std::to_underlying(Attribute::DW_AT_entry_pc),
+    std::to_underlying(Attribute::DW_AT_ranges),
+    std::to_underlying(Attribute::DW_AT_low_pc),
+    std::to_underlying(Attribute::DW_AT_high_pc),
+    std::to_underlying(Attribute::DW_AT_entry_pc),
+    std::to_underlying(Attribute::DW_AT_ranges) };
   __m128i simd_constants = _mm_load_si128(reinterpret_cast<const __m128i *>(padded_constants));
 
   // Broadcast the input value to all elements of a SIMD register
@@ -469,7 +486,7 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
       abbr_ptr = DecodeUleb128(abbr_ptr, attributes[count]);
       abbr_ptr = DecodeUleb128(abbr_ptr, abbr.mForm);
       if (abbr.mForm == AttributeForm::DW_FORM_implicit_const) {
-        ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
+        MDB_ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
         abbr.IMPLICIT_CONST_INDEX = info.mImplicitConsts.size();
         i64 value = 0;
         abbr_ptr = DecodeLeb128(abbr_ptr, value);
@@ -522,7 +539,7 @@ PrepareUnitData(ObjectFile *obj, const UnitHeader &header) noexcept
       }
 
       if (abbr.mForm == AttributeForm::DW_FORM_implicit_const) {
-        ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
+        MDB_ASSERT((u8)info.mImplicitConsts.size() != UINT8_MAX, "Maxed out IMPLICIT const entries!");
         abbr.IMPLICIT_CONST_INDEX = info.mImplicitConsts.size();
         info.mImplicitConsts.push_back(0);
         abbr_ptr = DecodeLeb128(abbr_ptr, info.mImplicitConsts.back());
@@ -554,21 +571,33 @@ UnitHeadersRead::AverageUnitSize() noexcept
 }
 
 void
-UnitHeadersRead::AddUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
-                               u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
-                               DwarfUnitType unit_type) noexcept
+UnitHeadersRead::AddUnitHeader(SymbolInfoId id,
+  u64 sec_offset,
+  u64 unit_size,
+  std::span<const u8> die_data,
+  u64 abbrev_offset,
+  u8 addr_size,
+  u8 format,
+  DwarfVersion version,
+  DwarfUnitType unit_type) noexcept
 {
-  mUnitHeaders.emplace_back(id, sec_offset, unit_size, die_data, abbrev_offset, addr_size, format,
-                            (DwarfVersion)version, unit_type);
+  mUnitHeaders.emplace_back(
+    id, sec_offset, unit_size, die_data, abbrev_offset, addr_size, format, (DwarfVersion)version, unit_type);
   Accumulate(unit_size);
 }
 void
-UnitHeadersRead::AddTypeUnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
-                                   u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature,
-                                   u64 type_offset) noexcept
+UnitHeadersRead::AddTypeUnitHeader(SymbolInfoId id,
+  u64 sec_offset,
+  u64 unit_size,
+  std::span<const u8> die_data,
+  u64 abbrev_offset,
+  u8 addr_size,
+  u8 format,
+  u64 type_signature,
+  u64 type_offset) noexcept
 {
-  mUnitHeaders.emplace_back(id, sec_offset, unit_size, die_data, abbrev_offset, addr_size, format, type_signature,
-                            type_offset);
+  mUnitHeaders.emplace_back(
+    id, sec_offset, unit_size, die_data, abbrev_offset, addr_size, format, type_signature, type_offset);
   Accumulate(unit_size);
 }
 
@@ -577,7 +606,7 @@ UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
 {
   CDLOG(DwarfLog, dwarf, "Reading {} obfile compilation unit headers", obj->GetPathString());
   const auto dbg_info = obj->GetElf()->mDebugInfo;
-  DwarfBinaryReader reader{obj->GetElf(), dbg_info->mSectionData};
+  DwarfBinaryReader reader{ obj->GetElf(), dbg_info->mSectionData };
   auto unit_index = 0u;
   while (reader.HasMore()) {
     const auto sec_offset = reader.BytesRead();
@@ -622,32 +651,49 @@ UnitHeadersRead::ReadUnitHeaders(ObjectFile *obj) noexcept
       const u64 type_offset = format == 4 ? reader.ReadValue<u32>() : reader.ReadValue<u64>();
       const auto header_len = reader.PopBookmark();
       const auto die_data_len = unit_len - header_len;
-      ASSERT(header_len == 20 || header_len == 28, "Unexpected header length: {}", header_len);
-      AddTypeUnitHeader({unit_index}, sec_offset, total_unit_size, reader.GetSpan(die_data_len), abb_offs,
-                        addr_size, format, type_sig, type_offset);
+      MDB_ASSERT(header_len == 20 || header_len == 28, "Unexpected header length: {}", header_len);
+      AddTypeUnitHeader({ unit_index },
+        sec_offset,
+        total_unit_size,
+        reader.GetSpan(die_data_len),
+        abb_offs,
+        addr_size,
+        format,
+        type_sig,
+        type_offset);
     } break;
     case DwarfUnitType::DW_UT_compile:
       [[fallthrough]];
     case DwarfUnitType::DW_UT_partial: {
       const auto header_len = reader.PopBookmark();
       if (version == 4 || version == 3) {
-        ASSERT((header_len == 7 || header_len == 11), "Unexpected compilation unit header size: {}", header_len);
+        MDB_ASSERT(
+          (header_len == 7 || header_len == 11), "Unexpected compilation unit header size: {}", header_len);
       } else {
-        ASSERT(version == 5 && (header_len == 8 || header_len == 12),
-               "Unexpected compilation unit header size: {}", header_len);
+        MDB_ASSERT(version == 5 && (header_len == 8 || header_len == 12),
+          "Unexpected compilation unit header size: {}",
+          header_len);
       }
       const auto die_data_len = unit_len - header_len;
-      AddUnitHeader(SymbolInfoId{unit_index}, sec_offset, total_unit_size, reader.GetSpan(die_data_len), abb_offs,
-                    addr_size, format, (DwarfVersion)version, unit_type);
+      AddUnitHeader(SymbolInfoId{ unit_index },
+        sec_offset,
+        total_unit_size,
+        reader.GetSpan(die_data_len),
+        abb_offs,
+        addr_size,
+        format,
+        (DwarfVersion)version,
+        unit_type);
     } break;
     default:
-      ASSERT(false, "Unit type {} not supported yet", to_str(unit_type));
+      MDB_ASSERT(false, "Unit type {} not supported yet", to_str(unit_type));
       break;
     }
     ++unit_index;
-    ASSERT(reader.BytesRead() == sec_offset + unit_len + init_len,
-           "Well, this is wrong. Expected to have read {} bytes, but was at {}", sec_offset + unit_len + init_len,
-           reader.BytesRead());
+    MDB_ASSERT(reader.BytesRead() == sec_offset + unit_len + init_len,
+      "Well, this is wrong. Expected to have read {} bytes, but was at {}",
+      sec_offset + unit_len + init_len,
+      reader.BytesRead());
   }
   CDLOG(DwarfLog, dwarf, "Read {} compilation unit headers", mUnitHeaders.size());
 }

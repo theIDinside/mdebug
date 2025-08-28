@@ -4,17 +4,30 @@
 #include <utils/logger.h>
 namespace mdb::sym::dw {
 // Partial/Compile Unit-header constructor
-UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
-                       u64 abbrev_offset, u8 addr_size, u8 format, DwarfVersion version,
-                       DwarfUnitType unit_type) noexcept
+UnitHeader::UnitHeader(SymbolInfoId id,
+  u64 sec_offset,
+  u64 unit_size,
+  std::span<const u8> die_data,
+  u64 abbrev_offset,
+  u8 addr_size,
+  u8 format,
+  DwarfVersion version,
+  DwarfUnitType unit_type) noexcept
     : mSecOffset(sec_offset), mUnitSize(unit_size), mDieData(die_data), mAbbreviationSectionOffset(abbrev_offset),
       mAddrSize(addr_size), mDwarfFormat(format), mDwarfVersion(version), mUnitType(unit_type), mId(id)
 {
 }
 
 // Type Unit-Header constructor
-UnitHeader::UnitHeader(SymbolInfoId id, u64 sec_offset, u64 unit_size, std::span<const u8> die_data,
-                       u64 abbrev_offset, u8 addr_size, u8 format, u64 type_signature, u64 type_offset) noexcept
+UnitHeader::UnitHeader(SymbolInfoId id,
+  u64 sec_offset,
+  u64 unit_size,
+  std::span<const u8> die_data,
+  u64 abbrev_offset,
+  u8 addr_size,
+  u8 format,
+  u64 type_signature,
+  u64 type_offset) noexcept
     : mSecOffset(sec_offset), mUnitSize(unit_size), mDieData(die_data), mAbbreviationSectionOffset(abbrev_offset),
       mAddrSize(addr_size), mDwarfFormat(format), mDwarfVersion(DwarfVersion::D5),
       mUnitType(DwarfUnitType::DW_UT_type), mId(id), mTypeSignature(type_signature), mTypeOffset(type_offset)
@@ -36,8 +49,9 @@ UnitHeader::AddrSize() const noexcept
 const u8 *
 UnitHeader::AbbreviationData(const ElfSection *abbrev_sec) const noexcept
 {
-  ASSERT(abbrev_sec->GetName() == ".debug_abbrev",
-         "Wrong ELF section was used, expected .debug_abbrev but received {}", abbrev_sec->GetName());
+  MDB_ASSERT(abbrev_sec->GetName() == ".debug_abbrev",
+    "Wrong ELF section was used, expected .debug_abbrev but received {}",
+    abbrev_sec->GetName());
   return abbrev_sec->GetPointer(mAbbreviationSectionOffset);
 }
 
@@ -69,7 +83,7 @@ u8
 UnitHeader::HeaderLen() const noexcept
 {
   const auto fmt = Format();
-  ASSERT(fmt == 4 || fmt == 8, "Unknown format");
+  MDB_ASSERT(fmt == 4 || fmt == 8, "Unknown format");
   switch (mUnitType) {
   case DwarfUnitType::DW_UT_type:
     return fmt == 4 ? (4 * 6) : (4 * 10);
@@ -79,7 +93,7 @@ UnitHeader::HeaderLen() const noexcept
     return 4 * (3 * (fmt / 4)) - ((std::to_underlying(mDwarfVersion) < 5) ? 1 : 0);
   }
   default:
-    ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at {}", to_str(mUnitType), mSecOffset);
+    MDB_ASSERT(false, "UNIT TYPE {} not yet implemented support for unit at {}", to_str(mUnitType), mSecOffset);
     break;
   }
 }

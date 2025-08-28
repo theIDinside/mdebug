@@ -18,7 +18,7 @@ namespace mdb::sym::dw {
 using FileIndex = u32;
 
 #define LNP_ASSERT(cond, formatString, ...)                                                                       \
-  ASSERT((cond),                                                                                                  \
+  MDB_ASSERT((cond),                                                                                              \
     "[object={}, lnp={}]: " formatString,                                                                         \
     mObjectFile->GetFilePath().filename().c_str(),                                                                \
     mSectionOffset __VA_OPT__(, ) __VA_ARGS__)
@@ -297,7 +297,7 @@ ReadLineNumberProgramHeaderPreVersion4(DwarfBinaryReader &reader,
   reader.ReadIntoArray(opCodeLengths);
 
   const u8 addr_size = 8u;
-  ASSERT(version == 2 || version == 3, "Incompatible version with reader: {}", version);
+  MDB_ASSERT(version == 2 || version == 3, "Incompatible version with reader: {}", version);
   // read include directories
   std::vector<DirEntry> dirs;
   auto dir = reader.ReadString();
@@ -353,9 +353,9 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
   if (objectFile->HasReadLnpHeader(debugLineOffset)) {
     return objectFile->GetLnpHeader(debugLineOffset);
   }
-  ASSERT(elf != nullptr, "ELF must be parsed first");
+  MDB_ASSERT(elf != nullptr, "ELF must be parsed first");
   auto debug_line = elf->mDebugLine;
-  ASSERT(debug_line != nullptr && debug_line->GetName() == ".debug_line", "Must pass .debug_line ELF section");
+  MDB_ASSERT(debug_line != nullptr && debug_line->GetName() == ".debug_line", "Must pass .debug_line ELF section");
   // determine header count
 
   DwarfBinaryReader reader{ elf, debug_line->mSectionData };
@@ -368,7 +368,7 @@ LNPHeader::ReadLineNumberProgramHeader(ObjectFile *objectFile, u64 debugLineOffs
   reader.Bookmark();
   const auto version = reader.PeekValue<u16>();
 
-  ASSERT(version < 6 && version >= 2,
+  MDB_ASSERT(version < 6 && version >= 2,
     "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}",
     version,
     reader.BytesRead());
@@ -523,9 +523,9 @@ std::vector<LNPHeader>
 read_lnp_headers(ObjectFile *objectFile) noexcept
 {
   auto elf = objectFile->GetElf();
-  ASSERT(elf != nullptr, "ELF must be parsed first");
+  MDB_ASSERT(elf != nullptr, "ELF must be parsed first");
   auto debugLine = elf->mDebugLine;
-  ASSERT(debugLine != nullptr && debugLine->GetName() == ".debug_line", "Must pass .debug_line ELF section");
+  MDB_ASSERT(debugLine != nullptr && debugLine->GetName() == ".debug_line", "Must pass .debug_line ELF section");
   auto headerCount = 0u;
   // determine header count
   {
@@ -568,7 +568,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
       reader.SkipValue<u16>();
       break;
     default:
-      ASSERT(version >= 1 && version <= 6,
+      MDB_ASSERT(version >= 1 && version <= 6,
         "Invalid DWARF version value encountered: {} at offset 0x{:x}",
         version,
         reader.BytesRead());
@@ -576,7 +576,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
 
     // TODO(simon): introduce release-build logging & warnings; this should not fail, but should log a
     // warning/error message on all builds
-    ASSERT(version == 4 || version == 5, "Unsupported line number program version: {}", version);
+    MDB_ASSERT(version == 4 || version == 5, "Unsupported line number program version: {}", version);
     if (version == 5) {
       addr_size = reader.ReadValue<u8>();
       // don't care for segment selector size
@@ -706,7 +706,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
     }
   }
 
-  ASSERT(!reader.HasMore(),
+  MDB_ASSERT(!reader.HasMore(),
     ".debug_line section is expected to have been consumed here, but {} bytes were remaining",
     reader.RemainingSize());
   return headers;

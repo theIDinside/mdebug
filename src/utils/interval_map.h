@@ -121,7 +121,7 @@ private:
     // likely) points to .size() (i.e. one beyond last). Therefore, also ASSERT on that, lest it be misused (we
     // will then find out if the index value is getting produced in odd ways.)
     if (!(index < interval.size())) {
-      ASSERT(index == interval.size(),
+      MDB_ASSERT(index == interval.size(),
         "unexpected index value has been prodcued: {}, size of interval container: {}",
         index,
         interval.size());

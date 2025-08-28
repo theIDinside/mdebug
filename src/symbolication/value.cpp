@@ -169,7 +169,7 @@ Value::GetMember(std::string_view memberName) noexcept
 
   for (auto &mem : type->MemberFields()) {
     if (mem.mName == memberName) {
-      ASSERT(mContext, "Creating member from value that has no context");
+      MDB_ASSERT(mContext, "Creating member from value that has no context");
       auto variableContext = mem.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
                                                       : Tracer::Get().CloneFromVariableContext(*mContext);
       const auto vId = variableContext->mId;
@@ -389,7 +389,7 @@ bool
 EagerMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
 {
   auto mem = ReadMemory(supervisor, start, RawView().size_bytes());
-  ASSERT(mem.is_ok(), "failed to refresh {} .. {}", start, end);
+  MDB_ASSERT(mem.is_ok(), "failed to refresh {} .. {}", start, end);
   mContents = std::move(mem.value);
   return mem.is_ok();
 }

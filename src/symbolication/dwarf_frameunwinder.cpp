@@ -517,8 +517,8 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
     DBGLOG(core, "object {} does not have .eh_frame, using null unwinder", objfile->GetPathString());
     return nullptr;
   }
-  ASSERT(ehFrameSection != nullptr, "Expected a .eh_frame section!");
-  ASSERT(ehFrameSection->mName == ".eh_frame", "expected only .eh_frame section");
+  MDB_ASSERT(ehFrameSection != nullptr, "Expected a .eh_frame section!");
+  MDB_ASSERT(ehFrameSection->mName == ".eh_frame", "expected only .eh_frame section");
   DwarfBinaryReader reader{ objfile->GetElf(), ehFrameSection->mSectionData };
   DBGLOG(eh,
     "reading .eh_frame section [{}] of {} bytes. Offset {:x}",
@@ -541,10 +541,10 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
     constexpr auto len_field_len = 4;
     const auto eh_offset = reader.BytesRead();
     const auto entry_length = reader.ReadValue<u32>();
-    ASSERT(entry_length != 0xff'ff'ff'ff, "GCC and clang do not support 64-bit .eh_frame; so why should we?");
+    MDB_ASSERT(entry_length != 0xff'ff'ff'ff, "GCC and clang do not support 64-bit .eh_frame; so why should we?");
     const auto current_offset = reader.BytesRead();
     if (entry_length == 0) {
-      ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
+      MDB_ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
         "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet",
         cieCount);
       unwinderHandle->SetHighAddress(high);
@@ -575,7 +575,7 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
       }
       const auto bytes_remaining = entry_length - reader.PopBookmark();
       const auto ins = reader.GetSpan(bytes_remaining);
-      ASSERT(reader.BytesRead() - current_offset == entry_length,
+      MDB_ASSERT(reader.BytesRead() - current_offset == entry_length,
         "Unexpected difference in length: {} != {}",
         reader.BytesRead() - current_offset,
         entry_length);
@@ -593,7 +593,7 @@ ParseExceptionHeaderSection(ObjectFile *objfile, const ElfSection *ehFrameSectio
       });
     }
   }
-  ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
+  MDB_ASSERT(unwinderHandle->mElfEhCies.capacity() == cieCount,
     "We reserved memory to *exactly* hold {} count. std::vector re allocated under our feet",
     cieCount);
   unwinderHandle->SetHighAddress(high);
@@ -619,7 +619,7 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
     constexpr auto len_field_len = 4;
     const auto eh_offset = reader.BytesRead();
     const auto entry_length = reader.ReadValue<u32>();
-    ASSERT(entry_length != 0xff'ff'ff'ff, "GCC and clang do not support 64-bit .eh_frame; so why should we?");
+    MDB_ASSERT(entry_length != 0xff'ff'ff'ff, "GCC and clang do not support 64-bit .eh_frame; so why should we?");
     const auto current_offset = reader.BytesRead();
     if (entry_length == 0) {
       unwinderDb->SetHighAddress(high);
@@ -650,7 +650,7 @@ ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *deb
       }
       const auto bytes_remaining = entry_length - reader.PopBookmark();
       auto ins = reader.GetSpan(bytes_remaining);
-      ASSERT(reader.BytesRead() - current_offset == entry_length,
+      MDB_ASSERT(reader.BytesRead() - current_offset == entry_length,
         "Unexpected difference in length: {} != {}",
         reader.BytesRead() - current_offset,
         entry_length);

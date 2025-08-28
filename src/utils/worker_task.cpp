@@ -10,7 +10,7 @@ namespace mdb {
 void
 Task::SetOwner(TaskGroup *group) noexcept
 {
-  ASSERT(mOwningGroup == nullptr, "Moving owning task group for task is not allowed");
+  MDB_ASSERT(mOwningGroup == nullptr, "Moving owning task group for task is not allowed");
   mOwningGroup = group;
 }
 
@@ -67,7 +67,7 @@ TaskGroup::TaskDone(Task *task) noexcept
     std::vector<std::uintptr_t> tasks_{};
     std::transform(
       mDoneTasks.begin(), mDoneTasks.end(), std::back_inserter(tasks_), [](auto t) { return std::uintptr_t(t); });
-    ASSERT(false,
+    MDB_ASSERT(false,
       "Task 0x{:x} has already been added to done list: [{}]",
       std::uintptr_t(task),
       HexJoinFormatIterator{ tasks_, ", " });

@@ -126,7 +126,7 @@ TypeStorage::GetUnitType() noexcept
 static u32
 ResolveArrayBounds(sym::dw::DieReference array_die) noexcept
 {
-  ASSERT(array_die.GetDie()->mHasChildren, "expected die {} to have children", array_die);
+  MDB_ASSERT(array_die.GetDie()->mHasChildren, "expected die {} to have children", array_die);
 
   for (const auto child : sym::dw::IterateSiblings{ array_die.GetUnitData(), array_die.GetDie()->GetChildren() }) {
     if (child.mTag == DwarfTag::DW_TAG_subrange_type) {
@@ -197,7 +197,7 @@ TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
       // just means mulitple keys can reach the value, which is a pointer to the actual type.
       auto tu_die_ref =
         this_ref.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(attr_val->AsUnsignedValue());
-      ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
+      MDB_ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
       const u32 sz = tu_die_ref.ReadAttribute(Attribute::DW_AT_byte_size)->AsUnsignedValue();
       const auto name = tu_die_ref.ReadAttribute(Attribute::DW_AT_name)
                           .transform(AttributeValue::ToStringView)
@@ -252,7 +252,7 @@ Symbol::Computed() noexcept
 std::span<const u8>
 Symbol::GetDwarfExpression(AddrPtr programCounter) noexcept
 {
-  ASSERT(Computed(), "Symbol information not read in yet");
+  MDB_ASSERT(Computed(), "Symbol information not read in yet");
   switch (mLocation->mKind) {
   case LocKind::UnreadLocationList:
     break;
@@ -314,7 +314,7 @@ Type::Type(Type &&o) noexcept
       mIsResolved(o.mIsResolved), mIsProcessing(o.mIsProcessing), mTypeChain(o.mTypeChain),
       mFields(std::move(o.mFields)), mBaseType(o.mBaseType)
 {
-  ASSERT(!mIsProcessing, "Moving a type that's being processed is guaranteed to have undefined behavior");
+  MDB_ASSERT(!mIsProcessing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }
 
 Type *
@@ -473,14 +473,14 @@ Type::IsArrayType() const noexcept
 u32
 Type::MembersCount() noexcept
 {
-  ASSERT(mIsResolved, "Type is not fully resolved!");
+  MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
   return GetTargetType()->mFields.size();
 }
 
 const std::vector<Field> &
 Type::MemberFields() noexcept
 {
-  ASSERT(mIsResolved, "Type is not fully resolved!");
+  MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
   auto t = GetTargetType();
   return t->mFields;
 }

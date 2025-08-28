@@ -214,7 +214,7 @@ struct Pause final : public ui::UICommand
   {
     GetOrSendError(target);
 
-    ASSERT(target, "No target {}", mSessionId);
+    MDB_ASSERT(target, "No target {}", mSessionId);
     auto task = target->GetTaskByTid(mPauseArgs.mThreadId);
     if (task->IsStopped()) {
       return new PauseResponse{ false, this };
@@ -272,7 +272,7 @@ struct ReverseContinue final : ui::UICommand
     auto target = GetSupervisor();
     // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
     // _any_ target, and use that to resume backwards (since RR is the controller.).
-    ASSERT(target, "must have target.");
+    MDB_ASSERT(target, "must have target.");
     auto ok = target->ReverseResumeTarget(tc::ResumeAction{ .mResumeType = tc::RunType::Continue,
       .mResumeTarget = tc::ResumeTarget::AllNonRunningInProcess,
       .mDeliverSignal = 0 });
@@ -491,7 +491,7 @@ struct StepBack final : public ui::UICommand
   Execute() noexcept final
   {
     auto target = GetSupervisor();
-    ASSERT(target, "must have target");
+    MDB_ASSERT(target, "must have target");
 
     if (!target->IsReplaySession()) {
       return new StepBackResponse{ StepBackResponse::Result::NotReplaySession, this };
@@ -630,7 +630,7 @@ struct StepOut final : public ui::UICommand
     }
     const auto req = CallStackRequest::partial(2);
     auto resume_addrs = task->UnwindReturnAddresses(target, req);
-    ASSERT(resume_addrs.size() >= static_cast<std::size_t>(req.count), "Could not find frame info");
+    MDB_ASSERT(resume_addrs.size() >= static_cast<std::size_t>(req.count), "Could not find frame info");
     const auto rip = resume_addrs[1];
     auto loc = target->GetOrCreateBreakpointLocation(rip);
     if (!loc.is_expected()) {
@@ -723,7 +723,7 @@ struct SetBreakpoints final : public ui::UICommand
   SetBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
       : ui::UICommand(std::move(arg)), args(arguments)
   {
-    ASSERT(args.Contains("breakpoints") && args.UncheckedGetProperty("breakpoints")->IsArray(),
+    MDB_ASSERT(args.Contains("breakpoints") && args.UncheckedGetProperty("breakpoints")->IsArray(),
       "Arguments did not contain 'breakpoints' field or wasn't an array");
   }
 
@@ -737,8 +737,8 @@ struct SetBreakpoints final : public ui::UICommand
     GetOrSendError(target);
     auto res = new SetBreakpointsResponse{ true, this, BreakpointRequestKind::source };
 
-    ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
-    ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
+    MDB_ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
+    MDB_ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
     std::string_view file =
       args.UncheckedGetProperty("source")->UncheckedGetProperty("path")->UncheckedGetStringView();
 
@@ -807,7 +807,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   SetInstructionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
       : UICommand{ std::move(arg) }, mArgs(arguments)
   {
-    ASSERT(mArgs.Contains("breakpoints") && mArgs.At("breakpoints")->IsArray(),
+    MDB_ASSERT(mArgs.Contains("breakpoints") && mArgs.At("breakpoints")->IsArray(),
       "Arguments did not contain 'breakpoints' field or wasn't an array");
   }
 
@@ -823,7 +823,7 @@ struct SetInstructionBreakpoints final : public ui::UICommand
     Set<BreakpointSpecification> bps{};
     const auto ibps = mArgs.AsSpan("breakpoints");
     for (const auto &insBreakpoint : ibps) {
-      ASSERT(
+      MDB_ASSERT(
         insBreakpoint.Contains("instructionReference") && insBreakpoint.At("instructionReference")->IsString(),
         "instructionReference field not in args or wasn't of type string");
       std::string_view addrString = insBreakpoint["instructionReference"];
@@ -853,7 +853,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   SetFunctionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
       : UICommand{ std::move(arg) }, mArgs(arguments)
   {
-    ASSERT(mArgs.Contains("breakpoints") && mArgs.At("breakpoints")->IsArray(),
+    MDB_ASSERT(mArgs.Contains("breakpoints") && mArgs.At("breakpoints")->IsArray(),
       "Arguments did not contain 'breakpoints' field or wasn't an array");
   }
 
@@ -870,7 +870,7 @@ struct SetFunctionBreakpoints final : public ui::UICommand
     Set<BreakpointSpecification> bkpts{};
     auto res = new SetBreakpointsResponse{ true, this, BreakpointRequestKind::function };
     for (const auto &fnbkpt : mArgs.AsSpan("breakpoints")) {
-      ASSERT(fnbkpt.Contains("name") && fnbkpt["name"]->IsString(),
+      MDB_ASSERT(fnbkpt.Contains("name") && fnbkpt["name"]->IsString(),
         "instructionReference field not in args or wasn't of type string");
       std::string functionName = fnbkpt["name"];
       bool isRegex = false;
@@ -1340,7 +1340,7 @@ struct Attach final : public UICommand
   create(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   {
     auto type = args.At("type")->UncheckedGetStringView();
-    ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
+    MDB_ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
     if (type == "ptrace") {
       SessionId pid = args["pid"];
       return new Attach{ std::move(arg), args["sessionId"], PtraceAttachArgs{ .pid = pid } };
@@ -1445,7 +1445,7 @@ struct Threads final : public UICommand
     if (it.mFormat == TargetFormat::Remote) {
       auto res =
         it.RemoteConnection()->QueryTargetThreads({ target->TaskLeaderTid(), target->TaskLeaderTid() }, false);
-      ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
+      MDB_ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
       for (const auto thr : res) {
         if (std::ranges::none_of(
               target->GetThreads(), [t = thr.tid](const auto &entry) { return entry.mTid == t; })) {
@@ -2012,7 +2012,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
         return result;
       }
     } else {
-      ASSERT(v->GetType()->IsReference(),
+      MDB_ASSERT(v->GetType()->IsReference(),
         "Add visualizer & resolver for T* types. It will look more "
         "or less identical to CStringResolver & ArrayResolver");
       // Todo: this seem particularly shitty. For many reasons. First we check if there's a visualizer, then we

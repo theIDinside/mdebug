@@ -196,7 +196,7 @@ DapEventSystem::Poll(PollState &state) noexcept
         break;
       case InterfaceNotificationSource::ClientStdout: {
         auto tty = mClient->GetTtyFileDescriptor();
-        ASSERT(tty.has_value(), "DAP Client has invalid configuration");
+        MDB_ASSERT(tty.has_value(), "DAP Client has invalid configuration");
         const auto bytes_read = read(*tty, mTraceeStandardOutBuffer, 4096 * 3);
         if (bytes_read == -1) {
           continue;
@@ -216,7 +216,7 @@ DapEventSystem::Poll(PollState &state) noexcept
 void
 DebugAdapterClient::ReadPendingCommands() noexcept
 {
-  ASSERT(mReadFd != -1, "file descriptor for reading commands invalid: {}", mReadFd);
+  MDB_ASSERT(mReadFd != -1, "file descriptor for reading commands invalid: {}", mReadFd);
   if (!mParseSwapBuffer.expect_read_from_fd(mReadFd)) {
     return;
   }
@@ -239,9 +239,9 @@ DebugAdapterClient::ReadPendingCommands() noexcept
       }
 
       auto rd = std::get_if<RemainderData>(&request_headers.back());
-      ASSERT(rd, "Parsed communication was not of type RemainderData");
+      MDB_ASSERT(rd, "Parsed communication was not of type RemainderData");
       mParseSwapBuffer.swap(rd->offset);
-      ASSERT(mParseSwapBuffer.current_size() == rd->length,
+      MDB_ASSERT(mParseSwapBuffer.current_size() == rd->length,
         "Parse Swap Buffer operation failed; expected length {} but got {}",
         rd->length,
         mParseSwapBuffer.current_size());
@@ -266,7 +266,7 @@ SetNonBlocking(int fd)
 void
 DebugAdapterClient::SetTtyOut(int fd, SessionId pid) noexcept
 {
-  ASSERT(mTtyFileDescriptor == -1, "TTY fd was already set!");
+  MDB_ASSERT(mTtyFileDescriptor == -1, "TTY fd was already set!");
   mTtyFileDescriptor = fd;
   auto dap = Tracer::Get().GetDap();
   dap->ConfigureTty(fd);
@@ -506,7 +506,7 @@ DebugAdapterClient::CreateSocketConnection(const char *socketPath, int acceptTim
 std::unique_ptr<alloc::ScopedArenaAllocator>
 DebugAdapterClient::AcquireArena() noexcept
 {
-  ASSERT(!mCommandAllocatorPool.empty(), "No more allocators to take from the pool");
+  MDB_ASSERT(!mCommandAllocatorPool.empty(), "No more allocators to take from the pool");
   auto alloc = mCommandAllocatorPool.back();
   mCommandAllocatorPool.pop_back();
   return std::make_unique<alloc::ScopedArenaAllocator>(alloc, &mCommandAllocatorPool);
@@ -515,8 +515,9 @@ DebugAdapterClient::AcquireArena() noexcept
 void
 DebugAdapterClient::AddSupervisor(TraceeController *newSupervisor) noexcept
 {
-  ASSERT(none_of(mSupervisors,
-           [newSupervisor](const auto &supervisorEntry) { return supervisorEntry.mSupervisor == newSupervisor; }),
+  MDB_ASSERT(
+    none_of(mSupervisors,
+      [newSupervisor](const auto &supervisorEntry) { return supervisorEntry.mSupervisor == newSupervisor; }),
     "Already added suprervisor.");
   mSupervisors.push_back({ newSupervisor->GetSessionId(), newSupervisor });
   newSupervisor->ConfigureDapClient(this);
@@ -561,7 +562,7 @@ DebugAdapterClient::ConfigDone(SessionId processId) noexcept
   auto it = std::find_if(
     mSessionInit.begin(), mSessionInit.end(), [processId](const auto &e) { return e.mPid == processId; });
 
-  ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared for {}?", processId);
+  MDB_ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared for {}?", processId);
   if (it != std::end(mSessionInit)) {
     PushDelayedEvent(it->mLaunchOrAttachResponse);
   }
@@ -581,7 +582,7 @@ DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) cons
 
   auto begin = header_buffer + ContentLengthHeaderLength;
   auto res = std::to_chars(begin, header_buffer + 128, output.size(), 10);
-  ASSERT(res.ec == std::errc(), "Failed to append message size to content header");
+  MDB_ASSERT(res.ec == std::errc(), "Failed to append message size to content header");
   std::memcpy(res.ptr, header_end.data(), header_end.size());
   const auto header_length = static_cast<int>(res.ptr + header_end.size() - header_buffer);
 

@@ -23,7 +23,7 @@ TaskRegisters::TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archIn
     registers = new user_regs_struct{};
     break;
   case TargetFormat::Remote:
-    ASSERT(archInfo, "Architecture info must be present for remote targets!");
+    MDB_ASSERT(archInfo, "Architecture info must be present for remote targets!");
     registerFile = new RegisterDescription{ archInfo };
     break;
   }
@@ -74,7 +74,7 @@ TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, boo
 void
 TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcept
 {
-  ASSERT(mTaskCallstack == nullptr && initialized == false, "Thread has already been initialized.");
+  MDB_ASSERT(mTaskCallstack == nullptr && initialized == false, "Thread has already been initialized.");
   mUserVisibleStop = true;
   mTracerVisibleStop = true;
   initialized = true;
@@ -86,7 +86,7 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
   mBreakpointLocationStatus = {};
   mTaskCallstack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
   mSupervisor = tc.GetSupervisor();
-  ASSERT(mSupervisor != nullptr, "must have supervisor");
+  MDB_ASSERT(mSupervisor != nullptr, "must have supervisor");
   DBGLOG(core, "Deferred initializing of thread {} completed", mTid);
   if (restart) {
     auto *traceEvent = new TraceEvent{ *this };
@@ -117,21 +117,21 @@ TaskInfo::CreateUnInitializedTask(WaitPidResult wait) noexcept
 user_regs_struct *
 TaskInfo::NativeRegisters() const noexcept
 {
-  ASSERT(regs.mRegisterFormat == TargetFormat::Native, "Used in the wrong context");
+  MDB_ASSERT(regs.mRegisterFormat == TargetFormat::Native, "Used in the wrong context");
   return regs.registers;
 }
 
 RegisterDescription *
 TaskInfo::RemoteX86Registers() const noexcept
 {
-  ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Used in the wrong context");
+  MDB_ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Used in the wrong context");
   return regs.registerFile;
 }
 
 void
 TaskInfo::RemoteFromHexdigitEncoding(std::string_view hex_encoded) noexcept
 {
-  ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Expected remote format");
+  MDB_ASSERT(regs.mRegisterFormat == TargetFormat::Remote, "Expected remote format");
 
   regs.registerFile->FillFromHexEncodedString(hex_encoded);
   SetUpdated();
@@ -210,7 +210,7 @@ TaskInfo::SetTaskWait(WaitPidResult wait) noexcept
 WaitStatus
 TaskInfo::PendingWaitStatus() const noexcept
 {
-  ASSERT(mLastWaitStatus.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", mTid);
+  MDB_ASSERT(mLastWaitStatus.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", mTid);
   return mLastWaitStatus;
 }
 
@@ -285,7 +285,7 @@ TaskInfo::SetSessionId(u32 sessionId) noexcept
 void
 TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexcept
 {
-  ASSERT(mBreakpointLocationStatus.IsValid(), "Requires a valid bpstat");
+  MDB_ASSERT(mBreakpointLocationStatus.IsValid(), "Requires a valid bpstat");
 
   auto userBreakpointIds = mBreakpointLocationStatus.mBreakpointLocation->GetUserIds();
   DBGLOG(core,
@@ -300,7 +300,7 @@ TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexc
 
   const auto result = control.ResumeTask(*this, tc::ResumeAction{ tc::RunType::Step, tc::ResumeTarget::Task, 0 });
 
-  ASSERT(result.is_ok(), "Failed to step over breakpoint");
+  MDB_ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
 
 void
@@ -351,7 +351,7 @@ TaskInfo::SetUpdated() noexcept
 void
 TaskInfo::AddBreakpointLocationStatus(BreakpointLocation *breakpointLocation) noexcept
 {
-  ASSERT(!mBreakpointLocationStatus.IsValid(), "Overwriting breakpoint location status breaks the invariant");
+  MDB_ASSERT(!mBreakpointLocationStatus.IsValid(), "Overwriting breakpoint location status breaks the invariant");
   mBreakpointLocationStatus.Clear();
   mBreakpointLocationStatus.mBreakpointLocation = RefPtr{ breakpointLocation };
 }

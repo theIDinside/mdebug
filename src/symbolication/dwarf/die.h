@@ -244,7 +244,7 @@ template <> struct std::formatter<sym::dw::DieReference>
     if (auto cu = ref.GetUnitData(); cu != nullptr) {
       if (ref.GetUnitData()->HasLoadedDies()) {
         auto die = ref.GetDie();
-        ASSERT(die, "die was null!");
+        MDB_ASSERT(die, "die was null!");
         return std::format_to(ctx.out(),
           "DieRef {{ cu={}, die=0x{:x} ({}) }}",
           cu->SectionOffset(),

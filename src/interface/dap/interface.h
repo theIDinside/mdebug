@@ -63,7 +63,7 @@ public:
     auto start = std::chrono::high_resolution_clock::now();
     auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
     const auto duration_ms = MilliSecondsSince(start);
-    ASSERT(duration_ms < 1500, "Read took *way* too long");
+    MDB_ASSERT(duration_ms < 1500, "Read took *way* too long");
     if (read_bytes == -1) {
       CDLOG(errno != EWOULDBLOCK && errno != EAGAIN,
         core,
@@ -99,7 +99,7 @@ public:
     size[current_buffer_index] = 0;
     current_buffer_index = next_buffer_index();
     const auto dst = buffer_ptr();
-    ASSERT(
+    MDB_ASSERT(
       next_buffer_used < buffer_size, "Offset into buffer outside of {} bytes: {}", buffer_size, next_buffer_used);
     if (next_buffer_used > 0) {
       std::memcpy(dst, src, next_buffer_used);
