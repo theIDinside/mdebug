@@ -2,10 +2,8 @@
 #pragma once
 
 #include "bp.h"
-#include "common/formatter.h"
 #include "common/typedefs.h"
 #include "event_queue_event_param.h"
-#include "mdbjs/bpjs.h"
 #include "task.h"
 #include <format>
 #include <mdbsys/ptrace.h>
@@ -463,7 +461,7 @@ class EventSystem
   int mInternalEvents[2];
   int mSignalFd;
 
-  int mCurrentPollDescriptors;
+  int mCurrentPolledFdsCount;
   pollfd mPollDescriptors[5];
 
   std::mutex mCommandsGuard{};
