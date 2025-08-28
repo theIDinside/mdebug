@@ -3,7 +3,6 @@
 #include "common.h"
 #include "supervisor.h"
 #include "tracer.h"
-#include <cstring>
 #include <fcntl.h>
 #include <interface/ui_command.h>
 #include <mutex>
@@ -263,6 +262,20 @@ EventSystem::EventSystem(int commands[2], int debugger[2], int init[2], int inte
   mPollDescriptors[i++] = { mInitEvents[0], POLLIN, 0 };
   mPollDescriptors[i++] = { mInternalEvents[0], POLLIN, 0 };
 
+  // we set `mCurrentPollDescriptors` to `i`, because to initialize the wait system when we want to
+  // we increase `mCurrentPollDescriptors` by 1, and it will be used during the poll in the main event loop.
+  mCurrentPolledFdsCount = i;
+}
+
+int
+EventSystem::PollDescriptorsCount() const noexcept
+{
+  return mCurrentPolledFdsCount;
+}
+
+void
+EventSystem::InitWaitStatusManager() noexcept
+{
   // Block SIGCHLD in this thread to handle it only via signalfd
   sigset_t mask;
   sigemptyset(&mask);
@@ -271,27 +284,13 @@ EventSystem::EventSystem(int commands[2], int debugger[2], int init[2], int inte
     perror("sigprocmask");
     return;
   }
-  // we set `mCurrentPollDescriptors` to `i`, because to initialize the wait system when we want to
-  // we increase `mCurrentPollDescriptors` by 1, and it will be used during the poll in the main event loop.
-  mCurrentPollDescriptors = i;
+
   mSignalFd = signalfd(-1, &mask, 0);
   VERIFY(
     mSignalFd != -1, "Must be able to open signal file descriptor. WaitStatus system can't function otherwise.");
-  mPollDescriptors[i++] = { mSignalFd, POLLIN, 0 };
-}
-
-int
-EventSystem::PollDescriptorsCount() const noexcept
-{
-  return mCurrentPollDescriptors;
-}
-
-void
-EventSystem::InitWaitStatusManager() noexcept
-{
+  mPollDescriptors[mCurrentPolledFdsCount++] = { mSignalFd, POLLIN, 0 };
   // Include the signalfd in the polling, essentially "initializing" the wait system as it will now start reporting
   // events
-  mCurrentPollDescriptors++;
   PushInternalEvent(InitializedWaitSystem{});
 }
 

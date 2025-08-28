@@ -143,7 +143,6 @@ Tracer::AddLaunchedTarget(SessionId sessionId, const tc::InterfaceConfig &config
     PTRACE_OR_PANIC(PTRACE_ATTACH, newProcess, 0, 0);
   }
   ConfigurePtraceSettings(newProcess);
-  EventSystem::Get().InitWaitStatusManager();
 }
 
 TraceeController *
@@ -480,6 +479,12 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient,
       DBGLOG(core, "env={}", env);
     }
   }
+
+  // We wait until the last minute to start blocking SIGCHLD, because there may be sessions where we don't want to
+  // interfere (at all) with these things on the main thread specifically for RR, at least until I know exactly
+  // what the effects would be.
+  EventSystem::Get().InitWaitStatusManager();
+
   const auto forkResult =
     ptyFork(false, couldSetTermSettings ? &originalTty : nullptr, couldSetTermSettings ? &ws : nullptr);
   // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process

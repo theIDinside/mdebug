@@ -17,6 +17,7 @@ class DebuggerThread
   explicit DebuggerThread(std::string &&name, std::function<void(std::stop_token &)> &&task) noexcept;
 
 public:
+  static void BlockSigchildMustSucceed() noexcept;
   using OwnedPtr = std::unique_ptr<DebuggerThread>;
 
   ~DebuggerThread() noexcept;
