@@ -167,6 +167,22 @@ PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::ve
   return TaskExecuteResponse::Ok();
 }
 
+static __ptrace_request
+ToPtrace(RunType runtype)
+{
+  switch (runtype) {
+  case RunType::Unknown:
+    PANIC("Invalid ptrace resume type");
+    break;
+  case RunType::Step:
+    return PTRACE_SINGLESTEP;
+  case RunType::Continue:
+    return PTRACE_CONT;
+  case RunType::SyscallContinue:
+    return PTRACE_SYSCALL;
+  }
+}
+
 TaskExecuteResponse
 PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 {
@@ -182,7 +198,7 @@ PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
     }
 
     DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, action.mDeliverSignal);
-    const auto ptrace_result = ptrace(action, t.mTid, nullptr, action.mDeliverSignal);
+    const auto ptrace_result = ptrace(ToPtrace(action.mResumeType), t.mTid, nullptr, action.mDeliverSignal);
     if (ptrace_result == -1) {
       return TaskExecuteResponse::Error(errno);
     }
