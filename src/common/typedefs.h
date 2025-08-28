@@ -11,7 +11,6 @@
 #include <type_traits>
 
 // system
-#include <sys/ptrace.h>
 #include <sys/types.h>
 
 using u64 = std::uint64_t;
@@ -192,8 +191,8 @@ enum class RunType : u8
 {
   Unknown = 0b0000,
   None = Unknown,
-  Step = PTRACE_SINGLESTEP,
-  Continue = PTRACE_CONT,
-  SyscallContinue = PTRACE_SYSCALL,
+  Step,
+  Continue,
+  SyscallContinue,
 };
 }

@@ -308,7 +308,7 @@ Tracer::KillUI() noexcept
 }
 
 static int
-exec(const Path &program, std::span<const std::pmr::string> programArguments, char **env)
+Exec(const Path &program, std::span<const std::pmr::string> programArguments, char **env)
 {
   const auto arg_size = programArguments.size() + 2;
   std::vector<const char *> args;
@@ -319,9 +319,9 @@ exec(const Path &program, std::span<const std::pmr::string> programArguments, ch
   for (const auto &arg : programArguments) {
     args[idx++] = arg.c_str();
   }
-  environ = env;
+  // environ = env;
   args[arg_size - 1] = nullptr;
-  return execvp(cmd, (char *const *)args.data());
+  return execve(cmd, (char *const *)args.data(), env);
 }
 
 Pid
@@ -447,7 +447,7 @@ Tracer::AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept
 
 /* static */
 pid_t
-Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient,
+Tracer::ForkExec(ui::dap::DebugAdapterClient *debugAdapterClient,
   SessionId sessionId,
   bool stopOnEntry,
   const Path &program,
@@ -512,7 +512,7 @@ Tracer::Launch(ui::dap::DebugAdapterClient *debugAdapterClient,
 
     PTRACE_OR_PANIC(PTRACE_TRACEME, 0, 0, 0);
 
-    if (exec(program, prog_args, environment.data()) == -1) {
+    if (Exec(program, prog_args, environment.data()) == -1) {
       PANIC(std::format("EXECV Failed for {}", program.c_str()));
     }
     _exit(0);

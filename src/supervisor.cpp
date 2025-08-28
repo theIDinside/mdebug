@@ -1686,6 +1686,8 @@ TraceeController::IsSessionAllStopMode() const noexcept
     return false;
   case InterfaceType::GdbRemote:
     return !static_cast<tc::GdbRemoteCommander *>(mTraceeInterface.get())->remote_settings().mIsNonStop;
+  case InterfaceType::RR:
+    return true;
   }
   NEVER("Unknown target interface type");
 }

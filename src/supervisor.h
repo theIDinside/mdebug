@@ -58,13 +58,14 @@ struct NonFullRead
 /// When debugging 2 processes with the same binaries, we don't want duplicate storage.
 auto createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>;
 
-enum class InterfaceType
+enum class InterfaceType : std::uint8_t
 {
   Ptrace,
   GdbRemote,
+  RR
 };
 
-enum class ObserverType
+enum class ObserverType : u8
 {
   AllStop
 };
