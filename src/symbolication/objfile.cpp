@@ -33,6 +33,7 @@
 
 #include <lib/arena_allocator.h>
 namespace mdb {
+template <typename T> using Set = std::unordered_set<T>;
 ParsedAuxiliaryVector
 ParsedAuxiliaryVectorData(const tc::Auxv &aux, ParseAuxiliaryOptions options) noexcept
 {

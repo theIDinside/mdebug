@@ -146,12 +146,23 @@ template <typename T> struct Enum
     {                                                                                                             \
       return std::span{ detail::ENUM_TYPE##Names };                                                               \
     }                                                                                                             \
+    static constexpr std::optional<ENUM_TYPE>                                                                     \
+    FromString(std::string_view str) noexcept                                                                     \
+    {                                                                                                             \
+      auto index = 0;                                                                                             \
+      for (const auto &n : Names()) {                                                                             \
+        if (n == str)                                                                                             \
+          return detail::ENUM_TYPE##Ids[index];                                                                   \
+        ++index;                                                                                                  \
+      }                                                                                                           \
+      return {};                                                                                                  \
+    }                                                                                                             \
   };                                                                                                              \
   template <ENUM_TYPE EVENT> struct ENUM_TYPE##Traits;                                                            \
   ENUM_FMT(ENUM_TYPE, FOR_EACH, EACH_FN);
 
-#define ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN)                                                          \
-  enum class ENUM_TYPE : i32                                                                                      \
+#define ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN, UNDERLYING_TYPE)                                         \
+  enum class ENUM_TYPE : UNDERLYING_TYPE                                                                          \
   {                                                                                                               \
     FOR_EACH(EACH_FN)                                                                                             \
   };                                                                                                              \

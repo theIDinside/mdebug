@@ -18,8 +18,6 @@ namespace mdb {
 
 struct VariableContext;
 
-template <typename T> using Set = std::unordered_set<T>;
-
 class TraceeController;
 
 class NonExecutableCompilationUnitFile;

@@ -243,6 +243,26 @@ find(std::vector<T> &vec, const T &item, Predicate &&p) noexcept
   return std::cend(vec);
 }
 
+template <typename Container, typename Fn>
+constexpr auto
+ptr_find(Container &c, Fn &&f) noexcept
+{
+  using ReturnType = decltype(&(*c.begin()));
+  if constexpr (std::is_const<Container>::value) {
+    if (const auto it = std::find_if(c.cbegin(), c.cend(), f); it != std::cend(c)) {
+      return it.base();
+    } else {
+      return ReturnType{ nullptr };
+    }
+  } else {
+    if (auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
+      return it.base();
+    } else {
+      return ReturnType{ nullptr };
+    }
+  }
+}
+
 template <typename U, typename T, typename Predicate, typename Transform>
 constexpr auto
 map(std::vector<T> &vec, Predicate &&p, Transform &&transform) noexcept -> std::optional<U>

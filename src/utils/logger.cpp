@@ -3,6 +3,8 @@
 #include "../common.h"
 #include "utils/util.h"
 #include <algorithm>
+#include <configuration/command_line.h>
+#include <filesystem>
 #include <ranges>
 
 using namespace std::string_view_literals;
@@ -217,31 +219,15 @@ ProfilingLogger::End(std::string_view name, std::string_view category) noexcept
 
 /* static */
 void
-Logger::ConfigureLogging(const Path &logDirectory, const char *logEnvironVariable) noexcept
+Logger::ConfigureLogging(const mdb::cfg::InitializationConfiguration &config) noexcept
 {
-  if (logEnvironVariable == nullptr) {
-    return;
-  }
-  std::string_view variables{ logEnvironVariable };
-  std::vector<std::string_view> logList = SplitString(variables, ",");
-  static constexpr auto LogModuleNames = Enum<Channel>::Names();
-
-  if (std::ranges::any_of(logList, [](std::string_view cfg) { return cfg.contains("all"); })) {
-    auto channels = Enum<Channel>::Variants();
-    for (auto channel : channels) {
-      sLoggerInstance->SetupChannel(logDirectory, channel);
-    }
+  const auto &channels = config.mLogChannels;
+  if (channels.empty()) {
     return;
   }
 
-  for (auto logModuleName : logList) {
-    if (auto it = std::find(LogModuleNames.begin(), LogModuleNames.end(), logModuleName);
-      it != std::end(LogModuleNames)) {
-      auto logChannel = Enum<Channel>::FromInt(std::distance(it, std::end(LogModuleNames)));
-      if (logChannel) {
-        sLoggerInstance->SetupChannel(logDirectory, *logChannel);
-      }
-    }
+  for (auto channel : channels) {
+    sLoggerInstance->SetupChannel(config.mLogDirectory, channel);
   }
 }
 

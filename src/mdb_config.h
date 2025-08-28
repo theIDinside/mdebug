@@ -4,9 +4,6 @@
 #include <filesystem>
 #include <linux/limits.h>
 #include <optional>
-#include <span>
-#include <string_view>
-#include <unordered_set>
 
 // system namespace - anything and everything that involves the configuration of mdb
 namespace mdb::sys {
@@ -23,32 +20,13 @@ struct CLIError
   std::string msg;
 };
 
-// Awaiter thread should be used in most circumstances; but this system won't function under RR (yet).
-// So if MDB is to be recorded by RR, the signal handler system should be used instead.
-enum class WaitSystem
-{
-  UseAwaiterThread,
-  UseSignalHandler,
-};
-
-template <typename ConfigType> struct Setting
-{
-  std::string_view setting;
-  ConfigType boolean;
-};
-
-using namespace std::string_view_literals;
-
 class DebuggerConfiguration
 {
-  WaitSystem mWaitSystem{WaitSystem::UseAwaiterThread};
-  std::optional<int> mThreadPoolSize{std::nullopt};
+  std::optional<int> mThreadPoolSize{ std::nullopt };
   Path mLogDirectory;
+  std::vector<std::string> mLogModules;
 
 public:
-  friend mdb::Expected<DebuggerConfiguration, CLIError> ParseCommandLineArguments(int argc,
-                                                                                  const char **argv) noexcept;
-
   static auto
   Default() noexcept
   {
@@ -57,7 +35,6 @@ public:
     return res;
   }
 
-  WaitSystem GetWaitSystemConfig() const noexcept;
   int ThreadPoolSize() const noexcept;
   const Path &LogDirectory() const noexcept;
 };

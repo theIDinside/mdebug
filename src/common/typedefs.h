@@ -34,6 +34,9 @@ using Allocator = std::pmr::polymorphic_allocator<>;
 
 template <typename Fn, typename... FnArgs> using FnResult = std::invoke_result_t<Fn, FnArgs...>;
 
+template <typename ContainerType>
+concept PushBackContainer = requires(ContainerType container) { container.push_back({}); };
+
 template <typename T> struct IsTemplateType : std::false_type
 {
 };
@@ -49,27 +52,113 @@ template <typename T> static inline constexpr bool IsTemplate = IsTemplateType<T
 // Template type for string literals
 template <std::size_t N> struct StringLiteral
 {
-  consteval StringLiteral() = default;
+  char mValue[N];
+  static_assert(N > 1,
+    "A provided literal of length <= 1, means it's either empty, or it's an empty string with a 0 character. "
+    "That's not the intended use.");
 
   consteval StringLiteral(const char (&str)[N]) noexcept
   {
     for (std::size_t i = 0; i < N; ++i) {
-      value[i] = str[i];
+      mValue[i] = str[i];
     }
   }
 
-  char value[N];
+  template <size_t M, bool RemovePrefix> consteval StringLiteral(StringLiteral<M> string) noexcept
+  {
+    static_assert(N < M,
+      "N > M would not even make sense. It would mean we have trailing null bytes in a constexpr string literal. "
+      "We would have absolutely no use for that.");
+    constexpr size_t sizeDifference = []() {
+      if constexpr (RemovePrefix) {
+        return M - N;
+      } else {
+        return 0;
+      }
+    }();
+    for (auto i = 0; i < N; ++i) {
+      mValue[i] = string.mValue[i + sizeDifference];
+    }
+  }
+
+  static consteval bool
+  IsLarger(size_t n) noexcept
+  {
+    return n >= N - 1;
+  }
+
+  consteval char
+  operator[](size_t i) const noexcept
+  {
+    if constexpr (IsLarger(i)) {
+      return 0;
+    }
+    return mValue[i];
+  }
+
+  template <size_t StringLength>
+  consteval bool
+  StartsWith(const char (&string)[StringLength]) const noexcept
+  {
+    if (N < StringLength) {
+      return false;
+    }
+
+    const auto sz = string[StringLength - 1] == 0 ? StringLength - 1 : StringLength;
+    for (auto i = 0; i < sz; ++i) {
+      if (mValue[i] != string[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  consteval auto
+  RemovePrefix(size_t RemoveBy) noexcept
+  {
+    return StringLiteral<N - RemoveBy>{ *this };
+  }
 
   consteval const char *
   CString() const
   {
-    return value;
+    return mValue;
   }
 
   consteval std::string_view
   StringView() const
   {
-    return std::string_view{ value, N };
+    return std::string_view{ mValue, N - 1 };
+  }
+
+  static constexpr auto
+  Size() noexcept
+  {
+    return N - 1;
+  }
+};
+
+template <> struct StringLiteral<0>
+{
+
+  consteval StringLiteral([[maybe_unused]] const char (&str)[0]) noexcept {}
+
+  consteval const char *
+  CString() const
+  {
+    return nullptr;
+  }
+
+  consteval std::string_view
+  StringView() const
+  {
+    return std::string_view{};
+  }
+
+  static constexpr auto
+  Size() noexcept
+  {
+    return size_t{ 0 };
   }
 };
 

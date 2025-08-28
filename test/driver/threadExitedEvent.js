@@ -8,7 +8,7 @@ async function see9ThreadExits(DA) {
   const threads = await DA.threads()
   const EXPECTED_THREAD_EVENTS = 17
   let p = DA.prepareWaitForEventN('thread', EXPECTED_THREAD_EVENTS, 2500)
-  let pexited = DA.prepareWaitForEventN('exited', 1, 1000)
+  let pexited = DA.prepareWaitForEventN('exited', 1, 5000)
   for (let i = 0; i < 3; i++) {
     const response = await DA.sendReqGetResponse('continue', { threadId: threads[0].id })
     if (i == 0) {

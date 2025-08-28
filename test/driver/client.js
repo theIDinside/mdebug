@@ -478,7 +478,7 @@ class DebugAdapterClient {
         const { path, args } = parsed
         console.log(`${JSON.stringify(parsed)}`)
         console.log(`Recording using ${process.env['REC']}`)
-        let mdb_recorded_arg = ['-r']
+        let mdb_recorded_arg = []
         const cfg = unpackDebuggerArgs()
         if (!cfg.some((v) => v == '-t')) {
           mdb_recorded_arg.push('-t', 2)
@@ -562,6 +562,10 @@ class DebugAdapterClient {
     })
   }
 
+  onProcessEvent(event, handler) {
+    this.mdb.on(event, handler)
+  }
+
   /** Creates a new DebugAdapterClient, from `this`. Since MDB utilizes a server approach (i.e. we communicate only with 1 instance of mdb, but it multiplexes the sessions on a `sessionId` parameter.) we want to create new sessions re-using the already spawned binary.*/
   forkSession() {
     throw new Error('TODO')
@@ -618,25 +622,20 @@ class DebugAdapterClient {
    * @returns {Promise<Thread[]>} timeout
    */
   async getThreads(timeout) {
-    const threads = await this.sendReqGetResponse('threads', {}, timeout).then((res) => {
-      if (!res.success) {
-        throw new Error('Failed to get threads')
-      }
-      return res.body.threads
-    })
-    return threads.map((thread) => {
+    const threads = await this.threadsRequest().then((res) => checkResponse(res, 'threads', true))
+    return threads.body.threads.map((thread) => {
       return new Thread(this, thread.id, thread.name)
     })
   }
 
   /**
-   * @returns {Promise<{id: number, name: string}[]>}
+   * @returns {Promise<Thread[]>}
    */
   async threads(timeout = seconds(1)) {
-    return this.sendReqGetResponse('threads', {}, timeout)
-      .then((res) => {
-        return res.body.threads
-      })
+    return await this.threadsRequest()
+      .then((res) =>
+        checkResponse(res, 'threads', true).body.threads.map((thread) => new Thread(this, thread.id, thread.name))
+      )
       .catch(testException)
   }
 
@@ -970,7 +969,7 @@ class DebugAdapterClient {
     )
   }
 
-  async contNextStop(threadId, timeout = 1000) {
+  async contNextStop(threadId, timeout = 3000) {
     if (threadId == null) {
       const thrs = await this.threads()
       threadId = thrs[0].id
@@ -1146,6 +1145,19 @@ class DebugAdapterClient {
   async setFunctionBreakpointsRequest(args) {
     const response = await this.sendReqGetResponse(
       'setFunctionBreakpoints',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+    return response
+  }
+
+  /**
+   * @param { import("./types").StackTraceArguments } args
+   * @returns { Promise<import("./types").ThreadsResponse> }
+   */
+  async threadsRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'threads',
       { ...args, sessionId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )

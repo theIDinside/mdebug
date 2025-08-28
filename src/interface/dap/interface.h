@@ -170,11 +170,10 @@ struct InitializationState
 
 class DebugAdapterClient
 {
-  std::filesystem::path socket_path{};
-  int in{};
-  int out{};
-  ParseBuffer parse_swapbuffer{ MDB_PAGE_SIZE * 16 };
-  int tty_fd{ -1 };
+  int mReadFd{};
+  int mWriteFd{};
+  ParseBuffer mParseSwapBuffer{ MDB_PAGE_SIZE * 16 };
+  int mTtyFileDescriptor{ -1 };
   std::vector<SupervisorEntry> mSupervisors;
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
@@ -200,12 +199,17 @@ class DebugAdapterClient
   void InitAllocators() noexcept;
 
 public:
+  static const char *gSocketPath;
   DapClientSession mSessionType;
   ~DebugAdapterClient() noexcept;
 
   alloc::ArenaResource *GetCommandArenaAllocator() noexcept;
   alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
   static DebugAdapterClient *CreateStandardIOConnection() noexcept;
+  // The path passed into this function can be (_should be_) leaked. Clean up at exit of process, and by leaking,
+  // protections like atexit can work to remove the file, because it will always either exist, or not exist.
+  // `acceptTimeout` is how long mdb will wait for a connection until it times out and exits.
+  static DebugAdapterClient *CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept;
   std::unique_ptr<alloc::ScopedArenaAllocator> AcquireArena() noexcept;
 
   void AddSupervisor(TraceeController *tc) noexcept;
@@ -296,7 +300,7 @@ struct PollState
   }
 };
 
-class DAP
+class DapEventSystem
 {
 private:
   DebugAdapterClient *mClient;
@@ -309,43 +313,44 @@ public:
   using StackAllocator = alloc::StackAllocator<2048>;
   bool WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexcept;
 
-  explicit DAP(int inputFileDescriptor, int outputFileDescriptor) noexcept;
-  ~DAP() noexcept;
+  explicit DapEventSystem(DebugAdapterClient *client) noexcept;
+  ~DapEventSystem() noexcept;
 
   // After setup we call `infinite_poll` that does what the name suggests, polls for messages. We could say that
   // this function never returns, but that might not necessarily be the case. In a normal execution it will,
   // because this will be shut down when we shut down MDB, but if an error occur, we might want some cleanup at
   // which point we will have to return from this function since we have a hardline stance of *not* using
   // exceptions.
-  void run_ui_loop();
 
   void StartIOPolling(std::stop_token &token) noexcept;
   void SetClient(DebugAdapterClient *client) noexcept;
   void Poll(PollState &state) noexcept;
   void AddStandardIOSource(int fd, SessionId pid) noexcept;
 
-  void clean_up() noexcept;
-  void flush_events() noexcept;
+  void CleanUp() noexcept;
+  void FlushEvents() noexcept;
 
-  void configure_tty(int master_pty_fd) noexcept;
+  void ConfigureTty(int master_pty_fd) noexcept;
   DebugAdapterClient *Get() const noexcept;
 
 private:
-  UIResultPtr pop_event() noexcept;
+  UIResultPtr PopEvent() noexcept;
   void WriteProtocolMessage(std::string_view msg) noexcept;
 
-  mdb::Notifier::WriteEnd posted_event_notifier;
-  mdb::Notifier::ReadEnd posted_evt_listener;
+  mdb::Notifier::WriteEnd mPostedEventNotified;
+  mdb::Notifier::ReadEnd mPostedEventListener;
 
-  mdb::Notifier new_client_notifier;
-  int mTracerInputFileDescriptor;
-  int mTracerOutputFileDescriptor;
-  bool keep_running;
-  char *tracee_stdout_buffer;
+  mdb::Notifier mNewClientNotifier;
+  int mWriteFileDescriptor;
+  // The buffer where we put output from the traced application, buffered to be sent to the Debug adapter client
+  // (or whatever protocol or client we may support in the future.)
+  char *mTraceeStandardOutBuffer;
   std::mutex mUIResultLock;
-  std::deque<UIResultPtr> events_queue;
-  u64 seq;
-  bool cleaned_up = false;
+  std::deque<UIResultPtr> mEventsQueue;
 };
+
+void AtExit() noexcept;
+
 }; // namespace ui::dap
+
 } // namespace mdb

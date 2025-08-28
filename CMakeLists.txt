@@ -19,6 +19,9 @@ set(MDBDEPS "${CMAKE_SOURCE_DIR}/dependencies")
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
 set(MIDAS_SOURCES
+  src/app.cpp
+  src/main.cpp
+
   # root
   src/bp.cpp
   src/bp.h
@@ -29,7 +32,6 @@ set(MIDAS_SOURCES
   src/event_queue_event_param.h
   src/event_queue.cpp
   src/event_queue.h
-  src/main.cpp
   src/mdb_config.cpp
   src/mdb_config.h
   src/notify_pipe.cpp
@@ -48,6 +50,12 @@ set(MIDAS_SOURCES
   # common
   src/common/panic.cpp
   src/common/panic.h
+
+  # configuration
+  src/configuration/command_line.cpp
+  src/configuration/command_line.h
+  src/configuration/config.cpp
+  src/configuration/config.h
 
   #sys
   src/mdbsys/ptrace.cpp

@@ -1,4 +1,5 @@
 /** LICENSE TEMPLATE */
+#pragma once
 #include "common.h"
 #include <algorithm>
 #include <optional>
@@ -42,7 +43,7 @@ find_span(Container &c, const ValueType &v, Fn &&f)
   auto it = std::lower_bound(std::begin(c), std::end(c), v, f);
   if (it != std::end(c) && it != std::begin(c)) {
     auto s = it - 1;
-    return SpanResult{s, it};
+    return SpanResult{ s, it };
   } else {
     return SpanResult<It>{};
   }
@@ -54,13 +55,13 @@ lower_bound(Container &c, const ValueType &v, Fn &&f) noexcept -> std::optional<
 {
   if constexpr (std::is_const<Container>::value) {
     if (const auto it = std::lower_bound(c.cbegin(), c.cend(), v, f); it != std::end(c)) {
-      return std::optional{it};
+      return std::optional{ it };
     } else {
       return std::nullopt;
     }
   } else {
     if (auto it = std::lower_bound(c.begin(), c.end(), v, f); it != std::end(c)) {
-      return std::optional{it};
+      return std::optional{ it };
     } else {
       return std::nullopt;
     }
@@ -73,13 +74,13 @@ upper_bound(Container &c, const ValueType &v, Fn &&f) noexcept
 {
   if constexpr (std::is_const<Container>::value) {
     if (const auto it = std::upper_bound(c.cbegin(), c.cend(), v, f); it != std::end(c)) {
-      return std::optional{it};
+      return std::optional{ it };
     } else {
       return std::nullopt;
     }
   } else {
     if (auto it = std::upper_bound(c.begin(), c.end(), v, f); it != std::end(c)) {
-      return std::optional{it};
+      return std::optional{ it };
     } else {
       return std::nullopt;
     }
@@ -90,16 +91,16 @@ template <typename Container, typename Fn>
 constexpr auto
 find_if(Container &c, Fn &&f) noexcept
 {
-  using ReturnType = decltype(std::optional{c.begin()});
+  using ReturnType = decltype(std::optional{ c.begin() });
   if constexpr (std::is_const<Container>::value) {
     if (const auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
-      return std::optional{it};
+      return std::optional{ it };
     } else {
       return ReturnType{};
     }
   } else {
     if (auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
-      return std::optional{it};
+      return std::optional{ it };
     } else {
       return ReturnType{};
     }

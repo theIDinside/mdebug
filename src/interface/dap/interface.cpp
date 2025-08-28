@@ -33,6 +33,14 @@
 namespace mdb::ui::dap {
 using namespace std::string_literals;
 
+void
+AtExit() noexcept
+{
+  if (DebugAdapterClient::gSocketPath) {
+    unlink(DebugAdapterClient::gSocketPath);
+  }
+}
+
 std::string_view
 ContentDescriptor::payload() const noexcept
 {
@@ -88,54 +96,52 @@ static constexpr std::string_view strings[]{
 };
 */
 
-DAP::DAP(int tracerInputFileDescriptor, int tracerOutputFileDescriptor) noexcept
-    : mTracerInputFileDescriptor(tracerInputFileDescriptor),
-      mTracerOutputFileDescriptor(tracerOutputFileDescriptor), keep_running(true), mUIResultLock{}, events_queue{},
-      seq(0)
+DapEventSystem::DapEventSystem(DebugAdapterClient *client) noexcept
+    : mClient(client), mWriteFileDescriptor(client->WriteFileDescriptor()), mUIResultLock{}, mEventsQueue{}
 {
   auto [r, w] = mdb::Notifier::notify_pipe();
-  new_client_notifier = mdb::Notifier::notify_pipe();
-  posted_event_notifier = w;
-  posted_evt_listener = r;
-  tracee_stdout_buffer = mmap_buffer<char>(4096 * 3);
+  mNewClientNotifier = mdb::Notifier::notify_pipe();
+  mPostedEventNotified = w;
+  mPostedEventListener = r;
+  mTraceeStandardOutBuffer = mmap_buffer<char>(4096 * 3);
   mTemporaryArena = alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 16 });
 }
 
-DAP::~DAP() noexcept {}
+DapEventSystem::~DapEventSystem() noexcept {}
 
 UIResultPtr
-DAP::pop_event() noexcept
+DapEventSystem::PopEvent() noexcept
 {
-  VERIFY(!events_queue.empty(), "Can't pop events from an empty list!");
+  VERIFY(!mEventsQueue.empty(), "Can't pop events from an empty list!");
   std::lock_guard lock{ mUIResultLock };
-  UIResultPtr evt = events_queue.front();
-  events_queue.pop_front();
+  UIResultPtr evt = mEventsQueue.front();
+  mEventsQueue.pop_front();
   return evt;
 }
 
 void
-DAP::WriteProtocolMessage(std::string_view msg) noexcept
+DapEventSystem::WriteProtocolMessage(std::string_view msg) noexcept
 {
   const auto header = std::format("Content-Length: {}\r\n\r\n", msg.size());
   CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
-  const auto headerWrite = write(mTracerOutputFileDescriptor, header.data(), header.size());
+  const auto headerWrite = write(mWriteFileDescriptor, header.data(), header.size());
   VERIFY(headerWrite != -1 && headerWrite == static_cast<ssize_t>(header.size()),
     "Did not write entire header or some other error occured: {}",
     headerWrite);
-  const auto msgWrite = write(mTracerOutputFileDescriptor, msg.data(), msg.size());
+  const auto msgWrite = write(mWriteFileDescriptor, msg.data(), msg.size());
   VERIFY(msgWrite != -1 && msgWrite == static_cast<ssize_t>(msg.size()),
     "Did not write entire message or some other error occured: {}",
     msgWrite);
 }
 
 void
-DAP::SetClient(DebugAdapterClient *client) noexcept
+DapEventSystem::SetClient(DebugAdapterClient *client) noexcept
 {
   mClient = client;
 }
 
 void
-DAP::StartIOPolling(std::stop_token &token) noexcept
+DapEventSystem::StartIOPolling(std::stop_token &token) noexcept
 {
   mdb::ScopedBlockedSignals blocked_sigs{ std::array{ SIGCHLD } };
   // TODO: Implement support to spawn the DAP client for a socket etc, instead of stdio
@@ -148,13 +154,13 @@ DAP::StartIOPolling(std::stop_token &token) noexcept
 }
 
 void
-DAP::AddStandardIOSource(int fd, SessionId pid) noexcept
+DapEventSystem::AddStandardIOSource(int fd, SessionId pid) noexcept
 {
   mStandardIo.push_back({ fd, pid });
 }
 
 bool
-DAP::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexcept
+DapEventSystem::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexcept
 {
   // TODO(simon): Change this to a stack allocated (or a memory arena from which we can pull the contiguous memory
   // from and then just leak back to the allocator)
@@ -180,7 +186,7 @@ DAP::WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexc
 }
 
 void
-DAP::Poll(PollState &state) noexcept
+DapEventSystem::Poll(PollState &state) noexcept
 {
   if (WaitForEvents(state, mNewEvents)) {
     for (auto &event : mNewEvents) {
@@ -191,11 +197,11 @@ DAP::Poll(PollState &state) noexcept
       case InterfaceNotificationSource::ClientStdout: {
         auto tty = mClient->GetTtyFileDescriptor();
         ASSERT(tty.has_value(), "DAP Client has invalid configuration");
-        const auto bytes_read = read(*tty, tracee_stdout_buffer, 4096 * 3);
+        const auto bytes_read = read(*tty, mTraceeStandardOutBuffer, 4096 * 3);
         if (bytes_read == -1) {
           continue;
         }
-        std::string_view data{ tracee_stdout_buffer, static_cast<u64>(bytes_read) };
+        std::string_view data{ mTraceeStandardOutBuffer, static_cast<u64>(bytes_read) };
         mClient->WriteSerializedProtocolMessage(
           ui::dap::OutputEvent{ event.mPid, "stdout", std::string{ data } }.Serialize(
             0, mTemporaryArena->ScopeAllocation().GetAllocator()));
@@ -210,12 +216,12 @@ DAP::Poll(PollState &state) noexcept
 void
 DebugAdapterClient::ReadPendingCommands() noexcept
 {
-  ASSERT(in != -1, "file descriptor for reading commands invalid: {}", in);
-  if (!parse_swapbuffer.expect_read_from_fd(in)) {
+  ASSERT(mReadFd != -1, "file descriptor for reading commands invalid: {}", mReadFd);
+  if (!mParseSwapBuffer.expect_read_from_fd(mReadFd)) {
     return;
   }
   bool no_partials = false;
-  const auto request_headers = ParseHeadersFromBuffer(parse_swapbuffer.take_view(), &no_partials);
+  const auto request_headers = ParseHeadersFromBuffer(mParseSwapBuffer.take_view(), &no_partials);
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
       const auto *cd = std::get_if<ContentDescriptor>(&hdr);
@@ -223,7 +229,7 @@ DebugAdapterClient::ReadPendingCommands() noexcept
       EventSystem::Get().PushCommand(this, cmd);
     }
     // since there's no partials left in the buffer, we reset it
-    parse_swapbuffer.clear();
+    mParseSwapBuffer.clear();
   } else {
     if (request_headers.size() > 1) {
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
@@ -234,11 +240,11 @@ DebugAdapterClient::ReadPendingCommands() noexcept
 
       auto rd = std::get_if<RemainderData>(&request_headers.back());
       ASSERT(rd, "Parsed communication was not of type RemainderData");
-      parse_swapbuffer.swap(rd->offset);
-      ASSERT(parse_swapbuffer.current_size() == rd->length,
+      mParseSwapBuffer.swap(rd->offset);
+      ASSERT(mParseSwapBuffer.current_size() == rd->length,
         "Parse Swap Buffer operation failed; expected length {} but got {}",
         rd->length,
-        parse_swapbuffer.current_size());
+        mParseSwapBuffer.current_size());
     }
   }
 }
@@ -260,18 +266,18 @@ SetNonBlocking(int fd)
 void
 DebugAdapterClient::SetTtyOut(int fd, SessionId pid) noexcept
 {
-  ASSERT(tty_fd == -1, "TTY fd was already set!");
-  tty_fd = fd;
+  ASSERT(mTtyFileDescriptor == -1, "TTY fd was already set!");
+  mTtyFileDescriptor = fd;
   auto dap = Tracer::Get().GetDap();
-  dap->configure_tty(fd);
+  dap->ConfigureTty(fd);
   dap->AddStandardIOSource(fd, pid);
 }
 
 std::optional<int>
 DebugAdapterClient::GetTtyFileDescriptor() const noexcept
 {
-  if (tty_fd != -1) {
-    return tty_fd;
+  if (mTtyFileDescriptor != -1) {
+    return mTtyFileDescriptor;
   }
   return {};
 }
@@ -296,7 +302,7 @@ DebugAdapterClient::SetDebugAdapterSessionType(DapClientSession type) noexcept
 bool
 DebugAdapterClient::IsClosed() noexcept
 {
-  return in == -1;
+  return mReadFd == -1;
 }
 
 void
@@ -337,11 +343,11 @@ DebugAdapterClient::FlushEvents() noexcept
 }
 
 void
-DAP::flush_events() noexcept
+DapEventSystem::FlushEvents() noexcept
 {
   auto tempAlloc = mTemporaryArena.get();
-  while (!events_queue.empty()) {
-    auto evt = pop_event();
+  while (!mEventsQueue.empty()) {
+    auto evt = PopEvent();
     const auto protocol_msg = evt->Serialize(0, tempAlloc);
     WriteProtocolMessage(protocol_msg);
     delete evt;
@@ -349,20 +355,20 @@ DAP::flush_events() noexcept
 }
 
 void
-DAP::clean_up() noexcept
+DapEventSystem::CleanUp() noexcept
 {
   using namespace std::chrono_literals;
-  flush_events();
+  FlushEvents();
 }
 
 DebugAdapterClient *
-DAP::Get() const noexcept
+DapEventSystem::Get() const noexcept
 {
   return mClient;
 }
 
 void
-DAP::configure_tty(int master_pty_fd) noexcept
+DapEventSystem::ConfigureTty(int master_pty_fd) noexcept
 {
   // todo(simon): when we add a new pty, what we need to do
   // is somehow find a way to re-route (temporarily) the other pty's to /dev/null, because we don't care for them
@@ -388,25 +394,21 @@ DebugAdapterClient::InitAllocators() noexcept
   }
 }
 
-DebugAdapterClient::DebugAdapterClient(DapClientSession type, std::filesystem::path &&path, int socket) noexcept
-    : socket_path(std::move(path)), in(socket), out(socket), mSessionType(type)
-{
-  InitAllocators();
-}
-
-DebugAdapterClient::DebugAdapterClient(DapClientSession type, int standard_in, int standard_out) noexcept
-    : in(standard_in), out(standard_out), mSessionType(type)
+DebugAdapterClient::DebugAdapterClient(
+  DapClientSession type, int readFileDescriptor, int writeFileDescriptor) noexcept
+    : mReadFd(readFileDescriptor), mWriteFd(writeFileDescriptor), mSessionType(type)
 {
   InitAllocators();
 }
 
 DebugAdapterClient::~DebugAdapterClient() noexcept
 {
-  if (fs::exists(socket_path)) {
-    unlink(socket_path.c_str());
+  if (fs::exists(gSocketPath)) {
+    unlink(gSocketPath);
+    gSocketPath = nullptr;
     // means that in and out are of a socket, and not stdio
-    close(in);
-    close(out);
+    close(mReadFd);
+    close(mWriteFd);
   }
 }
 
@@ -427,6 +429,78 @@ DebugAdapterClient::CreateStandardIOConnection() noexcept
 {
   VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
   return new DebugAdapterClient{ DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO };
+}
+
+/* static */
+DebugAdapterClient *
+DebugAdapterClient::CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept
+{
+  bool DoCleanup = false;
+  int serverFd = -1;
+  int connectedClientFd = -1;
+
+  ScopedDefer defer = [&]() {
+    if (DoCleanup) {
+      for (const auto fd : { serverFd, connectedClientFd }) {
+        if (fd > 0) {
+          close(fd);
+        }
+      }
+      if (gSocketPath != nullptr) {
+        unlink(gSocketPath);
+        gSocketPath = nullptr;
+      }
+    }
+  };
+#define ERR_RET(condition, ...)                                                                                   \
+  if ((condition)) {                                                                                              \
+    DoCleanup = true;                                                                                             \
+    DBGLOG(core, __VA_ARGS__);                                                                                    \
+    std::println(__VA_ARGS__);                                                                                    \
+    return nullptr;                                                                                               \
+  }
+
+  sockaddr_un addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, socketPath, sizeof(addr.sun_path) - 1);
+
+  ERR_RET(std::filesystem::exists(socketPath), "Path already exists: {}", socketPath);
+
+  serverFd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+  ERR_RET(serverFd < 0, "Failed to open socket: {}", strerror(errno))
+
+  gSocketPath = socketPath;
+
+  ERR_RET(bind(serverFd, (sockaddr *)&addr, sizeof(addr)) < 0,
+    "Error: {}. Binding on server socket {} failed.",
+    strerror(errno),
+    serverFd);
+
+  ERR_RET(listen(serverFd, 1) < 0, "Error: {}. Listening on server socket {} failed.", strerror(errno), serverFd);
+
+  struct pollfd fds;
+  fds.fd = serverFd;
+  fds.events = POLLIN;
+
+  int ret = poll(&fds, 1, acceptTimeout);
+  ERR_RET(ret < 0, "Error: {}. Polling for incoming connections failed.", strerror(errno));
+  ERR_RET(ret == 0, "Polling timed out waiting for clients. Exiting.");
+
+  if (fds.revents & POLLIN) {
+    connectedClientFd = accept(serverFd, nullptr, nullptr);
+    ERR_RET(connectedClientFd < 0, "Error: {}. Accepting the client failed.", strerror(errno));
+
+    if (!SetNonBlocking(connectedClientFd)) {
+      ERR_RET(true, "Failed to set non-blocking for connected client file descriptor");
+    }
+
+    return new DebugAdapterClient{ DapClientSession::Launch, connectedClientFd, connectedClientFd };
+  }
+
+  return nullptr;
+#undef ERR_RET
 }
 
 std::unique_ptr<alloc::ScopedArenaAllocator>
@@ -473,12 +547,12 @@ DebugAdapterClient::PostDapEvent(ui::UIResultPtr event)
 int
 DebugAdapterClient::ReadFileDescriptor() const noexcept
 {
-  return in;
+  return mReadFd;
 }
 int
 DebugAdapterClient::WriteFileDescriptor() const noexcept
 {
-  return out;
+  return mWriteFd;
 }
 
 void
@@ -523,12 +597,12 @@ DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) cons
   DBGLOG(dap, "WRITING -->{}{}<---", header, output);
 #endif
 
-  const auto result = ::writev(out, iov, 2);
+  const auto result = ::writev(mWriteFd, iov, 2);
   VERIFY(result == (header_length + static_cast<ssize_t>(output.size())),
     "Required flush-write but wrote partial content: {} out of {}",
     result,
     header_length + output.size());
-  VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", out, output);
+  VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", mWriteFd, output);
   return result >= static_cast<ssize_t>(output.size());
 }
 
