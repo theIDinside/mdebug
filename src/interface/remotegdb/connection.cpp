@@ -1028,9 +1028,8 @@ RemoteConnection::QueryTargetThreads(GdbThread thread, bool forceFlush) noexcept
       return thrs;
     }
   }
+
   const auto threadsResults = GetRemoteThreads();
-  mTraceeControlMutex.lock();
-  ScopedDefer fn{ [&]() { mTraceeControlMutex.unlock(); } };
 
   UpdateKnownThreads(threadsResults);
 
