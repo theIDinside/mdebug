@@ -109,8 +109,9 @@ template <typename T> struct OwningPointer
   }
 };
 
+template <typename Delimiter = std::string_view>
 constexpr std::vector<std::string_view>
-SplitString(std::string_view str, std::string_view delim) noexcept
+SplitString(std::string_view str, Delimiter delim) noexcept
 {
   std::vector<std::string_view> result{};
   auto last = false;
@@ -303,6 +304,16 @@ MilliSecondsSince(auto start) noexcept
 {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
     .count();
+}
+
+template <class T, class F>
+T
+ValueOrElse(std::optional<T> &&opt, F &&f)
+{
+  if (opt) {
+    return *opt;
+  }
+  return std::invoke(std::forward<F>(f));
 }
 
 using DAPStringView = DebugAdapterProtocolString;

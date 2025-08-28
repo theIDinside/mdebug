@@ -22,8 +22,8 @@ public:
   ~DebuggerThread() noexcept;
   /// Create a debugger thread
   static std::unique_ptr<DebuggerThread> SpawnDebuggerThread(std::function<void(std::stop_token &)> task) noexcept;
-  static std::unique_ptr<DebuggerThread> SpawnDebuggerThread(std::string threadName,
-                                                             std::function<void(std::stop_token &)> task) noexcept;
+  static std::unique_ptr<DebuggerThread> SpawnDebuggerThread(
+    std::string threadName, std::function<void(std::stop_token &)> task) noexcept;
 
   /// Start the thread.
   void Start() noexcept;

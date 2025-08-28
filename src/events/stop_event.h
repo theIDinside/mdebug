@@ -63,7 +63,7 @@ class TaskInfo;
     mdb::TraceeController *,                                                                                      \
     const mdb::Ref<mdb::TaskInfo> &)
 
-ENUM_TYPE_METADATA(StopEvents, FOR_EACH_EVENT, DEFAULT_ENUM)
+ENUM_TYPE_METADATA(StopEvents, FOR_EACH_EVENT, DEFAULT_ENUM, u8)
 
 #define ENUM_MAP(E, DESCRIPTION, ...)                                                                             \
   template <> struct StopEventsTraits<StopEvents::E>                                                              \
@@ -82,10 +82,10 @@ FOR_EACH_EVENT(ENUM_MAP)
   RETURN_KIND(Stop, "Stop task and don't resume until explicitly told to do so.")                                 \
   RETURN_KIND(StopAll, "Stop task, and also halt all other tasks in this process.")
 
-ENUM_TYPE_METADATA(EventResult, FOR_EACH_EVENT_RESULT, DEFAULT_ENUM)
+ENUM_TYPE_METADATA(EventResult, FOR_EACH_EVENT_RESULT, DEFAULT_ENUM, i8)
 
 #define FOR_EACH_BP_OP(OP)                                                                                        \
   OP(Keep, "Keep the breakpoint")                                                                                 \
   OP(Retire, "Retire the breakpoint after this.")
 
-ENUM_TYPE_METADATA(BreakpointOp, FOR_EACH_BP_OP, DEFAULT_ENUM)
+ENUM_TYPE_METADATA(BreakpointOp, FOR_EACH_BP_OP, DEFAULT_ENUM, i8)

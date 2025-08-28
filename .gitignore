@@ -12,3 +12,4 @@ build_meta.json
 __pycache__
 test-dep/
 .vscode/launch.json
+prompts/

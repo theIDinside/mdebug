@@ -59,11 +59,11 @@ struct BreakpointHitEventResult
   // The user breakpoint that this hit event result is for.
   const UserBreakpoint *mUserBreakpoint{ nullptr };
   // if true, thread that hit breakpoint should be stopped
-  EventResult mResult : 30 { EventResult::None };
+  EventResult mResult{ EventResult::None };
   // if true, this user breakpoint should be removed now.
-  BreakpointOp mRetireBreakpoint : 1 { BreakpointOp::Keep };
+  BreakpointOp mRetireBreakpoint{ BreakpointOp::Keep };
   // If there's a conditional for the breakpoint, this signals if it should be kept or removed.
-  bool mRetireConditional : 1 { false };
+  bool mRetireConditional{ false };
 
   constexpr bool
   ShouldStop() const noexcept

@@ -29,16 +29,20 @@ async function launchToMain(debugAdapter) {
 }
 
 /** @param { import("./client").DebugAdapterClient } debugAdapter */
-async function launchThenDisconnect(DA) {
-  await DA.launchToMain(DA.buildDirFile('stackframes'))
-  const response = await DA.disconnect('terminate')
+async function launchThenDisconnect(debugAdapter) {
+  await debugAdapter.launchToMain(debugAdapter.buildDirFile('stackframes'))
+  const response = await debugAdapter.disconnect('terminate')
   assert(response.success, `Failed to disconnect. ${JSON.stringify(response)}`)
 }
+
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
+async function testUsingSockets(debugAdapter) {}
 
 const tests = {
   launch: () => launch,
   main: () => launchToMain,
   disconnect: () => launchThenDisconnect,
+  testUsingSockets: () => testUsingSockets,
 }
 
 module.exports = {

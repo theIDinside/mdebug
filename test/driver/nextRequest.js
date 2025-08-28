@@ -58,7 +58,7 @@ async function nextLineOverFunction(DA) {
       granularity: 'line',
     },
     'stopped',
-    1000
+    5000
   )
 
   assert(

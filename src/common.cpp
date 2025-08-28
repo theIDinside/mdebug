@@ -9,6 +9,7 @@
 #include <cxxabi.h>
 #include <execinfo.h>
 #include <fcntl.h>
+#include <ranges>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -26,4 +27,5 @@ syscall_name(u64 syscall_number)
 #undef SYSCALL
   panic(std::format("UNKNOWN SYSCALL NUMBER {}", syscall_number), std::source_location::current(), 1);
 }
+
 } // namespace mdb

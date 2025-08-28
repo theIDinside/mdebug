@@ -283,24 +283,9 @@ public:
   }
 };
 
-struct Ok
-{
-};
 struct None
 {
 };
-
-#define EXPECT_REF(expr, exp)                                                                                     \
-  if (!exp) {                                                                                                     \
-    return std::move(exp.error());                                                                                \
-  }                                                                                                               \
-  expr = exp.value();
-
-#define EXPECT(expr, exp)                                                                                         \
-  if (!exp) {                                                                                                     \
-    return std::move(exp.error());                                                                                \
-  }                                                                                                               \
-  expr = std::move(exp.value());
 
 template <typename Pointee> struct is_smart_ptr : std::false_type
 {

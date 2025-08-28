@@ -85,6 +85,27 @@ export interface SetBreakpointsExtensionArguments {
   identifiers: string[]
 }
 
+interface Thread {
+  /**
+   * Unique identifier for the thread.
+   */
+  id: number
+
+  /**
+   * The name of the thread.
+   */
+  name: string
+}
+
+interface ThreadsResponse extends Response {
+  body: {
+    /**
+     * All threads.
+     */
+    threads: Thread[]
+  }
+}
+
 interface StackTraceArguments {
   /**
    * Retrieve the stacktrace for this thread.

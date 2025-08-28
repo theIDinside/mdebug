@@ -5,7 +5,7 @@
 #include <common/macros.h>
 #include <mdbjs/util.h>
 #include <utils/expected.h>
-#include <utils/logger.h>
+#include <utils/log_channel.h>
 
 // std
 #include <expected>

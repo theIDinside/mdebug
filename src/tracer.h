@@ -4,6 +4,7 @@
 // mdb
 #include <bp.h>
 #include <common.h>
+#include <configuration/command_line.h>
 #include <event_queue.h>
 #include <events/event.h>
 #include <interface/attach_args.h>
@@ -55,7 +56,7 @@ struct RemoteSettings;
 } // namespace mdb::gdb
 
 namespace mdb::ui::dap {
-class DAP;
+class DapEventSystem;
 struct Event;
 struct Scope;
 } // namespace mdb::ui::dap
@@ -187,9 +188,9 @@ private:
 #endif
 public:
   friend struct ui::UICommand;
-  Tracer(sys::DebuggerConfiguration) noexcept;
+  Tracer() noexcept;
 
-  static Tracer *Create(sys::DebuggerConfiguration) noexcept;
+  static Tracer *Create() noexcept;
 
   static bool IsRunning() noexcept;
   static bool UsingTraceMe() noexcept;
@@ -211,7 +212,7 @@ public:
 
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept;
 
-  void SetUI(ui::dap::DAP *dap) noexcept;
+  void SetUI(ui::dap::DapEventSystem *dap) noexcept;
   void KillUI() noexcept;
 
   TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
@@ -253,7 +254,7 @@ public:
   static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;
   TraceeController *GetSupervisorBySessionId(SessionId sessionId) noexcept;
   std::vector<TraceeController *> GetAllProcesses() const noexcept;
-  ui::dap::DAP *GetDap() const noexcept;
+  ui::dap::DapEventSystem *GetDap() const noexcept;
 
   static void InitInterpreterAndStartDebugger(
     std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept;
@@ -306,7 +307,7 @@ private:
   std::unique_ptr<DebuggerThread> mDebugAdapterThread{ nullptr };
   std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
   std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
-  ui::dap::DAP *mDAP;
+  ui::dap::DapEventSystem *mDAP;
   u32 mBreakpointID{ 0 };
 
   // We do a monotonic increase. Unlike implementations I've previously worked on, and seen (like gdb)
@@ -321,7 +322,6 @@ private:
   VariableReferenceId mVariablesReferenceCounter{ 0 };
   std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
   bool already_launched{ false };
-  sys::DebuggerConfiguration config;
 
   // Apparently, due to the lovely way of the universe, if a thread clones or forks
   // we may actually see the wait status of the clone child before we get to see the wait status of the

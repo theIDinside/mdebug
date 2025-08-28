@@ -6,7 +6,7 @@ const fileDir = path.dirname(__filename)
 const driverTestDir = `${fileDir}/driver`
 const filePath = `${fileDir}/driver/DriverTests.cmake`
 
-const ignoredJsFiles = ['client.js', 'run.js', 'utils.js']
+const ignoredJsFiles = ['client.js', 'runDebugAdapterTest.js', 'utils.js']
 function testFileFilter(file) {
   return path.extname(file) == '.js' && !ignoredJsFiles.some((f) => f == file)
 }
@@ -24,15 +24,15 @@ function readFiles(directory) {
 
 function addTest(suite, test, is_todo = false) {
   if (is_todo) {
-    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
-add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
+    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
+add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
 set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
 set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
 set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")
 set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")`
   } else {
-    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
-add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/run.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
+    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
+add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
 set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")
 set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")`
   }

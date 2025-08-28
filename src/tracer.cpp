@@ -3,6 +3,7 @@
 #include "tracer.h"
 #include "common/typedefs.h"
 #include <bp.h>
+#include <configuration/command_line.h>
 #include <event_queue.h>
 #include <interface/attach_args.h>
 #include <interface/console_command.h>
@@ -47,7 +48,7 @@
 
 namespace mdb {
 
-Tracer::Tracer(sys::DebuggerConfiguration init) noexcept : config(std::move(init))
+Tracer::Tracer() noexcept
 {
   ASSERT(Tracer::sTracerInstance == nullptr,
     "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
@@ -72,9 +73,9 @@ Tracer::LoadAndProcessObjectFile(pid_t target_pid, const Path &objfile_path) noe
 
 // static
 Tracer *
-Tracer::Create(sys::DebuggerConfiguration cfg) noexcept
+Tracer::Create() noexcept
 {
-  sTracerInstance = new Tracer{ std::move(cfg) };
+  sTracerInstance = new Tracer{};
   return sTracerInstance;
 }
 
@@ -296,7 +297,7 @@ Tracer::EvaluateDebugConsoleExpression(const std::string &expression, Allocator 
 }
 
 void
-Tracer::SetUI(ui::dap::DAP *dap) noexcept
+Tracer::SetUI(ui::dap::DapEventSystem *dap) noexcept
 {
   this->mDAP = dap;
 }
@@ -304,7 +305,7 @@ Tracer::SetUI(ui::dap::DAP *dap) noexcept
 void
 Tracer::KillUI() noexcept
 {
-  mDAP->clean_up();
+  mDAP->CleanUp();
 }
 
 static int
@@ -697,7 +698,7 @@ Tracer::GetAllProcesses() const noexcept
   return result;
 }
 
-ui::dap::DAP *
+ui::dap::DapEventSystem *
 Tracer::GetDap() const noexcept
 {
   return mDAP;

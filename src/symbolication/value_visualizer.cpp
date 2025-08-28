@@ -615,7 +615,7 @@ static consteval StringLiteral<N>
 IndentString() noexcept
 {
   StringLiteral<N> buf;
-  for (auto &c : buf.value) {
+  for (auto &c : buf.mValue) {
     c = ' ';
   }
   return StringLiteral<N>{ buf };
