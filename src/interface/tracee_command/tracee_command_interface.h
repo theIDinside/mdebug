@@ -11,7 +11,6 @@
 
 // system
 #include <link.h>
-#include <sys/ptrace.h>
 
 // std
 #include <print>
@@ -49,13 +48,6 @@ struct ResumeAction
   RunType mResumeType;
   ResumeTarget mResumeTarget{ ResumeTarget::Task };
   int mDeliverSignal{ 0 };
-
-  constexpr
-  operator __ptrace_request() const noexcept
-  {
-    MDB_ASSERT(mResumeType != RunType::Unknown, "Invalid ptrace resume operation");
-    return static_cast<__ptrace_request>(mResumeType);
-  }
 };
 
 enum class ShouldProceed

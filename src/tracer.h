@@ -216,7 +216,7 @@ public:
   void KillUI() noexcept;
 
   TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
-  static pid_t Launch(ui::dap::DebugAdapterClient *client,
+  static pid_t ForkExec(ui::dap::DebugAdapterClient *client,
     SessionId sessionId,
     bool stopAtEntry,
     const Path &program,
