@@ -125,8 +125,8 @@ public:
   auto
   AlignedRequiredGetAtOffset(u64 offset) -> T *
   {
-    ASSERT(offset < mSize, "offset out of bounds");
-    ASSERT((offset % std::alignment_of<T>::value) == 0, "Alignment failure!");
+    MDB_ASSERT(offset < mSize, "offset out of bounds");
+    MDB_ASSERT((offset % std::alignment_of<T>::value) == 0, "Alignment failure!");
     return (T *)(mLoadedBinary + offset);
   }
 

@@ -44,7 +44,7 @@ DebuggerThread::SpawnDebuggerThread(std::string name, std::function<void(std::st
 void
 DebuggerThread::Start() noexcept
 {
-  ASSERT(mStarted == false, "Thread already started");
+  MDB_ASSERT(mStarted == false, "Thread already started");
   AssertSigChildIsBlocked();
   mStarted = true;
   mThread = std::jthread([this](std::stop_token token) {

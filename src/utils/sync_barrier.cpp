@@ -34,7 +34,7 @@ Pipe::close() noexcept
 {
   auto r = ::close(read_end.fd);
   auto w = ::close(write_end.fd);
-  ASSERT(r != -1 && w != -1, "Failed to close pipe");
+  MDB_ASSERT(r != -1 && w != -1, "Failed to close pipe");
 }
 
 Pipe
@@ -42,7 +42,7 @@ create_pipe() noexcept
 {
   int notify_pipe[2];
   VERIFY(::pipe(notify_pipe) != -1, "Failed to set up notifier pipe {}", strerror(errno));
-  return Pipe{.read_end = {notify_pipe[0]}, .write_end = {notify_pipe[1]}};
+  return Pipe{ .read_end = { notify_pipe[0] }, .write_end = { notify_pipe[1] } };
 }
 
 Barrier::Barrier(Pipe pipe) noexcept : pipe(pipe) {}

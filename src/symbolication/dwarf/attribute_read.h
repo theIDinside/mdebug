@@ -15,7 +15,7 @@ std::array<std::optional<AttributeValue>, N>
 read_attributes(UnitData *unitData, const DieMetaData &die, std::array<Attribute, N> &&attributes)
 {
   std::array<std::optional<AttributeValue>, N> result;
-  UnitReader reader{unitData};
+  UnitReader reader{ unitData };
   const auto &attrs = unitData->GetAbbreviation(die.mAbbreviationCode);
   reader.SeekDie(die);
 
@@ -46,12 +46,12 @@ void
 ProcessDie(DieReference dieRef, Fn &&fn) noexcept
 {
   static_assert(std::is_same_v<std::invoke_result_t<Fn, UnitReader &, Abbreviation &, const AbbreviationInfo &>,
-                               DieAttributeRead>,
-                "Requires function to return DieAttributeRead");
+                  DieAttributeRead>,
+    "Requires function to return DieAttributeRead");
   auto unit = dieRef.GetUnitData();
   const auto die = unit ? dieRef.GetDie() : nullptr;
-  ASSERT(unit && die, "Compilation Unit required to be not-null");
-  UnitReader reader{unit};
+  MDB_ASSERT(unit && die, "Compilation Unit required to be not-null");
+  UnitReader reader{ unit };
   const auto &attrs = unit->GetAbbreviation(die->mAbbreviationCode);
   reader.SeekDie(*die);
   for (auto attribute : attrs.mAttributes) {

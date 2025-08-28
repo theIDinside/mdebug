@@ -11,9 +11,9 @@ namespace mdb::sym::dw {
 std::tuple<u64, const char *>
 PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
 {
-  ASSERT(cu && std::to_underlying(cu->GetHeader().Version()) < 5,
-         "Expected compillation to not be null and version <= 4");
-  UnitReader reader{cu};
+  MDB_ASSERT(cu && std::to_underlying(cu->GetHeader().Version()) < 5,
+    "Expected compillation to not be null and version <= 4");
+  UnitReader reader{ cu };
   reader.SeekDie(unitDie);
   const auto &attrs = cu->GetAbbreviation(unitDie.mAbbreviationCode);
 
@@ -35,7 +35,7 @@ PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
     }
   }
 
-  return std::tuple<u64, const char *>{offset, directory};
+  return std::tuple<u64, const char *>{ offset, directory };
 }
 
 DieReference::DieReference(UnitData *compilationUnit, const DieMetaData *die) noexcept
@@ -59,9 +59,9 @@ DieReference
 DieReference::MaybeResolveReference() const noexcept
 {
   if (!mUnitData || !mDebugInfoEntry) {
-    return DieReference{nullptr, nullptr};
+    return DieReference{ nullptr, nullptr };
   }
-  UnitReader reader{mUnitData};
+  UnitReader reader{ mUnitData };
   const auto &attrs = mUnitData->GetAbbreviation(mDebugInfoEntry->mAbbreviationCode);
   reader.SeekDie(*mDebugInfoEntry);
   for (auto abbreviation : attrs.mAttributes) {
@@ -76,7 +76,7 @@ DieReference::MaybeResolveReference() const noexcept
       reader.SkipAttribute(abbreviation);
     }
   }
-  return DieReference{nullptr, nullptr};
+  return DieReference{ nullptr, nullptr };
 }
 
 u64
@@ -117,25 +117,25 @@ IndexedDieReference::IsValid() const noexcept
 IndexedDieReference
 DieReference::AsIndexed() const noexcept
 {
-  return IndexedDieReference{mUnitData, mUnitData->IndexOf(mDebugInfoEntry)};
+  return IndexedDieReference{ mUnitData, mUnitData->IndexOf(mDebugInfoEntry) };
 }
 
 UnitReader
 DieReference::GetReader() const noexcept
 {
-  return UnitReader{mUnitData, *mDebugInfoEntry};
+  return UnitReader{ mUnitData, *mDebugInfoEntry };
 }
 
 std::optional<AttributeValue>
 DieReference::ReadAttribute(Attribute attr) const noexcept
 {
-  UnitReader reader{mUnitData};
+  UnitReader reader{ mUnitData };
   const auto &attrs = mUnitData->GetAbbreviation(mDebugInfoEntry->mAbbreviationCode);
   reader.SeekDie(*mDebugInfoEntry);
   auto i = 0u;
   for (auto attribute : attrs.mAttributes) {
     if (attribute.mName == attr) {
-      reader.SkipAttributes(std::span{attrs.mAttributes.begin(), attrs.mAttributes.begin() + i});
+      reader.SkipAttributes(std::span{ attrs.mAttributes.begin(), attrs.mAttributes.begin() + i });
       return ReadAttributeValue(reader, attribute, attrs.mImplicitConsts);
     } else {
       ++i;

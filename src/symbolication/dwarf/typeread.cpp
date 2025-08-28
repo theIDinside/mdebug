@@ -15,13 +15,13 @@ namespace mdb::sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
     : mObjectRef(obj), mFunctionSymbol(frame.MaybeGetFullSymbolInfo()),
-      mParams{{AddressRange{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}}, {}}, mLexicalBlockStack()
+      mParams{ { AddressRange{ mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc() } }, {} }, mLexicalBlockStack()
 {
-  mLexicalBlockStack.emplace_back(std::vector{AddressRange{mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc()}},
-                                  std::vector<Symbol>{});
-  ASSERT(mLexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", mLexicalBlockStack.size());
+  mLexicalBlockStack.emplace_back(
+    std::vector{ AddressRange{ mFunctionSymbol->StartPc(), mFunctionSymbol->EndPc() } }, std::vector<Symbol>{});
+  MDB_ASSERT(mLexicalBlockStack.size() == 1, "Expected block stack size == 1, was {}", mLexicalBlockStack.size());
   MUST_HOLD(mFunctionSymbol != nullptr,
-            "To parse symbol information for a function, there must exist symbol information to parse.");
+    "To parse symbol information for a function, there must exist symbol information to parse.");
 }
 
 NonNullPtr<Type>
@@ -40,7 +40,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
   AddrPtr low = nullptr, hi = nullptr;
   const auto block_seen = [&]() { return low != nullptr && hi != nullptr; };
   auto &attr = die.GetUnitData()->GetAbbreviation(die.GetDie()->mAbbreviationCode);
-  UnitReader reader{die.GetUnitData()};
+  UnitReader reader{ die.GetUnitData() };
   reader.SeekDie(*die.GetDie());
 
   bool hadRanges = false;
@@ -65,7 +65,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
   }
 
   if (hadRanges) {
-    ASSERT(low == nullptr, "We need to adjust the ranges by LOW PC I think.");
+    MDB_ASSERT(low == nullptr, "We need to adjust the ranges by LOW PC I think.");
     return;
   }
 
@@ -79,14 +79,16 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
       break;
     }
   }
-  mLexicalBlockStack.emplace_back(std::vector{AddressRange{low, low + hi}}, std::vector<Symbol>{});
+  mLexicalBlockStack.emplace_back(std::vector{ AddressRange{ low, low + hi } }, std::vector<Symbol>{});
 }
 
 void
 FunctionSymbolicationContext::ProcessInlinedSubroutineDie(DieReference cu_die) noexcept
 {
-  DBGLOG(core, "[symbolication]: process_inline not implemented (cu={}, die=0x{:x})",
-         cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->mSectionOffset);
+  DBGLOG(core,
+    "[symbolication]: process_inline not implemented (cu={}, die=0x{:x})",
+    cu_die.GetUnitData()->SectionOffset(),
+    cu_die.GetDie()->mSectionOffset);
 }
 
 struct ParseState
@@ -96,7 +98,7 @@ struct ParseState
   Data mName;
   Data mTypeId;
   std::optional<DieReference> mReferedDie{};
-  DieAttributeRead mProceed{DieAttributeRead::Skipped};
+  DieAttributeRead mProceed{ DieAttributeRead::Skipped };
 
   constexpr bool
   ParsedEnough() const noexcept
@@ -112,8 +114,8 @@ struct ParseState
 };
 
 bool
-FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
-                                                 std::vector<Symbol> &processedSymbolStack) noexcept
+FunctionSymbolicationContext::ProcessVariableDie(
+  DieReference dieRef, std::vector<Symbol> &processedSymbolStack) noexcept
 {
   ParseState state;
   const auto originDie = dieRef;
@@ -148,8 +150,8 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
     } else {
       if (!state.mReferedDie) {
         DBGLOG(dwarf,
-               "[ProcessVariableDie]: Ignoring DW_TAG_variable die, incomplete symbol information. die=0x{:x}",
-               originDie.GetDie()->mSectionOffset);
+          "[ProcessVariableDie]: Ignoring DW_TAG_variable die, incomplete symbol information. die=0x{:x}",
+          originDie.GetDie()->mSectionOffset);
         return false;
       }
       dieRef = state.mReferedDie.value();
@@ -157,17 +159,18 @@ FunctionSymbolicationContext::ProcessVariableDie(DieReference dieRef,
     }
   }
   auto variableTypeDie = mObjectRef.GetDebugInfoEntryReference(state.mTypeId->AsUnsignedValue());
-  ASSERT(variableTypeDie.has_value(), "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
-         state.mTypeId->AsUnsignedValue());
+  MDB_ASSERT(variableTypeDie.has_value(),
+    "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
+    state.mTypeId->AsUnsignedValue());
 
   auto type = ProcessTypeDie(variableTypeDie.value());
   if (state.mLocation->form == AttributeForm::DW_FORM_sec_offset) {
-    processedSymbolStack.emplace_back(
-      type, SymbolLocation::UnreadLocationList(static_cast<u32>(state.mLocation->AsUnsignedValue())),
+    processedSymbolStack.emplace_back(type,
+      SymbolLocation::UnreadLocationList(static_cast<u32>(state.mLocation->AsUnsignedValue())),
       state.mName->AsCString());
   } else {
     DataBlock dwarf_expr_block = state.mLocation->AsDataBlock();
-    std::span<const u8> expr{dwarf_expr_block.ptr, dwarf_expr_block.size};
+    std::span<const u8> expr{ dwarf_expr_block.ptr, dwarf_expr_block.size };
     processedSymbolStack.emplace_back(type, SymbolLocation::Expression(expr), state.mName->AsCString());
   }
   return true;
@@ -188,8 +191,9 @@ FunctionSymbolicationContext::ProcessFormalParameter(DieReference dieRef) noexce
 void
 FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
 {
-  PROFILE_SCOPE_ARGS("FunctionSymbolicationContext::ProcessSymbolInformation", "symbolication",
-                     PEARG("function", this->mFunctionSymbol->name));
+  PROFILE_SCOPE_ARGS("FunctionSymbolicationContext::ProcessSymbolInformation",
+    "symbolication",
+    PEARG("function", this->mFunctionSymbol->name));
   if (mFunctionSymbol->IsResolved()) {
     return;
   }
@@ -198,8 +202,9 @@ FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
     auto cu = indexedDie.GetUnitData();
     auto dieIndex = indexedDie.GetIndex();
     auto compUnitDieReference = cu->GetDieByCacheIndex(dieIndex);
-    ASSERT(compUnitDieReference.GetDie()->mTag == DwarfTag::DW_TAG_subprogram,
-           "Origin die for a fn wasn't subprogram! It was: {}", to_str(compUnitDieReference.GetDie()->mTag));
+    MDB_ASSERT(compUnitDieReference.GetDie()->mTag == DwarfTag::DW_TAG_subprogram,
+      "Origin die for a fn wasn't subprogram! It was: {}",
+      to_str(compUnitDieReference.GetDie()->mTag));
 
     auto dieIterator = compUnitDieReference.GetDie()->GetChildren();
     // Means this fn ctx has no children. Whatever meta data (like pc start, pc end, etc) we may have, must already
@@ -223,20 +228,20 @@ FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
     while (dieIterator != parent) {
       switch (dieIterator->mTag) {
       case DwarfTag::DW_TAG_formal_parameter: {
-        ProcessFormalParameter(DieReference{compUnitDieReference.GetUnitData(), dieIterator});
+        ProcessFormalParameter(DieReference{ compUnitDieReference.GetUnitData(), dieIterator });
         dieIterator = next(dieIterator, dieIterator->Sibling());
       } break;
       case DwarfTag::DW_TAG_variable:
         ++mFrameLocalsCount;
-        ProcessVariable(DieReference{compUnitDieReference.GetUnitData(), dieIterator});
+        ProcessVariable(DieReference{ compUnitDieReference.GetUnitData(), dieIterator });
         dieIterator = next(dieIterator, dieIterator->Sibling());
         break;
       case DwarfTag::DW_TAG_lexical_block:
-        ProcessLexicalBlockDie(DieReference{compUnitDieReference.GetUnitData(), dieIterator});
+        ProcessLexicalBlockDie(DieReference{ compUnitDieReference.GetUnitData(), dieIterator });
         dieIterator = next(dieIterator, dieIterator->GetChildren());
         break;
       case DwarfTag::DW_TAG_inlined_subroutine:
-        ProcessInlinedSubroutineDie(DieReference{compUnitDieReference.GetUnitData(), dieIterator});
+        ProcessInlinedSubroutineDie(DieReference{ compUnitDieReference.GetUnitData(), dieIterator });
         dieIterator = next(dieIterator, dieIterator->Sibling());
         break;
       default:
@@ -260,7 +265,7 @@ TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type
 TypeSymbolicationContext
 TypeSymbolicationContext::ContinueWith(const TypeSymbolicationContext &ctx, Type *t) noexcept
 {
-  return TypeSymbolicationContext{ctx.mObjectRef, *t};
+  return TypeSymbolicationContext{ ctx.mObjectRef, *t };
 }
 
 // Fully resolves `Type`
@@ -280,7 +285,7 @@ TypeSymbolicationContext::ProcessInheritanceDie(DieReference cu_die) noexcept
     const auto member_offset = location->AsUnsignedValue();
     for (auto t : type->mFields) {
       mTypeFields.push_back(
-        Field{.mType = t.mType, .mObjectBaseOffset = *t.mObjectBaseOffset + member_offset, .mName = t.mName});
+        Field{ .mType = t.mType, .mObjectBaseOffset = *t.mObjectBaseOffset + member_offset, .mName = t.mName });
     }
   }
 }
@@ -300,7 +305,7 @@ name_from_tag(DwarfTag tag) noexcept
   default:
     break;
   }
-  ASSERT(false, "Did not expect that DwarfTag");
+  MDB_ASSERT(false, "Did not expect that DwarfTag");
   return "no tag";
 }
 
@@ -314,35 +319,42 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
 
   // A member without a location is not a member. It can be a static variable or a constexpr variable.
   if (!location) {
-    DBGLOG(core, "die 0x{:x} (name={}) is DW_TAG_member but had no location (static/constexpr/static-constexpr?)",
-           cu_die.GetDie()->mSectionOffset,
-           name.transform([](auto v) { return v.AsCString(); }).value_or("die had no name"));
+    DBGLOG(core,
+      "die 0x{:x} (name={}) is DW_TAG_member but had no location (static/constexpr/static-constexpr?)",
+      cu_die.GetDie()->mSectionOffset,
+      name.transform([](auto v) { return v.AsCString(); }).value_or("die had no name"));
     return;
   }
 
-  ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
-         "loclistx location descriptors not supported yet. cu={}, die=0x{:x}",
-         cu_die.GetUnitData()->SectionOffset(), cu_die.GetDie()->mSectionOffset);
-  ASSERT(typeId, "Expected to find type attribute for die 0x{:x} ({})", cu_die.GetDie()->mSectionOffset,
-         to_str(cu_die.GetDie()->mTag));
+  MDB_ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
+    "loclistx location descriptors not supported yet. cu={}, die=0x{:x}",
+    cu_die.GetUnitData()->SectionOffset(),
+    cu_die.GetDie()->mSectionOffset);
+  MDB_ASSERT(typeId,
+    "Expected to find type attribute for die 0x{:x} ({})",
+    cu_die.GetDie()->mSectionOffset,
+    to_str(cu_die.GetDie()->mTag));
 
   if (!name) {
     // means we're likely some anonymous structure of some kind
     auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
-    ASSERT(containingCompUnitDieReference.has_value(),
-           "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", typeId->AsUnsignedValue());
+    MDB_ASSERT(containingCompUnitDieReference.has_value(),
+      "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
+      typeId->AsUnsignedValue());
     auto type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
     const auto member_offset = location->AsUnsignedValue();
     auto name = name_from_tag(type->mDebugInfoEntryTag);
-    this->mTypeFields.push_back(Field{.mType = NonNull(*type), .mObjectBaseOffset = member_offset, .mName = name});
+    this->mTypeFields.push_back(
+      Field{ .mType = NonNull(*type), .mObjectBaseOffset = member_offset, .mName = name });
   } else {
     auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
-    ASSERT(containingCompUnitDieReference.has_value(),
-           "Failed to get compilation unit & die reference from DIE offset: 0x{:x}", typeId->AsUnsignedValue());
+    MDB_ASSERT(containingCompUnitDieReference.has_value(),
+      "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
+      typeId->AsUnsignedValue());
     auto type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
     const auto member_offset = location->AsUnsignedValue();
     this->mTypeFields.push_back(
-      Field{.mType = NonNull(*type), .mObjectBaseOffset = member_offset, .mName = name->AsCString()});
+      Field{ .mType = NonNull(*type), .mObjectBaseOffset = member_offset, .mName = name->AsCString() });
   }
 }
 
@@ -357,14 +369,14 @@ TypeSymbolicationContext::ProcessEnumDie(DieReference compUnitDie) noexcept
   if (const_value) {
     mEnumIsSigned = const_value->form == AttributeForm::DW_FORM_sdata;
     if (mEnumIsSigned) {
-      mConstValues.push_back(EnumeratorConstValue{.i = const_value->AsSignedValue()});
+      mConstValues.push_back(EnumeratorConstValue{ .i = const_value->AsSignedValue() });
     } else {
-      mConstValues.push_back(EnumeratorConstValue{.u = const_value->AsUnsignedValue()});
+      mConstValues.push_back(EnumeratorConstValue{ .u = const_value->AsUnsignedValue() });
     }
   }
 
   this->mTypeFields.push_back(
-    Field{.mType = NonNull(*mEnumerationType), .mObjectBaseOffset = memberOffset, .mName = name->AsCString()});
+    Field{ .mType = NonNull(*mEnumerationType), .mObjectBaseOffset = memberOffset, .mName = name->AsCString() });
 }
 
 void
@@ -378,7 +390,7 @@ TypeSymbolicationContext::ResolveType() noexcept
     }
     auto cu = typeIter->mCompUnitDieReference->GetUnitData();
     auto die = typeIter->mCompUnitDieReference.mut().GetDie();
-    auto typedie = DieReference{cu, die};
+    auto typedie = DieReference{ cu, die };
     if (die->mTag == DwarfTag::DW_TAG_enumeration_type) {
       const auto type_id = typedie.ReadAttribute(Attribute::DW_AT_type);
       if (type_id) {
@@ -389,16 +401,16 @@ TypeSymbolicationContext::ResolveType() noexcept
     }
 
     die = die->GetChildren();
-    for (const auto die : sym::dw::IterateSiblings{cu, die}) {
+    for (const auto die : sym::dw::IterateSiblings{ cu, die }) {
       switch (die.mTag) {
       case DwarfTag::DW_TAG_member:
-        ProcessMemberVariable(DieReference{cu, &die});
+        ProcessMemberVariable(DieReference{ cu, &die });
         break;
       case DwarfTag::DW_TAG_inheritance:
-        ProcessInheritanceDie(DieReference{cu, &die});
+        ProcessInheritanceDie(DieReference{ cu, &die });
         break;
       case DwarfTag::DW_TAG_enumerator:
-        ProcessEnumDie(DieReference{cu, &die});
+        ProcessEnumDie(DieReference{ cu, &die });
         break;
       default:
         continue;
@@ -406,8 +418,8 @@ TypeSymbolicationContext::ResolveType() noexcept
     }
 
     if (typedie.GetDie()->mTag == DwarfTag::DW_TAG_enumeration_type) {
-      typeIter->mEnumValues = {.mIsSigned = mEnumIsSigned,
-                               .mEnumeratorValues = std::make_unique<EnumeratorConstValue[]>(mTypeFields.size())};
+      typeIter->mEnumValues = { .mIsSigned = mEnumIsSigned,
+        .mEnumeratorValues = std::make_unique<EnumeratorConstValue[]>(mTypeFields.size()) };
       std::copy(mConstValues.begin(), mConstValues.end(), typeIter->mEnumValues.mEnumeratorValues.get());
     }
 

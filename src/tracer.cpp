@@ -50,7 +50,7 @@ namespace mdb {
 
 Tracer::Tracer() noexcept
 {
-  ASSERT(Tracer::sTracerInstance == nullptr,
+  MDB_ASSERT(Tracer::sTracerInstance == nullptr,
     "Multiple instantiations of the Debugger - Design Failure, this = 0x{:x}, older instance = 0x{:x}",
     (uintptr_t)this,
     (uintptr_t)sTracerInstance);
@@ -105,7 +105,7 @@ TraceeController *
 Tracer::PrepareNewSupervisorWithId(SessionId sessionId) noexcept
 {
   static SessionId latestSessionId = 0;
-  ASSERT(sessionId > latestSessionId, "Preparing a new session with a previously used ID is not supported.");
+  MDB_ASSERT(sessionId > latestSessionId, "Preparing a new session with a previously used ID is not supported.");
   latestSessionId = sessionId;
   auto &instance = Tracer::Get();
   instance.mUnInitializedSupervisor.push_back(
@@ -161,7 +161,7 @@ TraceeController *
 Tracer::GetController(pid_t pid) noexcept
 {
   auto it = std::ranges::find_if(mTracedProcesses, [&pid](auto &t) { return t->mTaskLeader == pid; });
-  ASSERT(it != std::end(mTracedProcesses), "Could not find target {} pid", pid);
+  MDB_ASSERT(it != std::end(mTracedProcesses), "Could not find target {} pid", pid);
 
   return it->get();
 }
@@ -191,7 +191,7 @@ Tracer::ConvertWaitEvent(WaitPidResult waitPid) noexcept
     DBGLOG(core, "Configuration for newly execed process {} not completed", tc->TaskLeaderTid());
     return nullptr;
   }
-  ASSERT(tc != nullptr, "Could not find process that task {} belongs to", waitPid.tid);
+  MDB_ASSERT(tc != nullptr, "Could not find process that task {} belongs to", waitPid.tid);
   auto task = tc->SetPendingWaitstatus(waitPid);
   return tc->CreateTraceEventFromWaitStatus(*task);
 }
@@ -204,7 +204,7 @@ Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
   auto result = cmd->Execute();
 
   if (result) [[likely]] {
-    ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
+    MDB_ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
     auto data = result->Serialize(0);
     if (!data.empty()) {
       dapClient->WriteSerializedProtocolMessage(data);
@@ -229,7 +229,7 @@ Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
   TraceeController *supervisor = evt->mTask->GetSupervisor();
   // TODO(simon): When we implement RR support (somehow, god knows), we need to be able to tell if we've
   // travelled back in time, or gone forward. This should potentially save us work.
-  ASSERT(
+  MDB_ASSERT(
     supervisor->mCreationEventTime >= evt->mEventTime, "Event time is before the creation of this supervisor?");
   sLastTraceEventTime = std::max<int>(0, evt->mEventTime);
   if (!supervisor) {
@@ -275,7 +275,7 @@ void
 Tracer::HandleInitEvent(TraceEvent *evt) noexcept
 {
   auto tc = GetController(evt->mProcessId);
-  ASSERT(tc, "Expected to have tracee controller for {}", evt->mProcessId);
+  MDB_ASSERT(tc, "Expected to have tracee controller for {}", evt->mProcessId);
   tc->HandleTracerEvent(evt);
   tc->EmitStopped(evt->mTaskId, ui::dap::StoppedReason::Entry, "attached", true, {});
 }
@@ -627,8 +627,9 @@ Tracer::UnInitializedTasks() noexcept
 void
 Tracer::RegisterTracedTask(Ref<TaskInfo> newTask) noexcept
 {
-  ASSERT(!mDebugSessionTasks.contains(newTask->mTid), "task {} has already been registered.", newTask->mTid);
-  ASSERT(!mUnInitializedThreads.contains(newTask->mTid), "task {} exists also in an unit state.", newTask->mTid);
+  MDB_ASSERT(!mDebugSessionTasks.contains(newTask->mTid), "task {} has already been registered.", newTask->mTid);
+  MDB_ASSERT(
+    !mUnInitializedThreads.contains(newTask->mTid), "task {} exists also in an unit state.", newTask->mTid);
   auto tid = newTask->mTid;
   newTask->SetSessionId(mSessionThreadId++);
   mDebugSessionTasks.emplace(tid, std::move(newTask));

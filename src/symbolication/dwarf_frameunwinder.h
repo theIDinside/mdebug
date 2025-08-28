@@ -93,15 +93,18 @@ class CFAStateMachine
 public:
   CFAStateMachine(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
 
-  CFAStateMachine(TraceeController &tc, TaskInfo &task, const RegisterValues &frame_below,
-                  UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
+  CFAStateMachine(TraceeController &tc,
+    TaskInfo &task,
+    const RegisterValues &frame_below,
+    UnwindInfoSymbolFilePair cfi,
+    AddrPtr pc) noexcept;
   /* Initialization routine for the statemachine - it saves the current task register into the state machine
    * registers. */
-  static CFAStateMachine Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi,
-                              AddrPtr pc) noexcept;
+  static CFAStateMachine Init(
+    TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
   u64 ComputeExpression(std::span<const u8> bytes, int frameLevel = -1) noexcept;
-  u64 ResolveRegisterContents(u64 registerNumber, const FrameUnwindState &belowFrame,
-                              int frameLevel = -1) noexcept;
+  u64 ResolveRegisterContents(
+    u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel = -1) noexcept;
   void SetCanonicalFrameAddress(u64 canonicalFrameAddress) noexcept;
   void RememberState() noexcept;
   void RestoreState() noexcept;
@@ -126,7 +129,7 @@ private:
   CFA mCanonicalFrameAddressData;
   Registers mRuleTable;
   u64 mCanonicalFrameAddressValue;
-  bool mResumeAddressUndefined{false};
+  bool mResumeAddressUndefined{ false };
   std::vector<Registers> mRememberedState;
   std::vector<CFA> mRememberedCFA;
 };
@@ -171,10 +174,10 @@ struct CommonInformationEntry
   GetAugmentation() const noexcept
   {
     if (!mAugmentationString) {
-      return Augmentation{false, false, false, false, false};
+      return Augmentation{ false, false, false, false, false };
     }
 
-    Augmentation aug{false, false, false, false, false};
+    Augmentation aug{ false, false, false, false, false };
 
     auto &view = mAugmentationString.value();
     const auto sz = view.size();
@@ -186,7 +189,7 @@ struct CommonInformationEntry
         aug.HasAugmentDataField = true;
         break;
       case 'e':
-        ASSERT(view[i + 1] == 'h', "Expected augmentation to be 'eh' but wasn't.");
+        MDB_ASSERT(view[i + 1] == 'h', "Expected augmentation to be 'eh' but wasn't.");
         aug.HasEHDataField = true;
         ++i;
         break;
@@ -203,7 +206,7 @@ struct CommonInformationEntry
         // found in /lib64/ld-linux-x86-64.so.2, but I don't know what it does.
         break;
       [[unlikely]] default:
-        ASSERT(false, "Unknown augmentation specifier");
+        MDB_ASSERT(false, "Unknown augmentation specifier");
       }
     }
     return aug;
@@ -295,13 +298,13 @@ private:
 using CommonInfoEntryCount = u64;
 using FrameDescriptionEntryCount = u64;
 
-std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
-CountTotalEntriesInElfSection(DwarfBinaryReader reader) noexcept;
-std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount>
-CountTotalEntriesInDwarfSection(DwarfBinaryReader reader) noexcept;
+std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount> CountTotalEntriesInElfSection(
+  DwarfBinaryReader reader) noexcept;
+std::pair<CommonInfoEntryCount, FrameDescriptionEntryCount> CountTotalEntriesInDwarfSection(
+  DwarfBinaryReader reader) noexcept;
 CommonInformationEntry ReadCommonInformationEntry(u64 length, u64 cie_offset, DwarfBinaryReader &reader) noexcept;
-std::unique_ptr<Unwinder> ParseExceptionHeaderSection(ObjectFile *objfile,
-                                                      const ElfSection *ehFrameSection) noexcept;
+std::unique_ptr<Unwinder> ParseExceptionHeaderSection(
+  ObjectFile *objfile, const ElfSection *ehFrameSection) noexcept;
 void ParseDwarfDebugFrame(const Elf *elf, Unwinder *unwinderDb, const ElfSection *debugFrame) noexcept;
 
 FrameDescriptionEntry ReadFrameDescriptionEntry(DwarfBinaryReader &reader);

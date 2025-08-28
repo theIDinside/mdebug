@@ -10,8 +10,8 @@
 #include <string_view>
 
 namespace mdb {
-constexpr static u8 ELF_MAGIC[4]{0x7F, 0x45, 0x4C, 0x46};
-constexpr static u8 ELF_MAGIC_[4]{EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3};
+constexpr static u8 ELF_MAGIC[4]{ 0x7F, 0x45, 0x4C, 0x46 };
+constexpr static u8 ELF_MAGIC_[4]{ EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3 };
 using Elf64Header = Elf64_Ehdr;
 class ObjectFile;
 
@@ -55,9 +55,9 @@ struct ElfSection
   auto
   GetDataAs() const noexcept -> std::span<const T>
   {
-    ASSERT(mSectionData->size_bytes() % sizeof(T) == 0, "data is unaligned!");
+    MDB_ASSERT(mSectionData->size_bytes() % sizeof(T) == 0, "data is unaligned!");
     const T *ptr = reinterpret_cast<const T *>(mSectionData->data());
-    return std::span<const T>{ptr, mSectionData->size_bytes() / sizeof(T)};
+    return std::span<const T>{ ptr, mSectionData->size_bytes() / sizeof(T) };
   }
 
   template <typename T>

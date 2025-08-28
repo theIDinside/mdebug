@@ -13,7 +13,7 @@ namespace mdb::sym {
 u64
 DwarfStack::Pop() noexcept
 {
-  ASSERT(mStackSize > 0, "Attempting to pop stack with no elements");
+  MDB_ASSERT(mStackSize > 0, "Attempting to pop stack with no elements");
   return mStack[--mStackSize];
 }
 
@@ -85,7 +85,7 @@ void
 op_reg(ExprByteCodeInterpreter &i) noexcept
 {
   const auto bytecode = std::to_underlying(i.mLatestDecoded);
-  ASSERT(
+  MDB_ASSERT(
     bytecode >= std::to_underlying(DwarfOp::DW_OP_reg0) && bytecode <= std::to_underlying(DwarfOp::DW_OP_reg31),
     "Byte code for DW_OP_reg<n> out of range");
   const auto reg_no = std::to_underlying(i.mLatestDecoded) - std::to_underlying(DwarfOp::DW_OP_reg0);
@@ -495,10 +495,10 @@ op_call_ref(ExprByteCodeInterpreter &i) noexcept
 void
 op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 {
-  ASSERT(i.mFrameLevel != -1,
+  MDB_ASSERT(i.mFrameLevel != -1,
     "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
   auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel);
-  ASSERT(unwindState, "The interpreter can not know the CFA value.");
+  MDB_ASSERT(unwindState, "The interpreter can not know the CFA value.");
   i.mStack.Push(unwindState->CanonicalFrameAddress());
 }
 
@@ -694,7 +694,7 @@ static Op ops[0xff] = {
 };
 
 AddrPtr ExprByteCodeInterpreter::ComputeFrameBase() noexcept {
-  ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
+  MDB_ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
   ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mTraceeController, mTask, mFrameBaseProgram};
   return frameBaseReader.Run();
 }

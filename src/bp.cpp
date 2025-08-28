@@ -38,8 +38,8 @@ BreakpointLocation::BreakpointLocation(
 
 BreakpointLocation::~BreakpointLocation() noexcept
 {
-  ASSERT(!mInstalled, "Breakpoint location was enabled while being destroyed - this is a hard error");
-  ASSERT(mUserMapping.empty(),
+  MDB_ASSERT(!mInstalled, "Breakpoint location was enabled while being destroyed - this is a hard error");
+  MDB_ASSERT(mUserMapping.empty(),
     "This breakpoint location was destroyed when having active (but destroyed) users registered to it");
   DBGLOG(core, "[breakpoint loc]: Destroying breakpoint location at {}", mAddress);
 }
@@ -135,7 +135,7 @@ BreakpointLocation::IsInstalled() const noexcept
 void
 BreakpointLocation::AddUser(tc::TraceeCommandInterface &controlInterface, UserBreakpoint &breakpoint) noexcept
 {
-  ASSERT(
+  MDB_ASSERT(
     std::none_of(mUserMapping.begin(), mUserMapping.begin(), [&breakpoint](auto v) { return v != &breakpoint; }),
     "Expected user breakpoint to not be registered with bploc");
   mUserMapping.push_back(&breakpoint);
@@ -357,7 +357,7 @@ HookRequestedResume(EventResult result) noexcept
 constexpr static BreakpointBehavior
 DetermineBehavior(EventResult evaluationResult, TraceeController &tc) noexcept
 {
-  ASSERT(evaluationResult != EventResult::Resume, "Requires a stop behavior (or default)");
+  MDB_ASSERT(evaluationResult != EventResult::Resume, "Requires a stop behavior (or default)");
   if (evaluationResult == EventResult::Stop) {
     return BreakpointBehavior::StopOnlyThreadThatHit;
   } else if (evaluationResult == EventResult::StopAll) {
@@ -414,7 +414,7 @@ Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage,
     mBreakpointSpec->Clone());
 
   breakpointStorage.AddUser(breakpoint);
-  ASSERT(!breakpoint->GetLocation()->GetUserIds().empty(), "Breakpoint location should have user now!");
+  MDB_ASSERT(!breakpoint->GetLocation()->GetUserIds().empty(), "Breakpoint location should have user now!");
   return breakpoint;
 }
 
@@ -477,7 +477,7 @@ Logpoint::Logpoint(RequiredUserParameters param,
   std::unique_ptr<BreakpointSpecification> specification) noexcept
     : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::move(specification))
 {
-  ASSERT(!mBreakpointSpec->mCondition, "logpoint should not have condition!");
+  MDB_ASSERT(!mBreakpointSpec->mCondition, "logpoint should not have condition!");
   prepareExpression(logExpression);
   auto res =
     js::JsBreakpointFunction::CreateJsBreakpointFunction(js::Scripting::Get().GetContext(), mExpressionString);

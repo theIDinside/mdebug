@@ -61,7 +61,7 @@ HexIndices(u8 checksum) noexcept
   static constexpr auto SecondDigitMask = 0b0000'1111;
   const auto FirstIndex = (checksum & FirstDigitMask) >> 4;
   const auto SecondIndex = (checksum & SecondDigitMask);
-  ASSERT(FirstIndex < 16 && SecondIndex < 16, "Index out of bounds");
+  MDB_ASSERT(FirstIndex < 16 && SecondIndex < 16, "Index out of bounds");
   return std::make_pair(FirstIndex, SecondIndex);
 }
 
@@ -82,7 +82,7 @@ struct SocketResult
   constexpr u32
   bytes_read() const noexcept
   {
-    ASSERT(success == SocketResultKind::Ok, "Socket operation failed");
+    MDB_ASSERT(success == SocketResultKind::Ok, "Socket operation failed");
     const auto res = static_cast<u32>(value);
     return res;
   }
@@ -90,7 +90,7 @@ struct SocketResult
   constexpr i32
   error_number() const noexcept
   {
-    ASSERT(success == SocketResultKind::Error, "Socket operation succeeded");
+    MDB_ASSERT(success == SocketResultKind::Error, "Socket operation succeeded");
     return value;
   }
 
@@ -207,21 +207,21 @@ struct SendResult
   constexpr SystemError
   system_error() const noexcept
   {
-    ASSERT(kind == SendResultKind::SystemError, "Send Result is not a SystemError kind");
+    MDB_ASSERT(kind == SendResultKind::SystemError, "Send Result is not a SystemError kind");
     return error;
   }
 
   constexpr NAck
   not_acknowledged() const noexcept
   {
-    ASSERT(kind == SendResultKind::NotAck, "Send Result is not a NAck kind");
+    MDB_ASSERT(kind == SendResultKind::NotAck, "Send Result is not a NAck kind");
     return nack;
   }
 
   constexpr Timeout
   timed_out() const noexcept
   {
-    ASSERT(kind == SendResultKind::ResponseTimeout, "Send Result is not a timeout");
+    MDB_ASSERT(kind == SendResultKind::ResponseTimeout, "Send Result is not a timeout");
     return timeout;
   }
 };

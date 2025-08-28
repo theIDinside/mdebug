@@ -21,7 +21,7 @@
 #define STATIC_INIT_CHECK(Message)                                                                                \
   static bool constantsInitialized = false;                                                                       \
   ScopedDefer defer = []() { constantsInitialized = true; };                                                      \
-  ASSERT(!constantsInitialized, Message)
+  MDB_ASSERT(!constantsInitialized, Message)
 
 namespace mdb::js {
 

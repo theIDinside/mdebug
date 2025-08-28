@@ -199,7 +199,7 @@ To
 BitCopy(std::span<const FromRepr> from)
 {
   static_assert(std::is_trivial_v<To>, "Target of bit copy must be trivially constructible.");
-  ASSERT(from.size_bytes() >= sizeof(To),
+  MDB_ASSERT(from.size_bytes() >= sizeof(To),
     "Span must contain {} bytes but only contained {}",
     sizeof(To),
     from.size_bytes());
@@ -477,7 +477,7 @@ struct BlockSymbolIterator
   friend bool
   operator==(const BlockSymbolIterator &l, const BlockSymbolIterator &r) noexcept
   {
-    ASSERT(l.blocks_data == r.blocks_data && l.mBlockCount == r.mBlockCount,
+    MDB_ASSERT(l.blocks_data == r.blocks_data && l.mBlockCount == r.mBlockCount,
       "Expected iterators to be built from the same underlying data. If not, you're a moron.");
     return l.mCurrentBlockIndex == r.mCurrentBlockIndex && l.mSymbolIndex == r.mSymbolIndex;
   }

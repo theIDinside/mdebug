@@ -53,7 +53,7 @@ struct ResumeAction
   constexpr
   operator __ptrace_request() const noexcept
   {
-    ASSERT(mResumeType != RunType::Unknown, "Invalid ptrace resume operation");
+    MDB_ASSERT(mResumeType != RunType::Unknown, "Invalid ptrace resume operation");
     return static_cast<__ptrace_request>(mResumeType);
   }
 };

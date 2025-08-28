@@ -66,7 +66,7 @@ TraceeController::TraceeController(
 
   // Out of order events may have already created the task.
   if (auto t = Tracer::Get().TakeUninitializedTask(mTraceeInterface->TaskLeaderTid()); t) {
-    ASSERT(t->mSupervisor == nullptr, "This task {} already has a supervisor.", t->mTid);
+    MDB_ASSERT(t->mSupervisor == nullptr, "This task {} already has a supervisor.", t->mTid);
     t->InitializeThread(*mTraceeInterface, false);
     AddTask(std::move(t));
   } else {
@@ -248,14 +248,14 @@ static TPtr<r_debug_extended>
 Get_rdebug_state(ObjectFile *objectFile)
 {
   const auto rdebug_state = objectFile->FindMinimalObjectSymbol(LOADER_STATE);
-  ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
+  MDB_ASSERT(rdebug_state.has_value(), "Could not find _r_debug!");
   return rdebug_state->address.As<r_debug_extended>();
 }
 
 static Path
 interpreter_path(const Elf *elf, const ElfSection *interp) noexcept
 {
-  ASSERT(interp->mName == ".interp", "Section is not .interp: {}", interp->mName);
+  MDB_ASSERT(interp->mName == ".interp", "Section is not .interp: {}", interp->mName);
   DwarfBinaryReader reader{ elf, interp->mSectionData };
   const auto path = reader.ReadString();
   DBGLOG(core, "Path to system interpreter: {}", path);
@@ -274,11 +274,11 @@ static constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
 TPtr<r_debug_extended>
 TraceeController::InstallDynamicLoaderBreakpoints() noexcept
 {
-  ASSERT(mMainExecutable != nullptr, "No main executable for this target");
+  MDB_ASSERT(mMainExecutable != nullptr, "No main executable for this target");
   const auto mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
   auto interpreterPath = interpreter_path(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
   auto tempObjectFile = ObjectFile::CreateObjectFile(this, interpreterPath);
-  ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
+  MDB_ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
 
   const auto interpreterBase = mParsedAuxiliaryVector.mInterpreterBaseAddress;
 
@@ -416,7 +416,7 @@ TraceeController::GetOrCreateNewTask(Tid tid, bool running) noexcept
 void
 TraceeController::CreateNewTask(Tid tid, bool running) noexcept
 {
-  ASSERT(tid != 0 && !HasTask(tid), "Task {} has already been created!", tid);
+  MDB_ASSERT(tid != 0 && !HasTask(tid), "Task {} has already been created!", tid);
   auto task = TaskInfo::CreateTask(*mTraceeInterface, tid, running);
   Tracer::Get().RegisterTracedTask(task);
   AddTask(std::move(task));
@@ -493,7 +493,7 @@ TraceeController::StopAllTasks() noexcept
     if (!t.mUserVisibleStop && !t.mTracerVisibleStop) {
       DBGLOG(core, "Halting {}", t.mTid);
       const auto response = mTraceeInterface->StopTask(t);
-      ASSERT(response.is_ok(), "Failed to stop {}: {}", t.mTid, strerror(response.sys_errno));
+      MDB_ASSERT(response.is_ok(), "Failed to stop {}: {}", t.mTid, strerror(response.sys_errno));
       t.SetUserVisibleStop();
     } else if (t.mTracerVisibleStop) {
       // we're in a tracer-stop, not in a user-stop, so we need no stopping, we only need to inform ourselves that
@@ -510,7 +510,7 @@ TraceeController::StopAllTasks() noexcept
 TaskInfo *
 TraceeController::RegisterTaskWaited(WaitPidResult wait) noexcept
 {
-  ASSERT(HasTask(wait.tid), "Target did not contain task {}", wait.tid);
+  MDB_ASSERT(HasTask(wait.tid), "Target did not contain task {}", wait.tid);
   auto task = GetTaskByTid(wait.tid);
   task->SetTaskWait(wait);
   task->mTracerVisibleStop = true;
@@ -530,14 +530,14 @@ void
 TraceeController::SetProgramCounterFor(TaskInfo &task, AddrPtr addr) noexcept
 {
   auto res = mTraceeInterface->SetProgramCounter(task, addr);
-  ASSERT(res.is_ok(), "Failed to set PC for {}; {}", task.mTid, strerror(res.sys_errno));
+  MDB_ASSERT(res.is_ok(), "Failed to set PC for {}; {}", task.mTid, strerror(res.sys_errno));
   task.mInstructionPointerDirty = false;
 }
 
 void
 TraceeController::SetTaskVmInfo(Tid tid, TaskVMInfo vmInfo) noexcept
 {
-  ASSERT(HasTask(tid), "Unknown task {}", tid);
+  MDB_ASSERT(HasTask(tid), "Unknown task {}", tid);
   mThreadInfos[tid] = vmInfo;
 }
 
@@ -729,7 +729,7 @@ TraceeController::CheckBreakpointLocationsForSymbolFile(
     case DapBreakpointType::instruction: {
       const auto &spec = *specPtr->uInstruction;
       auto addr_opt = ToAddress(spec.mInstructionReference);
-      ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
+      MDB_ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
       const auto addr = addr_opt.value();
       if (symbolFile.ContainsProgramCounter(addr)) {
         if (auto res = GetOrCreateBreakpointLocation(addr); res.is_expected()) {
@@ -772,7 +772,7 @@ TraceeController::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &
         for (auto &&loc : newLocations) {
           auto newUser = user->CloneBreakpoint(mUserBreakpoints, *this, loc);
           mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mTaskLeader, "new", {}, newUser });
-          ASSERT(!loc->GetUserIds().empty(), "location has no user!");
+          MDB_ASSERT(!loc->GetUserIds().empty(), "location has no user!");
         }
         newLocations.clear();
       }
@@ -974,8 +974,8 @@ TraceeController::SetSourceBreakpoints(
 void
 TraceeController::SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept
 {
-  ASSERT(std::ranges::all_of(
-           breakpoints, [](const auto &item) { return item.mKind == DapBreakpointType::instruction; }),
+  MDB_ASSERT(std::ranges::all_of(
+               breakpoints, [](const auto &item) { return item.mKind == DapBreakpointType::instruction; }),
     "Require all bps be instruction breakpoints");
   std::vector<BreakpointSpecification> add{};
   std::vector<BreakpointSpecification> remove{};
@@ -1014,7 +1014,7 @@ TraceeController::SetInstructionBreakpoints(const Set<BreakpointSpecification> &
 
   for (const auto &bp : remove) {
     auto iter = mUserBreakpoints.mInstructionBreakpoints.find(bp);
-    ASSERT(iter != std::end(mUserBreakpoints.mInstructionBreakpoints), "Expected to find breakpoint");
+    MDB_ASSERT(iter != std::end(mUserBreakpoints.mInstructionBreakpoints), "Expected to find breakpoint");
     mUserBreakpoints.RemoveUserBreakpoint(iter->second);
     mUserBreakpoints.mInstructionBreakpoints.erase(iter);
   }
@@ -1041,7 +1041,7 @@ TraceeController::SetFunctionBreakpoints(const Set<BreakpointSpecification> &bre
 
   for (const auto &to_remove : remove) {
     auto iter = mUserBreakpoints.mFunctionBreakpoints.find(to_remove);
-    ASSERT(iter != std::end(mUserBreakpoints.mFunctionBreakpoints), "Expected to find fn breakpoint in map");
+    MDB_ASSERT(iter != std::end(mUserBreakpoints.mFunctionBreakpoints), "Expected to find fn breakpoint in map");
 
     for (auto id : iter->second) {
       mUserBreakpoints.RemoveUserBreakpoint(id);
@@ -1106,7 +1106,7 @@ TraceeController::TryTerminateGracefully() noexcept
 static inline void
 CreateTraceEventFromStopped(TraceEvent *event, TraceeController &tc, TaskInfo &t) noexcept
 {
-  ASSERT(t.mLastWaitStatus.ws != WaitStatusKind::NotKnown,
+  MDB_ASSERT(t.mLastWaitStatus.ws != WaitStatusKind::NotKnown,
     "When creating a trace event from a wait status event, we must already know what kind it is.");
 
   const auto pc = tc.CacheAndGetPcFor(t);
@@ -1143,7 +1143,7 @@ NativeInitCloneEvent(TraceEvent &evt, TraceeController &control) noexcept
   control.CacheRegistersFor(*evt.mTask);
   pid_t np = -1;
   // we should only ever hit this when running debugging a native-hosted session
-  ASSERT(
+  MDB_ASSERT(
     control.GetInterface().mFormat == TargetFormat::Native, "We somehow ended up heer while debugging a remote");
   auto *regs = cloningTask.NativeRegisters();
   const auto orig_rax = regs->orig_rax;
@@ -1153,7 +1153,7 @@ NativeInitCloneEvent(TraceEvent &evt, TraceeController &control) noexcept
     const u64 tls = sys_arg_n<5>(*regs);
     np = control.ReadType(child_tid);
 
-    ASSERT(!control.HasTask(np), "Tracee controller already has task {} !", np);
+    MDB_ASSERT(!control.HasTask(np), "Tracee controller already has task {} !", np);
     return TraceEvent::InitCloneEvent(&evt,
       { control.TaskLeaderTid(), cloningTask.mTid, 5, {} },
       TaskVMInfo{ .stack_low = stack_ptr, .stack_size = 0, .tls = tls },
@@ -1211,7 +1211,7 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
   case WaitStatusKind::Forked: {
     Tid newChild = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &newChild);
-    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    MDB_ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
     DBGLOG(core, "[{} forked]: new process after fork {}", info.mTid, newChild);
     TraceEvent::InitForkEvent_(event, { mTaskLeader, info.mTid, 5, {} }, newChild, {});
     return event;
@@ -1219,7 +1219,7 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
   case WaitStatusKind::VForked: {
     Tid new_child = 0;
     auto result = ptrace(PTRACE_GETEVENTMSG, info.mTid, nullptr, &new_child);
-    ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    MDB_ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
     DBGLOG(core, "[vfork]: new process after fork {}", new_child);
     TraceEvent::InitVForkEvent_(event, { mTaskLeader, info.mTid, 5, {} }, new_child, {});
     return event;
@@ -1244,7 +1244,7 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
     TODO("WaitStatusKind::NotKnown");
     break;
   }
-  ASSERT(false, "Unknown wait status!");
+  MDB_ASSERT(false, "Unknown wait status!");
   MIDAS_UNREACHABLE
 }
 
@@ -1305,7 +1305,7 @@ TraceeController::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, boo
 
   // todo(simon): optimization possible; insert in a sorted fashion instead.
   std::sort(mSymbolFiles.begin(), mSymbolFiles.end(), [&symbolFile](auto &&a, auto &&b) {
-    ASSERT(a->LowProgramCounter() != b->LowProgramCounter(),
+    MDB_ASSERT(a->LowProgramCounter() != b->LowProgramCounter(),
       "[{}]: Added object files with identical address ranges. We screwed something up, for sure\na={}\nb={}",
       symbolFile->GetObjectFilePath().c_str(),
       a->GetObjectFilePath().c_str(),
@@ -1320,7 +1320,7 @@ void
 TraceeController::RegisterObjectFile(
   TraceeController *tc, std::shared_ptr<ObjectFile> &&obj, bool isMainExecutable, AddrPtr relocatedBase) noexcept
 {
-  ASSERT(obj != nullptr, "Object file is null");
+  MDB_ASSERT(obj != nullptr, "Object file is null");
   RegisterSymbolFile(SymbolFile::Create(tc, std::move(obj), relocatedBase), isMainExecutable);
 }
 
@@ -1333,14 +1333,14 @@ TraceeController::SetAuxiliaryVector(ParsedAuxiliaryVector data) noexcept
 void
 TraceeController::ReadAuxiliaryVector(TaskInfo &task)
 {
-  ASSERT(task.mLastWaitStatus.ws == WaitStatusKind::Execed,
+  MDB_ASSERT(task.mLastWaitStatus.ws == WaitStatusKind::Execed,
     "Reading AUXV using this function does not make sense if's not *right* after an EXEC");
   CacheRegistersFor(task);
   TPtr<i64> stackPointer = task.regs.registers->rsp;
   const i64 argc = ReadType(stackPointer);
 
   stackPointer += argc + 1;
-  ASSERT(ReadType(stackPointer) == 0, "Expected null terminator after argv at {}", stackPointer);
+  MDB_ASSERT(ReadType(stackPointer) == 0, "Expected null terminator after argv at {}", stackPointer);
   stackPointer++;
   auto envp = stackPointer.As<const char *>();
   // we're at the envp now, that pointer list is also terminated by a nullptr
@@ -1494,7 +1494,7 @@ TraceeController::CacheRegistersFor(TaskInfo &t, bool forceRefresh) noexcept
 {
   if (t.mRegisterCacheDirty || forceRefresh) {
     const auto result = mTraceeInterface->ReadRegisters(t);
-    ASSERT(result.is_ok(), "Failed to read register file for {}; {}", t.mTid, strerror(result.sys_errno));
+    MDB_ASSERT(result.is_ok(), "Failed to read register file for {}; {}", t.mTid, strerror(result.sys_errno));
     t.mRegisterCacheDirty = false;
     t.mInstructionPointerDirty = false;
   }
@@ -1519,7 +1519,7 @@ TraceeController::TaskExit(TaskInfo &task, bool notify) noexcept
 {
   Tid tid = task.mTid;
   auto it = FindByTid(mThreads, tid);
-  ASSERT(it != std::end(mThreads), "{} couldn't be found in this process {}", tid, mTaskLeader);
+  MDB_ASSERT(it != std::end(mThreads), "{} couldn't be found in this process {}", tid, mTaskLeader);
 
   task.exited = true;
 
@@ -1695,7 +1695,7 @@ TraceeController::SetPendingWaitstatus(WaitPidResult waitResult) noexcept
 {
   const auto tid = waitResult.tid;
   auto task = GetTaskByTid(tid);
-  ASSERT(task != nullptr, "couldn't find task {}", tid);
+  MDB_ASSERT(task != nullptr, "couldn't find task {}", tid);
   task->mLastWaitStatus = waitResult.ws;
   task->mTracerVisibleStop = true;
   task->mHasProcessedStop = false;
@@ -1750,7 +1750,7 @@ TraceeController::HandleThreadCreated(
     CreateNewTask(e.mThreadId, true);
     task = GetTaskByTid(e.mThreadId);
     if (!registerData.empty()) {
-      ASSERT(*GetInterface().mArchInfo != nullptr,
+      MDB_ASSERT(*GetInterface().mArchInfo != nullptr,
         "Passing raw register contents with no architecture description doesn't work.");
       task->StoreToRegisterCache(registerData);
       for (const auto &p : registerData) {
@@ -1867,7 +1867,7 @@ TraceeController::PostExec(const std::string &exe) noexcept
   programHeaderContents.resize(parsedAux.mProgramHeaderEntrySize * parsedAux.mProgramHeaderCount, 0);
   const auto readResult = mTraceeInterface->ReadBytes(
     parsedAux.mProgramHeaderPointer, programHeaderContents.size(), programHeaderContents.data());
-  ASSERT(readResult.WasSuccessful(), "Failed to read program headers");
+  MDB_ASSERT(readResult.WasSuccessful(), "Failed to read program headers");
 
   Elf64_Phdr *cast = (Elf64_Phdr *)programHeaderContents.data();
   AddrPtr baseAddress = nullptr;
@@ -1908,7 +1908,7 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
   // their subscribed event handlers will return `false`).
   using tc::ProcessedStopEvent;
 
-  ASSERT(!mIsExited, "Supervisor exited already.");
+  MDB_ASSERT(!mIsExited, "Supervisor exited already.");
 
   const auto arch = GetInterface().mArchInfo;
   auto task = evt->mTask;
@@ -1921,10 +1921,10 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
     DBGLOG(core, "task {} created in stop handler because target doesn't support thread events", evt->mTaskId);
     evt->mTask = task = GetOrCreateNewTask(evt->mTaskId, false);
   }
-  ASSERT(task, "no task when handling a task event?");
+  MDB_ASSERT(task, "no task when handling a task event?");
   task->mLastWaitStatus.signal = evt->uSignal;
   if (!evt->mRegisterData.empty()) {
-    ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
+    MDB_ASSERT(*arch != nullptr, "Passing raw register contents with no architecture description doesn't work.");
     task->StoreToRegisterCache(evt->mRegisterData);
     for (const auto &p : evt->mRegisterData) {
       if (p.first == 16) {

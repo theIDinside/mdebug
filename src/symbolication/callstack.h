@@ -90,12 +90,12 @@ public:
     if constexpr (std::is_same_v<Type, sym::FunctionSymbol> || std::is_same_v<Type, const sym::FunctionSymbol>) {
       mFrameType = FrameType::Full;
       mSymbolUnion.uFullSymbol = sym_info;
-      ASSERT(mSymbolUnion.uFullSymbol != nullptr,
+      MDB_ASSERT(mSymbolUnion.uFullSymbol != nullptr,
         "Setting to nullptr when expecting full symbol information to exist.");
     } else if constexpr (std::is_same_v<Type, MinSymbol> || std::is_same_v<Type, const MinSymbol>) {
       mFrameType = FrameType::ElfSymbol;
       mSymbolUnion.uMinSymbol = sym_info;
-      ASSERT(
+      MDB_ASSERT(
         mSymbolUnion.uMinSymbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
     } else if constexpr (std::is_null_pointer_v<T>) {
       mFrameType = FrameType::Unknown;

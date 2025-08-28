@@ -281,7 +281,7 @@ public:
       JSValue symbol = JS_GetPropertyStr(context, global, "Symbol");
       JSValue toPrimitive = JS_GetPropertyStr(context, symbol, "toPrimitive");
 
-      ASSERT(!JS_IsUndefined(toPrimitive), "Failed to configure toPrimitive");
+      MDB_ASSERT(!JS_IsUndefined(toPrimitive), "Failed to configure toPrimitive");
       BindingType::DefineToPrimitive(context, prototype, JS_ValueToAtom(context, toPrimitive));
       JS_FreeValue(context, global);
       JS_FreeValue(context, symbol);

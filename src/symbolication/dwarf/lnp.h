@@ -88,7 +88,7 @@ struct FileEntryIndexVector
   Add(u32 fileIndex) noexcept
   {
     for (auto &e : mIndices) {
-      ASSERT(fileIndex != e, "File index for file already exists: {}", fileIndex);
+      MDB_ASSERT(fileIndex != e, "File index for file already exists: {}", fileIndex);
       if (e == EMPTY_VALUE) {
         e = fileIndex;
         return;

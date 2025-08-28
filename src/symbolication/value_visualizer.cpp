@@ -103,7 +103,7 @@ std::vector<Ref<Value>>
 ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noexcept
 {
   auto &value = *context.GetValue();
-  ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
+  MDB_ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
   std::vector<Ref<Value>> results;
   const auto arraySize = value.GetType()->ArraySize();
   Type *elementsType = value.GetType()->TypeDescribingLayoutOfThis();
@@ -329,7 +329,7 @@ std::optional<std::pmr::string>
 PrimitiveVisualizer::Serialize(
   const Value &value, std::string_view name, int variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
-  ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
+  MDB_ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto byte_span = value.MemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
@@ -353,7 +353,7 @@ DefaultStructVisualizer::Serialize(
   const Value &value, std::string_view name, int variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
 
-  ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
+  MDB_ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto &t = *value.GetType();
   std::pmr::string result{ allocator };
   FormatAndReturn(result,

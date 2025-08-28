@@ -66,10 +66,10 @@ public:
   T *
   MmapFile(std::optional<u64> opt_size, bool read_only) noexcept
   {
-    ASSERT(IsOpen(), "Backing file not open: {}", GetPath().c_str());
+    MDB_ASSERT(IsOpen(), "Backing file not open: {}", GetPath().c_str());
     const auto size = opt_size.value_or(FileSize());
     auto ptr = (T *)mmap(nullptr, size, read_only ? PROT_READ : PROT_READ | PROT_WRITE, MAP_PRIVATE, Get(), 0);
-    ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, GetPath().c_str());
+    MDB_ASSERT(ptr != MAP_FAILED, "Failed to mmap buffer of size {} from file {}", size, GetPath().c_str());
     return ptr;
   }
 

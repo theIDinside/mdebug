@@ -27,8 +27,8 @@ ElfSection::end() const noexcept
 const u8 *
 ElfSection::Into(AddrPtr virtualMemoryAddress) const noexcept
 {
-  ASSERT(virtualMemoryAddress >= address, "Virtual Memory address {} is < {}", virtualMemoryAddress, address);
-  ASSERT((virtualMemoryAddress - address) < Size(),
+  MDB_ASSERT(virtualMemoryAddress >= address, "Virtual Memory address {} is < {}", virtualMemoryAddress, address);
+  MDB_ASSERT((virtualMemoryAddress - address) < Size(),
     "Virtual memory address {} is > {}",
     virtualMemoryAddress,
     address + Size());
@@ -45,7 +45,7 @@ ElfSection::GetCString(u64 offset) const noexcept
 u64
 ElfSection::GetPointerOffset(const u8 *insideRangePointer) const noexcept
 {
-  ASSERT(insideRangePointer >= mSectionData->data(),
+  MDB_ASSERT(insideRangePointer >= mSectionData->data(),
     "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
     (void *)insideRangePointer,
     (void *)mSectionData->data());
@@ -55,7 +55,7 @@ ElfSection::GetPointerOffset(const u8 *insideRangePointer) const noexcept
 const u8 *
 ElfSection::GetPointer(u64 offset) const noexcept
 {
-  ASSERT(offset < mSectionData->size_bytes(),
+  MDB_ASSERT(offset < mSectionData->size_bytes(),
     "Offset {} is outside of section of size {}",
     offset,
     mSectionData->size_bytes());
@@ -65,7 +65,7 @@ ElfSection::GetPointer(u64 offset) const noexcept
 u64
 ElfSection::RemainingBytes(const u8 *ptr) const noexcept
 {
-  ASSERT(ptr >= mSectionData->data(),
+  MDB_ASSERT(ptr >= mSectionData->data(),
     "parameter `inside_ptr` ({:p}) not >= section pointer ({:p})",
     (void *)ptr,
     (void *)mSectionData->data());
@@ -157,7 +157,7 @@ const ElfSection *
 Elf::GetSectionInfallible(std::string_view name) const noexcept
 {
   auto sec = GetSection(name);
-  ASSERT(sec != nullptr, "Expected {} not to be null in object file!", name);
+  MDB_ASSERT(sec != nullptr, "Expected {} not to be null in object file!", name);
   return sec;
 }
 

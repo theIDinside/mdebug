@@ -410,7 +410,7 @@ public:
 
   // It's fine to move LeakedRef and it's ok to destroy LeakedRef in non-friend contexts (because in those
   // contexts, you transform the leakedref to a ref counted pointer via .Take() or direct conversion)
-  constexpr ~LeakedRef() noexcept { ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
+  constexpr ~LeakedRef() noexcept { MDB_ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
   constexpr LeakedRef(LeakedRef &&other) noexcept : mUnManged(nullptr) { std::swap(mUnManged, other.mUnManged); }
 
   constexpr LeakedRef(const LeakedRef &) noexcept = delete;

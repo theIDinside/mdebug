@@ -107,7 +107,7 @@ LineStep::LineStep(TraceeController &ctrl, TaskInfo &task) noexcept
   mStartFrame = *callstack.GetFrameAtLevel(0);
   const auto fpc = mStartFrame.FramePc();
   SymbolFile *symbolFile = mSupervisor.FindObjectByPc(fpc);
-  ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", fpc);
+  MDB_ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", fpc);
 
   auto compilationUnits = symbolFile->GetCompilationUnits(fpc);
   bool found = false;
@@ -192,7 +192,7 @@ LineStep::UpdateStepped() noexcept
   // if we're in the same frame, we single step
 
   if (frame.GetFrameType() == sym::FrameType::Full && SameSymbol(frame, mStartFrame)) {
-    ASSERT(frame.FrameLevel() == mStartFrame.FrameLevel(),
+    MDB_ASSERT(frame.FrameLevel() == mStartFrame.FrameLevel(),
       "We haven't implemented support where recursion actually creates multiple frames that look the same.");
     auto result = frame.GetLineTableEntry();
     const LineTableEntry *lte = result.second;
@@ -316,7 +316,7 @@ StepInto::Create(TraceeController &ctrl, TaskInfo &task) noexcept
   const auto startFrame = *callstack.GetFrameAtLevel(0);
   const auto framePc = startFrame.FramePc();
   SymbolFile *symbolFile = ctrl.FindObjectByPc(framePc);
-  ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", framePc);
+  MDB_ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", framePc);
 
   auto compilationUnits = symbolFile->GetCompilationUnits(framePc);
 

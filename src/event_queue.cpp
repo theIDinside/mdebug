@@ -29,7 +29,7 @@ TraceEvent::TraceEvent(TaskInfo &task) noexcept
 void
 TraceEvent::SetSteppedOverBreakpointNeedsResume(tc::RunType resumeType) noexcept
 {
-  ASSERT(!mPostBreakpointOverStep, "Resume action already set for this trace event!");
+  MDB_ASSERT(!mPostBreakpointOverStep, "Resume action already set for this trace event!");
   mPostBreakpointOverStep = resumeType;
 }
 
@@ -167,7 +167,7 @@ void
 TraceEvent::InitVForkEvent_(
   TraceEvent *evt, const EventDataParam &param, Pid newProcessId, RegisterData &&regData) noexcept
 {
-  ASSERT(param.tid.has_value(), "param must have tid value");
+  MDB_ASSERT(param.tid.has_value(), "param must have tid value");
   INIT_EVENT(evt, param, regData)
   evt->mEvent = ForkEvent{ { .mThreadId = param.tid.value() }, newProcessId, true };
   evt->mEventType = TracerEventType::VFork;
@@ -208,7 +208,7 @@ TraceEvent::InitProcessExitEvent(
 void
 TraceEvent::InitSignal(TraceEvent *evt, const EventDataParam &param, RegisterData &&regData) noexcept
 {
-  ASSERT(param.sig_or_code.has_value(), "Expecting a terminating signal to have a signal value");
+  MDB_ASSERT(param.sig_or_code.has_value(), "Expecting a terminating signal to have a signal value");
   INIT_EVENT(evt, param, regData)
   evt->mEvent = Signal{ { param.target }, param.sig_or_code.value() };
   evt->mEventType = TracerEventType::Signal;
@@ -310,7 +310,7 @@ EventSystem::Initialize() noexcept
   MUST_HOLD(pipe(internal) != -1, "Failed to open pipe")
 
   for (auto read : { commands[0], dbg[0], init[0], internal[0] }) {
-    ASSERT(fcntl(read, F_SETFL, O_NONBLOCK) != -1, "failed to set read as non-blocking.");
+    MDB_ASSERT(fcntl(read, F_SETFL, O_NONBLOCK) != -1, "failed to set read as non-blocking.");
   }
 
   EventSystem::sEventSystem = new EventSystem{ commands, dbg, init, internal };
@@ -325,7 +325,7 @@ EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, ui::UIComman
   mCommands.push_back(cmd);
   DBGLOG(core, "notify of new command...");
   int writeValue = write(mCommandEvents[1], "+", 1);
-  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
@@ -334,7 +334,7 @@ EventSystem::PushDebuggerEvent(TraceEvent *event) noexcept
   std::lock_guard lock(mTraceEventGuard);
   mTraceEvents.push_back(event);
   int writeValue = write(mDebuggerEvents[1], "+", 1);
-  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
@@ -351,7 +351,7 @@ EventSystem::ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept
   }
   events.clear();
   int writeValue = write(mDebuggerEvents[1], "+", 1);
-  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
@@ -360,7 +360,7 @@ EventSystem::PushInitEvent(TraceEvent *event) noexcept
   std::lock_guard lock(mTraceEventGuard);
   mInitEvent.push_back(event);
   int writeValue = write(mInitEvents[1], "+", 1);
-  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
@@ -369,7 +369,7 @@ EventSystem::PushInternalEvent(InternalEvent event) noexcept
   std::lock_guard lock(mInternalEventGuard);
   mInternal.push_back(event);
   int writeValue = write(mInternalEvents[1], "+", 1);
-  ASSERT(writeValue != -1, "Failed to write notification to pipe");
+  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 bool
@@ -377,7 +377,7 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
 {
   int ret = poll(mPollDescriptors, PollDescriptorsCount(), -1);
   mPollFailures++;
-  ASSERT(mPollFailures < 10, "failed to poll event system");
+  MDB_ASSERT(mPollFailures < 10, "failed to poll event system");
   if (ret == 0) {
     return false;
   }
@@ -393,28 +393,28 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
     char buffer[128];
     if (pfd.fd == mCommandEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
+      MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mCommandsGuard);
       std::ranges::transform(
         mCommands, std::back_inserter(write), [](ui::UICommand *cmd) { return ApplicationEvent{ cmd }; });
       mCommands.clear();
     } else if (pfd.fd == mDebuggerEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
+      MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(
         mTraceEvents, std::back_inserter(write), [](TraceEvent *event) { return ApplicationEvent{ event }; });
       mTraceEvents.clear();
     } else if (pfd.fd == mInitEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
+      MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mTraceEventGuard);
       std::ranges::transform(
         mInitEvent, std::back_inserter(write), [](TraceEvent *event) { return ApplicationEvent{ event, true }; });
       mInitEvent.clear();
     } else if (pfd.fd == mInternalEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
-      ASSERT(bytesRead != -1, "Failed to flush notification pipe");
+      MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mInternalEventGuard);
       std::ranges::transform(
         mInternal, std::back_inserter(write), [](InternalEvent event) { return ApplicationEvent{ event }; });
