@@ -2,7 +2,15 @@ cmake_minimum_required(VERSION 3.28)
 project(midas LANGUAGES CXX C ASM)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 23)
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 23)
+endif()
+
+# Because `CMAKE_CXX_STANDARD_REQUIRED ON` does not enforce this for us.
+if(CMAKE_CXX_STANDARD LESS 23)
+  message(FATAL_ERROR "mdb requires c++ stancard >= 23 but was CMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}")
+endif()
+
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug symbols" OFF)
