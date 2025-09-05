@@ -1,4 +1,4 @@
-const { getStackFramePc, prettyJson } = require('./client')
+const { prettyJson } = require('./client')
 const { spawnSync } = require('child_process')
 const { assert, assert_eq } = require('./utils')
 
@@ -18,7 +18,7 @@ function getTextSection(objdumpOutput) {
       if (regex.test(lines[i])) res.push(lines[i].trimStart().trimEnd())
     }
   }
-  return res;
+  return res
 }
 
 function processObjdumpLines(insts) {
@@ -87,21 +87,21 @@ async function disasm_verify(objdump, client, pc, insOffset, insCount) {
   compareDisassembly(pc, objdumpSpan, disassembly.body.instructions)
 }
 
-async function backAndForward(DA) {
-  const objdumped = spawnSync('objdump', ['-d', DA.buildDirFile('stackframes')]).stdout.toString()
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
+async function backAndForward(debugAdapter) {
+  const objdumped = spawnSync('objdump', ['-d', debugAdapter.buildDirFile('stackframes')]).stdout.toString()
   const insts_of_interest = getTextSection(objdumped)
   const objdump = processObjdumpLines(insts_of_interest)
-  await DA.startRunToMain(DA.buildDirFile('stackframes'))
-  const threads = await DA.threads()
-  const frames = await DA.stackTrace(threads[0].id)
-  const pc = getStackFramePc(frames, 0)
-  await disasm_verify(objdump, DA, pc, 0, 10)
-  await disasm_verify(objdump, DA, pc, 5, 10)
-  await disasm_verify(objdump, DA, pc, -5, 10)
-  await disasm_verify(objdump, DA, pc, -30, 10)
-  await disasm_verify(objdump, DA, pc, -50, 10)
-  await disasm_verify(objdump, DA, pc, -100, 200)
-  await disasm_verify(objdump, DA, pc, 10, 2000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'))
+  const threads = await debugAdapter.threads()
+  const frames = await threads[0].stacktrace()
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, 0, 10)
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, 5, 10)
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, -5, 10)
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, -30, 10)
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, -50, 10)
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, -100, 200)
+  await disasm_verify(objdump, debugAdapter, frames[0].pc, 10, 2000)
 }
 
 const tests = {

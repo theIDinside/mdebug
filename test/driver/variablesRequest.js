@@ -475,7 +475,7 @@ async function shadowed(da) {
  */
 async function resolvePointeeValue(da) {
   const app = da.buildDirFile('pointer')
-  await da.startRunToMain(app, [], 500)
+  await da.startRunToMain(app, 500)
   const bplocs = allBreakpointIdentifiers(subjects.variablesRequest.pointer)
   const bps = await da.setBreakpoints(
     subjects.variablesRequest.pointer,
