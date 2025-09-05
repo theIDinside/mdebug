@@ -76,7 +76,25 @@ template <typename T> struct Enum
 {
   static constexpr u32 Count() noexcept;
   static constexpr std::optional<T> FromInt(int value) noexcept;
+  static constexpr std::string_view ToString(T EnumValue) noexcept;
 };
+
+// This namespace is needed, because when it's a static function, we get not template type deduction.
+namespace Enums {
+template <typename T>
+std::string_view
+ToString(T enumValue) noexcept
+{
+  return Enum<T>::ToString(enumValue);
+}
+
+template <typename T>
+std::optional<T>
+FromInt(int value) noexcept
+{
+  return Enum<T>::FromInt(value);
+}
+} // namespace Enums
 
 #define ENUM_FMT(ENUM_TYPE, FOR_EACH_FN, CASE_FN)                                                                 \
   template <> struct std::formatter<ENUM_TYPE> : public Default<ENUM_TYPE>                                        \

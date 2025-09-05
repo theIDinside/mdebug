@@ -151,7 +151,10 @@ Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noe
     mProcessId);
 }
 
-ExitedEvent::ExitedEvent(SessionId pid, int exitCode) noexcept : UIResult{ pid }, mExitCode(exitCode) {}
+ExitedEvent::ExitedEvent(SessionId sessionId, int exitCode) noexcept : UIResult{ sessionId }, mExitCode(exitCode)
+{
+}
+
 std::pmr::string
 ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
@@ -161,12 +164,13 @@ ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
     mExitCode);
 }
 
-ThreadEvent::ThreadEvent(SessionId pid, ThreadReason reason, Tid tid) noexcept
-    : UIResult{ pid }, mReason(reason), mTid(tid)
+ThreadEvent::ThreadEvent(SessionId sessionId, ThreadReason reason, Tid tid) noexcept
+    : UIResult{ sessionId }, mReason(reason), mTid(tid)
 {
 }
-ThreadEvent::ThreadEvent(SessionId pid, const Clone &event) noexcept
-    : UIResult{ pid }, mReason(ThreadReason::Started), mTid(event.mChildTid)
+
+ThreadEvent::ThreadEvent(SessionId sessionId, const Clone &event) noexcept
+    : UIResult{ sessionId }, mReason(ThreadReason::Started), mTid(event.mChildTid)
 {
 }
 
@@ -181,14 +185,14 @@ ThreadEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
     mTid);
 }
 
-StoppedEvent::StoppedEvent(SessionId pid,
+StoppedEvent::StoppedEvent(SessionId sessionId,
   StoppedReason reason,
   std::string_view description,
   Tid tid,
   std::vector<int> breakpointIds,
   std::string_view text,
   bool allStopped) noexcept
-    : UIResult{ pid }, mReason(reason), mDescription(description), mTid(tid),
+    : UIResult{ sessionId }, mReason(reason), mDescription(description), mTid(tid),
       mBreakpointIds(std::move(breakpointIds)), mText(text), mAllThreadsStopped(allStopped)
 {
 }
@@ -220,11 +224,11 @@ StoppedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) cons
   }
 }
 
-BreakpointEvent::BreakpointEvent(SessionId pid,
+BreakpointEvent::BreakpointEvent(SessionId sessionId,
   std::string_view reason,
   std::optional<std::string> message,
   const UserBreakpoint *breakpoint) noexcept
-    : UIResult{ pid }, mReason(reason), mMessage(std::move(message)), mBreakpoint(breakpoint)
+    : UIResult{ sessionId }, mReason(reason), mMessage(std::move(message)), mBreakpoint(breakpoint)
 {
 }
 

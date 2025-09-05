@@ -4,7 +4,7 @@
 
 namespace mdb {
 
-enum class BreakpointBehavior
+enum class BreakpointBehavior : std::uint8_t
 {
   StopAllThreadsWhenHit,
   StopOnlyThreadThatHit

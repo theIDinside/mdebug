@@ -287,7 +287,7 @@ EventSystem::InitWaitStatusManager() noexcept
 
   mSignalFd = signalfd(-1, &mask, 0);
   VERIFY(
-    mSignalFd != -1, "Must be able to open signal file descriptor. WaitStatus system can't function otherwise.");
+    mSignalFd != -1, "Must be able to open signal file descriptor. StopStatus system can't function otherwise.");
   mPollDescriptors[mCurrentPolledFdsCount++] = { mSignalFd, POLLIN, 0 };
   // Include the signalfd in the polling, essentially "initializing" the wait system as it will now start reporting
   // events
@@ -435,7 +435,16 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
           if (WIFSTOPPED(status.mStatus)) {
             const auto res = WaitResultToTaskWaitResult(status.mProcessId, status.mStatus);
             auto *traceEvent = Tracer::Get().ConvertWaitEvent(res);
-            write.push_back(ApplicationEvent{ traceEvent });
+            // sometimes during clone or fork system calls, we may be getting a waitpid event from a task we not
+            // have fully materialized yet, but we've seen the parent perform the syscall, so there's an actual
+            // event to handle it, before this one, but it means it wasn't processed yet, so it couldn't convert to
+            // TraceEvent here.
+            if (!traceEvent) {
+              write.push_back(ApplicationEvent{ WaitEvent{ .mWaitResult = res, .mCpuCore = 0 } });
+            } else {
+              MDB_ASSERT(traceEvent, "Expected trace event to not be null");
+              write.push_back(ApplicationEvent{ traceEvent });
+            }
           } else if (WIFEXITED(status.mStatus)) {
             for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
               for (const auto &entry : supervisor->GetThreads()) {
@@ -452,7 +461,7 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
 
           } else if (WIFSIGNALED(status.mStatus)) {
             const auto signalledEvent = WaitPidResult{ .tid = status.mProcessId,
-              .ws = WaitStatus{ .ws = WaitStatusKind::Signalled, .signal = WTERMSIG(status.mStatus) } };
+              .ws = StopStatus{ .ws = StopKind::Signalled, .signal = WTERMSIG(status.mStatus) } };
             write.push_back(ApplicationEvent{ WaitEvent{ signalledEvent, 0 } });
           } else {
             PANIC("Unknown wait status event");

@@ -226,6 +226,7 @@ public:
   void SetTtyOut(int fd, SessionId pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
   TraceeController *GetSupervisor(SessionId pid) const noexcept;
+  std::span<const SupervisorEntry> Supervisors() const noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
   void FlushEvents() noexcept;
@@ -252,7 +253,7 @@ struct StandardIo
 {
   int mFd;
   // The process ID that outputs to it's standard IO
-  SessionId mPid;
+  SessionId mSessionId;
 };
 
 struct PollState

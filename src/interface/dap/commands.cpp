@@ -31,6 +31,7 @@
 
 // std
 #include <algorithm>
+#include <filesystem>
 #include <iterator>
 #include <memory_resource>
 #include <optional>
@@ -1210,12 +1211,13 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
 
 struct LaunchResponse final : public UIResult
 {
-  LaunchResponse(SessionId sessionId, std::optional<SessionId> newProcess, bool success, UICommandPtr cmd) noexcept
-      : UIResult{ success, cmd }, mProcessId{ newProcess }, mRequestingSessionId{ sessionId } {};
+  LaunchResponse(std::optional<SessionId> newProcess, bool success, UICommandPtr cmd) noexcept
+      : UIResult{ success, cmd }, mProcessId{ newProcess }
+  {
+  }
   ~LaunchResponse() noexcept override = default;
 
   std::optional<SessionId> mProcessId;
-  SessionId mRequestingSessionId;
 
   std::pmr::string
   Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final
@@ -1226,30 +1228,55 @@ struct LaunchResponse final : public UIResult
     VERIFY(mProcessId.has_value(), "Failed to launch binary, but not responding with ErrorResponse?");
 
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {}}}}})",
+      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {} }}}})",
       seq,
       mRequestSeq,
-      mRequestingSessionId,
+      mSessionId,
       *mProcessId);
     return result;
   }
 };
 
-struct Launch final : public UICommand
+struct Launch : public UICommand
 {
-  Launch(UICommandArg arg,
-    SessionId id,
+  Launch(UICommandArg arg, bool stopOnEntry, std::optional<BreakpointBehavior> breakpointBehavior) noexcept
+      : UICommand{ std::move(arg) }, mStopOnEntry(stopOnEntry), mBreakpointBehavior(breakpointBehavior)
+  {
+  }
+  ~Launch() noexcept override = default;
+
+  static ui::UICommand *CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept;
+
+  bool mStopOnEntry;
+  std::optional<BreakpointBehavior> mBreakpointBehavior;
+
+  DEFINE_NAME("launch"sv);
+  RequiredArguments({ "type"sv });
+  DefineArgTypes({ "type"sv, FieldType::Enumeration, { "native"sv, "rr"sv } });
+};
+
+struct NativeLaunch final : public Launch
+{
+  // Native launch
+  NativeLaunch(UICommandArg arg,
     bool stopOnEntry,
-    Path program,
-    std::pmr::vector<std::pmr::string> &&program_args,
-    std::optional<BreakpointBehavior> breakpointBehavior) noexcept
-      : UICommand{ std::move(arg) }, mStopOnEntry{ stopOnEntry }, mProgram{ std::move(program) },
-        mProgramArgs{ std::move(program_args) }, mBreakpointBehavior{ breakpointBehavior },
-        mRequestingSessionId{ id }
+    std::optional<BreakpointBehavior> breakpointBehavior,
+    std::string_view program,
+    std::pmr::vector<std::pmr::string> programArgs,
+    std::pmr::vector<std::pmr::string> environVars,
+    std::pmr::string currentWorkingDir) noexcept
+      : Launch{ std::move(arg), stopOnEntry, breakpointBehavior, }, mProgram{ program },
+        mCurrentWorkingDir{ std::move(currentWorkingDir) }, mEnvironmenVariables{ std::move(environVars) },
+        mProgramArgs{ std::move(programArgs) }
   {
   }
 
-  ~Launch() noexcept override = default;
+  ~NativeLaunch() noexcept final = default;
+
+  static ui::UICommand *CreateRequest(UICommandArg arg,
+    bool stopOnEntry,
+    std::optional<BreakpointBehavior> behaviorSetting,
+    const mdbjson::JsonValue &args) noexcept;
 
   UIResultPtr
   Execute() noexcept final
@@ -1257,68 +1284,99 @@ struct Launch final : public UICommand
     PROFILE_SCOPE_ARGS(
       "launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{ mProgramArgs }));
     const auto processId =
-      Tracer::Launch(mDAPClient, mRequestingSessionId, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
+      Tracer::ForkExec(mDAPClient, GetSessionId(), mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
     GetOrSendError(supervisor);
     supervisor->ConfigurationDone();
     DBGLOG(core, "Responding to launch request, resuming target {}", supervisor->TaskLeaderTid());
     supervisor->ResumeTarget(
       tc::ResumeAction{ tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, 0 });
-    return new LaunchResponse{ mRequestingSessionId, processId, true, this };
+    return new LaunchResponse{ processId, true, this };
   }
 
-  static ui::UICommand *
-  CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args)
-  {
-    SessionId sessionId = args["sessionId"];
-    Path path{ args["program"]->UncheckedGetStringView() };
-    Path cwd;
-    std::pmr::vector<std::pmr::string> prog_args{ arg.allocator->GetAllocator() };
-    if (args.Contains("args")) {
-      for (const auto &v : args.AsSpan("args")) {
-        std::pmr::string arg;
-        std::format_to(std::back_inserter(arg), "{}", v);
-        prog_args.push_back(std::move(arg));
-      }
-    }
-
-    bool stopOnEntry = false;
-    if (args.Contains("stopOnEntry")) {
-      stopOnEntry = args["stopOnEntry"];
-    }
-
-    if (args.Contains("env")) {
-    }
-
-    if (args.Contains("cwd")) {
-    }
-
-    const auto behaviorSetting = args.Get("breakpointBehavior")
-                                   .and_then([](const auto &json) { return json.GetStringView(); })
-                                   .transform([](const std::string_view &behavior) {
-                                     if (behavior == "Stop all threads") {
-                                       return BreakpointBehavior::StopAllThreadsWhenHit;
-                                     } else if (behavior == "Stop single thread") {
-                                       return BreakpointBehavior::StopOnlyThreadThatHit;
-                                     } else {
-                                       return BreakpointBehavior::StopAllThreadsWhenHit;
-                                     }
-                                   })
-                                   .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
-
-    return new Launch{
-      std::move(arg), sessionId, stopOnEntry, std::move(path), std::move(prog_args), behaviorSetting
-    };
-  }
-
-  bool mStopOnEntry;
-  Path mProgram;
+  std::string_view mProgram;
+  std::pmr::string mCurrentWorkingDir;
+  std::pmr::vector<std::pmr::string> mEnvironmenVariables;
   std::pmr::vector<std::pmr::string> mProgramArgs;
-  std::optional<BreakpointBehavior> mBreakpointBehavior;
-  SessionId mRequestingSessionId;
-  DEFINE_NAME("launch");
+
   RequiredArguments({ "program"sv });
   DefineArgTypes({ "program", FieldType::String });
 };
+
+/* static */
+ui::UICommand *
+NativeLaunch::CreateRequest(UICommandArg arg,
+  bool stopOnEntry,
+  std::optional<BreakpointBehavior> behaviorSetting,
+  const mdbjson::JsonValue &args) noexcept
+{
+  IfInvalidArgsReturn(NativeLaunch);
+
+  std::string_view program = args["program"]->UncheckedGetStringView();
+  std::pmr::vector<std::pmr::string> programArguments{ arg.allocator->GetAllocator() };
+  if (args.Contains("args")) {
+    for (const auto &v : args.AsSpan("args")) {
+      std::pmr::string arg;
+      std::format_to(std::back_inserter(arg), "{}", v);
+      programArguments.push_back(std::move(arg));
+    }
+  }
+
+  std::pmr::vector<std::pmr::string> environVars{ arg.allocator->GetAllocator() };
+
+  if (args.Contains("env") && args["env"]->IsArray()) {
+    const auto env = args["env"]->AsSpan();
+    environVars.reserve(env.size());
+    for (const auto &jsonValue : env) {
+      if (jsonValue.IsString()) {
+        environVars.push_back(*jsonValue.GetString());
+      }
+    }
+  }
+
+  std::pmr::string currentWorkingDir{ arg.allocator->GetAllocator() };
+
+  if (args.Contains("cwd") && args["cwd"]->IsString()) {
+    currentWorkingDir = *args["cwd"]->GetString();
+  }
+
+  return new NativeLaunch{ std::move(arg),
+    stopOnEntry,
+    behaviorSetting,
+    program,
+    std::move(programArguments),
+    std::move(environVars),
+    std::move(currentWorkingDir) };
+}
+
+/* static */
+ui::UICommand *
+Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
+{
+  DBGLOG(core, "creating lauch request");
+  SessionId sessionId = args["sessionId"];
+
+  bool stopOnEntry = false;
+  if (args.Contains("stopOnEntry")) {
+    stopOnEntry = args["stopOnEntry"];
+  }
+
+  const auto behaviorSetting = args.Get("breakpointBehavior")
+                                 .and_then([](const auto &json) { return json.GetStringView(); })
+                                 .transform([](const std::string_view &behavior) {
+                                   if (behavior == "Stop all threads") {
+                                     return BreakpointBehavior::StopAllThreadsWhenHit;
+                                   } else if (behavior == "Stop single thread") {
+                                     return BreakpointBehavior::StopOnlyThreadThatHit;
+                                   } else {
+                                     return BreakpointBehavior::StopAllThreadsWhenHit;
+                                   }
+                                 })
+                                 .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
+
+  auto type = args["type"]->UncheckedGetStringView();
+  MDB_ASSERT(type == "native", "Unexpected type on launch request: {}", type);
+  return NativeLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
+}
 
 struct AttachResponse final : public UIResult
 {

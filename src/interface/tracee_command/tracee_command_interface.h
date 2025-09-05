@@ -120,7 +120,7 @@ enum class ReadResultType : i8
   DebuggerError
 };
 
-enum class ApplicationError : u32
+enum class ApplicationError : u8
 {
   TargetIsRunning
 };
@@ -254,7 +254,7 @@ struct Error
 class TraceeCommandInterface;
 using Interface = std::unique_ptr<TraceeCommandInterface>;
 
-enum class TraceeInterfaceType
+enum class TraceeInterfaceType : u8
 {
   Ptrace,
   GdbRemote

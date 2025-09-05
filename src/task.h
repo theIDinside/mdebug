@@ -1,16 +1,20 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "bp.h"
-#include "common.h"
-#include "interface/dap/types.h"
-#include "interface/tracee_command/tracee_command_interface.h"
-#include "symbolication/callstack.h"
-#include "symbolication/variable_reference.h"
-#include "utils/smartptr.h"
+// mdb
+#include <bp.h>
+#include <common.h>
 #include <common/formatter.h>
+#include <common/macros.h>
+#include <interface/dap/types.h>
+#include <interface/tracee_command/tracee_command_interface.h>
+#include <mdbsys/stop_status.h>
+#include <symbolication/callstack.h>
+#include <symbolication/variable_reference.h>
+#include <utils/smartptr.h>
+
+// system
 #include <linux/sched.h>
-#include <mdbsys/ptrace.h>
 #include <sys/user.h>
 
 using namespace std::string_view_literals;
@@ -74,7 +78,7 @@ public:
   friend class TraceeController;
   pid_t mTid;
   u32 mSessionId{ 0 };
-  WaitStatus mLastWaitStatus;
+  StopStatus mLastStopStatus;
   TargetFormat mTargetFormat;
   tc::ResumeAction mLastResumeAction;
   std::optional<tc::ResumeAction> mNextResumeAction{};
@@ -148,6 +152,7 @@ public:
   RegisterDescription *RemoteX86Registers() const noexcept;
   void RemoteFromHexdigitEncoding(std::string_view hex_encoded) noexcept;
   const TaskRegisters &GetRegisterCache() const;
+  void SetRegisterCacheTo(u8 *buffer, size_t bufferSize);
   u64 GetRegister(u64 reg_num) noexcept;
   u64 UnwindBufferRegister(u8 level, u16 register_number) const noexcept;
   void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
@@ -176,7 +181,6 @@ public:
   bool IsStopped() const noexcept;
   bool IsStopProcessed() const noexcept;
   void CollectStop() noexcept;
-  WaitStatus PendingWaitStatus() const noexcept;
 
   sym::CallStack &GetCallstack() noexcept;
   // Add the `VariableReferenceId` to this task, so that once the task is resumed, it can instruct MDB to destroy
@@ -263,8 +267,8 @@ template <> struct std::formatter<mdb::TaskInfo>
   {
 
     std::string_view wait_status = "None";
-    if (task.mLastWaitStatus.ws != mdb::WaitStatusKind::NotKnown) {
-      wait_status = to_str(task.mLastWaitStatus.ws);
+    if (task.mLastStopStatus.ws != StopKind::NotKnown) {
+      wait_status = Enums::ToString(task.mLastStopStatus.ws);
     }
 
     return std::format_to(ctx.out(),
