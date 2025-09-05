@@ -14,6 +14,7 @@ async function launch(debugAdapter) {
   })
   await debugAdapter
     .launchRequest({
+      type: 'native',
       program: debugAdapter.buildDirFile('stackframes'),
       stopOnEntry: true,
     })

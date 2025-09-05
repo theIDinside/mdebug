@@ -1,4 +1,4 @@
-const { readFileContents, repoDirFile, getLineOf, getStackFramePc } = require('./client')
+const { readFileContents, repoDirFile, getLineOf } = require('./client')
 const { todo, assert, prettyJson } = require('./utils')
 
 function getLinesOf(names) {
@@ -117,15 +117,16 @@ async function stopBecauseBpWhenNextLine(DA) {
 
 async function nextLineInTemplateCode(da) {}
 
-async function nextInstruction(DA) {
-  await DA.startRunToMain(DA.buildDirFile('stackframes'))
-  const threads = await DA.threads()
-  let frames = await DA.stackTrace(threads[0].id)
+/** @param { import("./client").DebugAdapterClient } debugAdapter */
+async function nextInstruction(debugAdapter) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'))
+  const threads = await debugAdapter.threads()
+  let frames = await threads[0].stacktrace()
   // await da_client.setInsBreakpoint("0x40121f");
-  const pc = getStackFramePc(frames, 0)
-  console.log(`STARTING PC THAT WE START DISASSEMBLING FROM: ${pc}`)
-  const disassembly = await DA.sendReqGetResponse('disassemble', {
-    memoryReference: pc,
+  const firstPc = frames[0].pc
+  console.log(`STARTING PC THAT WE START DISASSEMBLING FROM: ${firstPc}`)
+  const disassembly = await debugAdapter.sendReqGetResponse('disassemble', {
+    memoryReference: firstPc,
     offset: 0,
     instructionOffset: 0,
     instructionCount: 10,
@@ -133,7 +134,7 @@ async function nextInstruction(DA) {
   })
   const allThreadsStop = true
   // await da_client.contNextStop(threads[0].id);
-  const { event_body, response } = await DA.sendReqWaitEvent(
+  const { event_body, response } = await debugAdapter.sendReqWaitEvent(
     'next',
     {
       threadId: threads[0].id,
@@ -149,11 +150,11 @@ async function nextInstruction(DA) {
     `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
   )
 
-  frames = await DA.stackTrace(threads[0].id)
-  const next_pc = getStackFramePc(frames, 0)
+  frames = await threads[0].stacktrace()
+  const nextPc = frames[0].pc
   assert(
-    next_pc == disassembly.body.instructions[1].address,
-    `Expected to be at ${disassembly.body.instructions[1].address} but RIP=${next_pc} (previous pc: ${pc})`
+    nextPc == disassembly.body.instructions[1].address,
+    `Expected to be at ${disassembly.body.instructions[1].address} but RIP=${nextPc} (previous pc: ${firstPc})`
   )
 }
 

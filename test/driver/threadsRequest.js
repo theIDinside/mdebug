@@ -5,7 +5,7 @@ const { assert, prettyJson, assertLog } = require('./utils')
  * @param {import("./client").DebugAdapterClient } debugAdapter
  */
 async function threads(debugAdapter) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('threads_shared'), [], seconds(1))
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('threads_shared'), seconds(1))
   let threads = await debugAdapter.threads()
   const file = readFileContents(repoDirFile('test/threads_shared.cpp'))
   const bp_lines = ['BP1']

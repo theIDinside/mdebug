@@ -5,7 +5,7 @@ const { assertLog, prettyJson } = require('./utils')
  * @param { import("./client").DebugAdapterClient } debugAdapter
  */
 async function pokeTimesToZero(debugAdapter) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP3', 'BAZ_RET_BP'].map((ident) => getLineOf(file, ident)).filter((item) => item != null)
   const breakpoints = await debugAdapter.setBreakpoints('test/stackframes.cpp', bp_lines)

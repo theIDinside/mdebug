@@ -72,19 +72,15 @@ class RemoteService {
  * @param {string} host
  * @param {number} port
  * @param {string} binary
- * @param {string[]} args
  * @returns { Promise<RemoteService> }
  */
-async function createRemoteService(gdbserver, host, port, binary, args) {
+async function createRemoteService(gdbserver, host, port, binary) {
   port = Number.parseInt(port)
   return new Promise((resolve, reject) => {
     let serviceReadyEmitter = new EventEmitter()
 
-    if (args == undefined || args == null) {
-      args = []
-    }
     console.log(`spawning gdbserver...`)
-    let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary, ...args], {
+    let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -113,7 +109,7 @@ async function createRemoteService(gdbserver, host, port, binary, args) {
       if (done) {
         service.stderr.removeListener('data', waitUntilServiceReady)
         service.stdout.removeListener('data', waitUntilServiceReady)
-        resolve(new RemoteService(service, host, port, binary, args))
+        resolve(new RemoteService(service, host, port, binary))
       } else {
         reject(`Failed to initialize gdb server and wait until it starts listening on the port`)
       }
@@ -243,6 +239,7 @@ function unpackDebuggerArgs() {
 }
 
 class Thread {
+  /** @type { DebugAdapterClient } */
   #client
   id
   name
@@ -257,8 +254,10 @@ class Thread {
    * @returns {Promise<StackFrame[]>}
    */
   async stacktrace(timeout) {
-    const response = await this.#client.sendReqGetResponse('stackTrace', { threadId: this.id }, timeout)
-    checkResponse(response, 'stackTrace', true, this.stackTrace)
+    const response = await this.#client
+      .stackTraceRequest({ threadId: this.id })
+      .then((res) => checkResponse(res, 'stackTrace', true, this.stacktrace))
+
     return response.body.stackFrames.map((frame) => {
       return new StackFrame(
         this.#client,
@@ -278,7 +277,7 @@ class Thread {
  */
 
 class Variable {
-  /** @type {DebugAdapterClient} */
+  /** @type { DebugAdapterClient } */
   #client
   /** @type { DAPVariable } */
   dap
@@ -287,8 +286,8 @@ class Variable {
   cache = null
 
   /**
-   * @param {DebugAdapterClient} client
-   * @param {DAPVariable} dap
+   * @param { DebugAdapterClient } client
+   * @param { DAPVariable } dap
    */
   constructor(client, dap) {
     this.#client = client
@@ -306,10 +305,11 @@ class Variable {
     if (this.cache != null) {
       return this.cache
     }
+
     const {
       success,
       body: { variables },
-    } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.id }, timeout)
+    } = await this.#client.variablesRequest({ variablesReference: this.id })
     assertLog(success, 'expected success from variables request')
 
     this.cache = variables.map((el) => {
@@ -342,6 +342,43 @@ class Variable {
     return this.dap.variablesReference
   }
 }
+
+class Scope {
+  /** @type { DebugAdapterClient } */
+  #client
+  /** @type { string } */
+  #name
+
+  /** @type { number } */
+  id
+
+  /** @type { Variable[] } */
+  #variables
+
+  /**
+   * @param {DebugAdapterClient} debugAdapter
+   * @param { import("./types").Scope } scopeObject
+   */
+  constructor(debugAdapter, scopeObject) {
+    this.#client = debugAdapter
+    this.name = scopeObject.name
+    this.id = scopeObject.variablesReference
+  }
+
+  /**
+   * @returns {Promise<Variable[]>}
+   */
+  async variables() {
+    if (this.#variables) {
+      return this.#variables
+    }
+    const response = await this.#client.variablesRequest({ variablesReference: this.id })
+    const vars = response.body.variables.map((v) => new Variable(this.#client, v))
+    this.#variables = vars
+    return this.#variables
+  }
+}
+
 const ScopeNames = ['Arguments', 'Locals', 'Registers']
 class StackFrame {
   /** @type { DebugAdapterClient } */
@@ -362,7 +399,7 @@ class StackFrame {
    * order of scopes is: [args, locals, registers]
    * @type { number[] }
    */
-  scopes = null
+  #scopes = null
 
   constructor(client, id, name, line, column, instructionPointerReference, source) {
     this.#client = client
@@ -372,59 +409,64 @@ class StackFrame {
     this.column = column
     this.instructionPointerReference = instructionPointerReference
     this.source = source
-    this.scopes = null
+    this.#scopes = null
+  }
+
+  get pc() {
+    return this.instructionPointerReference
   }
 
   /**
-   * @param {number} timeout
    * @returns {Promise<Variable[]>}
    */
-  async locals(timeout = 1000) {
-    await this.get_scopes()
-    const {
-      success,
-      body: { variables },
-    } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.scopes[1] }, timeout)
-    assertLog(success, 'expected success from variables request')
-
-    return variables.map((v) => {
-      return new Variable(this.#client, v)
-    })
+  async locals() {
+    const scopes = await this.scopes()
+    for (const scope of scopes) {
+      if (scope.name == 'Locals') {
+        return scope.variables()
+      }
+    }
+    return []
   }
 
   /**
-   * @param {number} timeout
    * @returns { Promise<Variable[]> }
    */
-  async args(timeout) {
-    await this.get_scopes()
-    const {
-      success,
-      body: { variables },
-    } = await this.#client.sendReqGetResponse('variables', { variablesReference: this.scopes[0] }, timeout)
-    assertLog(success, 'expected success from variables request')
-
-    return variables.map((v) => {
-      return new Variable(this.#client, v)
-    })
+  async args() {
+    const scopes = await this.scopes()
+    for (const scope of scopes) {
+      if (scope.name == 'Arguments') {
+        return scope.variables()
+      }
+    }
+    return []
   }
 
-  async get_scopes() {
-    if (this.scopes !== null) {
-      return
+  /**
+   * @returns {Promise<Scope[]>}
+   */
+  async scopes() {
+    if (this.#scopes !== null) {
+      return this.#scopes
     }
 
     const {
       success,
       body: { scopes },
-    } = await this.#client.sendReqGetResponse('scopes', { frameId: this.id }, 1000)
+    } = await this.#client.scopesRequest({ frameId: this.id })
+
     assertLog(success, `Scopes retrieved for ${this.id}`)
     assertLog(scopes.length == ScopeNames.length, `Got ${ScopeNames.length} scopes`, `Failed, got: ${scopes.length}`)
-    this.scopes = []
-    for (let i = 0; i < ScopeNames.length; i++) {
-      this.scopes.push(scopes[i].variablesReference)
-      assertLog(scopes[i].name == ScopeNames[i], `Expected scope name ${ScopeNames[i]}`, ` but was ${scopes[i].name}`)
+    this.#scopes = []
+
+    for (const scope of scopes) {
+      this.#scopes.push(new Scope(this.#client, scope))
+      assertLog(
+        ScopeNames.some((name) => name == scope.name),
+        `Expected to recognize scope as one of ${ScopeNames.join(', ')} but was ${scope.name}`
+      )
     }
+    return this.#scopes
   }
 }
 
@@ -452,11 +494,11 @@ class DebugAdapterClient {
     return this.remoteService !== null
   }
 
-  static async CreateRemoteServer(testConfig, program, args) {
+  static async CreateRemoteServer(testConfig, program) {
     const remoteServerBinaryPath = testConfig.args.getServerBinary()
     const host = 'localhost'
     let remoteService = await checkPortAvailability(20, host).then((port) => {
-      return createRemoteService(remoteServerBinaryPath, host, port, program, args)
+      return createRemoteService(remoteServerBinaryPath, host, port, program)
     })
 
     if (remoteService == null) {
@@ -809,12 +851,10 @@ class DebugAdapterClient {
    * `configurationRoutine` can be whatever we want during testing, in the VSCode environment
    * this is where
    *
-   * @param {string} startType
    * @param {object} startArguments
-   * @param {number} timeout
    * @param {function} configurationRoutine
    */
-  async startSession(startType, startArguments, timeout, configurationRoutine) {
+  async startLaunchSession(startArguments, configurationRoutine) {
     let initEventWaitable = this.initializedEventPromise().then(async (initEvent) => {
       if (configurationRoutine) {
         await configurationRoutine()
@@ -831,28 +871,27 @@ class DebugAdapterClient {
 
     // the init event is fired (it doesn't fire before) after attach/launch has
     // started, and configurationDone is sent _before_ launch/attach responds
-    console.log(`${startType}ing using arguments: ${JSON.stringify(startArguments)}`)
-    await this.launchRequest(startArguments).then((res) => checkResponse(res, startType, true))
-    console.log(`${startType} completed`)
+    console.log(`launching using arguments: ${JSON.stringify(startArguments)}`)
+    await this.launchRequest(startArguments).then((res) => checkResponse(res, 'launch', true))
+    console.log(`launch completed`)
   }
 
   async #startRunToMainNative(launchArgs, timeout) {
     let stoppedPromise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainNative)
-    await this.startSession(
-      'launch',
+    await this.startLaunchSession(
       {
         program: launchArgs['program'],
         stopOnEntry: launchArgs['stopOnEntry'],
+        type: launchArgs['type'],
         sessionId: this.sessionId,
       },
-      1000,
       () => console.log(`configuration completed`)
     )
     return stoppedPromise
   }
 
-  async #startRunToMainRemote(program, args, timeout) {
-    this.remoteService = await DebugAdapterClient.CreateRemoteServer(this.config, program, args)
+  async #startRunToMainRemote(program, timeout) {
+    this.remoteService = await DebugAdapterClient.CreateRemoteServer(this.config, program)
 
     let hit_main_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
     let attachArguments = this.remoteService.attachArgs
@@ -897,10 +936,10 @@ class DebugAdapterClient {
     return hit_main_stopped_promise
   }
 
-  async startRunToMain(program, args = [], timeout = seconds(1)) {
+  async startRunToMain(program, timeout = seconds(1)) {
     switch (this.config.args.getArg('session')) {
       case 'remote': {
-        await this.#startRunToMainRemote(program, args, timeout)
+        await this.#startRunToMainRemote(program, timeout)
         const threads = await this.threads()
         console.log(`threads: ${JSON.stringify(threads)}`)
         await this.contNextStop(threads[0].id)
@@ -909,6 +948,7 @@ class DebugAdapterClient {
       case 'native': {
         return await this.#startRunToMainNative(
           {
+            type: 'native',
             program: program,
             stopOnEntry: true,
           },
@@ -923,13 +963,12 @@ class DebugAdapterClient {
   // utility function to initialize, launch `program` and run to `main`
   async launchToMain(program, timeout = seconds(1)) {
     let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.launchToMain)
-    await this.startSession(
-      'launch',
+    await this.startLaunchSession(
       {
+        type: 'native',
         program: program,
         stopOnEntry: true,
       },
-      timeout,
       () => console.log('configuration done')
     )
     await stopped_promise.then((evt) => console.log(`Stopped event seen: ${JSON.stringify(evt)}`))
@@ -1217,7 +1256,7 @@ function repoDirFile(filePath) {
   return path.join(REPO_DIR, filePath)
 }
 
-function checkResponse(response, command = null, expected_success = true, fn = checkResponse) {
+function checkResponse(response, command = null, expectedSuccess = true, fn = checkResponse) {
   if (response.type != 'response') {
     dump_log()
     const err = new Error()
@@ -1225,11 +1264,11 @@ function checkResponse(response, command = null, expected_success = true, fn = c
     err.message = `Type of message was expected to be 'response' but was '${response.type}'`
     throw err
   }
-  if (response.success != expected_success) {
+  if (response.success != expectedSuccess) {
     dump_log()
     const err = new Error()
     Error.captureStackTrace(err, fn)
-    err.message = `Expected response to succeed ${expected_success} but got ${response.success}`
+    err.message = `Expected response to succeed ${expectedSuccess} but got ${response.success}`
     throw err
   }
 
@@ -1241,16 +1280,6 @@ function checkResponse(response, command = null, expected_success = true, fn = c
     throw err
   }
   return response
-}
-
-/**
- * Returns PC (as string) of stack frame `level`
- * @param {{response_seq: number, type: string, success: boolean, command: string, body: { stackFrames: StackFrame[] }}} stackTraceRes
- * @param {number} level
- * @returns {string}
- */
-function getStackFramePc(stackTraceRes, level) {
-  return stackTraceRes.body.stackFrames[level].instructionPointerReference
 }
 
 function testSuccess(testSuite) {
@@ -1389,17 +1418,18 @@ async function PrepareBreakpointArguments(filePath, bpIdentifers) {
  * @returns { { threads: object[], frames: object[], scopes: object[], bpres: object[] } }
  */
 async function launchToGetFramesAndScopes(debugAdapter, filePath, bpIdentifiers, expectedFrameName, exeFile) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile(exeFile), [], 5000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile(exeFile), 5000)
   const bpres = await SetBreakpoints(debugAdapter, filePath, bpIdentifiers)
   const threads = await debugAdapter.threads()
   await debugAdapter.contNextStop(threads[0].id)
-  const fres = await debugAdapter.stackTrace(threads[0].id, 1000)
-  const frames = fres.body.stackFrames
+  const frames = await threads[0].stacktrace(1000)
   assertLog(
     frames[0].name == expectedFrameName,
     () => `Expected to be inside of frame '${expectedFrameName}`,
     () => `Actual frame=${frames[0].name}. Stacktrace:\n${prettyJson(frames)}`
   )
+
+  frames[0].scopes()
 
   const scopes_res = await debugAdapter.sendReqGetResponse('scopes', { frameId: frames[0].id })
   const scopes = scopes_res.body.scopes
@@ -1446,7 +1476,6 @@ module.exports = {
   getLineOf,
   getRandomNumber: randomSeqGenerator,
   getRequestedTest,
-  getStackFramePc,
   launchToGetFramesAndScopes,
   MDB_PATH,
   PrepareBreakpointArguments,
