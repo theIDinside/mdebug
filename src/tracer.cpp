@@ -198,7 +198,7 @@ Tracer::ConvertWaitEvent(WaitPidResult waitPid) noexcept
 }
 
 void
-Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
+Tracer::ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept
 {
   auto dapClient = cmd->mDAPClient;
   auto scoped = dapClient->GetResponseArenaAllocator()->ScopeAllocation();
@@ -213,7 +213,6 @@ Tracer::ExecuteCommand(ui::UICommand *cmd) noexcept
 
     delete result;
   }
-  delete cmd;
   dapClient->FlushEvents();
 }
 
@@ -799,25 +798,28 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) no
 
   while (dbgInstance.IsRunning()) {
     if (eventSystem->PollBlocking(readInEvents)) {
-      for (auto evt : readInEvents) {
+      for (auto &&evt : readInEvents) {
         switch (evt.mEventType) {
-        case EventType::WaitStatus: {
+        case ApplicationEventType::WaitStatus: {
           DBGLOG(
             awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, Enums::ToString(evt.uWait.mWaitResult.ws.ws));
           if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.mWaitResult); dbg_evt) {
             dbgInstance.HandleTracerEvent(dbg_evt);
           }
         } break;
-        case EventType::Command: {
-          dbgInstance.ExecuteCommand(evt.uCommand);
+        case ApplicationEventType::Command: {
+          // Up until this point, there's one "raw" owner. We materialize the shared pointer now, so that it can
+          // arbitrarily extend its lifetime, on it's own. That way we can keep this interface simple, (a union)
+          // since we have *terrible* ADT support in C++ (as of now, please, pattern matching, come soon)
+          dbgInstance.ExecuteCommand(RefPtr{ std::move(evt.uCommand) });
         } break;
-        case EventType::TraceeEvent: {
+        case ApplicationEventType::TraceeEvent: {
           dbgInstance.HandleTracerEvent(evt.uDebugger);
         } break;
-        case EventType::Initialization:
+        case ApplicationEventType::Initialization:
           dbgInstance.HandleInitEvent(evt.uDebugger);
           break;
-        case EventType::Internal: {
+        case ApplicationEventType::Internal: {
           dbgInstance.HandleInternalEvent(evt.uInternalEvent);
           break;
         }

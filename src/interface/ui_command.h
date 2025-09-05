@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
-
 #include <common/typedefs.h>
 #include <lib/arena_allocator.h>
+#include <utils/smartptr.h>
 
 // mdblib
 #include <json/json.h>
@@ -38,6 +38,10 @@
   }
 
 namespace mdb {
+
+template <typename U> class LeakedRef;
+template <typename T> struct RefCountControl;
+template <typename T> struct RefPtr;
 
 class Tracer;
 class TraceeController;
@@ -149,13 +153,17 @@ struct UICommandArg
 
 struct UICommand
 {
+  INTERNAL_REFERENCE_COUNT_THREAD_UNSAFE(UICommand);
+
+public:
+  using Base = UICommand;
+
   using RequestResponseAllocator = std::unique_ptr<alloc::ScopedArenaAllocator>;
+  friend struct UIResult;
+
   dap::DebugAdapterClient *mDAPClient;
   SessionId mSessionId;
   std::unique_ptr<alloc::ScopedArenaAllocator> mCommandAllocator;
-  friend struct UIResult;
-
-public:
   std::uint64_t mSeq;
 
   explicit UICommand(UICommandArg arg) noexcept

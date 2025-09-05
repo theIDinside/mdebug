@@ -222,20 +222,23 @@ DebugAdapterClient::ReadPendingCommands() noexcept
   }
   bool no_partials = false;
   const auto request_headers = ParseHeadersFromBuffer(mParseSwapBuffer.take_view(), &no_partials);
+
+  const auto PushNewCommand = [&](const ContentParse &parse) {
+    const auto *cd = std::get_if<ContentDescriptor>(&parse);
+    auto cmd = ParseDebugAdapterCommand(*this, std::string{ cd->payload() });
+    EventSystem::Get().PushCommand(this, std::move(cmd));
+  };
+
   if (no_partials && request_headers.size() > 0) {
     for (auto &&hdr : request_headers) {
-      const auto *cd = std::get_if<ContentDescriptor>(&hdr);
-      const auto cmd = ParseDebugAdapterCommand(*this, std::string{ cd->payload() });
-      EventSystem::Get().PushCommand(this, cmd);
+      PushNewCommand(hdr);
     }
     // since there's no partials left in the buffer, we reset it
     mParseSwapBuffer.clear();
   } else {
     if (request_headers.size() > 1) {
       for (auto i = 0ull; i < request_headers.size() - 1; i++) {
-        const auto cd = std::get_if<ContentDescriptor>(&request_headers[i]);
-        const auto cmd = ParseDebugAdapterCommand(*this, std::string{ cd->payload() });
-        EventSystem::Get().PushCommand(this, cmd);
+        PushNewCommand(request_headers[i]);
       }
 
       auto rd = std::get_if<RemainderData>(&request_headers.back());

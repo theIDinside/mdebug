@@ -1245,7 +1245,7 @@ struct Launch : public UICommand
   }
   ~Launch() noexcept override = default;
 
-  static ui::UICommand *CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept;
+  static RefPtr<ui::UICommand> CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept;
 
   bool mStopOnEntry;
   std::optional<BreakpointBehavior> mBreakpointBehavior;
@@ -1273,7 +1273,7 @@ struct NativeLaunch final : public Launch
 
   ~NativeLaunch() noexcept final = default;
 
-  static ui::UICommand *CreateRequest(UICommandArg arg,
+  static RefPtr<ui::UICommand> CreateRequest(UICommandArg arg,
     bool stopOnEntry,
     std::optional<BreakpointBehavior> behaviorSetting,
     const mdbjson::JsonValue &args) noexcept;
@@ -1303,7 +1303,7 @@ struct NativeLaunch final : public Launch
 };
 
 /* static */
-ui::UICommand *
+RefPtr<ui::UICommand>
 NativeLaunch::CreateRequest(UICommandArg arg,
   bool stopOnEntry,
   std::optional<BreakpointBehavior> behaviorSetting,
@@ -1339,17 +1339,17 @@ NativeLaunch::CreateRequest(UICommandArg arg,
     currentWorkingDir = *args["cwd"]->GetString();
   }
 
-  return new NativeLaunch{ std::move(arg),
+  return RefPtr<NativeLaunch>::MakeShared(std::move(arg),
     stopOnEntry,
     behaviorSetting,
     program,
     std::move(programArguments),
     std::move(environVars),
-    std::move(currentWorkingDir) };
+    std::move(currentWorkingDir));
 }
 
 /* static */
-ui::UICommand *
+RefPtr<ui::UICommand>
 Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
 {
   DBGLOG(core, "creating lauch request");
@@ -1439,23 +1439,23 @@ struct Attach final : public UICommand
       { "ptrace"sv, "gdbremote"sv, "rr"sv, "auto"sv },
     });
 
-  static ui::UICommand *
+  static RefPtr<ui::UICommand>
   CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   {
     auto type = args.At("type")->UncheckedGetStringView();
     MDB_ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
     if (type == "ptrace") {
       SessionId pid = args["pid"];
-      return new Attach{ std::move(arg), args["sessionId"], PtraceAttachArgs{ .pid = pid } };
+      return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], PtraceAttachArgs{ .pid = pid });
     } else if (type == "auto") {
       SessionId processId;
       if (args.Contains("processId")) {
         processId = args["processId"];
-        return new Attach{ std::move(arg), args["sessionId"], AutoArgs{ processId } };
+        return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], AutoArgs{ processId });
       }
-      return new ui::dap::InvalidArgs{ std::move(arg),
+      return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg),
         "attach",
-        std::vector<InvalidArg>{ { ArgumentError::Missing("Required for auto attach"), "processId" } } };
+        std::vector<InvalidArg>{ { ArgumentError::Missing("Required for auto attach"), "processId" } });
     } else {
       int port = args["port"];
       std::string_view host = args["host"];
@@ -1464,10 +1464,9 @@ struct Attach final : public UICommand
         allstop = allStopVal->UncheckedGetBoolean();
       }
       RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
-
-      return new Attach{ std::move(arg),
+      return RefPtr<Attach>::MakeShared(std::move(arg),
         args["sessionId"],
-        GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type } };
+        GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type });
     };
   }
 };
@@ -1865,7 +1864,7 @@ struct Evaluate final : public UICommand
     { "expression", FieldType::String }, { "frameId", FieldType::Int }, { "context", FieldType::String });
 
   static EvaluationContext ParseContext(std::string_view input) noexcept;
-  static UICommand *PrepareEvaluateCommand(UICommandArg arg, const mdbjson::JsonValue &args);
+  static RefPtr<UICommand> PrepareEvaluateCommand(UICommandArg arg, const mdbjson::JsonValue &args);
 };
 
 struct EvaluateResponse final : public UIResult
@@ -1935,7 +1934,7 @@ Evaluate::ParseContext(std::string_view input) noexcept
 }
 
 /*static*/
-UICommand *
+RefPtr<UICommand>
 Evaluate::PrepareEvaluateCommand(UICommandArg arg, const mdbjson::JsonValue &args)
 {
   IfInvalidArgsReturn(Evaluate);
@@ -1950,7 +1949,7 @@ Evaluate::PrepareEvaluateCommand(UICommandArg arg, const mdbjson::JsonValue &arg
   std::string_view context = args["context"];
   ctx = Evaluate::ParseContext(context);
 
-  return new ui::dap::Evaluate{ std::move(arg), std::move(expr), frameId, ctx };
+  return RefPtr<ui::dap::Evaluate>::MakeShared(std::move(arg), std::move(expr), frameId, ctx);
 }
 
 EvaluateResponse::EvaluateResponse(bool success,
@@ -2166,7 +2165,7 @@ ValidateRequestFormat(const mdbjson::JsonValue &req) noexcept
   return true;
 }
 
-ui::UICommand *
+RefPtr<ui::UICommand>
 ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) noexcept
 {
   using namespace ui::dap;
@@ -2207,7 +2206,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     TODO("Command::Completions");
   case CommandType::ConfigurationDone: {
     IfInvalidArgsReturn(ConfigurationDone);
-    return new ConfigurationDone{ std::move(arg) };
+    return RefPtr<ConfigurationDone>::MakeShared(std::move(arg));
   } break;
   case CommandType::Continue: {
     IfInvalidArgsReturn(Continue);
@@ -2217,15 +2216,14 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
       const bool b = args["singleThread"];
       all_threads = !b;
     }
-
-    return new Continue{ std::move(arg), args["threadId"], all_threads };
+    return RefPtr<Continue>::MakeShared(std::move(arg), args["threadId"], all_threads);
   }
   case CommandType::CustomRequest: {
     if (args.Contains("command") && args.Contains("arguments")) {
       std::string_view customCommand = args["command"];
       return ParseCustomRequestCommand(client, std::move(arg), customCommand, args["arguments"]);
     }
-    return new InvalidArgs{ std::move(arg), "customRequest", {} };
+    return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "customRequest", MissingOrInvalidArgs{});
   }
   case CommandType::DataBreakpointInfo:
     TODO("Command::DataBreakpointInfo");
@@ -2237,7 +2235,8 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     int offset = args["offset"];
     int instructionOffset = args["instructionOffset"];
     int instructionCount = args["instructionCount"];
-    return new ui::dap::Disassemble{ std::move(arg), addr, offset, instructionOffset, instructionCount, false };
+    return RefPtr<ui::dap::Disassemble>::MakeShared(
+      std::move(arg), addr, offset, instructionOffset, instructionCount, false);
   }
   case CommandType::Disconnect: {
     IfInvalidArgsReturn(Disconnect);
@@ -2254,7 +2253,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     if (args.Contains("suspendDebuggee")) {
       suspendDebuggee = args["suspendDebuggee"];
     }
-    return new Disconnect{ std::move(arg), restart, terminateDebuggee, suspendDebuggee };
+    return RefPtr<Disconnect>::MakeShared(std::move(arg), restart, terminateDebuggee, suspendDebuggee);
   }
   case CommandType::Evaluate: {
     return Evaluate::PrepareEvaluateCommand(std::move(arg), args);
@@ -2267,7 +2266,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     TODO("Command::GotoTargets");
   case CommandType::Initialize:
     IfInvalidArgsReturn(Initialize);
-    return new Initialize{ std::move(arg), args };
+    return RefPtr<Initialize>::MakeShared(std::move(arg), args);
   case CommandType::Launch: {
     IfInvalidArgsReturn(Launch);
     return Launch::CreateRequest(std::move(arg), args);
@@ -2289,12 +2288,12 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     if (args.Contains("singleThread")) {
       singleThread = args["singleThread"];
     }
-    return new Next{ std::move(arg), threadId, !singleThread, stepType };
+    return RefPtr<Next>::MakeShared(std::move(arg), threadId, !singleThread, stepType);
   }
   case CommandType::Pause: {
     IfInvalidArgsReturn(Pause);
     int threadId = args["threadId"];
-    return new Pause(std::move(arg), Pause::Args{ threadId });
+    return RefPtr<Pause>::MakeShared(std::move(arg), Pause::Args{ threadId });
   }
   case CommandType::ReadMemory: {
     IfInvalidArgsReturn(ReadMemory);
@@ -2304,7 +2303,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
 
     const auto offset = args.Contains("offset") ? i32{ args["offset"] } : 0;
     const u64 count = args["count"];
-    return new ui::dap::ReadMemory{ std::move(arg), addr, offset, count };
+    return RefPtr<ReadMemory>::MakeShared(std::move(arg), addr, offset, count);
   }
   case CommandType::Restart:
     TODO("Command::Restart");
@@ -2313,34 +2312,34 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
   case CommandType::ReverseContinue: {
     IfInvalidArgsReturn(ReverseContinue);
     int threadId = args["threadId"];
-    return new ui::dap::ReverseContinue{ std::move(arg), threadId };
+    return RefPtr<ReverseContinue>::MakeShared(std::move(arg), threadId);
   }
   case CommandType::Scopes: {
     IfInvalidArgsReturn(Scopes);
 
     const int frame_id = args["frameId"];
-    return new ui::dap::Scopes{ std::move(arg), frame_id };
+    return RefPtr<Scopes>::MakeShared(std::move(arg), frame_id);
   }
   case CommandType::SetBreakpoints:
     IfInvalidArgsReturn(SetBreakpoints);
 
-    return new SetBreakpoints{ std::move(arg), args };
+    return RefPtr<SetBreakpoints>::MakeShared(std::move(arg), args);
   case CommandType::SetDataBreakpoints:
     TODO("Command::SetDataBreakpoints");
   case CommandType::SetExceptionBreakpoints: {
     IfInvalidArgsReturn(SetExceptionBreakpoints);
-    return new SetExceptionBreakpoints{ std::move(arg), std::move(args) };
+    return RefPtr<SetExceptionBreakpoints>::MakeShared(std::move(arg), std::move(args));
   }
   case CommandType::SetExpression:
     TODO("Command::SetExpression");
   case CommandType::SetFunctionBreakpoints:
     IfInvalidArgsReturn(SetFunctionBreakpoints);
 
-    return new SetFunctionBreakpoints{ std::move(arg), std::move(args) };
+    return RefPtr<SetFunctionBreakpoints>::MakeShared(std::move(arg), std::move(args));
   case CommandType::SetInstructionBreakpoints:
     IfInvalidArgsReturn(SetInstructionBreakpoints);
 
-    return new SetInstructionBreakpoints{ std::move(arg), std::move(args) };
+    return RefPtr<SetInstructionBreakpoints>::MakeShared(std::move(arg), std::move(args));
   case CommandType::SetVariable:
     TODO("Command::SetVariable");
   case CommandType::Source:
@@ -2369,7 +2368,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
       format.includeAll = fmt.Value("includeAll", true);
       format_ = format;
     }
-    return new ui::dap::StackTrace{ std::move(arg), args["threadId"], startFrame, levels, format_ };
+    return RefPtr<StackTrace>::MakeShared(std::move(arg), args["threadId"], startFrame, levels, format_);
   }
   case CommandType::StepBack:
     TODO("Command::StepBack");
@@ -2387,7 +2386,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
       singleThread = args["singleThread"];
     }
 
-    return new StepIn{ std::move(arg), threadId, singleThread, step_type };
+    return RefPtr<StepIn>::MakeShared(std::move(arg), threadId, singleThread, step_type);
   }
   case CommandType::StepInTargets:
     TODO("Command::StepInTargets");
@@ -2399,18 +2398,18 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     if (args.Contains("singleThread")) {
       singleThread = args["singleThread"];
     }
-    return new ui::dap::StepOut{ std::move(arg), threadId, !singleThread };
+    return RefPtr<StepOut>::MakeShared(std::move(arg), threadId, !singleThread);
   }
   case CommandType::Terminate:
     IfInvalidArgsReturn(Terminate);
 
-    return new Terminate{ std::move(arg) };
+    return RefPtr<Terminate>::MakeShared(std::move(arg));
   case CommandType::TerminateThreads:
     TODO("Command::TerminateThreads");
   case CommandType::Threads:
     IfInvalidArgsReturn(Threads);
 
-    return new Threads{ std::move(arg) };
+    return RefPtr<Threads>::MakeShared(std::move(arg));
   case CommandType::Variables: {
     IfInvalidArgsReturn(Variables);
 
@@ -2423,7 +2422,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     if (args.Contains("count")) {
       count = args["count"];
     }
-    return new Variables{ std::move(arg), variablesReference, start, count };
+    return RefPtr<Variables>::MakeShared(std::move(arg), variablesReference, start, count);
   }
   case CommandType::WriteMemory: {
     IfInvalidArgsReturn(WriteMemory);
@@ -2437,9 +2436,9 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     std::string_view data = args["data"];
 
     if (auto bytes = mdb::decode_base64(data); bytes) {
-      return new WriteMemory{ std::move(arg), addr, offset, std::move(bytes.value()) };
+      return RefPtr<WriteMemory>::MakeShared(std::move(arg), addr, offset, std::move(bytes.value()));
     } else {
-      return new InvalidArgs{ std::move(arg), "writeMemory", {} };
+      return RefPtr<InvalidArgs>::MakeShared(std::move(arg), "writeMemory", MissingOrInvalidArgs{});
     }
   }
   case CommandType::ImportScript:
