@@ -40,7 +40,7 @@ async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
 
 /** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function attachInit(debugAdapter) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('next'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('next'), 1000)
 }
 
 /** @param { import("./client").DebugAdapterClient } debugAdapter */

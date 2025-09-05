@@ -15,7 +15,7 @@ const bpRequest = 'setBreakpoints'
  * @param {string} exe
  */
 async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile(exe), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile(exe), 1000)
   if (file) {
     const fileContent = readFileContents(repoDirFile(file))
     const bp_lines = bps
@@ -46,7 +46,7 @@ async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setInstructionBreakpoint(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const mainFnAddresses = findDisasmFunction('main', debugAdapter.buildDirFile('stackframes'))
   const instructionAddress = mainFnAddresses[1]
   await debugAdapter
@@ -70,7 +70,7 @@ async function setInstructionBreakpoint(debugAdapter) {
 
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function set4InSameCompUnit(debugAdapter) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
@@ -101,7 +101,7 @@ async function set4InSameCompUnit(debugAdapter) {
 
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function set2InDifferentCompUnit(debugAdapter) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const files = ['test/stackframes.cpp', 'test/templated_code/template.h']
   const bpIdentifier = 'BP3'
 
@@ -172,7 +172,7 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setBreakpointsThatArePending(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const printf_plt_addr = getPrintfPlt(debugAdapter, 'stackframes')
   const invalidAddressess = ['0x300000', '0x100000', '0x9800000', printf_plt_addr].map((v) => ({
     instructionReference: v,
@@ -232,7 +232,7 @@ async function setNonExistingSourceBp(debugAdapter) {
 
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function set4ThenSet2(debugAdapter) {
-  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), [], 1000)
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   {
     const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
@@ -293,12 +293,8 @@ async function set4ThenSet2(debugAdapter) {
   // continue to make sure we don't hit breakpoints at BP1 and BP2
   let threads = await debugAdapter.threads()
   await debugAdapter.contNextStop(threads[0].id)
-  const frames = await debugAdapter.stackTrace()
-  assertLog(
-    frames.body.stackFrames[0].name == 'baz',
-    `Expected to be in function 'baz'`,
-    ` but was in '${frames.body.stackFrames[0].name}'`
-  )
+  const frames = await threads[0].stacktrace()
+  assertLog(frames[0].name == 'baz', `Expected to be in function 'baz'`, ` but was in '${frames[0].name}'`)
 }
 
 /** @param {import("./client").DebugAdapterClient } debugAdapter */

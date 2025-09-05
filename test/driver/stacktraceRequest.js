@@ -34,7 +34,7 @@ async function unwindFromSharedObject(client) {
   }
 
   let modules_event_promise = client.prepareWaitForEventN('module', 6, seconds(1))
-  await client.startRunToMain(client.buildDirFile('stupid_shared'), [], seconds(1))
+  await client.startRunToMain(client.buildDirFile('stupid_shared'), seconds(1))
   const res = await modules_event_promise
 
   const bp_res = await setFnBp(['convert_kilometers_to_miles'])
@@ -104,7 +104,7 @@ function verifyFrameIs(frame, name) {
 /** @param { import("./client").DebugAdapterClient } client */
 async function insidePrologueTest(client) {
   const { prologue, epilogue } = parse_prologue_and_epilogue(client)
-  await client.startRunToMain(client.buildDirFile('stackframes'), [], seconds(1))
+  await client.startRunToMain(client.buildDirFile('stackframes'), seconds(1))
   await client.setInsBreakpoint(prologue)
   await client.contNextStop()
   const frames = await client.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
@@ -133,7 +133,7 @@ async function insidePrologueTest(client) {
 /** @param { import("./client").DebugAdapterClient } client */
 async function insideEpilogueTest(client) {
   const { prologue, epilogue } = parse_prologue_and_epilogue(client)
-  await client.startRunToMain(client.buildDirFile('stackframes'), [], seconds(1))
+  await client.startRunToMain(client.buildDirFile('stackframes'), seconds(1))
   await client.setInsBreakpoint(epilogue)
   await client.contNextStop()
   const frames = await client.stackTrace().then(({ response_seq, command, type, success, body: { stackFrames } }) => {
@@ -193,7 +193,7 @@ function createExpectedStacktraces() {
 async function normalTest(client) {
   const expectedStackTraces = createExpectedStacktraces(client)
 
-  await client.startRunToMain(client.buildDirFile('stackframes'), [], seconds(1))
+  await client.startRunToMain(client.buildDirFile('stackframes'), seconds(1))
   const file = readFileContents(repoDirFile('test/stackframes.cpp'))
   const bp_lines = ['BP1', 'BP2', 'BP3', 'BP4']
     .map((ident) => getLineOf(file, ident))
@@ -273,7 +273,7 @@ function* walk_expected_frames(frames) {
 async function unwindWithDwarfExpression(client) {
   const printf_plt_addr = getPrintfPlt(client, 'next')
   console.log(`printf@plt address: ${printf_plt_addr}`)
-  await client.startRunToMain(client.buildDirFile('next'), [], seconds(1))
+  await client.startRunToMain(client.buildDirFile('next'), seconds(1))
   await client
     .sendReqGetResponse('setInstructionBreakpoints', {
       breakpoints: [{ instructionReference: printf_plt_addr }],
