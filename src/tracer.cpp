@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 // mdb
 #include "tracer.h"
+#include "common/macros.h"
 #include "common/typedefs.h"
 #include <bp.h>
 #include <configuration/command_line.h>
@@ -133,6 +134,7 @@ Tracer::AddLaunchedTarget(SessionId sessionId, const tc::InterfaceConfig &config
   VERIFY(it.has_value(), "Failed to find prepared supervisor with id {}", sessionId);
 
   std::unique_ptr supervisor = std::move(it.value()->second);
+  mUnInitializedSupervisor.erase(*it);
   supervisor->InitializeSupervisor(
     session, tc::TraceeCommandInterface::CreateCommandInterface(config), InterfaceType::Ptrace);
   mTracedProcesses.push_back(std::move(supervisor));
@@ -539,7 +541,7 @@ Tracer::ForkExec(ui::dap::DebugAdapterClient *debugAdapterClient,
     supervisor->ConfigureBreakpointBehavior(
       breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
 
-    WaitPidResult twr{ .tid = leader, .ws = { .ws = WaitStatusKind::Execed, .exit_code = 0 } };
+    WaitPidResult twr{ .tid = leader, .ws = { .ws = StopKind::Execed, .exit_code = 0 } };
     auto task = supervisor->RegisterTaskWaited(twr);
     if (task == nullptr) {
       PANIC("Expected a task but could not find one for that wait status");
@@ -548,7 +550,7 @@ Tracer::ForkExec(ui::dap::DebugAdapterClient *debugAdapterClient,
     supervisor->PostExec(program);
 
     if (ttyFd) {
-      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->mTaskLeader);
+      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->mSessionId);
     }
 
     if (stopOnEntry) {
@@ -800,7 +802,8 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) no
       for (auto evt : readInEvents) {
         switch (evt.mEventType) {
         case EventType::WaitStatus: {
-          DBGLOG(awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, to_str(evt.uWait.mWaitResult.ws.ws));
+          DBGLOG(
+            awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, Enums::ToString(evt.uWait.mWaitResult.ws.ws));
           if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.mWaitResult); dbg_evt) {
             dbgInstance.HandleTracerEvent(dbg_evt);
           }

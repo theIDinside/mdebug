@@ -165,6 +165,12 @@ public:
 
   virtual ~UICommand() noexcept = default;
 
+  constexpr SessionId
+  GetSessionId() const noexcept
+  {
+    return mSessionId;
+  }
+
   constexpr void
   SetDebugAdapterClient(dap::DebugAdapterClient &debugAdapter) noexcept
   {

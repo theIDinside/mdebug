@@ -1,6 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "ptrace.h"
-#include <cstdlib>
+#include "mdbsys/stop_status.h"
 #include <sys/syscall.h>
 #include <tracer.h>
 #include <utility>
@@ -169,26 +169,26 @@ SyscallArguments::debug_print(bool flush, bool pretty)
 
 #endif
 
-WaitStatusKind
+StopKind
 from_register(u64 syscall_number)
 {
-  using enum WaitStatusKind;
+  using enum StopKind;
   if (syscall_number == SYS_clone || syscall_number == SYS_clone3) {
     return Cloned;
   }
   if (syscall_number == SYS_execve || syscall_number == SYS_execveat) {
     return Execed;
   }
-  return WaitStatusKind::Stopped;
+  return Stopped;
 }
 
 WaitPidResult
 WaitResultToTaskWaitResult(Tid tid, int status) noexcept
 {
-  WaitStatusKind kind = WaitStatusKind::NotKnown;
+  using enum StopKind;
+  StopKind kind = NotKnown;
   const auto signal = WSTOPSIG(status);
 
-  using enum WaitStatusKind;
   if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
     PtraceSyscallInfo info;
     constexpr auto size = sizeof(PtraceSyscallInfo);

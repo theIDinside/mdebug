@@ -132,8 +132,8 @@ struct ExitedEvent final : public ui::UIResult
 
 struct ThreadEvent final : public ui::UIResult
 {
-  ThreadEvent(SessionId pid, ThreadReason reason, Tid tid) noexcept;
-  ThreadEvent(SessionId pid, const Clone &event) noexcept;
+  ThreadEvent(SessionId sessionId, ThreadReason reason, Tid tid) noexcept;
+  ThreadEvent(SessionId sessionId, const Clone &event) noexcept;
   ~ThreadEvent() noexcept override = default;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
   ThreadReason mReason;
@@ -166,7 +166,7 @@ struct BreakpointEvent final : public ui::UIResult
   std::string_view mReason;
   std::optional<std::string> mMessage;
   const UserBreakpoint *mBreakpoint;
-  BreakpointEvent(SessionId pid,
+  BreakpointEvent(SessionId sessionId,
     std::string_view reason,
     std::optional<std::string> message,
     const UserBreakpoint *breakpoint) noexcept;

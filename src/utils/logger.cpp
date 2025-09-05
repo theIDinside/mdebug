@@ -221,12 +221,12 @@ ProfilingLogger::End(std::string_view name, std::string_view category) noexcept
 void
 Logger::ConfigureLogging(const mdb::cfg::InitializationConfiguration &config) noexcept
 {
+  // TODO(simon): Make this configurable (again). It was just too big of a pain during testing, so I just enabled
+  // all log channels. Need to integrate this into the test suite as well as the vscode extension so that
+  // environment variables are properly set.
   const auto &channels = config.mLogChannels;
-  if (channels.empty()) {
-    return;
-  }
-
-  for (auto channel : channels) {
+  DBGLOG(core, "channels set: {}", channels.size());
+  for (auto channel : Enum<Channel>::Variants()) {
     sLoggerInstance->SetupChannel(config.mLogDirectory, channel);
   }
 }
