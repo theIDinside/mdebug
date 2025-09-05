@@ -213,7 +213,7 @@ GdbRemoteCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
   std::array<char, 128> buf{};
   std::string_view resumeCommand;
   if (action.mDeliverSignal == -1) {
-    action.mDeliverSignal = t.mLastWaitStatus.signal == SIGTRAP ? 0 : t.mLastWaitStatus.signal;
+    action.mDeliverSignal = t.mLastStopStatus.signal == SIGTRAP ? 0 : t.mLastStopStatus.signal;
   }
   switch (action.mResumeType) {
   case RunType::Step: {

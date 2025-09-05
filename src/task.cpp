@@ -56,7 +56,7 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 }
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
-    : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), initialized(false),
+    : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), initialized(false),
       exited(false), reaped(false), regs(), mTaskCallstack(nullptr), mSupervisor(nullptr),
       mBreakpointLocationStatus()
 
@@ -64,7 +64,7 @@ TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
 }
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
-    : mTid(newTaskTid), mLastWaitStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
+    : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
       initialized(true), exited(false), reaped(false), regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()),
       mSupervisor(supervisor.GetSupervisor()), mBreakpointLocationStatus()
 {
@@ -110,7 +110,7 @@ TaskInfo::CreateUnInitializedTask(WaitPidResult wait) noexcept
 {
   auto task = RefPtr<TaskInfo>::MakeShared(wait.tid);
   Tracer::Get().RegisterTracedTask(task);
-  task->mLastWaitStatus = wait.ws;
+  task->mLastStopStatus = wait.ws;
   return task;
 }
 
@@ -141,6 +141,15 @@ const TaskRegisters &
 TaskInfo::GetRegisterCache() const
 {
   return regs;
+}
+
+void
+TaskInfo::SetRegisterCacheTo(u8 *buffer, size_t bufferSize)
+{
+  MDB_ASSERT(bufferSize == sizeof(*GetRegisterCache().registers),
+    "Buffer size does not match sizeof({})",
+    sizeof(*GetRegisterCache().registers));
+  regs.registers = reinterpret_cast<user_regs_struct *>(buffer);
 }
 
 u64
@@ -204,14 +213,7 @@ TaskInfo::GetSupervisor() const noexcept
 void
 TaskInfo::SetTaskWait(WaitPidResult wait) noexcept
 {
-  mLastWaitStatus = wait.ws;
-}
-
-WaitStatus
-TaskInfo::PendingWaitStatus() const noexcept
-{
-  MDB_ASSERT(mLastWaitStatus.ws != WaitStatusKind::NotKnown, "Wait status unknown for {}", mTid);
-  return mLastWaitStatus;
+  mLastStopStatus = wait.ws;
 }
 
 sym::CallStack &

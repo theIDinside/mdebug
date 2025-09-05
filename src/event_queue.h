@@ -6,7 +6,6 @@
 #include "event_queue_event_param.h"
 #include "task.h"
 #include <format>
-#include <mdbsys/ptrace.h>
 #include <optional>
 #include <string>
 #include <sys/poll.h>

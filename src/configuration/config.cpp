@@ -4,6 +4,7 @@
 // mdb
 #include <configuration/command_line.h>
 #include <utility>
+#include <utils/logger.h>
 #include <utils/util.h>
 
 // std
@@ -18,13 +19,18 @@ InitializationConfiguration *
 InitializationConfiguration::ConfigureWithParser(CommandLineRegistry &parser) noexcept
 {
   auto *config = new InitializationConfiguration{};
+  // When recorded using rr, hardware concurrency actually reports 1 ! which -2 would give us 4.5 billion threads.
+  // No wonder mdb blows up under rr record.
+  const auto minimumThreadPoolSize =
+    std::thread::hardware_concurrency() > 4 ? (std::thread::hardware_concurrency() - 2) : 2;
+
   parser.AddOption<ArgIterator &>("-t",
     "--threads",
     "Configure the worker thread pool size. Defaults to amount of threads on system minus specific debugger "
     "threads.",
     config->mThreadPoolSize,
     &FromTraits<size_t>::From,
-    std::thread::hardware_concurrency() - 2);
+    minimumThreadPoolSize);
 
   parser.AddOption<ArgIterator &>(
     "-l",

@@ -170,7 +170,7 @@ DapEventSystem::WaitForEvents(PollState &state, std::vector<DapNotification> &ev
   state.AddCommandSource(fd);
 
   for (auto io : mStandardIo) {
-    state.AddStandardIOSource(io.mFd, io.mPid);
+    state.AddStandardIOSource(io.mFd, io.mSessionId);
   }
 
   if (poll(state.fds.data(), state.fds.size(), -1) <= 0) {
@@ -291,6 +291,12 @@ DebugAdapterClient::GetSupervisor(SessionId sessionId) const noexcept
     }
   }
   return nullptr;
+}
+
+std::span<const SupervisorEntry>
+DebugAdapterClient::Supervisors() const noexcept
+{
+  return mSupervisors;
 }
 
 void

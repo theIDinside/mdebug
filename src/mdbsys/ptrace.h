@@ -1,10 +1,15 @@
 /** LICENSE TEMPLATE */
 #pragma once
+// mdb
 #include <common/macros.h>
 #include <common/typedefs.h>
-#include <optional>
+#include <mdbsys/stop_status.h>
+
+// std
 #include <source_location>
 #include <string_view>
+
+// system
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/user.h>
@@ -13,49 +18,6 @@ namespace mdb {
 class TaskInfo;
 
 template <size_t... T> constexpr bool always_false_i = false;
-
-enum class WaitStatusKind : u16
-{
-#define ITEM(IT, Value) IT = Value,
-#include "./defs/waitstatus.def"
-#undef ITEM
-};
-
-constexpr std::string_view
-to_str(const WaitStatusKind ws)
-{
-  switch (ws) {
-#define ITEM(IT, Value)                                                                                           \
-  case WaitStatusKind::IT:                                                                                        \
-    return #IT;
-#include "./defs/waitstatus.def"
-#undef ITEM
-  }
-  MIDAS_UNREACHABLE
-}
-
-struct WaitStatus
-{
-  WaitStatusKind ws;
-  union
-  {
-    int exit_code;
-    int signal;
-  };
-};
-
-struct WaitPidResult
-{
-  Tid tid;
-  WaitStatus ws;
-};
-
-/** C++-ified result from waitpid syscall. */
-struct WaitPid
-{
-  Tid tid;
-  int status;
-};
 
 /** `wait`'s for `tid` in a non-blocking way and also if the operation returns a result, leaves the wait value in
  * place so that `wait` can be called again to reap it. If no child was waited on returns `none`. */
