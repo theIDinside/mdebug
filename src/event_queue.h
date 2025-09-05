@@ -2,10 +2,12 @@
 #pragma once
 
 #include "bp.h"
+#include "common/macros.h"
 #include "common/typedefs.h"
 #include "event_queue_event_param.h"
 #include "task.h"
 #include <format>
+#include <memory>
 #include <optional>
 #include <string>
 #include <sys/poll.h>
@@ -23,7 +25,7 @@ class DebugAdapterClient;
 
 } // namespace ui
 
-enum class EventType
+enum class ApplicationEventType
 {
   WaitStatus,
   Command,
@@ -405,32 +407,68 @@ struct InternalEvent
 
 struct ApplicationEvent
 {
-  EventType mEventType;
+  NO_COPY(ApplicationEvent);
+
+  ApplicationEventType mEventType;
   Tid mPidOrTid;
   union
   {
     WaitEvent uWait;
     TraceEvent *uDebugger;
-    ui::UICommand *uCommand;
+    LeakedRef<ui::UICommand> uCommand;
     InternalEvent uInternalEvent;
   };
 
-  constexpr explicit ApplicationEvent(ui::UICommand *command) noexcept
-      : mEventType(EventType::Command), mPidOrTid(0), uCommand(command)
+  constexpr explicit ApplicationEvent(LeakedRef<ui::UICommand> command) noexcept
+      : mEventType(ApplicationEventType::Command), mPidOrTid(0), uCommand(std::move(command))
   {
   }
   constexpr explicit ApplicationEvent(TraceEvent *debuggerEvent, bool isInit = false) noexcept
-      : mEventType(!isInit ? EventType::TraceeEvent : EventType::Initialization),
+      : mEventType(!isInit ? ApplicationEventType::TraceeEvent : ApplicationEventType::Initialization),
         mPidOrTid(debuggerEvent->mProcessId), uDebugger(debuggerEvent)
   {
   }
   constexpr explicit ApplicationEvent(WaitEvent waitEvent) noexcept
-      : mEventType(EventType::WaitStatus), mPidOrTid(waitEvent.mWaitResult.tid), uWait(waitEvent)
+      : mEventType(ApplicationEventType::WaitStatus), mPidOrTid(waitEvent.mWaitResult.tid), uWait(waitEvent)
   {
   }
   constexpr explicit ApplicationEvent(InternalEvent internalEvent) noexcept
-      : mEventType(EventType::Internal), mPidOrTid(0), uInternalEvent(internalEvent)
+      : mEventType(ApplicationEventType::Internal), mPidOrTid(0), uInternalEvent(internalEvent)
   {
+  }
+
+  ApplicationEvent(ApplicationEvent &&other) noexcept : mEventType(other.mEventType), mPidOrTid(other.mPidOrTid)
+  {
+    switch (other.mEventType) {
+    case ApplicationEventType::WaitStatus: {
+      uWait = other.uWait;
+      break;
+    }
+    case ApplicationEventType::Command: {
+      std::construct_at(&uCommand, std::move(other.uCommand));
+      break;
+    }
+    case ApplicationEventType::TraceeEvent:
+      [[fallthrough]];
+    case ApplicationEventType::Initialization: {
+      uDebugger = other.uDebugger;
+      // Let's be nice to ourselves so we don't have to chase this bug if we choose to alter life times for this
+      // type any further.
+      other.uDebugger = nullptr;
+      break;
+    }
+    case ApplicationEventType::Internal: {
+      uInternalEvent = other.uInternalEvent;
+      break;
+    }
+    }
+  }
+
+  constexpr ~ApplicationEvent()
+  {
+    if (mEventType == ApplicationEventType::Command) {
+      MDB_ASSERT(uCommand.Forget() == nullptr, "Forgot to take a reference to the command data!");
+    }
   }
 };
 
@@ -467,7 +505,7 @@ class EventSystem
   std::mutex mTraceEventGuard{};
   std::mutex mInternalEventGuard{};
   std::vector<TraceEvent *> mTraceEvents;
-  std::vector<ui::UICommand *> mCommands;
+  std::vector<LeakedRef<ui::UICommand>> mCommands;
   std::vector<ApplicationEvent> mWaitEvents;
   std::vector<TraceEvent *> mInitEvent;
   std::vector<InternalEvent> mInternal;
@@ -482,7 +520,7 @@ class EventSystem
 public:
   static EventSystem *Initialize() noexcept;
   void InitWaitStatusManager() noexcept;
-  void PushCommand(ui::dap::DebugAdapterClient *dap_client, ui::UICommand *cmd) noexcept;
+  void PushCommand(ui::dap::DebugAdapterClient *dap_client, RefPtr<ui::UICommand> cmd) noexcept;
   void PushDebuggerEvent(TraceEvent *event) noexcept;
   void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
   void PushInitEvent(TraceEvent *event) noexcept;

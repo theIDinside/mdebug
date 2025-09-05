@@ -44,9 +44,10 @@ protected:                                                                      
   /* Grant RefCountPtr access to manage reference counts */                                                       \
   template <typename U> friend class RefPtr;                                                                      \
   template <typename U> friend class LeakedRef;                                                                   \
+  template <typename U> friend class RefCountControl;                                                             \
   friend class RefPtr<Type>;                                                                                      \
   friend class LeakedRef<Type>;                                                                                   \
-                                                                                                                  \
+  friend class RefCountControl<Type>;                                                                             \
   mutable std::atomic<int> mReferenceCount{ 0 };                                                                  \
   constexpr void IncreaseUseCount() const noexcept { mReferenceCount.fetch_add(1, std::memory_order_relaxed); }   \
                                                                                                                   \
@@ -55,6 +56,26 @@ protected:                                                                      
     if (mReferenceCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {                                           \
       delete this;                                                                                                \
     }                                                                                                             \
+  }
+
+#define INTERNAL_REFERENCE_COUNT_THREAD_UNSAFE(Type)                                                              \
+protected:                                                                                                        \
+  /* Grant RefPtr & LeakedRef access to manage reference counts */                                                \
+  template <typename U> friend class RefPtr;                                                                      \
+  template <typename U> friend class LeakedRef;                                                                   \
+  template <typename U> friend class RefCountControl;                                                             \
+  friend class RefPtr<Type>;                                                                                      \
+  friend class LeakedRef<Type>;                                                                                   \
+  friend class RefCountControl<Type>;                                                                             \
+                                                                                                                  \
+  mutable int mReferenceCount{ 0 };                                                                               \
+  constexpr void IncreaseUseCount() const noexcept { mReferenceCount += 1; }                                      \
+                                                                                                                  \
+  constexpr void DecreaseUseCount() const noexcept                                                                \
+  {                                                                                                               \
+    --mReferenceCount;                                                                                            \
+    if (mReferenceCount <= 0)                                                                                     \
+      delete this;                                                                                                \
   }
 
 #define REF_COUNTED_WITH_WEAKREF_SUPPORT(Type)                                                                    \
@@ -171,23 +192,35 @@ private:
   constexpr void
   IncrementUserCount() const noexcept
   {
-    if (mRef) {
-      mRef->IncreaseUseCount();
+    if constexpr (requires { typename T::Base; }) {
+      if (mRef) {
+        RefCountControl<typename T::Base>::IncRefCount(*static_cast<T::Base *>(mRef));
+      }
+    } else {
+      if (mRef) {
+        mRef->IncreaseUseCount();
+      }
     }
   }
 
   constexpr void
   DecrementUserCount() const noexcept
   {
-    if (mRef) {
-      mRef->DecreaseUseCount();
+    if constexpr (requires { typename T::Base; }) {
+      if (mRef) {
+        RefCountControl<typename T::Base>::DecRefCount(*static_cast<typename T::Base *>(mRef));
+      }
+    } else {
+      if (mRef) {
+        mRef->DecreaseUseCount();
+      }
     }
   }
 
 public:
   using Type = T;
   template <typename U> friend class RefPtr;
-  friend class LeakedRef<T>;
+  template <typename U> friend class LeakedRef;
   // Constructors
   constexpr RefPtr() = default;
   constexpr RefPtr(std::nullptr_t) noexcept : RefPtr() {};
@@ -218,6 +251,15 @@ public:
     T *swap = nullptr;
     std::swap(mRef, swap);
     return LeakedRef<T>{ swap };
+  }
+
+  template <typename U = T>
+  constexpr LeakedRef<U>
+  Leak() noexcept
+  {
+    U *swap = nullptr;
+    std::swap(mRef, swap);
+    return LeakedRef<U>{ swap };
   }
 
   // Implicit conversion operator from RefPtr<Derived> to RefPtr<Base>
@@ -408,6 +450,8 @@ public:
     return RefPtr<T>{ Forget() };
   }
 
+  LeakedRef() noexcept : mUnManged(nullptr) {}
+
   // It's fine to move LeakedRef and it's ok to destroy LeakedRef in non-friend contexts (because in those
   // contexts, you transform the leakedref to a ref counted pointer via .Take() or direct conversion)
   constexpr ~LeakedRef() noexcept { MDB_ASSERT(mUnManged == nullptr, "Dropped ref counted object on the floor"); }
@@ -428,6 +472,13 @@ public:
   Take() noexcept
   {
     return RefPtr<T>{ std::move(*this) };
+  }
+
+  void
+  ConsumeOtherLeaked(LeakedRef &&ref)
+  {
+    MDB_ASSERT(mUnManged == nullptr, "This leaked reference already holds a leaked reference value!");
+    std::swap(mUnManged, ref.mUnManged);
   }
 };
 

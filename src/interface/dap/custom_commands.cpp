@@ -2,6 +2,7 @@
 #include "custom_commands.h"
 #include "interface/dap/events.h"
 #include "interface/dap/interface.h"
+#include "interface/ui_command.h"
 #include "invalid.h"
 #include "supervisor.h"
 #include "tracer.h"
@@ -10,20 +11,21 @@
 namespace mdb::ui::dap {
 // TODO: ParseCustomRequestCommand will almost certainly take DebugAdapterClient at some point (to get an
 // allocator.)
-ui::UICommand *
+
+RefPtr<ui::UICommand>
 ParseCustomRequestCommand(
   const DebugAdapterClient &, UICommandArg arg, std::string_view cmd_name, const mdbjson::JsonValue &) noexcept
 {
   if (cmd_name == "continueAll") {
-    return new ContinueAll{ std::move(arg) };
+    return RefPtr<ContinueAll>::MakeShared(std::move(arg));
   }
   if (cmd_name == "pauseAll") {
-    return new PauseAll{ std::move(arg) };
+    return RefPtr<PauseAll>::MakeShared(std::move(arg));
   }
   if (cmd_name == "getProcesses") {
-    return new GetProcesses{ std::move(arg) };
+    return RefPtr<GetProcesses>::MakeShared(std::move(arg));
   }
-  return new InvalidArgs{ std::move(arg), cmd_name, {} };
+  return RefPtr<InvalidArgs>::MakeShared(std::move(arg), cmd_name, MissingOrInvalidArgs{});
 }
 
 UIResultPtr

@@ -317,11 +317,11 @@ EventSystem::Initialize() noexcept
 }
 
 void
-EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, ui::UICommand *cmd) noexcept
+EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, RefPtr<ui::UICommand> cmd) noexcept
 {
   std::lock_guard lock(mCommandsGuard);
   cmd->SetDebugAdapterClient(*debugAdapter);
-  mCommands.push_back(cmd);
+  mCommands.push_back(cmd.Leak());
   DBGLOG(core, "notify of new command...");
   int writeValue = write(mCommandEvents[1], "+", 1);
   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
@@ -394,8 +394,9 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mCommandsGuard);
-      std::ranges::transform(
-        mCommands, std::back_inserter(write), [](ui::UICommand *cmd) { return ApplicationEvent{ cmd }; });
+      for (auto &&cmd : mCommands) {
+        write.emplace_back(ApplicationEvent{ std::move(cmd) });
+      }
       mCommands.clear();
     } else if (pfd.fd == mDebuggerEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));

@@ -44,10 +44,10 @@ struct InvalidArgs final : public UICommand
 
 template <typename Derived>
 constexpr auto
-Validate(UICommandArg &arg, const mdbjson::JsonValue &args) -> InvalidArgs *
+Validate(UICommandArg &arg, const mdbjson::JsonValue &args) -> RefPtr<ui::dap::InvalidArgs>
 {
   if (auto &&missing = UICommand::CheckArguments<Derived>(args); missing) {
-    return new ui::dap::InvalidArgs{ std::move(arg), Derived::Request, std::move(missing.value()) };
+    return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), Derived::Request, std::move(missing.value()));
   } else {
     return nullptr;
   }

@@ -199,7 +199,7 @@ concept HasName = requires(T t) {
   { T::Request } -> std::convertible_to<std::string_view>;
 };
 
-ui::UICommand *ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) noexcept;
+RefPtr<ui::UICommand> ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) noexcept;
 
 }; // namespace ui::dap
 } // namespace mdb
