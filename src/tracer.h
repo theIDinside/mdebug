@@ -205,7 +205,7 @@ public:
   TraceEvent *ConvertWaitEvent(WaitPidResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
 
-  void ExecuteCommand(ui::UICommand *cmd) noexcept;
+  void ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
   void HandleInternalEvent(InternalEvent evt) noexcept;
   void HandleInitEvent(TraceEvent *evt) noexcept;
