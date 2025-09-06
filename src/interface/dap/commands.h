@@ -180,12 +180,39 @@ template <size_t Size> struct VerifyMap
     return std::nullopt;                                                                                          \
   }
 
-struct Message
+class Message
 {
-  std::string format;
-  std::unordered_map<std::string, std::string> variables{};
-  bool show_user{ true };
-  std::optional<int> id{};
+  std::pmr::string mFormat;
+  std::pmr::unordered_map<std::pmr::string, std::pmr::string> mVariables;
+  bool mShowUser{ true };
+  std::optional<int> mId{};
+
+public:
+  Message(std::string_view message, std::pmr::memory_resource *rsrc) noexcept;
+  Message(std::pmr::string message, std::pmr::memory_resource *rsrc) noexcept;
+
+  const auto &
+  Variables() const
+  {
+    return mVariables;
+  }
+
+  const auto &
+  Format() const noexcept
+  {
+    return mFormat;
+  }
+
+  bool
+  ShowToUser() const noexcept
+  {
+    return mShowUser;
+  }
+  std::optional<int>
+  MessageId() const noexcept
+  {
+    return mId;
+  }
 };
 
 // Defined in commands.cpp

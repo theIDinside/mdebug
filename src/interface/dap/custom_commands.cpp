@@ -1,12 +1,14 @@
 /** LICENSE TEMPLATE */
 #include "custom_commands.h"
-#include "interface/dap/events.h"
-#include "interface/dap/interface.h"
-#include "interface/ui_command.h"
-#include "invalid.h"
-#include "supervisor.h"
-#include "tracer.h"
-#include "utils/format_utils.h"
+
+// mdb
+#include <interface/dap/events.h>
+#include <interface/dap/interface.h>
+#include <interface/dap/invalid.h>
+#include <interface/ui_command.h>
+#include <supervisor.h>
+#include <tracer.h>
+#include <utils/format_utils.h>
 
 namespace mdb::ui::dap {
 // TODO: ParseCustomRequestCommand will almost certainly take DebugAdapterClient at some point (to get an
@@ -28,12 +30,12 @@ ParseCustomRequestCommand(
   return RefPtr<InvalidArgs>::MakeShared(std::move(arg), cmd_name, MissingOrInvalidArgs{});
 }
 
-UIResultPtr
+void
 ContinueAll::Execute() noexcept
 {
   auto target = GetSupervisor();
   MDB_ASSERT(target, "Target must not be null");
-  auto res = new ContinueAllResponse{ true, this, target->TaskLeaderTid() };
+  auto res = Allocate<ContinueAllResponse>(true, this, target->TaskLeaderTid());
   std::vector<Tid> resumedThreads{};
   // N.B: it's unfortunate that VSCode doesn't honor the "allThreadsContinued" field on a continued event
   // because merely sending 1 continued event for a thread with that flag set, doesn't update the UI. File bug with
@@ -46,7 +48,7 @@ ContinueAll::Execute() noexcept
       mDAPClient->PushDelayedEvent(new ContinuedEvent{ mSessionId, tid, true });
     }
   }
-  return res;
+  return WriteResponse(*res);
 }
 
 std::pmr::string
@@ -62,7 +64,7 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   return result;
 }
 
-UIResultPtr
+void
 PauseAll::Execute() noexcept
 {
   auto target = GetSupervisor();
@@ -71,8 +73,7 @@ PauseAll::Execute() noexcept
     client->PostDapEvent(
       new StoppedEvent{ sessionId, StoppedReason::Pause, "Paused", tid, {}, "Paused all", true });
   });
-  auto res = new PauseAllResponse{ true, this };
-  return res;
+  return WriteResponse(PauseAllResponse{ true, this });
 }
 
 std::pmr::string
@@ -92,7 +93,7 @@ ImportScript::ImportScript(UICommandArg arg, std::string &&scriptSource) noexcep
 {
 }
 
-UIResultPtr
+void
 ImportScript::Execute() noexcept
 {
   TODO("ImportScript::Execute() noexcept");
@@ -118,7 +119,8 @@ ImportScriptResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocat
   }
   return result;
 }
-UIResultPtr
+
+void
 GetProcesses::Execute() noexcept
 {
   IdContainer result{};
@@ -126,7 +128,7 @@ GetProcesses::Execute() noexcept
     result.emplace_back(tc->TaskLeaderTid(), tc->GetSessionId());
   }
 
-  return new GetProcessesResponse{ true, this, std::move(result) };
+  return WriteResponse(GetProcessesResponse{ true, this, std::move(result) });
 }
 
 std::pmr::string

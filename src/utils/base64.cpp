@@ -21,7 +21,7 @@ BaseTable() noexcept
 std::pmr::string
 EncodeIntoBase64(std::span<std::uint8_t> data, std::pmr::memory_resource *resource) noexcept
 {
-  std::pmr::string buffer{resource};
+  std::pmr::string buffer{ resource };
   buffer.reserve(static_cast<size_t>((double)data.size() * 1.40));
   const auto chunks = std::floor((static_cast<float>(data.size()) / 3.0f));
   const auto total = chunks * 3;
@@ -44,52 +44,37 @@ EncodeIntoBase64(std::span<std::uint8_t> data, std::pmr::memory_resource *resour
   return buffer;
 }
 
-std::optional<std::pmr::vector<std::uint8_t>>
-DecodeBase64(std::string_view encoded, std::pmr::memory_resource *resource) noexcept
+template <typename OutBuffer>
+void
+DecodeBase64Into(std::string_view encoded_data, OutBuffer &buffer)
 {
   static constexpr auto Table = BaseTable();
-  std::pmr::vector<std::uint8_t> out{resource};
-  out.reserve(encoded.size() / 4 * 3 + 2);
+  buffer.reserve(encoded_data.size() / 4 * 3 + 2);
 
   int val = 0, valb = -8;
-  for (const auto c : encoded) {
+  for (const auto c : encoded_data) {
     if (Table[c] == -1) {
       break;
     }
     val = (val << 6) + Table[c];
     valb += 6;
     if (valb >= 0) {
-      out.push_back(char((val >> valb) & 0xFF));
+      buffer.push_back(char((val >> valb) & 0xFF));
       valb -= 8;
     }
   }
-  return out;
 }
 
-std::optional<std::vector<std::uint8_t>>
-decode_base64(std::string_view encoded) noexcept
+std::pmr::vector<std::uint8_t>
+DecodeBase64(std::string_view encoded, std::pmr::memory_resource *rsrc) noexcept
 {
-  static constexpr auto Table = BaseTable();
-  std::vector<std::uint8_t> out;
-  out.reserve(encoded.size() / 4 * 3 + 2);
-
-  int val = 0, valb = -8;
-  for (const auto c : encoded) {
-    if (Table[c] == -1) {
-      break;
-    }
-    val = (val << 6) + Table[c];
-    valb += 6;
-    if (valb >= 0) {
-      out.push_back(char((val >> valb) & 0xFF));
-      valb -= 8;
-    }
-  }
+  std::pmr::vector<std::uint8_t> out{ rsrc };
+  DecodeBase64Into(encoded, out);
   return out;
 }
 
 std::string
-encode_base64(std::span<std::uint8_t> data) noexcept
+EncodeBase64(std::span<std::uint8_t> data) noexcept
 {
   std::string buffer;
   buffer.reserve(static_cast<size_t>((double)data.size() * 1.40));

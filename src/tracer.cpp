@@ -200,20 +200,8 @@ Tracer::ConvertWaitEvent(WaitPidResult waitPid) noexcept
 void
 Tracer::ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept
 {
-  auto dapClient = cmd->mDAPClient;
-  auto scoped = dapClient->GetResponseArenaAllocator()->ScopeAllocation();
-  auto result = cmd->Execute();
-
-  if (result) [[likely]] {
-    MDB_ASSERT(scoped.GetAllocator() != nullptr, "Arena allocator could not be retrieved");
-    auto data = result->Serialize(0);
-    if (!data.empty()) {
-      dapClient->WriteSerializedProtocolMessage(data);
-    }
-
-    delete result;
-  }
-  dapClient->FlushEvents();
+  cmd->Execute();
+  cmd->mDAPClient->FlushEvents();
 }
 
 void

@@ -244,6 +244,135 @@ interface StackTraceResponse extends Response {
   }
 }
 
+interface ContinueArguments {
+  /**
+   * Specifies the active thread. If the debug adapter supports single thread
+   * execution (see `supportsSingleThreadExecutionRequests`) and the argument
+   * `singleThread` is true, only the thread with this ID is resumed.
+   */
+  threadId: number
+
+  /**
+   * If this flag is true, execution is resumed only for the thread with given
+   * `threadId`.
+   */
+  singleThread?: boolean
+}
+
+type SteppingGranularity = 'statement' | 'line' | 'instruction'
+
+interface NextArguments {
+  /**
+   * Specifies the thread for which to resume execution for one step (of the
+   * given granularity).
+   */
+  threadId: number
+
+  /**
+   * If this flag is true, all other suspended threads are not resumed.
+   */
+  singleThread?: boolean
+
+  /**
+   * Stepping granularity. If no granularity is specified, a granularity of
+   * `statement` is assumed.
+   */
+  granularity?: SteppingGranularity
+}
+
+interface NextResponse extends Response {}
+
+type EventKinds =
+  | 'stopped'
+  | 'breakpoint'
+  | 'capabilities'
+  | 'continued'
+  | 'exited'
+  | 'initialized'
+  | 'invalidated'
+  | 'loadedSource'
+  | 'memory'
+  | 'module'
+  | 'output'
+  | 'process'
+  | 'progressEnd'
+  | 'progressStart'
+  | 'progressUpdate'
+  | 'terminated'
+  | 'thread'
+
+type StoppedReason =
+  | 'step'
+  | 'breakpoint'
+  | 'exception'
+  | 'pause'
+  | 'entry'
+  | 'goto'
+  | 'function breakpoint'
+  | 'data breakpoint'
+  | 'instruction breakpoint'
+
+// We strip the 'event' property and the body property becomes the event result.
+interface StoppedEvent extends Event {
+  // event: 'stopped'
+
+  // body: {
+  /**
+   * The reason for the event.
+   * For backward compatibility this string is shown in the UI if the
+   * `description` attribute is missing (but it must not be translated).
+   * Values: 'step', 'breakpoint', 'exception', 'pause', 'entry', 'goto',
+   * 'function breakpoint', 'data breakpoint', 'instruction breakpoint', etc.
+   */
+  reason: StoppedReason
+
+  /**
+   * The full reason for the event, e.g. 'Paused on exception'. This string is
+   * shown in the UI as is and can be translated.
+   */
+  description?: string
+
+  /**
+   * The thread which was stopped.
+   */
+  threadId?: number
+
+  /**
+   * A value of true hints to the client that this event should not change the
+   * focus.
+   */
+  preserveFocusHint?: boolean
+
+  /**
+   * Additional information. E.g. if reason is `exception`, text contains the
+   * exception name. This string is shown in the UI.
+   */
+  text?: string
+
+  /**
+   * If `allThreadsStopped` is true, a debug adapter can announce that all
+   * threads have stopped.
+   * - The client should use this information to enable that all threads can
+   * be expanded to access their stacktraces.
+   * - If the attribute is missing or false, only the thread with the given
+   * `threadId` can be expanded.
+   */
+  allThreadsStopped?: boolean
+
+  /**
+   * Ids of the breakpoints that triggered the event. In most cases there is
+   * only a single breakpoint but here are some examples for multiple
+   * breakpoints:
+   * - Different types of breakpoints map to the same location.
+   * - Multiple source breakpoints get collapsed to the same instruction by
+   * the compiler/runtime.
+   * - Multiple function breakpoints with different function names map to the
+   * same location.
+   */
+  hitBreakpointIds?: number[]
+  // }
+}
+
 interface StackFrame {
   /**
    * An identifier for the stack frame. It must be unique across all threads.

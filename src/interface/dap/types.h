@@ -41,11 +41,12 @@ struct Breakpoint
   std::optional<u32> mLine;
   std::optional<u32> mColumn;
   std::optional<std::string_view> mSourcePath;
-  std::optional<std::string> mErrorMessage;
+  std::optional<std::pmr::string> mErrorMessage;
 
   std::pmr::string Serialize(std::pmr::memory_resource *memoryResource) const noexcept;
-  static Breakpoint CreateNonVerified(u32 id, std::string_view msg) noexcept;
-  static Breakpoint CreateFromUserBreakpoint(const UserBreakpoint &userBreakpoint) noexcept;
+  static Breakpoint CreateNonVerified(u32 id, std::string_view msg, std::pmr::memory_resource *rsrc) noexcept;
+  static Breakpoint CreateFromUserBreakpoint(
+    const UserBreakpoint &userBreakpoint, std::pmr::memory_resource *rsrc) noexcept;
 };
 
 struct DataBreakpoint
@@ -128,7 +129,7 @@ struct Scope
   }
 };
 
-enum class EntityType
+enum class EntityType : std::uint8_t
 {
   Scope,
   Frame,
