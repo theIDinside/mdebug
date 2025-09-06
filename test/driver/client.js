@@ -1,6 +1,5 @@
 /** COPYRIGHT TEMPLATE */
 
-/** @import "./types" as Types */
 /** @typedef {import('./types')} DbgTypes */
 
 /**
@@ -692,6 +691,37 @@ class DebugAdapterClient {
     })
   }
 
+  /**
+   * @param { import("./types").EventKinds } waitEvent
+   * @param { number } timeout
+   * @param { function(import("./types").StoppedEvent) } predicate
+   * @returns { Promise }
+   */
+  waitForEvent(waitEvent, timeout, predicate) {
+    const ctrl = new AbortController()
+    const signal = ctrl.signal
+    const timeOut = setTimeout(() => {
+      ctrl.abort()
+    }, timeout)
+
+    const err = new Error('Timed out')
+    Error.captureStackTrace(err, this.waitForEvent)
+
+    return new Promise((resolve, reject) => {
+      this.events.on(waitEvent, (event) => {
+        if (predicate(event)) {
+          clearTimeout(timeOut)
+          resolve(event)
+        }
+      })
+
+      signal.addEventListener('abort', () => {
+        err.message = `Timed out (${timeout}ms threshold crossed): Waiting for ${n} events of type ${evt} to have happened (but saw ${eventCount})`
+        reject(err)
+      })
+    })
+  }
+
   /* Called _before_ an action that is expected to create an event.
    * Calling this after, may or may not work, as the event handler might not be set up in time,
    * before the actual event comes across the wire.*/
@@ -1121,9 +1151,26 @@ class DebugAdapterClient {
     return response
   }
 
+  /**
+   * @param {import("./types").ContinueArguments} args
+   * @returns
+   */
   async continueRequest(args) {
     const response = await this.sendReqGetResponse(
       'continue',
+      { ...args, sessionId: this.sessionId },
+      this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
+    )
+
+    return response
+  }
+
+  /**
+   * @param { import('./types').NextArguments } args
+   */
+  async nextRequest(args) {
+    const response = await this.sendReqGetResponse(
+      'next',
       { ...args, sessionId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
