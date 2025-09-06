@@ -13,7 +13,7 @@
 #include <tracer.h>
 #include <utils/logger.h>
 
-// system
+// std
 #include <algorithm>
 #include <type_traits>
 
@@ -281,11 +281,11 @@ UserBreakpoint::GetSourceFile() const noexcept
   }
 }
 
-std::optional<std::string>
-UserBreakpoint::GetErrorMessage() const noexcept
+std::optional<std::pmr::string>
+UserBreakpoint::GetErrorMessage(std::pmr::memory_resource *rsrc) const noexcept
 {
-  return mdb::transform(mInstallError, [t = this](const BreakpointError &err) {
-    std::string message{};
+  return mdb::transform(mInstallError, [t = this, rsrc](const BreakpointError &err) {
+    std::pmr::string message{ rsrc };
     auto it = std::back_inserter(message);
     std::visit(
       [t, &it](const auto &e) {

@@ -7,16 +7,11 @@
 #include <mdbjs/supervisorjs.h>
 #include <mdbjs/taskinfojs.h>
 #include <mdbjs/util.h>
-#include <supervisor.h>
-#include <tracer.h>
 #include <utils/logger.h>
 
 // system
 // dependency
 #include <mdbjs/include-quickjs.h>
-
-// std
-#include <memory_resource>
 
 #define STATIC_INIT_CHECK(Message)                                                                                \
   static bool constantsInitialized = false;                                                                       \
@@ -295,9 +290,8 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
   } };
 
   std::string_view view{ string };
-  res->reserve(view.size());
 
-  std::copy(view.begin(), view.end(), std::back_inserter(*res));
+  CopyTo(view, *res);
 
   return res;
 }

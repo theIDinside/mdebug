@@ -8,7 +8,7 @@
 namespace mdb::ui::dap {
 InvalidArgsResponse::InvalidArgsResponse(
   Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args, InvalidArgs *cmd) noexcept
-    : UIResult(false, cmd), mProcessId(processId), command(command), missing_or_invalid(std::move(missing_args))
+    : UIResult(false, cmd), mProcessId(processId), mCommand(command), mMissingOrInvalid(std::move(missing_args))
 {
 }
 
@@ -17,8 +17,8 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 {
   std::pmr::vector<std::string_view> missing{ arenaAllocator };
   std::pmr::vector<const InvalidArg *> parsedAndInvalid{ arenaAllocator };
-  missing.reserve(missing_or_invalid.size());
-  for (const auto &pair : missing_or_invalid) {
+  missing.reserve(mMissingOrInvalid.size());
+  for (const auto &pair : mMissingOrInvalid) {
     const auto &[k, v] = pair;
     switch (k.kind) {
     case ArgumentErrorKind::Missing:
@@ -36,7 +36,7 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
     seq,
     mRequestSeq,
     mProcessId,
-    command);
+    mCommand);
 
   bool wrote = false;
   if (!missing.empty()) {

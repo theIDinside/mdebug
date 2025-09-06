@@ -9,6 +9,7 @@
 
 // see https://arxiv.org/pdf/1704.00605.pdf for fancy pants AVX2 optimizations
 namespace mdb {
+// clang-format off
 static constexpr char base64_lookup[] = {
   'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
   'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
@@ -42,11 +43,12 @@ constexpr static char lookup_byte4[256] = {
   'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
   'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
 
-std::pmr::string EncodeIntoBase64(std::span<std::uint8_t> data, std::pmr::memory_resource *resource) noexcept;
-std::optional<std::pmr::vector<std::uint8_t>> DecodeBase64(std::string_view encoded,
-                                                           std::pmr::memory_resource *resource) noexcept;
+// clang-format on
 
-std::string encode_base64(std::span<std::uint8_t> data) noexcept;
-std::optional<std::vector<std::uint8_t>> decode_base64(std::string_view encoded) noexcept;
+std::pmr::string EncodeIntoBase64(std::span<std::uint8_t> data, std::pmr::memory_resource *resource) noexcept;
+
+std::string EncodeBase64(std::span<std::uint8_t> data) noexcept;
+
+std::pmr::vector<std::uint8_t> DecodeBase64(std::string_view encoded, std::pmr::memory_resource *rsrc) noexcept;
 
 } // namespace mdb

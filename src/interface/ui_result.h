@@ -25,7 +25,7 @@ struct UIResult
   // Command & Result own an allocator for their collective life time and release all allocations up execution and
   // serialization of the result whereas Events receive a allocator in argument at serialization time, since there
   // may be multiple events waiting to be serialized, using a bump allocator for all of them is better.
-  constexpr std::pmr::string
+  std::pmr::string
   Serialize(int monotonicId) const noexcept
   {
     return Serialize(monotonicId, mAllocator->GetAllocator());
