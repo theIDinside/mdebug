@@ -586,6 +586,7 @@ static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
 bool
 DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) const noexcept
 {
+  MDB_ASSERT(!output.empty(), "Ouptut is empty!");
   char header_buffer[128]{ "Content-Length: " };
   static constexpr auto header_end = "\r\n\r\n"sv;
 

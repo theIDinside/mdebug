@@ -29,7 +29,7 @@ struct ContinueAll final : public ui::UICommand
   DEFINE_NAME("continueAll");
   ContinueAll(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~ContinueAll() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
+  void Execute() noexcept final;
 };
 
 struct ContinueAllResponse final : UIResult
@@ -48,7 +48,7 @@ struct PauseAll final : UICommand
   DEFINE_NAME("pauseAll");
   PauseAll(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~PauseAll() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
+  void Execute() noexcept final;
 };
 
 struct PauseAllResponse final : UIResult
@@ -70,7 +70,7 @@ struct GetProcesses final : public UICommand
   DEFINE_NAME("getProcesses");
   GetProcesses(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
   ~GetProcesses() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
+  void Execute() noexcept final;
 };
 
 struct GetProcessesResponse final : public UIResult
@@ -96,7 +96,7 @@ struct ImportScript final : public UICommand
   DEFINE_NAME("importScript");
   ImportScript(UICommandArg arg, std::string &&scriptSource) noexcept;
   ~ImportScript() noexcept override = default;
-  UIResultPtr Execute() noexcept final;
+  void Execute() noexcept final;
   std::string mSource;
 };
 

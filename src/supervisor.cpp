@@ -491,15 +491,9 @@ TraceeController::StopAllTasks() noexcept
   for (auto &entry : mThreads) {
     auto &t = *entry.mTask;
     if (!t.mUserVisibleStop && !t.mTracerVisibleStop) {
-      DBGLOG(core, "Halting {}", t.mTid);
       const auto response = mTraceeInterface->StopTask(t);
-      DBGLOG(core, "Failed to stop {}, task exited? Error: {}", t.mTid, strerror(response.sys_errno));
-      t.SetUserVisibleStop();
-    } else if (t.mTracerVisibleStop) {
-      // we're in a tracer-stop, not in a user-stop, so we need no stopping, we only need to inform ourselves that
-      // we upgraded our tracer-stop to a user-stop
-      t.SetUserVisibleStop();
     }
+    t.SetUserVisibleStop();
   }
 
   if (IsAllStopped()) {

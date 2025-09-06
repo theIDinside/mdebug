@@ -5,6 +5,10 @@
 #include <lib/arena_allocator.h>
 #include <utils/smartptr.h>
 
+#ifdef MDB_DEBUG
+#include <utils/logger.h>
+#endif
+
 // mdblib
 #include <json/json.h>
 
@@ -62,7 +66,7 @@ count_tuple(Args... args)
 struct UIResult;
 using UIResultPtr = const UIResult *;
 
-enum class ArgumentErrorKind
+enum class ArgumentErrorKind : std::uint8_t
 {
   Missing,
   InvalidInput,
@@ -171,7 +175,11 @@ public:
   {
   }
 
+#ifdef MDB_DEBUG
+  virtual ~UICommand() noexcept { DBGLOG(core, "Destroying UICommand"); }
+#else
   virtual ~UICommand() noexcept = default;
+#endif
 
   constexpr SessionId
   GetSessionId() const noexcept
@@ -189,7 +197,7 @@ public:
 
   /** Returns either the result or nullptr. If nullptr is returned, it's because it's been queued/scheduled in the
    * delayed events queue, because some particular-to-the-DAP request ordering is required.*/
-  virtual UIResultPtr Execute() noexcept = 0;
+  virtual void Execute() noexcept = 0;
 
   template <typename Derived, typename JsonArgs>
   static constexpr MissingOrInvalidResult
@@ -224,6 +232,21 @@ public:
         { ArgumentErrorKind::Missing, "Required argument is missing" }, std::string{ commandArg });
     }
     return std::nullopt;
+  }
+
+  void WriteResponse(const UIResult &result) noexcept;
+
+  template <typename T, typename... Args>
+  T *
+  Allocate(Args &&...args) noexcept
+  {
+    return mCommandAllocator->Allocate<T>(std::forward<Args>(args)...);
+  }
+
+  std::pmr::memory_resource *
+  MemoryResource() const noexcept
+  {
+    return mCommandAllocator->GetAllocator();
   }
 
   constexpr virtual std::string_view name() const noexcept = 0;

@@ -361,15 +361,21 @@ TaskScheduler::SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualSch
   switch (mScheduling) {
   case SchedulingConfig::OneExclusive:
     if (tid != mExclusiveTask) {
+      DBGLOG(core, "tid != mExclusiveTask");
+      individualScheduler->cancel();
       return false;
     }
     break;
-  case SchedulingConfig::StopAll:
+  case SchedulingConfig::StopAll: {
+    DBGLOG(core, "SchedulingConfig::StopAll, return false.");
+    individualScheduler->cancel();
     return false;
+  }
   case SchedulingConfig::NormalResume:
     break;
   }
 
+  DBGLOG(core, "Move individual scheduler.");
   mIndividualScheduler[tid] = std::move(individualScheduler);
   if (resume) {
     mIndividualScheduler[tid]->Proceed();
@@ -390,6 +396,7 @@ TaskScheduler::SetStopAllScheduling() noexcept
   RemoveAllIndividualSchedulers();
   mScheduling = SchedulingConfig::StopAll;
 }
+
 void
 TaskScheduler::SetOneExclusiveScheduling(Tid tid) noexcept
 {
@@ -457,6 +464,7 @@ TaskScheduler::EmitStopWhenAllTasksHalted() noexcept
 {
   if (mSupervisor->IsAllStopped()) {
     mSupervisor->EmitAllStopped();
+    SetNormalScheduling();
   }
 }
 } // namespace mdb

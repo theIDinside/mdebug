@@ -90,7 +90,12 @@ public:
   {
     std::pmr::polymorphic_allocator<T> pmrAlloc{ this };
     auto ptr = pmrAlloc.template allocate_object<T>(1);
-    return std::construct_at(ptr, std::forward<Args>(args)..., this);
+    if constexpr (requires { std::construct_at(ptr, std::forward<Args>(args)..., this); }) {
+      // For types that are allocator aware, pass "this" allocator into them
+      return std::construct_at(ptr, std::forward<Args>(args)..., this);
+    } else {
+      return std::construct_at(ptr, std::forward<Args>(args)...);
+    }
   }
 
   u64 CurrentlyAllocated() const noexcept;

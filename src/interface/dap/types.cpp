@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "types.h"
+#include "utils/util.h"
 #include <iterator>
 #include <memory_resource>
 #include <supervisor.h>
@@ -40,19 +41,23 @@ Breakpoint::Serialize(std::pmr::memory_resource *memoryResource) const noexcept
 
 /*static*/
 Breakpoint
-Breakpoint::CreateNonVerified(u32 id, std::string_view msg) noexcept
+Breakpoint::CreateNonVerified(u32 id, std::string_view msg, std::pmr::memory_resource *rsrc) noexcept
 {
+  std::pmr::string message{ rsrc };
+  message.reserve(msg.size());
+  CopyTo(msg, message);
   return Breakpoint{ .mId = id,
     .mVerified = false,
     .mAddress = nullptr,
     .mLine = {},
     .mColumn = {},
     .mSourcePath = {},
-    .mErrorMessage = std::string{ msg } };
+    .mErrorMessage = std::move(message) };
 }
 
 Breakpoint
-Breakpoint::CreateFromUserBreakpoint(const UserBreakpoint &userBreakpoint) noexcept
+Breakpoint::CreateFromUserBreakpoint(
+  const UserBreakpoint &userBreakpoint, std::pmr::memory_resource *rsrc) noexcept
 {
   if (const auto addr = userBreakpoint.Address(); addr) {
     return Breakpoint{ .mId = userBreakpoint.mId,
@@ -69,7 +74,7 @@ Breakpoint::CreateFromUserBreakpoint(const UserBreakpoint &userBreakpoint) noexc
       .mLine = {},
       .mColumn = {},
       .mSourcePath = {},
-      .mErrorMessage = userBreakpoint.GetErrorMessage() };
+      .mErrorMessage = userBreakpoint.GetErrorMessage(rsrc) };
   }
 }
 

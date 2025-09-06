@@ -182,7 +182,10 @@ template <typename CA, typename CB = CA>
 constexpr auto
 CopyTo(const CA &c, CB &out)
 {
-  if constexpr (requires(CB o) { o.reserve(1024); }) {
+  if constexpr (requires(CA i, CB o) {
+                  i.size();
+                  o.reserve(1024);
+                }) {
     out.reserve(c.size());
     std::copy(c.begin(), c.end(), std::back_inserter(out));
   } else {

@@ -9,36 +9,36 @@ struct InvalidArgs;
 struct InvalidArgsResponse final : public UIResult
 {
   InvalidArgsResponse(
-    Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args, InvalidArgs *cmd) noexcept;
+    Pid processId, std::string_view command, MissingOrInvalidArgs &&missingArgs, InvalidArgs *cmd) noexcept;
   ~InvalidArgsResponse() noexcept override = default;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
   Pid mProcessId;
-  std::string_view command;
-  MissingOrInvalidArgs missing_or_invalid;
+  std::string_view mCommand;
+  MissingOrInvalidArgs mMissingOrInvalid;
 };
 
 struct InvalidArgs final : public UICommand
 {
-  InvalidArgs(UICommandArg arg, std::string_view command, MissingOrInvalidArgs &&missing_args) noexcept
-      : UICommand(std::move(arg)), command(command), missing_arguments(std::move(missing_args))
+  InvalidArgs(UICommandArg arg, std::string_view command, MissingOrInvalidArgs &&missingArgs) noexcept
+      : UICommand(std::move(arg)), mCommand(command), mMissingArguments(std::move(missingArgs))
   {
   }
   ~InvalidArgs() override = default;
 
-  UIResultPtr
+  void
   Execute() noexcept final
   {
-    return new InvalidArgsResponse{ mSessionId, command, std::move(missing_arguments), this };
+    return WriteResponse(InvalidArgsResponse{ mSessionId, mCommand, std::move(mMissingArguments), this });
   }
 
-  ArgumentErrorKind kind;
-  std::string_view command;
-  MissingOrInvalidArgs missing_arguments;
+  ArgumentErrorKind mKind;
+  std::string_view mCommand;
+  MissingOrInvalidArgs mMissingArguments;
 
   constexpr std ::string_view
   name() const noexcept final
   {
-    return command;
+    return mCommand;
   };
 };
 

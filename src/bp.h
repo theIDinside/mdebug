@@ -218,7 +218,7 @@ public:
   std::optional<u32> Line() const noexcept;
   std::optional<u32> Column() const noexcept;
   std::optional<std::string_view> GetSourceFile() const noexcept;
-  std::optional<std::string> GetErrorMessage() const noexcept;
+  std::optional<std::pmr::string> GetErrorMessage(std::pmr::memory_resource *rsrc) const noexcept;
   void UpdateLocation(Ref<BreakpointLocation> bploc) noexcept;
   void SetExpression(std::unique_ptr<js::JsBreakpointFunction> expression) noexcept;
 

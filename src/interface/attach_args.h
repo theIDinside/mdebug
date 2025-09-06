@@ -5,11 +5,10 @@
 
 // stdlib
 #include <optional>
-#include <string>
 #include <variant>
 
 namespace mdb {
-enum class RemoteType
+enum class RemoteType : u8
 {
   RR,
   GDB
