@@ -14,7 +14,6 @@
 #include <interface/tracee_command/tracee_command_interface.h>
 #include <lib/stack.h>
 #include <mdb_config.h>
-#include <mdbsys/ptrace.h>
 
 #include <notify_pipe.h>
 #include <symbolication/value.h>
@@ -145,6 +144,12 @@ private:
   HandlerStack mEventHandlerStack{};
 };
 
+struct UnInitializedSupervisor
+{
+  SessionId mSessionId;
+  std::unique_ptr<TraceeController> mSupervisor;
+};
+
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
 class Tracer
 {
@@ -158,7 +163,6 @@ class Tracer
   static JSContext *sApplicationJsContext;
   static bool sUsePTraceMe;
   static int sLastTraceEventTime;
-  std::vector<std::pair<SessionId, std::unique_ptr<TraceeController>>> mUnInitializedSupervisor{};
 
 #ifdef MDB_DEBUG
   u64 mDebuggerEvents;
@@ -198,12 +202,13 @@ public:
   static TraceeController *PrepareNewSupervisorWithId(SessionId sessionId) noexcept;
 
   void TerminateSession() noexcept;
-  void AddLaunchedTarget(SessionId sessionId, const tc::InterfaceConfig &config, TargetSession session) noexcept;
-  void LoadAndProcessObjectFile(pid_t target, const Path &objfile_path) noexcept;
   TraceeController *GetController(pid_t pid) noexcept;
   TraceeController *GetProcessContainingTid(Tid tid) noexcept;
   TraceEvent *ConvertWaitEvent(WaitPidResult wait_res) noexcept;
   Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
+
+  [[nodiscard("If someone is not using the return value, refactor this method")]] TraceeController *
+  AddTracedSupervisor(SessionId supervisorSessionId, const std::function<void(TraceeController *)> &initFunction);
 
   void ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept;
   void HandleTracerEvent(TraceEvent *evt) noexcept;
@@ -216,12 +221,7 @@ public:
   void KillUI() noexcept;
 
   TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
-  static pid_t ForkExec(ui::dap::DebugAdapterClient *client,
-    SessionId sessionId,
-    bool stopAtEntry,
-    const Path &program,
-    std::span<std::pmr::string> prog_args,
-    std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+
   // Returns the PID we've attached to; if we've attached to a remote target, there's a chance
   // that we may have in fact really attached to multiple processes. In this case, this is just the "first" process
   // id that we return - the remainder of the processes will get auto attached (via attach requests using the
@@ -305,8 +305,19 @@ private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::Scripting *interpreterInstance) noexcept;
 
   std::unique_ptr<DebuggerThread> mDebugAdapterThread{ nullptr };
+
+  // Processes under control (and visible to the user/where the user is interested in controlling them)
   std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
+  // Supervisors prepared to be used with a specific DAP session id
+  std::vector<UnInitializedSupervisor> mUnInitializedSupervisor{};
+  // Supervisors that does not have a debug adapter session id connected to it (possibly yet - but in the case of a
+  // user disconnecting from a tracee, they may end up here depending on the circumstances)
+  std::vector<std::unique_ptr<TraceeController>> mNotUserControlledSupervisors{};
+  // For replay-sessions, processes can get unborn by reverse-continuing across their birth. Not yet in use.
   std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
+  // Processes that has exited (and returned some exit code!)
+  std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
+
   ui::dap::DapEventSystem *mDAP;
   u32 mBreakpointID{ 0 };
 
@@ -334,7 +345,6 @@ private:
   u32 mSessionThreadId{ 1 };
   u32 mSessionProcessId{ 1 };
   std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
-  std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;
 
   sym::InvalidValueVisualizer *mInvalidValueDapSerializer{ nullptr };

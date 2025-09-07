@@ -15,7 +15,7 @@
 #include "task.h"
 #include "task_scheduling.h"
 #include "utils/expected.h"
-#include <mdbsys/ptrace.h>
+
 #include <memory_resource>
 #include <optional>
 #include <unordered_map>
@@ -161,8 +161,6 @@ class TraceeController
   TraceeController(u32 sessionId, TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
   explicit TraceeController(SessionId sessionId) noexcept;
 
-  void InitializeSupervisor(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
-
 public:
   using SessionId = i32;
   static std::unique_ptr<TraceeController> create(
@@ -172,6 +170,8 @@ public:
 
   TraceeController(const TraceeController &) = delete;
   TraceeController &operator=(const TraceeController &) = delete;
+
+  void InitializeInterface(TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept;
 
   void ConfigureBreakpointBehavior(BreakpointBehavior behavior) noexcept;
   constexpr BreakpointBehavior
@@ -292,7 +292,7 @@ public:
   bool SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept;
   TraceEvent *CreateTraceEventFromWaitStatus(TaskInfo &task) noexcept;
 
-  void PostExec(const std::string &exe) noexcept;
+  void PostExec(const std::string &exe, bool installDynamicLoaderBreakpoints = true) noexcept;
   /* Check if we have any tasks left in the process space. */
   bool ExecutionHasNotEnded() const noexcept;
   bool IsRunning() const noexcept;

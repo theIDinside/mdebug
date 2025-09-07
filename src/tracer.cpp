@@ -58,20 +58,6 @@ Tracer::Tracer() noexcept
   mConsoleCommandInterpreter = new ConsoleCommandInterpreter{};
 }
 
-void
-Tracer::LoadAndProcessObjectFile(pid_t target_pid, const Path &objfile_path) noexcept
-{
-  // TODO(simon) Once "shared object symbols" (NOT to be confused with Linux' shared objects/so's!) is implemented
-  //  we should check if the object file from `objfile_path` has already been loaded into memory
-  auto target = GetController(target_pid);
-  if (auto symbol_obj = Tracer::Get().LookupSymbolfile(objfile_path); symbol_obj == nullptr) {
-    auto obj = ObjectFile::CreateObjectFile(target, objfile_path);
-    target->RegisterObjectFile(target, std::move(obj), true, nullptr);
-  } else {
-    target->RegisterSymbolFile(symbol_obj, true);
-  }
-}
-
 // static
 Tracer *
 Tracer::Create() noexcept
@@ -109,9 +95,8 @@ Tracer::PrepareNewSupervisorWithId(SessionId sessionId) noexcept
   MDB_ASSERT(sessionId > latestSessionId, "Preparing a new session with a previously used ID is not supported.");
   latestSessionId = sessionId;
   auto &instance = Tracer::Get();
-  instance.mUnInitializedSupervisor.push_back(
-    std::make_pair(sessionId, TraceeController::CreateDetached(sessionId)));
-  return instance.mUnInitializedSupervisor.back().second.get();
+  instance.mUnInitializedSupervisor.push_back({ sessionId, TraceeController::CreateDetached(sessionId) });
+  return instance.mUnInitializedSupervisor.back().mSupervisor.get();
 }
 
 void
@@ -124,27 +109,6 @@ Tracer::TerminateSession() noexcept
     });
   }
   EventSystem::Get().PushInternalEvent(TerminateDebugging{});
-}
-
-void
-Tracer::AddLaunchedTarget(SessionId sessionId, const tc::InterfaceConfig &config, TargetSession session) noexcept
-{
-  std::unique_ptr<TraceeController> preparedSupervisor{ nullptr };
-  auto it = find_if(mUnInitializedSupervisor, [&](const auto &info) { return info.first == sessionId; });
-  VERIFY(it.has_value(), "Failed to find prepared supervisor with id {}", sessionId);
-
-  std::unique_ptr supervisor = std::move(it.value()->second);
-  mUnInitializedSupervisor.erase(*it);
-  supervisor->InitializeSupervisor(
-    session, tc::TraceeCommandInterface::CreateCommandInterface(config), InterfaceType::Ptrace);
-  mTracedProcesses.push_back(std::move(supervisor));
-
-  const auto newProcess = mTracedProcesses.back()->GetInterface().TaskLeaderTid();
-
-  if (!Tracer::sUsePTraceMe) {
-    PTRACE_OR_PANIC(PTRACE_ATTACH, newProcess, 0, 0);
-  }
-  ConfigurePtraceSettings(newProcess);
 }
 
 TraceeController *
@@ -176,6 +140,25 @@ Tracer::TakeUninitializedTask(Tid tid) noexcept
     return t;
   }
   return nullptr;
+}
+
+TraceeController *
+Tracer::AddTracedSupervisor(
+  SessionId supervisorSessionId, const std::function<void(TraceeController *)> &initFunction)
+{
+  auto it = std::find_if(mUnInitializedSupervisor.begin(), mUnInitializedSupervisor.end(), [&](const auto &info) {
+    return info.mSessionId == supervisorSessionId;
+  });
+  MDB_ASSERT(it != std::end(mUnInitializedSupervisor),
+    "Could not find pre-init supervisor with id: {}",
+    supervisorSessionId);
+
+  TraceeController *supervisor = mTracedProcesses.emplace_back(std::move(it->mSupervisor)).get();
+  initFunction(supervisor);
+
+  mUnInitializedSupervisor.erase(it);
+
+  return supervisor;
 }
 
 TraceEvent *
@@ -298,51 +281,25 @@ Tracer::KillUI() noexcept
   mDAP->CleanUp();
 }
 
-static int
-Exec(const Path &program, std::span<const std::pmr::string> programArguments, char **env)
-{
-  const auto arg_size = programArguments.size() + 2;
-  std::vector<const char *> args;
-  args.resize(arg_size, nullptr);
-  const char *cmd = program.c_str();
-  args[0] = cmd;
-  auto idx = 1;
-  for (const auto &arg : programArguments) {
-    args[idx++] = arg.c_str();
-  }
-  // environ = env;
-  args[arg_size - 1] = nullptr;
-  return execve(cmd, (char *const *)args.data(), env);
-}
-
 Pid
 Tracer::Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const AttachArgs &args) noexcept
 {
   using MatchResult = Pid;
 
-  const auto getUnInitializedSupervisor = [&](SessionId sessionId) -> std::unique_ptr<TraceeController> {
-    std::unique_ptr<TraceeController> preparedSupervisor{ nullptr };
-    auto it = find_if(mUnInitializedSupervisor, [&](const auto &info) { return info.first == sessionId; });
-    VERIFY(it.has_value(), "Failed to find prepared supervisor with id {}", sessionId);
-
-    preparedSupervisor = std::move(it.value()->second);
-    return preparedSupervisor;
-  };
-
   return std::visit(
     Match{ [&](const PtraceAttachArgs &ptrace) -> MatchResult {
-            auto interface = std::make_unique<tc::PtraceCommander>(ptrace.pid);
+            auto *supervisor = Tracer::Get().AddTracedSupervisor(sessionId, [&](TraceeController *supervisor) {
+              supervisor->InitializeInterface(
+                TargetSession::Attached, std::make_unique<tc::PtraceCommander>(ptrace.pid), InterfaceType::Ptrace);
+            });
 
-            auto preparedSupervisor = getUnInitializedSupervisor(sessionId);
-            preparedSupervisor->InitializeSupervisor(
-              TargetSession::Attached, std::move(interface), InterfaceType::Ptrace);
-
-            mTracedProcesses.push_back(std::move(preparedSupervisor));
-
-            auto *supervisor = mTracedProcesses.back().get();
             if (const std::optional<Path> execFile = supervisor->GetInterface().ExecedFile(); execFile) {
-              const Tid newProcess = supervisor->GetInterface().TaskLeaderTid();
-              LoadAndProcessObjectFile(newProcess, *execFile);
+              if (auto symbol_obj = Tracer::Get().LookupSymbolfile(*execFile); symbol_obj == nullptr) {
+                auto obj = ObjectFile::CreateObjectFile(supervisor, *execFile);
+                supervisor->RegisterObjectFile(supervisor, std::move(obj), true, nullptr);
+              } else {
+                supervisor->RegisterSymbolFile(symbol_obj, true);
+              }
             }
             return ptrace.pid;
           },
@@ -386,14 +343,12 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const A
 
         auto it = res.begin();
         const auto firstAttachedId = it->tc->TaskLeaderTid();
-        bool alreadyAdded = true;
 
         const auto hookupDapWithRemote =
           [&](auto &&newSupervisor, ui::dap::DebugAdapterClient *client, bool newProc) {
             mTracedProcesses.push_back(std::move(newSupervisor));
             auto *supervisor = mTracedProcesses.back().get();
             auto &ti = supervisor->GetInterface();
-            alreadyAdded = false;
             ti.OnExec();
             for (const auto &t : it->threads) {
               supervisor->CreateNewTask(t.tid, false);
@@ -408,14 +363,26 @@ Tracer::Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const A
           };
 
         auto mainConnection = mDAP->Get();
-        auto unInitializedSupervisor = getUnInitializedSupervisor(sessionId);
-        unInitializedSupervisor->InitializeSupervisor(
-          TargetSession::Attached, std::move(it->tc), InterfaceType::GdbRemote);
-        hookupDapWithRemote(std::move(unInitializedSupervisor), mainConnection, false);
+
+        (void)Tracer::Get().AddTracedSupervisor(sessionId, [&](TraceeController *supervisor) {
+          supervisor->InitializeInterface(TargetSession::Attached, std::move(it->tc), InterfaceType::GdbRemote);
+          auto &ti = supervisor->GetInterface();
+          ti.OnExec();
+          for (const auto &t : it->threads) {
+            if (!supervisor->HasTask(t.tid)) {
+              supervisor->CreateNewTask(t.tid, false);
+            }
+          }
+          for (auto &entry : supervisor->GetThreads()) {
+            entry.mTask->SetUserVisibleStop();
+          };
+        });
+
         mainConnection->SetDebugAdapterSessionType(
           (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach : ui::dap::DapClientSession::RR);
         ++it;
         for (; it != std::end(res); ++it) {
+
           hookupDapWithRemote(TraceeController::create(Tracer::Get().NewSupervisorId(),
                                 TargetSession::Attached,
                                 std::move(it->tc),
@@ -434,122 +401,6 @@ Tracer::AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept
   tc->SetIsOnEntry(true);
   mTracedProcesses.push_back(std::move(tc));
   return mTracedProcesses.back().get();
-}
-
-/* static */
-pid_t
-Tracer::ForkExec(ui::dap::DebugAdapterClient *debugAdapterClient,
-  SessionId sessionId,
-  bool stopOnEntry,
-  const Path &program,
-  std::span<std::pmr::string> prog_args,
-  std::optional<BreakpointBehavior> breakpointBehavior) noexcept
-{
-  termios originalTty;
-  winsize ws;
-
-  bool couldSetTermSettings = (tcgetattr(STDIN_FILENO, &originalTty) != -1);
-  if (couldSetTermSettings) {
-    VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
-  }
-
-  std::vector<std::string> execvpArgs{};
-  execvpArgs.push_back(program.c_str());
-  for (const auto &arg : prog_args) {
-    execvpArgs.push_back(std::string{ arg });
-  }
-
-  std::vector<char *> environment;
-  for (auto i = 0; environ[i] != nullptr; ++i) {
-    environment.push_back(environ[i]);
-  }
-
-  environment.push_back(nullptr);
-  for (const auto *env : environment) {
-    if (env != nullptr) {
-      DBGLOG(core, "env={}", env);
-    }
-  }
-
-  // We wait until the last minute to start blocking SIGCHLD, because there may be sessions where we don't want to
-  // interfere (at all) with these things on the main thread specifically for RR, at least until I know exactly
-  // what the effects would be.
-  EventSystem::Get().InitWaitStatusManager();
-
-  const auto forkResult =
-    ptyFork(false, couldSetTermSettings ? &originalTty : nullptr, couldSetTermSettings ? &ws : nullptr);
-  // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process
-  //  I'd much rather like a "stub" process to exec from, that gets handed to us by some "Fork server" thing,
-  //  but the logic for that is way more complex and I'm not really interested in solving that problem right now.
-  switch (forkResult.index()) {
-  case 0: // child
-  {
-    if (personality(ADDR_NO_RANDOMIZE) == -1) {
-      PANIC("Failed to set ADDR_NO_RANDOMIZE!");
-    }
-
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = SIG_DFL; // Set handler to default action
-
-    // Loop over all signals from 1 to 31
-    for (int i = 1; i <= 31; ++i) {
-      // Avoid resetting signals that can't be caught or ignored
-      if (i == SIGKILL || i == SIGSTOP) {
-        continue;
-      }
-      VERIFY(sigaction(i, &sa, nullptr) == 0, "Expected to succeed to reset signal handler for signal {}", i);
-    }
-
-    PTRACE_OR_PANIC(PTRACE_TRACEME, 0, 0, 0);
-
-    if (Exec(program, prog_args, environment.data()) == -1) {
-      PANIC(std::format("EXECV Failed for {}", program.c_str()));
-    }
-    _exit(0);
-    break;
-  }
-  default: {
-    pid_t childPid = 0;
-    std::optional<int> ttyFd = std::nullopt;
-    if (forkResult.index() == 1) {
-      const auto res = get<PtyParentResult>(forkResult);
-      childPid = res.mPid;
-      ttyFd = res.mFd;
-    } else {
-      const auto res = get<ParentResult>(forkResult);
-      childPid = res.mChildPid;
-    }
-
-    const auto leader = childPid;
-
-    Get().AddLaunchedTarget(sessionId, tc::PtraceCfg{ leader }, TargetSession::Launched);
-    auto supervisor = Get().mTracedProcesses.back().get();
-
-    debugAdapterClient->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
-    supervisor->ConfigureBreakpointBehavior(
-      breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
-
-    WaitPidResult twr{ .tid = leader, .ws = { .ws = StopKind::Execed, .exit_code = 0 } };
-    auto task = supervisor->RegisterTaskWaited(twr);
-    if (task == nullptr) {
-      PANIC("Expected a task but could not find one for that wait status");
-    }
-
-    supervisor->PostExec(program);
-
-    if (ttyFd) {
-      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->mSessionId);
-    }
-
-    if (stopOnEntry) {
-      Set<BreakpointSpecification> fns{ BreakpointSpecification::Create<FunctionBreakpointSpec>(
-        {}, {}, "main", false) };
-      supervisor->SetFunctionBreakpoints(fns);
-    }
-    return childPid;
-  }
-  }
 }
 
 std::shared_ptr<SymbolFile>

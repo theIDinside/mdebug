@@ -12,6 +12,7 @@
 #include <interface/dap/dap_defs.h>
 #include <interface/dap/events.h>
 #include <interface/dap/parse_buffer.h>
+#include <interface/tracee_command/ptrace_commander.h>
 #include <interface/tracee_command/tracee_command_interface.h>
 #include <supervisor.h>
 #include <symbolication/callstack.h>
@@ -22,6 +23,7 @@
 #include <task_scheduling.h>
 #include <tracer.h>
 #include <utils/base64.h>
+#include <utils/format_utils.h>
 #include <utils/logger.h>
 #include <utils/util.h>
 
@@ -356,6 +358,10 @@ struct Continue final : public ui::UICommand
   Execute() noexcept final
   {
     GetOrSendError(target);
+    if (target->IsSessionAllStopMode()) {
+      mContinueAll = true;
+    }
+
     bool success = false;
     if (mContinueAll && !target->SomeTaskCanBeResumed()) {
       std::vector<Tid> running_tasks{};
@@ -1328,8 +1334,10 @@ struct NativeLaunch final : public Launch
   {
     PROFILE_SCOPE_ARGS(
       "launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{ mProgramArgs }));
-    const auto processId =
-      Tracer::ForkExec(mDAPClient, GetSessionId(), mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
+
+    const auto processId = tc::PtraceCommander::ForkExec(
+      mDAPClient, GetSessionId(), mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
+
     GetOrSendError(supervisor);
     supervisor->ConfigurationDone();
     DBGLOG(core, "Responding to launch request, resuming target {}", supervisor->TaskLeaderTid());
