@@ -97,7 +97,7 @@ TraceeController::CreateDetached(SessionId sessionId) noexcept
 }
 
 void
-TraceeController::InitializeSupervisor(
+TraceeController::InitializeInterface(
   TargetSession session, tc::Interface &&interface, InterfaceType type) noexcept
 {
   DBGLOG(core, "Initializing supervisor {}", mSessionId);
@@ -126,9 +126,9 @@ TraceeController::TraceeController(
       mNullUnwinder{ new sym::Unwinder{ nullptr } }, mTraceeInterface(std::move(interface)),
       mAllStopSession(mTraceeInterface->IsAllStopSession())
 {
+  mThreads.reserve(64);
   // Must be set first.
   mTraceeInterface->SetTarget(this);
-  mThreads.reserve(64);
   auto task = TaskInfo::CreateTask(*mTraceeInterface, mTraceeInterface->TaskLeaderTid(), true);
   Tracer::Get().RegisterTracedTask(task);
   AddTask(std::move(task));
@@ -1536,9 +1536,10 @@ TraceeController::BuildCallFrameStack(TaskInfo &task, CallStackRequest req) noex
   if (!task.mTaskCallstack->IsDirty() && (req.req == CallStackRequest::Type::Full ||
                                            (req.req == CallStackRequest::Type::Partial &&
                                              task.mTaskCallstack->FramesCount() == static_cast<u32>(req.count)))) {
+    DBGLOG(core, "activation record cache not dirty");
     return *task.mTaskCallstack;
   }
-  CacheRegistersFor(task);
+  CacheRegistersFor(task, true);
   auto &callStack = *task.mTaskCallstack;
   PROFILE_BEGIN("Unwind return addresses", "stacktrace");
   auto frameProgramCounters = task.UnwindReturnAddresses(this, req);
@@ -1842,7 +1843,7 @@ TraceeController::HandleProcessExit(const ProcessExited &evt) noexcept
 }
 
 void
-TraceeController::PostExec(const std::string &exe) noexcept
+TraceeController::PostExec(const std::string &exe, bool installDynamicLoaderBreakpoints) noexcept
 {
   DBGLOG(core, "Processing EXEC for {} - process was vforked: {}", mTaskLeader, bool{ mIsVForking });
   if (mMainExecutable) {
@@ -1888,7 +1889,10 @@ TraceeController::PostExec(const std::string &exe) noexcept
     RegisterSymbolFile(symbol_obj, true);
   }
 
-  mTraceeInterface->tracee_r_debug = InstallDynamicLoaderBreakpoints();
+  if (installDynamicLoaderBreakpoints) {
+    mTraceeInterface->tracee_r_debug = InstallDynamicLoaderBreakpoints();
+  }
+
   DoBreakpointsUpdate({ mMainExecutable });
   mOnExecOrExitPublisher.Emit();
 }

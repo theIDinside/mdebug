@@ -143,6 +143,42 @@ TaskInfo::GetRegisterCache() const
   return regs;
 }
 
+std::string
+format_user_regs_struct(const user_regs_struct &regs)
+{
+  return std::format("{{ r15: 0x{:x} r14: 0x{:x} r13: 0x{:x} r12: 0x{:x} rbp: 0x{:x} rbx: 0x{:x} r11: 0x{:x} "
+                     "r10: 0x{:x} r9: 0x{:x} r8: 0x{:x} rax: 0x{:x} rcx: 0x{:x} rdx: 0x{:x} rsi: 0x{:x} rdi: "
+                     "0x{:x} orig_rax: 0x{:x} rip: 0x{:x} cs: {} eflags: {} rsp: 0x{:x} ss: {} fs_base: "
+                     "0x{:x} gs_base: 0x{:x} ds: 0x{:x} es: 0x{:x} fs: 0x{:x} gs: 0x{:x} }}",
+    regs.r15,
+    regs.r14,
+    regs.r13,
+    regs.r12,
+    regs.rbp,
+    regs.rbx,
+    regs.r11,
+    regs.r10,
+    regs.r9,
+    regs.r8,
+    regs.rax,
+    regs.rcx,
+    regs.rdx,
+    regs.rsi,
+    regs.rdi,
+    regs.orig_rax,
+    regs.rip,
+    regs.cs,
+    regs.eflags,
+    regs.rsp,
+    regs.ss,
+    regs.fs_base,
+    regs.gs_base,
+    regs.ds,
+    regs.es,
+    regs.fs,
+    regs.gs);
+}
+
 void
 TaskInfo::SetRegisterCacheTo(u8 *buffer, size_t bufferSize)
 {
@@ -150,6 +186,7 @@ TaskInfo::SetRegisterCacheTo(u8 *buffer, size_t bufferSize)
     "Buffer size does not match sizeof({})",
     sizeof(*GetRegisterCache().registers));
   regs.registers = reinterpret_cast<user_regs_struct *>(buffer);
+  DBGLOG(core, "[task:{}][registers]: {}", mTid, format_user_regs_struct(*regs.registers));
 }
 
 u64
