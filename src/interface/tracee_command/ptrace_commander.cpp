@@ -7,8 +7,11 @@
 #include <cerrno>
 #include <charconv>
 #include <fcntl.h>
+#include <interface/pty.h>
+#include <mdbsys/ptrace.h>
 #include <supervisor.h>
-#include <sys/ptrace.h>
+#include <sys/personality.h>
+
 #include <unistd.h>
 
 namespace mdb::tc {
@@ -20,6 +23,147 @@ PtraceCommander::PtraceCommander(Tid process_space_id) noexcept
   const auto procfs_path = std::format("/proc/{}/mem", process_space_id);
   mProcFsMemFd = mdb::ScopedFd::Open(procfs_path, O_RDWR);
   MDB_ASSERT(mProcFsMemFd.IsOpen(), "failed to open memfd for {}", process_space_id);
+}
+
+static int
+Exec(const Path &program, std::span<const std::pmr::string> programArguments, char **env)
+{
+  const auto arg_size = programArguments.size() + 2;
+  std::vector<const char *> args;
+  args.resize(arg_size, nullptr);
+  const char *cmd = program.c_str();
+  args[0] = cmd;
+  auto idx = 1;
+  for (const auto &arg : programArguments) {
+    args[idx++] = arg.c_str();
+  }
+  // environ = env;
+  args[arg_size - 1] = nullptr;
+  return execve(cmd, (char *const *)args.data(), env);
+}
+
+/* static */
+pid_t
+PtraceCommander::ForkExec(ui::dap::DebugAdapterClient *debugAdapterClient,
+  SessionId sessionId,
+  bool stopAtEntry,
+  const Path &program,
+  std::span<std::pmr::string> prog_args,
+  std::optional<BreakpointBehavior> breakpointBehavior) noexcept
+{
+  termios originalTty;
+  winsize ws;
+
+  bool couldSetTermSettings = (tcgetattr(STDIN_FILENO, &originalTty) != -1);
+  if (couldSetTermSettings) {
+    VERIFY(ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) >= 0, "Failed to get winsize of stdin");
+  }
+
+  std::vector<std::string> execvpArgs{};
+  execvpArgs.push_back(program.c_str());
+  for (const auto &arg : prog_args) {
+    execvpArgs.push_back(std::string{ arg });
+  }
+
+  std::vector<char *> environment;
+  for (auto i = 0; environ[i] != nullptr; ++i) {
+    environment.push_back(environ[i]);
+  }
+
+  environment.push_back(nullptr);
+  for (const auto *env : environment) {
+    if (env != nullptr) {
+      DBGLOG(core, "env={}", env);
+    }
+  }
+
+  // We wait until the last minute to start blocking SIGCHLD, because there may be sessions where we don't want to
+  // interfere (at all) with these things on the main thread specifically for RR, at least until I know exactly
+  // what the effects would be.
+  EventSystem::Get().InitWaitStatusManager();
+
+  const auto forkResult =
+    ptyFork(false, couldSetTermSettings ? &originalTty : nullptr, couldSetTermSettings ? &ws : nullptr);
+  // todo(simon): we're forking our already big Tracer process, just to tear it down and exec a new process
+  //  I'd much rather like a "stub" process to exec from, that gets handed to us by some "Fork server" thing,
+  //  but the logic for that is way more complex and I'm not really interested in solving that problem right now.
+  switch (forkResult.index()) {
+  case 0: // child
+  {
+    if (personality(ADDR_NO_RANDOMIZE) == -1) {
+      PANIC("Failed to set ADDR_NO_RANDOMIZE!");
+    }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL; // Set handler to default action
+
+    // Loop over all signals from 1 to 31
+    for (int i = 1; i <= 31; ++i) {
+      // Avoid resetting signals that can't be caught or ignored
+      if (i == SIGKILL || i == SIGSTOP) {
+        continue;
+      }
+      VERIFY(sigaction(i, &sa, nullptr) == 0, "Expected to succeed to reset signal handler for signal {}", i);
+    }
+
+    PTRACE_OR_PANIC(PTRACE_TRACEME, 0, 0, 0);
+
+    if (Exec(program, prog_args, environment.data()) == -1) {
+      PANIC(std::format("EXECV Failed for {}", program.c_str()));
+    }
+    _exit(0);
+    break;
+  }
+  default: {
+    pid_t childPid = 0;
+    std::optional<int> ttyFd = std::nullopt;
+    if (forkResult.index() == 1) {
+      const auto res = get<PtyParentResult>(forkResult);
+      childPid = res.mPid;
+      ttyFd = res.mFd;
+    } else {
+      const auto res = get<ParentResult>(forkResult);
+      childPid = res.mChildPid;
+    }
+
+    const auto leader = childPid;
+
+    auto supervisor = Tracer::Get().AddTracedSupervisor(sessionId, [&](TraceeController *supervisor) {
+      supervisor->InitializeInterface(
+        TargetSession::Launched, std::make_unique<tc::PtraceCommander>(leader), InterfaceType::Ptrace);
+      auto newProcess = supervisor->TaskLeaderTid();
+
+      if (!Tracer::UsingTraceMe()) {
+        PTRACE_OR_PANIC(PTRACE_ATTACH, newProcess, 0, 0);
+      }
+      ConfigurePtraceSettings(newProcess);
+    });
+
+    debugAdapterClient->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
+    supervisor->ConfigureBreakpointBehavior(
+      breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
+
+    WaitPidResult twr{ .tid = leader, .ws = { .ws = StopKind::Execed, .exit_code = 0 } };
+    auto task = supervisor->RegisterTaskWaited(twr);
+    if (task == nullptr) {
+      PANIC("Expected a task but could not find one for that wait status");
+    }
+
+    supervisor->PostExec(program);
+
+    if (ttyFd) {
+      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->GetSessionId());
+    }
+
+    if (stopAtEntry) {
+      Set<BreakpointSpecification> fns{ BreakpointSpecification::Create<FunctionBreakpointSpec>(
+        {}, {}, "main", false) };
+      supervisor->SetFunctionBreakpoints(fns);
+    }
+    return childPid;
+  }
+  }
 }
 
 bool

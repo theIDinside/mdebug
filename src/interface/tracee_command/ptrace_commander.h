@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include <bp_defs.h>
 #include <common/macros.h>
 #include <interface/tracee_command/tracee_command_interface.h>
 #include <utils/scoped_fd.h>
@@ -10,6 +11,12 @@
 #include <link.h>
 
 class TraceeController;
+
+namespace mdb {
+namespace ui::dap {
+class DebugAdapterClient;
+}
+} // namespace mdb
 
 namespace mdb::tc {
 
@@ -24,6 +31,13 @@ public:
   NO_COPY(PtraceCommander);
   explicit PtraceCommander(Tid task_leader) noexcept;
   ~PtraceCommander() noexcept override = default;
+
+  static pid_t ForkExec(ui::dap::DebugAdapterClient *client,
+    SessionId sessionId,
+    bool stopAtEntry,
+    const Path &program,
+    std::span<std::pmr::string> prog_args,
+    std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
 
   // TRACEE COMMAND INTERFACE API
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;

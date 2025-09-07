@@ -5,6 +5,7 @@
 #include "tracer.h"
 #include <fcntl.h>
 #include <interface/ui_command.h>
+#include <mdbsys/ptrace.h>
 #include <mutex>
 #include <optional>
 #include <sys/signalfd.h>
@@ -323,7 +324,6 @@ EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, RefPtr<ui::U
   cmd->SetDebugAdapterClient(*debugAdapter);
   DBGLOG(core, "notify of new command... {}", cmd->name());
   mCommands.push_back(cmd.Leak());
-  DBGLOG(core, "notify of new command...");
   int writeValue = write(mCommandEvents[1], "+", 1);
   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
