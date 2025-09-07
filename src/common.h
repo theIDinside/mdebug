@@ -179,8 +179,14 @@ IgnoreArgs(const Args &...)
 #define MDB_ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 /* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
 #define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
+
+#define MDB_ASSERT_IF(ONLYWHEN, cond, ...)                                                                        \
+  if ((ONLYWHEN))                                                                                                 \
+  MDB_ASSERT(cond, __VA_ARGS__)
+
 #else
 #define MDB_ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
+#define MDB_ASSERT_IF(ONLYWHEN, cond, ...)
 #define PERFORM_ASSERT(op, msg, ...) op
 #endif
 
