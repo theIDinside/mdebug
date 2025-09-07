@@ -321,6 +321,7 @@ EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, RefPtr<ui::U
 {
   std::lock_guard lock(mCommandsGuard);
   cmd->SetDebugAdapterClient(*debugAdapter);
+  DBGLOG(core, "notify of new command... {}", cmd->name());
   mCommands.push_back(cmd.Leak());
   DBGLOG(core, "notify of new command...");
   int writeValue = write(mCommandEvents[1], "+", 1);
