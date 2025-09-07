@@ -217,8 +217,10 @@ Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
   TraceeController *supervisor = evt->mTask->GetSupervisor();
   // TODO(simon): When we implement RR support (somehow, god knows), we need to be able to tell if we've
   // travelled back in time, or gone forward. This should potentially save us work.
-  MDB_ASSERT(
-    supervisor->mCreationEventTime >= evt->mEventTime, "Event time is before the creation of this supervisor?");
+  MDB_ASSERT_IF(evt->mEventTime > 0,
+    supervisor->mCreationEventTime <= evt->mEventTime,
+    "Event time is before the creation of this supervisor?");
+
   sLastTraceEventTime = std::max<int>(0, evt->mEventTime);
   if (!supervisor) {
     // out-of-order wait status; defer & wait for complete initilization of new supervisor
