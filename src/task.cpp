@@ -56,8 +56,8 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 }
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
-    : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), initialized(false),
-      exited(false), reaped(false), regs(), mTaskCallstack(nullptr), mSupervisor(nullptr),
+    : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), mInitialized(false),
+      mExited(false), mReaped(false), regs(), mTaskCallstack(nullptr), mSupervisor(nullptr),
       mBreakpointLocationStatus()
 
 {
@@ -65,8 +65,9 @@ TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
     : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
-      initialized(true), exited(false), reaped(false), regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()),
-      mSupervisor(supervisor.GetSupervisor()), mBreakpointLocationStatus()
+      mInitialized(true), mExited(false), mReaped(false),
+      regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()), mSupervisor(supervisor.GetSupervisor()),
+      mBreakpointLocationStatus()
 {
   mTaskCallstack = std::make_unique<sym::CallStack>(supervisor.GetSupervisor(), this);
 }
@@ -74,14 +75,14 @@ TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, boo
 void
 TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcept
 {
-  MDB_ASSERT(mTaskCallstack == nullptr && initialized == false, "Thread has already been initialized.");
+  MDB_ASSERT(mTaskCallstack == nullptr && mInitialized == false, "Thread has already been initialized.");
   mUserVisibleStop = true;
   mTracerVisibleStop = true;
-  initialized = true;
+  mInitialized = true;
   mRegisterCacheDirty = true;
   mInstructionPointerDirty = true;
-  exited = false;
-  reaped = false;
+  mExited = false;
+  mReaped = false;
   regs = { tc.mFormat, tc.mArchInfo.Cast().get() };
   mBreakpointLocationStatus = {};
   mTaskCallstack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
@@ -296,13 +297,13 @@ TaskInfo::GetVariablesReference(u32 ref) noexcept
 void
 TaskInfo::RequestedStop() noexcept
 {
-  bfRequestedStop = true;
+  mRequestedStop = true;
 }
 
 void
 TaskInfo::ClearRequestedStopFlag() noexcept
 {
-  bfRequestedStop = false;
+  mRequestedStop = false;
 }
 
 std::optional<Pid>
@@ -362,7 +363,7 @@ TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
 bool
 TaskInfo::CanContinue() noexcept
 {
-  return initialized && (mUserVisibleStop || mTracerVisibleStop) && !reaped;
+  return mInitialized && (mUserVisibleStop || mTracerVisibleStop) && !mReaped;
 }
 
 void

@@ -336,7 +336,7 @@ PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
     bool{ t.mTracerVisibleStop });
   if (t.mTracerVisibleStop) {
     action.mDeliverSignal = t.mLastStopStatus.signal == SIGTRAP ? 0 : t.mLastStopStatus.signal;
-    if (t.bfRequestedStop) {
+    if (t.mRequestedStop) {
       action.mDeliverSignal = 0;
       t.ClearRequestedStopFlag();
     }

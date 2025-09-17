@@ -54,10 +54,6 @@ struct NonFullRead
   int mErrorNumber;
 };
 
-/// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
-/// When debugging 2 processes with the same binaries, we don't want duplicate storage.
-auto createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>;
-
 enum class InterfaceType : std::uint8_t
 {
   Ptrace,
@@ -266,7 +262,6 @@ public:
     std::vector<int> breakpointsHit) noexcept;
   void EmitBreakpointEvent(
     std::string_view reason, const UserBreakpoint &bp, std::optional<std::string> message) noexcept;
-  tc::ProcessedStopEvent ProcessDeferredStopEvent(TaskInfo &t, DeferToSupervisor &evt) noexcept;
 
   // Get (&& ||) Create breakpoint locations
   Expected<Ref<BreakpointLocation>, BreakpointError> GetOrCreateBreakpointLocation(AddrPtr addr) noexcept;
