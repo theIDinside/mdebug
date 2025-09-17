@@ -196,6 +196,7 @@ LineStep::UpdateStepped() noexcept
       "We haven't implemented support where recursion actually creates multiple frames that look the same.");
     auto result = frame.GetLineTableEntry();
     const LineTableEntry *lte = result.second;
+    DBGLOG(core, "[line step]: could not find LTE for pc={}", frame.FramePc());
     MaybeSetDone((!lte || lte->line != mLineEntry.line));
   } else {
     auto &callstack = mSupervisor.BuildCallFrameStack(mTask, CallStackRequest::full());
@@ -344,6 +345,7 @@ TaskScheduler::TaskScheduler(TraceeController *supervisor) noexcept : mSuperviso
 void
 TaskScheduler::RemoveIndividualScheduler(Tid tid) noexcept
 {
+  DBGLOG(core, "Removing scheduler for {}", tid);
   mIndividualScheduler.erase(tid);
 }
 
@@ -429,7 +431,7 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
 
   // When a process has exited, or a task has exited, we always proceed the task in the same way (because it's
   // dead, it can't be scheduled at all.)
-  if (task.exited || mSupervisor->IsExited()) {
+  if (task.mExited || mSupervisor->IsExited()) {
     DBGLOG(core,
       "{}.{} has exited, process exited={}",
       mSupervisor->TaskLeaderTid(),
@@ -442,8 +444,9 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
   if (individualScheduler) {
     DBGLOG(core, "Task has individual scheduler");
     individualScheduler->UpdateStepped();
-    const auto stopped_by_user = !eventProceedResult.mShouldResumeAfterProcessing;
-    if (individualScheduler->HasCompleted(stopped_by_user)) {
+    const auto stoppedByUser = !eventProceedResult.mShouldResumeAfterProcessing;
+    if (individualScheduler->HasCompleted(stoppedByUser)) {
+      DBGLOG(core, "remove scheduler for {}, stopped by user={}", task.mTid, stoppedByUser);
       RemoveIndividualScheduler(task.mTid);
     } else {
       individualScheduler->Proceed();

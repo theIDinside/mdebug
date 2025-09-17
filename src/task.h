@@ -97,15 +97,15 @@ public:
                                 // sent a stop reply for a thread if the remote is also in "not non-stop mode",
                                 // *all* threads get set to true on each stop (and false on each continue)
                                 // regardless of what thread the user is operating on. It's "all stop mode".
-      bool initialized : 1;     // fully initialized task. after a clone syscall some setup is required
+      bool mInitialized : 1;    // fully initialized task. after a clone syscall some setup is required
       bool mRegisterCacheDirty : 1 { true }; // register is dirty and requires refetching
       bool mInstructionPointerDirty : 1 {
         true
       }; // rip requires fetching FIXME(simon): Is this even needed anymore?
-      bool exited : 1; // task has exited
-      bool reaped : 1; // task has been reaped after exit
-      bool killed : 1 { false };
-      bool bfRequestedStop : 1 { false };
+      bool mExited : 1; // task has exited
+      bool mReaped : 1; // task has been reaped after exit
+      bool mKilled : 1 { false };
+      bool mRequestedStop : 1 { false };
     };
   };
 

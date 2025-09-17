@@ -224,17 +224,19 @@ TraceeController::LookupSymbolFile(const Path &path) noexcept
   return nullptr;
 }
 
-auto
-createSymbolFile(auto &tc, auto path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>
+/// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
+/// When debugging 2 processes with the same binaries, we don't want duplicate storage.
+static auto
+CreateSymbolFile(TraceeController &tc, const Path &path, AddrPtr addr) noexcept -> std::shared_ptr<SymbolFile>
 {
-  auto existing_obj = Tracer::Get().LookupSymbolfile(path);
-  if (existing_obj) {
+  auto existingObjFile = Tracer::Get().LookupSymbolfile(path);
+  if (existingObjFile) {
     // This process already registered this symbol object.
-    if (existing_obj->GetSupervisor() == &tc) {
+    if (existingObjFile->GetSupervisor() == &tc) {
       return nullptr;
     }
     // if baseAddr == addr; unique = false, return null, because we've already registered it
-    return existing_obj->Copy(tc, addr);
+    return existingObjFile->Copy(tc, addr);
   } else {
     auto obj = ObjectFile::CreateObjectFile(&tc, path);
     if (obj != nullptr) {
@@ -305,7 +307,7 @@ TraceeController::OnSharedObjectEvent() noexcept
     const auto &libraries = readLibrariesResult.value();
     DBGLOG(core, "Object File Descriptors read: {}", libraries.size());
     for (const auto &[path, l_addr] : libraries) {
-      auto symbolFile = createSymbolFile(*this, path, l_addr);
+      auto symbolFile = CreateSymbolFile(*this, path, l_addr);
       if (symbolFile) {
         objectFiles.push_back(symbolFile);
         RegisterSymbolFile(symbolFile, false);
@@ -609,12 +611,6 @@ TraceeController::EmitBreakpointEvent(
   std::string_view reason, const UserBreakpoint &bp, std::optional<std::string> message) noexcept
 {
   mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mSessionId, reason, std::move(message), &bp });
-}
-
-tc::ProcessedStopEvent
-TraceeController::ProcessDeferredStopEvent(TaskInfo &, DeferToSupervisor &) noexcept
-{
-  TODO("implement TraceeController::process_deferred_stopevent(TaskInfo &t, DeferToSupervisor &evt) noexcept");
 }
 
 mdb::Expected<Ref<BreakpointLocation>, BreakpointError>
@@ -1186,7 +1182,7 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
 
   switch (ss.ws) {
   case StopKind::Stopped: {
-    if (!info.initialized) {
+    if (!info.mInitialized) {
       TraceEvent::InitThreadCreated(
         event, { mTaskLeader, info.mTid, 5, {} }, { tc::RunType::Continue, tc::ResumeTarget::Task, {} }, {});
     } else {
@@ -1518,7 +1514,7 @@ TraceeController::TaskExit(TaskInfo &task, bool notify) noexcept
   auto it = FindByTid(mThreads, tid);
   MDB_ASSERT(it != std::end(mThreads), "{} couldn't be found in this process {}", tid, mTaskLeader);
 
-  task.exited = true;
+  task.mExited = true;
 
   mExitedThreads.push_back(std::move(*it));
   mThreads.erase(it);
@@ -1830,11 +1826,11 @@ tc::ProcessedStopEvent
 TraceeController::HandleProcessExit(const ProcessExited &evt) noexcept
 {
   auto t = GetTaskByTid(evt.mThreadId);
-  if (t && !t->exited) {
+  if (t && !t->mExited) {
     mDebugAdapterClient->PostDapEvent(
       new ui::dap::ThreadEvent{ mSessionId, ui::dap::ThreadReason::Exited, t->mTid });
-    t->exited = true;
-    t->reaped = true;
+    t->mExited = true;
+    t->mReaped = true;
   }
 
   ScheduleInvalidateThis(this);
