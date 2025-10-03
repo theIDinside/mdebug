@@ -7,6 +7,7 @@
 #include "interface/dap/dap_defs.h"
 #include "interface/dap/types.h"
 #include "interface/remotegdb/connection.h"
+#include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/callstack.h"
 #include "symbolication/dwarf/lnp.h"
 #include "symbolication/elf.h"
@@ -64,6 +65,12 @@ enum class InterfaceType : std::uint8_t
 enum class ObserverType : u8
 {
   AllStop
+};
+
+enum class ScheduleAction : u8
+{
+  Resume,
+  Stop
 };
 
 // Controller for one process
@@ -224,14 +231,15 @@ public:
   /* Create new task meta data for `tid` */
   void CreateNewTask(Tid tid, bool running) noexcept;
   bool HasTask(Tid tid) noexcept;
-  bool ReverseResumeTarget(tc::ResumeAction type) noexcept;
+  bool ReverseResumeTarget(tc::RunType type) noexcept;
   /* Resumes all tasks in this target. */
-  bool ResumeTarget(tc::ResumeAction type, std::vector<Tid> *resumedThreads = nullptr) noexcept;
+  bool ResumeTarget(tc::RunType type, std::vector<Tid> *resumedThreads = nullptr) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
-  void ResumeTask(TaskInfo &task, tc::ResumeAction type) noexcept;
+  void ResumeTask(TaskInfo &task, tc::RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
   void StopAllTasks() noexcept;
   void StopAllTasks(std::function<void()> &&callback) noexcept;
+  void ScheduleResume(TaskInfo &task, tc::RunType type) noexcept;
   /** We've gotten a `TaskWaitResult` and we want to register it with the task it's associated with. This also
    * reads that task's registers and caches them.*/
   TaskInfo *RegisterTaskWaited(WaitPidResult wait) noexcept;
@@ -403,19 +411,19 @@ public:
   void TaskExit(TaskInfo &task, bool notify) noexcept;
   void ExitAll() noexcept;
 
-  // Core event handlers
-  tc::ProcessedStopEvent HandleTerminatedBySignal(const Signal &evt) noexcept;
-  tc::ProcessedStopEvent HandleStepped(TaskInfo *task, const Stepped &event) noexcept;
-  tc::ProcessedStopEvent HandleEntry(const EntryEvent &e) noexcept;
-  tc::ProcessedStopEvent HandleThreadCreated(
-    TaskInfo *task, const ThreadCreated &evt, const RegisterData &register_data) noexcept;
   bool OneRemainingTask() noexcept;
-  tc::ProcessedStopEvent HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &evt) noexcept;
-  tc::ProcessedStopEvent HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
-  tc::ProcessedStopEvent HandleProcessExit(const ProcessExited &evt) noexcept;
-  tc::ProcessedStopEvent HandleFork(const ForkEvent &evt) noexcept;
-  tc::ProcessedStopEvent HandleClone(const Clone &evt) noexcept;
-  tc::ProcessedStopEvent HandleExec(const Exec &evt) noexcept;
+  // Core event handlers
+  void HandleTerminatedBySignal(const Signal &evt) noexcept;
+  void HandleStepped(TaskInfo *task, const Stepped &event) noexcept;
+  void HandleEntry(const EntryEvent &e) noexcept;
+  void HandleThreadCreated(TaskInfo *task, const ThreadCreated &evt, const RegisterData &register_data) noexcept;
+  void HandleBreakpointHit(TaskInfo *task, const BreakpointHitEvent &evt) noexcept;
+  void HandleThreadExited(TaskInfo *task, const ThreadExited &evt) noexcept;
+  void HandleProcessExit(const ProcessExited &evt) noexcept;
+  void HandleFork(const ForkEvent &evt) noexcept;
+  void HandleClone(const Clone &evt) noexcept;
+  void HandleExec(const Exec &evt) noexcept;
+  void HandleDeferred(NonNullPtr<TaskInfo> task, const DeferToSupervisor &e) noexcept;
 
   ui::dap::DebugAdapterClient *GetDebugAdapterProtocolClient() const noexcept;
 

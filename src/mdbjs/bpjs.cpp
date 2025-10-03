@@ -124,7 +124,6 @@ JsBreakpoint::Disable(JSContext *context, [[maybe_unused]] JSValue thisValue, JS
 JSValue
 JsBreakpointEvent::Stop(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
-  DBGLOG(interpreter, "The old cunt stopped. Can you believe it.");
   auto *bpEvent = GetThisOrReturnException(bpEvent, "Could not get Breakpoint status");
 
   int choice = 0;

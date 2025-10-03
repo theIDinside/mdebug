@@ -176,8 +176,7 @@ WaitEventParser::NewDebuggerEvent(bool init) noexcept
     case TraceeStopReason::Create: {
       const auto target =
         mConnection.GetSettings().mIsNonStop ? tc::ResumeTarget::Task : tc::ResumeTarget::AllNonRunningInProcess;
-      TraceEvent::InitThreadCreated(
-        traceEvent, Params(), { tc::RunType::Continue, target, 0 }, std::move(mRegisters));
+      TraceEvent::InitThreadCreated(traceEvent, Params(), tc::RunType::Continue, std::move(mRegisters));
     } break;
     default:
       TODO("Default handling should fail");
@@ -193,7 +192,7 @@ WaitEventParser::NewDebuggerEvent(bool init) noexcept
       TraceEvent::InitStepped(traceEvent = new TraceEvent{ *t },
         Params(),
         t->mBreakpointLocationStatus.ShouldBeStopped(),
-        tc::ResumeAction{ t->mBreakpointLocationStatus.mSteppingOverState.mResumeActionUponCompletion },
+        t->mResumeRequest.mType,
         std::move(mRegisters));
     } else if (mSignal != SIGTRAP) {
       TraceEvent::InitSignal(traceEvent = new TraceEvent{}, Params(), std::move(mRegisters));

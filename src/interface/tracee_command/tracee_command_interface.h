@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+#include "common/typedefs.h"
 #include <common/macros.h>
 #include <interface/remotegdb/target_description.h>
 #include <register_description.h>
@@ -20,6 +21,7 @@ namespace mdb {
 class TraceeController;
 class TaskInfo;
 class SymbolFile;
+struct TraceEvent;
 
 class BreakpointLocation;
 } // namespace mdb
@@ -43,13 +45,6 @@ enum class ResumeTarget : u8
   AllNonRunningInProcess = 2
 };
 
-struct ResumeAction
-{
-  RunType mResumeType;
-  ResumeTarget mResumeTarget{ ResumeTarget::Task };
-  int mDeliverSignal{ 0 };
-};
-
 enum class ShouldProceed
 {
   DoNothing,
@@ -57,10 +52,17 @@ enum class ShouldProceed
   StopAll
 };
 
+struct TraceEventAction
+{
+  bool mShouldResume;
+  std::optional<int> mResumeWithSignal{};
+};
+
 struct ProcessedStopEvent
 {
   bool mShouldResumeAfterProcessing;
-  std::optional<tc::ResumeAction> mResumeAction{};
+  tc::RunType mResumeType = tc::RunType::None;
+  std::optional<int> mSignal{ std::nullopt };
   bool mProcessExited{ false };
   bool mThreadExited{ false };
   bool mVForked{ false };
@@ -80,13 +82,19 @@ struct ProcessedStopEvent
   constexpr static auto
   ProcessExited() noexcept
   {
-    return ProcessedStopEvent{ false, std::nullopt, true };
+    auto result = ProcessedStopEvent{};
+    result.mShouldResumeAfterProcessing = false;
+    result.mProcessExited = true;
+    return result;
   }
 
   constexpr static auto
   ThreadExited() noexcept
   {
-    return ProcessedStopEvent{ false, std::nullopt, false, true };
+    auto result = ProcessedStopEvent{};
+    result.mShouldResumeAfterProcessing = false;
+    result.mThreadExited = true;
+    return result;
   }
 };
 
@@ -257,7 +265,8 @@ using Interface = std::unique_ptr<TraceeCommandInterface>;
 enum class TraceeInterfaceType : u8
 {
   Ptrace,
-  GdbRemote
+  GdbRemote,
+  RR
 };
 
 // Abstract base class & interface for controlling and querying tracees
@@ -290,12 +299,11 @@ public:
   // Reverse execute. `onlyStep` if we should be stepping. If false, do reverse execution.
   virtual TaskExecuteResponse ReverseContinue(bool onlyStep) noexcept;
   // Can (possibly) modify state in `t`
-  virtual TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction run) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTask(TaskInfo &t, RunType type) noexcept = 0;
 
   // TODO(simon): remove `tc` from interface. we now hold on to one in this type instead
   /** `resumedThreads` is an optional out parameter consisting of the tids of the threads that got resumed. */
-  virtual TaskExecuteResponse ResumeTarget(
-    TraceeController *tc, ResumeAction run, std::vector<Tid> *resumedThreads) noexcept = 0;
+  virtual TaskExecuteResponse ResumeTarget(RunType run, std::vector<Tid> *resumedThreads) noexcept = 0;
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
 
@@ -410,6 +418,9 @@ public:
   {
     return false;
   }
+
+  virtual void OnTaskExit(TaskInfo &task) noexcept = 0;
+  virtual void OnTaskCreated(TaskInfo &task) noexcept = 0;
 };
 
 } // namespace mdb::tc

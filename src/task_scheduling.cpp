@@ -28,6 +28,7 @@ ThreadProceedAction::ThreadProceedAction(TraceeController &ctrl, TaskInfo &task)
 void
 ThreadProceedAction::cancel() noexcept
 {
+  DBGLOG(core, "Cancel thread proceed action");
   mIsCancelled = true;
 }
 
@@ -54,7 +55,7 @@ FinishFunction::HasCompleted(bool stopped_by_user) const noexcept
 void
 FinishFunction::Proceed() noexcept
 {
-  mSupervisor.ResumeTask(mTask, { tc::RunType::Continue, tc::ResumeTarget::Task, 0 });
+  mSupervisor.ResumeTask(mTask, tc::RunType::Continue);
 }
 
 void
@@ -78,7 +79,7 @@ void
 InstructionStep::Proceed() noexcept
 {
   DBGLOG(core, "[InstructionStep] stepping 1 instruction for {}", mTask.mTid);
-  mSupervisor.ResumeTask(mTask, { tc::RunType::Step, tc::ResumeTarget::Task, 0 });
+  mSupervisor.ResumeTask(mTask, tc::RunType::Step);
 }
 
 void
@@ -139,11 +140,8 @@ LineStep::~LineStep() noexcept
   if (!mIsCancelled) {
     DBGLOG(core, "[line step]: line step for {} ended", mTask.mTid);
     auto *traceEvent = new TraceEvent{ mTask };
-    TraceEvent::InitSteppingDone(traceEvent,
-      { .target = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid, .sig_or_code = 0, .event_time = {} },
-      "Line stepping finished",
-      {});
-    EventSystem::Get().PushDebuggerEvent(traceEvent);
+    mSupervisor.EmitSteppedStop(
+      { .pid = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid }, "Line stepping finished", false);
   } else {
     if (mPotentialBreakpointAtReturnAddress) {
       mSupervisor.RemoveBreakpoint(mPotentialBreakpointAtReturnAddress->mId);
@@ -162,11 +160,11 @@ LineStep::Proceed() noexcept
 {
   if (mPotentialBreakpointAtReturnAddress && !mResumedToReturnAddress) {
     DBGLOG(core, "[line step]: continuing sub frame for {}", mTask.mTid);
-    mSupervisor.ResumeTask(mTask, { tc::RunType::Continue, tc::ResumeTarget::Task, 0 });
+    mSupervisor.ResumeTask(mTask, tc::RunType::Continue);
     mResumedToReturnAddress = true;
   } else {
     DBGLOG(core, "[line step]: no resume address set, keep istepping");
-    mSupervisor.ResumeTask(mTask, { tc::RunType::Step, tc::ResumeTarget::Task, 0 });
+    mSupervisor.ResumeTask(mTask, tc::RunType::Step);
   }
 }
 
@@ -182,6 +180,7 @@ LineStep::InstallBreakpoint(AddrPtr address) noexcept
 void
 LineStep::MaybeSetDone(bool isDone) noexcept
 {
+  DBGLOG(core, "[line step]: Maybe set done to={}", isDone);
   mIsDone = isDone;
 }
 
@@ -196,7 +195,11 @@ LineStep::UpdateStepped() noexcept
       "We haven't implemented support where recursion actually creates multiple frames that look the same.");
     auto result = frame.GetLineTableEntry();
     const LineTableEntry *lte = result.second;
-    DBGLOG(core, "[line step]: could not find LTE for pc={}", frame.FramePc());
+    DBGLOG(core,
+      "[line step]: found Line Table Entry ?={} for pc={}, objfile={}",
+      lte != nullptr,
+      frame.FramePc(),
+      frame.GetSymbolFile()->GetObjectFilePath().c_str());
     MaybeSetDone((!lte || lte->line != mLineEntry.line));
   } else {
     auto &callstack = mSupervisor.BuildCallFrameStack(mTask, CallStackRequest::full());
@@ -259,10 +262,8 @@ StepInto::~StepInto() noexcept
 {
   if (!mIsCancelled) {
     auto *traceEvent = new TraceEvent{ mTask };
-    TraceEvent::InitSteppingDone(traceEvent,
-      { .target = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid, .sig_or_code = 0, .event_time = {} },
-      "Step into command finished.",
-      {});
+    mSupervisor.EmitSteppedStop(
+      { .pid = mSupervisor.TaskLeaderTid(), .tid = mTask.mTid }, "Step into command finished.", false);
     EventSystem::Get().PushDebuggerEvent(traceEvent);
   }
 }
@@ -276,7 +277,7 @@ StepInto::HasCompleted(bool stopped_by_user) const noexcept
 void
 StepInto::Proceed() noexcept
 {
-  mSupervisor.ResumeTask(mTask, { tc::RunType::Step, tc::ResumeTarget::Task, 0 });
+  mSupervisor.ResumeTask(mTask, tc::RunType::Step);
 }
 
 bool
@@ -363,13 +364,11 @@ TaskScheduler::SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualSch
   switch (mScheduling) {
   case SchedulingConfig::OneExclusive:
     if (tid != mExclusiveTask) {
-      DBGLOG(core, "tid != mExclusiveTask");
       individualScheduler->cancel();
       return false;
     }
     break;
   case SchedulingConfig::StopAll: {
-    DBGLOG(core, "SchedulingConfig::StopAll, return false.");
     individualScheduler->cancel();
     return false;
   }
@@ -377,7 +376,6 @@ TaskScheduler::SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualSch
     break;
   }
 
-  DBGLOG(core, "Move individual scheduler.");
   mIndividualScheduler[tid] = std::move(individualScheduler);
   if (resume) {
     mIndividualScheduler[tid]->Proceed();
@@ -417,7 +415,7 @@ TaskScheduler::Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResul
     }
     [[fallthrough]];
   case SchedulingConfig::NormalResume:
-    NormalScheduleTask(task, eventProceedResult);
+    NormalScheduleTask(task, eventProceedResult.mShouldResumeAfterProcessing);
     break;
   case SchedulingConfig::StopAll:
     EmitStopWhenAllTasksHalted();
@@ -426,7 +424,7 @@ TaskScheduler::Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResul
 }
 
 void
-TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept
+TaskScheduler::NormalScheduleTask(TaskInfo &task, bool shouldResume) noexcept
 {
 
   // When a process has exited, or a task has exited, we always proceed the task in the same way (because it's
@@ -444,7 +442,7 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
   if (individualScheduler) {
     DBGLOG(core, "Task has individual scheduler");
     individualScheduler->UpdateStepped();
-    const auto stoppedByUser = !eventProceedResult.mShouldResumeAfterProcessing;
+    const auto stoppedByUser = !shouldResume;
     if (individualScheduler->HasCompleted(stoppedByUser)) {
       DBGLOG(core, "remove scheduler for {}, stopped by user={}", task.mTid, stoppedByUser);
       RemoveIndividualScheduler(task.mTid);
@@ -452,10 +450,8 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventPr
       individualScheduler->Proceed();
     }
   } else {
-    const auto kind = eventProceedResult.mResumeAction.value_or(tc::ResumeAction{
-      .mResumeType = tc::RunType::Continue, .mResumeTarget = tc::ResumeTarget::Task, .mDeliverSignal = 0 });
-    if (task.CanContinue() && eventProceedResult.mShouldResumeAfterProcessing) {
-      mSupervisor->ResumeTask(task, kind);
+    if (task.CanContinue() && shouldResume) {
+      mSupervisor->ResumeTask(task, task.mResumeRequest.mType);
     } else {
       task.SetUserVisibleStop();
     }

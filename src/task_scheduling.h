@@ -170,7 +170,7 @@ public:
   ~TaskScheduler() noexcept = default;
   bool SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualScheduler, bool resume) noexcept;
   void Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
-  void NormalScheduleTask(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
+  void NormalScheduleTask(TaskInfo &task, bool shouldResume) noexcept;
   void EmitStopWhenAllTasksHalted() noexcept;
 
   void SetNormalScheduling() noexcept;

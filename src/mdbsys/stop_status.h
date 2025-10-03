@@ -26,8 +26,8 @@ struct StopStatus
   StopKind ws;
   union
   {
-    int exit_code;
-    int signal;
+    int uStopExitCode;
+    int uStopSignal;
   };
 };
 

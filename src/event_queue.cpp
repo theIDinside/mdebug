@@ -3,6 +3,7 @@
 #include "common.h"
 #include "supervisor.h"
 #include "tracer.h"
+#include "utils/format_utils.h"
 #include <fcntl.h>
 #include <interface/ui_command.h>
 #include <mdbsys/ptrace.h>
@@ -24,13 +25,6 @@ EventSystem *EventSystem::sEventSystem = nullptr;
 TraceEvent::TraceEvent(TaskInfo &task) noexcept
     : mProcessId(task.GetTaskLeaderTid().value_or(0)), mTaskId(task.mTid), mTask(&task)
 {
-}
-
-void
-TraceEvent::SetSteppedOverBreakpointNeedsResume(tc::RunType resumeType) noexcept
-{
-  MDB_ASSERT(!mPostBreakpointOverStep, "Resume action already set for this trace event!");
-  mPostBreakpointOverStep = resumeType;
 }
 
 constexpr bool
@@ -107,10 +101,10 @@ TraceEvent::InitSyscallExit(
 
 void
 TraceEvent::InitThreadCreated(
-  TraceEvent *evt, const EventDataParam &param, tc::ResumeAction resumeAction, RegisterData &&regData) noexcept
+  TraceEvent *evt, const EventDataParam &param, tc::RunType resumeType, RegisterData &&regData) noexcept
 {
   INIT_EVENT(evt, param, regData)
-  evt->mEvent = ThreadCreated{ { param.tid.value_or(-1) }, resumeAction };
+  evt->mEvent = ThreadCreated{ { param.tid.value_or(-1) }, resumeType };
   evt->mEventType = TracerEventType::ThreadCreated;
 }
 
@@ -181,7 +175,7 @@ TraceEvent::InitCloneEvent(TraceEvent *evt,
   RegisterData &&regData) noexcept
 {
   INIT_EVENT(evt, param, regData)
-  evt->mEvent = Clone{ { param.target }, newTaskId, taskStackMetadata };
+  evt->mEvent = Clone{ { param.tid.value() }, newTaskId, taskStackMetadata };
   evt->mEventType = TracerEventType::Clone;
 }
 
@@ -218,20 +212,11 @@ void
 TraceEvent::InitStepped(TraceEvent *evt,
   const EventDataParam &param,
   bool stop,
-  std::optional<tc::ResumeAction> maybeResumeAction,
+  tc::RunType mayResumeWith,
   RegisterData &&regData) noexcept
 {
   INIT_EVENT(evt, param, regData)
-  evt->mEvent = Stepped{ { param.tid.value() }, stop, maybeResumeAction };
-  evt->mEventType = TracerEventType::Stepped;
-}
-
-void
-TraceEvent::InitSteppingDone(
-  TraceEvent *evt, const EventDataParam &param, std::string_view message, RegisterData &&regData) noexcept
-{
-  INIT_EVENT(evt, param, regData)
-  evt->mEvent = Stepped{ { param.tid.value() }, true, {}, message };
+  evt->mEvent = Stepped{ { param.tid.value() }, stop, mayResumeWith };
   evt->mEventType = TracerEventType::Stepped;
 }
 
@@ -436,34 +421,59 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
           }
           if (WIFSTOPPED(status.mStatus)) {
             const auto res = WaitResultToTaskWaitResult(status.mProcessId, status.mStatus);
-            auto *traceEvent = Tracer::Get().ConvertWaitEvent(res);
-            // sometimes during clone or fork system calls, we may be getting a waitpid event from a task we not
-            // have fully materialized yet, but we've seen the parent perform the syscall, so there's an actual
-            // event to handle it, before this one, but it means it wasn't processed yet, so it couldn't convert to
-            // TraceEvent here.
-            if (!traceEvent) {
+            if (false) {
               write.push_back(ApplicationEvent{ WaitEvent{ .mWaitResult = res, .mCpuCore = 0 } });
             } else {
-              MDB_ASSERT(traceEvent, "Expected trace event to not be null");
-              write.push_back(ApplicationEvent{ traceEvent });
+              auto *traceEvent = Tracer::Get().ConvertWaitEvent(res);
+              // sometimes during clone or fork system calls, we may be getting a waitpid event from a task we not
+              // have fully materialized yet, but we've seen the parent perform the syscall, so there's an actual
+              // event to handle it, before this one, but it means it wasn't processed yet, so it couldn't convert
+              // to TraceEvent here.
+              if (!traceEvent) {
+                write.push_back(ApplicationEvent{ WaitEvent{ .mWaitResult = res, .mCpuCore = 0 } });
+              } else {
+                DBGLOG(
+                  awaiter, "converted waitstatus event to trace event {} for {}", traceEvent->mEventType, res.tid);
+                write.push_back(ApplicationEvent{ traceEvent });
+              }
             }
           } else if (WIFEXITED(status.mStatus)) {
+            bool handled = false;
             for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
+              std::vector<Tid> threads{};
+              if (supervisor->TaskLeaderTid() == status.mProcessId) {
+                auto *traceEvent = new TraceEvent{};
+                TraceEvent::InitProcessExitEvent(
+                  traceEvent, status.mProcessId, status.mProcessId, WEXITSTATUS(status.mStatus), {});
+                write.push_back(ApplicationEvent{ traceEvent });
+                break;
+              }
               for (const auto &entry : supervisor->GetThreads()) {
+                threads.push_back(entry.mTid);
                 if (entry.mTid == status.mProcessId) {
                   auto *traceEvent = new TraceEvent{};
+                  DBGLOG(core, "Exit code for thread {} exited={}", entry.mTid, WEXITSTATUS(status.mStatus));
                   TraceEvent::InitThreadExited(traceEvent,
                     { supervisor->TaskLeaderTid(), status.mProcessId, WEXITSTATUS(status.mStatus), 0 },
                     false,
                     {});
                   write.push_back(ApplicationEvent{ traceEvent });
+                  handled = true;
                 }
+              }
+
+              if (!handled) {
+                DBGLOG(core,
+                  "EXIT STATUS went unhandled for {} (threads=[{}]), exit status={}",
+                  status.mProcessId,
+                  JoinFormatIterator{ threads },
+                  WEXITSTATUS(status.mStatus));
               }
             }
 
           } else if (WIFSIGNALED(status.mStatus)) {
             const auto signalledEvent = WaitPidResult{ .tid = status.mProcessId,
-              .ws = StopStatus{ .ws = StopKind::Signalled, .signal = WTERMSIG(status.mStatus) } };
+              .ws = StopStatus{ .ws = StopKind::Signalled, .uStopSignal = WTERMSIG(status.mStatus) } };
             write.push_back(ApplicationEvent{ WaitEvent{ signalledEvent, 0 } });
           } else {
             PANIC("Unknown wait status event");

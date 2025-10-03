@@ -59,7 +59,8 @@ BreakpointLocation::CreateLocationWithSource(
 bool
 BreakpointLocation::AnyUsersActive() const noexcept
 {
-  return std::any_of(mUserMapping.begin(), mUserMapping.end(), [](const auto user) { return user->IsEnabled(); });
+  return std::any_of(
+    mUserMapping.begin(), mUserMapping.end(), [](const auto user) { return user->IsEnabledAndInstalled(); });
 }
 
 std::vector<u32>
@@ -100,6 +101,12 @@ BreakpointLocation::RemoveUserOfThis(tc::TraceeCommandInterface &controlInterfac
 void
 BreakpointLocation::Enable(Tid taskId, tc::TraceeCommandInterface &controlInterface) noexcept
 {
+  if (mUserMapping.empty()) {
+    MDB_ASSERT(!mInstalled, "A breakpoint location, with no users, but is installed?");
+    DBGLOG(core, "BreakpointLocation has no users.");
+    return;
+  }
+
   if (!mInstalled) {
     const auto res = controlInterface.EnableBreakpoint(taskId, *this);
     switch (res.kind) {
@@ -172,7 +179,7 @@ UserBreakpoint::GetLocation() noexcept
 }
 
 bool
-UserBreakpoint::IsEnabled() noexcept
+UserBreakpoint::IsEnabledAndInstalled() noexcept
 {
   return mEnabledByUser && mBreakpointLocation != nullptr && mBreakpointLocation->IsInstalled();
 }
@@ -181,9 +188,9 @@ void
 UserBreakpoint::Enable(tc::TraceeCommandInterface &controlInterface) noexcept
 {
   if (mEnabledByUser && mBreakpointLocation != nullptr) {
+    mEnabledByUser = true;
     mBreakpointLocation->Enable(controlInterface.TaskLeaderTid(), controlInterface);
   }
-  mEnabledByUser = mBreakpointLocation != nullptr;
 }
 
 void

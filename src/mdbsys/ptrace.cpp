@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #include "ptrace.h"
 #include "mdbsys/stop_status.h"
+#include <cstdlib>
 #include <sys/syscall.h>
 #include <tracer.h>
 #include <utility>
@@ -105,7 +106,7 @@ ConfigurePtraceSettings(pid_t pid)
   // PTRACE_O_TRACEEXIT stops on exit of a task, but it's not at a point where we can do anything. At which point
   // my question becomes: what's the purpose? I'd rather just be notified that a task has died and that's that.
   const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD |
-                       PTRACE_O_TRACEVFORK; // | PTRACE_O_TRACEEXIT;
+                       PTRACE_O_TRACEVFORK | PTRACE_O_TRACEEXIT;
   if (-1 == ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
     int stat;
     if (-1 == waitpid(pid, &stat, 0)) {
@@ -186,8 +187,9 @@ WaitPidResult
 WaitResultToTaskWaitResult(Tid tid, int status) noexcept
 {
   using enum StopKind;
-  StopKind kind = NotKnown;
   const auto signal = WSTOPSIG(status);
+  WaitPidResult result{ .tid = tid, .ws = { .ws = NotKnown, .uStopSignal = signal } };
+  auto &kind = result.ws.ws;
 
   if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
     PtraceSyscallInfo info;
@@ -204,6 +206,7 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
     kind = Execed;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
     kind = Exited;
+    result.ws.uStopExitCode = WEXITSTATUS(status);
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
     kind = Forked;
   } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
@@ -220,7 +223,7 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
   } else {
     kind = Stopped;
   }
-  return WaitPidResult{ .tid = tid, .ws = { .ws = kind, .signal = signal } };
+  return result;
 }
 
 std::optional<WaitPid>

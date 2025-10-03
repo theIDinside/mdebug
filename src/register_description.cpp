@@ -93,6 +93,7 @@ RegisterDescription::GetRegister(u32 regNumber) const noexcept
 void
 RegisterDescription::Store(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept
 {
+  MDB_ASSERT(mArchInfo, "No architecture information found");
   const auto &metaData = mArchInfo->mRegisters->mRegisterMetaData.Cast();
   for (const auto &[number, contents] : data) {
     u8 *ptr = mRegisterContents.Data(metaData[number].mOffset);
