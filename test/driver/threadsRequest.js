@@ -1,5 +1,5 @@
 const { getLineOf, readFileContents, repoDirFile, seconds } = require('./client')
-const { assert, prettyJson, assertLog } = require('./utils')
+const { prettyJson } = require('./utils')
 
 /**
  * @param {import("./client").DebugAdapterClient } debugAdapter
@@ -21,7 +21,11 @@ async function threads(debugAdapter) {
     breakpoints: breakpointLines,
   })
 
-  assertLog(res.body.breakpoints[0].verified, `Expected breakpoint to be ok`, 'Breakpoint could not be verified')
+  await debugAdapter.assert(
+    res.body.breakpoints[0].verified,
+    `Expected breakpoint to be ok`,
+    'Breakpoint could not be verified'
+  )
 
   let waitForStop = debugAdapter.waitForEvent('stopped', 3000, (event) => {
     return (event.reason == 'breakpoint' && event.threadId == threads[0].id) || event.allThreadsStopped
@@ -37,13 +41,17 @@ async function threads(debugAdapter) {
   })
 
   let response = await debugAdapter.nextRequest({ threadId: threads[1].id, granularity: 'line', singleThread: true })
-  assertLog(response.success, `Expected 'next' command to succeed`, `Response was ${JSON.stringify(response)}`)
+  await debugAdapter.assert(
+    response.success,
+    `Expected 'next' command to succeed`,
+    `Response was ${JSON.stringify(response)}`
+  )
   await nextFinisihed
 
   frames = await debugAdapter.stackTrace(threads[1].id)
 
   const currentLine = frames.body.stackFrames[0].line
-  assertLog(
+  await debugAdapter.assert(
     currentLine == breakpointLines[0].line + 1,
     `Expected to be at line ${breakpointLines[0].line + 1}`,
     `Was at line ${currentLine}. \n${prettyJson(frames.body.stackFrames)}`
