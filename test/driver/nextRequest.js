@@ -1,5 +1,5 @@
 const { readFileContents, repoDirFile, getLineOf } = require('./client')
-const { todo, assert, prettyJson } = require('./utils')
+const { todo, prettyJson } = require('./utils')
 
 function getLinesOf(names) {
   const file = readFileContents(repoDirFile('test/next.cpp'))
@@ -9,48 +9,55 @@ function getLinesOf(names) {
     .map((l) => ({ line: l }))
 }
 
-async function setup(DA, bps) {
-  await DA.startRunToMain(DA.buildDirFile('next'))
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ * @param { string[] } bps
+ */
+async function setup(debugAdapter, bps) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('next'))
   const file = readFileContents(repoDirFile('test/next.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))
     .filter((item) => item != null)
     .map((l) => ({ line: l }))
 
-  assert(
+  await debugAdapter.assert(
     bp_lines.length == bps.length,
     `Could not parse contents of ${repoDirFile('test/next.cpp')} to find all string identifiers`
   )
 
-  const breakpoint_response = await DA.sendReqGetResponse('setBreakpoints', {
+  const breakpoint_response = await debugAdapter.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/next.cpp'),
       path: repoDirFile('test/next.cpp'),
     },
     breakpoints: bp_lines,
   })
-  assert(
+  await debugAdapter.assert(
     breakpoint_response.body.breakpoints.length == bps.length,
-    `Expected to have set ${bps.length} breakpoints but only successfully set ${
-      breakpoint_response.body.breakpoints.length
-    }:\n${prettyJson(breakpoint_response)}`
+    `Expected to have set ${bps.length} breakpoints`,
+    `Set ${breakpoint_response.body.breakpoints.length} breakpoints`
   )
 }
 
-async function nextLineOverFunction(DA) {
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ */
+async function nextLineOverFunction(debugAdapter) {
   const bp_lines = getLinesOf(['BP1', 'BP2'])
-  await setup(DA, ['BP1'])
-  const threads = await DA.threads()
-  await DA.contNextStop(threads[0].id)
-  let frames = await DA.stackTrace(threads[0].id)
+  await setup(debugAdapter, ['BP1'])
+  const threads = await debugAdapter.threads()
+  await debugAdapter.contNextStop(threads[0].id)
+  let frames = await debugAdapter.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
-  assert(
+  await debugAdapter.assert(
     start_line == bp_lines[0].line,
-    `Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}. Frames: ${prettyJson(frames)}`
+    `Expeceted to be on line ${bp_lines[0].line}`,
+    `But saw ${start_line}. Frames: ${prettyJson(frames)}`
   )
 
   const allThreadsStop = true
-  const { event_body, response } = await DA.sendReqWaitEvent(
+  const { event_body, response } = await debugAdapter.sendReqWaitEvent(
     'next',
     {
       threadId: threads[0].id,
@@ -61,35 +68,40 @@ async function nextLineOverFunction(DA) {
     5000
   )
 
-  assert(
+  await debugAdapter.assert(
     event_body.reason == 'step',
-    `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
+    `Expected to see a 'stopped' event with 'step' as reason.`,
+    `Got event ${prettyJson(event_body)}`
   )
 
   {
-    frames = await DA.stackTrace(threads[0].id)
+    frames = await debugAdapter.stackTrace(threads[0].id)
     const end_line = frames.body.stackFrames[0].line
-    assert(
+    await debugAdapter.assert(
       end_line == bp_lines[1].line,
-      `Expected to be at line ${bp_lines[1].line} but we're at line ${end_line}: ${prettyJson(frames.body.stackFrames)}`
+      `Expected to be at line ${bp_lines[1].line}`,
+      `At line ${end_line}: ${prettyJson(frames.body.stackFrames)}`
     )
-    console.log(`at correct line ${end_line}`)
   }
 }
 
-async function stopBecauseBpWhenNextLine(DA) {
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ */
+async function stopBecauseBpWhenNextLine(debugAdapter) {
   const bp_lines = getLinesOf(['BP1', 'BP3'])
-  await setup(DA, ['BP1', 'BP3'])
-  const threads = await DA.threads()
-  await DA.contNextStop(threads[0].id)
-  let frames = await DA.stackTrace(threads[0].id)
+  await setup(debugAdapter, ['BP1', 'BP3'])
+  const threads = await debugAdapter.threads()
+  await debugAdapter.contNextStop(threads[0].id)
+  let frames = await debugAdapter.stackTrace(threads[0].id)
   const start_line = frames.body.stackFrames[0].line
-  assert(
+  await debugAdapter.assert(
     start_line == bp_lines[0].line,
-    `Expected to be on line ${bp_lines[0].line} for breakpoint but saw ${start_line}`
+    `Expected to be on line ${bp_lines[0].line}`,
+    `At: ${start_line}`
   )
   const allThreadsStop = true
-  const { event_body, response } = await DA.sendReqWaitEvent(
+  const { event_body, response } = await debugAdapter.sendReqWaitEvent(
     'next',
     {
       threadId: threads[0].id,
@@ -99,17 +111,19 @@ async function stopBecauseBpWhenNextLine(DA) {
     'stopped',
     1000
   )
-  assert(
+  await debugAdapter.assert(
     event_body.reason == 'breakpoint',
-    `Expected to see a 'stopped' event with 'breakpoint' as reason. Got event ${JSON.stringify(event_body)}`
+    `Expected to see a 'stopped' event with 'breakpoint' as reason.`,
+    `Got event ${JSON.stringify(event_body)}`
   )
 
   {
-    frames = await DA.stackTrace(threads[0].id)
+    frames = await debugAdapter.stackTrace(threads[0].id)
     const end_line = frames.body.stackFrames[0].line
-    assert(
+    await debugAdapter.assert(
       end_line == bp_lines[1].line,
-      `Expected to be at line ${bp_lines[1].line} but we're at line ${end_line}: ${prettyJson(frames.body.stackFrames)}`
+      `Expected to be at line ${bp_lines[1].line}`,
+      `At line ${end_line}: ${prettyJson(frames.body.stackFrames)}`
     )
     console.log(`at correct line ${end_line}`)
   }
@@ -144,17 +158,19 @@ async function nextInstruction(debugAdapter) {
     'stopped',
     1000
   )
-  assert(response.success, `Request was unsuccessful: ${prettyJson(response)}`)
-  assert(
+  await debugAdapter.assert(response.success, `Expected succesful response`)
+  await debugAdapter.assert(
     event_body.reason == 'step',
-    `Expected to see a 'stopped' event with 'step' as reason. Got event ${prettyJson(event_body)}`
+    `Expected to see a 'stopped' event with 'step' as reason.`,
+    `Got event ${prettyJson(event_body)}`
   )
 
   frames = await threads[0].stacktrace()
   const nextPc = frames[0].pc
-  assert(
+  await debugAdapter.assert(
     nextPc == disassembly.body.instructions[1].address,
-    `Expected to be at ${disassembly.body.instructions[1].address} but RIP=${nextPc} (previous pc: ${firstPc})`
+    `Expected to be at ${disassembly.body.instructions[1].address}`,
+    `RIP=${nextPc} (previous pc: ${firstPc})`
   )
 }
 
