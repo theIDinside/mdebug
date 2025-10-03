@@ -1,11 +1,11 @@
-/** @typedef { import("./client").DebugAdapterClient } MDB */
+/** @typedef { import("./client").DebugAdapterClient } DebugAdapterClient */
 
 const {
   launchToGetFramesAndScopes,
   allBreakpointIdentifiers,
   SubjectSourceFiles: { include, subjects },
 } = require('./client')
-const { todo, assert, assertLog, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
+const { todo, assert, assertEqAInB, prettyJson, assertAllVariableReferencesUnique } = require('./utils')
 const stdAssert = require('assert')
 
 function newVarObject(name, value, type, ref = (val) => !isNaN(val)) {
@@ -22,14 +22,17 @@ function newVarObject(name, value, type, ref = (val) => !isNaN(val)) {
  * Verify that `vars` is of length `expectedCount`. `varRef` is
  * the variablesReference we requested `vars` for. `response` was the full response
  */
-function assertVarResponseLength(vars, expectedCount, varRef, response) {
-  assertLog(
+async function assertVarResponseLength(debugAdapter, vars, expectedCount, varRef, response) {
+  await debugAdapter.assert(
     vars.length == expectedCount,
     `[var ref: ${varRef}]: Expected ${expectedCount} variables. `,
     `Got ${vars.length}. Variables response: ${prettyJson(response)}`
   )
 }
 
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ */
 async function inConstructor(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
     debugAdapter,
@@ -44,11 +47,12 @@ async function inConstructor(debugAdapter) {
       const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: scope.variablesReference })
       console.log(prettyJson(vres))
       assertAllVariableReferencesUnique(vres.body.variables)
-      assertVarResponseLength(vres.body.variables, 3, scope.variablesReference, vres)
+      await assertVarResponseLength(debugAdapter, vres.body.variables, 3, scope.variablesReference, vres)
       // clang emits `Class *` for a `this` pointer of type Class, gcc emits `Class *const` ... sigh. why gcc. why.
-      assert(
+      await debugAdapter.assert(
         vres.body.variables.some((v) => v.name == 'this' && (v.type == 'Class *' || v.type == 'const Class *')),
-        () => `Expected to see a 'this' parameter, but didn't. Variables: ${prettyJson(vres.body.variables)}`
+        `Expected to see a 'this' parameter.`,
+        () => `Variables: ${prettyJson(vres.body.variables)}`
       )
     }
   }
@@ -68,10 +72,14 @@ async function scopeLocalsTest(debugAdapter) {
     if (scope.name == 'Locals') {
       const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: scope.variablesReference })
       const variables = vres?.body?.variables
-      assertLog(variables != null, 'variables', `Request failed. Response: ${JSON.stringify(vres)}`)
+      await debugAdapter.assert(
+        variables != null,
+        'Expected variables',
+        `Request failed. Response: ${JSON.stringify(vres)}`
+      )
       const expectedCount = 7
       assertAllVariableReferencesUnique(variables)
-      assertVarResponseLength(variables, expectedCount, scope.variablesReference, vres)
+      await assertVarResponseLength(debugAdapter, variables, expectedCount, scope.variablesReference, vres)
 
       const expected = {
         a: newVarObject('a', '1', 'int', 0),
@@ -90,9 +98,13 @@ async function scopeLocalsTest(debugAdapter) {
           }
           const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: v.variablesReference })
           const variables = vres?.body?.variables
-          assertLog(variables != null, 'variables', `Request failed. Response: ${JSON.stringify(vres)}`)
+          await debugAdapter.assert(
+            variables != null,
+            'Expected variables',
+            `Request failed. Response: ${JSON.stringify(vres)}`
+          )
           assertAllVariableReferencesUnique(variables)
-          assertVarResponseLength(variables, 3, scope.variablesReference, vres)
+          await assertVarResponseLength(debugAdapter, variables, 3, scope.variablesReference, vres)
           for (const v of variables) {
             assertEqAInB(expected[v.name], v)
           }
@@ -103,6 +115,9 @@ async function scopeLocalsTest(debugAdapter) {
   }
 }
 
+/**
+ * @param { DebugAdapterClient } debugAdapter
+ */
 async function scopeArgsTest(debugAdapter) {
   const MAIN_FILE = 'test/basetypes.cpp'
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
@@ -119,7 +134,7 @@ async function scopeArgsTest(debugAdapter) {
       })
       const args = argsResponse.body.variables
       assertAllVariableReferencesUnique(args)
-      assertVarResponseLength(args, 2, scope.variablesReference, argsResponse)
+      await assertVarResponseLength(debugAdapter, args, 2, scope.variablesReference, argsResponse)
       const expectedArgs = {
         name: newVarObject(
           'name',
@@ -195,21 +210,24 @@ async function membersOfVariableTest(debugAdapter) {
   }
 }
 
-async function readStringVariable(DA) {
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ */
+async function readStringVariable(debugAdapter) {
   const hardcodedMmapAddress = '0x1f21000'
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
-    DA,
+    debugAdapter,
     'test/readMemory.cpp',
     ['BP1'],
     'main',
     'readMemory'
   )
   let local = scopes.find((s) => s.name == 'Locals')
-  assert(local != undefined, 'Could not find locals scope')
-  const vres = await DA.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
+  await debugAdapter.assert(local != undefined, 'Could not find locals scope')
+  const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
 
   const variables = vres.body.variables.filter((v) => v.name == 'hello_world' || v.name == 'str_ptr')
-  assert(
+  await debugAdapter.assert(
     variables.length == 2,
     () =>
       `Could not find local variables 'hello_world' and 'str_ptr' in ${prettyJson(
@@ -218,10 +236,14 @@ async function readStringVariable(DA) {
   )
   console.log(prettyJson(variables))
 
-  const hello_world = await DA.sendReqGetResponse('variables', { variablesReference: variables[0].variablesReference })
+  const hello_world = await debugAdapter.sendReqGetResponse('variables', {
+    variablesReference: variables[0].variablesReference,
+  })
   console.log(prettyJson(hello_world))
 
-  const strptr = await DA.sendReqGetResponse('variables', { variablesReference: variables[1].variablesReference })
+  const strptr = await debugAdapter.sendReqGetResponse('variables', {
+    variablesReference: variables[1].variablesReference,
+  })
   console.log(prettyJson(strptr))
 }
 
@@ -233,20 +255,23 @@ async function readStringVariable(DA) {
 /// In the future, we might want to specifically tweak ArrayResolver (and it's cousins ValueResolver, CStringResolver, DefaultStructResolver et al)
 /// to cache a specific amount, some multiple of N elements resulting in M bytes,
 /// because we can verify that it has some property that makes it the fastest, since we're requesting data from the tracee into the supervisor.
-async function testArrayResolverCaching(DA) {
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ */
+async function testArrayResolverCaching(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
-    DA,
+    debugAdapter,
     'test/readMemory.cpp',
     ['ARRBP'],
     'main',
     'readMemory'
   )
   let local = scopes.find((s) => s.name == 'Locals')
-  assert(local != undefined, 'Could not find locals scope')
-  const vres = await DA.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
+  await debugAdapter.assert(local != undefined, 'Could not find locals scope')
+  const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
 
   const variables = vres.body.variables.filter((v) => v.name == 'array')
-  assert(
+  await debugAdapter.assert(
     variables.length == 1,
     () =>
       `Could not find local variables 'hello_world' and 'str_ptr' in ${prettyJson(
@@ -265,15 +290,15 @@ async function testArrayResolverCaching(DA) {
   const count = 5
   const arrayId = variables[0].variablesReference
   for (let i = 55; i >= 5; i -= 5) {
-    const five = await DA.sendReqGetResponse('variables', {
+    const five = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assertLog(five.body.variables.length == 5, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(five.body.variables.length == 5, `Expected result to be of length: ${count}`)
     let index = i
     for (const v of five.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(index, arrTypeVariable.body.variables)
@@ -283,14 +308,14 @@ async function testArrayResolverCaching(DA) {
   // Array resolver should have cached all 60 elements now.
   for (let i = 0; i < 60; ++i) {
     const count = 1
-    const one = await DA.sendReqGetResponse('variables', {
+    const one = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assertLog(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
     for (const v of one.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(i, arrTypeVariable.body.variables)
@@ -300,14 +325,14 @@ async function testArrayResolverCaching(DA) {
   // Let's try it backwards
   for (let i = 59; i >= 0; --i) {
     const count = 1
-    const one = await DA.sendReqGetResponse('variables', {
+    const one = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assertLog(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
     for (const v of one.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(i, arrTypeVariable.body.variables)
@@ -315,20 +340,23 @@ async function testArrayResolverCaching(DA) {
   }
 }
 
-async function testArrayResolverCachingDispersed(DA) {
+/**
+ * @param {DebugAdapterClient} debugAdapter
+ */
+async function testArrayResolverCachingDispersed(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
-    DA,
+    debugAdapter,
     'test/readMemory.cpp',
     ['ARRBP'],
     'main',
     'readMemory'
   )
   let local = scopes.find((s) => s.name == 'Locals')
-  assert(local != undefined, 'Could not find locals scope')
-  const vres = await DA.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
+  await debugAdapter.assert(local != undefined, 'Could not find locals scope')
+  const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
 
   const variables = vres.body.variables.filter((v) => v.name == 'array')
-  assert(
+  await debugAdapter.assert(
     variables.length == 1,
     () =>
       `Could not find local variables 'hello_world' and 'str_ptr' in ${prettyJson(
@@ -348,16 +376,16 @@ async function testArrayResolverCachingDispersed(DA) {
   const arrayId = variables[0].variablesReference
   for (let i = 0; i < 30; i += 5) {
     console.log(`VARIABLES REQUEST FOR START=${i} COUNT=${count}`)
-    const three = await DA.sendReqGetResponse('variables', {
+    const three = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assert(three.body.variables.length == count, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(three.body.variables.length == count, `Expected result to be of length: ${count}`)
     let index = i
     console.log(prettyJson(three.body.variables))
     for (const v of three.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(index, arrTypeVariable.body.variables)
@@ -369,15 +397,15 @@ async function testArrayResolverCachingDispersed(DA) {
   count = 5
   for (let i = 0; i < 30; i += 5) {
     console.log(`VARIABLES REQUEST FOR START=${i} COUNT=${count}`)
-    const five = await DA.sendReqGetResponse('variables', {
+    const five = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assert(five.body.variables.length == count, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(five.body.variables.length == count, `Expected result to be of length: ${count}`)
     let index = i
     for (const v of five.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(index, arrTypeVariable.body.variables)
@@ -387,14 +415,14 @@ async function testArrayResolverCachingDispersed(DA) {
 
   // Now go over all of them.
   for (let i = 59; i >= 0; --i) {
-    const one = await DA.sendReqGetResponse('variables', {
+    const one = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: 1,
     })
-    assert(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(one.body.variables.length == 1, `Expected result to be of length: ${count}`)
     for (const v of one.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(i, arrTypeVariable.body.variables)
@@ -402,20 +430,23 @@ async function testArrayResolverCachingDispersed(DA) {
   }
 }
 
-async function readArrayTypes(DA) {
+/**
+ * @param {DebugAdapterClient} debugAdapter
+ */
+async function readArrayTypes(debugAdapter) {
   let { threads, frames, scopes } = await launchToGetFramesAndScopes(
-    DA,
+    debugAdapter,
     'test/readMemory.cpp',
     ['ARRBP'],
     'main',
     'readMemory'
   )
   let local = scopes.find((s) => s.name == 'Locals')
-  assert(local != undefined, 'Could not find locals scope')
-  const vres = await DA.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
+  await debugAdapter.assert(local != undefined, 'Could not find locals scope')
+  const vres = await debugAdapter.sendReqGetResponse('variables', { variablesReference: local.variablesReference })
 
   const variables = vres.body.variables.filter((v) => v.name == 'array')
-  assert(
+  await debugAdapter.assert(
     variables.length == 1,
     () =>
       `Could not find local variables 'hello_world' and 'str_ptr' in ${prettyJson(
@@ -436,14 +467,14 @@ async function readArrayTypes(DA) {
   const arrayId = variables[0].variablesReference
   for (let i = 0; i < 55; ) {
     console.log(`VARIABLES REQUEST FOR START=${i}`)
-    const five = await DA.sendReqGetResponse('variables', {
+    const five = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,
       start: i,
       count: count,
     })
-    assert(five.body.variables.length == 5, `Expected result to be of length: ${count}`)
+    await debugAdapter.assert(five.body.variables.length == 5, `Expected result to be of length: ${count}`)
     for (const v of five.body.variables) {
-      const arrTypeVariable = await DA.sendReqGetResponse('variables', {
+      const arrTypeVariable = await debugAdapter.sendReqGetResponse('variables', {
         variablesReference: v.variablesReference,
       })
       asserter(i, arrTypeVariable.body.variables)
@@ -471,34 +502,37 @@ async function shadowed(da) {
 }
 
 /**
- * @param { MDB } da
+ * @param { DebugAdapterClient } debugAdapter
  */
-async function resolvePointeeValue(da) {
-  const app = da.buildDirFile('pointer')
-  await da.startRunToMain(app, 500)
+async function resolvePointeeValue(debugAdapter) {
+  const app = debugAdapter.buildDirFile('pointer')
+  await debugAdapter.startRunToMain(app, 500)
   const bplocs = allBreakpointIdentifiers(subjects.variablesRequest.pointer)
-  const bps = await da.setBreakpoints(
+  const bps = await debugAdapter.setBreakpoints(
     subjects.variablesRequest.pointer,
     bplocs.map((i) => i.line)
   )
-  await da.contNextStop(null, 1000)
-  const threads = await da.getThreads(100)
+  await debugAdapter.contNextStop(null, 1000)
+  const threads = await debugAdapter.getThreads(100)
   {
     let { ptr, pointee } = await threads[0]
       .stacktrace(100)
       .then((frames) => frames[0].locals(1000))
       .then((vars) => vars[0])
       .then((ptr) => ptr.variables(1000).then((r) => ({ ptr: ptr, pointee: r[0] })))
-
-    assertLog(
+    await debugAdapter.assert(
       pointee.memoryReference == ptr.value,
       ' expected memory reference of pointee to be identical with the value of the pointer',
       `pointee: ${pointee.memoryReference} != pointer value: ${ptr.value}`
     )
-    assertLog(pointee.value == 10, 'Expected value to be 10', ` But was ${pointee.value}: ${JSON.stringify(pointee)}`)
+    await debugAdapter.assert(
+      pointee.value == 10,
+      'Expected value to be 10',
+      ` But was ${pointee.value}: ${JSON.stringify(pointee)}`
+    )
   }
 
-  await da.contNextStop(threads[0].id, 1000)
+  await debugAdapter.contNextStop(threads[0].id, 1000)
   {
     const { ptr, pointee } = await threads[0]
       .stacktrace(100)
@@ -509,16 +543,20 @@ async function resolvePointeeValue(da) {
         console.log(`variables requests failed: ${ex}`)
         throw ex
       })
-    assertLog(
+    await debugAdapter.assert(
       pointee.memoryReference == ptr.value,
       ' expected memory reference of pointee to be identical with the value of the pointer',
       `pointee: ${pointee.memoryReference} != pointer value: ${ptr.value}`
     )
-    assertLog(pointee.value == 42, 'Expected value to be 42', ` But was ${pointee.value}: ${JSON.stringify(pointee)}`)
+    await debugAdapter.assert(
+      pointee.value == 42,
+      'Expected value to be 42',
+      ` But was ${pointee.value}: ${JSON.stringify(pointee)}`
+    )
   }
 
-  await da.contNextStop(threads[0].id, 1000)
-  await da.contNextStop(threads[0].id, 1000)
+  await debugAdapter.contNextStop(threads[0].id, 1000)
+  await debugAdapter.contNextStop(threads[0].id, 1000)
   {
     const { john, jane } = await threads[0]
       .stacktrace(100)
@@ -538,9 +576,13 @@ async function resolvePointeeValue(da) {
     const person_expect = async (val, expected) => {
       if (val.name == 'name') {
         const name = await val.variables(100)
-        assertLog(name[0].value == expected.name, `Expected name to be '${expected.name}'`, `but was ${name[0].value}`)
+        await debugAdapter.assert(
+          name[0].value == expected.name,
+          `Expected name to be '${expected.name}'`,
+          `but was ${name[0].value}`
+        )
       } else {
-        assertLog(
+        await debugAdapter.assert(
           val.value == expected[val.name],
           `Expected Person.${val.name} to be ${expected[val.name]}`,
           ` But was ${val.value}`
@@ -552,7 +594,7 @@ async function resolvePointeeValue(da) {
       await person_expect(jane[i], Jane)
     }
   }
-  await da.contNextStop(threads[0].id, 100)
+  await debugAdapter.contNextStop(threads[0].id, 100)
   {
     const { ptrs, ptr } = await threads[0].stacktrace(100).then(async (frames) => {
       const [ptr] = await frames[0].locals(100).then((vars) => vars.filter((v) => v.name == 'ptr'))
