@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include "common/typedefs.h"
 #include <bp.h>
 #include <common.h>
 #include <common/formatter.h>
@@ -80,30 +81,25 @@ public:
   u32 mSessionId{ 0 };
   StopStatus mLastStopStatus;
   TargetFormat mTargetFormat;
-  tc::ResumeAction mLastResumeAction;
-  std::optional<tc::ResumeAction> mNextResumeAction{};
+  tc::ResumeRequest mResumeRequest{ tc::RunType::Continue, 0 };
 
   union
   {
-    u16 bit_set;
     struct
     {
-      bool mHasProcessedStop : 1; // if we're in a "waiting for all stop" state, we check if we've collected the
-                                  // stop for this task
-      bool mUserVisibleStop : 1;  // stops visible (possibly) to the user
-      bool
-        mTracerVisibleStop : 1; // stops invisible to the user - may be upgraded to user stops. tracer_stop always
-                                // occur when waitpid has returned a result for this task, or when a remote has
-                                // sent a stop reply for a thread if the remote is also in "not non-stop mode",
-                                // *all* threads get set to true on each stop (and false on each continue)
-                                // regardless of what thread the user is operating on. It's "all stop mode".
-      bool mInitialized : 1;    // fully initialized task. after a clone syscall some setup is required
-      bool mRegisterCacheDirty : 1 { true }; // register is dirty and requires refetching
-      bool mInstructionPointerDirty : 1 {
-        true
-      }; // rip requires fetching FIXME(simon): Is this even needed anymore?
-      bool mExited : 1; // task has exited
-      bool mReaped : 1; // task has been reaped after exit
+      bool mUserVisibleStop : 1; // stops visible (possibly) to the user
+      /* stops invisible to the user - may be upgraded to user stops. tracer_stop always occur when waitpid has
+       * returned a result for this task, or when a remote has sent a stop reply for a thread if the remote is also
+       * in "not non-stop mode", *all* threads get set to true on each stop (and false on each continue) regardless
+       * of what thread the user is operating on. It's "all stop mode". */
+      bool mTracerVisibleStop : 1;
+      bool mInitialized : 1; // fully initialized task. after a clone syscall some setup is required
+      // register is dirty and requires refetching
+      bool mRegisterCacheDirty : 1 { true };
+      // rip requires fetching FIXME(simon): Is this even needed anymore?
+      bool mInstructionPointerDirty : 1 { true };
+      bool mExited : 1;           // task has exited
+      bool mReaped : 1 { false }; // task has been reaped after exit
       bool mKilled : 1 { false };
       bool mRequestedStop : 1 { false };
     };
@@ -129,7 +125,7 @@ public:
     Ptr mTask;
   };
 
-  LocationStatus mBreakpointLocationStatus;
+  BreakpointStepOverInfo mBreakpointLocationStatus;
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
   TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
@@ -158,15 +154,15 @@ public:
   void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
   void RefreshRegisterCache() noexcept;
 
-  std::span<const AddrPtr> UnwindReturnAddresses(TraceeController *tc, CallStackRequest req) noexcept;
+  std::span<const AddrPtr> UnwindReturnAddresses(CallStackRequest req) noexcept;
   sym::FrameUnwindState *GetUnwindState(int frameLevel) noexcept;
   TraceeController *GetSupervisor() const noexcept;
 
   void SetTaskWait(WaitPidResult wait) noexcept;
 
-  void StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexcept;
+  void StepOverBreakpoint() noexcept;
   void SetUserVisibleStop() noexcept;
-  void SetCurrentResumeAction(tc::ResumeAction type) noexcept;
+  void SetIsRunning() noexcept;
   void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
   bool CanContinue() noexcept;
   void SetInvalidCache() noexcept;
@@ -198,6 +194,12 @@ public:
   void ClearRequestedStopFlag() noexcept;
   std::optional<Pid> GetTaskLeaderTid() const noexcept;
   void SetSessionId(u32 sessionId) noexcept;
+
+  void SetResumeType(tc::RunType type) noexcept;
+  void SetForwardedSignal(int signal) noexcept;
+  // Takes the last received/seen signal for this task and clears the signal flag (so we don't accidentally forward
+  // it multiple times)
+  std::optional<int> ConsumeSignal() noexcept;
 };
 
 struct TaskVMInfo

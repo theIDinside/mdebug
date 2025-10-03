@@ -14,6 +14,7 @@
 
 // std
 // system
+#include <sys/prctl.h>
 
 namespace mdb {
 Tracer *Tracer::sTracerInstance = nullptr;
@@ -36,6 +37,9 @@ const char *ui::dap::DebugAdapterClient::gSocketPath = nullptr;
 int
 main(int argc, const char **argv, const char **envp)
 {
+
+  prctl(PR_SET_DUMPABLE, 1);
+
   mdb::Start(argc, argv, envp);
   return 0;
 }

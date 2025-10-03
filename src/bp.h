@@ -127,27 +127,14 @@ public:
   }
 };
 
-struct LocationStatus
+struct BreakpointStepOverInfo
 {
   RefPtr<BreakpointLocation> mBreakpointLocation{ nullptr };
   TaskInfo *mTaskReference;
-
-  struct SteppingOverState
-  {
-    tc::RunType mResumeActionUponCompletion{ tc::RunType::None };
-    bool mIsSteppingOver{ false };
-  } mSteppingOverState;
-
   EventResult mStopInfo{ EventResult::None };
+  bool mIsSteppingOver : 1 { false };
   bool mFieldShouldRetireBreakpoint : 1 { false };
   bool mConditionalEvaluationFailed : 1 { false };
-
-  void
-  SetSteppingOver(tc::RunType resumeAction) noexcept
-  {
-    mSteppingOverState.mIsSteppingOver = true;
-    mSteppingOverState.mResumeActionUponCompletion = resumeAction;
-  }
 
   constexpr bool
   ShouldBeStopped() const noexcept
@@ -169,10 +156,10 @@ struct LocationStatus
   Clear() noexcept
   {
     mBreakpointLocation = nullptr;
-    mSteppingOverState = SteppingOverState{};
+    mStopInfo = EventResult::None;
+    mIsSteppingOver = false;
     mFieldShouldRetireBreakpoint = false;
     mConditionalEvaluationFailed = false;
-    mStopInfo = EventResult::None;
   }
 };
 
@@ -207,7 +194,7 @@ public:
   virtual ~UserBreakpoint() noexcept;
 
   Ref<BreakpointLocation> GetLocation() noexcept;
-  bool IsEnabled() noexcept;
+  bool IsEnabledAndInstalled() noexcept;
   void Enable(tc::TraceeCommandInterface &ctrl) noexcept;
   void Disable(tc::TraceeCommandInterface &ctrl) noexcept;
   Tid GetTid() noexcept;

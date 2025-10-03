@@ -12,9 +12,9 @@
 
 using ThreadPool = std::vector<std::thread>;
 
-static Foo *global_foo = new Foo{{.next = nullptr, .prev = nullptr}, 10000, 20000, 30000, 40000};
+static Foo *global_foo = new Foo{ { .next = nullptr, .prev = nullptr }, 10000, 20000, 30000, 40000 };
 
-constexpr static std::string_view thread_names[8] = {"Foo", "Bar", "Baz", "Quux", "420", "1337", "MDB", "DAP"};
+constexpr static std::string_view thread_names[8] = { "Foo", "Bar", "Baz", "Quux", "420", "1337", "MDB", "DAP" };
 
 static bool ShouldRunForever = false;
 
@@ -38,7 +38,7 @@ main(int argc, const char **argv)
 
   SpinLock spin_lock{};
 
-  static int ids[8]{-1, -1, -1, -1, -1, -1, -1, -1};
+  static int ids[8]{ -1, -1, -1, -1, -1, -1, -1, -1 };
   int a = 10 + argc;
   int b = a * 9;
   printf("b: %d\n", b);
@@ -59,7 +59,7 @@ main(int argc, const char **argv)
 
   for (auto i = 0; i < 8; i++) {
 
-    thread_pool.push_back(std::thread{[i, &foo, &spin_lock]() {
+    thread_pool.push_back(std::thread{ [i, &foo, &spin_lock]() {
       pthread_setname_np(pthread_self(), thread_names[i].data());
       auto pos = i / 2 % 4;
       for (auto j = 0; j < 1000; j++) {
@@ -82,7 +82,7 @@ main(int argc, const char **argv)
         }
       }
       if (ShouldRunForever) {
-        std::this_thread::sleep_for(std::chrono::seconds{i});
+        std::this_thread::sleep_for(std::chrono::seconds{ i });
         while (true) {
           spin_lock.lock();
           const auto tid = gettid();
@@ -91,7 +91,7 @@ main(int argc, const char **argv)
           printf("TASK NAME %s with TASK number %d ___ TID: %d ___ EXITED\n", name, i, tid);
           printf(" --- --- \n");
           spin_lock.unlock();
-          std::this_thread::sleep_for(std::chrono::seconds{8});
+          std::this_thread::sleep_for(std::chrono::seconds{ 8 });
         }
       }
 
@@ -109,7 +109,7 @@ main(int argc, const char **argv)
       }
       spin_lock.unlock();
       return i;
-    }});
+    } });
   }
 
   auto done_list_index = 0;
@@ -126,5 +126,5 @@ main(int argc, const char **argv)
   }
   printf("Foo {a: %d, b: %lld, c: %f, d: %f}", foo.a, foo.b, foo.c, foo.d);
 
-  return 42;
+  exit(42);
 }

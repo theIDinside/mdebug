@@ -27,7 +27,7 @@ private:
 class NoOp final : public Task
 {
 public:
-  NoOp() noexcept = default;
+  NoOp() noexcept : Task() {}
   ~NoOp() noexcept override = default;
 
 protected:

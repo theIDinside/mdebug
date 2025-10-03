@@ -7,6 +7,7 @@
 #include "interface/remotegdb/target_description.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/objfile.h"
+#include "symbolication/value.h"
 #include "task.h"
 #include "utils/logger.h"
 #include "utils/xml.h"
@@ -103,6 +104,7 @@ GdbRemoteCommander::GdbRemoteCommander(RemoteType type,
     : TraceeCommandInterface(TargetFormat::Remote, std::move(arch), TraceeInterfaceType::GdbRemote),
       mConnection(std::move(conn)), mProcessId(processId), mExecFile(std::move(execFile)), mRemoteType(type)
 {
+  mIsNonStopConfigured = mConnection->GetSettings().mIsNonStop;
 }
 
 static ReadResult
@@ -205,31 +207,30 @@ GdbRemoteCommander::SetCatchSyscalls(bool on) noexcept
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
+GdbRemoteCommander::ResumeTask(TaskInfo &t, RunType type) noexcept
 {
-  SetCatchSyscalls(action.mResumeType == RunType::SyscallContinue);
+  SetCatchSyscalls(type == RunType::SyscallContinue);
 
   const auto pid = TaskLeaderTid();
   std::array<char, 128> buf{};
   std::string_view resumeCommand;
-  if (action.mDeliverSignal == -1) {
-    action.mDeliverSignal = t.mLastStopStatus.signal == SIGTRAP ? 0 : t.mLastStopStatus.signal;
-  }
-  switch (action.mResumeType) {
+  auto signal = t.ConsumeSignal();
+
+  switch (type) {
   case RunType::Step: {
-    if (action.mDeliverSignal == 0) {
-      resumeCommand = SerializeCommand(buf, "vCont;s:p{:x}.{:x}", pid, t.mTid);
+    if (signal) {
+      resumeCommand = SerializeCommand(buf, "vCont;S{:02x}:p{:x}.{:x}", *signal, pid, t.mTid);
     } else {
-      resumeCommand = SerializeCommand(buf, "vCont;S{:02x}:p{:x}.{:x}", action.mDeliverSignal, pid, t.mTid);
+      resumeCommand = SerializeCommand(buf, "vCont;s:p{:x}.{:x}", pid, t.mTid);
     }
     break;
   }
   case RunType::Continue:
   case RunType::SyscallContinue: {
-    if (action.mDeliverSignal == 0) {
-      resumeCommand = SerializeCommand(buf, "vCont;c:p{:x}.{:x}", pid, t.mTid);
+    if (signal) {
+      resumeCommand = SerializeCommand(buf, "vCont;C{:02x}:p{:x}.{:x}", *signal, pid, t.mTid);
     } else {
-      resumeCommand = SerializeCommand(buf, "vCont;C{:02x}:p{:x}.{:x}", action.mDeliverSignal, pid, t.mTid);
+      resumeCommand = SerializeCommand(buf, "vCont;c:p{:x}.{:x}", pid, t.mTid);
     }
   } break;
   case RunType::Unknown:
@@ -238,7 +239,7 @@ GdbRemoteCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
 
   const auto resumeError = mConnection->SendVContCommand(resumeCommand, {});
   MDB_ASSERT(!resumeError.has_value(), "vCont resume command failed");
-  t.SetCurrentResumeAction(action);
+  t.SetIsRunning();
   mConnection->InvalidateKnownThreads();
   return TaskExecuteResponse::Ok();
 }
@@ -255,27 +256,21 @@ GdbRemoteCommander::ReverseContinue(bool stepOnly) noexcept
   MDB_ASSERT(!resumeError.has_value(), "reverse continue failed");
 
   for (auto &entry : mControl->GetThreads()) {
-    entry.mTask->SetCurrentResumeAction({ .mResumeType = RunType::Continue,
-      .mResumeTarget = ResumeTarget::AllNonRunningInProcess,
-      .mDeliverSignal = 0 });
+    entry.mTask->SetIsRunning();
   }
   mConnection->InvalidateKnownThreads();
   return TaskExecuteResponse::Ok();
 }
 
 TaskExecuteResponse
-GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::vector<Tid> *) noexcept
+GdbRemoteCommander::ResumeTarget(RunType resumeType, std::vector<Tid> *) noexcept
 {
   // TODO: implement writing the resumed threads into `resumedThreads` if it's not null.
-  SetCatchSyscalls(action.mResumeType == RunType::SyscallContinue);
+  SetCatchSyscalls(resumeType == RunType::SyscallContinue);
 
-  if (action.mDeliverSignal == -1) {
-    action.mDeliverSignal = 0;
-  }
-
-  for (auto &entry : tc->GetThreads()) {
+  for (auto &entry : mControl->GetThreads()) {
     if (entry.mTask->mBreakpointLocationStatus.IsValid()) {
-      entry.mTask->StepOverBreakpoint(tc, action.mResumeType);
+      entry.mTask->StepOverBreakpoint();
       if (!mConnection->GetSettings().mIsNonStop) {
         return TaskExecuteResponse::Ok();
       }
@@ -285,21 +280,24 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std:
   const auto pid = TaskLeaderTid();
   std::array<char, 128> buf{};
   std::string_view resumecommand;
-  switch (action.mResumeType) {
+
+  auto signal = ConsumeForwardedSignal();
+
+  switch (resumeType) {
   case RunType::Step: {
-    if (action.mDeliverSignal == 0) {
-      resumecommand = SerializeCommand(buf, "vCont;s:p{:x}.-1", pid);
+    if (signal) {
+      resumecommand = SerializeCommand(buf, "vCont;S{:02x}:p{:x}.-1", *signal, pid);
     } else {
-      resumecommand = SerializeCommand(buf, "vCont;S{:02x}:p{:x}.-1", action.mDeliverSignal, pid);
+      resumecommand = SerializeCommand(buf, "vCont;s:p{:x}.-1", pid);
     }
     break;
   }
   case RunType::Continue:
   case RunType::SyscallContinue: {
-    if (action.mDeliverSignal == 0) {
-      resumecommand = SerializeCommand(buf, "vCont;c:p{:x}.-1", pid);
+    if (signal) {
+      resumecommand = SerializeCommand(buf, "vCont;C{:02x}:p{:x}.-1", *signal, pid);
     } else {
-      resumecommand = SerializeCommand(buf, "vCont;C{:02x}:p{:x}.-1", action.mDeliverSignal, pid);
+      resumecommand = SerializeCommand(buf, "vCont;c:p{:x}.-1", pid);
     }
   } break;
   case RunType::Unknown:
@@ -308,8 +306,8 @@ GdbRemoteCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std:
 
   const auto resumeError = mConnection->SendVContCommand(resumecommand, {});
   MDB_ASSERT(!resumeError.has_value(), "vCont resume command failed");
-  for (auto &entry : tc->GetThreads()) {
-    entry.mTask->SetCurrentResumeAction(action);
+  for (auto &entry : mControl->GetThreads()) {
+    entry.mTask->SetIsRunning();
   }
   mConnection->InvalidateKnownThreads();
   return TaskExecuteResponse::Ok();
@@ -693,6 +691,14 @@ GdbRemoteCommander::remote_settings() noexcept
   return mConnection->GetSettings();
 }
 
+std::optional<int>
+GdbRemoteCommander::ConsumeForwardedSignal() noexcept
+{
+  std::optional<int> result{ std::nullopt };
+  std::swap(mAllStopSignalToForward, result);
+  return result;
+}
+
 RemoteSessionConfigurator::RemoteSessionConfigurator(gdb::RemoteConnection::ShrPtr remote) noexcept
     : conn(std::move(remote))
 {
@@ -931,6 +937,31 @@ RemoteSessionConfigurator::configure_session() noexcept
   }
   conn->InitializeThread();
   return result;
+}
+
+void
+GdbRemoteCommander::OnTaskExit(TaskInfo &task) noexcept
+{
+  OnTaskCreated(task);
+}
+
+void
+GdbRemoteCommander::OnTaskCreated(TaskInfo &task) noexcept
+{
+  if (!IsNonStop()) {
+    const auto pid = TaskLeaderTid();
+    std::array<char, 128> buf{};
+    std::string_view resumeCommand;
+    resumeCommand = SerializeCommand(buf, "vCont;c");
+    const auto resumeError = mConnection->SendVContCommand(resumeCommand, {});
+    MDB_ASSERT(!resumeError.has_value(), "vCont resume command failed");
+  }
+}
+
+bool
+GdbRemoteCommander::IsNonStop() const noexcept
+{
+  return mIsNonStopConfigured;
 }
 
 } // namespace mdb::tc

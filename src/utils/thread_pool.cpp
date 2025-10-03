@@ -43,6 +43,12 @@ ThreadPool::~ThreadPool()
   for (auto t : tasks) {
     PostTask(t);
   }
+
+  for (auto &t : mThreadPool) {
+    if (t->IsJoinable()) {
+      t->Join();
+    }
+  }
 }
 
 void

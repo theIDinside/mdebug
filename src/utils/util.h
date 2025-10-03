@@ -197,9 +197,9 @@ CopyTo(const CA &c, CB &out)
   }
 }
 
-template <typename C, typename Fn>
+template <typename C1, typename C2, typename Fn>
 constexpr auto
-TransformCopyTo(C &c, C &out, Fn transform)
+TransformCopyTo(C1 &c, C2 &out, Fn transform)
 {
   std::transform(c.begin(), c.end(), std::back_inserter(out), transform);
 }

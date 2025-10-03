@@ -158,7 +158,7 @@ struct SyscallEvent : public TaskEvent
 struct ThreadCreated : public TaskEvent
 {
   EventType(ThreadCreated);
-  tc::ResumeAction mResumeAction;
+  tc::RunType mResumeAction;
 };
 
 struct ThreadExited : public TaskEvent
@@ -210,7 +210,7 @@ struct Stepped : public TaskEvent
 {
   EventType(Stepped);
   bool mStop;
-  std::optional<tc::ResumeAction> mResumeWhenDone{};
+  tc::RunType mResumeWhenDone{ tc::RunType::None };
   std::string_view mMessage{};
 };
 
@@ -289,8 +289,6 @@ public:
   TracerEventType mEventType{ TracerEventType::DeferToSupervisor };
   // For sessions where a "time" can be determined (only record & replay)
   int mEventTime{ 0 };
-  // The current decision the task should take when having processed this tracer event.
-  std::optional<tc::RunType> mPostBreakpointOverStep{ std::nullopt };
 
   // Safe to pass in a reference: pointers to TaskInfo are stable for their entire existence (which last the entire
   // session. We never actually destroy TaskInfos);
@@ -298,7 +296,6 @@ public:
   explicit TraceEvent(TaskInfo &task) noexcept;
   constexpr ~TraceEvent() noexcept = default;
 
-  void SetSteppedOverBreakpointNeedsResume(tc::RunType resumeType) noexcept;
   constexpr bool HasRegisterData() noexcept;
   const RegisterData &GetRegisterData() noexcept;
 
@@ -325,9 +322,9 @@ public:
   static void InitSyscallExit(
     TraceEvent *event, const EventDataParam &param, int syscall, RegisterData &&reg) noexcept;
   static void InitThreadCreated(
-    TraceEvent *event, const EventDataParam &param, tc::ResumeAction resume_action, RegisterData &&reg) noexcept;
+    TraceEvent *event, const EventDataParam &param, tc::RunType runType, RegisterData &&reg) noexcept;
   static void InitThreadExited(
-    TraceEvent *event, const EventDataParam &param, bool process_needs_resuming, RegisterData &&reg) noexcept;
+    TraceEvent *event, const EventDataParam &param, bool processNeedsResuming, RegisterData &&reg) noexcept;
   static void InitWriteWatchpoint(
     TraceEvent *event, const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
   static void InitReadWatchpoint(
@@ -335,27 +332,24 @@ public:
   static void InitAccessWatchpoint(
     TraceEvent *event, const EventDataParam &param, std::uintptr_t addr, RegisterData &&reg) noexcept;
   static void InitForkEvent_(
-    TraceEvent *event, const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
+    TraceEvent *event, const EventDataParam &param, Pid newPid, RegisterData &&reg) noexcept;
   static void InitVForkEvent_(
-    TraceEvent *event, const EventDataParam &param, Pid new_pid, RegisterData &&reg) noexcept;
+    TraceEvent *event, const EventDataParam &param, Pid newPid, RegisterData &&reg) noexcept;
   static void InitCloneEvent(TraceEvent *event,
     const EventDataParam &param,
     std::optional<TaskVMInfo> vm_info,
-    Tid new_tid,
+    Tid newTid,
     RegisterData &&reg) noexcept;
   static void InitExecEvent(
-    TraceEvent *event, const EventDataParam &param, std::string_view exec_file, RegisterData &&reg) noexcept;
-  static void InitProcessExitEvent(
-    TraceEvent *event, Pid pid, Tid tid, int exit_code, RegisterData &&reg) noexcept;
+    TraceEvent *event, const EventDataParam &param, std::string_view execFile, RegisterData &&reg) noexcept;
+  static void InitProcessExitEvent(TraceEvent *event, Pid pid, Tid tid, int exitCode, RegisterData &&reg) noexcept;
   static void InitSignal(TraceEvent *event, const EventDataParam &param, RegisterData &&reg) noexcept;
   static void InitStepped(TraceEvent *event,
     const EventDataParam &param,
     bool stop,
-    std::optional<tc::ResumeAction> mayresume,
+    tc::RunType mayResumeWith,
     RegisterData &&reg) noexcept;
 
-  static void InitSteppingDone(
-    TraceEvent *event, const EventDataParam &param, std::string_view msg, RegisterData &&reg) noexcept;
   static void InitDeferToSupervisor(
     TraceEvent *event, const EventDataParam &param, RegisterData &&reg, bool attached) noexcept;
   static void InitEntryEvent(
