@@ -6,7 +6,7 @@ const {
   launchToGetFramesAndScopes,
   PrepareBreakpointArguments,
 } = require('./client')
-const { findDisasmFunction, assert, assertLog, assert_eq, prettyJson, getPrintfPlt } = require('./utils')
+const { findDisasmFunction, prettyJson, getPrintfPlt } = require('./utils')
 
 const bpRequest = 'setBreakpoints'
 
@@ -22,7 +22,7 @@ async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
       .map((ident) => getLineOf(fileContent, ident))
       .filter((item) => item != null)
       .map((l) => ({ line: l }))
-    assertLog(
+    await debugAdapter.assert(
       bp_lines.length == bps.length,
       `Expected ${bps.length} identifiers`,
       `Could not parse contents of  ${repoDirFile('test/next.cpp')} to find all string identifiers`
@@ -35,7 +35,7 @@ async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
       },
       breakpoints: bp_lines,
     })
-    assertLog(
+    await debugAdapter.assert(
       breakpoint_response.body.breakpoints.length == bps.length,
       `Expected to have set ${bps.length} breakpoints`,
       ` but only successfully set ${breakpoint_response.body.breakpoints.length}:\n${prettyJson(breakpoint_response)}`
@@ -53,17 +53,21 @@ async function setInstructionBreakpoint(debugAdapter) {
     .sendReqGetResponse('setInstructionBreakpoints', {
       breakpoints: [{ instructionReference: instructionAddress }],
     })
-    .then((res) => {
+    .then(async (res) => {
       checkResponse(res, 'setInstructionBreakpoints', true)
-      assertLog(res.body.breakpoints.length == 1, `Expected bkpts 1`, ` but got ${res.body.breakpoints.length}`)
+      await debugAdapter.assert(
+        res.body.breakpoints.length == 1,
+        `Expected bkpts 1`,
+        ` but got ${res.body.breakpoints.length}`
+      )
 
       const bpres = res.body.breakpoints[0]
       const { id, verified, instructionReference } = res.body.breakpoints[0]
-      assertLog(verified, 'Expected breakpoint to be verified', `. Failed: ${JSON.stringify(bpres)}`)
-      assert_eq(
-        instructionReference,
-        instructionAddress,
-        `Attempted to set ins breakpoint at ${instructionAddress} but it was set at ${instructionReference}`
+      await debugAdapter.assert(verified, 'Expected breakpoint to be verified', `. Failed: ${JSON.stringify(bpres)}`)
+      await debugAdapter.assert(
+        instructionReference == instructionAddress,
+        `Expected breakpoint at ${instructionAddress}`,
+        `Was set at ${instructionReference}`
       )
     })
 }
@@ -85,14 +89,18 @@ async function set4InSameCompUnit(debugAdapter) {
   })
 
   checkResponse(res, bpRequest, true)
-  assert_eq(res.body.breakpoints.length, 4, `Expected bkpts 4 but got ${res.body.breakpoints.length}`)
+  await debugAdapter.assert(
+    res.body.breakpoints.length == 4,
+    `Expected 4 breakpoints`,
+    `Got ${res.body.breakpoints.length}`
+  )
   const found_all = [false, false, false]
   for (let i = 0; i < bp_lines.length; i++) {
     for (let bp of res.body.breakpoints) {
       if (bp.line == bp_lines[i].line) found_all[i] = true
     }
   }
-  assertLog(
+  await debugAdapter.assert(
     !found_all.some((v) => v == false),
     `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)}`,
     ` but got ${prettyJson(res.body.breakpoints)}`
@@ -119,7 +127,7 @@ async function set2InDifferentCompUnit(debugAdapter) {
       },
       breakpoints: breakpoints,
     })
-    assertLog(
+    await debugAdapter.assert(
       res.body.breakpoints.length == breakpoints.length,
       `Expected to see ${breakpoints.length} breakpoints`,
       ` but saw ${res.body.breakpoints.length}.\n${prettyJson(res)}`
@@ -136,7 +144,7 @@ async function setFunctionBreakpoint(debugAdapter) {
   const fnBreakpointResponse = await debugAdapter.sendReqGetResponse('setFunctionBreakpoints', {
     breakpoints: functions,
   })
-  assertLog(
+  await debugAdapter.assert(
     fnBreakpointResponse.body.breakpoints.length == 5,
     `Expected 5 breakpoints from breakpoint requests: [${functions.map((v) => v.name)}]`,
     ` but got ${fnBreakpointResponse.body.breakpoints.length}: ${prettyJson(fnBreakpointResponse)}`
@@ -156,7 +164,7 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
 
   const requestArgs = { breakpoints: [{ name: `less_than<\\w+>`, regex: true }] }
   const response = await debugAdapter.sendReqGetResponse('setFunctionBreakpoints', requestArgs)
-  assertLog(
+  await debugAdapter.assert(
     response.body.breakpoints.length == 3,
     'Expected 3 breakpoints',
     ` but saw ${response.body.breakpoints.length}`
@@ -181,10 +189,10 @@ async function setBreakpointsThatArePending(debugAdapter) {
     .sendReqGetResponse('setInstructionBreakpoints', {
       breakpoints: invalidAddressess,
     })
-    .then((res) => {
+    .then(async (res) => {
       console.log(prettyJson(res))
       checkResponse(res, 'setInstructionBreakpoints', true)
-      assertLog(
+      await debugAdapter.assert(
         res.body.breakpoints.length == invalidAddressess.length,
         `Expected bkpts 1`,
         ` but got ${res.body.breakpoints.length}`
@@ -193,7 +201,7 @@ async function setBreakpointsThatArePending(debugAdapter) {
       let expected = [{ verified: false }, { verified: false }, { verified: false }, { verified: true }]
 
       for (let i = 0; i < 4; ++i) {
-        assertLog(
+        await debugAdapter.assert(
           res.body.breakpoints[i].verified == expected[i].verified,
           `Expected verified for ${i} to be ${expected[i].verified}`,
           ` but was ${res.body.breakpoints[i].verified}`
@@ -222,8 +230,7 @@ async function setNonExistingSourceBp(debugAdapter) {
     breakpoints: bp_lines,
   })
 
-  console.log(prettyJson(res))
-  assertLog(
+  await debugAdapter.assert(
     res.body.breakpoints.length == bp_lines.length,
     `Expected to see ${bp_lines.length} breakpoints`,
     ` but saw ${res.body.breakpoints.length}: \n${prettyJson(res)}`
@@ -248,14 +255,18 @@ async function set4ThenSet2(debugAdapter) {
     })
 
     checkResponse(res, bpRequest, true)
-    assertLog(res.body.breakpoints.length == 4, `Expected 4 bkpts`, ` but got ${res.body.breakpoints.length}`)
+    await debugAdapter.assert(
+      res.body.breakpoints.length == 4,
+      `Expected 4 bkpts`,
+      ` but got ${res.body.breakpoints.length}`
+    )
     const found_all = [false, false, false]
     for (let i = 0; i < bp_lines.length; i++) {
       for (let bp of res.body.breakpoints) {
         if (bp.line == bp_lines[i].line) found_all[i] = true
       }
     }
-    assertLog(
+    await debugAdapter.assert(
       !found_all.some((v) => v == false),
       `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)}`,
       ` but got ${prettyJson(res.body.breakpoints)}`
@@ -276,14 +287,18 @@ async function set4ThenSet2(debugAdapter) {
     })
 
     checkResponse(res, bpRequest, true)
-    assertLog(res.body.breakpoints.length == 2, `Expected 2 bkpts`, ` but got ${res.body.breakpoints.length}`)
+    await debugAdapter.assert(
+      res.body.breakpoints.length == 2,
+      `Expected 2 bkpts`,
+      ` but got ${res.body.breakpoints.length}`
+    )
     const found_all = [false, false]
     for (let i = 0; i < bp_lines.length; i++) {
       for (let bp of res.body.breakpoints) {
         if (bp.line == bp_lines[i].line) found_all[i] = true
       }
     }
-    assertLog(
+    await debugAdapter.assert(
       !found_all.some((v) => v == false),
       `Expected to get breakpoints for lines ${JSON.stringify(bp_lines)}`,
       ` but got ${prettyJson(res.body.breakpoints)}`
@@ -294,7 +309,11 @@ async function set4ThenSet2(debugAdapter) {
   let threads = await debugAdapter.threads()
   await debugAdapter.contNextStop(threads[0].id)
   const frames = await threads[0].stacktrace()
-  assertLog(frames[0].name == 'baz', `Expected to be in function 'baz'`, ` but was in '${frames[0].name}'`)
+  await debugAdapter.assert(
+    frames[0].name == 'baz',
+    `Expected to be in function 'baz'`,
+    ` but was in '${frames[0].name}'`
+  )
 }
 
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
@@ -333,7 +352,7 @@ async function testConditionShouldStopOn5(debugAdapter) {
     const variables = await debugAdapter.variablesRequest({
       variablesReference: scopes.body.scopes[1].variablesReference,
     })
-    assertLog(
+    await debugAdapter.assert(
       variables.body.variables[0].value == 5,
       `Breakpoint stopped succesfully with condition`,
       () => `Expected value of variable to be 5, was ${variables.body.variables[0].value}`
