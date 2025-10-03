@@ -1,43 +1,43 @@
 const path = require('path')
 const fs = require('fs')
 const { spawnSync } = require('child_process')
-const net = require('net');
+const net = require('net')
 
 function prettyJson(obj) {
   return JSON.stringify(obj, null, 2)
 }
 
 function findFirstOfAny(string, searchItems) {
-  for(const s of searchItems) {
-    const r = string.indexOf(s);
-    if(r != -1) {
-      return r;
+  for (const s of searchItems) {
+    const r = string.indexOf(s)
+    if (r != -1) {
+      return r
     }
   }
-  return -1;
+  return -1
 }
 
 function findAvailablePort(min = 10000, max = 65000) {
   return new Promise((resolve, reject) => {
-    const port = Math.floor(Math.random() * (max - min + 1)) + min;
-    const server = net.createServer();
+    const port = Math.floor(Math.random() * (max - min + 1)) + min
+    const server = net.createServer()
 
     server.once('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        resolve(findAvailablePort(min, max));
+        resolve(findAvailablePort(min, max))
       } else {
-        reject(err);
+        reject(err)
       }
-    });
+    })
 
     server.once('listening', () => {
       server.close(() => {
-        resolve(port); // Port is available
-      });
-    });
+        resolve(port) // Port is available
+      })
+    })
 
-    server.listen(port);
-  });
+    server.listen(port)
+  })
 }
 
 const RecognizedArgsConfig = [
@@ -405,8 +405,6 @@ function assertAllVariableReferencesUnique(varRefs) {
   )
 }
 
-
-
 function getPrintfPlt(DA, executable) {
   const objdumped = objdump(DA.buildDirFile(executable)).split('\n')
   for (const line of objdumped) {
@@ -416,7 +414,7 @@ function getPrintfPlt(DA, executable) {
       return `0x${addr}`
     }
   }
-  throw new Error(`Could not find prologue and epilogue of bar in ${DA.buildDirFile(executable)}`);
+  throw new Error(`Could not find prologue and epilogue of bar in ${DA.buildDirFile(executable)}`)
 }
 
 module.exports = {
@@ -437,5 +435,5 @@ module.exports = {
   assertAllVariableReferencesUnique,
   parseTestConfiguration,
   TestArgs,
-  findAvailablePort
+  findAvailablePort,
 }
