@@ -42,7 +42,9 @@ class RemoteService {
     this.#port = port
     this.#host = host
     process.on('exit', () => {
-      this.#server.kill('SIGTERM')
+      if (!this.hasExited()) {
+        this.#server.kill('SIGTERM')
+      }
     })
   }
 
@@ -63,6 +65,16 @@ class RemoteService {
       port: this.#port,
       allstop: false,
     }
+  }
+
+  hasExited() {
+    return this.serverProcess.exitCode != null
+  }
+
+  shutdown() {
+    console.log(`Terminating remote service`)
+    const ok = this.serverProcess.kill('SIGKILL')
+    console.log(`Success: ${ok}`)
   }
 }
 
@@ -507,7 +519,7 @@ class DebugAdapterClient {
     return remoteService
   }
 
-  constructor(mdb, mdb_args, config) {
+  constructor(mdb, mdbArguments, config) {
     // for future work when we get recording in tests suites working.
     this.config = config
     // For now we don't support multi-process testing. That is only testable manually.
@@ -535,7 +547,6 @@ class DebugAdapterClient {
         }
         console.log(`Spawning test with: ${mdb} ${config_args.join(' ')}`)
         this.mdb = spawn(mdb, [...config_args], {
-          shell: true,
           stdio: 'pipe',
         })
       }
@@ -552,10 +563,35 @@ class DebugAdapterClient {
       if (exitCode != 0) {
         console.error(`[TEST FAILED] MDB panicked or terminated with exit code ${exitCode}`)
         process.exit(-1)
+      } else {
+        console.log(`mdb exited gracefully.`)
       }
     })
+
+    const printMdbInfo = () => {
+      console.log(`mdb connected=${this.mdb.connected}`)
+      console.log(`mdb exitCode=${this.mdb.exitCode}`)
+      console.log(`mdb killed=$${this.mdb.killed}`)
+    }
+
     process.on('exit', (code) => {
-      this.mdb.kill('SIGTERM')
+      printMdbInfo()
+      if (this.mdb.exitCode != null) {
+        if (!process.env.hasOwnProperty('REC')) {
+          let ok = this.mdb.kill('SIGKILL')
+          console.log(`SENDING SIGKILL: ${ok ? 'ok' : 'failed'}`)
+        } else if (process.env.hasOwnProperty('REC')) {
+          /**
+           * Since SIGKILL is uncatchable, we need to do SIGTERM when being recorded,
+           * so that the record doesn't become incomplete. But in cases where we're not recorded,
+           * we want SIGKILL, since we do not want to produce a core dump,
+           * we only want core dumps for when the applications actually crashes on it's own, like nullptr deref's for instace.
+           */
+          let ok = this.mdb.kill('SIGTERM')
+          console.log(`SENDING SIGTERM (is recorded): ${ok ? 'ok' : 'failed'}`)
+        }
+      }
+
       if (code != 0) {
         dump_log(this.config.args.test)
       }
@@ -601,6 +637,26 @@ class DebugAdapterClient {
       }
       this.buf.receive_buffer = this.buf.receive_buffer.slice(last_ends)
     })
+  }
+
+  async shutdown() {
+    console.log(`shutdown of DA client. remote service: ${this.remoteService}. mdb exit code=${this.mdb.exitCode}`)
+    let exception = null
+    try {
+      if (this.mdb.exitCode == null) {
+        await this.disconnect()
+      }
+    } catch (ex) {
+      exception = ex
+    }
+
+    if (this.remoteService) {
+      this.remoteService.shutdown()
+    }
+
+    if (exception) {
+      throw exception
+    }
   }
 
   onProcessEvent(event, handler) {
@@ -920,8 +976,12 @@ class DebugAdapterClient {
     return stoppedPromise
   }
 
-  async #startRunToMainRemote(program, timeout) {
+  async initRemoteServer(config, program) {
     this.remoteService = await DebugAdapterClient.CreateRemoteServer(this.config, program)
+  }
+
+  async #startRunToMainRemote(program, timeout) {
+    await this.initRemoteServer(this.config, program)
 
     let hit_main_stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.#startRunToMainRemote)
     let attachArguments = this.remoteService.attachArgs
@@ -1061,15 +1121,17 @@ class DebugAdapterClient {
    * @param { number } timeout
    * @returns
    */
-  async disconnect(kind = 'terminateDebuggee', timeout = 1000) {
+  async disconnect(kind = 'terminate', timeout = 1000) {
     switch (kind) {
       case 'terminate':
         return this.sendReqGetResponse('disconnect', {
           terminateDebuggee: true,
+          sessionId: this.sessionId,
         })
       case 'suspend':
         return this.sendReqGetResponse('disconnect', {
           suspendDebuggee: true,
+          sessionId: this.sessionId,
         })
     }
   }
@@ -1288,6 +1350,17 @@ class DebugAdapterClient {
     )
     return response
   }
+
+  // This asserts makes sure to disconnect the session before throwing the error farther up.
+  // This means that we don't get core files for assertion errors, since mdb will terminate gracefully.
+  async assert(boolCondition, AssertLogMessage, AssertErrorMessage) {
+    try {
+      assertLog(boolCondition, AssertLogMessage, AssertErrorMessage)
+    } catch (ex) {
+      await this.disconnect()
+      throw ex
+    }
+  }
 }
 
 // Since we're running in a test suite, we want individual tests to
@@ -1339,9 +1412,32 @@ function testException(err) {
   process.exit(-1)
 }
 
-async function runTest(DA, testFn, should_exit = true) {
-  if (should_exit) testFn(DA).then(testSuccess).catch(testException)
-  else testFn(DA).catch(testException)
+/**
+ * @param {DebugAdapterClient} debugAdapter
+ */
+async function runTest(debugAdapter, testFn, shouldExit = true) {
+  const logExceptionAndDisconnect = async (err) => {
+    try {
+      await debugAdapter.shutdown()
+    } catch (ex) {
+      console.log(`disconnect failed: ${ex}`)
+    }
+    console.log(err)
+    process.exit(-1)
+  }
+
+  const logSuccessDisconnectExit = async (testSuite) => {
+    try {
+      await debugAdapter.shutdown()
+    } catch (ex) {
+      console.log(`disconnect failed: ${ex}`)
+    }
+    console.log(`Test ${testSuite} succeeded`)
+    process.exit(0)
+  }
+
+  if (shouldExit) testFn(debugAdapter).then(logSuccessDisconnectExit).catch(logExceptionAndDisconnect)
+  else testFn(debugAdapter).then(logSuccessDisconnectExit).catch(logExceptionAndDisconnect)
 }
 
 /**
