@@ -1,5 +1,5 @@
 const { seconds } = require('./client')
-const { assert, assertLog, prettyJson } = require('./utils')
+const { prettyJson } = require('./utils')
 
 /**
  * @param { import("./client").DebugAdapterClient } debugAdapter
