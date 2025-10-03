@@ -1,31 +1,46 @@
 const { seconds } = require('./client')
 const { assert, assertLog, prettyJson } = require('./utils')
 
-async function programExit(DA) {
-  await DA.startRunToMain(DA.buildDirFile('stackframes'))
-  const threads = await DA.threads()
-  const { event_body, response } = await DA.sendReqWaitEvent(
+/**
+ * @param { import("./client").DebugAdapterClient } debugAdapter
+ */
+async function programExit(debugAdapter) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'))
+  const threads = await debugAdapter.threads()
+  const { event_body } = await debugAdapter.sendReqWaitEvent(
     'continue',
     { threadId: threads[0].id },
     'thread',
     seconds(2)
   )
-  assert(
+
+  await debugAdapter.assert(
     event_body.reason == 'exited',
-    `Expected an 'thread exit' event: ${prettyJson(event_body)} after response ${prettyJson(response)}`
+    `Expected a 'thread exit' event`,
+    `Got ${prettyJson(event_body)}`
   )
-  assert(event_body.threadId == threads[0].id, `Expected to see ${threads[0].id} exit, but saw ${event_body.threadId}`)
+
+  await debugAdapter.assert(
+    event_body.threadId == threads[0].id,
+    `Expected to see ${threads[0].id} exit`,
+    `Saw ${event_body.threadId}`
+  )
 }
 
 /**
- * @param { import("./client").DebugAdapterClient } DA
+ * @param { import("./client").DebugAdapterClient } debugAdapter
  */
-async function readExitCode(DA) {
-  await DA.startRunToMain(DA.buildDirFile('stackframes'))
-  const threads = await DA.getThreads()
-  const { event_body } = await DA.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'exited', seconds(1))
+async function readExitCode(debugAdapter) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'))
+  const threads = await debugAdapter.getThreads()
+  const { event_body } = await debugAdapter.sendReqWaitEvent(
+    'continue',
+    { threadId: threads[0].id },
+    'exited',
+    seconds(1)
+  )
   const ExpectedExitCode = 241
-  assertLog(
+  await debugAdapter.assert(
     event_body.exitCode == ExpectedExitCode,
     `Expected exitCode == ${ExpectedExitCode}`,
     ` Failed. Got ${prettyJson(event_body)}`
