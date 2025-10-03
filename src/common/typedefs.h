@@ -195,4 +195,14 @@ enum class RunType : u8
   Continue,
   SyscallContinue,
 };
-}
+
+struct ResumeRequest
+{
+  RunType mType;
+  // The signal to "forward" to the process (if any).
+  // Signal == 0, means no signal. This value is passed to ptrace() (and 0 is a valid value, it means no signal
+  // there).
+  int mSignal;
+};
+
+} // namespace mdb::tc

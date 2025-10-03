@@ -40,8 +40,7 @@ ContinueAll::Execute() noexcept
   // N.B: it's unfortunate that VSCode doesn't honor the "allThreadsContinued" field on a continued event
   // because merely sending 1 continued event for a thread with that flag set, doesn't update the UI. File bug with
   // vscode. instead we have to re-factor resume target to report the resumed threads.
-  auto result = target->ResumeTarget(
-    tc::ResumeAction{ tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, -1 }, &resumedThreads);
+  auto result = target->ResumeTarget(tc::RunType::Continue, &resumedThreads);
   res->mSuccess = result;
   if (result) {
     for (const auto &tid : resumedThreads) {

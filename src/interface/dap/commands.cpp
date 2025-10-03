@@ -299,9 +299,7 @@ struct ReverseContinue final : ui::UICommand
     // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
     // _any_ target, and use that to resume backwards (since RR is the controller.).
     MDB_ASSERT(target, "must have target.");
-    auto ok = target->ReverseResumeTarget(tc::ResumeAction{ .mResumeType = tc::RunType::Continue,
-      .mResumeTarget = tc::ResumeTarget::AllNonRunningInProcess,
-      .mDeliverSignal = 0 });
+    auto ok = target->ReverseResumeTarget(tc::RunType::Continue);
     WriteResponse(ReverseContinueResponse{ ok, this });
   }
 
@@ -377,12 +375,11 @@ struct Continue final : public ui::UICommand
       if (mContinueAll) {
         DBGLOG(core, "continue all");
         const int deliverNonSigtrapSignal = -1;
-        target->ResumeTarget(tc::ResumeAction{
-          tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, deliverNonSigtrapSignal });
+        target->ResumeTarget(tc::RunType::Continue);
       } else {
         DBGLOG(core, "continue single thread: {}", mThreadId);
         auto t = target->GetTaskByTid(mThreadId);
-        target->ResumeTask(*t, { tc::RunType::Continue, tc::ResumeTarget::Task, -1 });
+        target->ResumeTask(*t, tc::RunType::Continue);
       }
     }
     WriteResponse(ContinueResponse{ success, mContinueAll, this });
@@ -539,9 +536,7 @@ struct StepBack final : public ui::UICommand
       return WriteResponse(StepBackResponse{ StepBackResponse::Result::NotStopped, this });
     }
 
-    target->ReverseResumeTarget(tc::ResumeAction{ .mResumeType = tc::RunType::Step,
-      .mResumeTarget = tc::ResumeTarget::AllNonRunningInProcess,
-      .mDeliverSignal = 0 });
+    target->ReverseResumeTarget(tc::RunType::Step);
     return WriteResponse(StepBackResponse{ StepBackResponse::Result::Success, this });
   }
   DEFINE_NAME("stepBack");
@@ -667,7 +662,7 @@ struct StepOut final : public ui::UICommand
       return WriteResponse(StepOutResponse{ false, this });
     }
     const auto req = CallStackRequest::partial(2);
-    auto resume_addrs = task->UnwindReturnAddresses(target, req);
+    auto resume_addrs = task->UnwindReturnAddresses(req);
     MDB_ASSERT(resume_addrs.size() >= static_cast<std::size_t>(req.count), "Could not find frame info");
     const auto rip = resume_addrs[1];
     auto loc = target->GetOrCreateBreakpointLocation(rip);
@@ -1053,7 +1048,9 @@ struct ReadMemory final : public ui::UICommand
       auto sv = target->ReadToVector(*mAddress, mBytes, MemoryResource());
       auto res = mCommandAllocator->Allocate<ReadMemoryResponse>(true, this);
 
-      res->mBase64Data = mdb::EncodeIntoBase64(sv->span(), MemoryResource());
+      // TODO: Make pointer to memory resource shared? Easier to not get wrong. As soon as the response object is
+      // created, the allocator is moved into the response object.
+      res->mBase64Data = mdb::EncodeIntoBase64(sv->span(), res->MemoryResource());
       res->mFirstReadableAddress = *mAddress;
       res->mSuccess = true;
       res->mUnreadableBytes = 0;
@@ -1341,8 +1338,7 @@ struct NativeLaunch final : public Launch
     GetOrSendError(supervisor);
     supervisor->ConfigurationDone();
     DBGLOG(core, "Responding to launch request, resuming target {}", supervisor->TaskLeaderTid());
-    supervisor->ResumeTarget(
-      tc::ResumeAction{ tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, 0 });
+    supervisor->ResumeTarget(tc::RunType::Continue);
     return WriteResponse(LaunchResponse{ processId, true, this });
   }
 
@@ -1470,8 +1466,7 @@ struct Attach final : public UICommand
     const auto processId = Tracer::Get().Attach(mDAPClient, mRequestingSessionId, attachArgs);
     GetOrSendError(supervisor);
     if (supervisor->IsReplaySession()) {
-      supervisor->ResumeTarget(
-        tc::ResumeAction{ tc::RunType::Continue, tc::ResumeTarget::AllNonRunningInProcess, 0 });
+      supervisor->ResumeTarget(tc::RunType::Continue);
     } else {
       DBGLOG(core, "configurationDone - doing nothing for normal attach sessions {}", supervisor->TaskLeaderTid());
     }

@@ -3,6 +3,8 @@
 #include "tracer.h"
 #include "common/macros.h"
 #include "common/typedefs.h"
+#include "utils/format_utils.h"
+#include "utils/util.h"
 #include <bp.h>
 #include <configuration/command_line.h>
 #include <event_queue.h>
@@ -197,7 +199,7 @@ Tracer::HandleTracerEvent(TraceEvent *evt) noexcept
     evt->mTask = GetTaskPointer(evt->mTaskId);
   }
 
-  TraceeController *supervisor = evt->mTask->GetSupervisor();
+  TraceeController *supervisor = GetController(evt->mProcessId);
   // TODO(simon): When we implement RR support (somehow, god knows), we need to be able to tell if we've
   // travelled back in time, or gone forward. This should potentially save us work.
   MDB_ASSERT_IF(evt->mEventTime > 0,

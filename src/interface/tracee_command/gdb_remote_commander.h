@@ -21,6 +21,10 @@ class GdbRemoteCommander final : public TraceeCommandInterface
   std::optional<std::string> mExecFile{};
   Auxv mAuxvData{};
   RemoteType mRemoteType;
+  bool mIsNonStopConfigured;
+  // When a remote stub is all stop, it'll just be a signal for the entire process. "Local" debugging or ptrace or
+  // rr debugging, we can be exactly specific.
+  std::optional<int> mAllStopSignalToForward = std::nullopt;
   // TODO(simon): allow for smart caching of thread names, by catching system call `prctl` with the parameters that
   // call the `PR_SET_NAME` request, and on SyscallExit, call qXfer:threads:read:... and update the cache.
   // This way, we don't have to potentially open N files to /proc/<pid>/task/<tid> on every `Threads` request
@@ -41,9 +45,8 @@ public:
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
   TaskExecuteResponse ReverseContinue(bool stepOnly) noexcept final;
-  TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction type) noexcept final;
-  TaskExecuteResponse ResumeTarget(
-    TraceeController *tc, ResumeAction run, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
+  TaskExecuteResponse ResumeTask(TaskInfo &t, RunType type) noexcept final;
+  TaskExecuteResponse ResumeTarget(RunType type, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
@@ -80,6 +83,13 @@ public:
   {
     return mRemoteType == RemoteType::RR;
   }
+
+  std::optional<int> ConsumeForwardedSignal() noexcept;
+  void OnTaskExit(TaskInfo &task) noexcept final;
+  void OnTaskCreated(TaskInfo &task) noexcept final;
+
+private:
+  bool IsNonStop() const noexcept;
 };
 
 struct Thread

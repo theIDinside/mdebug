@@ -12,6 +12,7 @@
 #include <supervisor.h>
 #include <sys/personality.h>
 
+#include <sys/ptrace.h>
 #include <unistd.h>
 
 namespace mdb::tc {
@@ -144,7 +145,7 @@ PtraceCommander::ForkExec(ui::dap::DebugAdapterClient *debugAdapterClient,
     supervisor->ConfigureBreakpointBehavior(
       breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
 
-    WaitPidResult twr{ .tid = leader, .ws = { .ws = StopKind::Execed, .exit_code = 0 } };
+    WaitPidResult twr{ .tid = leader, .ws = { .ws = StopKind::Execed, .uStopExitCode = 0 } };
     auto task = supervisor->RegisterTaskWaited(twr);
     if (task == nullptr) {
       PANIC("Expected a task but could not find one for that wait status");
@@ -296,16 +297,16 @@ PtraceCommander::WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
 }
 
 TaskExecuteResponse
-PtraceCommander::ResumeTarget(TraceeController *tc, ResumeAction action, std::vector<Tid> *resumedThreads) noexcept
+PtraceCommander::ResumeTarget(RunType type, std::vector<Tid> *resumedThreads) noexcept
 {
-  for (auto &entry : tc->GetThreads()) {
+  for (auto &entry : mControl->GetThreads()) {
     if (entry.mTask->CanContinue()) {
-      if (resumedThreads) {
+      mControl->ResumeTask(*entry.mTask, type);
+      if (resumedThreads && !entry.mTask->IsStopped()) {
         resumedThreads->push_back(entry.mTid);
       }
-      tc->ResumeTask(*entry.mTask, action);
     } else {
-      DBGLOG(core, "[{}:resume:target] {} can_continue=false", tc->TaskLeaderTid(), entry.mTid);
+      DBGLOG(core, "[{}:resume:target] {} can_continue=false", mControl->TaskLeaderTid(), entry.mTid);
     }
   }
   return TaskExecuteResponse::Ok();
@@ -328,22 +329,22 @@ ToPtrace(RunType runtype)
 }
 
 TaskExecuteResponse
-PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
+PtraceCommander::ResumeTask(TaskInfo &t, RunType action) noexcept
 {
   MDB_ASSERT(t.mUserVisibleStop || t.mTracerVisibleStop,
     "Was in neither user_stop ({}) or tracer_stop ({})",
     bool{ t.mUserVisibleStop },
     bool{ t.mTracerVisibleStop });
+  DBGLOG(core, "resume task {}, at visible stop={}", t.mTid, bool{ t.mTracerVisibleStop });
   if (t.mTracerVisibleStop) {
-    action.mDeliverSignal = t.mLastStopStatus.signal == SIGTRAP ? 0 : t.mLastStopStatus.signal;
-    if (t.mRequestedStop) {
-      action.mDeliverSignal = 0;
-      t.ClearRequestedStopFlag();
-    }
-
-    DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, action.mDeliverSignal);
-    const auto ptrace_result = ptrace(ToPtrace(action.mResumeType), t.mTid, nullptr, action.mDeliverSignal);
+    const auto signal = t.ConsumeSignal();
+    DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, signal.value_or(0));
+    const auto ptrace_result = ptrace(ToPtrace(action), t.mTid, nullptr, signal.value_or(0));
     if (ptrace_result == -1) {
+      // Reset the last pending signal, to be sent later
+      if (signal) {
+        t.SetForwardedSignal(*signal);
+      }
       return TaskExecuteResponse::Error(errno);
     }
   } else {
@@ -352,7 +353,7 @@ PtraceCommander::ResumeTask(TaskInfo &t, ResumeAction action) noexcept
       t.GetSupervisor()->TaskLeaderTid(),
       t.mTid);
   }
-  t.SetCurrentResumeAction(action);
+  t.SetIsRunning();
   return TaskExecuteResponse::Ok();
 }
 
@@ -540,6 +541,22 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
     }
     std::memset(buffer, 0, sizeof(u64) * Count);
     offset += sizeof(u64) * Count;
+  }
+}
+
+void
+PtraceCommander::OnTaskCreated(TaskInfo &task) noexcept
+{
+  mControl->ScheduleResume(task, task.mResumeRequest.mType);
+}
+
+void
+PtraceCommander::OnTaskExit(TaskInfo &t) noexcept
+{
+  DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, 0);
+  const auto ptrace_result = ptrace(PTRACE_CONT, t.mTid, nullptr, 0);
+  if (ptrace_result == -1) {
+    DBGLOG(core, "Failed to resume task.");
   }
 }
 

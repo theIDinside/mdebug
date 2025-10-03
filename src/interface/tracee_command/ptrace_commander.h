@@ -43,9 +43,8 @@ public:
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
-  TaskExecuteResponse ResumeTask(TaskInfo &t, ResumeAction resume) noexcept final;
-  TaskExecuteResponse ResumeTarget(
-    TraceeController *tc, ResumeAction run, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
+  TaskExecuteResponse ResumeTask(TaskInfo &t, RunType resume) noexcept final;
+  TaskExecuteResponse ResumeTarget(RunType run, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
@@ -74,6 +73,8 @@ public:
   std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept final;
   std::shared_ptr<gdb::RemoteConnection> RemoteConnection() noexcept final;
   mdb::Expected<Auxv, Error> ReadAuxiliaryVector() noexcept final;
+  void OnTaskExit(TaskInfo &task) noexcept final;
+  void OnTaskCreated(TaskInfo &task) noexcept final;
   //
 };
 } // namespace mdb::tc

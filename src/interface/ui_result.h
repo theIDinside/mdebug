@@ -37,6 +37,12 @@ struct UIResult
     return mSessionId;
   }
 
+  std::pmr::memory_resource *
+  MemoryResource() const noexcept
+  {
+    return mAllocator->GetAllocator();
+  }
+
   SessionId mSessionId;
   bool mSuccess;
   std::uint64_t mRequestSeq;

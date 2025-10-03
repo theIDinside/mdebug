@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "task.h"
+#include "common/typedefs.h"
 #include "interface/tracee_command/tracee_command_interface.h"
 #include "register_description.h"
 #include "supervisor.h"
@@ -87,12 +88,12 @@ TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcep
   mBreakpointLocationStatus = {};
   mTaskCallstack = std::make_unique<sym::CallStack>(tc.GetSupervisor(), this);
   mSupervisor = tc.GetSupervisor();
+  mResumeRequest = { tc::RunType::Continue, 0 };
   MDB_ASSERT(mSupervisor != nullptr, "must have supervisor");
   DBGLOG(core, "Deferred initializing of thread {} completed", mTid);
   if (restart) {
     auto *traceEvent = new TraceEvent{ *this };
-    TraceEvent::InitThreadCreated(
-      traceEvent, { tc.TaskLeaderTid(), mTid, 5, 0 }, { tc::RunType::Continue, tc::ResumeTarget::Task, 0 }, {});
+    TraceEvent::InitThreadCreated(traceEvent, { tc.TaskLeaderTid(), mTid, 5, 0 }, tc::RunType::Continue, {});
     EventSystem::Get().PushDebuggerEvent(traceEvent);
   }
 }
@@ -225,11 +226,11 @@ TaskInfo::RefreshRegisterCache() noexcept
   }
 
 std::span<const AddrPtr>
-TaskInfo::UnwindReturnAddresses(TraceeController *tc, CallStackRequest req) noexcept
+TaskInfo::UnwindReturnAddresses(CallStackRequest req) noexcept
 {
   RETURN_RET_ADDR_IF(!mTaskCallstack->IsDirty());
 
-  tc->CacheRegistersFor(*this);
+  mSupervisor->CacheRegistersFor(*this);
   // initialize bottom frame's registers with actual live register contents
   // this is then used to execute the dwarf binary code
   mTaskCallstack->Unwind(req);
@@ -323,7 +324,30 @@ TaskInfo::SetSessionId(u32 sessionId) noexcept
 }
 
 void
-TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexcept
+TaskInfo::SetResumeType(tc::RunType type) noexcept
+{
+  mResumeRequest.mType = type;
+}
+
+void
+TaskInfo::SetForwardedSignal(int signal) noexcept
+{
+  mResumeRequest.mSignal = signal;
+}
+
+std::optional<int>
+TaskInfo::ConsumeSignal() noexcept
+{
+  if (mResumeRequest.mSignal != 0) {
+    const int signal = mResumeRequest.mSignal;
+    mResumeRequest.mSignal = 0;
+    return signal;
+  }
+  return {};
+}
+
+void
+TaskInfo::StepOverBreakpoint() noexcept
 {
   MDB_ASSERT(mBreakpointLocationStatus.IsValid(), "Requires a valid bpstat");
 
@@ -334,11 +358,10 @@ TaskInfo::StepOverBreakpoint(TraceeController *tc, tc::RunType resumeType) noexc
     JoinFormatIterator{ userBreakpointIds, ", " },
     mBreakpointLocationStatus.mBreakpointLocation->Address());
 
-  auto &control = tc->GetInterface();
+  auto &control = mSupervisor->GetInterface();
   mBreakpointLocationStatus.mBreakpointLocation->Disable(mTid, control);
-  mBreakpointLocationStatus.SetSteppingOver(resumeType);
-
-  const auto result = control.ResumeTask(*this, tc::ResumeAction{ tc::RunType::Step, tc::ResumeTarget::Task, 0 });
+  mBreakpointLocationStatus.mIsSteppingOver = true;
+  const auto result = control.ResumeTask(*this, tc::RunType::Step);
 
   MDB_ASSERT(result.is_ok(), "Failed to step over breakpoint");
 }
@@ -351,12 +374,10 @@ TaskInfo::SetUserVisibleStop() noexcept
 }
 
 void
-TaskInfo::SetCurrentResumeAction(tc::ResumeAction type) noexcept
+TaskInfo::SetIsRunning() noexcept
 {
-  mHasProcessedStop = false;
   mUserVisibleStop = false;
   mTracerVisibleStop = false;
-  mLastResumeAction = type;
   SetInvalidCache();
 }
 
@@ -411,13 +432,12 @@ TaskInfo::IsStopped() const noexcept
 bool
 TaskInfo::IsStopProcessed() const noexcept
 {
-  return mHasProcessedStop;
+  return mTracerVisibleStop;
 }
 
 void
 TaskInfo::CollectStop() noexcept
 {
-  mHasProcessedStop = true;
   mTracerVisibleStop = true;
 }
 
