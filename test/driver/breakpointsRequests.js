@@ -314,7 +314,6 @@ async function testConditionShouldStopOn5(debugAdapter) {
     'let variable = frame.locals().find(v => v.name() == "i");',
     "if(variable.name() == 'i') {", //9
     '  if(variable == 5) {', //10
-    '    mdb.log("Stop ye old cunt");',
     '    bpstat.stop();', //11
     '    return;', //12
     '  } else {', //13

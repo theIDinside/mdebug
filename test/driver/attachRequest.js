@@ -36,6 +36,8 @@ async function attachArgsGetErrResponseWhenInvalid(debugAdapter) {
     'Expected attach command to fail',
     `Succeeded when it should not, with ${JSON.stringify(attachArgs)}`
   )
+
+  server_spawn.server.shutdown()
 }
 
 /** @param { import("./client").DebugAdapterClient } debugAdapter */
