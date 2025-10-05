@@ -5,6 +5,9 @@
 
 #define FOR_EACH_LOG(LOGCHANNEL)                                                                                  \
   LOGCHANNEL(core, "Debugger Core", "Messages that don't have a intuitive log channel can be logged here.")       \
+  LOGCHANNEL(control,                                                                                             \
+    "Thread control",                                                                                             \
+    "Messages pertaining to execution of a thread or process. Consider putting breakpoint events here as well.")  \
   LOGCHANNEL(dap, "Debug Adapter Protocol", "Log messages involving the DA protocol should be logged here.")      \
   LOGCHANNEL(                                                                                                     \
     dwarf, "DWARF Debug Symbol Information", "Log messages involving symbol parsing and value evaluation")        \

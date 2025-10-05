@@ -175,11 +175,7 @@ public:
   {
   }
 
-#ifdef MDB_DEBUG
-  virtual ~UICommand() noexcept { DBGLOG(core, "Destroying UICommand"); }
-#else
   virtual ~UICommand() noexcept = default;
-#endif
 
   constexpr SessionId
   GetSessionId() const noexcept
