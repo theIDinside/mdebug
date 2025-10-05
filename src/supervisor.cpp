@@ -466,6 +466,8 @@ TraceeController::ResumeTask(TaskInfo &task, tc::RunType type) noexcept
 
   task.SetResumeType(type);
 
+  task.mHasStarted = true;
+
   if (task.mBreakpointLocationStatus.IsValid()) {
     task.StepOverBreakpoint();
   } else {
@@ -494,7 +496,7 @@ TraceeController::ScheduleResume(TaskInfo &task, tc::RunType type) noexcept
 void
 TraceeController::StopAllTasks() noexcept
 {
-  DBGLOG(core, "Stopping all threads")
+  DBGBUFLOG(control, "Stopping all threads")
   // If all threads were at a signal-delivery stop, then we will not receive new wait status events
   // and we will never report to the user that everyone has stopped. We need to track that, and possibly emit a
   // stopped event immediately.
@@ -502,9 +504,10 @@ TraceeController::StopAllTasks() noexcept
   for (auto &entry : mThreads) {
     auto &t = *entry.mTask;
     if (!t.mUserVisibleStop && !t.mTracerVisibleStop) {
+      DBGBUFLOG(control, "thread {} is init={}", t.mTid, bool{ t.mHasStarted });
       const auto response = mTraceeInterface->StopTask(t);
     }
-    t.SetUserVisibleStop();
+    t.RequestedStop();
   }
 
   if (IsAllStopped()) {
@@ -563,7 +566,6 @@ TraceeController::EmitStoppedAtBreakpoints(LWP lwp, u32 breakpointId, bool allSt
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
-  DBGLOG(core, "[dap event]: stopped at breakpoint {} emitted", breakpointId);
   const bool stopAll = allStopped | mAllStopSession;
   auto evt = new ui::dap::StoppedEvent{
     mSessionId, ui::dap::StoppedReason::Breakpoint, "Breakpoint Hit", lwp.tid, {}, "", stopAll
@@ -1118,7 +1120,7 @@ CreateTraceEventFromStopped(TraceEvent *event, TraceeController &tc, TaskInfo &t
   // this actually will trigger a breakpoint/SIGTRAP, whereby event->mPostBreakpointOverStep will be false and a
   // breakpoint event created)
 
-  if (breakpointLocation != nullptr && !t.mBreakpointLocationStatus.mIsSteppingOver) {
+  if (breakpointLocation != nullptr && !t.mBreakpointLocationStatus.IsValid()) {
     tc.SetProgramCounterFor(t, breakpointAdjustedProgramCounter);
     return TraceEvent::InitSoftwareBreakpointHit(event,
       { .target = tc.TaskLeaderTid(), .tid = t.mTid, .sig_or_code = {}, .event_time = {} },
@@ -1184,7 +1186,7 @@ TraceeController::CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept
 
   switch (ss.ws) {
   case StopKind::Stopped: {
-    if (!info.mInitialized) {
+    if (!info.mHasStarted) {
       TraceEvent::InitThreadCreated(event, { mTaskLeader, info.mTid, 0, {} }, tc::RunType::Continue, {});
     } else {
       CreateTraceEventFromStopped(event, *this, info);
@@ -1884,7 +1886,7 @@ TraceeController::DefaultHandler(TraceEvent *evt) noexcept
 {
   MDB_ASSERT(!mIsExited, "Supervisor exited already.");
 
-  DBGLOG(core, "Running default handler");
+  DBGBUFLOG(core, "Running default handler for event {}", evt->mEventType);
   // todo(simon): I'm more and more leaning into making remote | local debug sessions _completely_ separate,
   // instead of this "unified behind one interface approach". Due to gdb's remote protocol design it just doesn't
   // lend itself well to that, unfortunately. In a better world, with a better protocol (one that actually just
@@ -1991,7 +1993,6 @@ TraceeController::HandleTracerEvent(TraceEvent *evt) noexcept
     DefaultHandler(evt);
     [[fallthrough]];
   case EventState::Handled:
-    DBGLOG(core, "Supervisor event handled {}", evt->mEventType);
     delete evt;
     break;
   case EventState::Defer:

@@ -188,7 +188,7 @@ WaitResultToTaskWaitResult(Tid tid, int status) noexcept
 {
   using enum StopKind;
   const auto signal = WSTOPSIG(status);
-  WaitPidResult result{ .tid = tid, .ws = { .ws = NotKnown, .uStopSignal = signal } };
+  WaitPidResult result{ .tid = tid, .ws = { .ws = NotKnown, .uStopSignal = signal }, .status = status };
   auto &kind = result.ws.ws;
 
   if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {

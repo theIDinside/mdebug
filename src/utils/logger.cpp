@@ -269,6 +269,13 @@ Logger::GetLogger() noexcept
   return Logger::sLoggerInstance;
 }
 
+/* static */
+uint64_t
+Logger::GetLogMessageId() noexcept
+{
+  return (*GetLogger()).mSequenceId++;
+}
+
 void
 Logger::OnAbort() noexcept
 {
@@ -282,16 +289,18 @@ void
 LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept
 {
   std::lock_guard guard{ mChannelMutex };
-  mFileStream << message;
-  mFileStream << " [" << file << ":" << line << ":" << column << "]: " << std::endl;
+  const auto id = Logger::GetLogMessageId();
+  mFileStream << '[' << id << "] " << message;
+  char buf[1024];
+  auto it = std::format_to(buf, " [{}:{}]", file, line);
+  *it = 0;
+  mFileStream << buf << std::endl;
 }
 
 void
-LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string &&message) noexcept
+LogChannel::LogMessage(const char *file, u32 line, u32 column, const std::string &message) noexcept
 {
-  std::lock_guard guard{ mChannelMutex };
-  mFileStream << message;
-  mFileStream << " [" << file << ":" << line << ":" << column << "]: " << std::endl;
+  LogMessage(file, line, column, std::string_view{ message });
 }
 
 void

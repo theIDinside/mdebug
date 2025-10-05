@@ -35,6 +35,7 @@ struct WaitPidResult
 {
   Tid tid;
   StopStatus ws;
+  int status;
 };
 
 /** C++-ified result from waitpid syscall. */

@@ -93,7 +93,8 @@ public:
        * in "not non-stop mode", *all* threads get set to true on each stop (and false on each continue) regardless
        * of what thread the user is operating on. It's "all stop mode". */
       bool mTracerVisibleStop : 1;
-      bool mInitialized : 1; // fully initialized task. after a clone syscall some setup is required
+      bool mHasStarted : 1; // fully initialized task. after a clone syscall some setup is required. If this is
+                            // false, it means this task has never been resumed.
       // register is dirty and requires refetching
       bool mRegisterCacheDirty : 1 { true };
       // rip requires fetching FIXME(simon): Is this even needed anymore?
