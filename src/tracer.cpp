@@ -645,7 +645,7 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) no
         switch (evt.mEventType) {
         case ApplicationEventType::WaitStatus: {
           DBGLOG(
-            awaiter, "stop for {}: {}", evt.uWait.mWaitResult.tid, Enums::ToString(evt.uWait.mWaitResult.ws.ws));
+            control, "stop for {}: {}", evt.uWait.mWaitResult.tid, Enums::ToString(evt.uWait.mWaitResult.ws.ws));
           if (auto dbg_evt = Tracer::Get().ConvertWaitEvent(evt.uWait.mWaitResult); dbg_evt) {
             dbgInstance.HandleTracerEvent(dbg_evt);
           }

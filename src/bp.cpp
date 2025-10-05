@@ -26,7 +26,7 @@ namespace mdb {
 BreakpointLocation::BreakpointLocation(AddrPtr address, u8 original) noexcept
     : mAddress(address), mSourceLocation(), mOriginalByte(original)
 {
-  DBGLOG(core, "[breakpoint loc]: Constructed breakpoint location at {}", address);
+  DBGBUFLOG(control, "[breakpoint loc]: Constructed breakpoint location at {}", address);
 }
 
 BreakpointLocation::BreakpointLocation(
@@ -377,7 +377,7 @@ DetermineBehavior(EventResult evaluationResult, TraceeController &tc) noexcept
 BreakpointHitEventResult
 Breakpoint::OnHit(TraceeController &controller, TaskInfo &t) noexcept
 {
-  DBGLOG(core, "[{}:bkpt]: bp {} hit", t.mTid, mId);
+  DBGBUFLOG(control, "[{}:bkpt]: bp {} hit", t.mTid, mId);
   IncrementHitCount();
 
   const auto evaluatedResult = EvaluateStopCondition(t).value_or(BreakpointHitEventResult{ this });
@@ -436,7 +436,7 @@ FinishBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
   if (t.mTid != mStopOnlyTid) {
     return BP_KEEP(Resume);
   }
-  DBGLOG(core, "Hit finish_bp_t {}", mId);
+  DBGBUFLOG(control, "Hit finish_bp_t {}", mId);
   const auto all_stopped = tc.IsAllStopped();
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
@@ -457,7 +457,7 @@ CodeInjectionBoundaryBreakpoint::CodeInjectionBoundaryBreakpoint(RequiredUserPar
 BreakpointHitEventResult
 CodeInjectionBoundaryBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
 {
-  DBGLOG(core, "Task {} hit code injection boundary breakpoint at {}", t.mTid, Address().value());
+  DBGBUFLOG(control, "Task {} hit code injection boundary breakpoint at {}", t.mTid, Address().value());
   (void)tc;
   (void)t;
   return BP_KEEP(None);
@@ -472,7 +472,7 @@ BreakpointHitEventResult
 ResumeToBreakpoint::OnHit(TraceeController &, TaskInfo &t) noexcept
 {
   if (t.mTid == mStopOnlyTid) {
-    DBGLOG(core, "Hit resume_bp_t {}", mId);
+    DBGBUFLOG(control, "Hit resume_bp_t {}", mId);
     return BP_RETIRE(Resume);
   } else {
     return BP_KEEP(None);

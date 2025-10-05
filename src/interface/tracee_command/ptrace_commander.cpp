@@ -306,7 +306,7 @@ PtraceCommander::ResumeTarget(RunType type, std::vector<Tid> *resumedThreads) no
         resumedThreads->push_back(entry.mTid);
       }
     } else {
-      DBGLOG(core, "[{}:resume:target] {} can_continue=false", mControl->TaskLeaderTid(), entry.mTid);
+      DBGLOG(control, "[{}:resume:target] {} can_continue=false", mControl->TaskLeaderTid(), entry.mTid);
     }
   }
   return TaskExecuteResponse::Ok();
@@ -335,21 +335,22 @@ PtraceCommander::ResumeTask(TaskInfo &t, RunType action) noexcept
     "Was in neither user_stop ({}) or tracer_stop ({})",
     bool{ t.mUserVisibleStop },
     bool{ t.mTracerVisibleStop });
-  DBGLOG(core, "resume task {}, at visible stop={}", t.mTid, bool{ t.mTracerVisibleStop });
   if (t.mTracerVisibleStop) {
     const auto signal = t.ConsumeSignal();
-    DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, signal.value_or(0));
+    DBGBUFLOG(
+      control, "[{}.{}] resuming with {} with signal {}", TaskLeaderTid(), t.mTid, action, signal.value_or(0));
     const auto ptrace_result = ptrace(ToPtrace(action), t.mTid, nullptr, signal.value_or(0));
     if (ptrace_result == -1) {
       // Reset the last pending signal, to be sent later
       if (signal) {
         t.SetForwardedSignal(*signal);
       }
+      DBGBUFLOG(control, "[WARNING]: failed to resume {}: {}", t.mTid, strerror(errno));
       return TaskExecuteResponse::Error(errno);
     }
   } else {
-    DBGLOG(awaiter,
-      "[{}.{}:resume]: did not resume, not recorded signal delivery stop.",
+    DBGBUFLOG(control,
+      "[{}.{}]: Did not resume, not recorded signal delivery stop.",
       t.GetSupervisor()->TaskLeaderTid(),
       t.mTid);
   }
@@ -362,10 +363,10 @@ PtraceCommander::StopTask(TaskInfo &t) noexcept
 {
   const auto result = tgkill(mProcessId, t.mTid, SIGSTOP);
   if (result == -1) {
-    DBGLOG(awaiter, "failed to send SIGSTOP to {}.{}", mProcessId, t.mTid);
+    DBGBUFLOG(control, "failed to send SIGSTOP to {}.{}", mProcessId, t.mTid);
     return TaskExecuteResponse::Error(errno);
   }
-  DBGLOG(awaiter, "sent SIGSTOP to {}.{}", mProcessId, t.mTid);
+  DBGBUFLOG(control, "sent SIGSTOP to {}.{}", mProcessId, t.mTid);
   t.RequestedStop();
   return TaskExecuteResponse::Ok();
 }
@@ -373,14 +374,14 @@ PtraceCommander::StopTask(TaskInfo &t) noexcept
 TaskExecuteResponse
 PtraceCommander::EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  DBGLOG(core, "[{}.{}:bkpt]: enabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
+  DBGBUFLOG(control, "[{}.{}:bkpt]: enabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
   return InstallBreakpoint(tid, location.Address());
 }
 
 TaskExecuteResponse
 PtraceCommander::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
-  DBGLOG(core, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
+  DBGBUFLOG(control, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
   const auto addr = location.Address().GetRaw();
   const auto read_value = ptrace(PTRACE_PEEKDATA, tid, addr, nullptr);
   if (read_value == -1) {
@@ -547,16 +548,17 @@ PtraceCommander::ReadAuxiliaryVector() noexcept
 void
 PtraceCommander::OnTaskCreated(TaskInfo &task) noexcept
 {
+  task.mHasStarted = true;
   mControl->ScheduleResume(task, task.mResumeRequest.mType);
 }
 
 void
 PtraceCommander::OnTaskExit(TaskInfo &t) noexcept
 {
-  DBGLOG(awaiter, "resuming {} with signal {}", t.mTid, 0);
+  DBGBUFLOG(control, "[on task exit]: resuming {} with signal {}", t.mTid, 0);
   const auto ptrace_result = ptrace(PTRACE_CONT, t.mTid, nullptr, 0);
   if (ptrace_result == -1) {
-    DBGLOG(core, "Failed to resume task.");
+    DBGBUFLOG(control, "Failed to resume task.");
   }
 }
 

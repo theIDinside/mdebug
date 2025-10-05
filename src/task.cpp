@@ -57,7 +57,7 @@ TaskRegisters::GetRegister(u32 regNumber) const noexcept
 }
 
 TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
-    : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), mInitialized(false),
+    : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(true), mTracerVisibleStop(true), mHasStarted(false),
       mExited(false), mReaped(false), regs(), mTaskCallstack(nullptr), mSupervisor(nullptr),
       mBreakpointLocationStatus()
 
@@ -66,7 +66,7 @@ TaskInfo::TaskInfo(pid_t newTaskTid) noexcept
 
 TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept
     : mTid(newTaskTid), mLastStopStatus(), mUserVisibleStop(isUserStopped), mTracerVisibleStop(true),
-      mInitialized(true), mExited(false), mReaped(false),
+      mHasStarted(false), mExited(false), mReaped(false),
       regs(supervisor.mFormat, supervisor.mArchInfo.Cast().get()), mSupervisor(supervisor.GetSupervisor()),
       mBreakpointLocationStatus()
 {
@@ -76,10 +76,10 @@ TaskInfo::TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, boo
 void
 TaskInfo::InitializeThread(tc::TraceeCommandInterface &tc, bool restart) noexcept
 {
-  MDB_ASSERT(mTaskCallstack == nullptr && mInitialized == false, "Thread has already been initialized.");
-  mUserVisibleStop = true;
-  mTracerVisibleStop = true;
-  mInitialized = true;
+  MDB_ASSERT(mTaskCallstack == nullptr && mHasStarted == false, "Thread has already been initialized.");
+  mUserVisibleStop = false;
+  mTracerVisibleStop = false;
+  mHasStarted = false;
   mRegisterCacheDirty = true;
   mInstructionPointerDirty = true;
   mExited = false;
@@ -352,8 +352,8 @@ TaskInfo::StepOverBreakpoint() noexcept
   MDB_ASSERT(mBreakpointLocationStatus.IsValid(), "Requires a valid bpstat");
 
   auto userBreakpointIds = mBreakpointLocationStatus.mBreakpointLocation->GetUserIds();
-  DBGLOG(core,
-    "[TaskInfo {}] Stepping over bps {} at {}",
+  DBGBUFLOG(control,
+    "Task {} stepping over bps {} at {}",
     mTid,
     JoinFormatIterator{ userBreakpointIds, ", " },
     mBreakpointLocationStatus.mBreakpointLocation->Address());
@@ -384,7 +384,7 @@ TaskInfo::SetIsRunning() noexcept
 bool
 TaskInfo::CanContinue() noexcept
 {
-  return mInitialized && (mUserVisibleStop || mTracerVisibleStop) && !mReaped;
+  return mTracerVisibleStop && !mReaped;
 }
 
 void
@@ -412,7 +412,8 @@ TaskInfo::SetUpdated() noexcept
 void
 TaskInfo::AddBreakpointLocationStatus(BreakpointLocation *breakpointLocation) noexcept
 {
-  MDB_ASSERT(!mBreakpointLocationStatus.IsValid(), "Overwriting breakpoint location status breaks the invariant");
+  MDB_ASSERT(
+    !mBreakpointLocationStatus.IsValid(), "Handling a new breakpoint hit without having finalized the last one.");
   mBreakpointLocationStatus.Clear();
   mBreakpointLocationStatus.mBreakpointLocation = RefPtr{ breakpointLocation };
 }
