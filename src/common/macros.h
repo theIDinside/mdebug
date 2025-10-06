@@ -110,10 +110,11 @@ FromInt(int value) noexcept
 // Using this macro instead of `ENUM_TYPE_METADATA` we can define values outside of the "public" range
 // which are not intended for "automatic" use, but very niche (like setting exact range, or storing extra metadata)
 #define PREDEFINED_ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN)                                               \
-  namespace detail {                                                                                              \
-  using enum ENUM_TYPE;                                                                                           \
-  static constexpr auto ENUM_TYPE##Ids = std::to_array<ENUM_TYPE>({ FOR_EACH(DEFAULT_ENUM) });                    \
-  static constexpr auto ENUM_TYPE##Names = std::to_array<std::string_view>({ FOR_EACH(STRINGIFY_VAL) });          \
+  namespace detail##ENUM_TYPE                                                                                     \
+  {                                                                                                               \
+    using enum ENUM_TYPE;                                                                                         \
+    static constexpr auto ENUM_TYPE##Ids = std::to_array<ENUM_TYPE>({ FOR_EACH(DEFAULT_ENUM) });                  \
+    static constexpr auto ENUM_TYPE##Names = std::to_array<std::string_view>({ FOR_EACH(STRINGIFY_VAL) });        \
   }                                                                                                               \
   template <> struct Enum<ENUM_TYPE>                                                                              \
   {                                                                                                               \
@@ -121,21 +122,21 @@ FromInt(int value) noexcept
     EnumBaseOffset() noexcept                                                                                     \
     {                                                                                                             \
       using enum ENUM_TYPE;                                                                                       \
-      return std::to_underlying(detail::ENUM_TYPE##Ids[0]);                                                       \
+      return std::to_underlying(detail##ENUM_TYPE::ENUM_TYPE##Ids[0]);                                            \
     }                                                                                                             \
                                                                                                                   \
     static constexpr u32                                                                                          \
     Count() noexcept                                                                                              \
     {                                                                                                             \
-      return detail::ENUM_TYPE##Ids.size();                                                                       \
+      return detail##ENUM_TYPE::ENUM_TYPE##Ids.size();                                                            \
     }                                                                                                             \
                                                                                                                   \
     static constexpr std::optional<ENUM_TYPE>                                                                     \
     FromInt(auto value) noexcept                                                                                  \
     {                                                                                                             \
       using enum ENUM_TYPE;                                                                                       \
-      if (value < std::to_underlying(detail::ENUM_TYPE##Ids.front()) ||                                           \
-          value > std::to_underlying(detail::ENUM_TYPE##Ids.back())) {                                            \
+      if (value < std::to_underlying(detail##ENUM_TYPE::ENUM_TYPE##Ids.front()) ||                                \
+          value > std::to_underlying(detail##ENUM_TYPE::ENUM_TYPE##Ids.back())) {                                 \
         return std::nullopt;                                                                                      \
       }                                                                                                           \
       switch (value) {                                                                                            \
@@ -149,20 +150,20 @@ FromInt(int value) noexcept
     static constexpr std::span<const ENUM_TYPE>                                                                   \
     Variants()                                                                                                    \
     {                                                                                                             \
-      return std::span{ detail::ENUM_TYPE##Ids };                                                                 \
+      return std::span{ detail##ENUM_TYPE::ENUM_TYPE##Ids };                                                      \
     }                                                                                                             \
                                                                                                                   \
     static constexpr std::string_view                                                                             \
     ToString(ENUM_TYPE value) noexcept                                                                            \
     {                                                                                                             \
       static constexpr auto INDEX_OFFSET = EnumBaseOffset();                                                      \
-      return detail::ENUM_TYPE##Names[std::to_underlying(value) - INDEX_OFFSET];                                  \
+      return detail##ENUM_TYPE::ENUM_TYPE##Names[std::to_underlying(value) - INDEX_OFFSET];                       \
     }                                                                                                             \
                                                                                                                   \
     static constexpr std::span<const std::string_view>                                                            \
     Names() noexcept                                                                                              \
     {                                                                                                             \
-      return std::span{ detail::ENUM_TYPE##Names };                                                               \
+      return std::span{ detail##ENUM_TYPE::ENUM_TYPE##Names };                                                    \
     }                                                                                                             \
     static constexpr std::optional<ENUM_TYPE>                                                                     \
     FromString(std::string_view str) noexcept                                                                     \
@@ -170,7 +171,7 @@ FromInt(int value) noexcept
       auto index = 0;                                                                                             \
       for (const auto &n : Names()) {                                                                             \
         if (n == str)                                                                                             \
-          return detail::ENUM_TYPE##Ids[index];                                                                   \
+          return detail##ENUM_TYPE::ENUM_TYPE##Ids[index];                                                        \
         ++index;                                                                                                  \
       }                                                                                                           \
       return {};                                                                                                  \
