@@ -88,6 +88,12 @@ JavascriptException::GetException(JSContext *context) noexcept
   return ex;
 }
 
+Scripting::Scripting(JSRuntime *runtime, JSContext *context) noexcept
+    : mRuntime(runtime), mContext(context),
+      mBumpAllocator(alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 32 }))
+{
+}
+
 /* static */ JSValue
 Scripting::GetSupervisor(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
@@ -138,11 +144,10 @@ Scripting::GetTask(
 Scripting::PrintThreads(
   JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
-  alloc::StackBufferResource<4096> alloc;
-  std::pmr::string buffer{ &alloc };
+  auto scopedTemporary = sInstance->mBumpAllocator->ScopeAllocation();
 
+  std::pmr::string buffer{ scopedTemporary.GetAllocator() };
   buffer.reserve(4096);
-  // Define your custom string representation
 
   auto iterator = std::back_inserter(buffer);
   for (auto supervisor : Tracer::Get().GetAllProcesses()) {
@@ -150,7 +155,7 @@ Scripting::PrintThreads(
     *iterator++ = '\n';
 
     for (const auto &t : supervisor->GetThreads()) {
-      iterator = ToString(iterator, *t.mTask);
+      iterator = ToString(iterator, t);
       *iterator++ = '\n';
     }
     iterator = std::format_to(iterator, "----------\n");
@@ -164,8 +169,8 @@ Scripting::PrintThreads(
 Scripting::PrintProcesses(
   JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
-  alloc::StackBufferResource<4096> alloc;
-  std::pmr::string buffer{ &alloc };
+  auto scopedTemporary = sInstance->mBumpAllocator->ScopeAllocation();
+  std::pmr::string buffer{ scopedTemporary.GetAllocator() };
   buffer.reserve(4096);
 
   auto iterator = std::back_inserter(buffer);
@@ -181,17 +186,8 @@ Scripting::PrintProcesses(
 /* static */ JSValue
 Scripting::Help(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
-  alloc::StackBufferResource<4096> rsrc;
-  std::pmr::polymorphic_allocator alloc{ &rsrc };
-  std::pmr::string &buffer = *alloc.new_object<std::pmr::string>();
-  buffer.reserve(4096);
-  auto it = std::back_inserter(buffer);
-  it = std::format_to(it, "Global functions\n");
-  for (const auto &[_, name, argCount, helpInfo] : FunctionDescriptors()) {
-    it = std::format_to(it, "{}, arg count: {} - {}\n", name, argCount, helpInfo);
-  }
-
-  return JS_NewStringLen(ctx, buffer.data(), buffer.size());
+  auto msg = HelpMessage();
+  return JS_NewStringLen(ctx, msg.data(), msg.size());
 }
 
 void
@@ -228,12 +224,18 @@ Scripting::InitializeMdbModule() noexcept
 
   JSValue fn;
 
+  // We duplicate global script objects to both this.foo and mdb.foo, if the user wants to overwrite
+  // this.foo to be something they want to use instead. That way mdb.foo is always safe.
+  JSValue globalObject = JS_GetGlobalObject(mContext);
   for (const FunctionDescriptor &descriptor : FunctionDescriptors()) {
     fn = JS_NewCFunction(mContext, descriptor.mFn, descriptor.mName.data(), descriptor.mArgCount);
     JS_SetPropertyStr(mContext, mdbObject, descriptor.mName.data(), fn);
+
+    // Duplicate for global scope
+    JS_DupValue(mContext, fn);
+    JS_SetPropertyStr(mContext, globalObject, descriptor.mName.data(), fn);
   }
 
-  JSValue globalObject = JS_GetGlobalObject(mContext);
   JS_SetPropertyStr(mContext, globalObject, "mdb", mdbObject);
   InitModuleConstants(mdbObject);
   JS_FreeValue(mContext, globalObject);
@@ -266,6 +268,13 @@ Scripting::Get() noexcept
   return *sInstance;
 }
 
+/* static */
+alloc::ArenaResource *
+Scripting::GetAllocator() noexcept
+{
+  return Get().mBumpAllocator.get();
+}
+
 void
 Scripting::Shutdown() noexcept
 {
@@ -281,6 +290,10 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
   JSValue evalRes = JS_Eval(mContext, input.data(), input.size(), "<eval>", 0);
 
   auto jsString = JS_ToString(mContext, evalRes);
+  if (JS_IsException(evalRes)) {
+    ConvertExceptionToString(*res);
+    return res;
+  }
   auto string = JS_ToCString(mContext, jsString);
 
   ScopedDefer defer{ [&]() {
@@ -294,6 +307,38 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
   CopyTo(view, *res);
 
   return res;
+}
+
+bool
+Scripting::ConvertExceptionToString(std::pmr::string &result) noexcept
+{
+  if (!JS_HasException(mContext)) {
+    return false;
+  }
+
+  JSValue exception = JS_GetException(mContext);
+
+  const char *exceptionString = JS_ToCString(mContext, exception);
+  const std::string_view msg{ exceptionString ? exceptionString : "<unknown exception>" };
+  CopyTo(msg, result);
+
+  if (JS_IsError(mContext, exception)) {
+    result.push_back('\n');
+    JSValue stack = JS_GetPropertyStr(mContext, exception, "stack");
+    if (!JS_IsUndefined(stack)) {
+      const char *exceptionStackString = JS_ToCString(mContext, stack);
+      const std::string_view msg{ exceptionStackString ? exceptionStackString : "<error converting stack>" };
+      CopyTo(msg, result);
+
+      JS_FreeCString(mContext, exceptionStackString);
+    }
+    JS_FreeValue(mContext, stack);
+  }
+
+  JS_FreeCString(mContext, exceptionString);
+  JS_FreeValue(mContext, exception);
+
+  return true;
 }
 
 std::expected<JSValue, JavascriptException>
