@@ -3,18 +3,16 @@
 
 // mdb
 #include <common/macros.h>
+#include <lib/arena_allocator.h>
 #include <mdbjs/util.h>
 #include <utils/expected.h>
 #include <utils/log_channel.h>
 
 // std
 #include <expected>
-#include <memory_resource>
-#include <mutex>
 #include <utility>
 
 // system
-#include <limits>
 #include <optional>
 #include <string>
 
@@ -97,8 +95,9 @@ private:
   static Scripting *sInstance;
   JSRuntime *mRuntime;
   JSContext *mContext;
+  UniquePtr<alloc::ArenaResource> mBumpAllocator;
 
-  Scripting(JSRuntime *runtime, JSContext *context) noexcept : mRuntime(runtime), mContext(context) {}
+  Scripting(JSRuntime *runtime, JSContext *context) noexcept;
 
   static JSValue GetSupervisor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue Log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
@@ -115,7 +114,7 @@ private:
   FunctionDescriptors() noexcept -> std::span<const FunctionDescriptor>
   {
     static constexpr auto descriptors = std::to_array<const FunctionDescriptor>({
-      FunctionDescriptor{ &Log, "log", 2, "Log to one of the debug logging channels" },
+      FunctionDescriptor{ &Log, "log", 1, "Log to one of the debug logging channels" },
       FunctionDescriptor{ &GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid" },
       FunctionDescriptor{
         &GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId" },
@@ -126,9 +125,21 @@ private:
     return std::span<const FunctionDescriptor>{ descriptors };
   }
 
+  static constexpr auto
+  HelpMessage() noexcept
+  {
+    static std::array<char, 4096> buffer{};
+    auto it = std::format_to(buffer.begin(), "Global functions\n");
+    for (const auto &[_, name, argCount, helpInfo] : FunctionDescriptors()) {
+      it = std::format_to(it, "{}, arg count: {} - {}\n", name, argCount, helpInfo);
+    }
+    return std::string_view{ buffer.data(), static_cast<size_t>(std::distance(buffer.begin(), it)) };
+  }
+
 public:
   static Scripting *Create() noexcept;
   static Scripting &Get() noexcept;
+  static alloc::ArenaResource *GetAllocator() noexcept;
 
   constexpr JSContext *
   GetContext() noexcept
@@ -150,6 +161,8 @@ public:
 
     std::unreachable();
   }
+
+  bool ConvertExceptionToString(std::pmr::string &output) noexcept;
 };
 
 /** Calls function `functionValue` and then frees the arguments in `arguments`. */
