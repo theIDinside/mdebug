@@ -1,4 +1,4 @@
-#include "interface/remotegdb/deserialization.h"
+#include "interface/tracee_command/gdbserver/deserialization.h"
 #include "utils/expected.h"
 #include <gtest/gtest.h>
 #include <set>
@@ -36,10 +36,10 @@ SetContains(std::set<std::string_view> expected_set, std::string_view test)
 TEST(StringSplit, CommaSeparated)
 {
   std::string foo = "eh,dwarf,dap,";
-  std::set<std::string_view> expected{"eh", "dwarf", "dap"};
+  std::set<std::string_view> expected{ "eh", "dwarf", "dap" };
   auto res = mdb::SplitString(foo, ",");
   EXPECT_EQ(res.size(), expected.size());
-  std::set<std::string_view> res_set{res.begin(), res.end()};
+  std::set<std::string_view> res_set{ res.begin(), res.end() };
   for (const auto item : res_set) {
     EXPECT_TRUE(SetContains(expected, item));
   }
@@ -71,8 +71,8 @@ TEST(GdbRemote, DecodeGPacket)
 
 TEST(GdbRemote, RunLengthDecode)
 {
-  std::string_view contents{"48888ffffffa0000"};
-  std::string_view encoded{"48* fff* a0* "};
+  std::string_view contents{ "48888ffffffa0000" };
+  std::string_view encoded{ "48* fff* a0* " };
   std::array<u8, 8> val_non_encoded{};
   std::array<u8, 8> val_encoded{};
 

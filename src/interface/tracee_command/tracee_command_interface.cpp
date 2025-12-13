@@ -39,6 +39,14 @@ TraceeCommandInterface::TargetManagesBreakpoints() noexcept
   return false;
 }
 
+RefPtr<TaskInfo>
+TraceeCommandInterface::CreateNewTask(Tid tid, bool isRunning) noexcept
+{
+  auto task = TaskInfo::CreateTask(*this, tid, isRunning);
+  Tracer::Get().RegisterTracedTask(task);
+  return task;
+}
+
 TaskExecuteResponse
 TraceeCommandInterface::ReverseContinue(bool) noexcept
 {
@@ -95,23 +103,6 @@ TraceeCommandInterface::SetTarget(TraceeController *supervisor) noexcept
 {
   MDB_ASSERT(mControl == nullptr, "Target already configured with this interface!");
   mControl = supervisor;
-}
-
-std::string_view
-to_str(RunType type) noexcept
-{
-  switch (type) {
-  case RunType::Step:
-    return "RunType::Step";
-  case RunType::Continue:
-    return "RunType::Continue";
-  case RunType::SyscallContinue:
-    return "RunType::SyscallContinue";
-  case RunType::Unknown:
-    return "RunType::UNKNOWN";
-    break;
-  }
-  __builtin_unreachable();
 }
 
 } // namespace mdb::tc

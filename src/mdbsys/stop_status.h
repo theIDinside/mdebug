@@ -23,11 +23,16 @@ namespace mdb {
 
 struct StopStatus
 {
-  StopKind ws;
+  StopKind ws{ StopKind::NotKnown };
+  // If this is true, this stop status reflects a tracee that has died, either by exit or by signal termination.
+  bool mIsTerminatingEvent{ false };
+  pid_t mPid;
   union
   {
-    int uStopExitCode;
-    int uStopSignal;
+    int uExitCode;
+    int uSignal;
+    // Misc data, retrieved by PTRACE_GETEVENTMSG
+    int uPtraceEventMsg;
   };
 };
 

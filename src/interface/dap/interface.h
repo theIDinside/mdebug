@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include "utils/immutable.h"
 #include <common/typedefs.h>
 #include <interface/dap/dap_defs.h>
 #include <json/json.h>
@@ -21,7 +22,12 @@
 
 namespace mdb {
 class Tracer;
-class TraceeController;
+class SessionBreakpoints;
+
+namespace tc {
+class SupervisorState;
+}
+
 /* The different DAP commands/requests */
 namespace alloc {
 class ArenaResource;
@@ -153,28 +159,49 @@ enum class DapClientSession
   RR,
 };
 
-struct SupervisorEntry
+class DebugAdapterSession
 {
-  SessionId mSupervisorId;
-  TraceeController *mSupervisor;
+  const SessionId mSessionId;
+  // Until attach/launch, this will be nullptr
+  // OnCreatedSupervisor hooks up the supervisor with the debug adapter sesssion.
+  tc::SupervisorState *mSupervisor{ nullptr };
+  bool mConfigurationDone{ false };
+  std::vector<std::function<void(tc::SupervisorState &)>> mOnSessionFirstStart;
 
-  constexpr auto operator<=>(const SupervisorEntry &) const = default;
+public:
+  explicit DebugAdapterSession(SessionId sessionId) noexcept;
+  bool HasAttachedOrLaunched() const noexcept;
+  void OnCreatedSupervisor(NonNullPtr<tc::SupervisorState> supervisor) noexcept;
+  void OnSessionConfiguredWithSupervisor(std::function<void(tc::SupervisorState &)> callback) noexcept;
+  SessionBreakpoints &GetBreakpoints() noexcept;
+  bool ConfigurationDone() noexcept;
+
+  bool
+  HasConfigured() const noexcept
+  {
+    return mConfigurationDone;
+  }
+
+  SessionId
+  GetId() const noexcept
+  {
+    return mSessionId;
+  }
+
+  tc::SupervisorState *
+  GetSupervisor() const noexcept
+  {
+    return mSupervisor;
+  }
 };
 
-struct InitializationState
-{
-  SessionId mPid;
-  std::string mSessionId;
-  UIResult *mLaunchOrAttachResponse;
-};
-
-class DebugAdapterClient
+class DebugAdapterManager
 {
   int mReadFd{};
   int mWriteFd{};
   ParseBuffer mParseSwapBuffer{ MDB_PAGE_SIZE * 16 };
   int mTtyFileDescriptor{ -1 };
-  std::vector<SupervisorEntry> mSupervisors;
+  std::vector<UniquePtr<DebugAdapterSession>> mSessions;
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
   // away.
@@ -184,51 +211,48 @@ class DebugAdapterClient
 
   std::vector<alloc::ArenaResource *> mCommandAllocatorPool;
 
-  DebugAdapterClient(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
+  DebugAdapterManager(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
   // be.)
-  DebugAdapterClient(DapClientSession session, int standard_in, int standard_out) noexcept;
+  DebugAdapterManager(DapClientSession session, int standard_in, int standard_out) noexcept;
 
   std::mutex m{};
   // Delayed events are used when we want to either delay and event or result or order events and results from a
   // command in a specific order. For instance, during attach/launch, there is non-trivial ordering in how events
   // need to be sent and received and this solves that problem.
   std::vector<UIResultPtr> mDelayedEvents{};
-  std::vector<InitializationState> mSessionInit;
 
   void InitAllocators() noexcept;
 
 public:
   static const char *gSocketPath;
   DapClientSession mSessionType;
-  ~DebugAdapterClient() noexcept;
+  ~DebugAdapterManager() noexcept;
 
   alloc::ArenaResource *GetCommandArenaAllocator() noexcept;
   alloc::ArenaResource *GetResponseArenaAllocator() noexcept;
-  static DebugAdapterClient *CreateStandardIOConnection() noexcept;
+  static DebugAdapterManager *CreateStandardIOConnection() noexcept;
   // The path passed into this function can be (_should be_) leaked. Clean up at exit of process, and by leaking,
   // protections like atexit can work to remove the file, because it will always either exist, or not exist.
   // `acceptTimeout` is how long mdb will wait for a connection until it times out and exits.
-  static DebugAdapterClient *CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept;
+  static DebugAdapterManager *CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept;
   std::unique_ptr<alloc::ScopedArenaAllocator> AcquireArena() noexcept;
 
-  void AddSupervisor(TraceeController *tc) noexcept;
-  void RemoveSupervisor(TraceeController *supervisor) noexcept;
+  void RemoveSupervisor(tc::SupervisorState *supervisor) noexcept;
   void PostDapEvent(ui::UIResultPtr event);
 
   int ReadFileDescriptor() const noexcept;
   int WriteFileDescriptor() const noexcept;
 
-  void ConfigDone(SessionId processId) noexcept;
-
   bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;
   void ReadPendingCommands() noexcept;
   void SetTtyOut(int fd, SessionId pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
-  TraceeController *GetSupervisor(SessionId pid) const noexcept;
-  std::span<const SupervisorEntry> Supervisors() const noexcept;
+  DebugAdapterSession *GetSession(SessionId pid) const noexcept;
+  std::span<UniquePtr<DebugAdapterSession>> Sessions() noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
+  void InitializeSession(SessionId sessionId) noexcept;
   void FlushEvents() noexcept;
   bool IsClosed() noexcept;
   bool SessionConfigurationDone(SessionId sessionId) noexcept;
@@ -241,7 +265,7 @@ enum class InterfaceNotificationSource
 };
 
 using DAPKey = std::uintptr_t;
-using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterClient *>;
+using NotifSource = std::tuple<int, InterfaceNotificationSource, DebugAdapterManager *>;
 
 struct DapNotification
 {
@@ -304,7 +328,7 @@ struct PollState
 class DapEventSystem
 {
 private:
-  DebugAdapterClient *mClient;
+  DebugAdapterManager *mClient;
   std::vector<StandardIo> mStandardIo;
   std::vector<DapNotification> mNewEvents;
 
@@ -314,7 +338,7 @@ public:
   using StackAllocator = alloc::StackAllocator<2048>;
   bool WaitForEvents(PollState &state, std::vector<DapNotification> &events) noexcept;
 
-  explicit DapEventSystem(DebugAdapterClient *client) noexcept;
+  explicit DapEventSystem(DebugAdapterManager *client) noexcept;
   ~DapEventSystem() noexcept;
 
   // After setup we call `infinite_poll` that does what the name suggests, polls for messages. We could say that
@@ -324,7 +348,7 @@ public:
   // exceptions.
 
   void StartIOPolling(std::stop_token &token) noexcept;
-  void SetClient(DebugAdapterClient *client) noexcept;
+  void SetClient(DebugAdapterManager *client) noexcept;
   void Poll(PollState &state) noexcept;
   void AddStandardIOSource(int fd, SessionId pid) noexcept;
 
@@ -332,7 +356,7 @@ public:
   void FlushEvents() noexcept;
 
   void ConfigureTty(int master_pty_fd) noexcept;
-  DebugAdapterClient *Get() const noexcept;
+  DebugAdapterManager *Get() const noexcept;
 
 private:
   UIResultPtr PopEvent() noexcept;

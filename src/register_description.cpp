@@ -1,8 +1,9 @@
 /** LICENSE TEMPLATE */
+#include "register_description.h"
+
 // mdb
 #include <common/panic.h>
 #include <interface/remotegdb/deserialization.h>
-#include <register_description.h>
 
 // system
 #include <cstring>

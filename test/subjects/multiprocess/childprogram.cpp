@@ -3,7 +3,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
-#include <iostream>
+#include <print>
 #include <string>
 #include <thread>
 
@@ -17,25 +17,24 @@ printDirectoryContents(const std::string &path, std::optional<int> sleepPerItera
     auto dirEntryItem = 1ull;
     if (fs::exists(path) && fs::is_directory(path)) {
       for (const auto &entry : fs::directory_iterator(path)) {
-
-        std::cout << "#" << dirEntryItem << " " << entry.path().string() << std::endl;
+        std::println("# {} {}", dirEntryItem, entry.path().string());
         ++dirEntryItem; // #ITERATE_DIR_ENTRY_BP
         if (sleepPerIteration) {
           // Make sure we handle signals properly.
           if (iter == 500) {
             raise(SIGINT);
           }
-          std::this_thread::sleep_for(std::chrono::milliseconds{*sleepPerIteration});
+          std::this_thread::sleep_for(std::chrono::milliseconds{ *sleepPerIteration });
         }
         ++iter;
       }
     } else {
-      std::cerr << "Error: The path does not exist or is not a directory." << std::endl;
+      std::println(stderr, "Error: The path does not exist or is not a directory.");
     }
   } catch (const fs::filesystem_error &e) {
-    std::cerr << "Filesystem error: " << e.what() << std::endl;
+    std::println(stderr, "Filesystem error: {}", e.what());
   } catch (const std::exception &e) {
-    std::cerr << "General error: " << e.what() << std::endl;
+    std::println(stderr, "General error: {}", e.what());
   }
 }
 
@@ -43,20 +42,19 @@ int
 main(int argc, char *argv[])
 {
   if (argc < 2) {
-    std::cerr << "argument count was: " << argc << std::endl;
-    std::cerr << "Usage: " << argv[0] << " <directory_path>" << std::endl; // #NO_INPUT_BP
+    std::println(stderr, "argument count was: {}\nUsage: {} <directory_path>", argc, argv[0]);
     return 1;
   }
 
   std::optional<int> sleepTimeMilliseconds{};
   if (argc > 2) {
-    std::string_view sleepArg{argv[2]};
+    std::string_view sleepArg{ argv[2] };
     int readInValue = 0;
     const auto res = std::from_chars(sleepArg.begin(), sleepArg.end(), readInValue);
     if (res.ec == std::errc()) {
       sleepTimeMilliseconds = readInValue;
     } else {
-      std::cout << " failed to read sleep arg: " << sleepArg << " setting to default value 1ms";
+      std::println(" failed to read sleep arg: {} setting to default value 1ms", sleepArg);
     }
   }
 
@@ -65,12 +63,12 @@ main(int argc, char *argv[])
   std::mutex stdioLock{};
   static bool keepRunning = true;
   for (auto i = 0; i < 8; i++) {
-    pool.emplace_back(std::thread{[&stdioLock, num = i]() {
+    pool.emplace_back(std::thread{ [&stdioLock, num = i]() {
       while (keepRunning) {
         std::printf("thread %d going to sleep\n", num);
-        std::this_thread::sleep_for(std::chrono::milliseconds{400 + num * 30});
+        std::this_thread::sleep_for(std::chrono::milliseconds{ 400 + num * 30 });
       }
-    }});
+    } });
   }
 
   atexit([]() { keepRunning = false; });
@@ -78,7 +76,7 @@ main(int argc, char *argv[])
   std::string directoryPath = argv[1];
   printDirectoryContents(directoryPath, sleepTimeMilliseconds);
   keepRunning = false;
-  for (auto& j : pool) {
+  for (auto &j : pool) {
     j.join();
   }
 

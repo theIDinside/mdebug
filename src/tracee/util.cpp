@@ -45,6 +45,7 @@ QueryAvxSupport() noexcept
   return 16; // Fallback: Assume 128 bits = 16 bytes
 }
 
+// https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
 static constexpr u16 RegNumToX86_64Offsets[24] = {
   offsetof(user_regs_struct, rax),
   offsetof(user_regs_struct, rbx),
@@ -71,6 +72,59 @@ static constexpr u16 RegNumToX86_64Offsets[24] = {
   offsetof(user_regs_struct, fs),
   offsetof(user_regs_struct, gs),
 };
+
+constexpr auto
+DwarfRegisterToIndex()
+{
+  static constexpr u16 DwarfRegisterNumberToUserRegs[24] = {
+    offsetof(user_regs_struct, rax),
+    offsetof(user_regs_struct, rbx),
+    offsetof(user_regs_struct, rcx),
+    offsetof(user_regs_struct, rdx),
+    offsetof(user_regs_struct, rsi),
+    offsetof(user_regs_struct, rdi),
+    offsetof(user_regs_struct, rbp),
+    offsetof(user_regs_struct, rsp),
+    offsetof(user_regs_struct, r8),
+    offsetof(user_regs_struct, r9),
+    offsetof(user_regs_struct, r10),
+    offsetof(user_regs_struct, r11),
+    offsetof(user_regs_struct, r12),
+    offsetof(user_regs_struct, r13),
+    offsetof(user_regs_struct, r14),
+    offsetof(user_regs_struct, r15),
+    offsetof(user_regs_struct, rip),
+    offsetof(user_regs_struct, eflags),
+    offsetof(user_regs_struct, cs),
+    offsetof(user_regs_struct, ss),
+    offsetof(user_regs_struct, ds),
+    offsetof(user_regs_struct, es),
+    offsetof(user_regs_struct, fs),
+    offsetof(user_regs_struct, gs),
+  };
+
+  std::array<size_t, 24> indices{};
+  auto i = 0;
+  for (auto value : DwarfRegisterNumberToUserRegs) {
+    indices[i++] = value / sizeof(u64);
+  }
+
+  return indices;
+}
+
+static constexpr std::array<size_t, 24> DwarfMappings = DwarfRegisterToIndex();
+
+size_t
+GetDwarfRegisterIndex(size_t dwarfNumber) noexcept
+{
+  return DwarfMappings[dwarfNumber];
+}
+
+u64
+GetDwarfRegister(const u64 *registerCache, size_t number) noexcept
+{
+  return *(registerCache + DwarfMappings[number]);
+}
 
 #ifdef DEBUG
 static constexpr std::array<std::pair<u8, u16>, 24> UserRegsMapping = { { { 8, offsetof(user_regs_struct, rax) },

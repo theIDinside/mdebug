@@ -1,13 +1,17 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../common.h"
-#include "dwarf_binary_reader.h"
-#include "dwarf_defs.h"
-#include "tracee_pointer.h"
-#include "utils/immutable.h"
+
+// mdb
+#include <symbolication/dwarf_binary_reader.h>
+#include <symbolication/dwarf_defs.h>
+#include <tracee_pointer.h>
+#include <utils/immutable.h>
 
 namespace mdb {
-class TraceeController;
+namespace tc {
+class SupervisorState;
+}
+
 class TaskInfo;
 } // namespace mdb
 
@@ -87,9 +91,9 @@ struct DwarfStack
 struct ExprByteCodeInterpreter
 {
   explicit ExprByteCodeInterpreter(
-    int frameLevel, TraceeController &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept;
+    int frameLevel, tc::SupervisorState &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept;
   explicit ExprByteCodeInterpreter(int frameLevel,
-    TraceeController &tc,
+    tc::SupervisorState &tc,
     TaskInfo &t,
     std::span<const u8> byteStream,
     std::span<const u8> frameBaseCode) noexcept;
@@ -103,7 +107,7 @@ struct ExprByteCodeInterpreter
   int mFrameLevel;
   DwarfStack mStack;
   DwarfOp mLatestDecoded;
-  TraceeController &mTraceeController;
+  tc::SupervisorState &mSupervisor;
   TaskInfo &mTask;
   std::span<const u8> mByteStream;
   std::span<const u8> mFrameBaseProgram;

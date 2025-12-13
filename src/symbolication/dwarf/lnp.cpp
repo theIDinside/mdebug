@@ -60,7 +60,7 @@ LNPHeader::file(u32 f_index) const noexcept
     return {};
   }
 
-  for (const auto &[i, f] : mdb::EnumerateView(mFileEntries)) {
+  for (const auto &[i, f] : Enumerate(mFileEntries)) {
     if (i == adjusted_index) {
       const auto dir_index = lnp_index(f.dir_index, mVersion);
       return std::filesystem::path{ std::format("{}/{}", mDirectories[dir_index].path, f.file_name) }

@@ -291,7 +291,7 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
 
   auto jsString = JS_ToString(mContext, evalRes);
   if (JS_IsException(evalRes)) {
-    ConvertExceptionToString(*res);
+    ExceptionToPrintableOutput(*res);
     return res;
   }
   auto string = JS_ToCString(mContext, jsString);
@@ -310,7 +310,7 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
 }
 
 bool
-Scripting::ConvertExceptionToString(std::pmr::string &result) noexcept
+Scripting::ExceptionToPrintableOutput(std::pmr::string &result) noexcept
 {
   if (!JS_HasException(mContext)) {
     return false;

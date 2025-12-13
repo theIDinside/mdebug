@@ -1,18 +1,22 @@
 /** LICENSE TEMPLATE */
 #include "value_visualizer.h"
-#include "symbolication/dwarf/typeread.h"
-#include "symbolication/variable_reference.h"
-#include "tracer.h"
-#include "type.h"
-#include "utils/enumerator.h"
-#include "value.h"
+
+// mdb
+#include <symbolication/dwarf/die.h>
+#include <symbolication/dwarf/typeread.h>
+#include <symbolication/objfile.h>
+#include <symbolication/type.h>
+#include <symbolication/value.h>
+#include <symbolication/variable_reference.h>
+#include <task.h>
+#include <tracer.h>
+#include <utils/enumerator.h>
+
+// std
 #include <algorithm>
 #include <iterator>
 #include <memory_resource>
 #include <string>
-#include <supervisor.h>
-#include <symbolication/dwarf/die.h>
-#include <symbolication/objfile.h>
 #include <utility>
 
 namespace mdb::sym {
@@ -416,7 +420,7 @@ CStringVisualizer::Serialize(
     return std::nullopt;
   }
   std::optional<u32> null_terminator = {};
-  for (const auto [index, ch] : mdb::EnumerateView(byte_span)) {
+  for (const auto [index, ch] : Enumerate(byte_span)) {
     if (ch == 0) {
       null_terminator = index;
       break;

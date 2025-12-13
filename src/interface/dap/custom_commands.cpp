@@ -5,8 +5,8 @@
 #include <interface/dap/events.h>
 #include <interface/dap/interface.h>
 #include <interface/dap/invalid.h>
+#include <interface/tracee_command/supervisor_state.h>
 #include <interface/ui_command.h>
-#include <supervisor.h>
 #include <tracer.h>
 #include <utils/format_utils.h>
 
@@ -16,7 +16,7 @@ namespace mdb::ui::dap {
 
 RefPtr<ui::UICommand>
 ParseCustomRequestCommand(
-  const DebugAdapterClient &, UICommandArg arg, std::string_view cmd_name, const mdbjson::JsonValue &) noexcept
+  const DebugAdapterManager &, UICommandArg arg, std::string_view cmd_name, const mdbjson::JsonValue &) noexcept
 {
   if (cmd_name == "continueAll") {
     return RefPtr<ContinueAll>::MakeShared(std::move(arg));
@@ -33,7 +33,8 @@ ParseCustomRequestCommand(
 void
 ContinueAll::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  auto session = GetSession();
+  auto target = session->GetSupervisor();
   MDB_ASSERT(target, "Target must not be null");
   auto res = Allocate<ContinueAllResponse>(true, this, target->TaskLeaderTid());
   std::vector<Tid> resumedThreads{};
@@ -44,7 +45,7 @@ ContinueAll::Execute() noexcept
   res->mSuccess = result;
   if (result) {
     for (const auto &tid : resumedThreads) {
-      mDAPClient->PushDelayedEvent(new ContinuedEvent{ mSessionId, tid, true });
+      mDebugAdapterManager->PushDelayedEvent(new ContinuedEvent{ mSessionId, tid, true });
     }
   }
   return WriteResponse(*res);
@@ -66,9 +67,10 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 void
 PauseAll::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  auto session = GetSession();
+  auto target = session->GetSupervisor();
   auto tid = target->TaskLeaderTid();
-  target->StopAllTasks([client = mDAPClient, tid, sessionId = mSessionId]() {
+  target->StopAllTasks([client = mDebugAdapterManager, tid, sessionId = mSessionId]() {
     client->PostDapEvent(
       new StoppedEvent{ sessionId, StoppedReason::Pause, "Paused", tid, {}, "Paused all", true });
   });

@@ -1,19 +1,23 @@
 /** LICENSE TEMPLATE */
 #include "callstack.h"
-#include "common.h"
-#include "supervisor.h"
-#include "symbolication/dwarf/lnp.h"
-#include "symbolication/dwarf_binary_reader.h"
-#include "symbolication/dwarf_frameunwinder.h"
-#include "symbolication/value.h"
-#include "tracer.h"
-#include "utils/immutable.h"
-#include <algorithm>
+
+// mdb
+#include <common.h>
 #include <common/macros.h>
-#include <iterator>
+#include <interface/tracee_command/supervisor_state.h>
 #include <symbolication/cu_symbol_info.h>
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/dwarf_binary_reader.h>
+#include <symbolication/dwarf_frameunwinder.h>
 #include <symbolication/objfile.h>
+#include <symbolication/value.h>
 #include <task.h>
+#include <tracer.h>
+#include <utils/immutable.h>
+
+// std
+#include <algorithm>
+#include <iterator>
 
 namespace mdb::sym {
 
@@ -270,7 +274,8 @@ FrameUnwindState::GetRegister(u64 registerNumber) const noexcept
   return mFrameRegisters[registerNumber];
 }
 
-CallStack::CallStack(TraceeController *supervisor, TaskInfo *task) noexcept : mTask(task), mSupervisor(supervisor)
+CallStack::CallStack(tc::SupervisorState *supervisor, TaskInfo *task) noexcept
+    : mTask(task), mSupervisor(supervisor)
 {
 }
 
@@ -321,9 +326,8 @@ CallStack::Initialize() noexcept
   mUnwoundRegister[0].Reset();
   mUnwoundRegister[0].Reserve(17);
 
-  const auto &cache = mTask->GetRegisterCache();
   for (auto i = 0u; i <= 16; ++i) {
-    mUnwoundRegister[0].Set(i, cache.GetRegister(i));
+    mUnwoundRegister[0].Set(i, mTask->GetDwarfRegister(i));
   }
 }
 
@@ -434,13 +438,14 @@ CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
 }
 
 static void
-decode_eh_insts(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state) noexcept
+DecodeCFI(sym::UnwindInfoSymbolFilePair info, sym::CFAStateMachine &state) noexcept
 {
   // TODO(simon): Refactor DwarfBinaryReader, splitting it into 2 components, a BinaryReader and a
   // DwarfBinaryReader which inherits from that. in this instance, a BinaryReader suffices, we don't need to
   // actually know how to read DWARF binary data here.
   DwarfBinaryReader reader{ info.GetCommonInformationEntryData() };
   const int decodedInstructions = sym::decode(reader, state, info.mInfo);
+  state.SetCurrentAsInitialInstructions();
   DBGLOG(eh, "[unwinder] decoded {} CIE instructions", decodedInstructions);
   DwarfBinaryReader fde{ info.GetFrameDescriptionEntryData() };
   sym::decode(fde, state, info.mInfo);
@@ -463,7 +468,7 @@ CallStack::Unwind(const CallStackRequest &req)
   if (mCallstackState == CallStackState::Full) {
     return;
   }
-  const auto pc = mTask->GetRegisterCache().GetPc();
+  const auto pc = mTask->GetPc();
   sym::UnwindIterator it{ mSupervisor, pc };
   auto uninfo = it.GetInfo(pc);
   bool initialized = false;
@@ -471,7 +476,7 @@ CallStack::Unwind(const CallStackRequest &req)
     constexpr auto STACK_POINTER_NUMBER = 7;
     // we may be in a plt entry. Try sniffing out this frame before throwing away the entire call stack
     // a call instruction automatically pushes rip onto the stack at $rsp
-    const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{ mTask->GetRegister(STACK_POINTER_NUMBER) });
+    const auto resumeAddress = mSupervisor->ReadType(TPtr<u64>{ mTask->GetDwarfRegister(STACK_POINTER_NUMBER) });
     uninfo = it.GetInfo(resumeAddress);
     if (uninfo) {
       Initialize();
@@ -505,7 +510,7 @@ CallStack::Unwind(const CallStackRequest &req)
     for (auto uinf = uninfo; uinf.has_value(); uinf = it.GetInfo(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
       cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
-      decode_eh_insts(uinf.value(), cfa_state);
+      DecodeCFI(uinf.value(), cfa_state);
       const auto keepUnwinding = ResolveNewFrameRegisters(cfa_state);
       if (!keepUnwinding) {
         break;
@@ -519,7 +524,7 @@ CallStack::Unwind(const CallStackRequest &req)
     for (auto uinf = uninfo; uinf.has_value() && count > 0; uinf = it.GetInfo(GetTopMostPc())) {
       const auto pc = GetTopMostPc();
       cfa_state.Reset(uinf.value(), mUnwoundRegister.back(), pc);
-      decode_eh_insts(uinf.value(), cfa_state);
+      DecodeCFI(uinf.value(), cfa_state);
       const auto keepUnwinding = ResolveNewFrameRegisters(cfa_state);
       --count;
       if (!keepUnwinding) {

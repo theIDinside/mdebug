@@ -37,17 +37,17 @@ set(MIDAS_SOURCES
   src/bp_spec.h
   src/common.cpp
   src/common.h
-  src/event_queue_event_param.h
+  src/event_queue_types.h
   src/event_queue.cpp
   src/event_queue.h
   src/mdb_config.cpp
   src/mdb_config.h
   src/notify_pipe.cpp
   src/notify_pipe.h
-  src/register_description.cpp
-  src/register_description.h
-  src/supervisor.cpp
-  src/supervisor.h
+  # src/register_description.cpp
+  # src/register_description.h
+  src/session_task_map.cpp
+  src/session_task_map.h
   src/task_scheduling.cpp
   src/task_scheduling.h
   src/task.cpp
@@ -179,26 +179,43 @@ set(MIDAS_SOURCES
   src/interface/pty.h
 
   # Gdb Remote interface
-  src/interface/remotegdb/connection.cpp
-  src/interface/remotegdb/connection.h
-  src/interface/remotegdb/deserialization.cpp
-  src/interface/remotegdb/deserialization.h
-  src/interface/remotegdb/shared.cpp
-  src/interface/remotegdb/shared.h
-  src/interface/remotegdb/stopreply_parser.cpp
-  src/interface/remotegdb/stopreply_parser.h
-  src/interface/remotegdb/target_description.cpp
-  src/interface/remotegdb/target_description.h
-  src/interface/remotegdb/wait_event_parser.cpp
-  src/interface/remotegdb/wait_event_parser.h
+  # src/interface/remotegdb/connection.cpp
+  # src/interface/remotegdb/connection.h
+  # src/interface/remotegdb/deserialization.cpp
+  # src/interface/remotegdb/deserialization.h
+  # src/interface/remotegdb/shared.cpp
+  # src/interface/remotegdb/shared.h
+  # src/interface/remotegdb/stopreply_parser.cpp
+  # src/interface/remotegdb/stopreply_parser.h
+  # src/interface/remotegdb/target_description.cpp
+  # src/interface/remotegdb/target_description.h
+  # src/interface/remotegdb/wait_event_parser.cpp
+  # src/interface/remotegdb/wait_event_parser.h
+
+  # RR Supervisor interface
+  # src/interface/rr/rr_supervisor.cpp
+  # src/interface/rr/rr_supervisor.h
 
   # Tracee Interfaces
-  src/interface/tracee_command/gdb_remote_commander.cpp
-  src/interface/tracee_command/gdb_remote_commander.h
-  src/interface/tracee_command/ptrace_commander.cpp
-  src/interface/tracee_command/ptrace_commander.h
-  src/interface/tracee_command/tracee_command_interface.cpp
-  src/interface/tracee_command/tracee_command_interface.h
+  src/interface/tracee_command/supervisor_state.cpp
+  src/interface/tracee_command/supervisor_state.h
+
+  # Native
+  src/interface/tracee_command/ptrace/ptrace_session.cpp
+  src/interface/tracee_command/ptrace/ptrace_session.h
+
+  # Replay
+  src/interface/tracee_command/rr/rr_session.cpp
+  src/interface/tracee_command/rr/rr_session.h
+  src/interface/tracee_command/rr/rr_supervisor.cpp
+  src/interface/tracee_command/rr/rr_supervisor.h
+
+  # src/interface/tracee_command/gdb_remote_commander.cpp
+  # src/interface/tracee_command/gdb_remote_commander.h
+  # src/interface/tracee_command/rr_commander.cpp
+  # src/interface/tracee_command/rr_commander.h
+  # src/interface/tracee_command/tracee_command_interface.cpp
+  # src/interface/tracee_command/tracee_command_interface.h
 
   # Interpreter
   src/mdbjs/bpjs.cpp
@@ -228,6 +245,7 @@ target_include_directories(zydis PRIVATE ./dependencies/zydis)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(COMMON_FLAGS "-msse2 -D__MMX__ -D__SSE__ -D__SSE2__ -march=native -mavx -mavx2")
 set(MIDAS_DEBUG_FLAGS "-g3 -O0 -fpermissive")
+set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-exceptions")
 set(MIDAS_TEST_FLAGS "${MIDAS_DEBUG_FLAGS}")
 
 if(USE_DWARF5)
@@ -240,10 +258,9 @@ endif()
 
 # Check if the compiler name contains gcc or clang
 if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference -Wno-exceptions")
+  set(MIDAS_RELEASE_FLAGS "${MIDAS_RELEASE_FLAGS} -Wno-error=dangling-reference")
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-  # clang using GNU's stdlib ranges, is.... iffy at the moment.
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-exceptions")
+  message("Release flags all ok for clang")
 else ()
   error("Unknown compiler")
 endif ()
@@ -270,7 +287,7 @@ if(BUILD_MDB_TESTS)
   )
 
   AddTest(NAME test_utils
-    SOURCES test/unittest/util_testing.cpp src/utils/logger.cpp ${COMMON_SRC} src/lib/spinlock.cpp src/interface/remotegdb/deserialization.cpp src/utils/debugger_thread.cpp
+    SOURCES test/unittest/util_testing.cpp src/utils/logger.cpp ${COMMON_SRC} src/lib/spinlock.cpp src/interface/tracee_command/gdbserver/deserialization.cpp src/utils/debugger_thread.cpp
     LIBS mdb_spinlock)
 
   AddTest(NAME expected_tests
@@ -306,11 +323,52 @@ set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 add_subdirectory(dependencies/quickjs)
 add_subdirectory(lib/json)
 
-target_link_libraries(mdb PRIVATE mdb_spinlock zydis libquickjs mdbjson)
+# TODO - When you've refactored RR To be a lib, this needs to be dynamically configured
+# THIS IS EXPLICITLY FOR DEV PURPOSES.
+set(BUILD_TESTS OFF CACHE BOOL "Disable tests for Project B" FORCE)
+set(WILL_RUN_TESTS OFF CACHE BOOL "Run tests" FORCE)
+
+set(RR_BINARY_OBJ_DIR ${CMAKE_BINARY_DIR}/_deps/rr)
+# If RR_SRC is not provided as a CMake variable, try reading environment variable
+if(NOT DEFINED RR_SRC)
+    if(DEFINED ENV{RR_SRC})
+        set(RR_SRC "$ENV{RR_SRC}")
+    endif()
+endif()
+
+# If still not provided, stop with a helpful message
+if(NOT DEFINED RR_SRC)
+    message(FATAL_ERROR
+        "\n"
+        "RR source directory not specified.\n"
+        "\n"
+        "Please provide it in one of the following ways:\n"
+        "  1. Pass it during configuration via:\n"
+        "       -DRR_SRC=/path/to/rr\n"
+        "\n"
+        "  2. Or set the environment variable before running CMake:\n"
+        "       export RR_SRC=/path/to/rr\n"
+        "\n"
+        "CMake could not auto-detect RR_SRC.\n"
+    )
+endif()
+
+# Show the resolved path
+message(STATUS "Using RR source directory: ${RR_SRC}")
+
+# Validate that it exists
+if(NOT IS_DIRECTORY "${RR_SRC}")
+    message(FATAL_ERROR "RR_SRC path does not exist or is not a directory: ${RR_SRC}")
+endif()
+
+add_subdirectory("${RR_SRC}" "${RR_BINARY_OBJ_DIR}")
+
+target_link_libraries(mdb PRIVATE mdb_spinlock zydis libquickjs mdbjson librr)
 # Link the libraries to your target
 
 target_include_directories(mdb PUBLIC ./dependencies)
 target_include_directories(mdb PUBLIC ./src)
+target_include_directories(mdb PUBLIC ${RR_BINARY_OBJ_DIR})
 
 # To be able to print backtrace with symbols (see `man backtrace`)
 target_link_options(mdb PRIVATE -rdynamic)

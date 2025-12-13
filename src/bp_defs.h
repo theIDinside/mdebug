@@ -29,6 +29,7 @@ enum class LocationUserKind : std::uint8_t
   ResumeTo,
   SharedObjectLoaded,
   Exception,
-  LongJump
+  LongJump,
+  Maintenance
 };
 } // namespace mdb

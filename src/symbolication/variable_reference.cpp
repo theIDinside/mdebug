@@ -1,12 +1,18 @@
 /** LICENSE TEMPLATE */
 #include "variable_reference.h"
-#include "symbolication/value.h"
+
+// mdb
 #include <common/macros.h>
+#include <interface/tracee_command/supervisor_state.h>
+#include <symbolication/value.h>
 #include <task.h>
 
 namespace mdb {
-VariableContext::VariableContext(TaskInfo *task, SymbolFile *symbolFile, VariableReferenceId frameId,
-                                 VariableReferenceId varRefId, ContextType type) noexcept
+VariableContext::VariableContext(TaskInfo *task,
+  SymbolFile *symbolFile,
+  VariableReferenceId frameId,
+  VariableReferenceId varRefId,
+  ContextType type) noexcept
     : mTask(task), mSymbolFile(symbolFile), mFrameId(frameId), mId(varRefId), mType(type)
 {
 }

@@ -2,49 +2,44 @@
 #pragma once
 
 // mdb
-#include <bp_defs.h>
 #include <common/macros.h>
+#include <interface/rr/rr_supervisor.h>
 #include <interface/tracee_command/tracee_command_interface.h>
 #include <utils/scoped_fd.h>
 
-// system
-#include <link.h>
-
-class TraceeController;
-
-namespace mdb {
-namespace ui::dap {
-class DebugAdapterClient;
+namespace rr {
+class SupervisorLibrary;
 }
-} // namespace mdb
 
 namespace mdb::tc {
 
-class PtraceCommander final : public TraceeCommandInterface
+class RR final : public TraceeCommandInterface
 {
-  mdb::ScopedFd mProcFsMemFd;
-  Tid mProcessId;
+  mdbrr::ReplaySupervisor *mReplaySupervisor;
+  Tid mTaskLeader;
 
-  std::unordered_map<Tid, std::string> mThreadNames{};
+  mdbrr::ReplaySupervisor *GetSupervisor() noexcept;
+  std::unordered_map<Tid, std::string> mThreadNames;
+
+  // When a thread is first seen, we store it here, and it's kept here forever after that
+  // so if we reverse/replay across the boundary where it's either born or dies, we can resurrect it by just
+  // looking it up in this map.
+  std::unordered_map<Tid, RefPtr<TaskInfo>> mTraceThreads{};
 
 public:
-  NO_COPY(PtraceCommander);
-  explicit PtraceCommander(Tid task_leader) noexcept;
-  ~PtraceCommander() noexcept override = default;
-
-  static pid_t ForkExec(ui::dap::DebugAdapterClient *client,
-    SessionId sessionId,
-    bool stopAtEntry,
-    const Path &program,
-    std::span<std::pmr::string> prog_args,
-    std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
+  NO_COPY(RR);
+  explicit RR(Tid taskLeaderId, mdbrr::ReplaySupervisor *replaySupervisor) noexcept;
+  ~RR() noexcept override = default;
 
   // TRACEE COMMAND INTERFACE API
   ReadResult ReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult WriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
 
-  TaskExecuteResponse ResumeTask(TaskInfo &t, RunType resume) noexcept final;
-  TaskExecuteResponse ResumeTarget(RunType run, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
+  RefPtr<TaskInfo> CreateNewTask(Tid tid, bool isRunning) noexcept final;
+  TaskExecuteResponse ReverseContinue(bool onlyStep) noexcept final;
+
+  TaskExecuteResponse ResumeTask(TaskInfo &t, RunType resumeType) noexcept final;
+  TaskExecuteResponse ResumeTarget(RunType resumeType, std::vector<Tid> *resumedThreads = nullptr) noexcept final;
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
@@ -67,6 +62,12 @@ public:
   // Called after a fork for the creation of a new process supervisor
   Interface OnFork(SessionId pid) noexcept final;
   bool PostFork(TraceeController *parent) noexcept final;
+
+  bool
+  IsAllStopSession() noexcept final
+  {
+    return true;
+  }
 
   Tid TaskLeaderTid() const noexcept final;
   std::optional<Path> ExecedFile() noexcept final;

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "common.h"
+#include <concepts>
 #include <iterator>
 #include <utils/indexing.h>
 namespace mdb {
@@ -10,113 +11,54 @@ template <typename C> concept HasIteratorAlias = requires(C c) { typename C::ite
 template <typename C> concept HasPointerAlias = requires(C c) { typename C::pointer; };
 template <typename C> concept HasValueTypeAlias = requires(C c) { typename C::value_type; };
 
-/** An enumerating view over `Container`. Only deals with immutable values (because, it is a view!)*/
-template <typename Container> class EnumerateView
+template <std::integral IndexType = size_t, std::ranges::range R>
+auto
+Enumerate(const R &r)
 {
-  Container &c;
-
-public:
-  template <typename IterValueType> struct Enumeration
+  struct Iterator
   {
-    Index index;
-    IterValueType &T;
-  };
+    using BaseIt = std::ranges::iterator_t<const R>; // use iterator_t<const R> directly
+    BaseIt it;
+    IndexType index;
 
-  template <typename ContainerIterator = typename Container::iterator> class Enumerator
-  {
-    ContainerIterator iter;
-    Index index;
-
-  public:
-    using IsConst = std::is_const<typename std::remove_reference<decltype(*iter)>::type>;
-    static_assert(HasReferenceAlias<Container>,
-                  "Your container type must provide a 'reference' type alias (using declaration or typedef)");
-    static_assert(HasIteratorAlias<Container>,
-                  "Your container type must provide a 'iterator' type alias (using declaration or typedef)");
-    static_assert(HasPointerAlias<Container>,
-                  "Your container type must provide a 'pointer' type alias (using declaration or typedef)");
-    static_assert(HasValueTypeAlias<Container>,
-                  "Your container type must provide a 'value_type' type alias (using declaration or typedef)");
-
-    using RefType =
-      std::conditional_t<IsConst::value, const typename Container::reference, typename Container::reference>;
-    using PtrType =
-      std::conditional_t<IsConst::value, const typename Container::pointer, typename Container::pointer>;
-
-    using iterator_category = std::forward_iterator_tag;
-    using difference_type = std::ptrdiff_t;
-    using value_type = Enumeration<typename Container::value_type>;
-    using pointer = Enumeration<PtrType>;
-    using reference = Enumeration<RefType>;
-
-    Enumerator(ContainerIterator iter, int index) noexcept : iter(iter), index(index) {}
-    ~Enumerator() noexcept = default;
-
-    auto
-    operator++(int)
+    constexpr auto
+    operator*() const
     {
-      iter++;
-      index++;
-      return Enumerator{iter, index};
+      return std::pair{ index, *it };
     }
 
-    auto &
+    constexpr Iterator &
     operator++()
     {
-      ++iter;
+      ++it;
       ++index;
       return *this;
     }
 
-    auto
-    operator->() const noexcept
+    constexpr bool
+    operator!=(const Iterator &other) const
     {
-      return Enumeration<decltype(*iter)>{index, *iter};
-    }
-
-    auto
-    operator*() const noexcept
-    {
-      return Enumeration<decltype(*iter)>{index, *iter};
-    }
-
-    auto
-    operator==(const Enumerator &other) noexcept
-    {
-      return iter == other.iter;
-    }
-
-    auto
-    operator!=(const Enumerator &o) noexcept
-    {
-      return !(*this == o);
+      return it != other.it;
     }
   };
 
-  EnumerateView(Container &c) noexcept : c(c) {}
-
-  Enumerator<decltype(c.begin())>
-  begin() noexcept
+  struct WrappedRange
   {
-    return Enumerator<decltype(c.begin())>{c.begin(), 0};
-  }
+    const R &r;
 
-  Enumerator<decltype(c.end())>
-  end() noexcept
-  {
-    return Enumerator<decltype(c.end())>{c.end(), 0};
-  }
+    constexpr auto
+    begin()
+    {
+      return Iterator{ std::ranges::begin(r), 0 };
+    }
+    constexpr auto
+    end()
+    {
+      return Iterator{ std::ranges::end(r), 0 };
+    }
+  };
 
-  Enumerator<decltype(c.cbegin())>
-  cbegin() const noexcept
-  {
-    return Enumerator<decltype(c.cbegin())>{c.cbegin(), 0};
-  }
+  return WrappedRange{ r };
+}
 
-  Enumerator<decltype(c.cend())>
-  cend() const noexcept
-  {
-    return Enumerator<decltype(c.cend())>{c.cend(), 0};
-  }
-};
 } // namespace mdb

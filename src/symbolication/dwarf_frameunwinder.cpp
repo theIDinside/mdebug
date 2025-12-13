@@ -1,14 +1,20 @@
 /** LICENSE TEMPLATE */
 #include "dwarf_frameunwinder.h"
-#include "../supervisor.h"
-#include "../task.h"
-#include "dwarf_binary_reader.h"
-#include "dwarf_expressions.h"
-#include "elf.h"
-#include "objfile.h"
+
+// mdb
+#include <interface/tracee_command/supervisor_state.h>
+#include <symbolication/dwarf_binary_reader.h>
+#include <symbolication/dwarf_expressions.h>
+#include <symbolication/objfile.h>
+#include <task.h>
+
+// std
 #include <array>
 #include <cstdint>
 #include <span>
+
+// system
+#include <elf.h>
 
 namespace mdb::sym {
 
@@ -50,19 +56,19 @@ Reg::SetRegister(u64 reg) noexcept
 Reg::Reg() noexcept : uValue(0), mRule(RegisterRule::Undefined) {}
 
 CFAStateMachine::CFAStateMachine(
-  TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
-    : mTraceeController(tc), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
+  tc::SupervisorState &supervisor, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
+    : mSupervisor(supervisor), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
       mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { 0, 0 } }), mRuleTable()
 {
   mRuleTable.fill(Reg{});
 }
 
-CFAStateMachine::CFAStateMachine(TraceeController &tc,
+CFAStateMachine::CFAStateMachine(tc::SupervisorState &supervisor,
   TaskInfo &task,
   const RegisterValues &frameBelow,
   UnwindInfoSymbolFilePair cfi,
   AddrPtr pc) noexcept
-    : mTraceeController(tc), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
+    : mSupervisor(supervisor), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
       mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { 0, 0 } })
 {
   for (auto i = 0u; i < mRuleTable.size(); ++i) {
@@ -96,6 +102,12 @@ CFAStateMachine::SetNoKnownResumeAddress() noexcept
 }
 
 void
+CFAStateMachine::SetCurrentAsInitialInstructions() noexcept
+{
+  mInitialInstructions = mRuleTable;
+}
+
+void
 CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frameBelow, AddrPtr pc) noexcept
 {
   mFrameDescriptionEntryPc = cfi.start();
@@ -114,13 +126,16 @@ CFAStateMachine::Reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frame
 // then.
 /* static */
 CFAStateMachine
-CFAStateMachine::Init(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
+CFAStateMachine::Init(
+  tc::SupervisorState &supervisor, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
 {
-  auto cfa_sm = CFAStateMachine{ tc, task, cfi, pc };
-  const auto &cache = task.GetRegisterCache();
+  auto cfa_sm = CFAStateMachine{ supervisor, task, cfi, pc };
+
+  // TODO: GetDwarfRegister is 2 lookups, first the reg cache for that task, then the dwarf register with number i
+  //  fix so that task can just pull out it's reg cache and dump it in one go, instead (2 lookups) * i
   for (auto i = 0; i <= 16; i++) {
     cfa_sm.mRuleTable[i].mRule = RegisterRule::Undefined;
-    cfa_sm.mRuleTable[i].uValue = cache.GetRegister(i);
+    cfa_sm.mRuleTable[i].uValue = task.GetDwarfRegister(i);
   }
   return cfa_sm;
 }
@@ -129,7 +144,7 @@ u64
 CFAStateMachine::ComputeExpression(std::span<const u8> bytes, int frameLevel) noexcept
 {
   DBGLOG(eh, "compute_expression of dwarf expression of {} bytes", bytes.size());
-  auto intepreter = ExprByteCodeInterpreter{ frameLevel, mTraceeController, mTask, bytes };
+  auto intepreter = ExprByteCodeInterpreter{ frameLevel, mSupervisor, mTask, bytes };
   return intepreter.Run();
 }
 
@@ -167,7 +182,7 @@ CFAStateMachine::ResolveRegisterContents(
     return reg.uValue;
   case sym::RegisterRule::Offset: {
     const AddrPtr cfa_record = mCanonicalFrameAddressValue + reg.uOffset;
-    const auto res = mTraceeController.ReadType(cfa_record.As<u64>());
+    const auto res = mSupervisor.ReadType(cfa_record.As<u64>());
     return res;
   }
   case sym::RegisterRule::ValueOffset: {
@@ -180,7 +195,7 @@ CFAStateMachine::ResolveRegisterContents(
   }
   case sym::RegisterRule::Expression: {
     const auto saved_at_addr = TPtr<u64>(ComputeExpression(reg.uExpression, frameLevel));
-    const auto res = mTraceeController.ReadType(saved_at_addr);
+    const auto res = mSupervisor.ReadType(saved_at_addr);
     return res;
   }
   case sym::RegisterRule::ValueExpression: {
@@ -200,7 +215,7 @@ CFAStateMachine::GetCanonicalFrameAddressData() const noexcept
   return mCanonicalFrameAddressData;
 }
 
-const Registers &
+const RegisterRuleTable &
 CFAStateMachine::GetRegisters() const noexcept
 {
   return mRuleTable;
@@ -258,9 +273,11 @@ decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi)
       state.mRuleTable[reg_num].SetOffset(static_cast<i64>(n));
       break;
     }
-    case 0b1100'0000:
-      TODO("I::DW_CFA_restore restore not implemented");
+    case 0b1100'0000: {
+      const auto regNumber = (op & BOTTOM6_BITS);
+      state.mRuleTable[regNumber] = state.mInitialInstructions[regNumber];
       break;
+    }
     default:
       switch (op) {
       case 0: // I::DW_CFA_nop
@@ -779,8 +796,8 @@ Unwinder::GetUnwindInformation(AddrPtr pc) const noexcept
 
 Unwinder::Unwinder(ObjectFile *objfile) noexcept : mObjectFile(objfile), mAddressRange(AddressRange::MaxMin()) {}
 
-UnwindIterator::UnwindIterator(TraceeController *tc, AddrPtr firstPc) noexcept
-    : mTraceeController(tc), mCurrent(tc->GetUnwinderUsingPc(firstPc))
+UnwindIterator::UnwindIterator(tc::SupervisorState *tc, AddrPtr firstPc) noexcept
+    : mSupervisor(tc), mCurrent(tc->GetUnwinderUsingPc(firstPc))
 {
 }
 
@@ -806,7 +823,7 @@ UnwindIterator::GetInfo(AddrPtr pc) noexcept
   if (inf) {
     return inf;
   } else {
-    mCurrent = mTraceeController->GetUnwinderUsingPc(pc);
+    mCurrent = mSupervisor->GetUnwinderUsingPc(pc);
     return mCurrent.GetUnwinderInfo(pc);
   }
 }
@@ -814,7 +831,7 @@ UnwindIterator::GetInfo(AddrPtr pc) noexcept
 bool
 UnwindIterator::IsNull() const noexcept
 {
-  return mTraceeController->IsNullUnwinder(mCurrent.mUnwinder);
+  return mSupervisor->GetNullUnwinder() == mCurrent.mUnwinder;
 }
 
 AddrPtr

@@ -1,12 +1,10 @@
 /** LICENSE TEMPLATE */
 #include "wait_event_parser.h"
 #include "bp.h"
-#include "interface/remotegdb/connection.h"
-#include "interface/remotegdb/shared.h"
-#include "interface/tracee_command/tracee_command_interface.h"
 #include <charconv>
 #include <event_queue.h>
-#include <supervisor.h>
+#include <interface/remotegdb/connection.h>
+#include <interface/remotegdb/shared.h>
 #include <tracer.h>
 
 namespace mdb::gdb {
