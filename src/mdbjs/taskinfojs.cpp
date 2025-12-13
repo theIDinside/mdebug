@@ -2,9 +2,10 @@
 #include "taskinfojs.h"
 
 // mdb
+#include <interface/tracee_command/supervisor_state.h>
 #include <mdbjs/framejs.h>
 #include <mdbjs/jsobject.h>
-#include <supervisor.h>
+#include <symbolication/callstack.h>
 
 namespace mdb::js {
 
@@ -24,7 +25,7 @@ JsTaskInfo::Pc(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, a
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
-  return JS_NewBigUint64(context, taskInfo->GetRegisterCache().GetPc().GetRaw());
+  return JS_NewBigUint64(context, taskInfo->GetPc().GetRaw());
 }
 /*static*/ JSValue
 JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)

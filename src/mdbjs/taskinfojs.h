@@ -10,14 +10,14 @@ namespace mdb::js {
 
 template <typename Out, typename TaskT>
 constexpr Out
-ToString(Out iteratorLike, const TaskT &task)
+ToString(Out iteratorLike, const TaskT &entry)
 {
   return std::format_to(iteratorLike,
     "thread {}.{}, dbg id={}: stopped={}",
-    task.GetTaskLeaderTid().value_or(-1),
-    task.mTid,
-    task.mSessionId,
-    task.IsStopped());
+    entry.mTask->GetTaskLeaderTid().value_or(-1),
+    entry.mTid,
+    entry.mTask->mSessionId,
+    entry.mTask->IsStopped());
 }
 
 struct JsTaskInfo : public JSBinding<JsTaskInfo, TaskInfo, JavascriptClasses::TaskInfo>

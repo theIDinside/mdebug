@@ -30,7 +30,7 @@ JsSupervisor::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(arg
   auto ptr = std::format_to(buf,
     "supervisor {}: threads={}, exited={}",
     supervisor->TaskLeaderTid(),
-    supervisor->GetThreads().size(),
+    supervisor->ThreadsCount(),
     supervisor->IsExited());
   auto len = std::distance(buf, ptr);
   auto strValue = JS_NewStringLen(context, buf, len);

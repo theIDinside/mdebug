@@ -27,7 +27,7 @@ winsize Tracer::sTerminalWindowSize = {};
 bool Tracer::sUsePTraceMe = true;
 TracerProcess Tracer::sApplicationState = TracerProcess::Running;
 ThreadPool *ThreadPool::sGlobalThreadPool = new ThreadPool{};
-const char *ui::dap::DebugAdapterClient::gSocketPath = nullptr;
+const char *ui::dap::DebugAdapterManager::gSocketPath = nullptr;
 } // namespace mdb
 
 // DO NOT MOVE. Declaration of MDB Javascript types. Initialization of the types happen during init of script

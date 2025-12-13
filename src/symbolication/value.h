@@ -14,7 +14,10 @@ namespace mdb {
 using Bytes = std::span<const u8>;
 using MemoryContentBytes = mdb::ByteBuffer::OwnPtr;
 
-class TraceeController;
+namespace tc {
+class SupervisorState;
+}
+
 class TaskInfo;
 } // namespace mdb
 
@@ -182,7 +185,7 @@ public:
   MemoryContentsObject(AddrPtr start, AddrPtr end) noexcept;
   virtual ~MemoryContentsObject() noexcept = default;
 
-  virtual bool Refresh(TraceeController &supervisor) noexcept = 0;
+  virtual bool Refresh(tc::SupervisorState &supervisor) noexcept = 0;
   virtual std::span<const u8> RawView() noexcept = 0;
   virtual std::span<const u8> View(u32 offset, u32 size) noexcept = 0;
 
@@ -199,11 +202,11 @@ public:
   // in the whole damn thing while we are still in kernel land. Objects are *RARELY* large enough to justify
   // anythign else.
   static Ref<Value> CreateFrameVariable(
-    TraceeController &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept;
+    tc::SupervisorState &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept;
 
-  static ReadResult ReadMemory(TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
+  static ReadResult ReadMemory(tc::SupervisorState &tc, AddrPtr address, u32 size_of) noexcept;
   static ReadResult ReadMemory(
-    std::pmr::memory_resource *allocator, TraceeController &tc, AddrPtr address, u32 size_of) noexcept;
+    std::pmr::memory_resource *allocator, tc::SupervisorState &tc, AddrPtr address, u32 size_of) noexcept;
 };
 
 class EagerMemoryContentsObject final : public MemoryContentsObject
@@ -213,20 +216,20 @@ class EagerMemoryContentsObject final : public MemoryContentsObject
 public:
   EagerMemoryContentsObject(AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept;
 
-  bool Refresh(TraceeController &supervisor) noexcept final;
+  bool Refresh(tc::SupervisorState &supervisor) noexcept final;
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };
 
 class LazyMemoryContentsObject final : public MemoryContentsObject
 {
-  TraceeController &mSupervisor;
+  tc::SupervisorState &mSupervisor;
   MemoryContentBytes mContents{ nullptr };
   void CacheMemory() noexcept;
 
 public:
-  LazyMemoryContentsObject(TraceeController &supervisor, AddrPtr start, AddrPtr end) noexcept;
-  bool Refresh(TraceeController &supervisor) noexcept final;
+  LazyMemoryContentsObject(tc::SupervisorState &supervisor, AddrPtr start, AddrPtr end) noexcept;
+  bool Refresh(tc::SupervisorState &supervisor) noexcept final;
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };

@@ -1,8 +1,14 @@
 const { readFileContents, repoDirFile, getLineOf } = require('./client')
 const { prettyJson, assert } = require('./utils')
 
-async function setup(DA, bps) {
-  await DA.startRunToMain(DA.buildDirFile('readMemory'))
+/** @typedef { import("./client").DebugAdapterClient } DebugAdapterClient */
+
+/**
+ * @param {DebugAdapterClient} debugAdapter
+ * @param {string[]} bps
+ */
+async function setup(debugAdapter, bps) {
+  await debugAdapter.startRunToMain(debugAdapter.buildDirFile('readMemory'))
   const file = readFileContents(repoDirFile('test/readMemory.cpp'))
   const bp_lines = bps
     .map((ident) => getLineOf(file, ident))
@@ -14,7 +20,7 @@ async function setup(DA, bps) {
     `Could not parse contents of ${repoDirFile('test/next.cpp')} to find all string identifiers`
   )
 
-  const breakpoint_response = await DA.sendReqGetResponse('setBreakpoints', {
+  const breakpoint_response = await debugAdapter.sendReqGetResponse('setBreakpoints', {
     source: {
       name: repoDirFile('test/readMemory.cpp'),
       path: repoDirFile('test/readMemory.cpp'),
@@ -29,20 +35,25 @@ async function setup(DA, bps) {
   )
 }
 
-const readAtMemoryMappedAddress = async function (DA) {
+/**
+ * @param {DebugAdapterClient} debugAdapter
+ */
+const readAtMemoryMappedAddress = async function (debugAdapter) {
   const hardcodedMmapAddress = '0x1f21000'
-  await setup(DA, ['BP1'])
-  const threads = await DA.threads()
-  await DA.contNextStop(threads[0].id)
-  const readMemoryResponse = await DA.sendReqGetResponse('readMemory', {
+  await setup(debugAdapter, ['BP1'])
+  const threads = await debugAdapter.threads()
+  await debugAdapter.contNextStop(threads[0].id)
+  const readMemoryResponse = await debugAdapter.sendReqGetResponse('readMemory', {
     memoryReference: hardcodedMmapAddress,
     count: 255,
   })
-  assert(readMemoryResponse.success, `readMemory request was unsuccessful: ${readMemoryResponse.message}`)
+  await debugAdapter.assert(readMemoryResponse.success, 'Read memory success', readMemoryResponse.message)
   const decodedString = Buffer.from(readMemoryResponse.body.data, 'base64').toString('hex')
-  assert(
-    decodedString.length == 255 * 2,
-    `Expected decoded string to be 255 * 2 bytes (bytes represent as hex pair-values) but was ${decodedString.length}. Contents:\n${decodedString}`
+  const expectedSize = 255 * 2
+  await debugAdapter.assert(
+    decodedString.length == expectedSize,
+    `Expected size: ${expectedSize}`,
+    `Was ${decodedString.length}`
   )
 
   const arr = []
@@ -50,9 +61,10 @@ const readAtMemoryMappedAddress = async function (DA) {
     arr.push(i.toString(16).padStart(2, '0'))
   }
 
-  assert(
+  await debugAdapter.assert(
     arr.join('') == decodedString,
-    () => `Unexpected content of decoded string.\nExpected value: ${arr.join('')}\nSeen value: ${decodedString}`
+    `String contents as expected`,
+    () => `Contents was:\n${decodedString}\nExpected to be:\n${arr.join('')}`
   )
 }
 

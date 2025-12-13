@@ -14,7 +14,15 @@ enum class RemoteType : u8
   GDB
 };
 
+// There's no "normal attach" configuration for RR, since that doesn't make sense. There are no free-running
+// instances of RR replays in the world of MDB. Because we control them directly, locally in the debugger process.
+
 struct PtraceAttachArgs
+{
+  Pid pid;
+};
+
+struct RRAttachArgs
 {
   Pid pid;
 };
@@ -28,10 +36,5 @@ struct GdbRemoteAttachArgs
   RemoteType type;
 };
 
-struct AutoArgs
-{
-  Pid mExistingProcessId;
-};
-
-using AttachArgs = std::variant<PtraceAttachArgs, GdbRemoteAttachArgs, AutoArgs>;
+using AttachArgs = std::variant<PtraceAttachArgs, RRAttachArgs, GdbRemoteAttachArgs>;
 } // namespace mdb

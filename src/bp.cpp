@@ -5,11 +5,12 @@
 #include <common/panic.h>
 #include <events/stop_event.h>
 #include <interface/dap/events.h>
+#include <interface/tracee_command/supervisor_state.h>
 #include <mdbjs/bpjs.h>
 #include <mdbjs/mdbjs.h>
 #include <mdbsys/ptrace.h>
-#include <supervisor.h>
 #include <symbolication/objfile.h>
+#include <task.h>
 #include <tracer.h>
 #include <utils/logger.h>
 
@@ -84,7 +85,7 @@ BreakpointLocation::GetSourceLocationInfo() const noexcept
 }
 
 bool
-BreakpointLocation::RemoveUserOfThis(tc::TraceeCommandInterface &controlInterface, UserBreakpoint &bp) noexcept
+BreakpointLocation::RemoveUserOfThis(tc::SupervisorState &controlInterface, UserBreakpoint &bp) noexcept
 {
   auto it = std::find(mUserMapping.begin(), mUserMapping.end(), &bp);
   if (it == std::end(mUserMapping)) {
@@ -99,7 +100,7 @@ BreakpointLocation::RemoveUserOfThis(tc::TraceeCommandInterface &controlInterfac
 }
 
 void
-BreakpointLocation::Enable(Tid taskId, tc::TraceeCommandInterface &controlInterface) noexcept
+BreakpointLocation::Enable(Tid taskId, tc::SupervisorState &controlInterface) noexcept
 {
   if (mUserMapping.empty()) {
     MDB_ASSERT(!mInstalled, "A breakpoint location, with no users, but is installed?");
@@ -121,7 +122,7 @@ BreakpointLocation::Enable(Tid taskId, tc::TraceeCommandInterface &controlInterf
 }
 
 void
-BreakpointLocation::Disable(Tid taskId, tc::TraceeCommandInterface &controlInterface) noexcept
+BreakpointLocation::Disable(Tid taskId, tc::SupervisorState &controlInterface) noexcept
 {
   if (mInstalled) {
     const auto result = controlInterface.DisableBreakpoint(taskId, *this);
@@ -140,7 +141,7 @@ BreakpointLocation::IsInstalled() const noexcept
 }
 
 void
-BreakpointLocation::AddUser(tc::TraceeCommandInterface &controlInterface, UserBreakpoint &breakpoint) noexcept
+BreakpointLocation::AddUser(tc::SupervisorState &controlInterface, UserBreakpoint &breakpoint) noexcept
 {
   MDB_ASSERT(
     std::none_of(mUserMapping.begin(), mUserMapping.begin(), [&breakpoint](auto v) { return v != &breakpoint; }),
@@ -153,8 +154,8 @@ BreakpointLocation::AddUser(tc::TraceeCommandInterface &controlInterface, UserBr
 }
 
 UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind locationUserKind) noexcept
-    : mProcessId(param.mControl.TaskLeaderTid()), mId(param.mBreakpointId), mTid(param.mTaskId),
-      mKind(locationUserKind), mHitCondition(param.mTimesToHit.value_or(0))
+    : mId(param.mBreakpointId), mTid(param.mTaskId), mKind(locationUserKind),
+      mHitCondition(param.mTimesToHit.value_or(0))
 {
 
   if (param.mBreakpointLocationResult.is_expected()) {
@@ -166,7 +167,7 @@ UserBreakpoint::UserBreakpoint(RequiredUserParameters param, LocationUserKind lo
   }
 
   if (mBreakpointLocation != nullptr) {
-    mBreakpointLocation->AddUser(param.mControl.GetInterface(), *this);
+    mBreakpointLocation->AddUser(param.mControl, *this);
   }
 }
 
@@ -185,7 +186,7 @@ UserBreakpoint::IsEnabledAndInstalled() noexcept
 }
 
 void
-UserBreakpoint::Enable(tc::TraceeCommandInterface &controlInterface) noexcept
+UserBreakpoint::Enable(tc::SupervisorState &controlInterface) noexcept
 {
   if (mEnabledByUser && mBreakpointLocation != nullptr) {
     mEnabledByUser = true;
@@ -194,7 +195,7 @@ UserBreakpoint::Enable(tc::TraceeCommandInterface &controlInterface) noexcept
 }
 
 void
-UserBreakpoint::Disable(tc::TraceeCommandInterface &controlInterface) noexcept
+UserBreakpoint::Disable(tc::SupervisorState &controlInterface) noexcept
 {
   if (mEnabledByUser && mBreakpointLocation != nullptr) {
     mEnabledByUser = false;
@@ -202,18 +203,6 @@ UserBreakpoint::Disable(tc::TraceeCommandInterface &controlInterface) noexcept
       mBreakpointLocation->Disable(controlInterface.TaskLeaderTid(), controlInterface);
     }
   }
-}
-
-Tid
-UserBreakpoint::GetTid() noexcept
-{
-  return mTid;
-}
-
-std::optional<Tid>
-UserBreakpoint::GetProcessId() const noexcept
-{
-  return mProcessId;
 }
 
 std::optional<BreakpointHitEventResult>
@@ -336,7 +325,8 @@ UserBreakpoint::UserProvidedSpec() const noexcept
 
 /* virtual */
 Ref<UserBreakpoint>
-UserBreakpoint::CloneBreakpoint(UserBreakpoints &, TraceeController &, Ref<BreakpointLocation>) noexcept
+UserBreakpoint::CloneBreakpoint(
+  ProcessBreakpointsManager &, tc::SupervisorState &, Ref<BreakpointLocation>) noexcept
 {
   PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
@@ -362,7 +352,7 @@ HookRequestedResume(EventResult result) noexcept
 }
 
 constexpr static BreakpointBehavior
-DetermineBehavior(EventResult evaluationResult, TraceeController &tc) noexcept
+DetermineBehavior(EventResult evaluationResult, tc::SupervisorState &tc) noexcept
 {
   MDB_ASSERT(evaluationResult != EventResult::Resume, "Requires a stop behavior (or default)");
   if (evaluationResult == EventResult::Stop) {
@@ -375,7 +365,7 @@ DetermineBehavior(EventResult evaluationResult, TraceeController &tc) noexcept
 }
 
 BreakpointHitEventResult
-Breakpoint::OnHit(TraceeController &controller, TaskInfo &t) noexcept
+Breakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &t) noexcept
 {
   DBGBUFLOG(control, "[{}:bkpt]: bp {} hit", t.mTid, mId);
   IncrementHitCount();
@@ -387,13 +377,8 @@ Breakpoint::OnHit(TraceeController &controller, TaskInfo &t) noexcept
   };
 
   if (DetermineBehavior(evaluatedResult.mResult, controller) == BreakpointBehavior::StopAllThreadsWhenHit) {
-    const auto all_stopped = controller.IsAllStopped();
-    if (all_stopped) {
-      controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true);
-    } else {
-      controller.StopAllTasks(
-        [&]() { controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true); });
-    }
+    controller.StopAllTasks(
+      [&]() { controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true); });
   } else {
     controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, false);
   }
@@ -407,8 +392,8 @@ Breakpoint::UserProvidedSpec() const noexcept
 }
 
 Ref<UserBreakpoint>
-Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage,
-  TraceeController &controller,
+Breakpoint::CloneBreakpoint(ProcessBreakpointsManager &breakpointStorage,
+  tc::SupervisorState &supervisor,
   Ref<BreakpointLocation> breakpointLocation) noexcept
 {
 
@@ -416,7 +401,7 @@ Breakpoint::CloneBreakpoint(UserBreakpoints &breakpointStorage,
                                                   .mBreakpointId = breakpointStorage.NewBreakpointId(),
                                                   .mBreakpointLocationResult = std::move(breakpointLocation),
                                                   .mTimesToHit = {},
-                                                  .mControl = controller },
+                                                  .mControl = supervisor },
     mKind,
     mBreakpointSpec->Clone());
 
@@ -431,7 +416,7 @@ FinishBreakpoint::FinishBreakpoint(RequiredUserParameters param, Tid stopOnlyTas
 }
 
 BreakpointHitEventResult
-FinishBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
+FinishBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
 {
   if (t.mTid != mStopOnlyTid) {
     return BP_KEEP(Resume);
@@ -455,7 +440,7 @@ CodeInjectionBoundaryBreakpoint::CodeInjectionBoundaryBreakpoint(RequiredUserPar
 }
 
 BreakpointHitEventResult
-CodeInjectionBoundaryBreakpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
+CodeInjectionBoundaryBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
 {
   DBGBUFLOG(control, "Task {} hit code injection boundary breakpoint at {}", t.mTid, Address().value());
   (void)tc;
@@ -469,7 +454,7 @@ ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) no
 }
 
 BreakpointHitEventResult
-ResumeToBreakpoint::OnHit(TraceeController &, TaskInfo &t) noexcept
+ResumeToBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
 {
   if (t.mTid == mStopOnlyTid) {
     DBGBUFLOG(control, "Hit resume_bp_t {}", mId);
@@ -531,14 +516,11 @@ Logpoint::EvaluateLog(TaskInfo &t) noexcept
   if (!mExpression) {
     return;
   }
-
-  auto result = mExpression->EvaluateLog(&t, this);
-  // t.GetSupervisor()->GetDebugAdapterProtocolClient()->PostDapEvent(new ui::dap::OutputEvent{
-  // t.GetSupervisor()->TaskLeaderTid(), "console", std::move(result.value()) });
+  TODO("Evaluate the log fn and post a DAP event with the string contents it produced.");
 }
 
 BreakpointHitEventResult
-Logpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
+Logpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
 {
   TODO("Implement this");
   (void)tc;
@@ -547,29 +529,59 @@ Logpoint::OnHit(TraceeController &tc, TaskInfo &t) noexcept
   return BP_KEEP(Resume);
 }
 
+BreakpointHitEventResult
+InternalBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
+{
+  return mMaintenanceFn();
+}
+
+InternalBreakpoint::InternalBreakpoint(RequiredUserParameters param,
+  std::string_view debugName,
+  std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept
+    : UserBreakpoint(std::move(param), LocationUserKind::Maintenance), mMaintenanceFn(std::move(maintenanceFunc))
+{
+}
+
 SOLoadingBreakpoint::SOLoadingBreakpoint(RequiredUserParameters param) noexcept
     : UserBreakpoint(std::move(param), LocationUserKind::SharedObjectLoaded)
 {
 }
 
 BreakpointHitEventResult
-SOLoadingBreakpoint::OnHit(TraceeController &tc, TaskInfo &) noexcept
+SOLoadingBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &) noexcept
 {
   tc.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints
   return BreakpointHitEventResult{ this, EventResult::Resume, BreakpointOp::Keep };
 }
 
-UserBreakpoints::UserBreakpoints(TraceeController &tc) noexcept : mControl(tc) {}
+/* static */
+SharedPtr<SessionBreakpoints>
+SessionBreakpoints::Create() noexcept
+{
+  return std::make_shared<SessionBreakpoints>();
+}
+
+void
+SessionBreakpoints::Clear() noexcept
+{
+  mUserBreakpoints.clear();
+  mUserBreakpointsAtAddress.clear();
+  mSourceCodeBreakpoints.clear();
+  mFunctionBreakpoints.clear();
+  mInstructionBreakpoints.clear();
+}
+
+ProcessBreakpointsManager::ProcessBreakpointsManager(tc::SupervisorState &tc) noexcept : mControl(tc) {}
 
 u16
-UserBreakpoints::NewBreakpointId() noexcept
+ProcessBreakpointsManager::NewBreakpointId() noexcept
 {
   return Tracer::GenerateNewBreakpointId();
 }
 
 void
-UserBreakpoints::OnProcessExit() noexcept
+ProcessBreakpointsManager::OnProcessExit() noexcept
 {
   for (auto &user : AllUserBreakpoints()) {
     if (user->mBreakpointLocation) {
@@ -588,7 +600,7 @@ UserBreakpoints::OnProcessExit() noexcept
 }
 
 void
-UserBreakpoints::OnExec() noexcept
+ProcessBreakpointsManager::OnExec() noexcept
 {
   for (auto &user : AllUserBreakpoints()) {
     if (user->mBreakpointLocation) {
@@ -603,13 +615,13 @@ UserBreakpoints::OnExec() noexcept
 }
 
 void
-UserBreakpoints::AddBreakpointLocation(const UserBreakpoint &updatedBreakpoint) noexcept
+ProcessBreakpointsManager::AddBreakpointLocation(const UserBreakpoint &updatedBreakpoint) noexcept
 {
   mUserBreakpointsAtAddress[updatedBreakpoint.Address().value()].push_back(updatedBreakpoint.mId);
 }
 
 void
-UserBreakpoints::AddUser(Ref<UserBreakpoint> breakpoint) noexcept
+ProcessBreakpointsManager::AddUser(Ref<UserBreakpoint> breakpoint) noexcept
 {
   if (breakpoint->IsVerified()) {
     AddBreakpointLocation(*breakpoint);
@@ -618,7 +630,7 @@ UserBreakpoints::AddUser(Ref<UserBreakpoint> breakpoint) noexcept
 }
 
 void
-UserBreakpoints::RemoveUserBreakpoint(u32 breakpointId) noexcept
+ProcessBreakpointsManager::RemoveUserBreakpoint(u32 breakpointId) noexcept
 {
   auto bp = mUserBreakpoints.find(breakpointId);
   if (bp == std::end(mUserBreakpoints)) {
@@ -626,14 +638,14 @@ UserBreakpoints::RemoveUserBreakpoint(u32 breakpointId) noexcept
   }
 
   if (bp->second->mBreakpointLocation) {
-    bp->second->mBreakpointLocation->RemoveUserOfThis(mControl.GetInterface(), *bp->second);
+    bp->second->mBreakpointLocation->RemoveUserOfThis(mControl, *bp->second);
   }
 
   mUserBreakpoints.erase(bp);
 }
 
 Ref<BreakpointLocation>
-UserBreakpoints::GetLocationAt(AddrPtr address) noexcept
+ProcessBreakpointsManager::GetLocationAt(AddrPtr address) noexcept
 {
   auto firstUserBreakpointAt = mUserBreakpointsAtAddress.find(address);
   if (firstUserBreakpointAt == std::end(mUserBreakpointsAtAddress)) {
@@ -650,7 +662,7 @@ UserBreakpoints::GetLocationAt(AddrPtr address) noexcept
 }
 
 Ref<UserBreakpoint>
-UserBreakpoints::GetUserBreakpoint(u32 id) const noexcept
+ProcessBreakpointsManager::GetUserBreakpoint(u32 id) const noexcept
 {
   auto it = mUserBreakpoints.find(id);
   if (it == std::end(mUserBreakpoints)) {
@@ -661,7 +673,7 @@ UserBreakpoints::GetUserBreakpoint(u32 id) const noexcept
 }
 
 std::vector<Ref<UserBreakpoint>>
-UserBreakpoints::AllUserBreakpoints() const noexcept
+ProcessBreakpointsManager::AllUserBreakpoints() const noexcept
 {
   std::vector<Ref<UserBreakpoint>> result{};
   result.reserve(mUserBreakpoints.size());
@@ -673,7 +685,7 @@ UserBreakpoints::AllUserBreakpoints() const noexcept
 }
 
 std::vector<Ref<UserBreakpoint>>
-UserBreakpoints::GetNonVerified() const noexcept
+ProcessBreakpointsManager::GetNonVerified() const noexcept
 {
   std::vector<Ref<UserBreakpoint>> result;
   for (const auto &[id, bp] : mUserBreakpoints) {
@@ -685,20 +697,20 @@ UserBreakpoints::GetNonVerified() const noexcept
   return result;
 }
 
-UserBreakpoints::SourceFileBreakpointMap &
-UserBreakpoints::GetBreakpointsFromSourceFile(const SourceCodeFileName &sourceCodeFileName) noexcept
+SourceFileBreakpointMap &
+ProcessBreakpointsManager::GetBreakpointsFromSourceFile(const SourceCodeFileName &sourceCodeFileName) noexcept
 {
   return mSourceCodeBreakpoints[sourceCodeFileName];
 }
 
-UserBreakpoints::SourceFileBreakpointMap &
-UserBreakpoints::GetBreakpointsFromSourceFile(std::string_view sourceCodeFileName) noexcept
+SourceFileBreakpointMap &
+ProcessBreakpointsManager::GetBreakpointsFromSourceFile(std::string_view sourceCodeFileName) noexcept
 {
   return mSourceCodeBreakpoints[std::string{ sourceCodeFileName }];
 }
 
 std::vector<std::string_view>
-UserBreakpoints::GetSourceFilesWithBreakpointSpecs() const noexcept
+ProcessBreakpointsManager::GetSourceFilesWithBreakpointSpecs() const noexcept
 {
   std::vector<std::string_view> result{ 15 };
   result.reserve(mSourceCodeBreakpoints.size());
@@ -710,8 +722,8 @@ UserBreakpoints::GetSourceFilesWithBreakpointSpecs() const noexcept
 
 /* static */
 Expected<Ref<BreakpointLocation>, BreakpointError>
-UserBreakpoints::CreateBreakpointLocation(TraceeController &ctrl, AddrPtr address) noexcept
+ProcessBreakpointsManager::CreateBreakpointLocation(tc::SupervisorState &supervisor, AddrPtr address) noexcept
 {
-  return ctrl.GetOrCreateBreakpointLocation(address);
+  return supervisor.GetOrCreateBreakpointLocation(address);
 }
 } // namespace mdb

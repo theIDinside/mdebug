@@ -1,18 +1,23 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../common.h"
-#include "block.h"
-#include "dwarf_defs.h"
-#include "symbolication/callstack.h"
+#include <common.h>
+
+#include <symbolication/block.h>
+#include <symbolication/callstack.h>
+#include <symbolication/dwarf_defs.h>
 
 namespace mdb {
 struct ElfSection;
 class ObjectFile;
 class SymbolFile;
-class TraceeController;
 class TaskInfo;
 class DwarfBinaryReader;
 class Elf;
+
+namespace tc {
+class SupervisorState;
+}
+
 } // namespace mdb
 
 namespace mdb::sym {
@@ -83,7 +88,7 @@ template <size_t RegCount> struct FrameRegisters
   std::array<u64, RegCount> regs;
 };
 
-using Registers = std::array<Reg, 17>;
+using RegisterRuleTable = std::array<Reg, 17>;
 using RegisterValues = std::array<u64, 17>;
 
 class CFAStateMachine
@@ -91,9 +96,9 @@ class CFAStateMachine
   friend int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
 public:
-  CFAStateMachine(TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
+  CFAStateMachine(tc::SupervisorState &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
 
-  CFAStateMachine(TraceeController &tc,
+  CFAStateMachine(tc::SupervisorState &tc,
     TaskInfo &task,
     const RegisterValues &frame_below,
     UnwindInfoSymbolFilePair cfi,
@@ -101,7 +106,7 @@ public:
   /* Initialization routine for the statemachine - it saves the current task register into the state machine
    * registers. */
   static CFAStateMachine Init(
-    TraceeController &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
+    tc::SupervisorState &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
   u64 ComputeExpression(std::span<const u8> bytes, int frameLevel = -1) noexcept;
   u64 ResolveRegisterContents(
     u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel = -1) noexcept;
@@ -110,11 +115,12 @@ public:
   void RestoreState() noexcept;
 
   const CFA &GetCanonicalFrameAddressData() const noexcept;
-  const Registers &GetRegisters() const noexcept;
+  const RegisterRuleTable &GetRegisters() const noexcept;
   const Reg &GetProgramCounterRegister() const noexcept;
   void Reset(UnwindInfoSymbolFilePair cfi, const RegisterValues &frameBelow, AddrPtr pc) noexcept;
   void Reset(UnwindInfoSymbolFilePair cfi, const FrameUnwindState &belowFrameRegisters, AddrPtr pc) noexcept;
   void SetNoKnownResumeAddress() noexcept;
+  void SetCurrentAsInitialInstructions() noexcept;
   constexpr bool
   KnowsResumeAddress()
   {
@@ -122,15 +128,18 @@ public:
   }
 
 private:
-  TraceeController &mTraceeController;
+  tc::SupervisorState &mSupervisor;
   TaskInfo &mTask;
   AddrPtr mFrameDescriptionEntryPc;
   AddrPtr mEndPc;
   CFA mCanonicalFrameAddressData;
-  Registers mRuleTable;
+  // Represent DWARF 5 standard, page 175: "initial_instructions".
+  RegisterRuleTable mInitialInstructions;
+  // The "current rule table" at a specific location (address)
+  RegisterRuleTable mRuleTable;
   u64 mCanonicalFrameAddressValue;
   bool mResumeAddressUndefined{ false };
-  std::vector<Registers> mRememberedState;
+  std::vector<RegisterRuleTable> mRememberedState;
   std::vector<CFA> mRememberedCFA;
 };
 
@@ -287,12 +296,12 @@ struct UnwinderSymbolFilePair
 class UnwindIterator
 {
 public:
-  UnwindIterator(TraceeController *tc, AddrPtr firstPc) noexcept;
+  UnwindIterator(tc::SupervisorState *tc, AddrPtr firstPc) noexcept;
   std::optional<UnwindInfoSymbolFilePair> GetInfo(AddrPtr pc) noexcept;
   bool IsNull() const noexcept;
 
 private:
-  TraceeController *mTraceeController;
+  tc::SupervisorState *mSupervisor;
   UnwinderSymbolFilePair mCurrent;
 };
 using CommonInfoEntryCount = u64;

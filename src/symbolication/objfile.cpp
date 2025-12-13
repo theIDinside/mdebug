@@ -1,82 +1,130 @@
 /** LICENSE TEMPLATE */
 #include "objfile.h"
-#include "./dwarf/name_index.h"
-#include "bp.h"
-#include "common.h"
-#include "dwarf/die.h"
-#include "dwarf_attribute_value.h"
-#include "jobs/dwarf_unit_data.h"
-#include "jobs/index_die_names.h"
-#include "supervisor.h"
-#include "symbolication/block.h"
-#include "symbolication/cu_symbol_info.h"
-#include "symbolication/dwarf/lnp.h"
-#include "symbolication/dwarf_defs.h"
-#include "symbolication/dwarf_frameunwinder.h"
-#include "symbolication/elf_symbols.h"
-#include "symbolication/value_visualizer.h"
-#include "type.h"
-#include "utils/enumerator.h"
-#include "utils/logger.h"
-#include "utils/worker_task.h"
-#include "value.h"
+
+// mdb
+#include <bp.h>
+#include <common.h>
+#include <elf.h>
+#include <jobs/dwarf_unit_data.h>
+#include <jobs/index_die_names.h>
+#include <lib/arena_allocator.h>
+#include <symbolication/block.h>
+#include <symbolication/callstack.h>
+#include <symbolication/cu_symbol_info.h>
+#include <symbolication/dwarf/die.h>
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/dwarf/name_index.h>
+#include <symbolication/dwarf/typeread.h>
+#include <symbolication/dwarf_attribute_value.h>
+#include <symbolication/dwarf_defs.h>
+#include <symbolication/dwarf_frameunwinder.h>
+#include <symbolication/elf_symbols.h>
+#include <symbolication/type.h>
+#include <symbolication/value.h>
+#include <symbolication/value_visualizer.h>
+#include <task.h>
+#include <tracer.h>
+#include <utility>
+#include <utils/enumerator.h>
+#include <utils/logger.h>
+#include <utils/scope_defer.h>
+#include <utils/scoped_fd.h>
+#include <utils/worker_task.h>
+
+// std
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <regex>
-#include <symbolication/dwarf/typeread.h>
-#include <task.h>
-#include <tracer.h>
-#include <utility>
-#include <utils/scope_defer.h>
-#include <utils/scoped_fd.h>
+// system
 
-#include <lib/arena_allocator.h>
+static std::string_view
+DynamicEntryTagToString(Elf64_Sxword value)
+{
+  switch (value) {
+  case DT_NULL:
+    return "DT_NULL";
+  case DT_NEEDED:
+    return "DT_NEEDED";
+  case DT_PLTRELSZ:
+    return "DT_PLTRELSZ";
+  case DT_PLTGOT:
+    return "DT_PLTGOT";
+  case DT_HASH:
+    return "DT_HASH";
+  case DT_STRTAB:
+    return "DT_STRTAB";
+  case DT_SYMTAB:
+    return "DT_SYMTAB";
+  case DT_RELA:
+    return "DT_RELA";
+  case DT_RELASZ:
+    return "DT_RELASZ";
+  case DT_RELAENT:
+    return "DT_RELAENT";
+  case DT_STRSZ:
+    return "DT_STRSZ";
+  case DT_SYMENT:
+    return "DT_SYMENT";
+  case DT_INIT:
+    return "DT_INIT";
+  case DT_FINI:
+    return "DT_FINI";
+  case DT_SONAME:
+    return "DT_SONAME";
+  case DT_RPATH:
+    return "DT_RPATH";
+  case DT_SYMBOLIC:
+    return "DT_SYMBOLIC";
+  case DT_REL:
+    return "DT_REL";
+  case DT_RELSZ:
+    return "DT_RELSZ";
+  case DT_RELENT:
+    return "DT_RELENT";
+  case DT_PLTREL:
+    return "DT_PLTREL";
+  case DT_DEBUG:
+    return "DT_DEBUG";
+  case DT_TEXTREL:
+    return "DT_TEXTREL";
+  case DT_JMPREL:
+    return "DT_JMPREL";
+  case DT_BIND_NOW:
+    return "DT_BIND_NOW";
+  case DT_INIT_ARRAY:
+    return "DT_INIT_ARRAY";
+  case DT_FINI_ARRAY:
+    return "DT_FINI_ARRAY";
+  case DT_INIT_ARRAYSZ:
+    return "DT_INIT_ARRAYSZ";
+  case DT_FINI_ARRAYSZ:
+    return "DT_FINI_ARRAYSZ";
+  case DT_RUNPATH:
+    return "DT_RUNPATH";
+  case DT_FLAGS:
+    return "DT_FLAGS";
+  case DT_ENCODING:
+    return "DT_ENCODING | DT_PREINIT_ARRAY";
+    //  case DT_PREINIT_ARRAY: return "DT_PREINIT_ARRAY";
+  case DT_PREINIT_ARRAYSZ:
+    return "DT_PREINIT_ARRAYSZ";
+  case DT_SYMTAB_SHNDX:
+    return "DT_SYMTAB_SHNDX";
+  case DT_RELRSZ:
+    return "DT_RELRSZ";
+  case DT_RELR:
+    return "DT_RELR";
+  case DT_RELRENT:
+    return "DT_RELRENT";
+  case DT_NUM:
+    return "DT_NUM";
+  }
+  return "Not supported dynamic entry type";
+}
+
 namespace mdb {
 template <typename T> using Set = std::unordered_set<T>;
-ParsedAuxiliaryVector
-ParsedAuxiliaryVectorData(const tc::Auxv &aux, ParseAuxiliaryOptions options) noexcept
-{
-  ParsedAuxiliaryVector result;
-  ParseAuxiliaryOptions found;
-  for (const auto [id, value] : aux.mContents) {
-    switch (id) {
-    case AT_PHDR:
-      result.mProgramHeaderPointer = value;
-      break;
-    case AT_PHENT:
-      result.mProgramHeaderEntrySize = value;
-      break;
-    case AT_PHNUM:
-      result.mProgramHeaderCount = value;
-      break;
-    case AT_BASE:
-      result.mInterpreterBaseAddress = value;
-      found.requiresInterpreterBase = true;
-      break;
-    case AT_ENTRY:
-      result.mEntry = value;
-      found.requireEntry = true;
-      break;
-    }
-  }
-
-  DBGLOG(core,
-    "Auxiliary Vector: {{ interpreter: {}, program entry: {}, program headers: {} }}",
-    result.mInterpreterBaseAddress,
-    result.mEntry,
-    result.mProgramHeaderPointer);
-
-  if (options.requiresInterpreterBase) {
-    VERIFY(found.requiresInterpreterBase, "Could not find interpreter base in aux vector");
-  }
-
-  if (options.requireEntry) {
-    VERIFY(found.requireEntry, "Could not find entry address in aux vector");
-  }
-
-  return result;
-}
 
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
     : mObjectFilePath(std::move(p)), mObjectFileId(std::move(objfile_id)), mSize(size),
@@ -161,14 +209,24 @@ ObjectFile::GetTypeStorage() noexcept
 }
 
 std::optional<MinSymbol>
-ObjectFile::FindMinimalFunctionSymbol(std::string_view name) noexcept
+ObjectFile::FindMinimalFunctionSymbol(std::string_view name, bool searchDynamic) noexcept
 {
-  if (mMinimalFunctionSymbols.contains(name)) {
-    auto &index = mMinimalFunctionSymbols[name];
-    if (const auto symbol = mMinimalFunctionSymbolsSorted[index]; symbol.maybe_size > 0) {
+  for (const auto &symbol : mMinimalFunctionSymbolsSorted) {
+    if (symbol.name.contains(name)) {
+      DBGLOG(core, "Returning symbol that contains name '{}': {}", name, symbol.name);
       return symbol;
     }
   }
+
+  if (searchDynamic) {
+    for (const auto &symbol : mMinimalDynamicFunctionSymbolsSorted) {
+      if (symbol.name.contains(name)) {
+        DBGLOG(core, "Returning symbol that contains name '{}': {}", name, symbol.name);
+        return symbol;
+      }
+    }
+  }
+
   return std::nullopt;
 }
 
@@ -505,19 +563,51 @@ ObjectFile::InitializeDebugSymbolInfo() noexcept
 }
 
 void
-ObjectFile::AddMinimalElfSymbols(
-  std::vector<MinSymbol> &&fn_symbols, std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept
+ObjectFile::ParseELFSymbols(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept
 {
-  mMinimalFunctionSymbolsSorted = std::move(fn_symbols);
-  mMinimalObjectSymbols = std::move(obj_symbols);
-  InitializeMinimalSymbolLookup();
-}
+  elf = new Elf{ header, std::move(sections) };
 
-void
-ObjectFile::InitializeMinimalSymbolLookup() noexcept
-{
-  for (const auto &[index, sym] : mdb::EnumerateView(mMinimalFunctionSymbolsSorted)) {
-    mMinimalFunctionSymbols[sym.name] = Index{ static_cast<u32>(index) };
+  const auto parseSymbols = [this](ElfSec stringTable,
+                              ElfSec symbolTable,
+                              std::vector<MinSymbol> &fnSymbols,
+                              std::unordered_map<std::string_view, MinSymbol> &objectSymbols) {
+    auto strtab = elf->GetSection(stringTable);
+    const auto sec = elf->GetSection(symbolTable);
+
+    if (strtab && sec) {
+      auto symbols = sec->GetDataAs<Elf64_Sym>();
+      for (auto &symbol : symbols) {
+        if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
+          const std::string_view name = strtab->GetCString(symbol.st_name);
+          fnSymbols.emplace_back(name, AddrPtr{ symbol.st_value }, u64{ symbol.st_size });
+        } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
+          const std::string_view name = strtab->GetCString(symbol.st_name);
+          objectSymbols[name] =
+            MinSymbol{ .name = name, .address = symbol.st_value, .maybe_size = symbol.st_size };
+        }
+      }
+      // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
+      constexpr auto cmp = [](const auto &a, const auto &b) -> bool { return a.address < b.address; };
+      std::sort(fnSymbols.begin(), fnSymbols.end(), cmp);
+    } else {
+      DBGLOG(core, "[warning]: No .symtab for {}", GetPathString());
+    }
+  };
+
+  parseSymbols(ElfSec::StringTable, ElfSec::SymbolTable, mMinimalFunctionSymbolsSorted, mMinimalObjectSymbols);
+
+  parseSymbols(ElfSec::DynamicStringTable,
+    ElfSec::DynamicSymbolTable,
+    mMinimalDynamicFunctionSymbolsSorted,
+    mMinimalDynamicObjectSymbols);
+
+  // Initialize minimal symbols so they can be looked up in a hashmap
+  for (const auto &[index, sym] : Enumerate<u32>(mMinimalFunctionSymbolsSorted)) {
+    mMinimalFunctionSymbols[sym.name] = Index{ index };
+  }
+
+  for (const auto &[index, sym] : Enumerate(mMinimalDynamicFunctionSymbolsSorted)) {
+    mMinimalDynamicFunctionSymbols[sym.name] = Index{ static_cast<u32>(index) };
   }
 }
 
@@ -572,7 +662,7 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
 }
 
 ObjectFile *
-mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
+mmap_objectfile(const tc::SupervisorState &tc, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -588,7 +678,7 @@ mmap_objectfile(const TraceeController &tc, const Path &path) noexcept
 
 /* static */
 std::shared_ptr<ObjectFile>
-ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
+ObjectFile::CreateObjectFile(tc::SupervisorState *tc, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -639,8 +729,8 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
     });
   }
   // ObjectFile is the owner of `Elf`
-  objfile->elf = new Elf{ header, std::move(sectionData) };
-  Elf::ParseMinimalSymbol(objfile->elf, *objfile);
+  objfile->ParseELFSymbols(header, std::move(sectionData));
+
   auto unwinder = sym::ParseExceptionHeaderSection(objfile.get(), objfile->elf->GetSection(".eh_frame"));
   if (unwinder) {
     objfile->unwinder = std::move(unwinder);
@@ -665,8 +755,10 @@ ObjectFile::CreateObjectFile(TraceeController *tc, const Path &path) noexcept
   return objfile;
 }
 
-SymbolFile::SymbolFile(
-  TraceeController *tc, std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
+SymbolFile::SymbolFile(tc::SupervisorState *tc,
+  std::string obj_id,
+  std::shared_ptr<ObjectFile> &&binary,
+  AddrPtr relocated_base) noexcept
     : mObjectFile(std::move(binary)), mTraceeController(tc), mSymbolObjectFileId(std::move(obj_id)),
       mBaseAddress(relocated_base),
       mPcBounds(AddressRange::relocate(mObjectFile->mUnrelocatedAddressBounds, relocated_base))
@@ -674,7 +766,7 @@ SymbolFile::SymbolFile(
 }
 
 SymbolFile::shr_ptr
-SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
+SymbolFile::Create(tc::SupervisorState *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
 {
   MDB_ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
@@ -683,7 +775,7 @@ SymbolFile::Create(TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, A
 }
 
 auto
-SymbolFile::Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
+SymbolFile::Copy(tc::SupervisorState &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
   auto obj = mObjectFile;
   return SymbolFile::Create(&tc, std::move(obj), relocated_base);
@@ -709,7 +801,13 @@ SymbolFile::UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr
 }
 
 auto
-SymbolFile::GetVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+SymbolFile::GetLocals(tc::SupervisorState &tc, sym::Frame &frame) noexcept -> std::vector<Ref<sym::Value>>
+{
+  return GetVariables(tc, frame, sym::VariableSet::Locals);
+}
+
+auto
+SymbolFile::GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::VariableSet set) noexcept
   -> std::vector<Ref<sym::Value>>
 {
   auto symbolInformation = frame.MaybeGetFullSymbolInfo();
@@ -849,7 +947,7 @@ SymbolFile::GetObjectFilePath() const noexcept -> Path
 }
 
 auto
-SymbolFile::GetSupervisor() noexcept -> TraceeController *
+SymbolFile::GetSupervisor() noexcept -> tc::SupervisorState *
 {
   return mTraceeController;
 }
@@ -928,7 +1026,7 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
 }
 
 auto
-SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, TraceeController &tc, sym::Frame &frame) noexcept
+SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, tc::SupervisorState &tc, sym::Frame &frame) noexcept
   -> std::vector<Ref<sym::Value>>
 {
   PROFILE_SCOPE("SymbolFile::GetVariables", logging::kSymbolication);

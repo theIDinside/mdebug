@@ -97,6 +97,7 @@ Elf::Elf(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept
       mDebugLoclist{ nullptr }
 {
   mStrTable = GetSection(ElfSec::StringTable);
+  mDynStrTable = GetSection(ElfSec::DynamicStringTable);
   mDebugInfo = GetSection(ElfSec::DebugInfo);
   mDebugAbbrev = GetSection(ElfSec::DebugAbbrev);
   mDebugStr = GetSection(ElfSec::DebugStr);
@@ -173,36 +174,4 @@ Elf::AddressesNeedsRelocation() const noexcept
   return mElfHeader->e_type == ET_DYN;
 }
 
-/* static */
-void
-Elf::ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept
-{
-  if (auto strtab = elf->GetSection(ElfSec::StringTable); !strtab) {
-    return;
-  }
-
-  std::vector<MinSymbol> elfFunctionSymbols{};
-  std::unordered_map<std::string_view, MinSymbol> elfObjectSymbols{};
-
-  if (const auto sec = elf->GetSection(ElfSec::SymbolTable); sec) {
-    auto symbols = sec->GetDataAs<Elf64_Sym>();
-    for (auto &symbol : symbols) {
-      if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
-        std::string_view name = elf->mStrTable->GetCString(symbol.st_name);
-        const auto res = MinSymbol{ .name = name, .address = symbol.st_value, .maybe_size = symbol.st_size };
-        elfFunctionSymbols.push_back(res);
-      } else if (ELF64_ST_TYPE(symbol.st_info) == STT_OBJECT) {
-        std::string_view name = elf->mStrTable->GetCString(symbol.st_name);
-        elfObjectSymbols[name] =
-          MinSymbol{ .name = name, .address = symbol.st_value, .maybe_size = symbol.st_size };
-      }
-    }
-    // TODO(simon): Again; sorting after insertion may not be as good as actually sorting while inserting.
-    const auto cmp = [](const auto &a, const auto &b) -> bool { return a.address < b.address; };
-    std::sort(elfFunctionSymbols.begin(), elfFunctionSymbols.end(), cmp);
-    objectFile.AddMinimalElfSymbols(std::move(elfFunctionSymbols), std::move(elfObjectSymbols));
-  } else {
-    DBGLOG(core, "[warning]: No .symtab for {}", objectFile.GetPathString());
-  }
-}
 } // namespace mdb

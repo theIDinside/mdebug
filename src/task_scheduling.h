@@ -1,25 +1,29 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "bp.h"
-#include "interface/dap/dap_defs.h"
-#include "interface/tracee_command/tracee_command_interface.h"
-#include "symbolication/dwarf/lnp.h"
-#include "utils/smartptr.h"
-#include <symbolication/callstack.h>
+// mdb
+#include <bp.h>
+#include <interface/dap/dap_defs.h>
+#include <symbolication/dwarf/lnp.h>
+#include <utils/smartptr.h>
+
+// std
 #include <unordered_map>
 
 namespace mdb {
-class TraceeController;
 struct BpStat;
 class TaskInfo;
 struct TraceEvent;
 } // namespace mdb
 
 namespace mdb::tc {
-class TraceeCommandInterface;
+class SupervisorState;
 struct ProcessedStopEvent;
 } // namespace mdb::tc
+
+namespace mdb::sym {
+class Frame;
+}
 
 namespace mdb {
 namespace ptracestop {
@@ -29,7 +33,7 @@ class StopHandler;
 class ThreadProceedAction
 {
 public:
-  ThreadProceedAction(TraceeController &ctrl, TaskInfo &task) noexcept;
+  ThreadProceedAction(tc::SupervisorState &ctrl, TaskInfo &task) noexcept;
   virtual void cancel() noexcept;
 
   // Abstract Interface
@@ -39,8 +43,7 @@ public:
   virtual void UpdateStepped() noexcept = 0;
 
 protected:
-  tc::TraceeCommandInterface &mControlInterface;
-  TraceeController &mSupervisor;
+  tc::SupervisorState &mSupervisor;
   TaskInfo &mTask;
   bool mIsCancelled;
 };
@@ -50,7 +53,7 @@ protected:
 class StopImmediately : public ThreadProceedAction
 {
 public:
-  StopImmediately(TraceeController &control, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
+  StopImmediately(tc::SupervisorState &control, TaskInfo &task, ui::dap::StoppedReason reason) noexcept;
   ~StopImmediately() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -64,7 +67,7 @@ private:
 class InstructionStep : public ThreadProceedAction
 {
 public:
-  InstructionStep(TraceeController &ctrl, TaskInfo &task, int steps) noexcept;
+  InstructionStep(tc::SupervisorState &ctrl, TaskInfo &task, int steps) noexcept;
   ~InstructionStep() override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -78,7 +81,7 @@ private:
 class LineStep : public ThreadProceedAction
 {
 public:
-  LineStep(TraceeController &ctrl, TaskInfo &task) noexcept;
+  LineStep(tc::SupervisorState &ctrl, TaskInfo &task) noexcept;
   ~LineStep() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -91,7 +94,7 @@ private:
 
   bool mIsDone;
   bool mResumedToReturnAddress;
-  sym::Frame mStartFrame;
+  sym::Frame *mStartFrame;
   sym::dw::LineTableEntry mLineEntry;
   Ref<UserBreakpoint> mPotentialBreakpointAtReturnAddress{ nullptr };
 };
@@ -99,7 +102,7 @@ private:
 class FinishFunction : public ThreadProceedAction
 {
 public:
-  FinishFunction(TraceeController &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp) noexcept;
+  FinishFunction(tc::SupervisorState &ctrl, TaskInfo &t, Ref<UserBreakpoint> bp) noexcept;
   ~FinishFunction() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -109,32 +112,17 @@ private:
   Ref<UserBreakpoint> mBreakpointAtReturnAddress;
 };
 
-class StopHandler
-{
-public:
-  StopHandler(TraceeController &tc) noexcept;
-  virtual ~StopHandler() = default;
-  std::shared_ptr<ThreadProceedAction> GetProceedAction(const TaskInfo &t) noexcept;
-  void RemoveProceedAction(const TaskInfo &t) noexcept;
-  void DecideProceedFor(TaskInfo &info, const tc::ProcessedStopEvent &should_resume) noexcept;
-  TraceEvent *CreateTraceEventFromWaitStatus(TaskInfo &info) noexcept;
-
-  TraceeController &tc;
-
-private:
-  // native_ because it's generated from a WaitStatus event (and thus comes directly from ptrace, not a remote)
-  TraceEvent *CreateTraceEventFromStopped(TaskInfo &t) noexcept;
-  std::unordered_map<Tid, std::shared_ptr<ThreadProceedAction>> mTaskProceedActions;
-};
-
 class StepInto final : public ThreadProceedAction
 {
-  sym::Frame mStartFrame;
+  sym::Frame *mStartFrame;
   sym::dw::LineTableEntry mStartingLineEntry;
   bool mIsDone{ false };
 
 public:
-  StepInto(TraceeController &ctrl, TaskInfo &task, sym::Frame start_frame, sym::dw::LineTableEntry entry) noexcept;
+  StepInto(tc::SupervisorState &ctrl,
+    TaskInfo &task,
+    const sym::Frame &start_frame,
+    sym::dw::LineTableEntry entry) noexcept;
   ~StepInto() noexcept final;
   bool HasCompleted(bool was_stopped) const noexcept final;
   void Proceed() noexcept final;
@@ -142,7 +130,7 @@ public:
   bool IsInsideOriginFrame(const sym::Frame &f) const noexcept;
   bool IsOriginLine(u32 line) const noexcept;
 
-  static std::shared_ptr<StepInto> Create(TraceeController &ctrl, TaskInfo &task) noexcept;
+  static std::shared_ptr<StepInto> Create(tc::SupervisorState &ctrl, TaskInfo &task) noexcept;
 };
 
 } // namespace ptracestop
@@ -158,7 +146,7 @@ enum class SchedulingConfig
 
 class TaskScheduler
 {
-  TraceeController *mSupervisor;
+  tc::SupervisorState *mSupervisor;
   SchedulingConfig mScheduling;
   std::optional<Tid> mExclusiveTask;
   std::unordered_map<Tid, std::shared_ptr<Proceed>> mIndividualScheduler{};
@@ -166,7 +154,7 @@ class TaskScheduler
   void RemoveAllIndividualSchedulers(std::optional<Tid> keep = {}) noexcept;
 
 public:
-  TaskScheduler(TraceeController *supervisor) noexcept;
+  TaskScheduler(tc::SupervisorState *supervisor) noexcept;
   ~TaskScheduler() noexcept = default;
   bool SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualScheduler, bool resume) noexcept;
   void Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;

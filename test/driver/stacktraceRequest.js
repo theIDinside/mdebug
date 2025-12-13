@@ -85,11 +85,21 @@ async function verifyFrameIs(debugAdapter, frame, name) {
   await debugAdapter.assert(frame.name == name, `Expected frame ${name} but got ${frame.name}`)
 }
 
+function adjustPIEMainExecutableAddress(programCounterString) {
+  const addrNumber = Number.parseInt(programCounterString, 16)
+  // if addr is low, this system most likely creates PIE's for most things.
+  // add the most common base-addr (0x555555554000) to the address to test this feature here.
+  if (addrNumber < 0x20000) {
+    return `0x${(addrNumber + 0x555555554000).toString(16)}`
+  }
+  return programCounterString
+}
+
 /** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function insidePrologueTest(debugAdapter) {
   const { prologue, epilogue } = await parsePrologueAndEpilogue(debugAdapter)
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), seconds(1))
-  await debugAdapter.setInsBreakpoint(prologue)
+  await debugAdapter.setInsBreakpoint(adjustPIEMainExecutableAddress(prologue))
   await debugAdapter.contNextStop()
   const frames = await debugAdapter
     .stackTrace()
@@ -114,13 +124,15 @@ async function insidePrologueTest(debugAdapter) {
   await verifyFrameIs(debugAdapter, frames[0], 'bar')
   await verifyFrameIs(debugAdapter, frames[1], 'foo')
   await verifyFrameIs(debugAdapter, frames[2], 'main')
+  await debugAdapter.disconnect('terminate', 1000)
+  debugAdapter.exit()
 }
 
 /** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function insideEpilogueTest(debugAdapter) {
   const { prologue, epilogue } = await parsePrologueAndEpilogue(debugAdapter)
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), seconds(1))
-  await debugAdapter.setInsBreakpoint(epilogue)
+  await debugAdapter.setInsBreakpoint(adjustPIEMainExecutableAddress(epilogue))
   await debugAdapter.contNextStop()
   const frames = await debugAdapter
     .stackTrace()
@@ -198,29 +210,27 @@ async function normalTest(debugAdapter) {
   const threads = await debugAdapter.threads()
   {
     const frames = await debugAdapter
-      .stackTrace(threads[0].id)
+      .stackTraceRequest({ threadId: threads[0].id })
       .then(({ response_seq, command, type, success, body: { stackFrames } }) => {
         checkResponse({ type, success, command }, 'stackTrace', true)
         return stackFrames
       })
     await debugAdapter.assert(
       frames.length == 4,
-      () =>
-        `We're exactly at the start of the first instruction of main - expecting only 1 frame but got ${
-          frames.length
-        }: ${prettyJson(frames)}`
+      () => `Expecting 4 frames`,
+      `Got ${frames.length} - Stacktrace:\n ${prettyJson(frames)}`
     )
 
     const scopes = []
     for (const frame of frames) {
-      scopes.push(await debugAdapter.sendReqGetResponse('scopes', { frameId: frame.id }))
+      scopes.push(await debugAdapter.scopesRequest({ frameId: frame.id }))
     }
     if (scopes.length != frames.length) throw new Error(`Expected ${frames.length} scopes but got ${scopes.length}`)
   }
   const total = 5
   for (let i = total; i < 9; i++) {
-    await debugAdapter.sendReqWaitEvent('continue', { threadId: threads[0].id }, 'stopped', seconds(1))
-    await debugAdapter.stackTrace(threads[0].id).then(async (res) => {
+    await debugAdapter.contNextStop(threads[0].id)
+    await debugAdapter.stackTraceRequest({ threadId: threads[0].id }).then(async (res) => {
       checkResponse(res, 'stackTrace', true)
       const { stackFrames } = res.body
       if (stackFrames.length != i) {
@@ -232,10 +242,8 @@ async function normalTest(debugAdapter) {
       for (const idx in stackFrames) {
         await debugAdapter.assert(
           stackFrames[idx].line == expectedStackTraces[i - total][idx].line,
-          () =>
-            `Expected line to be at ${expectedStackTraces[i - total][idx].line} but was ${
-              stackFrames[idx].line
-            }: ${prettyJson(stackFrames)}`
+          () => `Expected line to be at ${expectedStackTraces[i - total][idx].line}`,
+          `Was at ${stackFrames[idx].line} - Stacktrace:\n ${prettyJson(stackFrames)}`
         )
         if (
           stackFrames[idx].name != expectedStackTraces[i - total][idx].name &&
@@ -243,9 +251,8 @@ async function normalTest(debugAdapter) {
         ) {
           await debugAdapter.assert(
             false,
-            `Expected name to be ${expectedStackTraces[i - total][idx].name} but was ${
-              stackFrames[idx].name
-            }: ${prettyJson(stackFrames)}`
+            `Expected name to be ${expectedStackTraces[i - total][idx].name}`,
+            `Was at ${stackFrames[idx].name} - Stacktrace:\n ${prettyJson(stackFrames)}`
           )
         }
       }
@@ -259,7 +266,7 @@ function* walk_expected_frames(frames) {
 
 /** @param { import("./client").DebugAdapterClient } debugAdapter */
 async function unwindWithDwarfExpression(debugAdapter) {
-  const printf_plt_addr = getPrintfPlt(debugAdapter, 'next')
+  const printf_plt_addr = adjustPIEMainExecutableAddress(getPrintfPlt(debugAdapter, 'next'))
   console.log(`printf@plt address: ${printf_plt_addr}`)
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('next'), seconds(1))
   await debugAdapter

@@ -8,9 +8,9 @@
 #include <interface/dap/commands.h>
 #include <interface/dap/events.h>
 #include <interface/dap/parse_buffer.h>
+#include <interface/tracee_command/supervisor_state.h>
 #include <interface/ui_result.h>
 #include <lib/arena_allocator.h>
-#include <supervisor.h>
 #include <tracer.h>
 #include <utils/signals.h>
 
@@ -36,8 +36,8 @@ using namespace std::string_literals;
 void
 AtExit() noexcept
 {
-  if (DebugAdapterClient::gSocketPath) {
-    unlink(DebugAdapterClient::gSocketPath);
+  if (DebugAdapterManager::gSocketPath) {
+    unlink(DebugAdapterManager::gSocketPath);
   }
 }
 
@@ -96,7 +96,7 @@ static constexpr std::string_view strings[]{
 };
 */
 
-DapEventSystem::DapEventSystem(DebugAdapterClient *client) noexcept
+DapEventSystem::DapEventSystem(DebugAdapterManager *client) noexcept
     : mClient(client), mWriteFileDescriptor(client->WriteFileDescriptor()), mUIResultLock{}, mEventsQueue{}
 {
   auto [r, w] = mdb::Notifier::notify_pipe();
@@ -135,7 +135,7 @@ DapEventSystem::WriteProtocolMessage(std::string_view msg) noexcept
 }
 
 void
-DapEventSystem::SetClient(DebugAdapterClient *client) noexcept
+DapEventSystem::SetClient(DebugAdapterManager *client) noexcept
 {
   mClient = client;
 }
@@ -145,7 +145,7 @@ DapEventSystem::StartIOPolling(std::stop_token &token) noexcept
 {
   mdb::ScopedBlockedSignals blocked_sigs{ std::array{ SIGCHLD } };
   // TODO: Implement support to spawn the DAP client for a socket etc, instead of stdio
-  SetClient(DebugAdapterClient::CreateStandardIOConnection());
+  Tracer::SetDebugAdapterManager(mClient);
 
   PollState state{};
   while (!token.stop_requested()) {
@@ -214,7 +214,7 @@ DapEventSystem::Poll(PollState &state) noexcept
 }
 
 void
-DebugAdapterClient::ReadPendingCommands() noexcept
+DebugAdapterManager::ReadPendingCommands() noexcept
 {
   MDB_ASSERT(mReadFd != -1, "file descriptor for reading commands invalid: {}", mReadFd);
   if (!mParseSwapBuffer.expect_read_from_fd(mReadFd)) {
@@ -267,7 +267,7 @@ SetNonBlocking(int fd)
 }
 
 void
-DebugAdapterClient::SetTtyOut(int fd, SessionId pid) noexcept
+DebugAdapterManager::SetTtyOut(int fd, SessionId pid) noexcept
 {
   MDB_ASSERT(mTtyFileDescriptor == -1, "TTY fd was already set!");
   mTtyFileDescriptor = fd;
@@ -277,7 +277,7 @@ DebugAdapterClient::SetTtyOut(int fd, SessionId pid) noexcept
 }
 
 std::optional<int>
-DebugAdapterClient::GetTtyFileDescriptor() const noexcept
+DebugAdapterManager::GetTtyFileDescriptor() const noexcept
 {
   if (mTtyFileDescriptor != -1) {
     return mTtyFileDescriptor;
@@ -285,44 +285,50 @@ DebugAdapterClient::GetTtyFileDescriptor() const noexcept
   return {};
 }
 
-TraceeController *
-DebugAdapterClient::GetSupervisor(SessionId sessionId) const noexcept
+DebugAdapterSession *
+DebugAdapterManager::GetSession(SessionId sessionId) const noexcept
 {
-  for (const auto entry : mSupervisors) {
-    if (entry.mSupervisorId == sessionId) {
-      return entry.mSupervisor;
+  for (const auto &entry : mSessions) {
+    if (entry->GetId() == sessionId) {
+      return entry.get();
     }
   }
-  return nullptr;
+  [[unlikely]] return nullptr;
 }
 
-std::span<const SupervisorEntry>
-DebugAdapterClient::Supervisors() const noexcept
+std::span<UniquePtr<DebugAdapterSession>>
+DebugAdapterManager::Sessions() noexcept
 {
-  return mSupervisors;
+  return mSessions;
 }
 
 void
-DebugAdapterClient::SetDebugAdapterSessionType(DapClientSession type) noexcept
+DebugAdapterManager::SetDebugAdapterSessionType(DapClientSession type) noexcept
 {
   mSessionType = type;
 }
 
 bool
-DebugAdapterClient::IsClosed() noexcept
+DebugAdapterManager::IsClosed() noexcept
 {
   return mReadFd == -1;
 }
 
 void
-DebugAdapterClient::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
+DebugAdapterManager::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
 {
   std::lock_guard lock(m);
   mDelayedEvents.push_back(delayedEvent);
 }
 
 void
-DebugAdapterClient::FlushEvents() noexcept
+DebugAdapterManager::InitializeSession(SessionId sessionId) noexcept
+{
+  mSessions.push_back(std::make_unique<DebugAdapterSession>(sessionId));
+}
+
+void
+DebugAdapterManager::FlushEvents() noexcept
 {
   if (mDelayedEvents.empty()) {
     return;
@@ -370,7 +376,7 @@ DapEventSystem::CleanUp() noexcept
   FlushEvents();
 }
 
-DebugAdapterClient *
+DebugAdapterManager *
 DapEventSystem::Get() const noexcept
 {
   return mClient;
@@ -388,8 +394,53 @@ DapEventSystem::ConfigureTty(int master_pty_fd) noexcept
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
+DebugAdapterSession::DebugAdapterSession(SessionId sessionId) noexcept : mSessionId(sessionId) {}
+
+bool
+DebugAdapterSession::HasAttachedOrLaunched() const noexcept
+{
+  return mSupervisor != nullptr;
+}
+
 void
-DebugAdapterClient::InitAllocators() noexcept
+DebugAdapterSession::OnCreatedSupervisor(NonNullPtr<tc::SupervisorState> supervisor) noexcept
+{
+  DBGBUFLOG(core,
+    "Created supervisor for session {}, run {} post-poned requests",
+    mSessionId,
+    mOnSessionFirstStart.size());
+  mSupervisor = supervisor;
+  mSupervisor->SetSessionId(mSessionId);
+  for (const auto &cb : mOnSessionFirstStart) {
+    cb(*supervisor);
+  }
+  Tracer::Get().GetDap()->FlushEvents();
+}
+
+void
+DebugAdapterSession::OnSessionConfiguredWithSupervisor(
+  std::function<void(tc::SupervisorState &)> callback) noexcept
+{
+  mOnSessionFirstStart.push_back(std::move(callback));
+}
+
+bool
+DebugAdapterSession::ConfigurationDone() noexcept
+{
+  if (mConfigurationDone) {
+    return false;
+  }
+
+  mConfigurationDone = true;
+
+  if (mSupervisor) {
+    mSupervisor->ConfigurationDone();
+  }
+  return true;
+}
+
+void
+DebugAdapterManager::InitAllocators() noexcept
 {
   using alloc::ArenaResource;
   using alloc::Page;
@@ -403,14 +454,14 @@ DebugAdapterClient::InitAllocators() noexcept
   }
 }
 
-DebugAdapterClient::DebugAdapterClient(
+DebugAdapterManager::DebugAdapterManager(
   DapClientSession type, int readFileDescriptor, int writeFileDescriptor) noexcept
     : mReadFd(readFileDescriptor), mWriteFd(writeFileDescriptor), mSessionType(type)
 {
   InitAllocators();
 }
 
-DebugAdapterClient::~DebugAdapterClient() noexcept
+DebugAdapterManager::~DebugAdapterManager() noexcept
 {
   if (fs::exists(gSocketPath)) {
     unlink(gSocketPath);
@@ -422,27 +473,27 @@ DebugAdapterClient::~DebugAdapterClient() noexcept
 }
 
 alloc::ArenaResource *
-DebugAdapterClient::GetCommandArenaAllocator() noexcept
+DebugAdapterManager::GetCommandArenaAllocator() noexcept
 {
   return mCommandsAllocator.get();
 }
 
 alloc::ArenaResource *
-DebugAdapterClient::GetResponseArenaAllocator() noexcept
+DebugAdapterManager::GetResponseArenaAllocator() noexcept
 {
   return mCommandResponseAllocator.get();
 }
 
-DebugAdapterClient *
-DebugAdapterClient::CreateStandardIOConnection() noexcept
+DebugAdapterManager *
+DebugAdapterManager::CreateStandardIOConnection() noexcept
 {
   VERIFY(SetNonBlocking(STDIN_FILENO), "Failed to set STDIN to non-blocking. Use a socket instead?");
-  return new DebugAdapterClient{ DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO };
+  return new DebugAdapterManager{ DapClientSession::Launch, STDIN_FILENO, STDOUT_FILENO };
 }
 
 /* static */
-DebugAdapterClient *
-DebugAdapterClient::CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept
+DebugAdapterManager *
+DebugAdapterManager::CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept
 {
   bool DoCleanup = false;
   int serverFd = -1;
@@ -505,7 +556,7 @@ DebugAdapterClient::CreateSocketConnection(const char *socketPath, int acceptTim
       ERR_RET(true, "Failed to set non-blocking for connected client file descriptor");
     }
 
-    return new DebugAdapterClient{ DapClientSession::Launch, connectedClientFd, connectedClientFd };
+    return new DebugAdapterManager{ DapClientSession::Launch, connectedClientFd, connectedClientFd };
   }
 
   return nullptr;
@@ -513,7 +564,7 @@ DebugAdapterClient::CreateSocketConnection(const char *socketPath, int acceptTim
 }
 
 std::unique_ptr<alloc::ScopedArenaAllocator>
-DebugAdapterClient::AcquireArena() noexcept
+DebugAdapterManager::AcquireArena() noexcept
 {
   MDB_ASSERT(!mCommandAllocatorPool.empty(), "No more allocators to take from the pool");
   auto alloc = mCommandAllocatorPool.back();
@@ -522,26 +573,16 @@ DebugAdapterClient::AcquireArena() noexcept
 }
 
 void
-DebugAdapterClient::AddSupervisor(TraceeController *newSupervisor) noexcept
+DebugAdapterManager::RemoveSupervisor(tc::SupervisorState *supervisor) noexcept
 {
-  MDB_ASSERT(
-    none_of(mSupervisors,
-      [newSupervisor](const auto &supervisorEntry) { return supervisorEntry.mSupervisor == newSupervisor; }),
-    "Already added suprervisor.");
-  mSupervisors.push_back({ newSupervisor->GetSessionId(), newSupervisor });
-  newSupervisor->ConfigureDapClient(this);
+  auto it = std::find_if(mSessions.begin(), mSessions.end(), [sv = supervisor](auto &session) {
+    return session->GetSupervisor() == sv;
+  });
+  mSessions.erase(it);
 }
 
 void
-DebugAdapterClient::RemoveSupervisor(TraceeController *supervisor) noexcept
-{
-  SupervisorEntry entry{ supervisor->TaskLeaderTid(), supervisor };
-  auto it = std::find(mSupervisors.begin(), mSupervisors.end(), entry);
-  mSupervisors.erase(it);
-}
-
-void
-DebugAdapterClient::PostDapEvent(ui::UIResultPtr event)
+DebugAdapterManager::PostDapEvent(ui::UIResultPtr event)
 {
   // TODO(simon): I'm split on the idea if we should have one thread for each DebugAdapterClient, or like we do
   // now, 1 thread for all debug adapter client, that does it's dispatching vie the poll system calls. If we land,
@@ -555,36 +596,20 @@ DebugAdapterClient::PostDapEvent(ui::UIResultPtr event)
 }
 
 int
-DebugAdapterClient::ReadFileDescriptor() const noexcept
+DebugAdapterManager::ReadFileDescriptor() const noexcept
 {
   return mReadFd;
 }
 int
-DebugAdapterClient::WriteFileDescriptor() const noexcept
+DebugAdapterManager::WriteFileDescriptor() const noexcept
 {
   return mWriteFd;
-}
-
-void
-DebugAdapterClient::ConfigDone(SessionId processId) noexcept
-{
-  auto it = std::find_if(
-    mSessionInit.begin(), mSessionInit.end(), [processId](const auto &e) { return e.mPid == processId; });
-
-  MDB_ASSERT(it != std::end(mSessionInit), "No launch/attach response prepared for {}?", processId);
-  if (it != std::end(mSessionInit)) {
-    PushDelayedEvent(it->mLaunchOrAttachResponse);
-  }
-
-  DBGLOG(core, "Config done, removing prepared session.");
-
-  mSessionInit.erase(it);
 }
 
 static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
 
 bool
-DebugAdapterClient::WriteSerializedProtocolMessage(std::string_view output) const noexcept
+DebugAdapterManager::WriteSerializedProtocolMessage(std::string_view output) const noexcept
 {
   MDB_ASSERT(!output.empty(), "Ouptut is empty!");
   char header_buffer[128]{ "Content-Length: " };

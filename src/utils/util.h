@@ -185,12 +185,35 @@ CopyTo(const CA &c, CB &out)
   if constexpr (requires(CA i, CB o) {
                   i.size();
                   o.reserve(1024);
+                  out.size();
                 }) {
-    out.reserve(c.size());
+    out.reserve(c.size() + out.size());
     std::copy(c.begin(), c.end(), std::back_inserter(out));
   } else {
     auto index = 0;
     while (index < out.size() && index < c.size()) {
+      out[index] = c[index];
+      ++index;
+    }
+  }
+}
+
+template <typename CA, typename CB = CA>
+constexpr auto
+CopyNTo(const CA &c, CB &out, size_t n)
+{
+  if constexpr (requires(CA i, CB o) {
+                  i.size();
+                  o.reserve(1024);
+                  out.size();
+                }) {
+    const auto total = std::min(std::size(c), n);
+    out.reserve(std::size(c) + total);
+    std::copy(c.begin(), c.begin() + total, std::back_inserter(out));
+  } else {
+    auto index = 0;
+    const auto max = std::min(std::min(out.size(), c.size()), n);
+    while (index < max) {
       out[index] = c[index];
       ++index;
     }

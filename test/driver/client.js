@@ -571,23 +571,23 @@ class DebugAdapterClient {
     const printMdbInfo = () => {
       console.log(`mdb connected=${this.mdb.connected}`)
       console.log(`mdb exitCode=${this.mdb.exitCode}`)
-      console.log(`mdb killed=$${this.mdb.killed}`)
+      console.log(`mdb killed=${this.mdb.killed}`)
     }
 
     process.on('exit', (code) => {
       printMdbInfo()
-      if (this.mdb.exitCode != null) {
-        if (!process.env.hasOwnProperty('REC')) {
-          let ok = this.mdb.kill('SIGKILL')
-          console.log(`SENDING SIGKILL: ${ok ? 'ok' : 'failed'}`)
-        } else if (process.env.hasOwnProperty('REC')) {
+      if (this.mdb.exitCode == null && !process.env.hasOwnProperty('REC')) {
+        const ok = this.mdb.kill('SIGKILL')
+        console.log(`SENDING SIGKILL: ${ok ? 'ok' : 'failed'}`)
+      } else if (this.mdb.exitCode != null) {
+        if (process.env.hasOwnProperty('REC')) {
           /**
            * Since SIGKILL is uncatchable, we need to do SIGTERM when being recorded,
            * so that the record doesn't become incomplete. But in cases where we're not recorded,
            * we want SIGKILL, since we do not want to produce a core dump,
            * we only want core dumps for when the applications actually crashes on it's own, like nullptr deref's for instace.
            */
-          let ok = this.mdb.kill('SIGTERM')
+          const ok = this.mdb.kill('SIGTERM')
           console.log(`SENDING SIGTERM (is recorded): ${ok ? 'ok' : 'failed'}`)
         }
       }
@@ -639,13 +639,26 @@ class DebugAdapterClient {
     })
   }
 
+  exit() {
+    if (!process.env.hasOwnProperty('REC')) {
+      const ok = this.mdb.kill('SIGKILL')
+    } else if (process.env.hasOwnProperty('REC')) {
+      const ok = this.mdb.kill('SIGTERM')
+    }
+  }
+
   async shutdown() {
     console.log(`shutdown of DA client. remote service: ${this.remoteService}. mdb exit code=${this.mdb.exitCode}`)
     let exception = null
     try {
       if (this.mdb.exitCode == null) {
-        await this.disconnect()
+        await this.disconnect('terminate')
       }
+      setTimeout(() => {
+        if (this.mdb.exitCode == null || !this.mdb.killed) {
+          this.exit()
+        }
+      }, 1500)
     } catch (ex) {
       exception = ex
     }
@@ -1038,7 +1051,7 @@ class DebugAdapterClient {
       case 'native': {
         return await this.#startRunToMainNative(
           {
-            type: 'native',
+            type: 'ptrace',
             program: program,
             stopOnEntry: true,
           },
@@ -1055,7 +1068,7 @@ class DebugAdapterClient {
     let stopped_promise = this.prepareWaitForEventN('stopped', 1, timeout, this.launchToMain)
     await this.startLaunchSession(
       {
-        type: 'native',
+        type: 'ptrace',
         program: program,
         stopOnEntry: true,
       },
@@ -1517,7 +1530,7 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
   const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', args)
   assertLog(
     bkpt_res.body.breakpoints.length == bpIdentifiers.length,
-    `Expected ${bpIdentifiers.length} breakpoints`,
+    `Expected ${bpIdentifiers.length} breakpoints:\n${prettyJson(bkpt_res)}`,
     `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
   )
   return bkpt_res

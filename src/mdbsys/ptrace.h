@@ -15,7 +15,6 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 namespace mdb {
-class TaskInfo;
 
 template <size_t... T> constexpr bool always_false_i = false;
 

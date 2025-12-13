@@ -18,7 +18,7 @@ using ui::UICommand;
 using ui::UIResult;
 using ui::UIResultPtr;
 
-RefPtr<ui::UICommand> ParseCustomRequestCommand(const DebugAdapterClient &client,
+RefPtr<ui::UICommand> ParseCustomRequestCommand(const DebugAdapterManager &client,
   UICommandArg arg,
   std::string_view cmd_name,
   const mdbjson::JsonValue &json) noexcept;

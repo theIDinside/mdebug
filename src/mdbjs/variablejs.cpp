@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "variablejs.h"
+#include "mdbjs/mdbjs.h"
 
 // mdb
 #include <lib/arena_allocator.h>
@@ -73,9 +74,9 @@ JsVariable::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCo
   auto pointer = GetThisOrReturnException(pointer, kBindingDataError);
   auto serializeOptions = GetSerializeOptionsFromJsArg(context, argCount, argv).value_or({});
 
-  mdb::alloc::StackBufferResource<4096> alloc{};
-  std::pmr::string buffer{ &alloc };
-  buffer.reserve(alloc.GetCapacity());
+  auto scopedTemporary = Scripting::GetAllocator()->ScopeAllocation();
+  std::pmr::string buffer{ scopedTemporary.GetAllocator() };
+  buffer.reserve(4096);
   sym::JavascriptValueSerializer::Serialize(pointer, buffer, serializeOptions);
 
   return JS_NewStringLen(context, buffer.data(), buffer.size());

@@ -18,7 +18,6 @@
 using namespace std::string_view_literals;
 
 namespace mdb {
-class TraceeController;
 class ObjectFile;
 namespace sym {
 class Type;

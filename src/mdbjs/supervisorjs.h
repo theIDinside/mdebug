@@ -1,7 +1,7 @@
 /** LICENSE TEMPLATE */
 
+#include <interface/tracee_command/supervisor_state.h>
 #include <mdbjs/jsobject.h>
-#include <supervisor.h>
 
 namespace mdb::js {
 
@@ -12,11 +12,11 @@ ToString(Out iteratorLike, Supervisor *supervisor)
   return std::format_to(iteratorLike,
     "supervisor {}: threads={}, exited={}",
     supervisor->TaskLeaderTid(),
-    supervisor->GetThreads().size(),
+    supervisor->ThreadsCount(),
     supervisor->IsExited());
 }
 
-struct JsSupervisor : public JSBinding<JsSupervisor, TraceeController, JavascriptClasses::Supervisor>
+struct JsSupervisor : public JSBinding<JsSupervisor, tc::SupervisorState, JavascriptClasses::Supervisor>
 {
   static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;

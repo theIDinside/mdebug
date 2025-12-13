@@ -1,13 +1,19 @@
 /** LICENSE TEMPLATE */
 #include "disassemble.h"
-#include "../supervisor.h"
-#include "elf.h"
-#include "objfile.h"
-#include "symbolication/dwarf/lnp.h"
-#include "symbolication/fnsymbol.h"
-#include "zydis/Zydis.h"
+
+// mdb
+#include <interface/tracee_command/supervisor_state.h>
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/elf.h>
+#include <symbolication/fnsymbol.h>
+#include <symbolication/objfile.h>
+
+// std
 #include <algorithm>
 #include <set>
+
+// dependency
+#include <zydis/Zydis.h>
 
 namespace mdb::sym {
 
@@ -36,7 +42,7 @@ GetSourceInfo(const std::vector<sym::CompilationUnit *> &compilationUnits, AddrP
 }
 
 static sym::Disassembly
-CreateDisassemblyEntry(TraceeController *target,
+CreateDisassemblyEntry(tc::SupervisorState *target,
   AddrPtr vm_address,
   const ZydisDisassembledInstruction &ins,
   const u8 *exec_data_ptr) noexcept
@@ -82,7 +88,7 @@ CreateDisassemblyEntry(TraceeController *target,
 
 void
 DisassembleBackwards(
-  TraceeController *target, AddrPtr addr, i32 ins_offset, std::vector<sym::Disassembly> &output) noexcept
+  tc::SupervisorState *target, AddrPtr addr, i32 ins_offset, std::vector<sym::Disassembly> &output) noexcept
 {
   const auto objfile = target->FindObjectByPc(addr);
   const auto text = objfile->GetObjectFile()->GetElf()->GetSection(".text");
@@ -96,8 +102,8 @@ DisassembleBackwards(
 
   for (auto src : srcs) {
     if (static_cast<int>(output.size()) <= ins_offset) {
-      auto add = src->StartPc();
-      auto exec_data_ptr = text->Into(add);
+      AddrPtr add = src->StartPc() + objfile->mBaseAddress;
+      auto exec_data_ptr = text->Into(objfile->UnrelocateAddress(add));
       std::vector<sym::Disassembly> result;
       while (
         ZYAN_SUCCESS(ZydisDisassembleATT(
@@ -148,7 +154,7 @@ DisassembleBackwards(
 }
 
 void
-Disassemble(TraceeController *target,
+Disassemble(tc::SupervisorState *target,
   AddrPtr addr,
   u32 ins_offset,
   u32 total,
@@ -156,7 +162,7 @@ Disassemble(TraceeController *target,
 {
   auto obj = target->FindObjectByPc(addr);
   const ElfSection *text = obj->GetTextSection();
-  const auto start_exec_data = text->Into(addr);
+  const auto start_exec_data = text->Into(obj->UnrelocateAddress(addr));
   auto exec_data_ptr = start_exec_data;
   ZydisDisassembledInstruction instruction;
   auto vm_address = addr;

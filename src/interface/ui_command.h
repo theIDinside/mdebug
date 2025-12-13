@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+#include "interface/dap/interface.h"
 #include <common/typedefs.h>
 #include <lib/arena_allocator.h>
 #include <utils/smartptr.h>
@@ -48,11 +49,15 @@ template <typename T> struct RefCountControl;
 template <typename T> struct RefPtr;
 
 class Tracer;
-class TraceeController;
+
+namespace tc {
+class SupervisorState;
+}
+
 namespace ui {
 
 namespace dap {
-class DebugAdapterClient;
+class DebugAdapterManager;
 
 template <typename... Args>
 consteval auto
@@ -165,7 +170,7 @@ public:
   using RequestResponseAllocator = std::unique_ptr<alloc::ScopedArenaAllocator>;
   friend struct UIResult;
 
-  dap::DebugAdapterClient *mDAPClient;
+  dap::DebugAdapterManager *mDebugAdapterManager;
   SessionId mSessionId;
   std::unique_ptr<alloc::ScopedArenaAllocator> mCommandAllocator;
   std::uint64_t mSeq;
@@ -184,12 +189,12 @@ public:
   }
 
   constexpr void
-  SetDebugAdapterClient(dap::DebugAdapterClient &debugAdapter) noexcept
+  SetDebugAdapterClient(dap::DebugAdapterManager &debugAdapter) noexcept
   {
-    mDAPClient = &debugAdapter;
+    mDebugAdapterManager = &debugAdapter;
   }
 
-  TraceeController *GetSupervisor() noexcept;
+  dap::DebugAdapterSession *GetSession() noexcept;
 
   /** Returns either the result or nullptr. If nullptr is returned, it's because it's been queued/scheduled in the
    * delayed events queue, because some particular-to-the-DAP request ordering is required.*/

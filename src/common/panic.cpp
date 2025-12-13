@@ -1,3 +1,4 @@
+/** LICENSE TEMPLATE */
 #include "panic.h"
 
 // mdb

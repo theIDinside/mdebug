@@ -1,6 +1,5 @@
-const { prettyJson } = require('./client')
 const { spawnSync } = require('child_process')
-const { assert, assert_eq } = require('./utils')
+const { assert, prettyJson } = require('./utils')
 
 const regex = /[0-9a-f]+:/
 function getTextSection(objdumpOutput) {
@@ -41,6 +40,16 @@ function processObjdumpLines(insts) {
   return res
 }
 
+function adjustPCBackToUnrelocated(programCounter) {
+  // if addr is low, this system most likely creates PIE's for most things.
+  // add the most common base-addr (0x555555554000) to the address to test this feature here.
+  let num = Number.parseInt(programCounter, 16)
+  if (num > 0x555555554000) {
+    return `0x${(num - 0x555555554000).toString(16)}`
+  }
+  return programCounter
+}
+
 function compareDisassembly(pc, objdump, mdbResult) {
   if (mdbResult.length != objdump.length) {
     throw new Error(
@@ -50,7 +59,7 @@ function compareDisassembly(pc, objdump, mdbResult) {
     )
   }
   for (let i = 0; i < objdump.length; ++i) {
-    const resAddr = mdbResult[i].address
+    const resAddr = adjustPCBackToUnrelocated(mdbResult[i].address)
     const dumpAddr = objdump[i].addr
     assert(
       resAddr == dumpAddr,
@@ -74,7 +83,8 @@ function compareDisassembly(pc, objdump, mdbResult) {
 }
 
 async function disasm_verify(objdump, client, pc, insOffset, insCount) {
-  const insIndex = objdump.findIndex(({ addr, opcode, rep }) => addr == pc)
+  const objdumpPc = adjustPCBackToUnrelocated(pc)
+  const insIndex = objdump.findIndex(({ addr, opcode, rep }) => addr == objdumpPc)
   const offset = insIndex + insOffset
   const objdumpSpan = objdump.slice(offset, offset + insCount)
   const disassembly = await client.sendReqGetResponse('disassemble', {

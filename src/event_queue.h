@@ -1,66 +1,33 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
-#include "bp.h"
-#include "common/macros.h"
-#include "common/typedefs.h"
-#include "event_queue_event_param.h"
-#include "task.h"
+// mdb
+#include <bp.h>
+#include <common/macros.h>
+#include <common/typedefs.h>
+#include <event_queue_types.h>
+
+// std
 #include <format>
 #include <memory>
 #include <optional>
 #include <string>
+
+// system
 #include <sys/poll.h>
 
 namespace mdb {
 
-class TraceeController;
+class TaskInfo;
 
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
 namespace ui {
 struct UICommand;
 namespace dap {
-class DebugAdapterClient;
+class DebugAdapterManager;
 }
 
 } // namespace ui
-
-enum class ApplicationEventType
-{
-  WaitStatus,
-  Command,
-  TraceeEvent,
-  Initialization,
-  Internal,
-};
-
-struct WaitEvent
-{
-  WaitPidResult mWaitResult;
-  int mCpuCore;
-};
-
-enum class TracerEventType : u8
-{
-  BreakpointHitEvent,
-  Clone,
-  DeferToSupervisor,
-  Entry,
-  Exec,
-  Fork,
-  LibraryEvent,
-  ProcessExited,
-  ProcessTerminated,
-  Signal,
-  Stepped,
-  Stop,
-  SyscallEvent,
-  ThreadCreated,
-  ThreadExited,
-  VFork,
-  VForkDone,
-  WatchpointEvent,
-};
 
 #define EventType(Type) static constexpr TracerEventType EvtType = TracerEventType::Type // NOLINT
 } // namespace mdb
@@ -179,7 +146,9 @@ struct Clone : public TaskEvent
 {
   EventType(Clone);
   Tid mChildTid;
-  std::optional<TaskVMInfo> mTaskStackMetadata;
+  std::optional<TraceePointer<void>> mStackLow;
+  std::optional<u64> mStackSize;
+  std::optional<TraceePointer<void>> mTLS;
 };
 
 struct Exec : public TaskEvent
@@ -271,6 +240,9 @@ using CoreEventVariant = std::variant<BreakpointHitEvent,
  */
 struct TraceEvent
 {
+  static int sMonotonicEventTime;
+  static int NextEventTime() noexcept;
+
 private:
   constexpr void SetGeneralEventData(const EventDataParam &param, RegisterData &&regs) noexcept;
   // The register data for this task during this event (can be empty)
@@ -281,23 +253,18 @@ public:
   Pid mProcessId{ 0 };
   // The thread for which this core event was generated for
   Tid mTaskId{ 0 };
-  // If task is already known to exist, set a reference to it directly.
-  TaskInfo *mTask{ nullptr };
   // The payload std::variant, which holds the data and therefore determines what kind of event this is
   CoreEventVariant mEvent;
   // The signal generated (or the exit code returned) by the process that generated the
   TracerEventType mEventType{ TracerEventType::DeferToSupervisor };
   // For sessions where a "time" can be determined (only record & replay)
-  int mEventTime{ 0 };
+  int mEventTime;
 
   // Safe to pass in a reference: pointers to TaskInfo are stable for their entire existence (which last the entire
   // session. We never actually destroy TaskInfos);
-  constexpr explicit TraceEvent() noexcept = default;
-  explicit TraceEvent(TaskInfo &task) noexcept;
+  explicit TraceEvent() noexcept;
+  explicit TraceEvent(int eventTime) noexcept;
   constexpr ~TraceEvent() noexcept = default;
-
-  constexpr bool HasRegisterData() noexcept;
-  const RegisterData &GetRegisterData() noexcept;
 
   union
   {
@@ -335,11 +302,8 @@ public:
     TraceEvent *event, const EventDataParam &param, Pid newPid, RegisterData &&reg) noexcept;
   static void InitVForkEvent_(
     TraceEvent *event, const EventDataParam &param, Pid newPid, RegisterData &&reg) noexcept;
-  static void InitCloneEvent(TraceEvent *event,
-    const EventDataParam &param,
-    std::optional<TaskVMInfo> vm_info,
-    Tid newTid,
-    RegisterData &&reg) noexcept;
+  static void InitCloneEvent(
+    TraceEvent *event, const EventDataParam &param, Tid newTid, RegisterData &&reg) noexcept;
   static void InitExecEvent(
     TraceEvent *event, const EventDataParam &param, std::string_view execFile, RegisterData &&reg) noexcept;
   static void InitProcessExitEvent(TraceEvent *event, Pid pid, Tid tid, int exitCode, RegisterData &&reg) noexcept;
@@ -354,30 +318,6 @@ public:
     TraceEvent *event, const EventDataParam &param, RegisterData &&reg, bool attached) noexcept;
   static void InitEntryEvent(
     TraceEvent *event, const EventDataParam &param, RegisterData &&reg, bool should_stop) noexcept;
-};
-
-enum class InternalEventDiscriminant
-{
-  InvalidateSupervisor,
-  TerminateDebugging,
-  InitializedWaitSystem,
-};
-
-// Event sent when a supervisor for a process "dies". Was called "DestroySupervisor" before
-// but seeing as the plan is to integrate with RR at some point, it's better to just call it "invalidate" instead
-// so that it can be potentially lifted back into life, if the user reverse-continues across the boundary of it's
-// normal death.
-struct InvalidateSupervisor
-{
-  TraceeController *mSupervisor;
-};
-
-struct TerminateDebugging
-{
-};
-
-struct InitializedWaitSystem
-{
 };
 
 struct InternalEvent
@@ -404,51 +344,54 @@ struct ApplicationEvent
   NO_COPY(ApplicationEvent);
 
   ApplicationEventType mEventType;
-  Tid mPidOrTid;
+  Tid mId;
   union
   {
-    WaitEvent uWait;
-    TraceEvent *uDebugger;
+    PtraceEvent uPtrace;
+    GdbServerEvent *uGdbServer;
+    ReplayEvent uReplayStop;
     LeakedRef<ui::UICommand> uCommand;
     InternalEvent uInternalEvent;
   };
 
   constexpr explicit ApplicationEvent(LeakedRef<ui::UICommand> command) noexcept
-      : mEventType(ApplicationEventType::Command), mPidOrTid(0), uCommand(std::move(command))
+      : mEventType(ApplicationEventType::Command), mId(0), uCommand(std::move(command))
   {
   }
-  constexpr explicit ApplicationEvent(TraceEvent *debuggerEvent, bool isInit = false) noexcept
-      : mEventType(!isInit ? ApplicationEventType::TraceeEvent : ApplicationEventType::Initialization),
-        mPidOrTid(debuggerEvent->mProcessId), uDebugger(debuggerEvent)
-  {
-  }
-  constexpr explicit ApplicationEvent(WaitEvent waitEvent) noexcept
-      : mEventType(ApplicationEventType::WaitStatus), mPidOrTid(waitEvent.mWaitResult.tid), uWait(waitEvent)
-  {
-  }
-  constexpr explicit ApplicationEvent(InternalEvent internalEvent) noexcept
-      : mEventType(ApplicationEventType::Internal), mPidOrTid(0), uInternalEvent(internalEvent)
+  constexpr explicit ApplicationEvent(PtraceEvent ptraceEvent) noexcept
+      : mEventType(ApplicationEventType::Ptrace), mId(ptraceEvent.mPid), uPtrace(ptraceEvent)
   {
   }
 
-  ApplicationEvent(ApplicationEvent &&other) noexcept : mEventType(other.mEventType), mPidOrTid(other.mPidOrTid)
+  constexpr explicit ApplicationEvent(GdbServerEvent *gdbEvent) noexcept
+      : mEventType(ApplicationEventType::Ptrace), mId(gdbEvent->mRemoteId), uGdbServer(gdbEvent)
+  {
+  }
+
+  constexpr explicit ApplicationEvent(ReplayEvent replayEvent) noexcept
+      : mEventType(ApplicationEventType::RR), mId(replayEvent.mTaskInfo.mTaskLeader), uReplayStop(replayEvent)
+  {
+  }
+
+  constexpr explicit ApplicationEvent(InternalEvent internalEvent) noexcept
+      : mEventType(ApplicationEventType::Internal), mId(0), uInternalEvent(internalEvent)
+  {
+  }
+
+  ApplicationEvent(ApplicationEvent &&other) noexcept : mEventType(other.mEventType), mId(other.mId)
   {
     switch (other.mEventType) {
-    case ApplicationEventType::WaitStatus: {
-      uWait = other.uWait;
-      break;
-    }
+    case ApplicationEventType::Ptrace: {
+      uPtrace = other.uPtrace;
+    } break;
+    case ApplicationEventType::GdbServer: {
+      uGdbServer = other.uGdbServer;
+    } break;
+    case ApplicationEventType::RR: {
+      uReplayStop = other.uReplayStop;
+    } break;
     case ApplicationEventType::Command: {
       std::construct_at(&uCommand, std::move(other.uCommand));
-      break;
-    }
-    case ApplicationEventType::TraceeEvent:
-      [[fallthrough]];
-    case ApplicationEventType::Initialization: {
-      uDebugger = other.uDebugger;
-      // Let's be nice to ourselves so we don't have to chase this bug if we choose to alter life times for this
-      // type any further.
-      other.uDebugger = nullptr;
       break;
     }
     case ApplicationEventType::Internal: {
@@ -487,9 +430,15 @@ struct WaitResult
 class EventSystem
 {
   int mCommandEvents[2];
-  int mDebuggerEvents[2];
-  int mInitEvents[2];
   int mInternalEvents[2];
+
+  // The three main session notifier pipes/fd's.
+
+  // When a gdb remote server has events to notify us of, it uses this pipe
+  int mGdbServerEvents[2];
+  // rr sessions use this pipe
+  int mReplayStopEvents[2];
+  // ptrace events are polled using signalfd, checking for SIGCHLD signals
   int mSignalFd;
 
   int mCurrentPolledFdsCount;
@@ -498,12 +447,11 @@ class EventSystem
   std::mutex mCommandsGuard{};
   std::mutex mTraceEventGuard{};
   std::mutex mInternalEventGuard{};
+  ReplayEvent mLastReplayEvent;
   std::vector<TraceEvent *> mTraceEvents;
   std::vector<LeakedRef<ui::UICommand>> mCommands;
-  std::vector<ApplicationEvent> mWaitEvents;
-  std::vector<TraceEvent *> mInitEvent;
   std::vector<InternalEvent> mInternal;
-  EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept;
+  EventSystem(int commands[2], int gdbServer[2], int replay[2], int internal[2]) noexcept;
 
   static EventSystem *sEventSystem;
 
@@ -514,12 +462,15 @@ class EventSystem
 public:
   static EventSystem *Initialize() noexcept;
   void InitWaitStatusManager() noexcept;
-  void PushCommand(ui::dap::DebugAdapterClient *dap_client, RefPtr<ui::UICommand> cmd) noexcept;
-  void PushDebuggerEvent(TraceEvent *event) noexcept;
-  void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
-  void PushInitEvent(TraceEvent *event) noexcept;
-  void NotifyNewWaitpidResults() noexcept;
+  void PushCommand(ui::dap::DebugAdapterManager *dap_client, RefPtr<ui::UICommand> cmd) noexcept;
+  void PushGdbServerEvent(GdbServerEvent *event) noexcept;
+  void PushReplayStopEvent(ReplayEvent event) noexcept;
+  // void PushDebuggerEvent(TraceEvent *event) noexcept;
+  // void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
+  // void PushInitEvent(TraceEvent *event) noexcept;
+
   void PushInternalEvent(InternalEvent event) noexcept;
+
   bool PollBlocking(std::vector<ApplicationEvent> &write) noexcept;
 
   static EventSystem &Get() noexcept;

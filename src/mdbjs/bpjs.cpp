@@ -7,7 +7,6 @@
 #include <mdbjs/mdbjs.h>
 #include <mdbjs/taskinfojs.h>
 #include <mdbjs/util.h>
-#include <supervisor.h>
 #include <tracer.h>
 #include <utils/logger.h>
 
