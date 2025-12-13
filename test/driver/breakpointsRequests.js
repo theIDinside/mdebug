@@ -43,12 +43,22 @@ async function initLaunchToMain(debugAdapter, exe, { file, bps } = {}) {
   }
 }
 
+function adjustPIEMainExecutableAddress(programCounterString) {
+  const addrNumber = Number.parseInt(programCounterString, 16)
+  // if addr is low, this system most likely creates PIE's for most things.
+  // add the most common base-addr (0x555555554000) to the address to test this feature here.
+  if (addrNumber < 0x20000) {
+    return `0x${(addrNumber + 0x555555554000).toString(16)}`
+  }
+  return programCounterString
+}
+
 /** @param {import("./client").DebugAdapterClient } debugAdapter */
 async function setInstructionBreakpoint(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
   const mainFnAddresses = findDisasmFunction('main', debugAdapter.buildDirFile('stackframes'))
-  const instructionAddress = mainFnAddresses[1]
+  let instructionAddress = adjustPIEMainExecutableAddress(mainFnAddresses[1])
   await debugAdapter
     .sendReqGetResponse('setInstructionBreakpoints', {
       breakpoints: [{ instructionReference: instructionAddress }],
@@ -181,7 +191,7 @@ async function setFunctionBreakpointUsingRegex(debugAdapter) {
 async function setBreakpointsThatArePending(debugAdapter) {
   // we don't care for initialize, that's tested elsewhere
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile('stackframes'), 1000)
-  const printf_plt_addr = getPrintfPlt(debugAdapter, 'stackframes')
+  const printf_plt_addr = adjustPIEMainExecutableAddress(getPrintfPlt(debugAdapter, 'stackframes'))
   const invalidAddressess = ['0x300000', '0x100000', '0x9800000', printf_plt_addr].map((v) => ({
     instructionReference: v,
   }))
