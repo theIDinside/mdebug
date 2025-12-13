@@ -14,7 +14,7 @@ struct UIResult
   // Responses from commands construct UIResult:
   constexpr UIResult(bool success, UICommandPtr cmd) noexcept
       : mSessionId(cmd->mSessionId), mSuccess(success), mRequestSeq(cmd->mSeq),
-        mAllocator(std::move(cmd->mCommandAllocator)), mClient(cmd->mDAPClient)
+        mAllocator(std::move(cmd->mCommandAllocator)), mClient(cmd->mDebugAdapterManager)
   {
   }
 
@@ -47,7 +47,7 @@ struct UIResult
   bool mSuccess;
   std::uint64_t mRequestSeq;
   UICommand::RequestResponseAllocator mAllocator;
-  ui::dap::DebugAdapterClient *mClient;
+  ui::dap::DebugAdapterManager *mClient;
 };
 
 // Makes it *somewhat* easier to re-factoer later, if we want to use shared_ptr or unique_ptr here

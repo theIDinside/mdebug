@@ -1,14 +1,16 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common/formatter.h"
-#include "interface/dap/types.h"
-// #include "symbolication/dwarf/lnp.h"
-#include "symbolication/elf_symbols.h"
-#include "symbolication/type.h"
-#include "symbolication/variable_reference.h"
-#include "utils/immutable.h"
+
+// mdb
 #include <common.h>
+#include <common/formatter.h>
+#include <interface/dap/types.h>
+#include <interface/tracee_command/supervisor_state.h>
+#include <symbolication/elf_symbols.h>
 #include <symbolication/fnsymbol.h>
+#include <symbolication/type.h>
+#include <symbolication/variable_reference.h>
+#include <utils/immutable.h>
 
 namespace mdb {
 class SymbolFile;
@@ -236,7 +238,7 @@ public:
 
 class CallStack
 {
-  enum class CallStackState
+  enum class CallStackState : u8
   {
     Invalidated,
     Partial,
@@ -245,7 +247,7 @@ class CallStack
 
 public:
   NO_COPY(CallStack);
-  explicit CallStack(TraceeController *supervisor, TaskInfo *task) noexcept;
+  explicit CallStack(tc::SupervisorState *supervisor, TaskInfo *task) noexcept;
   ~CallStack() = default;
 
   Frame *GetFrame(u64 frameId) noexcept;
@@ -289,7 +291,7 @@ private:
   std::pair<FrameUnwindState *, FrameUnwindState *> GetCurrent() noexcept;
 
   TaskInfo *mTask; // the task associated with this call stack
-  TraceeController *mSupervisor;
+  tc::SupervisorState *mSupervisor;
   CallStackState mCallstackState{ CallStackState::Invalidated };
   std::vector<Frame> mStackFrames{}; // the call stack
   std::vector<AddrPtr> mFrameProgramCounters{};

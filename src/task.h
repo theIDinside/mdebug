@@ -2,13 +2,13 @@
 #pragma once
 
 // mdb
-#include "common/typedefs.h"
 #include <bp.h>
 #include <common.h>
 #include <common/formatter.h>
 #include <common/macros.h>
+#include <common/typedefs.h>
+#include <event_queue_types.h>
 #include <interface/dap/types.h>
-#include <interface/tracee_command/tracee_command_interface.h>
 #include <mdbsys/stop_status.h>
 #include <symbolication/callstack.h>
 #include <symbolication/variable_reference.h>
@@ -19,8 +19,21 @@
 #include <sys/user.h>
 
 using namespace std::string_view_literals;
+
+#define FOR_EACH_TRACEE_STATE(STATE)                                                                              \
+  STATE(Running, "The task is currently executing.")                                                              \
+  STATE(TraceEventStopped, "The thread is currently stopped at a trace event")                                    \
+  STATE(ReportedStoppedToUser,                                                                                    \
+    "The task has had it's trace event processed and the user has been notified that this thread is stopped.")
+
+ENUM_TYPE_METADATA(TraceeState, FOR_EACH_TRACEE_STATE, DEFAULT_ENUM, u8);
+
+#undef FOR_EACH_TRACEE_STATE
+
 namespace mdb {
-class TraceeController;
+namespace tc {
+class SupervisorState;
+}
 class RegisterDescription;
 
 namespace sym {
@@ -44,78 +57,34 @@ struct CallStackRequest
   static CallStackRequest full() noexcept;
 };
 
-struct TaskRegisters
-{
-  Immutable<ArchType> arch;
-  Immutable<TargetFormat> mRegisterFormat;
-
-  TaskRegisters() noexcept = default;
-  TaskRegisters(TargetFormat format, gdb::ArchictectureInfo *archInfo);
-  TaskRegisters(TaskRegisters &&) noexcept = default;
-  TaskRegisters &operator=(TaskRegisters &&) noexcept = default;
-
-  union
-  {
-    user_regs_struct *registers;
-    RegisterDescription *registerFile;
-  };
-
-  AddrPtr GetPc() const noexcept;
-  u64 GetRegister(u32 regNumber) const noexcept;
-};
-
 class TaskInfo
 {
   INTERNAL_REFERENCE_COUNT(TaskInfo)
 public:
-  enum class SupervisorState : u8
-  {
-    Traced,
-    Exited,
-    Killed = Exited,
-    Detached
-  };
-
-  friend class TraceeController;
+  friend class tc::SupervisorState;
   pid_t mTid;
   u32 mSessionId{ 0 };
-  StopStatus mLastStopStatus;
-  TargetFormat mTargetFormat;
+  i64 mCreatedAtEvent;
+
+  std::optional<PtraceEvent> mUnhandledInitPtraceEvent{ std::nullopt };
   tc::ResumeRequest mResumeRequest{ tc::RunType::Continue, 0 };
 
-  union
-  {
-    struct
-    {
-      bool mUserVisibleStop : 1; // stops visible (possibly) to the user
-      /* stops invisible to the user - may be upgraded to user stops. tracer_stop always occur when waitpid has
-       * returned a result for this task, or when a remote has sent a stop reply for a thread if the remote is also
-       * in "not non-stop mode", *all* threads get set to true on each stop (and false on each continue) regardless
-       * of what thread the user is operating on. It's "all stop mode". */
-      bool mTracerVisibleStop : 1;
-      bool mHasStarted : 1; // fully initialized task. after a clone syscall some setup is required. If this is
-                            // false, it means this task has never been resumed.
-      // register is dirty and requires refetching
-      bool mRegisterCacheDirty : 1 { true };
-      // rip requires fetching FIXME(simon): Is this even needed anymore?
-      bool mInstructionPointerDirty : 1 { true };
-      bool mExited : 1;           // task has exited
-      bool mReaped : 1 { false }; // task has been reaped after exit
-      bool mKilled : 1 { false };
-      bool mRequestedStop : 1 { false };
-    };
-  };
+  TraceeState mTraceeState : 2 { TraceeState::TraceEventStopped };
+  bool mHasStarted : 1 { false }; // fully initialized task. after a clone syscall some setup is required.
+                                  // If this is false, it means this task has never been resumed.
+  bool mExited : 1 { false };     // task has exited
+  bool mReaped : 1 { false };     // task has been reaped after exit
+  bool mKilled : 1 { false };
+  bool mRequestedStop : 1 { false };
+  bool mRegisterCacheDirty : 1 { true };
 
 private:
-  TaskRegisters regs;
   std::unique_ptr<sym::CallStack> mTaskCallstack;
   std::vector<u32> variableReferences{};
   VariableReferenceId mLivenessBoundary;
   std::unordered_map<VariableReferenceId, Ref<sym::Value>> mVariablesCache{};
-  TraceeController *mSupervisor;
-
-  // Unititialized thread constructor
-  TaskInfo(pid_t newTaskTid) noexcept;
+  tc::SupervisorState *mSupervisor;
+  std::string mThreadName;
 
 public:
   using Ptr = Ref<TaskInfo>;
@@ -129,7 +98,7 @@ public:
   BreakpointStepOverInfo mBreakpointLocationStatus;
   TaskInfo() = delete;
   // Create a new task; either in a user-stopped state or user running state
-  TaskInfo(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isUserStopped) noexcept;
+  TaskInfo(tc::SupervisorState &supervisor, pid_t newTaskTid) noexcept;
 
   TaskInfo(TaskInfo &&o) noexcept = delete;
   TaskInfo &operator=(TaskInfo &&) noexcept = delete;
@@ -139,35 +108,26 @@ public:
   TaskInfo &operator=(TaskInfo &t) noexcept = delete;
   TaskInfo &operator=(const TaskInfo &o) = delete;
 
-  ~TaskInfo() noexcept = default;
+  ~TaskInfo() noexcept;
 
-  static Ptr CreateTask(tc::TraceeCommandInterface &supervisor, pid_t newTaskTid, bool isRunning) noexcept;
+  static Ptr CreateTask(tc::SupervisorState &supervisor, pid_t newTaskTid) noexcept;
 
-  static Ptr CreateUnInitializedTask(WaitPidResult wait) noexcept;
-
-  user_regs_struct *NativeRegisters() const noexcept;
-  RegisterDescription *RemoteX86Registers() const noexcept;
-  void RemoteFromHexdigitEncoding(std::string_view hex_encoded) noexcept;
-  const TaskRegisters &GetRegisterCache() const;
-  void SetRegisterCacheTo(u8 *buffer, size_t bufferSize);
-  u64 GetRegister(u64 reg_num) noexcept;
+  AddrPtr GetPc() const noexcept;
+  u64 GetDwarfRegister(u64 reg_num) noexcept;
   u64 UnwindBufferRegister(u8 level, u16 register_number) const noexcept;
-  void StoreToRegisterCache(const std::vector<std::pair<u32, std::vector<u8>>> &data) noexcept;
   void RefreshRegisterCache() noexcept;
+  void SetName(std::string_view name) noexcept;
+  std::string_view GetName() const noexcept;
 
   std::span<const AddrPtr> UnwindReturnAddresses(CallStackRequest req) noexcept;
   sym::FrameUnwindState *GetUnwindState(int frameLevel) noexcept;
-  TraceeController *GetSupervisor() const noexcept;
-
-  void SetTaskWait(WaitPidResult wait) noexcept;
+  tc::SupervisorState *GetSupervisor() const noexcept;
 
   void StepOverBreakpoint() noexcept;
-  void SetUserVisibleStop() noexcept;
+  void SetAtTraceEventStop() noexcept;
   void SetIsRunning() noexcept;
-  void InitializeThread(tc::TraceeCommandInterface &supervisor, bool restart) noexcept;
   bool CanContinue() noexcept;
   void SetInvalidCache() noexcept;
-  void SetUpdated() noexcept;
   void AddBreakpointLocationStatus(BreakpointLocation *breakpointLocation) noexcept;
   void ClearBreakpointLocStatus() noexcept;
 
@@ -176,8 +136,6 @@ public:
    * being delivered, etc.
    */
   bool IsStopped() const noexcept;
-  bool IsStopProcessed() const noexcept;
-  void CollectStop() noexcept;
 
   sym::CallStack &GetCallstack() noexcept;
   // Add the `VariableReferenceId` to this task, so that once the task is resumed, it can instruct MDB to destroy
@@ -197,40 +155,13 @@ public:
   void SetSessionId(u32 sessionId) noexcept;
 
   void SetResumeType(tc::RunType type) noexcept;
-  void SetForwardedSignal(int signal) noexcept;
+  void SetSignalToForward(int signal) noexcept;
   // Takes the last received/seen signal for this task and clears the signal flag (so we don't accidentally forward
   // it multiple times)
   std::optional<int> ConsumeSignal() noexcept;
 };
-
-struct TaskVMInfo
-{
-  static TaskVMInfo from_clone_args(const clone_args &cl_args) noexcept;
-
-  TraceePointer<void> stack_low;
-  u64 stack_size;
-  TraceePointer<void> tls;
-};
-
-struct ExecutionContext
-{
-  TraceeController *tc;
-  TaskInfo *t;
-};
 } // namespace mdb
 
-template <> struct std::formatter<mdb::TaskVMInfo>
-{
-  BASIC_PARSE
-
-  template <typename FormatContext>
-  auto
-  format(mdb::TaskVMInfo const &vm_info, FormatContext &ctx)
-  {
-    return std::format_to(
-      ctx.out(), "{{ stack: {}, stack_size: {}, tls: {} }}", vm_info.stack_low, vm_info.stack_size, vm_info.tls);
-  }
-};
 // CallStackRequest
 template <> struct std::formatter<mdb::CallStackRequest>
 {
@@ -269,17 +200,13 @@ template <> struct std::formatter<mdb::TaskInfo>
   format(mdb::TaskInfo const &task, FormatContext &ctx)
   {
 
-    std::string_view wait_status = "None";
-    if (task.mLastStopStatus.ws != StopKind::NotKnown) {
-      wait_status = Enums::ToString(task.mLastStopStatus.ws);
+    std::string_view initialized = "true";
+    if (task.mUnhandledInitPtraceEvent) {
+      initialized = "false";
     }
 
-    return std::format_to(ctx.out(),
-      "[Task {}] {{ stopped: {}, tracer_stopped: {}, wait_status: {} }}",
-      task.mTid,
-      task.mUserVisibleStop,
-      task.mTracerVisibleStop,
-      wait_status);
+    return std::format_to(
+      ctx.out(), "[Task {}] {{ tracee state: {}, initialized: {} }}", task.mTid, task.mTraceeState, initialized);
   }
 };
 

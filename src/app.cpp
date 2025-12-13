@@ -90,19 +90,16 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
 
   Tracer::Create();
 
-  // mdb::logging::ProfilingLogger::ConfigureProfiling(config.LogDirectory());
-  logging::ProfilingLogger::ConfigureProfiling(fs::current_path());
-
   // spawn the UI thread that runs our UI loop
   bool uiThreadSetup = false;
 
-  ui::dap::DebugAdapterClient *userInterface = std::visit(
-    [&](const auto &setting) -> ui::dap::DebugAdapterClient * {
+  ui::dap::DebugAdapterManager *userInterface = std::visit(
+    [&](const auto &setting) -> ui::dap::DebugAdapterManager * {
       using T = std::decay_t<decltype(setting)>;
       if constexpr (std::is_same_v<cfg::UseStdio, T>) {
-        return ui::dap::DebugAdapterClient::CreateStandardIOConnection();
+        return ui::dap::DebugAdapterManager::CreateStandardIOConnection();
       } else if constexpr (std::is_same_v<cfg::UnixSocket, T>) {
-        return ui::dap::DebugAdapterClient::CreateSocketConnection(
+        return ui::dap::DebugAdapterManager::CreateSocketConnection(
           setting.mPath.data(), configurationOptions->mWaitForConnectionTimeout);
       } else {
         static_assert(always_false<T>, "Unhandled debug adapter interface type.");

@@ -1,8 +1,12 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "tracee_pointer.h"
-#include "utils/smartptr.h"
+
+// mdb
 #include <common/typedefs.h>
+#include <tracee_pointer.h>
+#include <utils/smartptr.h>
+
+// std
 #include <memory>
 #include <memory_resource>
 #include <optional>

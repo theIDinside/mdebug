@@ -229,6 +229,8 @@ Logger::ConfigureLogging(const mdb::cfg::InitializationConfiguration &config) no
   for (auto channel : Enum<Channel>::Variants()) {
     sLoggerInstance->SetupChannel(config.mLogDirectory, channel);
   }
+
+  ProfilingLogger::ConfigureProfiling(config.mLogDirectory);
 }
 
 Logger::~Logger() noexcept

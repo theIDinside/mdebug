@@ -443,9 +443,8 @@ public:
     return result;
   }
 
-  // Also only callable from RefPtrJsObject, that manually manages reference counting.
   constexpr RefPtr<T>
-  CloneReference() noexcept
+  Materialize() noexcept
   {
     return RefPtr<T>{ Forget() };
   }

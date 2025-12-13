@@ -10,16 +10,12 @@
 #include <interface/attach_args.h>
 #include <interface/console_command.h>
 #include <interface/dap/interface.h>
-#include <interface/tracee_command/gdb_remote_commander.h>
-#include <interface/tracee_command/tracee_command_interface.h>
 #include <lib/stack.h>
 #include <mdb_config.h>
-
 #include <notify_pipe.h>
 #include <symbolication/value.h>
 #include <symbolication/value_visualizer.h>
 #include <symbolication/variable_reference.h>
-
 #include <utils/debugger_thread.h>
 #include <utils/immutable.h>
 
@@ -40,7 +36,8 @@ namespace mdb {
 
 class ObjectFile;
 class SymbolFile;
-class TraceeController;
+class SessionTaskMap;
+
 struct LWP;
 class TaskInfo;
 
@@ -49,6 +46,21 @@ using Tid = pid_t;
 using BreakpointSpecId = u32;
 
 } // namespace mdb
+
+namespace mdb::tc {
+
+class SupervisorState;
+
+namespace ptrace {
+class Session;
+}
+
+namespace replay {
+class Session;
+}
+
+} // namespace mdb::tc
+
 namespace mdb::gdb {
 class RemoteConnection;
 struct RemoteSettings;
@@ -80,74 +92,25 @@ struct UICommand;
 
 namespace mdb {
 
-enum class TracerProcess
+struct InternalEvent;
+
+enum class TracerProcess : u8
 {
   Running,
   RequestedShutdown,
   Shutdown
 };
 
-enum class EventState : u8
-{
-  Unhandled,
-  Handled,
-  Defer,
-};
-
-template <typename Evt> using EventHandler = std::function<EventState(const Evt &evt)>;
-
-template <typename Evt> class EventHandlerStack
-{
-public:
-  using Handler = EventHandler<Evt>;
-  using HandlerStack = InlineStack<Handler, 16>;
-
-  constexpr bool
-  HasEventHandler() const noexcept
-  {
-    return !mEventHandlerStack.Empty();
-  }
-
-  constexpr EventState
-  ProcessEvent(const Evt &evt) noexcept
-  {
-    if (mEventHandlerStack.Empty()) {
-      return EventState::Unhandled;
-    }
-
-    for (const auto &handler : mEventHandlerStack.StackWalkDown()) {
-      if (const auto result = handler(evt); result != EventState::Unhandled) {
-        return result;
-      }
-    }
-
-    return EventState::Unhandled;
-  }
-
-  constexpr bool
-  PushEventHandler(Handler &&handler) noexcept
-  {
-    if (mEventHandlerStack.Size() == mEventHandlerStack.Capacity()) {
-      PANIC("Event handler stack can't hold more handlers");
-    }
-    mEventHandlerStack.Push(std::move(handler));
-    return true;
-  }
-
-  constexpr void
-  Pop() noexcept
-  {
-    mEventHandlerStack.Pop();
-  }
-
-private:
-  HandlerStack mEventHandlerStack{};
-};
-
 struct UnInitializedSupervisor
 {
   SessionId mSessionId;
-  std::unique_ptr<TraceeController> mSupervisor;
+  std::unique_ptr<tc::SupervisorState> mSupervisor;
+};
+
+template <typename ControlType> struct TaskControl
+{
+  ControlType &mControl;
+  TaskInfo &mTask;
 };
 
 /** -- A Singleton instance --. There can only be one. (well, there should only be one.)*/
@@ -161,6 +124,7 @@ class Tracer
   static mdb::js::Scripting *sScriptRuntime;
   // same as sScriptRuntime::mContext. But it's used so often that having direct access to it, is sensible.
   static JSContext *sApplicationJsContext;
+  ui::dap::DebugAdapterManager *mDebugAdapterManager;
   static bool sUsePTraceMe;
   static int sLastTraceEventTime;
 
@@ -199,28 +163,28 @@ public:
   static bool IsRunning() noexcept;
   static bool UsingTraceMe() noexcept;
   static Tracer &Get() noexcept;
-  static TraceeController *PrepareNewSupervisorWithId(SessionId sessionId) noexcept;
+  static ui::dap::DebugAdapterManager &GetDebugAdapterManager() noexcept;
+  static void SetDebugAdapterManager(ui::dap::DebugAdapterManager *dap) noexcept;
 
-  void TerminateSession() noexcept;
-  TraceeController *GetController(pid_t pid) noexcept;
-  TraceeController *GetProcessContainingTid(Tid tid) noexcept;
-  TraceEvent *ConvertWaitEvent(WaitPidResult wait_res) noexcept;
-  Ref<TaskInfo> TakeUninitializedTask(Tid tid) noexcept;
-
-  [[nodiscard("If someone is not using the return value, refactor this method")]] TraceeController *
-  AddTracedSupervisor(SessionId supervisorSessionId, const std::function<void(TraceeController *)> &initFunction);
+  void OnDisconnectOrExit(tc::SupervisorState *supervisor) noexcept;
+  tc::SupervisorState *GetController(pid_t pid) noexcept;
+  tc::SupervisorState *GetProcessContainingTid(Tid tid) noexcept;
 
   void ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept;
-  void HandleTracerEvent(TraceEvent *evt) noexcept;
-  void HandleInternalEvent(InternalEvent evt) noexcept;
-  void HandleInitEvent(TraceEvent *evt) noexcept;
 
+  // The main event handlers for the different session types.
+  std::optional<TaskControl<tc::ptrace::Session>> GetPtraceProcess(pid_t tidOrPid) noexcept;
+  void HandlePtraceEvent(PtraceEvent event) noexcept;
+
+  tc::replay::Session *GetReplayProcess(pid_t tidOrPid) noexcept;
+  void HandleReplayStopEvent(ReplayEvent evt) noexcept;
+
+  void HandleGdbEvent(GdbServerEvent *evt) noexcept;
+  void HandleInternalEvent(const InternalEvent &evt) noexcept;
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept;
 
   void SetUI(ui::dap::DapEventSystem *dap) noexcept;
   void KillUI() noexcept;
-
-  TraceeController *AddNewSupervisor(std::unique_ptr<TraceeController> tc) noexcept;
 
   // Returns the PID we've attached to; if we've attached to a remote target, there's a chance
   // that we may have in fact really attached to multiple processes. In this case, this is just the "first" process
@@ -229,13 +193,12 @@ public:
   // processes. In the future, when we've written a new Callstack UI, we can remove all this nonsense, because
   // then, one session can be responsible for multiple processes. Until then, we're stuck with this 1979 version of
   // a protocol.
-  Pid Attach(ui::dap::DebugAdapterClient *client, SessionId sessionId, const AttachArgs &args) noexcept;
-  bool RemoteAttachInit(tc::GdbRemoteCommander &tc) noexcept;
+  bool SessionAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const AttachArgs &args) noexcept;
 
   std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
 
-  std::shared_ptr<gdb::RemoteConnection> ConnectToRemoteGdb(
-    const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept;
+  // std::shared_ptr<gdb::RemoteConnection> ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const
+  // std::optional<gdb::RemoteSettings> &settings) noexcept;
 
   static u32 GenerateNewBreakpointId() noexcept;
   VariableReferenceId NewVariablesReference() noexcept;
@@ -246,14 +209,10 @@ public:
   sym::VarContext CloneFromVariableContext(const VariableContext &ctx) noexcept;
   void DestroyVariablesReference(VariableReferenceId key) noexcept;
 
-  std::unordered_map<Tid, Ref<TaskInfo>> &UnInitializedTasks() noexcept;
-  void RegisterTracedTask(Ref<TaskInfo> newTask) noexcept;
-  Ref<TaskInfo> GetTaskReference(Tid tid) noexcept;
-  TaskInfo *GetTaskPointer(Tid tid) noexcept;
   Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
   static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;
-  TraceeController *GetSupervisorBySessionId(SessionId sessionId) noexcept;
-  std::vector<TraceeController *> GetAllProcesses() const noexcept;
+  tc::SupervisorState *GetSupervisorBySessionId(SessionId sessionId) noexcept;
+  std::vector<tc::SupervisorState *> GetAllProcesses() const noexcept;
   ui::dap::DapEventSystem *GetDap() const noexcept;
 
   static void InitInterpreterAndStartDebugger(
@@ -301,22 +260,27 @@ public:
 
   u32 NewSupervisorId() noexcept;
 
+  static tc::SupervisorState *AddSupervisor(UniquePtr<tc::SupervisorState> supervisor) noexcept;
+  static SessionTaskMap &GetSessionTaskMap() noexcept;
+
+  auto
+  FindSupervisor(tc::SupervisorState *supervisor) noexcept
+  {
+    return std::find_if(
+      mTracedProcesses.begin(), mTracedProcesses.end(), [&](auto &s) { return s.get() == supervisor; });
+  }
+
 private:
   static void MainLoop(EventSystem *eventSystem, mdb::js::Scripting *interpreterInstance) noexcept;
 
   std::unique_ptr<DebuggerThread> mDebugAdapterThread{ nullptr };
 
+  std::vector<UniquePtr<tc::ptrace::Session>> mPtracedProcesses{};
+
   // Processes under control (and visible to the user/where the user is interested in controlling them)
-  std::vector<std::unique_ptr<TraceeController>> mTracedProcesses{};
-  // Supervisors prepared to be used with a specific DAP session id
-  std::vector<UnInitializedSupervisor> mUnInitializedSupervisor{};
-  // Supervisors that does not have a debug adapter session id connected to it (possibly yet - but in the case of a
-  // user disconnecting from a tracee, they may end up here depending on the circumstances)
-  std::vector<std::unique_ptr<TraceeController>> mNotUserControlledSupervisors{};
-  // For replay-sessions, processes can get unborn by reverse-continuing across their birth. Not yet in use.
-  std::vector<std::unique_ptr<TraceeController>> mUnbornProcesses{};
-  // Processes that has exited (and returned some exit code!)
-  std::vector<std::unique_ptr<TraceeController>> mExitedProcesses;
+  std::vector<UniquePtr<tc::SupervisorState>> mTracedProcesses{};
+  // Processes that has exited, or has been disconnected (or just ignored)
+  std::vector<std::unique_ptr<tc::SupervisorState>> mDetachedProcesses;
 
   ui::dap::DapEventSystem *mDAP;
   u32 mBreakpointID{ 0 };
@@ -334,17 +298,15 @@ private:
   std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
   bool already_launched{ false };
 
-  // Apparently, due to the lovely way of the universe, if a thread clones or forks
-  // we may actually see the wait status of the clone child before we get to see the wait status of the
-  // thread making the clone system call. I guess, this could be tracked, if every single resume operation stopped
-  // on system call boundaries (and therefore checked "ARE WE DOING A CLONE? THAT IS A SPECIAL CASE ONE" for
-  // instance). For now, we will solve this problem by having an "unitialized" thread; these are the ones that show
-  // up before their wait status of their clone parent has been seen. This should work.
-  std::unordered_map<Tid, Ref<TaskInfo>> mUnInitializedThreads{};
-  std::unordered_map<Tid, Ref<TaskInfo>> mDebugSessionTasks;
+  UniquePtr<SessionTaskMap> mDebugSessionTasks;
+
+  // Sometimes a cloned child's ptrace event shows up, before the ptrace event comes through from the parent
+  // in those cases, we stick the child's event into a pending map (from it's Tid -> event), so that it can be
+  // handled after we've processed the parent.
+  std::unordered_map<Tid, PtraceEvent> mPendingPtraceEvent;
   u32 mSessionThreadId{ 1 };
   u32 mSessionProcessId{ 1 };
-  std::unordered_map<Tid, ui::dap::DebugAdapterClient *> mDebugAdapterConnections;
+
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;
 
   sym::InvalidValueVisualizer *mInvalidValueDapSerializer{ nullptr };

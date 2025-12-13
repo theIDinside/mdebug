@@ -21,13 +21,12 @@ namespace js {
 struct JsBreakpointFunction;
 }
 
-class TraceeController;
 class TaskInfo;
 class ObjectFile;
 class SymbolFile;
 
 namespace tc {
-class TraceeCommandInterface;
+class SupervisorState;
 };
 
 struct UserRequestedBreakpoint
@@ -78,7 +77,7 @@ struct BreakpointHitEventResult
   }
 };
 
-class UserBreakpoints;
+class ProcessBreakpointsManager;
 
 class UserBreakpoint;
 using StopCondition = std::function<StopEvents(UserBreakpoint *, TaskInfo &t)>;
@@ -97,7 +96,7 @@ class BreakpointLocation
   AddrPtr mAddress;
   std::vector<UserBreakpoint *> mUserMapping{};
   std::unique_ptr<LocationSourceInfo> mSourceLocation;
-  friend UserBreakpoints;
+  friend ProcessBreakpointsManager;
 
 public:
   Immutable<u8> mOriginalByte;
@@ -111,11 +110,11 @@ public:
     AddrPtr address, u8 original, std::unique_ptr<LocationSourceInfo> sourceLocationInfo) noexcept;
   ~BreakpointLocation() noexcept;
 
-  bool RemoveUserOfThis(tc::TraceeCommandInterface &controlInterface, UserBreakpoint &breakpoint) noexcept;
-  void Enable(Tid taskId, tc::TraceeCommandInterface &controlInterface) noexcept;
-  void Disable(Tid taskId, tc::TraceeCommandInterface &controlInterface) noexcept;
+  bool RemoveUserOfThis(tc::SupervisorState &controlInterface, UserBreakpoint &breakpoint) noexcept;
+  void Enable(Tid taskId, tc::SupervisorState &controlInterface) noexcept;
+  void Disable(Tid taskId, tc::SupervisorState &controlInterface) noexcept;
   bool IsInstalled() const noexcept;
-  void AddUser(tc::TraceeCommandInterface &controlInterface, UserBreakpoint &breakpoint) noexcept;
+  void AddUser(tc::SupervisorState &controlInterface, UserBreakpoint &breakpoint) noexcept;
   bool AnyUsersActive() const noexcept;
   std::vector<u32> GetUserIds() const noexcept;
   const LocationSourceInfo *GetSourceLocationInfo() const noexcept;
@@ -161,6 +160,12 @@ struct BreakpointStepOverInfo
     mFieldShouldRetireBreakpoint = false;
     mConditionalEvaluationFailed = false;
   }
+
+  bool
+  IsSteppingOverBreakpoint() const noexcept
+  {
+    return mBreakpointLocation != nullptr && mIsSteppingOver;
+  }
 };
 
 struct RequiredUserParameters
@@ -169,7 +174,7 @@ struct RequiredUserParameters
   u16 mBreakpointId;
   Expected<Ref<BreakpointLocation>, BreakpointError> mBreakpointLocationResult;
   std::optional<u32> mTimesToHit;
-  TraceeController &mControl;
+  tc::SupervisorState &mControl;
 };
 
 class UserBreakpoint
@@ -181,8 +186,7 @@ protected:
   Ref<BreakpointLocation> mBreakpointLocation;
   std::unique_ptr<BreakpointError> mInstallError;
   std::unique_ptr<js::JsBreakpointFunction> mExpression{ nullptr };
-  SessionId mProcessId;
-  friend UserBreakpoints;
+  friend ProcessBreakpointsManager;
 
 public:
   Immutable<u32> mId;
@@ -195,10 +199,8 @@ public:
 
   Ref<BreakpointLocation> GetLocation() noexcept;
   bool IsEnabledAndInstalled() noexcept;
-  void Enable(tc::TraceeCommandInterface &ctrl) noexcept;
-  void Disable(tc::TraceeCommandInterface &ctrl) noexcept;
-  Tid GetTid() noexcept;
-  std::optional<Tid> GetProcessId() const noexcept;
+  void Enable(tc::SupervisorState &ctrl) noexcept;
+  void Disable(tc::SupervisorState &ctrl) noexcept;
 
   std::optional<AddrPtr> Address() const noexcept;
   bool IsVerified() const noexcept;
@@ -211,12 +213,12 @@ public:
 
   virtual BreakpointSpecification *UserProvidedSpec() const noexcept;
   virtual Ref<UserBreakpoint> CloneBreakpoint(
-    UserBreakpoints &breakpointStorage, TraceeController &tc, Ref<BreakpointLocation> bp) noexcept;
+    ProcessBreakpointsManager &breakpointStorage, tc::SupervisorState &tc, Ref<BreakpointLocation> bp) noexcept;
 
   virtual std::optional<BreakpointHitEventResult> EvaluateStopCondition(TaskInfo &t) noexcept;
   /// Evaluate the result of hitting this breakpoint which determines what behavior the task scheduler will take.
   /// `tc` is the relevant supervisor for the task `t` that hit the breakpoint.
-  virtual BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept = 0;
+  virtual BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept = 0;
 
   template <typename UB, typename... Args>
   static Ref<UB>
@@ -238,10 +240,11 @@ public:
     RequiredUserParameters param, LocationUserKind kind, std::unique_ptr<BreakpointSpecification> spec) noexcept;
   ~Breakpoint() noexcept override = default;
   // Interface to implement
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept override;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept override;
   BreakpointSpecification *UserProvidedSpec() const noexcept override;
-  Ref<UserBreakpoint> CloneBreakpoint(
-    UserBreakpoints &breakpointStorage, TraceeController &tc, Ref<BreakpointLocation> bp) noexcept override;
+  Ref<UserBreakpoint> CloneBreakpoint(ProcessBreakpointsManager &breakpointStorage,
+    tc::SupervisorState &tc,
+    Ref<BreakpointLocation> bp) noexcept override;
 
   constexpr void
   IncrementHitCount() noexcept
@@ -256,14 +259,14 @@ class FinishBreakpoint : public UserBreakpoint
 
 public:
   explicit FinishBreakpoint(RequiredUserParameters param, Tid stopOnlyTaskTid) noexcept;
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
 };
 
 class CodeInjectionBoundaryBreakpoint : public UserBreakpoint
 {
 public:
   explicit CodeInjectionBoundaryBreakpoint(RequiredUserParameters param) noexcept;
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
 };
 
 class ResumeToBreakpoint : public UserBreakpoint
@@ -272,7 +275,7 @@ class ResumeToBreakpoint : public UserBreakpoint
 
 public:
   explicit ResumeToBreakpoint(RequiredUserParameters param, Tid tid) noexcept;
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
 };
 
 class Logpoint : public Breakpoint
@@ -286,41 +289,76 @@ public:
     std::string_view expression,
     std::unique_ptr<BreakpointSpecification> spec) noexcept;
 
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+};
+
+class InternalBreakpoint : public UserBreakpoint
+{
+  std::function<BreakpointHitEventResult()> mMaintenanceFn;
+
+public:
+  explicit InternalBreakpoint(RequiredUserParameters param,
+    std::string_view debugName,
+    std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
 };
 
 class SOLoadingBreakpoint : public UserBreakpoint
 {
 public:
   explicit SOLoadingBreakpoint(RequiredUserParameters param) noexcept;
-  BreakpointHitEventResult OnHit(TraceeController &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
 };
 
-class UserBreakpoints
+using BreakpointId = u32;
+using SourceCodeFileName = std::string;
+using SourceFileBreakpointMap = std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>>;
+
+class SessionBreakpoints
 {
 public:
-  using BpId = u32;
-  using SourceCodeFileName = std::string;
-  using SourceFileBreakpointMap = std::unordered_map<BreakpointSpecification, std::vector<BpId>>;
-
-private:
-  TraceeController &mControl;
-  // User breakpoints are breakpoints set by the user.
-  std::unordered_map<BpId, Ref<UserBreakpoint>> mUserBreakpoints{};
-  std::unordered_map<AddrPtr, std::vector<BpId>> mUserBreakpointsAtAddress{};
+  std::unordered_map<BreakpointId, Ref<UserBreakpoint>> mUserBreakpoints{};
+  std::unordered_map<AddrPtr, std::vector<BreakpointId>> mUserBreakpointsAtAddress{};
   std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> mSourceCodeBreakpoints{};
+  std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints{};
+  std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints{};
+
+  static SharedPtr<SessionBreakpoints> Create() noexcept;
+  void Clear() noexcept;
+};
+
+struct UnverifiedBreakpoint
+{
+  BreakpointId mId;
+  BreakpointSpecification mSpec;
+};
+
+struct NotProcessedBreakpoints
+{
+  std::vector<NotProcessedBreakpoints> mBreakpoints;
+};
+
+class ProcessBreakpointsManager
+{
+private:
+  tc::SupervisorState &mControl;
+  SharedPtr<NotProcessedBreakpoints> mNotProcessed;
 
 public:
-  explicit UserBreakpoints(TraceeController &tc) noexcept;
+  ProcessBreakpointsManager(tc::SupervisorState &tc) noexcept;
   // All these actually map to some form of user breakpoint. The actual "real" software breakpoint that's
   // installed we don't expose here at all, it's behind a shared pointer in the `user_bp_t` types and as such,
   // will die when the last user breakpoint that references it dies (it can also be explicitly killed by
   // instructing a user breakpoint to remove itself from the location's list and if that list becomes empty, the
   // location will die.)
 
-  std::unordered_map<BreakpointSpecification, std::vector<BpId>> mFunctionBreakpoints{};
-  std::unordered_map<BreakpointSpecification, BpId> mInstructionBreakpoints{};
+  std::unordered_map<BreakpointId, Ref<UserBreakpoint>> mUserBreakpoints{};
+  std::unordered_map<AddrPtr, std::vector<BreakpointId>> mUserBreakpointsAtAddress{};
+  std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> mSourceCodeBreakpoints{};
+  std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints{};
+  std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints{};
 
+  void LoadBreakpointsFrom(SharedPtr<SessionBreakpoints> sessionBreakpoints) noexcept;
   void OnExec() noexcept;
   void OnProcessExit() noexcept;
   void AddBreakpointLocation(const UserBreakpoint &updatedBreakpoint) noexcept;
@@ -340,7 +378,7 @@ public:
 
   template <typename BreakpointT, typename... UserBpArgs>
   Ref<UserBreakpoint>
-  CreateBreakpointLocationUser(TraceeController &control,
+  CreateBreakpointLocationUser(tc::SupervisorState &control,
     Expected<Ref<BreakpointLocation>, BreakpointError> &&breakpointLocationResult,
     Tid tid,
     UserBpArgs &&...args)
@@ -351,18 +389,18 @@ public:
                                             .mBreakpointLocationResult = std::move(breakpointLocationResult),
                                             .mTimesToHit = {},
                                             .mControl = control },
-        args...);
+        std::forward<UserBpArgs>(args)...);
     AddUser(user);
 
     return user;
   }
 
   static Expected<Ref<BreakpointLocation>, BreakpointError> CreateBreakpointLocation(
-    TraceeController &control, AddrPtr address) noexcept;
+    tc::SupervisorState &control, AddrPtr address) noexcept;
 
   template <typename BreakpointT, typename... UserBpArgs>
   Ref<UserBreakpoint>
-  CreateBreakpointLocationUser(TraceeController &control, AddrPtr address, Tid tid, UserBpArgs &&...args)
+  CreateBreakpointLocationUser(tc::SupervisorState &control, AddrPtr address, Tid tid, UserBpArgs &&...args)
   {
     auto user = UserBreakpoint::Create<BreakpointT>(
       RequiredUserParameters{ .mTaskId = tid,
@@ -375,22 +413,6 @@ public:
     return user;
   }
 
-  template <typename BreakpointT, typename... UserBpArgs>
-  void
-  CreateAndAddUserBreakpoint(TraceeController &control,
-    Expected<Ref<BreakpointLocation>, BreakpointError> &&breakpointLocationResult,
-    Tid tid,
-    UserBpArgs &&...args)
-  {
-    auto user =
-      UserBreakpoint::Create<BreakpointT>(RequiredUserParameters{ .mTaskId = tid,
-                                            .mBreakpointId = NewBreakpointId(),
-                                            .mBreakpointLocationResult = std::move(breakpointLocationResult),
-                                            .mTimesToHit = {},
-                                            .mControl = control },
-        args...);
-    AddUser(user);
-  }
   u16 NewBreakpointId() noexcept;
 };
 }; // namespace mdb

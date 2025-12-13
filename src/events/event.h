@@ -17,7 +17,9 @@
 #include <sys/types.h>
 
 namespace mdb {
-class TraceeController;
+namespace tc {
+class SupervisorState;
+}
 
 class StopEventNotification
 {
@@ -29,11 +31,11 @@ public:
 class Step : public StopEventNotification
 {
 public:
-  explicit Step(TraceeController &tc, int tid, std::string_view msg) noexcept;
+  explicit Step(tc::SupervisorState &tc, int tid, std::string_view msg) noexcept;
   void send() noexcept override;
 
 private:
-  TraceeController &tc;
+  tc::SupervisorState &tc;
   int tid;
   std::string_view msg;
 };
@@ -41,11 +43,11 @@ private:
 class BreakpointHit : public StopEventNotification
 {
 public:
-  explicit BreakpointHit(TraceeController &tc, int bp_id, int tid) noexcept;
+  explicit BreakpointHit(tc::SupervisorState &tc, int bp_id, int tid) noexcept;
   void send() noexcept override;
 
 private:
-  TraceeController &tc;
+  tc::SupervisorState &tc;
   int bp_id;
   int tid;
 };
@@ -53,11 +55,11 @@ private:
 class SignalStop : public StopEventNotification
 {
 public:
-  SignalStop(TraceeController &tc, int signal, int tid) noexcept;
+  SignalStop(tc::SupervisorState &tc, int signal, int tid) noexcept;
   void send() noexcept override;
 
 private:
-  TraceeController &tc;
+  tc::SupervisorState &tc;
   int signal;
   int tid;
 };

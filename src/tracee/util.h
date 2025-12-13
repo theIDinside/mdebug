@@ -3,6 +3,8 @@
 #include <common/typedefs.h>
 #include <string>
 
+#include <span>
+
 struct user_regs_struct;
 
 namespace mdb {
@@ -21,6 +23,8 @@ struct PidTid
 
 u64 *register_by_number(user_regs_struct *regs, int reg_number) noexcept;
 u64 get_register(user_regs_struct *regs, int reg_number) noexcept;
+u64 GetDwarfRegister(const u64 *registerCache, size_t number) noexcept;
+size_t GetDwarfRegisterIndex(size_t dwarfNumber) noexcept;
 
 /// Returns the path that process with `pid` used to `exec`
 std::string ProcessExecPath(SessionId pid) noexcept;

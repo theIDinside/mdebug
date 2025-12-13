@@ -1,6 +1,10 @@
 /** LICENSE TEMPLATE */
 
 #include "commands.h"
+#include "interface/attach_args.h"
+#include "interface/dap/interface.h"
+#include "interface/tracee_command/supervisor_state.h"
+#include "interface/ui_command.h"
 
 // mdb
 #include <bp.h>
@@ -12,14 +16,15 @@
 #include <interface/dap/dap_defs.h>
 #include <interface/dap/events.h>
 #include <interface/dap/parse_buffer.h>
-#include <interface/tracee_command/ptrace_commander.h>
-#include <interface/tracee_command/tracee_command_interface.h>
-#include <supervisor.h>
+#include <interface/tracee_command/ptrace/ptrace_session.h>
+#include <interface/tracee_command/rr/rr_session.h>
+#include <interface/tracee_command/rr/rr_supervisor.h>
 #include <symbolication/callstack.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
 #include <symbolication/value.h>
 #include <symbolication/value_visualizer.h>
+#include <task.h>
 #include <task_scheduling.h>
 #include <tracer.h>
 #include <utils/base64.h>
@@ -35,6 +40,8 @@
 #include <iterator>
 #include <optional>
 #include <string>
+
+template <typename T> using Set = std::unordered_set<T>;
 
 namespace ui = mdb::ui;
 template <> struct std::formatter<ui::dap::Message>
@@ -71,9 +78,38 @@ template <> struct std::formatter<ui::dap::Message>
   }
 };
 
-#define GetOrSendError(name)                                                                                      \
-  auto name = GetSupervisor();                                                                                    \
+#define GetSessionOrSendError()                                                                                   \
+  ({                                                                                                              \
+    auto session = GetSession();                                                                                  \
+    if (!session) {                                                                                               \
+      std::pmr::string err{ MemoryResource() };                                                                   \
+      std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mSessionId);                    \
+      WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                          \
+      return;                                                                                                     \
+    }                                                                                                             \
+    session;                                                                                                      \
+  })
+
+#define GetSupervisoOrSendError()                                                                                 \
+  ({                                                                                                              \
+    auto session = GetSessionOrSendError();                                                                       \
+    auto supervisor = session->GetSupervisor();                                                                   \
+    if (!supervisor || supervisor->IsExited()) {                                                                  \
+      DBGBUFLOG(core, "Could not find supervisor for session {} ({})", mSessionId, __PRETTY_FUNCTION__);          \
+      std::pmr::string err{ MemoryResource() };                                                                   \
+      std::format_to(std::back_inserter(err), "Could not find supervisor for session {}", mSessionId);            \
+      WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                          \
+      return;                                                                                                     \
+    }                                                                                                             \
+    supervisor;                                                                                                   \
+  })
+
+#define GetSupervisoOrSendErrorA(name)                                                                            \
+  auto session = GetSession();                                                                                    \
+  MDB_ASSERT(session != nullptr, "Expected session to be found!");                                                \
+  auto name = session->GetSupervisor();                                                                           \
   if (!name || name->IsExited()) {                                                                                \
+    DBGBUFLOG(core, "Could not find supervisor with session id {} ({})", mSessionId, __PRETTY_FUNCTION__);        \
     std::pmr::string err{ MemoryResource() };                                                                     \
     std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mSessionId);                      \
     WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                            \
@@ -89,18 +125,22 @@ UICommand::WriteResponse(const UIResult &result) noexcept
 {
   auto data = result.Serialize(0);
   if (!data.empty()) {
-    mDAPClient->WriteSerializedProtocolMessage(data);
+    mDebugAdapterManager->WriteSerializedProtocolMessage(data);
   }
 }
 
-TraceeController *
-UICommand::GetSupervisor() noexcept
+dap::DebugAdapterSession *
+UICommand::GetSession() noexcept
 {
-  return mDAPClient->GetSupervisor(mSessionId);
+  return mDebugAdapterManager->GetSession(mSessionId);
 }
 } // namespace ui
 
 namespace ui::dap {
+
+static constexpr auto kSessionTypePtrace = "ptrace"sv;
+static constexpr auto kSessionTypeRr = "rr"sv;
+static constexpr auto kSessionTypeGdbRemote = "gdbremote"sv;
 
 Message::Message(std::string_view message, std::pmr::memory_resource *rsrc) noexcept
     : mFormat(rsrc), mVariables(rsrc)
@@ -238,16 +278,10 @@ struct Pause final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto target = GetSupervisoOrSendError();
 
     MDB_ASSERT(target, "No target {}", mSessionId);
-    auto task = target->GetTaskByTid(mPauseArgs.mThreadId);
-    if (task->IsStopped()) {
-      return WriteResponse(PauseResponse{ false, this });
-    }
-    const bool success = target->SetAndCallRunAction(
-      task->mTid, std::make_shared<ptracestop::StopImmediately>(*target, *task, StoppedReason::Pause));
-
+    bool success = target->Pause(mPauseArgs.mThreadId);
     WriteResponse(PauseResponse{ success, this });
   }
 
@@ -295,11 +329,11 @@ struct ReverseContinue final : ui::UICommand
   void
   Execute() noexcept final
   {
-    auto target = GetSupervisor();
+    auto session = GetSession();
     // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
     // _any_ target, and use that to resume backwards (since RR is the controller.).
-    MDB_ASSERT(target, "must have target.");
-    auto ok = target->ReverseResumeTarget(tc::RunType::Continue);
+    MDB_ASSERT(session->GetSupervisor(), "must have target.");
+    auto ok = session->GetSupervisor()->ReverseResumeTarget(tc::RunType::Continue);
     WriteResponse(ReverseContinueResponse{ ok, this });
   }
 
@@ -355,33 +389,25 @@ struct Continue final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
-    if (target->IsSessionAllStopMode()) {
-      mContinueAll = true;
-    }
+    auto *target = GetSupervisoOrSendError();
 
     bool success = false;
-    if (mContinueAll && !target->SomeTaskCanBeResumed()) {
-      std::vector<Tid> running_tasks{};
-      for (const auto &entry : target->GetThreads()) {
-        if (!entry.mTask->IsStopped() || entry.mTask->mTracerVisibleStop) {
-          running_tasks.push_back(entry.mTid);
-        }
-      }
-      DBGLOG(core, "Denying continue request, target is running ([{}])", JoinFormatIterator{ running_tasks });
-      success = false;
-    } else {
+    DBGLOG(control, "user requested resume, all={}, thread={}", mContinueAll, mThreadId);
+
+    if (mContinueAll) {
+      target->ResumeTarget(tc::RunType::Continue);
       success = true;
-      if (mContinueAll) {
-        DBGLOG(core, "continue all");
-        const int deliverNonSigtrapSignal = -1;
-        target->ResumeTarget(tc::RunType::Continue);
+    } else {
+      auto task = target->GetTaskByTid(mThreadId);
+      if (task && task->CanContinue()) {
+        target->ResumeTask(*task, tc::RunType::Continue);
+        success = true;
       } else {
-        DBGLOG(core, "continue single thread: {}", mThreadId);
-        auto t = target->GetTaskByTid(mThreadId);
-        target->ResumeTask(*t, tc::RunType::Continue);
+        DBGBUFLOG(core, "task {} could not be resumed", mThreadId);
+        success = false;
       }
     }
+
     WriteResponse(ContinueResponse{ success, mContinueAll, this });
   }
 
@@ -432,7 +458,7 @@ struct Next final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto *target = GetSupervisoOrSendError();
 
     auto task = target->GetTaskByTid(mThreadId);
 
@@ -525,19 +551,21 @@ struct StepBack final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    auto target = GetSupervisor();
-    MDB_ASSERT(target, "must have target");
+    TODO("Implement StepBack again");
+    // auto target = GetSupervisor();
+    // MDB_ASSERT(target, "must have target");
 
-    if (!target->IsReplaySession()) {
-      return WriteResponse(StepBackResponse{ StepBackResponse::Result::NotReplaySession, this });
-    } else if (target->IsRunning()) {
-      // During reverse execution, because we are RR-oriented, the entire process will be stopped, so we don't have
-      // to actually check individual tasks here.
-      return WriteResponse(StepBackResponse{ StepBackResponse::Result::NotStopped, this });
-    }
+    // if (!target->IsReplaySession()) {
+    //   return WriteResponse(StepBackResponse{ StepBackResponse::Result::NotReplaySession, this });
+    // } else if (target->IsRunning()) {
+    //   // During reverse execution, because we are RR-oriented, the entire process will be stopped, so we don't
+    //   have
+    //   // to actually check individual tasks here.
+    //   return WriteResponse(StepBackResponse{ StepBackResponse::Result::NotStopped, this });
+    // }
 
-    target->ReverseResumeTarget(tc::RunType::Step);
-    return WriteResponse(StepBackResponse{ StepBackResponse::Result::Success, this });
+    // target->ReverseResumeTarget(tc::RunType::Step);
+    // return WriteResponse(StepBackResponse{ StepBackResponse::Result::Success, this });
   }
   DEFINE_NAME("stepBack");
   RequiredArguments({ "threadId"sv });
@@ -588,7 +616,7 @@ struct StepIn final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto *target = GetSupervisoOrSendError();
 
     auto task = target->GetTaskByTid(mThreadId);
 
@@ -655,7 +683,7 @@ struct StepOut final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto *target = GetSupervisoOrSendError();
     auto task = target->GetTaskByTid(thread_id);
 
     if (!task->IsStopped()) {
@@ -762,6 +790,27 @@ struct SetBreakpointsResponse final : ui::UIResult
 
 struct SetBreakpoints final : public ui::UICommand
 {
+private:
+  inline void
+  ExecuteDuringConfigPhase(DebugAdapterSession *session, Path file, Set<BreakpointSpecification> specs) noexcept
+  {
+    session->OnSessionConfiguredWithSupervisor(
+      [sessionId = mSessionId, dap = mDebugAdapterManager, file = std::move(file), specs = std::move(specs)](
+        tc::SupervisorState &target) {
+        // Set the breakpoints
+        DBGBUFLOG(core, "Setting post poned source breakpoints");
+        target.SetSourceBreakpoints(file, specs);
+        // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
+        for (const auto &[bp, ids] : target.GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
+          for (const auto id : ids) {
+            const auto user = target.GetUserBreakpoints().GetUserBreakpoint(id);
+            dap->PostDapEvent(new ui::dap::BreakpointEvent{ sessionId, "new", {}, user });
+          }
+        }
+      });
+  }
+
+public:
   SetBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
       : ui::UICommand(std::move(arg)), args(arguments)
   {
@@ -776,15 +825,15 @@ struct SetBreakpoints final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
-    auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
+    auto session = GetSession();
+    auto target = session->GetSupervisor();
 
     MDB_ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
     MDB_ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
     std::string_view file =
       args.UncheckedGetProperty("source")->UncheckedGetProperty("path")->UncheckedGetStringView();
 
-    Set<BreakpointSpecification> srcBpSpecs;
+    Set<BreakpointSpecification> specs;
 
     for (const auto &sourceBreakpoint : args.AsSpan("breakpoints")) {
       if (!sourceBreakpoint.Contains("line")) {
@@ -797,25 +846,35 @@ struct SetBreakpoints final : public ui::UICommand
       auto logMessage = get<std::string>(sourceBreakpoint, "logMessage");
       auto condition = get<std::string>(sourceBreakpoint, "condition");
 
-      srcBpSpecs.insert(BreakpointSpecification::Create<SourceBreakpointSpecPair>(std::move(condition),
+      specs.insert(BreakpointSpecification::Create<SourceBreakpointSpecPair>(std::move(condition),
         std::move(hitCondition),
         std::string{ file },
         SourceBreakpointSpec{ .line = line, .column = column, .log_message = std::move(logMessage) }));
     }
 
-    target->SetSourceBreakpoints(file, srcBpSpecs);
+    // If target == nullptr, means this is in the configuration phase of a session, because attach or launch has
+    // not yet happened so we don't actually have a process and executable to set these for. In that event
+    // respond with breakpoints: [], and then instead emit "new breakpoint" events for when the configuration phase
+    // + attach/launch has happened.
+    if (!target) {
+      DBGBUFLOG(core, "Session {} has no supervisor yet, postponing breakpoint creation.", mSessionId);
+      ExecuteDuringConfigPhase(session, Path{ file }, std::move(specs));
+      return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
+    } else {
+      target->SetSourceBreakpoints(file, specs);
 
-    using BP = ui::dap::Breakpoint;
+      using BP = ui::dap::Breakpoint;
 
-    for (const auto &[bp, ids] : target->GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
-      for (const auto id : ids) {
-        const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
-        breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+      auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
+      for (const auto &[bp, ids] : target->GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
+        for (const auto id : ids) {
+          const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
+          breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+        }
       }
-    }
 
-    return WriteResponse(
-      SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, std::move(*breakpoints) });
+      WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, std::move(*breakpoints) });
+    }
   }
   DEFINE_NAME("setBreakpoints");
   RequiredArguments({ "source"sv });
@@ -846,6 +905,26 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
+private:
+  inline void
+  ExecuteDuringConfigPhase(DebugAdapterSession *session, Set<BreakpointSpecification> specs) noexcept
+  {
+    session->OnSessionConfiguredWithSupervisor(
+      [sessionId = mSessionId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
+        DBGBUFLOG(core, "Setting post poned instruction breakpoints");
+        // Set the breakpoints
+        target.SetInstructionBreakpoints(specs);
+        // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
+        auto &userBreakpoints = target.GetUserBreakpoints();
+
+        for (const auto &[k, id] : userBreakpoints.mInstructionBreakpoints) {
+          dap->PostDapEvent(
+            new ui::dap::BreakpointEvent{ sessionId, "new", {}, userBreakpoints.GetUserBreakpoint(id) });
+        }
+      });
+  }
+
+public:
   SetInstructionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
       : UICommand{ std::move(arg) }, mArgs(arguments)
   {
@@ -859,10 +938,11 @@ struct SetInstructionBreakpoints final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto session = GetSession();
+    auto target = session->GetSupervisor();
 
     using BP = ui::dap::Breakpoint;
-    Set<BreakpointSpecification> bps{};
+    Set<BreakpointSpecification> specs{};
     const auto ibps = mArgs.AsSpan("breakpoints");
     auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
     for (const auto &insBreakpoint : ibps) {
@@ -870,21 +950,26 @@ struct SetInstructionBreakpoints final : public ui::UICommand
         insBreakpoint.Contains("instructionReference") && insBreakpoint.At("instructionReference")->IsString(),
         "instructionReference field not in args or wasn't of type string");
       std::string_view addrString = insBreakpoint["instructionReference"];
-      bps.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{ addrString }));
+      specs.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{ addrString }));
     }
 
-    target->SetInstructionBreakpoints(bps);
+    if (!target) {
+      ExecuteDuringConfigPhase(session, std::move(specs));
+      return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
+    } else {
+      target->SetInstructionBreakpoints(specs);
 
-    auto &userBreakpoints = target->GetUserBreakpoints();
-    breakpoints->reserve(userBreakpoints.mInstructionBreakpoints.size());
+      auto &userBreakpoints = target->GetUserBreakpoints();
+      breakpoints->reserve(userBreakpoints.mInstructionBreakpoints.size());
 
-    for (const auto &[k, id] : userBreakpoints.mInstructionBreakpoints) {
-      breakpoints->push_back(
-        BP::CreateFromUserBreakpoint(*userBreakpoints.GetUserBreakpoint(id), MemoryResource()));
+      for (const auto &[k, id] : userBreakpoints.mInstructionBreakpoints) {
+        breakpoints->push_back(
+          BP::CreateFromUserBreakpoint(*userBreakpoints.GetUserBreakpoint(id), MemoryResource()));
+      }
+
+      WriteResponse(
+        SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, std::move(*breakpoints) });
     }
-
-    return WriteResponse(
-      SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, std::move(*breakpoints) });
   }
   DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({ "breakpoints"sv });
@@ -892,6 +977,25 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 
 struct SetFunctionBreakpoints final : public ui::UICommand
 {
+private:
+  inline void
+  ExecuteDuringConfigPhase(DebugAdapterSession *session, Set<BreakpointSpecification> specs) noexcept
+  {
+    session->OnSessionConfiguredWithSupervisor(
+      [sessionId = mSessionId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
+        DBGBUFLOG(core, "Setting post poned function breakpoints");
+        // Set the breakpoints
+        target.SetFunctionBreakpoints(specs);
+        // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
+        for (const auto &user : target.GetUserBreakpoints().AllUserBreakpoints()) {
+          if (user->mKind == LocationUserKind::Function) {
+            dap->PostDapEvent(new ui::dap::BreakpointEvent{ sessionId, "new", {}, user });
+          }
+        }
+      });
+  }
+
+public:
   SetFunctionBreakpoints(UICommandArg arg, const mdbjson::JsonValue &arguments) noexcept
       : UICommand{ std::move(arg) }, mArgs(arguments)
   {
@@ -906,10 +1010,11 @@ struct SetFunctionBreakpoints final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto session = GetSession();
+    auto target = session->GetSupervisor();
 
     using BP = ui::dap::Breakpoint;
-    Set<BreakpointSpecification> bkpts{};
+    Set<BreakpointSpecification> specs{};
     auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
 
     for (const auto &fnbkpt : mArgs.AsSpan("breakpoints")) {
@@ -921,19 +1026,24 @@ struct SetFunctionBreakpoints final : public ui::UICommand
         isRegex = fnbkpt["regex"];
       }
 
-      bkpts.insert(
+      specs.insert(
         BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, std::move(functionName), isRegex));
     }
 
-    target->SetFunctionBreakpoints(bkpts);
-    for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
-      if (user->mKind == LocationUserKind::Function) {
-        breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+    if (!target) {
+      ExecuteDuringConfigPhase(session, std::move(specs));
+      WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
+    } else {
+      target->SetFunctionBreakpoints(specs);
+      for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
+        if (user->mKind == LocationUserKind::Function) {
+          breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+        }
       }
-    }
 
-    return WriteResponse(
-      SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, std::move(*breakpoints) });
+      WriteResponse(
+        SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, std::move(*breakpoints) });
+    }
   }
   DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({ "breakpoints"sv });
@@ -974,12 +1084,12 @@ struct WriteMemory final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
+    auto *target = GetSupervisoOrSendError();
     PROFILE_SCOPE_ARGS("WriteMemory", "command", PEARG("seq", mSeq));
     auto response = mCommandAllocator->Allocate<WriteMemoryResponse>(false, this);
     response->bytes_written = 0;
     if (mAddress) {
-      const auto result = target->GetInterface().WriteBytes(mAddress.value(), mBytes.data(), mBytes.size());
+      const auto result = target->DoWriteBytes(mAddress.value(), mBytes.data(), mBytes.size());
       response->mSuccess = result.mWasSuccessful;
       if (result.mWasSuccessful) {
         response->bytes_written = result.uBytesWritten;
@@ -1044,7 +1154,7 @@ struct ReadMemory final : public ui::UICommand
     if (mAddress) {
       PROFILE_SCOPE_ARGS(
         "ReadMemory", "command", PEARG("seq", mSeq), PEARG("addr", *mAddress), PEARG("bytes", mBytes));
-      GetOrSendError(target);
+      auto *target = GetSupervisoOrSendError();
       auto sv = target->ReadToVector(*mAddress, mBytes, MemoryResource());
       auto res = mCommandAllocator->Allocate<ReadMemoryResponse>(true, this);
 
@@ -1102,7 +1212,9 @@ struct ConfigurationDone final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    return WriteResponse(ConfigurationDoneResponse{ true, this });
+    bool success = GetSession()->ConfigurationDone();
+    DBGBUFLOG(core, "[request]: executing configurationDone for {}, ok={}", mSessionId, success);
+    return WriteResponse(ConfigurationDoneResponse{ success, this });
   }
 
   DEFINE_NAME("configurationDone");
@@ -1145,15 +1257,15 @@ struct Disconnect final : public UICommand
     // We don't allow for child sessions to be terminated, and not have the entire application torn down.
     // We only allow for suspension, or detaching individual child sessions. This behavior is also mimicked for RR
     // sessions, as destroying a process would invalidate the entire application trace.
-    GetOrSendError(target);
+    auto session = GetSessionOrSendError();
+    auto target = session->GetSupervisor();
 
-    if (mTerminateTracee || mDAPClient->mSessionType == DapClientSession::Launch) {
-      Tracer::Get().TerminateSession();
+    if (!target || target->IsExited()) {
+      WriteResponse(DisconnectResponse{ true, this });
     } else {
-      target->Disconnect();
+      target->Disconnect(mTerminateTracee);
+      mDebugAdapterManager->PushDelayedEvent(new DisconnectResponse{ true, this });
     }
-    mDAPClient->PushDelayedEvent(new DisconnectResponse{ true, this });
-    mDAPClient->PushDelayedEvent(new TerminatedEvent{ mSessionId });
   }
 
   bool mRestart, mTerminateTracee, mSuspendTracee;
@@ -1193,8 +1305,8 @@ struct Initialize final : public ui::UICommand
       RRSession = mArgs["RRSession"];
     }
 
-    mDAPClient->AddSupervisor(Tracer::PrepareNewSupervisorWithId(mSessionId));
-    mDAPClient->PushDelayedEvent(new ui::dap::InitializedEvent{ mSessionId, {} });
+    mDebugAdapterManager->PushDelayedEvent(new ui::dap::InitializedEvent{ mSessionId, {} });
+    mDebugAdapterManager->InitializeSession(mSessionId);
     return WriteResponse(InitializeResponse{ RRSession, true, this });
   }
   mdbjson::JsonValue mArgs;
@@ -1285,8 +1397,39 @@ struct LaunchResponse final : public UIResult
   }
 };
 
+struct RRLaunchResponse final : public UIResult
+{
+  RRLaunchResponse(std::vector<Pid> processes, bool success, UICommandPtr cmd) noexcept
+      : UIResult{ success, cmd }, mProcesses(std::move(processes))
+  {
+  }
+
+  ~RRLaunchResponse() noexcept override = default;
+
+  std::vector<Pid> mProcesses;
+
+  std::pmr::string
+  Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final
+  {
+    std::pmr::string result{ arenaAllocator };
+    result.reserve(256);
+    auto outIt = std::back_inserter(result);
+
+    std::format_to(outIt,
+      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"launch", "body": {{ "processes": [{}] }}}})",
+      seq,
+      mRequestSeq,
+      mSessionId,
+      JoinFormatIterator{ mProcesses });
+    return result;
+  }
+};
+
 struct Launch : public UICommand
 {
+  static constexpr auto kPtraceSession = "ptrace"sv;
+  static constexpr auto kReplaySession = "rr"sv;
+
   Launch(UICommandArg arg, bool stopOnEntry, std::optional<BreakpointBehavior> breakpointBehavior) noexcept
       : UICommand{ std::move(arg) }, mStopOnEntry(stopOnEntry), mBreakpointBehavior(breakpointBehavior)
   {
@@ -1300,7 +1443,7 @@ struct Launch : public UICommand
 
   DEFINE_NAME("launch"sv);
   RequiredArguments({ "type"sv });
-  DefineArgTypes({ "type"sv, FieldType::Enumeration, { "native"sv, "rr"sv } });
+  DefineArgTypes({ "type"sv, FieldType::Enumeration, { kPtraceSession, kReplaySession } });
 };
 
 struct NativeLaunch final : public Launch
@@ -1332,14 +1475,26 @@ struct NativeLaunch final : public Launch
     PROFILE_SCOPE_ARGS(
       "launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{ mProgramArgs }));
 
-    const auto processId = tc::PtraceCommander::ForkExec(
-      mDAPClient, GetSessionId(), mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
+    auto process = tc::ptrace::Session::ForkExec(
+      mDebugAdapterManager, GetSessionId(), mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
 
-    GetOrSendError(supervisor);
-    supervisor->ConfigurationDone();
-    DBGLOG(core, "Responding to launch request, resuming target {}", supervisor->TaskLeaderTid());
-    supervisor->ResumeTarget(tc::RunType::Continue);
-    return WriteResponse(LaunchResponse{ processId, true, this });
+    DBGLOG(core, "Responding to launch request, resuming target {}", process->TaskLeaderTid());
+
+    // Queue a pseudo stop event that will force a start during configurationDone by processing deferred events.
+    process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid() });
+    WriteResponse(LaunchResponse{ process->TaskLeaderTid(), true, this });
+
+    if (GetSession()->HasConfigured()) {
+      process->ProcessDeferredEvents();
+      process->ProcessQueuedUnhandled(process->TaskLeaderTid());
+    } else {
+      process->OnConfigurationDone([&](mdb::tc::SupervisorState *supervisor) {
+        mdb::tc::ptrace::Session *process = static_cast<mdb::tc::ptrace::Session *>(supervisor);
+        process->ProcessDeferredEvents();
+        process->ProcessQueuedUnhandled(process->TaskLeaderTid());
+        return true;
+      });
+    }
   }
 
   std::string_view mProgram;
@@ -1397,6 +1552,92 @@ NativeLaunch::CreateRequest(UICommandArg arg,
     std::move(currentWorkingDir));
 }
 
+struct RRLaunch final : public Launch
+{
+  RRLaunch(UICommandArg arg,
+    bool stopOnEntry,
+    std::optional<BreakpointBehavior> breakpointBehavior,
+    std::string_view traceDir) noexcept
+      : Launch{ std::move(arg), stopOnEntry, breakpointBehavior }, mTraceDirectory(traceDir)
+  {
+  }
+
+  ~RRLaunch() noexcept final = default;
+
+  std::string_view mTraceDirectory;
+
+  RequiredArguments({ "traceDir"sv });
+  DefineArgTypes({ "traceDir", FieldType::String });
+
+  void
+  Execute() noexcept final
+  {
+    PROFILE_SCOPE_ARGS("launch", "command", PEARG("traceDir", mTraceDirectory));
+
+    namespace replay = mdb::tc::replay;
+    DBGBUFLOG(core, "[launch]: Creating replay supervisor");
+    auto replaySupervisor = replay::ReplaySupervisor::Create(mSessionId, tc::replay::RRInitOptions{});
+
+    replaySupervisor->StartReplay(mTraceDirectory.data(), [self = RefPtr{ this }, replaySupervisor]() -> void {
+      DBGLOG(core, "Reached target event, session can start.");
+
+      // TODO: Add the ability to "go to" event N and start from there. But regardless if that feature gets
+      // implemented keep StartReplay as the method to go to event 15, as this is post rr_exec_stub being executed;
+      // and after this point, we can interrupt a go-to-event-N (if user wants to), by having the user interrupt
+      // it. But the user can not interrupt pre event 15.
+
+      auto dap = self->mDebugAdapterManager;
+      auto processes = replaySupervisor->CurrentLiveProcesses();
+      MDB_ASSERT(!processes.empty(), "No live processes?");
+      const bool hasReplayedStep = true;
+      auto session =
+        replay::Session::Create(replaySupervisor, self->mSessionId, processes.front(), dap, hasReplayedStep);
+      session->CreateNewTask(processes.front(), replaySupervisor->ExecedFile(session->TaskLeaderTid()), false);
+
+      if (self->GetSession()->HasConfigured()) {
+        DBGBUFLOG(core, "Session has already configured");
+        replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
+
+        for (const auto &pid : processes) {
+          if (session->TaskLeaderTid() != pid && !replaySupervisor->IsIgnoring(pid)) {
+            dap->PostDapEvent(new ui::dap::Process{ session->GetSessionId(), pid, "forked", true });
+          }
+        }
+        session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
+      } else {
+        DBGBUFLOG(core, "Session not configured yet, perform work on config done.");
+        session->OnConfigurationDone([dap, processes = std::move(processes)](tc::SupervisorState *supervisor) {
+          DBGBUFLOG(core, "Configuration done; request attaching of additional processes if necessary.");
+          auto *session = static_cast<replay::Session *>(supervisor);
+          replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
+          for (const auto &pid : processes) {
+            if (session->TaskLeaderTid() != pid && !replaySupervisor->IsIgnoring(pid)) {
+              dap->PostDapEvent(new ui::dap::Process{ session->GetSessionId(), pid, "forked", true });
+            }
+          }
+          session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
+          return true;
+        });
+      }
+
+      session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
+
+      self->WriteResponse(RRLaunchResponse{ replaySupervisor->CurrentLiveProcesses(), true, self });
+    });
+  }
+
+  static RefPtr<ui::UICommand>
+  CreateRequest(UICommandArg arg,
+    bool stopOnEntry,
+    std::optional<BreakpointBehavior> behaviorSetting,
+    const mdbjson::JsonValue &args) noexcept
+  {
+    IfInvalidArgsReturn(RRLaunch);
+    std::string_view traceDir = args["traceDir"];
+    return RefPtr<RRLaunch>::MakeShared(std::move(arg), stopOnEntry, behaviorSetting, traceDir);
+  }
+};
+
 /* static */
 RefPtr<ui::UICommand>
 Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
@@ -1412,9 +1653,9 @@ Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   const auto behaviorSetting = args.Get("breakpointBehavior")
                                  .and_then([](const auto &json) { return json.GetStringView(); })
                                  .transform([](const std::string_view &behavior) {
-                                   if (behavior == "Stop all threads") {
+                                   if (behavior == "Stop all threads"sv) {
                                      return BreakpointBehavior::StopAllThreadsWhenHit;
-                                   } else if (behavior == "Stop single thread") {
+                                   } else if (behavior == "Stop single thread"sv) {
                                      return BreakpointBehavior::StopOnlyThreadThatHit;
                                    } else {
                                      return BreakpointBehavior::StopAllThreadsWhenHit;
@@ -1423,8 +1664,13 @@ Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
                                  .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
 
   auto type = args["type"]->UncheckedGetStringView();
-  MDB_ASSERT(type == "native", "Unexpected type on launch request: {}", type);
-  return NativeLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
+  if (type == kSessionTypePtrace) {
+    return NativeLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
+  } else if (type == kSessionTypeRr) {
+    return RRLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
+  }
+
+  PANIC("Unhandled launch session type");
 }
 
 struct AttachResponse final : public UIResult
@@ -1453,6 +1699,8 @@ struct AttachResponse final : public UIResult
 
 struct Attach final : public UICommand
 {
+  static constexpr auto kSessionType = "sessionType"sv;
+
   Attach(UICommandArg arg, SessionId sessionId, AttachArgs args) noexcept
       : UICommand{ std::move(arg) }, mRequestingSessionId{ sessionId }, attachArgs{ args }
   {
@@ -1463,48 +1711,74 @@ struct Attach final : public UICommand
   void
   Execute() noexcept final
   {
-    const auto processId = Tracer::Get().Attach(mDAPClient, mRequestingSessionId, attachArgs);
-    GetOrSendError(supervisor);
-    if (supervisor->IsReplaySession()) {
-      supervisor->ResumeTarget(tc::RunType::Continue);
-    } else {
-      DBGLOG(core, "configurationDone - doing nothing for normal attach sessions {}", supervisor->TaskLeaderTid());
-    }
-    return WriteResponse(AttachResponse{ processId, true, this });
+    const auto processId = Tracer::Get().SessionAttach(mDebugAdapterManager, mRequestingSessionId, attachArgs);
+    auto *supervisor = GetSupervisoOrSendError();
+    WriteResponse(AttachResponse{ processId, true, this });
   }
 
   SessionId mRequestingSessionId;
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
-  RequiredArguments({ "type"sv });
+  RequiredArguments({ kSessionType });
 
   DefineArgTypes({ "port", FieldType::Int },
     { "host", FieldType::String },
     { "pid", FieldType::Int },
     {
-      "type",
+      kSessionType,
       FieldType::Enumeration,
-      { "ptrace"sv, "gdbremote"sv, "rr"sv, "auto"sv },
+      { kSessionTypePtrace, kSessionTypeGdbRemote, kSessionTypeRr },
     });
+
+  inline static std::vector<InvalidArg>
+  ProcessArgs(const mdbjson::JsonValue &args)
+  {
+    std::vector<InvalidArg> invalid{};
+    for (const auto &required : { "pid" }) {
+      if (!args.Contains(required)) {
+        invalid.push_back({ ArgumentError::Missing("required for ptrace attach"), required });
+      } else if (!args.Get(required)->IsNumber()) {
+        invalid.push_back({ ArgumentError::RequiredNumberType(), required });
+      }
+    }
+    return invalid;
+  }
+
+  static RefPtr<ui::UICommand>
+  CreateRequestForRr(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
+  {
+    auto invalid = ProcessArgs(args);
+    if (!invalid.empty()) {
+      return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
+    }
+
+    Pid pid = args["pid"];
+    return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], RRAttachArgs{ .pid = pid });
+  }
+
+  static RefPtr<ui::UICommand>
+  CreateRequestForPtrace(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
+  {
+    auto invalid = ProcessArgs(args);
+    if (!invalid.empty()) {
+      return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
+    }
+
+    Pid processId = args["pid"];
+
+    return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], PtraceAttachArgs{ processId });
+  }
 
   static RefPtr<ui::UICommand>
   CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   {
-    auto type = args.At("type")->UncheckedGetStringView();
+    auto type = args.At(kSessionType)->UncheckedGetStringView();
     MDB_ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
-    if (type == "ptrace") {
-      SessionId pid = args["pid"];
-      return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], PtraceAttachArgs{ .pid = pid });
-    } else if (type == "auto") {
-      SessionId processId;
-      if (args.Contains("processId")) {
-        processId = args["processId"];
-        return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], AutoArgs{ processId });
-      }
-      return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg),
-        "attach",
-        std::vector<InvalidArg>{ { ArgumentError::Missing("Required for auto attach"), "processId" } });
-    } else {
+    if (type == kSessionTypePtrace) {
+      return CreateRequestForPtrace(std::move(arg), args);
+    } else if (type == kSessionTypeRr) {
+      return CreateRequestForRr(std::move(arg), args);
+    } else if (type == kSessionTypeGdbRemote) {
       int port = args["port"];
       std::string_view host = args["host"];
       bool allstop = true;
@@ -1515,7 +1789,10 @@ struct Attach final : public UICommand
       return RefPtr<Attach>::MakeShared(std::move(arg),
         args["sessionId"],
         GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type });
-    };
+    }
+    std::vector<InvalidArg> invalid{};
+    invalid.emplace_back(ArgumentError::Invalid("invalid session type"), "sessionType"sv);
+    return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
   }
 };
 
@@ -1547,7 +1824,8 @@ struct Terminate final : public UICommand
   void
   Execute() noexcept final
   {
-    Tracer::Get().TerminateSession();
+    auto *target = GetSupervisoOrSendError();
+    target->Disconnect(true);
     return WriteResponse(TerminateResponse{ true, this });
   }
   DEFINE_NAME("terminate");
@@ -1587,29 +1865,14 @@ struct Threads final : public UICommand
   void
   Execute() noexcept final
   {
-    GetOrSendError(target);
-
+    auto *target = GetSupervisoOrSendError();
     std::pmr::vector<Thread> threads{ MemoryResource() };
-    auto &it = target->GetInterface();
-
-    if (it.mFormat == TargetFormat::Remote) {
-      auto res =
-        it.RemoteConnection()->QueryTargetThreads({ target->TaskLeaderTid(), target->TaskLeaderTid() }, false);
-      MDB_ASSERT(res.front().pid == target->TaskLeaderTid(), "expected pid == task_leader");
-      for (const auto thr : res) {
-        if (std::ranges::none_of(
-              target->GetThreads(), [t = thr.tid](const auto &entry) { return entry.mTid == t; })) {
-          target->AddTask(TaskInfo::CreateTask(target->GetInterface(), thr.tid, false));
-        }
-      }
-      target->RemoveTasksNotInSet(res);
-    }
 
     auto knownThreads = target->GetThreads();
     threads.reserve(knownThreads.size());
     for (const auto &entry : knownThreads) {
       const auto tid = entry.mTid;
-      threads.push_back(Thread{ .mThreadId = tid, .mName = it.GetThreadName(tid) });
+      threads.push_back(Thread{ .mThreadId = tid, .mName = entry.mTask->GetName() });
     }
     return WriteResponse(ThreadsResponse{ true, std::move(threads), this });
   }
@@ -1681,7 +1944,7 @@ void
 StackTrace::Execute() noexcept
 {
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
-  GetOrSendError(target);
+  auto *target = GetSupervisoOrSendError();
   PROFILE_BEGIN_ARGS("StackTrace", "command", PEARG("seq", mSeq));
   auto task = target->GetTaskByTid(mThreadId);
   if (task == nullptr) {
@@ -1835,7 +2098,7 @@ void
 Disassemble::Execute() noexcept
 {
   if (mAddress) {
-    GetOrSendError(target);
+    auto *target = GetSupervisoOrSendError();
     auto res = new DisassembleResponse{ true, this };
     res->mInstructions.reserve(ins_count);
     int remaining = ins_count;
@@ -2231,7 +2494,7 @@ ValidateRequestFormat(const mdbjson::JsonValue &req) noexcept
 }
 
 RefPtr<ui::UICommand>
-ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) noexcept
+ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) noexcept
 {
   using namespace ui::dap;
 
@@ -2252,7 +2515,7 @@ ParseDebugAdapterCommand(DebugAdapterClient &client, std::string_view packet) no
     return nullptr;
   }
 
-  DBGLOG(core, "[dap]: parsed request: {}", obj);
+  DBGLOG(dap, "parsed request: {}", obj);
   std::string_view commandName = obj["command"];
 
   arg.mSeq = obj["seq"];

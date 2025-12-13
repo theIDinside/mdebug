@@ -1,24 +1,56 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "block.h"
-#include "bp.h"
-#include "elf.h"
-#include "elf_symbols.h"
-#include "interface/dap/types.h"
-#include "symbolication/callstack.h"
-#include "symbolication/cu_symbol_info.h"
-#include "symbolication/dwarf/die_ref.h"
-#include "symbolication/dwarf/lnp.h"
-#include "tracer.h"
+
+// mdb
+#include <bp.h>
+#include <interface/dap/types.h>
+#include <symbolication/block.h>
+#include <symbolication/cu_symbol_info.h>
+#include <symbolication/dwarf/die_ref.h>
+#include <symbolication/dwarf/lnp.h>
+#include <symbolication/elf.h>
+#include <symbolication/elf_symbols.h>
+#include <symbolication/value_visualizer.h>
+#include <tracer.h>
+
+// std
 #include <string_view>
-#include <sys/mman.h>
 #include <type_traits>
+
+// system
+#include <sys/mman.h>
 
 namespace mdb {
 
-struct VariableContext;
+namespace tc {
+class SupervisorState;
+}
 
-class TraceeController;
+struct WriteError
+{
+  AddrPtr mAddress;
+  u32 mBytesWritten;
+  int mSysErrorNumber;
+};
+
+struct ObjectFileDescriptor
+{
+  std::filesystem::path mPath;
+  AddrPtr mAddress;
+};
+
+struct AuxvElement
+{
+  u64 mId;
+  u64 mEntry;
+};
+
+struct Auxv
+{
+  std::vector<AuxvElement> mContents;
+};
+
+struct VariableContext;
 
 class NonExecutableCompilationUnitFile;
 
@@ -34,6 +66,7 @@ class Type;
 class Value;
 class DebugAdapterSerializer;
 class ValueResolver;
+class IValueResolve;
 enum class VariableSet : u8;
 enum class FrameVariableKind : u8;
 
@@ -55,24 +88,6 @@ struct BreakpointLookup
   AddrPtr address;
   std::optional<LocationSourceInfo> loc_src_info;
 };
-
-struct ParsedAuxiliaryVector
-{
-  AddrPtr mProgramHeaderPointer{ nullptr };
-  u32 mProgramHeaderEntrySize{ 0 };
-  u32 mProgramHeaderCount{ 0 };
-  AddrPtr mEntry{ nullptr };
-  AddrPtr mInterpreterBaseAddress{ nullptr };
-};
-
-// Asserts if required entries are not found.
-struct ParseAuxiliaryOptions
-{
-  bool requireEntry{ true };
-  bool requiresInterpreterBase{ true };
-};
-
-ParsedAuxiliaryVector ParsedAuxiliaryVectorData(const tc::Auxv &aux, ParseAuxiliaryOptions options = {}) noexcept;
 
 /**
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
@@ -97,6 +112,10 @@ class ObjectFile
   std::vector<MinSymbol> mMinimalFunctionSymbolsSorted;
   std::unordered_map<std::string_view, MinSymbol> mMinimalObjectSymbols;
 
+  std::unordered_map<std::string_view, Index> mMinimalDynamicFunctionSymbols;
+  std::vector<MinSymbol> mMinimalDynamicFunctionSymbolsSorted;
+  std::unordered_map<std::string_view, MinSymbol> mMinimalDynamicObjectSymbols;
+
   std::mutex mLnpHeaderMutex{};
   std::unordered_map<u64, sym::dw::LNPHeader *> mLineNumberProgramHeaders{};
 
@@ -119,7 +138,7 @@ public:
   ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
 
-  static std::shared_ptr<ObjectFile> CreateObjectFile(TraceeController *tc, const Path &path) noexcept;
+  static std::shared_ptr<ObjectFile> CreateObjectFile(tc::SupervisorState *tc, const Path &path) noexcept;
 
   template <typename T>
   auto
@@ -150,7 +169,8 @@ public:
 
   auto GetTypeStorage() noexcept -> NonNullPtr<TypeStorage>;
   auto GetElfSectionBytes(Elf *elf, u32 index) const noexcept -> u8 *;
-  auto FindMinimalFunctionSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
+  auto FindMinimalFunctionSymbol(std::string_view name, bool searchDynamic = false) noexcept
+    -> std::optional<MinSymbol>;
   auto SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *;
   auto FindMinimalObjectSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
 
@@ -174,8 +194,7 @@ public:
   auto GetCompilationUnits() noexcept -> std::span<sym::CompilationUnit *>;
 
   auto InitializeDebugSymbolInfo() noexcept -> void;
-  auto AddMinimalElfSymbols(std::vector<MinSymbol> &&fn_symbols,
-    std::unordered_map<std::string_view, MinSymbol> &&obj_symbols) noexcept -> void;
+  auto ParseELFSymbols(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept -> void;
 
   auto InitializeMinimalSymbolLookup() noexcept -> void;
 
@@ -203,7 +222,7 @@ private:
 class SymbolFile
 {
   std::shared_ptr<ObjectFile> mObjectFile;
-  TraceeController *mTraceeController{ nullptr };
+  tc::SupervisorState *mTraceeController{ nullptr };
 
 public:
   using shr_ptr = std::shared_ptr<SymbolFile>;
@@ -211,14 +230,14 @@ public:
   Immutable<AddrPtr> mBaseAddress;
   Immutable<AddressRange> mPcBounds;
 
-  SymbolFile(TraceeController *tc,
+  SymbolFile(tc::SupervisorState *tc,
     std::string obj_id,
     std::shared_ptr<ObjectFile> &&binary,
     AddrPtr relocated_base) noexcept;
 
   static shr_ptr Create(
-    TraceeController *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
-  auto Copy(TraceeController &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
+    tc::SupervisorState *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
+  auto Copy(tc::SupervisorState &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
 
   inline auto
@@ -229,13 +248,9 @@ public:
   auto ContainsProgramCounter(AddrPtr pc) const noexcept -> bool;
   auto UnrelocateAddress(AddrPtr pc) const noexcept -> AddrPtr;
 
-  auto
-  GetLocals(TraceeController &tc, sym::Frame &frame) noexcept -> std::vector<Ref<sym::Value>>
-  {
-    return GetVariables(tc, frame, sym::VariableSet::Locals);
-  }
+  auto GetLocals(tc::SupervisorState &tc, sym::Frame &frame) noexcept -> std::vector<Ref<sym::Value>>;
 
-  auto GetVariables(TraceeController &tc, sym::Frame &frame, sym::VariableSet set) noexcept
+  auto GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::VariableSet set) noexcept
     -> std::vector<Ref<sym::Value>>;
   auto GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
   static auto GetStaticResolver(sym::Value &value) noexcept -> sym::IValueResolve *;
@@ -252,14 +267,14 @@ public:
 
   auto LookupFunctionBreakpointBySpec(const BreakpointSpecification &spec) noexcept
     -> std::vector<BreakpointLookup>;
-  auto GetSupervisor() noexcept -> TraceeController *;
+  auto GetSupervisor() noexcept -> tc::SupervisorState *;
   auto GetTextSection() const noexcept -> const ElfSection *;
 
 private:
-  auto GetVariables(sym::FrameVariableKind variables_kind, TraceeController &tc, sym::Frame &frame) noexcept
+  auto GetVariables(sym::FrameVariableKind variables_kind, tc::SupervisorState &tc, sym::Frame &frame) noexcept
     -> std::vector<Ref<sym::Value>>;
 };
 
-ObjectFile *mmap_objectfile(const TraceeController &tc, const Path &path) noexcept;
+ObjectFile *mmap_objectfile(const tc::SupervisorState &tc, const Path &path) noexcept;
 void object_file_unloader(ObjectFile *obj);
 } // namespace mdb

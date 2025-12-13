@@ -183,6 +183,7 @@ template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<Re
 #define KiloBytes(KB) 1024 * KB
 #define MegaBytes(MB) 1024 * 1024 * MB
 
+// SessionId of -1 means "unset",  "unknown", or "not yet initialized".
 using SessionId = i32;
 static constexpr auto kSessionId = std::string_view{ "sessionId" };
 

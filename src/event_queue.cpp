@@ -1,17 +1,33 @@
 /** LICENSE TEMPLATE */
 #include "event_queue.h"
-#include "common.h"
-#include "supervisor.h"
-#include "tracer.h"
-#include "utils/format_utils.h"
-#include <fcntl.h>
+
+// mdb
+#include <common.h>
 #include <interface/ui_command.h>
 #include <mdbsys/ptrace.h>
+#include <tracer.h>
+#include <utils/format_utils.h>
+
+// std
 #include <mutex>
 #include <optional>
+
+// system
+#include <fcntl.h>
 #include <sys/signalfd.h>
 
 namespace mdb {
+
+int TraceEvent::sMonotonicEventTime = 1;
+
+/* static */
+int
+TraceEvent::NextEventTime() noexcept
+{
+  const auto res = sMonotonicEventTime;
+  ++sMonotonicEventTime;
+  return res;
+}
 
 // todo(simon): Major refactor. This file is just a proto-prototype event queue system, to replace the more hacky
 // system that was before.
@@ -22,22 +38,9 @@ EventSystem *EventSystem::sEventSystem = nullptr;
 
 #define INIT_EVENT(EVT, PARAM, REG_DATA) EVT->SetGeneralEventData(PARAM, std::move(REG_DATA));
 
-TraceEvent::TraceEvent(TaskInfo &task) noexcept
-    : mProcessId(task.GetTaskLeaderTid().value_or(0)), mTaskId(task.mTid), mTask(&task)
-{
-}
+TraceEvent::TraceEvent(int eventTime) noexcept : mEventTime(eventTime) {}
 
-constexpr bool
-TraceEvent::HasRegisterData() noexcept
-{
-  return !mRegisterData.empty();
-}
-
-const RegisterData &
-TraceEvent::GetRegisterData() noexcept
-{
-  return mRegisterData;
-}
+TraceEvent::TraceEvent() noexcept : TraceEvent(NextEventTime()) {}
 
 constexpr void
 TraceEvent::SetGeneralEventData(const EventDataParam &param, RegisterData &&regs) noexcept
@@ -168,14 +171,12 @@ TraceEvent::InitVForkEvent_(
 }
 
 void
-TraceEvent::InitCloneEvent(TraceEvent *evt,
-  const EventDataParam &param,
-  std::optional<TaskVMInfo> taskStackMetadata,
-  Tid newTaskId,
-  RegisterData &&regData) noexcept
+TraceEvent::InitCloneEvent(
+  TraceEvent *evt, const EventDataParam &param, Tid newTaskId, RegisterData &&regData) noexcept
 {
   INIT_EVENT(evt, param, regData)
-  evt->mEvent = Clone{ { param.tid.value() }, newTaskId, taskStackMetadata };
+  // TODO: Add support to book keep the stack space of a thread, as well as TLS and thread areas, etc.
+  evt->mEvent = Clone{ { param.tid.value() }, newTaskId, nullptr, {}, {} };
   evt->mEventType = TracerEventType::Clone;
 }
 
@@ -238,14 +239,14 @@ TraceEvent::InitEntryEvent(
   evt->mEventType = TracerEventType::Entry;
 }
 
-EventSystem::EventSystem(int commands[2], int debugger[2], int init[2], int internal[2]) noexcept
-    : mCommandEvents(commands[0], commands[1]), mDebuggerEvents(debugger[0], debugger[1]),
-      mInitEvents(init[0], init[1]), mInternalEvents(internal[0], internal[1])
+EventSystem::EventSystem(int commands[2], int gdbServer[2], int replay[2], int internal[2]) noexcept
+    : mCommandEvents(commands[0], commands[1]), mInternalEvents(internal[0], internal[1]),
+      mGdbServerEvents(gdbServer[0], gdbServer[1]), mReplayStopEvents(replay[0], replay[1])
 {
   int i = 0;
   mPollDescriptors[i++] = { mCommandEvents[0], POLLIN, 0 };
-  mPollDescriptors[i++] = { mDebuggerEvents[0], POLLIN, 0 };
-  mPollDescriptors[i++] = { mInitEvents[0], POLLIN, 0 };
+  mPollDescriptors[i++] = { mGdbServerEvents[0], POLLIN, 0 };
+  mPollDescriptors[i++] = { mReplayStopEvents[0], POLLIN, 0 };
   mPollDescriptors[i++] = { mInternalEvents[0], POLLIN, 0 };
 
   // we set `mCurrentPollDescriptors` to `i`, because to initialize the wait system when we want to
@@ -285,68 +286,81 @@ EventSystem *
 EventSystem::Initialize() noexcept
 {
   int commands[2];
-  int dbg[2];
-  int init[2];
+  int gdbServer[2];
+  int replay[2];
   int internal[2];
 
   MUST_HOLD(pipe(commands) != -1, "Failed to open pipe");
-  MUST_HOLD(pipe(dbg) != -1, "Failed to open pipe");
-  MUST_HOLD(pipe(init) != -1, "Failed to open pipe")
+  MUST_HOLD(pipe(gdbServer) != -1, "Failed to open pipe");
+  MUST_HOLD(pipe(replay) != -1, "Failed to open pipe");
   MUST_HOLD(pipe(internal) != -1, "Failed to open pipe")
 
-  for (auto read : { commands[0], dbg[0], init[0], internal[0] }) {
+  for (auto read : { commands[0], gdbServer[0], replay[0], internal[0] }) {
     MDB_ASSERT(fcntl(read, F_SETFL, O_NONBLOCK) != -1, "failed to set read as non-blocking.");
   }
 
-  EventSystem::sEventSystem = new EventSystem{ commands, dbg, init, internal };
+  EventSystem::sEventSystem = new EventSystem{ commands, gdbServer, replay, internal };
   return EventSystem::sEventSystem;
 }
 
 void
-EventSystem::PushCommand(ui::dap::DebugAdapterClient *debugAdapter, RefPtr<ui::UICommand> cmd) noexcept
+EventSystem::PushCommand(ui::dap::DebugAdapterManager *debugAdapter, RefPtr<ui::UICommand> cmd) noexcept
 {
   std::lock_guard lock(mCommandsGuard);
   cmd->SetDebugAdapterClient(*debugAdapter);
-  DBGLOG(core, "notify of new command... {}", cmd->name());
+  DBGLOG(core, "notify of new command... {} for {}", cmd->name(), cmd->mSessionId);
   mCommands.push_back(cmd.Leak());
   int writeValue = write(mCommandEvents[1], "+", 1);
   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
-EventSystem::PushDebuggerEvent(TraceEvent *event) noexcept
+EventSystem::PushGdbServerEvent(GdbServerEvent *event) noexcept
 {
-  std::lock_guard lock(mTraceEventGuard);
-  mTraceEvents.push_back(event);
-  int writeValue = write(mDebuggerEvents[1], "+", 1);
-  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
 void
-EventSystem::ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept
+EventSystem::PushReplayStopEvent(ReplayEvent event) noexcept
 {
-  std::lock_guard lock(mTraceEventGuard);
-
-  if (events.empty()) {
-    return;
-  }
-
-  for (auto e : events) {
-    mTraceEvents.push_back(e);
-  }
-  events.clear();
-  int writeValue = write(mDebuggerEvents[1], "+", 1);
+  mLastReplayEvent = event;
+  int writeValue = write(mReplayStopEvents[1], "+", 1);
   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
 
-void
-EventSystem::PushInitEvent(TraceEvent *event) noexcept
-{
-  std::lock_guard lock(mTraceEventGuard);
-  mInitEvent.push_back(event);
-  int writeValue = write(mInitEvents[1], "+", 1);
-  MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
-}
+// void
+// EventSystem::PushDebuggerEvent(TraceEvent *event) noexcept
+// {
+//   std::lock_guard lock(mTraceEventGuard);
+//   mTraceEvents.push_back(event);
+//   int writeValue = write(mDebuggerEvents[1], "+", 1);
+//   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
+// }
+
+// void
+// EventSystem::ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept
+// {
+//   std::lock_guard lock(mTraceEventGuard);
+
+//   if (events.empty()) {
+//     return;
+//   }
+
+//   for (auto e : events) {
+//     mTraceEvents.push_back(e);
+//   }
+//   events.clear();
+//   int writeValue = write(mDebuggerEvents[1], "+", 1);
+//   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
+// }
+
+// void
+// EventSystem::PushInitEvent(TraceEvent *event) noexcept
+// {
+//   std::lock_guard lock(mTraceEventGuard);
+//   mInitEvent.push_back(event);
+//   int writeValue = write(mInitEvents[1], "+", 1);
+//   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
+// }
 
 void
 EventSystem::PushInternalEvent(InternalEvent event) noexcept
@@ -384,21 +398,29 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
         write.emplace_back(ApplicationEvent{ std::move(cmd) });
       }
       mCommands.clear();
-    } else if (pfd.fd == mDebuggerEvents[0]) {
+    } else if (pfd.fd == mReplayStopEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
-      std::lock_guard lock(mTraceEventGuard);
-      std::ranges::transform(
-        mTraceEvents, std::back_inserter(write), [](TraceEvent *event) { return ApplicationEvent{ event }; });
-      mTraceEvents.clear();
-    } else if (pfd.fd == mInitEvents[0]) {
-      const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
-      MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
-      std::lock_guard lock(mTraceEventGuard);
-      std::ranges::transform(
-        mInitEvent, std::back_inserter(write), [](TraceEvent *event) { return ApplicationEvent{ event, true }; });
-      mInitEvent.clear();
-    } else if (pfd.fd == mInternalEvents[0]) {
+      write.push_back(ApplicationEvent{ mLastReplayEvent });
+    }
+    // else if (pfd.fd == mDebuggerEvents[0]) {
+    //   const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
+    //   MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
+    //   std::lock_guard lock(mTraceEventGuard);
+    //   std::ranges::transform(
+    //     mTraceEvents, std::back_inserter(write), [](TraceEvent *event) { return ApplicationEvent{ event }; });
+    //   mTraceEvents.clear();
+    // }
+    // else if (pfd.fd == mInitEvents[0]) {
+    //   const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
+    //   MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
+    //   std::lock_guard lock(mTraceEventGuard);
+    //   std::ranges::transform(
+    //     mInitEvent, std::back_inserter(write), [](TraceEvent *event) { return ApplicationEvent{ event, true };
+    //     });
+    //   mInitEvent.clear();
+    // }
+    else if (pfd.fd == mInternalEvents[0]) {
       const ssize_t bytesRead = read(pfd.fd, buffer, sizeof(buffer));
       MDB_ASSERT(bytesRead != -1, "Failed to flush notification pipe");
       std::lock_guard lock(mInternalEventGuard);
@@ -419,57 +441,52 @@ EventSystem::PollBlocking(std::vector<ApplicationEvent> &write) noexcept
           if (status.mProcessId <= 0) {
             break;
           }
-          if (WIFSTOPPED(status.mStatus)) {
-            const auto res = WaitResultToTaskWaitResult(status.mProcessId, status.mStatus);
-            auto *traceEvent = Tracer::Get().ConvertWaitEvent(res);
-            // Sometimes when a new thread is created, we receive events out of order, where we haven't initialized
-            // it properly yet.
-            if (!traceEvent) {
-              write.push_back(ApplicationEvent{ WaitEvent{ .mWaitResult = res, .mCpuCore = 0 } });
-            } else {
-              write.push_back(ApplicationEvent{ traceEvent });
-            }
-          } else if (WIFEXITED(status.mStatus)) {
-            bool handled = false;
-            for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
-              std::vector<Tid> threads{};
-              if (supervisor->TaskLeaderTid() == status.mProcessId) {
-                auto *traceEvent = new TraceEvent{};
-                TraceEvent::InitProcessExitEvent(
-                  traceEvent, status.mProcessId, status.mProcessId, WEXITSTATUS(status.mStatus), {});
-                write.push_back(ApplicationEvent{ traceEvent });
-                break;
-              }
-              for (const auto &entry : supervisor->GetThreads()) {
-                threads.push_back(entry.mTid);
-                if (entry.mTid == status.mProcessId) {
-                  auto *traceEvent = new TraceEvent{};
-                  DBGLOG(core, "Exit code for thread {} exited={}", entry.mTid, WEXITSTATUS(status.mStatus));
-                  TraceEvent::InitThreadExited(traceEvent,
-                    { supervisor->TaskLeaderTid(), status.mProcessId, WEXITSTATUS(status.mStatus), 0 },
-                    false,
-                    {});
-                  write.push_back(ApplicationEvent{ traceEvent });
-                  handled = true;
-                }
-              }
+          write.push_back(ApplicationEvent{
+            PtraceEvent{ .mPid = status.mProcessId, .mStatus = status.mStatus, .mCpuCore = 0 } });
+          // if (WIFSTOPPEReplayEvent *eventD(status.mStatus)) {
+          //   const auto res = WaitResultToTaskWaitResult(status.mProcessId, status.mStatus);
+          //   write.push_back(ApplicationEvent{ PtraceEvent{ .mWaitResult = res, .mCpuCore = 0 } });
+          // } else if (WIFEXITED(status.mStatus)) {
+          //   bool handled = false;
+          //   for (const auto &supervisor : Tracer::Get().GetAllProcesses()) {
+          //     std::vector<Tid> threads{};
+          //     if (supervisor->TaskLeaderTid() == status.mProcessId) {
+          //       auto *traceEvent = new TraceEvent{};
+          //       TraceEvent::InitProcessExitEvent(
+          //         traceEvent, status.mProcessId, status.mProcessId, WEXITSTATUS(status.mStatus), {});
+          //       write.push_back(ApplicationEvent{ traceEvent });
+          //       break;
+          //     }
+          //     for (const auto &entry : supervisor->GetThreads()) {
+          //       threads.push_back(entry.mTid);
+          //       if (entry.mTid == status.mProcessId) {
+          //         auto *traceEvent = new TraceEvent{};
+          //         DBGLOG(core, "Exit code for thread {} exited={}", entry.mTid, WEXITSTATUS(status.mStatus));
+          //         TraceEvent::InitThreadExited(traceEvent,
+          //           { supervisor->TaskLeaderTid(), status.mProcessId, WEXITSTATUS(status.mStatus), 0 },
+          //           false,
+          //           {});
+          //         write.push_back(ApplicationEvent{ traceEvent });
+          //         handled = true;
+          //       }
+          //     }
 
-              if (!handled) {
-                DBGLOG(core,
-                  "EXIT STATUS went unhandled for {} (threads=[{}]), exit status={}",
-                  status.mProcessId,
-                  JoinFormatIterator{ threads },
-                  WEXITSTATUS(status.mStatus));
-              }
-            }
+          //     if (!handled) {
+          //       DBGLOG(core,
+          //         "EXIT STATUS went unhandled for {} (threads=[{}]), exit status={}",
+          //         status.mProcessId,
+          //         JoinFormatIterator{ threads },
+          //         WEXITSTATUS(status.mStatus));
+          //     }
+          //   }
 
-          } else if (WIFSIGNALED(status.mStatus)) {
-            const auto signalledEvent = WaitPidResult{ .tid = status.mProcessId,
-              .ws = StopStatus{ .ws = StopKind::Signalled, .uStopSignal = WTERMSIG(status.mStatus) } };
-            write.push_back(ApplicationEvent{ WaitEvent{ signalledEvent, 0 } });
-          } else {
-            PANIC("Unknown wait status event");
-          }
+          // } else if (WIFSIGNALED(status.mStatus)) {
+          //   const auto signalledEvent = WaitPidResult{ .tid = status.mProcessId,
+          //     .ws = StopStatus{ .ws = StopKind::Signalled, .uStopSignal = WTERMSIG(status.mStatus) } };
+          //   write.push_back(ApplicationEvent{ PtraceEvent{ signalledEvent, 0 } });
+          // } else {
+          //   PANIC("Unknown wait status event");
+          // }
         }
       }
     }

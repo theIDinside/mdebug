@@ -5,7 +5,6 @@
 #include "interface/remotegdb/deserialization.h"
 #include "interface/remotegdb/shared.h"
 #include "interface/remotegdb/target_description.h"
-#include "interface/tracee_command/tracee_command_interface.h"
 #include "symbolication/objfile.h"
 #include "symbolication/value.h"
 #include "task.h"
@@ -15,7 +14,6 @@
 #include <array>
 #include <charconv>
 #include <set>
-#include <supervisor.h>
 #include <sys/user.h>
 #include <tracer.h>
 

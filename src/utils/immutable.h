@@ -2,6 +2,7 @@
 #pragma once
 #include "common.h"
 #include "common/formatter.h"
+#include <concepts>
 #include <type_traits>
 #include <utility>
 
@@ -405,13 +406,29 @@ template <typename T> struct NonNullPtr
   {
     return ptr;
   }
+
+  // Allow implicit conversion NonNullPtr<Derived> -> NonNullPtr<Base>
+  template <typename U>
+  constexpr
+  operator NonNullPtr<U>() const noexcept
+    requires std::is_convertible_v<T *, U *> // C++20 constraint
+  {
+    return NonNullPtr<U>{ ptr };
+  }
 };
 
-template <typename U>
+// template <typename U>
+// static constexpr auto
+// NonNull(U &ref) noexcept
+// {
+//   return NonNullPtr{ .ptr = &ref };
+// }
+
+template <typename T>
 static constexpr auto
-NonNull(U &ref) noexcept
+NonNull(T &ref) noexcept
 {
-  return NonNullPtr<U>{ .ptr = &ref };
+  return NonNullPtr{ .ptr = &ref };
 }
 
 template <typename T> using ImmutablePtr = Immutable<NonNullPtr<T>>;

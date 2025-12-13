@@ -88,13 +88,13 @@ public:
   bool HasDWARF() const noexcept;
 
   /** Parses minimal symbols (from .symtab) and registers them with `obj_file` */
-  static void ParseMinimalSymbol(Elf *elf, ObjectFile &objectFile) noexcept;
   bool AddressesNeedsRelocation() const noexcept;
 
   Elf64Header *mElfHeader;
   Immutable<std::vector<ElfSection>> mSections;
 
   const ElfSection *mStrTable;
+  const ElfSection *mDynStrTable;
   // Dwarf Sections, might as well keep direct pointers to them
   const ElfSection *mDebugInfo;
   const ElfSection *mDebugAbbrev;

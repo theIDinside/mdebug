@@ -162,7 +162,7 @@ public:
     std::unreachable();
   }
 
-  bool ConvertExceptionToString(std::pmr::string &output) noexcept;
+  bool ExceptionToPrintableOutput(std::pmr::string &output) noexcept;
 };
 
 /** Calls function `functionValue` and then frees the arguments in `arguments`. */

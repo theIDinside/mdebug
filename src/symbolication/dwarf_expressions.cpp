@@ -1,12 +1,15 @@
 /** LICENSE TEMPLATE */
 #include "dwarf_expressions.h"
-#include "../supervisor.h"
-#include "../task.h"
-#include "common.h"
-#include "dwarf_defs.h"
-#include "dwarf_frameunwinder.h"
-#include <utility>
+
+// mdb
+#include <common.h>
+#include <interface/tracee_command/supervisor_state.h>
+#include <symbolication/dwarf_frameunwinder.h>
+#include <task.h>
 #include <utils/logger.h>
+
+// std
+#include <utility>
 
 namespace mdb::sym {
 
@@ -47,18 +50,18 @@ DwarfStack::Swap() noexcept
 }
 
 ExprByteCodeInterpreter::ExprByteCodeInterpreter(
-  int frameLevel, TraceeController &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept
-    : mFrameLevel(frameLevel), mStack(), mTraceeController(tc), mTask(t), mByteStream(byteStream),
+  int frameLevel, tc::SupervisorState &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept
+    : mFrameLevel(frameLevel), mStack(), mSupervisor(tc), mTask(t), mByteStream(byteStream),
       mReader(nullptr, byteStream.data(), byteStream.size())
 {
 }
 
 ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel,
-  TraceeController &tc,
+  tc::SupervisorState &tc,
   TaskInfo &t,
   std::span<const u8> byteStream,
   std::span<const u8> frameBaseCode) noexcept
-    : mFrameLevel(frameLevel), mStack(), mTraceeController(tc), mTask(t), mByteStream(byteStream),
+    : mFrameLevel(frameLevel), mStack(), mSupervisor(tc), mTask(t), mByteStream(byteStream),
       mFrameBaseProgram(frameBaseCode), mReader(this->mByteStream)
 {
 }
@@ -109,7 +112,7 @@ op_deref(ExprByteCodeInterpreter &i) noexcept
 {
   const auto v = i.mStack.Pop();
   const TPtr<std::uintptr_t> addr{ v };
-  const auto deref = i.mTraceeController.ReadType(addr);
+  const auto deref = i.mSupervisor.ReadType(addr);
   i.mStack.Push(deref);
 }
 
@@ -122,22 +125,22 @@ op_deref_size(ExprByteCodeInterpreter &i) noexcept
   switch (bytes) {
   case 1: {
     const TPtr<u8> addr{ v };
-    const auto deref = i.mTraceeController.ReadType(addr);
+    const auto deref = i.mSupervisor.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   case 2: {
     const TPtr<u16> addr{ v };
-    const auto deref = i.mTraceeController.ReadType(addr);
+    const auto deref = i.mSupervisor.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   case 4: {
     const TPtr<u32> addr{ v };
-    const auto deref = i.mTraceeController.ReadType(addr);
+    const auto deref = i.mSupervisor.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   case 8: {
     const TPtr<u64> addr{ v };
-    const auto deref = i.mTraceeController.ReadType(addr);
+    const auto deref = i.mSupervisor.ReadType(addr);
     i.mStack.Push<u64>(deref);
   } break;
   }
@@ -695,7 +698,7 @@ static Op ops[0xff] = {
 
 AddrPtr ExprByteCodeInterpreter::ComputeFrameBase() noexcept {
   MDB_ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
-  ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mTraceeController, mTask, mFrameBaseProgram};
+  ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mSupervisor, mTask, mFrameBaseProgram};
   return frameBaseReader.Run();
 }
 

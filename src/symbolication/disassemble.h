@@ -1,11 +1,17 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common/formatter.h"
-#include "tracee_pointer.h"
+
+// mdb
 #include <common.h>
+#include <common/formatter.h>
 #include <common/typedefs.h>
+#include <tracee_pointer.h>
+
 namespace mdb {
-class TraceeController;
+namespace tc {
+class SupervisorState;
+}
+
 struct ElfSection;
 struct LineTableEntry;
 } // namespace mdb
@@ -23,9 +29,9 @@ struct Disassembly
 };
 
 void DisassembleBackwards(
-  TraceeController *target, AddrPtr addr, i32 ins_offset, std::vector<sym::Disassembly> &output) noexcept;
+  tc::SupervisorState *target, AddrPtr addr, i32 ins_offset, std::vector<sym::Disassembly> &output) noexcept;
 
-void Disassemble(TraceeController *target,
+void Disassemble(tc::SupervisorState *target,
   AddrPtr addr,
   u32 ins_offset,
   u32 total,

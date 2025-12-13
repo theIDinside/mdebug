@@ -2,6 +2,7 @@
 #include "ptrace.h"
 #include "mdbsys/stop_status.h"
 #include <cstdlib>
+#include <sys/ptrace.h>
 #include <sys/syscall.h>
 #include <tracer.h>
 #include <utility>
@@ -181,49 +182,6 @@ from_register(u64 syscall_number)
     return Execed;
   }
   return Stopped;
-}
-
-WaitPidResult
-WaitResultToTaskWaitResult(Tid tid, int status) noexcept
-{
-  using enum StopKind;
-  const auto signal = WSTOPSIG(status);
-  WaitPidResult result{ .tid = tid, .ws = { .ws = NotKnown, .uStopSignal = signal }, .status = status };
-  auto &kind = result.ws.ws;
-
-  if (IS_SYSCALL_SIGTRAP(WSTOPSIG(status))) {
-    PtraceSyscallInfo info;
-    constexpr auto size = sizeof(PtraceSyscallInfo);
-    PTRACE_OR_PANIC(PTRACE_GET_SYSCALL_INFO, tid, size, &info);
-    if (info.IsEntry()) {
-      kind = SyscallEntry;
-    } else {
-      kind = SyscallExit;
-    }
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_CLONE)) {
-    kind = Cloned;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXEC)) {
-    kind = Execed;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_EXIT)) {
-    kind = Exited;
-    result.ws.uStopExitCode = WEXITSTATUS(status);
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_FORK)) {
-    kind = Forked;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK)) {
-    kind = VForked;
-  } else if (IS_TRACE_EVENT(status, PTRACE_EVENT_VFORK_DONE)) {
-    kind = VForkDone;
-  } else if (WSTOPSIG(status) == SIGTRAP) {
-    kind = Stopped;
-  } else if (WSTOPSIG(status) == SIGSTOP) {
-    kind = Stopped;
-  } else if (WSTOPSIG(status) == SIGTERM) {
-    DBGLOG(core, "SOME OTHER STOP FOR {}. WSTOPSIG: {}", tid, WSTOPSIG(status));
-    kind = Stopped;
-  } else {
-    kind = Stopped;
-  }
-  return result;
 }
 
 std::optional<WaitPid>

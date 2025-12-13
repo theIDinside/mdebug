@@ -1,6 +1,70 @@
 from .base import Command, Argument, presets, runCommand
 from tooling.metadata import BuildMetadata
 
+import os
+import subprocess
+
+zshComplete = """
+autoload -Uz compinit
+compinit
+
+# --- begin mdbuild completion ---
+_mdbuild() {
+    local -a commands build_opts configure_opts
+
+    commands=(help build clean dev-setup configure-buildroot configure list-presets select autocomplete)
+    build_opts=(debug release fulldebug fullrelease)
+    configure_opts=(debug release fulldebug fullrelease)
+
+    _arguments \
+        '1:command:->cmd' \
+        '*::arg:->args'
+
+    case $state in
+        cmd)
+            _values 'mdbuild commands' $commands
+            return
+        ;;
+    esac
+
+    case $words[2] in
+        build)      _values 'build options' $build_opts ;;
+        configure)  _values 'configure options' $configure_opts ;;
+        help)       _values 'help topics' $commands ;;
+    esac
+}
+
+compdef _mdbuild mdbuild ./mdbuild
+# --- end mdbuild completion ---
+
+"""
+
+def detect_shell():
+    """
+    Returns: 'bash', 'zsh', or None if unknown.
+    """
+    # --- Method 1: inspect parent process name ---
+    try:
+        ppid = os.getppid()
+        proc_name = subprocess.check_output(
+            ["ps", "-p", str(ppid), "-o", "comm="],
+            text=True
+        ).strip()
+
+        if proc_name in ("bash", "zsh"):
+            return proc_name
+    except Exception:
+        pass
+
+    # --- Method 2: fallback to SHELL env var ---
+    shell = os.environ.get("SHELL", "")
+    if shell.endswith("bash"):
+        return "bash"
+    if shell.endswith("zsh"):
+        return "zsh"
+
+    return None
+
 scriptPrelude = """
 #!/bin/bash
 
@@ -48,8 +112,8 @@ complete -F _mdbuild_completion mdbuild
 
 
 class AutoCompleteCommand(Command):
-    description = "Generate autocompletion for bash"
-    useMessage = "Create auto-complete bash script that can auto complete the build system commands from the command line. You have to source that script."
+    description = "Generate autocompletion for bash or zsh"
+    useMessage = "Create auto-complete bash/zsh script that can auto complete the build system commands from the command line. You have to source that script."
     arguments = []
 
     def __init__(self):
@@ -61,19 +125,26 @@ class AutoCompleteCommand(Command):
             raise ValueError("Build command does not accept any arguments.")
         return None
 
-    def run(self, buildMetadata: BuildMetadata, args):
-        optionsSource = f"""    local commands='{" ".join([x.commandName for x in Command.registeredCommands.values()])}'"""
-        scriptSourceParts = [
-            scriptPrelude,
-            optionsSource,
-            scriptCompleter,
-            createScriptEpilogue(presets),
-        ]
-        scriptSource = "\n".join(scriptSourceParts)
-        with open("autocomplete.sh", "w") as file:
-            file.write(scriptSource)
+    def getScriptSource(self, shell):
+        if shell == "zsh":
+            return zshComplete
+        elif shell == "bash":
+            optionsSource = f"""    local commands='{" ".join([x.commandName for x in Command.registeredCommands.values()])}'"""
+            scriptSourceParts = [
+                scriptPrelude,
+                optionsSource,
+                scriptCompleter,
+                createScriptEpilogue(presets),
+            ]
+            scriptSource = "\n".join(scriptSourceParts)
+            return scriptSource
 
-        print("Auto-complete script successfully written to autocomplete.sh")
+    def run(self, buildMetadata: BuildMetadata, args):
+        shell = detect_shell()
+        scriptSource = self.getScriptSource(shell)
+        with open("mdbuild-autocomplete", "w") as file:
+            file.write(scriptSource)
+        print(f"Auto-complete script successfully written to mdbuild-autocomplete for {shell}")
 
 
 AutoCompleteCommand()

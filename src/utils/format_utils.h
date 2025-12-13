@@ -121,25 +121,18 @@ template <typename C> struct std::formatter<JoinFormatIterator<C>>
   format(const SelfType &self, FormatContext &ctx) const
   {
     auto out = ctx.out();
-    const auto *ptr = self.mContainer.data();
 
     if (self.mContainer.empty()) {
       return out;
     }
 
-    const auto size = self.mContainer.size();
+    std::span view{ self.mContainer };
+    out = std::format_to(out, "{}", *view.data());
 
-    if (size == 1) {
-      return std::format_to(out, "{}", *ptr);
+    for (const auto &element : view.subspan(1)) {
+      out = std::format_to(out, "{}{}", self.mDelimiter, element);
     }
 
-    for (auto i = 0u; i < size - 1; ++i) {
-      out = std::format_to(out, "{}", ptr[i]);
-      for (const auto &ch : self.mDelimiter) {
-        *out++ = ch;
-      }
-    }
-
-    return std::format_to(out, "{}", ptr[self.mContainer.size() - 1]);
+    return out;
   }
 };

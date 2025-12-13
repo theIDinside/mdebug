@@ -4,7 +4,6 @@
 // mdb
 #include <mdbjs/jsobject.h>
 #include <mdbjs/variablejs.h>
-#include <supervisor.h>
 #include <symbolication/callstack.h>
 #include <symbolication/objfile.h>
 
@@ -32,7 +31,7 @@ Frame::Id(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 static JSValue
 GetArrayOfVariables(JSContext *context,
   SymbolFile *symbolFile,
-  TraceeController *supervisor,
+  tc::SupervisorState *supervisor,
   sym::Frame &frame,
   sym::VariableSet set)
 {

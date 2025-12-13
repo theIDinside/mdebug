@@ -38,6 +38,7 @@ class CompilationUnit
 {
   friend class dw::SourceCodeFile;
   dw::UnitData *mUnitData;
+  // These are unreloacted addresses.
   AddrPtr mPcStart{ nullptr };
   AddrPtr mPcEndExclusive{ nullptr };
   dw::LNPHeader *mLineNumberProgram{ nullptr };

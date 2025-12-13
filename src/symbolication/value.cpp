@@ -1,16 +1,20 @@
 /** LICENSE TEMPLATE */
 #include "value.h"
-#include "common.h"
-#include "interface/dap/types.h"
-#include "lib/arena_allocator.h"
-#include "symbolication/dwarf/typeread.h"
-#include "symbolication/dwarf_expressions.h"
-#include "type.h"
-#include "value_visualizer.h"
-#include <memory_resource>
-#include <supervisor.h>
+
+// mdb
+#include <common.h>
+#include <interface/dap/types.h>
+#include <lib/arena_allocator.h>
 #include <symbolication/dwarf/die.h>
+#include <symbolication/dwarf/typeread.h>
+#include <symbolication/dwarf_expressions.h>
 #include <symbolication/objfile.h>
+#include <symbolication/type.h>
+#include <symbolication/value_visualizer.h>
+#include <task.h>
+
+// std
+#include <memory_resource>
 #include <type_traits>
 
 namespace mdb::sym {
@@ -219,8 +223,7 @@ Value::OverwriteValueBytes(const std::span<const std::byte> newBytes) noexcept
   auto addr = Address();
 
   auto supervisor = mContext->mTask->GetSupervisor();
-
-  const auto result = supervisor->GetInterface().WriteBytes(addr, (const u8 *)newBytes.data(), newBytes.size());
+  const auto result = supervisor->DoWriteBytes(addr, (const u8 *)newBytes.data(), newBytes.size());
   mValueObject->Refresh(*supervisor);
 
   return result.mWasSuccessful;
@@ -380,13 +383,13 @@ EagerMemoryContentsObject::EagerMemoryContentsObject(
 }
 
 LazyMemoryContentsObject::LazyMemoryContentsObject(
-  TraceeController &supervisor, AddrPtr start, AddrPtr end) noexcept
+  tc::SupervisorState &supervisor, AddrPtr start, AddrPtr end) noexcept
     : MemoryContentsObject(start, end), mSupervisor(supervisor)
 {
 }
 
 bool
-EagerMemoryContentsObject::Refresh(TraceeController &supervisor) noexcept
+EagerMemoryContentsObject::Refresh(tc::SupervisorState &supervisor) noexcept
 {
   auto mem = ReadMemory(supervisor, start, RawView().size_bytes());
   MDB_ASSERT(mem.is_ok(), "failed to refresh {} .. {}", start, end);
@@ -418,7 +421,7 @@ LazyMemoryContentsObject::CacheMemory() noexcept
 }
 
 bool
-LazyMemoryContentsObject::Refresh(TraceeController &) noexcept
+LazyMemoryContentsObject::Refresh(tc::SupervisorState &) noexcept
 {
   CacheMemory();
   return true;
@@ -446,7 +449,7 @@ LazyMemoryContentsObject::View(u32 offset, u32 size) noexcept
 
 /*static*/
 MemoryContentsObject::ReadResult
-MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 sizeOf) noexcept
+MemoryContentsObject::ReadMemory(tc::SupervisorState &tc, AddrPtr address, u32 sizeOf) noexcept
 {
   if (auto res = tc.SafeRead(address, sizeOf); res.is_expected()) {
     return ReadResult{ .info = ReadResultInfo::Success, .value = res.take_value() };
@@ -462,7 +465,7 @@ MemoryContentsObject::ReadMemory(TraceeController &tc, AddrPtr address, u32 size
 
 /*static*/
 MemoryContentsObject::ReadResult
-MemoryContentsObject::ReadMemory(std::pmr::memory_resource *, TraceeController &, AddrPtr, u32) noexcept
+MemoryContentsObject::ReadMemory(std::pmr::memory_resource *, tc::SupervisorState &, AddrPtr, u32) noexcept
 {
   TODO("implement MemoryContentsObject that uses custom allocation strategies.");
 }
@@ -535,7 +538,7 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
 /*static*/
 Ref<Value>
 MemoryContentsObject::CreateFrameVariable(
-  TraceeController &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept
+  tc::SupervisorState &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept
 {
   const auto requested_byte_size = symbol.mType->Size();
 

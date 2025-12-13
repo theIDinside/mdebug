@@ -2,68 +2,98 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <iostream>
+#include <print>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+
+namespace fs = std::filesystem;
+
+using Path = fs::path;
+
+static int
+Exec(const std::vector<std::string> &execArgs)
+{
+  if (execArgs.empty()) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  // Build argv for execve
+  std::vector<char *> argv;
+  argv.reserve(execArgs.size() + 1);
+
+  for (const auto &arg : execArgs) {
+    // const_cast is safe because execve() does not modify the strings themselves
+    argv.push_back(const_cast<char *>(arg.c_str()));
+  }
+  argv.push_back(nullptr); // must be nullptr-terminated
+
+  // Call execve. We pass `environ` to inherit the current environment.
+  extern char **environ;
+  std::println("execve({}, {}, nullptr)", argv[0], std::span{ argv }.subspan(0, argv.size() - 1));
+  return execve(argv[0], argv.data(), environ);
+}
 
 int
 main(int argc, char *argv[])
 {
   if (argc < 3) {
-    std::cerr << "Usage: <required params> |optional params|\n\t" << argv[0]
-              << " <child program path> <directory_path> <sleep time in milliseconds>" << std::endl;
+    std::println(stderr,
+      "Usage: <required params> |optional params|\n\t {} <child program path> <directory_path> <sleep time in "
+      "milliseconds>",
+      argv[0]);
     return 1;
   }
 
-  std::cout << "file: " << argv[0] << std::endl;
-  std::cout << "child to execute: " << argv[1] << std::endl;
-  std::cout << std::format("child 1st param: {}\n", argv[2]);
-  std::cout << std::format("child 2nd param: {}\n", argv[3]);
+  std::println("file {}", argv[0]);
+  std::println("child to execute: {}", argv[1]);
+  std::println("child 1st param: {}", argv[2]);
+  std::println("child 2nd param: {}", argv[3]);
 
-  std::string directoryPath = argv[1];
-  auto current = std::filesystem::current_path();
-  std::filesystem::path programpath = directoryPath;
-  programpath = current / "build" / "bin" / "childprogram";
+  std::vector<std::string> execArguments{};
+  for (auto arg : std::span{ argv + 1, argv + argc }) {
+    execArguments.emplace_back(arg);
+  }
 
-  std::cout << " exec=" << programpath << " with parameter: " << directoryPath
-            << " . cwd=" << std::filesystem::current_path() << std::endl;
   pid_t pid = fork();
-  // THE DEBUGGER MASTER RACE IS HERE LOL
+
   if (pid == -1) {
     // Fork failed
-    std::cerr << "Error: fork failed." << std::endl;
+    std::println(stderr, "[Error] fork failed: {}", strerror(errno));
     return 1;
   } else if (pid == 0) {
     // Child process
     // Replace this with the path to the executable created from the previous program
 
-    int res;
+    int res = Exec(execArguments);
     if (argc == 3) {
+      std::println("execl({}, {}, {}, nullptr)", argv[1], argv[1], argv[2]);
       res = execl(argv[1], argv[1], argv[2], nullptr); // #CHILD_EXEC_BP
     } else {
+      std::println("execl({}, {}, {}, {}, nullptr)", argv[1], argv[1], argv[2], argv[3]);
       res = execl(argv[1], argv[1], argv[2], argv[3], nullptr);
     }
 
     // If execl returns, it must have failed
-    std::cerr << "Error: execl failed exit code=" << res << ", error: " << strerror(errno) << std::endl;
+    std::println(stderr, "Error: execl failed exit code={}, error={}", res, strerror(errno));
     return 1;
   } else {
     // Parent process
     int status;
     // to introduce some multi-threadedness.
-    bool exitThread = false;
-    std::thread bg_thr{[&]() {
+    std::atomic<bool> exitThread = false;
+    std::thread bg_thr{ [&]() {
       for (; !exitThread;) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{15});
-        std::cout << "Yaaaaaaawn I " << std::this_thread::get_id() << " just woke up" << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds{ 1000 });
+        std::println("Yaaaaaaawn I, thread {}, just woke up", std::this_thread::get_id());
       }
-    }};
+    } };
     waitpid(pid, &status, 0); // #PARENT_WAITPID
     if (WIFEXITED(status)) {
-      std::cout << "Child process exited with status " << WEXITSTATUS(status) << std::endl;
+      std::println("Child process exited with status={}", WEXITSTATUS(status));
     } else {
-      std::cerr << "Child process did not exit successfully." << std::endl;
+      std::println(stderr, "Child process did not exit successfully.");
     }
     exitThread = true;
     bg_thr.join();

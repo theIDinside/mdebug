@@ -13,7 +13,8 @@ struct SharedObject;
 
 struct Clone;
 
-constexpr std::string_view LOADER_STATE = "_r_debug_extended";
+constexpr std::string_view LOADER_STATE_EXTENDED = "_r_debug_extended";
+constexpr std::string_view LOADER_STATE = "_r_debug";
 
 enum class SharedObjectSymbols : u8
 {

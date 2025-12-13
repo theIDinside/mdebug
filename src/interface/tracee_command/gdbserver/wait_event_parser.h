@@ -2,7 +2,7 @@
 #pragma once
 // mdb
 #include <common/typedefs.h>
-#include <event_queue_event_param.h>
+#include <event_queue_types.h>
 #include <interface/remotegdb/shared.h>
 #include <tracee_pointer.h>
 
@@ -19,8 +19,6 @@ namespace gdb {
 
 struct GdbThread;
 class RemoteConnection;
-
-using RegisterData = std::vector<std::pair<u32, std::vector<u8>>>;
 
 constexpr u32
 valueOf(std::string_view v)
