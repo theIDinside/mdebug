@@ -220,6 +220,12 @@ public:
   /// `tc` is the relevant supervisor for the task `t` that hit the breakpoint.
   virtual BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept = 0;
 
+  virtual bool
+  IsUserBreakpoint() const noexcept
+  {
+    return false;
+  }
+
   template <typename UB, typename... Args>
   static Ref<UB>
   Create(RequiredUserParameters &&param, Args &&...args) noexcept
@@ -245,6 +251,12 @@ public:
   Ref<UserBreakpoint> CloneBreakpoint(ProcessBreakpointsManager &breakpointStorage,
     tc::SupervisorState &tc,
     Ref<BreakpointLocation> bp) noexcept override;
+
+  bool
+  IsUserBreakpoint() const noexcept final
+  {
+    return true;
+  }
 
   constexpr void
   IncrementHitCount() noexcept
