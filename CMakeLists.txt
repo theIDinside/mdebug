@@ -21,6 +21,8 @@ option(MDB_PROFILE_LOGGER "Configure mdb to build with profile logging" OFF)
 find_package(PkgConfig REQUIRED)
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
 
+include(cmake/StageRR.cmake)
+
 # Project dependencies directory
 set(MDBDEPS "${CMAKE_SOURCE_DIR}/dependencies")
 
@@ -212,10 +214,6 @@ set(MIDAS_SOURCES
 
   # src/interface/tracee_command/gdb_remote_commander.cpp
   # src/interface/tracee_command/gdb_remote_commander.h
-  # src/interface/tracee_command/rr_commander.cpp
-  # src/interface/tracee_command/rr_commander.h
-  # src/interface/tracee_command/tracee_command_interface.cpp
-  # src/interface/tracee_command/tracee_command_interface.h
 
   # Interpreter
   src/mdbjs/bpjs.cpp
@@ -328,7 +326,7 @@ add_subdirectory(lib/json)
 set(BUILD_TESTS OFF CACHE BOOL "Disable tests for Project B" FORCE)
 set(WILL_RUN_TESTS OFF CACHE BOOL "Run tests" FORCE)
 
-set(RR_BINARY_OBJ_DIR ${CMAKE_BINARY_DIR}/_deps/rr)
+set(RR_BINARY_OBJ_DIR ${CMAKE_BINARY_DIR}/dependencies/rr)
 # If RR_SRC is not provided as a CMake variable, try reading environment variable
 if(NOT DEFINED RR_SRC)
     if(DEFINED ENV{RR_SRC})
@@ -355,13 +353,12 @@ endif()
 
 # Show the resolved path
 message(STATUS "Using RR source directory: ${RR_SRC}")
-
-# Validate that it exists
-if(NOT IS_DIRECTORY "${RR_SRC}")
-    message(FATAL_ERROR "RR_SRC path does not exist or is not a directory: ${RR_SRC}")
+if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/rr")
+    message(FATAL_ERROR "RR source has not been configured. run `mdbuild dev-setup`")
 endif()
 
-add_subdirectory("${RR_SRC}" "${RR_BINARY_OBJ_DIR}")
+# Add RR to this configuration and build artefacts into RR_BINARY_OBJ_DIR
+add_subdirectory(dependencies/rr "${RR_BINARY_OBJ_DIR}")
 
 target_link_libraries(mdb PRIVATE mdb_spinlock zydis libquickjs mdbjson librr)
 # Link the libraries to your target
@@ -409,3 +406,10 @@ if(CLANG_TIDY_CHECK)
   set_target_properties(mdb PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
 endif()
 
+
+
+stage_rr_runtime(
+  mdb
+  "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resource/bin"
+  "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resource/lib/rr"
+)
