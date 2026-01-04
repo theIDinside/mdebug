@@ -62,6 +62,13 @@ def decompress(archivePath, name):
                         adjustedMemberPath, "wb"
                     ) as dest:
                         dest.write(source.read())
+
+                    # Apply original Unix permission bits if present
+                    info = zf.getinfo(member)
+                    unix_permissions = info.external_attr >> 16
+                    if unix_permissions:
+                        adjustedMemberPath.chmod(unix_permissions)
+                        
     elif archivePath.suffix in (".tar", ".gz", ".tgz") or archivePath.name.endswith(
         (".tar.gz", ".tar", ".tar.xz")
     ):
@@ -141,7 +148,10 @@ class DependencyDeclaration:
         self.lib = lib
         self.version = version
         self.localName = localName
-        self.downloadUrl = urlTemplate.replace("$(VERSION)", self.version)
+        if "$(VERSION)" not in urlTemplate:
+            self.downloadUrl = urlTemplate
+        else:
+            self.downloadUrl = urlTemplate.replace("$(VERSION)", self.version)
         self.archiveKind = archiveKind
         self.producedDependencyType: Dependency = DependencyType
         self.configureStep = configureStep
@@ -192,6 +202,12 @@ class SetupProjectCommand(Command):
             urlTemplate="https://github.com/zyantific/zydis/releases/download/$(VERSION)/zydis-amalgamated.tar.gz",
             archiveKind="tar.gz",
         ),
+        DependencyDeclaration(
+            lib="rr",
+            version="v5.9.0",
+            urlTemplate="https://github.com/theIDinside/rr/archive/refs/heads/replay-as-library.zip",
+            archiveKind="zip"
+        )
     ]
 
     description = "Setup project and download dependencies."
@@ -216,6 +232,8 @@ class SetupProjectCommand(Command):
             if not args
             else buildMetadata.getProjectPath(args[0])
         )
+
+        Path(downloadDirectory).mkdir(parents=True, exist_ok=True)
 
         for declaration in SetupProjectCommand.projectDependencies:
             dependency = declaration.download(directory=downloadDirectory)
