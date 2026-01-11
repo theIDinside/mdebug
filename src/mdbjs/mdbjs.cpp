@@ -7,6 +7,7 @@
 #include <mdbjs/supervisorjs.h>
 #include <mdbjs/taskinfojs.h>
 #include <mdbjs/util.h>
+#include <session_task_map.h>
 #include <tracer.h>
 #include <utils/logger.h>
 
@@ -128,8 +129,8 @@ Scripting::GetTask(
     return JS_ThrowTypeError(ctx, Scripting::HelpMessage("getThread").data());
   }
 
-  i32 tid;
-  if (!JS_ToInt32(ctx, &tid, argv[0])) {
+  i32 tid = -1;
+  if (JS_ToInt32(ctx, &tid, argv[0])) {
     return JS_ThrowTypeError(ctx, "number conversion failed.");
   }
 
@@ -139,6 +140,22 @@ Scripting::GetTask(
   }
 
   return JsTaskInfo::CreateValue(ctx, taskInfo);
+}
+
+/* static */
+JSValue
+Scripting::GetThreads(
+  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  auto value = JS_NewArray(ctx);
+
+  auto index = 0;
+  for (auto &[id, thread] : Tracer::GetSessionTaskMap().AllThreads()) {
+    auto task = JsTaskInfo::CreateValue(ctx, thread);
+    JS_SetPropertyUint32(ctx, value, index++, task);
+  }
+
+  return value;
 }
 
 /* static */ JSValue

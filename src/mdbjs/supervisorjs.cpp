@@ -63,4 +63,14 @@ JsSupervisor::Breakpoints(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(
   return arrayObject;
 }
 
+/* static */
+JSValue
+JsSupervisor::ResumeAll(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
+
+  supervisor->ResumeTarget(tc::RunType::Continue);
+  return JS_UNDEFINED;
+}
+
 } // namespace mdb::js
