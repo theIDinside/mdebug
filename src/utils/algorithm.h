@@ -1,11 +1,21 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common.h"
+// mdb
+#include <common/traits.h>
+
+// std
 #include <algorithm>
+#include <concepts>
 #include <optional>
-#include <type_traits>
 
 namespace mdb {
+
+enum class PredicateIterator : uint8_t
+{
+  Continue,
+  Stop
+};
+
 template <typename T>
 concept Comparable = requires(const T &t) {
   { t == t } -> std::convertible_to<bool>;
@@ -93,18 +103,66 @@ find_if(Container &c, Fn &&f) noexcept
 {
   using ReturnType = decltype(std::optional{ c.begin() });
   if constexpr (std::is_const<Container>::value) {
-    if (const auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
+    if (const auto it = FindIf(c, f); it != std::end(c)) {
       return std::optional{ it };
     } else {
       return ReturnType{};
     }
   } else {
-    if (auto it = std::find_if(c.begin(), c.end(), f); it != std::end(c)) {
+    if (auto it = FindIf(c, f); it != std::end(c)) {
       return std::optional{ it };
     } else {
       return ReturnType{};
     }
   }
+}
+
+template <bool DerefPointer = true, typename Container, typename Fn>
+constexpr auto
+FindIf(Container &c, Fn &&fn) noexcept
+{
+  using Elem = std::remove_reference_t<decltype(*std::begin(c))>;
+
+  if constexpr (IsSmartPointer<Elem> && DerefPointer) {
+    for (auto it = std::begin(c); it != std::end(c); ++it) {
+      if (fn(**it)) {
+        return it;
+      }
+    }
+  } else {
+    for (auto it = std::begin(c); it != std::end(c); ++it) {
+      if (fn(*it)) {
+        return it;
+      }
+    }
+  }
+  return std::end(c);
+}
+
+template <typename Container, typename Fn>
+constexpr auto
+any_of(const Container &c, Fn &&compare) noexcept
+{
+  for (const auto &v : c) {
+    if (compare(v)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+template <typename Container, Comparable T>
+constexpr auto
+any_of_value(const Container &c, const T &value) noexcept
+{
+  for (const auto &v : c) {
+    if (v == value) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 template <typename Container, typename Fn>
@@ -116,22 +174,9 @@ none_of(const Container &c, Fn &&fn) noexcept
 
 template <typename Container, Comparable T>
 constexpr auto
-any_of(const Container &c, const T &value) noexcept
+none_of_value(const Container &c, const T &value) noexcept
 {
-  for (const auto &v : c) {
-    if (v == value) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-template <typename Container, Comparable T>
-constexpr auto
-none_of(const Container &c, const T &value) noexcept
-{
-  return !any_of(c, value);
+  return !any_of_value(c, value);
 }
 
 } // namespace mdb

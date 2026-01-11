@@ -1,6 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "utils/immutable.h"
+// mdb
+#include <common/typedefs.h>
+#include <utils/immutable.h>
+
+// std
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -75,7 +79,7 @@ private:
   void parse_close_tag() noexcept;
 };
 
-std::vector<const XMLElementView *> collect_by_name(const XMLElementView &root, std::string_view name,
-                                                    bool can_contain_children, u32 guess_total = 85) noexcept;
+std::vector<const XMLElementView *> collect_by_name(
+  const XMLElementView &root, std::string_view name, bool can_contain_children, u32 guess_total = 85) noexcept;
 
 } // namespace mdb::xml

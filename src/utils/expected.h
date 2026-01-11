@@ -2,14 +2,12 @@
 #pragma once
 
 // mdb
-#include "common.h"
+#include <common.h>
 #include <common/panic.h>
+#include <common/traits.h>
 
 // stdlib
-#include <memory>
 #include <optional>
-#include <type_traits>
-#include <utility>
 #include <variant>
 
 namespace mdb {
@@ -287,21 +285,9 @@ struct None
 {
 };
 
-template <typename Pointee> struct is_smart_ptr : std::false_type
-{
-};
-template <typename Pointee> struct is_smart_ptr<std::shared_ptr<Pointee>> : std::true_type
-{
-};
-template <typename Pointee> struct is_smart_ptr<std::unique_ptr<Pointee>> : std::true_type
-{
-};
-
-template <typename T> concept IsPointer = is_smart_ptr<T>::value || std::is_pointer_v<T>;
-
 template <typename Fn>
 auto
-transform(const IsPointer auto &smart_ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*smart_ptr))>
+transform(const IsSmartPointer auto &smart_ptr, Fn &&fn) noexcept -> std::optional<decltype(fn(*smart_ptr))>
 {
   if (smart_ptr == nullptr) {
     return std::nullopt;
