@@ -12,10 +12,13 @@
 #include <interface/dap/custom_commands.h>
 #include <interface/dap/dap_defs.h>
 #include <interface/dap/events.h>
+#include <interface/dap/interface.h>
 #include <interface/dap/parse_buffer.h>
 #include <interface/tracee_command/ptrace/ptrace_session.h>
 #include <interface/tracee_command/rr/rr_session.h>
 #include <interface/tracee_command/rr/rr_supervisor.h>
+#include <interface/tracee_command/supervisor_state.h>
+#include <interface/ui_command.h>
 #include <symbolication/callstack.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/objfile.h>
@@ -78,41 +81,28 @@ template <> struct std::formatter<ui::dap::Message>
 
 #define GetSessionOrSendError()                                                                                   \
   ({                                                                                                              \
-    auto session = GetSession();                                                                                  \
-    if (!session) {                                                                                               \
+    auto supervisor = GetSupervisor();                                                                            \
+    if (!supervisor) {                                                                                            \
       std::pmr::string err{ MemoryResource() };                                                                   \
-      std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mSessionId);                    \
-      WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                          \
-      return;                                                                                                     \
-    }                                                                                                             \
-    session;                                                                                                      \
-  })
-
-#define GetSupervisoOrSendError()                                                                                 \
-  ({                                                                                                              \
-    auto session = GetSessionOrSendError();                                                                       \
-    auto supervisor = session->GetSupervisor();                                                                   \
-    if (!supervisor || supervisor->IsExited()) {                                                                  \
-      DBGBUFLOG(core, "Could not find supervisor for session {} ({})", mSessionId, __PRETTY_FUNCTION__);          \
-      std::pmr::string err{ MemoryResource() };                                                                   \
-      std::format_to(std::back_inserter(err), "Could not find supervisor for session {}", mSessionId);            \
+      std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mProcessId);                    \
       WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                          \
       return;                                                                                                     \
     }                                                                                                             \
     supervisor;                                                                                                   \
   })
 
-#define GetSupervisoOrSendErrorA(name)                                                                            \
-  auto session = GetSession();                                                                                    \
-  MDB_ASSERT(session != nullptr, "Expected session to be found!");                                                \
-  auto name = session->GetSupervisor();                                                                           \
-  if (!name || name->IsExited()) {                                                                                \
-    DBGBUFLOG(core, "Could not find supervisor with session id {} ({})", mSessionId, __PRETTY_FUNCTION__);        \
-    std::pmr::string err{ MemoryResource() };                                                                     \
-    std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mSessionId);                      \
-    WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                            \
-    return;                                                                                                       \
-  }
+#define GetSupervisoOrSendError()                                                                                 \
+  ({                                                                                                              \
+    auto supervisor = GetSessionOrSendError();                                                                    \
+    if (supervisor->IsExited()) {                                                                                 \
+      DBGBUFLOG(core, "Could not find supervisor for session {} ({})", mProcessId, __PRETTY_FUNCTION__);          \
+      std::pmr::string err{ MemoryResource() };                                                                   \
+      std::format_to(std::back_inserter(err), "Could not find supervisor for session {}", mProcessId);            \
+      WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                          \
+      return;                                                                                                     \
+    }                                                                                                             \
+    supervisor;                                                                                                   \
+  })
 
 namespace mdb {
 
@@ -127,10 +117,10 @@ UICommand::WriteResponse(const UIResult &result) noexcept
   }
 }
 
-dap::DebugAdapterSession *
-UICommand::GetSession() noexcept
+tc::SupervisorState *
+UICommand::GetSupervisor() noexcept
 {
-  return mDebugAdapterManager->GetSession(mSessionId);
+  return mDebugAdapterManager->GetSupervisor(mProcessId);
 }
 } // namespace ui
 
@@ -157,7 +147,7 @@ get(const mdbjson::JsonValue &obj, std::string_view field)
 {
   if (obj.Contains(field)) {
     Res result = obj[field];
-    return std::move(result);
+    return std::make_optional(std::move(result));
   }
   return std::nullopt;
 }
@@ -182,7 +172,7 @@ struct ErrorResponse final : ui::UIResult
     ui::UICommandPtr cmd,
     std::optional<std::pmr::string> &&shortMessage,
     std::optional<Message> &&message) noexcept
-      : ui::UIResult(false, cmd), mPid(cmd->mSessionId), mCommand(command), mShortMessage(std::move(shortMessage)),
+      : ui::UIResult(false, cmd), mPid(cmd->mProcessId), mCommand(command), mShortMessage(std::move(shortMessage)),
         mMessage(std::move(message))
   {
   }
@@ -196,7 +186,7 @@ struct ErrorResponse final : ui::UIResult
     if (mShortMessage && mMessage) {
       const Message &m = mMessage.value();
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{"error":{}}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"{}","body":{{"error":{}}}}})",
         seq,
         mRequestSeq,
         mPid,
@@ -205,7 +195,7 @@ struct ErrorResponse final : ui::UIResult
         m);
     } else if (mShortMessage && !mMessage) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","message":"{}"}})",
         seq,
         mRequestSeq,
         mPid,
@@ -213,7 +203,7 @@ struct ErrorResponse final : ui::UIResult
         *mShortMessage);
     } else if (!mShortMessage && mMessage) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}","body":{{"error":{}}}}})",
         seq,
         mRequestSeq,
         mPid,
@@ -221,7 +211,7 @@ struct ErrorResponse final : ui::UIResult
         *mMessage);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"{}"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"{}"}})",
         seq,
         mRequestSeq,
         mPid,
@@ -247,16 +237,16 @@ struct PauseResponse final : public ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"pause"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"pause"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"pause","message":"taskwasnotrunning"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     }
     return result;
   }
@@ -278,7 +268,7 @@ struct Pause final : public ui::UICommand
   {
     auto target = GetSupervisoOrSendError();
 
-    MDB_ASSERT(target, "No target {}", mSessionId);
+    MDB_ASSERT(target, "No target {}", mProcessId);
     bool success = target->Pause(mPauseArgs.mThreadId);
     WriteResponse(PauseResponse{ success, this });
   }
@@ -301,17 +291,17 @@ struct ReverseContinueResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"reverseContinue","body":{{"allThreadsContinued":true}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         mContinueAll);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"reverseContinue","message":"notStopped"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     }
     return result;
   }
@@ -327,11 +317,11 @@ struct ReverseContinue final : ui::UICommand
   void
   Execute() noexcept final
   {
-    auto session = GetSession();
+    auto supervisor = GetSupervisor();
     // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
     // _any_ target, and use that to resume backwards (since RR is the controller.).
-    MDB_ASSERT(session->GetSupervisor(), "must have target.");
-    auto ok = session->GetSupervisor()->ReverseResumeTarget(tc::RunType::Continue);
+    MDB_ASSERT(supervisor, "must have target.");
+    auto ok = supervisor->ReverseResumeTarget(tc::RunType::Continue);
     WriteResponse(ReverseContinueResponse{ ok, this });
   }
 
@@ -357,17 +347,17 @@ struct ContinueResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"continue","body":{{"allThreadsContinued":{}}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         mContinueAll);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"continue","message":"notStopped"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     }
     return result;
   }
@@ -392,7 +382,7 @@ struct Continue final : public ui::UICommand
     bool success = false;
     DBGLOG(control, "user requested resume, all={}, thread={}", mContinueAll, mThreadId);
 
-    if (mContinueAll) {
+    if (mContinueAll || !target->SingleThreadControl()) {
       target->ResumeTarget(tc::RunType::Continue);
       success = true;
     } else {
@@ -426,16 +416,16 @@ struct NextResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"next"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"next"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"next","message":"notStopped"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     }
     return result;
   }
@@ -477,7 +467,7 @@ struct Next final : public ui::UICommand
         target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::InstructionStep>(*target, *task, 1));
       break;
     case SteppingGranularity::Line:
-      success = target->SetAndCallRunAction(task->mTid, std::make_shared<ptracestop::LineStep>(*target, *task));
+      success = target->SetAndCallRunAction(task->mTid, ptracestop::LineStep::FallibleMake(*target, *task));
       break;
     case SteppingGranularity::LogicalBreakpointLocation:
       TODO("Next::execute granularity=SteppingGranularity::LogicalBreakpointLocation")
@@ -510,10 +500,10 @@ struct StepBackResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"stepBack"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepBack"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     } else {
       std::string_view error;
       switch (mResult) {
@@ -527,10 +517,10 @@ struct StepBackResponse final : ui::UIResult
         break;
       }
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"stepBack","message":"{}"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepBack","message":"{}"}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         error);
     }
     return result;
@@ -583,16 +573,16 @@ struct StepInResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"stepIn"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepIn"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepIn","message":"notStopped"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     }
     return result;
   }
@@ -652,16 +642,16 @@ struct StepOutResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"stepOut"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stepOut"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     } else {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"stepOut","message":"notStopped"}})",
         seq,
         mRequestSeq,
-        mSessionId);
+        mProcessId);
     }
     return result;
   }
@@ -742,34 +732,34 @@ struct SetBreakpointsResponse final : ui::UIResult
     switch (this->mType) {
     case BreakpointRequestKind::source:
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setBreakpoints","body":{{"breakpoints":[{}]}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         JoinFormatIterator{ serializedBreakpoints, "," });
       break;
     case BreakpointRequestKind::function:
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setFunctionBreakpoints","body":{{"breakpoints":[{}]}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         JoinFormatIterator{ serializedBreakpoints, "," });
       break;
     case BreakpointRequestKind::instruction:
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"setInstructionBreakpoints","body":{{"breakpoints":[{}]}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         JoinFormatIterator{ serializedBreakpoints, "," });
       break;
     case BreakpointRequestKind::exception:
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":{},"command":"setExceptionBreakpoints","body":{{"breakpoints":[{}]}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         mSuccess,
         JoinFormatIterator{ serializedBreakpoints, "," });
       break;
@@ -790,10 +780,10 @@ struct SetBreakpoints final : public ui::UICommand
 {
 private:
   inline void
-  ExecuteDuringConfigPhase(DebugAdapterSession *session, Path file, Set<BreakpointSpecification> specs) noexcept
+  ExecuteDuringConfigPhase(Path file, Set<BreakpointSpecification> specs) noexcept
   {
-    session->OnSessionConfiguredWithSupervisor(
-      [sessionId = mSessionId, dap = mDebugAdapterManager, file = std::move(file), specs = std::move(specs)](
+    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(
+      [sessionId = mProcessId, dap = mDebugAdapterManager, file = std::move(file), specs = std::move(specs)](
         tc::SupervisorState &target) {
         // Set the breakpoints
         DBGBUFLOG(core, "Setting post poned source breakpoints");
@@ -823,8 +813,7 @@ public:
   void
   Execute() noexcept final
   {
-    auto session = GetSession();
-    auto target = session->GetSupervisor();
+    auto target = GetSupervisor();
 
     MDB_ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
     MDB_ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
@@ -855,8 +844,8 @@ public:
     // respond with breakpoints: [], and then instead emit "new breakpoint" events for when the configuration phase
     // + attach/launch has happened.
     if (!target) {
-      DBGBUFLOG(core, "Session {} has no supervisor yet, postponing breakpoint creation.", mSessionId);
-      ExecuteDuringConfigPhase(session, Path{ file }, std::move(specs));
+      DBGBUFLOG(core, "Session {} has no supervisor yet, postponing breakpoint creation.", mProcessId);
+      ExecuteDuringConfigPhase(Path{ file }, std::move(specs));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
     } else {
       target->SetSourceBreakpoints(file, specs);
@@ -905,10 +894,10 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 {
 private:
   inline void
-  ExecuteDuringConfigPhase(DebugAdapterSession *session, Set<BreakpointSpecification> specs) noexcept
+  ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs) noexcept
   {
-    session->OnSessionConfiguredWithSupervisor(
-      [sessionId = mSessionId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
+    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(
+      [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
         DBGBUFLOG(core, "Setting post poned instruction breakpoints");
         // Set the breakpoints
         target.SetInstructionBreakpoints(specs);
@@ -936,8 +925,7 @@ public:
   void
   Execute() noexcept final
   {
-    auto session = GetSession();
-    auto target = session->GetSupervisor();
+    auto target = GetSupervisor();
 
     using BP = ui::dap::Breakpoint;
     Set<BreakpointSpecification> specs{};
@@ -952,7 +940,7 @@ public:
     }
 
     if (!target) {
-      ExecuteDuringConfigPhase(session, std::move(specs));
+      ExecuteDuringConfigPhase(std::move(specs));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
     } else {
       target->SetInstructionBreakpoints(specs);
@@ -977,10 +965,10 @@ struct SetFunctionBreakpoints final : public ui::UICommand
 {
 private:
   inline void
-  ExecuteDuringConfigPhase(DebugAdapterSession *session, Set<BreakpointSpecification> specs) noexcept
+  ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs) noexcept
   {
-    session->OnSessionConfiguredWithSupervisor(
-      [sessionId = mSessionId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
+    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(
+      [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
         DBGBUFLOG(core, "Setting post poned function breakpoints");
         // Set the breakpoints
         target.SetFunctionBreakpoints(specs);
@@ -1008,8 +996,7 @@ public:
   void
   Execute() noexcept final
   {
-    auto session = GetSession();
-    auto target = session->GetSupervisor();
+    auto target = GetSupervisor();
 
     using BP = ui::dap::Breakpoint;
     Set<BreakpointSpecification> specs{};
@@ -1029,7 +1016,7 @@ public:
     }
 
     if (!target) {
-      ExecuteDuringConfigPhase(session, std::move(specs));
+      ExecuteDuringConfigPhase(std::move(specs));
       WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
     } else {
       target->SetFunctionBreakpoints(specs);
@@ -1059,10 +1046,10 @@ struct WriteMemoryResponse final : public ui::UIResult
     result.reserve(256);
     auto outIt = std::back_inserter(result);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":{},"command":"writeMemory","body":{{"bytesWritten":{}}}}})",
       seq,
       mRequestSeq,
-      mSessionId,
+      mProcessId,
       mSuccess,
       bytes_written);
     return result;
@@ -1120,10 +1107,10 @@ struct ReadMemoryResponse final : public ui::UIResult
     auto outIt = std::back_inserter(result);
     if (mSuccess) {
       std::format_to(outIt,
-        R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
+        R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"readMemory","body":{{"address":"{}","unreadableBytes":{},"data":"{}"}}}})",
         seq,
         mRequestSeq,
-        mSessionId,
+        mProcessId,
         mFirstReadableAddress,
         mUnreadableBytes,
         mBase64Data);
@@ -1193,10 +1180,10 @@ struct ConfigurationDoneResponse final : public ui::UIResult
     auto outIt = std::back_inserter(result);
     result.reserve(256);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"configurationDone"}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"configurationDone"}})",
       seq,
       mRequestSeq,
-      mSessionId);
+      mProcessId);
     return result;
   }
 };
@@ -1210,9 +1197,13 @@ struct ConfigurationDone final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    bool success = GetSession()->ConfigurationDone();
-    DBGBUFLOG(core, "[request]: executing configurationDone for {}, ok={}", mSessionId, success);
-    return WriteResponse(ConfigurationDoneResponse{ success, this });
+    if (auto target = GetSupervisor(); target) {
+      bool success = target->ConfigurationDone();
+    } else {
+      DBGLOG(core, "No target to run configuration done on");
+      mDebugAdapterManager->ConfigDoneWithNoSupervisor();
+    }
+    return WriteResponse(ConfigurationDoneResponse{ true, this });
   }
 
   DEFINE_NAME("configurationDone");
@@ -1231,10 +1222,10 @@ struct DisconnectResponse final : public UIResult
     result.reserve(256);
     auto outIt = std::back_inserter(result);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"disconnect"}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disconnect"}})",
       seq,
       mRequestSeq,
-      mSessionId);
+      mProcessId);
     return result;
   }
 };
@@ -1255,8 +1246,7 @@ struct Disconnect final : public UICommand
     // We don't allow for child sessions to be terminated, and not have the entire application torn down.
     // We only allow for suspension, or detaching individual child sessions. This behavior is also mimicked for RR
     // sessions, as destroying a process would invalidate the entire application trace.
-    auto session = GetSessionOrSendError();
-    auto target = session->GetSupervisor();
+    auto target = GetSessionOrSendError();
 
     if (!target || target->IsExited()) {
       WriteResponse(DisconnectResponse{ true, this });
@@ -1297,14 +1287,13 @@ struct Initialize final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    DBGLOG(core, "Executing initialize request, session id={}", mSessionId);
+    DBGLOG(core, "Executing initialize request, session id={}", mProcessId);
     bool RRSession = false;
     if (mArgs.Contains("RRSession") && mArgs["RRSession"]->IsBoolean()) {
       RRSession = mArgs["RRSession"];
     }
 
-    mDebugAdapterManager->PushDelayedEvent(new ui::dap::InitializedEvent{ mSessionId, {} });
-    mDebugAdapterManager->InitializeSession(mSessionId);
+    mDebugAdapterManager->PushDelayedEvent(new ui::dap::InitializedEvent{ mProcessId, {} });
     return WriteResponse(InitializeResponse{ RRSession, true, this });
   }
   mdbjson::JsonValue mArgs;
@@ -1361,7 +1350,7 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
   std::pmr::string res{ arenaAllocator };
 
   std::format_to(std::back_inserter(res),
-    R"({{"seq":0,"request_seq":{},"sessionId":0,"type":"response","success":true,"command":"initialize","body": {} }})",
+    R"({{"seq":0,"request_seq":{},"processId":0,"type":"response","success":true,"command":"initialize","body": {} }})",
     mRequestSeq,
     body);
   return res;
@@ -1369,13 +1358,13 @@ InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) co
 
 struct LaunchResponse final : public UIResult
 {
-  LaunchResponse(std::optional<SessionId> newProcess, bool success, UICommandPtr cmd) noexcept
-      : UIResult{ success, cmd }, mProcessId{ newProcess }
+  LaunchResponse(std::optional<Pid> newProcess, bool success, UICommandPtr cmd) noexcept
+      : UIResult{ success, cmd }, mDeterminedProcessId{ newProcess }
   {
   }
   ~LaunchResponse() noexcept override = default;
 
-  std::optional<SessionId> mProcessId;
+  std::optional<Pid> mDeterminedProcessId;
 
   std::pmr::string
   Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final
@@ -1383,27 +1372,28 @@ struct LaunchResponse final : public UIResult
     std::pmr::string result{ arenaAllocator };
     result.reserve(256);
     auto outIt = std::back_inserter(result);
-    VERIFY(mProcessId.has_value(), "Failed to launch binary, but not responding with ErrorResponse?");
+    VERIFY(mDeterminedProcessId.has_value(), "Failed to launch binary, but not responding with ErrorResponse?");
 
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {} }}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {} }}}})",
       seq,
       mRequestSeq,
-      mSessionId,
-      *mProcessId);
+      mProcessId,
+      *mDeterminedProcessId);
     return result;
   }
 };
 
 struct RRLaunchResponse final : public UIResult
 {
-  RRLaunchResponse(std::vector<Pid> processes, bool success, UICommandPtr cmd) noexcept
-      : UIResult{ success, cmd }, mProcesses(std::move(processes))
+  RRLaunchResponse(Pid firstProcess, std::vector<Pid> processes, bool success, UICommandPtr cmd) noexcept
+      : UIResult{ success, cmd }, mFirstProcess(firstProcess), mProcesses(std::move(processes))
   {
   }
 
   ~RRLaunchResponse() noexcept override = default;
 
+  Pid mFirstProcess;
   std::vector<Pid> mProcesses;
 
   std::pmr::string
@@ -1414,10 +1404,11 @@ struct RRLaunchResponse final : public UIResult
     auto outIt = std::back_inserter(result);
 
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"launch", "body": {{ "processes": [{}] }}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"launch", "body": {{ "processId": {}, "processes": [{}] }}}})",
       seq,
       mRequestSeq,
-      mSessionId,
+      mProcessId,
+      mFirstProcess,
       JoinFormatIterator{ mProcesses });
     return result;
   }
@@ -1474,7 +1465,7 @@ struct NativeLaunch final : public Launch
       "launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{ mProgramArgs }));
 
     auto process = tc::ptrace::Session::ForkExec(
-      mDebugAdapterManager, GetSessionId(), mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
+      mDebugAdapterManager, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
 
     DBGLOG(core, "Responding to launch request, resuming target {}", process->TaskLeaderTid());
 
@@ -1482,9 +1473,12 @@ struct NativeLaunch final : public Launch
     process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid() });
     WriteResponse(LaunchResponse{ process->TaskLeaderTid(), true, this });
 
-    if (GetSession()->HasConfigured()) {
+    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized({ process });
+    DBGLOG(core, "Configuration phase executed with materialized supervisor: {}", configPhaseDone);
+    if (mDebugAdapterManager->HasPendingConfigDone()) {
       process->ProcessDeferredEvents();
       process->ProcessQueuedUnhandled(process->TaskLeaderTid());
+      mDebugAdapterManager->ConfigDoneWithNoSupervisor(false);
     } else {
       process->OnConfigurationDone([&](mdb::tc::SupervisorState *supervisor) {
         mdb::tc::ptrace::Session *process = static_cast<mdb::tc::ptrace::Session *>(supervisor);
@@ -1568,60 +1562,51 @@ struct RRLaunch final : public Launch
   DefineArgTypes({ "traceDir", FieldType::String });
 
   void
+  OnReplayStarted(tc::replay::ReplaySupervisor *replaySupervisor) noexcept
+  {
+    namespace replay = tc::replay;
+
+    // TODO: Add the ability to "go to" event N and start from there. But regardless if that feature gets
+    // implemented keep StartReplay as the method to go to event 15, as this is post rr_exec_stub being executed;
+    // and after this point, we can interrupt a go-to-event-N (if user wants to), by having the user interrupt
+    // it. But the user can not interrupt pre event 15.
+
+    auto processes = replaySupervisor->CurrentLiveProcesses();
+    MDB_ASSERT(!processes.empty(), "No live processes?");
+    const bool hasReplayedStep = true;
+    replay::Session *session =
+      replay::Session::Create(replaySupervisor, processes.front(), mDebugAdapterManager, hasReplayedStep);
+
+    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized({ session });
+    WriteResponse(RRLaunchResponse{
+      replaySupervisor->CurrentLiveProcesses().front(), replaySupervisor->CurrentLiveProcesses(), true, this });
+    session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
+
+    if (mDebugAdapterManager->HasPendingConfigDone() || session->IsConfigured()) {
+      session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
+      mDebugAdapterManager->ConfigDoneWithNoSupervisor(false);
+    } else {
+      session->OnConfigurationDone([processes = std::move(processes)](tc::SupervisorState *supervisor) {
+        DBGBUFLOG(core, "Configuration done; request attaching of additional processes if necessary.");
+        auto *session = static_cast<replay::Session *>(supervisor);
+        replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
+        session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
+        return true;
+      });
+    }
+  }
+
+  void
   Execute() noexcept final
   {
     PROFILE_SCOPE_ARGS("launch", "command", PEARG("traceDir", mTraceDirectory));
 
     namespace replay = mdb::tc::replay;
     DBGBUFLOG(core, "[launch]: Creating replay supervisor");
-    auto replaySupervisor = replay::ReplaySupervisor::Create(mSessionId, tc::replay::RRInitOptions{});
+    auto replaySupervisor = replay::ReplaySupervisor::Create(tc::replay::RRInitOptions{});
 
-    replaySupervisor->StartReplay(mTraceDirectory.data(), [self = RefPtr{ this }, replaySupervisor]() -> void {
-      DBGLOG(core, "Reached target event, session can start.");
-
-      // TODO: Add the ability to "go to" event N and start from there. But regardless if that feature gets
-      // implemented keep StartReplay as the method to go to event 15, as this is post rr_exec_stub being executed;
-      // and after this point, we can interrupt a go-to-event-N (if user wants to), by having the user interrupt
-      // it. But the user can not interrupt pre event 15.
-
-      auto dap = self->mDebugAdapterManager;
-      auto processes = replaySupervisor->CurrentLiveProcesses();
-      MDB_ASSERT(!processes.empty(), "No live processes?");
-      const bool hasReplayedStep = true;
-      auto session =
-        replay::Session::Create(replaySupervisor, self->mSessionId, processes.front(), dap, hasReplayedStep);
-      session->CreateNewTask(processes.front(), replaySupervisor->ExecedFile(session->TaskLeaderTid()), false);
-
-      if (self->GetSession()->HasConfigured()) {
-        DBGBUFLOG(core, "Session has already configured");
-        replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
-
-        for (const auto &pid : processes) {
-          if (session->TaskLeaderTid() != pid && !replaySupervisor->IsIgnoring(pid)) {
-            dap->PostDapEvent(new ui::dap::Process{ session->GetSessionId(), pid, "forked", true });
-          }
-        }
-        session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
-      } else {
-        DBGBUFLOG(core, "Session not configured yet, perform work on config done.");
-        session->OnConfigurationDone([dap, processes = std::move(processes)](tc::SupervisorState *supervisor) {
-          DBGBUFLOG(core, "Configuration done; request attaching of additional processes if necessary.");
-          auto *session = static_cast<replay::Session *>(supervisor);
-          replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
-          for (const auto &pid : processes) {
-            if (session->TaskLeaderTid() != pid && !replaySupervisor->IsIgnoring(pid)) {
-              dap->PostDapEvent(new ui::dap::Process{ session->GetSessionId(), pid, "forked", true });
-            }
-          }
-          session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
-          return true;
-        });
-      }
-
-      session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
-
-      self->WriteResponse(RRLaunchResponse{ replaySupervisor->CurrentLiveProcesses(), true, self });
-    });
+    replaySupervisor->StartReplay(mTraceDirectory.data(),
+      [cmd = RefPtr{ this }, replaySupervisor]() -> void { cmd->OnReplayStarted(replaySupervisor); });
   }
 
   static RefPtr<ui::UICommand>
@@ -1641,31 +1626,30 @@ RefPtr<ui::UICommand>
 Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
 {
   DBGLOG(core, "creating lauch request");
-  SessionId sessionId = args["sessionId"];
 
   bool stopOnEntry = false;
   if (args.Contains("stopOnEntry")) {
     stopOnEntry = args["stopOnEntry"];
   }
 
-  const auto behaviorSetting = args.Get("breakpointBehavior")
-                                 .and_then([](const auto &json) { return json.GetStringView(); })
-                                 .transform([](const std::string_view &behavior) {
-                                   if (behavior == "Stop all threads"sv) {
-                                     return BreakpointBehavior::StopAllThreadsWhenHit;
-                                   } else if (behavior == "Stop single thread"sv) {
-                                     return BreakpointBehavior::StopOnlyThreadThatHit;
-                                   } else {
-                                     return BreakpointBehavior::StopAllThreadsWhenHit;
-                                   }
-                                 })
-                                 .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
-
   auto type = args["type"]->UncheckedGetStringView();
   if (type == kSessionTypePtrace) {
+    const auto behaviorSetting = args.Get("breakpointBehavior")
+                                   .and_then([](const auto &json) { return json.GetStringView(); })
+                                   .transform([](const std::string_view &behavior) {
+                                     if (behavior == "Stop all threads"sv) {
+                                       return BreakpointBehavior::StopAllThreadsWhenHit;
+                                     } else if (behavior == "Stop single thread"sv) {
+                                       return BreakpointBehavior::StopOnlyThreadThatHit;
+                                     } else {
+                                       return BreakpointBehavior::StopAllThreadsWhenHit;
+                                     }
+                                   })
+                                   .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
+
     return NativeLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
   } else if (type == kSessionTypeRr) {
-    return RRLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
+    return RRLaunch::CreateRequest(std::move(arg), stopOnEntry, BreakpointBehavior::StopAllThreadsWhenHit, args);
   }
 
   PANIC("Unhandled launch session type");
@@ -1674,11 +1658,11 @@ Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
 struct AttachResponse final : public UIResult
 {
   AttachResponse(SessionId processId, bool success, UICommandPtr cmd) noexcept
-      : UIResult(success, cmd), mProcessId(processId)
+      : UIResult(success, cmd), mAttachedProcessId(processId)
   {
   }
   ~AttachResponse() noexcept override = default;
-  SessionId mProcessId;
+  SessionId mAttachedProcessId;
 
   std::pmr::string
   Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final
@@ -1687,10 +1671,11 @@ struct AttachResponse final : public UIResult
     result.reserve(256);
     auto outIt = std::back_inserter(result);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"attach"}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"attach", "body": {{ "processId": {} }} }})",
       seq,
       mRequestSeq,
-      mSessionId);
+      mProcessId,
+      mAttachedProcessId);
     return result;
   }
 };
@@ -1699,22 +1684,17 @@ struct Attach final : public UICommand
 {
   static constexpr auto kSessionType = "sessionType"sv;
 
-  Attach(UICommandArg arg, SessionId sessionId, AttachArgs args) noexcept
-      : UICommand{ std::move(arg) }, mRequestingSessionId{ sessionId }, attachArgs{ args }
-  {
-  }
+  Attach(UICommandArg arg, AttachArgs args) noexcept : UICommand{ std::move(arg) }, attachArgs{ args } {}
 
   ~Attach() override = default;
 
   void
   Execute() noexcept final
   {
-    const auto processId = Tracer::Get().SessionAttach(mDebugAdapterManager, mRequestingSessionId, attachArgs);
-    auto *supervisor = GetSupervisoOrSendError();
-    WriteResponse(AttachResponse{ processId, true, this });
+    auto *supervisor = Tracer::Get().SessionAttach(mDebugAdapterManager, attachArgs);
+    WriteResponse(AttachResponse{ supervisor->GetProcessId(), true, this });
   }
 
-  SessionId mRequestingSessionId;
   AttachArgs attachArgs;
   DEFINE_NAME("attach");
   RequiredArguments({ kSessionType });
@@ -1732,7 +1712,7 @@ struct Attach final : public UICommand
   ProcessArgs(const mdbjson::JsonValue &args)
   {
     std::vector<InvalidArg> invalid{};
-    for (const auto &required : { "pid" }) {
+    for (const auto &required : { "processId" }) {
       if (!args.Contains(required)) {
         invalid.push_back({ ArgumentError::Missing("required for ptrace attach"), required });
       } else if (!args.Get(required)->IsNumber()) {
@@ -1743,18 +1723,6 @@ struct Attach final : public UICommand
   }
 
   static RefPtr<ui::UICommand>
-  CreateRequestForRr(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
-  {
-    auto invalid = ProcessArgs(args);
-    if (!invalid.empty()) {
-      return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
-    }
-
-    Pid pid = args["pid"];
-    return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], RRAttachArgs{ .pid = pid });
-  }
-
-  static RefPtr<ui::UICommand>
   CreateRequestForPtrace(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   {
     auto invalid = ProcessArgs(args);
@@ -1762,20 +1730,20 @@ struct Attach final : public UICommand
       return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
     }
 
-    Pid processId = args["pid"];
-
-    return RefPtr<Attach>::MakeShared(std::move(arg), args["sessionId"], PtraceAttachArgs{ processId });
+    Pid processId = *args.Get("processId")->GetNumber();
+    MDB_ASSERT(processId > 0, "Expect a process id > 0 (technically 1 too, since it's systemd)");
+    return RefPtr<Attach>::MakeShared(std::move(arg), PtraceAttachArgs{ processId });
   }
 
   static RefPtr<ui::UICommand>
   CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
   {
     auto type = args.At(kSessionType)->UncheckedGetStringView();
-    MDB_ASSERT(args.Contains("sessionId"), "Attach arguments had no 'sessionId' field.");
+    MDB_ASSERT(args.Contains("processId"), "Attach arguments had no 'processId' field.");
     if (type == kSessionTypePtrace) {
       return CreateRequestForPtrace(std::move(arg), args);
     } else if (type == kSessionTypeRr) {
-      return CreateRequestForRr(std::move(arg), args);
+      TODO("Multiprocess rr currently handled in UI layer.");
     } else if (type == kSessionTypeGdbRemote) {
       TODO("Removed gdb support, not priority");
     }
@@ -1797,10 +1765,10 @@ struct TerminateResponse final : public UIResult
     result.reserve(256);
     auto outIt = std::back_inserter(result);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"terminate"}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"terminate"}})",
       seq,
       mRequestSeq,
-      mSessionId);
+      mProcessId);
     return result;
   }
 };
@@ -1835,10 +1803,10 @@ struct ThreadsResponse final : public UIResult
     result.reserve(256 + (mThreads.size() * 64));
     auto outIt = std::back_inserter(result);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"threads","body":{{"threads":[{}]}}}})",
       seq,
       mRequestSeq,
-      mSessionId,
+      mProcessId,
       JoinFormatIterator{ mThreads, "," });
     return result;
   }
@@ -1856,13 +1824,13 @@ struct Threads final : public UICommand
   {
     auto *target = GetSupervisoOrSendError();
     std::pmr::vector<Thread> threads{ MemoryResource() };
+    threads.reserve(target->GetThreads().size());
 
-    auto knownThreads = target->GetThreads();
-    threads.reserve(knownThreads.size());
-    for (const auto &entry : knownThreads) {
-      const auto tid = entry.mTid;
-      threads.push_back(Thread{ .mThreadId = tid, .mName = entry.mTask->GetName() });
-    }
+    target->IterateValidThreads([&](TaskInfo &task) {
+      threads.push_back(Thread{ .mThreadId = task.mTid, .mName = task.GetName() });
+      return PredicateIterator::Continue;
+    });
+
     return WriteResponse(ThreadsResponse{ true, std::move(threads), this });
   }
   DEFINE_NAME("threads");
@@ -1921,10 +1889,10 @@ StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
   result.reserve(256 + ((105 + 18 + 2 + 2 + 256) * stack_frames.size()));
   auto outIt = std::back_inserter(result);
   std::format_to(outIt,
-    R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"stackTrace","body":{{"stackFrames":[{}]}}}})",
     seq,
     mRequestSeq,
-    mSessionId,
+    mProcessId,
     JoinFormatIterator{ stack_frames, "," });
   return result;
 }
@@ -1995,10 +1963,10 @@ struct ScopesResponse final : public UIResult
     result.reserve(256 + (256 * mScopes.size()));
     auto outIt = std::back_inserter(result);
     std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"scopes","body":{{"scopes":[{}]}}}})",
       seq,
       mRequestSeq,
-      mSessionId,
+      mProcessId,
       JoinFormatIterator{ mScopes, "," });
     return result;
   }
@@ -2015,7 +1983,7 @@ struct Scopes final : public UICommand
   void
   Execute() noexcept final
   {
-    auto ctx = Tracer::Get().GetVariableContext(mFrameId);
+    auto ctx = Tracer::GetVariableContext(mFrameId);
     if (!ctx || !ctx->IsValidContext() || ctx->mType != ContextType::Frame) {
       std::pmr::string err{ MemoryResource() };
       std::format_to(std::back_inserter(err), "Invalid variable context for {}", mFrameId);
@@ -2131,10 +2099,10 @@ DisassembleResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
   result.reserve(256 + (256 * mInstructions.size()));
   auto outIt = std::back_inserter(result);
   auto it = std::format_to(outIt,
-    R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[)",
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"disassemble","body":{{"instructions":[)",
     seq,
     mRequestSeq,
-    mSessionId);
+    mProcessId);
   auto count = 0;
   for (const auto &inst : mInstructions) {
     if (count > 0) {
@@ -2272,17 +2240,17 @@ EvaluateResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) 
   evalResponseResult.reserve(1024);
   if (mSuccess) {
     std::format_to(std::back_inserter(evalResponseResult),
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"evaluate","body":{{ "result":"{}", "variablesReference":{} }}}})",
       seq,
       mRequestSeq,
-      mSessionId,
+      mProcessId,
       DebugAdapterProtocolString{ *mResult },
       mVariablesReference);
   } else {
     std::format_to(std::back_inserter(evalResponseResult),
-      R"({{"seq":0,"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
+      R"({{"seq":0,"request_seq":{},"processId":{},"type":"response","success":false,"command":"evaluate","body":{{ "error":{{ "id": -1, "format": "{}" }} }}}})",
       mRequestSeq,
-      mSessionId,
+      mProcessId,
       mSuccess,
       DebugAdapterProtocolString{ *mResult });
   }
@@ -2331,7 +2299,7 @@ void
 Variables::Execute() noexcept
 {
   PROFILE_SCOPE_ARGS("Variables", "command", PEARG("seq", mSeq));
-  auto requestedContext = Tracer::Get().GetVariableContext(mVariablesReferenceId);
+  auto requestedContext = Tracer::GetVariableContext(mVariablesReferenceId);
   if (!requestedContext || !requestedContext->IsValidContext()) {
     std::pmr::string msg{ MemoryResource() };
     std::format_to(
@@ -2406,10 +2374,10 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   result.reserve(256 + (256 * mVariables.size()));
   if (mVariables.empty()) {
     std::format_to(std::back_inserter(result),
-      R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
       seq,
       mRequestSeq,
-      mSessionId);
+      mProcessId);
     return result;
   }
   std::pmr::string variables_contents{ arenaAllocator };
@@ -2423,10 +2391,10 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
         it = std::format_to(it, "{},", *opt);
       } else {
         std::format_to(std::back_inserter(result),
-          R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
+          R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
           seq,
           mRequestSeq,
-          mSessionId,
+          mProcessId,
           v->mName);
         return result;
       }
@@ -2454,10 +2422,10 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   variables_contents.pop_back();
 
   std::format_to(std::back_inserter(result),
-    R"({{"seq":{},"request_seq":{},"sessionId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
+    R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",
     seq,
     mRequestSeq,
-    mSessionId,
+    mProcessId,
     variables_contents);
   return result;
 }
@@ -2466,13 +2434,13 @@ static bool
 ValidateRequestFormat(const mdbjson::JsonValue &req) noexcept
 {
   const auto missingFields = req.Contains("command") && req.Contains("type") && req.Contains("seq") &&
-                             req.Contains("arguments") && req.Contains(kSessionId);
+                             req.Contains("arguments") && req.Contains(kProcessId);
   if (!missingFields) {
     DBGLOG(core, "Request missing fields. Request: {}", req);
     return false;
   }
 
-  const auto correctTypes = req["command"]->IsString() && req["seq"]->IsNumber() && req[kSessionId]->IsNumber();
+  const auto correctTypes = req["command"]->IsString() && req["seq"]->IsNumber() && req[kProcessId]->IsNumber();
 
   if (!correctTypes) {
     DBGLOG(dap, "Base protocol request fields of incorrect type. Request: {}", req);
@@ -2487,7 +2455,7 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
 {
   using namespace ui::dap;
 
-  UICommandArg arg{ 0, 0, client.AcquireArena() };
+  UICommandArg arg{ 0, std::nullopt, client.AcquireArena() };
   std::pmr::string *str = arg.allocator->Allocate<std::pmr::string>();
   str->reserve(packet.size());
   // now we've stored the data in the block. it'll live as long as the allocator is alive.
@@ -2508,7 +2476,10 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
   std::string_view commandName = obj["command"];
 
   arg.mSeq = obj["seq"];
-  arg.mSessionId = obj["sessionId"];
+
+  if (obj.Contains("processId")) {
+    arg.mProcessId = obj["processId"];
+  }
 
   const auto cmd = ParseCommandType(commandName);
   const mdbjson::JsonValue &args = obj["arguments"];

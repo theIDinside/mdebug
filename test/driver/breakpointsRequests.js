@@ -245,6 +245,8 @@ async function setNonExistingSourceBp(debugAdapter) {
     `Expected to see ${bp_lines.length} breakpoints`,
     ` but saw ${res.body.breakpoints.length}: \n${prettyJson(res)}`
   )
+
+  const result = await debugAdapter.disconnect()
 }
 
 /** @param {import("./client").DebugAdapterClient } debugAdapter */

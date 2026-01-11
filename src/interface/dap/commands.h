@@ -101,8 +101,7 @@ template <size_t Size> struct VerifyMap
   constexpr VerifyResult
   isOK(const JsonValueType &j, std::string_view fieldName) const noexcept
   {
-    if (const auto it =
-          std::find_if(mFields.cbegin(), mFields.cend(), [&](const auto &f) { return fieldName == f.mName; });
+    if (const auto it = FindIf(mFields, [&](const auto &f) { return fieldName == f.mName; });
       it != std::cend(mFields)) {
       switch (it->mType) {
       case FieldType::Address:

@@ -100,43 +100,49 @@ InstructionStep::~InstructionStep()
   }
 }
 
-LineStep::LineStep(tc::SupervisorState &ctrl, TaskInfo &task) noexcept
-    : ThreadProceedAction(ctrl, task), mIsDone(false), mResumedToReturnAddress(false), mStartFrame{ nullptr },
-      mLineEntry()
+LineStep::LineStep(tc::SupervisorState &ctrl,
+  TaskInfo &task,
+  std::unique_ptr<sym::Frame> startFrame,
+  sym::dw::LineTableEntry lineTableEntry) noexcept
+    : ThreadProceedAction(ctrl, task), mIsDone(false), mResumedToReturnAddress(false),
+      mStartFrame{ std::move(startFrame) }, mLineEntry(lineTableEntry)
 {
-  using sym::dw::SourceCodeFile;
+}
 
-  auto &callstack = mSupervisor.BuildCallFrameStack(task, CallStackRequest::partial(1));
+/* static */
+std::shared_ptr<LineStep>
+LineStep::FallibleMake(tc::SupervisorState &ctrl, TaskInfo &task) noexcept
+{
+  auto &callstack = ctrl.BuildCallFrameStack(task, CallStackRequest::partial(1));
   // First/bottommost/last/current frame always exists.
-  mStartFrame = new sym::Frame{ *callstack.GetFrameAtLevel(0) };
-  const auto fpc = mStartFrame->FramePc();
-  SymbolFile *symbolFile = mSupervisor.FindObjectByPc(fpc);
+  std::unique_ptr startFrame = std::make_unique<sym::Frame>(*callstack.GetFrameAtLevel(0));
+  const auto fpc = startFrame->FramePc();
+  SymbolFile *symbolFile = ctrl.FindObjectByPc(fpc);
   MDB_ASSERT(symbolFile, "Expected to find a ObjectFile from pc: {}", fpc);
 
   auto compilationUnits = symbolFile->GetCompilationUnits(fpc);
   bool found = false;
   const auto unrelocatedPc = symbolFile->UnrelocateAddress(fpc);
+  sym::dw::LineTableEntry lte{};
   for (auto compilationUnit : compilationUnits) {
-
     const auto [sourceCodeFile, lineTableEntry] = compilationUnit->GetLineTableEntry(unrelocatedPc);
-
     if (sourceCodeFile && lineTableEntry &&
-        mStartFrame->IsInside(lineTableEntry->pc.AsVoid()) == sym::InsideRange::Yes) {
-
+        startFrame->IsInside(lineTableEntry->pc.AsVoid()) == sym::InsideRange::Yes) {
       if (lineTableEntry->RelocateProgramCounter(symbolFile->mBaseAddress) == fpc) {
         found = true;
-        mLineEntry = *lineTableEntry;
+        lte = *lineTableEntry;
       } else {
         found = true;
-        mLineEntry = *(lineTableEntry - 1);
+        lte = *(lineTableEntry - 1);
       }
       break;
     }
   }
-  // TODO: Convert LineStep to instruction stepping, until debug symbol information can be found for RIP
-  VERIFY(found,
-    "Couldn't find Line Table Entry Information needed to navigate source code lines based on pc = {}",
-    fpc);
+  if (!found) {
+    return nullptr;
+  }
+
+  return std::shared_ptr<LineStep>{ new LineStep{ ctrl, task, std::move(startFrame), lte } };
 }
 
 LineStep::~LineStep() noexcept
@@ -149,10 +155,6 @@ LineStep::~LineStep() noexcept
 
   if (mPotentialBreakpointAtReturnAddress) {
     mSupervisor.RemoveBreakpoint(mPotentialBreakpointAtReturnAddress->mId);
-  }
-
-  if (mStartFrame) {
-    delete mStartFrame;
   }
 }
 
@@ -435,6 +437,41 @@ TaskScheduler::Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResul
   case SchedulingConfig::StopAll:
     EmitStopWhenAllTasksHalted();
     break;
+  }
+}
+
+void
+TaskScheduler::ReplaySchedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept
+{
+  MDB_ASSERT(
+    mScheduling >= SchedulingConfig::NormalResume && mScheduling <= SchedulingConfig::StopAll, "Scheduling value");
+  switch (mScheduling) {
+  case SchedulingConfig::OneExclusive:
+    PANIC("Scheduling individual tasks for replay sessions will never be supported.");
+    break;
+  case SchedulingConfig::NormalResume: {
+    auto individualScheduler = mIndividualScheduler[task.mTid];
+    if (individualScheduler) {
+      DBGLOG(core, "Task has individual scheduler");
+      individualScheduler->UpdateStepped();
+      const auto stoppedByUser = !eventProceedResult.mShouldResumeAfterProcessing;
+      if (individualScheduler->HasCompleted(stoppedByUser)) {
+        DBGLOG(core, "remove scheduler for {}, stopped by user={}", task.mTid, stoppedByUser);
+        RemoveIndividualScheduler(task.mTid);
+      } else {
+        individualScheduler->Proceed();
+      }
+    } else {
+      DBGLOG(core, "Schedule task {} via ResumeTask", task.mTid);
+      mSupervisor->ResumeTask(task, task.mResumeRequest.mType);
+    }
+  } break;
+  case SchedulingConfig::StopAll: {
+    DBGLOG(core, "Don't resume any tasks");
+    EmitStopWhenAllTasksHalted();
+  } break;
+  default:
+    PANIC("Invalid scheduling value");
   }
 }
 

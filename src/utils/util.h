@@ -200,6 +200,22 @@ CopyTo(const CA &c, CB &out)
 
 template <typename CA, typename CB = CA>
 constexpr auto
+CopyMapValueTo(const CA &c, CB &out)
+{
+  out.reserve(c.size() + out.size());
+  std::transform(c.begin(), c.end(), std::back_inserter(out), [](const auto &node) { return node.second; });
+}
+
+template <typename CA, typename CB = CA>
+constexpr auto
+CopyMapKeysTo(const CA &c, CB &out)
+{
+  out.reserve(c.size() + out.size());
+  std::transform(c.begin(), c.end(), std::back_inserter(out), [](const auto &node) { return node.first; });
+}
+
+template <typename CA, typename CB = CA>
+constexpr auto
 CopyNTo(const CA &c, CB &out, size_t n)
 {
   if constexpr (requires(CA i, CB o) {

@@ -170,7 +170,7 @@ public:
   tc::SupervisorState *GetController(pid_t pid) noexcept;
   tc::SupervisorState *GetProcessContainingTid(Tid tid) noexcept;
 
-  void ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept;
+  void ExecuteCommand(ui::UICommand &cmd) noexcept;
 
   // The main event handlers for the different session types.
   std::optional<TaskControl<tc::ptrace::Session>> GetPtraceProcess(pid_t tidOrPid) noexcept;
@@ -180,6 +180,7 @@ public:
   void HandleReplayStopEvent(ReplayEvent evt) noexcept;
 
   void HandleInternalEvent(const InternalEvent &evt) noexcept;
+  void EraseSessionDuringReverse(Pid processId) noexcept;
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept;
 
   void SetUI(ui::dap::DapEventSystem *dap) noexcept;
@@ -192,7 +193,7 @@ public:
   // processes. In the future, when we've written a new Callstack UI, we can remove all this nonsense, because
   // then, one session can be responsible for multiple processes. Until then, we're stuck with this 1979 version of
   // a protocol.
-  bool SessionAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const AttachArgs &args) noexcept;
+  tc::SupervisorState *SessionAttach(ui::dap::DebugAdapterManager *client, const AttachArgs &args) noexcept;
 
   static std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
 
@@ -209,7 +210,6 @@ public:
 
   Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
   static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;
-  tc::SupervisorState *GetSupervisorBySessionId(SessionId sessionId) noexcept;
   std::vector<tc::SupervisorState *> GetAllProcesses() const noexcept;
   ui::dap::DapEventSystem *GetDap() const noexcept;
 
@@ -258,14 +258,38 @@ public:
 
   u32 NewSupervisorId() noexcept;
 
-  static tc::SupervisorState *AddSupervisor(UniquePtr<tc::SupervisorState> supervisor) noexcept;
+  template <typename SupervisorType, typename ConstructorFn>
+  UniquePtr<SupervisorType>
+  PossiblyReviveSupervisor(Pid pid, ConstructorFn &&constructor) noexcept
+  {
+    auto it = FindIf(mDetachedProcesses, [&](auto &state) { return state.GetProcessId() == pid; });
+    if (it != std::end(mDetachedProcesses)) {
+      UniquePtr<SupervisorType> result{ static_cast<SupervisorType *>(it->release()) };
+      result->Revive();
+      mDetachedProcesses.erase(it);
+      return result;
+    }
+
+    return constructor();
+  }
+
+  template <typename SupervisorType>
+    requires std::derived_from<SupervisorType, tc::SupervisorState>
+  static SupervisorType *
+  AddSupervisor(UniquePtr<SupervisorType> supervisor) noexcept
+  {
+    DBGLOG(core, "Adding supervisor to session with task leader tid {}", supervisor->TaskLeaderTid());
+    SupervisorType *ptr =
+      static_cast<SupervisorType *>(Get().mTracedProcesses.emplace_back(std::move(supervisor)).get());
+    Tracer::GetDebugAdapterManager().AddSupervisor(ptr);
+    return ptr;
+  }
   static SessionTaskMap &GetSessionTaskMap() noexcept;
 
   auto
   FindSupervisor(tc::SupervisorState *supervisor) noexcept
   {
-    return std::find_if(
-      mTracedProcesses.begin(), mTracedProcesses.end(), [&](auto &s) { return s.get() == supervisor; });
+    return FindIf<false>(mTracedProcesses, [&](auto &s) { return s.get() == supervisor; });
   }
 
 private:
@@ -273,12 +297,10 @@ private:
 
   std::unique_ptr<DebuggerThread> mDebugAdapterThread{ nullptr };
 
-  std::vector<UniquePtr<tc::ptrace::Session>> mPtracedProcesses{};
-
   // Processes under control (and visible to the user/where the user is interested in controlling them)
   std::vector<UniquePtr<tc::SupervisorState>> mTracedProcesses{};
   // Processes that has exited, or has been disconnected (or just ignored)
-  std::vector<std::unique_ptr<tc::SupervisorState>> mDetachedProcesses;
+  std::vector<UniquePtr<tc::SupervisorState>> mDetachedProcesses;
 
   ui::dap::DapEventSystem *mDAP;
   u32 mBreakpointID{ 0 };
@@ -294,7 +316,6 @@ private:
   // (and update the `Value`'s `mVariableReference`)
   VariableReferenceId mVariablesReferenceCounter{ 0 };
   std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
-  bool already_launched{ false };
 
   UniquePtr<SessionTaskMap> mDebugSessionTasks;
 

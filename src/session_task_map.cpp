@@ -16,7 +16,7 @@ SessionTaskMap::Get(Tid tid) noexcept
 void
 SessionTaskMap::Add(Tid tid, TaskInfo *t) noexcept
 {
-  MDB_ASSERT(!mThreads.contains(tid), "Thread already added");
+  MDB_ASSERT(!mThreads.contains(tid) || mThreads[tid] == nullptr, "Thread already added");
   RefPtr task{ t };
   mThreads[tid] = task;
 

@@ -156,7 +156,7 @@ concept HasValidation = requires(const Json &json) {
 struct UICommandArg
 {
   u64 mSeq;
-  SessionId mSessionId;
+  std::optional<Pid> mProcessId;
   std::unique_ptr<alloc::ScopedArenaAllocator> allocator;
 };
 
@@ -171,21 +171,21 @@ public:
   friend struct UIResult;
 
   dap::DebugAdapterManager *mDebugAdapterManager;
-  SessionId mSessionId;
+  Pid mProcessId{};
   std::unique_ptr<alloc::ScopedArenaAllocator> mCommandAllocator;
   std::uint64_t mSeq;
 
   explicit UICommand(UICommandArg arg) noexcept
-      : mSessionId(arg.mSessionId), mCommandAllocator(std::move(arg.allocator)), mSeq(arg.mSeq)
+      : mProcessId(arg.mProcessId.value_or(0)), mCommandAllocator(std::move(arg.allocator)), mSeq(arg.mSeq)
   {
   }
 
   virtual ~UICommand() noexcept = default;
 
   constexpr SessionId
-  GetSessionId() const noexcept
+  GetProcessId() const noexcept
   {
-    return mSessionId;
+    return mProcessId;
   }
 
   constexpr void
@@ -194,7 +194,7 @@ public:
     mDebugAdapterManager = &debugAdapter;
   }
 
-  dap::DebugAdapterSession *GetSession() noexcept;
+  tc::SupervisorState *GetSupervisor() noexcept;
 
   /** Returns either the result or nullptr. If nullptr is returned, it's because it's been queued/scheduled in the
    * delayed events queue, because some particular-to-the-DAP request ordering is required.*/

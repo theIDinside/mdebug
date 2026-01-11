@@ -48,12 +48,12 @@ enum ChangeEvent : u8
 
 struct InitializedEvent final : public ui::UIResult
 {
-  InitializedEvent(SessionId sessionId, std::optional<SessionId> processId) noexcept
-      : ui::UIResult(sessionId), mProcessId(processId)
+  InitializedEvent(SessionId processId, std::optional<SessionId> determinedProcessId) noexcept
+      : ui::UIResult(processId), mDeterminedProcessId(determinedProcessId)
   {
   }
   ~InitializedEvent() noexcept final = default;
-  std::optional<SessionId> mProcessId;
+  std::optional<SessionId> mDeterminedProcessId;
   std::pmr::string Serialize(int monotonicId, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
@@ -117,9 +117,9 @@ struct CustomEvent final : public ui::UIResult
 struct Process final : public ui::UIResult
 {
   std::string mName;
-  Pid mProcessId;
+  Pid mNewProcessId;
   bool mIsLocal;
-  Process(SessionId parentSessionId, Pid pid, std::string name, bool isLocal) noexcept;
+  Process(Pid parentProcessId, Pid childProcessId, std::string name, bool isLocal) noexcept;
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
@@ -159,6 +159,10 @@ struct StoppedEvent final : public ui::UIResult
   // static additional information, name of exception for instance
   std::string_view mText;
   bool mAllThreadsStopped;
+
+  std::optional<std::vector<Pid>> mProcesses{ std::nullopt };
+
+  void SetExistingProcesses(std::vector<Pid> processes);
   std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 

@@ -102,6 +102,38 @@ TaskInfo::SetName(std::string_view name) noexcept
   mThreadName = name;
 }
 
+void
+TaskInfo::Invalidate() noexcept
+{
+  mInvalid = true;
+  mBreakpointLocationStatus.Clear();
+}
+
+void
+TaskInfo::SetExited() noexcept
+{
+  mExited = true;
+  Invalidate();
+}
+
+void
+TaskInfo::ReInit() noexcept
+{
+  mUnhandledInitPtraceEvent = std::nullopt;
+  mResumeRequest = { tc::RunType::Continue, 0 };
+
+  mTraceeState = TraceeState::TraceEventStopped;
+  mHasStarted = false;
+  mExited = false;
+  mReaped = false;
+  mKilled = false;
+  mRequestedStop = false;
+  mRegisterCacheDirty = true;
+  // Task is reborn
+  mInvalid = false;
+  SetInvalidCache();
+}
+
 std::string_view
 TaskInfo::GetName() const noexcept
 {
@@ -220,6 +252,7 @@ TaskInfo::SetResumeType(tc::RunType type) noexcept
 void
 TaskInfo::SetSignalToForward(int signal) noexcept
 {
+  DBGLOG(core, "Set signal={} to forward for task={}", signal, mTid);
   mResumeRequest.mSignal = signal;
 }
 
@@ -232,6 +265,12 @@ TaskInfo::ConsumeSignal() noexcept
     return signal;
   }
   return {};
+}
+
+void
+TaskInfo::SetTimestampCreated(u64 time) noexcept
+{
+  mTimestampCreated = time;
 }
 
 void
@@ -277,7 +316,7 @@ TaskInfo::SetInvalidCache() noexcept
   mTaskCallstack->SetDirty();
   // Clear the variables reference cache
   for (const auto ref : variableReferences) {
-    Tracer::Get().DestroyVariablesReference(ref);
+    Tracer::DestroyVariablesReference(ref);
   }
 
   variableReferences.clear();
@@ -296,6 +335,7 @@ TaskInfo::AddBreakpointLocationStatus(BreakpointLocation *breakpointLocation) no
 void
 TaskInfo::ClearBreakpointLocStatus() noexcept
 {
+  DBGLOG(core, "clearing breakpoint location status");
   mBreakpointLocationStatus.Clear();
 }
 

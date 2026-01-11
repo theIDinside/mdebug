@@ -7,6 +7,7 @@
 #include <interface/dap/interface.h>
 #include <interface/tracee_command/request_results.h>
 #include <symbolication/objfile.h>
+#include <task.h>
 #include <task_scheduling.h>
 #include <tracee_pointer.h>
 #include <utils/leak_vector.h>
@@ -57,7 +58,8 @@ struct UnwinderSymbolFilePair;
 
 namespace mdb::ui::dap {
 class DebugAdapterManager;
-}
+struct StoppedEvent;
+} // namespace mdb::ui::dap
 
 namespace mdb::tc {
 
@@ -144,7 +146,6 @@ enum class SupervisorType : u8
 class SupervisorState
 {
 protected:
-  SessionId mSessionId;
   // This process' parent pid
   pid_t mParentPid{ 0 };
   // The process pid, or the initial task that was spawned for this process
@@ -203,6 +204,7 @@ protected:
   ParsedAuxiliaryVector mParsedAuxiliaryVector;
   LinkerLoaderDebug mLinkerDebugData;
 
+  bool mHasConfigurationDoneCallback{ false };
   std::function<bool(SupervisorState *supervisor)> mOnConfigurationDoneCallback;
 
 public:
@@ -213,10 +215,9 @@ public:
   virtual ~SupervisorState() noexcept = default;
 
   sym::Unwinder *GetNullUnwinder() const noexcept;
-  void OnForkFrom(const SupervisorState &parent) noexcept;
+  void OnForkCopySymbols(const SupervisorState &parent, bool isVFork) noexcept;
   void SetParent(Pid parentPid) noexcept;
   void SetTaskLeader(Tid taskLeaderTid) noexcept;
-  void SetSessionId(SessionId sessionId) noexcept;
   Publisher<void> &GetOnExecOrExitPublisher() noexcept;
 
   ProcessBreakpointsManager &
@@ -254,26 +255,27 @@ public:
 
   Expected<Ref<BreakpointLocation>, BreakpointError> GetOrCreateBreakpointLocationWithSourceLoc(
     AddrPtr addr, std::optional<LocationSourceInfo> &&sourceLocInfo) noexcept;
-  void SetSourceBreakpoints(
+
+  virtual void UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
+    std::span<const BreakpointSpecification> add,
+    std::span<const BreakpointSpecification> remove) noexcept;
+
+  virtual void SetSourceBreakpoints(
     const std::filesystem::path &sourceFilePath, const Set<BreakpointSpecification> &bps) noexcept;
-  void UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-    std::vector<BreakpointSpecification> &&add,
-    const std::vector<BreakpointSpecification> &remove) noexcept;
 
-  void SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
-  void SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
-  void RemoveBreakpoint(u32 breakpointId) noexcept;
+  virtual void SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
+  virtual void SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
 
-  void LoadBreakpoints(SharedPtr<SessionBreakpoints> breakpoints) noexcept;
-  void DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&newSymbolFiles) noexcept;
+  virtual void RemoveBreakpoint(u32 breakpointId) noexcept;
+  virtual void DoBreakpointsUpdate(std::span<std::shared_ptr<SymbolFile>> newSymbolFiles) noexcept;
 
   bool CheckBreakpointLocationsForSymbolFile(
-    SymbolFile &symbolFile, UserBreakpoint &user, std::vector<Ref<BreakpointLocation>> &locs) noexcept;
+    const SymbolFile &symbolFile, UserBreakpoint &user, std::vector<Ref<BreakpointLocation>> &locs) noexcept;
 
-  SessionId
-  GetSessionId() const noexcept
+  Pid
+  GetProcessId() const noexcept
   {
-    return mSessionId;
+    return mTaskLeader;
   }
 
   void SetExitSeen() noexcept;
@@ -304,8 +306,11 @@ public:
   void OnTearDown() noexcept;
 
   TaskInfo *GetTaskByTid(pid_t pid) noexcept;
-  /* Create new task meta data for `tid` */
-  void CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept;
+  virtual bool
+  SingleThreadControl() const noexcept
+  {
+    return true;
+  }
   bool HasTask(Tid tid) noexcept;
 
   /* Resumes all tasks in this target. */
@@ -447,6 +452,27 @@ public:
   bool IsRunning() const noexcept;
   void OnConfigurationDone(std::function<bool(SupervisorState *supervisor)> &&done) noexcept;
   bool ConfigurationDone() noexcept;
+  bool
+  IsConfigured() const noexcept
+  {
+    return mIsConfigured;
+  }
+
+  template <typename Fn>
+  void
+  IterateValidThreads(Fn &&fn) noexcept
+    requires(std::is_same_v<std::invoke_result_t<Fn, TaskInfo &>, PredicateIterator>)
+  {
+    for (auto &entry : mThreads) {
+      if (entry.mTask->IsValid()) {
+        if (fn(*entry.mTask) == PredicateIterator::Stop) {
+          return;
+        }
+      } else {
+        DBGLOG(core, "thread {} is invalid", entry.mTid);
+      }
+    }
+  }
 
 protected:
   Expected<u8, BreakpointError> InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexcept;
@@ -466,16 +492,18 @@ private:
   // Called after a fork for the creation of a new process supervisor
   virtual void HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept = 0;
   virtual mdb::Expected<Auxv, Error> DoReadAuxiliaryVector() noexcept = 0;
-  virtual void InitRegisterCacheFor(const TaskInfo &task) noexcept = 0;
 
 protected:
-  virtual bool PerformShutdown() noexcept = 0;
-
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)
   virtual TaskExecuteResponse InstallBreakpoint(Tid tid, AddrPtr addr) noexcept = 0;
 
 public:
+  virtual void
+  OnErase() noexcept
+  {
+    PANIC("OnErase called for session that does not support erase during reverse");
+  }
   virtual TaskExecuteResponse ReadRegisters(TaskInfo &t) noexcept = 0;
   virtual TaskExecuteResponse WriteRegisters(TaskInfo &t, void *data, size_t length) noexcept = 0;
   virtual TaskExecuteResponse SetRegister(
@@ -501,9 +529,23 @@ public:
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
   virtual void DoResumeTask(TaskInfo &t, RunType type) noexcept = 0;
   virtual bool DoResumeTarget(RunType type) noexcept = 0;
-  virtual void AttachSession(ui::dap::DebugAdapterSession &session) noexcept = 0;
+  virtual void AttachSession() noexcept = 0;
   virtual bool ReverseResumeTarget(tc::RunType type) noexcept;
+  virtual mdb::ui::dap::StoppedEvent *CreateStoppedEvent(ui::dap::StoppedReason reason,
+    std::string_view description,
+    Tid tid,
+    std::string_view text,
+    bool allStopped,
+    std::vector<int> breakpointIds) noexcept;
+  virtual bool
+  CanContinue() noexcept
+  {
+    return true;
+  }
 };
+
+auto CreateSymbolFile(SupervisorState &supervisorState, const Path &path, AddrPtr addr) noexcept
+  -> std::shared_ptr<SymbolFile>;
 
 } // namespace mdb::tc
 

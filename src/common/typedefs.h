@@ -185,7 +185,7 @@ template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<Re
 
 // SessionId of -1 means "unset",  "unknown", or "not yet initialized".
 using SessionId = i32;
-static constexpr auto kSessionId = std::string_view{ "sessionId" };
+static constexpr auto kProcessId = std::string_view{ "processId" };
 
 namespace mdb::tc {
 enum class RunType : u8

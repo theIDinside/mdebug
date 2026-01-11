@@ -308,7 +308,7 @@ EventSystem::PushCommand(ui::dap::DebugAdapterManager *debugAdapter, RefPtr<ui::
 {
   std::lock_guard lock(mCommandsGuard);
   cmd->SetDebugAdapterClient(*debugAdapter);
-  DBGLOG(core, "notify of new command... {} for {}", cmd->name(), cmd->mSessionId);
+  DBGLOG(core, "notify of new command... {} for {}", cmd->name(), cmd->mProcessId);
   mCommands.push_back(cmd.Leak());
   int writeValue = write(mCommandEvents[1], "+", 1);
   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");

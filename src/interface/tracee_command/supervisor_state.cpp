@@ -114,12 +114,12 @@ static constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
 
 SupervisorState::SupervisorState(
   SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client) noexcept
-    : mSessionId(-1), mTaskLeader(taskLeader), mDebugAdapterClient(client), mUserBreakpoints(*this),
+    : mTaskLeader(taskLeader), mDebugAdapterClient(client), mUserBreakpoints(*this),
       mScheduler{ std::make_unique<TaskScheduler>(this) }, mNullUnwinder{ new sym::Unwinder{ nullptr } },
       mSupervisorType(type)
 {
   mNewObjectFilePublisher.Subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
-    mDebugAdapterClient->PostDapEvent(new ui::dap::ModuleEvent{ mSessionId, "new", *sf });
+    mDebugAdapterClient->PostDapEvent(new ui::dap::ModuleEvent{ mTaskLeader, "new", *sf });
   });
 }
 
@@ -130,12 +130,16 @@ SupervisorState::GetNullUnwinder() const noexcept
 }
 
 void
-SupervisorState::OnForkFrom(const SupervisorState &parent) noexcept
+SupervisorState::OnForkCopySymbols(const SupervisorState &parent, bool isVFork) noexcept
 {
   mParentPid = parent.mTaskLeader;
-  CopyTo(parent.mSymbolFiles, mSymbolFiles);
-  std::string threadName = "forked";
-  CreateNewTask(mTaskLeader, threadName, false);
+  if (!isVFork) {
+    // We don't setup symbol files from the parent in the vfork because we expect it to exec soon and technically
+    // "release" those resources.
+    CopyTo(parent.mSymbolFiles, mSymbolFiles);
+    DBGLOG(core, "copied {} symbol files", mSymbolFiles.size());
+  }
+  SetLinkerDebugData(parent.mLinkerDebugData.mVersion, parent.mLinkerDebugData.mRDebug.AsVoid());
 }
 
 void
@@ -148,13 +152,6 @@ void
 SupervisorState::SetTaskLeader(Tid taskLeaderTid) noexcept
 {
   mTaskLeader = taskLeaderTid;
-}
-
-void
-SupervisorState::SetSessionId(SessionId sessionId) noexcept
-{
-  MDB_ASSERT(mSessionId == -1, "Expected sessionId to not be set!");
-  mSessionId = sessionId;
 }
 
 Publisher<void> &
@@ -222,14 +219,13 @@ SupervisorState::InstallDynamicLoaderBreakpoints(AddrPtr mappedDynamicSectionAdd
           SetLinkerDebugData(rDebug.r_version, entry.d_un.d_val);
           mUserBreakpoints.CreateBreakpointLocationUser<SOLoadingBreakpoint>(
             *this, GetOrCreateBreakpointLocation(rDebug.r_brk), mTaskLeader);
-
           break;
         }
       }
       // Let's run a check to see if we can parse any symbols right now. Normally we shouldn't, but let's not miss
       // if that ever changes.
       OnSharedObjectEvent();
-      return BreakpointHitEventResult{ .mRetireBreakpoint = BreakpointOp::Retire };
+      return BreakpointHitEventResult{ .mResult = EventResult::Resume, .mRetireBreakpoint = BreakpointOp::Retire };
     });
   mUserBreakpoints.AddUser(user);
 }
@@ -243,6 +239,7 @@ SupervisorState::ConfigureBreakpointBehavior(BreakpointBehavior behavior) noexce
 void
 SupervisorState::SetLinkerDebugData(int version, AddrPtr rDebugAddr)
 {
+  DBGBUFLOG(core, "{}: Setting rdebug version={}, address={}", mTaskLeader, version, rDebugAddr);
   mLinkerDebugData = LinkerLoaderDebug{ .mVersion = version, .mRDebug = rDebugAddr.As<r_debug>() };
 }
 
@@ -303,7 +300,6 @@ SupervisorState::OnTearDown() noexcept
 {
   mUserBreakpoints.OnProcessExit();
   mOnExecOrExitPublisher.Emit();
-  PerformShutdown();
   ShutDownDebugAdapterClient();
 }
 
@@ -324,17 +320,6 @@ SupervisorState::GetTaskByTid(pid_t pid) noexcept
   }
 
   return findTask(mExitedThreads);
-}
-
-void
-SupervisorState::CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept
-{
-  MDB_ASSERT(tid != 0 && !HasTask(tid), "Task {} has already been created!", tid);
-  auto task = TaskInfo::CreateTask(*this, tid);
-  task->SetName(name.value_or(std::to_string(tid)));
-  InitRegisterCacheFor(*task);
-  mThreads.push_back({ task->mTid, task });
-  Tracer::GetSessionTaskMap().Add(tid, task);
 }
 
 bool
@@ -425,6 +410,9 @@ SupervisorState::CacheAndGetPcFor(TaskInfo &t) noexcept
 bool
 SupervisorState::SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept
 {
+  if (!action) {
+    return false;
+  }
   return mScheduler->SetTaskScheduling(tid, std::move(action), true);
 }
 
@@ -441,6 +429,7 @@ void
 SupervisorState::OnConfigurationDone(std::function<bool(SupervisorState *supervisor)> &&done) noexcept
 {
   mOnConfigurationDoneCallback = std::move(done);
+  mHasConfigurationDoneCallback = true;
 }
 
 bool
@@ -450,7 +439,11 @@ SupervisorState::ConfigurationDone() noexcept
     return true;
   }
   mIsConfigured = true;
-  return mOnConfigurationDoneCallback(this);
+  if (mHasConfigurationDoneCallback) {
+    return mOnConfigurationDoneCallback(this);
+  } else {
+    return true;
+  }
 }
 
 void
@@ -458,14 +451,12 @@ SupervisorState::EmitStoppedAtBreakpoints(LWP lwp, u32 breakpointId, bool allSto
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
-  auto evt = new ui::dap::StoppedEvent{ mSessionId,
-    ui::dap::StoppedReason::Breakpoint,
+  mDebugAdapterClient->PostDapEvent(CreateStoppedEvent(ui::dap::StoppedReason::Breakpoint,
     "Breakpoint Hit",
     lwp.tid,
-    { static_cast<int>(breakpointId) },
     "",
-    allStopped };
-  mDebugAdapterClient->PostDapEvent(evt);
+    allStopped,
+    { static_cast<int>(breakpointId) }));
 }
 
 void
@@ -480,8 +471,9 @@ SupervisorState::EmitStepNotification(LWP lwp) noexcept
 void
 SupervisorState::EmitSteppedStop(LWP lwp, std::string_view message, bool allStopped) noexcept
 {
+  ;
   mDebugAdapterClient->PostDapEvent(
-    new ui::dap::StoppedEvent{ mSessionId, ui::dap::StoppedReason::Step, message, lwp.tid, {}, "", allStopped });
+    CreateStoppedEvent(ui::dap::StoppedReason::Step, message, lwp.tid, "", allStopped, {}));
 }
 
 void
@@ -489,8 +481,8 @@ SupervisorState::EmitSignalEvent(LWP lwp, int signal) noexcept
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
-  mDebugAdapterClient->PostDapEvent(new ui::dap::StoppedEvent{
-    mSessionId, ui::dap::StoppedReason::Exception, std::format("Signalled {}", signal), lwp.tid, {}, "", false });
+  mDebugAdapterClient->PostDapEvent(
+    CreateStoppedEvent(ui::dap::StoppedReason::Exception, "Signalled", lwp.tid, "", false, {}));
 }
 
 void
@@ -501,14 +493,14 @@ SupervisorState::EmitStopped(Tid tid,
   std::vector<int> breakpointsHit) noexcept
 {
   mDebugAdapterClient->PostDapEvent(
-    new ui::dap::StoppedEvent{ mSessionId, reason, message, tid, std::move(breakpointsHit), message, allStopped });
+    CreateStoppedEvent(reason, message, tid, "", allStopped, std::move(breakpointsHit)));
 }
 
 void
 SupervisorState::EmitBreakpointEvent(
   std::string_view reason, const UserBreakpoint &bp, std::optional<std::string> message) noexcept
 {
-  mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mSessionId, reason, std::move(message), &bp });
+  mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mTaskLeader, reason, std::move(message), &bp });
 }
 
 void
@@ -582,7 +574,7 @@ SupervisorState::GetOrCreateBreakpointLocationWithSourceLoc(
 
 bool
 SupervisorState::CheckBreakpointLocationsForSymbolFile(
-  SymbolFile &symbolFile, UserBreakpoint &user, std::vector<Ref<BreakpointLocation>> &locs) noexcept
+  const SymbolFile &symbolFile, UserBreakpoint &user, std::vector<Ref<BreakpointLocation>> &locs) noexcept
 {
   const auto sz = locs.size();
   if (auto specPtr = user.UserProvidedSpec(); specPtr != nullptr) {
@@ -612,8 +604,7 @@ SupervisorState::CheckBreakpointLocationsForSymbolFile(
     case DapBreakpointType::function: {
       auto result = symbolFile.LookupFunctionBreakpointBySpec(*specPtr);
 
-      if (auto it =
-            std::find_if(result.begin(), result.end(), [](const auto &it) { return it.loc_src_info.has_value(); });
+      if (auto it = FindIf(result, [](const auto &it) { return it.loc_src_info.has_value(); });
         it != end(result)) {
         if (auto res =
               GetOrCreateBreakpointLocationWithSourceLoc(it->address, std::move(it->loc_src_info.value()));
@@ -648,7 +639,7 @@ SupervisorState::CheckBreakpointLocationsForSymbolFile(
 }
 
 void
-SupervisorState::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&newSymbolFiles) noexcept
+SupervisorState::DoBreakpointsUpdate(std::span<std::shared_ptr<SymbolFile>> newSymbolFiles) noexcept
 {
   auto non_verified = mUserBreakpoints.GetNonVerified();
   DBGLOG(
@@ -668,12 +659,12 @@ SupervisorState::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&
         newLocations.back()->AddUser(*this, *user);
         user->UpdateLocation(std::move(newLocations.back()));
         mUserBreakpoints.AddBreakpointLocation(*user);
-        mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mSessionId, "changed", {}, user });
+        mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mTaskLeader, "changed", {}, user });
         newLocations.pop_back();
 
         for (auto &&loc : newLocations) {
           auto newUser = user->CloneBreakpoint(mUserBreakpoints, *this, loc);
-          mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mSessionId, "new", {}, newUser });
+          mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mTaskLeader, "new", {}, newUser });
           MDB_ASSERT(!loc->GetUserIds().empty(), "location has no user!");
         }
         newLocations.clear();
@@ -713,7 +704,7 @@ SupervisorState::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&
                 mTaskLeader,
                 LocationUserKind::Source,
                 desc.Clone());
-              mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mSessionId, "new", {}, user });
+              mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mTaskLeader, "new", {}, user });
               user_ids.push_back(user->mId);
               const auto last_slash = source_file.find_last_of('/');
               const std::string_view file_name =
@@ -744,7 +735,7 @@ SupervisorState::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&
           mTaskLeader,
           LocationUserKind::Function,
           fn.Clone());
-        mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mSessionId, "new", {}, user });
+        mDebugAdapterClient->PostDapEvent(new ui::dap::BreakpointEvent{ mTaskLeader, "new", {}, user });
         ids.push_back(user->mId);
       }
     }
@@ -753,8 +744,8 @@ SupervisorState::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&
 
 void
 SupervisorState::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
-  std::vector<BreakpointSpecification> &&add,
-  const std::vector<BreakpointSpecification> &remove) noexcept
+  std::span<const BreakpointSpecification> add,
+  std::span<const BreakpointSpecification> remove) noexcept
 {
   SourceFileBreakpointMap &map = mUserBreakpoints.GetBreakpointsFromSourceFile(sourceFilePath.string());
 
@@ -868,7 +859,7 @@ SupervisorState::SetSourceBreakpoints(
     }
   }
 
-  UpdateSourceBreakpoints(sourceFilePath, std::move(add), remove);
+  UpdateSourceBreakpoints(sourceFilePath, add, remove);
 }
 
 void
@@ -878,7 +869,6 @@ SupervisorState::SetInstructionBreakpoints(const Set<BreakpointSpecification> &b
                breakpoints, [](const auto &item) { return item.mKind == DapBreakpointType::instruction; }),
     "Require all bps be instruction breakpoints");
   std::vector<BreakpointSpecification> add{};
-  std::vector<BreakpointSpecification> remove{};
 
   for (const auto &bp : breakpoints) {
     if (!mUserBreakpoints.mInstructionBreakpoints.contains(bp)) {
@@ -910,13 +900,6 @@ SupervisorState::SetInstructionBreakpoints(const Set<BreakpointSpecification> &b
         *this, GetOrCreateBreakpointLocation(addr), mTaskLeader, LocationUserKind::Address, bp.Clone());
       mUserBreakpoints.mInstructionBreakpoints[bp] = user->mId;
     }
-  }
-
-  for (const auto &bp : remove) {
-    auto iter = mUserBreakpoints.mInstructionBreakpoints.find(bp);
-    MDB_ASSERT(iter != std::end(mUserBreakpoints.mInstructionBreakpoints), "Expected to find breakpoint");
-    mUserBreakpoints.RemoveUserBreakpoint(iter->second);
-    mUserBreakpoints.mInstructionBreakpoints.erase(iter);
   }
 }
 
@@ -968,7 +951,7 @@ SupervisorState::SetFunctionBreakpoints(const Set<BreakpointSpecification> &brea
         mUserBreakpoints.mFunctionBreakpoints[fn.mSpec].push_back(user->mId);
         fn.mWasSet = true;
         mDebugAdapterClient->PostDapEvent(
-          new ui::dap::BreakpointEvent{ mSessionId, "new", "Breakpoint was created", user });
+          new ui::dap::BreakpointEvent{ mTaskLeader, "new", "Breakpoint was created", user });
       }
     }
   }
@@ -1051,7 +1034,7 @@ SupervisorState::OnSharedObjectEvent() noexcept
         RegisterSymbolFile(symbolFile, false);
       }
     }
-    DoBreakpointsUpdate(std::move(objectFiles));
+    DoBreakpointsUpdate(objectFiles);
   } else {
     DBGLOG(core, "No library info was returned");
   }
@@ -1071,9 +1054,8 @@ SupervisorState::IsAllStopped() const noexcept
 void
 SupervisorState::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, bool isMainExecutable) noexcept
 {
-  const auto it = std::find_if(mSymbolFiles.begin(), mSymbolFiles.end(), [&symbolFile](auto &s) {
-    return symbolFile->GetObjectFilePath() == s->GetObjectFilePath();
-  });
+  const auto it = FindIf<true>(mSymbolFiles,
+    [&symbolFile](const auto &s) { return symbolFile->GetObjectFilePath() == s.GetObjectFilePath(); });
   if (it != std::end(mSymbolFiles)) {
     const auto same_bounds = symbolFile->mPcBounds == (*it)->mPcBounds;
     DBGLOG(core,
@@ -1126,12 +1108,12 @@ SupervisorState::PostTaskExit(TaskInfo &task, bool notify) noexcept
   task.mExited = true;
 
   mExitedThreads.push_back({ task.mTid, RefPtr{ &task } });
-  auto it = std::find_if(mThreads.begin(), mThreads.end(), [tid = task.mTid](auto &t) { return t.mTid == tid; });
+  auto it = FindIf(mThreads, [tid = task.mTid](auto &t) { return t.mTid == tid; });
   mThreads.erase(it);
 
   if (notify) {
     mDebugAdapterClient->PostDapEvent(
-      new ui::dap::ThreadEvent{ mSessionId, ui::dap::ThreadReason::Exited, task.mTid });
+      new ui::dap::ThreadEvent{ mTaskLeader, ui::dap::ThreadReason::Exited, task.mTid });
   }
 }
 
@@ -1176,7 +1158,7 @@ SupervisorState::HandleExec(TaskInfo &task, const std::string &execFile) noexcep
   // stop at entry & install ld.so breakpoints
   PostExec(execFile, true, true);
   mDebugAdapterClient->PostDapEvent(new ui::dap::CustomEvent{
-    mSessionId, "setProcessName", std::format(R"({{ "name": "{}", "processId": {} }})", execFile, mTaskLeader) });
+    mTaskLeader, "setProcessName", std::format(R"({{ "name": "{}", "processId": {} }})", execFile, mTaskLeader) });
   mScheduler->Schedule(task, { true, task.mResumeRequest.mType });
 }
 
@@ -1204,8 +1186,8 @@ SupervisorState::BuildCallFrameStack(TaskInfo &task, const CallStackRequest &req
       break;
     }
     auto &[symbol, obj] = result.value();
-    const auto id = Tracer::Get().NewVariablesReference();
-    Tracer::Get().SetVariableContext(std::make_shared<VariableContext>(&task, obj, id, id, ContextType::Frame));
+    const auto id = Tracer::NewVariablesReference();
+    Tracer::SetVariableContext(std::make_shared<VariableContext>(&task, obj, id, id, ContextType::Frame));
     if (symbol) {
       callStack.PushFrame(obj, task, depth, id, i.AsVoid(), symbol);
     } else {
@@ -1361,13 +1343,21 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
     InstallDynamicLoaderBreakpoints(dynamicSegment);
   }
 
-  DoBreakpointsUpdate({ mMainExecutable });
+  auto mainExecutable_ = std::to_array({ mMainExecutable });
+  DoBreakpointsUpdate(std::span{ mainExecutable_ });
   mOnExecOrExitPublisher.Emit();
 
   if (stopAtEntry) {
-    Set<BreakpointSpecification> fns{ BreakpointSpecification::Create<FunctionBreakpointSpec>(
-      {}, {}, "main", false) };
-    SetFunctionBreakpoints(fns);
+    Set<BreakpointSpecification> fns{};
+    const auto mainSpec = BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, "main", false);
+    const std::vector result = mMainExecutable->LookupFunctionBreakpointBySpec(mainSpec);
+    for (const auto &lookup : result) {
+      auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
+        GetOrCreateBreakpointLocation(lookup.address),
+        mTaskLeader,
+        LocationUserKind::Address,
+        mainSpec.Clone());
+    }
   }
 }
 
@@ -1476,7 +1466,7 @@ SupervisorState::ShutDownDebugAdapterClient() noexcept
 {
   if (mDebugAdapterClient) {
     mDebugAdapterClient->PostDapEvent(new ui::dap::TerminatedEvent{
-      mSessionId,
+      mTaskLeader,
     });
     mDebugAdapterClient = nullptr;
   }
@@ -1514,6 +1504,20 @@ SupervisorState::ReverseResumeTarget(tc::RunType resumeType) noexcept
 {
   // Normal debug sessions do not support reverse execution.
   return false;
+}
+
+/* virtual */
+mdb::ui::dap::StoppedEvent *
+SupervisorState::CreateStoppedEvent(ui::dap::StoppedReason reason,
+  std::string_view description,
+  Tid tid,
+  std::string_view text,
+  bool allStopped,
+  std::vector<int> breakpointsHit = {}) noexcept
+{
+  return new ui::dap::StoppedEvent{
+    mTaskLeader, reason, description, tid, std::move(breakpointsHit), text, allStopped
+  };
 }
 
 std::optional<std::vector<ObjectFileDescriptor>>
