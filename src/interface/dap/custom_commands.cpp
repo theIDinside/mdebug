@@ -34,8 +34,7 @@ ParseCustomRequestCommand(
 void
 ContinueAll::Execute() noexcept
 {
-  auto session = GetSession();
-  auto target = session->GetSupervisor();
+  auto target = GetSupervisor();
   MDB_ASSERT(target, "Target must not be null");
   auto res = Allocate<ContinueAllResponse>(true, this, target->TaskLeaderTid());
   std::vector<Tid> resumedThreads{};
@@ -46,7 +45,7 @@ ContinueAll::Execute() noexcept
   res->mSuccess = result;
   if (result) {
     for (const auto &tid : resumedThreads) {
-      mDebugAdapterManager->PushDelayedEvent(new ContinuedEvent{ mSessionId, tid, true });
+      mDebugAdapterManager->PushDelayedEvent(new ContinuedEvent{ mProcessId, tid, true });
     }
   }
   return WriteResponse(*res);
@@ -68,12 +67,10 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 void
 PauseAll::Execute() noexcept
 {
-  auto session = GetSession();
-  auto target = session->GetSupervisor();
+  auto target = GetSupervisor();
   auto tid = target->TaskLeaderTid();
-  target->StopAllTasks([client = mDebugAdapterManager, tid, sessionId = mSessionId]() {
-    client->PostDapEvent(
-      new StoppedEvent{ sessionId, StoppedReason::Pause, "Paused", tid, {}, "Paused all", true });
+  target->StopAllTasks([client = mDebugAdapterManager, tid, sessionId = mProcessId, target]() {
+    client->PostDapEvent(target->CreateStoppedEvent(StoppedReason::Pause, "Paused", tid, "Paused all", true, {}));
   });
   return WriteResponse(PauseAllResponse{ true, this });
 }
@@ -127,7 +124,7 @@ GetProcesses::Execute() noexcept
 {
   IdContainer result{};
   for (auto tc : Tracer::Get().GetAllProcesses()) {
-    result.emplace_back(tc->TaskLeaderTid(), tc->GetSessionId());
+    result.emplace_back(tc->TaskLeaderTid(), tc->GetProcessId());
   }
 
   return WriteResponse(GetProcessesResponse{ true, this, std::move(result) });

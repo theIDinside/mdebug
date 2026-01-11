@@ -17,26 +17,25 @@ InitializedEvent::Serialize(int, std::pmr::memory_resource *arenaAllocator) cons
   // process id mapping immediately For Launch requests however, we can't create this mapping until the process is
   // actually created, post spawn. It's up to the client to create this mapping based on what kind of request it's
   // starting with.
-  if (mProcessId) {
+  if (mDeterminedProcessId) {
     ReturnFormatted(
-      R"({{"seq":{},"sessionId":{},"type":"event","event":"initialized", "body":{{"sessionId":{}, "processId":{}}}}})",
+      R"({{"seq":{},"processId":{},"type":"event","event":"initialized", "body":{{"processId":{}}}}})",
       1,
-      mSessionId,
-      mSessionId,
-      *mProcessId);
+      mProcessId,
+      *mDeterminedProcessId);
   } else {
+    // Process ID not yet determined; will have to be determined post launch
     ReturnFormatted(
-      R"({{"seq":{},"sessionId":{},"type":"event","event":"initialized", "body":{{"sessionId":{}, "processId":null}}}})",
+      R"({{"seq":{},"processId":{},"type":"event","event":"initialized", "body":{{"processId":null}}}})",
       1,
-      mSessionId,
-      mSessionId);
+      mProcessId);
   }
 }
 
 std::pmr::string
 TerminatedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{},"sessionId":{},"type":"event", "event":"terminated" }})", seq, mSessionId);
+  ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event", "event":"terminated" }})", seq, mProcessId);
 }
 
 ModuleEvent::ModuleEvent(SessionId sessionId,
@@ -87,9 +86,9 @@ ModuleEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
   std::pmr::string result{ arenaAllocator };
 
   auto it = std::format_to(std::back_inserter(result),
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
+    R"({{"seq":{},"processId":{},"type":"event","event":"module","body":{{"reason":"{}", "module":{{"id":"{}","name":"{}","path":"{}")",
     seq,
-    mSessionId,
+    mProcessId,
     mReason,
     mObjectFileId,
     mName,
@@ -118,24 +117,24 @@ std::pmr::string
 ContinuedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"continued","body":{{"threadId":{},"allThreadsContinued":{}}}}})",
+    R"({{"seq":{},"processId":{},"type":"event","event":"continued","body":{{"threadId":{},"allThreadsContinued":{}}}}})",
     seq,
-    mSessionId,
+    mProcessId,
     mThreadId,
     mAllThreadsContinued);
 }
 
-Process::Process(SessionId parentSessionId, SessionId pid, std::string name, bool isLocal) noexcept
-    : UIResult{ parentSessionId }, mName(std::move(name)), mProcessId(pid), mIsLocal(isLocal)
+Process::Process(Pid parentProcessId, Pid childProcessId, std::string name, bool isLocal) noexcept
+    : UIResult{ parentProcessId }, mName(std::move(name)), mNewProcessId(childProcessId), mIsLocal(isLocal)
 {
 }
 
 std::pmr::string
 CustomEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{},"sessionId":{},"type":"event","event":"{}","body":{}}})",
+  ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event","event":"{}","body":{}}})",
     seq,
-    mSessionId,
+    mProcessId,
     mCustomEventName,
     mSerializedBody);
 }
@@ -144,11 +143,11 @@ std::pmr::string
 Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"process","body":{{"name":"{}","isLocalProcess":true,"startMethod":"attach","processId":{}}}}})",
+    R"({{"seq":{},"processId":{},"type":"event","event":"process","body":{{"name":"{}","isLocalProcess":true,"startMethod":"attach","processId":{}}}}})",
     seq,
-    mSessionId,
+    mProcessId,
     mName,
-    mProcessId);
+    mNewProcessId);
 }
 
 ExitedEvent::ExitedEvent(SessionId sessionId, int exitCode) noexcept : UIResult{ sessionId }, mExitCode(exitCode)
@@ -158,9 +157,9 @@ ExitedEvent::ExitedEvent(SessionId sessionId, int exitCode) noexcept : UIResult{
 std::pmr::string
 ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  ReturnFormatted(R"({{"seq":{},"sessionId":{},"type":"event","event":"exited","body":{{"exitCode":{}}}}})",
+  ReturnFormatted(R"({{"seq":{},"processId":{},"type":"event","event":"exited","body":{{"exitCode":{}}}}})",
     seq,
-    mSessionId,
+    mProcessId,
     mExitCode);
 }
 
@@ -178,9 +177,9 @@ std::pmr::string
 ThreadEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   ReturnFormatted(
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"thread","body":{{"reason":"{}","threadId":{}}}}})",
+    R"({{"seq":{},"processId":{},"type":"event","event":"thread","body":{{"reason":"{}","threadId":{}}}}})",
     seq,
-    mSessionId,
+    mProcessId,
     to_str(mReason),
     mTid);
 }
@@ -197,31 +196,46 @@ StoppedEvent::StoppedEvent(SessionId sessionId,
 {
 }
 
+void
+StoppedEvent::SetExistingProcesses(std::vector<Pid> processes)
+{
+  mProcesses = std::make_optional(std::move(processes));
+}
+
 std::pmr::string
 StoppedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
-  if (mText.empty()) {
-    ReturnFormatted(
-      R"({{"seq":{},"sessionId":{},"type":"event","event":"stopped","body":{{"reason":"{}","threadId":{},"description":"{}","text":"","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
-      seq,
-      mSessionId,
-      to_str(mReason),
-      mTid,
-      mDescription,
-      mAllThreadsStopped,
-      JoinFormatIterator{ mBreakpointIds, "," });
+
+  std::pmr::string result{ arenaAllocator };
+  auto it = std::format_to(std::back_inserter(result),
+    R"({{"seq":{},"processId":{},"type":"event","event":"stopped","body":{{"reason":"{}","threadId":{},"description":"{}","text":)",
+    seq,
+    mProcessId,
+    to_str(mReason),
+    mTid,
+    mDescription);
+
+  if (!mText.empty()) {
+    it = std::format_to(it, R"("{}",)", mText);
   } else {
-    ReturnFormatted(
-      R"({{"seq":{},"sessionId":{},"type":"event","event":"stopped","body":{{ "reason":"{}","threadId":{},"description":"{}","text":"{}","allThreadsStopped":{},"hitBreakpointIds":[{}]}}}})",
-      seq,
-      mSessionId,
-      to_str(mReason),
-      mTid,
-      mDescription,
-      mText,
-      mAllThreadsStopped,
-      JoinFormatIterator{ mBreakpointIds, "," });
+    *it++ = '"';
+    *it++ = '"';
+    *it++ = ',';
   }
+
+  it = std::format_to(it,
+    R"("allThreadsStopped":{},"hitBreakpointIds":[{}])",
+    mAllThreadsStopped,
+    JoinFormatIterator{ mBreakpointIds, "," });
+
+  if (mProcesses) {
+    it = std::format_to(it, R"(, "processes": [{}])", JoinFormatIterator{ *mProcesses, "," });
+  }
+
+  // the 2 closing }
+  it = std::format_to(it, R"(}}}})");
+
+  return result;
 }
 
 BreakpointEvent::BreakpointEvent(SessionId sessionId,
@@ -250,9 +264,9 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
   result.reserve(1024);
   auto it = std::back_inserter(result);
   it = std::format_to(it,
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
+    R"({{"seq":{},"processId":{},"type":"event","event":"breakpoint","body":{{"reason":"{}","breakpoint":{{"id":{},"verified":{})",
     seq,
-    mSessionId,
+    mProcessId,
     mReason,
     mBreakpoint->mId,
     mBreakpoint->IsVerified());
@@ -287,9 +301,9 @@ OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
 {
   std::pmr::string result{ arenaAllocator };
   std::format_to(std::back_inserter(result),
-    R"({{"seq":{},"sessionId":{},"type":"event","event":"output","body":{{"category":"{}","output":"{}"}}}})",
+    R"({{"seq":{},"processId":{},"type":"event","event":"output","body":{{"category":"{}","output":"{}"}}}})",
     seq,
-    mSessionId,
+    mProcessId,
     mCategory,
     EscapeFormatter{ mOutput });
   return result;

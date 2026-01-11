@@ -64,7 +64,6 @@ public:
   friend class tc::SupervisorState;
   pid_t mTid;
   u32 mSessionId{ 0 };
-  i64 mCreatedAtEvent;
 
   std::optional<PtraceEvent> mUnhandledInitPtraceEvent{ std::nullopt };
   tc::ResumeRequest mResumeRequest{ tc::RunType::Continue, 0 };
@@ -75,6 +74,7 @@ public:
   bool mExited : 1 { false };     // task has exited
   bool mReaped : 1 { false };     // task has been reaped after exit
   bool mKilled : 1 { false };
+  bool mInvalid : 1 { false };
   bool mRequestedStop : 1 { false };
   bool mRegisterCacheDirty : 1 { true };
 
@@ -82,6 +82,7 @@ private:
   std::unique_ptr<sym::CallStack> mTaskCallstack;
   std::vector<u32> variableReferences{};
   VariableReferenceId mLivenessBoundary;
+  u64 mTimestampCreated{ 0 };
   std::unordered_map<VariableReferenceId, Ref<sym::Value>> mVariablesCache{};
   tc::SupervisorState *mSupervisor;
   std::string mThreadName;
@@ -117,6 +118,21 @@ public:
   u64 UnwindBufferRegister(u8 level, u16 register_number) const noexcept;
   void RefreshRegisterCache() noexcept;
   void SetName(std::string_view name) noexcept;
+  /**
+   * Invalidates the thread, so that it is no longer representative of an actual task. JS code can still hold a
+   * reference to it, but it will not be representing an actual task's state in the OS. This happens for instance
+   * during reverse execution to before the time when the thread was created.
+   */
+  void Invalidate() noexcept;
+  void ReInit() noexcept;
+  void SetExited() noexcept;
+
+  u64
+  StartTime() const noexcept
+  {
+    return mTimestampCreated;
+  }
+
   std::string_view GetName() const noexcept;
 
   std::span<const AddrPtr> UnwindReturnAddresses(CallStackRequest req) noexcept;
@@ -136,6 +152,12 @@ public:
    * being delivered, etc.
    */
   bool IsStopped() const noexcept;
+
+  bool
+  IsValid() const noexcept
+  {
+    return !mInvalid;
+  }
 
   sym::CallStack &GetCallstack() noexcept;
   // Add the `VariableReferenceId` to this task, so that once the task is resumed, it can instruct MDB to destroy
@@ -159,6 +181,7 @@ public:
   // Takes the last received/seen signal for this task and clears the signal flag (so we don't accidentally forward
   // it multiple times)
   std::optional<int> ConsumeSignal() noexcept;
+  void SetTimestampCreated(u64 time) noexcept;
 };
 } // namespace mdb
 

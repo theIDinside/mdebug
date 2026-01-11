@@ -165,9 +165,7 @@ public:
   void
   Unsubscribe(SubscriberIdentity identity) noexcept
   {
-    if (auto it = std::find_if(subscribers.begin(),
-          subscribers.end(),
-          [&identity](const auto &sub) { return sub.identity == identity; });
+    if (auto it = FindIf(subscribers, [&identity](const auto &sub) { return sub.identity == identity; });
       it != std::end(subscribers)) {
       subscribers.erase(it);
     }
@@ -221,8 +219,7 @@ public:
   void
   Unsubscribe(SubscriberIdentity identity) noexcept
   {
-    auto it = std::find_if(
-      subscribers.begin(), subscribers.end(), [&identity](auto &sub) { return sub.identity == identity; });
+    auto it = FindIf(subscribers, [&identity](auto &sub) { return sub.identity == identity; });
     if (it != std::end(subscribers)) {
       subscribers.erase(it);
     }

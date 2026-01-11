@@ -49,16 +49,18 @@ private:
   std::vector<Elf64_Phdr> LoadProgramHeaders(
     Pid pid, AddrPtr phdrAddress, size_t phdrCount, size_t phdrSize) noexcept;
 
+  /* Create new task meta data for `tid` */
+  TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept;
+  void InitRegisterCacheFor(const TaskInfo &task) noexcept;
+
 public:
   static Session *ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
-    SessionId sessionId,
     bool stopAtEntry,
     const Path &program,
     std::span<std::pmr::string> prog_args,
     std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
 
-  static Session *Create(
-    std::optional<SessionId> sessionId, Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
+  static Session *Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
   static void QueueUnhandledPtraceEvent(PtraceEvent event) noexcept;
   void ProcessQueuedUnhandled(Pid childPid) noexcept;
 
@@ -73,7 +75,6 @@ public:
 private:
   void HandleFork(TaskInfo &task, pid_t newChild, bool vFork) noexcept final;
   mdb::Expected<Auxv, Error> DoReadAuxiliaryVector() noexcept final;
-  void InitRegisterCacheFor(const TaskInfo &task) noexcept final;
 
 public:
   TaskExecuteResponse ReadRegisters(TaskInfo &t) noexcept final;
@@ -88,7 +89,6 @@ public:
   TaskExecuteResponse DoDisconnect(bool terminate) noexcept final;
   ReadResult DoReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
   TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
-  bool PerformShutdown() noexcept final;
 
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)
@@ -99,8 +99,9 @@ public:
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   void DoResumeTask(TaskInfo &t, RunType type) noexcept final;
   bool DoResumeTarget(RunType type) noexcept final;
-  void AttachSession(ui::dap::DebugAdapterSession &session) noexcept final;
+  void AttachSession() noexcept final;
   bool Pause(Tid tid) noexcept final;
+  bool CanContinue() noexcept final;
 };
 
 } // namespace mdb::tc::ptrace

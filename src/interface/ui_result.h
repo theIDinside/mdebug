@@ -9,11 +9,11 @@ namespace mdb::ui {
 struct UIResult
 {
   // Events contruct UIResult like so:
-  constexpr UIResult(SessionId sessionId) noexcept : mSessionId(sessionId), mSuccess(true), mRequestSeq(0) {}
+  constexpr UIResult(SessionId sessionId) noexcept : mProcessId(sessionId), mSuccess(true), mRequestSeq(0) {}
 
   // Responses from commands construct UIResult:
   constexpr UIResult(bool success, UICommandPtr cmd) noexcept
-      : mSessionId(cmd->mSessionId), mSuccess(success), mRequestSeq(cmd->mSeq),
+      : mProcessId(cmd->mProcessId), mSuccess(success), mRequestSeq(cmd->mSeq),
         mAllocator(std::move(cmd->mCommandAllocator)), mClient(cmd->mDebugAdapterManager)
   {
   }
@@ -32,9 +32,9 @@ struct UIResult
   }
 
   SessionId
-  GetSessionId() const noexcept
+  GetProcessId() const noexcept
   {
-    return mSessionId;
+    return mProcessId;
   }
 
   std::pmr::memory_resource *
@@ -43,7 +43,7 @@ struct UIResult
     return mAllocator->GetAllocator();
   }
 
-  SessionId mSessionId;
+  SessionId mProcessId;
   bool mSuccess;
   std::uint64_t mRequestSeq;
   UICommand::RequestResponseAllocator mAllocator;

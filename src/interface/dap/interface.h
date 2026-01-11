@@ -161,38 +161,13 @@ enum class DapClientSession
 
 class DebugAdapterSession
 {
-  const SessionId mSessionId;
   // Until attach/launch, this will be nullptr
   // OnCreatedSupervisor hooks up the supervisor with the debug adapter sesssion.
-  tc::SupervisorState *mSupervisor{ nullptr };
-  bool mConfigurationDone{ false };
-  std::vector<std::function<void(tc::SupervisorState &)>> mOnSessionFirstStart;
 
 public:
-  explicit DebugAdapterSession(SessionId sessionId) noexcept;
   bool HasAttachedOrLaunched() const noexcept;
   void OnCreatedSupervisor(NonNullPtr<tc::SupervisorState> supervisor) noexcept;
-  void OnSessionConfiguredWithSupervisor(std::function<void(tc::SupervisorState &)> callback) noexcept;
-  SessionBreakpoints &GetBreakpoints() noexcept;
-  bool ConfigurationDone() noexcept;
-
-  bool
-  HasConfigured() const noexcept
-  {
-    return mConfigurationDone;
-  }
-
-  SessionId
-  GetId() const noexcept
-  {
-    return mSessionId;
-  }
-
-  tc::SupervisorState *
-  GetSupervisor() const noexcept
-  {
-    return mSupervisor;
-  }
+  bool ManagesSupervisor(Pid processId) const;
 };
 
 class DebugAdapterManager
@@ -201,7 +176,13 @@ class DebugAdapterManager
   int mWriteFd{};
   ParseBuffer mParseSwapBuffer{ MDB_PAGE_SIZE * 16 };
   int mTtyFileDescriptor{ -1 };
-  std::vector<UniquePtr<DebugAdapterSession>> mSessions;
+
+  std::vector<tc::SupervisorState *> mSupervisors;
+  // Callback for configuration phase to be executed when an actual supervisor has materialized
+  // (which happens after a launch or attach). For processes that got spawed by the target, while debugging,
+  // the configuration phase will work on the first try, since there's a materialized session to target.
+  std::vector<std::function<void(tc::SupervisorState &)>> mOnInitialSupervisor;
+  bool mConfigPhaseDoneWithNoMaterializedSupervisor{ false };
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
   // away.
@@ -238,7 +219,6 @@ public:
   static DebugAdapterManager *CreateSocketConnection(const char *socketPath, int acceptTimeout) noexcept;
   std::unique_ptr<alloc::ScopedArenaAllocator> AcquireArena() noexcept;
 
-  void RemoveSupervisor(tc::SupervisorState *supervisor) noexcept;
   void PostDapEvent(ui::UIResultPtr event);
 
   int ReadFileDescriptor() const noexcept;
@@ -248,14 +228,25 @@ public:
   void ReadPendingCommands() noexcept;
   void SetTtyOut(int fd, SessionId pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
-  DebugAdapterSession *GetSession(SessionId pid) const noexcept;
+  tc::SupervisorState *GetSupervisor(Pid pid) const noexcept;
   std::span<UniquePtr<DebugAdapterSession>> Sessions() noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
-  void InitializeSession(SessionId sessionId) noexcept;
+  void AddSupervisor(tc::SupervisorState *supervisor) noexcept;
+  void RemoveSupervisor(tc::SupervisorState *supervisor) noexcept;
   void FlushEvents() noexcept;
   bool IsClosed() noexcept;
-  bool SessionConfigurationDone(SessionId sessionId) noexcept;
+
+  // Called when configuration happens for a session with no running processes.
+  void OnSessionConfiguredWithSupervisor(std::function<void(tc::SupervisorState &)> callback) noexcept;
+  bool SupervisorMaterialized(NonNullPtr<tc::SupervisorState> supervisor) noexcept;
+  void ConfigDoneWithNoSupervisor(bool value = true) noexcept;
+
+  bool
+  HasPendingConfigDone() const noexcept
+  {
+    return mConfigPhaseDoneWithNoMaterializedSupervisor;
+  }
 };
 
 enum class InterfaceNotificationSource

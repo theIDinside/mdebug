@@ -6,6 +6,7 @@
 // mdb
 #include <common/macros.h>
 #include <common/traits.h>
+#include <cstdlib>
 #include <cstring>
 #include <event_queue.h>
 #include <interface/tracee_command/rr/rr_session.h>
@@ -18,6 +19,7 @@
 // std
 #include <algorithm>
 #include <filesystem>
+#include <string>
 #include <utility>
 // system
 
@@ -103,14 +105,15 @@ ReplaySupervisor::AddSupervisor(NonNullPtr<Session> session) noexcept
 void
 ReplaySupervisor::RegisterStopsForProcess(Pid pid) noexcept
 {
-  MDB_ASSERT(!IsTracing(pid), "Already added {}", pid);
-  mTracedProcesses.push_back(pid);
+  if (!IsTracing(pid)) {
+    mTracedProcessesPids.push_back(pid);
+  }
 }
 
 bool
 ReplaySupervisor::IsTracing(Pid pid) noexcept
 {
-  return std::ranges::any_of(mTracedProcesses, [pid](auto p) { return p == pid; });
+  return std::ranges::any_of(mTracedProcessesPids, [pid](auto p) { return p == pid; });
 }
 
 bool
@@ -144,13 +147,6 @@ ReplaySupervisor::ProcessRequests()
       auto replayedTask = replayResult.break_status.task();
 
       auto t = mTimeline->current_session().current_task();
-      RRLOG("replayed one step, replayed_task = {}, current_task={}, exited={}, fastfwd={}, res={}, pc=0x{:x}",
-        replayedTask ? replayedTask->rec_tid : 0,
-        t ? t->rec_tid : 0,
-        replayResult.break_status.task_exit,
-        replayResult.did_fast_forward,
-        (int)replayResult.status,
-        t ? t->ip().register_value() : 0);
 
       if (replayResult.status == rr::REPLAY_EXITED) {
         RRLOG("replay exited");
@@ -164,6 +160,14 @@ ReplaySupervisor::ProcessRequests()
 
       if (const auto res = FromReplayResult(replayResult, *mRequestedResume);
         res && !IsIgnoring(t->thread_group()->tgid)) {
+        RRLOG("replayed one step that needs stop notification, replayed_task = {}, current_task={}, exited={}, "
+              "fastfwd={}, res={}, pc=0x{:x}",
+          replayedTask ? replayedTask->rec_tid : 0,
+          t ? t->rec_tid : 0,
+          replayResult.break_status.task_exit,
+          replayResult.did_fast_forward,
+          (int)replayResult.status,
+          t ? t->ip().register_value() : 0);
         PublishEvent(*res);
         InterruptCheck();
         SetWillNeedResume(&replayResult.break_status);
@@ -175,8 +179,7 @@ ReplaySupervisor::ProcessRequests()
     }
   } else if (mRequestedShutdown) {
     RRLOG("Destroying timeline");
-    delete mTimeline;
-    mTimeline = nullptr;
+    mTimeline.reset(nullptr);
     mKeepRunning = false;
     PublishSessionEvent(SupervisorSessionEventType::TraceEnded);
   }
@@ -230,10 +233,11 @@ ReplaySupervisor::Shutdown()
   // thread that initialized the supervisor.
   mRequestedShutdown = true;
   mRequestedResume.reset();
+  mRequestCondVar.notify_one();
 }
 
 bool
-ReplaySupervisor::RequestResume(ResumeReplay resume_tracee)
+ReplaySupervisor::RequestResume(ResumeReplay resumeReplayOp)
 {
   RRLOG("requesting resume");
   if (IsReplaying()) {
@@ -241,7 +245,12 @@ ReplaySupervisor::RequestResume(ResumeReplay resume_tracee)
     return false;
   }
 
-  mRequestedResume = resume_tracee;
+  mIsReversing = resumeReplayOp.direction == RR_DIR_REVERSE;
+  if (mIsReversing) {
+    OnReverse();
+  }
+
+  mRequestedResume = resumeReplayOp;
 
   NotifyResumed();
   return true;
@@ -404,6 +413,18 @@ ReplaySupervisor::GetTask(pid_t rec_tid) const
   return mTimeline->current_session().find_task(rec_tid);
 }
 
+bool
+ReplaySupervisor::IsReversing() const
+{
+  return mIsReversing;
+}
+
+uint64_t
+ReplaySupervisor::CurrentFrameTime() const noexcept
+{
+  return mTimeline->current_session().current_frame_time();
+}
+
 static rr::ReplaySession::Flags
 CreateReplayFlags(const StartReplayOptions &options)
 {
@@ -487,7 +508,7 @@ ReplaySupervisor::InitializeDebugSession()
 {
   const auto &opts = mReplayOptions.value();
   const auto flags = CreateReplayFlags(opts);
-  mTimeline = new rr::ReplayTimeline{ rr::ReplaySession::create(opts.trace_dir, flags) };
+  mTimeline = std::make_unique<rr::ReplayTimeline>(rr::ReplaySession::create(opts.trace_dir, flags));
   MDB_ASSERT(mTimeline != nullptr, "Failed to create replay session");
   if (!mTimeline) {
     std::terminate();
@@ -658,16 +679,26 @@ ReplaySupervisor::FromReplayResult(const rr::ReplayResult &result, ResumeReplay 
 
   // check if last replayed_event was a thread group mutating syscall.
   auto &ev = traceFrame.event();
-  if (ev.is_syscall_event() && ev.Syscall().state == rr::EXITING_SYSCALL && !traceFrame.regs().syscall_failed()) {
+  if (ev.is_syscall_event() && result.created_task.has_value()) {
     stopKind = CheckStopKind(result.break_status.task()->rec_tid, ev.Syscall().number, traceFrame);
     if (stopKind >= StopKind::Forked && stopKind <= StopKind::Cloned) {
-      DBGBUFLOG(core, "new child is = {}", traceFrame.regs().syscall_result());
-      return std::make_optional(
-        ReplayEvent{ .mTaskInfo = toInfo(traceFrame.regs().syscall_result()), .mStopKind = stopKind });
+      DBGBUFLOG(core, "new child is = {}", *result.created_task);
+      return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(*result.created_task), .mStopKind = stopKind });
     } else if (stopKind == StopKind::Execed) {
       return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(), .mStopKind = stopKind });
     }
   }
+  // if (ev.is_syscall_event() && ev.Syscall().state == rr::EXITING_SYSCALL && !traceFrame.regs().syscall_failed())
+  // {
+  //   stopKind = CheckStopKind(result.break_status.task()->rec_tid, ev.Syscall().number, traceFrame);
+  //   if (stopKind >= StopKind::Forked && stopKind <= StopKind::Cloned) {
+  //     DBGBUFLOG(core, "new child is = {}", traceFrame.regs().syscall_result());
+  //     return std::make_optional(
+  //       ReplayEvent{ .mTaskInfo = toInfo(traceFrame.regs().syscall_result()), .mStopKind = stopKind });
+  //   } else if (stopKind == StopKind::Execed) {
+  //     return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(), .mStopKind = stopKind });
+  //   }
+  // }
 
   if (result.break_status.breakpoint_hit || !result.break_status.watchpoints_hit.empty()) {
     return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(),
@@ -705,7 +736,7 @@ ReplaySupervisor::PerformResume()
                                             : rr::RunCommand::RUN_SINGLESTEP);
   }
   case RR_DIR_REVERSE: {
-    return mTimeline->reverse_continue([](auto, auto) { return true; },
+    return mTimeline->reverse_continue([](auto, auto &) { return true; },
       [&stop_flag = mPendingInterrupt]() { return stop_flag.load(std::memory_order_relaxed); });
   }
   }
@@ -741,14 +772,25 @@ ReplaySupervisor::NotifyResumed() noexcept
   if (!mTimelineSupervisors.empty()) {
     auto *debugAdapterManager = mTimelineSupervisors.front()->GetDebugAdapterProtocolClient();
     for (auto &supervisor : mTimelineSupervisors) {
-      if (supervisor->GetSessionId() != -1 && !supervisor->IsExited()) {
+      if (supervisor->GetProcessId() != -1 && !supervisor->IsExited()) {
         debugAdapterManager->PostDapEvent(new ui::dap::ContinuedEvent{
-          supervisor->GetSessionId(), supervisor->TaskLeaderTid(), /* allThreads */ true });
+          supervisor->GetProcessId(), supervisor->TaskLeaderTid(), /* allThreads */ true });
       }
     }
   }
 
   mRequestCondVar.notify_one();
+}
+
+void
+ReplaySupervisor::OnReverse() noexcept
+{
+  for (auto session : mTimelineSupervisors) {
+    for (auto &t : session->GetThreads()) {
+      t.mTask->ClearBreakpointLocStatus();
+      t.mTask->SetInvalidCache();
+    }
+  }
 }
 
 static std::optional<Path>
@@ -764,6 +806,199 @@ MdbPath()
   return Path{ path };
 }
 
+/* static */ std::shared_ptr<BreakpointInfo>
+BreakpointInfo::Create(u32 id) noexcept
+{
+  auto result = std::make_shared<BreakpointInfo>();
+  result->mId = id;
+  return result;
+}
+
+bool
+BreakpointInfo::IsVerified() const noexcept
+{
+  return !mUsers.empty();
+}
+
+void
+BreakpointInfo::SetLine(u32 line) noexcept
+{
+  mLine = line;
+}
+
+void
+BreakpointInfo::SetColumn(u32 column) noexcept
+{
+  mColumn = column;
+}
+
+void
+BreakpointInfo::SetSource(std::string_view sourcePath) noexcept
+{
+  mSourcePath = sourcePath;
+}
+
+void
+BreakpointInfo::SetErrorMessage(std::string message) noexcept
+{
+  mErrorMessage = std::move(message);
+}
+
+void
+BreakpointInfo::AddUser(Pid processId) noexcept
+{
+  for (const auto &user : mUsers) {
+    if (user == processId) {
+      return;
+    }
+  }
+  mUsers.push_back(processId);
+}
+
+void
+BreakpointInfo::RemoveUser(Pid processId) noexcept
+{
+  mUsers.erase(std::find(mUsers.begin(), mUsers.end(), processId));
+}
+
+void
+BreakpointInfo::SetStale() noexcept
+{
+  mStale = true;
+}
+
+std::pmr::string
+BreakpointInfo::Serialize(std::pmr::memory_resource *memoryResource) const noexcept
+{
+  std::pmr::string buf{ memoryResource };
+  // TODO(simon): Here we really should be using some form of arena allocation for the DAP interpreter
+  // communication
+  //  so that all these allocations can be "blinked" out of existence, i.e. all serialized command results, will be
+  //  manually de/allocated by us. But that's the future.
+  buf.reserve(256);
+  auto it = std::back_inserter(buf);
+  it = std::format_to(it, R"({{"id":{},"verified":{})", mId, IsVerified());
+  if (!IsVerified()) {
+    it = std::format_to(it, R"(,"message": "{}")", mErrorMessage.value());
+  }
+
+  if (mLine) {
+    it = std::format_to(it, R"(,"line": {})", *mLine);
+  }
+
+  if (mColumn) {
+    it = std::format_to(it, R"(,"column": {})", *mColumn);
+  }
+  if (mSourcePath) {
+    it = std::format_to(it, R"(,"source": {{ "name": "{}", "path": "{}" }})", *mSourcePath, *mSourcePath);
+  }
+  it = std::format_to(it, R"(}})");
+  return buf;
+}
+
+/* static */
+std::shared_ptr<SessionBreakpointSpecs>
+SessionBreakpointSpecs::Create() noexcept
+{
+  return std::make_shared<SessionBreakpointSpecs>();
+}
+
+/* static */
+std::shared_ptr<BreakpointInfo>
+SessionBreakpointSpecs::CreateBreakpointInfo()
+{
+  static u32 breakpointInfoId = 0;
+  return BreakpointInfo::Create(++breakpointInfoId);
+}
+
+template <typename Map, typename Spec>
+static void
+EraseFrom(Map &map, const Spec &spec)
+{
+  const auto it = map.find(spec);
+  if (it != std::end(map)) {
+    it->second->SetStale();
+    map.erase(it);
+  }
+}
+
+bool
+SessionBreakpointSpecs::TryInitNewInstructionSpec(const BreakpointSpecification &spec) noexcept
+{
+  if (mInstructionBreakpoints.contains(spec)) {
+    return false;
+  }
+  mInstructionBreakpoints.emplace(spec, CreateBreakpointInfo());
+  return true;
+}
+
+bool
+SessionBreakpointSpecs::TryInitNewFunctionSpec(const BreakpointSpecification &spec) noexcept
+{
+  if (mFunctionBreakpoints.contains(spec)) {
+    return false;
+  }
+  mFunctionBreakpoints.emplace(spec, CreateBreakpointInfo());
+  return true;
+}
+
+bool
+SessionBreakpointSpecs::TryInitSourceCodeSpec(
+  const std::string &sourceFilePath, const BreakpointSpecification &spec) noexcept
+{
+  if (auto &source = mSourceCodeBreakpoints[sourceFilePath]; !source.contains(spec)) {
+    source.emplace(spec, CreateBreakpointInfo());
+    return true;
+  }
+
+  return false;
+}
+
+void
+SessionBreakpointSpecs::RemoveInstructionSpec(const BreakpointSpecification &spec) noexcept
+{
+  EraseFrom(mInstructionBreakpoints, spec);
+}
+
+void
+SessionBreakpointSpecs::RemoveFunctionSpec(const BreakpointSpecification &spec) noexcept
+{
+  EraseFrom(mFunctionBreakpoints, spec);
+}
+
+void
+SessionBreakpointSpecs::RemoveSourceCodeSpec(
+  const std::string &sourceFilePath, const std::span<BreakpointSpecification> &specs) noexcept
+{
+  auto specsForSourceIter = mSourceCodeBreakpoints.find(sourceFilePath);
+  if (specsForSourceIter == std::end(mSourceCodeBreakpoints)) {
+    return;
+  }
+
+  auto &[_, map] = *specsForSourceIter;
+  for (const auto &spec : specs) {
+    EraseFrom(map, spec);
+  }
+}
+
+void
+SessionBreakpointSpecs::UserExeced(Pid processId) noexcept
+{
+  for (auto &[spec, bpInfo] : mFunctionBreakpoints) {
+    bpInfo->RemoveUser(processId);
+  }
+
+  for (auto &[spec, bpInfo] : mInstructionBreakpoints) {
+    bpInfo->RemoveUser(processId);
+  }
+
+  for (auto &[sourceFile, specs] : mSourceCodeBreakpoints) {
+    for (auto &[spec, bpInfo] : specs) {
+      bpInfo->RemoveUser(processId);
+    }
+  }
+}
+
 void
 ReplaySupervisor::SpawnSupervisorThread() noexcept
 {
@@ -771,7 +1006,7 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
     InitLibrary();
     const auto debuggerBinaryPathResult = MdbPath();
     MDB_ASSERT(debuggerBinaryPathResult.has_value(), "Failed to get mdb executable path");
-    rr::Flags::get_for_init().resource_path = debuggerBinaryPathResult->parent_path().string() + "/";
+    rr::Flags::get_for_init().resource_path = debuggerBinaryPathResult->parent_path() / "resource/";
     DBGBUFLOG(core, "Started supervisor thread, initialized resources path to={}", rr::Flags::get().resource_path);
     std::unique_lock lock(mCondVarMutex);
     while (!tok.stop_requested()) {
@@ -784,14 +1019,10 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
       auto traceDir = mTraceDir;
       if (!fs::exists(traceDir)) {
         // FIXME(!): Remove this hard coding later
-        const auto RR_TRACE_DIR = "/home/prometheus/.local/share/rr";
-        traceDir = std::format("{}/{}", RR_TRACE_DIR, mTraceDir);
-        if (!fs::exists(traceDir)) {
-          DBGLOG(core, "Trace directory {} doesn't exist", mTraceDir);
-          continue;
-        } else {
-          DBGLOG(core, "Found trace named {} when looking in RR_TRACE_DIR", mTraceDir);
-        }
+        const auto $HOME = std::getenv("HOME");
+        const auto RR_TRACE_DIR = ".local/share/rr";
+        traceDir = std::format("{}/{}/{}", $HOME, RR_TRACE_DIR, mTraceDir);
+        MDB_ASSERT(fs::exists(traceDir), "Expected directory {} to exist", traceDir);
       }
 
       DBGLOG(core, "Supervisor starting replay...");
@@ -808,19 +1039,23 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
   });
 }
 
-ReplaySupervisor::ReplaySupervisor(const RRInitOptions &initOptions) noexcept : mInitOptions(initOptions) {}
+ReplaySupervisor::ReplaySupervisor(const RRInitOptions &initOptions) noexcept
+    : mInitOptions(initOptions), mSessionBreakpoints(SessionBreakpointSpecs::Create())
+{
+}
 
-#define MATCH(VARIANT)                                                                                            \
-  std::visit(                                                                                                     \
-    [&](auto &&event) {                                                                                           \
-      using T = std::decay_t<decltype(event)>;                                                                    \
-      (void)event;                                                                                                \
-    },                                                                                                            \
-    VARIANT);
+void
+ReplaySupervisor::Erase(Session *session) noexcept
+{
+  auto it = std::find(mTimelineSupervisors.begin(), mTimelineSupervisors.end(), session);
+  if (it != std::end(mTimelineSupervisors)) {
+    mTimelineSupervisors.erase(it);
+  }
+}
 
 /* static */
 ReplaySupervisor *
-ReplaySupervisor::Create(SessionId sessionId, const RRInitOptions &initOptions) noexcept
+ReplaySupervisor::Create(const RRInitOptions &initOptions) noexcept
 {
   auto supervisor = new ReplaySupervisor{ initOptions };
 
