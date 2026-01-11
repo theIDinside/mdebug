@@ -12,6 +12,7 @@
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
 #include <utils/enumerator.h>
+#include <utils/todo.h>
 
 static bool DwarfLog = false;
 

@@ -9,6 +9,7 @@
 #include <interface/ui_command.h>
 #include <tracer.h>
 #include <utils/format_utils.h>
+#include <utils/todo.h>
 
 namespace mdb::ui::dap {
 // TODO: ParseCustomRequestCommand will almost certainly take DebugAdapterClient at some point (to get an
