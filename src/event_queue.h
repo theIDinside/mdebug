@@ -348,7 +348,6 @@ struct ApplicationEvent
   union
   {
     PtraceEvent uPtrace;
-    GdbServerEvent *uGdbServer;
     ReplayEvent uReplayStop;
     LeakedRef<ui::UICommand> uCommand;
     InternalEvent uInternalEvent;
@@ -360,11 +359,6 @@ struct ApplicationEvent
   }
   constexpr explicit ApplicationEvent(PtraceEvent ptraceEvent) noexcept
       : mEventType(ApplicationEventType::Ptrace), mId(ptraceEvent.mPid), uPtrace(ptraceEvent)
-  {
-  }
-
-  constexpr explicit ApplicationEvent(GdbServerEvent *gdbEvent) noexcept
-      : mEventType(ApplicationEventType::Ptrace), mId(gdbEvent->mRemoteId), uGdbServer(gdbEvent)
   {
   }
 
@@ -383,9 +377,6 @@ struct ApplicationEvent
     switch (other.mEventType) {
     case ApplicationEventType::Ptrace: {
       uPtrace = other.uPtrace;
-    } break;
-    case ApplicationEventType::GdbServer: {
-      uGdbServer = other.uGdbServer;
     } break;
     case ApplicationEventType::RR: {
       uReplayStop = other.uReplayStop;
@@ -429,6 +420,7 @@ struct WaitResult
 
 class EventSystem
 {
+  static EventSystem *sEventSystem;
   int mCommandEvents[2];
   int mInternalEvents[2];
 
@@ -451,26 +443,17 @@ class EventSystem
   std::vector<TraceEvent *> mTraceEvents;
   std::vector<LeakedRef<ui::UICommand>> mCommands;
   std::vector<InternalEvent> mInternal;
-  EventSystem(int commands[2], int gdbServer[2], int replay[2], int internal[2]) noexcept;
-
-  static EventSystem *sEventSystem;
-
   int mPollFailures = 0;
 
+  EventSystem(int commands[2], int gdbServer[2], int replay[2], int internal[2]) noexcept;
   int PollDescriptorsCount() const noexcept;
 
 public:
   static EventSystem *Initialize() noexcept;
   void InitWaitStatusManager() noexcept;
   void PushCommand(ui::dap::DebugAdapterManager *dap_client, RefPtr<ui::UICommand> cmd) noexcept;
-  void PushGdbServerEvent(GdbServerEvent *event) noexcept;
   void PushReplayStopEvent(ReplayEvent event) noexcept;
-  // void PushDebuggerEvent(TraceEvent *event) noexcept;
-  // void ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept;
-  // void PushInitEvent(TraceEvent *event) noexcept;
-
   void PushInternalEvent(InternalEvent event) noexcept;
-
   bool PollBlocking(std::vector<ApplicationEvent> &write) noexcept;
 
   static EventSystem &Get() noexcept;

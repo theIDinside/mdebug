@@ -646,11 +646,6 @@ SupervisorState::CheckBreakpointLocationsForSymbolFile(
 }
 
 void
-SupervisorState::LoadBreakpoints(SharedPtr<SessionBreakpoints> breakpoints) noexcept
-{
-}
-
-void
 SupervisorState::DoBreakpointsUpdate(std::vector<std::shared_ptr<SymbolFile>> &&newSymbolFiles) noexcept
 {
   auto non_verified = mUserBreakpoints.GetNonVerified();
