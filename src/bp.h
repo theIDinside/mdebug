@@ -370,7 +370,6 @@ public:
   std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints{};
   std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints{};
 
-  void LoadBreakpointsFrom(SharedPtr<SessionBreakpoints> sessionBreakpoints) noexcept;
   void OnExec() noexcept;
   void OnProcessExit() noexcept;
   void AddBreakpointLocation(const UserBreakpoint &updatedBreakpoint) noexcept;
