@@ -126,8 +126,8 @@ Frame::Scopes() noexcept
   if (mFrameScopes[0].variables_reference == 0) {
     for (auto i = 0u; i < 3; ++i) {
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
-      const auto key = Tracer::Get().NewVariablesReference();
-      Tracer::Get().SetVariableContext(
+      const auto key = Tracer::NewVariablesReference();
+      Tracer::SetVariableContext(
         std::make_shared<VariableContext>(mTask->ptr, mOwningSymbolFile, FrameId(), key, ContextType::Scope));
       mFrameScopes[i].variables_reference = key;
     }

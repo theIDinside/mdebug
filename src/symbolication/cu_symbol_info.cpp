@@ -925,7 +925,7 @@ CompilationUnit::PrepareFunctionSymbols() noexcept
 AddressToCompilationUnitMap::AddressToCompilationUnitMap() noexcept : mMutex(), mMapping() {}
 
 std::vector<CompilationUnit *>
-AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) noexcept
+AddressToCompilationUnitMap::find_by_pc(AddrPtr pc) const noexcept
 {
   if (auto res = mMapping.Find(pc); res) {
     auto result = std::move(res.value());

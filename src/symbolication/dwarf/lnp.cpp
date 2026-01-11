@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "lnp.h"
+
 #include "symbolication/block.h"
 #include "utils/enumerator.h"
 #include <filesystem>
@@ -11,6 +12,9 @@
 #include <symbolication/objfile.h>
 #include <type_traits>
 #include <utility>
+
+#include <utils/log_channel.h>
+#include <utils/logger.h>
 
 #include <common/panic.h>
 

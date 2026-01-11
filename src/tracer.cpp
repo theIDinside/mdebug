@@ -314,10 +314,11 @@ Tracer::GetSessionTaskMap() noexcept
   return *Tracer::Get().mDebugSessionTasks;
 }
 
+/** static */
 std::shared_ptr<SymbolFile>
 Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
 {
-  for (const auto &t : mTracedProcesses) {
+  for (const auto &t : Get().mTracedProcesses) {
     if (std::shared_ptr<SymbolFile> sym = t->LookupSymbolFile(path); sym) {
       return sym;
     }
@@ -332,31 +333,37 @@ Tracer::GenerateNewBreakpointId() noexcept
   return Get().mBreakpointID;
 }
 
+/* static */
 VariableReferenceId
 Tracer::NewVariablesReference() noexcept
 {
-  return ++mVariablesReferenceCounter;
+  auto &counter = Get().mVariablesReferenceCounter;
+  return ++counter;
 }
 
+/* static */
 VariableReferenceId
-Tracer::GetCurrentVariableReferenceBoundary() const noexcept
+Tracer::GetCurrentVariableReferenceBoundary() noexcept
 {
-  return mVariablesReferenceCounter;
+  return Get().mVariablesReferenceCounter;
 }
 
+/* static */
 sym::VarContext
 Tracer::GetVariableContext(VariableReferenceId varRefKey) noexcept
 {
-  if (mVariablesReferenceContext.contains(varRefKey)) {
-    return mVariablesReferenceContext[varRefKey];
+  auto &tracer = Get();
+  if (tracer.mVariablesReferenceContext.contains(varRefKey)) {
+    return tracer.mVariablesReferenceContext[varRefKey];
   }
   return nullptr;
 }
 
+/* static */
 void
 Tracer::DestroyVariablesReference(VariableReferenceId key) noexcept
 {
-  mVariablesReferenceContext.erase(key);
+  Get().mVariablesReferenceContext.erase(key);
 }
 
 /* static */
@@ -413,14 +420,16 @@ Tracer::GetDap() const noexcept
   return mDAP;
 }
 
+/* static */
 void
 Tracer::SetVariableContext(std::shared_ptr<VariableContext> ctx) noexcept
 {
   auto id = ctx->mId;
   ctx->mTask->AddReference(id);
-  mVariablesReferenceContext[id] = std::move(ctx);
+  Get().mVariablesReferenceContext[id] = std::move(ctx);
 }
 
+/** static */
 sym::VarContext
 Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
 {
@@ -429,10 +438,11 @@ Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
     // stale context
     return VariableContext::CloneFrom(ctx.mId - 1, ctx);
   }
-  const auto key = NewVariablesReference();
+  auto &tracer = Get();
+  const auto key = tracer.NewVariablesReference();
 
   auto context = VariableContext::CloneFrom(key, ctx);
-  mVariablesReferenceContext.emplace(key, context);
+  tracer.mVariablesReferenceContext.emplace(key, context);
   return context;
 }
 

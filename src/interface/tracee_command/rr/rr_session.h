@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+#include <event_queue_types.h>
 #include <interface/tracee_command/supervisor_state.h>
 
 namespace rr {

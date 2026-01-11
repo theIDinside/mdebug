@@ -1,15 +1,16 @@
 /** LICENSE TEMPLATE */
 #include "variablejs.h"
-#include "mdbjs/mdbjs.h"
 
 // mdb
 #include <lib/arena_allocator.h>
 #include <mdbjs/jsobject.h>
+#include <mdbjs/mdbjs.h>
 #include <mdbjs/util.h>
 #include <symbolication/dwarf_defs.h>
 #include <symbolication/objfile.h>
 #include <symbolication/type.h>
 #include <symbolication/value_visualizer.h>
+#include <utils/logger.h>
 #include <utils/scope_defer.h>
 
 // dependency

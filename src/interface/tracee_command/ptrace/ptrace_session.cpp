@@ -17,6 +17,7 @@
 #include <memory_resource>
 #include <sys/personality.h>
 #include <task.h>
+#include <tracer.h>
 #include <utils/todo.h>
 
 // std
