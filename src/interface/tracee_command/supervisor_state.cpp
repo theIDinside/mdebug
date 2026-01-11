@@ -279,6 +279,7 @@ SupervisorState::Disconnect(bool terminate) noexcept
 
   if (terminate) {
     DoDisconnect(true);
+    EventSystem::Get().PushInternalEvent(TerminateDebugging{});
     return;
   }
 
