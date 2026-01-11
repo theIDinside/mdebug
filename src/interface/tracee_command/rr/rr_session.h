@@ -21,41 +21,78 @@ private: // members
   // Flag for if this process has done any replaying. On fork, a process will be created, but it may not have
   // executed yet.
   bool mHasFirstExecuted{ false };
+  bool mRevived{ false };
+  uint64_t mGenesisFrame{ UINT64_MAX };
 
-  std::optional<SessionId> mParentSessionId{ std::nullopt };
+  Pid mParenPid{ 0 };
   std::optional<ReplayEvent> mDeferredEvent{ std::nullopt };
 
 private: // methods
-  Session(ReplaySupervisor *replaySupervisor, Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
+  Session(ReplaySupervisor *replaySupervisor,
+    Tid taskLeader,
+    uint64_t frameTime,
+    ui::dap::DebugAdapterManager *dap) noexcept;
 
   rr::ReplayTask *GetReplayTask(Tid recTid) noexcept;
   std::optional<std::string> GetThreadName(Tid tid) noexcept;
+  TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept;
 
 public:
   static Session *Create(ReplaySupervisor *replaySupervisor,
-    std::optional<SessionId> sessionId,
     Tid taskLeader,
     ui::dap::DebugAdapterManager *dap,
     bool hasReplayedStep) noexcept;
 
   ReplaySupervisor *GetReplaySupervisor() const noexcept;
+  void StoppedDuringReverse() noexcept;
+  void DisconnectDueToReverse();
   void HandleEvent(const ReplayEvent &event) noexcept;
+
+  // Returns true if we should keep reversing, false if we hit a breakpoint that we should report and abort
+  // reversing for
+  bool HandleBreakpointHitInReverse(TaskInfo &task, const RefPtr<BreakpointLocation> &breakpointLocation) noexcept;
+  void HandleEventInReverse(const ReplayEvent &event) noexcept;
+
+  void Revive() noexcept;
+  bool
+  FrameTimeYoungerThanGenesis(uint64_t time) const
+  {
+    DBGLOG(core, "[replay]: genesis time {}; compared to time {}", mGenesisFrame, time);
+    return time < mGenesisFrame;
+  }
 
   // Implementation of SupervisorState interface
 private:
   // Called after a fork for the creation of a new process supervisor
   void HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept final;
+  void AdjustSymbols() noexcept;
   mdb::Expected<Auxv, Error> DoReadAuxiliaryVector() noexcept final;
-  void InitRegisterCacheFor(const TaskInfo &task) noexcept final;
 
 protected:
-  bool PerformShutdown() noexcept final;
-
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)
   TaskExecuteResponse InstallBreakpoint(Tid tid, AddrPtr addr) noexcept final;
 
+  void UpdateInstructionBreakpoints(
+    std::span<const BreakpointSpecification> add, std::span<const BreakpointSpecification> remove);
+
+  void UpdateFunctionBreakpoints(
+    std::span<const BreakpointSpecification> add, std::span<const BreakpointSpecification> remove);
+
 public:
+  void UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
+    std::span<const BreakpointSpecification> add,
+    std::span<const BreakpointSpecification> remove) noexcept final;
+  // rr session override some DAP commands, as they're supposed to (possibly) affect multiple supervisor via one
+  // shared interface.
+  void SetSourceBreakpoints(
+    const std::filesystem::path &sourceFilePath, const Set<BreakpointSpecification> &bps) noexcept final;
+  void SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept final;
+  void SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept final;
+  void DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept;
+  void DoBreakpointsUpdate(std::span<std::shared_ptr<SymbolFile>> newSymbolFiles) noexcept final;
+
+  void OnErase() noexcept final;
   TaskExecuteResponse ReadRegisters(TaskInfo &t) noexcept final;
   TaskExecuteResponse WriteRegisters(TaskInfo &t, void *data, size_t length) noexcept final;
   TaskExecuteResponse SetRegister(TaskInfo &t, size_t registerNumber, void *data, size_t length) noexcept final;
@@ -77,7 +114,19 @@ public:
   void DoResumeTask(TaskInfo &t, RunType type) noexcept final;
   bool DoResumeTarget(RunType type) noexcept final;
   bool ReverseResumeTarget(tc::RunType type) noexcept final;
-  void AttachSession(ui::dap::DebugAdapterSession &session) noexcept final;
+  void AttachSession() noexcept final;
   bool Pause(Tid tid) noexcept final;
+  mdb::ui::dap::StoppedEvent *CreateStoppedEvent(ui::dap::StoppedReason reason,
+    std::string_view description,
+    Tid tid,
+    std::string_view text,
+    bool allStopped,
+    std::vector<int> breakpointsHit = {}) noexcept final;
+
+  bool
+  SingleThreadControl() const noexcept final
+  {
+    return false;
+  }
 };
 } // namespace mdb::tc::replay

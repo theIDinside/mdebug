@@ -1135,18 +1135,30 @@ class DebugAdapterClient {
    * @returns
    */
   async disconnect(kind = 'terminate', timeout = 1000) {
+    let res = null
+    if (this.hasDisconnected) {
+      console.log(`Client has already disconnected.`)
+      throw new Error(`Disconnecting from an already disconnected session.`)
+    }
     switch (kind) {
       case 'terminate':
-        return this.sendReqGetResponse('disconnect', {
+        res = this.sendReqGetResponse('disconnect', {
           terminateDebuggee: true,
           sessionId: this.sessionId,
         })
+        break
       case 'suspend':
-        return this.sendReqGetResponse('disconnect', {
+        res = this.sendReqGetResponse('disconnect', {
           suspendDebuggee: true,
           sessionId: this.sessionId,
         })
+        break
+      default:
+        throw new Error(`Unknown disconnect kind ${kind}`)
     }
+    const result = await res
+    this.hasDisconnected = result.success
+    return result
   }
 
   /**

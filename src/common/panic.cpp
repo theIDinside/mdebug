@@ -49,7 +49,7 @@ panic_exit()
     raise(SIGTRAP);
     exit(-1);
   } else {
-    raise(SIGTRAP);
+    raise(SIGTERM);
     exit(-1);
   }
 }

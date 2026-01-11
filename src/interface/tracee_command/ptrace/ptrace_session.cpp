@@ -1,30 +1,30 @@
 /** LICENSE TEMPLATE */
 #include "ptrace_session.h"
-#include "common.h"
-#include "interface/tracee_command/request_results.h"
-#include "tracee/util.h"
-#include "utils/logger.h"
-#include "utils/util.h"
 
 // mdb
-#include <elf.h>
+#include <common.h>
 #include <interface/dap/events.h>
 #include <interface/pty.h>
+#include <interface/tracee_command/request_results.h>
 #include <interface/tracee_command/supervisor_state.h>
-#include <link.h>
 #include <mdbsys/ptrace.h>
 #include <mdbsys/stop_status.h>
-#include <memory_resource>
-#include <sys/personality.h>
+#include <session_task_map.h>
 #include <task.h>
+#include <tracee/util.h>
 #include <tracer.h>
+#include <utils/logger.h>
 #include <utils/todo.h>
+#include <utils/util.h>
 
 // std
 #include <cstdlib>
 
 // system
+#include <elf.h>
 #include <fcntl.h>
+#include <link.h>
+#include <sys/personality.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
 #include <unistd.h>
@@ -239,7 +239,7 @@ Session::DoDisconnect(bool terminate) noexcept
       MDB_ASSERT(res != -1, "Failed to detach from {}", entry.mTid);
     }
   }
-  PerformShutdown();
+
   return TaskExecuteResponse::Ok();
 }
 
@@ -265,12 +265,6 @@ Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
   } else {
     return TraceeWriteResult::Error(errno);
   }
-}
-
-bool
-Session::PerformShutdown() noexcept
-{
-  return true;
 }
 
 // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
@@ -378,9 +372,8 @@ Session::DoResumeTarget(RunType type) noexcept
 }
 
 void
-Session::AttachSession(ui::dap::DebugAdapterSession &session) noexcept
+Session::AttachSession() noexcept
 {
-  session.OnCreatedSupervisor(NonNull<tc::SupervisorState>(*this));
   OnConfigurationDone([](tc::SupervisorState *supervisor) {
     mdb::tc::ptrace::Session *process = static_cast<mdb::tc::ptrace::Session *>(supervisor);
     process->ProcessDeferredEvents();
@@ -399,6 +392,12 @@ Session::Pause(Tid tid) noexcept
   const bool success = SetAndCallRunAction(
     task->mTid, std::make_shared<ptracestop::StopImmediately>(*this, *task, ui::dap::StoppedReason::Pause));
   return success;
+}
+
+bool
+Session::CanContinue() noexcept
+{
+  return !mIsVForking;
 }
 
 void
@@ -453,6 +452,18 @@ Session::LoadProgramHeaders(Pid pid, AddrPtr phdrAddress, size_t phdrCount, size
   return result;
 }
 
+TaskInfo *
+Session::CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept
+{
+  MDB_ASSERT(tid != 0 && !HasTask(tid), "Task {} has already been created!", tid);
+  auto task = TaskInfo::CreateTask(*this, tid);
+  task->SetName(name.value_or(std::to_string(tid)));
+  InitRegisterCacheFor(*task);
+  mThreads.push_back({ task->mTid, task });
+  Tracer::GetSessionTaskMap().Add(tid, task);
+  return task;
+}
+
 static int
 Exec(const Path &program, std::span<const std::pmr::string> programArguments, char **env)
 {
@@ -491,7 +502,6 @@ ConfigurePtraceSettings(pid_t pid)
 
 Session *
 Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
-  SessionId sessionId,
   bool stopAtEntry,
   const Path &program,
   std::span<std::pmr::string> prog_args,
@@ -576,7 +586,7 @@ Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
     const auto leader = childPid;
 
     ConfigurePtraceSettings(leader);
-    auto supervisor = Session::Create(sessionId, leader, debugAdapterClient);
+    auto supervisor = Session::Create(leader, debugAdapterClient);
     supervisor->OpenMemoryFile();
 
     debugAdapterClient->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
@@ -590,7 +600,7 @@ Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
     supervisor->PostExec(program, stopAtEntry, /* installDynamicLoaderBreakpoints */ true);
 
     if (ttyFd) {
-      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->GetSessionId());
+      debugAdapterClient->SetTtyOut(*ttyFd, supervisor->GetProcessId());
     }
 
     return supervisor;
@@ -600,25 +610,19 @@ Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
 
 /* static */
 Session *
-Session::Create(std::optional<SessionId> sessionId, Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
+Session::Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
 {
-  auto supervisor = std::unique_ptr<Session>(new Session{ taskLeader, dap });
-  auto ptr = supervisor.get();
-
-  if (sessionId) {
-    Tracer::GetDebugAdapterManager().InitializeSession(*sessionId);
-    auto session = Tracer::GetDebugAdapterManager().GetSession(*sessionId);
-    session->OnCreatedSupervisor(NonNull<tc::SupervisorState>(*ptr));
-  }
-
-  Tracer::AddSupervisor(std::move(supervisor));
-  return ptr;
+  MDB_ASSERT(taskLeader > 0, "Invalid pid as taskleader {}", taskLeader);
+  return Tracer::AddSupervisor(UniquePtr<Session>(new Session{ taskLeader, dap }));
 }
 
 static inline Pid
 NativeInitCloneEvent(TaskInfo &cloningTask, const user_regs_struct &regs, Session &control) noexcept
 {
-  DBGLOG(core, "Processing CLONE for {}", cloningTask.mTid);
+  DBGLOG(core,
+    "Processing CLONE({}) for {}",
+    regs.orig_rax == SYS_clone ? "SYS_clone" : "SYS_clone3",
+    cloningTask.mTid);
 
   // TODO: Make use of this once bugs and issues are resolve enough for this to be interesting.
   const auto orig_rax = regs.orig_rax;
@@ -644,7 +648,7 @@ void
 Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
 {
   task.SetAtTraceEventStop();
-  task.SetValueLiveness(Tracer::Get().GetCurrentVariableReferenceBoundary());
+  task.SetValueLiveness(Tracer::GetCurrentVariableReferenceBoundary());
 
   if (stopStatus.mIsTerminatingEvent) {
     DBGBUFLOG(core, "stop event is tracee-termination.");
@@ -665,7 +669,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
   case StopKind::Stopped: {
     if (!task.mHasStarted) {
       mDebugAdapterClient->PostDapEvent(
-        new ui::dap::ThreadEvent{ mSessionId, ui::dap::ThreadReason::Started, task.mTid });
+        new ui::dap::ThreadEvent{ mTaskLeader, ui::dap::ThreadReason::Started, task.mTid });
       task.mHasStarted = true;
       mScheduler->Schedule(task, { true, task.mResumeRequest.mType });
     } else {
@@ -705,7 +709,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
       }
     } else {
       if (mThreads.empty()) {
-        mDebugAdapterClient->PostDapEvent(new ui::dap::ExitedEvent{ mSessionId, stopStatus.uSignal });
+        mDebugAdapterClient->PostDapEvent(new ui::dap::ExitedEvent{ mTaskLeader, stopStatus.uSignal });
         ShutDownDebugAdapterClient();
         mIsExited = true;
         Tracer::Get().OnDisconnectOrExit(this);
@@ -738,7 +742,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
     if (stopStatus.mIsTerminatingEvent) {
       // TODO: Allow signals through / stop process / etc. Allow for configurability here.
       DBGLOG(core, "Terminated by signal: {}", stopStatus.uSignal);
-      mDebugAdapterClient->PostDapEvent(new ui::dap::ExitedEvent{ mSessionId, stopStatus.uSignal });
+      mDebugAdapterClient->PostDapEvent(new ui::dap::ExitedEvent{ mTaskLeader, stopStatus.uSignal });
       ShutDownDebugAdapterClient();
       mIsExited = true;
     } else {
@@ -807,13 +811,14 @@ Session::ReadThreadName(Tid tid, std::string &result) noexcept
 void
 Session::HandleFork(TaskInfo &parentTask, pid_t childPid, bool vFork) noexcept
 {
-  auto newSupervisor = Session::Create(std::nullopt, childPid, mDebugAdapterClient);
+  auto newSupervisor = Session::Create(childPid, mDebugAdapterClient);
 
   bool resume = true;
+  newSupervisor->CreateNewTask(childPid, "forked", false);
   if (!vFork) {
     DBGLOG(core, "event was not vfork; disabling breakpoints in new address space.");
 
-    newSupervisor->OnForkFrom(*this);
+    newSupervisor->OnForkCopySymbols(*this, /* isVFork */ false);
     // the new process space copies the old one; which contains breakpoints.
     // we restore the newly forked process space to the real contents. New breakpoints will be set
     // by the initialize -> configDone sequence
@@ -827,18 +832,19 @@ Session::HandleFork(TaskInfo &parentTask, pid_t childPid, bool vFork) noexcept
     newSupervisor->mStopEventHandlerStack.PushEventHandler([](auto &e) { return EventState::Defer; });
     newSupervisor->OpenMemoryFile();
 
-    mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mSessionId, childPid, "forked", true });
+    mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mTaskLeader, childPid, "forked", true });
     mScheduler->Schedule(parentTask, { true && resume, parentTask.mResumeRequest.mType });
   } else {
     // under no circumstances are we allowed to resume the parent while the vfork-to-exec is in flight.
     mStopEventHandlerStack.PushEventHandler([](const auto &) { return EventState::Defer; });
     newSupervisor->mIsVForking = true;
+    newSupervisor->OnForkCopySymbols(*this, /* isVFork */ false);
     newSupervisor->GetOnExecOrExitPublisher().Once(
       [parent = this, self = newSupervisor, task = RefPtr{ &parentTask }, newPid = childPid]() {
         parent->ProcessDeferredEvents();
         self->mIsVForking = false;
         parent->mDebugAdapterClient->PostDapEvent(
-          new ui::dap::Process{ parent->mSessionId, newPid, "forked", true });
+          new ui::dap::Process{ parent->mTaskLeader, newPid, "forked", true });
         parent->ScheduleResume(*task, tc::RunType::Continue);
       });
   }

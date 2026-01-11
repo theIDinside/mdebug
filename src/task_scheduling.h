@@ -80,8 +80,13 @@ private:
 
 class LineStep : public ThreadProceedAction
 {
+  LineStep(tc::SupervisorState &ctrl,
+    TaskInfo &task,
+    std::unique_ptr<sym::Frame> startFrame,
+    sym::dw::LineTableEntry lineTableEntry) noexcept;
+
 public:
-  LineStep(tc::SupervisorState &ctrl, TaskInfo &task) noexcept;
+  static std::shared_ptr<LineStep> FallibleMake(tc::SupervisorState &ctrl, TaskInfo &task) noexcept;
   ~LineStep() noexcept override;
   bool HasCompleted(bool was_stopped) const noexcept override;
   void Proceed() noexcept override;
@@ -94,7 +99,7 @@ private:
 
   bool mIsDone;
   bool mResumedToReturnAddress;
-  sym::Frame *mStartFrame;
+  std::unique_ptr<sym::Frame> mStartFrame;
   sym::dw::LineTableEntry mLineEntry;
   Ref<UserBreakpoint> mPotentialBreakpointAtReturnAddress{ nullptr };
 };
@@ -137,7 +142,7 @@ public:
 
 using Proceed = ptracestop::ThreadProceedAction;
 
-enum class SchedulingConfig
+enum class SchedulingConfig : u8
 {
   NormalResume,
   OneExclusive,
@@ -147,7 +152,7 @@ enum class SchedulingConfig
 class TaskScheduler
 {
   tc::SupervisorState *mSupervisor;
-  SchedulingConfig mScheduling;
+  SchedulingConfig mScheduling{ SchedulingConfig::NormalResume };
   std::optional<Tid> mExclusiveTask;
   std::unordered_map<Tid, std::shared_ptr<Proceed>> mIndividualScheduler{};
   void RemoveIndividualScheduler(Tid tid) noexcept;
@@ -158,6 +163,7 @@ public:
   ~TaskScheduler() noexcept = default;
   bool SetTaskScheduling(Tid tid, std::shared_ptr<Proceed> individualScheduler, bool resume) noexcept;
   void Schedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
+  void ReplaySchedule(TaskInfo &task, tc::ProcessedStopEvent eventProceedResult) noexcept;
   void NormalScheduleTask(TaskInfo &task, bool shouldResume) noexcept;
   void EmitStopWhenAllTasksHalted() noexcept;
 

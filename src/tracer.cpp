@@ -15,6 +15,7 @@
 #include <interface/pty.h>
 #include <interface/tracee_command/ptrace/ptrace_session.h>
 #include <interface/tracee_command/rr/rr_session.h>
+#include <interface/tracee_command/rr/rr_supervisor.h>
 #include <interface/tracee_command/supervisor_state.h>
 #include <lib/arena_allocator.h>
 #include <lib/lockguard.h>
@@ -142,10 +143,10 @@ Tracer::GetController(pid_t pid) noexcept
 }
 
 void
-Tracer::ExecuteCommand(RefPtr<ui::UICommand> cmd) noexcept
+Tracer::ExecuteCommand(ui::UICommand &cmd) noexcept
 {
-  cmd->Execute();
-  cmd->mDebugAdapterManager->FlushEvents();
+  cmd.Execute();
+  cmd.mDebugAdapterManager->FlushEvents();
 }
 
 std::optional<TaskControl<tc::ptrace::Session>>
@@ -157,6 +158,7 @@ Tracer::GetPtraceProcess(pid_t tidOrPid) noexcept
       return std::make_optional<TaskControl<tc::ptrace::Session>>(
         *static_cast<tc::ptrace::Session *>(proc.get()), *task);
     }
+    MDB_ASSERT(tidOrPid != proc->TaskLeaderTid(), "We should have found a task in process");
   }
   return {};
 }
@@ -188,7 +190,34 @@ Tracer::GetReplayProcess(pid_t tidOrPid) noexcept
 void
 Tracer::HandleReplayStopEvent(ReplayEvent evt) noexcept
 {
-  tc::replay::Session *session = GetReplayProcess(evt.mTaskInfo.mTaskLeader);
+  tc::replay::Session *session = nullptr;
+  for (const auto &proc : mTracedProcesses) {
+    if (proc->GetTaskByTid(evt.mTaskInfo.mTaskLeader)) {
+      session = static_cast<tc::replay::Session *>(proc.get());
+    }
+  }
+
+  MDB_ASSERT(session, "We should always have a session.");
+
+  if (session->GetReplaySupervisor()->IsReversing()) {
+    std::vector<SessionId> sessionsToShutDown{};
+    for (const auto &session : mTracedProcesses) {
+      auto *replay = static_cast<tc::replay::Session *>(session.get());
+      if (replay->FrameTimeYoungerThanGenesis(evt.mTaskInfo.mFrameTime)) {
+        DBGLOG(core, "session {} is older than {}", replay->TaskLeaderTid(), evt.mTaskInfo.mFrameTime);
+        sessionsToShutDown.push_back(session->GetProcessId());
+      }
+    }
+
+    for (const auto &sessionId : sessionsToShutDown) {
+      EraseSessionDuringReverse(sessionId);
+    }
+
+    for (auto &s : mTracedProcesses) {
+      static_cast<tc::replay::Session *>(s.get())->StoppedDuringReverse();
+    }
+  }
+
   session->HandleEvent(evt);
 }
 
@@ -198,13 +227,11 @@ Tracer::HandleInternalEvent(const InternalEvent &evt) noexcept
   switch (evt.mType) {
   case InternalEventDiscriminant::InvalidateSupervisor: {
     auto sv = evt.uInvalidateSupervisor.mSupervisor;
-    auto it = std::find_if(
-      mTracedProcesses.begin(), mTracedProcesses.end(), [sv](const auto &t) { return t.get() == sv; });
+    auto it = FindIf<false>(mTracedProcesses, [sv](const auto &t) { return t.get() == sv; });
     if (it != std::end(mTracedProcesses)) {
       sv->OnTearDown();
-      std::unique_ptr<tc::SupervisorState> swap = std::move(*it);
+      mDetachedProcesses.push_back(std::move(*it));
       mTracedProcesses.erase(it);
-      mDetachedProcesses.push_back(std::move(swap));
     }
 
     if (mTracedProcesses.empty()) {
@@ -221,6 +248,23 @@ Tracer::HandleInternalEvent(const InternalEvent &evt) noexcept
   default:
     PANIC("Unhandled internal event");
   }
+}
+
+void
+Tracer::EraseSessionDuringReverse(Pid processId) noexcept
+{
+  auto iterator = FindIf(
+    mTracedProcesses, [processId](const tc::SupervisorState &state) { return state.GetProcessId() == processId; });
+  if (iterator == std::end(mTracedProcesses)) {
+    DBGLOG(core, "could not find process to erase: {}", processId);
+  }
+  auto &session = *iterator;
+
+  // Repurpose exit stuff, for processes that gets "unborn"
+  session->GetUserBreakpoints().OnProcessExit();
+  session->OnErase();
+  mDetachedProcesses.push_back(std::move(*iterator));
+  mTracedProcesses.erase(iterator);
 }
 
 #define ReturnEvalExprError(errorCondition, msg, ...)                                                             \
@@ -251,8 +295,8 @@ Tracer::KillUI() noexcept
   mDAP->CleanUp();
 }
 
-static bool
-PtraceAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const PtraceAttachArgs &args) noexcept
+static tc::SupervisorState *
+PtraceAttach(ui::dap::DebugAdapterManager *client, const PtraceAttachArgs &args) noexcept
 {
   auto supervisor = Tracer::Get().GetController(args.pid);
   if (!supervisor) {
@@ -260,13 +304,12 @@ PtraceAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const Pt
   }
   // The DAP request was made for a supervisor that was not of the right type.
   if (supervisor->mSupervisorType != tc::SupervisorType::Native) {
-    return false;
+    return nullptr;
   }
 
-  auto session = client->GetSession(sessionId);
-  supervisor->AttachSession(*session);
+  supervisor->AttachSession();
 
-  return true;
+  return supervisor;
 }
 
 static bool
@@ -279,32 +322,20 @@ RRAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const RRAtta
     return false;
   }
 
-  auto session = client->GetSession(sessionId);
-  supervisor->AttachSession(*session);
+  supervisor->AttachSession();
 
   return true;
 }
 
-bool
-Tracer::SessionAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const AttachArgs &args) noexcept
+tc::SupervisorState *
+Tracer::SessionAttach(ui::dap::DebugAdapterManager *client, const AttachArgs &args) noexcept
 {
-  using MatchResult = Pid;
+  using MatchResult = tc::SupervisorState *;
 
   return std::visit(
-    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(client, sessionId, args); },
+    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(client, args); },
       [&](const RRAttachArgs &args) -> MatchResult { TODO("Possibly never implement this, after all"); } },
     args);
-}
-
-/* static */
-tc::SupervisorState *
-Tracer::AddSupervisor(UniquePtr<tc::SupervisorState> supervisor) noexcept
-{
-  static SessionId latestSessionId = 0;
-  MDB_ASSERT(supervisor->GetSessionId() > latestSessionId || supervisor->GetSessionId() == -1,
-    "Preparing a new session with a previously used ID is not supported.");
-  latestSessionId = supervisor->GetSessionId();
-  return Get().mTracedProcesses.emplace_back(std::move(supervisor)).get();
 }
 
 /* static */
@@ -385,17 +416,6 @@ Tracer::GetTaskBySessionId(u32 sessionId) noexcept
     return nullptr;
   }
   return RefPtr{ task };
-}
-
-tc::SupervisorState *
-Tracer::GetSupervisorBySessionId(SessionId sessionId) noexcept
-{
-  for (auto &t : mTracedProcesses) {
-    if (t->GetSessionId() == sessionId) {
-      return t.get();
-    }
-  }
-  return nullptr;
 }
 
 std::vector<tc::SupervisorState *>
@@ -519,7 +539,7 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) no
           dbgInstance.HandleReplayStopEvent(evt.uReplayStop);
         } break;
         case ApplicationEventType::Command: {
-          dbgInstance.ExecuteCommand(evt.uCommand.Materialize());
+          dbgInstance.ExecuteCommand(*evt.uCommand.Materialize());
         } break;
         case ApplicationEventType::Internal: {
           dbgInstance.HandleInternalEvent(evt.uInternalEvent);

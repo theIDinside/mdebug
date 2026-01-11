@@ -431,6 +431,8 @@
   ITEM(DW_TAG_GNU_BINCL, 0x4104)
   ITEM(DW_TAG_GNU_EINCL, 0x4105)
   ITEM(DW_TAG_GNU_template_parameter_pack, 0x4107)
+  ITEM(DW_TAG_GNU_call_site, 0x4109)
+  ITEM(DW_TAG_GNU_call_site_parameter, 0x410a)
   ITEM(DW_TAG_hi_user, 0xffff)
 #endif
 

@@ -285,21 +285,16 @@ DebugAdapterManager::GetTtyFileDescriptor() const noexcept
   return {};
 }
 
-DebugAdapterSession *
-DebugAdapterManager::GetSession(SessionId sessionId) const noexcept
+tc::SupervisorState *
+DebugAdapterManager::GetSupervisor(Pid pid) const noexcept
 {
-  for (const auto &entry : mSessions) {
-    if (entry->GetId() == sessionId) {
-      return entry.get();
+  for (auto sv : mSupervisors) {
+    if (sv->HasTask(pid)) {
+      return sv;
     }
   }
-  [[unlikely]] return nullptr;
-}
 
-std::span<UniquePtr<DebugAdapterSession>>
-DebugAdapterManager::Sessions() noexcept
-{
-  return mSessions;
+  return nullptr;
 }
 
 void
@@ -315,6 +310,30 @@ DebugAdapterManager::IsClosed() noexcept
 }
 
 void
+DebugAdapterManager::OnSessionConfiguredWithSupervisor(
+  std::function<void(tc::SupervisorState &)> callback) noexcept
+{
+  mOnInitialSupervisor.push_back(std::move(callback));
+}
+
+bool
+DebugAdapterManager::SupervisorMaterialized(NonNullPtr<tc::SupervisorState> supervisor) noexcept
+{
+  const bool configPhaseBeforeMaterialization = !mOnInitialSupervisor.empty();
+  for (auto &cb : mOnInitialSupervisor) {
+    cb(supervisor);
+  }
+  mOnInitialSupervisor.clear();
+  return configPhaseBeforeMaterialization;
+}
+
+void
+DebugAdapterManager::ConfigDoneWithNoSupervisor(bool value /* = true */) noexcept
+{
+  mConfigPhaseDoneWithNoMaterializedSupervisor = value;
+}
+
+void
 DebugAdapterManager::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
 {
   std::lock_guard lock(m);
@@ -322,9 +341,18 @@ DebugAdapterManager::PushDelayedEvent(UIResultPtr delayedEvent) noexcept
 }
 
 void
-DebugAdapterManager::InitializeSession(SessionId sessionId) noexcept
+DebugAdapterManager::AddSupervisor(tc::SupervisorState *supervisor) noexcept
 {
-  mSessions.push_back(std::make_unique<DebugAdapterSession>(sessionId));
+#ifdef MDB_DEBUG
+  MDB_ASSERT(mdb::none_of_value(mSupervisors, supervisor), "Duplicate addition of supervisor");
+#endif
+  mSupervisors.push_back(supervisor);
+}
+
+void
+DebugAdapterManager::RemoveSupervisor(tc::SupervisorState *supervisor) noexcept
+{
+  mSupervisors.erase(std::remove(mSupervisors.begin(), mSupervisors.end(), supervisor), mSupervisors.end());
 }
 
 void
@@ -394,63 +422,17 @@ DapEventSystem::ConfigureTty(int master_pty_fd) noexcept
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
-DebugAdapterSession::DebugAdapterSession(SessionId sessionId) noexcept : mSessionId(sessionId) {}
-
-bool
-DebugAdapterSession::HasAttachedOrLaunched() const noexcept
-{
-  return mSupervisor != nullptr;
-}
-
-void
-DebugAdapterSession::OnCreatedSupervisor(NonNullPtr<tc::SupervisorState> supervisor) noexcept
-{
-  DBGBUFLOG(core,
-    "Created supervisor for session {}, run {} post-poned requests",
-    mSessionId,
-    mOnSessionFirstStart.size());
-  mSupervisor = supervisor;
-  mSupervisor->SetSessionId(mSessionId);
-  for (const auto &cb : mOnSessionFirstStart) {
-    cb(*supervisor);
-  }
-  Tracer::Get().GetDap()->FlushEvents();
-}
-
-void
-DebugAdapterSession::OnSessionConfiguredWithSupervisor(
-  std::function<void(tc::SupervisorState &)> callback) noexcept
-{
-  mOnSessionFirstStart.push_back(std::move(callback));
-}
-
-bool
-DebugAdapterSession::ConfigurationDone() noexcept
-{
-  if (mConfigurationDone) {
-    return false;
-  }
-
-  mConfigurationDone = true;
-
-  if (mSupervisor) {
-    mSupervisor->ConfigurationDone();
-  }
-  return true;
-}
-
 void
 DebugAdapterManager::InitAllocators() noexcept
 {
   using alloc::ArenaResource;
   using alloc::Page;
 
-  // Create a 1 megabyte arena allocator.
   mCommandsAllocator = ArenaResource::CreateUniquePtr(Page{ 16 });
   mCommandResponseAllocator = ArenaResource::CreateUniquePtr(Page{ 128 });
   mEventsAllocator = ArenaResource::CreateUniquePtr(Page{ 16 });
-  for (auto i = 0; i < 32; ++i) {
-    mCommandAllocatorPool.push_back(ArenaResource::Create(Page{ 512 }));
+  for (auto i = 0; i < 512; ++i) {
+    mCommandAllocatorPool.push_back(ArenaResource::Create(Page{ 32 }));
   }
 }
 
@@ -573,15 +555,6 @@ DebugAdapterManager::AcquireArena() noexcept
 }
 
 void
-DebugAdapterManager::RemoveSupervisor(tc::SupervisorState *supervisor) noexcept
-{
-  auto it = std::find_if(mSessions.begin(), mSessions.end(), [sv = supervisor](auto &session) {
-    return session->GetSupervisor() == sv;
-  });
-  mSessions.erase(it);
-}
-
-void
 DebugAdapterManager::PostDapEvent(ui::UIResultPtr event)
 {
   // TODO(simon): I'm split on the idea if we should have one thread for each DebugAdapterClient, or like we do
@@ -630,7 +603,7 @@ DebugAdapterManager::WriteSerializedProtocolMessage(std::string_view output) con
 
   const auto header = std::format("Content-Length: {}\r\n\r\n", output.size());
 #ifdef DEBUG
-  DBGLOG(dap, "WRITING -->{}{}<---", header, output);
+  DBGLOG(dap, "[write]:[{}{}]", header, output);
 #endif
 
   const auto result = ::writev(mWriteFd, iov, 2);

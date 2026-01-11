@@ -202,8 +202,7 @@ template <typename K, std::size_t S> struct RequestMap
   constexpr CommandType
   get_command(std::string_view key) const noexcept
   {
-    const auto itr =
-      std::find_if(std::cbegin(data), std::cend(data), [&key](const auto &p) { return p.first == key; });
+    const auto itr = FindIf(data, [&key](const auto &p) { return p.first == key; });
     [[likely]] if (itr != std::cend(data)) {
       return itr->second;
     } else {

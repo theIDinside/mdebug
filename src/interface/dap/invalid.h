@@ -28,7 +28,8 @@ struct InvalidArgs final : public UICommand
   void
   Execute() noexcept final
   {
-    return WriteResponse(InvalidArgsResponse{ mSessionId, mCommand, std::move(mMissingArguments), this });
+    DBGLOG(core, "Invalid args for {} for command {}", mProcessId, mCommand);
+    return WriteResponse(InvalidArgsResponse{ mProcessId, mCommand, std::move(mMissingArguments), this });
   }
 
   ArgumentErrorKind mKind;

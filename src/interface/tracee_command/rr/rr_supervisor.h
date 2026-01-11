@@ -2,9 +2,14 @@
 #pragma once
 
 // mdb
+#include "interface/dap/types.h"
+#include <bp.h>
+#include <bp_spec.h>
 #include <common/typedefs.h>
 #include <event_queue_types.h>
 #include <events/event.h>
+#include <memory_resource>
+#include <set>
 #include <utils/immutable.h>
 
 // std
@@ -168,6 +173,60 @@ struct EventCallback
   }
 };
 
+class BreakpointInfo
+{
+  u32 mId;
+
+  std::optional<u32> mLine;
+  std::optional<u32> mColumn;
+  std::optional<std::string_view> mSourcePath;
+  std::optional<std::string> mErrorMessage;
+
+  // The processes that use this breakpoint and that has set this breakpoint
+  std::vector<Pid> mUsers;
+
+  bool mStale{ false };
+
+public:
+  static std::shared_ptr<BreakpointInfo> Create(u32 id) noexcept;
+
+  bool IsVerified() const noexcept;
+
+  void SetLine(u32 line) noexcept;
+  void SetColumn(u32 column) noexcept;
+  void SetSource(std::string_view sourcePath) noexcept;
+  void SetErrorMessage(std::string message) noexcept;
+  void AddUser(Pid processId) noexcept;
+  void RemoveUser(Pid processId) noexcept;
+  void SetStale() noexcept;
+
+  std::pmr::string Serialize(std::pmr::memory_resource *memoryResource) const noexcept;
+};
+
+struct SessionBreakpointSpecs
+{
+
+  std::unordered_map<SourceCodeFileName,
+    std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>>>
+    mSourceCodeBreakpoints{};
+  std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>> mFunctionBreakpoints{};
+  std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>> mInstructionBreakpoints{};
+
+  static std::shared_ptr<SessionBreakpointSpecs> Create() noexcept;
+  static std::shared_ptr<BreakpointInfo> CreateBreakpointInfo();
+
+  bool TryInitNewInstructionSpec(const BreakpointSpecification &spec) noexcept;
+  bool TryInitNewFunctionSpec(const BreakpointSpecification &spec) noexcept;
+  bool TryInitSourceCodeSpec(const std::string &sourceFilePath, const BreakpointSpecification &spec) noexcept;
+
+  void RemoveInstructionSpec(const BreakpointSpecification &spec) noexcept;
+  void RemoveFunctionSpec(const BreakpointSpecification &spec) noexcept;
+  void RemoveSourceCodeSpec(
+    const std::string &sourceFilePath, const std::span<BreakpointSpecification> &spec) noexcept;
+
+  void UserExeced(Pid processId) noexcept;
+};
+
 class ReplaySupervisor
 {
   void SpawnSupervisorThread() noexcept;
@@ -177,7 +236,7 @@ class ReplaySupervisor
 
   RRInitOptions mInitOptions;
   std::jthread mSupervisorThread;
-  rr::ReplayTimeline *mTimeline;
+  std::unique_ptr<rr::ReplayTimeline> mTimeline;
   // Sessions are only ever created once. When replaying backwards across a session creation, we
   // do nothing but notify the UI frontend (via DAP events) that it's "exited" - and once reborn, we just pick it
   // out of this cache and do the hook-up dance with the UI frontend again, via normal DAP processess
@@ -190,8 +249,9 @@ class ReplaySupervisor
   pid_t mLastPendingInterruptFor{ 0 };
   std::optional<ResumeReplay> mRequestedResume{ std::nullopt };
   std::optional<ResumeReplay> mLastRequestedResume{ std::nullopt };
+  bool mIsReversing{ false };
   // If process is not registered with ReplaySupervisor, we don't notify the debugger of events related to it.
-  std::vector<Pid> mTracedProcesses{};
+  std::vector<Pid> mTracedProcessesPids{};
   bool mRequestedShutdown{ false };
 
   EventCallback mEventCallback;
@@ -211,6 +271,7 @@ class ReplaySupervisor
   bool mHasRequest;
 
   std::unordered_map<SupervisorSessionEventType, std::function<void()>> mSupervisorEvents{};
+  std::shared_ptr<SessionBreakpointSpecs> mSessionBreakpoints{ nullptr };
 
   void PublishEvent(const SupervisorEvent &evt) noexcept;
   void PublishSessionEvent(SupervisorSessionEventType type,
@@ -227,9 +288,15 @@ class ReplaySupervisor
   void NotifyResumed() noexcept;
 
   explicit ReplaySupervisor(const RRInitOptions &initOptions) noexcept;
+  // Clear & set state which is appropriate for reverse execution.
+  // since we're moving backwards in time, we need to clear breakpoint location statuses (since we won't be
+  // stepping over breakpoints), we need to invalidate caches, we need to also notify any potential UI clients that
+  // all processes are "running" right now
+  void OnReverse() noexcept;
 
 public:
-  static ReplaySupervisor *Create(SessionId sessionId, const RRInitOptions &initOptions = {}) noexcept;
+  void Erase(Session *session) noexcept;
+  static ReplaySupervisor *Create(const RRInitOptions &initOptions = {}) noexcept;
   void StartReplay(const char *traceDir, std::function<void()> onStartCompleted) noexcept;
   std::vector<Pid> CurrentLiveProcesses() const noexcept;
   Session *CachedSupervisor(Tid taskLeader) const noexcept;
@@ -283,6 +350,23 @@ public:
   const char *ExecedFile(pid_t rec_tid) const;
   const std::vector<std::uint8_t> &GetAuxv(pid_t rec_tid);
   rr::ReplayTask *GetTask(pid_t rec_tid) const;
+  bool IsReversing() const;
+  uint64_t CurrentFrameTime() const noexcept;
+
+  std::shared_ptr<SessionBreakpointSpecs> &
+  GetSessionBreakpoints() noexcept
+  {
+    return mSessionBreakpoints;
+  }
+
+  template <typename Fn>
+  constexpr void
+  IterateSupervisors(Fn &&fn) noexcept
+  {
+    for (auto supervisor : mTimelineSupervisors) {
+      fn(supervisor);
+    }
+  }
 };
 } // namespace mdb::tc::replay
 
