@@ -21,7 +21,6 @@ class SupervisorState;
 enum class ApplicationEventType : u8
 {
   Ptrace,
-  GdbServer,
   RR,
   Command,
   Internal,
@@ -32,11 +31,6 @@ struct PtraceEvent
   int mPid;
   int mStatus;
   int mCpuCore;
-};
-
-struct GdbServerEvent
-{
-  int mRemoteId;
 };
 
 struct TraceFrameTaskContext

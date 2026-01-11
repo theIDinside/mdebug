@@ -193,12 +193,6 @@ Tracer::HandleReplayStopEvent(ReplayEvent evt) noexcept
 }
 
 void
-Tracer::HandleGdbEvent(GdbServerEvent *evt) noexcept
-{
-  TODO("Tracer::HandleGdbEvent(GdbServerEvent *evt) noexcept");
-}
-
-void
 Tracer::HandleInternalEvent(const InternalEvent &evt) noexcept
 {
   switch (evt.mType) {
@@ -298,95 +292,7 @@ Tracer::SessionAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId,
 
   return std::visit(
     Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(client, sessionId, args); },
-      [&](const RRAttachArgs &args) -> MatchResult { return RRAttach(client, sessionId, args); },
-      [&](const GdbRemoteAttachArgs &gdb) -> MatchResult {
-        TODO("Implement attach for gdbserver sessions");
-        /*
-        DBGLOG(core, "Initializing remote protocol interface...");
-        // Since we may connect to a remote that is not connected to nuthin,
-        // we need an extra step here (via the RemoteSessionConfiguirator), before
-        // we can actually be served a TraceeInterface of GdbRemoteCommander type (or actually
-        // 0..N of them) Why? Because when we ptrace(someprocess), we know we are attaching to
-        // 1 process, that's it. But the remote target might actually be attached to many, and
-        // we want our design to be consistent (1 commander / process. Otherwise we turn into
-        // gdb hell hole.)
-        auto remote_init = tc::RemoteSessionConfigurator{ Tracer::Get().ConnectToRemoteGdb(
-          { .host = std::string{ gdb.host }, .port = gdb.port }, {}) };
-
-        std::vector<tc::RemoteProcess> res;
-
-        switch (gdb.type) {
-        case RemoteType::RR: {
-          auto result = remote_init.configure_rr_session();
-          if (result.is_expected()) {
-            res = std::move(result.take_value());
-          } else {
-            PANIC("Failed to configure session");
-          }
-        } break;
-        case RemoteType::GDB: {
-          auto result = remote_init.configure_session();
-          if (result.is_expected()) {
-            res = std::move(result.take_value());
-          } else {
-            PANIC("Failed to configure session");
-          }
-        } break;
-        }
-
-        auto it = res.begin();
-        const auto firstAttachedId = it->tc->TaskLeaderTid();
-
-        const auto hookupDapWithRemote =
-          [&](auto &&newSupervisor, ui::dap::DebugAdapterClient *client, bool newProc) {
-            mTracedProcesses.push_back(std::move(newSupervisor));
-            auto *supervisor = mTracedProcesses.back().get();
-            auto &ti = supervisor->GetInterface();
-            ti.OnExec();
-            for (const auto &t : it->threads) {
-              supervisor->CreateNewTask(t.tid, false);
-            }
-            for (auto &entry : supervisor->GetThreads()) {
-              entry.mTask->SetAtTraceEventStop();
-            };
-
-            if (newProc) {
-              client->PostDapEvent(new ui::dap::Process{ 0, supervisor->TaskLeaderTid(), "process",
-        false });
-            }
-          };
-
-        auto mainConnection = mDAP->Get();
-
-        (void)Tracer::Get().AddTracedSupervisor(sessionId, [&](tc::SupervisorState *supervisor) {
-          supervisor->InitializeInterface(TargetSession::Attached, std::move(it->tc),
-        InterfaceType::GdbRemote); auto &ti = supervisor->GetInterface(); ti.OnExec(); for (const
-        auto &t : it->threads) { if (!supervisor->HasTask(t.tid)) {
-              supervisor->CreateNewTask(t.tid, false);
-            }
-          }
-          for (auto &entry : supervisor->GetThreads()) {
-            entry.mTask->SetAtTraceEventStop();
-          };
-        });
-
-        mainConnection->SetDebugAdapterSessionType(
-          (gdb.type == RemoteType::GDB) ? ui::dap::DapClientSession::Attach :
-        ui::dap::DapClientSession::RR);
-        ++it;
-        for (; it != std::end(res); ++it) {
-
-          hookupDapWithRemote(tc::SupervisorState::create(Tracer::Get().NewSupervisorId(),
-                                TargetSession::Attached,
-                                std::move(it->tc),
-                                InterfaceType::GdbRemote),
-            mainConnection,
-            true);
-        }
-        return firstAttachedId;
-        */
-        return 0;
-      } },
+      [&](const RRAttachArgs &args) -> MatchResult { TODO("Possibly never implement this, after all"); } },
     args);
 }
 
@@ -418,24 +324,6 @@ Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
   }
   return nullptr;
 }
-
-// std::shared_ptr<gdb::RemoteConnection>
-// Tracer::ConnectToRemoteGdb(
-//   const tc::GdbRemoteCfg &config, const std::optional<gdb::RemoteSettings> &settings) noexcept
-// {
-//   for (auto &t : mTracedProcesses) {
-//     if (auto conn = t->GetInterface().RemoteConnection(); conn && conn->IsConnectedTo(config.host, config.port))
-//     {
-//       return conn;
-//     }
-//   }
-//   auto connection = gdb::RemoteConnection::Connect(config.host, config.port, settings);
-//   if (connection.is_error()) {
-//     DBGLOG(core, "failed to connect to {}:{}", config.host, config.port);
-//     PANIC("Exiting after hard failure");
-//   }
-//   return connection.take_value();
-// }
 
 /*static */ u32
 Tracer::GenerateNewBreakpointId() noexcept
@@ -616,9 +504,6 @@ Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) no
         switch (evt.mEventType) {
         case ApplicationEventType::Ptrace: {
           dbgInstance.HandlePtraceEvent(evt.uPtrace);
-        } break;
-        case ApplicationEventType::GdbServer: {
-          dbgInstance.HandleGdbEvent(evt.uGdbServer);
         } break;
         case ApplicationEventType::RR: {
           dbgInstance.HandleReplayStopEvent(evt.uReplayStop);
