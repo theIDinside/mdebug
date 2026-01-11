@@ -1,10 +1,8 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common.h"
-#include "common/formatter.h"
-#include <concepts>
-#include <type_traits>
-#include <utility>
+// mdb
+#include <common/formatter.h>
+#include <common/traits.h>
 
 namespace mdb {
 template <typename T> class Immutable
