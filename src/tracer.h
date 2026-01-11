@@ -179,7 +179,6 @@ public:
   tc::replay::Session *GetReplayProcess(pid_t tidOrPid) noexcept;
   void HandleReplayStopEvent(ReplayEvent evt) noexcept;
 
-  void HandleGdbEvent(GdbServerEvent *evt) noexcept;
   void HandleInternalEvent(const InternalEvent &evt) noexcept;
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept;
 

@@ -315,52 +315,12 @@ EventSystem::PushCommand(ui::dap::DebugAdapterManager *debugAdapter, RefPtr<ui::
 }
 
 void
-EventSystem::PushGdbServerEvent(GdbServerEvent *event) noexcept
-{
-}
-
-void
 EventSystem::PushReplayStopEvent(ReplayEvent event) noexcept
 {
   mLastReplayEvent = event;
   int writeValue = write(mReplayStopEvents[1], "+", 1);
   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
 }
-
-// void
-// EventSystem::PushDebuggerEvent(TraceEvent *event) noexcept
-// {
-//   std::lock_guard lock(mTraceEventGuard);
-//   mTraceEvents.push_back(event);
-//   int writeValue = write(mDebuggerEvents[1], "+", 1);
-//   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
-// }
-
-// void
-// EventSystem::ConsumeDebuggerEvents(std::vector<TraceEvent *> &events) noexcept
-// {
-//   std::lock_guard lock(mTraceEventGuard);
-
-//   if (events.empty()) {
-//     return;
-//   }
-
-//   for (auto e : events) {
-//     mTraceEvents.push_back(e);
-//   }
-//   events.clear();
-//   int writeValue = write(mDebuggerEvents[1], "+", 1);
-//   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
-// }
-
-// void
-// EventSystem::PushInitEvent(TraceEvent *event) noexcept
-// {
-//   std::lock_guard lock(mTraceEventGuard);
-//   mInitEvent.push_back(event);
-//   int writeValue = write(mInitEvents[1], "+", 1);
-//   MDB_ASSERT(writeValue != -1, "Failed to write notification to pipe");
-// }
 
 void
 EventSystem::PushInternalEvent(InternalEvent event) noexcept

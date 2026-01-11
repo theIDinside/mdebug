@@ -27,14 +27,5 @@ struct RRAttachArgs
   Pid pid;
 };
 
-struct GdbRemoteAttachArgs
-{
-  std::string_view host;
-  int port;
-  std::optional<Pid> pid{ std::nullopt };
-  bool allstop;
-  RemoteType type;
-};
-
-using AttachArgs = std::variant<PtraceAttachArgs, RRAttachArgs, GdbRemoteAttachArgs>;
+using AttachArgs = std::variant<PtraceAttachArgs, RRAttachArgs>;
 } // namespace mdb

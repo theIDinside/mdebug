@@ -1169,13 +1169,6 @@ RemoteConnection::SendQXferCommandWithResponse(qXferCommand &cmd, std::optional<
 
   return true;
 }
-#define MATCH(var, param, result, expr)                                                                           \
-  std::visit(                                                                                                     \
-    [&](auto &param) -> result {                                                                                  \
-      using T = ActualType<decltype(param)>;                                                                      \
-      expr                                                                                                        \
-    },                                                                                                            \
-    var)
 
 mdb::Expected<std::vector<std::string>, SendError>
 RemoteConnection::SendCommandsInOrderFailFast(

@@ -1,10 +1,6 @@
 /** LICENSE TEMPLATE */
 
 #include "commands.h"
-#include "interface/attach_args.h"
-#include "interface/dap/interface.h"
-#include "interface/tracee_command/supervisor_state.h"
-#include "interface/ui_command.h"
 
 // mdb
 #include <bp.h>
@@ -12,6 +8,7 @@
 #include <common/formatter.h>
 #include <event_queue.h>
 #include <events/event.h>
+#include <interface/attach_args.h>
 #include <interface/dap/custom_commands.h>
 #include <interface/dap/dap_defs.h>
 #include <interface/dap/events.h>
@@ -1728,7 +1725,7 @@ struct Attach final : public UICommand
     {
       kSessionType,
       FieldType::Enumeration,
-      { kSessionTypePtrace, kSessionTypeGdbRemote, kSessionTypeRr },
+      { kSessionTypePtrace, kSessionTypeRr },
     });
 
   inline static std::vector<InvalidArg>
@@ -1780,16 +1777,7 @@ struct Attach final : public UICommand
     } else if (type == kSessionTypeRr) {
       return CreateRequestForRr(std::move(arg), args);
     } else if (type == kSessionTypeGdbRemote) {
-      int port = args["port"];
-      std::string_view host = args["host"];
-      bool allstop = true;
-      if (auto allStopVal = args.At("allstop"); allStopVal && allStopVal->IsBoolean()) {
-        allstop = allStopVal->UncheckedGetBoolean();
-      }
-      RemoteType remote_type = type == "rr" ? RemoteType::RR : RemoteType::GDB;
-      return RefPtr<Attach>::MakeShared(std::move(arg),
-        args["sessionId"],
-        GdbRemoteAttachArgs{ .host = host, .port = port, .allstop = allstop, .type = remote_type });
+      TODO("Removed gdb support, not priority");
     }
     std::vector<InvalidArg> invalid{};
     invalid.emplace_back(ArgumentError::Invalid("invalid session type"), "sessionType"sv);
