@@ -121,6 +121,36 @@ JsBreakpoint::Disable(JSContext *context, [[maybe_unused]] JSValue thisValue, JS
   return JS_ThrowTypeError(context, "Disable method not implemented");
 };
 
+auto
+JsBreakpoint::ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue
+{
+  auto pointer = GetThisOrReturnException(pointer, "Invalid breakpoint!");
+  Ref<BreakpointLocation> bpLoc = pointer->GetLocation();
+  const LocationSourceInfo *slocInfo = bpLoc ? bpLoc->GetSourceLocationInfo() : nullptr;
+  char buf[1024];
+  char *end = buf;
+  if (slocInfo) {
+    end = std::format_to(buf,
+      R"("{{ id":{}, "kind":"{}", "loc":"{}", "source": "{}:{}" }})",
+      pointer->mId,
+      pointer->mKind,
+      bpLoc ? bpLoc->Address() : AddrPtr{ nullptr },
+      slocInfo->mSourceFile,
+      slocInfo->mLineNumber);
+  } else {
+    end = std::format_to(buf,
+      R"({{ "id":{}, "kind":"{}", "loc":"{}" }})",
+      pointer->mId,
+      pointer->mKind,
+      bpLoc ? bpLoc->Address() : AddrPtr{ nullptr });
+  }
+
+  auto len = std::distance(buf, end);
+  MDB_ASSERT(len <= 1024, "Stack space written over");
+  auto strValue = JS_NewStringLen(context, buf, len);
+  return strValue;
+}
+
 JSValue
 JsBreakpointEvent::Stop(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
 {
