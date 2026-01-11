@@ -1,17 +1,20 @@
 /** LICENSE TEMPLATE */
 #include "rnglists.h"
-#include "symbolication/dwarf/reader_funcs.h"
-#include "symbolication/dwarf_binary_reader.h"
+
+#include <common.h>
 #include <symbolication/dwarf/die.h>
+#include <symbolication/dwarf/reader_funcs.h>
+#include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
 #include <utils/todo.h>
+
 namespace mdb::sym::dw {
 
 /*static*/ ResolvedRangeListOffset
 ResolvedRangeListOffset::Make(sym::dw::UnitData &compUnit, u64 unresolvedOffset) noexcept
 {
-  return ResolvedRangeListOffset{compUnit.RangeListBase() + unresolvedOffset};
+  return ResolvedRangeListOffset{ compUnit.RangeListBase() + unresolvedOffset };
 }
 
 u32
@@ -94,7 +97,7 @@ ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
       const auto addr_ptr = elf->mDebugAddr->GetPointer(cu.AddressBase() + (addrIndex * 8));
       u64 startAddr = 0;
       std::memcpy(&startAddr, addr_ptr, 8);
-      result.push_back({startAddr, startAddr + rangeLength});
+      result.push_back({ startAddr, startAddr + rangeLength });
       break;
     }
     case RangeListEntry::DW_RLE_start_end:
@@ -103,7 +106,7 @@ ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
     case RangeListEntry::DW_RLE_offset_pair: {
       OffsetPair pair{};
       ptr = ReadOffsetPair(ptr, pair);
-      result.push_back({base + pair.start, base + pair.end});
+      result.push_back({ base + pair.start, base + pair.end });
       break;
     }
     case RangeListEntry::DW_RLE_base_address: {
@@ -113,7 +116,7 @@ ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
       AddrPtr start = read_address();
       u64 len;
       ptr = DecodeUleb128(ptr, len);
-      result.push_back({start, start + len});
+      result.push_back({ start, start + len });
       break;
     }
     case RangeListEntry::DW_RLE_end_of_list:

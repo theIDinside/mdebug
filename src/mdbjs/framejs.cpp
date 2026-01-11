@@ -2,10 +2,10 @@
 #include "framejs.h"
 
 // mdb
-#include <mdbjs/jsobject.h>
 #include <mdbjs/variablejs.h>
 #include <symbolication/callstack.h>
 #include <symbolication/objfile.h>
+#include <utils/logger.h>
 
 namespace mdb {
 

@@ -1,24 +1,27 @@
 /** LICENSE TEMPLATE */
 #include "supervisor_state.h"
-#include "bp.h"
-#include "utils/util.h"
 
 // mdb
+#include <bp.h>
 #include <common.h>
 #include <interface/dap/events.h>
 #include <interface/dap/interface.h>
-#include <link.h>
 #include <session_task_map.h>
-#include <string>
 #include <symbolication/callstack.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/dwarf_binary_reader.h>
 #include <symbolication/dwarf_frameunwinder.h>
 #include <task.h>
+#include <tracer.h>
 #include <utils/enumerator.h>
+#include <utils/util.h>
 
 // std
 #include <algorithm>
+#include <string>
+
+// system
+#include <link.h>
 
 namespace mdb {
 ParsedAuxiliaryVector
@@ -70,22 +73,21 @@ namespace mdb::tc {
 
 /// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
 /// When debugging 2 processes with the same binaries, we don't want duplicate storage.
-static auto
+auto
 CreateSymbolFile(SupervisorState &supervisorState, const Path &path, AddrPtr addr) noexcept
   -> std::shared_ptr<SymbolFile>
 {
-  auto existingObjFile = Tracer::Get().LookupSymbolfile(path);
-  if (existingObjFile) {
+  if (auto existingObjFile = Tracer::LookupSymbolfile(path); existingObjFile) {
     // This process already registered this symbol object.
-    if (existingObjFile->GetSupervisor() == &supervisorState) {
+    if (existingObjFile->GetId() == supervisorState.TaskLeaderTid()) {
       return nullptr;
     }
     // if baseAddr == addr; unique = false, return null, because we've already registered it
-    return existingObjFile->Copy(supervisorState, addr);
+    return existingObjFile->Copy(supervisorState.TaskLeaderTid(), addr);
   } else {
-    auto obj = ObjectFile::CreateObjectFile(&supervisorState, path);
+    auto obj = ObjectFile::CreateObjectFile(supervisorState.TaskLeaderTid(), path);
     if (obj != nullptr) {
-      return SymbolFile::Create(&supervisorState, std::move(obj), addr);
+      return SymbolFile::Create(supervisorState.TaskLeaderTid(), std::move(obj), addr);
     }
   }
   return nullptr;
@@ -190,7 +192,7 @@ SupervisorState::InstallDynamicLoaderBreakpoints(AddrPtr mappedDynamicSectionAdd
   MDB_ASSERT(mMainExecutable != nullptr, "No main executable for this target");
   const auto mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
   const Path interpreterPath = InterpreterPath(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
-  const std::shared_ptr tempObjectFile = ObjectFile::CreateObjectFile(this, interpreterPath);
+  const std::shared_ptr tempObjectFile = ObjectFile::CreateObjectFile(TaskLeaderTid(), interpreterPath);
   MDB_ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
 
   const auto interpreterBase = mParsedAuxiliaryVector.mInterpreterBaseAddress;
@@ -1109,7 +1111,7 @@ SupervisorState::RegisterObjectFile(
   SupervisorState *tc, std::shared_ptr<ObjectFile> &&obj, bool isMainExecutable, AddrPtr relocatedBase) noexcept
 {
   MDB_ASSERT(obj != nullptr, "Object file is null");
-  RegisterSymbolFile(SymbolFile::Create(tc, std::move(obj), relocatedBase), isMainExecutable);
+  RegisterSymbolFile(SymbolFile::Create(tc->TaskLeaderTid(), std::move(obj), relocatedBase), isMainExecutable);
 }
 
 void
@@ -1344,8 +1346,8 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
   const auto dynamicSegment = baseAddress + pt_dynamic->p_vaddr;
   DBGLOG(core, "Dynamic segment mapped in at {}", dynamicSegment);
 
-  if (auto symbol_obj = Tracer::Get().LookupSymbolfile(exe); symbol_obj == nullptr) {
-    auto obj = ObjectFile::CreateObjectFile(this, exe);
+  if (auto symbol_obj = Tracer::LookupSymbolfile(exe); symbol_obj == nullptr) {
+    auto obj = ObjectFile::CreateObjectFile(TaskLeaderTid(), exe);
     if (obj->GetElf()->AddressesNeedsRelocation()) {
       RegisterObjectFile(this, std::move(obj), true, baseAddress);
     } else {

@@ -4,6 +4,7 @@
 // mdb
 #include <common.h>
 #include <interface/dap/types.h>
+#include <interface/tracee_command/supervisor_state.h>
 #include <lib/arena_allocator.h>
 #include <symbolication/dwarf/die.h>
 #include <symbolication/dwarf/typeread.h>
@@ -12,6 +13,7 @@
 #include <symbolication/type.h>
 #include <symbolication/value_visualizer.h>
 #include <task.h>
+#include <tracer.h>
 #include <utils/todo.h>
 
 // std
@@ -176,7 +178,7 @@ Value::GetMember(std::string_view memberName) noexcept
     if (mem.mName == memberName) {
       MDB_ASSERT(mContext, "Creating member from value that has no context");
       auto variableContext = mem.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
-                                                      : Tracer::Get().CloneFromVariableContext(*mContext);
+                                                      : Tracer::CloneFromVariableContext(*mContext);
       const auto vId = variableContext->mId;
       auto memberValue = Ref<sym::Value>::MakeShared(
         variableContext, mem.mName, const_cast<sym::Field &>(mem), mMemoryContentsOffsets, TakeMemoryReference());
@@ -210,7 +212,7 @@ Value::IsLive() const noexcept
 void
 Value::RegisterContext() noexcept
 {
-  Tracer::Get().SetVariableContext(mContext);
+  Tracer::SetVariableContext(mContext);
   mContext->mTask->CacheValueObject(mContext->mId, RefPtr<sym::Value>{ this });
 }
 
@@ -567,7 +569,7 @@ MemoryContentsObject::CreateFrameVariable(
   auto variableContext =
     symbol.mType->IsPrimitive()
       ? VariableContext::FromFrame(0, ContextType::Variable, frame)
-      : VariableContext::FromFrame(Tracer::Get().NewVariablesReference(), ContextType::Variable, frame);
+      : VariableContext::FromFrame(Tracer::NewVariablesReference(), ContextType::Variable, frame);
 
   const auto address = interp.Run();
 

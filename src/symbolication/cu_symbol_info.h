@@ -95,7 +95,7 @@ class AddressToCompilationUnitMap
 {
 public:
   AddressToCompilationUnitMap() noexcept;
-  std::vector<CompilationUnit *> find_by_pc(AddrPtr pc) noexcept;
+  std::vector<CompilationUnit *> find_by_pc(AddrPtr pc) const noexcept;
   void AddCompilationUnits(std::span<CompilationUnit *> cus) noexcept;
 
 private:
