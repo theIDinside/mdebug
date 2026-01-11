@@ -61,6 +61,7 @@ class EventDispatcher;
   FNDESC(Log, "log", 1, "Log message to the 'interpreter' channel (interpreter.log file output).")                \
   FNDESC(GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid")                       \
   FNDESC(GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId")     \
+  FNDESC(GetThreads, "getThreads", 0, "Get all threads")                                                          \
   FNDESC(PrintThreads, "listThreads", 0, "List all threads in this debug session")                                \
   FNDESC(PrintProcesses, "procs", 0, "List all processes supervisor info")                                        \
   FNDESC(Help, "help", 1, "Show this help message.")
@@ -102,6 +103,7 @@ private:
   static JSValue GetSupervisor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue Log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue GetTask(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  static JSValue GetThreads(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue PrintThreads(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue PrintProcesses(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
   static JSValue Help(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
@@ -121,6 +123,7 @@ private:
       FunctionDescriptor{ &PrintThreads, "listThreads", 0, "List all threads in this debug session" },
       FunctionDescriptor{ &PrintProcesses, "procs", 0, "List all processes supervisor info" },
       FunctionDescriptor{ &Help, "help", 1, "Show this help message." },
+      FunctionDescriptor{ &GetThreads, "getThreads", 0, "Get all threads" },
     });
     return std::span<const FunctionDescriptor>{ descriptors };
   }
