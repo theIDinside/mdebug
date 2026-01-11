@@ -5,6 +5,7 @@
 #include <symbolication/dwarf/die.h>
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
+#include <utils/todo.h>
 namespace mdb::sym::dw {
 
 /*static*/ ResolvedRangeListOffset

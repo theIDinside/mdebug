@@ -1,15 +1,19 @@
 /** LICENSE TEMPLATE */
 
 #include "rr_session.h"
-#include "kernel_abi.h"
+
+// rr
+#include <ReplayTask.h>
+#include <kernel_abi.h>
 
 // mdb
 #include <interface/dap/events.h>
 #include <interface/tracee_command/rr/rr_supervisor.h>
+#include <session_task_map.h>
+#include <symbolication/dwarf_binary_reader.h>
 #include <task.h>
-
-// rr
-#include <ReplayTask.h>
+#include <tracer.h>
+#include <utils/todo.h>
 
 namespace mdb::tc::replay {
 

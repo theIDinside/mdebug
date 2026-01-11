@@ -12,6 +12,7 @@
 #include <symbolication/type.h>
 #include <symbolication/value_visualizer.h>
 #include <task.h>
+#include <utils/todo.h>
 
 // std
 #include <memory_resource>
