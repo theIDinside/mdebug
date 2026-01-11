@@ -7,6 +7,7 @@
 #include <symbolication/dwarf_expressions.h>
 #include <symbolication/objfile.h>
 #include <task.h>
+#include <utils/todo.h>
 
 // std
 #include <array>
