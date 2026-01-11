@@ -300,10 +300,10 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
           }
         }
         break;
+      // case DwarfTag::DW_TAG_constant: // TODO: add support for constants. They can not just be parsed as types.
       case DwarfTag::DW_TAG_array_type:
       case DwarfTag::DW_TAG_base_type:
       case DwarfTag::DW_TAG_class_type:
-      case DwarfTag::DW_TAG_constant:
       case DwarfTag::DW_TAG_enumeration_type:
       case DwarfTag::DW_TAG_string_type:
       case DwarfTag::DW_TAG_structure_type:
