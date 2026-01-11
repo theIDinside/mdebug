@@ -505,6 +505,5 @@ struct IsUniquePtrCheck<Template<U>>
 };
 
 template <typename TypeToCheck> concept IsRefPointer = IsRefPointerCheck<TypeToCheck>::value;
-template <typename TypeToCheck> concept IsUniquePtr = IsUniquePtrCheck<TypeToCheck>::value;
 
 } // namespace mdb

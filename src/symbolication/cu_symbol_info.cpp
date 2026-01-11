@@ -644,9 +644,8 @@ CompilationUnit::GetFunctionSymbolByProgramCounter(AddrPtr pc) noexcept
     PrepareFunctionSymbols();
   }
 
-  auto iter = std::find_if(mFunctionSymbols.begin(), mFunctionSymbols.end(), [pc](sym::FunctionSymbol &fn) {
-    return fn.StartPc() <= pc && pc < fn.EndPc();
-  });
+  auto iter =
+    FindIf(mFunctionSymbols, [pc](sym::FunctionSymbol &fn) { return fn.StartPc() <= pc && pc < fn.EndPc(); });
   if (iter != std::end(mFunctionSymbols)) {
     return iter.base();
   }

@@ -38,41 +38,6 @@ struct LWP
   constexpr bool operator<=>(const LWP &other) const = default;
 };
 
-template <typename, typename = void> struct has_begin : std::false_type
-{
-};
-
-template <typename T> struct has_begin<T, std::void_t<decltype(std::begin(std::declval<T>()))>> : std::true_type
-{
-};
-
-template <typename, typename = void> struct has_end : std::false_type
-{
-};
-
-template <typename T> struct has_end<T, std::void_t<decltype(std::end(std::declval<T>()))>> : std::true_type
-{
-};
-
-template <typename T> struct is_unique_ptr : std::false_type
-{
-};
-
-template <typename T> struct is_unique_ptr<std::unique_ptr<T>> : std::true_type
-{
-};
-
-template <typename T> struct is_shared_ptr : std::false_type
-{
-};
-
-template <typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type
-{
-};
-
-template <typename T> concept IsSmartPointer = is_unique_ptr<T>::value || is_shared_ptr<T>::value;
-template <typename T> concept IsRange = has_begin<T>::value && has_end<T>::value;
-
 // A line/col-source coordinate. Identifies a source file by full path and a line and column number
 struct SourceCoordinate
 {

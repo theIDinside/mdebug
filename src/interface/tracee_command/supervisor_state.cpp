@@ -1226,7 +1226,7 @@ SymbolFile *
 SupervisorState::FindObjectByPc(AddrPtr addr) noexcept
 {
   return mdb::find_if(
-    mSymbolFiles, [addr](auto &symbol_file) { return symbol_file->ContainsProgramCounter(addr); })
+    mSymbolFiles, [addr](const auto &symbolFile) { return symbolFile.ContainsProgramCounter(addr); })
     .transform([](auto iterator) { return iterator->get(); })
     .value_or(nullptr);
 }
