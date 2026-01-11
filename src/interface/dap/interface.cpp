@@ -289,11 +289,25 @@ tc::SupervisorState *
 DebugAdapterManager::GetSupervisor(Pid pid) const noexcept
 {
   for (auto sv : mSupervisors) {
+    if (sv->TaskLeaderTid() == pid) {
+      return sv;
+    }
+
     if (sv->HasTask(pid)) {
       return sv;
     }
   }
 
+  return nullptr;
+}
+
+tc::SupervisorState *
+DebugAdapterManager::GetSupervisor(std::string_view configToken) const noexcept
+{
+  auto it = mConfigTokenToProcessId.find(std::string{ configToken });
+  if (it != std::end(mConfigTokenToProcessId)) {
+    return GetSupervisor(it->second);
+  }
   return nullptr;
 }
 
@@ -311,20 +325,37 @@ DebugAdapterManager::IsClosed() noexcept
 
 void
 DebugAdapterManager::OnSessionConfiguredWithSupervisor(
-  std::function<void(tc::SupervisorState &)> callback) noexcept
+  std::optional<std::string_view> configToken, std::function<void(tc::SupervisorState &)> callback) noexcept
 {
-  mOnInitialSupervisor.push_back(std::move(callback));
+  if (configToken) {
+    mOnConfigSupervisors[std::string{ *configToken }].push_back(std::move(callback));
+  } else {
+    mOnInitialSupervisor.push_back(std::move(callback));
+  }
 }
 
 bool
-DebugAdapterManager::SupervisorMaterialized(NonNullPtr<tc::SupervisorState> supervisor) noexcept
+DebugAdapterManager::SupervisorMaterialized(
+  std::optional<std::string_view> configToken, NonNullPtr<tc::SupervisorState> supervisor) noexcept
 {
-  const bool configPhaseBeforeMaterialization = !mOnInitialSupervisor.empty();
-  for (auto &cb : mOnInitialSupervisor) {
-    cb(supervisor);
+  if (configToken) {
+    const std::string key = std::string{ *configToken };
+    auto &setupFunctions = mOnConfigSupervisors[key];
+    const bool configPhaseBeforeMaterialization = !setupFunctions.empty();
+    for (auto &cb : mOnInitialSupervisor) {
+      cb(supervisor);
+    }
+    mOnConfigSupervisors.erase(key);
+    return configPhaseBeforeMaterialization;
+  } else {
+    // Do best effort, check the "hopefully correct callbacks"
+    const bool configPhaseBeforeMaterialization = !mOnInitialSupervisor.empty();
+    for (auto &cb : mOnInitialSupervisor) {
+      cb(supervisor);
+    }
+    mOnInitialSupervisor.clear();
+    return configPhaseBeforeMaterialization;
   }
-  mOnInitialSupervisor.clear();
-  return configPhaseBeforeMaterialization;
 }
 
 void

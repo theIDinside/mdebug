@@ -182,6 +182,8 @@ class DebugAdapterManager
   // (which happens after a launch or attach). For processes that got spawed by the target, while debugging,
   // the configuration phase will work on the first try, since there's a materialized session to target.
   std::vector<std::function<void(tc::SupervisorState &)>> mOnInitialSupervisor;
+  std::unordered_map<std::string, std::vector<std::function<void(tc::SupervisorState &)>>> mOnConfigSupervisors;
+  std::unordered_map<std::string, Pid> mConfigTokenToProcessId;
   bool mConfigPhaseDoneWithNoMaterializedSupervisor{ false };
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
@@ -224,11 +226,18 @@ public:
   int ReadFileDescriptor() const noexcept;
   int WriteFileDescriptor() const noexcept;
 
+  void
+  ConnectConfigToken(Pid processId, std::string_view configToken) noexcept
+  {
+    mConfigTokenToProcessId[std::string{ configToken }] = processId;
+  }
+
   bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;
   void ReadPendingCommands() noexcept;
   void SetTtyOut(int fd, SessionId pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
   tc::SupervisorState *GetSupervisor(Pid pid) const noexcept;
+  tc::SupervisorState *GetSupervisor(std::string_view configToken) const noexcept;
   std::span<UniquePtr<DebugAdapterSession>> Sessions() noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
@@ -238,8 +247,10 @@ public:
   bool IsClosed() noexcept;
 
   // Called when configuration happens for a session with no running processes.
-  void OnSessionConfiguredWithSupervisor(std::function<void(tc::SupervisorState &)> callback) noexcept;
-  bool SupervisorMaterialized(NonNullPtr<tc::SupervisorState> supervisor) noexcept;
+  void OnSessionConfiguredWithSupervisor(
+    std::optional<std::string_view> configToken, std::function<void(tc::SupervisorState &)> callback) noexcept;
+  bool SupervisorMaterialized(
+    std::optional<std::string_view> configToken, NonNullPtr<tc::SupervisorState> supervisor) noexcept;
   void ConfigDoneWithNoSupervisor(bool value = true) noexcept;
 
   bool
