@@ -73,4 +73,18 @@ JsTaskInfo::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCo
   return strValue;
 }
 
+/*static*/ JSValue
+JsTaskInfo::Resume(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+{
+  auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
+
+  if (!taskInfo->IsValid()) {
+    return JS_ThrowTypeError(context, "Can't resume task, task is invalid");
+  }
+
+  auto supervisor = taskInfo->GetSupervisor();
+  supervisor->ResumeTask(*taskInfo, tc::RunType::Continue);
+  return JS_UNDEFINED;
+}
+
 } // namespace mdb::js

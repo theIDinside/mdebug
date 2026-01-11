@@ -21,6 +21,7 @@ struct JsSupervisor : public JSBinding<JsSupervisor, tc::SupervisorState, Javasc
   static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto Breakpoints(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto ResumeAll(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept
@@ -29,6 +30,7 @@ struct JsSupervisor : public JSBinding<JsSupervisor, tc::SupervisorState, Javasc
       FunctionEntry("id", 0, &Id),
       FunctionEntry("toString", 0, &ToString),
       FunctionEntry("breakpoints", 0, &Breakpoints),
+      FunctionEntry("resumeAll", 0, &ResumeAll),
       ToStringTag("Supervisor")
     };
     return funcs;
