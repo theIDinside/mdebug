@@ -4,6 +4,7 @@
 // mdb
 #include <common/macros.h>
 #include <lib/arena_allocator.h>
+#include <mdbjs/macros.h>
 #include <mdbjs/util.h>
 #include <utils/expected.h>
 #include <utils/log_channel.h>
@@ -61,7 +62,8 @@ class EventDispatcher;
   FNDESC(Log, "log", 1, "Log message to the 'interpreter' channel (interpreter.log file output).")                \
   FNDESC(GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid")                       \
   FNDESC(GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId")     \
-  FNDESC(GetThreads, "getThreads", 0, "Get all threads")                                                          \
+  FNDESC(GetThreads, "threads", 0, "Get all threads")                                                             \
+  FNDESC(GetSupervisors, "supervisors", 0, "Get all supervisors")                                                 \
   FNDESC(PrintThreads, "listThreads", 0, "List all threads in this debug session")                                \
   FNDESC(PrintProcesses, "procs", 0, "List all processes supervisor info")                                        \
   FNDESC(Help, "help", 1, "Show this help message.")
@@ -100,13 +102,7 @@ private:
 
   Scripting(JSRuntime *runtime, JSContext *context) noexcept;
 
-  static JSValue GetSupervisor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
-  static JSValue Log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
-  static JSValue GetTask(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
-  static JSValue GetThreads(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
-  static JSValue PrintThreads(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
-  static JSValue PrintProcesses(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
-  static JSValue Help(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) noexcept;
+  FOR_EACH_GLOBAL_FN(DECLARE_METHOD)
 
   void InitializeTypes() noexcept;
   void InitializeMdbModule() noexcept;
@@ -115,16 +111,12 @@ private:
   static constexpr auto
   FunctionDescriptors() noexcept -> std::span<const FunctionDescriptor>
   {
-    static constexpr auto descriptors = std::to_array<const FunctionDescriptor>({
-      FunctionDescriptor{ &Log, "log", 1, "Log to one of the debug logging channels" },
-      FunctionDescriptor{ &GetSupervisor, "getSupervisor", 1, "Get the supervisor that has the provided pid" },
-      FunctionDescriptor{
-        &GetTask, "getThread", 1, "Get the thread that has `tid | dbgId`. `useDbgId=true` searches by dbgId" },
-      FunctionDescriptor{ &PrintThreads, "listThreads", 0, "List all threads in this debug session" },
-      FunctionDescriptor{ &PrintProcesses, "procs", 0, "List all processes supervisor info" },
-      FunctionDescriptor{ &Help, "help", 1, "Show this help message." },
-      FunctionDescriptor{ &GetThreads, "getThreads", 0, "Get all threads" },
-    });
+#define PRODUCE_FN(Method, JSName, ArgCount, HelpMessage)                                                         \
+  FunctionDescriptor{ .mFn = &Method, .mName = JSName, .mArgCount = ArgCount, .mHelpMessage = HelpMessage },
+    static constexpr auto descriptors =
+      std::to_array<const FunctionDescriptor>({ FOR_EACH_GLOBAL_FN(PRODUCE_FN) });
+#undef PRODUCE_FN
+
     return std::span<const FunctionDescriptor>{ descriptors };
   }
 

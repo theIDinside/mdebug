@@ -107,6 +107,21 @@ Scripting::GetSupervisor(JSContext *ctx, JSValueConst thisValue, int argCount, J
 }
 
 /* static */ JSValue
+Scripting::GetSupervisors(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  auto arrayValue = JS_NewArray(ctx);
+
+  auto index = 0;
+  const auto procs = Tracer::Get().GetAllProcesses();
+  for (auto supervisor : procs) {
+    auto supervisorValue = JsSupervisor::CreateValue(ctx, supervisor);
+    JS_SetPropertyUint32(ctx, arrayValue, index++, supervisorValue);
+  }
+
+  return arrayValue;
+}
+
+/* static */ JSValue
 Scripting::Log(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
   if (argCount < 1) {
