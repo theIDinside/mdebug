@@ -1170,20 +1170,24 @@ struct ReadMemory final : public ui::UICommand
 
 struct ConfigurationDoneResponse final : public ui::UIResult
 {
-  CTOR(ConfigurationDoneResponse);
+  ConfigurationDoneResponse(bool postponed, bool success, UICommandPtr cmd) noexcept
+      : UIResult(success, cmd), mPostPoned(postponed) {};
   ~ConfigurationDoneResponse() noexcept override = default;
+
+  bool mPostPoned;
 
   std::pmr::string
   Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final
   {
     std::pmr::string result{ arenaAllocator };
-    auto outIt = std::back_inserter(result);
     result.reserve(256);
-    std::format_to(outIt,
-      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"configurationDone"}})",
+
+    std::format_to(std::back_inserter(result),
+      R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"configurationDone", "body":{{"postponed":{}}}}})",
       seq,
       mRequestSeq,
-      mProcessId);
+      mProcessId,
+      mPostPoned);
     return result;
   }
 };
@@ -1197,13 +1201,16 @@ struct ConfigurationDone final : public ui::UICommand
   void
   Execute() noexcept final
   {
+    bool postponed = false;
     if (auto target = GetSupervisor(); target) {
       bool success = target->ConfigurationDone();
+      postponed = false;
     } else {
       DBGLOG(core, "No target to run configuration done on");
+      postponed = true;
       mDebugAdapterManager->ConfigDoneWithNoSupervisor();
     }
-    return WriteResponse(ConfigurationDoneResponse{ true, this });
+    return WriteResponse(ConfigurationDoneResponse{ postponed, /*success*/ true, /*cmd*/ this });
   }
 
   DEFINE_NAME("configurationDone");
