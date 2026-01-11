@@ -47,6 +47,7 @@ struct JsBreakpoint : public JSBinding<JsBreakpoint, UserBreakpoint, JavascriptC
   static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto Enable(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto Disable(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept
@@ -55,6 +56,7 @@ struct JsBreakpoint : public JSBinding<JsBreakpoint, UserBreakpoint, JavascriptC
       FunctionEntry("id", 0, &JsBreakpoint::Id),
       FunctionEntry("enable", 0, &JsBreakpoint::Enable),
       FunctionEntry("disable", 0, &JsBreakpoint::Disable),
+      FunctionEntry("toString", 0, &JsBreakpoint::ToString),
       ToStringTag("Breakpoint")
     };
     return funcs;
