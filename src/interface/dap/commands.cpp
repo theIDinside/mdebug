@@ -129,6 +129,7 @@ namespace ui::dap {
 static constexpr auto kSessionTypePtrace = "ptrace"sv;
 static constexpr auto kSessionTypeRr = "rr"sv;
 static constexpr auto kSessionTypeGdbRemote = "gdbremote"sv;
+static constexpr auto kConfigToken = "configToken"sv;
 
 Message::Message(std::string_view message, std::pmr::memory_resource *rsrc) noexcept
     : mFormat(rsrc), mVariables(rsrc)
@@ -780,9 +781,10 @@ struct SetBreakpoints final : public ui::UICommand
 {
 private:
   inline void
-  ExecuteDuringConfigPhase(Path file, Set<BreakpointSpecification> specs) noexcept
+  ExecuteDuringConfigPhase(
+    Path file, Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
-    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(
+    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, file = std::move(file), specs = std::move(specs)](
         tc::SupervisorState &target) {
         // Set the breakpoints
@@ -839,13 +841,17 @@ public:
         SourceBreakpointSpec{ .line = line, .column = column, .log_message = std::move(logMessage) }));
     }
 
+    if (!target) {
+      target = mDebugAdapterManager->GetSupervisor(get<std::string_view>(args, kConfigToken).value_or(""));
+    }
+
     // If target == nullptr, means this is in the configuration phase of a session, because attach or launch has
     // not yet happened so we don't actually have a process and executable to set these for. In that event
     // respond with breakpoints: [], and then instead emit "new breakpoint" events for when the configuration phase
     // + attach/launch has happened.
     if (!target) {
       DBGBUFLOG(core, "Session {} has no supervisor yet, postponing breakpoint creation.", mProcessId);
-      ExecuteDuringConfigPhase(Path{ file }, std::move(specs));
+      ExecuteDuringConfigPhase(Path{ file }, std::move(specs), get<std::string>(args, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
     } else {
       target->SetSourceBreakpoints(file, specs);
@@ -894,9 +900,9 @@ struct SetInstructionBreakpoints final : public ui::UICommand
 {
 private:
   inline void
-  ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs) noexcept
+  ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
-    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(
+    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
         DBGBUFLOG(core, "Setting post poned instruction breakpoints");
         // Set the breakpoints
@@ -940,7 +946,11 @@ public:
     }
 
     if (!target) {
-      ExecuteDuringConfigPhase(std::move(specs));
+      target = mDebugAdapterManager->GetSupervisor(get<std::string_view>(mArgs, kConfigToken).value_or(""));
+    }
+
+    if (!target) {
+      ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
     } else {
       target->SetInstructionBreakpoints(specs);
@@ -965,9 +975,10 @@ struct SetFunctionBreakpoints final : public ui::UICommand
 {
 private:
   inline void
-  ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs) noexcept
+  ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
-    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(
+    DBGLOG(core, "setFunctionBreakpoints with no target, postponed");
+    mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
         DBGBUFLOG(core, "Setting post poned function breakpoints");
         // Set the breakpoints
@@ -1016,7 +1027,11 @@ public:
     }
 
     if (!target) {
-      ExecuteDuringConfigPhase(std::move(specs));
+      target = mDebugAdapterManager->GetSupervisor(get<std::string_view>(mArgs, kConfigToken).value_or(""));
+    }
+
+    if (!target) {
+      ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
     } else {
       target->SetFunctionBreakpoints(specs);
@@ -1448,11 +1463,12 @@ struct NativeLaunch final : public Launch
   NativeLaunch(UICommandArg arg,
     bool stopOnEntry,
     std::optional<BreakpointBehavior> breakpointBehavior,
+    std::string_view configToken,
     std::string_view program,
     std::pmr::vector<std::pmr::string> programArgs,
     std::pmr::vector<std::pmr::string> environVars,
     std::pmr::string currentWorkingDir) noexcept
-      : Launch{ std::move(arg), stopOnEntry, breakpointBehavior, }, mProgram{ program },
+      : Launch{ std::move(arg), stopOnEntry, breakpointBehavior, }, mConfigToken(configToken), mProgram{ program },
         mCurrentWorkingDir{ std::move(currentWorkingDir) }, mEnvironmenVariables{ std::move(environVars) },
         mProgramArgs{ std::move(programArgs) }
   {
@@ -1474,14 +1490,13 @@ struct NativeLaunch final : public Launch
     auto process = tc::ptrace::Session::ForkExec(
       mDebugAdapterManager, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
 
-    DBGLOG(core, "Responding to launch request, resuming target {}", process->TaskLeaderTid());
+    mDebugAdapterManager->ConnectConfigToken(process->TaskLeaderTid(), mConfigToken);
 
     // Queue a pseudo stop event that will force a start during configurationDone by processing deferred events.
     process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid() });
     WriteResponse(LaunchResponse{ process->TaskLeaderTid(), true, this });
 
-    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized({ process });
-    DBGLOG(core, "Configuration phase executed with materialized supervisor: {}", configPhaseDone);
+    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized(mConfigToken, { process });
     if (mDebugAdapterManager->HasPendingConfigDone()) {
       process->ProcessDeferredEvents();
       process->ProcessQueuedUnhandled(process->TaskLeaderTid());
@@ -1496,13 +1511,14 @@ struct NativeLaunch final : public Launch
     }
   }
 
+  std::string_view mConfigToken;
   std::string_view mProgram;
   std::pmr::string mCurrentWorkingDir;
   std::pmr::vector<std::pmr::string> mEnvironmenVariables;
   std::pmr::vector<std::pmr::string> mProgramArgs;
 
-  RequiredArguments({ "program"sv });
-  DefineArgTypes({ "program", FieldType::String });
+  RequiredArguments({ "program"sv, kConfigToken });
+  DefineArgTypes({ "program", FieldType::String }, { kConfigToken, FieldType::String });
 };
 
 /* static */
@@ -1542,9 +1558,13 @@ NativeLaunch::CreateRequest(UICommandArg arg,
     currentWorkingDir = *args["cwd"]->GetString();
   }
 
+  auto configTokenValue = get<std::string_view>(args, kConfigToken);
+  MDB_ASSERT(configTokenValue.has_value(), "configToken field missing from LaunchRequest");
+
   return RefPtr<NativeLaunch>::MakeShared(std::move(arg),
     stopOnEntry,
     behaviorSetting,
+    *configTokenValue,
     program,
     std::move(programArguments),
     std::move(environVars),
@@ -1584,7 +1604,7 @@ struct RRLaunch final : public Launch
     replay::Session *session =
       replay::Session::Create(replaySupervisor, processes.front(), mDebugAdapterManager, hasReplayedStep);
 
-    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized({ session });
+    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized({}, { session });
     WriteResponse(RRLaunchResponse{
       replaySupervisor->CurrentLiveProcesses().front(), replaySupervisor->CurrentLiveProcesses(), true, this });
     session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
