@@ -11,7 +11,6 @@
 #include <symbolication/elf.h>
 #include <symbolication/elf_symbols.h>
 #include <symbolication/value_visualizer.h>
-#include <tracer.h>
 
 // std
 #include <string_view>
@@ -138,7 +137,7 @@ public:
   ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
 
-  static std::shared_ptr<ObjectFile> CreateObjectFile(tc::SupervisorState *tc, const Path &path) noexcept;
+  static std::shared_ptr<ObjectFile> CreateObjectFile(Pid processId, const Path &path) noexcept;
 
   template <typename T>
   auto
@@ -216,13 +215,13 @@ private:
   auto GetProbableCompilationUnits(AddrPtr programCounter) noexcept -> std::vector<sym::CompilationUnit *>;
   // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
   // uninteresting for now and not really important, as it can be fixed at any point in time.
-  auto GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
+  auto GetCompilationUnitsSpanningPC(AddrPtr pc) const noexcept -> std::vector<sym::CompilationUnit *>;
 };
 
 class SymbolFile
 {
   std::shared_ptr<ObjectFile> mObjectFile;
-  tc::SupervisorState *mTraceeController{ nullptr };
+  Pid mProcessId;
 
 public:
   using shr_ptr = std::shared_ptr<SymbolFile>;
@@ -230,14 +229,11 @@ public:
   Immutable<AddrPtr> mBaseAddress;
   Immutable<AddressRange> mPcBounds;
 
-  SymbolFile(tc::SupervisorState *tc,
-    std::string obj_id,
-    std::shared_ptr<ObjectFile> &&binary,
-    AddrPtr relocated_base) noexcept;
+  SymbolFile(
+    Pid processId, std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
 
-  static shr_ptr Create(
-    tc::SupervisorState *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
-  auto Copy(tc::SupervisorState &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
+  static shr_ptr Create(Pid processId, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept;
+  auto Copy(Pid processId, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
 
   inline auto
@@ -252,7 +248,7 @@ public:
 
   auto GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::VariableSet set) noexcept
     -> std::vector<Ref<sym::Value>>;
-  auto GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
+  auto GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::CompilationUnit *>;
   static auto GetStaticResolver(sym::Value &value) noexcept -> sym::IValueResolve *;
   auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
     -> std::vector<Ref<sym::Value>>;
@@ -265,9 +261,9 @@ public:
   auto GetMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto GetObjectFilePath() const noexcept -> Path;
 
-  auto LookupFunctionBreakpointBySpec(const BreakpointSpecification &spec) noexcept
+  auto LookupFunctionBreakpointBySpec(const BreakpointSpecification &spec) const noexcept
     -> std::vector<BreakpointLookup>;
-  auto GetSupervisor() noexcept -> tc::SupervisorState *;
+  auto GetId() noexcept -> Pid;
   auto GetTextSection() const noexcept -> const ElfSection *;
 
 private:
@@ -275,6 +271,5 @@ private:
     -> std::vector<Ref<sym::Value>>;
 };
 
-ObjectFile *mmap_objectfile(const tc::SupervisorState &tc, const Path &path) noexcept;
 void object_file_unloader(ObjectFile *obj);
 } // namespace mdb

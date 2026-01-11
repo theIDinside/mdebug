@@ -5,7 +5,6 @@
 #include <common.h>
 #include <common/formatter.h>
 #include <interface/dap/types.h>
-#include <interface/tracee_command/supervisor_state.h>
 #include <symbolication/elf_symbols.h>
 #include <symbolication/fnsymbol.h>
 #include <symbolication/type.h>

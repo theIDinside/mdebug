@@ -49,7 +49,7 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
     auto layout_type = value.GetType()->TypeDescribingLayoutOfThis();
 
     auto clonedContext = layout_type->IsPrimitive() ? VariableContext::CloneFrom(0, context)
-                                                    : Tracer::Get().CloneFromVariableContext(context);
+                                                    : Tracer::CloneFromVariableContext(context);
 
     if (layout_type->IsArrayType()) {
       results.push_back(Ref<Value>::MakeShared(
@@ -134,7 +134,7 @@ ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noe
   for (auto i = 0u; i < (endIndex - startIndex); ++i) {
     const auto memoryObjectOffset = i * elementTypeSize;
     auto varContext = elementsType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
-                                                  : Tracer::Get().CloneFromVariableContext(context);
+                                                  : Tracer::CloneFromVariableContext(context);
     results.emplace_back(
       Ref<Value>::MakeShared(varContext, std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
 

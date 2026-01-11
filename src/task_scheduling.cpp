@@ -6,6 +6,7 @@
 #include <common.h>
 #include <event_queue.h>
 #include <events/event.h>
+#include <interface/tracee_command/supervisor_state.h>
 #include <mdbsys/ptrace.h>
 #include <symbolication/callstack.h>
 #include <symbolication/cu_symbol_info.h>

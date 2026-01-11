@@ -4,7 +4,6 @@
 // mdb
 #include <bp.h>
 #include <common.h>
-#include <elf.h>
 #include <jobs/dwarf_unit_data.h>
 #include <jobs/index_die_names.h>
 #include <lib/arena_allocator.h>
@@ -24,7 +23,6 @@
 #include <symbolication/value_visualizer.h>
 #include <task.h>
 #include <tracer.h>
-#include <utility>
 #include <utils/enumerator.h>
 #include <utils/logger.h>
 #include <utils/scope_defer.h>
@@ -37,8 +35,11 @@
 #include <cstddef>
 #include <iterator>
 #include <regex>
-// system
+#include <utility>
 
+// system
+#include <elf.h>
+#include <immintrin.h>
 static std::string_view
 DynamicEntryTagToString(Elf64_Sxword value)
 {
@@ -214,7 +215,8 @@ ObjectFile::FindMinimalFunctionSymbol(std::string_view name, bool searchDynamic)
 {
   for (const auto &symbol : mMinimalFunctionSymbolsSorted) {
     if (symbol.name.contains(name)) {
-      DBGLOG(core, "Returning symbol that contains name '{}': {}", name, symbol.name);
+      DBGLOG(
+        core, "[{}]: Returning symbol that contains name '{}': {}", mObjectFilePath.c_str(), name, symbol.name);
       return symbol;
     }
   }
@@ -222,7 +224,11 @@ ObjectFile::FindMinimalFunctionSymbol(std::string_view name, bool searchDynamic)
   if (searchDynamic) {
     for (const auto &symbol : mMinimalDynamicFunctionSymbolsSorted) {
       if (symbol.name.contains(name)) {
-        DBGLOG(core, "Returning symbol that contains name '{}': {}", name, symbol.name);
+        DBGLOG(core,
+          "[{}]: Returning dynamic symbol that contains name '{}': {}",
+          mObjectFilePath.c_str(),
+          name,
+          symbol.name);
         return symbol;
       }
     }
@@ -543,7 +549,7 @@ ObjectFile::GetProbableCompilationUnits(AddrPtr programCounter) noexcept
 // TODO(simon): Implement something more efficient. For now, we do the absolute worst thing, but this problem is
 // uninteresting for now and not really important, as it can be fixed at any point in time.
 std::vector<sym::CompilationUnit *>
-ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) noexcept
+ObjectFile::GetCompilationUnitsSpanningPC(AddrPtr pc) const noexcept
 {
   return mAddressToCompileUnitMapping.find_by_pc(pc);
 }
@@ -662,8 +668,9 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
   return results;
 }
 
-ObjectFile *
-mmap_objectfile(const tc::SupervisorState &tc, const Path &path) noexcept
+/* static */
+std::shared_ptr<ObjectFile>
+ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
 {
   if (!fs::exists(path)) {
     return nullptr;
@@ -672,23 +679,7 @@ mmap_objectfile(const tc::SupervisorState &tc, const Path &path) noexcept
   auto fd = mdb::ScopedFd::OpenFileReadOnly(path);
   const auto addr = fd.MmapFile<u8>({}, true);
   const auto objfile =
-    new ObjectFile{ std::format("{}:{}", tc.TaskLeaderTid(), path.c_str()), path, fd.FileSize(), addr };
-
-  return objfile;
-}
-
-/* static */
-std::shared_ptr<ObjectFile>
-ObjectFile::CreateObjectFile(tc::SupervisorState *tc, const Path &path) noexcept
-{
-  if (!fs::exists(path)) {
-    return nullptr;
-  }
-
-  auto fd = mdb::ScopedFd::OpenFileReadOnly(path);
-  const auto addr = fd.MmapFile<u8>({}, true);
-  const auto objfile = std::make_shared<ObjectFile>(
-    std::format("{}:{}", tc->TaskLeaderTid(), path.c_str()), path, fd.FileSize(), addr);
+    std::make_shared<ObjectFile>(std::format("{}:{}", processId, path.c_str()), path, fd.FileSize(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
   const auto header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
@@ -756,30 +747,28 @@ ObjectFile::CreateObjectFile(tc::SupervisorState *tc, const Path &path) noexcept
   return objfile;
 }
 
-SymbolFile::SymbolFile(tc::SupervisorState *tc,
-  std::string obj_id,
-  std::shared_ptr<ObjectFile> &&binary,
-  AddrPtr relocated_base) noexcept
-    : mObjectFile(std::move(binary)), mTraceeController(tc), mSymbolObjectFileId(std::move(obj_id)),
+SymbolFile::SymbolFile(
+  Pid processId, std::string obj_id, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
+    : mObjectFile(std::move(binary)), mProcessId(processId), mSymbolObjectFileId(std::move(obj_id)),
       mBaseAddress(relocated_base),
       mPcBounds(AddressRange::relocate(mObjectFile->mUnrelocatedAddressBounds, relocated_base))
 {
 }
 
 SymbolFile::shr_ptr
-SymbolFile::Create(tc::SupervisorState *tc, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
+SymbolFile::Create(Pid processId, std::shared_ptr<ObjectFile> &&binary, AddrPtr relocated_base) noexcept
 {
   MDB_ASSERT(binary != nullptr, "SymbolFile was provided no backing ObjectFile");
 
   return std::make_shared<SymbolFile>(
-    tc, std::format("{}:{}", tc->TaskLeaderTid(), binary->GetPathString()), std::move(binary), relocated_base);
+    processId, std::format("{}:{}", processId, binary->GetPathString()), std::move(binary), relocated_base);
 }
 
 auto
-SymbolFile::Copy(tc::SupervisorState &tc, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
+SymbolFile::Copy(Pid processId, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>
 {
   auto obj = mObjectFile;
-  return SymbolFile::Create(&tc, std::move(obj), relocated_base);
+  return SymbolFile::Create(processId, std::move(obj), relocated_base);
 }
 
 auto
@@ -836,7 +825,7 @@ SymbolFile::GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::Variab
 }
 
 auto
-SymbolFile::GetCompilationUnits(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>
+SymbolFile::GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::CompilationUnit *>
 {
   return mObjectFile->GetCompilationUnitsSpanningPC(pc - *mBaseAddress);
 }
@@ -894,7 +883,7 @@ SymbolFile::ResolveVariable(
 
     for (auto &memberField : type->MemberFields()) {
       auto variableContext = memberField.mType->IsPrimitive() ? VariableContext::CloneFrom(0, ctx)
-                                                              : Tracer::Get().CloneFromVariableContext(ctx);
+                                                              : Tracer::CloneFromVariableContext(ctx);
       auto vId = variableContext->mId;
       auto memberVariable = Ref<sym::Value>::MakeShared(std::move(variableContext),
         memberField.mName,
@@ -948,9 +937,9 @@ SymbolFile::GetObjectFilePath() const noexcept -> Path
 }
 
 auto
-SymbolFile::GetSupervisor() noexcept -> tc::SupervisorState *
+SymbolFile::GetId() noexcept -> Pid
 {
-  return mTraceeController;
+  return mProcessId;
 }
 
 auto
@@ -960,7 +949,7 @@ SymbolFile::GetTextSection() const noexcept -> const ElfSection *
 }
 
 auto
-SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec) noexcept
+SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec) const noexcept
   -> std::vector<BreakpointLookup>
 {
   MDB_ASSERT(bpSpec.mKind == DapBreakpointType::function, "required type=function");
@@ -993,7 +982,7 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
           dieReference.GetUnitData()->SectionOffset(),
           dieReference.GetDie()->mSectionOffset,
           n,
-          addr);
+          AddrPtr{ addr });
       }
     });
   }

@@ -86,9 +86,10 @@ void
 FunctionSymbolicationContext::ProcessInlinedSubroutineDie(DieReference cu_die) noexcept
 {
   DBGLOG(core,
-    "[symbolication]: process_inline not implemented (cu={}, die=0x{:x})",
+    "[symbolication]: process_inline not implemented (cu={}, die=0x{:x}), objfile={}",
     cu_die.GetUnitData()->SectionOffset(),
-    cu_die.GetDie()->mSectionOffset);
+    cu_die.GetDie()->mSectionOffset,
+    mObjectRef.GetObjectFileId());
 }
 
 struct ParseState

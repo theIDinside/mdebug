@@ -194,19 +194,18 @@ public:
   // a protocol.
   bool SessionAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const AttachArgs &args) noexcept;
 
-  std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
+  static std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
 
   // std::shared_ptr<gdb::RemoteConnection> ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const
   // std::optional<gdb::RemoteSettings> &settings) noexcept;
 
   static u32 GenerateNewBreakpointId() noexcept;
-  VariableReferenceId NewVariablesReference() noexcept;
-  VariableReferenceId GetCurrentVariableReferenceBoundary() const noexcept;
-  sym::VarContext GetVariableContext(VariableReferenceId varRefKey) noexcept;
-
-  void SetVariableContext(std::shared_ptr<VariableContext> ctx) noexcept;
-  sym::VarContext CloneFromVariableContext(const VariableContext &ctx) noexcept;
-  void DestroyVariablesReference(VariableReferenceId key) noexcept;
+  static VariableReferenceId NewVariablesReference() noexcept;
+  static VariableReferenceId GetCurrentVariableReferenceBoundary() noexcept;
+  static sym::VarContext GetVariableContext(VariableReferenceId varRefKey) noexcept;
+  static void SetVariableContext(std::shared_ptr<VariableContext> ctx) noexcept;
+  static sym::VarContext CloneFromVariableContext(const VariableContext &ctx) noexcept;
+  static void DestroyVariablesReference(VariableReferenceId key) noexcept;
 
   Ref<TaskInfo> GetTaskBySessionId(u32 sessionId) noexcept;
   static Ref<TaskInfo> GetThreadByTidOrDebugId(Tid tid) noexcept;

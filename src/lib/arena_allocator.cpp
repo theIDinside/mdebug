@@ -1,10 +1,16 @@
 /** LICENSE TEMPLATE */
 #include "arena_allocator.h"
-#include "common.h"
-#include "events/event.h"
+
+// mdb
+#include <common.h>
+#include <utils/logger.h>
+
+// system
+#include <sys/mman.h>
+
+// std
 #include <cstdlib>
 #include <memory_resource>
-#include <sys/mman.h>
 namespace mdb::alloc {
 ArenaResource::ScopedArenaAllocator::ScopedArenaAllocator(ArenaResource *allocator) noexcept
     : mAllocator(allocator)

@@ -130,9 +130,10 @@ NameIndex::MergeTypes(
     const auto offs = Offset{ die_ref.GetDie()->mSectionOffset };
     const auto possible_size = die_ref.ReadAttribute(Attribute::DW_AT_byte_size);
     MDB_ASSERT(possible_size.has_value(),
-      "Expected a 'root' die for a type to have a byte size cu={}, die=0x{:x}",
+      "Expected a 'root' die for a type to have a byte size cu={}, die=0x{:x}, objfile={}",
       cu->SectionOffset(),
-      die_ref.GetDie()->mSectionOffset);
+      die_ref.GetDie()->mSectionOffset,
+      cu->GetObjectFile()->GetObjectFileId());
 
     auto type = typeStorage->CreateNewType(
       this_die->mTag, offs, IndexedDieReference{ cu, idx }, possible_size->AsUnsignedValue(), name);
@@ -141,9 +142,10 @@ NameIndex::MergeTypes(
       reader.SeekDie(*die_ref.GetDie());
       auto attr = die_ref.ReadAttribute(Attribute::DW_AT_encoding);
       MDB_ASSERT(attr.has_value(),
-        "Failed to read encoding of base type. cu={}, die=0{:x}",
+        "Failed to read encoding of base type. cu={}, die=0{:x}, objfile={}",
         cu->SectionOffset(),
-        die_ref.GetDie()->mSectionOffset);
+        die_ref.GetDie()->mSectionOffset,
+        cu->GetObjectFile()->GetObjectFileId());
       auto encoding = attr.and_then(
         [](auto val) { return std::optional{ static_cast<BaseTypeEncoding>(val.AsUnsignedValue()) }; });
       type->SetBaseTypeEncoding(encoding.value());
