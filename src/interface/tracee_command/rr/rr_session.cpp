@@ -571,6 +571,12 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
   auto sessionBreakpoints = mReplaySupervisor->GetSessionBreakpoints();
   auto &specsForSource = sessionBreakpoints->mSourceCodeBreakpoints[sourceFilePath];
 
+  for (const auto &sourceSpec : add) {
+    if (!specsForSource.contains(sourceSpec)) {
+      specsForSource.emplace(sourceSpec, sessionBreakpoints->CreateBreakpointInfo());
+    }
+  }
+
   for (const auto &symbol_file : mSymbolFiles) {
     auto obj = symbol_file->GetObjectFile();
     for (auto &sourceCodeFile : obj->GetSourceCodeFiles(sourceFilePath.c_str())) {
