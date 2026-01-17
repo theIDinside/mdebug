@@ -39,6 +39,7 @@ main(int argc, const char **argv, const char **envp)
 {
 
   prctl(PR_SET_DUMPABLE, 1);
+  prctl(PR_SET_NAME, "mdb-main", 0, 0, 0);
 
   mdb::Start(argc, argv, envp);
   return 0;
