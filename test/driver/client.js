@@ -13,6 +13,7 @@ const { spawn, ChildProcess } = require('child_process')
 const EventEmitter = require('events')
 const { assertLog, prettyJson, allUniqueVariableReferences, TestArgs, parseTestConfiguration } = require('./utils')
 const net = require('net')
+const { randomUUID } = require('crypto')
 
 if (!global.__sessionId__) {
   global.__sessionId__ = 0
@@ -524,6 +525,7 @@ class DebugAdapterClient {
     this.config = config
     // For now we don't support multi-process testing. That is only testable manually.
     this.sessionId = getNextSessionId()
+    this.configToken = randomUUID()
     try {
       this.recording = process.env.hasOwnProperty('REC')
       if (this.recording) {
@@ -591,6 +593,8 @@ class DebugAdapterClient {
           console.log(`SENDING SIGTERM (is recorded): ${ok ? 'ok' : 'failed'}`)
         }
       }
+
+      printMdbInfo()
 
       if (code != 0) {
         dump_log(this.config.args.test)
@@ -717,7 +721,7 @@ class DebugAdapterClient {
     const json = {
       seq: this.seq,
       type: 'request',
-      sessionId: sessionId,
+      processId: sessionId,
       command: req,
       arguments: args,
     }
@@ -958,7 +962,6 @@ class DebugAdapterClient {
       if (configurationRoutine) {
         await configurationRoutine()
       }
-      await this.configurationDoneRequest()
     })
 
     for (const p of [
@@ -972,6 +975,7 @@ class DebugAdapterClient {
     // started, and configurationDone is sent _before_ launch/attach responds
     console.log(`launching using arguments: ${JSON.stringify(startArguments)}`)
     await this.launchRequest(startArguments).then((res) => checkResponse(res, 'launch', true))
+    await this.configurationDoneRequest()
     console.log(`launch completed`)
   }
 
@@ -982,7 +986,7 @@ class DebugAdapterClient {
         program: launchArgs['program'],
         stopOnEntry: launchArgs['stopOnEntry'],
         type: launchArgs['type'],
-        sessionId: this.sessionId,
+        processId: this.sessionId,
       },
       () => console.log(`configuration completed`)
     )
@@ -1037,6 +1041,24 @@ class DebugAdapterClient {
     await this.attachRequest(attachArguments)
 
     return hit_main_stopped_promise
+  }
+
+  async nativeStartToMain(program, breapointRequests, timeout = seconds(2)) {
+    let stoppedPromise = this.prepareWaitForEventN('stopped', 1, timeout, this.nativeStartToMain)
+    await this.startLaunchSession(
+      {
+        program: launchArgs['program'],
+        stopOnEntry: launchArgs['stopOnEntry'],
+        type: launchArgs['type'],
+        processId: this.sessionId,
+      },
+      () => {
+        for (const request of breakpointsRequests) {
+          this.setBreakpointsRequest({ ...request, configToken: this.configToken })
+        }
+      }
+    )
+    return stoppedPromise
   }
 
   async startRunToMain(program, timeout = seconds(1)) {
@@ -1144,13 +1166,13 @@ class DebugAdapterClient {
       case 'terminate':
         res = this.sendReqGetResponse('disconnect', {
           terminateDebuggee: true,
-          sessionId: this.sessionId,
+          processId: this.sessionId,
         })
         break
       case 'suspend':
         res = this.sendReqGetResponse('disconnect', {
           suspendDebuggee: true,
-          sessionId: this.sessionId,
+          processId: this.sessionId,
         })
         break
       default:
@@ -1207,7 +1229,7 @@ class DebugAdapterClient {
     this.sessionId = getNextSessionId()
     return this.sendReqGetResponse(
       'initialize',
-      { sessionId: this.sessionId },
+      { processId: this.sessionId, configToken: this.configToken },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
   }
@@ -1215,7 +1237,7 @@ class DebugAdapterClient {
   async configurationDoneRequest() {
     return this.sendReqGetResponse(
       'configurationDone',
-      { sessionId: this.sessionId },
+      { processId: this.sessionId, configToken: this.configToken },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
   }
@@ -1223,7 +1245,7 @@ class DebugAdapterClient {
   async attachRequest(args) {
     const response = await this.sendReqGetResponse(
       'attach',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId, configToken: this.configToken },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1232,9 +1254,10 @@ class DebugAdapterClient {
   async launchRequest(args) {
     const response = await this.sendReqGetResponse(
       'launch',
-      { ...args, sessionId: this.sessionId },
+      { ...args, configToken: this.configToken },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
+    this.sessionId = response.body.processId
     return response
   }
 
@@ -1245,7 +1268,7 @@ class DebugAdapterClient {
   async continueRequest(args) {
     const response = await this.sendReqGetResponse(
       'continue',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
 
@@ -1258,7 +1281,7 @@ class DebugAdapterClient {
   async nextRequest(args) {
     const response = await this.sendReqGetResponse(
       'next',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
 
@@ -1268,7 +1291,7 @@ class DebugAdapterClient {
   async pauseRequest(args) {
     const response = await this.sendReqGetResponse(
       'pause',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
 
@@ -1307,9 +1330,10 @@ class DebugAdapterClient {
 
       args.breakpoints = lineNumbers
     }
+
     const response = await this.sendReqGetResponse(
       'setBreakpoints',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1318,7 +1342,7 @@ class DebugAdapterClient {
   async setFunctionBreakpointsRequest(args) {
     const response = await this.sendReqGetResponse(
       'setFunctionBreakpoints',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1331,7 +1355,7 @@ class DebugAdapterClient {
   async threadsRequest(args) {
     const response = await this.sendReqGetResponse(
       'threads',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1344,7 +1368,7 @@ class DebugAdapterClient {
   async stackTraceRequest(args) {
     const response = await this.sendReqGetResponse(
       'stackTrace',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1357,7 +1381,7 @@ class DebugAdapterClient {
   async scopesRequest(args) {
     const response = await this.sendReqGetResponse(
       'scopes',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1370,7 +1394,7 @@ class DebugAdapterClient {
   async variablesRequest(args) {
     const response = await this.sendReqGetResponse(
       'variables',
-      { ...args, sessionId: this.sessionId },
+      { ...args, processId: this.sessionId },
       this.defaultTimeout ?? this.setDefaultRequestTimeout(1000)
     )
     return response
@@ -1520,6 +1544,12 @@ function allBreakpointIdentifiers(relativeTestFilePath) {
   return result
 }
 
+/**
+ * @param { DebugAdapterClient } debugAdapter
+ * @param { string } filePath
+ * @param { string[] } bpIdentifiers
+ * @returns
+ */
 async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
   const file = readFileContents(repoDirFile(filePath))
   const bp_lines = bpIdentifiers
@@ -1539,13 +1569,13 @@ async function SetBreakpoints(debugAdapter, filePath, bpIdentifiers) {
     breakpoints: bp_lines,
   }
   console.log(`setting breakpoints in: ${prettyJson(args)}`)
-  const bkpt_res = await debugAdapter.sendReqGetResponse('setBreakpoints', args)
+  const breakpointResponse = await debugAdapter.setBreakpointsRequest(args)
   assertLog(
-    bkpt_res.body.breakpoints.length == bpIdentifiers.length,
-    `Expected ${bpIdentifiers.length} breakpoints:\n${prettyJson(bkpt_res)}`,
-    `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(bkpt_res)}`
+    breakpointResponse.body.breakpoints.length == bpIdentifiers.length,
+    `Expected ${bpIdentifiers.length} breakpoints:\n${prettyJson(breakpointResponse)}`,
+    `Failed to set ${bpIdentifiers.length} breakpoints. Response: \n${prettyJson(breakpointResponse)}`
   )
-  return bkpt_res
+  return breakpointResponse
 }
 
 /**
@@ -1587,6 +1617,7 @@ async function PrepareBreakpointArguments(filePath, bpIdentifers) {
  */
 async function launchToGetFramesAndScopes(debugAdapter, filePath, bpIdentifiers, expectedFrameName, exeFile) {
   await debugAdapter.startRunToMain(debugAdapter.buildDirFile(exeFile), 5000)
+  console.log(`SET BREAKPOINTS`)
   const bpres = await SetBreakpoints(debugAdapter, filePath, bpIdentifiers)
   const threads = await debugAdapter.threads()
   await debugAdapter.contNextStop(threads[0].id)
