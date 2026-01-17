@@ -339,10 +339,11 @@ DebugAdapterManager::SupervisorMaterialized(
   std::optional<std::string_view> configToken, NonNullPtr<tc::SupervisorState> supervisor) noexcept
 {
   if (configToken) {
+    MDB_ASSERT(mOnInitialSupervisor.empty(), "mOnInitialSupervisor is not empty!");
     const std::string key = std::string{ *configToken };
-    auto &setupFunctions = mOnConfigSupervisors[key];
-    const bool configPhaseBeforeMaterialization = !setupFunctions.empty();
-    for (auto &cb : mOnInitialSupervisor) {
+    auto setupFunctionsIterator = mOnConfigSupervisors.find(key);
+    const bool configPhaseBeforeMaterialization = !setupFunctionsIterator->second.empty();
+    for (auto &cb : setupFunctionsIterator->second) {
       cb(supervisor);
     }
     mOnConfigSupervisors.erase(key);

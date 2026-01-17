@@ -784,6 +784,7 @@ private:
   ExecuteDuringConfigPhase(
     Path file, Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
+    DBGLOG(core, "setBreakpoints with no target, postponed");
     mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, file = std::move(file), specs = std::move(specs)](
         tc::SupervisorState &target) {
@@ -850,7 +851,10 @@ public:
     // respond with breakpoints: [], and then instead emit "new breakpoint" events for when the configuration phase
     // + attach/launch has happened.
     if (!target) {
-      DBGBUFLOG(core, "Session {} has no supervisor yet, postponing breakpoint creation.", mProcessId);
+      DBGBUFLOG(core,
+        "Session {} has no supervisor yet, postponing breakpoint creation (configToken: {})",
+        mProcessId,
+        get<std::string_view>(args, kConfigToken).value_or("<no config token provided>"));
       ExecuteDuringConfigPhase(Path{ file }, std::move(specs), get<std::string>(args, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
     } else {
@@ -902,6 +906,7 @@ private:
   inline void
   ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
+    DBGLOG(core, "setInstructionBreakpoints with no target, postponed");
     mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
         DBGBUFLOG(core, "Setting post poned instruction breakpoints");
@@ -1209,16 +1214,18 @@ struct ConfigurationDoneResponse final : public ui::UIResult
 
 struct ConfigurationDone final : public ui::UICommand
 {
-  ConfigurationDone(UICommandArg arg) noexcept : UICommand(std::move(arg)) {}
-
+  ConfigurationDone(UICommandArg arg, mdbjson::JsonValue args) noexcept : UICommand(std::move(arg)), mArgs(args) {}
   ~ConfigurationDone() override = default;
+
+  mdbjson::JsonValue mArgs;
 
   void
   Execute() noexcept final
   {
     bool postponed = false;
     if (auto target = GetSupervisor(); target) {
-      bool success = target->ConfigurationDone();
+      bool success = target->ConfigurationDone(
+        get<std::string_view>(mArgs, kConfigToken).value_or("<no config token provided>"));
       postponed = false;
     } else {
       DBGLOG(core, "No target to run configuration done on");
@@ -1229,7 +1236,8 @@ struct ConfigurationDone final : public ui::UICommand
   }
 
   DEFINE_NAME("configurationDone");
-  NoRequiredArgs();
+  RequiredArguments({ kConfigToken });
+  DefineArgTypes({ kConfigToken, FieldType::String });
 };
 
 struct DisconnectResponse final : public UIResult
@@ -1576,20 +1584,23 @@ struct RRLaunch final : public Launch
   RRLaunch(UICommandArg arg,
     bool stopOnEntry,
     std::optional<BreakpointBehavior> breakpointBehavior,
-    std::string_view traceDir) noexcept
-      : Launch{ std::move(arg), stopOnEntry, breakpointBehavior }, mTraceDirectory(traceDir)
+    std::string_view traceDir,
+    std::string_view configToken) noexcept
+      : Launch{ std::move(arg), stopOnEntry, breakpointBehavior }, mTraceDirectory(traceDir),
+        mConfigToken(configToken)
   {
   }
 
   ~RRLaunch() noexcept final = default;
 
   std::string_view mTraceDirectory;
+  std::string_view mConfigToken;
 
-  RequiredArguments({ "traceDir"sv });
-  DefineArgTypes({ "traceDir", FieldType::String });
+  RequiredArguments({ "traceDir"sv, kConfigToken });
+  DefineArgTypes({ "traceDir", FieldType::String }, { kConfigToken, FieldType::String });
 
   void
-  OnReplayStarted(tc::replay::ReplaySupervisor *replaySupervisor) noexcept
+  ExecuteOnReplayStarted(tc::replay::ReplaySupervisor *replaySupervisor) noexcept
   {
     namespace replay = tc::replay;
 
@@ -1604,7 +1615,7 @@ struct RRLaunch final : public Launch
     replay::Session *session =
       replay::Session::Create(replaySupervisor, processes.front(), mDebugAdapterManager, hasReplayedStep);
 
-    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized({}, { session });
+    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized(mConfigToken, { session });
     WriteResponse(RRLaunchResponse{
       replaySupervisor->CurrentLiveProcesses().front(), replaySupervisor->CurrentLiveProcesses(), true, this });
     session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
@@ -1633,7 +1644,7 @@ struct RRLaunch final : public Launch
     auto replaySupervisor = replay::ReplaySupervisor::Create(tc::replay::RRInitOptions{});
 
     replaySupervisor->StartReplay(mTraceDirectory.data(),
-      [cmd = RefPtr{ this }, replaySupervisor]() -> void { cmd->OnReplayStarted(replaySupervisor); });
+      [cmd = RefPtr{ this }, replaySupervisor]() -> void { cmd->ExecuteOnReplayStarted(replaySupervisor); });
   }
 
   static RefPtr<ui::UICommand>
@@ -1644,7 +1655,11 @@ struct RRLaunch final : public Launch
   {
     IfInvalidArgsReturn(RRLaunch);
     std::string_view traceDir = args["traceDir"];
-    return RefPtr<RRLaunch>::MakeShared(std::move(arg), stopOnEntry, behaviorSetting, traceDir);
+
+    auto configTokenValue = get<std::string_view>(args, kConfigToken);
+    MDB_ASSERT(configTokenValue.has_value(), "configToken field missing from LaunchRequest");
+
+    return RefPtr<RRLaunch>::MakeShared(std::move(arg), stopOnEntry, behaviorSetting, traceDir, *configTokenValue);
   }
 };
 
@@ -2521,7 +2536,7 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
     TODO("Command::Completions");
   case CommandType::ConfigurationDone: {
     IfInvalidArgsReturn(ConfigurationDone);
-    return RefPtr<ConfigurationDone>::MakeShared(std::move(arg));
+    return RefPtr<ConfigurationDone>::MakeShared(std::move(arg), args);
   } break;
   case CommandType::Continue: {
     IfInvalidArgsReturn(Continue);
