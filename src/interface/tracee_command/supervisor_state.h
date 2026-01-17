@@ -451,7 +451,7 @@ public:
   bool SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept;
   bool IsRunning() const noexcept;
   void OnConfigurationDone(std::function<bool(SupervisorState *supervisor)> &&done) noexcept;
-  bool ConfigurationDone() noexcept;
+  bool ConfigurationDone(std::string_view configToken) noexcept;
   bool
   IsConfigured() const noexcept
   {
