@@ -31,37 +31,39 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
 {
   std::vector<Ref<Value>> results;
   auto value = *context.GetValue();
+  // actual `T` type behind the reference
+  Type *dereferencedType = value.GetType()->TypeDescribingLayoutOfThis();
   if (const auto address = value.ToRemotePointer(); address.has_value()) {
-    auto adjusted_address = address.value() + (valueRange.start.value_or(0) * value.GetType()->Size());
-    const auto requested_length = valueRange.count.value_or(32);
-    auto memory =
-      sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjusted_address, requested_length);
+    auto adjusted_address = address.value() + (valueRange.start.value_or(0) * dereferencedType->Size());
+    const auto requestedLengthInBytes = valueRange.count.value_or(1) * dereferencedType->Size();
+    auto memory = sym::MemoryContentsObject::ReadMemory(
+      *context.mTask->GetSupervisor(), adjusted_address, requestedLengthInBytes);
     if (!memory.is_ok()) {
       auto t = value.GetType()->TypeDescribingLayoutOfThis();
       results.push_back(
         Ref<Value>::MakeShared(nullptr, *t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
       return results;
     }
-    auto mIndirectValueObject = std::make_shared<EagerMemoryContentsObject>(
+    auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
 
-    // actual `T` type behind the reference
-    auto layout_type = value.GetType()->TypeDescribingLayoutOfThis();
+    auto clonedContext = dereferencedType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
+                                                         : Tracer::CloneFromVariableContext(context);
 
-    auto clonedContext = layout_type->IsPrimitive() ? VariableContext::CloneFrom(0, context)
-                                                    : Tracer::CloneFromVariableContext(context);
-
-    if (layout_type->IsArrayType()) {
+    if (dereferencedType->IsArrayType()) {
       results.push_back(Ref<Value>::MakeShared(
-        clonedContext, *layout_type, 0u, mIndirectValueObject, Tracer::GetSerializer<sym::ArrayVisualizer>()));
-    } else if (layout_type->IsPrimitive() || layout_type->IsReference()) {
-      results.push_back(Ref<Value>::MakeShared(
-        clonedContext, *layout_type, 0u, mIndirectValueObject, Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
+        clonedContext, *dereferencedType, 0u, indirectValueObject, Tracer::GetSerializer<sym::ArrayVisualizer>()));
+    } else if (dereferencedType->IsPrimitive() || dereferencedType->IsReference()) {
+      results.push_back(Ref<Value>::MakeShared(clonedContext,
+        *dereferencedType,
+        0u,
+        indirectValueObject,
+        Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
     } else {
       results.push_back(Ref<Value>::MakeShared(clonedContext,
-        *layout_type,
+        *dereferencedType,
         0u,
-        mIndirectValueObject,
+        indirectValueObject,
         Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
     }
     ObjectFile::InitializeDataVisualizer(*results.back());
