@@ -371,17 +371,6 @@ Session::DoResumeTarget(RunType type) noexcept
   return resumed > 0;
 }
 
-void
-Session::AttachSession() noexcept
-{
-  OnConfigurationDone([](tc::SupervisorState *supervisor) {
-    mdb::tc::ptrace::Session *process = static_cast<mdb::tc::ptrace::Session *>(supervisor);
-    process->ProcessDeferredEvents();
-    process->ProcessQueuedUnhandled(process->TaskLeaderTid());
-    return true;
-  });
-}
-
 bool
 Session::Pause(Tid tid) noexcept
 {

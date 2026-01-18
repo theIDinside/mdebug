@@ -114,7 +114,6 @@ public:
   void DoResumeTask(TaskInfo &t, RunType type) noexcept final;
   bool DoResumeTarget(RunType type) noexcept final;
   bool ReverseResumeTarget(tc::RunType type) noexcept final;
-  void AttachSession() noexcept final;
   bool Pause(Tid tid) noexcept final;
   mdb::ui::dap::StoppedEvent *CreateStoppedEvent(ui::dap::StoppedReason reason,
     std::string_view description,

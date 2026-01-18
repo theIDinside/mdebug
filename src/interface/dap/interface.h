@@ -170,6 +170,39 @@ public:
   bool ManagesSupervisor(Pid processId) const;
 };
 
+class DebugAdapterManager;
+
+enum class ConfigureState : u8
+{
+  Initialized,
+  Launched,
+  Configured,
+  Completed
+};
+
+class SupervisorSessionConfiguration
+{
+  using ConfigRequest = std::function<void(tc::SupervisorState &)>;
+
+  // The supervisor which we're applying the configuration steps to.
+  // The DebugAdapterManager maps a configToken -> DebugAdapterSessionConfiguration
+  tc::SupervisorState *mSupervisor{ nullptr };
+  // Apply when a process has been creatd, where this work can actually run.
+  // In some scenarios, Launch happens first. Then this will never be filled with anything
+  // because the requests can just run immediately.
+  std::vector<ConfigRequest> mOnProcessCreated;
+
+  ConfigureState mConfigureState{ ConfigureState::Initialized };
+
+  void Complete();
+
+public:
+  static std::unique_ptr<SupervisorSessionConfiguration> Create();
+  ConfigureState OnLaunch(NonNullPtr<tc::SupervisorState> supervisor);
+  ConfigureState OnConfigurationDone();
+  void AddConfigurationRequest(ConfigRequest &&request);
+};
+
 class DebugAdapterManager
 {
   int mReadFd{};
@@ -181,10 +214,9 @@ class DebugAdapterManager
   // Callback for configuration phase to be executed when an actual supervisor has materialized
   // (which happens after a launch or attach). For processes that got spawed by the target, while debugging,
   // the configuration phase will work on the first try, since there's a materialized session to target.
-  std::vector<std::function<void(tc::SupervisorState &)>> mOnInitialSupervisor;
-  std::unordered_map<std::string, std::vector<std::function<void(tc::SupervisorState &)>>> mOnConfigSupervisors;
   std::unordered_map<std::string, Pid> mConfigTokenToProcessId;
-  bool mConfigPhaseDoneWithNoMaterializedSupervisor{ false };
+  std::unordered_map<std::string, std::unique_ptr<SupervisorSessionConfiguration>> mSessionConfigurations;
+
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt
   // away.
@@ -237,8 +269,8 @@ public:
   void SetTtyOut(int fd, SessionId pid) noexcept;
   std::optional<int> GetTtyFileDescriptor() const noexcept;
   tc::SupervisorState *GetSupervisor(Pid pid) const noexcept;
-  tc::SupervisorState *GetSupervisor(std::string_view configToken) const noexcept;
-  std::span<UniquePtr<DebugAdapterSession>> Sessions() noexcept;
+  void ConfigureNewSession(std::string_view configToken) noexcept;
+  SupervisorSessionConfiguration *GetConfigurationFor(std::string_view configToken) noexcept;
   void SetDebugAdapterSessionType(DapClientSession type) noexcept;
   void PushDelayedEvent(UIResultPtr delayedEvent) noexcept;
   void AddSupervisor(tc::SupervisorState *supervisor) noexcept;
@@ -249,15 +281,6 @@ public:
   // Called when configuration happens for a session with no running processes.
   void OnSessionConfiguredWithSupervisor(
     std::optional<std::string_view> configToken, std::function<void(tc::SupervisorState &)> callback) noexcept;
-  bool SupervisorMaterialized(
-    std::optional<std::string_view> configToken, NonNullPtr<tc::SupervisorState> supervisor) noexcept;
-  void ConfigDoneWithNoSupervisor(bool value = true) noexcept;
-
-  bool
-  HasPendingConfigDone() const noexcept
-  {
-    return mConfigPhaseDoneWithNoMaterializedSupervisor;
-  }
 };
 
 enum class InterfaceNotificationSource
