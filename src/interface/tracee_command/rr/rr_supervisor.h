@@ -295,6 +295,7 @@ class ReplaySupervisor
   void OnReverse() noexcept;
 
 public:
+  void SetIsReversing(bool value) noexcept;
   void Erase(Session *session) noexcept;
   static ReplaySupervisor *Create(const RRInitOptions &initOptions = {}) noexcept;
   void StartReplay(const char *traceDir, std::function<void()> onStartCompleted) noexcept;

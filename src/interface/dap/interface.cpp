@@ -301,14 +301,21 @@ DebugAdapterManager::GetSupervisor(Pid pid) const noexcept
   return nullptr;
 }
 
-tc::SupervisorState *
-DebugAdapterManager::GetSupervisor(std::string_view configToken) const noexcept
+void
+DebugAdapterManager::ConfigureNewSession(std::string_view configToken) noexcept
 {
-  auto it = mConfigTokenToProcessId.find(std::string{ configToken });
-  if (it != std::end(mConfigTokenToProcessId)) {
-    return GetSupervisor(it->second);
+  mSessionConfigurations.emplace(std::string{ configToken }, SupervisorSessionConfiguration::Create());
+}
+
+SupervisorSessionConfiguration *
+DebugAdapterManager::GetConfigurationFor(std::string_view configToken) noexcept
+{
+  auto it = mSessionConfigurations.find(std::string{ configToken });
+  if (it == std::end(mSessionConfigurations)) {
+    return nullptr;
   }
-  return nullptr;
+
+  return it->second.get();
 }
 
 void
@@ -327,42 +334,11 @@ void
 DebugAdapterManager::OnSessionConfiguredWithSupervisor(
   std::optional<std::string_view> configToken, std::function<void(tc::SupervisorState &)> callback) noexcept
 {
-  if (configToken) {
-    mOnConfigSupervisors[std::string{ *configToken }].push_back(std::move(callback));
-  } else {
-    mOnInitialSupervisor.push_back(std::move(callback));
-  }
-}
+  MDB_ASSERT(configToken.has_value(), "NO CONFIG TOKEN");
+  auto it = mSessionConfigurations.find(std::string{ *configToken });
 
-bool
-DebugAdapterManager::SupervisorMaterialized(
-  std::optional<std::string_view> configToken, NonNullPtr<tc::SupervisorState> supervisor) noexcept
-{
-  if (configToken) {
-    MDB_ASSERT(mOnInitialSupervisor.empty(), "mOnInitialSupervisor is not empty!");
-    const std::string key = std::string{ *configToken };
-    auto setupFunctionsIterator = mOnConfigSupervisors.find(key);
-    const bool configPhaseBeforeMaterialization = !setupFunctionsIterator->second.empty();
-    for (auto &cb : setupFunctionsIterator->second) {
-      cb(supervisor);
-    }
-    mOnConfigSupervisors.erase(key);
-    return configPhaseBeforeMaterialization;
-  } else {
-    // Do best effort, check the "hopefully correct callbacks"
-    const bool configPhaseBeforeMaterialization = !mOnInitialSupervisor.empty();
-    for (auto &cb : mOnInitialSupervisor) {
-      cb(supervisor);
-    }
-    mOnInitialSupervisor.clear();
-    return configPhaseBeforeMaterialization;
-  }
-}
-
-void
-DebugAdapterManager::ConfigDoneWithNoSupervisor(bool value /* = true */) noexcept
-{
-  mConfigPhaseDoneWithNoMaterializedSupervisor = value;
+  MDB_ASSERT(it != std::end(mSessionConfigurations), "Could not find session configurator {}", *configToken);
+  it->second->AddConfigurationRequest(std::move(callback));
 }
 
 void
@@ -452,6 +428,60 @@ DapEventSystem::ConfigureTty(int master_pty_fd) noexcept
   auto flags = fcntl(master_pty_fd, F_GETFL);
   VERIFY(flags != -1, "Failed to get pty flags");
   VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
+}
+
+void
+SupervisorSessionConfiguration::Complete()
+{
+  MDB_ASSERT(mSupervisor, "Supervisor has not been set.");
+  for (auto &req : mOnProcessCreated) {
+    req(*mSupervisor);
+  }
+  mConfigureState = ConfigureState::Completed;
+  mSupervisor->ConfigurationDone();
+}
+
+/*static*/ std::unique_ptr<SupervisorSessionConfiguration>
+SupervisorSessionConfiguration::Create()
+{
+  return std::unique_ptr<SupervisorSessionConfiguration>{ new SupervisorSessionConfiguration{} };
+}
+
+ConfigureState
+SupervisorSessionConfiguration::OnLaunch(NonNullPtr<tc::SupervisorState> supervisor)
+{
+  mSupervisor = supervisor;
+
+  switch (mConfigureState) {
+  case ConfigureState::Configured:
+    Complete();
+    break;
+  default:
+    mConfigureState = ConfigureState::Launched;
+    break;
+  }
+
+  return mConfigureState;
+}
+
+ConfigureState
+SupervisorSessionConfiguration::OnConfigurationDone()
+{
+  switch (mConfigureState) {
+  case ConfigureState::Launched:
+    Complete();
+    break;
+  default:
+    mConfigureState = ConfigureState::Configured;
+    break;
+  }
+  return mConfigureState;
+}
+
+void
+SupervisorSessionConfiguration::AddConfigurationRequest(ConfigRequest &&request)
+{
+  mOnProcessCreated.emplace_back(std::move(request));
 }
 
 void

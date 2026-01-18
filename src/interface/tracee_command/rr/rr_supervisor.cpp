@@ -245,10 +245,12 @@ ReplaySupervisor::RequestResume(ResumeReplay resumeReplayOp)
     return false;
   }
 
-  mIsReversing = resumeReplayOp.direction == RR_DIR_REVERSE;
-  if (mIsReversing) {
+  // We don't want to iterate and clear state _every_ time we reverse
+  // we only want to do it the first time (and only if we hit breakpoint while reversing).
+  if (!mIsReversing && resumeReplayOp.direction == RR_DIR_REVERSE) {
     OnReverse();
   }
+  SetIsReversing(resumeReplayOp.direction == RR_DIR_REVERSE);
 
   mRequestedResume = resumeReplayOp;
 
@@ -768,17 +770,6 @@ void
 ReplaySupervisor::NotifyResumed() noexcept
 {
   mHasRequest = true;
-
-  if (!mTimelineSupervisors.empty()) {
-    auto *debugAdapterManager = mTimelineSupervisors.front()->GetDebugAdapterProtocolClient();
-    for (auto &supervisor : mTimelineSupervisors) {
-      if (supervisor->GetProcessId() != -1 && !supervisor->IsExited()) {
-        debugAdapterManager->PostDapEvent(new ui::dap::ContinuedEvent{
-          supervisor->GetProcessId(), supervisor->TaskLeaderTid(), /* allThreads */ true });
-      }
-    }
-  }
-
   mRequestCondVar.notify_one();
 }
 
@@ -791,6 +782,12 @@ ReplaySupervisor::OnReverse() noexcept
       t.mTask->SetInvalidCache();
     }
   }
+}
+
+void
+ReplaySupervisor::SetIsReversing(bool value) noexcept
+{
+  mIsReversing = value;
 }
 
 static std::optional<Path>

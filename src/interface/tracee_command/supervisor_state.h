@@ -59,6 +59,7 @@ struct UnwinderSymbolFilePair;
 namespace mdb::ui::dap {
 class DebugAdapterManager;
 struct StoppedEvent;
+class SupervisorSessionConfiguration;
 } // namespace mdb::ui::dap
 
 namespace mdb::tc {
@@ -145,6 +146,8 @@ enum class SupervisorType : u8
 
 class SupervisorState
 {
+  friend class ui::dap::SupervisorSessionConfiguration;
+
 protected:
   // This process' parent pid
   pid_t mParentPid{ 0 };
@@ -203,9 +206,6 @@ protected:
   // applications on Linux)
   ParsedAuxiliaryVector mParsedAuxiliaryVector;
   LinkerLoaderDebug mLinkerDebugData;
-
-  bool mHasConfigurationDoneCallback{ false };
-  std::function<bool(SupervisorState *supervisor)> mOnConfigurationDoneCallback;
 
 public:
   const SupervisorType mSupervisorType;
@@ -450,8 +450,7 @@ public:
   ui::dap::DebugAdapterManager *GetDebugAdapterProtocolClient() const noexcept;
   bool SetAndCallRunAction(Tid tid, std::shared_ptr<ptracestop::ThreadProceedAction> action) noexcept;
   bool IsRunning() const noexcept;
-  void OnConfigurationDone(std::function<bool(SupervisorState *supervisor)> &&done) noexcept;
-  bool ConfigurationDone(std::string_view configToken) noexcept;
+  void ConfigurationDone() noexcept;
   bool
   IsConfigured() const noexcept
   {
@@ -529,7 +528,6 @@ public:
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
   virtual void DoResumeTask(TaskInfo &t, RunType type) noexcept = 0;
   virtual bool DoResumeTarget(RunType type) noexcept = 0;
-  virtual void AttachSession() noexcept = 0;
   virtual bool ReverseResumeTarget(tc::RunType type) noexcept;
   virtual mdb::ui::dap::StoppedEvent *CreateStoppedEvent(ui::dap::StoppedReason reason,
     std::string_view description,

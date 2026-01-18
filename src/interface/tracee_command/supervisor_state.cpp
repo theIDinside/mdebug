@@ -427,29 +427,10 @@ SupervisorState::IsRunning() const noexcept
 }
 
 void
-SupervisorState::OnConfigurationDone(std::function<bool(SupervisorState *supervisor)> &&done) noexcept
+SupervisorState::ConfigurationDone() noexcept
 {
-  mOnConfigurationDoneCallback = std::move(done);
-  mHasConfigurationDoneCallback = true;
-}
-
-bool
-SupervisorState::ConfigurationDone(std::string_view configToken) noexcept
-{
-  DBGBUFLOG(core, "Configuration done for supervisor {} using configToken {}", mTaskLeader, configToken);
-  if (mIsConfigured) {
-    return true;
-  }
+  DBGBUFLOG(core, "Configuration done for supervisor {}", mTaskLeader);
   mIsConfigured = true;
-  bool result = [&]() {
-    if (mHasConfigurationDoneCallback) {
-      return mOnConfigurationDoneCallback(this);
-    } else {
-      return true;
-    }
-  }();
-
-  return result || mDebugAdapterClient->SupervisorMaterialized(configToken, { this });
 }
 
 void
