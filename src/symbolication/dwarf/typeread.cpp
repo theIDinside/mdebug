@@ -321,7 +321,8 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
   // A member without a location is not a member. It can be a static variable or a constexpr variable.
   if (!location) {
     DBGLOG(core,
-      "die 0x{:x} (name={}) is DW_TAG_member but had no location (static/constexpr/static-constexpr?)",
+      "cu={}, die 0x{:x} (name={}) is DW_TAG_member but had no location",
+      cu_die.GetUnitData()->SectionOffset(),
       cu_die.GetDie()->mSectionOffset,
       name.transform([](auto v) { return v.AsCString(); }).value_or("die had no name"));
     return;

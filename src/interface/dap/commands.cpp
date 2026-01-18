@@ -842,22 +842,14 @@ public:
         SourceBreakpointSpec{ .line = line, .column = column, .log_message = std::move(logMessage) }));
     }
 
-    if (!target) {
-      target = mDebugAdapterManager->GetSupervisor(get<std::string_view>(args, kConfigToken).value_or(""));
-    }
-
-    // If target == nullptr, means this is in the configuration phase of a session, because attach or launch has
-    // not yet happened so we don't actually have a process and executable to set these for. In that event
-    // respond with breakpoints: [], and then instead emit "new breakpoint" events for when the configuration phase
-    // + attach/launch has happened.
-    if (!target) {
-      DBGBUFLOG(core,
-        "Session {} has no supervisor yet, postponing breakpoint creation (configToken: {})",
-        mProcessId,
-        get<std::string_view>(args, kConfigToken).value_or("<no config token provided>"));
+    if (auto token = get<std::string_view>(args, kConfigToken); token.has_value()) {
+      // Request sent during configuration phase
       ExecuteDuringConfigPhase(Path{ file }, std::move(specs), get<std::string>(args, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
     } else {
+      if (!target) {
+        TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+      }
       target->SetSourceBreakpoints(file, specs);
 
       using BP = ui::dap::Breakpoint;
@@ -869,8 +861,8 @@ public:
           breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
         }
       }
-
-      WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, std::move(*breakpoints) });
+      return WriteResponse(
+        SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, std::move(*breakpoints) });
     }
   }
   DEFINE_NAME("setBreakpoints");
@@ -912,6 +904,7 @@ private:
         DBGBUFLOG(core, "Setting post poned instruction breakpoints");
         // Set the breakpoints
         target.SetInstructionBreakpoints(specs);
+        DBGBUFLOG(core, "Instruction breakpoints was set.");
         // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
         auto &userBreakpoints = target.GetUserBreakpoints();
 
@@ -950,14 +943,14 @@ public:
       specs.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{ addrString }));
     }
 
-    if (!target) {
-      target = mDebugAdapterManager->GetSupervisor(get<std::string_view>(mArgs, kConfigToken).value_or(""));
-    }
-
-    if (!target) {
+    if (auto token = get<std::string_view>(mArgs, kConfigToken); token.has_value()) {
+      // Request sent during configuration phase
       ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
     } else {
+      if (!target) {
+        TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+      }
       target->SetInstructionBreakpoints(specs);
 
       auto &userBreakpoints = target->GetUserBreakpoints();
@@ -968,7 +961,7 @@ public:
           BP::CreateFromUserBreakpoint(*userBreakpoints.GetUserBreakpoint(id), MemoryResource()));
       }
 
-      WriteResponse(
+      return WriteResponse(
         SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, std::move(*breakpoints) });
     }
   }
@@ -1031,14 +1024,14 @@ public:
         BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, std::move(functionName), isRegex));
     }
 
-    if (!target) {
-      target = mDebugAdapterManager->GetSupervisor(get<std::string_view>(mArgs, kConfigToken).value_or(""));
-    }
-
-    if (!target) {
+    if (auto token = get<std::string_view>(mArgs, kConfigToken); token.has_value()) {
+      // Request sent during configuration phase
       ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
-      WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
+      return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
     } else {
+      if (!target) {
+        TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+      }
       target->SetFunctionBreakpoints(specs);
       for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
         if (user->mKind == LocationUserKind::Function) {
@@ -1046,7 +1039,7 @@ public:
         }
       }
 
-      WriteResponse(
+      return WriteResponse(
         SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, std::move(*breakpoints) });
     }
   }
@@ -1222,17 +1215,13 @@ struct ConfigurationDone final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    bool postponed = false;
-    if (auto target = GetSupervisor(); target) {
-      bool success = target->ConfigurationDone(
-        get<std::string_view>(mArgs, kConfigToken).value_or("<no config token provided>"));
-      postponed = false;
-    } else {
-      DBGLOG(core, "No target to run configuration done on");
-      postponed = true;
-      mDebugAdapterManager->ConfigDoneWithNoSupervisor();
-    }
-    return WriteResponse(ConfigurationDoneResponse{ postponed, /*success*/ true, /*cmd*/ this });
+    auto token = get<std::string_view>(mArgs, kConfigToken);
+    MDB_ASSERT(token.has_value(), "MDB DAP Extension Configuration Phase requires configToken field");
+
+    auto config = mDebugAdapterManager->GetConfigurationFor(*token);
+    ConfigureState state = config->OnConfigurationDone();
+    return WriteResponse(
+      ConfigurationDoneResponse{ state != ConfigureState::Completed, /*success*/ true, /*cmd*/ this });
   }
 
   DEFINE_NAME("configurationDone");
@@ -1323,6 +1312,10 @@ struct Initialize final : public ui::UICommand
       RRSession = mArgs["RRSession"];
     }
 
+    auto configToken = get<std::string_view>(mArgs, kConfigToken);
+    MDB_ASSERT(configToken.has_value(), "Initialize request requires a config token");
+
+    mDebugAdapterManager->ConfigureNewSession(*configToken);
     mDebugAdapterManager->PushDelayedEvent(new ui::dap::InitializedEvent{ mProcessId, {} });
     return WriteResponse(InitializeResponse{ RRSession, true, this });
   }
@@ -1504,19 +1497,17 @@ struct NativeLaunch final : public Launch
     process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid() });
     WriteResponse(LaunchResponse{ process->TaskLeaderTid(), true, this });
 
-    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized(mConfigToken, { process });
-    if (mDebugAdapterManager->HasPendingConfigDone()) {
-      process->ProcessDeferredEvents();
-      process->ProcessQueuedUnhandled(process->TaskLeaderTid());
-      mDebugAdapterManager->ConfigDoneWithNoSupervisor(false);
-    } else {
-      process->OnConfigurationDone([&](mdb::tc::SupervisorState *supervisor) {
-        mdb::tc::ptrace::Session *process = static_cast<mdb::tc::ptrace::Session *>(supervisor);
-        process->ProcessDeferredEvents();
-        process->ProcessQueuedUnhandled(process->TaskLeaderTid());
-        return true;
-      });
-    }
+    auto config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
+
+    // As the last config request, we start processing deferred ptrace events, effectively "starting" the debug
+    // session
+    config->AddConfigurationRequest([](tc::SupervisorState &process) {
+      auto &supervisor = static_cast<tc::ptrace::Session &>(process);
+      supervisor.ProcessDeferredEvents();
+      supervisor.ProcessQueuedUnhandled(supervisor.TaskLeaderTid());
+    });
+
+    config->OnLaunch({ process });
   }
 
   std::string_view mConfigToken;
@@ -1615,23 +1606,20 @@ struct RRLaunch final : public Launch
     replay::Session *session =
       replay::Session::Create(replaySupervisor, processes.front(), mDebugAdapterManager, hasReplayedStep);
 
-    const bool configPhaseDone = mDebugAdapterManager->SupervisorMaterialized(mConfigToken, { session });
     WriteResponse(RRLaunchResponse{
       replaySupervisor->CurrentLiveProcesses().front(), replaySupervisor->CurrentLiveProcesses(), true, this });
     session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
 
-    if (mDebugAdapterManager->HasPendingConfigDone() || session->IsConfigured()) {
+    auto config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
+
+    // last step to run, right when we've completed configuration
+    config->AddConfigurationRequest([](tc::SupervisorState &supervisor) {
+      auto *session = static_cast<replay::Session *>(&supervisor);
+      replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
       session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
-      mDebugAdapterManager->ConfigDoneWithNoSupervisor(false);
-    } else {
-      session->OnConfigurationDone([processes = std::move(processes)](tc::SupervisorState *supervisor) {
-        DBGBUFLOG(core, "Configuration done; request attaching of additional processes if necessary.");
-        auto *session = static_cast<replay::Session *>(supervisor);
-        replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
-        session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
-        return true;
-      });
-    }
+    });
+
+    config->OnLaunch({ session });
   }
 
   void
@@ -1643,8 +1631,10 @@ struct RRLaunch final : public Launch
     DBGBUFLOG(core, "[launch]: Creating replay supervisor");
     auto replaySupervisor = replay::ReplaySupervisor::Create(tc::replay::RRInitOptions{});
 
-    replaySupervisor->StartReplay(mTraceDirectory.data(),
-      [cmd = RefPtr{ this }, replaySupervisor]() -> void { cmd->ExecuteOnReplayStarted(replaySupervisor); });
+    replaySupervisor->StartReplay(mTraceDirectory.data(), [cmd = RefPtr{ this }, replaySupervisor]() -> void {
+      DBGBUFLOG(core, "RR Trace has been configured to be replayed!");
+      cmd->ExecuteOnReplayStarted(replaySupervisor);
+    });
   }
 
   static RefPtr<ui::UICommand>

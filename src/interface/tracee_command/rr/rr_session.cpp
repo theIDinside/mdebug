@@ -165,6 +165,9 @@ Session::HandleEventInReverse(const ReplayEvent &evt) noexcept
       TaskInfo *task = GetTaskByTid(evt.mTaskInfo.mRecTid);
       shouldKeepReversing = HandleBreakpointHitInReverse(*task, loc);
     }
+    // Setting flag to false, means if user reverse continues
+    // we will clear any potential breakpoint-stop status metadata created here.
+    mReplaySupervisor->SetIsReversing(false);
   }
 
   if (shouldKeepReversing) {
@@ -636,11 +639,15 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
 
   // Remove the breakpoints whose specs got removed
   for (const auto &bp : remove) {
-    auto iter = map.find(bp);
+    const auto iter = map.find(bp);
+    // Should this even be possible? It happens, but it seems like this happening is a bug.
+    if (iter == std::end(map)) {
+      continue;
+    }
     for (const auto id : iter->second) {
       mUserBreakpoints.RemoveUserBreakpoint(id);
     }
-    map.erase(map.find(bp));
+    map.erase(iter);
   }
 }
 
@@ -937,13 +944,6 @@ Session::ReverseResumeTarget(tc::RunType runType) noexcept
     return false;
   }
   return true;
-}
-
-void
-Session::AttachSession() noexcept
-{
-  // no-op. an rr replay is controllable through 1 session only, using specialized/supported only by midas DAP
-  // extensions
 }
 
 bool

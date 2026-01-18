@@ -307,8 +307,6 @@ PtraceAttach(ui::dap::DebugAdapterManager *client, const PtraceAttachArgs &args)
     return nullptr;
   }
 
-  supervisor->AttachSession();
-
   return supervisor;
 }
 
@@ -321,8 +319,6 @@ RRAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const RRAtta
   if (supervisor->mSupervisorType != tc::SupervisorType::RR) {
     return false;
   }
-
-  supervisor->AttachSession();
 
   return true;
 }
