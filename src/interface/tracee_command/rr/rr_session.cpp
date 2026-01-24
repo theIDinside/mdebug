@@ -195,6 +195,7 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
   }
 
   auto task = GetTaskByTid(evt.mTaskInfo.mRecTid);
+  task->SetValueLiveness(Tracer::GetCurrentVariableReferenceBoundary());
 
   bool steppedOverBreakpoint = false;
 

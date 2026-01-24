@@ -81,7 +81,7 @@ public:
 private:
   std::unique_ptr<sym::CallStack> mTaskCallstack;
   std::vector<u32> variableReferences{};
-  VariableReferenceId mLivenessBoundary;
+  VariableReferenceId mLivenessBoundary{ 0 };
   u64 mTimestampCreated{ 0 };
   std::unordered_map<VariableReferenceId, Ref<sym::Value>> mVariablesCache{};
   tc::SupervisorState *mSupervisor;
