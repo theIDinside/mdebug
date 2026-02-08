@@ -65,7 +65,7 @@ class Type;
 class Value;
 class DebugAdapterSerializer;
 class ValueResolver;
-class IValueResolve;
+class IValueContentsResolve;
 enum class VariableSet : u8;
 enum class FrameVariableKind : u8;
 
@@ -236,7 +236,7 @@ public:
   auto Copy(Pid processId, AddrPtr relocated_base) const noexcept -> std::shared_ptr<SymbolFile>;
   auto GetUnitDataFromProgramCounter(AddrPtr pc) noexcept -> std::vector<sym::CompilationUnit *>;
 
-  inline auto
+  [[nodiscard]] auto
   GetObjectFile() const noexcept -> ObjectFile *
   {
     return mObjectFile.get();
@@ -248,13 +248,13 @@ public:
 
   auto GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::VariableSet set) noexcept
     -> std::vector<Ref<sym::Value>>;
-  auto GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::CompilationUnit *>;
-  static auto GetStaticResolver(sym::Value &value) noexcept -> sym::IValueResolve *;
+  [[nodiscard]] auto GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::CompilationUnit *>;
+  static auto GetStaticResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *;
   auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
     -> std::vector<Ref<sym::Value>>;
 
-  auto LowProgramCounter() noexcept -> AddrPtr;
-  auto HighProgramCounter() noexcept -> AddrPtr;
+  [[nodiscard]] auto LowProgramCounter() const noexcept -> AddrPtr;
+  [[nodiscard]] auto HighProgramCounter() const noexcept -> AddrPtr;
 
   auto GetMinimalFunctionSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *;

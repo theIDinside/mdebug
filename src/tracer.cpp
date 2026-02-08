@@ -460,11 +460,11 @@ void
 Tracer::InitializeDapSerializers() noexcept
 {
   auto &tracer = Get();
-  tracer.mInvalidValueDapSerializer = new sym::InvalidValueVisualizer{};
-  tracer.mArrayValueDapSerializer = new sym::ArrayVisualizer{};
-  tracer.mPrimitiveValueDapSerializer = new sym::PrimitiveVisualizer{};
-  tracer.mDefaultStructDapSerializer = new sym::DefaultStructVisualizer{};
-  tracer.mCStringDapSerializer = new sym::CStringVisualizer{};
+  tracer.mInvalidValueDapSerializer = new sym::InvalidValueSerializer{};
+  tracer.mArrayValueDapSerializer = new sym::ArraySerializer{};
+  tracer.mPrimitiveValueDapSerializer = new sym::PrimitiveSerializer{};
+  tracer.mDefaultStructDapSerializer = new sym::DefaultStructSerializer{};
+  tracer.mCStringDapSerializer = new sym::CStringSerializer{};
 
   tracer.mResolveReference = new sym::ResolveReference{};
   tracer.mResolveCString = new sym::ResolveCString{};

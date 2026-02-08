@@ -194,7 +194,7 @@ public:
     mDebugAdapterManager = &debugAdapter;
   }
 
-  tc::SupervisorState *GetSupervisor() noexcept;
+  tc::SupervisorState *GetSupervisor() const noexcept;
 
   /** Returns either the result or nullptr. If nullptr is returned, it's because it's been queued/scheduled in the
    * delayed events queue, because some particular-to-the-DAP request ordering is required.*/
@@ -235,7 +235,7 @@ public:
     return std::nullopt;
   }
 
-  void WriteResponse(const UIResult &result) noexcept;
+  void WriteResponse(const UIResult &result) const noexcept;
 
   template <typename T, typename... Args>
   T *

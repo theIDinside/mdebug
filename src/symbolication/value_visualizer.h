@@ -35,31 +35,37 @@ struct ValueRange
   std::optional<u32> count;
 };
 
-class IValueResolve
+class IValueContentsResolver
 {
 public:
   virtual std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept = 0;
 };
 
-class ResolveReference final : public IValueResolve
+class ResolveReference final : public IValueContentsResolver
 {
 public:
   std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
-class ResolveCString final : public IValueResolve
+class ResolveCString final : public IValueContentsResolver
 {
 public:
   std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
-class ResolveArray final : public IValueResolve
+class ResolveArray final : public IValueContentsResolver
 {
 public:
   std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
 };
 
-class ResolveRange final : public IValueResolve
+class ResolveRange final : public IValueContentsResolver
+{
+public:
+  std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
+};
+
+class CustomResolver final : public IValueContentsResolver
 {
 public:
   std::vector<Ref<Value>> Resolve(const VariableContext &context, ValueRange valueRange = {}) noexcept final;
@@ -77,11 +83,11 @@ public:
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
   virtual std::optional<std::pmr::string> Serialize(const Value &value,
     std::string_view name,
-    int variablesReference,
+    u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept = 0;
 };
 
-class PrimitiveVisualizer final : public DebugAdapterSerializer
+class PrimitiveSerializer final : public DebugAdapterSerializer
 {
   std::optional<std::pmr::string> FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept;
   std::optional<std::pmr::string> FormatEnum(
@@ -90,47 +96,47 @@ class PrimitiveVisualizer final : public DebugAdapterSerializer
 public:
   std::optional<std::pmr::string> Serialize(const Value &value,
     std::string_view name,
-    int variablesReference,
+    u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
 };
 
-class DefaultStructVisualizer final : public DebugAdapterSerializer
+class DefaultStructSerializer final : public DebugAdapterSerializer
 {
 public:
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
   std::optional<std::pmr::string> Serialize(const Value &value,
     std::string_view name,
-    int variablesReference,
+    u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
 };
 
-class InvalidValueVisualizer final : public DebugAdapterSerializer
+class InvalidValueSerializer final : public DebugAdapterSerializer
 {
 public:
   std::optional<std::pmr::string> Serialize(const Value &value,
     std::string_view name,
-    int variablesReference,
+    u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
 };
 
-class ArrayVisualizer final : public DebugAdapterSerializer
+class ArraySerializer final : public DebugAdapterSerializer
 {
 public:
   std::optional<std::pmr::string> Serialize(const Value &value,
     std::string_view name,
-    int variablesReference,
+    u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
 };
 
-class CStringVisualizer final : public DebugAdapterSerializer
+class CStringSerializer final : public DebugAdapterSerializer
 {
-  std::optional<std::pmr::string> FormatValue(
-    const Value &value, std::optional<u32> null_terminator, std::pmr::memory_resource *allocator) noexcept;
+  static std::optional<std::pmr::string> FormatValue(
+    const Value &value, std::optional<u32> nullTerminator, std::pmr::memory_resource *allocator) noexcept;
 
 public:
   std::optional<std::pmr::string> Serialize(const Value &value,
     std::string_view name,
-    int variablesReference,
+    u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
 };
 

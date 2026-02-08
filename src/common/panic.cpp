@@ -77,14 +77,14 @@ panic(std::string_view err_msg, const char *functionName, const char *file, int 
   }
 
   for (int j = strip_levels; j < nptrs; j++) {
-    auto demangle_len = 0ul;
+    auto demangle_len = 0UL;
     int stat = 0;
     std::string_view view{ strings[j] };
     if (const auto p = view.find_first_of("_Z"); p != std::string_view::npos) {
       view.remove_prefix(p);
       view.remove_suffix(view.size() - view.find_first_of('+'));
       std::string copy{ view };
-      if (const auto res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
+      if (const auto *res = __cxxabiv1::__cxa_demangle(copy.data(), nullptr, &demangle_len, &stat); stat == 0) {
         std::string copy{ res };
         sanitize(copy);
         logIf(copy);
@@ -98,7 +98,7 @@ panic(std::string_view err_msg, const char *functionName, const char *file, int 
 
   free(strings);
 ifbacktrace_failed:
-  const auto strerr = strerror(errno);
+  const auto *strerr = strerror(errno);
   const auto message =
     std::format("--- [PANIC] ---\n[FILE]: {}:{}\n[FUNCTION]: {}\n[REASON]: {}\nErrno: {}: {}\n--- [PANIC] ---",
       file,

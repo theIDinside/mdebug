@@ -79,11 +79,11 @@ class Command;
 namespace mdb::sym {
 // The base class serializer
 class DebugAdapterSerializer;
-class InvalidValueVisualizer;
-class ArrayVisualizer;
-class PrimitiveVisualizer;
-class DefaultStructVisualizer;
-class CStringVisualizer;
+class InvalidValueSerializer;
+class ArraySerializer;
+class PrimitiveSerializer;
+class DefaultStructSerializer;
+class CStringSerializer;
 } // namespace mdb::sym
 
 namespace mdb::ui {
@@ -220,18 +220,18 @@ public:
 
   template <typename DapSerializer>
   static DapSerializer *
-  GetSerializer() noexcept
+  GetDataResolver() noexcept
   {
     using namespace sym;
-    if constexpr (std::is_same_v<DapSerializer, InvalidValueVisualizer>) {
+    if constexpr (std::is_same_v<DapSerializer, InvalidValueSerializer>) {
       return Get().mInvalidValueDapSerializer;
-    } else if constexpr (std::is_same_v<DapSerializer, ArrayVisualizer>) {
+    } else if constexpr (std::is_same_v<DapSerializer, ArraySerializer>) {
       return Get().mArrayValueDapSerializer;
-    } else if constexpr (std::is_same_v<DapSerializer, PrimitiveVisualizer>) {
+    } else if constexpr (std::is_same_v<DapSerializer, PrimitiveSerializer>) {
       return Get().mPrimitiveValueDapSerializer;
-    } else if constexpr (std::is_same_v<DapSerializer, DefaultStructVisualizer>) {
+    } else if constexpr (std::is_same_v<DapSerializer, DefaultStructSerializer>) {
       return Get().mDefaultStructDapSerializer;
-    } else if constexpr (std::is_same_v<DapSerializer, CStringVisualizer>) {
+    } else if constexpr (std::is_same_v<DapSerializer, CStringSerializer>) {
       return Get().mCStringDapSerializer;
     } else {
       static_assert(always_false<DapSerializer>, "Invalid DAP serializer - write a new one?");
@@ -326,11 +326,11 @@ private:
 
   ConsoleCommandInterpreter *mConsoleCommandInterpreter;
 
-  sym::InvalidValueVisualizer *mInvalidValueDapSerializer{ nullptr };
-  sym::ArrayVisualizer *mArrayValueDapSerializer{ nullptr };
-  sym::PrimitiveVisualizer *mPrimitiveValueDapSerializer{ nullptr };
-  sym::DefaultStructVisualizer *mDefaultStructDapSerializer{ nullptr };
-  sym::CStringVisualizer *mCStringDapSerializer{ nullptr };
+  sym::InvalidValueSerializer *mInvalidValueDapSerializer{ nullptr };
+  sym::ArraySerializer *mArrayValueDapSerializer{ nullptr };
+  sym::PrimitiveSerializer *mPrimitiveValueDapSerializer{ nullptr };
+  sym::DefaultStructSerializer *mDefaultStructDapSerializer{ nullptr };
+  sym::CStringSerializer *mCStringDapSerializer{ nullptr };
 
   sym::ResolveReference *mResolveReference{ nullptr };
   sym::ResolveCString *mResolveCString{ nullptr };

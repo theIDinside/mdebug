@@ -25,7 +25,7 @@ class FunctionSymbolicationContext
   sym::FunctionSymbol *mFunctionSymbol;
   SymbolBlock mParams;
   std::vector<SymbolBlock> mLexicalBlockStack;
-  u32 mFrameLocalsCount{0};
+  u32 mFrameLocalsCount{ 0 };
 
   // Process the variable DIE referenced by `variableDebugInfoEntry` and store it (if successful) in
   // `processedSymbolStack`
@@ -48,8 +48,8 @@ class TypeSymbolicationContext
   std::vector<Field> mTypeFields;
   sym::Type *mCurrentType;
 
-  sym::Type *mEnumerationType{nullptr};
-  bool mEnumIsSigned{false};
+  sym::Type *mEnumerationType{ nullptr };
+  bool mEnumIsSigned{ false };
   std::vector<EnumeratorConstValue> mConstValues{};
   void ProcessMemberVariable(DieReference die) noexcept;
   void ProcessInheritanceDie(DieReference die) noexcept;

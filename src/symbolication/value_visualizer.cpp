@@ -39,9 +39,9 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
     auto memory = sym::MemoryContentsObject::ReadMemory(
       *context.mTask->GetSupervisor(), adjusted_address, requestedLengthInBytes);
     if (!memory.is_ok()) {
-      auto t = value.GetType()->TypeDescribingLayoutOfThis();
+      Type *t = value.GetType()->TypeDescribingLayoutOfThis();
       results.push_back(
-        Ref<Value>::MakeShared(nullptr, *t, 0u, nullptr, Tracer::GetSerializer<sym::InvalidValueVisualizer>()));
+        Ref<Value>::MakeShared(nullptr, *t, 0U, nullptr, Tracer::GetDataResolver<sym::InvalidValueSerializer>()));
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
@@ -51,20 +51,23 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
                                                          : Tracer::CloneFromVariableContext(context);
 
     if (dereferencedType->IsArrayType()) {
-      results.push_back(Ref<Value>::MakeShared(
-        clonedContext, *dereferencedType, 0u, indirectValueObject, Tracer::GetSerializer<sym::ArrayVisualizer>()));
+      results.push_back(Ref<Value>::MakeShared(clonedContext,
+        *dereferencedType,
+        0U,
+        indirectValueObject,
+        Tracer::GetDataResolver<sym::ArraySerializer>()));
     } else if (dereferencedType->IsPrimitive() || dereferencedType->IsReference()) {
       results.push_back(Ref<Value>::MakeShared(clonedContext,
         *dereferencedType,
-        0u,
+        0U,
         indirectValueObject,
-        Tracer::GetSerializer<sym::PrimitiveVisualizer>()));
+        Tracer::GetDataResolver<sym::PrimitiveSerializer>()));
     } else {
       results.push_back(Ref<Value>::MakeShared(clonedContext,
         *dereferencedType,
-        0u,
+        0U,
         indirectValueObject,
-        Tracer::GetSerializer<sym::DefaultStructVisualizer>()));
+        Tracer::GetDataResolver<sym::DefaultStructSerializer>()));
     }
     ObjectFile::InitializeDataVisualizer(*results.back());
     if (clonedContext->mId > 0) {
@@ -85,21 +88,21 @@ ResolveCString::Resolve(const VariableContext &context, ValueRange valueRange) n
     auto referencedMemory =
       sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjustedAddress, requestedLength);
     if (!referencedMemory.is_ok()) {
-      auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
+      auto *layoutType = value.GetType()->TypeDescribingLayoutOfThis();
       results.push_back(Ref<Value>::MakeShared(
-        nullptr, *layoutType, 0u, nullptr, Tracer::GetSerializer<InvalidValueVisualizer>()));
+        nullptr, *layoutType, 0U, nullptr, Tracer::GetDataResolver<InvalidValueSerializer>()));
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
 
     // actual `char` type
-    auto layoutType = value.GetType()->TypeDescribingLayoutOfThis();
+    auto *layoutType = value.GetType()->TypeDescribingLayoutOfThis();
     auto stringValue = Ref<sym::Value>::MakeShared(VariableContext::CloneFrom(0, context),
       *layoutType,
-      0u,
+      0U,
       indirectValueObject,
-      Tracer::GetSerializer<CStringVisualizer>());
+      Tracer::GetDataResolver<CStringSerializer>());
 
     results.push_back(std::move(stringValue));
   }
@@ -133,7 +136,7 @@ ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noe
   auto lazy = std::make_shared<LazyMemoryContentsObject>(
     *context.mTask->GetSupervisor(), desiredFirstElementAddress, desiredFirstElementAddress + underlying);
 
-  for (auto i = 0u; i < (endIndex - startIndex); ++i) {
+  for (auto i = 0U; i < (endIndex - startIndex); ++i) {
     const auto memoryObjectOffset = i * elementTypeSize;
     auto varContext = elementsType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
                                                   : Tracer::CloneFromVariableContext(context);
@@ -158,9 +161,9 @@ ResolveRange::Resolve(const VariableContext &context, ValueRange valueRange) noe
 }
 
 std::optional<std::pmr::string>
-PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept
+PrimitiveSerializer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept
 {
-  auto &enums = t.GetEnumerations();
+  const EnumeratorValues &enums = t.GetEnumerations();
   EnumeratorConstValue value;
   if (enums.mIsSigned) {
     switch (t.size_of) {
@@ -196,7 +199,7 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
 
   const auto &fields = t.MemberFields();
   if (enums.mIsSigned) {
-    for (auto i = 0u; i < fields.size(); ++i) {
+    for (auto i = 0U; i < fields.size(); ++i) {
       if (enums.mEnumeratorValues[i].i == value.i) {
         std::pmr::string result{ allocator };
         FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
@@ -204,27 +207,26 @@ PrimitiveVisualizer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
     }
     std::pmr::string result{ allocator };
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
-  } else {
-    for (auto i = 0u; i < fields.size(); ++i) {
-      if (enums.mEnumeratorValues[i].u == value.u) {
-        std::pmr::string result{ allocator };
-        FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
-      }
-    }
-    std::pmr::string result{ allocator };
-    FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
   }
+  for (auto i = 0U; i < fields.size(); ++i) {
+    if (enums.mEnumeratorValues[i].u == value.u) {
+      std::pmr::string result{ allocator };
+      FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
+    }
+  }
+  std::pmr::string result{ allocator };
+  FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
 }
 
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::pmr::string>
-PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept
+PrimitiveSerializer::FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
   const auto span = value.MemoryView();
   if (span.empty()) {
     return std::nullopt;
   }
-  auto type = value.GetType();
+  auto *type = value.GetType();
   const auto size_of = type->size_of;
 
   std::pmr::string result{ allocator };
@@ -255,25 +257,25 @@ PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *
     FormatAndReturn(result, "{}", value);
   }
   case BaseTypeEncoding::DW_ATE_float: {
-    if (size_of == 4u) {
-      float value = BitCopy<float>(span);
+    if (size_of == 4U) {
+      auto value = BitCopy<float>(span);
       FormatAndReturn(result, "{}", value);
-    } else if (size_of == 8u) {
-      double value = BitCopy<double>(span);
-      FormatAndReturn(result, "{}", value);
-    } else {
-      PANIC("Expected byte size of a floating point to be 4 or 8");
     }
+    if (size_of == 8U) {
+      auto value = BitCopy<double>(span);
+      FormatAndReturn(result, "{}", value);
+    }
+    PANIC("Expected byte size of a floating point to be 4 or 8");
   }
   case BaseTypeEncoding::DW_ATE_signed_char:
   case BaseTypeEncoding::DW_ATE_signed:
     switch (size_of) {
     case 1: {
-      signed char value = BitCopy<signed char>(span);
+      auto value = BitCopy<signed char>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 2: {
-      signed short value = BitCopy<signed short>(span);
+      auto value = BitCopy<signed short>(span);
       FormatAndReturn(result, "{}", value);
     }
     case 4: {
@@ -281,7 +283,7 @@ PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *
       FormatAndReturn(result, "{}", value);
     }
     case 8: {
-      signed long long value = BitCopy<signed long long>(span);
+      auto value = BitCopy<signed long long>(span);
       FormatAndReturn(result, "{}", value);
     }
     }
@@ -333,8 +335,8 @@ PrimitiveVisualizer::FormatValue(const Value &value, std::pmr::memory_resource *
 }
 
 std::optional<std::pmr::string>
-PrimitiveVisualizer::Serialize(
-  const Value &value, std::string_view name, int variablesReference, std::pmr::memory_resource *allocator) noexcept
+PrimitiveSerializer::Serialize(
+  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   MDB_ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto byte_span = value.MemoryView();
@@ -356,8 +358,8 @@ PrimitiveVisualizer::Serialize(
 }
 
 std::optional<std::pmr::string>
-DefaultStructVisualizer::Serialize(
-  const Value &value, std::string_view name, int variablesReference, std::pmr::memory_resource *allocator) noexcept
+DefaultStructSerializer::Serialize(
+  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
 
   MDB_ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
@@ -373,8 +375,8 @@ DefaultStructVisualizer::Serialize(
 }
 
 std::optional<std::pmr::string>
-InvalidValueVisualizer::Serialize(
-  const Value &value, std::string_view, int, std::pmr::memory_resource *allocator) noexcept
+InvalidValueSerializer::Serialize(
+  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   std::pmr::string result{ allocator };
   FormatAndReturn(result,
@@ -385,11 +387,11 @@ InvalidValueVisualizer::Serialize(
 }
 
 std::optional<std::pmr::string>
-ArrayVisualizer::Serialize(
-  const Value &value, std::string_view, int variablesReference, std::pmr::memory_resource *allocator) noexcept
+ArraySerializer::Serialize(
+  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   auto &t = *value.GetType();
-  const auto no_alias = t.ResolveAlias();
+  const Type *no_alias = t.ResolveAlias();
   std::pmr::string result{ allocator };
   FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
@@ -401,22 +403,23 @@ ArrayVisualizer::Serialize(
     no_alias->ArraySize());
 }
 
+/** static */
 std::optional<std::pmr::string>
-CStringVisualizer::FormatValue(
-  const Value &ptr, std::optional<u32> null_terminator, std::pmr::memory_resource *allocator) noexcept
+CStringSerializer::FormatValue(
+  const Value &value, std::optional<u32> nullTerminator, std::pmr::memory_resource *allocator) noexcept
 {
-  const auto byte_span = ptr.FullMemoryView();
+  const auto byte_span = value.FullMemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
   }
-  std::string_view cast{ (const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes()) };
+  std::string_view cast{ (const char *)byte_span.data(), nullTerminator.value_or(byte_span.size_bytes()) };
   std::pmr::string result{ allocator };
   FormatAndReturn(result, "{}", cast);
 }
 
 std::optional<std::pmr::string>
-CStringVisualizer::Serialize(
-  const Value &value, std::string_view name, int, std::pmr::memory_resource *allocator) noexcept
+CStringSerializer::Serialize(
+  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
 {
   const auto byte_span = value.FullMemoryView();
   if (byte_span.empty()) {
@@ -451,7 +454,7 @@ template <typename Iterator>
 static Iterator
 FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
 {
-  auto &enums = t.GetEnumerations();
+  const EnumeratorValues &enums = t.GetEnumerations();
   EnumeratorConstValue value;
   if (enums.mIsSigned) {
     switch (t.size_of) {
@@ -487,20 +490,19 @@ FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
 
   const auto &fields = t.MemberFields();
   if (enums.mIsSigned) {
-    for (auto i = 0u; i < fields.size(); ++i) {
+    for (auto i = 0U; i < fields.size(); ++i) {
       if (enums.mEnumeratorValues[i].i == value.i) {
         FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
       }
     }
     FormatAndReturn(result, "{}::(invalid){}", t.mName, value.i);
-  } else {
-    for (auto i = 0u; i < fields.size(); ++i) {
-      if (enums.mEnumeratorValues[i].u == value.u) {
-        FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
-      }
-    }
-    FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
   }
+  for (auto i = 0U; i < fields.size(); ++i) {
+    if (enums.mEnumeratorValues[i].u == value.u) {
+      FormatAndReturn(result, "{}::{}", t.mName, fields[i].mName);
+    }
+  }
+  FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
 }
 
 template <typename Iterator>
@@ -511,12 +513,12 @@ FormatValue(Value &value, Iterator iter) noexcept
   if (span.empty()) {
     return std::format_to(iter, "<err:value had no memory contents>");
   }
-  auto type = value.GetType();
+  Type *type = value.GetType();
   const auto size_of = type->size_of;
 
   if (type->IsReference()) {
-    const std::uintptr_t ptr = BitCopy<std::uintptr_t>(span);
-    FormatAndReturn(iter, "0x{:x}", ptr);
+    const auto ptrValue = BitCopy<std::uintptr_t>(span);
+    FormatAndReturn(iter, "0x{:x}", ptrValue);
   }
 
   auto target_type = type->GetTargetType();
@@ -540,25 +542,25 @@ FormatValue(Value &value, Iterator iter) noexcept
     FormatAndReturn(iter, "{}", value);
   }
   case BaseTypeEncoding::DW_ATE_float: {
-    if (size_of == 4u) {
-      float value = BitCopy<float>(span);
+    if (size_of == 4U) {
+      auto value = BitCopy<float>(span);
       FormatAndReturn(iter, "{}", value);
-    } else if (size_of == 8u) {
-      double value = BitCopy<double>(span);
-      FormatAndReturn(iter, "{}", value);
-    } else {
-      PANIC("Expected byte size of a floating point to be 4 or 8");
     }
+    if (size_of == 8U) {
+      auto value = BitCopy<double>(span);
+      FormatAndReturn(iter, "{}", value);
+    }
+    PANIC("Expected byte size of a floating point to be 4 or 8");
   }
   case BaseTypeEncoding::DW_ATE_signed_char:
   case BaseTypeEncoding::DW_ATE_signed:
     switch (size_of) {
     case 1: {
-      signed char value = BitCopy<signed char>(span);
+      auto value = BitCopy<signed char>(span);
       FormatAndReturn(iter, "{}", value);
     }
     case 2: {
-      signed short value = BitCopy<signed short>(span);
+      auto value = BitCopy<signed short>(span);
       FormatAndReturn(iter, "{}", value);
     }
     case 4: {
@@ -566,7 +568,7 @@ FormatValue(Value &value, Iterator iter) noexcept
       FormatAndReturn(iter, "{}", value);
     }
     case 8: {
-      signed long long value = BitCopy<signed long long>(span);
+      auto value = BitCopy<signed long long>(span);
       FormatAndReturn(iter, "{}", value);
     }
     }
@@ -649,11 +651,10 @@ JavascriptValueSerializer::Serialize(
   static constexpr auto finalizeField = [](auto it, const auto &opts) noexcept {
     if (opts.mNewLineAfterMember) {
       return std::format_to(it, ",\n");
-    } else {
-      return std::format_to(it, ", ");
     }
+    return std::format_to(it, ", ");
   };
-  auto valueType = value->GetType();
+  Type *valueType = value->GetType();
   if (!valueType->IsResolved()) {
     sym::dw::TypeSymbolicationContext symbolicationContext{
       *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType
@@ -667,7 +668,8 @@ JavascriptValueSerializer::Serialize(
     auto it = std::format_to(fmtIterator, "{}{} : ", indent, value->mName);
     it = FormatValue(*value, it);
     return finalizeField(it, options);
-  } else if (currentDepth == 0) {
+  }
+  if (currentDepth == 0) {
     auto it =
       std::format_to(fmtIterator, "{}{} : struct {}{{ .. }}", indent, value->mName, value->GetType()->mName);
     return finalizeField(it, options);
@@ -692,7 +694,7 @@ JavascriptValueSerializer::Serialize(
   Value *value, StringType &outputBuffer, const SerializeOptions &options) noexcept
 {
   auto it = std::back_inserter(outputBuffer);
-  auto valueType = value->GetType();
+  Type *valueType = value->GetType();
   if (!valueType->IsResolved()) {
     sym::dw::TypeSymbolicationContext symbolicationContext{
       *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType

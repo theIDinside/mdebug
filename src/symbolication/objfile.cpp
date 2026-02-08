@@ -629,7 +629,7 @@ void
 ObjectFile::InitializeDataVisualizer(sym::Value &value) noexcept
 {
   if (!value.IsValidValue()) {
-    value.SetDapSerializer(Tracer::GetSerializer<sym::InvalidValueVisualizer>());
+    value.SetDapSerializer(Tracer::GetDataResolver<sym::InvalidValueSerializer>());
   }
   if (value.HasVisualizer()) {
     return;
@@ -638,11 +638,11 @@ ObjectFile::InitializeDataVisualizer(sym::Value &value) noexcept
   sym::Type &type = *value.GetType()->ResolveAlias();
 
   if (type.IsArrayType()) {
-    value.SetDapSerializer(Tracer::GetSerializer<sym::ArrayVisualizer>());
+    value.SetDapSerializer(Tracer::GetDataResolver<sym::ArraySerializer>());
   } else if (type.IsPrimitive() || type.IsReference()) {
-    value.SetDapSerializer(Tracer::GetSerializer<sym::PrimitiveVisualizer>());
+    value.SetDapSerializer(Tracer::GetDataResolver<sym::PrimitiveSerializer>());
   } else {
-    value.SetDapSerializer(Tracer::GetSerializer<sym::DefaultStructVisualizer>());
+    value.SetDapSerializer(Tracer::GetDataResolver<sym::DefaultStructSerializer>());
   }
 }
 
@@ -677,12 +677,12 @@ ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
   }
 
   auto fd = mdb::ScopedFd::OpenFileReadOnly(path);
-  const auto addr = fd.MmapFile<u8>({}, true);
+  const auto *addr = fd.MmapFile<u8>({}, true);
   const auto objfile =
     std::make_shared<ObjectFile>(std::format("{}:{}", processId, path.c_str()), path, fd.FileSize(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
-  const auto header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
+  auto *header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
   MDB_ASSERT(std::memcmp(ELF_MAGIC, header->e_ident, 4) == 0,
     "ELF Magic not correct, expected {} got {}",
     *(u32 *)(ELF_MAGIC),
@@ -690,7 +690,7 @@ ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
   std::vector<ElfSection> sectionData;
   sectionData.reserve(header->e_shnum);
 
-  const auto sec_names_offset_hdr =
+  const auto *sectionNamesOffsetHeader =
     objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
 
   u64 min = UINTMAX_MAX;
@@ -698,11 +698,12 @@ ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
 
   // good enough heuristic to determine mapped in ranges.
   for (auto i = 0; i < header->e_phnum; ++i) {
-    auto phdr = objfile->AlignedRequiredGetAtOffset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
-    if (phdr->p_type == PT_LOAD) {
-      min = std::min(phdr->p_vaddr, min);
-      const auto end = u64{ phdr->p_vaddr + phdr->p_memsz };
-      const auto align_adjust = u64{ phdr->p_align - (end % phdr->p_align) };
+    auto *programHeader =
+      objfile->AlignedRequiredGetAtOffset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
+    if (programHeader->p_type == PT_LOAD) {
+      min = std::min(programHeader->p_vaddr, min);
+      const auto end = u64{ programHeader->p_vaddr + programHeader->p_memsz };
+      const auto align_adjust = u64{ programHeader->p_align - (end % programHeader->p_align) };
       max = std::max(end + align_adjust, max);
     }
   }
@@ -711,13 +712,15 @@ ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
   auto sec_hdrs_offset = header->e_shoff;
   // parse sections
   for (auto i = 0; i < header->e_shnum; i++) {
-    const auto sec_hdr = objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(sec_hdrs_offset);
+    const auto *sectionHeader = objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(sec_hdrs_offset);
     sec_hdrs_offset += header->e_shentsize;
     sectionData.push_back(ElfSection{
-      .mSectionData = std::span{ objfile->AlignedRequiredGetAtOffset<u8>(sec_hdr->sh_offset), sec_hdr->sh_size },
-      .mName = objfile->AlignedRequiredGetAtOffset<const char>(sec_names_offset_hdr->sh_offset + sec_hdr->sh_name),
-      .file_offset = sec_hdr->sh_offset,
-      .address = sec_hdr->sh_addr,
+      .mSectionData =
+        std::span{ objfile->AlignedRequiredGetAtOffset<u8>(sectionHeader->sh_offset), sectionHeader->sh_size },
+      .mName = objfile->AlignedRequiredGetAtOffset<const char>(
+        sectionNamesOffsetHeader->sh_offset + sectionHeader->sh_name),
+      .file_offset = sectionHeader->sh_offset,
+      .address = sectionHeader->sh_addr,
     });
   }
   // ObjectFile is the owner of `Elf`
@@ -735,7 +738,7 @@ ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
     /// frames in it any how.
     objfile->unwinder = std::make_unique<sym::Unwinder>(nullptr);
   }
-  if (const auto section = objfile->elf->GetSection(".debug_frame"); section) {
+  if (const auto *section = objfile->elf->GetSection(".debug_frame"); section) {
     DBGLOG(core, ".debug_frame section found; parsing DWARF CFI section");
     sym::ParseDwarfDebugFrame(objfile->GetElf(), objfile->unwinder.get(), section);
   }
@@ -800,7 +803,7 @@ auto
 SymbolFile::GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::VariableSet set) noexcept
   -> std::vector<Ref<sym::Value>>
 {
-  auto symbolInformation = frame.MaybeGetFullSymbolInfo();
+  auto *symbolInformation = frame.MaybeGetFullSymbolInfo();
   if (!symbolInformation) {
     return {};
   }
@@ -831,29 +834,28 @@ SymbolFile::GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::C
 }
 
 /* static */
-sym::IValueResolve *
+sym::IValueContentsResolver *
 SymbolFile::GetStaticResolver(sym::Value &value) noexcept
 {
   // TODO(simon): For now this "infrastructure" just hardcodes support for custom visualization of C-strings
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
   //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
   //   values and how to display them, which *is* the issue with GDB's pretty printers
-  auto type = value.GetType()->ResolveAlias();
+  sym::Type *type = value.GetType()->ResolveAlias();
 
-  auto layout_type = type->TypeDescribingLayoutOfThis();
+  sym::Type *layoutType = type->TypeDescribingLayoutOfThis();
 
-  const auto array_type = type->IsArrayType();
-  if (type->IsReference() && !array_type) {
-    if (layout_type->IsCharType()) {
-      return Tracer::Get().GetResolver<sym::ResolveCString>();
-    } else {
-      return Tracer::Get().GetResolver<sym::ResolveReference>();
+  const auto arrayType = type->IsArrayType();
+  if (type->IsReference() && !arrayType) {
+    if (layoutType->IsCharType()) {
+      return Tracer::GetResolver<sym::ResolveCString>();
     }
+    return Tracer::GetResolver<sym::ResolveReference>();
   }
 
   // todo: again, this is hardcoded, which is counter to the whole idea here.
-  if (array_type) {
-    return Tracer::Get().GetResolver<sym::ResolveArray>();
+  if (arrayType) {
+    return Tracer::GetResolver<sym::ResolveArray>();
   }
   return nullptr;
 }
@@ -868,46 +870,45 @@ SymbolFile::ResolveVariable(
     DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ctx.mId);
     return {};
   }
-  auto type = value->GetType();
+  sym::Type *type = value->GetType();
   if (!type->IsResolved()) {
     sym::dw::TypeSymbolicationContext typeResolver{ *GetObjectFile(), *type };
     typeResolver.ResolveType();
   }
 
-  auto resolver = GetStaticResolver(*value);
+  sym::IValueContentsResolver *resolver = GetStaticResolver(*value);
   if (resolver != nullptr) {
-    return resolver->Resolve(ctx, { start, count });
-  } else {
-    std::vector<Ref<sym::Value>> result{};
-    result.reserve(type->MemberFields().size());
-
-    for (auto &memberField : type->MemberFields()) {
-      auto variableContext = memberField.mType->IsPrimitive() ? VariableContext::CloneFrom(0, ctx)
-                                                              : Tracer::CloneFromVariableContext(ctx);
-      auto vId = variableContext->mId;
-      auto memberVariable = Ref<sym::Value>::MakeShared(std::move(variableContext),
-        memberField.mName,
-        const_cast<sym::Field &>(memberField),
-        value->mMemoryContentsOffsets,
-        value->TakeMemoryReference());
-      GetObjectFile()->InitializeDataVisualizer(*memberVariable);
-      if (vId > 0) {
-        ctx.mTask->CacheValueObject(vId, memberVariable);
-      }
-      result.push_back(std::move(memberVariable));
-    }
-    return result;
+    return resolver->Resolve(ctx, { .start = start, .count = count });
   }
+  std::vector<Ref<sym::Value>> result{};
+  result.reserve(type->MemberFields().size());
+
+  for (const sym::Field &memberField : type->MemberFields()) {
+    auto variableContext = memberField.mType->IsPrimitive() ? VariableContext::CloneFrom(0, ctx)
+                                                            : Tracer::CloneFromVariableContext(ctx);
+    auto vId = variableContext->mId;
+    auto memberVariable = Ref<sym::Value>::MakeShared(std::move(variableContext),
+      memberField.mName,
+      const_cast<sym::Field &>(memberField),
+      value->mMemoryContentsOffsets,
+      value->TakeMemoryReference());
+    ObjectFile::InitializeDataVisualizer(*memberVariable);
+    if (vId > 0) {
+      ctx.mTask->CacheValueObject(vId, memberVariable);
+    }
+    result.push_back(std::move(memberVariable));
+  }
+  return result;
 }
 
 auto
-SymbolFile::LowProgramCounter() noexcept -> AddrPtr
+SymbolFile::LowProgramCounter() const noexcept -> AddrPtr
 {
   return mBaseAddress + GetObjectFile()->mUnrelocatedAddressBounds.low;
 }
 
 auto
-SymbolFile::HighProgramCounter() noexcept -> AddrPtr
+SymbolFile::HighProgramCounter() const noexcept -> AddrPtr
 {
   return mBaseAddress + GetObjectFile()->mUnrelocatedAddressBounds.high;
 }

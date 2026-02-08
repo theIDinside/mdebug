@@ -60,22 +60,21 @@ template <> struct std::formatter<ui::dap::Message>
         msg.MessageId().value_or(-1),
         msg.Format(),
         msg.ShowToUser());
-    } else {
-      auto sz = 1u;
-      auto max = msg.Variables().size();
-      auto it = std::format_to(
-        ctx.out(), R"({{ "id": {}, "format": "{}","variables":{{)", msg.MessageId().value_or(-1), msg.Format());
-      for (const auto &[k, v] : msg.Variables()) {
-        if (sz < max) {
-          it = std::format_to(it, R"("{}":"{}", )", k, v);
-        } else {
-          it = std::format_to(it, R"("{}":"{}")", k, v);
-        }
-        ++sz;
-      }
-
-      return std::format_to(it, R"(}}, "showUser":{}}})", msg.ShowToUser());
     }
+    auto sz = 1U;
+    auto max = msg.Variables().size();
+    auto it = std::format_to(
+      ctx.out(), R"({{ "id": {}, "format": "{}","variables":{{)", msg.MessageId().value_or(-1), msg.Format());
+    for (const auto &[k, v] : msg.Variables()) {
+      if (sz < max) {
+        it = std::format_to(it, R"("{}":"{}", )", k, v);
+      } else {
+        it = std::format_to(it, R"("{}":"{}")", k, v);
+      }
+      ++sz;
+    }
+
+    return std::format_to(it, R"(}}, "showUser":{}}})", msg.ShowToUser());
   }
 };
 
@@ -109,7 +108,7 @@ namespace mdb {
 namespace ui {
 
 void
-UICommand::WriteResponse(const UIResult &result) noexcept
+UICommand::WriteResponse(const UIResult &result) const noexcept
 {
   auto data = result.Serialize(0);
   if (!data.empty()) {
@@ -118,7 +117,7 @@ UICommand::WriteResponse(const UIResult &result) noexcept
 }
 
 tc::SupervisorState *
-UICommand::GetSupervisor() noexcept
+UICommand::GetSupervisor() const noexcept
 {
   return mDebugAdapterManager->GetSupervisor(mProcessId);
 }
@@ -158,13 +157,14 @@ from_str(std::string_view granularity) noexcept
 {
   if (granularity == "statement") {
     return SteppingGranularity::LogicalBreakpointLocation; // default
-  } else if (granularity == "line") {
-    return SteppingGranularity::Line; // default
-  } else if (granularity == "instruction") {
-    return SteppingGranularity::Instruction; // default
-  } else {
+  }
+  if (granularity == "line") {
     return SteppingGranularity::Line; // default
   }
+  if (granularity == "instruction") {
+    return SteppingGranularity::Instruction; // default
+  }
+  return SteppingGranularity::Line; // default
 }
 
 struct ErrorResponse final : ui::UIResult
@@ -267,7 +267,7 @@ struct Pause final : public ui::UICommand
   void
   Execute() noexcept final
   {
-    auto target = GetSupervisoOrSendError();
+    auto *target = GetSupervisoOrSendError();
 
     MDB_ASSERT(target, "No target {}", mProcessId);
     bool success = target->Pause(mPauseArgs.mThreadId);
@@ -318,7 +318,7 @@ struct ReverseContinue final : ui::UICommand
   void
   Execute() noexcept final
   {
-    auto supervisor = GetSupervisor();
+    tc::SupervisorState *supervisor = GetSupervisor();
     // TODO: This is the only command where it's ok to get a nullptr for target, in that case, we should just pick
     // _any_ target, and use that to resume backwards (since RR is the controller.).
     MDB_ASSERT(supervisor, "must have target.");
@@ -2339,13 +2339,13 @@ Variables::Execute() noexcept
     return WriteResponse(*error(std::move(msg)));
   }
   auto &context = *requestedContext;
-  auto frame = context.GetFrame(mVariablesReferenceId);
+  auto *frame = context.GetFrame(mVariablesReferenceId);
   if (!frame) {
     std::pmr::string err{ MemoryResource() };
     std::format_to(std::back_inserter(err),
       "Could not find frame that's referenced via variablesReference {}",
       mVariablesReferenceId);
-    WriteResponse(*error(std::move(err)));
+    return WriteResponse(*error(std::move(err)));
   }
 
   switch (context.mType) {
@@ -2416,7 +2416,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   variables_contents.reserve(256 * variables_contents.size());
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : mVariables) {
-    if (auto datvis = v->GetVisualizer(); datvis != nullptr) {
+    if (auto *datvis = v->GetVisualizer(); datvis != nullptr) {
 
       auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), arenaAllocator);
       if (opt) {
@@ -2487,8 +2487,8 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
 {
   using namespace ui::dap;
 
-  UICommandArg arg{ 0, std::nullopt, client.AcquireArena() };
-  std::pmr::string *str = arg.allocator->Allocate<std::pmr::string>();
+  UICommandArg arg{ .mSeq = 0, .mProcessId = std::nullopt, .allocator = client.AcquireArena() };
+  auto *str = arg.allocator->Allocate<std::pmr::string>();
   str->reserve(packet.size());
   // now we've stored the data in the block. it'll live as long as the allocator is alive.
   str->append(packet);
@@ -2499,7 +2499,7 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
     return nullptr;
   }
 
-  const auto &obj = jsonResult.value();
+  const auto &obj = *jsonResult;
   if (!ValidateRequestFormat(obj)) {
     return nullptr;
   }
@@ -2761,7 +2761,7 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
     return RefPtr<WriteMemory>::MakeShared(std::move(arg), addr, offset, std::move(bytes));
   }
   case CommandType::ImportScript:
-    break;
+    [[fallthrough]];
   case CommandType::UNKNOWN:
     break;
   }
