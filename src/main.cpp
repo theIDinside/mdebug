@@ -24,7 +24,6 @@ int Tracer::sLastTraceEventTime = 0;
 
 termios Tracer::sOriginalTty = {};
 winsize Tracer::sTerminalWindowSize = {};
-bool Tracer::sUsePTraceMe = true;
 TracerProcess Tracer::sApplicationState = TracerProcess::Running;
 ThreadPool *ThreadPool::sGlobalThreadPool = new ThreadPool{};
 const char *ui::dap::DebugAdapterManager::gSocketPath = nullptr;

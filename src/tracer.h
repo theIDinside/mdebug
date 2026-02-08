@@ -125,7 +125,6 @@ class Tracer
   // same as sScriptRuntime::mContext. But it's used so often that having direct access to it, is sensible.
   static JSContext *sApplicationJsContext;
   ui::dap::DebugAdapterManager *mDebugAdapterManager;
-  static bool sUsePTraceMe;
   static int sLastTraceEventTime;
 
 #ifdef MDB_DEBUG
@@ -161,7 +160,6 @@ public:
   static Tracer *Create() noexcept;
 
   static bool IsRunning() noexcept;
-  static bool UsingTraceMe() noexcept;
   static Tracer &Get() noexcept;
   static ui::dap::DebugAdapterManager &GetDebugAdapterManager() noexcept;
   static void SetDebugAdapterManager(ui::dap::DebugAdapterManager *dap) noexcept;

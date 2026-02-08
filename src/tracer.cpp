@@ -79,13 +79,6 @@ Tracer::IsRunning() noexcept
   return sApplicationState == TracerProcess::Running;
 }
 
-/* static */
-bool
-Tracer::UsingTraceMe() noexcept
-{
-  return sUsePTraceMe;
-}
-
 // static
 Tracer &
 Tracer::Get() noexcept
