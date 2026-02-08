@@ -26,7 +26,7 @@
 namespace mdb {
 
 BreakpointLocation::BreakpointLocation(AddrPtr address, u8 original) noexcept
-    : mAddress(address), mSourceLocation(), mOriginalByte(original)
+    : mAddress(address), mOriginalByte(original)
 {
   DBGBUFLOG(control, "[breakpoint loc]: Constructed breakpoint location at {}", address);
 }
@@ -70,7 +70,7 @@ BreakpointLocation::GetUserIds() const noexcept
 {
   std::vector<u32> usr{};
   usr.reserve(mUserMapping.size());
-  for (auto u : mUserMapping) {
+  for (auto *u : mUserMapping) {
     usr.push_back(u->mId);
   }
   return usr;
@@ -86,22 +86,22 @@ BreakpointLocation::GetSourceLocationInfo() const noexcept
 }
 
 bool
-BreakpointLocation::RemoveUserOfThis(tc::SupervisorState &controlInterface, UserBreakpoint &bp) noexcept
+BreakpointLocation::RemoveUserOfThis(tc::SupervisorState &controller, UserBreakpoint &breakpoint) noexcept
 {
-  auto it = std::find(mUserMapping.begin(), mUserMapping.end(), &bp);
+  auto it = std::ranges::find(mUserMapping, &breakpoint);
   if (it == std::end(mUserMapping)) {
     return false;
   }
 
   mUserMapping.erase(it);
   if (!AnyUsersActive()) {
-    Disable(controlInterface.TaskLeaderTid(), controlInterface);
+    Disable(controller.TaskLeaderTid(), controller);
   }
   return true;
 }
 
 void
-BreakpointLocation::Enable(Tid taskId, tc::SupervisorState &controlInterface) noexcept
+BreakpointLocation::Enable(Tid taskId, tc::SupervisorState &controller) noexcept
 {
   if (mUserMapping.empty()) {
     MDB_ASSERT(!mInstalled, "A breakpoint location, with no users, but is installed?");
@@ -110,7 +110,7 @@ BreakpointLocation::Enable(Tid taskId, tc::SupervisorState &controlInterface) no
   }
 
   if (!mInstalled) {
-    const auto res = controlInterface.EnableBreakpoint(taskId, *this);
+    const auto res = controller.EnableBreakpoint(taskId, *this);
     switch (res.kind) {
     case tc::TaskExecuteResult::Ok:
       mInstalled = true;
@@ -123,13 +123,13 @@ BreakpointLocation::Enable(Tid taskId, tc::SupervisorState &controlInterface) no
 }
 
 void
-BreakpointLocation::Disable(Tid taskId, tc::SupervisorState &controlInterface) noexcept
+BreakpointLocation::Disable(Tid taskId, tc::SupervisorState &controller) noexcept
 {
   if (mInstalled) {
-    const auto result = controlInterface.DisableBreakpoint(taskId, *this);
+    const auto result = controller.DisableBreakpoint(taskId, *this);
     VERIFY(result.kind == tc::TaskExecuteResult::Ok,
       "[tracer:{}.{}] Failed to disable breakpoint",
-      controlInterface.TaskLeaderTid(),
+      controller.TaskLeaderTid(),
       taskId);
     mInstalled = false;
   }
@@ -142,7 +142,7 @@ BreakpointLocation::IsInstalled() const noexcept
 }
 
 void
-BreakpointLocation::AddUser(tc::SupervisorState &controlInterface, UserBreakpoint &breakpoint) noexcept
+BreakpointLocation::AddUser(tc::SupervisorState &controller, UserBreakpoint &breakpoint) noexcept
 {
   MDB_ASSERT(
     std::none_of(mUserMapping.begin(), mUserMapping.begin(), [&breakpoint](auto v) { return v != &breakpoint; }),
@@ -150,7 +150,7 @@ BreakpointLocation::AddUser(tc::SupervisorState &controlInterface, UserBreakpoin
   mUserMapping.push_back(&breakpoint);
 
   if (!mInstalled) {
-    breakpoint.Enable(controlInterface);
+    breakpoint.Enable(controller);
   }
 }
 
@@ -187,21 +187,21 @@ UserBreakpoint::IsEnabledAndInstalled() noexcept
 }
 
 void
-UserBreakpoint::Enable(tc::SupervisorState &controlInterface) noexcept
+UserBreakpoint::Enable(tc::SupervisorState &controller) noexcept
 {
   if (mEnabledByUser && mBreakpointLocation != nullptr) {
     mEnabledByUser = true;
-    mBreakpointLocation->Enable(controlInterface.TaskLeaderTid(), controlInterface);
+    mBreakpointLocation->Enable(controller.TaskLeaderTid(), controller);
   }
 }
 
 void
-UserBreakpoint::Disable(tc::SupervisorState &controlInterface) noexcept
+UserBreakpoint::Disable(tc::SupervisorState &controller) noexcept
 {
   if (mEnabledByUser && mBreakpointLocation != nullptr) {
     mEnabledByUser = false;
     if (mBreakpointLocation->AnyUsersActive()) {
-      mBreakpointLocation->Disable(controlInterface.TaskLeaderTid(), controlInterface);
+      mBreakpointLocation->Disable(controller.TaskLeaderTid(), controller);
     }
   }
 }
@@ -243,11 +243,10 @@ UserBreakpoint::Line() const noexcept
     return {};
   }
 
-  if (auto src = mBreakpointLocation->GetSourceLocationInfo(); src) {
+  if (const auto *src = mBreakpointLocation->GetSourceLocationInfo(); src) {
     return src->mLineNumber;
-  } else {
-    return {};
   }
+  return {};
 }
 
 std::optional<u32>
@@ -257,11 +256,10 @@ UserBreakpoint::Column() const noexcept
     return {};
   }
 
-  if (auto src = mBreakpointLocation->GetSourceLocationInfo(); src) {
+  if (const auto *src = mBreakpointLocation->GetSourceLocationInfo(); src) {
     return src->mColumnNumber;
-  } else {
-    return {};
   }
+  return {};
 }
 
 std::optional<std::string_view>
@@ -271,11 +269,10 @@ UserBreakpoint::GetSourceFile() const noexcept
     return {};
   }
 
-  if (auto src = mBreakpointLocation->GetSourceLocationInfo(); src) {
+  if (const auto *src = mBreakpointLocation->GetSourceLocationInfo(); src) {
     return std::optional{ std::string_view{ src->mSourceFile } };
-  } else {
-    return {};
   }
+  return {};
 }
 
 std::optional<std::pmr::string>
@@ -290,7 +287,7 @@ UserBreakpoint::GetErrorMessage(std::pmr::memory_resource *rsrc) const noexcept
         if constexpr (std::is_same_v<T, MemoryError>) {
           std::format_to(it, "Could not write to {} ({})", e.mRequestedAddress, strerror(e.mErrorNumber));
         } else if constexpr (std::is_same_v<T, ResolveError>) {
-          auto spec = t->UserProvidedSpec();
+          const auto *spec = t->UserProvidedSpec();
           if (spec) {
             std::format_to(it, "Could not resolve using spec: {}", *spec);
           } else {
@@ -327,8 +324,9 @@ UserBreakpoint::UserProvidedSpec() const noexcept
 /* virtual */
 Ref<UserBreakpoint>
 UserBreakpoint::CloneBreakpoint(
-  ProcessBreakpointsManager &, tc::SupervisorState &, Ref<BreakpointLocation>) noexcept
+  ProcessBreakpointsManager &breakpointStorage, tc::SupervisorState &tc, Ref<BreakpointLocation> bp) noexcept
 {
+  IGNORE_ARGS(breakpointStorage, tc, bp);
   PANIC("Generic user breakpoint should not be cloned. This is icky that I've done it like this.");
   return nullptr;
 }
@@ -358,7 +356,8 @@ DetermineBehavior(EventResult evaluationResult, tc::SupervisorState &tc) noexcep
   MDB_ASSERT(evaluationResult != EventResult::Resume, "Requires a stop behavior (or default)");
   if (evaluationResult == EventResult::Stop) {
     return BreakpointBehavior::StopOnlyThreadThatHit;
-  } else if (evaluationResult == EventResult::StopAll) {
+  }
+  if (evaluationResult == EventResult::StopAll) {
     return BreakpointBehavior::StopAllThreadsWhenHit;
   }
   // Get session-wide configuration of breakpoint behavior.
@@ -366,12 +365,12 @@ DetermineBehavior(EventResult evaluationResult, tc::SupervisorState &tc) noexcep
 }
 
 BreakpointHitEventResult
-Breakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &t) noexcept
+Breakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  DBGBUFLOG(control, "[{}:bkpt]: bp {} hit", t.mTid, mId);
+  DBGBUFLOG(control, "[{}:bkpt]: bp {} hit", task.mTid, mId);
   IncrementHitCount();
 
-  const auto evaluatedResult = EvaluateStopCondition(t).value_or(BreakpointHitEventResult{ this });
+  const auto evaluatedResult = EvaluateStopCondition(task).value_or(BreakpointHitEventResult{ this });
 
   if (HookRequestedResume(evaluatedResult.mResult)) {
     return evaluatedResult;
@@ -379,9 +378,9 @@ Breakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &t) noexcept
 
   if (DetermineBehavior(evaluatedResult.mResult, controller) == BreakpointBehavior::StopAllThreadsWhenHit) {
     controller.StopAllTasks(
-      [&]() { controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, true); });
+      [&]() { controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = task.mTid }, mId, true); });
   } else {
-    controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = t.mTid }, mId, false);
+    controller.EmitStoppedAtBreakpoints({ .pid = 0, .tid = task.mTid }, mId, false);
   }
   return BP_KEEP(EventResult::Stop);
 }
@@ -394,7 +393,7 @@ Breakpoint::UserProvidedSpec() const noexcept
 
 Ref<UserBreakpoint>
 Breakpoint::CloneBreakpoint(ProcessBreakpointsManager &breakpointStorage,
-  tc::SupervisorState &supervisor,
+  tc::SupervisorState &controller,
   Ref<BreakpointLocation> breakpointLocation) noexcept
 {
 
@@ -402,7 +401,7 @@ Breakpoint::CloneBreakpoint(ProcessBreakpointsManager &breakpointStorage,
                                                   .mBreakpointId = breakpointStorage.NewBreakpointId(),
                                                   .mBreakpointLocationResult = std::move(breakpointLocation),
                                                   .mTimesToHit = {},
-                                                  .mControl = supervisor },
+                                                  .mControl = controller },
     mKind,
     mBreakpointSpec->Clone());
 
@@ -417,20 +416,21 @@ FinishBreakpoint::FinishBreakpoint(RequiredUserParameters param, Tid stopOnlyTas
 }
 
 BreakpointHitEventResult
-FinishBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
+FinishBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  if (t.mTid != mStopOnlyTid) {
+  if (task.mTid != mStopOnlyTid) {
     return BP_KEEP(Resume);
   }
   DBGBUFLOG(control, "Hit finish_bp_t {}", mId);
-  const auto all_stopped = tc.IsAllStopped();
+  const auto all_stopped = controller.IsAllStopped();
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
   if (all_stopped) {
-    tc.EmitSteppedStop({ tc.TaskLeaderTid(), mTid }, "Finished function", true);
+    controller.EmitSteppedStop({ controller.TaskLeaderTid(), mTid }, "Finished function", true);
   } else {
-    tc.StopAllTasks(
-      [&tc, tid = mTid]() { tc.EmitSteppedStop({ tc.TaskLeaderTid(), tid }, "Finished function", true); });
+    controller.StopAllTasks([&controller, tid = mTid]() {
+      controller.EmitSteppedStop({ controller.TaskLeaderTid(), tid }, "Finished function", true);
+    });
   }
   return BP_RETIRE(Stop);
 }
@@ -441,11 +441,11 @@ CodeInjectionBoundaryBreakpoint::CodeInjectionBoundaryBreakpoint(RequiredUserPar
 }
 
 BreakpointHitEventResult
-CodeInjectionBoundaryBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
+CodeInjectionBoundaryBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  DBGBUFLOG(control, "Task {} hit code injection boundary breakpoint at {}", t.mTid, Address().value());
-  (void)tc;
-  (void)t;
+  DBGBUFLOG(control, "Task {} hit code injection boundary breakpoint at {}", task.mTid, Address().value());
+  (void)controller;
+  (void)task;
   return BP_KEEP(None);
 }
 
@@ -455,14 +455,13 @@ ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) no
 }
 
 BreakpointHitEventResult
-ResumeToBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
+ResumeToBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  if (t.mTid == mStopOnlyTid) {
+  if (task.mTid == mStopOnlyTid) {
     DBGBUFLOG(control, "Hit resume_bp_t {}", mId);
     return BP_RETIRE(Resume);
-  } else {
-    return BP_KEEP(None);
   }
+  return BP_KEEP(None);
 }
 
 Logpoint::Logpoint(RequiredUserParameters param,
@@ -521,17 +520,17 @@ Logpoint::EvaluateLog(TaskInfo &t) noexcept
 }
 
 BreakpointHitEventResult
-Logpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
+Logpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
   TODO("Implement this");
-  (void)tc;
-  (void)t;
-  EvaluateLog(t);
+  (void)controller;
+  (void)task;
+  EvaluateLog(task);
   return BP_KEEP(Resume);
 }
 
 BreakpointHitEventResult
-InternalBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept
+InternalBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
   return mMaintenanceFn();
 }
@@ -549,11 +548,13 @@ SOLoadingBreakpoint::SOLoadingBreakpoint(RequiredUserParameters param) noexcept
 }
 
 BreakpointHitEventResult
-SOLoadingBreakpoint::OnHit(tc::SupervisorState &tc, TaskInfo &) noexcept
+SOLoadingBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  tc.OnSharedObjectEvent();
+  controller.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints
-  return BreakpointHitEventResult{ this, EventResult::Resume, BreakpointOp::Keep };
+  return BreakpointHitEventResult{
+    .mUserBreakpoint = this, .mResult = EventResult::Resume, .mRetireBreakpoint = BreakpointOp::Keep
+  };
 }
 
 /* static */

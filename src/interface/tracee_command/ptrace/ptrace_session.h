@@ -47,7 +47,7 @@ private:
   RegisterCache *GetUpToDateRegisterCache(Tid tid) noexcept;
 
   std::vector<Elf64_Phdr> LoadProgramHeaders(
-    Pid pid, AddrPtr phdrAddress, size_t phdrCount, size_t phdrSize) noexcept;
+    Pid pid, AddrPtr phdrAddress, size_t phdrCount, size_t phdrEntrySize) noexcept;
 
   /* Create new task meta data for `tid` */
   TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept;
@@ -87,8 +87,8 @@ public:
   // interface to account for special registers as well.
   u64 GetUserRegister(const TaskInfo &t, size_t registerNumber) noexcept final;
   TaskExecuteResponse DoDisconnect(bool terminate) noexcept final;
-  ReadResult DoReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
-  TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
+  ReadResult DoReadBytes(AddrPtr address, u64 size, u8 *read_buffer) noexcept final;
+  TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u64 size) noexcept final;
 
   // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
   // that was overwritten if the current tracee interface needs it (which is the case for PtraceCommander)

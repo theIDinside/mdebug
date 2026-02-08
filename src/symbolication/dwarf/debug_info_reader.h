@@ -47,11 +47,11 @@ public:
   LEB128Read<i64> DecodeLEB128() noexcept;
   u64 ReadOffsetValue() noexcept;
   u64 ReadSectionOffsetValue(u64 offset) const noexcept;
-  u64 ReadNumbBytes(u8 n_bytes) noexcept;
-  AddrPtr ReadByIndexFromAddressTable(u64 address_index) const noexcept;
-  const char *ReadByIndexFromStringTable(u64 str_index) const noexcept;
-  u64 ReadByIndexFromRangeList(u64 range_index) const noexcept;
-  u64 ReadLocationListIndex(u64 range_index, std::optional<u64> loc_list_base) const noexcept;
+  u64 ReadNumbBytes(u8 bytes) noexcept;
+  AddrPtr ReadByIndexFromAddressTable(u64 addressIndex) const noexcept;
+  const char *ReadByIndexFromStringTable(u64 strIndex) const noexcept;
+  u64 ReadByIndexFromRangeList(u64 rangeIndex) const noexcept;
+  u64 ReadLocationListIndex(u64 rangeIndex, std::optional<u64> locListBase) const noexcept;
   u64 SectionOffset() const noexcept;
   bool HasMore() const noexcept;
 
@@ -68,15 +68,18 @@ public:
   constexpr auto
   ReadIntegralValue() noexcept
   {
-    Integral type = *(Integral *)mCurrentPtr;
-    mCurrentPtr += sizeof(Integral);
+    Integral tmp;
+    constexpr auto size = sizeof(Integral);
+    std::memcpy(&tmp, mCurrentPtr, size);
+    mCurrentPtr += size;
+    // Always return 8 byte values, because this simplifies *a lot*
     if constexpr (std::unsigned_integral<Integral>) {
-      return static_cast<u64>(type);
+      return static_cast<u64>(tmp);
     } else if constexpr (std::signed_integral<Integral>) {
-      return static_cast<i64>(type);
+      return static_cast<i64>(tmp);
     } else {
       static_assert(always_false<Integral>,
-                    "Somehow, some way, an integral slipped through that's neither signed nor unsigned");
+        "Somehow, some way, an integral slipped through that's neither signed nor unsigned");
     }
   }
 
@@ -98,8 +101,8 @@ private:
   u8 mFormat;
 };
 
-AttributeValue ReadAttributeValue(UnitReader &reader, Abbreviation abbr,
-                                  const std::vector<i64> &implicit_consts) noexcept;
+AttributeValue ReadAttributeValue(
+  UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicit_consts) noexcept;
 
 class DieAttributeReader
 {
