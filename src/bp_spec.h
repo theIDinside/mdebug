@@ -25,6 +25,12 @@ struct SourceBreakpointSpec
   std::optional<u32> column;
   std::optional<std::string> log_message;
 
+  [[nodiscard]] constexpr bool
+  IsLogPoint() const
+  {
+    return log_message.has_value();
+  }
+
   // All comparisons assume that this `SourceBreakpoint` actually belongs in the same source file
   // Comparing two `SourceBreakpoint` objects from different source files is non sensical
   friend constexpr auto operator<=>(const SourceBreakpointSpec &l, const SourceBreakpointSpec &r) = default;

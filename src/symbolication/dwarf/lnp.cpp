@@ -3,6 +3,7 @@
 
 #include "symbolication/block.h"
 #include "utils/enumerator.h"
+#include <algorithm>
 #include <filesystem>
 #include <set>
 #include <symbolication/cu_symbol_info.h>
@@ -159,6 +160,32 @@ AddrPtr
 LineTableEntry::RelocateProgramCounter(AddrPtr base) const noexcept
 {
   return pc + base;
+}
+
+[[nodiscard]] std::string
+LineTableEntry::FormatUsingFile(std::string_view filePath) const noexcept
+{
+  auto str = std::format("entry = ({}){}:{}:{} [", file, filePath, line, column);
+
+  if (is_stmt) {
+    str.append(" is_stmt");
+  }
+
+  if (prologue_end) {
+    str.append(" pe");
+  }
+
+  if (epilogue_begin) {
+    str.append(" eb");
+  }
+
+  if (IsEndOfSequence) {
+    str.append(" end");
+  }
+
+  str.push_back(']');
+
+  return str;
 }
 
 RelocatedLteIterator::RelocatedLteIterator(RelocatedLteIterator::Iter iter, AddrPtr base) noexcept
@@ -763,9 +790,13 @@ SourceCodeFile::AddLineTableRanges(const std::vector<std::pair<u32, u32>> &range
 }
 
 void
-SourceCodeFile::ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) noexcept
+SourceCodeFile::ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result, bool debug) noexcept
 {
   if (!IsComputed()) {
+    if (debug) {
+      DBGLOG(core, "Computing line table for this {}", mFullPath);
+    }
+
     ComputeLineTableForThis();
   }
   u32 acc = 0;
@@ -797,7 +828,7 @@ SourceCodeFile::ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) n
   auto it = std::back_inserter(result);
   for (const auto &r : mLineTableRanges) {
     auto subspan = lineTable.subspan(r.mStartIndex, r.Count());
-    it = std::copy(std::begin(subspan), std::end(subspan), it);
+    it = std::ranges::copy(subspan, it).out;
     const auto end = r.mStartIndex + r.Count();
     if (lineTable.size() > end) {
       result.push_back(lineTable[end]);
