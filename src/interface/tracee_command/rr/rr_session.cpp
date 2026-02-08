@@ -408,30 +408,30 @@ Session::HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept
   mHasFirstExecuted = true;
   auto &sessionBreakpoints = *mReplaySupervisor->GetSessionBreakpoints();
 
-  {
-    std::vector<BreakpointSpecification> add{};
-    CopyMapKeysTo(sessionBreakpoints.mFunctionBreakpoints, add);
-    DBGLOG(core, "{}: update fn bps of {}", mTaskLeader, add.size());
-    UpdateFunctionBreakpoints(add, {});
-    add.clear();
+  std::vector<BreakpointSpecification> add{};
 
-    CopyMapKeysTo(sessionBreakpoints.mInstructionBreakpoints, add);
-    DBGLOG(core, "{}: update addr bps of {}", mTaskLeader, add.size());
-    UpdateInstructionBreakpoints(add, {});
+  const auto copyAndClear = [&add](auto &specs, auto &&cb) {
+    CopyMapKeysTo(specs, add);
+    cb(add);
     add.clear();
+  };
 
-    for (const auto &[source, specs] : sessionBreakpoints.mSourceCodeBreakpoints) {
-      CopyMapKeysTo(specs, add);
-      DBGLOG(core, "{}: update source {} bps of {}", mTaskLeader, source, add.size());
-      UpdateSourceBreakpoints(source, add, {});
-    }
+  copyAndClear(
+    sessionBreakpoints.mFunctionBreakpoints, [this](const auto &add) { UpdateFunctionBreakpoints(add, {}); });
+
+  copyAndClear(
+    sessionBreakpoints.mFunctionBreakpoints, [this](const auto &add) { UpdateInstructionBreakpoints(add, {}); });
+
+  for (const auto &[source, specs] : sessionBreakpoints.mSourceCodeBreakpoints) {
+    copyAndClear(specs, [this, &source](const auto &add) { UpdateSourceBreakpoints(source, add, {}); });
   }
 
   newSupervisor->CreateNewTask(child, "forked", false);
   if (vFork) {
     TODO("Implement vFork for rr replay sessions");
   }
-  mScheduler->ReplaySchedule(parentTask, { true, parentTask.mResumeRequest.mType });
+  mScheduler->ReplaySchedule(
+    parentTask, { .mShouldResumeAfterProcessing = true, .mResumeType = parentTask.mResumeRequest.mType });
 }
 
 mdb::Expected<Auxv, Error>
@@ -564,12 +564,13 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
 
 #define LOGBPADD()                                                                                                \
   DBGLOG(core,                                                                                                    \
-    "[{}:bkpt:source:{}]: added bkpt {} at 0x{:x}, orig_byte=0x{:x}",                                             \
+    "[{}:bkpt:source:{}]: added bkpt {} at 0x{}, {}, {}",                                                         \
     mTaskLeader,                                                                                                  \
     sourceCodeFile->mFullPath.FileName(),                                                                         \
-    user->mId,                                                                                                    \
+    u32{ user->mId },                                                                                             \
     pc,                                                                                                           \
-    user->GetLocation() != nullptr ? *user->GetLocation()->mOriginalByte : u8{ 0 });                              \
+    user->GetLocation(),                                                                                          \
+    e.FormatUsingFile(sourceCodeFile->mFullPath));                                                                \
   addIdToSpec(user->mId);
 
   auto sessionBreakpoints = mReplaySupervisor->GetSessionBreakpoints();
@@ -583,8 +584,9 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
 
   DBGBUFLOG(core, "Add {} source spec'ed user breakpoints", specsForSource.size());
 
-  for (const auto &symbol_file : mSymbolFiles) {
-    auto *obj = symbol_file->GetObjectFile();
+  std::set<AddrPtr> addedLocations{};
+  for (const auto &symbolFile : mSymbolFiles) {
+    auto *obj = symbolFile->GetObjectFile();
     for (auto &sourceCodeFile : obj->GetSourceCodeFiles(sourceFilePath.c_str())) {
       // TODO(simon): use arena allocator for foundEntries
       std::vector<sym::dw::LineTableEntry> foundEntries;
@@ -594,28 +596,32 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
 
         const auto addIdToSpec = [&](u32 id) {
           map[sourceSpec].push_back(id);
-
           appliedSpecAndAdded = true;
         };
 
         foundEntries.clear();
-        sourceCodeFile->ReadInSourceCodeLineTable(foundEntries);
-        const auto predicate = [&sourceSpec](const sym::dw::LineTableEntry &entry) {
-          if (entry.IsEndOfSequence) {
-            return false;
-          }
-          return sourceSpec.Line().value() == entry.line &&
-                 sourceSpec.Column().value_or(entry.column) == entry.column;
-        };
+        sourceCodeFile->ReadInSourceCodeLineTable(foundEntries, true);
+        const auto predicate =
+          [&sourceSpec, &addedLocations, &bps = mUserBreakpoints, baseAddress = symbolFile->mBaseAddress](
+            const sym::dw::LineTableEntry &entry) {
+            const auto pc = entry.pc + baseAddress;
+            // Don't add end of sequence entries, duplicate entries, or entries which we already have a bploc for
+            if (entry.IsEndOfSequence || addedLocations.contains(pc) || bps.GetLocationAt(pc)) {
+              return false;
+            }
+            return sourceSpec.Line().value() == entry.line &&
+                   sourceSpec.Column().value_or(entry.column) == entry.column;
+          };
 
         for (const auto &e : foundEntries | std::views::filter(predicate)) {
-          const auto pc = e.pc + symbol_file->mBaseAddress;
-          if (sourceSpec.uSource->mSpec.log_message) {
+          const auto pc = e.RelocateProgramCounter(symbolFile->mBaseAddress);
+          if (sourceSpec.uSource->mSpec.IsLogPoint()) {
             auto user = mUserBreakpoints.CreateBreakpointLocationUser<Logpoint>(*this,
               GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e),
               mTaskLeader,
               std::string_view{ sourceSpec.uSource->mSpec.log_message.value() },
               sourceSpec.Clone());
+
             LOGBPADD()
           } else {
             auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
@@ -629,6 +635,7 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
           if (!sourceSpec.Column()) {
             break;
           }
+          addedLocations.insert(pc);
         }
 
         if (appliedSpecAndAdded) {
@@ -720,7 +727,7 @@ Session::DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept
   using Entry = sym::dw::LineTableEntry;
 
   // Do update for "source breakpoints", breakpoints set via a source spec
-  auto obj = newSymbolFile.GetObjectFile();
+  auto *obj = newSymbolFile.GetObjectFile();
 
   // Apply source code breakpoint specs to new symbol file
   for (const auto &[sourceFile, specs] : sessionBreakpoints->mSourceCodeBreakpoints) {

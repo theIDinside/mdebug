@@ -427,3 +427,28 @@ public:
   u16 NewBreakpointId() noexcept;
 };
 }; // namespace mdb
+
+template <> struct std::formatter<mdb::BreakpointLocation> : BasicFormat<mdb::BreakpointLocation>
+{
+  template <typename FormatContext>
+  constexpr auto
+  format(const Self &loc, FormatContext &context) const noexcept
+  {
+    auto out = context.out();
+
+    out = std::format_to(out, "bploc=@ {}, src=", loc.Address());
+
+    if (const auto *srcLoc = loc.GetSourceLocationInfo()) {
+      out = std::format_to(out,
+        "{}:{}:{}",
+        srcLoc->mSourceFile.StringView(),
+        u32{ srcLoc->mLineNumber },
+        srcLoc->mColumnNumber->value_or(0));
+    } else {
+      out = std::format_to(out, "<none>");
+    }
+    return out;
+  }
+};
+
+DEFINE_POINTER_FORMAT(mdb::BreakpointLocation);

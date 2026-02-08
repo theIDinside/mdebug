@@ -255,6 +255,43 @@ template <typename T> struct Default
   }
 };
 
+template <typename T> struct BasicFormat
+{
+  using Self = T;
+  template <typename ParseContext>
+  constexpr auto
+  parse(ParseContext &context)
+  {
+    return context.begin();
+  }
+};
+
+#define DEFINE_POINTER_FORMAT(TYPE)                                                                               \
+  template <> struct std::formatter<mdb::RefPtr<TYPE>> : std::formatter<TYPE>                                     \
+  {                                                                                                               \
+    template <typename FormatContext>                                                                             \
+    constexpr auto                                                                                                \
+    format(const mdb::RefPtr<TYPE> &ptr, FormatContext &context) const noexcept                                   \
+    {                                                                                                             \
+      if (!ptr) {                                                                                                 \
+        return std::format_to(context.out(), "nullptr");                                                          \
+      }                                                                                                           \
+      return std::formatter<TYPE>::format(*ptr, context);                                                         \
+    }                                                                                                             \
+  };                                                                                                              \
+  template <> struct std::formatter<TYPE *> : std::formatter<TYPE>                                                \
+  {                                                                                                               \
+    template <typename FormatContext>                                                                             \
+    constexpr auto                                                                                                \
+    format(const TYPE *ptr, FormatContext &context) const noexcept                                                \
+    {                                                                                                             \
+      if (!ptr) {                                                                                                 \
+        return std::format_to(context.out(), "nullptr");                                                          \
+      }                                                                                                           \
+      return std::formatter<TYPE>::format(*ptr, context);                                                         \
+    }                                                                                                             \
+  };
+
 // Debug adapter protocol messages are json, and as such may need escaping (in the cases where we can't control the
 // format up front.)
 struct DebugAdapterProtocolString
