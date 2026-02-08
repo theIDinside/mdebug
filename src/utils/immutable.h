@@ -202,23 +202,24 @@ public:
   template <typename... Args> Immutable(Args... args) noexcept : mData(std::forward<Args>(args)...) {}
 
   constexpr
-  operator const std::string_view() const &
-  {
-    return mData;
-  }
-  constexpr
-  operator const std::optional<std::string_view>() const &
+  operator std::string_view() const &
   {
     return mData;
   }
 
-  constexpr std::string_view
+  constexpr
+  operator std::optional<std::string_view>() const &
+  {
+    return mData;
+  }
+
+  [[nodiscard]] constexpr std::string_view
   StringView() const noexcept
   {
     return mData;
   }
 
-  constexpr const std::string_view
+  constexpr std::string_view
   operator*() const & noexcept
   {
     return std::string_view{ mData };

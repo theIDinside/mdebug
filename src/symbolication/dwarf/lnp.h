@@ -183,7 +183,10 @@ struct LineTableEntry
   bool epilogue_begin : 1;
   bool IsEndOfSequence : 1 { false };
 
-  AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
+  [[nodiscard]] AddrPtr RelocateProgramCounter(AddrPtr base) const noexcept;
+  // Entries are light weight. We need to provide the file that `file` actually maps to. That is the caller's
+  // responsibility
+  [[nodiscard]] std::string FormatUsingFile(std::string_view file) const noexcept;
 };
 
 struct LineTableEntryAddress
@@ -335,7 +338,7 @@ public:
   sym::CompilationUnit *GetOwningCompilationUnit() const noexcept;
   AddressRange AddressBounds() noexcept;
   bool HasAddressRange() noexcept;
-  void ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result) noexcept;
+  void ReadInSourceCodeLineTable(std::vector<LineTableEntry> &result, bool debug = false) noexcept;
   void AddLineTableRanges(const std::vector<std::pair<u32, u32>> &ranges) noexcept;
 
   constexpr AddrPtr
