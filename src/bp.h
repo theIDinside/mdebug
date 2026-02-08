@@ -33,7 +33,7 @@ struct UserRequestedBreakpoint
 {
   u32 mSpecificationKey;
   BreakpointRequestKind mSpecificationType;
-  std::vector<u32> mUserBreakpointIds{};
+  std::vector<u32> mUserBreakpointIds;
 };
 
 struct MemoryError
@@ -94,7 +94,7 @@ class BreakpointLocation
   INTERNAL_REFERENCE_COUNT(BreakpointLocation)
   bool mInstalled{ true };
   AddrPtr mAddress;
-  std::vector<UserBreakpoint *> mUserMapping{};
+  std::vector<UserBreakpoint *> mUserMapping;
   std::unique_ptr<LocationSourceInfo> mSourceLocation;
   friend ProcessBreakpointsManager;
 
@@ -110,11 +110,11 @@ public:
     AddrPtr address, u8 original, std::unique_ptr<LocationSourceInfo> sourceLocationInfo) noexcept;
   ~BreakpointLocation() noexcept;
 
-  bool RemoveUserOfThis(tc::SupervisorState &controlInterface, UserBreakpoint &breakpoint) noexcept;
-  void Enable(Tid taskId, tc::SupervisorState &controlInterface) noexcept;
-  void Disable(Tid taskId, tc::SupervisorState &controlInterface) noexcept;
+  bool RemoveUserOfThis(tc::SupervisorState &controller, UserBreakpoint &breakpoint) noexcept;
+  void Enable(Tid taskId, tc::SupervisorState &controller) noexcept;
+  void Disable(Tid taskId, tc::SupervisorState &controller) noexcept;
   bool IsInstalled() const noexcept;
-  void AddUser(tc::SupervisorState &controlInterface, UserBreakpoint &breakpoint) noexcept;
+  void AddUser(tc::SupervisorState &controller, UserBreakpoint &breakpoint) noexcept;
   bool AnyUsersActive() const noexcept;
   std::vector<u32> GetUserIds() const noexcept;
   const LocationSourceInfo *GetSourceLocationInfo() const noexcept;
@@ -199,8 +199,8 @@ public:
 
   Ref<BreakpointLocation> GetLocation() noexcept;
   bool IsEnabledAndInstalled() noexcept;
-  void Enable(tc::SupervisorState &ctrl) noexcept;
-  void Disable(tc::SupervisorState &ctrl) noexcept;
+  void Enable(tc::SupervisorState &controller) noexcept;
+  void Disable(tc::SupervisorState &controller) noexcept;
 
   std::optional<AddrPtr> Address() const noexcept;
   bool IsVerified() const noexcept;
@@ -208,7 +208,7 @@ public:
   std::optional<u32> Column() const noexcept;
   std::optional<std::string_view> GetSourceFile() const noexcept;
   std::optional<std::pmr::string> GetErrorMessage(std::pmr::memory_resource *rsrc) const noexcept;
-  void UpdateLocation(Ref<BreakpointLocation> bploc) noexcept;
+  void UpdateLocation(Ref<BreakpointLocation> breakpointLocation) noexcept;
   void SetExpression(std::unique_ptr<js::JsBreakpointFunction> expression) noexcept;
 
   virtual BreakpointSpecification *UserProvidedSpec() const noexcept;
@@ -218,7 +218,7 @@ public:
   virtual std::optional<BreakpointHitEventResult> EvaluateStopCondition(TaskInfo &t) noexcept;
   /// Evaluate the result of hitting this breakpoint which determines what behavior the task scheduler will take.
   /// `tc` is the relevant supervisor for the task `t` that hit the breakpoint.
-  virtual BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept = 0;
+  virtual BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept = 0;
 
   virtual bool
   IsUserBreakpoint() const noexcept
@@ -246,11 +246,11 @@ public:
     RequiredUserParameters param, LocationUserKind kind, std::unique_ptr<BreakpointSpecification> spec) noexcept;
   ~Breakpoint() noexcept override = default;
   // Interface to implement
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept override;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept override;
   BreakpointSpecification *UserProvidedSpec() const noexcept override;
   Ref<UserBreakpoint> CloneBreakpoint(ProcessBreakpointsManager &breakpointStorage,
-    tc::SupervisorState &tc,
-    Ref<BreakpointLocation> bp) noexcept override;
+    tc::SupervisorState &controller,
+    Ref<BreakpointLocation> breakpointLocation) noexcept override;
 
   bool
   IsUserBreakpoint() const noexcept final
@@ -271,14 +271,14 @@ class FinishBreakpoint : public UserBreakpoint
 
 public:
   explicit FinishBreakpoint(RequiredUserParameters param, Tid stopOnlyTaskTid) noexcept;
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 
 class CodeInjectionBoundaryBreakpoint : public UserBreakpoint
 {
 public:
   explicit CodeInjectionBoundaryBreakpoint(RequiredUserParameters param) noexcept;
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 
 class ResumeToBreakpoint : public UserBreakpoint
@@ -287,7 +287,7 @@ class ResumeToBreakpoint : public UserBreakpoint
 
 public:
   explicit ResumeToBreakpoint(RequiredUserParameters param, Tid tid) noexcept;
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 
 class Logpoint : public Breakpoint
@@ -301,7 +301,7 @@ public:
     std::string_view expression,
     std::unique_ptr<BreakpointSpecification> spec) noexcept;
 
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 
 class InternalBreakpoint : public UserBreakpoint
@@ -312,14 +312,14 @@ public:
   explicit InternalBreakpoint(RequiredUserParameters param,
     std::string_view debugName,
     std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept;
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 
 class SOLoadingBreakpoint : public UserBreakpoint
 {
 public:
   explicit SOLoadingBreakpoint(RequiredUserParameters param) noexcept;
-  BreakpointHitEventResult OnHit(tc::SupervisorState &tc, TaskInfo &t) noexcept final;
+  BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 
 using BreakpointId = u32;
@@ -329,11 +329,11 @@ using SourceFileBreakpointMap = std::unordered_map<BreakpointSpecification, std:
 class SessionBreakpoints
 {
 public:
-  std::unordered_map<BreakpointId, Ref<UserBreakpoint>> mUserBreakpoints{};
-  std::unordered_map<AddrPtr, std::vector<BreakpointId>> mUserBreakpointsAtAddress{};
-  std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> mSourceCodeBreakpoints{};
-  std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints{};
-  std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints{};
+  std::unordered_map<BreakpointId, Ref<UserBreakpoint>> mUserBreakpoints;
+  std::unordered_map<AddrPtr, std::vector<BreakpointId>> mUserBreakpointsAtAddress;
+  std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> mSourceCodeBreakpoints;
+  std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints;
+  std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints;
 
   static SharedPtr<SessionBreakpoints> Create() noexcept;
   void Clear() noexcept;
@@ -364,11 +364,11 @@ public:
   // instructing a user breakpoint to remove itself from the location's list and if that list becomes empty, the
   // location will die.)
 
-  std::unordered_map<BreakpointId, Ref<UserBreakpoint>> mUserBreakpoints{};
-  std::unordered_map<AddrPtr, std::vector<BreakpointId>> mUserBreakpointsAtAddress{};
-  std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> mSourceCodeBreakpoints{};
-  std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints{};
-  std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints{};
+  std::unordered_map<BreakpointId, Ref<UserBreakpoint>> mUserBreakpoints;
+  std::unordered_map<AddrPtr, std::vector<BreakpointId>> mUserBreakpointsAtAddress;
+  std::unordered_map<SourceCodeFileName, SourceFileBreakpointMap> mSourceCodeBreakpoints;
+  std::unordered_map<BreakpointSpecification, std::vector<BreakpointId>> mFunctionBreakpoints;
+  std::unordered_map<BreakpointSpecification, BreakpointId> mInstructionBreakpoints;
 
   void OnExec() noexcept;
   void OnProcessExit() noexcept;

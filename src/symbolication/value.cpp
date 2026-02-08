@@ -452,7 +452,7 @@ LazyMemoryContentsObject::View(u32 offset, u32 size) noexcept
 
 /*static*/
 MemoryContentsObject::ReadResult
-MemoryContentsObject::ReadMemory(tc::SupervisorState &tc, AddrPtr address, u32 sizeOf) noexcept
+MemoryContentsObject::ReadMemory(tc::SupervisorState &tc, AddrPtr address, u64 sizeOf) noexcept
 {
   if (auto res = tc.SafeRead(address, sizeOf); res.is_expected()) {
     return ReadResult{ .info = ReadResultInfo::Success, .value = res.take_value() };

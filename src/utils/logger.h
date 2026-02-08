@@ -60,8 +60,8 @@ struct LogChannel
 {
   std::mutex mChannelMutex;
   std::fstream mFileStream;
-  void LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept;
-  void LogMessage(const char *file, u32 line, u32 column, const std::string &message) noexcept;
+  void LogMessage(const char *file, u32 line, std::string_view message) noexcept;
+  void LogMessage(const char *file, u32 line, const std::string &message) noexcept;
   void Log(std::string_view msg) noexcept;
 };
 
@@ -285,10 +285,10 @@ public:
   void LogMessage() noexcept;
 
   static void
-  LogIf(Channel id, const char *file, u32 line, u32 column, std::string_view message) noexcept
+  LogIf(Channel id, const char *file, u32 line, std::string_view message) noexcept
   {
     if (auto *channel = GetLogger()->GetLogChannel(id); channel) {
-      channel->LogMessage(file, line, column, message);
+      channel->LogMessage(file, line, message);
     }
   }
 
@@ -314,46 +314,46 @@ LogChannel *GetLogChannel(Channel id) noexcept;
 // CONDITIONAL DEBUG LOG
 #define CDLOG(condition, channel_name, ...)                                                                       \
   if ((condition)) {                                                                                              \
-    auto LOC = std::source_location::current();                                                                   \
-    if (auto channel = logging::GetLogChannel(Channel::channel_name); channel) {                                  \
-      channel->LogMessage(LOC.file_name(), LOC.line() - 1, LOC.column() - 2, std::format(__VA_ARGS__));           \
+    const auto LOC = std::source_location::current();                                                             \
+    if (auto *chan = logging::GetLogChannel(Channel::channel_name); chan) {                                       \
+      chan->LogMessage(LOC.file_name(), LOC.line() - 1, std::format(__VA_ARGS__));                                \
     }                                                                                                             \
   }
 
 #define DBGLOG(channel, ...)                                                                                      \
-  if (auto channel = mdb::logging::GetLogChannel(Channel::channel); channel) {                                    \
+  if (auto *chan = mdb::logging::GetLogChannel(Channel::channel); chan) {                                         \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::std::format(__VA_ARGS__));  \
+    chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, ::std::format(__VA_ARGS__));                          \
   }
 
 #define DBGBUFLOG(channel, ...)                                                                                   \
-  if (auto channel = mdb::logging::GetLogChannel(Channel::channel); channel) {                                    \
+  if (auto *chan = mdb::logging::GetLogChannel(Channel::channel); chan) {                                         \
     std::source_location srcLoc = std::source_location::current();                                                \
     char buf[1024];                                                                                               \
     auto it = ::std::format_to(buf, __VA_ARGS__);                                                                 \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, std::string_view{ buf, it }); \
+    chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, std::string_view{ buf, it });                         \
   }
 
 #define DBGLOG_STR(channel, str)                                                                                  \
-  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
+  if (auto *chan = logging::GetLogChannel(Channel::channel); chan) {                                              \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, str);                         \
+    chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, str);                                                 \
   }
 #else
 #define DLOG(...)
 #define DBGLOG(channel, ...)                                                                                      \
-  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
+  if (auto *chan = logging::GetLogChannel(Channel::channel); chan) {                                              \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, ::std::format(__VA_ARGS__));  \
+    chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, ::std::format(__VA_ARGS__));                          \
   }
 
 #define DBGBUFLOG(channel, ...)
 
 #define CDLOG(...)
 #define DBGLOG_STR(channel, str)                                                                                  \
-  if (auto channel = logging::GetLogChannel(Channel::channel); channel) {                                         \
+  if (auto *chan = logging::GetLogChannel(Channel::channel); chan) {                                              \
     std::source_location srcLoc = std::source_location::current();                                                \
-    channel->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, srcLoc.column() - 2, str);                         \
+    chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, str);                                                 \
   }
 #endif
 

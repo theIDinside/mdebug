@@ -118,9 +118,11 @@ PtraceEventToStopStatus(PtraceEvent event) noexcept
 {
   if (WIFSTOPPED(event.mStatus)) {
     return IfStoppedToStopStatus(event);
-  } else if (WIFEXITED(event.mStatus)) {
+  }
+  if (WIFEXITED(event.mStatus)) {
     return IfExitedToStopStatus(event);
-  } else if (WIFSIGNALED(event.mStatus)) {
+  }
+  if (WIFSIGNALED(event.mStatus)) {
     return IfSignalledToStopStatus(event);
   }
   PANIC("Should never reach here.");
@@ -171,7 +173,7 @@ Session::ProcessQueuedUnhandled(Pid childPid) noexcept
     DBGBUFLOG(core, "processing queued event for {}", childPid);
     PtraceEvent e = *it;
     sUnhandledPtraceEvents.erase(it);
-    auto task = GetTaskByTid(childPid);
+    auto *task = GetTaskByTid(childPid);
     VERIFY(task,
       "Task should have been created & initialized at this point, dealing with out-of-order creation/clone "
       "events.");
@@ -221,7 +223,7 @@ Session::DoDisconnect(bool terminate) noexcept
     // PostTaskExit mutates mThreads (invalidates iterators)
     std::vector<TaskInfo *> tasks;
     TransformCopyTo(mThreads, tasks, [](const auto &entry) { return entry.mTask.Get(); });
-    for (auto task : tasks) {
+    for (auto *task : tasks) {
       // Do we even care about this? It probably should be up to linux to handle it for us if there's an error
       // here.
       const auto _ = tgkill(mTaskLeader, task->mTid, SIGKILL);
@@ -244,27 +246,26 @@ Session::DoDisconnect(bool terminate) noexcept
 }
 
 ReadResult
-Session::DoReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept
+Session::DoReadBytes(AddrPtr address, u64 size, u8 *read_buffer) noexcept
 {
-  auto readBytes = pread64(mProcFsMemFd.Get(), read_buffer, size, address.GetRaw());
+  auto readBytes = pread64(mProcFsMemFd.Get(), read_buffer, size, static_cast<i64>(address.GetRaw()));
   if (readBytes > 0) {
     return ReadResult::Ok(static_cast<u32>(readBytes));
-  } else if (readBytes == 0) {
-    return ReadResult::EoF();
-  } else {
-    return ReadResult::SystemError(errno);
   }
+  if (readBytes == 0) {
+    return ReadResult::EoF();
+  }
+  return ReadResult::SystemError(errno);
 }
 
 TraceeWriteResult
-Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
+Session::DoWriteBytes(AddrPtr address, const u8 *buf, u64 size) noexcept
 {
-  const auto result = pwrite64(mProcFsMemFd.Get(), buf, size, addr.GetRaw());
+  const auto result = pwrite64(mProcFsMemFd.Get(), buf, size, static_cast<i64>(address.GetRaw()));
   if (result > 0) {
     return TraceeWriteResult::Ok(static_cast<u32>(result));
-  } else {
-    return TraceeWriteResult::Error(errno);
   }
+  return TraceeWriteResult::Error(errno);
 }
 
 // Install (new) software breakpoint at `addr`. The retuning TaskExecuteResponse *can* contain the original byte
@@ -374,7 +375,7 @@ Session::DoResumeTarget(RunType type) noexcept
 bool
 Session::Pause(Tid tid) noexcept
 {
-  auto task = GetTaskByTid(tid);
+  auto *task = GetTaskByTid(tid);
   if (task->IsStopped()) {
     return false;
   }
@@ -419,7 +420,7 @@ Session::OpenMemoryFile() noexcept
 RegisterCache *
 Session::GetUpToDateRegisterCache(Tid tid) noexcept
 {
-  auto task = GetTaskByTid(tid);
+  auto *task = GetTaskByTid(tid);
   VERIFY(task, "Expected task {} to exist", tid);
   if (task->mRegisterCacheDirty) {
     CacheRegistersFor(*task, false);
@@ -575,7 +576,7 @@ Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
     const auto leader = childPid;
 
     ConfigurePtraceSettings(leader);
-    auto supervisor = Session::Create(leader, debugAdapterClient);
+    auto *supervisor = Session::Create(leader, debugAdapterClient);
     supervisor->OpenMemoryFile();
 
     debugAdapterClient->SetDebugAdapterSessionType(ui::dap::DapClientSession::Launch);
@@ -623,7 +624,8 @@ NativeInitCloneEvent(TaskInfo &cloningTask, const user_regs_struct &regs, Sessio
     // result.mTaskVMInfo = vmInfo;
     MDB_ASSERT(!control.HasTask(childPid), "Tracee controller already has task {} !", childPid);
     return childPid;
-  } else if (orig_rax == SYS_clone3) {
+  }
+  if (orig_rax == SYS_clone3) {
     const TraceePointer<clone_args> ptr = sys_arg<mdb::SysRegister::RDI>(regs);
     const auto res = control.ReadType(ptr);
     const auto childPid = control.ReadType(TPtr<pid_t>{ res.parent_tid });
@@ -762,7 +764,7 @@ Session::ProcessDeferredEvents() noexcept
 {
   mStopEventHandlerStack.Pop();
   for (auto e : mDeferredEvents) {
-    auto task = GetTaskByTid(e.mPid);
+    auto *task = GetTaskByTid(e.mPid);
     HandleEvent(*task, e);
   }
 }
@@ -772,7 +774,7 @@ Session::ReadThreadName(Tid tid, std::string &result) noexcept
 {
   std::array<char, 256> pathbuf{};
 
-  auto it = std::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
+  auto *it = std::format_to(pathbuf.begin(), "/proc/{}/task/{}/comm", TaskLeaderTid(), tid);
   std::string_view path{ pathbuf.data(), it };
   auto file = mdb::ScopedFd::OpenFileReadOnly(path);
 
@@ -798,12 +800,12 @@ Session::ReadThreadName(Tid tid, std::string &result) noexcept
 }
 
 void
-Session::HandleFork(TaskInfo &parentTask, pid_t childPid, bool vFork) noexcept
+Session::HandleFork(TaskInfo &parentTask, pid_t newChild, bool vFork) noexcept
 {
-  auto newSupervisor = Session::Create(childPid, mDebugAdapterClient);
+  auto *newSupervisor = Session::Create(newChild, mDebugAdapterClient);
 
   bool resume = true;
-  newSupervisor->CreateNewTask(childPid, "forked", false);
+  newSupervisor->CreateNewTask(newChild, "forked", false);
   if (!vFork) {
     DBGLOG(core, "event was not vfork; disabling breakpoints in new address space.");
 
@@ -821,15 +823,16 @@ Session::HandleFork(TaskInfo &parentTask, pid_t childPid, bool vFork) noexcept
     newSupervisor->mStopEventHandlerStack.PushEventHandler([](auto &e) { return EventState::Defer; });
     newSupervisor->OpenMemoryFile();
 
-    mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mTaskLeader, childPid, "forked", true });
-    mScheduler->Schedule(parentTask, { true && resume, parentTask.mResumeRequest.mType });
+    mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mTaskLeader, newChild, "forked", true });
+    mScheduler->Schedule(
+      parentTask, { .mShouldResumeAfterProcessing = resume, .mResumeType = parentTask.mResumeRequest.mType });
   } else {
     // under no circumstances are we allowed to resume the parent while the vfork-to-exec is in flight.
     mStopEventHandlerStack.PushEventHandler([](const auto &) { return EventState::Defer; });
     newSupervisor->mIsVForking = true;
     newSupervisor->OnForkCopySymbols(*this, /* isVFork */ false);
     newSupervisor->GetOnExecOrExitPublisher().Once(
-      [parent = this, self = newSupervisor, task = RefPtr{ &parentTask }, newPid = childPid]() {
+      [parent = this, self = newSupervisor, task = RefPtr{ &parentTask }, newPid = newChild]() {
         parent->ProcessDeferredEvents();
         self->mIsVForking = false;
         parent->mDebugAdapterClient->PostDapEvent(
@@ -855,14 +858,14 @@ Session::DoReadAuxiliaryVector() noexcept
     if (result == -1) {
       return Error{ .mSysErrorNumber = errno, .mErrorMessage = strerror(errno) };
     }
-    MDB_ASSERT(result > (8 * 2),
+    MDB_ASSERT(result > static_cast<ssize_t>(8 * 2),
       "Expected to read at least 1 element (last element should always be a 0, 0 pair, "
       "thus one element should always exist at the minimum) but read {}",
       result);
     const auto item_count = result / 8;
 
     res.mContents.reserve(res.mContents.size() + item_count);
-    for (auto i = 0u; i < item_count; i += 2) {
+    for (auto i = 0U; i < item_count; i += 2) {
       if (buffer[i] == 0 && buffer[i + 1] == 0) {
         return res;
       }

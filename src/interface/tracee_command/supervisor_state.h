@@ -154,14 +154,14 @@ protected:
   // The process pid, or the initial task that was spawned for this process
   pid_t mTaskLeader{ 0 };
   // The symbol files that this process is "built of"
-  std::vector<std::shared_ptr<SymbolFile>> mSymbolFiles{};
+  std::vector<std::shared_ptr<SymbolFile>> mSymbolFiles;
   // The main executable symbol file; the initial executable binary, i.e. the one passed to `execve` at some point.
   std::shared_ptr<SymbolFile> mMainExecutable{ nullptr };
   // The tasks that exist in this "process space". Since tasks often are looked up by tid, before we want to do
   // something with it we save an indirection by storing the tid inline here, same goes for mExitedThreads.
-  std::vector<TaskInfoEntry> mThreads{};
+  std::vector<TaskInfoEntry> mThreads;
 
-  std::vector<TaskInfoEntry> mExitedThreads{};
+  std::vector<TaskInfoEntry> mExitedThreads;
 
   // The breakpoints set by the user
   ProcessBreakpointsManager mUserBreakpoints;
@@ -210,7 +210,6 @@ protected:
 public:
   const SupervisorType mSupervisorType;
 
-public:
   SupervisorState(SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client) noexcept;
   virtual ~SupervisorState() noexcept = default;
 
@@ -355,8 +354,8 @@ public:
   {
     MDB_ASSERT(address != nullptr, "Can't read from nullptr address (0)");
     typename TPtr<T>::Type result;
-    u8 *ptr = static_cast<u8 *>(static_cast<void *>(&result));
-    auto totalRead = 0ull;
+    u8 *ptr = reinterpret_cast<u8 *>(&result);
+    auto totalRead = 0ULL;
     constexpr auto sz = TPtr<T>::SizeOfPointee();
     while (totalRead < sz) {
       const auto readAddress = address.AsVoid() += totalRead;
@@ -377,8 +376,8 @@ public:
     if (addr == nullptr) {
       return std::nullopt;
     }
-    auto ptr = static_cast<u8 *>(static_cast<void *>(&result));
-    auto totalRead = 0ull;
+    auto *ptr = reinterpret_cast<u8 *>(&result);
+    auto totalRead = 0ULL;
     constexpr auto sz = TPtr<T>::SizeOfPointee();
     while (totalRead < sz) {
       const auto readAddress = addr.AsVoid() += totalRead;
@@ -516,8 +515,8 @@ public:
 
   virtual TaskExecuteResponse DoDisconnect(bool terminate) noexcept = 0;
   virtual std::optional<std::vector<ObjectFileDescriptor>> ReadLibraries() noexcept;
-  virtual ReadResult DoReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept = 0;
-  virtual TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept = 0;
+  virtual ReadResult DoReadBytes(AddrPtr address, u64 size, u8 *read_buffer) noexcept = 0;
+  virtual TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u64 size) noexcept = 0;
 
   virtual TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept = 0;
   virtual TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept = 0;
