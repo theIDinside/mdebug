@@ -29,7 +29,7 @@ class Type;
 class DebugAdapterSerializer;
 class Frame;
 
-enum class ValueDisplayType
+enum class ValueDisplayType : u8
 {
   Primitive,
   Structured,
@@ -38,7 +38,7 @@ enum class ValueDisplayType
 class MemoryContentsObject;
 class LazyMemoryContentsObject;
 
-enum class ValueError
+enum class ValueError : u8
 {
   Success,
   InvalidSize,
@@ -128,7 +128,7 @@ public:
 
 private:
   // This value is either a block symbol (e.g. a variable on the stack) or a member of some block symbol (a field)
-  enum class ValueKind
+  enum class ValueKind : u8
   {
     Symbol,
     Field,
@@ -155,7 +155,7 @@ private:
   VarContext mContext;
 };
 
-enum class ReadResultInfo
+enum class ReadResultInfo : u8
 {
   Success,
   Partial,
@@ -204,7 +204,7 @@ public:
   static Ref<Value> CreateFrameVariable(
     tc::SupervisorState &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept;
 
-  static ReadResult ReadMemory(tc::SupervisorState &tc, AddrPtr address, u32 size_of) noexcept;
+  static ReadResult ReadMemory(tc::SupervisorState &tc, AddrPtr address, u64 size_of) noexcept;
   static ReadResult ReadMemory(
     std::pmr::memory_resource *allocator, tc::SupervisorState &tc, AddrPtr address, u32 size_of) noexcept;
 };

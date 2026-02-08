@@ -35,7 +35,7 @@ Session::GetReplayTask(Tid recTid) noexcept
 std::optional<std::string>
 Session::GetThreadName(Tid tid) noexcept
 {
-  auto task = mReplaySupervisor->GetTask(tid);
+  auto *task = mReplaySupervisor->GetTask(tid);
   if (task) {
     return task->name();
   }
@@ -46,7 +46,7 @@ TaskInfo *
 Session::CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept
 {
   DBGLOG(core, "Create new task {}", tid);
-  if (auto t = Tracer::GetSessionTaskMap().Get(tid)) {
+  if (auto *t = Tracer::GetSessionTaskMap().Get(tid)) {
     if (!t->IsValid()) {
       t->SetName(name.value_or(std::to_string(tid)));
       t->ReInit();
@@ -337,7 +337,7 @@ Session::AdjustSymbols() noexcept
     return path;
   };
 
-  const auto mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
+  const auto *mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
   const Path interpreterPath = InterpreterPath(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
   const std::shared_ptr tempObjectFile = ObjectFile::CreateObjectFile(TaskLeaderTid(), interpreterPath);
   MDB_ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
@@ -348,7 +348,7 @@ Session::AdjustSymbols() noexcept
   MDB_ASSERT(dlDebugStateSymbol.has_value(), "Did not find _dl_debug_state");
   AddrPtr dlDebugState = dlDebugStateSymbol->address + interpreterBase;
 
-  auto sect = mMainExecutable->GetObjectFile()->GetElf()->GetSection(ElfSec::Dynamic);
+  auto *sect = mMainExecutable->GetObjectFile()->GetElf()->GetSection(ElfSec::Dynamic);
   MDB_ASSERT(sect, "Could not find .dynamic section");
   // TODO: Start supporting 32 bits
   auto count = sect->GetDataAs<Elf64_Dyn>().size();
@@ -390,7 +390,7 @@ void
 Session::HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept
 {
   const bool hasReplayedStep = false;
-  auto newSupervisor = Session::Create(mReplaySupervisor, child, mDebugAdapterClient, hasReplayedStep);
+  auto *newSupervisor = Session::Create(mReplaySupervisor, child, mDebugAdapterClient, hasReplayedStep);
   newSupervisor->mParenPid = mTaskLeader;
 
   // When a replay session forks, we can't actually notify the debugger client that the process exists yet
@@ -577,12 +577,14 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
 
   for (const auto &sourceSpec : add) {
     if (!specsForSource.contains(sourceSpec)) {
-      specsForSource.emplace(sourceSpec, sessionBreakpoints->CreateBreakpointInfo());
+      specsForSource.emplace(sourceSpec, mdb::tc::replay::SessionBreakpointSpecs::CreateBreakpointInfo());
     }
   }
 
+  DBGBUFLOG(core, "Add {} source spec'ed user breakpoints", specsForSource.size());
+
   for (const auto &symbol_file : mSymbolFiles) {
-    auto obj = symbol_file->GetObjectFile();
+    auto *obj = symbol_file->GetObjectFile();
     for (auto &sourceCodeFile : obj->GetSourceCodeFiles(sourceFilePath.c_str())) {
       // TODO(simon): use arena allocator for foundEntries
       std::vector<sym::dw::LineTableEntry> foundEntries;
@@ -846,7 +848,7 @@ Session::DoDisconnect(bool terminate) noexcept
 }
 
 ReadResult
-Session::DoReadBytes(AddrPtr address, u32 size, u8 *readBuffer) noexcept
+Session::DoReadBytes(AddrPtr address, u64 size, u8 *readBuffer) noexcept
 {
   const auto result = mReplaySupervisor->ReadMemory(mTaskLeader, address, size, readBuffer);
   if (result == -1) {
@@ -858,7 +860,7 @@ Session::DoReadBytes(AddrPtr address, u32 size, u8 *readBuffer) noexcept
 }
 
 TraceeWriteResult
-Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept
+Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u64 size) noexcept
 {
   TODO("Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept");
 }

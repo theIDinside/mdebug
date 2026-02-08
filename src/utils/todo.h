@@ -5,16 +5,20 @@
 #include <utils/logger.h>
 
 // std
+#include <iostream>
 #include <print>
 #include <source_location>
 
-#define IGNORE_WARN(...) (void)sizeof...(__VA_ARGS__);
+#define IGNORE_WARN(...) (void)sizeof...(__VA_OPT__(, ) __VA_ARGS__);
 
 template <typename... Args>
-void
-IgnoreArgs(const Args &...)
+consteval void
+IgnoreArgs(const Args &...args)
 {
+  ((void)args, ...);
 }
+
+#define IGNORE_ARGS(...) IgnoreArgs(__VA_ARGS__)
 
 #define TODO(abort_msg)                                                                                           \
   {                                                                                                               \

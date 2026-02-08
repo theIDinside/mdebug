@@ -45,9 +45,9 @@
 namespace mdb {
 
 template <typename U> class LeakedRef;
-template <typename T> struct RefCountControl;
-template <typename T> struct RefPtr;
-
+template <typename T> class RefCountControl;
+template <typename T> class RefPtr;
+//
 class Tracer;
 
 namespace tc {
@@ -218,9 +218,8 @@ public:
 
     if (faultyArgs.empty()) {
       return std::nullopt;
-    } else {
-      return MissingOrInvalidResult{ faultyArgs };
     }
+    return MissingOrInvalidResult{ faultyArgs };
   }
 
   template <typename JsonArgs, typename CommandArg>
@@ -230,7 +229,8 @@ public:
   {
     if (!args.Contains(commandArg)) {
       return std::make_pair<ArgumentError, std::string>(
-        { ArgumentErrorKind::Missing, "Required argument is missing" }, std::string{ commandArg });
+        { .kind = ArgumentErrorKind::Missing, .description = "Required argument is missing" },
+        std::string{ commandArg });
     }
     return std::nullopt;
   }

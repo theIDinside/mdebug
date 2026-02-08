@@ -104,8 +104,8 @@ public:
   u64 GetUserRegister(const TaskInfo &t, size_t registerNumber) noexcept final;
 
   TaskExecuteResponse DoDisconnect(bool terminate) noexcept final;
-  ReadResult DoReadBytes(AddrPtr address, u32 size, u8 *read_buffer) noexcept final;
-  TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept final;
+  ReadResult DoReadBytes(AddrPtr address, u64 size, u8 *read_buffer) noexcept final;
+  TraceeWriteResult DoWriteBytes(AddrPtr addr, const u8 *buf, u64 size) noexcept final;
 
   TaskExecuteResponse EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;
   TaskExecuteResponse DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept final;

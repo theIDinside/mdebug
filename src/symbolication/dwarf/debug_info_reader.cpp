@@ -254,12 +254,12 @@ UnitReader::ReadAddress() noexcept
     "Reader fell off of CU data section, possibly reading another CU's data");
   switch (mCompilationUnit->GetHeader().AddrSize()) {
   case 4: {
-    u32 addr = *(u32 *)mCurrentPtr;
+    const u32 addr = *(const u32 *)mCurrentPtr;
     mCurrentPtr += 4;
     return AddrPtr{ addr };
   }
   case 8: {
-    u64 addr = *(u64 *)mCurrentPtr;
+    u64 addr = *(const u64 *)mCurrentPtr;
     mCurrentPtr += 8;
     return AddrPtr{ addr };
   }
@@ -291,7 +291,7 @@ UnitReader::ReadCString() noexcept
 DataBlock
 UnitReader::ReadBlock(u64 block_size) noexcept
 {
-  const auto tmp = mCurrentPtr;
+  const auto *const tmp = mCurrentPtr;
   mCurrentPtr += block_size;
   return { .ptr = tmp, .size = block_size };
 }
@@ -321,7 +321,7 @@ UnitReader::ReadLEB128() noexcept
 LEB128Read<u64>
 UnitReader::DecodeULEB128() noexcept
 {
-  const auto start = mCurrentPtr;
+  const auto *start = mCurrentPtr;
   u64 value;
   mCurrentPtr = DecodeUleb128(mCurrentPtr, value);
   return LEB128Read<u64>{ value, static_cast<u8>(mCurrentPtr - start) };
@@ -330,10 +330,10 @@ UnitReader::DecodeULEB128() noexcept
 LEB128Read<i64>
 UnitReader::DecodeLEB128() noexcept
 {
-  const auto start = mCurrentPtr;
+  const auto *start = mCurrentPtr;
   i64 value;
   mCurrentPtr = DecodeLeb128(mCurrentPtr, value);
-  return LEB128Read<i64>{ value, static_cast<u8>(mCurrentPtr - start) };
+  return LEB128Read<i64>{ .result = value, .bytes_read = static_cast<u8>(mCurrentPtr - start) };
 }
 
 u64
@@ -343,9 +343,8 @@ UnitReader::ReadOffsetValue() noexcept
   MDB_ASSERT(format == 4 || format == 8, "Unsupported format: {}. Offset sizes supported are 4 and 8", format);
   if (format == 4) {
     return ReadIntegralValue<u32>();
-  } else {
-    return ReadIntegralValue<u64>();
   }
+  return ReadIntegralValue<u64>();
 }
 
 u64
@@ -355,86 +354,82 @@ UnitReader::ReadSectionOffsetValue(u64 offset) const noexcept
 }
 
 u64
-UnitReader::ReadNumbBytes(u8 nBytes) noexcept
+UnitReader::ReadNumbBytes(u8 bytes) noexcept
 {
-  MDB_ASSERT(nBytes <= 8, "Can't read more than 8 bytes when interpreting something as a u64: {}", nBytes);
-  auto result = 0;
+  MDB_ASSERT(bytes <= 8, "Can't read more than 8 bytes when interpreting something as a u64: {}", bytes);
+  u64 result = 0;
   auto shift = 0;
-  while (nBytes > 0) {
+  while (bytes > 0) {
     const u64 v = ReadIntegralValue<u8>();
     result |= (v << shift);
     shift += 8;
-    nBytes--;
+    bytes--;
   }
   return result;
 }
 
 AddrPtr
-UnitReader::ReadByIndexFromAddressTable(u64 addrIndex) const noexcept
+UnitReader::ReadByIndexFromAddressTable(u64 addressIndex) const noexcept
 {
-  auto obj = mCompilationUnit->GetObjectFile();
+  auto *obj = mCompilationUnit->GetObjectFile();
   const auto header = mCompilationUnit->GetHeader();
   MDB_ASSERT(!obj->GetElf()->mDebugAddr->mSectionData->empty(), ".debug_addr expected not to be nullptr");
-  const auto addrTableOffset = mCompilationUnit->AddressBase() + addrIndex * header.AddrSize();
-  const auto ptr = (obj->GetElf()->mDebugAddr->mSectionData->data() + addrTableOffset);
+  const auto addrTableOffset = mCompilationUnit->AddressBase() + (addressIndex * header.AddrSize());
+  const auto *ptr = (obj->GetElf()->mDebugAddr->mSectionData->data() + addrTableOffset);
   if (header.AddrSize() == 4) {
-    const auto value = *(u32 *)ptr;
-    return AddrPtr{ value };
-  } else {
-    const auto value = *(u64 *)ptr;
+    const auto value = *(const u32 *)ptr;
     return AddrPtr{ value };
   }
+  const auto value = *(const u64 *)ptr;
+  return AddrPtr{ value };
 }
 
 const char *
 UnitReader::ReadByIndexFromStringTable(u64 strIndex) const noexcept
 {
-  const auto elf = mCompilationUnit->GetObjectFile()->GetElf();
+  const auto *elf = mCompilationUnit->GetObjectFile()->GetElf();
   MDB_ASSERT(!elf->mDebugStrOffsets->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
   const auto strBase = mCompilationUnit->StrOffsetBase();
-  const auto strTableOffset = strBase.value() + strIndex * mCompilationUnit->GetHeader().Format();
-  const auto ptr = (elf->mDebugStrOffsets->mSectionData->data() + strTableOffset);
+  const auto strTableOffset = strBase.value() + (strIndex * mCompilationUnit->GetHeader().Format());
+  const auto *ptr = (elf->mDebugStrOffsets->mSectionData->data() + strTableOffset);
   if (mCompilationUnit->GetHeader().Format() == 4) {
-    const auto value = *(u32 *)ptr;
-    return elf->mDebugStr->GetCString(value);
-  } else {
-    const auto value = *(u64 *)ptr;
+    const auto value = *(const u32 *)ptr;
     return elf->mDebugStr->GetCString(value);
   }
+  const auto value = *(const u64 *)ptr;
+  return elf->mDebugStr->GetCString(value);
 }
 
 u64
 UnitReader::ReadByIndexFromRangeList(u64 rangeIndex) const noexcept
 {
-  const auto elf = mCompilationUnit->GetObjectFile()->GetElf();
+  const auto *elf = mCompilationUnit->GetObjectFile()->GetElf();
   MDB_ASSERT(!elf->mDebugRnglists->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
   const auto rnglistOffset =
-    mCompilationUnit->RangeListBase() + rangeIndex * mCompilationUnit->GetHeader().Format();
-  const auto ptr = (elf->mDebugRnglists->mSectionData->data() + rnglistOffset);
+    mCompilationUnit->RangeListBase() + (rangeIndex * mCompilationUnit->GetHeader().Format());
+  const auto *ptr = (elf->mDebugRnglists->mSectionData->data() + rnglistOffset);
   if (mCompilationUnit->GetHeader().Format() == 4) {
-    const auto value = *(u32 *)ptr;
-    return value;
-  } else {
-    const auto value = *(u64 *)ptr;
+    const auto value = *(const u32 *)ptr;
     return value;
   }
+  const auto value = *(const u64 *)ptr;
+  return value;
 }
 u64
 UnitReader::ReadLocationListIndex(u64 rangeIndex, std::optional<u64> locListBase) const noexcept
 {
   PANIC("read_loclist_index is not yet implemented. see other indirect + base calculations");
-  const auto elf = mCompilationUnit->GetObjectFile()->GetElf();
+  const auto *elf = mCompilationUnit->GetObjectFile()->GetElf();
   MDB_ASSERT(!elf->mDebugLoclist->mSectionData->empty(), ".debug_str_offsets expected not to be nullptr");
 
-  const auto rngListOffset = locListBase.value_or(0) + rangeIndex * mCompilationUnit->GetHeader().Format();
-  const auto ptr = (elf->mDebugLoclist->mSectionData->data() + rngListOffset);
+  const auto rngListOffset = locListBase.value_or(0) + (rangeIndex * mCompilationUnit->GetHeader().Format());
+  const auto *ptr = (elf->mDebugLoclist->mSectionData->data() + rngListOffset);
   if (mCompilationUnit->GetHeader().Format() == 4) {
-    const auto value = *(u32 *)ptr;
-    return value;
-  } else {
-    const auto value = *(u64 *)ptr;
+    const auto value = *(const u32 *)ptr;
     return value;
   }
+  const auto value = *(const u64 *)ptr;
+  return value;
 }
 
 u64
@@ -493,7 +488,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
     };
   }
 
-  const auto elf = reader.GetElf();
+  const auto *elf = reader.GetElf();
 
   switch (abbr.mForm) {
   case AttributeForm::DW_FORM_ref_addr:
@@ -544,7 +539,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
     MDB_ASSERT(elf->mDebugLineStr != nullptr, ".debug_line expected to be not null");
     if (!IS_DWZ) {
       const auto offset = reader.ReadOffsetValue();
-      const auto ptr = (const char *)elf->mDebugLineStr->begin() + offset;
+      const auto *ptr = (const char *)elf->mDebugLineStr->begin() + offset;
       return AttributeValue{ ptr, abbr.mForm, abbr.mName };
     }
   }
@@ -575,7 +570,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
     const auto newForm = (AttributeForm)reader.ReadULEB128();
     Abbreviation newAbbr{ .mName = abbr.mName, .mForm = newForm, .IMPLICIT_CONST_INDEX = UINT8_MAX };
     if (newForm == AttributeForm::DW_FORM_implicit_const) {
-      MDB_ASSERT("mdb", "This implicit const as a dynamic form just FEELS wrong!");
+      MDB_ASSERT(true, "This implicit const as a dynamic form just FEELS wrong!");
       // const auto value = reader.leb128();
       // new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
       // implicit_consts.push_back(value);
@@ -599,7 +594,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
   case AttributeForm::DW_FORM_strx4: {
     const auto base = mdb::castenum(AttributeForm::DW_FORM_strx1) - 1;
     const auto bytesToRead = mdb::castenum(abbr.mForm) - base;
-    const auto idx = reader.ReadNumbBytes(bytesToRead);
+    const auto idx = reader.ReadNumbBytes(static_cast<u8>(bytesToRead));
     return AttributeValue{ reader.ReadByIndexFromStringTable(idx), abbr.mForm, abbr.mName };
   }
   case AttributeForm::DW_FORM_strx: {
@@ -620,7 +615,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
       reader.GetObjectFile()->GetPathString());
     const auto base = mdb::castenum(AttributeForm::DW_FORM_addrx1) - 1;
     const auto bytesToRead = mdb::castenum(abbr.mForm) - base;
-    const auto addrIndex = reader.ReadNumbBytes(bytesToRead);
+    const auto addrIndex = reader.ReadNumbBytes(static_cast<u8>(bytesToRead));
     return AttributeValue{ reader.ReadByIndexFromAddressTable(addrIndex), abbr.mForm, abbr.mName };
   }
   case AttributeForm::DW_FORM_addrx: {

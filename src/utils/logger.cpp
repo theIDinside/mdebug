@@ -288,7 +288,7 @@ Logger::OnAbort() noexcept
 }
 
 void
-LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string_view message) noexcept
+LogChannel::LogMessage(const char *file, u32 line, std::string_view message) noexcept
 {
   std::lock_guard guard{ mChannelMutex };
   const auto id = Logger::GetLogMessageId();
@@ -300,9 +300,9 @@ LogChannel::LogMessage(const char *file, u32 line, u32 column, std::string_view 
 }
 
 void
-LogChannel::LogMessage(const char *file, u32 line, u32 column, const std::string &message) noexcept
+LogChannel::LogMessage(const char *file, u32 line, const std::string &message) noexcept
 {
-  LogMessage(file, line, column, std::string_view{ message });
+  LogMessage(file, line, std::string_view{ message });
 }
 
 void
