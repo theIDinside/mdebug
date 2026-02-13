@@ -1,19 +1,24 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "common/formatter.h"
-#include "symbolication/dwarf_defs.h"
+
+// mdb
 #include <common.h>
+#include <common/formatter.h>
 #include <common/macros.h>
-#include <cstring>
-#include <mutex>
+#include <lib/string_map.h>
 #include <symbolication/block.h>
 #include <symbolication/dwarf/die_ref.h>
+#include <symbolication/dwarf_defs.h>
 #include <tracee_pointer.h>
-#include <utility>
 #include <utils/expected.h>
 #include <utils/immutable.h>
 #include <utils/indexing.h>
 #include <utils/util.h>
+
+// std
+#include <cstring>
+#include <mutex>
+#include <utility>
 
 using namespace std::string_view_literals;
 
@@ -24,7 +29,7 @@ class Type;
 class Frame;
 
 using TypeMap = std::unordered_map<u64, Type>;
-using NameTypeMap = std::unordered_map<std::string_view, u64>;
+using NameTypeMap = StringViewMap<u64>;
 
 namespace dw {
 class TypeSymbolicationContext;

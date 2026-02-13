@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include "lib/string_map.h"
 #include "utils/format_utils.h"
 #include "utils/util.h"
 #include <common.h>
@@ -297,9 +298,9 @@ struct CommandLineResult
 class CommandLineRegistry
 {
   static constexpr auto UNIFORM_LINE_INDENT = 2;
-  std::unordered_map<std::string_view, std::shared_ptr<IOption<ArgIterator &>>> mOptions;
-  std::unordered_map<std::string_view, std::shared_ptr<IOption<std::string_view>>> mEnvironmentVariables;
-  std::unordered_map<std::string_view, std::shared_ptr<cmd::ICommand>> mCommands;
+  StringViewMap<std::shared_ptr<IOption<ArgIterator &>>> mOptions;
+  StringViewMap<std::shared_ptr<IOption<std::string_view>>> mEnvironmentVariables;
+  StringViewMap<std::shared_ptr<cmd::ICommand>> mCommands;
   // Holds the length of the largest left-column when displaying using PrintHelp
   // so the left column contains "-c, --com <value>" for an option that has both long and short form and is not a
   // flag. By calculating max width, we can format "properly", when we can't access a terminal size.

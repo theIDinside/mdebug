@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include "lib/string_map.h"
 #include <common/typedefs.h>
 
 // stdlib
@@ -11,7 +12,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 #define ConsoleLine(FORMAT_STR) FORMAT_STR "\\r\\n"
 
@@ -38,7 +38,7 @@ public:
 class ConsoleCommandRegistry
 {
 private:
-  std::unordered_map<std::string_view, std::shared_ptr<ConsoleCommand>> mCommands;
+  StringViewMap<std::shared_ptr<ConsoleCommand>> mCommands;
 
 public:
   void RegisterConsoleCommand(std::string_view name, std::shared_ptr<ConsoleCommand> command) noexcept;

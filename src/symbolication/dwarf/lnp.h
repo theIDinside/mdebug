@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+#include "lib/string_map.h"
 #include <common.h>
 #include <common/panic.h>
 #include <symbolication/block.h>
@@ -116,7 +117,7 @@ struct FileEntryIndexVector
  */
 struct LNPHeader
 {
-  using FileEntryContainer = std::unordered_map<std::string, FileEntryIndexVector>;
+  using FileEntryContainer = StringMap<FileEntryIndexVector>;
   NO_COPY_DEFAULTED_MOVE(LNPHeader);
   using shr_ptr = std::shared_ptr<LNPHeader>;
   using OpCodeLengths = std::array<u8, std::to_underlying(LineNumberProgramOpCode::DW_LNS_set_isa)>;

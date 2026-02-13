@@ -4,6 +4,7 @@
 // mdb
 #include <bp.h>
 #include <interface/dap/types.h>
+#include <lib/string_map.h>
 #include <symbolication/block.h>
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/die_ref.h>
@@ -107,13 +108,13 @@ class ObjectFile
   AddressRange mUnrelocatedAddressBounds{};
   std::unique_ptr<TypeStorage> mTypeStorage;
 
-  std::unordered_map<std::string_view, Index> mMinimalFunctionSymbols;
+  StringViewMap<Index> mMinimalFunctionSymbols;
   std::vector<MinSymbol> mMinimalFunctionSymbolsSorted;
-  std::unordered_map<std::string_view, MinSymbol> mMinimalObjectSymbols;
+  StringViewMap<MinSymbol> mMinimalObjectSymbols;
 
-  std::unordered_map<std::string_view, Index> mMinimalDynamicFunctionSymbols;
+  StringViewMap<Index> mMinimalDynamicFunctionSymbols;
   std::vector<MinSymbol> mMinimalDynamicFunctionSymbolsSorted;
-  std::unordered_map<std::string_view, MinSymbol> mMinimalDynamicObjectSymbols;
+  StringViewMap<MinSymbol> mMinimalDynamicObjectSymbols;
 
   std::mutex mLnpHeaderMutex{};
   std::unordered_map<u64, sym::dw::LNPHeader *> mLineNumberProgramHeaders{};

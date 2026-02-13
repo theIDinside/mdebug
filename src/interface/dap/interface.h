@@ -214,8 +214,8 @@ class DebugAdapterManager
   // Callback for configuration phase to be executed when an actual supervisor has materialized
   // (which happens after a launch or attach). For processes that got spawed by the target, while debugging,
   // the configuration phase will work on the first try, since there's a materialized session to target.
-  std::unordered_map<std::string, Pid> mConfigTokenToProcessId;
-  std::unordered_map<std::string, std::unique_ptr<SupervisorSessionConfiguration>> mSessionConfigurations;
+  StringMap<Pid> mConfigTokenToProcessId;
+  StringMap<std::unique_ptr<SupervisorSessionConfiguration>> mSessionConfigurations;
 
   // The allocator that can be used by commands during execution of them, for temporary objects etc
   // UICommand upon destruction, calls mCommandsAllocator.Reset(), at which point all allocations beautifully melt

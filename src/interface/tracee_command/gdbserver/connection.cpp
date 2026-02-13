@@ -35,7 +35,7 @@
 namespace mdb::gdb {
 using Connection = RemoteConnection::ShrPtr;
 
-std::unordered_map<std::string_view, TraceeStopReason> RemoteConnection::mStopReasonMap{
+StringViewMap<TraceeStopReason> RemoteConnection::mStopReasonMap{
   { { "watch", TraceeStopReason{ valueOf("watch") } },
     { "rwatch", TraceeStopReason{ valueOf("rwatch") } },
     { "awatch", TraceeStopReason{ valueOf("awatch") } },
