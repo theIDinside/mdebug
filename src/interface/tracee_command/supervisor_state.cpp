@@ -1126,9 +1126,17 @@ SupervisorState::HandleBreakpointHit(TaskInfo &task, const RefPtr<BreakpointLoca
     task.mTid,
     breakpointLocation->Address());
 
-  bool shouldResume = true;
+  // Breakpoints might be removed by what happens inside an OnHit. Take out a list of strong references before.
+  std::vector<Ref<UserBreakpoint>> bps;
   for (const auto bpId : users) {
     auto user = mUserBreakpoints.GetUserBreakpoint(bpId);
+    if (user) {
+      bps.push_back(std::move(user));
+    }
+  }
+
+  bool shouldResume = true;
+  for (auto &user : bps) {
     auto breakpointResult = user->OnHit(*this, task);
     shouldResume = shouldResume && !breakpointResult.ShouldStop();
     if (breakpointResult.ShouldRetire()) {
