@@ -66,7 +66,7 @@ class Type;
 class Value;
 class DebugAdapterSerializer;
 class ValueResolver;
-class IValueContentsResolve;
+class IValueContentsResolver;
 enum class VariableSet : u8;
 enum class FrameVariableKind : u8;
 
@@ -116,8 +116,8 @@ class ObjectFile
   std::vector<MinSymbol> mMinimalDynamicFunctionSymbolsSorted;
   StringViewMap<MinSymbol> mMinimalDynamicObjectSymbols;
 
-  std::mutex mLnpHeaderMutex{};
-  std::unordered_map<u64, sym::dw::LNPHeader *> mLineNumberProgramHeaders{};
+  std::mutex mLnpHeaderMutex;
+  std::unordered_map<u64, sym::dw::LNPHeader *> mLineNumberProgramHeaders;
 
   std::mutex mUnitDataWriteLock;
   std::vector<sym::dw::UnitData *> mCompileUnits;
@@ -125,11 +125,11 @@ class ObjectFile
 
   std::mutex mCompileUnitWriteLock;
   std::vector<sym::CompilationUnit *> mCompilationUnits;
-  std::unordered_map<u64, sym::dw::UnitData *> mTypeToUnitDataMap{};
+  std::unordered_map<u64, sym::dw::UnitData *> mTypeToUnitDataMap;
 
   // TODO(simon): use std::string_view here instead of std::filesystem::path, the std::string_view
   //   can actually reference the path in sym::dw::SourceCodeFile if it is made stable
-  std::unordered_map<std::string, std::vector<std::shared_ptr<sym::dw::SourceCodeFile>>> mSourceCodeFiles;
+  StringMap<std::vector<std::shared_ptr<sym::dw::SourceCodeFile>>> mSourceCodeFiles;
 
   sym::AddressToCompilationUnitMap mAddressToCompileUnitMapping;
   std::unordered_map<int, Ref<sym::Value>> mValueObjectCache;
@@ -199,7 +199,7 @@ public:
   auto InitializeMinimalSymbolLookup() noexcept -> void;
 
   auto FindCustomDataVisualizerFor(sym::Type &type) noexcept -> std::unique_ptr<sym::DebugAdapterSerializer>;
-  static auto InitializeDataVisualizer(sym::Value &value) noexcept -> void;
+  static auto SetSerializerFor(sym::Value &value) noexcept -> void;
 
   /**
    * Search the string tables of a object file, using regex pattern `regex_pattern`
@@ -250,6 +250,10 @@ public:
   auto GetVariables(tc::SupervisorState &tc, sym::Frame &frame, sym::VariableSet set) noexcept
     -> std::vector<Ref<sym::Value>>;
   [[nodiscard]] auto GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::CompilationUnit *>;
+  /*
+   * Used to end user provided variable resolver (what gdb calls pretty printers)
+   */
+  static auto GetCustomResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *;
   static auto GetStaticResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *;
   auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
     -> std::vector<Ref<sym::Value>>;

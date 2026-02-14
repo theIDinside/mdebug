@@ -69,7 +69,7 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
         indirectValueObject,
         Tracer::GetDataResolver<sym::DefaultStructSerializer>()));
     }
-    ObjectFile::InitializeDataVisualizer(*results.back());
+    ObjectFile::SetSerializerFor(*results.back());
     if (clonedContext->mId > 0) {
       clonedContext->mTask->CacheValueObject(clonedContext->mId, results.back());
     }
@@ -143,7 +143,7 @@ ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noe
     results.emplace_back(
       Ref<Value>::MakeShared(varContext, std::to_string(startIndex + i), *elementsType, memoryObjectOffset, lazy));
 
-    ObjectFile::InitializeDataVisualizer(*results.back());
+    ObjectFile::SetSerializerFor(*results.back());
     if (varContext->mId > 0) {
       context.mTask->CacheValueObject(varContext->mId, results.back());
     }

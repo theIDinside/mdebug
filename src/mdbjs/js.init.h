@@ -8,10 +8,6 @@
 #include <mdbjs/variablejs.h>
 
 namespace mdb::js {
-REGISTER_TYPE(JsBreakpointEvent);
-REGISTER_TYPE(JsBreakpoint);
-REGISTER_TYPE(Frame);
-REGISTER_TYPE(JsSupervisor);
-REGISTER_TYPE(JsTaskInfo);
-REGISTER_TYPE(JsVariable);
+// Run time registering the types
+FOR_EACH_TYPE(REGISTER_TYPE);
 } // namespace mdb::js

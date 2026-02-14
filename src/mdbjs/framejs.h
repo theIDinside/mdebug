@@ -28,7 +28,7 @@ public:
 
 namespace mdb::js {
 
-struct Frame : public JSBinding<Frame, mdb::FrameLookupHandle, JavascriptClasses::Frame>
+struct JsFrame : public JSBinding<JsFrame, mdb::FrameLookupHandle, JavascriptClasses::Frame>
 {
   static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto Locals(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;

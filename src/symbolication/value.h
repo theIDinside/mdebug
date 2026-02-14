@@ -38,11 +38,53 @@ enum class ValueDisplayType : u8
 class MemoryContentsObject;
 class LazyMemoryContentsObject;
 
-enum class ValueError : u8
+enum class ValueErrorType : u8
 {
-  Success,
   InvalidSize,
-  SegFault
+  NotAReference,
+  InvalidMemoryAddress,
+  NoVariableContext
+};
+
+struct ValueError
+{
+  ValueErrorType mType;
+  AddrPtr mAddress;
+  u32 mSize;
+  // Fill in additional fields here if necessary. Try to keep them POD (stack data). Errors should not allocate.
+
+  using Error = std::unexpected<ValueError>;
+
+  constexpr static Error
+  InvalidSize(u32 size = 0) noexcept
+  {
+    return std::unexpected(ValueError{ .mType = ValueErrorType::InvalidSize, .mAddress = nullptr, .mSize = size });
+  }
+
+  constexpr static Error
+  NotAReference() noexcept
+  {
+    return std::unexpected(ValueError{ .mType = ValueErrorType::NotAReference, .mAddress = nullptr, .mSize = 0 });
+  }
+
+  constexpr static Error
+  InvalidMemoryAddress(AddrPtr addr = nullptr) noexcept
+  {
+    return Error(ValueError{ .mType = ValueErrorType::NotAReference, .mAddress = addr, .mSize = 0 });
+  }
+
+  constexpr static Error
+  NoVariableContext() noexcept
+  {
+    return Error(ValueError{ .mType = ValueErrorType::NotAReference, .mAddress = nullptr, .mSize = 0 });
+  }
+};
+
+// Dynamic representation of T
+struct SyntheticType
+{
+  Type *mLayoutType;
+  u32 mCount;
 };
 
 using VarContext = std::shared_ptr<VariableContext>;
@@ -76,12 +118,19 @@ class Value
     u32 memContentsOffset,
     std::shared_ptr<MemoryContentsObject> valueObject,
     DebugAdapterSerializer *serializer = nullptr) noexcept;
+
   Value(VarContext context,
     std::string &&name,
     Type &type,
     u32 memContentsOffset,
     std::shared_ptr<MemoryContentsObject> valueObject,
     DebugAdapterSerializer *serializer = nullptr) noexcept;
+
+  Value(VarContext context,
+    std::string name,
+    SyntheticType type,
+    u32 memContentsOffset,
+    std::shared_ptr<MemoryContentsObject> valueObject) noexcept;
 
   template <typename... Args>
   static Value *
@@ -94,6 +143,7 @@ class Value
   void SetKind(Symbol *symbol) noexcept;
   void SetKind(Field *field) noexcept;
   void SetKind(Type *type) noexcept;
+  void SetKind(SyntheticType type) noexcept;
 
 public:
   ~Value() noexcept;
@@ -106,39 +156,64 @@ public:
 
   AddrPtr Address() const noexcept;
   Type *GetType() const noexcept;
+  Type *EnsureTypeResolved() const noexcept;
+
+  bool
+  IsSynthetic() const
+  {
+    return kind == ValueKind::Synthetic;
+  }
+
   std::span<const u8> MemoryView() const noexcept;
   std::span<const u8> FullMemoryView() const noexcept;
   SharedPtr<MemoryContentsObject> TakeMemoryReference() noexcept;
-  std::expected<AddrPtr, ValueError> ToRemotePointer() noexcept;
-  bool HasVisualizer() const noexcept;
-  DebugAdapterSerializer *GetVisualizer() noexcept;
-  bool IsValidValue() const noexcept;
-  bool HasMember(std::string_view memberName) noexcept;
+
+  /**
+   * Converts the value as a pointer into the remote. Works only for references. If you want the address of the
+   * actual value, `Address` does that.
+   */
+  [[nodiscard]] std::expected<AddrPtr, ValueError> ToRemotePointer() const noexcept;
+
+  // Dereference
+  [[nodiscard]] std::expected<std::vector<Ref<Value>>, ValueError> Dereference(u32 count) const noexcept;
+  [[nodiscard]] std::expected<u32, ValueError> Dereference(
+    u32 count, const std::function<bool(Ref<Value> value)> &onEachValue) const noexcept;
+
+  [[nodiscard]] bool HasVisualizer() const noexcept;
+  DebugAdapterSerializer *GetSerializer() noexcept;
+  [[nodiscard]] bool IsValidValue() const noexcept;
+  bool HasMember(std::string_view memberName) const noexcept;
   Ref<Value> GetMember(std::string_view memberName) noexcept;
-  VariableReferenceId ReferenceId() const noexcept;
-  bool IsLive() const noexcept;
+  size_t PushMemberValue(std::function<bool(Ref<Value> value)> &&onEachValue);
+  [[nodiscard]] VariableReferenceId ReferenceId() const noexcept;
+  [[nodiscard]] bool IsLive() const noexcept;
   void RegisterContext() noexcept;
+  bool OverwriteValueBytes(std::span<const std::byte> newBytes) noexcept;
 
-  bool OverwriteValueBytes(const std::span<const std::byte> newBytes) noexcept;
-
+  [[nodiscard]] VarContext GetVariableContext() const;
   template <typename Primitive> bool WritePrimitive(Primitive value) noexcept;
 
   Immutable<std::string> mName;
   Immutable<u32> mMemoryContentsOffsets;
 
 private:
+  std::expected<std::shared_ptr<MemoryContentsObject>, ValueError> DereferenceMemoryContentsObject(
+    tc::SupervisorState *supervisor, u32 count) const;
+
   // This value is either a block symbol (e.g. a variable on the stack) or a member of some block symbol (a field)
   enum class ValueKind : u8
   {
     Symbol,
     Field,
-    AbsoluteAddress
+    AbsoluteAddress,
+    Synthetic
   } kind;
   union
   {
     Symbol *uSymbol;
     Field *uField;
     Type *uType;
+    SyntheticType uSynthetic;
   };
   // The actual backing storage for this value. For instance, we may want to create multiple values out of a single
   // range of bytes in the target which is the case for struct Foo { int a; int b; } foo_val; we may want a Value
@@ -203,6 +278,13 @@ public:
   // anythign else.
   static Ref<Value> CreateFrameVariable(
     tc::SupervisorState &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept;
+
+  static Ref<Value> CreateSyntheticVariable(tc::SupervisorState &tc,
+    TaskInfo *task,
+    SymbolFile *symbolFile,
+    AddrPtr address,
+    SyntheticType type,
+    bool lazy);
 
   static ReadResult ReadMemory(tc::SupervisorState &tc, AddrPtr address, u64 size_of) noexcept;
   static ReadResult ReadMemory(

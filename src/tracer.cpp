@@ -448,7 +448,7 @@ Tracer::CloneFromVariableContext(const VariableContext &ctx) noexcept
     return VariableContext::CloneFrom(ctx.mId - 1, ctx);
   }
   auto &tracer = Get();
-  const auto key = tracer.NewVariablesReference();
+  const auto key = mdb::Tracer::NewVariablesReference();
 
   auto context = VariableContext::CloneFrom(key, ctx);
   tracer.mVariablesReferenceContext.emplace(key, context);

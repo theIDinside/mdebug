@@ -23,9 +23,10 @@
   EACH_TYPE(Variable)                                                                                             \
   EACH_TYPE(Frame)                                                                                                \
   EACH_TYPE(Breakpoint)                                                                                           \
-  EACH_TYPE(BreakpointStatus)                                                                                     \
+  EACH_TYPE(BreakpointEvent)                                                                                      \
   EACH_TYPE(Supervisor)                                                                                           \
-  EACH_TYPE(TaskInfo)
+  EACH_TYPE(TaskInfo)                                                                                             \
+  EACH_TYPE(Type)
 
 // NOLINTNEXTLINE(performance-enum-size): It's an actual drop-in replacement for JSClassId
 enum class JavascriptClasses : JSClassID
@@ -52,9 +53,9 @@ namespace js {
 
 #define REGISTER_TYPE(Type)                                                                                       \
   inline bool Type##Registered = []() {                                                                           \
-    MdbJavascriptTypes::Register(#Type, Type::Register);                                                          \
+    MdbJavascriptTypes::Register(#Type, Js##Type::Register);                                                      \
     return true;                                                                                                  \
-  }()
+  }();
 
 class MdbJavascriptTypes
 {

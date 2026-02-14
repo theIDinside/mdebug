@@ -327,7 +327,7 @@ Type::ResolveAlias() noexcept
   if (!mIsTypedef) {
     return this;
   }
-  auto t = mTypeChain;
+  Type *t = mTypeChain;
   while (t && t->mIsTypedef) {
     t = t->mTypeChain;
   }
@@ -346,7 +346,7 @@ Type::GetTargetType() noexcept
   if (mTypeChain == nullptr) {
     return NonNull(*this);
   }
-  auto t = mTypeChain;
+  Type *t = mTypeChain;
   while (t->mTypeChain) {
     t = t->mTypeChain;
   }
@@ -365,7 +365,7 @@ Type::IsReference() const noexcept
   if (mTypeChain == nullptr) {
     return false;
   }
-  auto t = mTypeChain;
+  Type *t = mTypeChain;
   while (t) {
     const auto mod = std::to_underlying(*t->mModifier);
     if (mod < ReferenceEnd && mod > ReferenceStart) {
@@ -414,7 +414,7 @@ Type::GetBaseTypeIfPrimitive() const noexcept
     return {};
   }
 
-  auto it = mTypeChain;
+  Type *it = mTypeChain;
   while (it != nullptr) {
     if (it->mBaseType.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
       return it->mBaseType;
@@ -467,7 +467,7 @@ Type::IsArrayType() const noexcept
   if (!mIsTypedef) {
     return this->mModifier == Modifier::Array;
   }
-  auto t = mTypeChain;
+  Type *t = mTypeChain;
   while (t->mIsTypedef) {
     t = t->mTypeChain;
   }
@@ -481,7 +481,7 @@ Type::MembersCount() noexcept
   return GetTargetType()->mFields.size();
 }
 
-const std::vector<Field> &
+std::span<const Field>
 Type::MemberFields() noexcept
 {
   MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
@@ -492,27 +492,21 @@ Type::MemberFields() noexcept
 Type *
 Type::TypeDescribingLayoutOfThis() noexcept
 {
-  if (mModifier == Modifier::None) {
+  // We have to check if it's a typedef here too. const int& which is considered a reference in the type
+  // information howoever using IntRef = const int&; makes IntRef have a modifier list of none, which is a DWARF
+  // side effect, making type aliases behave as their own types, instead of just names.
+
+  if (mModifier == Modifier::None && !mIsTypedef) {
     return this;
   }
 
-  if (auto t = ResolveAlias(); t->IsReference()) {
-    t = t == this ? t->mTypeChain : t;
-    while (!t->IsReference() && t->mModifier != Modifier::None) {
-      t = t->mTypeChain->ResolveAlias();
-    }
-    return t;
-  } else {
-    auto it = mTypeChain;
-    while (it != nullptr) {
-      if (it->mModifier == Modifier::None) {
-        return it;
-      }
-      it = it->mTypeChain;
-    }
+  Type *t = ResolveAlias();
+  MDB_ASSERT(t, "Debug Symbolication Error: Resolving a typedef should not result in a nullptr for type.");
+  if (t->IsReference()) {
+    t = t->mTypeChain->ResolveAlias();
   }
 
-  return nullptr;
+  return t;
 }
 
 void

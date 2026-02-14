@@ -64,7 +64,7 @@ struct JsBreakpoint : public JSBinding<JsBreakpoint, UserBreakpoint, JavascriptC
 };
 
 struct JsBreakpointEvent
-    : public JSBinding<JsBreakpointEvent, BreakpointHitEventResult, JavascriptClasses::BreakpointStatus>
+    : public JSBinding<JsBreakpointEvent, BreakpointHitEventResult, JavascriptClasses::BreakpointEvent>
 {
   static auto Stop(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
   static auto Retire(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;

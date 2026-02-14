@@ -414,6 +414,12 @@ template <typename T> struct NonNullPtr
   {
     return NonNullPtr<U>{ ptr };
   }
+
+  T *
+  Ptr() const
+  {
+    return ptr;
+  }
 };
 
 // template <typename U>

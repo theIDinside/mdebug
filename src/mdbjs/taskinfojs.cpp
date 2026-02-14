@@ -52,7 +52,7 @@ JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *
 
   auto &callStack = supervisor->BuildCallFrameStack(*taskInfo, CallStackRequest::full());
   auto frame = callStack.GetFrameAtLevel(static_cast<u32>(frameLevel));
-  const auto result = Frame::CreateValue(context, RefPtr{ new FrameLookupHandle{ RefPtr{ taskInfo }, *frame } });
+  const auto result = JsFrame::CreateValue(context, RefPtr{ new FrameLookupHandle{ RefPtr{ taskInfo }, *frame } });
   return result;
 }
 

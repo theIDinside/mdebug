@@ -331,13 +331,16 @@ public:
   NonNullPtr<Type> GetTargetType() noexcept;
   // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
   // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,
-  // Foo). We do different than gdb though. We say all references are the same thing: an address value
+  // Foo). We do different than gdb though. We say all references are the same thing: an address value.
+  // Note: We consider arrays as references, as this simplifies the mental model somewhat. Think C. An array is a
+  // reference + offset/bound.
   bool IsReference() const noexcept;
   bool IsResolved() const noexcept;
   bool IsPrimitive() const noexcept;
   std::optional<BaseTypeEncoding> GetBaseTypeIfPrimitive() const noexcept;
   bool IsCharType() const noexcept;
   bool IsArrayType() const noexcept;
+  Type NextTypeEntry() const noexcept;
 
   DwarfTag
   GetDwarfTag() const noexcept
@@ -355,17 +358,16 @@ public:
   u32 SizeBytes() noexcept;
 
   u32 MembersCount() noexcept;
-  const std::vector<Field> &MemberFields() noexcept;
-
+  std::span<const Field> MemberFields() noexcept;
   Type *TypeDescribingLayoutOfThis() noexcept;
   // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
   void SetArrayBounds(u32 bounds) noexcept;
 
   /** Walks the type chain for this type, looking for a base type encoding (if it's a primitive of some sort). */
-  constexpr std::optional<BaseTypeEncoding>
+  [[nodiscard]] constexpr std::optional<BaseTypeEncoding>
   GetBaseType() const noexcept
   {
-    auto it = this;
+    const Type *it = this;
     while (it != nullptr) {
       if (it->mBaseType) {
         return it->mBaseType;
@@ -375,7 +377,7 @@ public:
     return std::nullopt;
   }
 
-  constexpr u32
+  [[nodiscard]] constexpr u32
   ArraySize() const noexcept
   {
     return mArrayBounds;

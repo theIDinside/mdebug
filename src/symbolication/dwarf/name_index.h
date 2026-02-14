@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #pragma once
+#include "lib/string_map.h"
 #include "utils/immutable.h"
 #include <common.h>
 #include <mutex>
@@ -43,8 +44,8 @@ struct DieNameReference
   DieNameReference() noexcept : cu(nullptr), die_index(0) {}
   DieNameReference(UnitData *cu, u64 die_index) noexcept : cu(cu), die_index(die_index) {}
 
-  bool IsValid() const;
-  bool IsUnique() const noexcept;
+  [[nodiscard]] bool IsValid() const;
+  [[nodiscard]] bool IsUnique() const noexcept;
   void SetAsCollisionVariant(u64 index) noexcept;
   void SetNotUnique() noexcept;
   void SetCollisionIndex(u64 index) noexcept;
@@ -62,7 +63,7 @@ class NameIndex
   // notice the 40 sec/16 shards (down to 2.5 seconds) drop? Probably the latter.
   struct NameIndexShard
   {
-    std::unordered_map<std::string_view, DieNameReference> mMap{};
+    StringViewMap<DieNameReference> mMap{};
     std::vector<std::vector<DieNameReference>> mCollidingNames{};
 
     std::span<const DieNameReference> Search(std::string_view name) const noexcept;
@@ -81,8 +82,8 @@ public:
   std::optional<std::vector<DieNameReference>> Search(std::string_view name) const noexcept;
   NameIndexShard *CreateShard() noexcept;
   void Merge(const std::vector<NameDieTuple> &nameToDieReferences) noexcept;
-  void MergeTypes(NonNullPtr<TypeStorage> objfile,
-                  const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept;
+  void MergeTypes(
+    NonNullPtr<TypeStorage> objfile, const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept;
 
 private:
   // The mutex only guars insert operations, because when the user is going to use query operations (finding a die
@@ -94,11 +95,11 @@ private:
 struct ObjectFileNameIndex
 {
   // backlink to the object file owning this name index
-  NameIndex mFreeFunctions{"free functions"};
-  NameIndex mMethods{"methods"};
-  NameIndex mTypes{"types"};
-  NameIndex mGlobalVariables{"global variables"};
-  NameIndex mNamespaces{"namespaces"};
+  NameIndex mFreeFunctions{ "free functions" };
+  NameIndex mMethods{ "methods" };
+  NameIndex mTypes{ "types" };
+  NameIndex mGlobalVariables{ "global variables" };
+  NameIndex mNamespaces{ "namespaces" };
 
   template <typename Fn>
   void

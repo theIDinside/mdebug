@@ -577,13 +577,13 @@ ObjectFile::ParseELFSymbols(Elf64Header *header, std::vector<ElfSection> &&secti
   const auto parseSymbols = [this](ElfSec stringTable,
                               ElfSec symbolTable,
                               std::vector<MinSymbol> &fnSymbols,
-                              std::unordered_map<std::string_view, MinSymbol> &objectSymbols) {
-    auto strtab = elf->GetSection(stringTable);
-    const auto sec = elf->GetSection(symbolTable);
+                              StringViewMap<MinSymbol> &objectSymbols) {
+    const ElfSection *strtab = elf->GetSection(stringTable);
+    const ElfSection *sec = elf->GetSection(symbolTable);
 
     if (strtab && sec) {
       auto symbols = sec->GetDataAs<Elf64_Sym>();
-      for (auto &symbol : symbols) {
+      for (const auto &symbol : symbols) {
         if (ELF64_ST_TYPE(symbol.st_info) == STT_FUNC) {
           const std::string_view name = strtab->GetCString(symbol.st_name);
           fnSymbols.emplace_back(name, AddrPtr{ symbol.st_value }, u64{ symbol.st_size });
@@ -626,7 +626,7 @@ ObjectFile::FindCustomDataVisualizerFor(sym::Type &) noexcept
 
 /* static */
 void
-ObjectFile::InitializeDataVisualizer(sym::Value &value) noexcept
+ObjectFile::SetSerializerFor(sym::Value &value) noexcept
 {
   if (!value.IsValidValue()) {
     value.SetDapSerializer(Tracer::GetDataResolver<sym::InvalidValueSerializer>());
@@ -834,6 +834,13 @@ SymbolFile::GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::C
 }
 
 /* static */
+auto
+SymbolFile::GetCustomResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *
+{
+  return nullptr;
+}
+
+/* static */
 sym::IValueContentsResolver *
 SymbolFile::GetStaticResolver(sym::Value &value) noexcept
 {
@@ -870,13 +877,13 @@ SymbolFile::ResolveVariable(
     DBGLOG(core, "WARNING expected variable reference {} had no data associated with it.", ctx.mId);
     return {};
   }
-  sym::Type *type = value->GetType();
-  if (!type->IsResolved()) {
-    sym::dw::TypeSymbolicationContext typeResolver{ *GetObjectFile(), *type };
-    typeResolver.ResolveType();
-  }
 
-  sym::IValueContentsResolver *resolver = GetStaticResolver(*value);
+  sym::Type *type = value->EnsureTypeResolved();
+  sym::IValueContentsResolver *resolver = GetCustomResolver(*value);
+
+  if (!resolver) {
+    resolver = GetStaticResolver(*value);
+  }
   if (resolver != nullptr) {
     return resolver->Resolve(ctx, { .start = start, .count = count });
   }
@@ -892,7 +899,7 @@ SymbolFile::ResolveVariable(
       const_cast<sym::Field &>(memberField),
       value->mMemoryContentsOffsets,
       value->TakeMemoryReference());
-    ObjectFile::InitializeDataVisualizer(*memberVariable);
+    ObjectFile::SetSerializerFor(*memberVariable);
     if (vId > 0) {
       ctx.mTask->CacheValueObject(vId, memberVariable);
     }
@@ -1043,7 +1050,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, tc::SupervisorSta
 
     auto variableValue =
       sym::MemoryContentsObject::CreateFrameVariable(tc, frame, const_cast<sym::Symbol &>(symbol), true);
-    GetObjectFile()->InitializeDataVisualizer(*variableValue);
+    GetObjectFile()->SetSerializerFor(*variableValue);
 
     if (const auto id = variableValue->ReferenceId(); id > 0) {
       variableValue->RegisterContext();

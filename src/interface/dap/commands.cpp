@@ -2416,7 +2416,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   variables_contents.reserve(256 * variables_contents.size());
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : mVariables) {
-    if (auto *datvis = v->GetVisualizer(); datvis != nullptr) {
+    if (auto *datvis = v->GetSerializer(); datvis != nullptr) {
 
       auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), arenaAllocator);
       if (opt) {

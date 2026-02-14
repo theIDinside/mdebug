@@ -30,22 +30,25 @@ enum class ContextType : u8
 
 struct VariableContext
 {
-  TaskInfo *mTask{nullptr};
-  SymbolFile *mSymbolFile{nullptr};
-  VariableReferenceId mFrameId{0};
-  VariableReferenceId mId{0};
-  ContextType mType{ContextType::Global};
+  TaskInfo *mTask{ nullptr };
+  SymbolFile *mSymbolFile{ nullptr };
+  VariableReferenceId mFrameId{ 0 };
+  VariableReferenceId mId{ 0 };
+  ContextType mType{ ContextType::Global };
 
   VariableContext() noexcept = default;
-  VariableContext(TaskInfo *task, SymbolFile *symbolFile, VariableReferenceId frameId,
-                  VariableReferenceId varRefId, ContextType type) noexcept;
+  VariableContext(TaskInfo *task,
+    SymbolFile *symbolFile,
+    VariableReferenceId frameId,
+    VariableReferenceId varRefId,
+    ContextType type) noexcept;
 
   VariableContext(const VariableContext &) noexcept = default;
 
   static VariableContext
   MakeDependentContext(VariableReferenceId newId, const VariableContext &ctx) noexcept
   {
-    return VariableContext{ctx.mTask, ctx.mSymbolFile, ctx.mFrameId, newId, ContextType::Variable};
+    return VariableContext{ ctx.mTask, ctx.mSymbolFile, ctx.mFrameId, newId, ContextType::Variable };
   }
 
   static std::shared_ptr<VariableContext>
@@ -54,8 +57,11 @@ struct VariableContext
     return std::make_shared<VariableContext>(ctx.mTask, ctx.mSymbolFile, ctx.mFrameId, newId, ctx.mType);
   }
 
-  static std::shared_ptr<VariableContext> FromFrame(VariableReferenceId varRefId, ContextType type,
-                                                    const sym::Frame &frame) noexcept;
+  static std::shared_ptr<VariableContext> CreateFromFrame(
+    VariableReferenceId varRefId, ContextType type, const sym::Frame &frame) noexcept;
+
+  static std::shared_ptr<VariableContext> CreateFreestanding(
+    TaskInfo *task, SymbolFile *symbolFile, VariableReferenceId varRefId) noexcept;
 
   bool IsLiveReference() const noexcept;
   bool IsValidContext() const noexcept;
